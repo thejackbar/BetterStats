@@ -1730,11 +1730,11 @@ async def get_player_team_breakdown(
       is answerable against them — but a FORMAT is recorded per fixture, so it
       is not. `kind='aggregate'` emits `AND FALSE`, and under a match-type
       filter the grid becomes what we hold scorecards for and nothing else.
-    - CA's per-SEASON total has no grade at all, so under any active scope
-      there is nothing to compare a shortfall against. The gap heuristic is
-      skipped rather than run against a figure covering matches the filter has
-      just excluded, which would attribute out-of-scope matches to an
-      in-scope grade.
+    - CA's per-SEASON total has no grade at all. For a season in which the
+      filter excluded nothing it describes the player exactly and the gap
+      heuristic runs as ever; for a season where it did, the total covers
+      matches the filter removed and the heuristic is skipped for that season
+      alone, or it would hand out-of-scope matches to an in-scope grade.
     """
     season_clause_gr = ""
     season_clause_pss = ""
@@ -1933,15 +1933,52 @@ async def get_player_team_breakdown(
         params,
     )
     season_aggregate: dict = {}  # season_id -> CA's own match count
-    # SKIPPED ENTIRELY UNDER AN ACTIVE SCOPE. This figure covers the whole
-    # season with no grade on it, so under a filter it counts matches the
-    # filter has just excluded — and the gap heuristic below would hand that
-    # difference to an in-scope grade, inventing matches in it. Nothing to
-    # compare against is the honest answer; the scorecards stand alone.
-    if not scope_active:
-        for r in season_totals.mappings():
+    for r in season_totals.mappings():
+        sid = _canonical_season(r["season_id"])
+        season_aggregate[sid] = season_aggregate.get(sid, 0) + int(r["matches"] or 0)
+
+    # WHICH SEASONS THE FILTER ACTUALLY NARROWED. CA's per-season total covers
+    # every grade, so under a filter it counts matches the filter has just
+    # excluded — and the gap heuristic below would hand that difference to an
+    # in-scope grade, inventing matches in it. But a season in which EVERY
+    # match the player played is inside the filter is a season the total
+    # describes exactly, and dropping its shortfall would lose real matches
+    # from the grid on a club whose default already excludes a category —
+    # which is every senior player at a club with a junior programme, on every
+    # visit, with nobody having touched a control. So the heuristic is gated
+    # per season, not switched off: it runs where the filter excluded nothing
+    # and is skipped where it did. Measured the first time it was written as a
+    # blanket skip, and this is the correction.
+    mixed_seasons: set = set()
+    if scope_active:
+        unscoped = await session.execute(
+            text(f"""
+                WITH appearances AS (
+                    SELECT bi.game_id FROM v_effective_batting_innings bi WHERE bi.player_id = CAST(:pid AS UUID)
+                    UNION
+                    SELECT bs.game_id FROM v_effective_bowling_spells bs WHERE bs.player_id = CAST(:pid AS UUID)
+                    UNION
+                    SELECT fs.game_id FROM v_effective_fielding_stats fs WHERE fs.player_id = CAST(:pid AS UUID)
+                    UNION
+                    SELECT ga.game_id FROM game_appearances ga WHERE ga.player_id = CAST(:pid AS UUID)
+                      AND {_APPEARANCE_PLAYED}
+                )
+                SELECT gr.season_id AS season_id, COUNT(DISTINCT ap.game_id) AS games
+                FROM appearances ap
+                JOIN v_effective_games g  ON g.id = ap.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                WHERE TRUE {club_games_clause}{season_clause_gr}
+                GROUP BY gr.season_id
+            """),
+            params,
+        )
+        all_by_season: dict = {}
+        for r in unscoped.mappings():
             sid = _canonical_season(r["season_id"])
-            season_aggregate[sid] = season_aggregate.get(sid, 0) + int(r["matches"] or 0)
+            all_by_season[sid] = all_by_season.get(sid, 0) + int(r["games"] or 0)
+        for sid, total in all_by_season.items():
+            if total > sum(season_grade_games.get(sid, {}).values()):
+                mixed_seasons.add(sid)
 
     # Exact per-(season,grade) aggregate from CA (when synced). Source of truth.
     per_grade_agg = await session.execute(
@@ -2038,6 +2075,7 @@ async def get_player_team_breakdown(
     cells: dict = {}              # season_id -> {grade_name: matches}
     cell_unknown: dict = {}       # (season_id, grade_name) -> matches with no scorecard
     season_unattributed: dict = {}  # season_id -> matches we can't place in a grade
+    seasons_left_to_scorecards = 0  # gap skipped: the filter excluded matches
 
     manual_by_season: dict = {}
     for (msid, mgn), mval in manual_cells.items():
@@ -2068,7 +2106,11 @@ async def get_player_team_breakdown(
             # it can only have come from.
             row_cells = {gn: ct for gn, ct in scorecards.items() if ct > 0}
             gap = (season_aggregate.get(sid) or 0) - sum(scorecards.values())
-            if gap > 0:
+            if gap > 0 and sid in mixed_seasons:
+                # The total covers matches the filter excluded, so the gap is
+                # not this filter's to place. The scorecards stand alone.
+                seasons_left_to_scorecards += 1
+            elif gap > 0:
                 if len(row_cells) == 1:
                     gn = next(iter(row_cells))
                     row_cells[gn] += gap
@@ -2170,6 +2212,9 @@ async def get_player_team_breakdown(
             # A match type is recorded on a FIXTURE, so Cricket Australia's own
             # per-grade figures cannot answer it and drop out entirely.
             "aggregate_excluded": bool(scope.format_active),
+            # Seasons whose CA total covers matches the filter excluded, so
+            # the shortfall could not be placed and the scorecards stand alone.
+            "seasons_left_to_scorecards": seasons_left_to_scorecards,
         }} if scope_active else {}),
     }
 

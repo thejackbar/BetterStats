@@ -448,24 +448,41 @@ async def get_player_by_opposition_endpoint(
 
 
 @router.get("/{player_id}/teammates")
-async def get_player_teammates(player_id: str, db: AsyncSession = Depends(get_db)):
+async def get_player_teammates(
+    player_id: str,
+    categories: Optional[str] = Query(None),
+    formats: Optional[str] = Query(None),
+    competitions: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
     """Every player this player has shared a side with, most games together first,
-    with the team's record over those shared games. Public (career)."""
+    with the team's record over those shared games. Public; takes the page's
+    grade-type / match-type / competition scope like every other Analysis panel."""
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    result = await iq_teammates.teammates(db, str(player.organisation_id), player_id)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
+    result = await iq_teammates.teammates(db, str(player.organisation_id), player_id, scope=scope)
     return result or {"player": {"player_id": player_id, "name": player.name}, "teammates": []}
 
 
 @router.get("/{player_id}/teammates/{teammate_id}")
-async def get_player_teammate_split(player_id: str, teammate_id: str, db: AsyncSession = Depends(get_db)):
+async def get_player_teammate_split(
+    player_id: str,
+    teammate_id: str,
+    categories: Optional[str] = Query(None),
+    formats: Optional[str] = Query(None),
+    competitions: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
     """This player's batting, bowling and the team's record split by whether the
     teammate was also in the side (the with-vs-without comparison). Public."""
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    result = await iq_teammates.with_split(db, str(player.organisation_id), player_id, teammate_id)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
+    result = await iq_teammates.with_split(
+        db, str(player.organisation_id), player_id, teammate_id, scope=scope)
     if result is None:
         raise HTTPException(status_code=404, detail="Player or teammate not found")
     return result
@@ -654,7 +671,13 @@ async def get_player_upcoming_milestones(player_id: str, db: AsyncSession = Depe
 
 
 @router.get("/{player_id}/captain-stats")
-async def get_player_captain_stats(player_id: str, db: AsyncSession = Depends(get_db)):
+async def get_player_captain_stats(
+    player_id: str,
+    categories: Optional[str] = Query(None),
+    formats: Optional[str] = Query(None),
+    competitions: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
     pid = uuid.UUID(player_id)
     # Captaincy is a club's own record: a shared CA participant GUID means a
     # player's rows can sit on another club's game, and captaining a side for
@@ -662,6 +685,16 @@ async def get_player_captain_stats(player_id: str, db: AsyncSession = Depends(ge
     # aggregations._club_game_clause.
     params: dict = {"pid": pid}
     club = await _club_game_clause(db, player_id, params)
+    # The filter bar is page-level, so "matches captained in men's grades" is
+    # a real question this tab has to answer. Every query below joins
+    # v_effective_games as `g` and interpolates `club`, so the scope rides on
+    # that one string rather than being pasted into six places.
+    player = await db.get(Player, pid)
+    if player:
+        scope = await _resolve_player_scope(db, player, categories, formats, competitions)
+        if scope.active:
+            scope.bind(params)
+            club = club + scope.clause("g.grade_id")
 
     summary_res = await db.execute(text("""
         SELECT

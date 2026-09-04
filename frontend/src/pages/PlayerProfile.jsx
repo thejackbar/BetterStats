@@ -17,7 +17,7 @@ import {
   ResultPill, PageHeader, PbSpinner, TabBar,
 } from '../lib/presskit'
 import { GradeTotalNote, MatchCoverageNote } from '../components/MatchCoverage'
-import { FilterReachNote } from '../components/FilterReach'
+import { FilterReachDot, FilterReachNote } from '../components/FilterReach'
 import '../styles/honour-badge.css'
 import { countryFlagUrl } from '../data/countries'
 import { CAP } from '../lib/capabilities'
@@ -1333,18 +1333,18 @@ function FormatsSection({ playerId, seasonId }) {
 // ── Teammates: who a player has played alongside, and the with-vs-without split.
 // Self-fetching (public /players/{id}/teammates), so it doesn't touch the
 // parent's data flow — mirrors AchievementsSection.
-function TeammateSplitPanel({ playerId, teammate }) {
+function TeammateSplitPanel({ playerId, teammate, scope = null }) {
   const [split, setSplit] = useState(null)
   const [loading, setLoading] = useState(true)
   useEffect(() => {
     let alive = true
     setLoading(true); setSplit(null)
-    api.getPlayerTeammateSplit(playerId, teammate.player_id)
+    api.getPlayerTeammateSplit(playerId, teammate.player_id, scope)
       .then(d => { if (alive) setSplit(d) })
       .catch(() => { if (alive) setSplit({ error: true }) })
       .finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
-  }, [playerId, teammate.player_id])
+  }, [playerId, teammate.player_id, scope?.categories, scope?.formats, scope?.competitions])
 
   if (loading) return <div className="py-4 text-pb-faint font-mono text-xs">Working out the split…</div>
   if (!split || split.error) return <div className="py-4 text-pb-faint font-mono text-xs">Couldn’t load the split.</div>
@@ -1393,7 +1393,7 @@ function TeammateSplitPanel({ playerId, teammate }) {
   )
 }
 
-function TeammatesSection({ playerId }) {
+function TeammatesSection({ playerId, scope = null }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState(null)
@@ -1401,12 +1401,12 @@ function TeammatesSection({ playerId }) {
   useEffect(() => {
     let alive = true
     setLoading(true); setData(null); setSelected(null)
-    api.getPlayerTeammates(playerId)
+    api.getPlayerTeammates(playerId, scope)
       .then(d => { if (alive) setData(d) })
       .catch(() => { if (alive) setData({ error: true }) })
       .finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
-  }, [playerId])
+  }, [playerId, scope?.categories, scope?.formats, scope?.competitions])
 
   if (loading) return <div className="p-4 text-pb-faint font-mono text-sm">Loading teammates…</div>
   if (data?.error) return <p className="text-pb-faint text-sm py-4 font-mono">Couldn’t load teammates.</p>
@@ -1454,7 +1454,7 @@ function TeammatesSection({ playerId }) {
 
       {sel && (
         <Card title={`WITH VS WITHOUT ${(sel.name || '').split(',')[0].trim().toUpperCase()}`}>
-          <TeammateSplitPanel playerId={playerId} teammate={sel} />
+          <TeammateSplitPanel playerId={playerId} teammate={sel} scope={scope} />
         </Card>
       )}
     </div>
@@ -1712,7 +1712,7 @@ function MatchesBySeasonGrade({ rows = [], seasonRows = [] }) {
   )
 }
 
-function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGrade, byPosition, seasonStats, bowlingByGrade, bowlingDismissals = [], bowlingByBatterPosition = [], battingInnings = [], bowlingSpells = [], teamBreakdown = { rows: [], season_rows: [], unattributed: 0 }, seasonLabel = null, captainStats, byVenue = [], byOpposition = [], careerBatting = null, careerBowling = null, careerFielding = null, matchCoverage = null, gradeScope = null }) {
+function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGrade, byPosition, seasonStats, bowlingByGrade, bowlingDismissals = [], bowlingByBatterPosition = [], battingInnings = [], bowlingSpells = [], teamBreakdown = { rows: [], season_rows: [], unattributed: 0 }, seasonLabel = null, captainStats, byVenue = [], byOpposition = [], careerBatting = null, careerBowling = null, careerFielding = null, matchCoverage = null, gradeScope = null, filterPick = null, filterScope = null }) {
   const [subTab, setSubTab] = useState('profile')
 
   const hasBattingData = dismissals?.length || partnerships?.length || byGrade?.length || byPosition?.length || seasonStats?.some(s => (s.total_runs ?? 0) > 0)
@@ -1731,6 +1731,10 @@ function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGr
             }`}
           >
             {t.label}
+            {/* Said BEFORE the tab is opened, not after. */}
+            {(t.key === 'competitions' || t.key === 'formats') && (
+              <FilterReachDot pick={filterPick} reason="enumeration" />
+            )}
             {subTab === t.key && <span className="absolute left-2 right-2 -bottom-px h-[2px]" style={{ background: 'var(--pb-accent)' }} />}
           </button>
         ))}
@@ -2061,7 +2065,7 @@ function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGr
       {subTab === 'formats' && (
         <div className="space-y-3">
           {/* An enumeration: filtering it by format leaves one column. */}
-          <FilterReachNote scope={gradeScope} reason="enumeration" shows="every format" />
+          <FilterReachNote pick={filterPick} reason="enumeration" shows="every format" />
           <FormatsSection playerId={playerId} seasonId={seasonId} />
         </div>
       )}
@@ -2069,25 +2073,14 @@ function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGr
       {subTab === 'competitions' && (
         <div className="space-y-3">
           {/* Same: filtering it to one competition leaves one row. */}
-          <FilterReachNote scope={gradeScope} reason="enumeration" shows="every competition" />
+          <FilterReachNote pick={filterPick} reason="enumeration" shows="every competition" />
           <CompetitionsSection playerId={playerId} seasonId={seasonId} matchCoverage={matchCoverage} />
         </div>
       )}
 
-      {subTab === 'teammates' && (
-        <div className="space-y-3">
-          {/* A gap, not a decision: this panel does not take the scope yet. */}
-          <FilterReachNote scope={gradeScope} shows="every teammate" />
-          <TeammatesSection playerId={playerId} />
-        </div>
-      )}
+      {subTab === 'teammates' && <TeammatesSection playerId={playerId} scope={filterScope} />}
 
-      {subTab === 'captain' && (
-        <div className="space-y-3">
-          <FilterReachNote scope={gradeScope} shows="every match captained" />
-          <CaptainTab captainStats={captainStats} />
-        </div>
-      )}
+      {subTab === 'captain' && <CaptainTab captainStats={captainStats} />}
 
       {subTab === 'venue' && (
         <div className="space-y-6">
@@ -2300,8 +2293,19 @@ function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGr
                   {teamBreakdown.scope?.aggregate_excluded && (
                     <p className="font-mono text-[10px] text-pb-dim tracking-wide2">
                       Match type is recorded on each fixture, and Cricket Australia&apos;s
-                      own per-grade figures carry none, so they are left out here. This
-                      is what we hold a scorecard for.
+                      own per-grade figures carry none, so they are left out here.
+                    </p>
+                  )}
+                  {/* CA's season totals cover every grade, so a season in which
+                      the filter removed matches cannot have its shortfall placed.
+                      Counted and said, or a smaller grid reads as data missing. */}
+                  {teamBreakdown.scope?.seasons_left_to_scorecards > 0 && (
+                    <p className="font-mono text-[10px] text-pb-dim tracking-wide2">
+                      Cricket Australia&apos;s season totals cover every grade, so they are only
+                      used for a season in which every match was inside this filter.
+                      {' '}{teamBreakdown.scope.seasons_left_to_scorecards}{' '}
+                      {teamBreakdown.scope.seasons_left_to_scorecards === 1 ? 'season was' : 'seasons were'}
+                      {' '}left to the scorecards alone.
                     </p>
                   )}
                   {/* Why this total is a THIRD number, said here rather than left
@@ -2391,7 +2395,7 @@ function AchievedList({ items }) {
   )
 }
 
-function MilestonesTab({ playerId, upcomingMilestones, milestones, gradeScope = null }) {
+function MilestonesTab({ playerId, upcomingMilestones, milestones, filterPick = null }) {
   const [sub, setSub] = useState('batting')
 
   const upcoming = upcomingMilestones || []
@@ -2477,7 +2481,7 @@ function MilestonesTab({ playerId, upcomingMilestones, milestones, gradeScope = 
           Men's-only filter would give a number nobody can act on, so it is
           deliberately never filtered — and now says so instead of leaving the
           bar above it looking broken. */}
-      <FilterReachNote scope={gradeScope} reason="career" />
+      <FilterReachNote pick={filterPick} reason="career" />
       <div>
         <TabBar tabs={MILESTONE_SUB_TABS} active={sub} onChange={setSub} />
         {renderTab()}
@@ -2780,6 +2784,12 @@ export default function PlayerProfile() {
   // either way, so nobody has to discover the gap by adding the rows up.
   const matchCoverage = data?.match_coverage
   const scopeActive = !!gradeScope?.active
+  // The raw selection, null where untouched. The reach notes and tab marks
+  // fire on THIS, never on `gradeScope.active`: a club with a junior programme
+  // has a default scope on every visit, and the default is already announced
+  // once by the header. Six more notes about it would be noise.
+  const filterPick = { categories: catParam, formats: fmtParam, competitions: compParam }
+  const filterScope = filterPick
   useEffect(() => {
     const oid = data?.player?.organisation_id
     if (oid && oid !== profileOrgId) setProfileOrgId(oid)
@@ -2854,11 +2864,16 @@ export default function PlayerProfile() {
 
   useEffect(() => {
     if (!playerId) return
-    api.getPlayerSeasons(playerId, { categories: catParam, formats: fmtParam })
+    // The season table was sent the category and format halves and never the
+    // competition — the same class of gap as the grid, found while closing it.
+    const scope = { categories: catParam, formats: fmtParam, competitions: compParam }
+    api.getPlayerSeasons(playerId, scope)
       .then(setSeasonStats).catch(() => setSeasonStats([]))
+    // Milestones are deliberately never filtered: a career fact, and what the
+    // notification bell reports. The Milestones tab says so.
     api.getPlayerUpcomingMilestones(playerId).then(setUpcomingMilestones).catch(() => setUpcomingMilestones([]))
-    api.getPlayerCaptainStats(playerId).then(setCaptainStats).catch(() => setCaptainStats({}))
-  }, [playerId, catParam, fmtParam])
+    api.getPlayerCaptainStats(playerId, scope).then(setCaptainStats).catch(() => setCaptainStats({}))
+  }, [playerId, catParam, fmtParam, compParam])
 
   useEffect(() => {
     if (!data?.player?.organisation_id) return
@@ -3244,19 +3259,25 @@ export default function PlayerProfile() {
         )}
 
         {/* Tabs */}
-        <TabBar tabs={MAIN_TABS} active={tab} onChange={setTab} />
+        <TabBar
+          tabs={MAIN_TABS.map(t => (
+            (t.key === 'milestones' || t.key === 'achievements')
+              ? { ...t, label: <>{t.label}<FilterReachDot pick={filterPick} reason="career" /></> }
+              : t
+          ))}
+          active={tab} onChange={setTab} />
 
         {/* Tab content */}
         {tab === 'batting' && <BattingTab batting={batting} seasonStats={seasonStats} seasons={seasons} />}
         {tab === 'bowling' && <BowlingTab bowling={bowling} seasonStats={seasonStats} />}
         {tab === 'fielding' && <FieldingTab fielding={fielding} seasonStats={seasonStats} />}
-        {tab === 'analysis' && <AnalysisTab playerId={playerId} seasonId={seasonId} dismissals={dismissals} partnerships={partnerships} byGrade={byGrade} byPosition={byPosition} seasonStats={seasonStats} bowlingByGrade={bowlingByGrade} bowlingDismissals={bowlingDismissals} bowlingByBatterPosition={bowlingByBatterPosition} battingInnings={battingInnings} bowlingSpells={bowlingSpells} teamBreakdown={teamBreakdown} seasonLabel={seasonId ? (seasons.find(s => s.id === seasonId)?.name || null) : null} captainStats={captainStats} byVenue={byVenue} byOpposition={byOpposition} careerBatting={batting} careerBowling={bowling} careerFielding={fielding} matchCoverage={matchCoverage} gradeScope={gradeScope} />}
-        {tab === 'milestones' && <MilestonesTab playerId={playerId} upcomingMilestones={upcomingMilestones} milestones={milestones} gradeScope={gradeScope} />}
+        {tab === 'analysis' && <AnalysisTab playerId={playerId} seasonId={seasonId} dismissals={dismissals} partnerships={partnerships} byGrade={byGrade} byPosition={byPosition} seasonStats={seasonStats} bowlingByGrade={bowlingByGrade} bowlingDismissals={bowlingDismissals} bowlingByBatterPosition={bowlingByBatterPosition} battingInnings={battingInnings} bowlingSpells={bowlingSpells} teamBreakdown={teamBreakdown} seasonLabel={seasonId ? (seasons.find(s => s.id === seasonId)?.name || null) : null} captainStats={captainStats} byVenue={byVenue} byOpposition={byOpposition} careerBatting={batting} careerBowling={bowling} careerFielding={fielding} matchCoverage={matchCoverage} gradeScope={gradeScope} filterPick={filterPick} filterScope={filterScope} />}
+        {tab === 'milestones' && <MilestonesTab playerId={playerId} upcomingMilestones={upcomingMilestones} milestones={milestones} filterPick={filterPick} />}
         {tab === 'achievements' && (
           <div className="space-y-3">
             {/* An honour is not a men's honour or a T20 honour. Said rather
                 than silently ignoring the bar above it. */}
-            <FilterReachNote scope={gradeScope} reason="career" />
+            <FilterReachNote pick={filterPick} reason="career" />
             <AchievementsSection playerId={playerId} orgId={player.organisation_id} playerName={player.display_name || player.name} />
           </div>
         )}

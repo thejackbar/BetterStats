@@ -105,6 +105,7 @@ async function open(stats, { width = 1440, team = null } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: 1400 } })
   const page = await ctx.newPage()
   const errors = []
+  const wire = []   // every /teammates query string, to prove the pick reaches it
   page.on('pageerror', (e) => errors.push(String(e)))
   // Routed by REGEX, not a glob: Playwright's `**` does not cross a `?`, so a
   // glob silently loses `/stats?categories=…` to the catch-all.
@@ -121,6 +122,27 @@ async function open(stats, { width = 1440, team = null } = {}) {
     if (team && /\/team-breakdown$/.test(path)) {
       return route.fulfill({ status: 200, contentType: 'application/json',
                              body: JSON.stringify(team) })
+    }
+    // The whole filter row is gated on the club having a season, so the stub
+    // has to hand one back or there is no pill to press.
+    if (/\/organisations\/[^/]+\/seasons$/.test(path)) {
+      return route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify([{ id: 'dddddddd-0000-0000-0000-0000000000dd',
+                                name: 'Summer 2025/26', year: 2025 }]) })
+    }
+    if (/\/grade-categories$/.test(path)) {
+      return route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify({ available: ['senior', 'junior'], default: ['senior'],
+                               available_formats: ['one_day', 'two_day'],
+                               available_competitions: [] }) })
+    }
+    if (/\/teammates$/.test(path)) {
+      wire.push(new URL(route.request().url()).search)
+      return route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify({ player: { player_id: PID, name: 'Wilton, Rob' },
+                               teammates: [{ player_id: 'cccccccc-0000-0000-0000-0000000000cc',
+                                             name: 'Mate, Mick', games: 5, wins: 3,
+                                             losses: 2, draws: 0, win_pct: 60 }] }) })
     }
     const obj = /team-breakdown|grade-categories|captain-stats|self-serve|usage/.test(path)
     return route.fulfill({ status: 200, contentType: 'application/json',
@@ -140,8 +162,13 @@ async function open(stats, { width = 1440, team = null } = {}) {
     window.__mcPrev = now
     return settled
   }, null, { polling: 200, timeout: 10000 }).catch(() => {})
-  return { page, ctx, errors }
+  return { page, ctx, errors, wire }
 }
+
+const bodyText = (page) => page.evaluate(() =>
+  (document.body.innerText || '').replace(/\s+/g, ' ').trim())
+const dotCount = (page) => page.evaluate(() =>
+  document.querySelectorAll('button [aria-label*="filter does not"]').length)
 
 // The note as the page actually renders it, read out of the tile that holds
 // the MATCHES figure — not from anywhere on the document. A check scoped to
@@ -324,60 +351,84 @@ try {
     await ctx.close()
   }
 
-  console.log('\n-- the panels the filter does not reach say so --')
+  console.log('\n-- THE CLUB DEFAULT IS NOT A PICK: nothing extra is said --')
   {
     const { page, ctx, errors } = await open(DEFAULTED, { team: TEAM_BREAKDOWN })
+    // The header already says the default once. Six more lines about a
+    // filter nobody turned on would be noise on every visit to a club with a
+    // junior programme.
+    ck('no tab is marked while nothing has been picked',
+       (await dotCount(page)) === 0, String(await dotCount(page)))
     await page.click('text=Analysis').catch(() => {})
+    await page.waitForTimeout(300)
+    await page.click('text=COMPETITIONS').catch(() => {})
     await page.waitForTimeout(400)
-    const read = async (label) => {
-      await page.click(`text=${label}`).catch(() => {})
-      await page.waitForTimeout(500)
-      return page.evaluate(() => (document.body.innerText || '')
-        .replace(/\s+/g, ' ').trim())
-    }
-    const comps = await read('COMPETITIONS')
-    ck('COMPETITIONS says it enumerates rather than filters',
-       /Shows every competition, whatever is filtered above/.test(comps),
-       comps.slice(0, 200))
-    const formats = await read('FORMATS')
-    ck('FORMATS says the same, in its own words',
-       /Shows every format, whatever is filtered above/.test(formats))
-    const mates = await read('TEAMMATES')
-    ck('TEAMMATES names the filter that did not reach it, not a generic one',
-       /The Grade type filter above does not apply here/.test(mates),
-       mates.slice(0, 200))
-    ck('and says what it shows instead', /shows every teammate/.test(mates))
-    ck('no page errors', errors.length === 0, errors.join(' | '))
-    await ctx.close()
-  }
-
-  console.log('\n-- and nothing is said when no filter is on --')
-  {
-    const { page, ctx, errors } = await open(SURPLUS, { team: TEAM_BREAKDOWN })
-    await page.click('text=Analysis').catch(() => {})
-    await page.waitForTimeout(400)
-    await page.click('text=TEAMMATES').catch(() => {})
-    await page.waitForTimeout(500)
-    const text = await page.evaluate(() => (document.body.innerText || '')
-      .replace(/\s+/g, ' ').trim())
-    ck('NO reach note with every filter on All — the same rule the coverage '
-       + 'note keeps, so the page stays quiet on the common case',
-       !/does not apply here/.test(text) && !/whatever is filtered above/.test(text),
+    const text = await bodyText(page)
+    ck('and the Competitions panel carries no reach note under the default',
+       !/whatever is picked above/.test(text) && !/does not narrow/.test(text),
        text.slice(0, 200))
     ck('no page errors', errors.length === 0, errors.join(' | '))
     await ctx.close()
   }
 
-  console.log('\n-- milestones are never filtered, and say so --')
+  console.log('\n-- PICK A PILL, and the page says where it reached --')
   {
-    const { page, ctx, errors } = await open(DEFAULTED)
-    await page.click('text=MILESTONES').catch(() => {})
-    await page.waitForTimeout(600)
-    const text = await page.evaluate(() => (document.body.innerText || '')
-      .replace(/\s+/g, ' ').trim())
-    ck('the Milestones tab states it is a whole-career figure',
-       /Counted across the whole career, whatever is filtered above/.test(text),
+    const { page, ctx, errors, wire } = await open(DEFAULTED, { team: TEAM_BREAKDOWN })
+    await page.getByRole('button', { name: 'Juniors', exact: true }).click({ timeout: 3000 })
+      .catch(() => {})
+    await page.waitForTimeout(800)
+    ck('the two whole-career tabs are marked on the main bar, before opening them',
+       (await dotCount(page)) >= 2, String(await dotCount(page)))
+    await page.click('text=Analysis').catch(() => {})
+    await page.waitForTimeout(400)
+    ck('and the two enumerations are marked on the Analysis bar',
+       (await dotCount(page)) >= 4, String(await dotCount(page)))
+    await page.click('text=COMPETITIONS').catch(() => {})
+    await page.waitForTimeout(400)
+    let text = await bodyText(page)
+    ck('COMPETITIONS names the pick that did not reach it — Grade type, and only '
+       + 'Grade type, since nothing else was touched',
+       /Shows every competition, whatever is picked above/.test(text)
+       && /the Grade type filter does not narrow it/.test(text)
+       && !/Match type/.test(text.slice(text.indexOf('Shows every competition'))),
        text.slice(0, 300))
+    await page.click('text=FORMATS').catch(() => {})
+    await page.waitForTimeout(400)
+    text = await bodyText(page)
+    ck('FORMATS likewise', /Shows every format, whatever is picked above/.test(text))
+    await page.click('text=TEAMMATES').catch(() => {})
+    await page.waitForTimeout(600)
+    text = await bodyText(page)
+    ck('TEAMMATES carries NO note — it takes the filter now',
+       !/does not narrow/.test(text) && !/whatever is picked/.test(text),
+       text.slice(0, 200))
+    ck('and the pick is on the wire to it',
+       wire.some(q => /categories=junior/.test(q)), JSON.stringify(wire))
+    await page.click('text=MILESTONES').catch(() => {})
+    await page.waitForTimeout(500)
+    text = await bodyText(page)
+    ck('MILESTONES says it is whole-career and names the pick it ignores',
+       /Counted across the whole career\. The Grade type filter above does not change this\./
+         .test(text), text.slice(0, 300))
+    ck('no page errors', errors.length === 0, errors.join(' | '))
+    await ctx.close()
+  }
+
+  console.log('\n-- the grid says which seasons were left to the scorecards --')
+  {
+    const team = JSON.parse(JSON.stringify(TEAM_BREAKDOWN))
+    team.scope = { active: true, aggregate_excluded: false, seasons_left_to_scorecards: 2 }
+    const { page, ctx, errors } = await open(DEFAULTED, { team })
+    await page.click('text=Analysis').catch(() => {})
+    await page.waitForTimeout(400)
+    await page.click('text=Team').catch(() => {})
+    await page.waitForSelector('text=MATCHES BY GRADE', { timeout: 10000 }).catch(() => {})
+    const text = await bodyText(page)
+    ck('the per-season gate is stated with its count',
+       /only used for a season in which every match was inside this filter\. 2 seasons were left to the scorecards alone\./
+         .test(text), text.slice(text.indexOf('MATCHES BY GRADE'), text.indexOf('MATCHES BY GRADE') + 900))
+    ck('and the subtitle no longer claims "every grade"',
+       /Every grade in the current filter/.test(text))
     ck('no page errors', errors.length === 0, errors.join(' | '))
     await ctx.close()
   }

@@ -54,6 +54,7 @@ try:
     HAVE_GRID_SCOPE = True
 except ImportError:  # pragma: no cover
     HAVE_GRID_SCOPE = False
+from app.routers.players import get_player_teammates, get_player_captain_stats
 
 # Behind a guard so a CONTROL RUN against the previous commit reports the
 # feature missing as one failed check rather than dying on an ImportError
@@ -128,6 +129,16 @@ EMPTY = uuid.uuid4()
 # A career that arrived as season totals with no scorecards behind it.
 IMPORTED = uuid.uuid4()
 STRANGER = uuid.uuid4()
+# The two shapes the per-season gate has to tell apart. GAPPY has a season CA
+# counts short of us where he ALSO turned out in a junior grade (the total
+# covers matches a Men's filter removes) and a season where he did not (the
+# total describes him exactly). PLAIN has no junior grade at all, so the club
+# default must leave his grid byte-for-byte what the unfiltered read gives.
+GAPPY = uuid.uuid4()
+PLAIN = uuid.uuid4()
+# A teammate who shares GAPPY's senior games and one of his junior ones, and a
+# side GAPPY captained, for the two panels that take the scope now.
+MATE = uuid.uuid4()
 
 
 async def build_schema() -> None:
@@ -197,12 +208,16 @@ HELD = {
     EVEN:   {G_1ST: 5},                        # 5 held
     IMPORTED: {},                              # nothing held at all
     EMPTY:  {},
+    GAPPY:  {G_OLD: 2, G_1ST: 3, G_JNR: 2},    # old season senior only; new season mixed
+    PLAIN:  {G_OLD: 2, G_1ST: 3},              # senior only, both seasons
 }
 CLAIMED = {
     WILTON: {S_NEW: 5, S_OLD: 2},   # 7, plus 1 the manual game contributes
     SHORT:  {S_NEW: 9},             # 9 claimed against 3 held -> 6 with no scorecard
     EVEN:   {S_NEW: 5},             # agrees exactly -> no note
     IMPORTED: {S_OLD: 40},          # a whole career of season totals, no games
+    GAPPY:  {S_OLD: 4, S_NEW: 7},   # gap of 2 in each season; only S_OLD is placeable under Men's
+    PLAIN:  {S_OLD: 4, S_NEW: 5},   # gap of 2 in each; nothing for a Men's filter to exclude
 }
 # A grade-less manual game, on top of WILTON's 9 graded ones. It belongs to no
 # competition and MUST still count as held: we have the match, there is nothing
@@ -240,6 +255,8 @@ async def seed(session) -> None:
     for pid, org, nm in ((WILTON, ORG, "Wilton, Rob"), (SHORT, ORG, "Short, Sam"),
                          (EVEN, ORG, "Even, Ed"), (EMPTY, ORG, "Empty, Eve"),
                          (IMPORTED, ORG, "Ancient, Arthur"),
+                         (GAPPY, ORG, "Gappy, Greg"), (PLAIN, ORG, "Plain, Pete"),
+                         (MATE, ORG, "Mate, Mick"),
                          (STRANGER, OTHER, "Nobody, Ivan")):
         await ex("INSERT INTO players (id, organisation_id, name, grassroots_id, "
                  " status) VALUES (:i, :o, :n, :g, 'active')",
@@ -284,6 +301,28 @@ async def seed(session) -> None:
                 "VALUES (:p, :s, :m, :m, :r, 0, 0, 'api')",
                 p=player, s=sid, m=matches, r=matches * 30)
 
+    # MATE played alongside GAPPY in every senior game and ONE junior game, so
+    # a Men's filter on the Teammates panel must drop that one shared junior
+    # game from their count. GAPPY captained his senior S_NEW side.
+    gappy_games = (await session.execute(text(
+        "SELECT ga.game_id, g.grade_id FROM game_appearances ga "
+        "JOIN games g ON g.id = ga.game_id WHERE ga.player_id = :p"), {"p": GAPPY})).all()
+    jnr_shared = 0
+    for gid, grade_id in gappy_games:
+        if grade_id == G_JNR:
+            if jnr_shared >= 1:
+                continue
+            jnr_shared += 1
+        await ex("INSERT INTO game_appearances (game_id, player_id) VALUES (:g, :p)",
+                 g=gid, p=MATE)
+        if grade_id == G_1ST:
+            await ex("UPDATE game_appearances SET is_captain = TRUE "
+                     "WHERE game_id = :g AND player_id = :p", g=gid, p=GAPPY)
+    # And GAPPY captained one junior game too, so a Men's filter has one to drop.
+    jnr_game = next(gid for gid, grade_id in gappy_games if grade_id == G_JNR)
+    await ex("UPDATE game_appearances SET is_captain = TRUE "
+             "WHERE game_id = :g AND player_id = :p", g=jnr_game, p=GAPPY)
+
     # A grade-less manual game for WILTON, in the current season. There is no
     # `game_appearances` row: that table FKs to `games`, and a manual game is
     # not one — the appearance union picks it up through the effective
@@ -314,6 +353,22 @@ async def grid(session, player, **kw):
     params.update(kw)
     return await get_player_team_breakdown_endpoint(
         player_id=str(player), db=session, **params)
+
+
+def _strip_scope(payload: dict) -> dict:
+    return {k: v for k, v in payload.items() if k != "scope"}
+
+
+async def mates(session, player, **kw):
+    params = dict(categories=None, formats=None, competitions=None)
+    params.update(kw)
+    return await get_player_teammates(player_id=str(player), db=session, **params)
+
+
+async def captain(session, player, **kw):
+    params = dict(categories=None, formats=None, competitions=None)
+    params.update(kw)
+    return await get_player_captain_stats(player_id=str(player), db=session, **params)
 
 
 async def main() -> None:
@@ -541,6 +596,72 @@ async def main() -> None:
             check("the grade-less manual game is still out of every grid — it "
                   "has no grade to sit under",
                   all(r["grade_name"] for r in everything["rows"]))
+        print("\n-- THE GAP HEURISTIC IS GATED PER SEASON, NOT SWITCHED OFF --")
+        async with Session() as session:
+            # PLAIN has no junior grade, so on a club whose default excludes
+            # junior his grid must not move by a single match. A blanket skip
+            # dropped his four CA-claimed matches with nobody touching a control.
+            plain_all = await grid(session, PLAIN, categories="senior,junior")
+            plain_def = await grid(session, PLAIN)
+            check("a senior-only player's grid is BYTE-IDENTICAL under the club "
+                  "default and with no scope at all",
+                  _strip_scope(plain_def) == _strip_scope(plain_all),
+                  f"{_strip_scope(plain_def)} vs {_strip_scope(plain_all)}")
+            check("and it still carries the four matches CA counts that we hold "
+                  "no scorecard for", sum(r["matches"] for r in plain_def["rows"]) == 9
+                  and sum(r["attributed_unknown"] for r in plain_def["rows"]) == 4,
+                  str(plain_def["rows"]))
+            check("with no season left to the scorecards",
+                  plain_def["scope"]["seasons_left_to_scorecards"] == 0,
+                  str(plain_def["scope"]))
+
+            gappy_all = await grid(session, GAPPY, categories="senior,junior")
+            g_rows = {r["grade_name"]: r for r in gappy_all["rows"]}
+            check("unfiltered, the mixed player's senior-only season places its "
+                  "gap and the mixed season cannot (two grades)",
+                  g_rows["1st Grade"]["matches"] == 7
+                  and g_rows["1st Grade"]["attributed_unknown"] == 2
+                  and gappy_all["unattributed"] == 2,
+                  str(gappy_all))
+
+            gappy_def = await grid(session, GAPPY)
+            d_rows = {r["grade_name"]: r for r in gappy_def["rows"]}
+            check("under Men's, the SENIOR-ONLY season still places its gap — the "
+                  "total describes that season exactly",
+                  d_rows["1st Grade"]["attributed_unknown"] == 2, str(gappy_def["rows"]))
+            check("and the MIXED season is left to its scorecards — its total "
+                  "covers junior matches the filter removed",
+                  d_rows["1st Grade"]["matches"] == 7 - 0
+                  and gappy_def["unattributed"] == 0
+                  and "Under 16s" not in d_rows,
+                  str(gappy_def))
+            check("which the payload reports, so the screen can say so",
+                  gappy_def["scope"]["seasons_left_to_scorecards"] == 1,
+                  str(gappy_def["scope"]))
+            check("the two totals differ by exactly the junior scorecards plus "
+                  "the unplaceable gap, and nothing else",
+                  (sum(r["matches"] for r in gappy_all["rows"]) + gappy_all["unattributed"])
+                  - (sum(r["matches"] for r in gappy_def["rows"]) + gappy_def["unattributed"])
+                  == 2 + 2)
+
+        print("\n-- TEAMMATES AND CAPTAIN TAKE THE SCOPE TOO --")
+        async with Session() as session:
+            all_mates = await mates(session, GAPPY, categories="senior,junior")
+            m_all = next((m for m in all_mates["teammates"] if m["player_id"] == str(MATE)), None)
+            check("unfiltered, the teammate shares every senior game and one junior",
+                  m_all and m_all["games"] == 6, str(m_all))
+            def_mates = await mates(session, GAPPY)
+            m_def = next((m for m in def_mates["teammates"] if m["player_id"] == str(MATE)), None)
+            check("under Men's the shared junior game drops off their count",
+                  m_def and m_def["games"] == 5, str(m_def))
+            cap_all = await captain(session, GAPPY, categories="senior,junior")
+            check("unfiltered, four matches captained (three senior, one junior)",
+                  int(cap_all["summary"]["games_captained"] or 0) == 4, str(cap_all.get("summary")))
+            cap_def = await captain(session, GAPPY)
+            check("under Men's, three — the junior captaincy is out of scope",
+                  int(cap_def["summary"]["games_captained"] or 0) == 3, str(cap_def.get("summary")))
+            check("another club's player is still nobody's teammate",
+                  all(m["player_id"] != str(STRANGER) for m in all_mates["teammates"]))
     else:  # pragma: no cover - control run only
         check("the grid takes the filter bar's scope", False)
 

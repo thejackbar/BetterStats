@@ -31,6 +31,10 @@ from app.services.bowling_style import bowling_class, bowling_label
 # fixture whose grade belongs to the club that synced it first, and a grade-less
 # manual game, both count; the CASE re-derives WIN/LOSS against OUR home/away
 # side since g.result is relative to whichever club's sync wrote it.
+# `scope_clause` is appended to the universe's WHERE (a leading-AND fragment
+# from GradeScope.clause, or ""), so a filtered teammates list and a filtered
+# with/without split narrow the same games. The games alias is `g`, which is
+# what the clause reads the per-fixture format off.
 _OG_CTE = """
     og AS (
         SELECT g.id,
@@ -55,9 +59,21 @@ _OG_CTE = """
                 JOIN players op ON op.id = oga.player_id
                 WHERE oga.game_id = g.id AND op.organisation_id = CAST(:org AS UUID)
             )
-        )
+        ){scope_clause}
     )
 """
+
+
+def _og_cte(scope) -> str:
+    """The universe CTE, narrowed to the page's scope when one is active."""
+    clause = scope.clause("g.grade_id") if scope is not None and scope.active else ""
+    return _OG_CTE.replace("{scope_clause}", clause)
+
+
+def _bind_scope(scope, params: dict) -> dict:
+    if scope is not None and scope.active:
+        scope.bind(params)
+    return params
 
 
 def _win_pct(w: int, dec: int) -> float | None:
@@ -76,7 +92,8 @@ async def _player_name(session: AsyncSession, org_id: str, player_id: str) -> st
     return r.scalar()
 
 
-async def teammates(session: AsyncSession, org_id: str, player_id: str) -> dict | None:
+async def teammates(session: AsyncSession, org_id: str, player_id: str,
+                    scope=None) -> dict | None:
     """Every player the focal player has shared a game with, most games first."""
     name = await _player_name(session, org_id, player_id)
     if name is None:
@@ -84,7 +101,7 @@ async def teammates(session: AsyncSession, org_id: str, player_id: str) -> dict 
     res = await session.execute(
         text(
             f"""
-            WITH {_OG_CTE},
+            WITH {_og_cte(scope)},
             mine AS (SELECT DISTINCT game_id FROM game_appearances WHERE player_id = CAST(:pid AS UUID)),
             shared AS (SELECT og.id, og.result FROM og JOIN mine ON mine.game_id = og.id)
             SELECT p.id::text AS id,
@@ -104,7 +121,7 @@ async def teammates(session: AsyncSession, org_id: str, player_id: str) -> dict 
             ORDER BY games DESC, wins DESC, name
             """
         ),
-        {"org": org_id, "pid": player_id},
+        _bind_scope(scope, {"org": org_id, "pid": player_id}),
     )
     mates = []
     for r in res.mappings():
@@ -122,8 +139,9 @@ async def teammates(session: AsyncSession, org_id: str, player_id: str) -> dict 
 # Shared CTE block for the with/without split — the focal player's org games
 # (canonical ownership universe, see _OG_CTE), each tagged with whether the
 # teammate was also in the side.
-_SPLIT_CTES = f"""
-    WITH {_OG_CTE},
+def _split_ctes(scope) -> str:
+    return f"""
+    WITH {_og_cte(scope)},
     pg AS (SELECT DISTINCT game_id FROM game_appearances WHERE player_id = CAST(:p AS UUID)),
     xg AS (SELECT DISTINCT game_id FROM game_appearances WHERE player_id = CAST(:x AS UUID)),
     pgames AS (
@@ -133,14 +151,17 @@ _SPLIT_CTES = f"""
 """
 
 
-async def with_split(session: AsyncSession, org_id: str, player_id: str, teammate_id: str) -> dict | None:
+async def with_split(session: AsyncSession, org_id: str, player_id: str, teammate_id: str,
+                     scope=None) -> dict | None:
     """The focal player's batting & bowling and the team's record, split by
-    whether the teammate was also in the side. All-time, this club only."""
+    whether the teammate was also in the side. All-time, this club only, and
+    narrowed to the page's scope when one is active."""
     name_p = await _player_name(session, org_id, player_id)
     name_x = await _player_name(session, org_id, teammate_id)
     if name_p is None or name_x is None or player_id == teammate_id:
         return None
-    params = {"org": org_id, "p": player_id, "x": teammate_id}
+    params = _bind_scope(scope, {"org": org_id, "p": player_id, "x": teammate_id})
+    _SPLIT_CTES = _split_ctes(scope)
 
     # Column lists shared by the focal split and the teammate's shared-games line,
     # so one block-builder formats both.

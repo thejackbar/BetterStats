@@ -338,8 +338,12 @@ export const api = {
     request(`/players/${playerId}/by-opposition${scopeQuery(scope)}`),
   // Public teammates: who this player has shared a side with, and the with-vs-
   // without split of the player's output alongside one teammate.
-  getPlayerTeammates: (playerId) => request(`/players/${playerId}/teammates`),
-  getPlayerTeammateSplit: (playerId, teammateId) => request(`/players/${playerId}/teammates/${teammateId}`),
+  // Both take the page's scope: "men's teammates" and the with/without split
+  // inside one competition are real questions the filter bar has to answer.
+  getPlayerTeammates: (playerId, scope) =>
+    request(`/players/${playerId}/teammates${scopeQuery(scope)}`),
+  getPlayerTeammateSplit: (playerId, teammateId, scope) =>
+    request(`/players/${playerId}/teammates/${teammateId}${scopeQuery(scope)}`),
   // Takes the grade-type / match-type / competition scope like every other
   // Analysis panel: the filter bar is page-level, so a grid that ignored it
   // put the women's grades back one click after the Batting tab dropped them.
@@ -2831,7 +2835,7 @@ export const api = {
     if (competitions) params.set('competitions', competitions)
     return request(`/leaderboard/sirs/${type}?${params}`)
   },
-  getPlayerCaptainStats: (playerId) => request(`/players/${playerId}/captain-stats`),
+  getPlayerCaptainStats: (playerId, scope) => request(`/players/${playerId}/captain-stats${scopeQuery(scope)}`),
 
   // ─── BetterSelect: Fixtures ─────────────────────────────
   bsListFixtures: (upcomingOnly = false) =>

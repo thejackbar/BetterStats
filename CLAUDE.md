@@ -10890,6 +10890,66 @@ lenses they are looking through at the data."
   and are arguably a career fact like a milestone; that needs a decision rather
   than a pass.
 
+### The review, and what it changed (v9.64.1)
+
+Asked to review 1, 2 and 3 above honestly. Two of the design calls were wrong,
+and one had been pushed to `main` without being measured.
+
+- **THE BLANKET SKIP DROPPED REAL MATCHES ON THE DEFAULT VIEW, and the control
+  run reproduces it exactly.** v9.64.0 skipped the season-total gap heuristic
+  under ANY active scope. A club with a junior programme has the club default
+  active on every visit, so every senior player there whose older seasons
+  predate CA's per-grade data had their grid total drop with nobody touching a
+  control — in the suite, a senior-only player read `matches: 5,
+  attributed_unknown: 0` where the unfiltered read gives `9` and `4`. **Gated
+  per season now, not switched off**: an unscoped per-season count is compared
+  against the scoped one, a season where they differ is `mixed` and its gap is
+  not this filter's to place, and a season where they agree is one the total
+  describes exactly, so the heuristic runs as ever. The payload reports
+  `seasons_left_to_scorecards` and the grid says it. The suite asserts a
+  senior-only player's grid is BYTE-IDENTICAL under the club default and with
+  no scope at all, which is the property the first cut broke.
+- **THE REACH NOTES FIRE ON WHAT WAS PICKED, NEVER ON THE CLUB DEFAULT.** Six
+  tabs carrying "the filter above does not apply here" on every visit to a
+  junior-programme club, about a filter nobody turned on, is the "a note on
+  everything teaches people to stop reading notes" rule broken behind a
+  condition that is true by default for a large share of clubs. `FilterReach`
+  takes the RAW selection (`catParam`/`fmtParam`/`compParam`, null where
+  untouched), not the resolved scope — the frontend already knew the
+  difference. The default is announced once, by the header, and once is enough.
+- **A MARK ON THE TAB LABEL SAYS IT BEFORE THE TAB IS OPENED.**
+  `FilterReachDot` on Competitions, Formats, Milestones and Honours, drawn only
+  while something is picked. `presskit.TabBar` already accepts a node as a
+  label, so the main bar needed no change.
+- **TEAMMATES AND CAPTAIN ARE CLOSED, NOT DECLARED.** Both are per-game reads.
+  `iq_teammates` has one "our games" universe CTE and every read is built on
+  it, so `_og_cte(scope)` narrows the list and the with/without split
+  together; every captain query joins `v_effective_games g` and interpolates
+  one `club` string, so the scope rides on that string rather than being
+  pasted into six places.
+- **Found while closing it**: the season table was sent the category and
+  format halves and never the competition — same class of gap as the grid.
+- **Verified against a real Postgres** (`verify_match_coverage.py` is 59
+  checks now: the senior-only player byte-identical under the club default, a
+  mixed player's senior-only season still placing its gap while his mixed
+  season is left to the scorecards, the count reported, the two totals
+  differing by exactly the junior scorecards plus the unplaceable gap, and the
+  teammate and captaincy counts each dropping the shared junior game under
+  Men's) **with two control runs**: the blanket skip this replaces fails 7, and
+  the two new scopes neutered fail 2. **Driven in Chromium** (49: nothing
+  marked or noted under the club default, the pick made by pressing the real
+  Juniors pill, the dots on both bars before the tabs are opened, each note
+  naming Grade type and NOT Match type, Teammates carrying no note and the pick
+  on the wire to it, and the grid's per-season line) **with a control run**:
+  the notes and dots stubbed to null fail 5 and leave the silence checks green.
+- **THE FILTER ROW IS GATED ON THE CLUB HAVING A SEASON**, so a stub that
+  answers `[]` for `/organisations/{id}/seasons` renders no pill to press and
+  every pick-driven check fails with the pick never made. Found by probing the
+  rendered buttons, not by reading the harness.
+- **NOTICED, NOT FIXED**: club rankings are still unfiltered and carry no
+  note. They are arguably a career fact like a milestone, and that is a
+  decision rather than a pass.
+
 ## Naming a club or a contact outright (v9.58.3, Sep 2026)
 
 Asked for on the internal Segments screen straight after the rules above:
