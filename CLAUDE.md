@@ -4483,6 +4483,77 @@ status. So it is a plain admin-ticked fact, the same shape as the existing
 - **No new endpoint** — reuses the existing per-season PATCH, same as
   `is_new_registration`.
 
+## An absent key is not a clear: the member's tier, and one save per page (v9.65.2, Sep 2026)
+
+Reported off Sam Alborn's Accounts page (Applecross, 2025/26): changing the
+Membership Type and saving RESET the Membership Tier to "Needs tier", and with
+two panels edited only one panel's changes survived whichever button was
+pressed.
+
+- **ONE LINE CAUSED THE FIRST HALF, AND ITS OWN COMMENT SAID WHY IT WAS
+  SAFE.** `patch_member_season` read `# fee_schedule_id is always present in
+  the body; treat "" / null as clear.` It was not always present: **two**
+  callers wrote that row without it — the membership panel saving a status, and
+  the Accounts LIST ticking "Registered with PlayHQ" — so each of those writes
+  silently wiped the member's tier and left the club reading "No tier assigned
+  — fees won't calculate." **A comment asserting an invariant is not the
+  invariant**; grep the callers.
+- **THE KEY'S PRESENCE IS THE INTENT** (`model_fields_set`, the rule
+  `select_show_age_under` already keeps): absent means this caller is not
+  editing the tier, null or `""` means clear it. A genuine tri-state, and the
+  three states are what let one save carry several panels.
+- **THE ACCOUNTS LIST NEEDED NO FRONTEND CHANGE.** `togglePlayhq` was already
+  sending only what it meant to change; the server was reading a field it had
+  never been given. Fixing the reader fixes both screens at once, which is why
+  the fix is server-side rather than "make every caller send the tier back" —
+  that would put a stale tier from a browser on the wire and make the list
+  screen able to overwrite a tier it never displayed.
+- **THREE PANELS, TWO ENDPOINTS, ONE ACT OF SAVING.** Membership, Membership
+  Tier and Contact & Notes each had their own button that saved only itself, so
+  an admin who edited two and pressed one silently lost the other. Every button
+  now saves every panel that has been TOUCHED — compared against a baseline
+  captured on load, so an untouched panel writes nothing rather than re-sending
+  fields nobody edited.
+- **EACH ENDPOINT IS WRITTEN ONCE, with everything bound for it.** Membership
+  and Tier both write `fee_member_seasons`; two PATCHes would race and one
+  would overwrite the other's view of the row. The suite asserts one call per
+  endpoint, not merely that both changes landed.
+- **A PANEL SAYS IT IS UNSAVED, AND A BUTTON SAYS WHAT ELSE IT WILL WRITE.**
+  Silently widening what a button does is its own surprise, so a touched panel
+  carries an UNSAVED mark and a button about to write another panel's changes
+  names them above it. With two or more touched the label itself becomes
+  `SAVE ALL CHANGES (n)`.
+- **PRESSING SAVE WITH NOTHING EDITED SENDS NOTHING** and says so, rather than
+  reporting a save that never happened.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_member_fees_form_save.py`, 41 checks through
+  the shipped route bodies: the reported case replayed, the same write from the
+  Accounts list, an explicit null AND an explicit `""` still clearing, a clear
+  not rewriting the carry-forward default, the combined save landing every
+  field of all three panels, every refusal leaving the stored tier exactly as
+  it was, cross-club both ways, and a status-only save opening a season row
+  without inventing a tier for it) **with a control run**: 5 fail against the
+  previous commit, on exactly the reported behaviour.
+- **Driven in Chromium** (`frontend/verification/verify_member_fees_save_browser.mjs`,
+  39: the exact payload on the wire for each button, a membership save saying
+  NOTHING about the tier, one write per endpoint, an untouched panel sending
+  nothing, an intended clear carrying the key with null, the marks and the
+  notes, and no overflow at 390px) **with a control run**: 15 fail.
+- **A CHECK THAT MEASURES THE HARNESS IS NOT A CHECK, twice here.** The
+  backend suite's `reset_tier` used a raw UPDATE and left the ORM's in-memory
+  copy stale, so the next write looked like a no-op and a passing behaviour
+  read as failing — it expires the session now. The browser suite counted
+  `text=UNSAVED`, which matches every ANCESTOR of the pill too (5 for 2 marks),
+  and counted page-view telemetry as a save; both are addressed by their own
+  `data-testid` and a `/usage/` filter.
+- **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN.** The browser suite's
+  first cut clicked `SAVE ALL CHANGES` directly, so against a build without the
+  feature it died on an absent locator after three checks and said nothing
+  about the other thirty-six. `pressSave` falls back to the panel's own label.
+- **NOTICED, NOT FIXED**: nothing warns on navigating away from the page with a
+  panel still marked UNSAVED. The marks make it visible, and a route-leave
+  guard is its own change.
+
 ## BetterFees season rollover: undo, find-and-add, and remove (v9.19.13, Aug 2026)
 
 Reported from Applecross getting 26/27 ready: rolling players over before the

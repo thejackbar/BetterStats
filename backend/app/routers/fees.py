@@ -1014,12 +1014,18 @@ async def patch_member_season(
         )
         db.add(ms)
 
-    # fee_schedule_id is always present in the body; treat "" / null as clear.
-    schedule = await _resolve_schedule(db, club, season, data.fee_schedule_id)
-    ms.fee_schedule_id = schedule.id if schedule else None
-    # Carry the chosen tier forward as the member's default for future seasons.
-    if schedule is not None:
-        member.current_tier = schedule.name
+    # A tri-state on the wire, and the key being PRESENT is what carries the
+    # intent: absent means "this caller isn't editing the tier" (the membership
+    # panel saving a status, the Accounts list ticking PlayHQ), null or "" means
+    # "clear it". Reading a missing key as a clear silently wiped a member's
+    # tier every time either of those callers wrote, which is what left people
+    # reading "No tier assigned — fees won't calculate."
+    if "fee_schedule_id" in data.model_fields_set:
+        schedule = await _resolve_schedule(db, club, season, data.fee_schedule_id)
+        ms.fee_schedule_id = schedule.id if schedule else None
+        # Carry the chosen tier forward as the member's default for future seasons.
+        if schedule is not None:
+            member.current_tier = schedule.name
 
     if data.is_new_registration is not None:
         ms.is_new_registration = data.is_new_registration
