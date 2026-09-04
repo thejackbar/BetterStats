@@ -342,6 +342,13 @@ for (const [name, path] of [
     try { payload = req.postDataJSON() } catch { payload = null }
     if (method !== 'GET') calls.push({ path: p, method, payload })
     const json = (b) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(b) })
+    if (/competitions\/reorder/.test(p)) {
+      // A stub that ignores the write cannot tell a working reorder from one
+      // that only redraws — apply it, the way the server would.
+      const order = payload.competition_ids
+      comps = order.map(id => comps.find(c => c.id === id)).filter(Boolean)
+      return json({ status: 'reordered' })
+    }
 
     if (/^\/auth\/me/.test(p)) {
       return json({ id: 'u1', username: 'admin', role: 'club_admin', club_id: CLUB.id,
@@ -429,6 +436,46 @@ for (const [name, path] of [
   const rename = calls.find(c => c.method === 'PATCH')
   ck('renaming sends the new name', !!rename && rename.payload.name === 'WASTCA Seniors',
     JSON.stringify(rename))
+
+  // ORDERING. The order of these cards is the order the public Competition
+  // pills read in, so a club that wants its main competition first must be
+  // able to say so.
+  calls.length = 0
+  // Captured BEFORE the click: the stub applies the reorder to `comps`, so
+  // comparing the payload against `comps` afterwards compares it with itself
+  // and the check can never fail.
+  const idsBefore = comps.map(c => c.id)
+  const firstBefore = await page.locator('[data-testid="competition-card"] h3').first().innerText()
+  const downFirst = page.locator('button[aria-label^="Move"][aria-label$="down"]').first()
+  ck('every competition card carries an order control',
+    await page.locator('[data-testid="competition-card"]').count() >= 2
+    && await downFirst.count() === 1)
+  // Guarded, so a CONTROL RUN with the controls absent REPORTS each check
+  // below rather than dying here and saying nothing about them.
+  if (await downFirst.count()) {
+    await downFirst.click()
+    await page.waitForTimeout(900)
+  }
+  const reorder = calls.find(c => /competitions\/reorder/.test(c.path))
+  ck('moving one down sends the WHOLE list in its new order, not just the pair',
+    !!reorder && Array.isArray(reorder.payload.competition_ids)
+    && reorder.payload.competition_ids.length === idsBefore.length
+    && reorder.payload.competition_ids[0] === idsBefore[1]
+    && reorder.payload.competition_ids[1] === idsBefore[0],
+    JSON.stringify(reorder))
+  const firstAfter = await page.locator('[data-testid="competition-card"] h3').first().innerText()
+  ck('and the list on screen actually moves', firstAfter !== firstBefore,
+    `${firstBefore} -> ${firstAfter}`)
+  const ups = page.locator('button[aria-label$="up"]')
+  const downs = page.locator('button[aria-label$="down"]')
+  ck('the first card cannot be moved up, nor the last down',
+    await ups.count() > 0 && await downs.count() > 0
+    && await ups.first().isDisabled() && await downs.last().isDisabled())
+
+  ck('the screen says the order drives the public filter',
+    /order the Competition filter lists them in/i.test(await body()))
+  ck('and the page is named for competitions, not grades alone',
+    /Grades & Competitions/.test(await body()))
 
   // Create.
   calls.length = 0

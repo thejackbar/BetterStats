@@ -10988,6 +10988,47 @@ however balls faced counting did not commence until specific competitions from
   dagger, the complete one beside it does not, and the footnote under the
   table says why.
 
+### The order of the competition pills is the club's to set (v9.65.0)
+
+Reported: the pills on a club's public stats pages come out in whatever order
+the sync first met the competitions, and a club fielding sides in several
+should be able to lead with the one that matters.
+
+- **NOTHING NEW ON THE BACKEND, and checking that first is what kept this
+  small.** `club_competitions.display_order` has existed since migration 283,
+  `competitions.reorder_competitions` stamps it by position,
+  `POST /admin/competitions/reorder` is routed and `api.adminReorderCompetitions`
+  was already written. `list_competitions` sorts on it and
+  `org_available_competitions` is that list filtered, so every pill row and both
+  breakdown surfaces already read the order — nobody could set it.
+- **A SWAP SENDS THE WHOLE LIST, not the moved pair.** The server stamps
+  positions over every id it is given, so a partial list would renumber two
+  rows against stale neighbours; sending all of them is also what makes a
+  foreign or stale id skippable without leaving a gap, the rule
+  `reorder_plan_tree` and `reorder_agenda_items` already follow.
+- **Arrows, not drag.** Two to five cards in a vertical list, on a screen an
+  admin visits once. `dragOrder.js` exists for the nets batting order because
+  that is run from an iPad mid-session; this is not that.
+- **`MANAGE GRADES` IS NOW `GRADES & COMPETITIONS`**, in the sidebar and as the
+  page's own heading. The screen has owned competitions since 9.60 and the name
+  said nothing about it; a club admin looking for where to manage them had no
+  reason to open it. Display only — the route, the capability and every stored
+  row are untouched, the same call the BetterAdmin rename made.
+- **`/admin/grades#competitions` scrolls to the panel**, so a guide or a link
+  can land on it rather than the top of a long page. Gated on the data having
+  loaded, or there is nothing to scroll to yet.
+- **Driven in Chromium** (the suite is 78 now: the control on every card, the
+  whole list on the wire in its new order, the cards actually moving, the first
+  and last ends disabled, the sentence saying the order drives the public
+  filter, and the page named for competitions) **with a control run**: with the
+  arrows removed, 4 fail.
+- **A CHECK THAT COMPARES THE PAYLOAD AGAINST THE STUB'S OWN STATE CANNOT
+  FAIL.** The first cut asserted the sent ids differed from `comps`, which the
+  stub had already reordered — so it compared the payload with itself. It
+  captures the order BEFORE the click now and asserts the two swapped ends.
+  The stub also has to APPLY the reorder, or "the list actually moves" is
+  measuring a redraw.
+
 ## Naming a club or a contact outright (v9.58.3, Sep 2026)
 
 Asked for on the internal Segments screen straight after the rules above:

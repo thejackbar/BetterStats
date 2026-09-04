@@ -1,3 +1,4 @@
+import { useLocation } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { api } from '../../lib/api'
@@ -829,6 +830,14 @@ function CompetitionManager({ clubId }) {
       .finally(() => setLoading(false))
   }
   useEffect(() => { load() }, [])
+  // A link to /admin/grades#competitions (the sidebar, the blog, a guide)
+  // lands on the panel rather than the top of a long page. Waits for the data
+  // so there is something to scroll to.
+  const { hash } = useLocation()
+  useEffect(() => {
+    if (loading || hash !== '#competitions') return
+    document.getElementById('competitions')?.scrollIntoView({ block: 'start' })
+  }, [loading, hash])
 
   async function act(fn) {
     setBusy(true)
@@ -850,8 +859,23 @@ function CompetitionManager({ clubId }) {
   const associations = data?.associations || []
   const ungrouped = grades.filter(g => !g.competition_id)
 
+  // THE ORDER HERE IS THE ORDER EVERY COMPETITION PILL READS IN. The public
+  // filter row, the club's Competitions page and every player's Competitions
+  // tab all read `list_competitions`, which sorts on display_order — so until
+  // a club sets one, they came out in whatever order the sync first met them.
+  // A swap sends the WHOLE list, the way the grade reorder and the plan tree
+  // already do, so the server stamps positions over every row and a foreign
+  // or stale id cannot leave a gap in the numbering.
+  function move(index, delta) {
+    const target = index + delta
+    if (target < 0 || target >= competitions.length) return
+    const ids = competitions.map(c => c.id)
+    ;[ids[index], ids[target]] = [ids[target], ids[index]]
+    act(() => api.adminReorderCompetitions(ids))
+  }
+
   return (
-    <div className="mb-10">
+    <div className="mb-10" id="competitions">
       <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-3 uppercase">
         Competitions <span className="text-pb-faintest">({competitions.length})</span>
       </p>
@@ -860,6 +884,10 @@ function CompetitionManager({ clubId }) {
         automatically by the association that runs them, which is right for most
         clubs. Split one here when an association runs several competitions you
         want to read separately — a cup alongside the regular season, say.
+        {competitions.length > 1 && (
+          <> The order below is the order the Competition filter lists them in, on
+          every stats page and player profile. Use the arrows to change it.</>
+        )}
       </p>
 
       {error && <p className="text-pb-red text-sm mb-3">{error}</p>}
@@ -886,12 +914,26 @@ function CompetitionManager({ clubId }) {
         </div>
       )}
 
-      {competitions.map(c => {
+      {competitions.map((c, i) => {
         const held = grades.filter(g => g.competition_id === c.id)
         return (
-          <div key={c.id} className="border pb-hairline rounded p-4 mb-3">
+          <div key={c.id} className="border pb-hairline rounded p-4 mb-3" data-testid="competition-card">
             <div className="flex items-start justify-between gap-3 flex-wrap">
-              <div className="min-w-0">
+              {competitions.length > 1 && (
+                <div className="flex flex-col gap-0.5 shrink-0 -ml-1">
+                  <button type="button" disabled={busy || i === 0}
+                    onClick={() => move(i, -1)}
+                    aria-label={`Move ${c.name} up`}
+                    className="w-6 h-5 text-[11px] leading-none rounded text-pb-dim hover:text-pb-text hover:bg-pb-surface2 disabled:opacity-30 disabled:hover:bg-transparent"
+                  >▲</button>
+                  <button type="button" disabled={busy || i === competitions.length - 1}
+                    onClick={() => move(i, 1)}
+                    aria-label={`Move ${c.name} down`}
+                    className="w-6 h-5 text-[11px] leading-none rounded text-pb-dim hover:text-pb-text hover:bg-pb-surface2 disabled:opacity-30 disabled:hover:bg-transparent"
+                  >▼</button>
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
                 {renaming === c.id ? (
                   <form
                     onSubmit={e => {
@@ -1092,11 +1134,12 @@ export default function AdminGrades() {
   return (
     <BetterStatsLayout>
       <div className="max-w-3xl">
-        <h1 className="font-display font-bold text-2xl text-pb-text mb-2">Grades</h1>
+        <h1 className="font-display font-bold text-2xl text-pb-text mb-2">Grades &amp; Competitions</h1>
         <p className="text-pb-faint text-sm mb-6 leading-relaxed">
-          Group grades into the competitions they were played in, label them by type, choose which to
-          share publicly, merge grades that are the same competition under different names, or set
-          display name overrides.
+          Your competitions live here too: group grades into the competitions they were played in and
+          set the order the Competition filter lists them in. Below that, label grades by type, choose
+          which to share publicly, merge grades that are the same competition under different names,
+          or set display name overrides.
         </p>
 
         <CompetitionManager clubId={orgId} />
