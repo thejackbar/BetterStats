@@ -29,13 +29,18 @@ export function MatchCoverageNote({ coverage, filtered = false, className = '' }
   const { career_matches, breakdown_matches, without_scorecard, extra_scorecards } = coverage
   const short = without_scorecard > 0
 
-  const headline = short
-    ? (filtered
-        ? `Counted from the ${breakdown_matches} of ${career_matches} matches we hold a scorecard for.`
-        : `${breakdown_matches} of these ${career_matches} matches can be broken down by competition, grade or format.`)
-    : (filtered
-        ? `Counted from the ${breakdown_matches} matches we hold a scorecard for, ${extra_scorecards} more than the season totals count.`
-        : `Filtering counts ${breakdown_matches} matches, ${extra_scorecards} more than the ${career_matches} in the season totals.`)
+  // THE FILTERED LINE MUST NOT CLAIM TO BE THE HEADLINE. A club with junior
+  // grades has a DEFAULT scope active with nobody having touched a control, so
+  // the figure above this note is already a filtered one — neither of the two
+  // career figures here. Saying "counted from the N matches we hold a
+  // scorecard for" beside a headline that reads something else is the same
+  // class of mistake this note exists to prevent, one level down.
+  const headline = filtered
+    ? `Filtered figures are counted from the ${breakdown_matches} matches we hold `
+      + `a scorecard for, not the ${career_matches} in Cricket Australia's season totals.`
+    : short
+      ? `${breakdown_matches} of these ${career_matches} matches can be broken down by competition, grade or format.`
+      : `Filtering counts ${breakdown_matches} matches, ${extra_scorecards} more than the ${career_matches} in the season totals.`
 
   return (
     <div className={`mt-2 ${className}`}>
@@ -51,14 +56,14 @@ export function MatchCoverageNote({ coverage, filtered = false, className = '' }
              style={{ background: 'var(--pb-surface2)' }}>
           <p className="mb-2">
             <strong className="text-pb-text">Two records of the same career.</strong>{' '}
-            The career total, {career_matches} matches, comes from Cricket Australia's
-            own season figures. Those figures do not say which grade a match was played
-            in, so they cannot be split by competition, grade type or format.
+            Cricket Australia's own season figures count {career_matches} matches in
+            this career. They do not say which grade a match was played in, so they
+            cannot be split by competition, grade type or format.
           </p>
           <p className="mb-2">
             Anything you filter — a competition, a grade type, a format — is counted from
-            the {breakdown_matches} matches we hold a scorecard for, not from the career
-            total. That is why the parts do not add up to {career_matches}.
+            the {breakdown_matches} matches we hold a scorecard for, not from Cricket
+            Australia's count. That is why the parts do not add up to {career_matches}.
           </p>
           {short && (
             <p className="mb-2">
@@ -107,14 +112,19 @@ export default MatchCoverageNote
  * they could check.
  */
 export function GradeTotalNote({ rows = [], unattributed = 0, coverage = null,
-                                 className = '' }) {
+                                 scoped = false, className = '' }) {
   const held = rows.reduce((n, r) => n + (r.scorecard_matches || 0), 0)
   const added = rows.reduce((n, r) => n + (r.attributed_unknown || 0), 0)
   const total = held + added + unattributed
   // Matches we hold a scorecard for that carry no grade — an uploaded card with
   // the grade left blank. They belong to no row here at all, so without this
   // line the grid quietly holds fewer scorecards than the header says we have.
-  const noGrade = coverage
+  // Only comparable while the grid is showing the whole career. `coverage` is
+  // deliberately scope-independent — it is a fact about the career, not the
+  // view — so subtracting a FILTERED `held` from it would report every match
+  // the filter just excluded as one with no grade, which is the opposite of
+  // true.
+  const noGrade = coverage && !scoped
     ? Math.max((coverage.breakdown_matches || 0) - held, 0)
     : 0
   if (!added && !unattributed && !noGrade) return null
@@ -124,8 +134,8 @@ export function GradeTotalNote({ rows = [], unattributed = 0, coverage = null,
       <p>
         This total is worked out season by season and grade by grade, taking
         whichever is higher: the scorecards we hold, or Cricket Australia's own
-        figure for that grade. It is its own number, and does not have to match
-        the career total above.
+        figure for that grade.{!scoped && ' It is its own number, and does not '
+          + 'have to match the career total above.'}
       </p>
       <p>
         {held.toLocaleString()} we hold a scorecard for

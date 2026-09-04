@@ -17,6 +17,7 @@ import {
   ResultPill, PageHeader, PbSpinner, TabBar,
 } from '../lib/presskit'
 import { GradeTotalNote, MatchCoverageNote } from '../components/MatchCoverage'
+import { FilterReachNote } from '../components/FilterReach'
 import '../styles/honour-badge.css'
 import { countryFlagUrl } from '../data/countries'
 import { CAP } from '../lib/capabilities'
@@ -1711,7 +1712,7 @@ function MatchesBySeasonGrade({ rows = [], seasonRows = [] }) {
   )
 }
 
-function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGrade, byPosition, seasonStats, bowlingByGrade, bowlingDismissals = [], bowlingByBatterPosition = [], battingInnings = [], bowlingSpells = [], teamBreakdown = { rows: [], season_rows: [], unattributed: 0 }, seasonLabel = null, captainStats, byVenue = [], byOpposition = [], careerBatting = null, careerBowling = null, careerFielding = null, matchCoverage = null }) {
+function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGrade, byPosition, seasonStats, bowlingByGrade, bowlingDismissals = [], bowlingByBatterPosition = [], battingInnings = [], bowlingSpells = [], teamBreakdown = { rows: [], season_rows: [], unattributed: 0 }, seasonLabel = null, captainStats, byVenue = [], byOpposition = [], careerBatting = null, careerBowling = null, careerFielding = null, matchCoverage = null, gradeScope = null }) {
   const [subTab, setSubTab] = useState('profile')
 
   const hasBattingData = dismissals?.length || partnerships?.length || byGrade?.length || byPosition?.length || seasonStats?.some(s => (s.total_runs ?? 0) > 0)
@@ -2057,13 +2058,36 @@ function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGr
         </div>
       )}
 
-      {subTab === 'formats' && <FormatsSection playerId={playerId} seasonId={seasonId} />}
+      {subTab === 'formats' && (
+        <div className="space-y-3">
+          {/* An enumeration: filtering it by format leaves one column. */}
+          <FilterReachNote scope={gradeScope} reason="enumeration" shows="every format" />
+          <FormatsSection playerId={playerId} seasonId={seasonId} />
+        </div>
+      )}
 
-      {subTab === 'competitions' && <CompetitionsSection playerId={playerId} seasonId={seasonId} matchCoverage={matchCoverage} />}
+      {subTab === 'competitions' && (
+        <div className="space-y-3">
+          {/* Same: filtering it to one competition leaves one row. */}
+          <FilterReachNote scope={gradeScope} reason="enumeration" shows="every competition" />
+          <CompetitionsSection playerId={playerId} seasonId={seasonId} matchCoverage={matchCoverage} />
+        </div>
+      )}
 
-      {subTab === 'teammates' && <TeammatesSection playerId={playerId} />}
+      {subTab === 'teammates' && (
+        <div className="space-y-3">
+          {/* A gap, not a decision: this panel does not take the scope yet. */}
+          <FilterReachNote scope={gradeScope} shows="every teammate" />
+          <TeammatesSection playerId={playerId} />
+        </div>
+      )}
 
-      {subTab === 'captain' && <CaptainTab captainStats={captainStats} />}
+      {subTab === 'captain' && (
+        <div className="space-y-3">
+          <FilterReachNote scope={gradeScope} shows="every match captained" />
+          <CaptainTab captainStats={captainStats} />
+        </div>
+      )}
 
       {subTab === 'venue' && (
         <div className="space-y-6">
@@ -2181,7 +2205,11 @@ function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGr
                 pad="p-0"
               >
                 <p className="font-mono text-[10px] text-pb-faint tracking-wide2 px-5 pt-4">
-                  Every grade this player has appeared in (batting, bowling, or fielding), with result record.
+                  {/* "Every grade" stops being true the moment the filter bar
+                      narrows this table, so the sentence has to move with it. */}
+                  {teamBreakdown.scope?.active
+                    ? 'Every grade in the current filter that this player has appeared in (batting, bowling, or fielding), with result record.'
+                    : 'Every grade this player has appeared in (batting, bowling, or fielding), with result record.'}
                   {!seasonLabel && ' Use the season filter above to view a single season.'}
                 </p>
                 <div className="overflow-x-auto pb-scroll mt-3">
@@ -2264,13 +2292,26 @@ function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGr
                       in a single grade that season.
                     </p>
                   )}
+                  {/* A match type is recorded on a FIXTURE, so Cricket
+                      Australia's own per-grade figures cannot answer it and drop
+                      out entirely — the same call `GradeScope` makes for every
+                      other aggregate read. Said, or the shorter grid reads as
+                      data having gone missing. */}
+                  {teamBreakdown.scope?.aggregate_excluded && (
+                    <p className="font-mono text-[10px] text-pb-dim tracking-wide2">
+                      Match type is recorded on each fixture, and Cricket Australia&apos;s
+                      own per-grade figures carry none, so they are left out here. This
+                      is what we hold a scorecard for.
+                    </p>
+                  )}
                   {/* Why this total is a THIRD number, said here rather than left
                       to be discovered: the grid reconciles per season and grade and
                       takes whichever source is higher, so it is neither the career
                       total nor the matches we hold a scorecard for. Every figure in
                       it is summed from the rows above. */}
                   <GradeTotalNote rows={rows} unattributed={unattributed}
-                                  coverage={matchCoverage} />
+                                  coverage={matchCoverage}
+                                  scoped={!!teamBreakdown.scope?.active} />
                 </div>
               </Card>
             ) : (
@@ -2350,7 +2391,7 @@ function AchievedList({ items }) {
   )
 }
 
-function MilestonesTab({ playerId, upcomingMilestones, milestones }) {
+function MilestonesTab({ playerId, upcomingMilestones, milestones, gradeScope = null }) {
   const [sub, setSub] = useState('batting')
 
   const upcoming = upcomingMilestones || []
@@ -2430,9 +2471,17 @@ function MilestonesTab({ playerId, upcomingMilestones, milestones }) {
   }
 
   return (
-    <div>
-      <TabBar tabs={MILESTONE_SUB_TABS} active={sub} onChange={setSub} />
-      {renderTab()}
+    <div className="space-y-3">
+      {/* A milestone is a fact about a whole career, and it is what the
+          notification bell reports. Recomputing "247 runs to 5,000" under a
+          Men's-only filter would give a number nobody can act on, so it is
+          deliberately never filtered — and now says so instead of leaving the
+          bar above it looking broken. */}
+      <FilterReachNote scope={gradeScope} reason="career" />
+      <div>
+        <TabBar tabs={MILESTONE_SUB_TABS} active={sub} onChange={setSub} />
+        {renderTab()}
+      </div>
     </div>
   )
 }
@@ -2874,10 +2923,13 @@ export default function PlayerProfile() {
 
   useEffect(() => {
     if (!playerId || !data?.player) return
-    api.getPlayerTeamBreakdown(playerId, { seasonId })
-      .then(res => setTeamBreakdown(res && res.rows ? res : { rows: [], unattributed: 0, total_aggregate_matches: 0 }))
-      .catch(() => setTeamBreakdown({ rows: [], unattributed: 0, total_aggregate_matches: 0 }))
-  }, [playerId, data?.player, seasonId])
+    const empty = { rows: [], unattributed: 0, total_aggregate_matches: 0 }
+    api.getPlayerTeamBreakdown(playerId, {
+      seasonId, categories: catParam, formats: fmtParam, competitions: compParam,
+    })
+      .then(res => setTeamBreakdown(res && res.rows ? res : empty))
+      .catch(() => setTeamBreakdown(empty))
+  }, [playerId, data?.player, seasonId, catParam, fmtParam, compParam])
 
   if (loading) return <PbSpinner message="Loading player data…" />
   if (error) return <div className="max-w-7xl mx-auto px-4 py-16 text-pb-red">Error: {error}</div>
@@ -3198,9 +3250,16 @@ export default function PlayerProfile() {
         {tab === 'batting' && <BattingTab batting={batting} seasonStats={seasonStats} seasons={seasons} />}
         {tab === 'bowling' && <BowlingTab bowling={bowling} seasonStats={seasonStats} />}
         {tab === 'fielding' && <FieldingTab fielding={fielding} seasonStats={seasonStats} />}
-        {tab === 'analysis' && <AnalysisTab playerId={playerId} seasonId={seasonId} dismissals={dismissals} partnerships={partnerships} byGrade={byGrade} byPosition={byPosition} seasonStats={seasonStats} bowlingByGrade={bowlingByGrade} bowlingDismissals={bowlingDismissals} bowlingByBatterPosition={bowlingByBatterPosition} battingInnings={battingInnings} bowlingSpells={bowlingSpells} teamBreakdown={teamBreakdown} seasonLabel={seasonId ? (seasons.find(s => s.id === seasonId)?.name || null) : null} captainStats={captainStats} byVenue={byVenue} byOpposition={byOpposition} careerBatting={batting} careerBowling={bowling} careerFielding={fielding} matchCoverage={matchCoverage} />}
-        {tab === 'milestones' && <MilestonesTab playerId={playerId} upcomingMilestones={upcomingMilestones} milestones={milestones} />}
-        {tab === 'achievements' && <AchievementsSection playerId={playerId} orgId={player.organisation_id} playerName={player.display_name || player.name} />}
+        {tab === 'analysis' && <AnalysisTab playerId={playerId} seasonId={seasonId} dismissals={dismissals} partnerships={partnerships} byGrade={byGrade} byPosition={byPosition} seasonStats={seasonStats} bowlingByGrade={bowlingByGrade} bowlingDismissals={bowlingDismissals} bowlingByBatterPosition={bowlingByBatterPosition} battingInnings={battingInnings} bowlingSpells={bowlingSpells} teamBreakdown={teamBreakdown} seasonLabel={seasonId ? (seasons.find(s => s.id === seasonId)?.name || null) : null} captainStats={captainStats} byVenue={byVenue} byOpposition={byOpposition} careerBatting={batting} careerBowling={bowling} careerFielding={fielding} matchCoverage={matchCoverage} gradeScope={gradeScope} />}
+        {tab === 'milestones' && <MilestonesTab playerId={playerId} upcomingMilestones={upcomingMilestones} milestones={milestones} gradeScope={gradeScope} />}
+        {tab === 'achievements' && (
+          <div className="space-y-3">
+            {/* An honour is not a men's honour or a T20 honour. Said rather
+                than silently ignoring the bar above it. */}
+            <FilterReachNote scope={gradeScope} reason="career" />
+            <AchievementsSection playerId={playerId} orgId={player.organisation_id} playerName={player.display_name || player.name} />
+          </div>
+        )}
       </main>
     </div>
   )

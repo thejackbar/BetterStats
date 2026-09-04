@@ -340,8 +340,11 @@ export const api = {
   // without split of the player's output alongside one teammate.
   getPlayerTeammates: (playerId) => request(`/players/${playerId}/teammates`),
   getPlayerTeammateSplit: (playerId, teammateId) => request(`/players/${playerId}/teammates/${teammateId}`),
-  getPlayerTeamBreakdown: (playerId, { seasonId } = {}) => {
-    const params = new URLSearchParams()
+  // Takes the grade-type / match-type / competition scope like every other
+  // Analysis panel: the filter bar is page-level, so a grid that ignored it
+  // put the women's grades back one click after the Batting tab dropped them.
+  getPlayerTeamBreakdown: (playerId, { seasonId, ...scope } = {}) => {
+    const params = new URLSearchParams(scopeQuery(scope).replace(/^\?/, ''))
     if (seasonId) params.set('season_id', seasonId)
     const qs = params.toString()
     return request(`/players/${playerId}/team-breakdown${qs ? `?${qs}` : ''}`)

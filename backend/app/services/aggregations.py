@@ -1684,6 +1684,7 @@ async def get_player_team_breakdown(
     player_id: str,
     org_id: Optional[str] = None,
     season_id: Optional[str] = None,
+    scope: Optional[GradeScope] = None,
 ) -> dict:
     """Per-grade match breakdown for a single player.
 
@@ -1717,10 +1718,40 @@ async def get_player_team_breakdown(
     rows. Scoping both sides keeps `max(held, claimed)` self-healing — a shared
     fixture the other club synced first drops off the scorecard side but is
     still claimed by CA's per-grade row, so nothing is lost.
+
+    **The grade-type, match-type and competition scope applies here too, and the
+    three halves of it reach different parts of this function.** The filter bar
+    sits above every tab, so a grid that ignored it showed a club the women's
+    grades it had just filtered out of the Batting tab one click away.
+
+    - The scorecard side is per-game, so it takes the whole scope.
+    - CA's per-grade aggregate (`player_season_grade_stats`) and the club's own
+      per-grade corrections carry a GRADE, so a category or competition filter
+      is answerable against them — but a FORMAT is recorded per fixture, so it
+      is not. `kind='aggregate'` emits `AND FALSE`, and under a match-type
+      filter the grid becomes what we hold scorecards for and nothing else.
+    - CA's per-SEASON total has no grade at all, so under any active scope
+      there is nothing to compare a shortfall against. The gap heuristic is
+      skipped rather than run against a figure covering matches the filter has
+      just excluded, which would attribute out-of-scope matches to an
+      in-scope grade.
     """
     season_clause_gr = ""
     season_clause_pss = ""
     params: dict = {"pid": player_id, "org_id": org_id}
+    # Bound once, beside the params dict every query below shares — the trap
+    # the leaderboards hit when a clause was built in one branch and its
+    # parameter bound in another.
+    scope_active = bool(scope and scope.active)
+    game_scope_clause = ""
+    grade_agg_clause = ""
+    if scope_active:
+        scope.bind(params)
+        # The category half is expressed against the joined `grades` row while
+        # the format is still read off each game's own match_format, so the
+        # games alias has to be named explicitly.
+        game_scope_clause = scope.clause("gr.id", game_alias="g")
+        grade_agg_clause = scope.clause("gr.id", "aggregate")
     # A game is this club's when it owns the fixture or is one of the two sides
     # — the same predicate `_club_game_clause` and `iq_trends._ours_clause` use,
     # so a shared fixture the other club synced first is still counted as ours.
@@ -1778,7 +1809,7 @@ async def get_player_team_breakdown(
                   AND gr2.display_name_override IS NOT NULL
                 LIMIT 1
             ) gdn ON TRUE
-            WHERE TRUE {club_games_clause}{season_clause_gr}
+            WHERE TRUE {club_games_clause}{season_clause_gr}{game_scope_clause}
             GROUP BY COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name))
             ORDER BY matches DESC, grade_name
         """),
@@ -1842,7 +1873,7 @@ async def get_player_team_breakdown(
                   AND gr2.display_name_override IS NOT NULL
                 LIMIT 1
             ) gdn ON TRUE
-            WHERE TRUE {club_games_clause}{season_clause_gr}
+            WHERE TRUE {club_games_clause}{season_clause_gr}{game_scope_clause}
             GROUP BY gr.season_id, COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name))
         """),
         params,
@@ -1902,9 +1933,15 @@ async def get_player_team_breakdown(
         params,
     )
     season_aggregate: dict = {}  # season_id -> CA's own match count
-    for r in season_totals.mappings():
-        sid = _canonical_season(r["season_id"])
-        season_aggregate[sid] = season_aggregate.get(sid, 0) + int(r["matches"] or 0)
+    # SKIPPED ENTIRELY UNDER AN ACTIVE SCOPE. This figure covers the whole
+    # season with no grade on it, so under a filter it counts matches the
+    # filter has just excluded — and the gap heuristic below would hand that
+    # difference to an in-scope grade, inventing matches in it. Nothing to
+    # compare against is the honest answer; the scorecards stand alone.
+    if not scope_active:
+        for r in season_totals.mappings():
+            sid = _canonical_season(r["season_id"])
+            season_aggregate[sid] = season_aggregate.get(sid, 0) + int(r["matches"] or 0)
 
     # Exact per-(season,grade) aggregate from CA (when synced). Source of truth.
     per_grade_agg = await session.execute(
@@ -1934,6 +1971,7 @@ async def get_player_team_breakdown(
             ) gdn ON TRUE
             WHERE psgs.player_id = CAST(:pid AS UUID)
               {(" AND psgs.season_id = ANY(:sids)") if season_ids else ""}
+              {grade_agg_clause}
         """),
         params,
     )
@@ -1980,6 +2018,7 @@ async def get_player_team_breakdown(
             WHERE pss.player_id = CAST(:pid AS UUID)
               AND pss.source = 'manual_aggregate'
               {season_clause_pss}
+              {grade_agg_clause}
             GROUP BY pss.season_id,
                      COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name))
         """),
@@ -2122,6 +2161,16 @@ async def get_player_team_breakdown(
         "season_rows": season_rows,
         "unattributed": unattributed,
         "total_aggregate_matches": total_aggregate,
+        # What the active filter could and could not reach, so the screen can
+        # say why the asterisked matches have gone rather than leaving a
+        # shorter grid to be read as data going missing. Presence-aware: a
+        # request with no filter keeps the payload's exact shape.
+        **({"scope": {
+            "active": True,
+            # A match type is recorded on a FIXTURE, so Cricket Australia's own
+            # per-grade figures cannot answer it and drop out entirely.
+            "aggregate_excluded": bool(scope.format_active),
+        }} if scope_active else {}),
     }
 
 

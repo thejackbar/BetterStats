@@ -475,13 +475,20 @@ async def get_player_teammate_split(player_id: str, teammate_id: str, db: AsyncS
 async def get_player_team_breakdown_endpoint(
     player_id: str,
     season_id: Optional[str] = Query(None),
+    categories: Optional[str] = Query(None),
+    formats: Optional[str] = Query(None),
+    competitions: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
+    # The filter bar sits above every tab, so this grid answers to it like the
+    # rest of the Analysis panels. Without it a club filtering to Men's on the
+    # Batting tab found the women's grades back on Team, one click away.
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
     return await get_player_team_breakdown(
-        db, player_id, str(player.organisation_id), season_id
+        db, player_id, str(player.organisation_id), season_id, scope=scope
     )
 
 

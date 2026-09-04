@@ -87,6 +87,18 @@ GRID.career_batting = career(9)
 GRID.match_coverage = { career_matches: 9, breakdown_matches: 12,
                         without_scorecard: 0, extra_scorecards: 3 }
 
+// The club default already active: junior grades excluded with nobody having
+// touched a control. On a club with a junior programme this is the ORDINARY
+// state, and it is what makes "the headline is the career total" false.
+const DEFAULTED = JSON.parse(JSON.stringify(SURPLUS))
+DEFAULTED.career_batting = career(11)
+DEFAULTED.match_coverage = { career_matches: 9, breakdown_matches: 14,
+                             without_scorecard: 0, extra_scorecards: 5 }
+DEFAULTED.grade_scope = { ...SURPLUS.grade_scope, active: true,
+                          category_active: true,
+                          excluded_categories: ['junior'],
+                          available: ['senior', 'junior'] }
+
 const browser = await chromium.launch(existsSync(EXECUTABLE) ? { executablePath: EXECUTABLE } : {})
 
 async function open(stats, { width = 1440, team = null } = {}) {
@@ -291,6 +303,81 @@ try {
     ck('NO reconciliation note where the rows already add up — the same rule '
        + 'the header note keeps', !!text && !/whichever is higher/.test(text),
        text?.slice(0, 300))
+    ck('no page errors', errors.length === 0, errors.join(' | '))
+    await ctx.close()
+  }
+
+  console.log('\n-- the club default is already a filter --')
+  {
+    const { page, ctx, errors } = await open(DEFAULTED)
+    const tile = await readTile(page)
+    ck('the headline is the filtered figure, neither of the career numbers',
+       tile?.figure === '11', tile?.figure)
+    ck('THE NOTE NEVER CLAIMS ITS FIGURES ARE THE HEADLINE — it names both '
+       + 'career sources instead, so nothing on screen contradicts anything else',
+       !!tile && /counted from the 14 matches we hold a scorecard for, not the 9/
+         .test(tile.text), tile?.text)
+    ck('and it does not print "11" as if it were one of them',
+       !!tile && !/\b11\b/.test(tile.text.replace(/^MATCHES\s*11/, '')),
+       tile?.text)
+    ck('no page errors', errors.length === 0, errors.join(' | '))
+    await ctx.close()
+  }
+
+  console.log('\n-- the panels the filter does not reach say so --')
+  {
+    const { page, ctx, errors } = await open(DEFAULTED, { team: TEAM_BREAKDOWN })
+    await page.click('text=Analysis').catch(() => {})
+    await page.waitForTimeout(400)
+    const read = async (label) => {
+      await page.click(`text=${label}`).catch(() => {})
+      await page.waitForTimeout(500)
+      return page.evaluate(() => (document.body.innerText || '')
+        .replace(/\s+/g, ' ').trim())
+    }
+    const comps = await read('COMPETITIONS')
+    ck('COMPETITIONS says it enumerates rather than filters',
+       /Shows every competition, whatever is filtered above/.test(comps),
+       comps.slice(0, 200))
+    const formats = await read('FORMATS')
+    ck('FORMATS says the same, in its own words',
+       /Shows every format, whatever is filtered above/.test(formats))
+    const mates = await read('TEAMMATES')
+    ck('TEAMMATES names the filter that did not reach it, not a generic one',
+       /The Grade type filter above does not apply here/.test(mates),
+       mates.slice(0, 200))
+    ck('and says what it shows instead', /shows every teammate/.test(mates))
+    ck('no page errors', errors.length === 0, errors.join(' | '))
+    await ctx.close()
+  }
+
+  console.log('\n-- and nothing is said when no filter is on --')
+  {
+    const { page, ctx, errors } = await open(SURPLUS, { team: TEAM_BREAKDOWN })
+    await page.click('text=Analysis').catch(() => {})
+    await page.waitForTimeout(400)
+    await page.click('text=TEAMMATES').catch(() => {})
+    await page.waitForTimeout(500)
+    const text = await page.evaluate(() => (document.body.innerText || '')
+      .replace(/\s+/g, ' ').trim())
+    ck('NO reach note with every filter on All — the same rule the coverage '
+       + 'note keeps, so the page stays quiet on the common case',
+       !/does not apply here/.test(text) && !/whatever is filtered above/.test(text),
+       text.slice(0, 200))
+    ck('no page errors', errors.length === 0, errors.join(' | '))
+    await ctx.close()
+  }
+
+  console.log('\n-- milestones are never filtered, and say so --')
+  {
+    const { page, ctx, errors } = await open(DEFAULTED)
+    await page.click('text=MILESTONES').catch(() => {})
+    await page.waitForTimeout(600)
+    const text = await page.evaluate(() => (document.body.innerText || '')
+      .replace(/\s+/g, ' ').trim())
+    ck('the Milestones tab states it is a whole-career figure',
+       /Counted across the whole career, whatever is filtered above/.test(text),
+       text.slice(0, 300))
     ck('no page errors', errors.length === 0, errors.join(' | '))
     await ctx.close()
   }

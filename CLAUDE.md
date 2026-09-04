@@ -10798,6 +10798,98 @@ discover that the numbers don't add up. That looks like a mistake."
   the grid alone. Right for "every grade this player has appeared in", wrong the
   moment somebody reads the two as the same question; it needs its own look.
 
+## Which lens a panel is under, said on the panel (v9.64.0, Sep 2026)
+
+Asked for after the three-number diagnosis above: "what should I do next so
+that the user is always accurately and clearly informed about the different
+lenses they are looking through at the data."
+
+- **THE FILTER BAR IS PAGE-LEVEL AND ONLY REACHED ELEVEN OF EIGHTEEN PANELS.**
+  It sits above the TAB bar, so every tab renders under it. Audited before
+  building anything: `/stats`, dismissals, by-position, by-grade,
+  bowling-by-grade, bowling-dismissals, bowling-by-batter-position, by-venue,
+  by-opposition, seasons and partnerships take the scope; competitions,
+  formats, team-breakdown, teammates, captain-stats, milestones and rankings do
+  not. A club filtering to Men's on Batting found the women's grades back on
+  Milestones one click later with nothing saying why.
+- **THREE REASONS, NOT ONE, WHICH IS WHY A SINGLE DISCLAIMER WOULD BE WRONG.**
+  `components/FilterReach.jsx` carries the vocabulary: `enumeration` (the panel
+  IS the list of every value — filtering Competitions to one competition leaves
+  a one-row table), `career` (a fact about a whole career), `unfiltered` (a gap,
+  said out loud until it is closed). One list, so a panel added later has to
+  declare itself rather than quietly inheriting a promise the bar cannot keep.
+- **THE NOTE NAMES ONLY THE FILTERS ACTUALLY ON.** Mentioning Match type when
+  nobody has touched it reads as a fault in a control they never used, so
+  `activeFilterNames` reads `category_active` / `format_active` /
+  `competition_active` off the scope the payload already returns. Nothing at
+  all is drawn with every filter on All, which is most visits — the rule
+  `rate_coverage` and the coverage note already keep.
+- **MILESTONES ARE DELIBERATELY NEVER FILTERED.** "247 runs to 5,000" is a
+  career fact and is what the notification bell reports; recomputing it under a
+  Men's-only filter would give a number nobody can act on and would change what
+  a club is told is coming up. Same for an honour — a Life Membership is not a
+  men's honour or a T20 honour. Both now SAY it rather than being silently
+  exempt.
+
+### The grid answers to the bar now, and a match type is the exception
+
+- **`get_player_team_breakdown` takes the scope, and the three halves of it
+  reach different parts of the function.** The scorecard side is per-game and
+  takes the whole scope (`clause("gr.id", game_alias="g")` — the category is
+  expressed against the joined grade while the format is still read off each
+  game's own `match_format`). CA's per-grade aggregate and the club's own
+  per-grade corrections carry a GRADE, so a category or competition filter is
+  answerable against them and a FORMAT is not: `kind='aggregate'` emits
+  `AND FALSE`, the same call `GradeScope` already makes everywhere else.
+- **THE SEASON-TOTAL GAP HEURISTIC IS SKIPPED ENTIRELY UNDER AN ACTIVE SCOPE**,
+  and that half is load-bearing. `v_effective_player_season_stats` has no grade
+  at all, so under a filter it counts matches the filter has just excluded —
+  and the heuristic would hand that difference to an in-scope grade, inventing
+  matches in it. Nothing to compare against is the honest answer.
+- **The payload reports `scope: {active, aggregate_excluded}`**, so the screen
+  can say the asterisked matches have gone and why, rather than leaving a
+  shorter grid to read as data going missing. Presence-aware: an unfiltered
+  request keeps the payload's exact shape.
+- **The card's subtitle moves with it.** "Every grade this player has appeared
+  in" stops being true the moment the bar narrows the table.
+
+### A CLUB DEFAULT IS ALREADY A FILTER, and it broke the note one level down
+
+- **Found by adding a junior grade to the verification fixture, not by reading
+  the code.** `resolve_scope_for_player` applies the club's own default, so a
+  club with a junior programme has `scope.active` TRUE with nobody having
+  touched a control — and the headline is then neither career figure.
+  v9.63.1's filtered copy read "Counted from the 313 matches we hold a
+  scorecard for" beside a headline showing something else entirely, which is
+  the exact class of mistake that note exists to prevent.
+- **So the note never claims to be the headline.** Filtered, it names both
+  sources instead: "Filtered figures are counted from the N matches we hold a
+  scorecard for, not the M in Cricket Australia's season totals." True whatever
+  the figure above it happens to read.
+- **`GradeTotalNote` is scope-aware for the same reason.** Its grade-less line
+  is `breakdown_matches - held`, and `breakdown_matches` is deliberately
+  scope-INDEPENDENT — so subtracting a FILTERED `held` from it would report
+  every match the filter just excluded as one with no grade, the opposite of
+  true. Suppressed while the grid is scoped.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_match_coverage.py` is 46 checks now: the junior
+  grade in and out of the grid, the club default excluding it, an explicitly
+  all-category request reading as no scope at all, the aggregate dropped under
+  a match type and kept under a category one, the grid under a format filter
+  holding nothing it does not have a scorecard for, and the club default moving
+  the headline off both career figures) **with a control run**: with
+  `scope_active` forced false, 6 of the 46 fail.
+- **Driven in Chromium** (`verify_match_coverage_browser.mjs`, 44: each reach
+  note in its own words, the note naming only the active filters, nothing drawn
+  with every filter on All, the Milestones line, and the club-default case
+  where the headline is neither career number) **with a control run**: with
+  `FilterReachNote` stubbed to null, 5 fail.
+- **NOTICED, NOT FIXED**: `teammates` and `captain-stats` still do not take the
+  scope — they now SAY so rather than being silently unfiltered, which was the
+  point, but closing them is its own change. Club rankings are unfiltered too
+  and are arguably a career fact like a milestone; that needs a decision rather
+  than a pass.
+
 ## Naming a club or a contact outright (v9.58.3, Sep 2026)
 
 Asked for on the internal Segments screen straight after the rules above:

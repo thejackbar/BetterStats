@@ -49,6 +49,12 @@ from _view_ddl import view_statements
 from app.models.db import Base
 from app.routers.players import get_player_stats
 
+try:
+    from app.routers.players import get_player_team_breakdown_endpoint
+    HAVE_GRID_SCOPE = True
+except ImportError:  # pragma: no cover
+    HAVE_GRID_SCOPE = False
+
 # Behind a guard so a CONTROL RUN against the previous commit reports the
 # feature missing as one failed check rather than dying on an ImportError
 # before a single one runs.
@@ -106,6 +112,7 @@ S_OTHER = uuid.uuid4()
 G_1ST = uuid.uuid4()
 G_2ND = uuid.uuid4()
 G_OLD = uuid.uuid4()
+G_JNR = uuid.uuid4()      # a junior grade, so a Men's filter has work to do
 G_OTHER = uuid.uuid4()
 
 # The reported shape: CA counts FEWER than we hold, so a filter reads HIGHER
@@ -185,7 +192,7 @@ async def build_schema() -> None:
 # own season totals claim. Declared once here because every assertion below is
 # written against these numbers.
 HELD = {
-    WILTON: {G_1ST: 5, G_2ND: 2, G_OLD: 2},   # 9 graded (7 new season, 2 old)
+    WILTON: {G_1ST: 5, G_2ND: 2, G_OLD: 2, G_JNR: 3},  # 12 graded, 3 of them junior
     SHORT:  {G_1ST: 3},                        # 3 held
     EVEN:   {G_1ST: 5},                        # 5 held
     IMPORTED: {},                              # nothing held at all
@@ -203,7 +210,7 @@ CLAIMED = {
 # `v_effective_player_season_stats` — so both sides see it, which is what makes
 # this a fair test of the boundary rather than a free +1 on one side.
 WILTON_MANUAL = 1
-WILTON_HELD = 5 + 2 + 2 + WILTON_MANUAL   # 10
+WILTON_HELD = 5 + 2 + 2 + 3 + WILTON_MANUAL   # 13
 WILTON_CLAIMED = 5 + 2 + WILTON_MANUAL    # 8
 
 
@@ -226,6 +233,10 @@ async def seed(session) -> None:
                  " category, categories) "
                  "VALUES (:i, :s, :n, :g, 'senior', ARRAY['senior'])",
                  i=gid, s=sid, n=nm, g=str(gid))
+    await ex("INSERT INTO grades (id, season_id, name, grassroots_id, "
+             " category, categories) "
+             "VALUES (:i, :s, 'Under 16s', :g, 'junior', ARRAY['junior'])",
+             i=G_JNR, s=S_NEW, g=str(G_JNR))
     for pid, org, nm in ((WILTON, ORG, "Wilton, Rob"), (SHORT, ORG, "Short, Sam"),
                          (EVEN, ORG, "Even, Ed"), (EMPTY, ORG, "Empty, Eve"),
                          (IMPORTED, ORG, "Ancient, Arthur"),
@@ -297,6 +308,14 @@ async def stats(session, player, **kw):
     return await get_player_stats(player_id=str(player), db=session, **params)
 
 
+async def grid(session, player, **kw):
+    """The SHIPPED grid route body, with every FastAPI default filled in."""
+    params = dict(season_id=None, categories=None, formats=None, competitions=None)
+    params.update(kw)
+    return await get_player_team_breakdown_endpoint(
+        player_id=str(player), db=session, **params)
+
+
 async def main() -> None:
     if not HAVE:
         check("the match-coverage note is built at all", False, "; ".join(MISSING))
@@ -315,7 +334,7 @@ async def main() -> None:
         held = await match_coverage.scorecard_matches(session, str(WILTON), ORG)
         check("CA's season totals for the reported player read 8",
               claimed == WILTON_CLAIMED, f"got {claimed}")
-        check("the scorecards we hold read 10 (9 graded + 1 grade-less)",
+        check("the scorecards we hold read 13 (12 graded + 1 grade-less)",
               held == WILTON_HELD, f"got {held}")
         check("A GRADE-LESS MANUAL GAME COUNTS AS HELD — we have the match, so "
               "it must not be reported as one we have no scorecard for",
@@ -332,8 +351,9 @@ async def main() -> None:
         check("nothing is reported as missing a scorecard",
               cov and cov["without_scorecard"] == 0, str(cov))
         check("THE SURPLUS IS ITS OWN FIGURE, never a negative 'missing' one — "
-              "'10 of 8 matches' is the shape of a bug, not an explanation",
-              cov and cov["extra_scorecards"] == 2, str(cov))
+              "'13 of 8 matches' is the shape of a bug, not an explanation",
+              cov and cov["extra_scorecards"] == WILTON_HELD - WILTON_CLAIMED,
+              str(cov))
 
         print("\n-- the other direction: CA counts more than we hold --")
         cov = await match_coverage.career_coverage(session, str(SHORT), ORG)
@@ -367,8 +387,8 @@ async def main() -> None:
         print("\n-- season scope --")
         held_new = await match_coverage.scorecard_matches(
             session, str(WILTON), ORG, str(S_NEW))
-        check("this season's held matches are the 7 graded plus the manual one",
-              held_new == 8, f"got {held_new}")
+        check("this season's held matches are the 10 graded plus the manual one",
+              held_new == 11, f"got {held_new}")
         claimed_new = await match_coverage.aggregate_matches(
             session, str(WILTON), str(S_NEW))
         check("and CA's figure narrows to the same season", claimed_new == 6,
@@ -376,7 +396,7 @@ async def main() -> None:
         cov = await match_coverage.career_coverage(
             session, str(WILTON), ORG, str(S_NEW))
         check("the season note reports both narrowed figures",
-              cov and cov["career_matches"] == 6 and cov["breakdown_matches"] == 8,
+              cov and cov["career_matches"] == 6 and cov["breakdown_matches"] == 11,
               str(cov))
 
     print("\n-- through the shipped route body --")
@@ -387,10 +407,25 @@ async def main() -> None:
         # the other checks say nothing.
         cov = res.get("match_coverage") or {}
         check("the profile payload carries the note", bool(cov))
-        headline = (res.get("career_batting") or {}).get("games")
-        check("the career figure the note quotes IS the headline the page shows",
+        # A CLUB WITH JUNIOR GRADES HAS A DEFAULT SCOPE ACTIVE WITH NOBODY
+        # HAVING TOUCHED A CONTROL, so `res` above is already a filtered view
+        # and its headline is neither career figure. Ask for every category
+        # explicitly to get a genuinely unscoped read.
+        unscoped = await stats(session, WILTON, categories="senior,junior")
+        check("asking for every category really is an inactive scope",
+              not (unscoped.get("grade_scope") or {}).get("active"),
+              str(unscoped.get("grade_scope")))
+        headline = (unscoped.get("career_batting") or {}).get("games")
+        check("with no scope at all the headline IS Cricket Australia's figure, "
+              "which is what the note quotes",
               bool(cov) and cov.get("career_matches") == headline,
               f"note {cov} vs headline {headline}")
+        default_headline = (res.get("career_batting") or {}).get("games")
+        check("but the CLUB DEFAULT already moves it, so the note must never "
+              "claim its figures are the headline",
+              default_headline != cov.get("career_matches")
+              and default_headline != cov.get("breakdown_matches"),
+              f"default headline {default_headline} vs {cov}")
 
         even = await stats(session, EVEN)
         check("a player the two sources agree on carries NO key at all — the "
@@ -433,7 +468,7 @@ async def main() -> None:
         season = await stats(session, WILTON, season_id=str(S_NEW))
         scov = season.get("match_coverage") or {}
         check("the season view carries its own narrowed note",
-              scov.get("career_matches") == 6 and scov.get("breakdown_matches") == 8,
+              scov.get("career_matches") == 6 and scov.get("breakdown_matches") == 11,
               str(scov))
 
     if HAVE_COMPS:
@@ -451,11 +486,63 @@ async def main() -> None:
             check("ROWS + UNATTRIBUTED == THE BREAKDOWN FIGURE, so the panel's "
                   "own arithmetic closes and only the career total is left to "
                   "explain", total + unatt == WILTON_HELD, f"{total} + {unatt}")
-            check("and the career total sits 2 BELOW it, which is exactly the "
+            check("and the career total sits below it, which is exactly the "
                   "gap the note has to account for",
-                  WILTON_CLAIMED - (total + unatt) == -2, f"{total + unatt}")
+                  WILTON_CLAIMED - (total + unatt) == -5, f"{total + unatt}")
     else:  # pragma: no cover - control run only
         check("the competitions panel is available to cross-check against", False)
+
+    if HAVE_GRID_SCOPE:
+        print("\n-- THE GRID ANSWERS TO THE FILTER BAR ABOVE IT --")
+        async with Session() as session:
+            # The filter bar is page-level, so a grid that ignored it put the
+            # junior grades back one click after the Batting tab dropped them.
+            everything = await grid(session, WILTON, categories="senior,junior")
+            names = {r["grade_name"] for r in everything["rows"]}
+            check("asking for every category lists the junior grade too",
+                  "Under 16s" in names, str(sorted(names)))
+            check("and reports no scope, so the payload keeps its old shape",
+                  "scope" not in everything, str(everything.get("scope")))
+
+            default = await grid(session, WILTON)
+            dnames = {r["grade_name"] for r in default["rows"]}
+            check("THE CLUB DEFAULT ALREADY EXCLUDES JUNIOR, and the grid now "
+                  "follows it rather than showing what the header just dropped",
+                  "Under 16s" not in dnames, str(sorted(dnames)))
+            check("the senior grades are all still there",
+                  {"1st Grade", "2nd Grade"} <= dnames, str(sorted(dnames)))
+            check("and it says a filter is in play",
+                  (default.get("scope") or {}).get("active") is True,
+                  str(default.get("scope")))
+
+            jnr = await grid(session, WILTON, categories="junior")
+            jnames = {r["grade_name"] for r in jnr["rows"]}
+            check("picking Juniors returns the junior grade and nothing else",
+                  jnames == {"Under 16s"}, str(sorted(jnames)))
+            check("with its own three matches",
+                  sum(r["matches"] for r in jnr["rows"]) == 3,
+                  str([(r["grade_name"], r["matches"]) for r in jnr["rows"]]))
+
+            print("\n-- a match type cannot be asked of a per-grade aggregate --")
+            fmt = await grid(session, WILTON, formats="one_day")
+            check("it says so on the payload rather than leaving a shorter grid "
+                  "to read as data going missing",
+                  (fmt.get("scope") or {}).get("aggregate_excluded") is True,
+                  str(fmt.get("scope")))
+            check("and a category filter alone does NOT drop the aggregate — a "
+                  "grade has one category, so that half is answerable",
+                  (default.get("scope") or {}).get("aggregate_excluded") is False,
+                  str(default.get("scope")))
+            fmt_total = sum(r["matches"] for r in fmt["rows"]) + fmt["unattributed"]
+            check("under a match type the grid is what we hold a scorecard for, "
+                  "and nothing is invented on top",
+                  fmt_total == sum(r["scorecard_matches"] for r in fmt["rows"]),
+                  f"total {fmt_total}")
+            check("the grade-less manual game is still out of every grid — it "
+                  "has no grade to sit under",
+                  all(r["grade_name"] for r in everything["rows"]))
+    else:  # pragma: no cover - control run only
+        check("the grid takes the filter bar's scope", False)
 
     await engine.dispose()
     print(f"\n{PASS} passed, {FAIL} failed")
