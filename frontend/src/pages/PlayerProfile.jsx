@@ -652,9 +652,13 @@ function PlayerRadarChart({ batting, bowling, fielding, innings }) {
   const inningsCount = validInnings.length
 
   const battingAvg = batting?.average != null ? Number(batting.average) : 0
-  const totalBalls = validInnings.reduce((s, i) => s + (Number(i.balls) || 0), 0)
-  const totalRuns = validInnings.reduce((s, i) => s + (Number(i.runs) || 0), 0)
-  const strikeRate = totalBalls > 0 ? (totalRuns / totalBalls) * 100 : 0
+  // The strike rate is the server's, worked out from the innings that carry a
+  // ball count (backend/app/services/rate_coverage.py). This used to be
+  // SUM(runs) / SUM(balls) over every innings drawn below, which puts the runs
+  // from an un-balled innings in the numerator with nothing behind them in the
+  // denominator — the exact figure that rule exists to stop us publishing.
+  const strikeRate = batting?.strike_rate != null ? Number(batting.strike_rate) : null
+  const srCoverage = batting?.strike_rate_coverage
   const bigScores = validInnings.filter(i => (i.runs ?? 0) >= 50).length
   const bigScoreRate = inningsCount > 0 ? bigScores / inningsCount : 0
 
@@ -672,10 +676,12 @@ function PlayerRadarChart({ batting, bowling, fielding, innings }) {
 
   const axes = [
     { axis: 'Bat Avg',    raw: battingAvg > 0 ? battingAvg.toFixed(2) : '—',                    value: norm(battingAvg, 50) },
-    { axis: 'Strike Rt',  raw: totalBalls > 0 ? strikeRate.toFixed(2) : '—',                    value: norm(strikeRate, 120) },
+    { axis: 'Strike Rt',  raw: strikeRate != null ? strikeRate.toFixed(2) : '—',                 value: norm(strikeRate ?? 0, 120),
+      coverage: srCoverage, unit: 'innings' },
     { axis: 'Big Scores', raw: inningsCount > 0 ? `${(bigScoreRate * 100).toFixed(0)}%` : '—',  value: norm(bigScoreRate, 0.35) },
     { axis: 'Bowl Avg',   raw: hasBowled && bowlingAvg != null ? bowlingAvg.toFixed(2) : '—',   value: hasBowled ? normInv(bowlingAvg, 12, 40) : 0 },
-    { axis: 'Economy',    raw: hasBowled && economy != null ? economy.toFixed(2) : '—',         value: hasBowled ? normInv(economy, 3, 8) : 0 },
+    { axis: 'Economy',    raw: hasBowled && economy != null ? economy.toFixed(2) : '—',         value: hasBowled ? normInv(economy, 3, 8) : 0,
+      coverage: hasBowled ? bowling?.economy_coverage : null, unit: 'spells' },
     { axis: 'Fielding',   raw: games > 0 ? `${fieldingPerMatch.toFixed(2)}/g` : '—',            value: norm(fieldingPerMatch, 0.8) },
   ]
 
@@ -709,9 +715,17 @@ function PlayerRadarChart({ batting, bowling, fielding, innings }) {
             <div className="flex-1 h-1.5 bg-pb-hairline rounded-sm overflow-hidden">
               <div className="h-full transition-all duration-500" style={{ width: `${a.value}%`, background: 'var(--pb-accent)' }} />
             </div>
-            <span className="font-mono font-bold text-pb-text text-[12px] w-14 text-right pb-num">{a.raw}</span>
+            <span className="font-mono font-bold text-pb-text text-[12px] w-16 text-right pb-num">
+              {a.raw}<RateMark coverage={a.coverage} unit={a.unit} />
+            </span>
           </div>
         ))}
+        {/* Only where a figure on this card is actually short. A note on every
+            rate in the app is noise that trains people to stop reading it. */}
+        <RateNote coverage={srCoverage} className="mt-1" />
+        {hasBowled && !isPartial(srCoverage) && (
+          <RateNote coverage={bowling?.economy_coverage} unit="spells" className="mt-1" />
+        )}
       </div>
     </div>
   )
@@ -1557,18 +1571,24 @@ function CaptainTab({ captainStats }) {
                 <td className="py-2.5 px-2 text-right font-mono text-pb-text">{fmtV(bowling_as_captain?.games)}</td>
                 <td className="py-2.5 px-2 text-right font-mono text-pb-text">{fmtV(bowling_as_captain?.wickets)}</td>
                 <td className="py-2.5 px-2 text-right font-mono text-pb-text">{fmtV(bowling_as_captain?.average)}</td>
-                <td className="py-2.5 px-2 text-right font-mono text-pb-text">{fmtV(bowling_as_captain?.economy)}</td>
+                <td className="py-2.5 px-2 text-right font-mono text-pb-text">{fmtV(bowling_as_captain?.economy)}<RateMark coverage={bowling_as_captain?.economy_coverage} unit="spells" /></td>
               </tr>
               <tr className="border-t pb-hairline-t">
                 <td className="py-2.5 pr-4 font-mono text-pb-dim text-[12px] whitespace-nowrap">Not captain</td>
                 <td className="py-2.5 px-2 text-right font-mono text-pb-dim">{fmtV(bowling_not_captain?.games)}</td>
                 <td className="py-2.5 px-2 text-right font-mono text-pb-dim">{fmtV(bowling_not_captain?.wickets)}</td>
                 <td className="py-2.5 px-2 text-right font-mono text-pb-dim">{fmtV(bowling_not_captain?.average)}</td>
-                <td className="py-2.5 px-2 text-right font-mono text-pb-dim">{fmtV(bowling_not_captain?.economy)}</td>
+                <td className="py-2.5 px-2 text-right font-mono text-pb-dim">{fmtV(bowling_not_captain?.economy)}<RateMark coverage={bowling_not_captain?.economy_coverage} unit="spells" /></td>
               </tr>
             </tbody>
           </table>
         </div>
+        <RateFootnote
+          rows={[bowling_as_captain, bowling_not_captain]}
+          field="economy_coverage"
+          unit="spells"
+          className="px-0"
+        />
       </div>
 
       {/* Season by season */}

@@ -1326,7 +1326,7 @@ async def query_player_career(
                     {_r('bowl.runs_conceded')}                                        AS runs_conceded,
                     ROUND({_r('bowl.runs_conceded')}::numeric / NULLIF({_r('bowl.wickets')}, 0), 2)   AS bowling_average,
                     ROUND(COALESCE(bowl.covered_conceded, 0)::numeric / NULLIF(COALESCE(bowl.covered_bowl_balls, 0), 0) * 6, 2) AS bowling_economy,
-                    ROUND({_r('bowl.overs')}::numeric * 6 / NULLIF({_r('bowl.wickets')}, 0), 2)        AS bowling_strike_rate,
+                    ROUND(COALESCE(bowl.covered_bowl_balls, 0)::numeric / NULLIF(COALESCE(bowl.covered_wickets, 0), 0), 2)        AS bowling_strike_rate,
                     {_r('bowl.five_wicket_innings')}                                  AS five_wicket_innings,
                     {_r('bowl.maidens')}                                              AS maidens,
                     GREATEST(bowl.best_bowling_wickets{', resid.best_bowling_wickets' if residual_ok else ''}) AS best_bowling_wickets,
@@ -1534,7 +1534,7 @@ async def query_player_season(
                     {_r('bowl.runs_conceded')}                        AS runs_conceded,
                     ROUND({_r('bowl.runs_conceded')}::numeric / NULLIF({_r('bowl.wickets')}, 0), 2) AS bowling_average,
                     ROUND(COALESCE(bowl.covered_conceded, 0)::numeric / NULLIF(COALESCE(bowl.covered_bowl_balls, 0), 0) * 6, 2) AS bowling_economy,
-                    ROUND({_r('bowl.overs')}::numeric * 6 / NULLIF({_r('bowl.wickets')}, 0), 2) AS bowling_strike_rate,
+                    ROUND(COALESCE(bowl.covered_bowl_balls, 0)::numeric / NULLIF(COALESCE(bowl.covered_wickets, 0), 0), 2) AS bowling_strike_rate,
                     {_r('bowl.five_wicket_innings')}                  AS five_wicket_innings,
                     {_r('bowl.maidens')}                              AS maidens,
                     GREATEST(bowl.best_bowling_wickets{', resid.best_bowling_wickets' if residual_ok else ''}) AS best_bowling_wickets,
@@ -1752,7 +1752,7 @@ async def query_player_grade(
                 {_r('bowl.runs_conceded')}                               AS runs_conceded,
                 ROUND({_r('bowl.runs_conceded')}::numeric / NULLIF({_r('bowl.wickets')}, 0), 2)   AS bowling_average,
                 ROUND(COALESCE(bowl.covered_conceded, 0)::numeric / NULLIF(COALESCE(bowl.covered_bowl_balls, 0), 0) * 6, 2) AS bowling_economy,
-                ROUND({_r('bowl.overs')}::numeric * 6 / NULLIF({_r('bowl.wickets')}, 0), 2)        AS bowling_strike_rate,
+                ROUND(COALESCE(bowl.covered_bowl_balls, 0)::numeric / NULLIF(COALESCE(bowl.covered_wickets, 0), 0), 2)        AS bowling_strike_rate,
                 {_r('bowl.five_wicket_innings')}                         AS five_wicket_innings,
                 {_r('bowl.maidens')}                                     AS maidens,
                 GREATEST(bowl.best_bowling_wickets{', resid.best_bowling_wickets' if residual_ok else ''}) AS best_bowling_wickets,
@@ -1788,6 +1788,11 @@ async def query_player_grade(
 # from the family-level sums so e.g. "Family batting average" treats the whole
 # family as one combined career, which is what users intuitively expect.
 #
+# The strike rate and the economy are the exception to "from the family-level
+# sums": they come from the family's own covered innings and spells
+# (_family_covered_ctes), because a season total's runs and balls need not
+# describe the same innings. See services/rate_coverage.py.
+#
 # Players that aren't in any family don't appear in these reports (the JOIN is
 # inner). The family_id context filter is ignored here — every row is a
 # different family by construction, so filtering to one family would just
@@ -1800,6 +1805,49 @@ async def query_player_grade(
 # Family-aggregate SUM/derivation SQL shared by all three targets. Takes the
 # group_cols / select_extra / join_extra / order_extra placeholders that
 # differentiate career / season / grade.
+def _family_covered_ctes(scope, params: dict, by_season: bool, season_filter: str = "") -> str:
+    """Per-family covered halves of the two rates, from the members' scorecards.
+
+    The family targets sum ``player_season_stats``, which carries a runs total
+    and a balls total that need not describe the same innings — the whole
+    reason ``services/rate_coverage.py`` exists. The counts stay as they are;
+    only the ratio is re-derived here, from the innings and spells that can
+    actually answer it, over the same population the counts cover.
+
+    Scoped the aggregate way, matching the ``pss`` join above it: a match-type
+    filter empties both sides rather than one of them, so a family whose rows
+    are all out of scope reads as no figure rather than an unfiltered one.
+    """
+    scope_bat = _scope_clause_for_join(scope, "g.grade_id", params)
+    scope_bowl = _scope_clause_for_join(scope, "g.grade_id", params)
+    key = "g.season_id AS season_id, " if by_season else ""
+    grp = "f.id, g.season_id" if by_season else "f.id"
+    sf = season_filter.replace("pss.season_id", "g.season_id") if season_filter else ""
+    return f"""
+        fam_cov_bat AS (
+            SELECT f.id AS family_id, {key}
+                   {rc.batting_rate_columns('bi', extra='bi.did_not_bat IS NOT TRUE')}
+            FROM families f
+            JOIN family_members fm ON fm.family_id = f.id
+            JOIN players p ON p.id = fm.player_id AND p.organisation_id = :org_id
+            JOIN v_effective_batting_innings bi ON bi.player_id = p.id
+            JOIN v_effective_games g ON g.id = bi.game_id
+            WHERE f.organisation_id = :org_id{scope_bat}{sf}
+            GROUP BY {grp}
+        ),
+        fam_cov_bowl AS (
+            SELECT f.id AS family_id, {key}
+                   {rc.bowling_rate_columns('bs')}
+            FROM families f
+            JOIN family_members fm ON fm.family_id = f.id
+            JOIN players p ON p.id = fm.player_id AND p.organisation_id = :org_id
+            JOIN v_effective_bowling_spells bs ON bs.player_id = p.id
+            JOIN v_effective_games g ON g.id = bs.game_id
+            WHERE f.organisation_id = :org_id{scope_bowl}{sf}
+            GROUP BY {grp}
+        )"""
+
+
 def _family_agg_select_cols() -> str:
     return """
         f.id::text                                                                              AS family_id,
@@ -1814,12 +1862,16 @@ def _family_agg_select_cols() -> str:
         COALESCE(SUM(pss.not_outs), 0)                                                          AS not_outs,
         COALESCE(SUM(pss.balls_faced), 0)                                                       AS balls_faced,
         ROUND(SUM(pss.runs)::numeric / NULLIF(SUM(pss.batting_innings) - SUM(pss.not_outs), 0), 2) AS batting_average,
-        -- NOT re-derived from scorecards, unlike every other target here. A
-        -- family aggregate already ignores every other match-context filter
-        -- (see the family-target note in CLAUDE.md), so it is left summing the
-        -- season rows and reports itself as an aggregate figure rather than
-        -- being quietly half-fixed.
-        ROUND(SUM(pss.runs)::numeric / NULLIF(SUM(pss.balls_faced), 0) * 100, 2)                AS batting_strike_rate,
+        -- Re-derived from the members' own scorecards, like every other target
+        -- here: a season total's runs and balls need not describe the same
+        -- innings. A family we hold no scorecards for keeps its aggregate
+        -- figure and reports an aggregate basis rather than reading blank.
+        CASE WHEN COALESCE(MAX(cb.covered_innings), 0) > 0
+             THEN ROUND(MAX(cb.covered_runs)::numeric
+                        / NULLIF(MAX(cb.covered_balls), 0) * 100, 2)
+             ELSE ROUND(SUM(pss.runs)::numeric
+                        / NULLIF(SUM(pss.balls_faced), 0) * 100, 2)
+        END                                                                                    AS batting_strike_rate,
         MAX(pss.high_score)                                                                     AS high_score,
         COALESCE(SUM(pss.fifties), 0)                                                           AS fifties,
         COALESCE(SUM(pss.hundreds), 0)                                                          AS hundreds,
@@ -1831,8 +1883,17 @@ def _family_agg_select_cols() -> str:
         COALESCE(SUM(pss.overs), 0)                                                             AS overs,
         COALESCE(SUM(pss.runs_conceded), 0)                                                     AS runs_conceded,
         ROUND(SUM(pss.runs_conceded)::numeric / NULLIF(SUM(pss.wickets), 0), 2)                 AS bowling_average,
-        ROUND(SUM(pss.runs_conceded)::numeric / NULLIF(SUM(pss.bowling_balls), 0) * 6, 2)       AS bowling_economy,
-        ROUND(SUM(pss.bowling_balls)::numeric / NULLIF(SUM(pss.wickets), 0), 2)                 AS bowling_strike_rate,
+        CASE WHEN COALESCE(MAX(cw.covered_spells), 0) > 0
+             THEN ROUND(MAX(cw.covered_conceded)::numeric * 6
+                        / NULLIF(MAX(cw.covered_bowl_balls), 0), 2)
+             ELSE ROUND(SUM(pss.runs_conceded)::numeric
+                        / NULLIF(SUM(pss.bowling_balls), 0) * 6, 2)
+        END                                                                                    AS bowling_economy,
+        CASE WHEN COALESCE(MAX(cw.covered_spells), 0) > 0
+             THEN ROUND(MAX(cw.covered_bowl_balls)::numeric
+                        / NULLIF(MAX(cw.covered_wickets), 0), 2)
+             ELSE ROUND(SUM(pss.bowling_balls)::numeric / NULLIF(SUM(pss.wickets), 0), 2)
+        END                                                                                    AS bowling_strike_rate,
         COALESCE(SUM(pss.five_wicket_innings), 0)                                               AS five_wicket_innings,
         COALESCE(SUM(pss.maidens), 0)                                                           AS maidens,
         MAX(pss.best_bowling_wickets)                                                           AS best_bowling_wickets,
@@ -1874,8 +1935,10 @@ async def query_family_career(
     # row is out of scope should still list, at zero, rather than disappear.
     scope = _ctx_scope(context)
     scope_clause = _scope_clause_for_join(scope, "pss.grade_id", params)
+    covered = _family_covered_ctes(scope, params, by_season=False)
     sql = f"""
-        WITH agg AS (
+        WITH {covered},
+        agg AS (
             SELECT {select_cols}
             FROM families f
             JOIN family_members fm ON fm.family_id = f.id
@@ -1890,6 +1953,8 @@ async def query_family_career(
                     SELECT 1 FROM seasons s
                     WHERE s.id = pss.season_id AND s.organisation_id = :org_id
                 )){scope_clause}
+            LEFT JOIN fam_cov_bat cb ON cb.family_id = f.id
+            LEFT JOIN fam_cov_bowl cw ON cw.family_id = f.id
             WHERE f.organisation_id = :org_id
             GROUP BY f.id, f.name
         )
@@ -1928,8 +1993,11 @@ async def query_family_season(
     where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
 
     select_cols = _family_agg_select_cols()
+    covered = _family_covered_ctes(_ctx_scope(context), params, by_season=True,
+                                   season_filter=season_filter)
     sql = f"""
-        WITH agg AS (
+        WITH {covered},
+        agg AS (
             SELECT {select_cols},
                    s.id::text                AS season_id,
                    s.name                    AS season_name,
@@ -1942,6 +2010,8 @@ async def query_family_season(
             -- excluded by the INNER JOIN to seasons below, same as before.
             JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             JOIN seasons s ON s.id = pss.season_id
+            LEFT JOIN fam_cov_bat cb ON cb.family_id = f.id AND cb.season_id = s.id
+            LEFT JOIN fam_cov_bowl cw ON cw.family_id = f.id AND cw.season_id = s.id
             WHERE f.organisation_id = :org_id AND s.organisation_id = :org_id {season_filter}{scope_clause}
             GROUP BY f.id, f.name, s.id, s.name, s.year
         )
@@ -1997,6 +2067,12 @@ async def query_family_grade(
                 COALESCE(bat.runs, 0)                   AS runs,
                 COALESCE(bat.not_outs, 0)               AS not_outs,
                 COALESCE(bat.balls_faced, 0)            AS balls_faced,
+                -- The halves of the strike rate, kept apart from the totals
+                -- above all the way to the family aggregate below: runs and
+                -- balls have to describe the same innings (rate_coverage.py).
+                COALESCE(bat.covered_runs, 0)           AS covered_runs,
+                COALESCE(bat.covered_balls, 0)          AS covered_balls,
+                COALESCE(bat.covered_innings, 0)        AS covered_innings,
                 COALESCE(bat.high_score, 0)             AS high_score,
                 COALESCE(bat.fifties, 0)                AS fifties,
                 COALESCE(bat.hundreds, 0)               AS hundreds,
@@ -2007,6 +2083,10 @@ async def query_family_grade(
                 COALESCE(bowl.wickets, 0)               AS wickets,
                 COALESCE(bowl.overs, 0)                 AS overs,
                 COALESCE(bowl.runs_conceded, 0)         AS runs_conceded,
+                COALESCE(bowl.covered_conceded, 0)      AS covered_conceded,
+                COALESCE(bowl.covered_bowl_balls, 0)    AS covered_bowl_balls,
+                COALESCE(bowl.covered_wickets, 0)       AS covered_wickets,
+                COALESCE(bowl.covered_spells, 0)        AS covered_spells,
                 COALESCE(bowl.five_wicket_innings, 0)   AS five_wicket_innings,
                 COALESCE(bowl.maidens, 0)               AS maidens,
                 COALESCE(bowl.best_bowling_wickets, 0)  AS best_bowling_wickets,
@@ -2040,7 +2120,7 @@ async def query_family_grade(
                 COALESCE(SUM(pp.not_outs), 0)                                                   AS not_outs,
                 COALESCE(SUM(pp.balls_faced), 0)                                                AS balls_faced,
                 ROUND(SUM(pp.runs)::numeric / NULLIF(SUM(pp.batting_innings) - SUM(pp.not_outs), 0), 2) AS batting_average,
-                ROUND(SUM(pp.runs)::numeric / NULLIF(SUM(pp.balls_faced), 0) * 100, 2)          AS batting_strike_rate,
+                ROUND(SUM(pp.covered_runs)::numeric / NULLIF(SUM(pp.covered_balls), 0) * 100, 2) AS batting_strike_rate,
                 MAX(pp.high_score)                                                              AS high_score,
                 COALESCE(SUM(pp.fifties), 0)                                                    AS fifties,
                 COALESCE(SUM(pp.hundreds), 0)                                                   AS hundreds,
@@ -2052,8 +2132,11 @@ async def query_family_grade(
                 COALESCE(SUM(pp.overs), 0)                                                      AS overs,
                 COALESCE(SUM(pp.runs_conceded), 0)                                              AS runs_conceded,
                 ROUND(SUM(pp.runs_conceded)::numeric / NULLIF(SUM(pp.wickets), 0), 2)           AS bowling_average,
-                ROUND(SUM(pp.runs_conceded)::numeric / NULLIF(SUM(pp.overs * 6), 0) * 6, 2)     AS bowling_economy,
-                ROUND(SUM(pp.overs)::numeric * 6 / NULLIF(SUM(pp.wickets), 0), 2)               AS bowling_strike_rate,
+                -- Balls, not summed cricket notation: 10.2 + 10.2 is 20 overs
+                -- and 4 balls, not 20.4. And only the spells that carry an
+                -- overs figure answer either rate.
+                ROUND(SUM(pp.covered_conceded)::numeric * 6 / NULLIF(SUM(pp.covered_bowl_balls), 0), 2) AS bowling_economy,
+                ROUND(SUM(pp.covered_bowl_balls)::numeric / NULLIF(SUM(pp.covered_wickets), 0), 2)      AS bowling_strike_rate,
                 COALESCE(SUM(pp.five_wicket_innings), 0)                                        AS five_wicket_innings,
                 COALESCE(SUM(pp.maidens), 0)                                                    AS maidens,
                 MAX(pp.best_bowling_wickets)                                                    AS best_bowling_wickets,

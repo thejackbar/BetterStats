@@ -42,6 +42,7 @@ from app.models.db import Organisation
 from app.services import grassroots_scores_client
 from app.services import scouting_intel
 from app.services.club_match import club_match_keys
+from app.services import rate_coverage as rc
 from app.services.iq_filters import (
     grade_canonical_label, grade_match_clause, grade_scope_fragment,
 )
@@ -725,7 +726,12 @@ async def _our_performers_vs(
                 MAX(t.name) AS squad,
                 COALESCE(SUM(bs.wickets), 0) AS wickets,
                 COALESCE(SUM(bs.runs), 0) AS runs,
+                COUNT(*) AS spells,
                 COALESCE(SUM(FLOOR(bs.overs) * 6 + ROUND((bs.overs - FLOOR(bs.overs)) * 10)), 0) AS balls,
+                -- The economy divides these two, never the totals above: a
+                -- spell that reached us without an overs figure would put its
+                -- runs over somebody else's overs (rate_coverage.py).
+                {rc.bowling_rate_columns("bs")},
                 MAX(bs.wickets) AS best_wkts
             FROM v_effective_bowling_spells bs
             JOIN v_effective_games g ON g.id = bs.game_id{_ORG_SCOPE}
@@ -759,7 +765,8 @@ async def _our_performers_vs(
                 "wickets": wkts,
                 "runs": runs,
                 "average": round(runs / wkts, 2) if wkts else None,
-                "economy": round(runs / (balls / 6), 2) if balls else None,
+                "economy": rc.economy(r["covered_conceded"], r["covered_bowl_balls"]),
+                "economy_coverage": rc.coverage(r["covered_spells"], r["spells"]),
                 "best_wickets": r["best_wkts"],
             }
         )

@@ -2503,27 +2503,12 @@ async def _season_by_season_scoped(
 
 
 def _with_rate_coverage(row: dict) -> dict:
-    """Turn the raw sr_/econ_ counts on a season row into the pair every rate rides with.
+    """The one rule lives in services/rate_coverage.py; this is the local name.
 
-    ``basis`` is what a screen uses to word the note: a rate re-derived from
-    scorecards can name the innings behind it, while one that could only come
-    from a season total has nothing to count and says so instead.
+    Two copies of "what a coverage pair looks like" is how a leaderboard and a
+    router start disagreeing about whether a figure is short.
     """
-    if "sr_counted" in row:
-        counted = _n(row.pop("sr_counted", 0))
-        of = _n(row.pop("sr_of", 0))
-        row["strike_rate_coverage"] = {
-            **rc.coverage(counted, max(of, counted)),
-            "basis": "innings" if counted else "aggregate",
-        }
-    if "econ_counted" in row:
-        counted = _n(row.pop("econ_counted", 0))
-        of = _n(row.pop("econ_of", 0))
-        row["economy_coverage"] = {
-            **rc.coverage(counted, max(of, counted)),
-            "basis": "innings" if counted else "aggregate",
-        }
-    return row
+    return rc.with_coverage(row)
 
 
 async def get_season_by_season(

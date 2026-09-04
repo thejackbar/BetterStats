@@ -213,14 +213,104 @@ find out.
 - **A CHECK THAT COUNTS MARKS ON A PAGE CANNOT FAIL PROPERLY.** The first cut of
   "the covered leader is not marked, the partial one is" counted daggers in the
   whole document, which passes with BOTH marked. It reads the two rows.
-- **NOTICED, NOT FIXED**: StatLab's family targets (`family_career`,
-  `family_season`) still divide the season totals, and say so in a comment where
-  the rate is built. They already ignore every other match-context filter (the
-  pre-existing gap this file documents), so half-fixing them would have been
-  worse than leaving them named. A club's history that predates the sync also
+- **NOTICED, NOT FIXED — and SETTLED in v9.65.1 below**: StatLab's family
+  targets (`family_career`, `family_season`) divided the season totals, and said
+  so in a comment where the rate was built, on the reasoning that they already
+  ignored every other match-context filter. They honour the aggregate scope now,
+  and coverage is not a filter, so all three are re-derived from the members'
+  own scorecards. A club's history that predates the sync also
   needs a Full Rebuild before its ball counts read as NULL rather than zero;
   until then the zero-with-runs test is what carries it, which is why that test
   exists rather than being tidied away.
+
+### The one figure the browser still worked out itself (v9.65.1, Sep 2026)
+
+Reported off Darren Hind's profile: the Player Profile radar read a **strike
+rate of 320.19** beside an innings history where most rows record no balls
+faced at all. 2,379 runs over the ~743 balls somebody had typed in.
+
+- **282 SET THE RULE AND SEVERAL SURFACES WERE NEVER BROUGHT ACROSS.** The
+  career header two inches above the radar already had the figure right; the
+  radar computed its own in the browser as `SUM(runs) / SUM(balls)` over every
+  innings it drew. `careerBatting.strike_rate` and its coverage pair were on
+  the payload the component already received — it simply ignored them. **It was
+  the last client-side rate in the frontend**, and the audit that found it is
+  the one to repeat: grep the frontend for a division by summed balls, and the
+  backend for a rate whose module carries no `rc.` import.
+- **A RATE READS THE SERVER'S FIGURE OR IT IS A SECOND DEFINITION.** The fix is
+  not to reimplement coverage in the browser — it is to stop computing rates
+  there at all. Two places that work out a strike rate are two places that can
+  disagree about it, which is exactly what a reader saw.
+- **`rc.with_coverage` IS THE ONE SHAPE OF A COVERAGE PAIR**, moved out of
+  `aggregations._with_rate_coverage` (which now delegates) so a ROUTER can use
+  it too. A query emits `sr_counted`/`sr_of` or `econ_counted`/`econ_of` and the
+  helper turns them into the pair. Presence-aware, so a query that never asked
+  keeps its exact payload shape.
+- **`batting_rate_columns(extra=…)` EXISTS FOR A SELECT WIDER THAN THE INNINGS
+  THE RATE IS ABOUT.** A query keeping did-not-bat rows for their counts has to
+  leave them out of the coverage, or a 0 off 0 nobody batted in reads as an
+  innings that answered the question — and `covered_innings` then exceeds the
+  innings it is counted against. The teammate split is that shape.
+- **THE CAPTAIN PANEL'S ECONOMY WAS TWO BUGS IN ONE LINE**: `SUM(runs) /
+  SUM(overs)` with no coverage AND overs summed in cricket notation, so 10.2 +
+  10.2 came to 20.4 rather than 20 overs and 4 balls. It read **6.25 where the
+  answer is 3.00**. StatLab's balls-per-wicket carried the same `overs * 6` on
+  three targets.
+- **AN OPPONENT'S CARD REACHES US THE SAME WAY OURS DOES.** `iq_opponent`'s
+  live accumulator wrote `ballsFaced or 0`, the same flattening `sync.py` does,
+  so a danger batter's strike rate was inflated the same way. `DOSSIER_VERSION`
+  is bumped so every cached dossier rebuilds rather than waiting out the 7-day
+  TTL.
+- **THE FAMILY TARGETS ARE FIXED, AND THE OLD NOTE'S REASONING NO LONGER
+  HOLDS.** v9.59.0 left them alone because they "ignore every other
+  match-context filter", so half-fixing looked worse. They honour the aggregate
+  scope now, and — the part that settles it — **coverage is not a filter**. It
+  is about which innings can answer, so re-deriving the rate over the SAME
+  population the counts cover is consistent rather than half-fixed.
+- **A FAMILY'S RATE IS THE FAMILY'S COVERED HALVES, and the first cut of the
+  check got this wrong.** It expected the family's WHOLE 700 runs over its 550
+  counted balls (127.27) — the same two-population mixing on a family scale.
+  The answer is 350 over 550. Found by running it, not by reading it.
+- **STATLAB PUBLISHES NO COVERAGE PAIR ON ANY TARGET, so the family ones do not
+  either.** The extra columns were written, then dropped: a target that reports
+  a pair no sibling reports is a column contract that differs per target, and
+  `_serialise` passes every column through to the CSV. Correct figures, uniform
+  shape. Saying it on a StatLab report is its own change.
+- **DELIBERATELY LEFT ON THE AGGREGATE, and each for the same reason — there
+  are no scorecards to re-derive from**: the Scout product (`iq_scout`,
+  `scout_discovery`, `scout_internal_link`, `frontend/src/scout/lib/seasonRollup.js`)
+  reads CA's season totals for players at OTHER clubs, and `iq._their_key_players`
+  reads a synced opponent's own aggregates. That is the documented
+  `basis: "aggregate"` case. They are NOT marked as such today, which is the
+  obvious follow-up and is a frontend change in three screens.
+- **ALSO LEFT, and NOT because it is hard**: `iq_team._role_ratings` and
+  `iq_trends._similar_players` derive an economy and a strike rate from
+  `player_season_stats` as z-scored FEATURES and `pop()` them before returning —
+  no figure is published, and switching their source would move the MVP rating
+  and the similar-player list for every club with nobody having asked.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_rate_coverage_everywhere.py`, 33 checks through
+  the shipped route bodies and services: the captain economy and its coverage,
+  two 10.2-over spells measured as 124 balls, the teammate split both sides with
+  the fully-covered mate NOT marked, the deep dive's balls and balls-per-boundary
+  from the covered innings, the attack board, the dossier's batter and bowler
+  through the real accumulator, all three family targets, no coverage columns
+  leaking into a StatLab row, and the SQL and Python agreeing row by row) **with
+  a control run**: 17 of the 33 fail against the previous commit, reporting
+  333.3, 300.0, 127.27 and the captain's 6.25.
+- **Driven in Chromium** (`frontend/verification/verify_radar_rate_browser.mjs`,
+  21: the radar reading the server's figure and not the one its own innings
+  would give, the dagger, the note naming the innings, a fully covered player
+  drawing neither, the aggregate basis still drawing a figure rather than a
+  dash, the economy row counting SPELLS, and no overflow at 390px) **with a
+  control run**: 11 of the 21 fail, the radar reading 500.00 where the server
+  said 100.00 and a dash where the aggregate figure belongs.
+- **The neighbouring suites were re-run rather than assumed**: rate coverage
+  105, competitions 136, match coverage 66, shared fixtures 38, season fold 65,
+  records timing 47, milestones 23, and the profile browser suite 49.
+- **A CHECK THAT READS THE WHOLE CARD CANNOT TELL WHICH FIGURE IS MARKED.** The
+  radar checks read each axis off its own row and strip the dagger before
+  comparing, since the career strip above the card prints a strike rate too.
 
 ## A player's seasons drawn two and three times over (v9.53.10, Aug 2026)
 

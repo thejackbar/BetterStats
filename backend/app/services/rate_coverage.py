@@ -77,14 +77,21 @@ def overs_to_balls_sql(col: str) -> str:
     return f"(FLOOR({col}) * 6 + ROUND(({col} - FLOOR({col})) * 10))"
 
 
-def batting_rate_columns(alias: str = "bi", prefix: str = "") -> str:
+def batting_rate_columns(alias: str = "bi", prefix: str = "", extra: str = "") -> str:
     """Select-list fragment: the covered halves of a batting strike rate.
 
     Emitted as raw sums rather than a finished rate so a caller blending these
     with another source can add them up first and divide once, which is the
     same rule the averages here already follow.
+
+    ``extra`` is ANDed into the filter for a query whose rows are wider than the
+    innings the rate is about — a select that keeps did-not-bat rows for their
+    counts has to leave them out of the coverage, or a 0 off 0 nobody batted in
+    reads as an innings that answered the question.
     """
     cov = batting_covered_sql(alias)
+    if extra:
+        cov = f"({cov} AND ({extra}))"
     return (
         f"COALESCE(SUM({alias}.runs) FILTER (WHERE {cov}), 0) AS {prefix}covered_runs,\n"
         f"COALESCE(SUM({alias}.balls) FILTER (WHERE {cov}), 0) AS {prefix}covered_balls,\n"
@@ -92,9 +99,11 @@ def batting_rate_columns(alias: str = "bi", prefix: str = "") -> str:
     )
 
 
-def bowling_rate_columns(alias: str = "bs", prefix: str = "") -> str:
+def bowling_rate_columns(alias: str = "bs", prefix: str = "", extra: str = "") -> str:
     """Select-list fragment: the covered halves of a bowling economy."""
     cov = bowling_covered_sql(alias)
+    if extra:
+        cov = f"({cov} AND ({extra}))"
     balls = overs_to_balls_sql(f"{alias}.overs")
     return (
         f"COALESCE(SUM({alias}.runs) FILTER (WHERE {cov}), 0) AS {prefix}covered_conceded,\n"
@@ -210,3 +219,30 @@ def qualifies(counted, minimum) -> bool:
     stop.
     """
     return int(counted or 0) >= int(minimum or 0)
+
+
+def with_coverage(row: dict) -> dict:
+    """Turn the raw ``sr_``/``econ_`` counts on a row into the pair every rate rides with.
+
+    ``basis`` is what a screen uses to word the note: a rate re-derived from
+    scorecards can name the innings behind it, while one that could only come
+    from a season total has nothing to count and says so instead.
+
+    Presence-aware, so a query that never asked for coverage keeps its exact
+    payload shape and no screen grows a key it does not use.
+    """
+    if "sr_counted" in row:
+        counted = int(row.pop("sr_counted", 0) or 0)
+        of = int(row.pop("sr_of", 0) or 0)
+        row["strike_rate_coverage"] = {
+            **coverage(counted, max(of, counted)),
+            "basis": "innings" if counted else "aggregate",
+        }
+    if "econ_counted" in row:
+        counted = int(row.pop("econ_counted", 0) or 0)
+        of = int(row.pop("econ_of", 0) or 0)
+        row["economy_coverage"] = {
+            **coverage(counted, max(of, counted)),
+            "basis": "innings" if counted else "aggregate",
+        }
+    return row

@@ -16,6 +16,7 @@ from app.routers.auth import get_current_user, get_optional_user, user_can_view_
 from app.auth.capabilities import require_cap, MANAGE_PLAYERS
 from app.services.squad_membership import sync_squad_membership
 from app.services.name_format import name_sort_key
+from app.services import rate_coverage as rc
 from app.services.aggregations import (
     get_career_batting, get_career_bowling, get_career_fielding,
     get_career_batting_from_innings, get_career_bowling_from_spells, get_career_fielding_from_stats,
@@ -748,27 +749,45 @@ async def get_player_captain_stats(
             COUNT(DISTINCT bs.game_id) AS games,
             COALESCE(SUM(bs.wickets), 0) AS wickets,
             ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.wickets), 0), 2) AS average,
-            ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.overs), 0), 2) AS economy
+            -- Overs are cricket notation (10.2 is 10 overs and 2 balls), so they
+            -- are converted to balls before dividing, and only the spells that
+            -- carry an overs figure answer the rate. Summing the notation and
+            -- dividing by it is two bugs in one line: 10.2 + 10.2 is 20 overs 4
+            -- balls, not 20.4, and a spell that reached us without an overs
+            -- figure would put its runs over somebody else's overs.
+            -- See services/rate_coverage.py.
+            """ + rc.economy_sql("bs") + """ AS economy,
+            """ + rc.bowling_covered_count_sql("bs") + """ AS econ_counted,
+            COUNT(*) AS econ_of
         FROM v_effective_bowling_spells bs
         JOIN v_effective_games g ON g.id = bs.game_id
         JOIN game_appearances ga ON ga.game_id = bs.game_id AND ga.player_id = bs.player_id AND ga.is_captain = TRUE
         WHERE bs.player_id = :pid""" + club + """
     """), params)
-    bowl_cap = dict(bowl_cap_res.mappings().first() or {})
+    bowl_cap = rc.with_coverage(dict(bowl_cap_res.mappings().first() or {}))
 
     bowl_not_res = await db.execute(text("""
         SELECT
             COUNT(DISTINCT bs.game_id) AS games,
             COALESCE(SUM(bs.wickets), 0) AS wickets,
             ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.wickets), 0), 2) AS average,
-            ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.overs), 0), 2) AS economy
+            -- Overs are cricket notation (10.2 is 10 overs and 2 balls), so they
+            -- are converted to balls before dividing, and only the spells that
+            -- carry an overs figure answer the rate. Summing the notation and
+            -- dividing by it is two bugs in one line: 10.2 + 10.2 is 20 overs 4
+            -- balls, not 20.4, and a spell that reached us without an overs
+            -- figure would put its runs over somebody else's overs.
+            -- See services/rate_coverage.py.
+            """ + rc.economy_sql("bs") + """ AS economy,
+            """ + rc.bowling_covered_count_sql("bs") + """ AS econ_counted,
+            COUNT(*) AS econ_of
         FROM v_effective_bowling_spells bs
         JOIN v_effective_games g ON g.id = bs.game_id
         LEFT JOIN game_appearances ga ON ga.game_id = bs.game_id AND ga.player_id = bs.player_id AND ga.is_captain = TRUE
         WHERE bs.player_id = :pid""" + club + """
           AND ga.game_id IS NULL
     """), params)
-    bowl_not = dict(bowl_not_res.mappings().first() or {})
+    bowl_not = rc.with_coverage(dict(bowl_not_res.mappings().first() or {}))
 
     by_season_res = await db.execute(text("""
         WITH captain_games AS (
