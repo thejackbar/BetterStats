@@ -139,6 +139,11 @@ PLAIN = uuid.uuid4()
 # A teammate who shares GAPPY's senior games and one of his junior ones, and a
 # side GAPPY captained, for the two panels that take the scope now.
 MATE = uuid.uuid4()
+# Hamilton Veterans' second requirement: "balls faced counting did not commence
+# until specific competitions from 2013 onwards". Four innings, two of them
+# with no ball count — one un-balled with runs (the pre-2013 shape, stored as a
+# zero by the sync) and one genuine 0 off 0 — plus a spell with no overs.
+RATES = uuid.uuid4()
 
 
 async def build_schema() -> None:
@@ -256,7 +261,7 @@ async def seed(session) -> None:
                          (EVEN, ORG, "Even, Ed"), (EMPTY, ORG, "Empty, Eve"),
                          (IMPORTED, ORG, "Ancient, Arthur"),
                          (GAPPY, ORG, "Gappy, Greg"), (PLAIN, ORG, "Plain, Pete"),
-                         (MATE, ORG, "Mate, Mick"),
+                         (MATE, ORG, "Mate, Mick"), (RATES, ORG, "Rates, Ray"),
                          (STRANGER, OTHER, "Nobody, Ivan")):
         await ex("INSERT INTO players (id, organisation_id, name, grassroots_id, "
                  " status) VALUES (:i, :o, :n, :g, 'active')",
@@ -322,6 +327,29 @@ async def seed(session) -> None:
     jnr_game = next(gid for gid, grade_id in gappy_games if grade_id == G_JNR)
     await ex("UPDATE game_appearances SET is_captain = TRUE "
              "WHERE game_id = :g AND player_id = :p", g=jnr_game, p=GAPPY)
+
+    # RATES: four innings in one grade. 30 off 40, 30 off 40, 40 off NO balls
+    # (runs are real, the zero is the sync's "not recorded"), and a genuine
+    # 0 off 0 (run out backing up — covered, contributes nothing to either
+    # half). Covered: 3 of 4, 60 runs off 80 balls -> 75.00. The naive
+    # SUM/SUM reads 100 off 80 -> 125.00. Bowling: 5.0/20, 5.0/20, and a spell
+    # with no overs recorded conceding 10 -> covered 2 of 3, economy 4.00;
+    # naive would be 50 runs over 60 balls -> 5.00.
+    for runs, balls, overs, conceded in ((30, 40, 5.0, 20), (30, 40, 5.0, 20),
+                                         (40, 0, None, 10), (0, 0, None, None)):
+        gid = uuid.uuid4()
+        await ex("INSERT INTO games (id, grade_id, played_at, result, home_org_id, "
+                 " away_org_id, match_format, status) "
+                 "VALUES (:i, :g, :d, 'WIN', :o, :x, 'One Day', 'COMPLETED')",
+                 i=gid, g=G_1ST, d=date(2025, 2, 10 + runs % 5), o=ORG, x=OPPONENT)
+        await ex("INSERT INTO batting_innings (game_id, player_id, runs, balls, fours, "
+                 " sixes, not_out, dismissal_type, did_not_bat) "
+                 "VALUES (:g, :p, :r, :b, 0, 0, false, 'caught', false)",
+                 g=gid, p=RATES, r=runs, b=balls)
+        if conceded is not None:
+            await ex("INSERT INTO bowling_spells (game_id, player_id, overs, maidens, "
+                     " runs, wickets) VALUES (:g, :p, :o, 0, :c, 1)",
+                     g=gid, p=RATES, o=overs, c=conceded)
 
     # A grade-less manual game for WILTON, in the current season. There is no
     # `game_appearances` row: that table FKs to `games`, and a manual game is
@@ -662,6 +690,34 @@ async def main() -> None:
                   int(cap_def["summary"]["games_captained"] or 0) == 3, str(cap_def.get("summary")))
             check("another club's player is still nobody's teammate",
                   all(m["player_id"] != str(STRANGER) for m in all_mates["teammates"]))
+        print("\n-- HAMILTON'S SECOND ASK: a rate only from the innings that can answer --")
+        if HAVE_COMPS:
+            async with Session() as session:
+                comps = await get_player_competitions(player_id=str(RATES), season_id=None, db=session)
+                row = (comps.get("rows") or [None])[0] or {}
+                bat = row.get("batting") or {}
+                bowl = row.get("bowling") or {}
+                check("runs are still every run scored (100)", bat.get("runs") == 100, str(bat))
+                check("but the strike rate is 75.00, from the three innings that carry a "
+                      "ball count — NOT 125.00 from every run over the typed-in balls",
+                      bat.get("strike_rate") == 75.0, str(bat.get("strike_rate")))
+                check("and it says so: 3 of 4 innings, not complete",
+                      (bat.get("strike_rate_coverage") or {}).get("counted") == 3
+                      and (bat.get("strike_rate_coverage") or {}).get("of") == 4
+                      and (bat.get("strike_rate_coverage") or {}).get("complete") is False,
+                      str(bat.get("strike_rate_coverage")))
+                check("a genuine 0 off 0 is COVERED — it is a real innings that "
+                      "contributes nothing to either half",
+                      (bat.get("strike_rate_coverage") or {}).get("counted") == 3)
+                check("the economy is 4.00 from the two spells with overs, not 5.00",
+                      bowl.get("economy") == 4.0, str(bowl))
+                check("and reports 2 of 3 spells",
+                      (bowl.get("economy_coverage") or {}).get("counted") == 2
+                      and (bowl.get("economy_coverage") or {}).get("of") == 3,
+                      str(bowl.get("economy_coverage")))
+                check("wickets are still all three", bowl.get("wickets") == 3, str(bowl))
+        else:  # pragma: no cover
+            check("the competitions panel is available", False)
     else:  # pragma: no cover - control run only
         check("the grid takes the filter bar's scope", False)
 

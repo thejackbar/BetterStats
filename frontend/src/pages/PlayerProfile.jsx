@@ -1130,7 +1130,11 @@ function CompetitionsSection({ playerId, seasonId, matchCoverage = null }) {
           { label: 'INNINGS', value: c => c.row.batting?.innings || null },
           { label: 'RUNS', value: c => fmtNum(c.row.batting?.runs), strong: true },
           { label: 'AVERAGE', value: c => fmtDec(c.row.batting?.average), strong: true },
-          { label: 'STRIKE RATE', value: c => fmtDec(c.row.batting?.strike_rate) },
+          // Marked and footnoted where fewer than every innings carried a ball
+          // count — the case Hamilton Veterans asked about, whose scorers began
+          // recording balls faced in 2013, competition by competition.
+          { label: 'STRIKE RATE', value: c => fmtDec(c.row.batting?.strike_rate),
+            coverage: c => c.row.batting?.strike_rate_coverage, unit: 'innings' },
           { label: 'HIGH SCORE', value: c => fmtNum(c.row.batting?.high_score) },
           { label: 'NOT OUTS', value: c => c.row.batting?.not_outs || null },
           { label: '50s', value: c => c.row.batting?.fifties || null },
@@ -1145,7 +1149,8 @@ function CompetitionsSection({ playerId, seasonId, matchCoverage = null }) {
           { label: 'WICKETS', value: c => fmtNum(c.row.bowling?.wickets), strong: true },
           { label: 'OVERS', value: c => fmtDec(c.row.bowling?.overs) },
           { label: 'AVERAGE', value: c => fmtDec(c.row.bowling?.average), strong: true },
-          { label: 'ECONOMY', value: c => fmtDec(c.row.bowling?.economy) },
+          { label: 'ECONOMY', value: c => fmtDec(c.row.bowling?.economy),
+            coverage: c => c.row.bowling?.economy_coverage, unit: 'spells' },
           { label: 'STRIKE RATE', value: c => fmtDec(c.row.bowling?.strike_rate) },
           { label: 'MAIDENS', value: c => c.row.bowling?.maidens || null },
           { label: 'RUNS CONCEDED', value: c => fmtNum(c.row.bowling?.runs) },

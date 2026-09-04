@@ -10950,6 +10950,44 @@ and one had been pushed to `main` without being measured.
   note. They are arguably a career fact like a milestone, and that is a
   decision rather than a pass.
 
+### Hamilton's second ask was unmet in the panel built for the first (v9.64.2)
+
+Asked to review whether the competition layer satisfied Hamilton Veterans'
+request — "batting strike rates and bowling economy rates will be handy ...
+however balls faced counting did not commence until specific competitions from
+2013 onwards" — and it did not, at the one place he would look.
+
+- **`competition_stats.player_competition_breakdown` DIVIDED `SUM(runs)` BY
+  `SUM(balls)` ACROSS EVERY INNINGS IN THE COMPETITION.** That is the exact
+  shape migration 282 removed from every other rate in the app (`rate_coverage`,
+  v9.59.0), and this query shipped as 283 — one migration later — without it.
+  For a competition with pre-2013 innings every run lands in the numerator and
+  only the typed-in balls in the denominator: the suite's four-innings case
+  reads 125.00 where 75.00 is right, and the control run reproduces the 125.
+  Economy had the milder version of the same thing through a spell with no
+  overs recorded.
+- **Fixed with the module that already existed**: `rc.batting_rate_columns`
+  and `rc.bowling_rate_columns` ride alongside the plain sums, the rate is
+  `rc.strike_rate(covered_runs, covered_balls)`, and `strike_rate_coverage` /
+  `economy_coverage` ride on the payload. Runs, innings and wickets are still
+  the whole competition's — only the ratio changes source, per the 282 rule.
+- **`FormatCompareTable` already took a `coverage` accessor per row** and drew
+  the dagger and footnote itself, so the panel needed two row definitions
+  changed and nothing else. The Formats page had been doing this since 282;
+  the Competitions page beside it had not.
+- **A CHECK FOR A RATE NEEDS AN INNINGS THE RATE CANNOT USE.** The competition
+  suite's fixture wrote `balls = runs + 10` for every innings, so every rate in
+  it was fully covered and the bug could never have shown. The new case carries
+  an un-balled innings with runs (the sync's stored zero), a genuine 0 off 0
+  (covered — it contributes nothing to either half) and a spell with no overs.
+- **Verified against a real Postgres** (`verify_match_coverage.py` is 66
+  checks: 75.00 from 3 of 4, the 0(0) counted as covered, economy 4.00 from 2
+  of 3, runs and wickets still whole) **with a control run** that reads 125.0
+  and 5.0; the competitions suite unchanged at 136. **Driven in Chromium**
+  (`verify_competitions_browser.mjs`): the partially-covered rate carries the
+  dagger, the complete one beside it does not, and the footnote under the
+  table says why.
+
 ## Naming a club or a contact outright (v9.58.3, Sep 2026)
 
 Asked for on the internal Segments screen straight after the rules above:

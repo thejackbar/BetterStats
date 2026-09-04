@@ -219,18 +219,24 @@ for (const [name, path] of [
           { competition_id: 'c-wastca', competition_name: 'West Australian Suburban Turf Cricket Assoc.',
             association_name: 'WASTCA', matches: 118, seasons: 12, grades: 5,
             first_year: 2013, last_year: 2025,
+            // Hamilton's shape: balls faced recorded only from 2013 in this
+            // competition, so the rate is from 60 of 110 innings and MARKED.
             batting: { innings: 110, not_outs: 14, runs: 3412, high_score: 143, average: 35.54,
-                       strike_rate: 68.2, balls: 5003, fours: 380, sixes: 44, fifties: 19, hundreds: 4 },
+                       strike_rate: 68.2, balls: 5003, fours: 380, sixes: 44, fifties: 19, hundreds: 4,
+                       strike_rate_coverage: { counted: 60, of: 110, complete: false, none: false } },
             bowling: { spells: 90, wickets: 141, runs: 3010, maidens: 62, balls: 5400,
-                       overs: 900, average: 21.35, economy: 3.34, strike_rate: 38.3 },
+                       overs: 900, average: 21.35, economy: 3.34, strike_rate: 38.3,
+                       economy_coverage: { counted: 90, of: 90, complete: true, none: false } },
             fielding: { catches: 61, catches_wk: 0, catches_non_wk: 61, stumpings: 0, run_outs: 7 } },
           { competition_id: 'c-icl', competition_name: 'WA Integrated Cricket League',
             association_name: 'WA ICL', matches: 9, seasons: 2, grades: 1,
             first_year: 2024, last_year: 2025,
             batting: { innings: 8, not_outs: 1, runs: 214, high_score: 61, average: 30.57,
-                       strike_rate: 91.0, balls: 235, fours: 22, sixes: 6, fifties: 1, hundreds: 0 },
+                       strike_rate: 91.0, balls: 235, fours: 22, sixes: 6, fifties: 1, hundreds: 0,
+                       strike_rate_coverage: { counted: 8, of: 8, complete: true, none: false } },
             bowling: { spells: 6, wickets: 7, runs: 180, maidens: 1, balls: 240,
-                       overs: 40, average: 25.71, economy: 4.5, strike_rate: 34.3 },
+                       overs: 40, average: 25.71, economy: 4.5, strike_rate: 34.3,
+                       economy_coverage: { counted: 6, of: 6, complete: true, none: false } },
             fielding: { catches: 4, catches_wk: 0, catches_non_wk: 4, stumpings: 0, run_outs: 1 } },
         ],
         total_matches: 127,
@@ -276,6 +282,26 @@ for (const [name, path] of [
     ck('with the batting, bowling and fielding tables',
       /BATTING BY COMPETITION/i.test(body) && /BOWLING BY COMPETITION/i.test(body)
       && /FIELDING BY COMPETITION/i.test(body), body.slice(0, 400))
+    // HAMILTON'S SECOND ASK, on the screen. The WASTCA strike rate is from 60
+    // of 110 innings and must carry the dagger; the ICL one is complete and
+    // must not; and the footnote under the table says why.
+    const srRow = await page.evaluate(() => {
+      const table = [...document.querySelectorAll('table')]
+        .find(t => /STRIKE RATE/.test(t.innerText || ''))
+      if (!table) return null
+      const tr = [...table.querySelectorAll('tr')]
+        .find(r => /^\s*STRIKE RATE/.test(r.innerText || ''))
+      if (!tr) return null
+      const cells = [...tr.querySelectorAll('td')].map(td => (td.innerText || '').trim())
+      return { cells, daggers: (tr.innerText.match(/†/g) || []).length }
+    })
+    ck('the partially-covered strike rate carries the dagger and the complete one does not',
+       !!srRow && srRow.daggers === 1 && /68\.20/.test(srRow.cells[0] || '')
+       && /†/.test(srRow.cells[0] || '') && !/†/.test(srRow.cells[1] || ''),
+       JSON.stringify(srRow))
+    ck('and the footnote under the table says why',
+       /not every innings recorded a ball count/.test(await page.evaluate(() => document.body.innerText)))
+
     ck('each competition\'s own figures, not a shared total',
       /3,?412/.test(body) && /214/.test(body), '')
     // The honest half: a competition breakdown is built from scorecards, so a

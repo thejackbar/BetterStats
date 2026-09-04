@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.club_grades import club_grade_competitions
 from app.services.competitions import UNGROUPED_LABEL
+from app.services import rate_coverage as rc
 from app.services.game_status import appearance_counts_as_match
 from app.services.season_aliases import resolve_season_filter
 
@@ -379,6 +380,15 @@ async def player_competition_breakdown(
                    SUM(bi.runs) AS runs,
                    MAX(bi.runs) AS high_score,
                    SUM(bi.balls) AS balls,
+                   -- The strike rate comes ONLY from the innings that carry a
+                   -- ball count able to carry their runs. A club whose scorers
+                   -- began recording balls faced part-way through its history
+                   -- (Hamilton Veterans: 2013 onwards, competition by
+                   -- competition) otherwise gets every run in the numerator and
+                   -- only the typed-in balls in the denominator, which is the
+                   -- bug migration 282 removed everywhere else and this query
+                   -- shipped one migration later without. See rate_coverage.py.
+                   {rc.batting_rate_columns('bi')},
                    SUM(bi.fours) AS fours,
                    SUM(bi.sixes) AS sixes,
                    COUNT(*) FILTER (WHERE bi.runs >= 50 AND bi.runs < 100) AS fifties,
@@ -404,8 +414,9 @@ async def player_competition_breakdown(
         runs = int(r["runs"] or 0)
         dismissals = int(r["dismissals"] or 0)
         balls = int(r["balls"] or 0)
+        innings = int(r["innings"] or 0)
         row["batting"] = {
-            "innings": int(r["innings"] or 0),
+            "innings": innings,
             "not_outs": int(r["not_outs"] or 0),
             "runs": runs,
             "high_score": int(r["high_score"] or 0),
@@ -413,7 +424,10 @@ async def player_competition_breakdown(
             # as null rather than as the run total, which would read as an
             # average nobody computed.
             "average": round(runs / dismissals, 2) if dismissals else None,
-            "strike_rate": round(runs * 100.0 / balls, 2) if balls else None,
+            # Runs and balls from the SAME innings, and a note saying how many
+            # of them could answer. `runs` above is still every run scored.
+            "strike_rate": rc.strike_rate(r["covered_runs"], r["covered_balls"]),
+            "strike_rate_coverage": rc.coverage(r["covered_innings"], innings),
             "balls": balls,
             "fours": int(r["fours"] or 0),
             "sixes": int(r["sixes"] or 0),
@@ -433,7 +447,8 @@ async def player_competition_breakdown(
                    -- divided by them. Summing the decimals would make every
                    -- economy rate wrong.
                    SUM(FLOOR(bs.overs)::bigint * 6
-                       + ROUND((bs.overs - FLOOR(bs.overs)) * 10)::bigint) AS balls
+                       + ROUND((bs.overs - FLOOR(bs.overs)) * 10)::bigint) AS balls,
+                   {rc.bowling_rate_columns('bs')}
               FROM v_effective_bowling_spells bs
               JOIN v_effective_games g ON g.id = bs.game_id
               {_COMP_JOIN}
@@ -450,16 +465,22 @@ async def player_competition_breakdown(
         wickets = int(r["wickets"] or 0)
         conceded = int(r["runs"] or 0)
         balls = int(r["balls"] or 0)
+        spells = int(r["spells"] or 0)
+        cov_balls = int(r["covered_bowl_balls"] or 0)
+        cov_wkts = int(r["covered_wickets"] or 0)
         row["bowling"] = {
-            "spells": int(r["spells"] or 0),
+            "spells": spells,
             "wickets": wickets,
             "runs": conceded,
             "maidens": int(r["maidens"] or 0),
             "balls": balls,
             "overs": round(balls / 6, 1) if balls else 0,
             "average": round(conceded / wickets, 2) if wickets else None,
-            "economy": round(conceded * 6.0 / balls, 2) if balls else None,
-            "strike_rate": round(balls / wickets, 1) if wickets else None,
+            # Both rates from the spells that carry an over count; wickets and
+            # runs above are still the whole competition's.
+            "economy": rc.economy(r["covered_conceded"], cov_balls),
+            "economy_coverage": rc.coverage(r["covered_spells"], spells),
+            "strike_rate": round(cov_balls / cov_wkts, 1) if cov_wkts else None,
         }
 
     fielding = await session.execute(
