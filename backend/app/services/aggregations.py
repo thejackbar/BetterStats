@@ -1327,7 +1327,11 @@ async def get_player_batting_innings(
                 bi.balls,
                 bi.fours,
                 bi.sixes,
-                bi.strike_rate,
+                -- Derived from this innings' own runs and balls. Nothing
+                -- writes batting_innings.strike_rate for a synced innings, so
+                -- reading the column drew a dash on every row. See
+                -- services/rate_coverage.py.
+                {rc.innings_strike_rate_sql('bi')} AS strike_rate,
                 bi.dismissal_type,
                 bi.not_out,
                 bi.batting_position,
@@ -1542,7 +1546,15 @@ async def get_batting_by_position(
                     2
                 ) AS average,
                 MAX(bi.runs) AS high_score,
-                ROUND(AVG(bi.strike_rate), 1) AS avg_strike_rate
+                -- Was AVG(bi.strike_rate): an average of per-innings rates,
+                -- which weights a four-ball cameo the same as a hundred-ball
+                -- innings — and over a column nothing writes, so it read blank
+                -- on every row anyway. The rate is the covered runs over the
+                -- covered balls, and rides with a coverage pair like every
+                -- other rate in the app.
+                {rc.strike_rate_sql('bi')} AS avg_strike_rate,
+                {rc.batting_covered_count_sql('bi')} AS sr_counted,
+                COUNT(*) AS sr_of
             FROM v_effective_batting_innings bi
             JOIN v_effective_games g ON g.id = bi.game_id
             WHERE bi.player_id = :pid
@@ -1555,7 +1567,7 @@ async def get_batting_by_position(
         """),
         params,
     )
-    return [dict(r) for r in result.mappings()]
+    return [_with_rate_coverage(dict(r)) for r in result.mappings()]
 
 
 async def get_batting_by_grade(

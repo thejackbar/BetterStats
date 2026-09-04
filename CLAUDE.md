@@ -311,6 +311,35 @@ faced at all. 2,379 runs over the ~743 balls somebody had typed in.
 - **A CHECK THAT READS THE WHOLE CARD CANNOT TELL WHICH FIGURE IS MARKED.** The
   radar checks read each axis off its own row and strip the dagger before
   comparing, since the career strip above the card prints a strike rate too.
+- **THE INNINGS HISTORY SR COLUMN WAS BLANK ON EVERY ROW, and it is the column
+  a reader would have used to check the headline.** `batting_innings.strike_rate`
+  has a writer for a hand-entered manual innings and none at all for a synced
+  one — `sync.py` stamps CA's `battingStrikeRate` onto the season aggregate and
+  nothing else — so the column was NULL for essentially every innings on the
+  platform. Derived on read now (`rc.innings_strike_rate_sql`), never
+  backfilled: a stored rate is wrong the moment somebody corrects the runs, and
+  deriving it fixes every row already in the database with no migration and no
+  re-sync. Same call `player_age.age_on` makes about an age.
+- **AT ONE INNINGS THERE IS NO POPULATION TO MIX, so `NULLIF(balls, 0)` IS the
+  coverage test.** The runs and the balls are the same innings by construction,
+  and the three ways an innings cannot answer — a NULL count, a count flattened
+  to zero with runs on it, and a genuine 0 off 0 — all fall out of that one
+  expression as NULL. The suite asserts the SQL and the Python agree row by row
+  rather than taking the equivalence on trust.
+- **A STORED FIGURE IS THE FALLBACK, NOT THE ANSWER.** Where balls were
+  recorded, a stored rate that contradicts the two columns printed beside it
+  reads as a bug; where they were not, it is the only thing we hold, which is
+  the case the manual scorecard form's own field exists for.
+- **`get_batting_by_position` AVERAGED PER-INNINGS STRIKE RATES**, which weights
+  a four-ball cameo the same as a hundred-ball innings — over a column nothing
+  writes, so it read blank anyway and no screen draws it. Fixed rather than left
+  standing: it would have been wrong the day somebody rendered it. **The control
+  run is what showed the shape of it** — the old expression reads **88.0**, the
+  one manual innings that happened to carry a stored figure, ignoring the three
+  real ball-counted innings entirely.
+- **NOT DONE: no SR column was added to Batting by Position.** The field is
+  correct now and nothing renders it; adding a column to a table nobody asked
+  about is a product decision, not part of fixing a wrong figure.
 
 ## A player's seasons drawn two and three times over (v9.53.10, Aug 2026)
 

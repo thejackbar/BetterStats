@@ -11,6 +11,7 @@ from app.models.db import Game, Grade, Season, Organisation, BattingInnings, Bow
 from app.services import grade_scope
 from app.services.aggregations import get_game_fall_of_wickets, get_game_partnerships
 from app.services.sync import _caught_by_keeper, _innings_keeper_names
+from app.services import rate_coverage as rc
 
 router = APIRouter(prefix="/games", tags=["games"])
 
@@ -585,7 +586,12 @@ async def get_scorecard(
             "balls": bi.balls,
             "fours": bi.fours,
             "sixes": bi.sixes,
-            "strike_rate": float(bi.strike_rate) if bi.strike_rate is not None else None,
+            # Derived from this row's own runs and balls: nothing writes
+            # batting_innings.strike_rate for a synced innings, so reading the
+            # column left the column blank whenever the live Grassroots rebuild
+            # below could not run. A stored figure (a hand-entered manual
+            # innings) is the fallback. See services/rate_coverage.py.
+            "strike_rate": rc.innings_strike_rate(bi.runs, bi.balls, bi.strike_rate),
             "dismissal_type": bi.dismissal_type,
             # `caught_behind` is a SYNCED-only column (migration 075) —
             # `manual_batting_innings` has no equivalent, because the AI

@@ -36,7 +36,11 @@ const ORG = 'bbbbbbbb-0000-0000-0000-0000000000bb'
 // the two answers are impossible to confuse in a check.
 const INNINGS = Array.from({ length: 125 }, (_, i) => ({
   runs: 20, balls: i < 25 ? 20 : null, fours: 2, sixes: 0,
-  not_out: false, strike_rate: null, dismissal_type: 'bowled',
+  // What the server now sends per row: derived from that innings' own runs
+  // and balls, and null where it recorded no count. It used to send the
+  // stored batting_innings.strike_rate, which nothing writes for a synced
+  // innings — so the column drew a dash on every row.
+  not_out: false, strike_rate: i < 25 ? 100.0 : null, dismissal_type: 'bowled',
   batting_position: 3, innings_number: 1,
   game_id: `gggggggg-0000-0000-0000-${String(i).padStart(12, '0')}`,
   home_team: 'Our Club', away_team: 'Them', played_at: '2025-11-01',
@@ -222,6 +226,46 @@ try {
     const text = await cardText(page)
     ck('the note counts spells, not innings',
        /from 5 of 12 spells/.test(text), text.slice(0, 400))
+    await ctx.close()
+  }
+
+  console.log('\n-- the innings history column, on the row it belongs to --')
+  {
+    const { page, ctx, errors } = await open(PARTIAL)
+    // Two buttons read BATTING — the main tab bar and, since ANALYSIS is
+    // already open, its sub-tab bar. The sub-tab is the second.
+    await page.getByRole('button', { name: 'BATTING', exact: true }).nth(1).click()
+    await page.waitForSelector('text=INNINGS HISTORY', { timeout: 15000 })
+    // Read the SR cell off each row, keyed by the balls cell beside it, so a
+    // check cannot pass by finding a rate somewhere else on a long page.
+    const rows = await page.evaluate(() => {
+      for (const el of document.querySelectorAll('.pb-card')) {
+        if (!/INNINGS HISTORY/.test(el.innerText || '')) continue
+        const head = [...el.querySelectorAll('thead th')]
+          .map(th => th.textContent.trim().toUpperCase())
+        const iB = head.indexOf('B'), iSR = head.indexOf('SR')
+        return [...el.querySelectorAll('tbody tr')].map(tr => {
+          const td = tr.querySelectorAll('td')
+          return { balls: (td[iB]?.textContent || '').trim(),
+                   sr: (td[iSR]?.textContent || '').trim() }
+        })
+      }
+      return []
+    })
+    ck('the innings history table is drawn', rows.length > 0, String(rows.length))
+    const counted = rows.filter(r => r.balls === '20')
+    const blank = rows.filter(r => r.balls !== '20')
+    // The column itself was never broken — the backend sent nothing to draw.
+    // What these check is that the figure the server now sends reaches the
+    // cell beside the balls it was worked out from, and that a row with no
+    // ball count still reads a dash rather than a zero.
+    ck('a row that recorded 20 balls reads 100.00',
+       counted.length > 0 && counted.every(r => r.sr === '100.00'),
+       JSON.stringify(counted.slice(0, 3)))
+    ck('a row that recorded no ball count still reads a dash',
+       blank.length > 0 && blank.every(r => r.sr === '—'),
+       JSON.stringify(blank.slice(0, 3)))
+    ck('no page errors', errors.length === 0, errors.join(' | '))
     await ctx.close()
   }
 

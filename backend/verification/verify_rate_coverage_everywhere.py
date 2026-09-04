@@ -422,6 +422,89 @@ async def main() -> None:
                       near(fg[0].get("batting_strike_rate"), 63.64),
                       str(fg[0].get("batting_strike_rate")))
 
+        # ── the innings history column ───────────────────────────────────────
+        print("\n— one innings' own strike rate, on the row it belongs to —")
+        async with guard(s, "innings history"):
+            from app.services import aggregations as agg
+            rows = await agg.get_player_batting_innings(s, str(BAT))
+            by_balls: dict = {}
+            for r in rows:
+                by_balls.setdefault(r["balls"], []).append(r)
+            counted = by_balls.get(50) or []
+            flattened = by_balls.get(0) or []
+            missing = by_balls.get(None) or []
+            check("innings history: every innings is listed", len(rows) == 10, str(len(rows)))
+            check("a ball-counted innings now reads a rate rather than a dash",
+                  bool(counted) and all(near(r["strike_rate"], 100.0) for r in counted),
+                  str([r["strike_rate"] for r in counted]))
+            check("an innings whose count was flattened to zero reads no rate",
+                  bool(flattened) and all(r["strike_rate"] is None for r in flattened),
+                  str([r["strike_rate"] for r in flattened]))
+            check("nor does one that recorded no count at all",
+                  bool(missing) and all(r["strike_rate"] is None for r in missing),
+                  str([r["strike_rate"] for r in missing]))
+            check("the runs on every row are untouched",
+                  all(int(r["runs"]) == 50 for r in rows), "")
+
+            # A genuine 0 off 0 is a real innings and a real absence of a rate:
+            # covered by the coverage rule, undefined as a ratio.
+            g = uuid.uuid4()
+            await s.execute(text(
+                "INSERT INTO games (id, grade_id, played_at, venue, result, match_format) "
+                "VALUES (:i, :g, :d, 'Home Oval', 'WIN', 'One Day')"),
+                {"i": g, "g": GRADE, "d": date(2025, 12, 1)})
+            await s.execute(text(
+                "INSERT INTO batting_innings (game_id, player_id, runs, balls, not_out, "
+                " innings_number, batting_position) "
+                "VALUES (:g, :p, 0, 0, false, 1, 11)"), {"g": g, "p": BAT})
+            await s.commit()
+            rows = await agg.get_player_batting_innings(s, str(BAT))
+            duck = [r for r in rows if int(r["runs"]) == 0][0]
+            check("a genuine 0 off 0 is listed as an innings",
+                  duck is not None and int(duck["balls"]) == 0, str(duck and duck["balls"]))
+            check("and carries no rate — a ratio over no balls is not zero",
+                  duck["strike_rate"] is None, str(duck["strike_rate"]))
+
+            # A hand-entered manual innings can carry a figure off the card
+            # even where the card recorded no ball count. That is the one case
+            # a stored value is the only thing we hold.
+            mg = uuid.uuid4()
+            await s.execute(text(
+                "INSERT INTO manual_games (id, organisation_id, season_id, grade_id, "
+                " played_at, venue, result, home_team, away_team) "
+                "VALUES (:i, :o, :s, :g, :d, 'Away Oval', 'WIN', 'Our Club', 'Them')"),
+                {"i": mg, "o": ORG, "s": SEASON, "g": GRADE, "d": date(2025, 12, 8)})
+            await s.execute(text(
+                "INSERT INTO manual_batting_innings (manual_game_id, player_id, runs, "
+                " balls, not_out, innings_number, batting_position, strike_rate) "
+                "VALUES (:m, :p, 44, NULL, false, 1, 3, 88.00)"),
+                {"m": mg, "p": BAT})
+            await s.commit()
+            rows = await agg.get_player_batting_innings(s, str(BAT))
+            manual = [r for r in rows if int(r["runs"]) == 44]
+            check("a manual innings with no ball count falls back to the stored figure",
+                  bool(manual) and near(manual[0]["strike_rate"], 88.0),
+                  str(manual and manual[0]["strike_rate"]))
+
+        # ── batting by position ──────────────────────────────────────────────
+        print("\n— batting by position no longer averages rates —")
+        async with guard(s, "by position"):
+            from app.services import aggregations as agg2
+            pos = await agg2.get_batting_by_position(s, str(BAT))
+            three = [r for r in pos if int(r["batting_position"]) == 3]
+            check("the position is listed", bool(three), str([r["batting_position"] for r in pos]))
+            if three:
+                # The counted innings only: 150 off 150 at No. 3, plus the
+                # manual 44 which carries no ball count. An average of the
+                # per-innings rates would read 100 as well here, so the check
+                # that separates them is the coverage pair beside it.
+                check("the rate is the covered runs over the covered balls",
+                      near(three[0].get("avg_strike_rate"), 100.0),
+                      str(three[0].get("avg_strike_rate")))
+                cov = three[0].get("strike_rate_coverage") or {}
+                check("and it says how many innings answered it",
+                      cov.get("counted") == 3 and cov.get("complete") is False, str(cov))
+
         # ── the rule itself ──────────────────────────────────────────────────
         print("\n— the SQL and the Python agree on every seeded innings —")
         async with guard(s, "agreement"):
@@ -436,6 +519,14 @@ async def main() -> None:
                 "FROM v_effective_bowling_spells bs"))).mappings().all()
             check(f"bowling: {len(rows)} spells classified identically",
                   all(bool(r["cov"]) == rc.is_bowling_covered(r["runs"], r["overs"])
+                      for r in rows))
+            rows = (await s.execute(text(
+                f"SELECT bi.runs, bi.balls, bi.strike_rate AS stored, "
+                f"{rc.innings_strike_rate_sql('bi')} AS sr "
+                "FROM v_effective_batting_innings bi"))).mappings().all()
+            check(f"per innings: {len(rows)} rates agree between SQL and Python",
+                  all((float(r["sr"]) if r["sr"] is not None else None)
+                      == rc.innings_strike_rate(r["runs"], r["balls"], r["stored"])
                       for r in rows))
 
     print(f"\n{PASS} passed, {FAIL} failed")

@@ -142,6 +142,32 @@ def economy_sql(alias: str = "bs") -> str:
     )
 
 
+def innings_strike_rate_sql(alias: str = "bi", stored: str = "strike_rate") -> str:
+    """ONE innings' own strike rate, derived rather than read off the column.
+
+    ``batting_innings.strike_rate`` has a writer for a hand-entered manual
+    innings and none at all for a synced one — CA's ``battingStrikeRate`` is
+    only ever stamped onto the season aggregate — so the column is NULL for
+    essentially every innings in the platform and the screens reading it drew a
+    dash on every row.
+
+    There is no population to mix at one innings: the runs and the balls are
+    the same innings by construction. So the only question is whether the
+    innings can answer at all, and ``NULLIF(balls, 0)`` answers it exactly the
+    way :func:`batting_covered_sql` does — a NULL ball count, a count flattened
+    to zero with runs on it, and a genuine 0 off 0 (a real innings, but not a
+    rate) all come out NULL rather than as a figure nobody can stand behind.
+
+    A stored figure is the FALLBACK, not the answer: where balls were recorded
+    it must not contradict the two columns printed beside it, and where they
+    were not it is the only thing we hold.
+    """
+    return (
+        f"COALESCE(ROUND({alias}.runs::numeric / NULLIF({alias}.balls, 0) * 100, 2), "
+        f"{alias}.{stored})"
+    )
+
+
 def bowling_strike_rate_sql(alias: str = "bs") -> str:
     """Balls per wicket, over the covered spells only."""
     cov = bowling_covered_sql(alias)
@@ -179,6 +205,17 @@ def overs_to_balls(overs) -> int:
     whole = int(float(overs))
     part = round((float(overs) - whole) * 10)
     return whole * 6 + int(part)
+
+
+def innings_strike_rate(runs, balls, stored=None, digits: int = 2) -> Optional[float]:
+    """Python mirror of :func:`innings_strike_rate_sql`.
+
+    The two are asserted against each other row by row in the verification
+    suite rather than assumed to agree.
+    """
+    if balls:
+        return round(float(runs or 0) * 100 / float(balls), digits)
+    return round(float(stored), digits) if stored is not None else None
 
 
 def strike_rate(runs, balls, digits: int = 2) -> Optional[float]:
