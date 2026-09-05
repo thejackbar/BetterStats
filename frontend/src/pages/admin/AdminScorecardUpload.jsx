@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import { formatSeason } from '../../lib/cricketFormat'
+import { isNotOutDismissal } from '../../lib/dismissal'
 
 const INPUT_CLS = 'w-full bg-pb-surface2 border pb-hairline text-pb-text text-sm rounded px-3 py-2 focus:outline-none focus:border-pb-accent'
 const SMALL_INPUT = 'w-full bg-pb-surface2 border pb-hairline text-pb-text text-sm rounded px-2 py-1 focus:outline-none focus:border-pb-accent'
@@ -40,13 +41,30 @@ const DISMISSAL_MODES = [
   { value: 'run out', label: 'Run out', fielder: true, bowler: false },
   { value: 'hit wicket', label: 'Hit wicket', fielder: false, bowler: true },
   { value: 'not out', label: 'Not out', fielder: false, bowler: false },
-  { value: 'retired', label: 'Retired', fielder: false, bowler: false },
+  // The two retirements are different innings, so they are different options.
+  // Retired not out is not a dismissal and does not count against the average
+  // (Law 25.4.2); retired out is a wicket credited to no bowler (Law 25.4.3).
+  { value: 'retired not out', label: 'Retired - not out', fielder: false, bowler: false },
+  { value: 'retired hurt', label: 'Retired hurt', fielder: false, bowler: false },
+  { value: 'retired out', label: 'Retired - out (counts as a dismissal)', fielder: false, bowler: false },
   { value: 'did not bat', label: 'Did not bat', fielder: false, bowler: false },
   { value: 'absent', label: 'Absent', fielder: false, bowler: false },
 ]
 const MODE_BY_VALUE = Object.fromEntries(DISMISSAL_MODES.map(m => [m.value, m]))
 const modeHasFielder = v => !!MODE_BY_VALUE[(v || '').toLowerCase()]?.fielder
 const modeHasBowler = v => !!MODE_BY_VALUE[(v || '').toLowerCase()]?.bowler
+
+// Which retirement the card is describing. "hurt" and "not out" are the same
+// answer for an average (neither is a dismissal) but the card should keep
+// saying which one it said. A bare "retired" is read as the not-out kind: that
+// is what a scorer nearly always means, and the alternative reading would
+// invent a wicket. See lib/dismissal.js.
+function retiredMode(text) {
+  const s = (text || '').toLowerCase()
+  if (/\bhurt\b/.test(s)) return 'retired hurt'
+  if (/\bretired\s+out\b/.test(s)) return 'retired out'
+  return 'retired not out'
+}
 
 // Read a dismissal string into {mode, fielder, bowler}. Mirrors the backend
 // _parse_dismissal so the on-card text and the split columns always agree.
@@ -57,7 +75,10 @@ function parseDismissalText(text) {
   if (sl.includes('not out')) return { mode: 'not out', fielder: '', bowler: '' }
   if (sl === 'dnb' || sl === 'did not bat') return { mode: 'did not bat', fielder: '', bowler: '' }
   if (sl.startsWith('absent')) return { mode: 'absent', fielder: '', bowler: '' }
-  if (sl.startsWith('retired')) return { mode: 'retired', fielder: '', bowler: '' }
+  // A card that says "retired out" means the batter was dismissed; anything
+  // else beginning "retired" is read as the not-out kind, which is what a
+  // scorer writing a bare "retired" in a junior game almost always means.
+  if (sl.startsWith('retired')) return { mode: retiredMode(sl), fielder: '', bowler: '' }
   let m
   if ((m = s.match(/^c(?:aught)?\s*(?:&|and|\+)\s*b(?:owled)?\.?\s+(.+)$/i))) return { mode: 'caught & bowled', fielder: m[1].trim(), bowler: m[1].trim() }
   if ((m = s.match(/^st(?:umped)?\.?\s+(.+?)\s+b(?:owled)?\.?\s+(.+)$/i))) return { mode: 'stumped', fielder: m[1].trim(), bowler: m[2].trim() }
@@ -76,7 +97,7 @@ function modeFromHowOut(how) {
   if (h.includes('not out')) return 'not out'
   if (h.includes('did not bat') || h === 'dnb') return 'did not bat'
   if (h.includes('absent')) return 'absent'
-  if (h.includes('retired')) return 'retired'
+  if (h.includes('retired')) return retiredMode(h)
   if (h.includes('hit wicket')) return 'hit wicket'
   if (h.includes('&') || h.includes('and bowled')) return 'caught & bowled'
   if (h.includes('stump') || h === 'st') return 'stumped'
@@ -97,7 +118,7 @@ function composeDismissal(mode, fielder, bowler) {
   if (m === 'not out') return 'not out'
   if (m === 'did not bat') return 'did not bat'
   if (m === 'absent') return 'absent'
-  if (m === 'retired') return 'retired not out'
+  if (m === 'retired not out' || m === 'retired hurt' || m === 'retired out') return m
   if (m === 'run out') return f ? `run out (${f})` : 'run out'
   if (m === 'caught & bowled') return b ? `c & b ${b}` : 'c & b'
   if (m === 'stumped') return b ? `st ${f} b ${b}`.replace(/\s+/g, ' ').trim() : (f ? `st ${f}` : 'stumped')
@@ -717,7 +738,9 @@ export default function AdminScorecardUpload() {
   function prepBattingRow(b, isOur, sugg) {
     const parsed = parseDismissalText(b.dismissal_text)
     let how_out = parsed.mode || modeFromHowOut(b.how_out)
-    if (b.not_out) how_out = 'not out'
+    // A retirement is already a not out, so don't let the flag flatten the
+    // mode back to a plain "not out" and lose which kind of innings it was.
+    if (b.not_out && !isNotOutDismissal(how_out)) how_out = 'not out'
     if (b.did_not_bat) how_out = 'did not bat'
     const fielder = parsed.fielder || b.fielder || ''
     const bowler = parsed.bowler || b.bowler || ''
@@ -778,7 +801,7 @@ export default function AdminScorecardUpload() {
       if ('how_out' in patch) {
         if (!modeHasFielder(row.how_out)) { row.fielder = ''; row.fielder_id = '' }
         if (!modeHasBowler(row.how_out)) { row.bowler = ''; row.bowler_id = '' }
-        row.not_out = row.how_out === 'not out'
+        row.not_out = isNotOutDismissal(row.how_out)
         row.did_not_bat = row.how_out === 'did not bat'
       }
       const fName = isOur ? row.fielder : (rosterName(row.fielder_id) || row.fielder || '')

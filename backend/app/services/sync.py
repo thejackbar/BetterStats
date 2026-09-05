@@ -17,7 +17,7 @@ from app.models.db import (
     PlayerSeasonStats, PlayerSeasonGradeStats, Milestone,
     SyncRun, async_session_maker
 )
-from app.services import auto_sync, playhq_client
+from app.services import auto_sync, dismissal, playhq_client
 from app.services.game_status import NOT_PLAYED_SQL_LIST, NOT_PLAYED_STATUSES
 from app.services.grade_labels import suggest_categories, suggest_category
 
@@ -2434,7 +2434,16 @@ async def sync_grassroots_game_level_data(
                                 not_out=False, dismissal_type=None, did_not_bat=True,
                             ))
                             continue
-                        not_out = dt_id == 1
+                        # A retirement through injury or another unavoidable
+                        # cause is NOT a dismissal (Law 25.4.2), and CA's own
+                        # season aggregate counts it as a not out. Reading
+                        # `dt_id == 1` alone put every Retired Not Out and
+                        # Retired Hurt in the average's denominator, so a
+                        # filtered figure sat below the club's own PlayCricket
+                        # one. `services/dismissal.py` is the one rule, and it
+                        # deliberately does NOT claim CA's plain `Retired`
+                        # (Law 25.4.3's retired-out), which is a real wicket.
+                        not_out = dismissal.is_not_out(dt_id, dt_long)
                         dt_short = _GR_DISMISSAL_SHORT.get(dt_long, dt_long.lower())
                         caught_behind = (
                             dt_long == "Caught"

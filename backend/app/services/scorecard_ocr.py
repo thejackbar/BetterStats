@@ -21,6 +21,7 @@ import json
 import logging
 import re
 
+from app.services import dismissal
 from app.config.settings import settings
 from app.services.llm_text import strip_em_dashes
 
@@ -91,6 +92,9 @@ _SYSTEM = (
     "wickets, and '10/111' is 111 all out.\n"
     "- Common shorthand: c = caught, b = bowled, lbw, st = stumped, ro/run out, "
     "ct = caught, '†' or (wk) or W/K = the wicketkeeper, * = not out / captain.\n"
+    "- RETIRED: transcribe which kind the card says. 'retired hurt' and 'retired not "
+    "out' are NOT dismissals; 'retired out' is. Where the card just says 'retired' with "
+    "nothing else, write 'retired not out', which is what a scorer nearly always means.\n"
     "- For every dismissal record the mode in how_out, the wicket-taking bowler in "
     "bowler, and for a catch or stumping the catcher in fielder, AND write the full "
     "dismissal_text the way a scorecard reads it: 'c Aspinall b Raneri', 'c & b Raneri', "
@@ -147,7 +151,7 @@ _BAT = {
         "balls": {"type": ["integer", "null"]},
         "fours": {"type": ["integer", "null"], "description": "Number of 4s, counted from the batter's scoring strokes."},
         "sixes": {"type": ["integer", "null"], "description": "Number of 6s, counted from the batter's scoring strokes."},
-        "how_out": {"type": ["string", "null"], "description": "Dismissal kind: caught, bowled, lbw, run out, stumped, not out, did not bat, absent."},
+        "how_out": {"type": ["string", "null"], "description": "Dismissal kind: caught, bowled, lbw, run out, stumped, not out, retired not out, retired hurt, retired out, did not bat, absent."},
         "bowler": {"type": ["string", "null"], "description": "Bowler credited with the wicket, if any."},
         "fielder": {"type": ["string", "null"], "description": "Catcher / fielder for a catch, stumping or run out, if shown."},
         "not_out": {"type": "boolean", "default": False},
@@ -336,7 +340,11 @@ def reconcile(payload: dict) -> list[dict]:
     def add(kind: str, text: str):
         warnings.append({"kind": kind, "text": text})
 
-    _DISMISSED_NOT = {"not out", "did not bat", "dnb", "absent", "", None}
+    # An innings that ended in no wicket, so it must not be counted against
+    # the card's own fall-of-wickets. The two not-out retirements belong
+    # here (Law 25.4.2); a bare "retired out" does not, since that is a
+    # real wicket credited to no bowler (25.4.3). See services/dismissal.py.
+    _DISMISSED_NOT = set(dismissal.NOT_OUT_DISMISSAL_NAMES) | {"did not bat", "dnb", "absent", "", None}
     bpo = (payload.get("match") or {}).get("balls_per_over") or 6
     for inn in (payload.get("innings") or []):
         n = inn.get("innings_number")

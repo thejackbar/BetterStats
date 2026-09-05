@@ -289,7 +289,7 @@ async def _vs_opponent(db: AsyncSession, org_id: str, opp_key: str) -> dict[str,
             f"""
             SELECT bi.player_id::text AS id,
                    COALESCE(SUM(bi.runs) FILTER (WHERE bi.did_not_bat IS NOT TRUE), 0) AS runs,
-                   COUNT(*) FILTER (WHERE bi.did_not_bat IS NOT TRUE AND NOT bi.not_out AND bi.dismissal_type IS NOT NULL) AS outs
+                   COUNT(*) FILTER (WHERE bi.did_not_bat IS NOT TRUE AND NOT bi.not_out) AS outs
             FROM v_effective_batting_innings bi
             JOIN players p ON p.id = bi.player_id AND p.organisation_id = CAST(:org AS UUID)
             JOIN v_effective_games g ON g.id = bi.game_id{_OWN_JOIN}

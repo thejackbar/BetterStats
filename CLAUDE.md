@@ -116,6 +116,88 @@ Cricket Association matches** — the same matches the Men's filter returned.
   without also naming `home_org_id`. It reported 89 blocks; this change covers
   the club-facing stats reads.
 
+## A RETIRED NOT OUT IS NOT A DISMISSAL, and a plain RETIRED is (v9.66.0, Sep 2026)
+
+Reported by a club with two screenshots of one player. Lily Thompson, Payneham
+CC, SGCL Metro U18, 2025/26: her profile header read **15.40**, matching
+PlayCricket, and StatLab with the grade picked read **12.83**. 77 runs and 8
+innings on both.
+
+- **`sync.py` DECIDED THIS WITH `not_out = dt_id == 1`**, so every retirement
+  landed in the database flagged as a wicket. Any figure worked out from our own
+  scorecards then put it in the average's denominator: 77 / (8 - 2) = 12.83
+  against CA's 77 / (8 - 3) = 15.40. The unfiltered header was right only because
+  it reads `player_season_stats.not_outs`, which is CA's own `battingNotOuts`
+  copied verbatim — so the two paths disagreed by exactly one innings and the
+  club could see both numbers on one screen.
+- **THE TWO RETIREMENTS ARE DIFFERENT INNINGS, AND THAT IS THE WHOLE FIX.** MCC
+  Law 25.4.2 ("Retired - not out", illness or injury, did not resume) is not a
+  dismissal; **25.4.3 ("Retired - out", retired for any other reason without the
+  opposing captain's consent) IS one**, credited to no bowler. CA sends both, as
+  separate ids, and treats them exactly the way the Law does.
+- **`services/dismissal.py` IS THE ONE RULE**, and it is deliberately a
+  whole-phrase match. **NEVER write this as `LIKE 'retired%'`** — that sweeps
+  CA's plain `Retired` in with the two not-out retirements and hands every
+  retired-out batter an average they have not earned, which is this same bug
+  pointed the other way. The suite pins both directions for exactly that reason.
+- **CA'S VOCABULARY WAS ENUMERATED LIVE, NOT ASSUMED**: 260 real scorecards
+  across 33 grades give `0 Did Not Bat, 1 Not Out, 2 Caught, 3 LBW, 4 Bowled,
+  5 Stumped, 6 Run Out, 8 Retired Hurt, 13 Retired, 14 Retired Not Out,
+  15 Absent`. **8, 13 and 14 are three different answers** and no amount of
+  reading the code would have told us which.
+- **RECONCILED AGAINST CA'S OWN AGGREGATE BOTH WAYS, which is what settled 13.**
+  Lily's `battingNotOuts: 3` over two plain not outs plus one Retired Not Out
+  proves 14 is a not out. N Raux (Murrumbidgee, 2025/26) retired for 0 and CA
+  counted it among his `batting0s` with `battingNotOuts: 1` for his one genuine
+  not out — a duck AND a wicket. **8 (Retired Hurt) rests on the Law and on
+  CA's naming, not on a measurement**: the aggregate for the one live case found
+  belongs to a club outside the sample, and the note says so rather than
+  implying it was checked.
+- **THE FIX IS THE WRITER, NOT THE READERS.** Every average in the app was
+  already `runs / (innings - not_outs)`; they were all reading a flag that was
+  wrong. So the change is one line in `sync.py`, the same line in the live
+  scorecard merge, and a backfill — not thirty query edits.
+- **`python -m app.scripts.backfill_retired_not_out <org|all> --apply`** repairs
+  what is stored. No network at all: the dismissal name is already on the row,
+  so it is a plain UPDATE, quick enough to run platform-wide and idempotent. Dry
+  run by default. **A club whose season rows came from Fix Missing Totals should
+  re-run it**, since those were rolled up from the old flag.
+- **TWO AVERAGES ON ONE PROFILE, found by auditing rather than by the report.**
+  By-opposition and by-venue divided by `NOT not_out AND dismissal_type IS NOT
+  NULL`, so an uploaded card whose dismissal column was never read dropped out of
+  the denominator there and stayed in it on the career header. Batting by
+  position and by grade had the same shape. All four are `innings - not outs`
+  now, and **the suite asserts it structurally on the ALIAS** so a new board
+  cannot reintroduce it.
+- **THE WICKET COUNTERS BESIDE THEM WERE DELIBERATELY LEFT** (`wkts_lost`,
+  `our_wkts_lost`, the fantasy engine's `out`). How many wickets a side lost is a
+  different question from how many times a batter was dismissed, and nobody asked
+  for those to move. They still improve for free, since a retirement is no longer
+  a wicket.
+- **A RETIREMENT IS NOT A WAY OF GETTING OUT**, so it leaves the How I Get Out
+  donut and the record book's unusual dismissals. A retired-OUT stays on both.
+  Retiring for 0 is no longer a duck; retiring OUT for 0 still is.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_retired_not_out.py`, 64 checks through the
+  shipped aggregation, StatLab, backfill and writer code: the reported card
+  replayed innings by innings, the average agreeing across the career header,
+  by-opposition, by-venue, by-grade, the leaderboard and StatLab, a retired-out
+  still counting as a dismissal and a duck, retired hurt not, the backfill's dry
+  run / apply / no-op re-run / club scoping / never touching a retired-out, and
+  the SQL and Python rules agreeing row by row) **with a control run**: 27 of the
+  64 fail against the previous commit, reporting the customer's own **12.83** on
+  both the profile and StatLab.
+- **THE FIXTURE IS SEEDED THROUGH THE CODE UNDER TEST, and the first cut was not.**
+  It repaired the rows with the backfill before reading them, so every check
+  about the average passed against the broken code — the one thing a control run
+  exists to catch. `writer_flag()` asks the shipped rule and falls back to the
+  old `dismissalTypeId == 1` when the module is absent, so the control stores the
+  fixture exactly as a club's real database holds it today.
+- **NOTICED, NOT FIXED**: `player_season_stats.batting_average` still stores CA's
+  own figure and a few BetterIQ features read it rather than recomputing. It
+  agrees with ours now, so it is no longer a divergence, but it is a second
+  stored copy of a derived number.
+
 ## A rate is only as good as the innings behind it (migration 282, v9.59.0, Sep 2026)
 
 **Asked for as a RULE to set, not off a live report** — the 500 runs / 150 balls

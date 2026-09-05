@@ -24,7 +24,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import select, func, delete as sa_delete, text as _t
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -48,6 +48,7 @@ from app.models.db import (
     get_db,
 )
 from app.routers.auth import get_current_club, get_current_user
+from app.services import dismissal
 from app.services.grade_labels import suggest_categories, suggest_category
 from app.services.season_resolve import (
     ensure_grade as _ensure_grade,
@@ -131,6 +132,22 @@ class ManualBattingIn(BaseModel):
     dismissal_type: Optional[str] = None
     not_out: bool = False
     did_not_bat: bool = False
+
+    @model_validator(mode="after")
+    def _not_out_follows_the_dismissal(self):
+        """A card whose dismissal reads "retired not out" or "retired hurt"
+        describes an innings that never ended in a wicket, so the flag has to
+        agree with the text however the row was typed in.
+
+        Raised only in that direction. A blank or unreadable dismissal with the
+        flag already set is a legitimate card ("not out" written with nothing
+        beside it), so nothing here ever clears a flag somebody set. Applied on
+        the model rather than in one route so the manual game form, the photo
+        upload and any other caller land on the same answer.
+        """
+        if not self.not_out and dismissal.is_not_out(dismissal_type=self.dismissal_type):
+            self.not_out = True
+        return self
 
 
 class ManualBowlingIn(BaseModel):
@@ -2409,7 +2426,11 @@ async def import_manual_games(
                         fours=_parse_int(raw.get("batting_fours")),
                         sixes=_parse_int(raw.get("batting_sixes")),
                         dismissal_type=(raw.get("dismissal_type") or "").strip() or None,
-                        not_out=_parse_bool(raw.get("batting_not_out")),
+                        # Same rule as ManualBattingIn: a spreadsheet naming a
+                        # retired-not-out or retired-hurt dismissal is naming a
+                        # not out, whether or not the sheet has that column.
+                        not_out=(_parse_bool(raw.get("batting_not_out"))
+                                 or dismissal.is_not_out(dismissal_type=raw.get("dismissal_type"))),
                         did_not_bat=_parse_bool(raw.get("did_not_bat")),
                     ))
 

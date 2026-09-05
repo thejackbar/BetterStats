@@ -394,7 +394,7 @@ async def player_competition_breakdown(
                    COUNT(*) FILTER (WHERE bi.runs >= 50 AND bi.runs < 100) AS fifties,
                    COUNT(*) FILTER (WHERE bi.runs >= 100) AS hundreds,
                    COUNT(*) FILTER (
-                       WHERE NOT bi.not_out AND bi.dismissal_type IS NOT NULL
+                       WHERE NOT bi.not_out
                    ) AS dismissals
               FROM v_effective_batting_innings bi
               JOIN v_effective_games g ON g.id = bi.game_id
