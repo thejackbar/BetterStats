@@ -232,6 +232,17 @@ async def seed(session) -> None:
     g = await game(date(2026, 2, 11), venue="Away Reserve")
     await bat(g, HURT, 20, "c Smith b Jones", False)
 
+    # ── the two kinds of season row ──────────────────────────────────────────
+    # HURT's season row is the synthetic kind "Fix Missing Totals" writes, rolled
+    # up from the old flag: 2 innings, 0 not outs. LILY's is CA's own and already
+    # right, and must survive untouched.
+    await ex("INSERT INTO player_season_stats (player_id, season_id, matches, "
+             "batting_innings, runs, not_outs, ducks, source) "
+             "VALUES (:p, :s, 2, 2, 23, 0, 0, 'backfill')", p=HURT, s=SEASON)
+    await ex("INSERT INTO player_season_stats (player_id, season_id, matches, "
+             "batting_innings, runs, not_outs, ducks, source) "
+             "VALUES (:p, :s, 9, 8, 77, 3, 1, 'api')", p=LILY, s=SEASON)
+
     # ── another club's retirement, untouched by a club-scoped backfill ───────
     s2 = uuid.uuid4()
     gr2 = uuid.uuid4()
@@ -451,11 +462,14 @@ async def _reset_flags(session) -> None:
     await session.commit()
 
 
-async def backfill(session) -> int:
+async def backfill(session, org_id=None) -> int:
+    """The same two steps, in the same order, that the script's own main() runs:
+    correct the innings, THEN re-derive the synthetic season rows from them."""
     from app.scripts import backfill_retired_not_out as bf
     n = 0
     for table in bf._TABLES:
-        n += await bf._apply(session, table, None)
+        n += await bf._apply(session, table, org_id)
+    await bf._season_rows(session, org_id, apply=True)
     await session.commit()
     return n
 
@@ -497,6 +511,28 @@ async def section_backfill(session) -> None:
             "SELECT COUNT(*) FROM batting_innings WHERE dismissal_type = 'b' AND not_out"))).scalar()
         check("no ordinary dismissal is touched", bowled == 0, f"got {bowled}")
 
+        # Fix Missing Totals cannot repair its own rows: its INSERT ends
+        # ON CONFLICT DO NOTHING, so pressing it again writes nothing to a row
+        # that already exists. The backfill has to do it.
+        from app.services.sync import _backfill_missing_season_stats
+        src = (Path(__file__).resolve().parent.parent
+               / "app/services/sync.py").read_text()
+        check("Fix Missing Totals still declines to overwrite an existing row, "
+              "which is why this repair lives here",
+              "ON CONFLICT (player_id, season_id) DO NOTHING" in src)
+
+        synth = (await session.execute(text(
+            "SELECT not_outs, ducks FROM player_season_stats "
+            "WHERE player_id = :p AND source = 'backfill'"), {"p": HURT})).first()
+        check("the synthetic season row is re-derived: the retired hurt is now "
+              "a not out", synth and synth[0] == 1, f"got {synth and synth[0]}")
+
+        ca = (await session.execute(text(
+            "SELECT not_outs, ducks FROM player_season_stats "
+            "WHERE player_id = :p AND source = 'api'"), {"p": LILY})).first()
+        check("CA's own season row is never rewritten", ca and ca[0] == 3 and ca[1] == 1,
+              f"got {ca}")
+
 
 async def section_backfill_scoping(session) -> None:
     print("\nThe backfill respects club scoping")
@@ -505,8 +541,7 @@ async def section_backfill_scoping(session) -> None:
 
         await _reset_flags(session)
         session.expire_all()
-        await bf._apply(session, "batting_innings", ORG)
-        await session.commit()
+        await backfill(session, ORG)
         session.expire_all()
 
         theirs = (await session.execute(text(
