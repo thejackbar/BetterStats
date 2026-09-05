@@ -679,7 +679,7 @@ async def _our_performers_vs(
                 COALESCE(SUM(bi.runs) FILTER (WHERE bi.did_not_bat IS NOT TRUE), 0) AS runs,
                 MAX(bi.runs) FILTER (WHERE bi.did_not_bat IS NOT TRUE) AS high_score,
                 COUNT(*) FILTER (
-                    WHERE bi.did_not_bat IS NOT TRUE AND NOT bi.not_out AND bi.dismissal_type IS NOT NULL
+                    WHERE bi.did_not_bat IS NOT TRUE AND NOT bi.not_out
                 ) AS dismissals
             FROM v_effective_batting_innings bi
             JOIN v_effective_games g ON g.id = bi.game_id{_ORG_SCOPE}

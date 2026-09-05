@@ -1541,8 +1541,13 @@ async def get_batting_by_position(
                 COUNT(*) AS innings,
                 SUM(bi.runs) AS runs,
                 ROUND(
+                    -- innings - not outs, the one formula. An innings whose
+                    -- dismissal was never read (an uploaded card with the
+                    -- column left blank) used to drop out of the denominator
+                    -- here and stay in it on the career header, so a player
+                    -- had two averages on one profile.
                     SUM(bi.runs)::numeric /
-                    NULLIF(COUNT(*) FILTER (WHERE NOT bi.not_out AND bi.dismissal_type IS NOT NULL), 0),
+                    NULLIF(COUNT(*) FILTER (WHERE NOT bi.not_out), 0),
                     2
                 ) AS average,
                 MAX(bi.runs) AS high_score,
@@ -1595,8 +1600,13 @@ async def get_batting_by_grade(
                 COUNT(*) AS innings,
                 SUM(bi.runs) AS runs,
                 ROUND(
+                    -- innings - not outs, the one formula. An innings whose
+                    -- dismissal was never read (an uploaded card with the
+                    -- column left blank) used to drop out of the denominator
+                    -- here and stay in it on the career header, so a player
+                    -- had two averages on one profile.
                     SUM(bi.runs)::numeric /
-                    NULLIF(COUNT(*) FILTER (WHERE NOT bi.not_out AND bi.dismissal_type IS NOT NULL), 0),
+                    NULLIF(COUNT(*) FILTER (WHERE NOT bi.not_out), 0),
                     2
                 ) AS average,
                 MAX(bi.runs) AS high_score
@@ -4309,7 +4319,14 @@ async def get_player_by_opposition(
                     COUNT(*) FILTER (WHERE bi.did_not_bat IS NOT TRUE AND bi.runs IS NOT NULL) AS innings,
                     COALESCE(SUM(bi.runs) FILTER (WHERE bi.did_not_bat IS NOT TRUE), 0) AS total_runs,
                     MAX(bi.runs) FILTER (WHERE bi.did_not_bat IS NOT TRUE) AS high_score,
-                    COUNT(*) FILTER (WHERE bi.did_not_bat IS NOT TRUE AND NOT bi.not_out AND bi.dismissal_type IS NOT NULL) AS dismissals
+                    -- innings - not outs, the one formula every other average in
+                    -- the app uses. This used to also require a non-NULL
+                    -- dismissal_type, so an uploaded card whose dismissal column
+                    -- was left unread dropped out of the denominator here and
+                    -- stayed in it everywhere else, giving one player two
+                    -- averages on the same profile.
+                    COUNT(*) FILTER (WHERE bi.did_not_bat IS NOT TRUE AND bi.runs IS NOT NULL
+                                       AND NOT bi.not_out) AS dismissals
                 FROM v_effective_batting_innings bi
                 JOIN player_games pg ON pg.game_id = bi.game_id
                 WHERE bi.player_id = CAST(:pid AS UUID)
@@ -4411,7 +4428,14 @@ async def get_player_by_venue(
                     COUNT(*) FILTER (WHERE bi.did_not_bat IS NOT TRUE AND bi.runs IS NOT NULL) AS innings,
                     COALESCE(SUM(bi.runs) FILTER (WHERE bi.did_not_bat IS NOT TRUE), 0) AS total_runs,
                     MAX(bi.runs) FILTER (WHERE bi.did_not_bat IS NOT TRUE) AS high_score,
-                    COUNT(*) FILTER (WHERE bi.did_not_bat IS NOT TRUE AND NOT bi.not_out AND bi.dismissal_type IS NOT NULL) AS dismissals
+                    -- innings - not outs, the one formula every other average in
+                    -- the app uses. This used to also require a non-NULL
+                    -- dismissal_type, so an uploaded card whose dismissal column
+                    -- was left unread dropped out of the denominator here and
+                    -- stayed in it everywhere else, giving one player two
+                    -- averages on the same profile.
+                    COUNT(*) FILTER (WHERE bi.did_not_bat IS NOT TRUE AND bi.runs IS NOT NULL
+                                       AND NOT bi.not_out) AS dismissals
                 FROM v_effective_batting_innings bi
                 JOIN v_effective_games g ON g.id = bi.game_id
                 WHERE bi.player_id = CAST(:pid AS UUID)

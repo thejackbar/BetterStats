@@ -37,6 +37,13 @@ import uuid
 from app.services.aggregations import _RESIDUAL_SOURCES
 from app.services.game_status import appearance_counts_as_match
 from app.services import rate_coverage as rc
+from app.services.dismissal import not_out_sql
+
+# The two retirements that are not dismissals, as a SQL predicate on a
+# stored dismissal_type. One definition, shared with the sync and the
+# backfill, so StatLab cannot drift from the rest of the app about what
+# counts as getting out. See services/dismissal.py.
+_NOT_OUT_NAMES_SQL = not_out_sql('bi.dismissal_type')
 
 
 # ─── Grade type / match type scope ─────────────────────────────────────────────
@@ -3570,8 +3577,14 @@ async def derived_dismissal_stumped(session, *, org_id, limit, offset=0, context
 async def derived_unusual_dismissals(
     session: AsyncSession, *, org_id: str, limit: int, offset: int = 0, context: dict,
 ) -> list[dict]:
-    """Innings dismissed by uncommon means (hit wicket, retired hurt, handled, obstructing).
-    'Retired not out' is excluded — it's a routine voluntary retirement, not unusual."""
+    """Innings dismissed by uncommon means (hit wicket, retired out, handled,
+    obstructing, timed out, hit the ball twice).
+
+    Retired NOT out and retired hurt are excluded, and not because they are
+    ordinary — they are not dismissals at all (Law 25.4.2), so they belong on
+    no list of ways a batter got out. What stays is Law 25.4.3's retired-out,
+    which CA sends as a bare "Retired": a genuine wicket credited to no bowler.
+    `services/dismissal.py` holds that distinction."""
     mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
     params = {"org_id": org_id, "limit": min(max(1, limit), 500), **mp, **pp}
     universe = _game_universe_sql(mc)
@@ -3600,14 +3613,19 @@ async def derived_unusual_dismissals(
           AND bi.dismissal_type IS NOT NULL
           AND (
             LOWER(bi.dismissal_type) LIKE 'hit wicket%'
-            OR LOWER(bi.dismissal_type) LIKE 'retired hurt%'
-            OR LOWER(bi.dismissal_type) LIKE 'retired out%'
+            OR LOWER(bi.dismissal_type) LIKE 'retired%'
             OR LOWER(bi.dismissal_type) LIKE 'handled%'
             OR LOWER(bi.dismissal_type) LIKE 'obstruct%'
             OR LOWER(bi.dismissal_type) LIKE 'timed out%'
             OR LOWER(bi.dismissal_type) LIKE 'hit ball twice%'
           )
-          AND LOWER(bi.dismissal_type) NOT LIKE 'retired not out%'
+          -- The LIKE above deliberately casts wide over 'retired%' and this
+          -- takes the two retirements that are not dismissals back out, so
+          -- there is one place the distinction is made rather than a pattern
+          -- per spelling. It also drops a genuine not out, which cannot reach
+          -- these patterns anyway.
+          AND NOT bi.not_out
+          AND NOT ({_NOT_OUT_NAMES_SQL})
           {player_extra}
         ORDER BY gu.played_at DESC
         LIMIT :limit OFFSET :offset

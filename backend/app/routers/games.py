@@ -8,7 +8,7 @@ import uuid
 logger = logging.getLogger(__name__)
 
 from app.models.db import Game, Grade, Season, Organisation, BattingInnings, BowlingSpell, FieldingStat, Player, ManualGame, ManualBattingInnings, ManualBowlingSpell, ManualFieldingStat, get_db
-from app.services import grade_scope
+from app.services import dismissal, grade_scope
 from app.services.aggregations import get_game_fall_of_wickets, get_game_partnerships
 from app.services.sync import _caught_by_keeper, _innings_keeper_names
 from app.services import rate_coverage as rc
@@ -389,7 +389,7 @@ async def _gr_scorecard_response(game_id: str) -> Optional[dict]:
                 "strike_rate": _to_float(row.get("strikeRate")),
                 "dismissal_type": None if is_dnb else (row.get("dismissalText") or dt_long.lower() or None),
                 "caught_behind": dt_long == "Caught" and _caught_by_keeper(row.get("dismissalText") or "", keeper_names),
-                "not_out": dt_id == 1,
+                "not_out": dismissal.is_not_out(dt_id, dt_long),
                 "did_not_bat": is_dnb,
                 "batting_position": row.get("batOrder"),
             })
@@ -960,7 +960,7 @@ async def get_scorecard(
                         "strike_rate": _to_float(row.get("strikeRate")),
                         "dismissal_type": dismissal_str,
                         "caught_behind": caught_behind,
-                        "not_out": dt_id == 1,
+                        "not_out": dismissal.is_not_out(dt_id, dt_long),
                         "batting_position": row.get("batOrder"),
                         "did_not_bat": is_dnb,
                     }
