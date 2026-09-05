@@ -160,8 +160,17 @@ innings on both.
 - **`python -m app.scripts.backfill_retired_not_out <org|all> --apply`** repairs
   what is stored. No network at all: the dismissal name is already on the row,
   so it is a plain UPDATE, quick enough to run platform-wide and idempotent. Dry
-  run by default. **A club whose season rows came from Fix Missing Totals should
-  re-run it**, since those were rolled up from the old flag.
+  run by default.
+- **PRESSING FIX MISSING TOTALS AGAIN REPAIRS NOTHING, so the backfill does it.**
+  `_backfill_missing_season_stats` ends `ON CONFLICT (player_id, season_id) DO
+  NOTHING`, so a second run writes nothing at all to a row that already exists —
+  and its `source='backfill'` rows were rolled up FROM the old flag, for the
+  (player, season) pairs CA omits. The script re-derives their `not_outs` and
+  `ducks` from the corrected innings, AFTER fixing those innings, or it would
+  re-derive from the very flag it is correcting. **CA's own `source='api'` rows
+  are never touched** — they already had this right and are what we reconcile
+  against. Found by reading the INSERT, not by assuming a re-run would do it;
+  the suite pins the `ON CONFLICT` clause so the reasoning cannot go stale.
 - **TWO AVERAGES ON ONE PROFILE, found by auditing rather than by the report.**
   By-opposition and by-venue divided by `NOT not_out AND dismissal_type IS NOT
   NULL`, so an uploaded card whose dismissal column was never read dropped out of
