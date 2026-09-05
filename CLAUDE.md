@@ -11606,6 +11606,74 @@ script that backfills everyone who is already one.
   8 fail — the route bodies add nobody at all; with the create form reverted,
   12 fail.
 
+## A club admin's mobile is already written down at their club (v9.67.0, Sep 2026)
+
+Asked for: for every club admin we hold no mobile number for, look at their club
+in the directory, find that person's record, and store their mobile against the
+user account.
+
+- **NEITHER FLOW THAT CREATES A CLUB ADMIN INSISTS ON A MOBILE, WHICH IS WHY THE
+  GAP EXISTS.** `admin_identity.validate_admin_fields` takes `require_mobile`
+  precisely so a super admin creating a club on somebody's behalf can leave it
+  blank, and an admin invited to an existing club (`create_club_user`) is never
+  asked for one at all. The number is frequently already on file about the same
+  person a table away.
+- **THREE PLACES A CLUB HOLDS A PHONE NUMBER, and all three are read** —
+  `fee_members.mobile`, the linked `players.phone` the Directory itself falls
+  back to (a read-through player with no member row included), and the Clubs
+  Directory contact for their club through `marketing_clubs.existing_org_id`.
+  That third one is the case a Clubhouse-only reading would have missed: a
+  brand-new club's first admin is usually its secretary, and that is the list
+  their mobile is on before anybody has built the club's own Directory.
+- **AN EMAIL MATCH IS AN IDENTITY; A NAME MATCH IS NOT.** So every email match
+  beats every name match whatever source it came from, and where a NAME match
+  turns up two different numbers it REFUSES rather than picking — a shared
+  surname and first name at one club is the shape of a father and son, the same
+  reason `_name_variant_pairs` is never bulk-mergeable. Two different numbers
+  under one EMAIL is one person with two recorded numbers, so there the source
+  order decides (the club's own member record, then the player behind it, then
+  the Clubs Directory contact).
+- **THE NUMBER HAS TO BE A MOBILE, AND `admin_identity.mobile_valid` IS THE ONE
+  RULE.** `players.phone` and `fee_members.mobile` are free text and routinely
+  hold a clubroom landline — `(08) 9364 1234` matches a person perfectly well
+  and is not a mobile. It is REPORTED with the number rather than stored, so an
+  operator can see it is a landline instead of wondering why the match did
+  nothing. Writing a landline into a field the platform will one day text is
+  worse than leaving it blank.
+- **SCOPED TO THEIR OWN CLUB, and the join is org-scoped as well as keyed.** A
+  `fee_members` row can point at another club's player (the cross-club leak this
+  file already documents for exactly this join), so without
+  `p.organisation_id = fm.organisation_id` this would serve a stranger's mobile
+  as if it were the admin's. Caught by the control run, not by reading it.
+- **NOTHING IS EVER OVERWRITTEN.** Only an admin whose `mobile_number` is blank
+  is considered at all, so a run is idempotent and a second writes nothing. No
+  network call either — everything read is already ours — so it is quick enough
+  to run platform-wide.
+- **`admin_contact_list.admin_rows` IS THE ONE DEFINITION OF "A CLUB ADMIN"**,
+  reused rather than re-queried: the primary is that same role carrying
+  `is_primary_admin`, a super_admin or sales membership is Better staff, and an
+  archived club is left out. Two copies is how this and the contact-list sync
+  start disagreeing about who counts.
+- **`python -m app.scripts.backfill_admin_mobiles [<org|all>] [--apply]
+  [--email-only]`**, dry run by default per the house rule. `--email-only` is
+  the strictest pass for an operator who does not want name matching at all.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_admin_mobile_backfill.py`, 53 checks through the
+  shipped service: the reported case, a name match where the addresses differ,
+  "Nolan, Sarah" reading as "Sarah Nolan", an email match beating a name match,
+  the member's number over the linked player's, a read-through player, the Clubs
+  Directory contact, the landline refused, two of one name refused while one
+  number spelled two ways is not a conflict, an archived member record ignored,
+  another club's records never reached, the foreign-player leak, a super admin
+  and a club member not counted, an archived club left out, the dry run writing
+  nothing and reporting exactly what applying does, and a second run writing
+  nothing) **with a control run**: with the org scoping, the mobile check and
+  the ambiguity refusal neutered, 7 fail — the leak among them.
+- **NOTICED, NOT FIXED**: nothing fills this in at account-creation time. The
+  lookup is a plain service call and the obvious follow-up is running it for the
+  one club when an admin is created, but that was not what was asked and a live
+  hook needs its own look at what happens when the club's records arrive later.
+
 ## A club's trial, as an audience and as a number in the email (v9.55.0, Aug 2026)
 
 Asked for on BetterComms → Segments: reach the contacts whose club is in a trial
