@@ -5,6 +5,7 @@
    Deep-links via ?player=<id>&with=<id>. */
 import { useState, useEffect, useRef } from 'react'
 import Dropdown from '../../../components/Dropdown'
+import { RateMark, RateNote } from '../../../components/RateCoverage'
 import { useSearchParams } from 'react-router-dom'
 import IQLayout from '../../../components/admin/IQLayout'
 import { api } from '../../../lib/api'
@@ -123,7 +124,8 @@ function WithWithout({ data }) {
     { label: 'Win %', a: w.record.win_pct, b: o.record.win_pct, dir: 'hi', fmt: pctTxt },
     ...(batted ? [
       { label: 'Bat avg', a: w.batting.average, b: o.batting.average, dir: 'hi', fmt: n2 },
-      { label: 'Strike rate', a: w.batting.strike_rate, b: o.batting.strike_rate, dir: 'hi', fmt: n2 },
+      { label: 'Strike rate', a: w.batting.strike_rate, b: o.batting.strike_rate, dir: 'hi', fmt: n2,
+        covA: w.batting.strike_rate_coverage, covB: o.batting.strike_rate_coverage },
       { label: 'Runs', a: w.batting.runs, b: o.batting.runs, dir: null, fmt: fmtCount },
       { label: 'High score', a: w.batting.high, b: o.batting.high, dir: 'hi', fmt: (v) => (v == null ? '—' : v) },
       { label: '50s / 100s', a: `${w.batting.fifties}/${w.batting.hundreds}`, b: `${o.batting.fifties}/${o.batting.hundreds}`, dir: null, fmt: (v) => v },
@@ -131,7 +133,8 @@ function WithWithout({ data }) {
     ...(bowled ? [
       { label: 'Wickets', a: w.bowling.wickets, b: o.bowling.wickets, dir: null, fmt: fmtCount },
       { label: 'Bowl avg', a: w.bowling.average, b: o.bowling.average, dir: 'lo', fmt: n2 },
-      { label: 'Economy', a: w.bowling.economy, b: o.bowling.economy, dir: 'lo', fmt: n2 },
+      { label: 'Economy', a: w.bowling.economy, b: o.bowling.economy, dir: 'lo', fmt: n2,
+        covA: w.bowling.economy_coverage, covB: o.bowling.economy_coverage, unit: 'spells' },
       { label: 'Bowl SR', a: w.bowling.strike_rate, b: o.bowling.strike_rate, dir: 'lo', fmt: n2 },
     ] : []),
   ]
@@ -162,9 +165,12 @@ function WithWithout({ data }) {
         </div>
         {rows.map(r => (
           <SplitRow key={r.label} label={r.label}
-            withVal={r.fmt(r.a)} withoutVal={r.fmt(r.b)}
+            withVal={<>{r.fmt(r.a)}<RateMark coverage={r.covA} unit={r.unit} /></>}
+            withoutVal={<>{r.fmt(r.b)}<RateMark coverage={r.covB} unit={r.unit} /></>}
             better={better(r.a, r.b, r.dir)} />
         ))}
+        <RateNote coverage={w.batting.strike_rate_coverage} />
+        <RateNote coverage={w.bowling.economy_coverage} unit="spells" />
         <Note>{nameP}’s own batting and bowling, and the team’s win rate, in the games {nameX} also played versus the games {nameX} did not. {data.note}</Note>
       </Card>
 

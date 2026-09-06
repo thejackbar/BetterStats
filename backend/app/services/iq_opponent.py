@@ -40,6 +40,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import OppositionDossier, async_session_maker
 from app.services import grassroots_scores_client as gr
 from app.services import iq_phrases
+from app.services import rate_coverage as rc
 from app.services.iq_filters import grade_canonical_label, grade_match_clause
 from app.services.sync import _caught_by_keeper, _innings_keeper_names
 
@@ -50,7 +51,7 @@ logger = logging.getLogger(__name__)
 # rebuilt on next view, so new analysis (game plan, how-they-win/lose, scouting
 # notes, …) pulls through for EVERY cache key — whole-club AND each team — without
 # waiting on the TTL or a manual refresh.
-DOSSIER_VERSION = 9
+DOSSIER_VERSION = 10
 
 # Squads change slowly and a rebuild is heavy; a week's freshness with a manual
 # Refresh button is the right trade-off.
@@ -191,14 +192,37 @@ def _team_roster(team: dict) -> dict[str, str]:
 
 
 def _new_bat(name):
+    # cov_* are the halves of the strike rate. An opponent's card reaches us the
+    # same way ours does — CA writes a missing ball count as nothing at all — so
+    # the same rule applies: runs and balls from the same innings, never every
+    # run over the balls somebody happened to type in. See rate_coverage.py.
     return {"name": name, "inns": 0, "runs": 0, "balls": 0, "outs": 0, "no": 0,
             "fours": 0, "sixes": 0, "hs": None, "hs_no": False,
+            "cov_runs": 0, "cov_balls": 0, "cov_inns": 0,
             "dism": Counter(), "scores": [], "matches": set()}
 
 
 def _new_bowl(name):
     return {"name": name, "balls": 0, "maidens": 0, "runs": 0, "wkts": 0, "spells": 0,
+            "cov_runs": 0, "cov_balls": 0, "cov_wkts": 0, "cov_spells": 0,
             "five_fors": 0, "best_w": -1, "best_r": None, "spell_log": [], "matches": set()}
+
+
+def _bat_coverage(b: dict, runs, balls) -> None:
+    """Fold one innings into the covered halves, if it can answer a strike rate."""
+    if rc.is_batting_covered(runs, balls):
+        b["cov_runs"] += runs or 0
+        b["cov_balls"] += balls or 0
+        b["cov_inns"] += 1
+
+
+def _bowl_coverage(bw: dict, runs, overs, balls, wkts) -> None:
+    """The bowling twin. ``overs`` is the raw figure; ``balls`` its conversion."""
+    if rc.is_bowling_covered(runs, overs):
+        bw["cov_runs"] += runs or 0
+        bw["cov_balls"] += balls or 0
+        bw["cov_wkts"] += wkts or 0
+        bw["cov_spells"] += 1
 
 
 def _new_field(name):
@@ -221,9 +245,11 @@ def _accumulate(scorecard: dict, match_id: str, opp_pids: dict[str, str], when: 
             if _norm(row.get("dismissalType")) in _NOT_AN_INNINGS:
                 continue
             runs = row.get("runsScored") or 0
-            balls = row.get("ballsFaced") or 0
+            balls = row.get("ballsFaced")
             not_out = dt_id == 1
             b = bat.setdefault(pid, _new_bat(opp_pids[pid]))
+            _bat_coverage(b, runs, balls)
+            balls = balls or 0
             b["inns"] += 1
             b["runs"] += runs
             b["balls"] += balls
@@ -250,8 +276,10 @@ def _accumulate(scorecard: dict, match_id: str, opp_pids: dict[str, str], when: 
                 continue
             w = row.get("wicketsTaken") or 0
             r = row.get("runsConceded") or 0
-            balls = _overs_to_balls(row.get("oversBowled"))
+            overs = row.get("oversBowled")
+            balls = _overs_to_balls(overs)
             bw = bowl.setdefault(pid, _new_bowl(opp_pids[pid]))
+            _bowl_coverage(bw, r, overs, balls, w)
             bw["balls"] += balls
             bw["maidens"] += row.get("maidensBowled") or 0
             bw["runs"] += r
@@ -342,7 +370,8 @@ def _finalise_bat(pid: str, b: dict) -> dict:
         "not_outs": b["no"],
         "high_score": (f"{b['hs']}*" if b["hs_no"] else str(b["hs"])) if b["hs"] is not None else None,
         "average": avg,
-        "strike_rate": round(100 * runs / balls, 2) if balls else None,
+        "strike_rate": rc.strike_rate(b["cov_runs"], b["cov_balls"]),
+        "strike_rate_coverage": rc.coverage(b["cov_inns"], max(inns, b["cov_inns"])),
         "fifties": fifties,
         "hundreds": hundreds,
         "fours": b["fours"],
@@ -369,8 +398,9 @@ def _finalise_bowl(pid: str, b: dict) -> dict:
         "runs": runs,
         "wickets": wkts,
         "average": round(runs / wkts, 2) if wkts else None,
-        "economy": round(runs / (balls / 6), 2) if balls else None,
-        "strike_rate": round(balls / wkts, 2) if wkts else None,
+        "economy": rc.economy(b["cov_runs"], b["cov_balls"]),
+        "economy_coverage": rc.coverage(b["cov_spells"], max(b["spells"], b["cov_spells"])),
+        "strike_rate": round(b["cov_balls"] / b["cov_wkts"], 2) if b["cov_wkts"] else None,
         "best": (f"{b['best_w']}/{b['best_r']}" if b["best_w"] >= 0 else None),
         "five_fors": b["five_fors"],
         "recent_wickets": [s["wkts"] for s in log[:5]],
@@ -501,6 +531,7 @@ async def _db_season_accumulators(
     for r in bat_rows:
         b = bat.setdefault(r.pid, _new_bat(r.name))
         runs, balls = r.runs or 0, r.balls or 0
+        _bat_coverage(b, r.runs, r.balls)
         when_s = r.played_at.isoformat() if r.played_at else None
         b["inns"] += 1
         b["runs"] += runs
@@ -549,6 +580,7 @@ async def _db_season_accumulators(
         bw = bowl.setdefault(r.pid, _new_bowl(r.name))
         w, runs = r.wickets or 0, r.runs or 0
         balls = _overs_to_balls(float(r.overs)) if r.overs is not None else 0
+        _bowl_coverage(bw, runs, r.overs, balls, w)
         when_s = r.played_at.isoformat() if r.played_at else None
         bw["balls"] += balls
         bw["maidens"] += r.maidens or 0

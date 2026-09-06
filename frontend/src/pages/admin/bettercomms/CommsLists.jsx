@@ -4,7 +4,7 @@ import { api } from '../../../lib/api'
 import { useAuth } from '../../../contexts/AuthContext'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
 import { Button, Badge, Caption, SectionHeading, Note, Empty, Toast, INPUT_CLS, SearchInput } from '../../../components/admin/ui'
-import { CrudPanes, RecordListPane, DetailPane, RecordTitleRow, CountBar, SaveRow, reachability } from '../clubhouse/crudShell'
+import { CrudPanes, RecordListPane, DetailPane, RecordTitleRow, CountBar, SaveRow, reachability, clubCount } from '../clubhouse/crudShell'
 import ScreenIntro, { useScreenIntro, INTROS } from '../clubhouse/intro'
 import { ContactDetailModal } from './CommsContacts'
 import { FACETS, matchesQuery, matchesFilters, facetOptionsFrom, MultiSelect, matchesSuppressed, SuppressedToggle,
@@ -423,6 +423,9 @@ export default function CommsLists() {
   const count = selected?.count ?? 0
   const reachable = members == null ? 0 : members.filter(c => reachability(c).key === 'email').length
   const otherRoute = members == null ? 0 : members.filter(c => reachability(c).key === 'guardian').length
+  // Computed from the membership rows, which this endpoint returns in full (no
+  // cap), so it needs no server figure the way a segment's does.
+  const clubs = members == null ? 0 : clubCount(members)
 
   if (intro.showing) {
     return (
@@ -505,6 +508,7 @@ export default function CommsLists() {
                       {count === 1 ? ' contact in this list' : ' contacts in this list'}
                       {' · '}<b style={{ color: 'var(--pb-positive-ink)' }}>{reachable}</b> reachable by email
                       {otherRoute > 0 && <> · <b style={{ color: '#f5b542' }}>{otherRoute}</b> need another route</>}
+                      {clubs > 0 && <> · <b style={{ color: 'var(--pb-accent-ink)' }}>{clubs}</b> {clubs === 1 ? 'club' : 'clubs'}</>}
                     </span>
                   )}
                 </CountBar>

@@ -1,5 +1,169 @@
 export const POSTS = [
   {
+    slug: 'breaking-club-stats-down-by-competition',
+    title: 'When One Season Is Really Three Competitions',
+    date: '2026-09-02',
+    image: '/marketing/blog/stats-history.jpg',
+    description: "Plenty of clubs field a side in more than one competition in the same season, and most stats systems add the lot together. Here is why that happens, and how BetterCricket now pulls them apart.",
+    readTime: '5 min read',
+    content: [
+      { type: 'p', text: `A club recently asked us an interesting question. In a season, one of their teams plays in three separate competitions: a cup, a midweek competition and a divisional competition. On their stats page all records were added together. Could we break it down by competition?` },
+      { type: 'p', text: `We could not, at the time. We can now.` },
+      { type: 'h2', text: `A season is not one competition` },
+      { type: 'p', text: `Most club cricket looks fairly simple from the outside. You play in an association, the association runs grades, and a season is the grades you competed in. Filter by season and grade and you have your stats.` },
+      { type: 'p', text: `A lot of clubs aren't organised that simply. One team plays across three different associations at the same time: its senior men's grades in one, its women's programme in another, an inclusive competition in a third. Another fields a single side in three competitions run by the one association. In both cases the previous BetterCricket season filter couldn't help, because all records were aggregated within the same season, and the grade filter only provides the right view if you already know which grades belong to which competition.` },
+      { type: 'p', text: `So the numbers were simply getting added together. A batting average across a cup, a midweek competition and a divisional competition is still a true number, but it doesn't tell the full story. It may not be a sufficiently accurate or detailed stat for a selector or captain looking to make a decision about a selection for a particular game, and it certainly doesn't give you the complete stats breakdown for that player across different competitions.` },
+      { type: 'h2', text: `A fixture does not name the competition` },
+      { type: 'p', text: `The obvious fix is to group on the competition itself, and that information isn't often available. A fixture generally tells us about the season, the grade, the match and the scorecard details, but the fixture usually doesn't automatically tell us which competition a grade is associated with. The competition or competitions that a grade participates in is usually well understood within the club, but it's just generally not recorded.` },
+      { type: 'p', text: `What a fixture does tell us, on every single grade, is the association that runs it. BetterCricket can work with that.` },
+      { type: 'h2', text: `Half the answer automatically, and the club supplies the rest` },
+      { type: 'p', text: `The association information alone gets most clubs to the right answer automatically. A club playing in three associations in one season now has its grades sorted in BetterCricket into three groups automatically, named after the associations.` },
+      { type: 'p', text: `If all three of a club's competitions are run by the same association, BetterCricket will initially put them in one bucket. A competition in BetterCricket is a named group of your own grades. In BetterCricket we seed it from the association. If you run several competitions under one association you need to split the competitions yourself in BetterCricket under the Manage Grades function: rename the initial group, add the other groups, then drag each grade into the right group.` },
+      { type: 'p', text: `Once a club admin has done this you're all set.` },
+      { type: 'h2', text: `How to view stats by Competition in BetterCricket` },
+      { type: 'p', text: `There is a Competition filter, sitting alongside the Grade Type and Match Type filters already on the dashboard, Leaderboard, Records, Players, Games and every player profile. Pick a Competition, plus batting, bowling, fielding to see your stats by competition.` },
+      { type: 'p', text: `Then there is a breakdown, because a filter tells you how you performed in one competition, not how records across competitions compare. Your club gets a Competitions page under Stats: your record in each competition, and under each one every grade that was played in it, which is where a side that turned out in two competitions in one summer finally reads as two separate stats. Every player profile has a Competitions tab providing the same breakdown for a player's batting, bowling and fielding.` },
+      { type: 'p', text: `If a club only plays in one competition, the viewer won't see these competition filters.` },
+      { type: 'h2', text: `The figures we cannot place, and why we say so` },
+      { type: 'p', text: `A competition stat has to come from scorecards, because the scorecard is where the grade is recorded. Clubs that import decades of history into BetterCricket from a spreadsheet or scorecards often have season totals with no grade details. In these cases those matches genuinely cannot be filed by competition.` },
+      { type: 'p', text: `We report them separately, with a count, rather than putting them in a competition they might not belong to. It means a per-competition breakdown will sometimes not add up to a career total, but the report will indicate this instead of leaving you to work it out.` },
+      { type: 'h2', text: `If your club is in this position` },
+      { type: 'p', text: `Once you've set up your competition groups, all new match information will keep your stats updated correctly. The Manage Grades function will tell you how many seasons sit outside your competitions and provide an admin function to help match any historical records. The admin process runs in the background to help you clean your historical data.` },
+      { type: 'links', heading: 'Related', items: [
+        { label: 'Why your stats page is your best recruitment tool', href: '/blog/why-your-cricket-club-needs-a-public-stats-page' },
+        { label: 'What to look for in a historical stats import', href: '/blog/merging-historical-cricket-stats-with-playhq' },
+        { label: 'Pricing', href: '/pricing' },
+        { label: 'Start your free trial', href: '/trial' },
+      ]},
+      { type: 'callout', text: `BetterCricket groups your grades into the competitions they were played in, automatically where we can and by hand where only the club knows. Search for your club at betterat.cricket/trial to get started.` },
+    ],
+    faq: [
+      { q: 'Can I see my cricket club stats broken down by competition?', a: `Yes. BetterCricket has a Competition filter on the dashboard, Leaderboard, Records, Players, Games and every player profile, plus a breakdown that lists a club's record in each competition and a player's batting, bowling and fielding across all of them side by side.` },
+      { q: 'What if one team plays in several competitions in the same season?', a: `That is the case this was built for. Each competition a side plays in is a different grade, so each reads separately once the grades are grouped. A player who turned out in a cup and a midweek competition in one summer gets a row for each.` },
+      { q: 'Does the fixture data say which competition a grade belongs to?', a: `A fixture tells us about the season, grade, match and scorecard information, but it doesn't tell us about the competition. It does name the association that runs each grade, so BetterCricket groups on that automatically and lets a club split it further where one association runs several competitions.` },
+      { q: 'Will grouping grades into competitions change my club stats?', a: `No. Grouping only changes how figures can be filtered and compared. Creating, renaming or deleting a competition never touches a game, a run or a wicket, and unfiltered totals stay exactly as they were.` },
+      { q: 'What about the historical records imported into BetterCricket that aren\'t associated with competitions?', a: `Two different things can leave records outside a competition. An older season that has grades but was synced before you set your competitions up can be grouped: Manage Grades tells you how many such seasons there are and offers to fetch what it needs, running in the background with a progress bar and no rebuild of your data. History imported with no grade recorded against it at all cannot be filed under any competition, so it is reported separately with a count rather than being put in one it might not belong to. Either way those matches still count in every unfiltered figure on the site.` },
+    ],
+  },
+  {
+    slug: `strike-rates-when-balls-faced-data-is-incomplete`,
+    title: `Strike Rates, Economy Rates and Incomplete Balls Faced Data`,
+    date: `2026-09-02`,
+    image: `/marketing/blog/batting-average.jpg`,
+    description: `Plenty of clubs only started counting balls faced recently, and a single season can be part iPad and part written book. Here is why that used to print a strike rate of 333, and how BetterCricket works one out now.`,
+    readTime: `3 min read`,
+    content: [
+      {
+        type: `p`,
+        text: `Recording balls faced is a relatively recent development in club cricket. It was never part of the traditional scorecard line, and plenty of competitions only began asking for it per batter in the last decade or two. Even now a single season can be made up of part iPad scoring and part scorebook results, which can leave you with different levels of detail recorded. So how do you deal with strike rates when you don't have all of the information about balls faced across all of the innings in question?`,
+      },
+      {
+        type: `h2`,
+        text: `Strike rates only make sense for fully recorded innings`,
+      },
+      {
+        type: `p`,
+        text: `A batting average needs runs scored and times dismissed. Both are on every scorecard a club has ever kept, so averages hold good as far back as the records go.`,
+      },
+      {
+        type: `p`,
+        text: `A strike rate is different. It is runs divided by balls faced, and a ratio only makes sense when you have that detail for all of the innings in question. If you apply simple maths and add up every run in a season and divide it by the balls faced that were recorded, and balls faced was only recorded for some of those innings, it breaks down.`,
+      },
+      {
+        type: `p`,
+        text: `Take a season of 500 runs across 10 innings, where only 3 of those innings carry a balls faced count, totalling 150 balls. Divide 500 by 150 and the strike rate reads 333. The runs from the other seven un-counted innings cause an obvious problem. Those figures are an illustration of the arithmetic rather than a real player strike rate.`,
+      },
+      {
+        type: `h2`,
+        text: `What BetterCricket does instead`,
+      },
+      {
+        type: `p`,
+        text: `If BetterCricket detects that not all of the innings in the range you are viewing have balls faced recorded, it highlights the issue with "Data may be incomplete". Click the (i) beside it and you get a longer, more detailed explanation.`,
+      },
+      {
+        type: `p`,
+        text: `Where a club has no scorecards at all for a season and only a season total, the figure still stands, but BetterCricket will note that it is based on season totals only. If a club's history was imported as annual figures alone, that is fine, and BetterCricket keeps track of it.`,
+      },
+      {
+        type: `h2`,
+        text: `Leaderboards and record books`,
+      },
+      {
+        type: `p`,
+        text: `A strike rate from three innings and a strike rate from thirty innings are both valid stats, but you may view them differently. Ranking those two against each other on a leaderboard may not be a fair comparison.`,
+      },
+      {
+        type: `p`,
+        text: `So under Club Settings, BetterCricket lets a club admin set their club's own minimum number of qualifying innings before a strike rate is published on a leaderboard. There is no minimum by default. A viewer can also raise the bar in their own reporting criteria.`,
+      },
+      {
+        type: `p`,
+        text: `In the record book, best strike rate and best economy are kept season by season rather than all time. Coverage varies too much across a long career for an all-time list to compare like with like, and a record that cannot be compared fairly is not a valuable statistical record.`,
+      },
+      {
+        type: `h2`,
+        text: `What this does not touch`,
+      },
+      {
+        type: `p`,
+        text: `Generally speaking, bowling stats are usually in better shape than batting stats. A scorer almost always records the overs bowled, so most clubs will find their economy rates fully covered. Where a spell was recorded without an overs figure, it is left out of the economy rate calculation rather than having its runs counted against somebody else's overs.`,
+      },
+      {
+        type: `h2`,
+        text: `What BetterCricket doesn't do`,
+      },
+      {
+        type: `p`,
+        text: `There is a line here, and it runs between recovering a figure and inventing one. Anything reachable by arithmetic on a number somebody actually recorded, we will use. Anything that needs an assumption, such as what a player's strike rate might have been, we will not.`,
+      },
+      {
+        type: `callout`,
+        text: `BetterCricket only calculates a strike rate and economy rate if the innings recorded provides the data, and will tell you if the information is missing. Search for your club at betterat.cricket/trial to discover your club's records.`,
+      },
+      {
+        type: `links`,
+        heading: `Related`,
+        items: [
+          {
+            label: `Understanding bowling economy rate in club cricket`,
+            href: `/blog/understanding-bowling-economy-rate-in-club-cricket`,
+          },
+          {
+            label: `What is a good batting average in club cricket?`,
+            href: `/blog/what-is-a-good-batting-average-in-club-cricket`,
+          },
+          {
+            label: `5 reasons your cricket club is losing its stats history`,
+            href: `/blog/5-reasons-your-cricket-club-is-losing-its-stats-history`,
+          },
+          {
+            label: `Start your free trial`,
+            href: `/trial`,
+          },
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: `Why does a strike rate on my club's site say the data may be incomplete?`,
+        a: `Because some of the innings behind it did not record a ball count. A strike rate is runs divided by balls faced, and the runs and the balls have to be counted from the same innings, so the figure is worked out from the innings where both were recorded and the note tells you how many that was. Runs, average and every other figure on the page still count every innings.`,
+      },
+      {
+        q: `Why not just divide all the runs by all the balls on file?`,
+        a: `Because the runs from innings with no ball count land on top of the sum with nothing underneath them, which sends the answer far too high. A season of 500 runs across 10 innings with only 150 balls recorded across 3 of them reads 333 that way, where those three innings actually say 100.`,
+      },
+      {
+        q: `Do bowling economy rates have the same problem?`,
+        a: `Rarely. Overs have always been part of the standard figures line, so a scorer who writes nothing else still writes the overs and most clubs find their economy fully covered with no note drawn. Where a spell did arrive without an overs figure, it is left out of the rate rather than having its runs counted against another bowler's overs.`,
+      },
+      {
+        q: `Can my club improve the coverage on its older seasons?`,
+        a: `Yes, wherever the ball counts exist somewhere. Old annual reports and yearbooks that printed a per-player season strike rate are the quickest route, since balls faced can be recovered from them exactly. Scorebooks with a balls faced column that was filled in but never typed up are the other, and BetterCricket's scorecard reader can take those from a photograph or scan. Neither is an estimate, so both are treated as real data.`,
+      },
+    ],
+  },
+  {
     slug: '100-years-of-cricket-history-in-one-spreadsheet',
     title: '100 Years of Club History, Sitting in One Spreadsheet',
     date: '2026-08-12',
@@ -13,7 +177,7 @@ export const POSTS = [
       { type: 'h2', text: 'What a hundred years of history is actually worth' },
       { type: 'p', text: `Ask most clubs where their pre-2010 stats live and you tend to get a shrug, a filing cabinet, or the name of someone who left the committee years ago. The spreadsheet at this club was the opposite of that: complete, current and cared for. The problem was never the data. It was that all of it depended on one person continuing to update it by hand, forever.` },
       { type: 'h2', text: 'The part that actually changed the room' },
-      { type: 'p', text: `We walked the committee and a few volunteers through what happens when that spreadsheet goes into BetterCricket. Not a demo on a blank system, their own hundred years, imported and reconciled against the club's live PlayHQ data, on screen in minutes. Every season, every player, every honour board entry.` },
+      { type: 'p', text: `We walked the committee and a few volunteers through what happens when that spreadsheet goes into BetterCricket. Not a demo on a blank system, their own hundred years, imported and reconciled against the club's live match data, on screen in minutes. Every season, every player, every honour board entry.` },
       { type: 'p', text: `The reaction in the room was not really about the software. It was relief. The statistician had spent years quietly worried about what happens to all of that history once he is no longer the one keeping it. That is a succession problem, not a stats problem, and it is the one a spreadsheet can never solve on its own.` },
       { type: 'ul', items: [
         'No more sitting down every week to update the spreadsheet by hand',
@@ -37,14 +201,14 @@ export const POSTS = [
     ],
     faq: [
       { q: "What happens to a cricket club's stats when the volunteer who keeps them steps down?", a: `Usually nothing good. Most clubs run their history through one person's spreadsheet, and when that person leaves the committee, the updates stop and the record freezes wherever it was left. BetterCricket imports the spreadsheet once, syncs live match data automatically after that, and the record no longer depends on any one volunteer.` },
-      { q: 'Can BetterCricket import a spreadsheet with dozens of tabs going back a hundred years?', a: `Yes. Clubs bring in whatever they have, however it is organised, and BetterCricket reconciles it against the club's synced PlayHQ or Play-Cricket data into one career history per player. The historical import is included in the subscription, not charged as a separate fee.` },
+      { q: 'Can BetterCricket import a spreadsheet with dozens of tabs going back a hundred years?', a: `Yes. Clubs bring in whatever they have, however it is organised, and BetterCricket reconciles it against the club's current match data into a complete career history per player. The historical import is included in the subscription, not charged as a separate fee.` },
       { q: 'Does moving to BetterCricket mean changing how the club scores or registers matches?', a: `No. BetterCricket sits on top of however the club already scores and registers. Nothing about match day changes. It reads the data already being generated and reconciles it with whatever historical records the club hands over.` },
       { q: "How long does it take to bring a club's full history online?", a: `The import itself typically runs in minutes once the data is handed over. Most of the time in the process is a club gathering what it has, whatever shape that is in, before the sync runs.` },
     ],
   },
   {
     slug: 'merging-historical-cricket-stats-with-playhq',
-    title: 'What to Look for When Merging Historical Cricket Stats into PlayHQ',
+    title: 'What to Look for When Merging Historical Cricket Stats in BetterCricket',
     date: '2026-08-11',
     image: '/marketing/blog/stats-history.jpg',
     description: 'A practical checklist for bringing decades of club cricket history online: what a genuine historical import should include, and the questions worth asking before you commit.',
@@ -58,19 +222,19 @@ export const POSTS = [
       { type: 'h2', text: 'Can it read more than a tidy spreadsheet?' },
       { type: 'p', text: `Most clubs do not have one clean spreadsheet. They have several, built up by different people over different eras, and some have nothing but old scorebooks that were never typed up at all. A platform that only accepts a specific CSV format is going to leave a chunk of a club's history behind. BetterCricket's scorecard reader takes a scanned or photographed handwritten scorebook and extracts the batting, bowling and fielding figures directly, on top of the usual spreadsheet and CSV imports.` },
       { type: 'h2', text: 'Does it stay in sync afterwards?' },
-      { type: 'p', text: `An import is only half the job. The other half is what happens to next Saturday's game. Look for a platform that keeps pulling from PlayHQ or Play-Cricket automatically after the initial import, rather than one that leaves you back to manual updates the moment the migration is done.` },
+      { type: 'p', text: `An import is only half the job. The other half is what happens to next Saturday's game. Look for a platform that keeps your results up to date automatically after the initial import, rather than one that leaves you back to manual updates the moment the migration is done.` },
       { type: 'h2', text: 'Does the history actually do anything?' },
       { type: 'p', text: `Once the data is in, it is worth asking what it becomes. A static archive page is one thing. A full public club website, with player profiles, leaderboards, all-time records and a season yearbook built from the same reconciled data, is another.` },
       { type: 'h2', text: 'A short checklist' },
       { type: 'ul', items: [
         'Is the historical import included in the price, or a separate invoice?',
         'Can it read scanned scorebooks and multiple spreadsheets, not just one tidy CSV?',
-        'Does it keep syncing with PlayHQ or Play-Cricket after the first import, or is it a one-off dump?',
+        'Does it keep itself up to date after the first import, or is it a one-off dump?',
         'Does the history power a full public website, or just a stats page?',
         'What happens to selection, fees and social posts once the history is in?',
       ]},
       { type: 'h2', text: 'Where BetterCricket lands on this' },
-      { type: 'p', text: `The historical import is included in every plan, whatever shape a club's records are in. Setup is typically under an hour. The scorecard reader handles old scorebooks as well as spreadsheets. Once your history is in, it keeps syncing automatically with PlayHQ or Play-Cricket, and the same data runs your public website, leaderboards, yearbooks, team selection, fees and opposition analysis.` },
+      { type: 'p', text: `The historical import is included in every plan, whatever shape a club's records are in. Setup is typically under an hour. The scorecard reader handles old scorebooks as well as spreadsheets. Once your history is in, it keeps itself up to date automatically, and the same data runs your public website, leaderboards, yearbooks, team selection, fees and opposition analysis.` },
       { type: 'links', heading: 'Related', items: [
         { label: '100 years of club history, sitting in one spreadsheet', href: '/blog/100-years-of-cricket-history-in-one-spreadsheet' },
         { label: 'BetterCricket features', href: '/features' },
@@ -81,7 +245,7 @@ export const POSTS = [
       { type: 'callout', text: `BetterCricket includes the historical import in every plan, whatever shape your old records are in. Search for your club at betterat.cricket/trial and we'll handle the first full historical sync.` },
     ],
     faq: [
-      { q: 'What should be included in a historical cricket stats import?', a: `A genuine import should read whatever a club actually has, spreadsheets, CSV exports, even scanned scorebooks, reconcile it against live PlayHQ or Play-Cricket data, and be included in the subscription rather than billed as a separate migration project.` },
+      { q: 'What should be included in a historical cricket stats import?', a: `A genuine import should read whatever a club actually has, spreadsheets, CSV exports, even scanned scorebooks, reconcile it against your club's live match data, and be included in the subscription rather than billed as a separate migration project.` },
       { q: 'How long should it take to merge decades of cricket stats with PlayHQ?', a: `A well-built automated import typically takes under an hour once the data is handed over. A manual, spreadsheet-by-spreadsheet migration can run to several days.` },
       { q: 'Can cricket stats platforms read old handwritten scorebooks?', a: `Not all of them. BetterCricket's scorecard reader can take a scanned or photographed handwritten scorebook and extract the batting, bowling and fielding figures directly, alongside ordinary CSV and spreadsheet imports.` },
       { q: "Does BetterCricket charge extra to import a club's history?", a: `No. The historical import is included in the annual plan, with no separate migration fee, whatever shape the club's records are in.` },
@@ -89,7 +253,7 @@ export const POSTS = [
   },
   {
     slug: 'how-to-merge-players-in-playhq-cricket',
-    title: 'How to Merge Duplicate Players in PlayHQ Cricket',
+    title: 'How to Merge Duplicate Players in BetterCricket',
     date: '2026-06-21',
     image: '/marketing/blog/merge-duplicate-players.jpg',
     description: 'How merging duplicate players works in PlayHQ cricket, who is allowed to do it, and how BetterCricket merges a club\'s duplicate stats reversibly.',
@@ -258,7 +422,7 @@ export const POSTS = [
     ],
     faq: [
       { q: 'Is BetterCricket a replacement for PlayHQ?', a: `No. PlayHQ is the official competition platform for registration, fixtures and scoring. BetterCricket sits on top of it and adds the club website, history, stats and analytics.` },
-      { q: 'Can BetterCricket read my PlayHQ data?', a: `BetterCricket brings your club's match history in and keeps it current automatically, so you never have to enter anything twice.` },
+      { q: 'I already record everything in PlayHQ. Do I have to do it again?', a: `No. BetterCricket always keeps all of your match data, player profiles, leaderboards and your yearbooks current.` },
       { q: 'How much does each one cost?', a: `PlayHQ has no mandatory club setup fee and is funded through registration and small transaction fees, including a National Registration Fee. BetterCricket is a flat annual rate per club, from $399 for the Core, the same for one team or fifty.` },
       { q: 'Do I still score in PlayHQ?', a: `Yes. Nothing about your match day changes. BetterCricket reads the finished scorecards and updates your stats after every game.` },
     ],
@@ -369,7 +533,7 @@ export const POSTS = [
         'Results home and away',
       ]},
       { type: 'h2', text: 'Why the manual version rarely happens' },
-      { type: 'p', text: `In theory you can pull a side's recent scorecards off PlayHQ, read them and build a picture. In practice nobody has a spare hour on a Thursday night, so it does not get done, and selection runs on memory and a bloke who reckons their opener cannot play the short ball.` },
+      { type: 'p', text: `In theory you can check a side's recent scorecards on PlayHQ, analyse them and build a picture. In practice nobody has a spare hour on a Thursday night, so it does not get done, and selection runs on memory and a bloke who reckons their opener cannot play the short ball.` },
       { type: 'h2', text: 'Start with the danger players' },
       { type: 'p', text: `Look for the names that keep showing up. A batter averaging well clear of the rest of their side, or a bowler taking wickets most weeks, is where your plan starts. Note how the batters get out, because a pattern there tells you how to set a field and who to bowl.` },
       { type: 'h2', text: 'Use your own head-to-head' },

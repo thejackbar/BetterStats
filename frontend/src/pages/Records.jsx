@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { RateMark, RateInfo } from '../components/RateCoverage'
 import { useParams, Link } from 'react-router-dom'
 import { useClub } from '../hooks/useClub'
 import { useClubTheme } from '../hooks/useClubTheme'
@@ -58,6 +59,29 @@ function RecordSection({ title, filter, empty, children }) {
   )
 }
 
+/**
+ * Why a rate record is filed by season and where a range of seasons is
+ * answered instead.
+ *
+ * An all-time strike rate would blend decades of differently scored cricket
+ * into one number nobody can check: older seasons rarely recorded balls faced
+ * at all. A season is a period that was scored one way, so it is a figure that
+ * can be stood behind. StatLab already takes several seasons at once, which is
+ * where a range belongs.
+ */
+function SeasonRateNote({ unit = 'innings', slug }) {
+  return (
+    <p className="px-5 py-2.5 pb-hairline-t font-mono text-[10px] text-pb-dim flex flex-wrap items-center gap-1.5">
+      <span>
+        Filed by season rather than all time, because how much was recorded
+        changed from one era to the next. For a range of seasons, use{' '}
+        <Link to={slug ? `/${slug}/statlab` : 'statlab'} className="underline hover:text-pb-accent">StatLab</Link>.
+      </span>
+      <RateInfo unit={unit} />
+    </p>
+  )
+}
+
 function RecordTable({ headers, rows }) {
   return (
     <table className="w-full text-[13px]">
@@ -83,7 +107,7 @@ function RecordTable({ headers, rows }) {
   )
 }
 
-function BattingTab({ data, latestSeason, fmt = n => n }) {
+function BattingTab({ data, latestSeason, fmt = n => n, slug }) {
   if (!data) return <PbSpinner />
   const isNew = (seasonName) => latestSeason && seasonName && formatSeason(seasonName) === formatSeason(latestSeason)
   return (
@@ -150,6 +174,26 @@ function BattingTab({ data, latestSeason, fmt = n => n }) {
           />
         </RecordSection>
       )}
+      {data.best_strike_rate_season?.length > 0 && (
+        <RecordSection
+          title="BEST STRIKE RATE IN A SEASON"
+          filter="MIN. 10 INNINGS WITH BALLS FACED"
+        >
+          <RecordTable
+            headers={['Player', 'SR', 'Runs', 'Season']}
+            rows={(data.best_strike_rate_season || []).map((r, i) => [
+              <span key={r.player_id}><RankNum rank={i+1} /><PlayerLink id={r.player_id} name={r.name} fmt={fmt} /></span>,
+              <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>
+                {r.strike_rate != null ? Number(r.strike_rate).toFixed(2) : '—'}
+                <RateMark coverage={r.strike_rate_coverage} />
+              </span>,
+              r.runs ?? '—',
+              <span className="text-pb-faintest text-[11px]">{formatSeason(r.season_name)}{isNew(r.season_name) && <NewBadge />}</span>,
+            ])}
+          />
+          <SeasonRateNote slug={slug} />
+        </RecordSection>
+      )}
       {data.most_sixes?.length > 0 && (
         <RecordSection title="MOST SIXES (CAREER)">
           <RecordTable
@@ -166,7 +210,7 @@ function BattingTab({ data, latestSeason, fmt = n => n }) {
   )
 }
 
-function BowlingTab({ data, latestSeason, fmt = n => n }) {
+function BowlingTab({ data, latestSeason, fmt = n => n, slug }) {
   if (!data) return <PbSpinner />
   const isNew = (seasonName) => latestSeason && seasonName && formatSeason(seasonName) === formatSeason(latestSeason)
   return (
@@ -206,11 +250,34 @@ function BowlingTab({ data, latestSeason, fmt = n => n }) {
           headers={['Player', 'Econ', 'Wkts', 'Ov']}
           rows={(data.top_economy || []).map((r, i) => [
             <span key={r.player_id}><RankNum rank={i+1} /><PlayerLink id={r.player_id} name={r.name} fmt={fmt} /></span>,
-            <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>{r.economy != null ? Number(r.economy).toFixed(2) : '—'}</span>,
+            <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>
+              {r.economy != null ? Number(r.economy).toFixed(2) : '—'}
+              <RateMark coverage={r.economy_coverage} unit="spells" />
+            </span>,
             r.wickets ?? '—', fmtOvers(r.overs),
           ])}
         />
       </RecordSection>
+      {data.best_economy_season?.length > 0 && (
+        <RecordSection
+          title="BEST ECONOMY IN A SEASON"
+          filter="MIN. 50 OVERS"
+        >
+          <RecordTable
+            headers={['Player', 'Econ', 'Wkts', 'Ov', 'Season']}
+            rows={(data.best_economy_season || []).map((r, i) => [
+              <span key={r.player_id}><RankNum rank={i+1} /><PlayerLink id={r.player_id} name={r.name} fmt={fmt} /></span>,
+              <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>
+                {r.economy != null ? Number(r.economy).toFixed(2) : '—'}
+                <RateMark coverage={r.economy_coverage} unit="spells" />
+              </span>,
+              r.wickets ?? '—', fmtOvers(r.overs),
+              <span className="text-pb-faintest text-[11px]">{formatSeason(r.season_name)}{isNew(r.season_name) && <NewBadge />}</span>,
+            ])}
+          />
+          <SeasonRateNote unit="spells" slug={slug} />
+        </RecordSection>
+      )}
       {data.most_five_fors?.length > 0 && (
         <RecordSection title="MOST FIVE-WICKET HAULS">
           <RecordTable
@@ -488,6 +555,184 @@ function TeamTab({ data, fmt = n => n }) {
   )
 }
 
+
+// ── The club's own records ───────────────────────────────────────────────────
+// Every figure here is a TEAM figure, rebuilt per game from the per-innings
+// rows (cricket stores no team score anywhere). The backend marks each row
+// `exact` — true when it holds the scorecard's own innings total, which counts
+// extras, false when it could only add up the batters. The two are not the
+// same kind of number and this screen never presents them as one.
+
+function GameCell({ r }) {
+  const label = r.opponent || 'Unknown opponent'
+  const inner = (
+    <>
+      <span className="text-pb-text">{r.our_venue === 'AWAY' ? 'at ' : 'v '}{label}</span>
+      {r.is_final && (
+        <span className="ml-1.5 font-mono text-[9px] tracking-wide3 text-pb-accent">FINAL</span>
+      )}
+    </>
+  )
+  return (
+    <span>
+      {r.game_id
+        ? <Link to={`/games/${r.game_id}`} className="hover:underline">{inner}</Link>
+        : inner}
+      <span className="block font-mono text-[10px] text-pb-faint">
+        {[fmtDate(r.played_at), r.grade_name, r.season_name].filter(Boolean).join(' · ')}
+      </span>
+    </span>
+  )
+}
+
+// An approximate figure is marked where it is READ, not only counted in a
+// footnote — a reader comparing two rows needs to know which of them is a
+// bat-only sum at the moment they compare them.
+function Approx() {
+  return (
+    <span
+      className="ml-1 font-mono text-[9px] text-pb-faintest"
+      title="Bat-only figure: the club doesn't hold this innings' extras, so the real total was higher."
+    >~</span>
+  )
+}
+
+function Val({ r, suffix }) {
+  return (
+    <span>
+      <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>{r.value}</span>
+      {suffix ? <span className="text-pb-faint"> {suffix}</span> : null}
+      {r.exact === false && <Approx />}
+    </span>
+  )
+}
+
+function ScoreCell({ runs, wkts }) {
+  if (runs == null) return '—'
+  return wkts != null && wkts < 10 ? `${wkts}/${runs}` : `${runs}`
+}
+
+function GameBoard({ title, board, suffix, note }) {
+  const rows = board?.rows || []
+  return (
+    <RecordSection title={title} filter={note} empty={!rows.length}>
+      <RecordTable
+        headers={['Match', suffix ? suffix.toUpperCase() : 'VALUE', 'Result']}
+        rows={rows.map((r, i) => [
+          <span key={r.game_id || i}><RankNum rank={i + 1} /><GameCell r={r} /></span>,
+          <Val r={r} suffix={suffix} />,
+          <span className="text-pb-faint">
+            <ScoreCell runs={r.our_runs} wkts={r.our_wickets} />
+            {' v '}
+            <ScoreCell runs={r.opp_runs} wkts={r.opp_wickets} />
+          </span>,
+        ])}
+      />
+    </RecordSection>
+  )
+}
+
+function StreakBoard({ title, board }) {
+  const rows = board?.rows || []
+  return (
+    <RecordSection title={title} empty={!rows.length}>
+      <RecordTable
+        headers={['Run', 'Games', 'Won']}
+        rows={rows.map((r, i) => [
+          <span key={i}>
+            <RankNum rank={i + 1} />
+            <span className="text-pb-text">
+              {[r.from_season, r.to_season].filter(Boolean).filter((v, j, a) => a.indexOf(v) === j).join(' – ')}
+            </span>
+            <span className="block font-mono text-[10px] text-pb-faint">
+              {[fmtDate(r.from), fmtDate(r.to)].filter(Boolean).join(' – ')}
+            </span>
+          </span>,
+          <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>{r.value}</span>,
+          <span className="text-pb-faint">{r.wins}{r.draws ? ` (${r.draws} drawn)` : ''}</span>,
+        ])}
+      />
+    </RecordSection>
+  )
+}
+
+function ClubTab({ data }) {
+  if (!data) return <PbSpinner />
+  const b = data.boards || {}
+  const s = data.summary || {}
+  const cov = data.coverage || {}
+
+  if (!s.played) {
+    return (
+      <Card>
+        <p className="text-pb-faintest text-sm px-1 py-3 italic">
+          No completed matches yet, so there are no club records to show.
+        </p>
+      </Card>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="pb-card px-5 py-4 flex flex-wrap gap-x-8 gap-y-3">
+        {[
+          ['PLAYED', s.played], ['WON', s.wins], ['LOST', s.losses],
+          ['DRAWN', s.draws], ['SEASONS', s.seasons],
+        ].map(([label, v]) => (
+          <div key={label}>
+            <div className="font-mono text-[10px] tracking-wide3 text-pb-faint">{label}</div>
+            <div className="text-xl font-bold" style={{ color: 'var(--pb-accent)' }}>{v}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* The club is told what its figures are made of, once, up front —
+          an approximate total reads LOW, which flatters a lowest-total
+          record and undersells a highest one. */}
+      {cov.note && (
+        <div className="pb-card px-5 py-3">
+          <p className="text-[12px] text-pb-dim">
+            <span className="font-mono text-[10px] tracking-wide3 text-pb-faint mr-2">
+              {cov.approximate_totals} OF {cov.games_with_a_total} TOTALS ARE APPROXIMATE
+            </span>
+            {cov.note} Marked <span className="font-mono">~</span> below.
+          </p>
+        </div>
+      )}
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <GameBoard title="HIGHEST TEAM TOTALS" board={b.highest_totals} suffix="runs" />
+        <GameBoard title="HIGHEST TOTALS CONCEDED" board={b.highest_conceded} suffix="runs" />
+        <GameBoard title="LOWEST TEAM TOTALS" board={b.lowest_totals} suffix="runs"
+                   note="all out only" />
+        <GameBoard title="LOWEST TOTALS DEFENDED AGAINST" board={b.lowest_conceded}
+                   suffix="runs" note="bowled out only" />
+        <GameBoard title="BIGGEST WINS (RUNS)" board={b.biggest_wins_runs} suffix="runs" />
+        <GameBoard title="BIGGEST WINS (WICKETS)" board={b.biggest_wins_wickets} suffix="wkts" />
+        <GameBoard title="HEAVIEST DEFEATS (RUNS)" board={b.heaviest_defeats_runs} suffix="runs" />
+        <GameBoard title="HEAVIEST DEFEATS (WICKETS)" board={b.heaviest_defeats_wickets} suffix="wkts" />
+        <StreakBoard title="LONGEST WINNING RUN" board={b.longest_win_streak} />
+        <StreakBoard title="LONGEST UNBEATEN RUN" board={b.longest_unbeaten_streak} />
+      </div>
+
+      <RecordSection title="SEASON BY SEASON" empty={!b.best_seasons?.rows?.length}>
+        <RecordTable
+          headers={['Season', 'P', 'W', 'L', 'D', 'Win %', 'Runs for', 'Runs against']}
+          rows={(b.best_seasons?.rows || []).map((r, i) => [
+            <span key={r.season_id}><RankNum rank={i + 1} />
+              <span className="text-pb-text">{r.season_name}</span></span>,
+            r.played,
+            <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>{r.wins}</span>,
+            r.losses, r.draws, `${r.win_rate}%`,
+            <span>{r.runs_for}{r.exact === false && <Approx />}</span>,
+            <span>{r.runs_against}{r.exact === false && <Approx />}</span>,
+          ])}
+        />
+      </RecordSection>
+    </div>
+  )
+}
+
 function AllRoundersTab({ data, fmt = n => n }) {
   if (!data) return <PbSpinner />
   return (
@@ -702,6 +947,7 @@ function MilestonesTab({ data, loading, gradeName, fmt = n => n }) {
 }
 
 const TABS = [
+  { key: 'club',         label: 'CLUB' },
   { key: 'batting',      label: 'BATTING' },
   { key: 'bowling',      label: 'BOWLING' },
   { key: 'partnerships', label: 'PARTNERSHIPS' },
@@ -727,13 +973,16 @@ export default function Records() {
   const {
     available: availableCategories, availableFormats, defaultCategories,
     gradeType, setGradeType, matchFormat, setMatchFormat,
-    categoriesParam, formatsParam,
+    categoriesParam, formatsParam, competitionsParam,
+    competition, setCompetition, availableCompetitions,
   } = useGradeFilters(orgId)
   const [tab, setTab] = useState('batting')
   const [records, setRecords] = useState(null)
   const [loading, setLoading] = useState(true)
   const [milestones, setMilestones] = useState(null)
   const [milestonesLoading, setMilestonesLoading] = useState(true)
+  const [clubRecords, setClubRecords] = useState(null)
+  const [clubLoadingRecs, setClubLoadingRecs] = useState(false)
 
   useEffect(() => {
     if (!orgId) return
@@ -748,11 +997,23 @@ export default function Records() {
   useEffect(() => {
     if (!orgId) return
     setLoading(true)
-    api.getRecords(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly, gender, categories: categoriesParam, formats: formatsParam })
+    api.getRecords(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly, gender, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam })
       .then(setRecords)
       .catch(() => setRecords(null))
       .finally(() => setLoading(false))
-  }, [orgId, selectedSeason, selectedGradeName, finalsOnly, captainOnly, gender, categoriesParam, formatsParam])
+  }, [orgId, selectedSeason, selectedGradeName, finalsOnly, captainOnly, gender, categoriesParam, formatsParam, competitionsParam])
+
+  useEffect(() => {
+    if (!orgId || tab !== 'club') return
+    setClubLoadingRecs(true)
+    api.getClubRecords(orgId, {
+      seasonId: selectedSeason, gradeName: selectedGradeName,
+      finalsOnly, categories: categoriesParam, formats: formatsParam,
+    })
+      .then(setClubRecords)
+      .catch(() => setClubRecords(null))
+      .finally(() => setClubLoadingRecs(false))
+  }, [orgId, tab, selectedSeason, selectedGradeName, finalsOnly, categoriesParam, formatsParam])
 
   useEffect(() => {
     if (!orgId) return
@@ -796,9 +1057,13 @@ export default function Records() {
             setGradeType={setGradeType}
             matchFormat={matchFormat}
             setMatchFormat={setMatchFormat}
+            competition={competition}
+            setCompetition={setCompetition}
+            availableCompetitions={availableCompetitions}
             availableCategories={availableCategories}
             availableFormats={availableFormats}
             defaultCategories={defaultCategories}
+            showCompetitionFilter
             showGradeTypeFilter
             showMatchFormatFilter
           />
@@ -819,12 +1084,21 @@ export default function Records() {
           )}
         </div>
         <TabBar tabs={TABS} active={tab} onChange={setTab} />
-        {loading ? <PbSpinner message="Loading records…" /> : !records ? (
+        {/* The club board is its own fetch, so it renders outside the player
+            records gate: a failure on one must not blank the other, and a
+            reader on CLUB shouldn't wait on ~40 per-player rankings. */}
+        {tab === 'club' ? (
+          clubLoadingRecs && !clubRecords
+            ? <PbSpinner message="Loading club records…" />
+            : !clubRecords
+              ? <p className="text-pb-faint text-sm py-8 text-center">No club records available.</p>
+              : <ClubTab data={clubRecords} />
+        ) : loading ? <PbSpinner message="Loading records…" /> : !records ? (
           <p className="text-pb-faint text-sm py-8 text-center">No records data available.</p>
         ) : (
           <>
-            {tab === 'batting'      && <BattingTab      data={records.batting}       latestSeason={latestSeason} fmt={fmt} />}
-            {tab === 'bowling'      && <BowlingTab      data={records.bowling}       latestSeason={latestSeason} fmt={fmt} />}
+            {tab === 'batting'      && <BattingTab      data={records.batting}       latestSeason={latestSeason} fmt={fmt} slug={clubSlug} />}
+            {tab === 'bowling'      && <BowlingTab      data={records.bowling}       latestSeason={latestSeason} fmt={fmt} slug={clubSlug} />}
             {tab === 'partnerships' && <PartnershipsTab data={records.partnerships}  fmt={fmt} />}
             {tab === 'allrounders'  && <AllRoundersTab  data={records.allrounders}  fmt={fmt} />}
             {tab === 'milestones'   && <MilestonesTab   data={milestones} loading={milestonesLoading} gradeName={selectedGradeName} fmt={fmt} />}

@@ -1,3 +1,4 @@
+import { useLocation } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { api } from '../../lib/api'
@@ -578,6 +579,519 @@ function RenameGrades() {
   )
 }
 
+// ── Grouping the seasons a sync no longer reaches ────────────────────────
+//
+// A competition can only hold a grade Cricket Australia has told us the
+// association for, and an incremental sync only scans the seasons that could
+// still have been in play. So an established club's older seasons sit outside
+// every competition it has just finished naming, and nothing on the screen
+// says why.
+//
+// This is that gap, said out loud, with the one job that closes it. The job is
+// services/competition_grouping.run_grouping — the same function the command
+// line runs, so the button and the script cannot disagree about what grouping
+// means.
+
+const DISMISS_PREFIX = 'bs_pref_competition_grouping_dismissed'
+
+// A local four-line twin of the Clubhouse kit's usePref rather than an import:
+// that module is a different bundle, and a remembered dismissal should not pull
+// it into this page's first paint. Read in the state initialiser, never an
+// effect, or the prompt renders for one frame before snapping shut.
+function useDismissed(clubId) {
+  const { user } = useAuth()
+  const key = `${DISMISS_PREFIX}_${user?.id || 'anon'}_${clubId || 'none'}`
+  const [value, setValue] = useState(() => {
+    try { return localStorage.getItem(key) === '1' } catch { return false }
+  })
+  function set(next) {
+    setValue(next)
+    try {
+      if (next) localStorage.setItem(key, '1')
+      else localStorage.removeItem(key)
+    } catch { /* private mode */ }
+  }
+  return [value, set]
+}
+
+function GroupingPanel({ clubId, onDone }) {
+  const [state, setState] = useState(null)
+  const [runId, setRunId] = useState(null)
+  const [run, setRun] = useState(null)
+  const [error, setError] = useState(null)
+  const [starting, setStarting] = useState(false)
+  const [dismissed, setDismissed] = useDismissed(clubId)
+
+  useEffect(() => {
+    let live = true
+    api.adminCompetitionGrouping()
+      .then(s => {
+        if (!live) return
+        setState(s)
+        // A job already in flight is picked back up rather than started
+        // again, so reloading the page mid-run rejoins the same bar.
+        if (s.running_run_id) setRunId(s.running_run_id)
+      })
+      .catch(() => { /* the panel is an offer, never the reason a page fails */ })
+    return () => { live = false }
+  }, [])
+
+  // Poll the run the same way every other background job on this platform is
+  // watched. Stops the moment it is no longer running, and refreshes the gap
+  // so the panel reports what is actually left rather than what it started with.
+  useEffect(() => {
+    if (!runId) return undefined
+    let live = true
+    let timer = null
+    async function tick() {
+      try {
+        const r = await api.adminGetSyncRun(runId)
+        if (!live) return
+        setRun(r)
+        if (r.status === 'running') {
+          timer = setTimeout(tick, 2000)
+          return
+        }
+        if (r.error) setError(r.error)
+        const fresh = await api.adminCompetitionGrouping().catch(() => null)
+        if (!live) return
+        if (fresh) setState(fresh)
+        onDone?.()
+      } catch (e) {
+        if (live) setError(e.message)
+      }
+    }
+    tick()
+    return () => { live = false; if (timer) clearTimeout(timer) }
+  }, [runId])
+
+  async function start() {
+    setStarting(true)
+    setError(null)
+    try {
+      const res = await api.adminStartCompetitionGrouping()
+      setRun(null)
+      setRunId(res.run_id)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setStarting(false)
+    }
+  }
+
+  if (!state) return null
+
+  const running = run ? run.status === 'running' : Boolean(runId)
+  const finished = run && run.status !== 'running'
+  const stats = run?.stats || {}
+  // A club with nothing to fetch still reaches 100 rather than dividing by
+  // zero and drawing an empty bar forever.
+  const pct = typeof stats.progress_pct === 'number' ? stats.progress_pct : 0
+
+  if (running || (finished && !error)) {
+    return (
+      <div className="border pb-hairline rounded p-4 mb-4" data-testid="grouping-panel">
+        <h3 className="text-pb-text font-semibold text-[15px] mb-1">
+          {running ? 'Grouping your older seasons' : 'Older seasons grouped'}
+        </h3>
+        {running ? (
+          <>
+            <p className="text-pb-faint text-sm mb-3 leading-relaxed">
+              Reading the association off each season, one at a time. You can
+              leave this page while it runs. It keeps going, and the bar picks
+              back up when you come back.
+            </p>
+            <div
+              role="progressbar"
+              aria-valuenow={pct}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-label="Grouping progress"
+              className="h-2 rounded bg-pb-surface2 overflow-hidden"
+            >
+              <div
+                className="h-full bg-pb-accent transition-all duration-300"
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+            <p className="text-pb-faint text-xs mt-2 font-mono" data-testid="grouping-phase">
+              {pct}%
+              {stats.progress_total ? ` · ${stats.progress_done || 0} of ${stats.progress_total} seasons` : ''}
+              {stats.progress_phase ? ` · ${stats.progress_phase}` : ''}
+            </p>
+          </>
+        ) : (
+          <p className="text-pb-dim text-sm leading-relaxed" data-testid="grouping-result">
+            {stats.grades_filled || 0} grade{(stats.grades_filled || 0) === 1 ? '' : 's'} filled
+            in across {stats.seasons_checked || 0} season{(stats.seasons_checked || 0) === 1 ? '' : 's'}.
+            {stats.competitions_created ? ` ${stats.competitions_created} competition${stats.competitions_created === 1 ? '' : 's'} added.` : ''}
+            {stats.grades_assigned ? ` ${stats.grades_assigned} grade${stats.grades_assigned === 1 ? '' : 's'} grouped.` : ''}
+            {stats.seasons_failed
+              ? ` ${stats.seasons_failed} season${stats.seasons_failed === 1 ? '' : 's'} could not be read from Cricket Australia. Run it again later to pick those up.`
+              : ''}
+          </p>
+        )}
+      </div>
+    )
+  }
+
+  if (!state.needs_grouping) {
+    return error ? <p className="text-pb-red text-sm mb-3">{error}</p> : null
+  }
+
+  const seasons = state.seasons_missing
+  const seasonWord = `${seasons} season${seasons === 1 ? '' : 's'}`
+
+  // Dismissed, but never gone. The offer stays as one quiet line, because an
+  // admin who said "not now" still has to be able to say yes later.
+  if (dismissed) {
+    return (
+      <p className="text-pb-faint text-sm mb-4" data-testid="grouping-quiet">
+        {seasonWord} sit outside your competitions.{' '}
+        <button
+          type="button"
+          onClick={start}
+          disabled={starting}
+          className="text-pb-accent underline underline-offset-2 disabled:opacity-50"
+        >
+          Group them now
+        </button>
+        {error && <span className="text-pb-red ml-2">{error}</span>}
+      </p>
+    )
+  }
+
+  return (
+    <div className="border pb-hairline rounded p-4 mb-4" data-testid="grouping-prompt">
+      <h3 className="text-pb-text font-semibold text-[15px] mb-1">
+        {seasonWord} sit outside your competitions
+      </h3>
+      <p className="text-pb-faint text-sm mb-3 leading-relaxed">
+        Cricket Australia has not told us which association ran those grades, so
+        they cannot be put in a competition yet. Those matches still count in
+        every unfiltered figure. Your next sync fetches the missing
+        associations and groups them on its own — this does it now instead. It
+        takes a minute or two and runs in the background.
+      </p>
+      {error && <p className="text-pb-red text-sm mb-3">{error}</p>}
+      <div className="flex items-center gap-3 flex-wrap">
+        <button
+          type="button"
+          disabled={starting}
+          onClick={start}
+          className="px-3 py-2 text-xs font-mono tracking-wide2 uppercase rounded bg-pb-accent/15 text-pb-accent hover:bg-pb-accent/25 disabled:opacity-50"
+        >
+          {starting ? 'Starting…' : 'Group them now'}
+        </button>
+        <button
+          type="button"
+          onClick={() => setDismissed(true)}
+          className="text-xs font-mono tracking-wide2 uppercase text-pb-faint hover:text-pb-text"
+        >
+          Not now
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Competitions ─────────────────────────────────────────────────────────
+//
+// A club plays in several competitions, sometimes several run by ONE
+// association. Cricket Australia publishes the ASSOCIATION on every grade and
+// no competition at all (see services/competitions.py for what was checked),
+// so a competition here is the club's own named group of grades, seeded one
+// per association.
+//
+// Most clubs never need to touch this: their grades come pre-grouped by the
+// association, which is already the right answer for a club that plays one
+// association's competitions. It exists for the club the association alone
+// cannot separate — Veterans Cricket Victoria runs the Border Cup, an Over
+// 60s competition and the Echuca divisions, and reading all three as one is
+// the reason this was built.
+function CompetitionManager({ clubId }) {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  const [newName, setNewName] = useState('')
+  const [renaming, setRenaming] = useState(null)
+  const [renameValue, setRenameValue] = useState('')
+
+  // Deliberately does NOT put the panel back into its loading state. The
+  // spinner belongs to the FIRST load; a refresh after an edit swaps the data
+  // in place. Blanking the section would unmount the grouping panel below,
+  // which is how the finished job's own result went missing the moment it
+  // reported — caught by the browser suite, not by reading this.
+  function load() {
+    api.adminCompetitions()
+      .then(setData)
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false))
+  }
+  useEffect(() => { load() }, [])
+  // A link to /admin/grades#competitions (the sidebar, the blog, a guide)
+  // lands on the panel rather than the top of a long page. Waits for the data
+  // so there is something to scroll to.
+  const { hash } = useLocation()
+  useEffect(() => {
+    if (loading || hash !== '#competitions') return
+    document.getElementById('competitions')?.scrollIntoView({ block: 'start' })
+  }, [loading, hash])
+
+  async function act(fn) {
+    setBusy(true)
+    setError(null)
+    try {
+      await fn()
+      load()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (loading) return <PbSpinner message="Loading competitions…" />
+
+  const competitions = data?.competitions || []
+  const grades = data?.grades || []
+  const associations = data?.associations || []
+  const ungrouped = grades.filter(g => !g.competition_id)
+
+  // THE ORDER HERE IS THE ORDER EVERY COMPETITION PILL READS IN. The public
+  // filter row, the club's Competitions page and every player's Competitions
+  // tab all read `list_competitions`, which sorts on display_order — so until
+  // a club sets one, they came out in whatever order the sync first met them.
+  // A swap sends the WHOLE list, the way the grade reorder and the plan tree
+  // already do, so the server stamps positions over every row and a foreign
+  // or stale id cannot leave a gap in the numbering.
+  function move(index, delta) {
+    const target = index + delta
+    if (target < 0 || target >= competitions.length) return
+    const ids = competitions.map(c => c.id)
+    ;[ids[index], ids[target]] = [ids[target], ids[index]]
+    act(() => api.adminReorderCompetitions(ids))
+  }
+
+  return (
+    <div className="mb-10" id="competitions">
+      <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-3 uppercase">
+        Competitions <span className="text-pb-faintest">({competitions.length})</span>
+      </p>
+      <p className="text-pb-faint text-sm mb-4 leading-relaxed">
+        Which competition each grade was played in. Grades are grouped
+        automatically by the association that runs them, which is right for most
+        clubs. Split one here when an association runs several competitions you
+        want to read separately — a cup alongside the regular season, say.
+        {competitions.length > 1 && (
+          <> The order below is the order the Competition filter lists them in, on
+          every stats page and player profile. Use the arrows to change it.</>
+        )}
+      </p>
+
+      {error && <p className="text-pb-red text-sm mb-3">{error}</p>}
+
+      <GroupingPanel clubId={clubId} onDone={load} />
+
+      {!competitions.length && (
+        <div className="border pb-hairline rounded p-4 mb-4">
+          <p className="text-sm text-pb-dim mb-3">
+            {associations.length
+              ? `Nothing grouped yet. Your grades come from ${associations.length} ${associations.length === 1 ? 'association' : 'associations'}.`
+              : 'No association recorded on your grades yet. Your next sync fetches them and groups your grades automatically; the button above does it now.'}
+          </p>
+          {associations.length > 0 && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => act(() => api.adminSeedCompetitions())}
+              className="px-3 py-2 text-xs font-mono tracking-wide2 uppercase rounded bg-pb-accent/15 text-pb-accent hover:bg-pb-accent/25 disabled:opacity-50"
+            >
+              Group my grades
+            </button>
+          )}
+        </div>
+      )}
+
+      {competitions.map((c, i) => {
+        const held = grades.filter(g => g.competition_id === c.id)
+        return (
+          <div key={c.id} className="border pb-hairline rounded p-4 mb-3" data-testid="competition-card">
+            <div className="flex items-start justify-between gap-3 flex-wrap">
+              {competitions.length > 1 && (
+                <div className="flex flex-col gap-0.5 shrink-0 -ml-1">
+                  <button type="button" disabled={busy || i === 0}
+                    onClick={() => move(i, -1)}
+                    aria-label={`Move ${c.name} up`}
+                    className="w-6 h-5 text-[11px] leading-none rounded text-pb-dim hover:text-pb-text hover:bg-pb-surface2 disabled:opacity-30 disabled:hover:bg-transparent"
+                  >▲</button>
+                  <button type="button" disabled={busy || i === competitions.length - 1}
+                    onClick={() => move(i, 1)}
+                    aria-label={`Move ${c.name} down`}
+                    className="w-6 h-5 text-[11px] leading-none rounded text-pb-dim hover:text-pb-text hover:bg-pb-surface2 disabled:opacity-30 disabled:hover:bg-transparent"
+                  >▼</button>
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                {renaming === c.id ? (
+                  <form
+                    onSubmit={e => {
+                      e.preventDefault()
+                      act(() => api.adminRenameCompetition(c.id, renameValue))
+                        .then(() => setRenaming(null))
+                    }}
+                    className="flex items-center gap-2"
+                  >
+                    <input
+                      autoFocus
+                      value={renameValue}
+                      onChange={e => setRenameValue(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Escape') setRenaming(null) }}
+                      className="bg-pb-surface2 border pb-hairline text-pb-text text-sm rounded px-2 py-1"
+                    />
+                    <button type="submit" disabled={busy} className="text-xs font-mono uppercase text-pb-accent">Save</button>
+                    <button type="button" onClick={() => setRenaming(null)} className="text-xs font-mono uppercase text-pb-faint">Cancel</button>
+                  </form>
+                ) : (
+                  <h3 className="text-pb-text font-semibold text-[15px]">{c.name}</h3>
+                )}
+                <p className="text-pb-faint text-xs mt-0.5">
+                  {c.association_name ? `${c.association_name} · ` : ''}
+                  {held.length} {held.length === 1 ? 'grade' : 'grades'}
+                  {c.season_count ? ` · ${c.season_count} season${c.season_count === 1 ? '' : 's'}` : ''}
+                </p>
+              </div>
+              <div className="flex items-center gap-3 shrink-0">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => { setRenaming(c.id); setRenameValue(c.name) }}
+                  className="text-xs font-mono uppercase tracking-wide2 text-pb-faint hover:text-pb-text"
+                >
+                  Rename
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    // Names what actually goes, because it is far less than a
+                    // reader would fear: the grades and every game, run and
+                    // wicket in them are untouched, they simply stop being
+                    // grouped.
+                    if (!window.confirm(
+                      `Delete "${c.name}"?\n\nIts ${held.length} grade${held.length === 1 ? '' : 's'} and every game in them are kept — they just stop being grouped, and you can put them in another competition afterwards.`
+                    )) return
+                    act(() => api.adminDeleteCompetition(c.id))
+                  }}
+                  className="text-xs font-mono uppercase tracking-wide2 text-pb-faint hover:text-pb-red"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+            {held.length > 0 && (
+              <div className="mt-3 space-y-1.5">
+                {held.map(g => (
+                  <GradeCompetitionRow
+                    key={g.name}
+                    grade={g}
+                    competitions={competitions}
+                    busy={busy}
+                    onChange={id => act(() => api.adminAssignGradeToCompetition(g.name, id))}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })}
+
+      {ungrouped.length > 0 && (
+        <div className="border pb-hairline rounded p-4 mb-3">
+          {/* Shown, never dropped — the same rule the un-grouped row on every
+              by-competition breakdown follows. A grade here still counts in
+              every unfiltered figure; it just has no competition to be found
+              under. */}
+          <h3 className="text-pb-text font-semibold text-[15px]">Not in a competition</h3>
+          <p className="text-pb-faint text-xs mt-0.5 mb-3">
+            These still count in every unfiltered figure. They simply have no
+            competition to be found under.
+          </p>
+          <div className="space-y-1.5">
+            {ungrouped.map(g => (
+              <GradeCompetitionRow
+                key={g.name}
+                grade={g}
+                competitions={competitions}
+                busy={busy}
+                onChange={id => act(() => api.adminAssignGradeToCompetition(g.name, id))}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      <form
+        onSubmit={e => {
+          e.preventDefault()
+          if (!newName.trim()) return
+          act(() => api.adminCreateCompetition(newName.trim())).then(() => setNewName(''))
+        }}
+        className="flex items-center gap-2 mt-4"
+      >
+        <input
+          value={newName}
+          onChange={e => setNewName(e.target.value)}
+          placeholder="New competition name"
+          className="flex-1 bg-pb-surface2 border pb-hairline text-pb-text text-sm rounded px-3 py-2 focus:outline-none focus:border-pb-accent"
+        />
+        <button
+          type="submit"
+          disabled={busy || !newName.trim()}
+          className="px-3 py-2 text-xs font-mono tracking-wide2 uppercase rounded bg-pb-accent/15 text-pb-accent hover:bg-pb-accent/25 disabled:opacity-50 shrink-0"
+        >
+          Add
+        </button>
+      </form>
+    </div>
+  )
+}
+
+// One grade, and which competition it is in. Assigning moves EVERY season row
+// of that grade name at once — a grade is one thing to a club across every
+// season it ran, the same rule the category and display-order editors above
+// already follow.
+function GradeCompetitionRow({ grade, competitions, busy, onChange }) {
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <span className="text-sm text-pb-dim flex-1 min-w-0 truncate">
+        {grade.name}
+        {grade.association_name && (
+          <span className="text-pb-faintest text-xs"> · {grade.association_name}</span>
+        )}
+        {/* A grade whose season rows sit in more than one competition is a real
+            state (a grade that changed association), so it is reported rather
+            than silently showing whichever row sorted first. */}
+        {grade.mixed && (
+          <span className="text-pb-faint text-xs"> · split across competitions</span>
+        )}
+      </span>
+      <select
+        value={grade.competition_id || ''}
+        disabled={busy}
+        onChange={e => onChange(e.target.value || null)}
+        className="bg-pb-surface2 border pb-hairline text-pb-text text-xs rounded px-2 py-1 focus:outline-none focus:border-pb-accent shrink-0"
+      >
+        <option value="">— not in a competition —</option>
+        {competitions.map(c => (
+          <option key={c.id} value={c.id}>{c.name}</option>
+        ))}
+      </select>
+    </div>
+  )
+}
+
 export default function AdminGrades() {
   const { user } = useAuth()
   const [orgId, setOrgId] = useState(null)
@@ -620,11 +1134,15 @@ export default function AdminGrades() {
   return (
     <BetterStatsLayout>
       <div className="max-w-3xl">
-        <h1 className="font-display font-bold text-2xl text-pb-text mb-2">Grades</h1>
+        <h1 className="font-display font-bold text-2xl text-pb-text mb-2">Grades &amp; Competitions</h1>
         <p className="text-pb-faint text-sm mb-6 leading-relaxed">
-          Label grades by type, choose which to share publicly, merge grades that are the same competition
-          under different names, or set display name overrides.
+          Your competitions live here too: group grades into the competitions they were played in and
+          set the order the Competition filter lists them in. Below that, label grades by type, choose
+          which to share publicly, merge grades that are the same competition under different names,
+          or set display name overrides.
         </p>
+
+        <CompetitionManager clubId={orgId} />
 
         <MergeBuilder orgId={orgId} grades={grades || []} onMerged={refresh} />
 

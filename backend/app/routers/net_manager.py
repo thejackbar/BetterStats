@@ -11,7 +11,8 @@ surface in BetterSelect and on the player profile.
                       the row's existence = "turned up", `batted` = completed a
                       turn, `bats` = in the batting rotation at all (someone can
                       be here and sitting out), `position` = where they sit in
-                      the queue
+                      the queue, `padding_up` = told to get ready for the next
+                      turn, `priority` = needs to bat early tonight
 
 THE LIVE SESSION IS SERVER-AUTHORITATIVE, and that is the whole shape of this
 router. It used to be a client-side state machine on one device that pushed a
@@ -250,6 +251,9 @@ class AttendeePatch(BaseModel):
     batted: Optional[bool] = None
     bats: Optional[bool] = None
     note: Optional[str] = None
+    # Told to pad up for the next turn, and needs to bat early tonight.
+    padding_up: Optional[bool] = None
+    priority: Optional[bool] = None
 
 
 class QueueOrder(BaseModel):
@@ -364,8 +368,12 @@ async def _live_payload(db: AsyncSession, s: NetSession) -> dict:
             "batted": bool(r.batted),
             "bats": bool(r.bats),
             "note": r.note,
-            "source": r.source or "admin",
             "position": r.position,
+            # Told to get their gear on for the next turn, and needs to bat
+            # early tonight. Two different questions, so two flags — see the
+            # model for why priority doesn't re-sort the queue by itself.
+            "padding_up": bool(r.padding_up),
+            "priority": bool(r.priority),
             # 'admin' or 'self' — what lets the live screen announce someone
             # who scanned themselves in and stay quiet for a name the manager
             # just tapped. Rows written before migration 272 read 'admin',
@@ -818,11 +826,18 @@ async def patch_attendee(
     user: User = Depends(require_cap(MANAGE_SELECTIONS)),
 ):
     """Mark one attendee as having had their turn, send them back to the queue,
-    or move them in or out of the rotation.
+    move them in or out of the rotation, or set either batting-order flag.
 
     Both re-entry paths put them at the END of the queue — "they need another
     go" and "his shoulder has loosened up, put him in" both mean the back of
     the line, not a place ahead of someone who has been waiting.
+
+    PADDING UP IS ABOUT THE NEXT TURN AND NOTHING ELSE, so it is cleared the
+    moment the person it applied to has batted or left the rotation. Leaving it
+    set would put a "get your pads on" mark beside somebody who has already had
+    their knock, which is worse than no mark at all. PRIORITY survives both,
+    because "leaving at seven" is still true after a turn and is exactly what a
+    coach needs to see if they come back into the queue for a second one.
     """
     s = await _owned_session(db, session_id, club.id)
     r = await _owned_attendee(db, s, attendee_id)
@@ -834,6 +849,13 @@ async def patch_attendee(
             r.note = note
             changed = True
 
+    if body.priority is not None and bool(r.priority) != bool(body.priority):
+        r.priority = bool(body.priority)
+        changed = True
+    if body.padding_up is not None and bool(r.padding_up) != bool(body.padding_up):
+        r.padding_up = bool(body.padding_up)
+        changed = True
+
     rejoined = False
     if body.bats is not None and bool(r.bats) != bool(body.bats):
         r.bats = bool(body.bats)
@@ -842,6 +864,10 @@ async def patch_attendee(
     if body.batted is not None and bool(r.batted) != bool(body.batted):
         r.batted = bool(body.batted)
         rejoined = rejoined or not r.batted
+        changed = True
+
+    if r.padding_up and (r.batted or not r.bats):
+        r.padding_up = False
         changed = True
 
     if rejoined and not r.batted and r.bats:
@@ -889,13 +915,24 @@ async def reorder_queue(
 
 async def _rotate(db: AsyncSession, s: NetSession, settings: dict, live: dict, autostart: bool) -> dict:
     """End the current turn: the batters in the nets are marked as having had
-    theirs, the next group steps up and the clock resets for them."""
+    theirs, the next group steps up and the clock resets for them.
+
+    A rotation is also what SPENDS a padding-up flag, at both ends: the group
+    coming out have batted, and the group going in have put their pads on and
+    walked to the nets. Clearing it here is what makes the mark mean "the next
+    turn" all night rather than slowly becoming a list of everyone the coach
+    has ever spoken to — the screen empties and the coach flags whoever is
+    actually next.
+    """
     rows = await _attendee_rows(db, s.id)
     waiting = _waiting(rows)
 
     group = waiting[: settings["nets"]]
     for r in group:
         r.batted = True
+        r.padding_up = False
+    for r in waiting[settings["nets"]: settings["nets"] * 2]:
+        r.padding_up = False
     await db.flush()
     await _renumber(db, s.id)
 

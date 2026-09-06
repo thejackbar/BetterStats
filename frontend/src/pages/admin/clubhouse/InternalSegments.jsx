@@ -86,7 +86,7 @@ export default function InternalSegments() {
               </div>
 
               <CountBar counting={s.counting} total={s.total} reachable={s.reachable} otherRoute={s.otherRoute}
-                noun="contact" nounPlural="contacts" />
+                clubs={s.clubs} noun="contact" nounPlural="contacts" />
 
               <SaveRow
                 onSave={() => s.save('Segment')} busy={s.busy} error={s.error}

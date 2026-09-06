@@ -14,10 +14,12 @@ import {
 } from '../lib/presskit'
 import { useNameFormat } from '../lib/nameFormat'
 import { fmt2, fmtCount, formatSeason } from '../lib/cricketFormat'
+import { RateMark, RateFootnote, RateInfo } from '../components/RateCoverage'
 
 const BATTING_SORTS = [
   { key: 'total_runs',    label: 'MOST RUNS' },
   { key: 'average',       label: 'AVERAGE' },
+  { key: 'strike_rate',   label: 'STRIKE RATE' },
   { key: 'high_score',    label: 'HIGH SCORE' },
   { key: 'fifties',       label: 'FIFTIES' },
   { key: 'hundreds',      label: 'CENTURIES' },
@@ -185,6 +187,7 @@ function SortBtn({ label, active, onClick }) {
 function getBattingCols(sortBy) {
   const base = ['M', 'RUNS', 'AVG', 'HS']
   if (sortBy === 'average')     return ['M', 'AVG', 'RUNS', 'INN', 'HS']
+  if (sortBy === 'strike_rate') return ['M', 'SR', 'RUNS', 'INN', 'AVG']
   if (sortBy === 'high_score')  return ['M', 'HS', 'RUNS', 'AVG']
   if (sortBy === 'fifties')     return ['M', '50s', 'RUNS', 'AVG']
   if (sortBy === 'hundreds')    return ['M', '100s', 'RUNS', 'AVG']
@@ -192,6 +195,52 @@ function getBattingCols(sortBy) {
   if (sortBy === 'total_fours') return ['M', '4s', 'RUNS']
   if (sortBy === 'ducks')       return ['M', 'DUCKS', 'INN']
   return base
+}
+
+/**
+ * How many ball-counted innings (or overs-carrying spells) a player needs
+ * before their rate is ranked here.
+ *
+ * Counted on the innings that could answer the question, never on innings
+ * played: ten innings with three ball counts is a three-innings strike rate,
+ * and letting that clear a ten-innings bar is what the bar exists to stop.
+ *
+ * "Club default" is the absence of a pick rather than a number of its own, so
+ * it sends nothing and the club's own setting applies.
+ */
+function RateMinPills({ label, value, onChange, unit = 'innings' }) {
+  const OPTIONS = [
+    { v: null, label: 'Club default' },
+    { v: 0, label: 'Any' },
+    { v: 3, label: '3+' },
+    { v: 5, label: '5+' },
+    { v: 10, label: '10+' },
+    { v: 20, label: '20+' },
+  ]
+  return (
+    <div className="flex flex-wrap items-center gap-2 px-1 py-2 mb-3">
+      <span className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">{label}</span>
+      <div className="flex flex-wrap gap-1">
+        {OPTIONS.map(o => (
+          <button
+            key={String(o.v)}
+            type="button"
+            onClick={() => onChange(o.v)}
+            aria-pressed={value === o.v}
+            className={`px-2 py-1 rounded font-mono text-[11px] border transition-colors ${
+              value === o.v
+                ? 'border-pb-accent text-pb-accent'
+                : 'border-pb-hairline text-pb-dim hover:text-pb-text'
+            }`}
+            style={value === o.v ? { background: 'color-mix(in srgb, var(--pb-accent) 10%, transparent)' } : {}}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+      <RateInfo unit={unit} />
+    </div>
+  )
 }
 
 function BattingTable({ rows, sortBy, fmt = n => n }) {
@@ -209,8 +258,8 @@ function BattingTable({ rows, sortBy, fmt = n => n }) {
               <th className="font-medium py-3">PLAYER</th>
               {cols.map(c => (
                 <th key={c} className="font-medium py-3 text-right pr-3"
-                  style={c === primaryLabel || c === 'RUNS' || c === 'AVG' || c === 'INN' || c === 'HS' || c === '50s' || c === '100s' || c === '6s' || c === '4s' || c === 'DUCKS' || c === 'M'
-                    ? (c === primaryLabel || (c === 'RUNS' && sortBy === 'total_runs') || (c === 'AVG' && sortBy === 'average') || (c === 'HS' && sortBy === 'high_score') || (c === '50s' && sortBy === 'fifties') || (c === '100s' && sortBy === 'hundreds') || (c === '6s' && sortBy === 'total_sixes') || (c === '4s' && sortBy === 'total_fours') || (c === 'DUCKS' && sortBy === 'ducks'))
+                  style={c === primaryLabel || c === 'SR' || c === 'RUNS' || c === 'AVG' || c === 'INN' || c === 'HS' || c === '50s' || c === '100s' || c === '6s' || c === '4s' || c === 'DUCKS' || c === 'M'
+                    ? (c === primaryLabel || (c === 'RUNS' && sortBy === 'total_runs') || (c === 'AVG' && sortBy === 'average') || (c === 'HS' && sortBy === 'high_score') || (c === '50s' && sortBy === 'fifties') || (c === '100s' && sortBy === 'hundreds') || (c === '6s' && sortBy === 'total_sixes') || (c === '4s' && sortBy === 'total_fours') || (c === 'DUCKS' && sortBy === 'ducks') || (c === 'SR' && sortBy === 'strike_rate'))
                       ? { color: 'var(--pb-accent)' } : {}
                     : {}
                   }>{c}</th>
@@ -226,11 +275,12 @@ function BattingTable({ rows, sortBy, fmt = n => n }) {
                 </td>
                 {cols.map(c => {
                   let val
-                  const isPrimary = (c === 'RUNS' && sortBy === 'total_runs') || (c === 'AVG' && sortBy === 'average') || (c === 'HS' && sortBy === 'high_score') || (c === '50s' && sortBy === 'fifties') || (c === '100s' && sortBy === 'hundreds') || (c === '6s' && sortBy === 'total_sixes') || (c === '4s' && sortBy === 'total_fours') || (c === 'DUCKS' && sortBy === 'ducks')
+                  const isPrimary = (c === 'RUNS' && sortBy === 'total_runs') || (c === 'AVG' && sortBy === 'average') || (c === 'HS' && sortBy === 'high_score') || (c === '50s' && sortBy === 'fifties') || (c === '100s' && sortBy === 'hundreds') || (c === '6s' && sortBy === 'total_sixes') || (c === '4s' && sortBy === 'total_fours') || (c === 'DUCKS' && sortBy === 'ducks') || (c === 'SR' && sortBy === 'strike_rate')
                   if (c === 'M')    val = p.games != null ? fmtCount(p.games) : '—'
                   else if (c === 'RUNS')  val = p.total_runs != null ? fmtCount(p.total_runs) : '—'
                   else if (c === 'INN')   val = p.innings ?? '—'
                   else if (c === 'AVG')   val = fmt2(p.average)
+                  else if (c === 'SR')    val = <>{fmt2(p.strike_rate)}<RateMark coverage={p.strike_rate_coverage} /></>
                   else if (c === 'HS')    val = p.high_score ?? '—'
                   else if (c === '50s')   val = p.fifties ?? '—'
                   else if (c === '100s')  val = p.hundreds ?? '—'
@@ -251,6 +301,7 @@ function BattingTable({ rows, sortBy, fmt = n => n }) {
           </tbody>
         </table>
       </div>
+      <RateFootnote rows={rows} when={cols.includes('SR')} />
     </Card>
   )
 }
@@ -286,7 +337,8 @@ function BowlingTable({ rows, sortBy, fmt = n => n }) {
                   <span className="font-mono text-[15px] font-bold pb-num" style={{ color: 'var(--pb-accent)' }}>
                     {sortBy === 'best_figures_wickets'
                       ? (p.best_bowling_figures ? p.best_bowling_figures.replace('-', '/') : p.best_figures_wickets != null ? `${fmtCount(p.best_figures_wickets)} wickets` : '—')
-                      : (sortBy === 'economy' || sortBy === 'average') ? fmt2(p[sortBy])
+                      : sortBy === 'economy' ? <>{fmt2(p.economy)}<RateMark coverage={p.economy_coverage} unit="spells" /></>
+                      : sortBy === 'average' ? fmt2(p.average)
                       : sortBy === 'total_wickets' ? (p.total_wickets != null ? fmtCount(p.total_wickets) : '—')
                       : (p[sortBy] ?? '—')}
                   </span>
@@ -295,7 +347,7 @@ function BowlingTable({ rows, sortBy, fmt = n => n }) {
                   <td className="py-3 pr-3 font-mono text-pb-text text-right">{p.total_wickets != null ? fmtCount(p.total_wickets) : '—'}</td>
                 )}
                 <td className="py-3 pr-3 font-mono text-pb-dim text-right">{fmt2(p.average)}</td>
-                <td className="py-3 pr-3 font-mono text-pb-dim text-right">{fmt2(p.economy)}</td>
+                <td className="py-3 pr-3 font-mono text-pb-dim text-right">{fmt2(p.economy)}<RateMark coverage={p.economy_coverage} unit="spells" /></td>
                 <td className="py-3 pr-5 font-mono text-pb-dim text-right">
                   {p.best_bowling_figures ? p.best_bowling_figures.replace('-', '/') : p.best_figures_wickets != null ? `${fmtCount(p.best_figures_wickets)} wickets` : '—'}
                 </td>
@@ -304,6 +356,7 @@ function BowlingTable({ rows, sortBy, fmt = n => n }) {
           </tbody>
         </table>
       </div>
+      <RateFootnote rows={rows} field="economy_coverage" unit="spells" />
     </Card>
   )
 }
@@ -380,7 +433,8 @@ export default function Leaderboard() {
   const {
     available: availableCategories, availableFormats, defaultCategories,
     gradeType, setGradeType, matchFormat, setMatchFormat,
-    categoriesParam, formatsParam,
+    categoriesParam, formatsParam, competitionsParam,
+    competition, setCompetition, availableCompetitions,
   } = useGradeFilters(orgId)
 
   const [mainTab, setMainTab] = useState('batting')
@@ -391,6 +445,11 @@ export default function Leaderboard() {
   const [minRuns, setMinRuns] = useState(500)
   const [minOvers, setMinOvers] = useState(100)
   const [minWickets, setMinWickets] = useState(50)
+  // null means "whatever the club set", which is what omitting the param asks
+  // for. 0 is a real answer — it is how a reader switches the bar off — so this
+  // is never collapsed to a falsy check.
+  const [minRateInnings, setMinRateInnings] = useState(null)
+  const [minRateSpells, setMinRateSpells] = useState(null)
 
   const [battingRows, setBattingRows] = useState([])
   const [bowlingRows, setBowlingRows] = useState([])
@@ -433,6 +492,8 @@ export default function Leaderboard() {
   }, [orgGrades, searchParams])
 
   const effectiveMinRuns = battingSort === 'average' ? minRuns : 0
+  const effectiveMinRateInnings = battingSort === 'strike_rate' ? minRateInnings : null
+  const effectiveMinRateSpells = bowlingSort === 'economy' ? minRateSpells : null
   const effectiveMinOvers = bowlingSort === 'economy' ? minOvers : 0
   const effectiveMinWickets = bowlingSort === 'average' ? minWickets : 0
 
@@ -440,23 +501,23 @@ export default function Leaderboard() {
     if (!orgId) return
     setLoading(true)
     Promise.allSettled([
-      api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, sortBy: battingSort, limit: 30, minRuns: effectiveMinRuns, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam, formats: formatsParam }),
-      api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, sortBy: bowlingSort, limit: 30, minOvers: effectiveMinOvers, minWickets: effectiveMinWickets, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam, formats: formatsParam }),
-      api.fieldingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, sortBy: fieldingSort, limit: 30, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam, formats: formatsParam }),
+      api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, sortBy: battingSort, limit: 30, minRuns: effectiveMinRuns, minRateInnings: effectiveMinRateInnings, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam }),
+      api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, sortBy: bowlingSort, limit: 30, minOvers: effectiveMinOvers, minWickets: effectiveMinWickets, minRateSpells: effectiveMinRateSpells, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam }),
+      api.fieldingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, sortBy: fieldingSort, limit: 30, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam }),
     ]).then(([b, bw, f]) => {
       if (b.status === 'fulfilled') setBattingRows(b.value)
       if (bw.status === 'fulfilled') setBowlingRows(bw.value)
       if (f.status === 'fulfilled') setFieldingRows(f.value)
     }).finally(() => setLoading(false))
-  }, [orgId, selectedSeason, selectedGradeName, battingSort, bowlingSort, fieldingSort, effectiveMinRuns, effectiveMinOvers, effectiveMinWickets, finalsOnly, captainOnly, gender, overseas, categoriesParam, formatsParam])
+  }, [orgId, selectedSeason, selectedGradeName, battingSort, bowlingSort, fieldingSort, effectiveMinRuns, effectiveMinOvers, effectiveMinWickets, effectiveMinRateInnings, effectiveMinRateSpells, finalsOnly, captainOnly, gender, overseas, categoriesParam, formatsParam, competitionsParam])
 
   useEffect(() => {
     if (!orgId || mainTab !== 'sirs') return
     setSirsLoading(true)
     Promise.allSettled([
-      api.sirsLeaderboard(orgId, 'batting', { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam, formats: formatsParam }),
-      api.sirsLeaderboard(orgId, 'bowling-innings', { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam, formats: formatsParam }),
-      api.sirsLeaderboard(orgId, 'bowling-match', { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam, formats: formatsParam }),
+      api.sirsLeaderboard(orgId, 'batting', { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam }),
+      api.sirsLeaderboard(orgId, 'bowling-innings', { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam }),
+      api.sirsLeaderboard(orgId, 'bowling-match', { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam }),
     ]).then(([sc, sbi, sbm]) => {
       if (sc.status === 'fulfilled') setCenturiesRows(sc.value)
       if (sbi.status === 'fulfilled') setBowlingInningsRows(sbi.value)
@@ -503,9 +564,13 @@ export default function Leaderboard() {
             setGradeType={setGradeType}
             matchFormat={matchFormat}
             setMatchFormat={setMatchFormat}
+            competition={competition}
+            setCompetition={setCompetition}
+            availableCompetitions={availableCompetitions}
             availableCategories={availableCategories}
             availableFormats={availableFormats}
             defaultCategories={defaultCategories}
+            showCompetitionFilter
             showGradeTypeFilter
             showMatchFormatFilter
           />
@@ -550,6 +615,13 @@ export default function Leaderboard() {
         {mainTab === 'batting' && battingSort === 'average' && (
           <MinFilterInput label="Min. runs" value={minRuns} onChange={setMinRuns} />
         )}
+        {mainTab === 'batting' && battingSort === 'strike_rate' && (
+          <RateMinPills
+            label="Min. innings with balls faced"
+            value={minRateInnings}
+            onChange={setMinRateInnings}
+          />
+        )}
         {mainTab === 'bowling' && (
           <div className="flex flex-wrap gap-1 mb-4 pb-hairline-b">
             {BOWLING_SORTS.map(s => (
@@ -558,7 +630,15 @@ export default function Leaderboard() {
           </div>
         )}
         {mainTab === 'bowling' && bowlingSort === 'economy' && (
-          <MinFilterInput label="Min. overs" value={minOvers} onChange={setMinOvers} />
+          <>
+            <MinFilterInput label="Min. overs" value={minOvers} onChange={setMinOvers} />
+            <RateMinPills
+              label="Min. spells with overs recorded"
+              value={minRateSpells}
+              onChange={setMinRateSpells}
+              unit="spells"
+            />
+          </>
         )}
         {mainTab === 'bowling' && bowlingSort === 'average' && (
           <MinFilterInput label="Min. wickets" value={minWickets} onChange={setMinWickets} />

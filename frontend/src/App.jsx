@@ -238,6 +238,7 @@ const ShareCard = lazy(() => import('./pages/ShareCard'))
 const StatLab = lazy(() => import('./pages/StatLab'))
 const Yearbook = lazy(() => import('./pages/Yearbook'))
 const GamesPage = lazy(() => import('./pages/GamesPage'))
+const CompetitionsPage = lazy(() => import('./pages/CompetitionsPage'))
 const FixturesPage = lazy(() => import('./pages/FixturesPage'))
 const LineupsPage = lazy(() => import('./pages/LineupsPage'))
 const MatchScorecard = lazy(() => import('./pages/MatchScorecard'))
@@ -603,6 +604,7 @@ export default function App() {
           <Route path="/:clubSlug/statlab" element={<StatLab />} />
           <Route path="/:clubSlug/statlab/r/:reportSlug" element={<StatLab />} />
           <Route path="/:clubSlug/games" element={<GamesPage />} />
+          <Route path="/:clubSlug/competitions" element={<CompetitionsPage />} />
           <Route path="/:clubSlug/fixtures" element={<FixturesPage />} />
           <Route path="/:clubSlug/lineups" element={<LineupsPage />} />
           <Route path="/:clubSlug/yearbook" element={<Yearbook />} />

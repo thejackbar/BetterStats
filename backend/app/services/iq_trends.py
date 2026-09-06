@@ -21,6 +21,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services import scouting_intel
+from app.services import rate_coverage as rc
 from app.services.bowling_style import bowling_class, bowling_label
 from app.services.aggregations import (
     get_bowling_by_batter_position,
@@ -1042,19 +1043,29 @@ async def player_deep_dive(
 
     # Batting style (brief §1.2, scorecard-reachable subset) — how they score,
     # from balls + boundaries. Dot% / SR-by-ball-range need ball-by-ball: out of reach.
-    tb = sum(r["balls"] for r in inns if r["balls"])
+    # Every ball-denominated figure here is worked out from the innings that
+    # carry a ball count, and only those: a career scored partly on paper gives
+    # us all the runs and some of the balls, so dividing one by the other mixes
+    # two populations. See services/rate_coverage.py. The boundary percentage
+    # is runs over runs and stays across every innings.
+    covered = [r for r in inns if rc.is_batting_covered(r["runs"], r["balls"])]
+    tb = sum(r["balls"] or 0 for r in covered)
+    cov_runs = sum(r["runs"] for r in covered)
+    cov_fours = sum(r["fours"] or 0 for r in covered)
+    cov_sixes = sum(r["sixes"] or 0 for r in covered)
+    cov_boundaries = cov_fours + cov_sixes
     tfours = sum(r["fours"] or 0 for r in inns)
     tsixes = sum(r["sixes"] or 0 for r in inns)
-    tboundaries = tfours + tsixes
     truns = sum(r["runs"] for r in inns)
     batting_style = None
     if tb > 0:
         bpct = round(100 * (4 * tfours + 6 * tsixes) / truns) if truns else None
         batting_style = {
             "balls": tb,
-            "strike_rate": round(100 * truns / tb, 1),
+            "strike_rate": rc.strike_rate(cov_runs, tb, 1),
+            "strike_rate_coverage": rc.coverage(len(covered), n),
             "boundary_pct": bpct,                         # share of runs in boundaries
-            "balls_per_boundary": round(tb / tboundaries, 1) if tboundaries else None,
+            "balls_per_boundary": round(tb / cov_boundaries, 1) if cov_boundaries else None,
             "fours": tfours, "sixes": tsixes,
             "profile": (
                 ("Boundary hitter" if bpct >= 60 else "Accumulator" if bpct <= 35 else "Balanced")

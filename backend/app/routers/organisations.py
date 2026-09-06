@@ -190,6 +190,10 @@ async def onboard_organisation(
         from app.services.memberships import ensure_primary_admin
         await ensure_primary_admin(db, org.id)
         await db.commit()
+        # ...and belongs on BetterCricket's internal club-admin list. After the
+        # commit, on its own session — never inside this transaction.
+        from app.services.admin_contact_list import queue_sync as queue_admin_contact_sync
+        queue_admin_contact_sync(org.id)
 
     return {
         "status": "sync_started",
@@ -340,6 +344,37 @@ async def get_org_grade_categories(org_id: str, db: AsyncSession = Depends(get_d
         "available": await grade_scope.org_available_categories(db, org_id),
         "default": list(await grade_scope.club_default_categories(db, org_id)),
         "available_formats": await grade_scope.org_available_formats(db, org_id),
+        # The club's competitions, so a page can draw the third filter row from
+        # the request it already makes. A club with fewer than two has nothing
+        # to choose between and the row doesn't render — the same rule the
+        # empty `available` above follows.
+        "available_competitions": await grade_scope.org_available_competitions(db, org_id),
+    }
+
+
+@router.get("/{org_id}/competitions")
+async def get_org_competitions(
+    org_id: str,
+    season_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """The club's record in each competition it has played, and its grades.
+
+    Answers "how did we go in the Border Cup" without switching a filter, and
+    is the CLUB half of the by-competition breakdown; ``grades`` is the TEAM
+    half, every grade listed under its own competition — which is what
+    separates a side that plays in more than one during a single season.
+
+    Public, and read from the per-innings scorecards, because Cricket
+    Australia's season aggregates carry no grade and so can say nothing about
+    which competition a run was scored in.
+    """
+    from app.services import competition_stats
+    club = await competition_stats.club_competition_breakdown(db, org_id, season_id)
+    return {
+        **club,
+        "grades": await competition_stats.competition_grade_breakdown(db, org_id, season_id),
+        "available": await grade_scope.org_available_competitions(db, org_id),
     }
 
 
@@ -412,12 +447,22 @@ async def get_org_summary(
             "Omit for no format filter."
         ),
     ),
+    competitions: str | None = Query(
+        None,
+        description=(
+            "Comma-separated club competition ids to count. A competition is "
+            "the club's own named group of grades (services/competitions.py), "
+            "seeded one per association — so this is what tells one "
+            "association's cricket from another's, and one competition of an "
+            "association from the next. Omitted applies no competition filter."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
     # W/L/D/total_games/win_rate are computed from our own synced games inside
     # get_club_summary (DB-first) — the old PlayHQ Partner override is retired.
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
+    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions)
     summary = await get_club_summary(db, org_id, season_id, grade_id, scope=scope)
     summary["scope"] = scope.as_meta()
     # The club-level totals stay whole (a hidden player's runs still happened
@@ -645,6 +690,28 @@ async def _sync_safe(org_id: str, run_id: uuid.UUID, kind: str = "org_full", aut
                 logging.getLogger(__name__).info(f"Self-serve yearbook auto-generate for {org_id}: {yb_result}")
             except Exception as ye:
                 logging.getLogger(__name__).warning(f"Self-serve yearbook auto-generate failed for {org_id}: {ye}")
+
+        # Group the club's grades into competitions the moment its first full
+        # sync lands, rather than leaving a brand-new club to wait for the
+        # 02:30 nightly pass and open Manage Grades on "not in a competition".
+        # The sync writes each grade's association as it goes, so by here the
+        # club has everything the grouping needs.
+        #
+        # `maybe_group_club` owns the decision and never raises: it skips a
+        # club whose remaining gap is Cricket Australia's own, and skips a run
+        # already in flight, so calling it after every full sync costs nothing
+        # once a club has settled. The nightly job stays as it is — a club that
+        # played nothing in a period never reaches a sync at all, which is why
+        # that pass exists.
+        try:
+            from app.services import competition_grouping
+            grouped = await competition_grouping.maybe_group_club(org_id)
+            if grouped.get("ran"):
+                logging.getLogger(__name__).info(
+                    f"Competition grouping after full sync for {org_id}: {grouped}")
+        except Exception as ge:
+            logging.getLogger(__name__).warning(
+                f"Competition grouping after full sync failed for {org_id}: {ge}")
     except SyncControlSignal as sig:
         # Pause/Cancel from the Super Admin All Clubs page — not a crash.
         if sig.action == "pause":
@@ -691,6 +758,16 @@ async def get_org_results(
             "Comma-separated match formats to count — two_day, one_day, t20, or "
             "'all'. Matched per fixture off each game's own match_format. "
             "Omit for no format filter."
+        ),
+    ),
+    competitions: str | None = Query(
+        None,
+        description=(
+            "Comma-separated club competition ids to count. A competition is "
+            "the club's own named group of grades (services/competitions.py), "
+            "seeded one per association — so this is what tells one "
+            "association's cricket from another's, and one competition of an "
+            "association from the next. Omitted applies no competition filter."
         ),
     ),
     db: AsyncSession = Depends(get_db),
@@ -794,7 +871,7 @@ async def get_org_results(
         query += " AND g.is_final = TRUE"
     # Grade-type / match-type scope. An explicitly picked grade beats it, the
     # same rule the leaderboards follow.
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
+    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions)
     if grade_id:
         scope = scope.formats_only()
     if scope.active:

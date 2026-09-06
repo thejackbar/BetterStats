@@ -1,3 +1,4 @@
+import { RateMark, RateFootnote, RateNote, isPartial } from '../components/RateCoverage'
 import { useParams, Link } from 'react-router-dom'
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { api } from '../lib/api'
@@ -15,6 +16,8 @@ import {
   AnimatedNum, Sparkline, Label, Card, Btn, Kpi,
   ResultPill, PageHeader, PbSpinner, TabBar,
 } from '../lib/presskit'
+import { GradeTotalNote, MatchCoverageNote } from '../components/MatchCoverage'
+import { FilterReachDot, FilterReachNote } from '../components/FilterReach'
 import '../styles/honour-badge.css'
 import { countryFlagUrl } from '../data/countries'
 import { CAP } from '../lib/capabilities'
@@ -332,7 +335,11 @@ function WicketsByGradeChart({ bowlingByGrade }) {
 
 // ── Batting tab ─────────────────────────────────────────────────────────
 function BattingTab({ batting, seasonStats, seasons }) {
-  const { sorted, sortKey, sortDir, request } = useSortable(seasonStats, 'season_name', 'desc')
+  // No default sort key: the server already returns these newest-first, and it
+  // orders on the season's YEAR. Sorting the raw name here instead put a
+  // "Winter 2013" row above "Summer 2025/26" (W sorts after S), which is what
+  // drew 2013/14 at the top of the table. Clicking a column still sorts.
+  const { sorted, sortKey, sortDir, request } = useSortable(seasonStats, null, 'desc')
   if (!batting) return <PbSpinner />
 
   return (
@@ -404,7 +411,11 @@ function BattingTab({ batting, seasonStats, seasons }) {
 
 // ── Bowling tab ──────────────────────────────────────────────────────────
 function BowlingTab({ bowling, seasonStats }) {
-  const { sorted, sortKey, sortDir, request } = useSortable(seasonStats, 'season_name', 'desc')
+  // No default sort key: the server already returns these newest-first, and it
+  // orders on the season's YEAR. Sorting the raw name here instead put a
+  // "Winter 2013" row above "Summer 2025/26" (W sorts after S), which is what
+  // drew 2013/14 at the top of the table. Clicking a column still sorts.
+  const { sorted, sortKey, sortDir, request } = useSortable(seasonStats, null, 'desc')
   if (!bowling) return <PbSpinner />
 
   return (
@@ -453,7 +464,7 @@ function BowlingTab({ bowling, seasonStats }) {
                     <td className="py-2.5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}>{fmt(s.total_wickets)}</td>
                     <td className="py-2.5 font-mono text-pb-dim text-right">{fmtOvers(s.total_overs)}</td>
                     <td className="py-2.5 font-mono text-pb-text text-right">{fmt(s.bowling_average, true)}</td>
-                    <td className="py-2.5 font-mono text-pb-dim text-right">{fmtDec(s.economy)}</td>
+                    <td className="py-2.5 font-mono text-pb-dim text-right">{fmtDec(s.economy)}<RateMark coverage={s.economy_coverage} unit="spells" /></td>
                     <td className="py-2.5 font-mono text-pb-dim text-right">{fmt(s.five_fors)}</td>
                     <td className="py-2.5 pr-5 font-mono text-pb-dim text-right">
                       {s.best_bowling_figures || (s.best_bowling_wickets ? `${s.best_bowling_wickets} wickets` : '—')}
@@ -471,7 +482,11 @@ function BowlingTab({ bowling, seasonStats }) {
 
 // ── Fielding tab ─────────────────────────────────────────────────────────
 function FieldingTab({ fielding, seasonStats }) {
-  const { sorted, sortKey, sortDir, request } = useSortable(seasonStats, 'season_name', 'desc')
+  // No default sort key: the server already returns these newest-first, and it
+  // orders on the season's YEAR. Sorting the raw name here instead put a
+  // "Winter 2013" row above "Summer 2025/26" (W sorts after S), which is what
+  // drew 2013/14 at the top of the table. Clicking a column still sorts.
+  const { sorted, sortKey, sortDir, request } = useSortable(seasonStats, null, 'desc')
   if (!fielding) return <PbSpinner />
 
   return (
@@ -637,9 +652,13 @@ function PlayerRadarChart({ batting, bowling, fielding, innings }) {
   const inningsCount = validInnings.length
 
   const battingAvg = batting?.average != null ? Number(batting.average) : 0
-  const totalBalls = validInnings.reduce((s, i) => s + (Number(i.balls) || 0), 0)
-  const totalRuns = validInnings.reduce((s, i) => s + (Number(i.runs) || 0), 0)
-  const strikeRate = totalBalls > 0 ? (totalRuns / totalBalls) * 100 : 0
+  // The strike rate is the server's, worked out from the innings that carry a
+  // ball count (backend/app/services/rate_coverage.py). This used to be
+  // SUM(runs) / SUM(balls) over every innings drawn below, which puts the runs
+  // from an un-balled innings in the numerator with nothing behind them in the
+  // denominator — the exact figure that rule exists to stop us publishing.
+  const strikeRate = batting?.strike_rate != null ? Number(batting.strike_rate) : null
+  const srCoverage = batting?.strike_rate_coverage
   const bigScores = validInnings.filter(i => (i.runs ?? 0) >= 50).length
   const bigScoreRate = inningsCount > 0 ? bigScores / inningsCount : 0
 
@@ -657,10 +676,12 @@ function PlayerRadarChart({ batting, bowling, fielding, innings }) {
 
   const axes = [
     { axis: 'Bat Avg',    raw: battingAvg > 0 ? battingAvg.toFixed(2) : '—',                    value: norm(battingAvg, 50) },
-    { axis: 'Strike Rt',  raw: totalBalls > 0 ? strikeRate.toFixed(2) : '—',                    value: norm(strikeRate, 120) },
+    { axis: 'Strike Rt',  raw: strikeRate != null ? strikeRate.toFixed(2) : '—',                 value: norm(strikeRate ?? 0, 120),
+      coverage: srCoverage, unit: 'innings' },
     { axis: 'Big Scores', raw: inningsCount > 0 ? `${(bigScoreRate * 100).toFixed(0)}%` : '—',  value: norm(bigScoreRate, 0.35) },
     { axis: 'Bowl Avg',   raw: hasBowled && bowlingAvg != null ? bowlingAvg.toFixed(2) : '—',   value: hasBowled ? normInv(bowlingAvg, 12, 40) : 0 },
-    { axis: 'Economy',    raw: hasBowled && economy != null ? economy.toFixed(2) : '—',         value: hasBowled ? normInv(economy, 3, 8) : 0 },
+    { axis: 'Economy',    raw: hasBowled && economy != null ? economy.toFixed(2) : '—',         value: hasBowled ? normInv(economy, 3, 8) : 0,
+      coverage: hasBowled ? bowling?.economy_coverage : null, unit: 'spells' },
     { axis: 'Fielding',   raw: games > 0 ? `${fieldingPerMatch.toFixed(2)}/g` : '—',            value: norm(fieldingPerMatch, 0.8) },
   ]
 
@@ -694,9 +715,17 @@ function PlayerRadarChart({ batting, bowling, fielding, innings }) {
             <div className="flex-1 h-1.5 bg-pb-hairline rounded-sm overflow-hidden">
               <div className="h-full transition-all duration-500" style={{ width: `${a.value}%`, background: 'var(--pb-accent)' }} />
             </div>
-            <span className="font-mono font-bold text-pb-text text-[12px] w-14 text-right pb-num">{a.raw}</span>
+            <span className="font-mono font-bold text-pb-text text-[12px] w-16 text-right pb-num">
+              {a.raw}<RateMark coverage={a.coverage} unit={a.unit} />
+            </span>
           </div>
         ))}
+        {/* Only where a figure on this card is actually short. A note on every
+            rate in the app is noise that trains people to stop reading it. */}
+        <RateNote coverage={srCoverage} className="mt-1" />
+        {hasBowled && !isPartial(srCoverage) && (
+          <RateNote coverage={bowling?.economy_coverage} unit="spells" className="mt-1" />
+        )}
       </div>
     </div>
   )
@@ -964,6 +993,7 @@ const ANALYSIS_SUBTABS = [
   { key: 'batting',  label: 'BATTING' },
   { key: 'bowling',  label: 'BOWLING' },
   { key: 'formats',  label: 'FORMATS' },
+  { key: 'competitions', label: 'COMPETITIONS' },
   { key: 'team',     label: 'TEAM' },
   { key: 'teammates', label: 'TEAMMATES' },
   { key: 'captain',  label: 'CAPTAIN' },
@@ -979,18 +1009,26 @@ const ANALYSIS_SUBTABS = [
 // routinely mixes one-day and two-day cricket, so this reads each match's own
 // recorded format. Matches we can't place get their own column rather than
 // being folded into one of the three.
-function FormatCompareTable({ rows, cols, title }) {
+// One column per thing being compared, one row per measure. `c.key` is the
+// column's identity — format columns supply `format`, competition columns
+// supply `key`, and both read the same table.
+function FormatCompareTable({ rows, cols, title, note }) {
   const shown = cols.filter(c => rows.some(r => r.value(c) != null && r.value(c) !== ''))
   if (!shown.length) return null
   return (
     <Card title={title} pad="p-0">
+      {note && (
+        <p className="font-mono text-[10px] text-pb-faint tracking-wide2 px-4 sm:px-[18px] pt-4">
+          {note}
+        </p>
+      )}
       <div className="overflow-x-auto">
         <table className="w-full text-[13px]">
           <thead>
             <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/40">
               <th className="font-medium py-2.5 pl-4 sm:pl-[18px]"> </th>
               {shown.map(c => (
-                <th key={c.format} className="font-medium py-2.5 pr-4 text-right whitespace-nowrap">
+                <th key={c.key ?? c.format} className="font-medium py-2.5 pr-4 text-right whitespace-nowrap">
                   {c.label.toUpperCase()}
                 </th>
               ))}
@@ -1005,8 +1043,9 @@ function FormatCompareTable({ rows, cols, title }) {
                 {shown.map(c => {
                   const v = r.value(c)
                   return (
-                    <td key={c.format} className={`py-2 pr-4 font-mono text-right ${r.strong ? 'text-pb-text font-bold' : 'text-pb-dim'}`}>
+                    <td key={c.key ?? c.format} className={`py-2 pr-4 font-mono text-right ${r.strong ? 'text-pb-text font-bold' : 'text-pb-dim'}`}>
                       {v == null || v === '' ? '—' : v}
+                      {r.coverage && <RateMark coverage={r.coverage(c)} unit={r.unit || 'innings'} />}
                     </td>
                   )
                 })}
@@ -1015,7 +1054,163 @@ function FormatCompareTable({ rows, cols, title }) {
           </tbody>
         </table>
       </div>
+      {rows.some(r => r.coverage && shown.some(c => isPartial(r.coverage(c)))) && (
+        <RateFootnote
+          rows={shown.flatMap(c => rows.filter(r => r.coverage).map(r => ({ cov: r.coverage(c) })))}
+          field="cov"
+        />
+      )}
     </Card>
+  )
+}
+
+// ── Competitions: which competition these runs were scored in ────────────
+// Self-fetching off the public /players/{id}/competitions endpoint, so a
+// visitor reading the batting tab never pays for the query.
+//
+// The COMPETITION FILTER in the header narrows every other panel to one
+// competition; this ENUMERATES them, which is the question a player in more
+// than one cannot otherwise answer — Hamilton Veterans' Over 60 Men play the
+// Border Cup and the VCV Over 60s competition in a single season.
+function CompetitionsSection({ playerId, seasonId, matchCoverage = null }) {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    api.playerCompetitions(playerId, seasonId)
+      .then(d => { if (!cancelled) setData(d) })
+      .catch(e => { if (!cancelled) setError(e.message) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [playerId, seasonId])
+
+  if (loading) return <PbSpinner message="Loading competitions…" />
+  if (error) return <p className="text-pb-red text-sm py-4">Couldn't load competitions: {error}</p>
+
+  const rows = data?.rows || []
+  const unattributed = data?.unattributed || 0
+  // Matches Cricket Australia counts that we hold no game row for at all.
+  // Said here as well as on the header tile, because this panel is where the
+  // figures visibly fail to add up and the reader is owed the reason at the
+  // point they'd otherwise start doing the arithmetic themselves.
+  const noScorecard = matchCoverage?.without_scorecard || 0
+  const careerTotal = matchCoverage?.career_matches || 0
+  if (!rows.length) {
+    return (
+      <p className="text-pb-faint text-sm py-4">
+        No matches filed under a competition yet.{' '}
+        {unattributed > 0
+          ? `${unattributed} ${unattributed === 1 ? 'match is' : 'matches are'} recorded without a grade, so there is nothing to file them under. `
+          : ''}
+        A club groups its grades into competitions on Admin → Manage Grades.
+      </p>
+    )
+  }
+
+  // The columns the compare tables read. `key` is the competition's own id,
+  // null for the un-grouped bucket — which is why it falls back to the label.
+  const cols = rows.map(r => ({
+    key: r.competition_id || r.competition_name,
+    label: r.competition_name,
+    row: r,
+  }))
+  const total = rows.reduce((a, r) => a + (r.matches || 0), 0)
+
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+        {rows.map(r => (
+          <Kpi
+            key={r.competition_id || r.competition_name}
+            label={r.competition_name.toUpperCase()}
+            value={r.matches}
+            sub={[
+              `${r.matches === 1 ? 'match' : 'matches'}`,
+              r.seasons ? `${r.seasons} season${r.seasons === 1 ? '' : 's'}` : null,
+            ].filter(Boolean).join(' · ')}
+          />
+        ))}
+      </div>
+
+      <FormatCompareTable
+        title="BATTING BY COMPETITION"
+        cols={cols}
+        rows={[
+          { label: 'MATCHES', value: c => c.row.matches || null },
+          { label: 'INNINGS', value: c => c.row.batting?.innings || null },
+          { label: 'RUNS', value: c => fmtNum(c.row.batting?.runs), strong: true },
+          { label: 'AVERAGE', value: c => fmtDec(c.row.batting?.average), strong: true },
+          // Marked and footnoted where fewer than every innings carried a ball
+          // count — the case Hamilton Veterans asked about, whose scorers began
+          // recording balls faced in 2013, competition by competition.
+          { label: 'STRIKE RATE', value: c => fmtDec(c.row.batting?.strike_rate),
+            coverage: c => c.row.batting?.strike_rate_coverage, unit: 'innings' },
+          { label: 'HIGH SCORE', value: c => fmtNum(c.row.batting?.high_score) },
+          { label: 'NOT OUTS', value: c => c.row.batting?.not_outs || null },
+          { label: '50s', value: c => c.row.batting?.fifties || null },
+          { label: '100s', value: c => c.row.batting?.hundreds || null },
+        ]}
+      />
+
+      <FormatCompareTable
+        title="BOWLING BY COMPETITION"
+        cols={cols}
+        rows={[
+          { label: 'WICKETS', value: c => fmtNum(c.row.bowling?.wickets), strong: true },
+          { label: 'OVERS', value: c => fmtDec(c.row.bowling?.overs) },
+          { label: 'AVERAGE', value: c => fmtDec(c.row.bowling?.average), strong: true },
+          { label: 'ECONOMY', value: c => fmtDec(c.row.bowling?.economy),
+            coverage: c => c.row.bowling?.economy_coverage, unit: 'spells' },
+          { label: 'STRIKE RATE', value: c => fmtDec(c.row.bowling?.strike_rate) },
+          { label: 'MAIDENS', value: c => c.row.bowling?.maidens || null },
+          { label: 'RUNS CONCEDED', value: c => fmtNum(c.row.bowling?.runs) },
+        ]}
+      />
+
+      <FormatCompareTable
+        title="FIELDING BY COMPETITION"
+        cols={cols}
+        rows={[
+          { label: 'CATCHES', value: c => fmtNum(c.row.fielding?.catches), strong: true },
+          { label: 'CT (WK)', value: c => c.row.fielding?.catches_wk || null },
+          { label: 'STUMPINGS', value: c => c.row.fielding?.stumpings || null },
+          { label: 'RUN OUTS', value: c => c.row.fielding?.run_outs || null },
+        ]}
+      />
+
+      {/* Said out loud rather than hidden: a competition figure comes from the
+          scorecards, and a career that arrived through BetterImport carries
+          rows with no grade and so no competition. Without this the tables
+          would simply not add up to the career total and nothing would say
+          why. */}
+      {(unattributed > 0 || noScorecard > 0) && (
+        <div className="text-[11px] text-pb-faint space-y-1">
+          <p>
+            These {total} {total === 1 ? 'match' : 'matches'} are the ones we can place
+            in a competition{careerTotal ? `, out of ${careerTotal} in the career total` : ''}.
+          </p>
+          {unattributed > 0 && (
+            <p>
+              {unattributed} {unattributed === 1 ? 'match is' : 'matches are'} recorded
+              without a grade, so {unattributed === 1 ? 'it belongs' : 'they belong'} to
+              no competition and {unattributed === 1 ? 'is' : 'are'} not counted above.
+            </p>
+          )}
+          {noScorecard > 0 && (
+            <p>
+              Another {noScorecard} {noScorecard === 1 ? 'match is' : 'matches are'} counted
+              in the career total from Cricket Australia's season figures, which we hold no
+              scorecard for. There is nothing to file {noScorecard === 1 ? 'it' : 'them'}{' '}
+              under.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -1103,7 +1298,7 @@ function FormatsSection({ playerId, seasonId }) {
           { label: 'INNINGS', value: c => c.batting.innings || null },
           { label: 'RUNS', value: c => fmtNum(c.batting.runs), strong: true },
           { label: 'AVERAGE', value: c => fmtDec(c.batting.average), strong: true },
-          { label: 'STRIKE RATE', value: c => fmtDec(c.batting.strike_rate) },
+          { label: 'STRIKE RATE', value: c => fmtDec(c.batting.strike_rate), coverage: c => c.batting.strike_rate_coverage },
           { label: 'HIGH SCORE', value: c => fmtNum(c.batting.high_score) },
           { label: 'NOT OUTS', value: c => c.batting.not_outs || null },
           { label: '50s', value: c => c.batting.fifties || null },
@@ -1122,7 +1317,7 @@ function FormatsSection({ playerId, seasonId }) {
           { label: 'OVERS', value: c => fmtDec(c.bowling.overs, 1) },
           { label: 'WICKETS', value: c => fmtNum(c.bowling.wickets), strong: true },
           { label: 'AVERAGE', value: c => fmtDec(c.bowling.average), strong: true },
-          { label: 'ECONOMY', value: c => fmtDec(c.bowling.economy) },
+          { label: 'ECONOMY', value: c => fmtDec(c.bowling.economy), coverage: c => c.bowling.economy_coverage, unit: 'spells' },
           { label: 'STRIKE RATE', value: c => fmtDec(c.bowling.strike_rate, 1) },
           { label: 'BEST', value: c => (c.bowling.best_wickets ? `${c.bowling.best_wickets}w` : null) },
           { label: '5 WICKETS', value: c => c.bowling.five_fors || null },
@@ -1157,18 +1352,18 @@ function FormatsSection({ playerId, seasonId }) {
 // ── Teammates: who a player has played alongside, and the with-vs-without split.
 // Self-fetching (public /players/{id}/teammates), so it doesn't touch the
 // parent's data flow — mirrors AchievementsSection.
-function TeammateSplitPanel({ playerId, teammate }) {
+function TeammateSplitPanel({ playerId, teammate, scope = null }) {
   const [split, setSplit] = useState(null)
   const [loading, setLoading] = useState(true)
   useEffect(() => {
     let alive = true
     setLoading(true); setSplit(null)
-    api.getPlayerTeammateSplit(playerId, teammate.player_id)
+    api.getPlayerTeammateSplit(playerId, teammate.player_id, scope)
       .then(d => { if (alive) setSplit(d) })
       .catch(() => { if (alive) setSplit({ error: true }) })
       .finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
-  }, [playerId, teammate.player_id])
+  }, [playerId, teammate.player_id, scope?.categories, scope?.formats, scope?.competitions])
 
   if (loading) return <div className="py-4 text-pb-faint font-mono text-xs">Working out the split…</div>
   if (!split || split.error) return <div className="py-4 text-pb-faint font-mono text-xs">Couldn’t load the split.</div>
@@ -1217,7 +1412,7 @@ function TeammateSplitPanel({ playerId, teammate }) {
   )
 }
 
-function TeammatesSection({ playerId }) {
+function TeammatesSection({ playerId, scope = null }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState(null)
@@ -1225,12 +1420,12 @@ function TeammatesSection({ playerId }) {
   useEffect(() => {
     let alive = true
     setLoading(true); setData(null); setSelected(null)
-    api.getPlayerTeammates(playerId)
+    api.getPlayerTeammates(playerId, scope)
       .then(d => { if (alive) setData(d) })
       .catch(() => { if (alive) setData({ error: true }) })
       .finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
-  }, [playerId])
+  }, [playerId, scope?.categories, scope?.formats, scope?.competitions])
 
   if (loading) return <div className="p-4 text-pb-faint font-mono text-sm">Loading teammates…</div>
   if (data?.error) return <p className="text-pb-faint text-sm py-4 font-mono">Couldn’t load teammates.</p>
@@ -1278,7 +1473,7 @@ function TeammatesSection({ playerId }) {
 
       {sel && (
         <Card title={`WITH VS WITHOUT ${(sel.name || '').split(',')[0].trim().toUpperCase()}`}>
-          <TeammateSplitPanel playerId={playerId} teammate={sel} />
+          <TeammateSplitPanel playerId={playerId} teammate={sel} scope={scope} />
         </Card>
       )}
     </div>
@@ -1376,18 +1571,24 @@ function CaptainTab({ captainStats }) {
                 <td className="py-2.5 px-2 text-right font-mono text-pb-text">{fmtV(bowling_as_captain?.games)}</td>
                 <td className="py-2.5 px-2 text-right font-mono text-pb-text">{fmtV(bowling_as_captain?.wickets)}</td>
                 <td className="py-2.5 px-2 text-right font-mono text-pb-text">{fmtV(bowling_as_captain?.average)}</td>
-                <td className="py-2.5 px-2 text-right font-mono text-pb-text">{fmtV(bowling_as_captain?.economy)}</td>
+                <td className="py-2.5 px-2 text-right font-mono text-pb-text">{fmtV(bowling_as_captain?.economy)}<RateMark coverage={bowling_as_captain?.economy_coverage} unit="spells" /></td>
               </tr>
               <tr className="border-t pb-hairline-t">
                 <td className="py-2.5 pr-4 font-mono text-pb-dim text-[12px] whitespace-nowrap">Not captain</td>
                 <td className="py-2.5 px-2 text-right font-mono text-pb-dim">{fmtV(bowling_not_captain?.games)}</td>
                 <td className="py-2.5 px-2 text-right font-mono text-pb-dim">{fmtV(bowling_not_captain?.wickets)}</td>
                 <td className="py-2.5 px-2 text-right font-mono text-pb-dim">{fmtV(bowling_not_captain?.average)}</td>
-                <td className="py-2.5 px-2 text-right font-mono text-pb-dim">{fmtV(bowling_not_captain?.economy)}</td>
+                <td className="py-2.5 px-2 text-right font-mono text-pb-dim">{fmtV(bowling_not_captain?.economy)}<RateMark coverage={bowling_not_captain?.economy_coverage} unit="spells" /></td>
               </tr>
             </tbody>
           </table>
         </div>
+        <RateFootnote
+          rows={[bowling_as_captain, bowling_not_captain]}
+          field="economy_coverage"
+          unit="spells"
+          className="px-0"
+        />
       </div>
 
       {/* Season by season */}
@@ -1536,7 +1737,7 @@ function MatchesBySeasonGrade({ rows = [], seasonRows = [] }) {
   )
 }
 
-function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGrade, byPosition, seasonStats, bowlingByGrade, bowlingDismissals = [], bowlingByBatterPosition = [], battingInnings = [], bowlingSpells = [], teamBreakdown = { rows: [], season_rows: [], unattributed: 0 }, seasonLabel = null, captainStats, byVenue = [], byOpposition = [], careerBatting = null, careerBowling = null, careerFielding = null }) {
+function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGrade, byPosition, seasonStats, bowlingByGrade, bowlingDismissals = [], bowlingByBatterPosition = [], battingInnings = [], bowlingSpells = [], teamBreakdown = { rows: [], season_rows: [], unattributed: 0 }, seasonLabel = null, captainStats, byVenue = [], byOpposition = [], careerBatting = null, careerBowling = null, careerFielding = null, matchCoverage = null, gradeScope = null, filterPick = null, filterScope = null }) {
   const [subTab, setSubTab] = useState('profile')
 
   const hasBattingData = dismissals?.length || partnerships?.length || byGrade?.length || byPosition?.length || seasonStats?.some(s => (s.total_runs ?? 0) > 0)
@@ -1555,6 +1756,10 @@ function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGr
             }`}
           >
             {t.label}
+            {/* Said BEFORE the tab is opened, not after. */}
+            {(t.key === 'competitions' || t.key === 'formats') && (
+              <FilterReachDot pick={filterPick} reason="enumeration" />
+            )}
             {subTab === t.key && <span className="absolute left-2 right-2 -bottom-px h-[2px]" style={{ background: 'var(--pb-accent)' }} />}
           </button>
         ))}
@@ -1882,9 +2087,23 @@ function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGr
         </div>
       )}
 
-      {subTab === 'formats' && <FormatsSection playerId={playerId} seasonId={seasonId} />}
+      {subTab === 'formats' && (
+        <div className="space-y-3">
+          {/* An enumeration: filtering it by format leaves one column. */}
+          <FilterReachNote pick={filterPick} reason="enumeration" shows="every format" />
+          <FormatsSection playerId={playerId} seasonId={seasonId} />
+        </div>
+      )}
 
-      {subTab === 'teammates' && <TeammatesSection playerId={playerId} />}
+      {subTab === 'competitions' && (
+        <div className="space-y-3">
+          {/* Same: filtering it to one competition leaves one row. */}
+          <FilterReachNote pick={filterPick} reason="enumeration" shows="every competition" />
+          <CompetitionsSection playerId={playerId} seasonId={seasonId} matchCoverage={matchCoverage} />
+        </div>
+      )}
+
+      {subTab === 'teammates' && <TeammatesSection playerId={playerId} scope={filterScope} />}
 
       {subTab === 'captain' && <CaptainTab captainStats={captainStats} />}
 
@@ -2004,7 +2223,11 @@ function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGr
                 pad="p-0"
               >
                 <p className="font-mono text-[10px] text-pb-faint tracking-wide2 px-5 pt-4">
-                  Every grade this player has appeared in (batting, bowling, or fielding), with result record.
+                  {/* "Every grade" stops being true the moment the filter bar
+                      narrows this table, so the sentence has to move with it. */}
+                  {teamBreakdown.scope?.active
+                    ? 'Every grade in the current filter that this player has appeared in (batting, bowling, or fielding), with result record.'
+                    : 'Every grade this player has appeared in (batting, bowling, or fielding), with result record.'}
                   {!seasonLabel && ' Use the season filter above to view a single season.'}
                 </p>
                 <div className="overflow-x-auto pb-scroll mt-3">
@@ -2078,12 +2301,47 @@ function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGr
                     </tbody>
                   </table>
                 </div>
-                {(rows.some(r => r.attributed_unknown > 0) || unattributed > 0) && (
-                  <p className="font-mono text-[10px] text-pb-faint tracking-wide2 px-5 pb-4 pt-2">
-                    * = matches counted by CA&apos;s season aggregate but with no scorecard captured yet; attributed to a grade only when the player played in a single grade that season.
-                    {unattributed > 0 && ` ${unattributed.toLocaleString()} ${unattributed === 1 ? 'match' : 'matches'} couldn't be attributed (mixed-grade season).`}
-                  </p>
-                )}
+                <div className="px-5 pb-4 pt-3 space-y-2">
+                  {rows.some(r => r.attributed_unknown > 0) && (
+                    <p className="font-mono text-[10px] text-pb-faint tracking-wide2">
+                      * = matches Cricket Australia counts in this grade that we hold
+                      no scorecard for. Where it has not broken a season down by grade
+                      at all, the shortfall is only placed when the player turned out
+                      in a single grade that season.
+                    </p>
+                  )}
+                  {/* A match type is recorded on a FIXTURE, so Cricket
+                      Australia's own per-grade figures cannot answer it and drop
+                      out entirely — the same call `GradeScope` makes for every
+                      other aggregate read. Said, or the shorter grid reads as
+                      data having gone missing. */}
+                  {teamBreakdown.scope?.aggregate_excluded && (
+                    <p className="font-mono text-[10px] text-pb-dim tracking-wide2">
+                      Match type is recorded on each fixture, and Cricket Australia&apos;s
+                      own per-grade figures carry none, so they are left out here.
+                    </p>
+                  )}
+                  {/* CA's season totals cover every grade, so a season in which
+                      the filter removed matches cannot have its shortfall placed.
+                      Counted and said, or a smaller grid reads as data missing. */}
+                  {teamBreakdown.scope?.seasons_left_to_scorecards > 0 && (
+                    <p className="font-mono text-[10px] text-pb-dim tracking-wide2">
+                      Cricket Australia&apos;s season totals cover every grade, so they are only
+                      used for a season in which every match was inside this filter.
+                      {' '}{teamBreakdown.scope.seasons_left_to_scorecards}{' '}
+                      {teamBreakdown.scope.seasons_left_to_scorecards === 1 ? 'season was' : 'seasons were'}
+                      {' '}left to the scorecards alone.
+                    </p>
+                  )}
+                  {/* Why this total is a THIRD number, said here rather than left
+                      to be discovered: the grid reconciles per season and grade and
+                      takes whichever source is higher, so it is neither the career
+                      total nor the matches we hold a scorecard for. Every figure in
+                      it is summed from the rows above. */}
+                  <GradeTotalNote rows={rows} unattributed={unattributed}
+                                  coverage={matchCoverage}
+                                  scoped={!!teamBreakdown.scope?.active} />
+                </div>
               </Card>
             ) : (
               <p className="text-pb-faint text-sm py-4">No grade appearances recorded{seasonLabel ? ` for ${seasonLabel}` : ''}.</p>
@@ -2162,7 +2420,7 @@ function AchievedList({ items }) {
   )
 }
 
-function MilestonesTab({ playerId, upcomingMilestones, milestones }) {
+function MilestonesTab({ playerId, upcomingMilestones, milestones, filterPick = null }) {
   const [sub, setSub] = useState('batting')
 
   const upcoming = upcomingMilestones || []
@@ -2242,9 +2500,17 @@ function MilestonesTab({ playerId, upcomingMilestones, milestones }) {
   }
 
   return (
-    <div>
-      <TabBar tabs={MILESTONE_SUB_TABS} active={sub} onChange={setSub} />
-      {renderTab()}
+    <div className="space-y-3">
+      {/* A milestone is a fact about a whole career, and it is what the
+          notification bell reports. Recomputing "247 runs to 5,000" under a
+          Men's-only filter would give a number nobody can act on, so it is
+          deliberately never filtered — and now says so instead of leaving the
+          bar above it looking broken. */}
+      <FilterReachNote pick={filterPick} reason="career" />
+      <div>
+        <TabBar tabs={MILESTONE_SUB_TABS} active={sub} onChange={setSub} />
+        {renderTab()}
+      </div>
     </div>
   )
 }
@@ -2524,16 +2790,31 @@ export default function PlayerProfile() {
   // hook no-ops on null and the pills simply aren't drawn until then.
   const [profileOrgId, setProfileOrgId] = useState(null)
   const {
-    available: availableCategories, availableFormats,
+    available: availableCategories, availableFormats, availableCompetitions,
     gradeType, setGradeType, matchFormat, setMatchFormat,
+    competition, setCompetition,
     categoriesParam: catParam, formatsParam: fmtParam,
+    competitionsParam: compParam,
   } = useGradeFilters(profileOrgId)
   const { data, loading, error } = usePlayerStats(playerId, {
     seasonId,
     categories: catParam,
     formats: fmtParam,
+    competitions: compParam,
   })
   const gradeScope = data?.grade_scope
+  // Why the career total and the per-competition figures differ. Sent only
+  // when they genuinely do, so the note draws on nobody it has nothing to
+  // tell. `scopeActive` only changes the wording — the note itself shows
+  // either way, so nobody has to discover the gap by adding the rows up.
+  const matchCoverage = data?.match_coverage
+  const scopeActive = !!gradeScope?.active
+  // The raw selection, null where untouched. The reach notes and tab marks
+  // fire on THIS, never on `gradeScope.active`: a club with a junior programme
+  // has a default scope on every visit, and the default is already announced
+  // once by the header. Six more notes about it would be noise.
+  const filterPick = { categories: catParam, formats: fmtParam, competitions: compParam }
+  const filterScope = filterPick
   useEffect(() => {
     const oid = data?.player?.organisation_id
     if (oid && oid !== profileOrgId) setProfileOrgId(oid)
@@ -2608,11 +2889,16 @@ export default function PlayerProfile() {
 
   useEffect(() => {
     if (!playerId) return
-    api.getPlayerSeasons(playerId, { categories: catParam, formats: fmtParam })
+    // The season table was sent the category and format halves and never the
+    // competition — the same class of gap as the grid, found while closing it.
+    const scope = { categories: catParam, formats: fmtParam, competitions: compParam }
+    api.getPlayerSeasons(playerId, scope)
       .then(setSeasonStats).catch(() => setSeasonStats([]))
+    // Milestones are deliberately never filtered: a career fact, and what the
+    // notification bell reports. The Milestones tab says so.
     api.getPlayerUpcomingMilestones(playerId).then(setUpcomingMilestones).catch(() => setUpcomingMilestones([]))
-    api.getPlayerCaptainStats(playerId).then(setCaptainStats).catch(() => setCaptainStats({}))
-  }, [playerId, catParam, fmtParam])
+    api.getPlayerCaptainStats(playerId, scope).then(setCaptainStats).catch(() => setCaptainStats({}))
+  }, [playerId, catParam, fmtParam, compParam])
 
   useEffect(() => {
     if (!data?.player?.organisation_id) return
@@ -2637,8 +2923,8 @@ export default function PlayerProfile() {
     // (a new object reference every time the season filter refetches career
     // stats) — so this only re-runs when the player changes or the Junior/
     // Senior/etc toggle actually changes, not on every unrelated re-render.
-    const scope = { categories: catParam, formats: fmtParam }
-    const key = `${playerId}|${catParam || ''}|${fmtParam || ''}`
+    const scope = { categories: catParam, formats: fmtParam, competitions: compParam }
+    const key = `${playerId}|${catParam || ''}|${fmtParam || ''}|${compParam || ''}`
     if (lastAuxFetchRef.current === key) return
     lastAuxFetchRef.current = key
     // Reset stale state from previously-viewed player — otherwise navigating
@@ -2677,10 +2963,13 @@ export default function PlayerProfile() {
 
   useEffect(() => {
     if (!playerId || !data?.player) return
-    api.getPlayerTeamBreakdown(playerId, { seasonId })
-      .then(res => setTeamBreakdown(res && res.rows ? res : { rows: [], unattributed: 0, total_aggregate_matches: 0 }))
-      .catch(() => setTeamBreakdown({ rows: [], unattributed: 0, total_aggregate_matches: 0 }))
-  }, [playerId, data?.player, seasonId])
+    const empty = { rows: [], unattributed: 0, total_aggregate_matches: 0 }
+    api.getPlayerTeamBreakdown(playerId, {
+      seasonId, categories: catParam, formats: fmtParam, competitions: compParam,
+    })
+      .then(res => setTeamBreakdown(res && res.rows ? res : empty))
+      .catch(() => setTeamBreakdown(empty))
+  }, [playerId, data?.player, seasonId, catParam, fmtParam, compParam])
 
   if (loading) return <PbSpinner message="Loading player data…" />
   if (error) return <div className="max-w-7xl mx-auto px-4 py-16 text-pb-red">Error: {error}</div>
@@ -2842,6 +3131,13 @@ export default function PlayerProfile() {
               setGradeType={setGradeType}
               matchFormat={matchFormat}
               setMatchFormat={setMatchFormat}
+              competition={competition}
+              setCompetition={setCompetition}
+              availableCompetitions={
+                availableCompetitions.length
+                  ? availableCompetitions
+                  : (gradeScope?.available_competitions || [])
+              }
               availableCategories={availableCategories.length ? availableCategories : (gradeScope?.available || [])}
               availableFormats={availableFormats}
             />
@@ -2858,13 +3154,22 @@ export default function PlayerProfile() {
           <div className="space-y-3 mb-6">
             {/* Row 1 — Matches + optional overseas info */}
             <div className="flex gap-3">
-              <div className="pb-card p-4 flex items-center gap-4 flex-1">
-                <div>
-                  <Label>MATCHES</Label>
-                  <span className="font-mono text-[36px] font-bold pb-num leading-none mt-1 text-pb-text">
-                    <AnimatedNum value={batting?.games || bowling?.games || 0} />
-                  </span>
+              <div className="pb-card p-4 flex-1">
+                <div className="flex items-center gap-4">
+                  <div>
+                    <Label>MATCHES</Label>
+                    <span className="font-mono text-[36px] font-bold pb-num leading-none mt-1 text-pb-text">
+                      <AnimatedNum value={batting?.games || bowling?.games || 0} />
+                    </span>
+                  </div>
                 </div>
+                {/* Said before anyone has to notice: with no filter this is
+                    Cricket Australia's season total, and anything filtered is
+                    counted from the scorecards we hold, so the competitions do
+                    not sum to it. Drawn on the unfiltered view too, which is
+                    the whole point — nobody should discover this themselves
+                    and read it as a mistake. */}
+                <MatchCoverageNote coverage={matchCoverage} filtered={scopeActive} />
               </div>
               {player.is_overseas && (
                 <div className="pb-card p-4 flex items-center gap-3" style={{ borderColor: 'color-mix(in srgb, var(--pb-amber) 30%, transparent)' }}>
@@ -2979,15 +3284,28 @@ export default function PlayerProfile() {
         )}
 
         {/* Tabs */}
-        <TabBar tabs={MAIN_TABS} active={tab} onChange={setTab} />
+        <TabBar
+          tabs={MAIN_TABS.map(t => (
+            (t.key === 'milestones' || t.key === 'achievements')
+              ? { ...t, label: <>{t.label}<FilterReachDot pick={filterPick} reason="career" /></> }
+              : t
+          ))}
+          active={tab} onChange={setTab} />
 
         {/* Tab content */}
         {tab === 'batting' && <BattingTab batting={batting} seasonStats={seasonStats} seasons={seasons} />}
         {tab === 'bowling' && <BowlingTab bowling={bowling} seasonStats={seasonStats} />}
         {tab === 'fielding' && <FieldingTab fielding={fielding} seasonStats={seasonStats} />}
-        {tab === 'analysis' && <AnalysisTab playerId={playerId} seasonId={seasonId} dismissals={dismissals} partnerships={partnerships} byGrade={byGrade} byPosition={byPosition} seasonStats={seasonStats} bowlingByGrade={bowlingByGrade} bowlingDismissals={bowlingDismissals} bowlingByBatterPosition={bowlingByBatterPosition} battingInnings={battingInnings} bowlingSpells={bowlingSpells} teamBreakdown={teamBreakdown} seasonLabel={seasonId ? (seasons.find(s => s.id === seasonId)?.name || null) : null} captainStats={captainStats} byVenue={byVenue} byOpposition={byOpposition} careerBatting={batting} careerBowling={bowling} careerFielding={fielding} />}
-        {tab === 'milestones' && <MilestonesTab playerId={playerId} upcomingMilestones={upcomingMilestones} milestones={milestones} />}
-        {tab === 'achievements' && <AchievementsSection playerId={playerId} orgId={player.organisation_id} playerName={player.display_name || player.name} />}
+        {tab === 'analysis' && <AnalysisTab playerId={playerId} seasonId={seasonId} dismissals={dismissals} partnerships={partnerships} byGrade={byGrade} byPosition={byPosition} seasonStats={seasonStats} bowlingByGrade={bowlingByGrade} bowlingDismissals={bowlingDismissals} bowlingByBatterPosition={bowlingByBatterPosition} battingInnings={battingInnings} bowlingSpells={bowlingSpells} teamBreakdown={teamBreakdown} seasonLabel={seasonId ? (seasons.find(s => s.id === seasonId)?.name || null) : null} captainStats={captainStats} byVenue={byVenue} byOpposition={byOpposition} careerBatting={batting} careerBowling={bowling} careerFielding={fielding} matchCoverage={matchCoverage} gradeScope={gradeScope} filterPick={filterPick} filterScope={filterScope} />}
+        {tab === 'milestones' && <MilestonesTab playerId={playerId} upcomingMilestones={upcomingMilestones} milestones={milestones} filterPick={filterPick} />}
+        {tab === 'achievements' && (
+          <div className="space-y-3">
+            {/* An honour is not a men's honour or a T20 honour. Said rather
+                than silently ignoring the bar above it. */}
+            <FilterReachNote pick={filterPick} reason="career" />
+            <AchievementsSection playerId={playerId} orgId={player.organisation_id} playerName={player.display_name || player.name} />
+          </div>
+        )}
       </main>
     </div>
   )

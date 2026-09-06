@@ -51,6 +51,8 @@ from app.routers.auth import get_current_user, get_current_club, require_super_a
 from app.services.marketing_org import get_outreach_org, org_is_outreach
 from app.services import email_suppression as suppress
 from app.services import comms_segments
+from app.services import club_trial_window
+from app.services import comms_contacts
 from app.services import comms_lists
 from app.services import directory
 from app.services import comms_limits
@@ -501,6 +503,9 @@ MERGE_VARIABLES = [
     {"name": "utm_code", "desc": "The recipient club's unique UTM code, for link tracking", "marketing_only": True},
     {"name": "state", "desc": "The recipient club's state", "marketing_only": True},
     {"name": "website", "desc": "The recipient club's website", "marketing_only": True},
+    {"name": "trial_days_left", "desc": "Days until the recipient club's trial ends (blank if it isn't on a trial)", "marketing_only": True},
+    {"name": "trial_days_since_expiry", "desc": "Days since the recipient club's trial expired (blank if it hasn't)", "marketing_only": True},
+    {"name": "trial_end_date", "desc": "The date the recipient club's trial ends or ended, e.g. 14 September 2026", "marketing_only": True},
     {"name": "utm_source", "desc": "Source from this email's UTM section (place inside a link)", "marketing_only": True},
     {"name": "utm_medium", "desc": "Medium from this email's UTM section (place inside a link)", "marketing_only": True},
     {"name": "utm_campaign", "desc": "Campaign from this email's UTM section (place inside a link)", "marketing_only": True},
@@ -512,15 +517,46 @@ MERGE_VARIABLES = [
 EDITABLE_MERGE_KEYS = ("first_name", "club", "association", "utm_code", "state", "website")
 
 
-def _send_vars(c: "CommsContact", mc: "Optional[MarketingClub]") -> dict:
-    """The per-contact extra merge vars used at send time: the linked directory
-    club's vars plus the contact's own merge_vars overrides. Mirrors the build in
-    _run_send so a preview matches the real send exactly."""
-    merged = dict(_marketing_vars(mc))
-    for k, v in (c.merge_vars or {}).items():
+def _apply_overrides(base: dict, overrides: "Optional[dict]") -> dict:
+    """Lay a contact's own merge_vars on top of the club-derived defaults. The ONE
+    place that rule lives, so the preview, the test send and the real send can't
+    drift apart. Only EDITABLE_MERGE_KEYS may be overridden — the trial figures are
+    computed facts about the club's subscription, and a hand-typed "days left"
+    would print a number the segment behind the audience disagrees with."""
+    merged = dict(base)
+    for k, v in (overrides or {}).items():
         if k in EDITABLE_MERGE_KEYS and v is not None and str(v).strip() != "":
             merged[k] = v
     return merged
+
+
+async def _trial_vars(db: AsyncSession, mc: "Optional[MarketingClub]") -> dict:
+    """The recipient club's trial countdown / expiry figures, or nothing at all
+    for a contact with no directory club (a club emailing its own members has no
+    prospect trial to report, so the variables simply don't apply there)."""
+    if mc is None:
+        return {}
+    return await club_trial_window.vars_for_marketing_club(db, mc)
+
+
+def _contact_vars(mc: "Optional[MarketingClub]", overrides: "Optional[dict]",
+                  trial_vars: "Optional[dict]" = None) -> dict:
+    """The per-recipient extra merge vars: the linked directory club's fields and
+    its trial window, with the contact's own overrides laid on top.
+
+    THE one definition — the preview, the test send and the real send all call it,
+    so a preview cannot show a different email from the one that goes out. The
+    only thing the send does differently is fetch the trial figures for the whole
+    batch at once instead of one at a time.
+    """
+    return _apply_overrides({**_marketing_vars(mc), **(trial_vars or {})}, overrides)
+
+
+async def _send_vars(db: AsyncSession, c: "CommsContact",
+                     mc: "Optional[MarketingClub]") -> dict:
+    """:func:`_contact_vars` for a single contact, fetching its club's trial
+    window itself. Used by the preview and the test send."""
+    return _contact_vars(mc, c.merge_vars, await _trial_vars(db, mc))
 
 
 async def _sample_dir_vars(db: AsyncSession, org: Organisation) -> Optional[dict]:
@@ -535,9 +571,13 @@ async def _sample_dir_vars(db: AsyncSession, org: Organisation) -> Optional[dict
         select(MarketingClub).where(MarketingClub.detail_fetched_at.isnot(None))
         .order_by(MarketingClub.name).limit(1))).scalars().first()
     if mc:
-        return _marketing_vars(mc)
+        return {**_marketing_vars(mc), **await _trial_vars(db, mc)}
+    # A made-up club has no real trial, and the sample must not imply one — the
+    # figures render blank here exactly as they will for a recipient not on a
+    # trial, so the preview shows the honest worst case rather than a number.
     return {"club": "Sample Cricket Club", "association": "Sample Association",
-            "utm_code": "sample-cricket-club", "state": "WA", "website": "https://example.com"}
+            "utm_code": "sample-cricket-club", "state": "WA", "website": "https://example.com",
+            **club_trial_window.BLANK_TRIAL_VARS}
 
 
 def _context_var_keys(org: Organisation) -> list:
@@ -546,12 +586,14 @@ def _context_var_keys(org: Organisation) -> list:
     outreach, so a normal club just sees the universal ones."""
     keys = ["first_name", "name", "email", "club"]
     if org_is_outreach(org):
-        keys += ["association", "utm_code", "state", "website"]
+        keys += ["association", "utm_code", "state", "website",
+                 "trial_days_left", "trial_days_since_expiry", "trial_end_date"]
     keys.append("unsubscribe_url")
     return keys
 
 
-def _resolved_vars(c: CommsContact, mc: Optional[MarketingClub], org: Organisation) -> dict:
+def _resolved_vars(c: CommsContact, mc: Optional[MarketingClub], org: Organisation,
+                   trial_vars: Optional[dict] = None) -> dict:
     """Every merge variable resolved for one contact: a per-contact override wins,
     then the linked directory club, then a sensible default. Used by both the
     contact-detail view and the actual send, so they always agree — regardless of
@@ -578,6 +620,9 @@ def _resolved_vars(c: CommsContact, mc: Optional[MarketingClub], org: Organisati
         "utm_code": pick("utm_code", mv.get("utm_code", "")),
         "state": pick("state", mv.get("state", "")),
         "website": pick("website", mv.get("website", "")),
+        # Computed from the club's subscription rows, never overridable per
+        # contact — see _apply_overrides.
+        **(trial_vars if mc is not None else {}),
     }
 
 
@@ -891,24 +936,10 @@ class ContactCreate(BaseModel):
 async def _upsert_contact(db: AsyncSession, club: Organisation, email: str, name: Optional[str],
                           source: str, player_id=None, member_id=None) -> str:
     """Insert or update a contact by (org, email). Returns 'added' | 'updated'.
-    Never resurrects a suppressed address — subscribed/bounced are left as-is."""
-    existing = (await db.execute(select(CommsContact).where(
-        CommsContact.organisation_id == club.id, CommsContact.email == email
-    ))).scalar_one_or_none()
-    if existing:
-        if name and not existing.name:
-            existing.name = name
-        if player_id and not existing.player_id:
-            existing.player_id = player_id
-        if member_id and not existing.member_id:
-            existing.member_id = member_id
-        existing.updated_at = datetime.now(timezone.utc)
-        return "updated"
-    db.add(CommsContact(
-        organisation_id=club.id, email=email, name=name, source=source,
-        player_id=player_id, member_id=member_id,
-    ))
-    return "added"
+    Never resurrects a suppressed address — see services/comms_contacts, which is
+    the one copy of that rule now it is called from outside a request too."""
+    return await comms_contacts.upsert_contact(
+        db, club.id, email, name, source, player_id=player_id, member_id=member_id)
 
 
 @router.post("/contacts")
@@ -1211,7 +1242,7 @@ async def preview_campaign(
     subject, html, _ = _render_parts(
         club, subject=c.subject or "", body_html=c.body_html or "", utm=c.utm or {},
         email=ct.email, name=ct.name, unsub_url=unsub, footer=footer,
-        extra_vars=_send_vars(ct, mc))
+        extra_vars=await _send_vars(db, ct, mc))
     return {"total": total, "index": idx, "html": html, "subject": subject,
             "contact": {"name": ct.name, "email": ct.email}}
 
@@ -1498,7 +1529,7 @@ async def send_test(
         if audience:
             first = audience[0]
             mc = await db.get(MarketingClub, first.marketing_club_id) if first.marketing_club_id else None
-            extra = _send_vars(first, mc)
+            extra = await _send_vars(db, first, mc)
         if not extra:
             extra = await _sample_dir_vars(db, club)
     msg = _render(club, c, email=email, name=None, unsub_url=unsub, footer=footer, extra_vars=extra)
@@ -1633,15 +1664,22 @@ async def _run_send(campaign_id: str, org_id: str) -> None:
             if cids:
                 # Outer join so a contact with no directory club still gets its own
                 # per-contact merge_vars overrides applied.
-                for cid, ov, mc in (await s.execute(
+                rows_v = (await s.execute(
                     select(CommsContact.id, CommsContact.merge_vars, MarketingClub)
                     .outerjoin(MarketingClub, MarketingClub.id == CommsContact.marketing_club_id)
                     .where(CommsContact.id.in_(cids))
-                )).all():
-                    merged = dict(_marketing_vars(mc))
-                    for k, v in (ov or {}).items():
-                        if k in EDITABLE_MERGE_KEYS and v is not None and str(v).strip() != "":
-                            merged[k] = v
+                )).all()
+                # One batched read of every recipient club's trial window, rather
+                # than a query per recipient. A directory club with no trial (or
+                # never onboarded) still gets an entry, so {{trial_days_left}}
+                # renders blank instead of going out as a raw token.
+                trial_by_club = await club_trial_window.vars_by_marketing_club(
+                    s, [mc for _, _, mc in rows_v if mc is not None])
+                for cid, ov, mc in rows_v:
+                    merged = _contact_vars(
+                        mc, ov,
+                        trial_by_club.get(mc.id, club_trial_window.BLANK_TRIAL_VARS)
+                        if mc is not None else None)
                     if merged:
                         mc_vars[cid] = merged
             # Snapshot to plain data so the network phase touches no ORM objects.
@@ -2225,7 +2263,7 @@ async def get_contact(
         raise HTTPException(status_code=404, detail="Contact not found")
     mc = await db.get(MarketingClub, c.marketing_club_id) if c.marketing_club_id else None
     mvars = _marketing_vars(mc)
-    resolved = _resolved_vars(c, mc, club)
+    resolved = _resolved_vars(c, mc, club, await _trial_vars(db, mc))
     keys = _context_var_keys(club)
     # The full org-context set, resolved (possibly blank) for THIS contact — shown
     # the same way no matter how the contact was added.
@@ -2304,6 +2342,22 @@ class SegmentIn(BaseModel):
     definition: dict = {}
 
 
+def _reject_foreign_rules(club: Organisation, definition: dict) -> None:
+    """Refuse to STORE a segment built on the directory fields outside the
+    BetterCricket outreach org. The engine already fails such a segment closed on
+    read, but a write is where a person is present to be told why — and it stops a
+    segment that can only ever resolve to nobody from being saved and sent."""
+    rules = (definition or {}).get("rules") or []
+    if comms_segments.directory_rules_allowed(club):
+        return
+    bad = sorted({str(r.get("field")) for r in rules
+                  if isinstance(r, dict) and r.get("field") in comms_segments.DIRECTORY_FIELDS})
+    if bad:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Not available for this club: {', '.join(bad)}")
+
+
 @router.post("/segments")
 async def create_segment(
     data: SegmentIn,
@@ -2314,6 +2368,7 @@ async def create_segment(
     name = (data.name or "").strip()
     if not name:
         raise HTTPException(status_code=422, detail="A segment name is required")
+    _reject_foreign_rules(club, data.definition or {})
     seg = CommsSegment(organisation_id=club.id, name=name, definition=data.definition or {})
     db.add(seg)
     try:
@@ -2345,6 +2400,7 @@ async def update_segment(
     db: AsyncSession = Depends(get_db),
 ):
     seg = await _segment_or_404(db, club, segment_id)
+    _reject_foreign_rules(club, data.definition or {})
     name = (data.name or "").strip()
     if name:
         seg.name = name
@@ -2386,6 +2442,30 @@ async def preview_segment(
     }
 
 
+def audience_figures(contacts) -> dict:
+    """The readout under a segment or a list: how many match, how many can
+    actually be emailed, and how many distinct clubs that reaches.
+
+    Computed over the WHOLE audience, never the capped preview slice — the three
+    numbers appear in one sentence, so a figure that silently stops at the cap
+    would contradict the count beside it.
+
+    A club is a contact's linked Clubs Directory row (``marketing_club_id``),
+    which only a BetterCricket outreach contact has; a club's own members carry
+    none, so the figure is 0 there and the screen simply doesn't draw it. Counted
+    among the REACHABLE contacts only — the question is how many clubs an email
+    would actually land at. Mirrors ``clubCount`` in
+    frontend/src/pages/admin/clubhouse/crudShell.jsx, which is what the Lists
+    screen computes from its own (uncapped) membership rows.
+    """
+    reachable = [c for c in contacts if (c.email or "").strip()]
+    return {
+        "reachable": len(reachable),
+        "other_route": 0,   # a comms contact always has an address; kept for shape
+        "clubs": len({c.marketing_club_id for c in reachable if c.marketing_club_id}),
+    }
+
+
 @router.post("/segments/resolve")
 async def resolve_segment(
     data: SegmentIn,
@@ -2395,13 +2475,15 @@ async def resolve_segment(
 ):
     """The full matching audience for a definition, enriched with each contact's
     Clubs Directory fields — powers the searchable/filterable audience preview and
-    its CSV export. Capped for safety; the count is exact."""
+    its CSV export. The CONTACT LIST is capped for safety; every figure is exact,
+    computed before the cap (see audience_figures)."""
     await reconcile_contacts_from_directory(db, club)
     contacts = await comms_segments.resolve_contacts(db, club, data.definition or {})
     rows = contacts[:5000]
     mc_map = await _mc_map(db, rows)
     return {
         "count": len(contacts),
+        **audience_figures(contacts),
         "contacts": [_contact_out(c, mc_map.get(c.marketing_club_id)) for c in rows],
     }
 
@@ -2480,6 +2562,84 @@ async def segment_options(
         "genders": [["male", "Male"], ["female", "Female"]],
         "teams": [{"id": str(t.id), "name": t.name} for t in teams],
     }
+
+
+ENTITY_SEARCH_LIMIT = 30
+
+
+@router.get("/segments/entities")
+async def segment_entities(
+    kind: str,
+    q: str = "",
+    ids: str = "",
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Search for the clubs / contacts a `club_is` or `contact_is` rule names,
+    and hydrate the ones a saved rule already holds.
+
+    Two jobs in one endpoint because they answer the same question — what is this
+    id called — and a saved segment has to render its chosen names before anybody
+    types. `ids` is answered whatever `q` is, so a chosen row never disappears
+    from the picker just because the search box has moved on.
+
+    Everything is scoped to the acting club's own contacts, so a club id from a
+    browser can only ever name a club this org actually holds contacts for.
+    """
+    if not comms_segments.directory_rules_allowed(club):
+        raise HTTPException(status_code=422, detail="Not available for this club")
+    if kind not in ("club", "contact"):
+        raise HTTPException(status_code=422, detail="Unknown kind")
+
+    picked = []
+    for raw in (ids or "").split(","):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            picked.append(uuid.UUID(raw))
+        except ValueError:
+            continue
+    term = (q or "").strip()
+
+    def _rows(res):
+        return [{"id": str(r[0]), "label": r[1], "hint": r[2] or ""} for r in res]
+
+    if kind == "club":
+        base = (
+            select(MarketingClub.id, MarketingClub.name, MarketingClub.association_name)
+            .join(CommsContact, CommsContact.marketing_club_id == MarketingClub.id)
+            .where(CommsContact.organisation_id == club.id)
+            .distinct()
+        )
+        chosen = _rows((await db.execute(
+            base.where(MarketingClub.id.in_(picked)).order_by(MarketingClub.name)
+        )).all()) if picked else []
+        found = base.order_by(MarketingClub.name).limit(ENTITY_SEARCH_LIMIT)
+        if term:
+            found = found.where(MarketingClub.name.ilike(f"%{term}%"))
+        options = _rows((await db.execute(found)).all())
+    else:
+        base = (
+            select(CommsContact.id, CommsContact.name, CommsContact.email)
+            .where(CommsContact.organisation_id == club.id)
+        )
+        chosen = _rows((await db.execute(
+            base.where(CommsContact.id.in_(picked)).order_by(CommsContact.email)
+        )).all()) if picked else []
+        found = base.order_by(CommsContact.email).limit(ENTITY_SEARCH_LIMIT)
+        if term:
+            like = f"%{term}%"
+            found = found.where(or_(CommsContact.name.ilike(like),
+                                    CommsContact.email.ilike(like)))
+        options = _rows((await db.execute(found)).all())
+
+    for row in options:
+        row["label"] = row["label"] or row["hint"] or "(unnamed)"
+    for row in chosen:
+        row["label"] = row["label"] or row["hint"] or "(unnamed)"
+    return {"options": options, "chosen": chosen}
 
 
 # ─── Static lists (Phase 2) ──────────────────────────────────────────────────

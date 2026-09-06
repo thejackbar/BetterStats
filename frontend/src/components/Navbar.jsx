@@ -36,7 +36,7 @@ function ThemeToggle() {
   );
 }
 
-const CLUB_SECTIONS = ['dashboard', 'players', 'leaderboard', 'records', 'compare', 'statlab', 'yearbook', 'yearbooks', 'games', 'fixtures', 'teams', 'website', 'premierships', 'honour-board'];
+const CLUB_SECTIONS = ['dashboard', 'players', 'leaderboard', 'records', 'compare', 'statlab', 'competitions', 'yearbook', 'yearbooks', 'games', 'fixtures', 'teams', 'website', 'premierships', 'honour-board'];
 // Single-segment paths that are NOT club slugs (must stay in sync with App.jsx routes)
 const RESERVED_ROOT_SEGMENTS = new Set([
   'login', 'admin', 'onboard', 'club-inactive',
@@ -139,6 +139,7 @@ export default function Navbar() {
       { label: "Leaderboard", href: `/${slug}/leaderboard` },
       { label: "Records",     href: `/${slug}/records` },
       { label: "Stat Lab",    href: `/${slug}/statlab` },
+      { label: "Competitions", href: `/${slug}/competitions` },
       { label: "Premierships", href: `/${slug}/premierships` },
       { label: "Honour Board", href: `/${slug}/honour-board` },
     ],
@@ -150,7 +151,7 @@ export default function Navbar() {
     ],
   } : {};
 
-  const statsActive = slug && ['leaderboard', 'records', 'statlab', 'premierships', 'honour-board'].some(s =>
+  const statsActive = slug && ['leaderboard', 'records', 'statlab', 'competitions', 'premierships', 'honour-board'].some(s =>
     pathname === `/${slug}/${s}` || pathname.startsWith(`/${slug}/${s}/`)
   );
   const gamesActive = slug && ['games', 'fixtures', 'lineups', 'ladders'].some(s =>

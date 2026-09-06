@@ -1,5 +1,437 @@
 # BetterStats — Claude Session Notes
 
+## A FIXTURE BELONGS TO BOTH CLUBS. Read it that way, every time (v9.62.0, Sep 2026)
+
+**THIS HAS NOW BEEN REPORTED FOUR TIMES** — the second club's Games list
+(migration 167), a player's own club as their opposition (167), a season table
+drawn two and three times over (v9.53.10), a career counting another club's
+matches (v9.53.12), and now Shoalwater Bay. Every one is the same sentence
+written a different way, so it is written here once, at the top, as a rule:
+
+> **A CA match between two clubs that both sync BetterCricket is a SINGLE
+> `games` row. Its `grade_id` — and so its `season_id` — points at whichever
+> club synced it FIRST. That club does not own the fixture. Both sides played
+> it, both sides' scorecards hang off it, and both sides' statistics have to
+> count it and classify it.**
+
+**NEVER decide "is this game ours" with `seasons.organisation_id`, and never
+decide "what kind of grade is this" from a `grades` row your own club owns.**
+Both are the same mistake at two ends of the query.
+
+- **Ownership is `services/club_grades.club_game_sql`** — the game's own club is
+  us (`v_effective_games.organisation_id`, migration 169) **or we are one of the
+  two sides** (`home_org_id`/`away_org_id`, migration 167, both indexed).
+  `aggregations._OURS_GAMES` and `records._OURS_GAMES` are that one string;
+  `_club_game_clause` is the player-scoped sibling. A per-game read guarded by
+  `players.organisation_id` and this predicate is correct; one guarded by the
+  season's org is not.
+- **Classification is `services/club_grades.club_grade_rows`**, which enumerates
+  the club's own grades PLUS every grade row its own games sit in, and resolves
+  each to the club's own answer by NAME (folded through `grade_merge_logs`).
+- **A season filter needs `resolve_season_filter(..., include_shared=True)`**,
+  which reaches the other club's row for the same real season: the CA season
+  GUID both rows carry first (a CA season id is global, not per club — the key
+  `iq_filters.season_ids_cross_club` already matched on), then the year, then
+  the name for a row that has neither. **Opt-in, and that matters**: a query
+  whose only club guard is the season list (a grade listing, a season dropdown)
+  would otherwise reach another club's rows. Pass it only where the read is
+  ALSO guarded by the club's own players or by the ownership predicate above.
+
+### What Shoalwater Bay reported, and why it read as two unrelated bugs
+
+Darren Hind's Players-list row said **106 matches**, his own profile said
+**150**, and asking that profile for **Juniors** returned **28 senior Peel
+Cricket Association matches** — the same matches the Men's filter returned.
+
+- **THE CATEGORY FILTER IS AN EXCLUSION, SO A GRADE IT CANNOT NAME IS KEPT.**
+  That is deliberate and still right (a manual game with no grade, or an import
+  residual, is not a row we know to be junior). But `resolve_scope` built its
+  exclusion list from `grades JOIN seasons WHERE s.organisation_id = us`, so
+  the other club's grade row was never in the list and could not be excluded by
+  anything. The fixture therefore passed Men's AND Juniors AND every other
+  category at once. **An exclusion-based filter is only as good as its
+  enumeration** — widen the enumeration, never relax the exclusion.
+- **THE SAME FIXTURE WAS BEING DROPPED ELSEWHERE, WHICH IS WHY THE TWO SCREENS
+  DISAGREED.** The leaderboards, the SIRS boards and the record boards all
+  scoped `s.organisation_id = :org_id`, so the 21 innings the profile counted
+  never reached the Players list. 127 − 21 = 106, exactly.
+- **AND THE SEASON FILTER DROPPED THEM A THIRD TIME.** `resolve_season_filter`
+  expanded a year to sibling rows **of the same club only**, so picking 2025/26
+  lost the very matches the all-time figure counted.
+- **150 IS THE RIGHT ANSWER OF THE TWO.** Shoalwater played those matches. The
+  fix brings the boards up to the profile, never the profile down to the boards.
+- **THE COMPETITION PANEL READ THE FOREIGN GRADE'S OWN `competition_id`**, which
+  is NULL until the other club groups its grades and is THEIR competition after
+  that. So 122 sat under Peel and 28 under "Other grades", and a club that had
+  grouped its own grades would have had another club's competition name
+  labelling its figures. `club_grade_competitions` resolves it to ours instead.
+- **THE ASSOCIATION FALLBACK IS ONLY FOR A NAME WE HAVE NEVER HELD.** The first
+  cut matched any ungrouped foreign grade to our competition running the same
+  association, and the verification caught it: our own ungrouped "Under 14s" sat
+  in "Other grades" while THEIR identically-named row was swept into Peel. A
+  grade we hold under that name gets the answer we gave it, ungrouped included.
+- **A MERGED-AWAY SPELLING MUST READ AS THE GRADE THAT WAS KEPT.** A shared
+  fixture is exactly where CA's older name turns up, and the club has usually
+  merged that name away. `_apply_alias_fold` registers the canonical's confirmed
+  answer under the alias key in all three of `grade_labels`' name maps, so
+  "F Grade Colts Cup" reads as the senior "F Grade" it was merged into rather
+  than as the juniors its own name suggests.
+- **StatLab's `game_universe` was one line** (`WHERE s.organisation_id`), and
+  every per-player read below it is separately guarded by `p.organisation_id`,
+  so widening the game universe there cannot reach another club's players.
+  BetterIQ's team analysis was ALREADY cross-club aware (`_ours_clause`,
+  `season_ids_cross_club`) and needed nothing.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_shared_fixture_stats.py`, 31 checks through the
+  shipped services and route bodies: the reported case replayed, the Juniors
+  filter returning only real junior matches, the Players list and the profile
+  agreeing, batting/bowling/fielding boards all counting the shared fixtures,
+  the club that DID sync the fixture unchanged and its own player never leaking
+  onto our board, a match we were not in still not ours, the season filter
+  reaching the other club's row on the CA season GUID and on the year, their
+  junior grade still excluded while their senior one is not, the merged
+  spelling read as ours, the format axis on a grade we do not own, the
+  competition panel filing every shared fixture under our own competition while
+  an ungrouped grade stays ungrouped, and the filtered senior and junior runs
+  adding back up to CA's own season total) **with a control run**: 22 of the 31
+  fail against the previous commit, the Juniors filter returning 126 runs of
+  senior cricket and the boards reading 3 where the profile reads 7.
+- **Measured at platform scale** (25,000 games, 1,260 grades, 75,000 innings):
+  `resolve_scope` 3.5 → 7.5ms, the scoped batting leaderboard 132 → 160ms. The
+  leaderboard's extra 28ms is **the 11% more innings it now correctly counts**,
+  not the predicate: the same query with only the WHERE swapped is 36.2 → 38.1ms
+  and returns 75,000 rows against 67,500. Writing the ownership test as
+  `s.organisation_id OR the two sides` measured SLOWER (42.1ms), so the plain
+  form stands.
+- **A CHECK THAT PASSES AGAINST THE BROKEN CODE IS NOT A CHECK.** The first cut
+  of "their older spelling reads as our merged grade's category" used a name
+  that suggests senior anyway, so an unclassified grade falling through passed
+  it. It is a junior-suggesting name now, and its sibling asserts the Juniors
+  filter does not claim it either — that pair fails both ways.
+- **NOTICED, NOT FIXED**: the same `seasons.organisation_id` shape still appears
+  in the yearbook generator, the fantasy engine and several admin tools. None is
+  a club-facing stats figure, and each needs its own look. The repeatable audit:
+  extract every triple-quoted SQL block, keep those with a per-game table after
+  `FROM`/`JOIN`, and flag any that tests a seasons alias' `organisation_id`
+  without also naming `home_org_id`. It reported 89 blocks; this change covers
+  the club-facing stats reads.
+
+## A RETIRED NOT OUT IS NOT A DISMISSAL, and a plain RETIRED is (v9.66.0, Sep 2026)
+
+Reported by a club with two screenshots of one player. Lily Thompson, Payneham
+CC, SGCL Metro U18, 2025/26: her profile header read **15.40**, matching
+PlayCricket, and StatLab with the grade picked read **12.83**. 77 runs and 8
+innings on both.
+
+- **`sync.py` DECIDED THIS WITH `not_out = dt_id == 1`**, so every retirement
+  landed in the database flagged as a wicket. Any figure worked out from our own
+  scorecards then put it in the average's denominator: 77 / (8 - 2) = 12.83
+  against CA's 77 / (8 - 3) = 15.40. The unfiltered header was right only because
+  it reads `player_season_stats.not_outs`, which is CA's own `battingNotOuts`
+  copied verbatim — so the two paths disagreed by exactly one innings and the
+  club could see both numbers on one screen.
+- **THE TWO RETIREMENTS ARE DIFFERENT INNINGS, AND THAT IS THE WHOLE FIX.** MCC
+  Law 25.4.2 ("Retired - not out", illness or injury, did not resume) is not a
+  dismissal; **25.4.3 ("Retired - out", retired for any other reason without the
+  opposing captain's consent) IS one**, credited to no bowler. CA sends both, as
+  separate ids, and treats them exactly the way the Law does.
+- **`services/dismissal.py` IS THE ONE RULE**, and it is deliberately a
+  whole-phrase match. **NEVER write this as `LIKE 'retired%'`** — that sweeps
+  CA's plain `Retired` in with the two not-out retirements and hands every
+  retired-out batter an average they have not earned, which is this same bug
+  pointed the other way. The suite pins both directions for exactly that reason.
+- **CA'S VOCABULARY WAS ENUMERATED LIVE, NOT ASSUMED**: 260 real scorecards
+  across 33 grades give `0 Did Not Bat, 1 Not Out, 2 Caught, 3 LBW, 4 Bowled,
+  5 Stumped, 6 Run Out, 8 Retired Hurt, 13 Retired, 14 Retired Not Out,
+  15 Absent`. **8, 13 and 14 are three different answers** and no amount of
+  reading the code would have told us which.
+- **RECONCILED AGAINST CA'S OWN AGGREGATE BOTH WAYS, which is what settled 13.**
+  Lily's `battingNotOuts: 3` over two plain not outs plus one Retired Not Out
+  proves 14 is a not out. N Raux (Murrumbidgee, 2025/26) retired for 0 and CA
+  counted it among his `batting0s` with `battingNotOuts: 1` for his one genuine
+  not out — a duck AND a wicket. **8 (Retired Hurt) rests on the Law and on
+  CA's naming, not on a measurement**: the aggregate for the one live case found
+  belongs to a club outside the sample, and the note says so rather than
+  implying it was checked.
+- **THE FIX IS THE WRITER, NOT THE READERS.** Every average in the app was
+  already `runs / (innings - not_outs)`; they were all reading a flag that was
+  wrong. So the change is one line in `sync.py`, the same line in the live
+  scorecard merge, and a backfill — not thirty query edits.
+- **`python -m app.scripts.backfill_retired_not_out <org|all> --apply`** repairs
+  what is stored. No network at all: the dismissal name is already on the row,
+  so it is a plain UPDATE, quick enough to run platform-wide and idempotent. Dry
+  run by default.
+- **PRESSING FIX MISSING TOTALS AGAIN REPAIRS NOTHING, so the backfill does it.**
+  `_backfill_missing_season_stats` ends `ON CONFLICT (player_id, season_id) DO
+  NOTHING`, so a second run writes nothing at all to a row that already exists —
+  and its `source='backfill'` rows were rolled up FROM the old flag, for the
+  (player, season) pairs CA omits. The script re-derives their `not_outs` and
+  `ducks` from the corrected innings, AFTER fixing those innings, or it would
+  re-derive from the very flag it is correcting. **CA's own `source='api'` rows
+  are never touched** — they already had this right and are what we reconcile
+  against. Found by reading the INSERT, not by assuming a re-run would do it;
+  the suite pins the `ON CONFLICT` clause so the reasoning cannot go stale.
+- **TWO AVERAGES ON ONE PROFILE, found by auditing rather than by the report.**
+  By-opposition and by-venue divided by `NOT not_out AND dismissal_type IS NOT
+  NULL`, so an uploaded card whose dismissal column was never read dropped out of
+  the denominator there and stayed in it on the career header. Batting by
+  position and by grade had the same shape. All four are `innings - not outs`
+  now, and **the suite asserts it structurally on the ALIAS** so a new board
+  cannot reintroduce it.
+- **THE WICKET COUNTERS BESIDE THEM WERE DELIBERATELY LEFT** (`wkts_lost`,
+  `our_wkts_lost`, the fantasy engine's `out`). How many wickets a side lost is a
+  different question from how many times a batter was dismissed, and nobody asked
+  for those to move. They still improve for free, since a retirement is no longer
+  a wicket.
+- **A RETIREMENT IS NOT A WAY OF GETTING OUT**, so it leaves the How I Get Out
+  donut and the record book's unusual dismissals. A retired-OUT stays on both.
+  Retiring for 0 is no longer a duck; retiring OUT for 0 still is.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_retired_not_out.py`, 64 checks through the
+  shipped aggregation, StatLab, backfill and writer code: the reported card
+  replayed innings by innings, the average agreeing across the career header,
+  by-opposition, by-venue, by-grade, the leaderboard and StatLab, a retired-out
+  still counting as a dismissal and a duck, retired hurt not, the backfill's dry
+  run / apply / no-op re-run / club scoping / never touching a retired-out, and
+  the SQL and Python rules agreeing row by row) **with a control run**: 27 of the
+  64 fail against the previous commit, reporting the customer's own **12.83** on
+  both the profile and StatLab.
+- **THE FIXTURE IS SEEDED THROUGH THE CODE UNDER TEST, and the first cut was not.**
+  It repaired the rows with the backfill before reading them, so every check
+  about the average passed against the broken code — the one thing a control run
+  exists to catch. `writer_flag()` asks the shipped rule and falls back to the
+  old `dismissalTypeId == 1` when the module is absent, so the control stores the
+  fixture exactly as a club's real database holds it today.
+- **NOTICED, NOT FIXED**: `player_season_stats.batting_average` still stores CA's
+  own figure and a few BetterIQ features read it rather than recomputing. It
+  agrees with ours now, so it is no longer a divergence, but it is a second
+  stored copy of a derived number.
+
+## A rate is only as good as the innings behind it (migration 282, v9.59.0, Sep 2026)
+
+**Asked for as a RULE to set, not off a live report** — the 500 runs / 150 balls
+/ 333.33 below is a worked example chosen to make the arithmetic obvious, and
+nobody has measured how far a real club's figures move. What WAS established
+before building is that the mechanism is real: a season scored partly on an iPad
+and partly in a written book gives CA a runs total covering every innings and a
+balls total covering only the ones somebody typed in, every rate in the app
+summed those two halves separately, and `sync.py` wrote a missing ball count as
+a zero. **How much any club's figures actually shift is still unmeasured** —
+`SELECT` the innings where `balls = 0 AND runs > 0` against a real database to
+find out.
+
+- **RUNS AND BALLS MUST COME FROM THE SAME INNINGS, and that is the whole
+  rule.** Every rate in the app was `SUM(runs) / SUM(balls)` across a season or
+  career, which divides one population by another: the runs from the un-balled
+  innings land in the numerator with nothing behind them in the denominator.
+  `services/rate_coverage.py` is the one definition, mirroring `game_status` and
+  `grade_scope`. **This is the rule `sync._derive_partnerships_grassroots`
+  already applies to stands** — when the inputs do not reconcile, refuse to
+  derive a figure from them rather than publishing a wrong one.
+- **A ZERO BALL COUNT BEHIND REAL RUNS IS NOT A BALL COUNT, and that half is
+  load-bearing rather than defensive.** `sync.py` wrote
+  `balls=row.get("ballsFaced") or 0`, so a missing count from CA has ALWAYS
+  landed in the database as a zero rather than a NULL. Testing `balls IS NOT
+  NULL` alone would therefore read every one of those innings as covered and
+  reproduce the reported bug one level down. Covered is `balls IS NOT NULL AND
+  (balls > 0 OR runs = 0)`; the sync preserves NULL going forward, and the
+  zero-with-runs test is what covers the history already stored. **Found by
+  reading the writer, not the reader.**
+- **A GENUINE 0 OFF 0 IS COVERED.** A batter run out backing up without facing
+  is a real innings that contributes nothing to either half, and calling it
+  uncovered would understate the coverage fraction on every scorecard that
+  holds one.
+- **THE RATE CHANGES SOURCE; NOTHING ELSE DOES.** Runs, innings, wickets and
+  every average still come from wherever they came from before, so a career
+  header still reads 500 runs. Only the ratio is re-derived, from the
+  scorecards, where the two halves stay together. That is what lets the answer
+  be "500 runs, strike rate 100, from 3 of 10 innings" rather than a smaller
+  career.
+- **WHERE THERE ARE NO SCORECARDS THE AGGREGATE STANDS AND SAYS SO.** A
+  BetterImport season carries a runs total and a balls total and nothing that
+  can separate them, so `basis: "aggregate"` is reported instead of a fraction.
+  Withholding every historical club's strike rate would be a worse answer than
+  naming where the figure came from. Withholding is reserved for what genuinely
+  cannot be worked out.
+- **`_with_rate_coverage` IS PRESENCE-AWARE**, so a query that never asked for
+  coverage keeps its exact payload shape. That is what let one helper serve the
+  career header, both season paths, all twelve leaderboard branches, the
+  yearbook boards and the record book without any of them growing keys they do
+  not use.
+- **THE MINIMUM IS COUNTED ON COVERED INNINGS, NEVER ON INNINGS PLAYED.** Ten
+  innings with three ball counts is a three-innings strike rate, and letting
+  that clear a ten-innings bar is exactly what the bar exists to stop. The
+  suite asserts both directions (clears 3, fails 4) on every board branch.
+- **THE PLATFORM DEFAULT IS 0, DELIBERATELY.** Nothing has ever qualified these
+  boards, so switching a number on for every club would drop players off their
+  own leaderboard the day it deployed without anybody choosing it — and a
+  number we invented would be quoted back at us. Migration 282 gives a club its
+  own (`organisations.stats_min_rate_innings` / `.stats_min_rate_spells`, NULL
+  = no preference), read through `services/stats_display.py`, with viewer pills
+  above the board for a one-off look. **A viewer's explicit 0 is a real answer**
+  — it switches the bar off — so the resolver tests for None, not falsiness.
+- **A STRIKE RATE RECORD IS SEASON BY SEASON AND NEVER ALL TIME.** How much was
+  written down changed from one era to the next, so a career figure blends
+  decades of differently scored cricket into one number nobody can check. A
+  season was scored one way. The record book already sets its own qualification
+  floors (20 wickets for a bowling average, 50 overs for an economy) and these
+  are their siblings; the screen points at StatLab, which already takes several
+  seasons at once, for a range.
+- **THE NOTE ONLY APPEARS WHERE THE FIGURE IS SHORT, AND ONLY WHERE THE FIGURE
+  IS DRAWN.** A note on every rate in the app is noise that trains people to
+  stop reading it. `RateFootnote`'s `when` is what stops a leaderboard sorted by
+  runs carrying a footnote about a mark nobody can see — caught by the browser
+  suite, not by reading the code. The mark is a **dagger, not an asterisk**: an
+  asterisk already means "not out" on every scorecard in the world.
+- **Fixed while here**: the per-spell economy boards divided by `SUM(overs)` in
+  cricket notation, so 10.2 + 10.2 summed to 20.4 rather than 20 overs 4 balls.
+  Every economy now converts to balls first, the conversion `player_formats`
+  already documented.
+- **Verified against a real Postgres** (`backend/verification/verify_rate_coverage.py`,
+  105 checks through the shipped functions and route bodies: the reported case
+  replayed on the career header, both season paths, all five leaderboard
+  branches, the formats page, StatLab's fast and live paths, the yearbook and
+  the record book; the flattened zero excluded and the genuine 0(0) kept; the
+  scorecard-less season keeping its own figure; the minimum counted on covered
+  innings both ways; and the SQL and Python covered tests agreeing row by row)
+  **with a control run**: 42 fail against the previous commit, reporting 333.33
+  on every surface. **Driven in Chromium** (`verify_rate_coverage_browser.mjs`,
+  36: the new strike-rate board, the exact params on the wire for a pill and for
+  the club default, the marked and unmarked rows read off the rows themselves,
+  the explainer and Escape closing it, both season records and the StatLab link,
+  no footnote where nothing is short, and no overflow at 390px) **with a control
+  run**: 11 fail against the previous commit.
+- **A CHECK THAT COUNTS MARKS ON A PAGE CANNOT FAIL PROPERLY.** The first cut of
+  "the covered leader is not marked, the partial one is" counted daggers in the
+  whole document, which passes with BOTH marked. It reads the two rows.
+- **NOTICED, NOT FIXED — and SETTLED in v9.65.1 below**: StatLab's family
+  targets (`family_career`, `family_season`) divided the season totals, and said
+  so in a comment where the rate was built, on the reasoning that they already
+  ignored every other match-context filter. They honour the aggregate scope now,
+  and coverage is not a filter, so all three are re-derived from the members'
+  own scorecards. A club's history that predates the sync also
+  needs a Full Rebuild before its ball counts read as NULL rather than zero;
+  until then the zero-with-runs test is what carries it, which is why that test
+  exists rather than being tidied away.
+
+### The one figure the browser still worked out itself (v9.65.1, Sep 2026)
+
+Reported off Darren Hind's profile: the Player Profile radar read a **strike
+rate of 320.19** beside an innings history where most rows record no balls
+faced at all. 2,379 runs over the ~743 balls somebody had typed in.
+
+- **282 SET THE RULE AND SEVERAL SURFACES WERE NEVER BROUGHT ACROSS.** The
+  career header two inches above the radar already had the figure right; the
+  radar computed its own in the browser as `SUM(runs) / SUM(balls)` over every
+  innings it drew. `careerBatting.strike_rate` and its coverage pair were on
+  the payload the component already received — it simply ignored them. **It was
+  the last client-side rate in the frontend**, and the audit that found it is
+  the one to repeat: grep the frontend for a division by summed balls, and the
+  backend for a rate whose module carries no `rc.` import.
+- **A RATE READS THE SERVER'S FIGURE OR IT IS A SECOND DEFINITION.** The fix is
+  not to reimplement coverage in the browser — it is to stop computing rates
+  there at all. Two places that work out a strike rate are two places that can
+  disagree about it, which is exactly what a reader saw.
+- **`rc.with_coverage` IS THE ONE SHAPE OF A COVERAGE PAIR**, moved out of
+  `aggregations._with_rate_coverage` (which now delegates) so a ROUTER can use
+  it too. A query emits `sr_counted`/`sr_of` or `econ_counted`/`econ_of` and the
+  helper turns them into the pair. Presence-aware, so a query that never asked
+  keeps its exact payload shape.
+- **`batting_rate_columns(extra=…)` EXISTS FOR A SELECT WIDER THAN THE INNINGS
+  THE RATE IS ABOUT.** A query keeping did-not-bat rows for their counts has to
+  leave them out of the coverage, or a 0 off 0 nobody batted in reads as an
+  innings that answered the question — and `covered_innings` then exceeds the
+  innings it is counted against. The teammate split is that shape.
+- **THE CAPTAIN PANEL'S ECONOMY WAS TWO BUGS IN ONE LINE**: `SUM(runs) /
+  SUM(overs)` with no coverage AND overs summed in cricket notation, so 10.2 +
+  10.2 came to 20.4 rather than 20 overs and 4 balls. It read **6.25 where the
+  answer is 3.00**. StatLab's balls-per-wicket carried the same `overs * 6` on
+  three targets.
+- **AN OPPONENT'S CARD REACHES US THE SAME WAY OURS DOES.** `iq_opponent`'s
+  live accumulator wrote `ballsFaced or 0`, the same flattening `sync.py` does,
+  so a danger batter's strike rate was inflated the same way. `DOSSIER_VERSION`
+  is bumped so every cached dossier rebuilds rather than waiting out the 7-day
+  TTL.
+- **THE FAMILY TARGETS ARE FIXED, AND THE OLD NOTE'S REASONING NO LONGER
+  HOLDS.** v9.59.0 left them alone because they "ignore every other
+  match-context filter", so half-fixing looked worse. They honour the aggregate
+  scope now, and — the part that settles it — **coverage is not a filter**. It
+  is about which innings can answer, so re-deriving the rate over the SAME
+  population the counts cover is consistent rather than half-fixed.
+- **A FAMILY'S RATE IS THE FAMILY'S COVERED HALVES, and the first cut of the
+  check got this wrong.** It expected the family's WHOLE 700 runs over its 550
+  counted balls (127.27) — the same two-population mixing on a family scale.
+  The answer is 350 over 550. Found by running it, not by reading it.
+- **STATLAB PUBLISHES NO COVERAGE PAIR ON ANY TARGET, so the family ones do not
+  either.** The extra columns were written, then dropped: a target that reports
+  a pair no sibling reports is a column contract that differs per target, and
+  `_serialise` passes every column through to the CSV. Correct figures, uniform
+  shape. Saying it on a StatLab report is its own change.
+- **DELIBERATELY LEFT ON THE AGGREGATE, and each for the same reason — there
+  are no scorecards to re-derive from**: the Scout product (`iq_scout`,
+  `scout_discovery`, `scout_internal_link`, `frontend/src/scout/lib/seasonRollup.js`)
+  reads CA's season totals for players at OTHER clubs, and `iq._their_key_players`
+  reads a synced opponent's own aggregates. That is the documented
+  `basis: "aggregate"` case. They are NOT marked as such today, which is the
+  obvious follow-up and is a frontend change in three screens.
+- **ALSO LEFT, and NOT because it is hard**: `iq_team._role_ratings` and
+  `iq_trends._similar_players` derive an economy and a strike rate from
+  `player_season_stats` as z-scored FEATURES and `pop()` them before returning —
+  no figure is published, and switching their source would move the MVP rating
+  and the similar-player list for every club with nobody having asked.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_rate_coverage_everywhere.py`, 33 checks through
+  the shipped route bodies and services: the captain economy and its coverage,
+  two 10.2-over spells measured as 124 balls, the teammate split both sides with
+  the fully-covered mate NOT marked, the deep dive's balls and balls-per-boundary
+  from the covered innings, the attack board, the dossier's batter and bowler
+  through the real accumulator, all three family targets, no coverage columns
+  leaking into a StatLab row, and the SQL and Python agreeing row by row) **with
+  a control run**: 17 of the 33 fail against the previous commit, reporting
+  333.3, 300.0, 127.27 and the captain's 6.25.
+- **Driven in Chromium** (`frontend/verification/verify_radar_rate_browser.mjs`,
+  21: the radar reading the server's figure and not the one its own innings
+  would give, the dagger, the note naming the innings, a fully covered player
+  drawing neither, the aggregate basis still drawing a figure rather than a
+  dash, the economy row counting SPELLS, and no overflow at 390px) **with a
+  control run**: 11 of the 21 fail, the radar reading 500.00 where the server
+  said 100.00 and a dash where the aggregate figure belongs.
+- **The neighbouring suites were re-run rather than assumed**: rate coverage
+  105, competitions 136, match coverage 66, shared fixtures 38, season fold 65,
+  records timing 47, milestones 23, and the profile browser suite 49.
+- **A CHECK THAT READS THE WHOLE CARD CANNOT TELL WHICH FIGURE IS MARKED.** The
+  radar checks read each axis off its own row and strip the dagger before
+  comparing, since the career strip above the card prints a strike rate too.
+- **THE INNINGS HISTORY SR COLUMN WAS BLANK ON EVERY ROW, and it is the column
+  a reader would have used to check the headline.** `batting_innings.strike_rate`
+  has a writer for a hand-entered manual innings and none at all for a synced
+  one — `sync.py` stamps CA's `battingStrikeRate` onto the season aggregate and
+  nothing else — so the column was NULL for essentially every innings on the
+  platform. Derived on read now (`rc.innings_strike_rate_sql`), never
+  backfilled: a stored rate is wrong the moment somebody corrects the runs, and
+  deriving it fixes every row already in the database with no migration and no
+  re-sync. Same call `player_age.age_on` makes about an age.
+- **AT ONE INNINGS THERE IS NO POPULATION TO MIX, so `NULLIF(balls, 0)` IS the
+  coverage test.** The runs and the balls are the same innings by construction,
+  and the three ways an innings cannot answer — a NULL count, a count flattened
+  to zero with runs on it, and a genuine 0 off 0 — all fall out of that one
+  expression as NULL. The suite asserts the SQL and the Python agree row by row
+  rather than taking the equivalence on trust.
+- **A STORED FIGURE IS THE FALLBACK, NOT THE ANSWER.** Where balls were
+  recorded, a stored rate that contradicts the two columns printed beside it
+  reads as a bug; where they were not, it is the only thing we hold, which is
+  the case the manual scorecard form's own field exists for.
+- **`get_batting_by_position` AVERAGED PER-INNINGS STRIKE RATES**, which weights
+  a four-ball cameo the same as a hundred-ball innings — over a column nothing
+  writes, so it read blank anyway and no screen draws it. Fixed rather than left
+  standing: it would have been wrong the day somebody rendered it. **The control
+  run is what showed the shape of it** — the old expression reads **88.0**, the
+  one manual innings that happened to carry a stored figure, ignoring the three
+  real ball-counted innings entirely.
+- **NOT DONE: no SR column was added to Batting by Position.** The field is
+  correct now and nothing renders it; adding a column to a table nobody asked
+  about is a product decision, not part of fixing a wrong figure.
+
 ## A player's seasons drawn two and three times over (v9.53.10, Aug 2026)
 
 Reported off a live profile: Cameron Sawatzky's season table read "2025/26"
@@ -62,6 +494,273 @@ slice of the real season.
   disagree about the size of a career for someone who has played for more than
   one synced club. Which of the two readings a club wants is a product decision,
   not a bug this fix should settle on its own.
+
+### M IS MATCHES PLAYED. INN IS INNINGS. They are different numbers (v9.62.2)
+
+Reported straight after the fix above: the Players list read **M 127** where
+the same player's profile read **MATCHES 150**. Both were "right" and they
+measured different things.
+
+- **A BOARD'S GAMES FIGURE WAS COUNTED FROM ITS OWN PER-INNINGS ROWS**, so the
+  batting board's M was matches he BATTED in, the bowling board's was matches
+  he bowled in, and the fielding board's was matches a ball came to him. Beside
+  an INN column that already means innings, M can only mean matches — and
+  `aggregations._scoped_games_played` (the profile's own figure) already said
+  so in its docstring. The 23 in the gap were matches he was picked for and
+  never got a bat in.
+- **WORSE, THE DEFINITION MOVED WITH THE FILTER.** With no grade-type filter
+  the same column reads `SUM(player_season_stats.matches)` — Cricket
+  Australia's own matches PLAYED — so one column meant two things depending on
+  whether a pill was on. That is what made 106 / 142 / 150 three plausible
+  answers to one question.
+- **`_matches_played_cte` is the one definition**, unioning the same four
+  sources `_scoped_games_played` unions (a batting innings, a bowling spell, a
+  fielding row, a bare `game_appearances` row). It **narrows the games FIRST**
+  so the three per-innings tables are not scanned platform-wide, the shape
+  `records.py`'s `grade_scoped_games` already uses.
+- **IT SUPPLIES THE FIGURE, NEVER THE QUALIFICATION.** A player is still listed
+  on the batting board because he has a batting innings or a residual; the
+  matches CTE is LEFT JOINed for its number alone. Joining on it would fill a
+  batting leaderboard with players who never batted.
+- **`records.most_matches` had the same hole** and it is the board literally
+  called most matches: its `use_game_level` branch unioned the three
+  per-innings tables and not `game_appearances`, so a player named in a side
+  and dismissed for nothing measurable was short a match against his own
+  profile. The fourth arm is added.
+- **Measured** (25,000 games, 1,260 grades, 75,000 innings): the scoped batting
+  leaderboard 160 → 188ms. The union is the cost, and it buys the column
+  meaning one thing on every screen.
+- **NOTICED, NOT FIXED**: the grade-scoped, finals-only and captain-only
+  branches of the same boards still count their own per-innings rows. Each is a
+  narrowed subset where "matches" wants its own reading (finals played, matches
+  captained), and each needs its own look rather than the same CTE pasted in.
+
+### Grouping is a job the platform does, not a button a club must find (v9.62.1)
+
+Reported off Applecross: Manage Grades showed **0 competitions** and every
+grade it has ever played under "not in a competition", with a button offering
+to fix it. A club should not have to know that button exists.
+
+- **THE SYNC ALREADY FILLS THE ASSOCIATION IN — FOR THE SEASONS IT SCANS.**
+  `_resolve_org_grade` writes it on an existing grade as well as a new one, so
+  a fresh club that syncs its whole history (Shoalwater Bay) comes out fully
+  grouped. An ESTABLISHED club syncs incrementally, so only the current season
+  is reached and the other fifty are not. That is the entire gap.
+- **IT IS NOT HOOKED TO THE SYNC, and the first cut's mistake is worth
+  keeping.** Hanging it off `sync_organisation` reads as the obvious place and
+  is wrong: a club that played nothing in the period never reaches that
+  function at all (`_record_idle_run` short-circuits it), so every off-season
+  and every quiet club would sit un-grouped indefinitely — exactly the clubs
+  most likely to be carrying a whole history of it. `competition_grouping
+  .maybe_group_club` is called from a standalone nightly job instead
+  (`jobs/scheduler.group_all_organisations`, 02:30 Perth), over
+  `auto_sync.eligible_clubs`. Its own try/except and its own session.
+- **IT IS A JOB THAT FINISHES, and that is the whole design problem.** Running
+  it every sync would re-fetch, for the life of the club, the seasons CA simply
+  has no association for. So `run_grouping` now reports **`seasons_unresolved`**
+  — what is still missing once it has done all it can — and the trigger fires
+  only when the current gap is GREATER than the last completed run's residual.
+  True the first time, true again when a new season turns up without one, false
+  for ever after on a club whose remaining gap is CA's own.
+- **A run in flight is never doubled up** (`running_run_id`), so a sync landing
+  while an admin has pressed the button joins nothing and starts nothing.
+- **The button stays as the escape hatch**, for a club that wants it now rather
+  than after the next sync, and the copy says which is which.
+
+### The association is already in our own database — ask it, don't re-fetch (v9.62.3)
+
+Asked for directly, after the nightly job above was costed out: a fortnight to
+work through the platform's backlog is not acceptable, and the fix should come
+from the data BetterCricket already holds rather than from Cricket Australia.
+
+- **`games.raw_payload` IS A DEAD COLUMN — nothing writes it**, so the
+  association cannot be recovered from stored match payloads. Checked before
+  designing anything; the only reference left is `clone_demo_club.py`. That
+  ruled out the obvious route and forced the two below, which are better.
+- **A CA GRADE GUID IS COMPETITION-WIDE, so one club's answer is every club's.**
+  The whole competition shares the guid (migration 067's own note: ten clubs
+  share High Wycombe's "1st Grade"), so an association ANY club holds against a
+  guid is the association for every club's row carrying it. That is what makes
+  a single recently-synced club resolve the same grade for everybody who plays
+  in it, with no call at all.
+- **A CLUB'S OWN GRADE NAME IS ITS OWN COMPETITION, so one recent season
+  resolves twenty-five old ones.** Folded through `grade_merge_logs` and the
+  sponsor-suffix strip, so CA's older spelling and "A Grade (Solo Energy)"
+  land on the same key — the same two rules `club_grade_rows` already applies,
+  because a name resolved one way for the filter and another way for the
+  backfill is how the two start disagreeing.
+- **BOTH PHASES REFUSE TO GUESS, and that half is load-bearing.** Each is
+  guarded by `HAVING COUNT(DISTINCT association_id) = 1`, so a club that MOVED
+  association under one grade name has its unknown years left unknown rather
+  than being filed under whichever era won. A wrong association is worse than a
+  missing one: it puts a club's matches under a competition it never played in,
+  which is the reported bug wearing a different hat.
+- **THEY FEED EACH OTHER, so `propagate_all` loops until neither writes.** A
+  guid filled from another club unlocks that club's other seasons of the same
+  name, which carry a guid a third club is waiting on. Bounded at five passes
+  so a pathological cycle cannot spin.
+- **NOTHING IS EVER OVERWRITTEN.** Every statement is `WHERE association_id IS
+  NULL`, so a run is idempotent and a second one writes nothing.
+- **THE API PHASE COLLAPSES AS IT GOES.** What our own data cannot answer is
+  fetched once per season, and each answer is applied across EVERY club holding
+  that guid immediately — so the first club processed in an association drops
+  the others' seasons off the list before they are ever called. Each season is
+  re-checked right before its call for exactly that reason.
+- **Measured at platform scale** (110 clubs, 23,381 grades, 2,750 seasons, with
+  a sixth of the clubs having moved association and a third carrying a defunct
+  competition that appears in no recent season): **96.4% of the gap closed from
+  our own data in 6.5 seconds**, and the remainder needing a CA call falls from
+  2,750 seasons to 407. `--apply --no-api` including the grouping of all 110
+  clubs runs in 1.7s.
+- **`python -m app.scripts.backfill_all_associations`** is the one-shot batch,
+  dry-run by default per the house rule.
+- **A DRY RUN MUST MEASURE BEFORE IT ROLLS BACK.** The first cut ran each phase
+  once and measured the residual gap AFTER the rollback, so it reported the gap
+  it started with — telling an operator nothing would be resolved by a run that
+  in fact resolves 96% of it. `propagate_all(commit=False)` is the fix, and it
+  exists so the dry run reuses the REAL loop rather than keeping a second copy
+  that could drift. Found by running the script, not by reading it.
+- **THE NIGHTLY JOB IS NO LONGER DRAINING A BACKLOG**, which is what its cap
+  was for, so `GROUP_CLUBS_PER_RUN` went 10 → 40 and its comment says the batch
+  owns the backlog. A settled club is skipped before any call is made, so the
+  steady state costs nothing.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_association_backfill.py`, 24 checks through the
+  shipped functions: a club inheriting a shared grade's association across
+  every season, a club's own earlier seasons inheriting from a later one
+  including CA's merged-away spelling and a sponsor-suffixed one, both
+  refusals — the club that moved and the club sharing nothing — the gap closing
+  from 11 to the 4 nobody can answer, a second run writing nothing and never
+  overwriting, `outstanding_seasons` naming only the two clubs left, one
+  fetched answer resolving every club holding that guid, the grouping it
+  unlocks, and the dry run reporting the real figures while leaving the
+  database untouched) **with control runs**: with the service absent the suite
+  reports it rather than crashing; with the two propagation phases neutered 11
+  of the 24 fail; with the `commit` flag ignored, 3.
+- **Verified**: the competitions suite is 126 checks now — the club grouped
+  with nothing pressed, the residual recorded, a second sync skipping, a later
+  season bringing it back, the club settling once CA answers, the in-flight
+  guard, and a structural check that the SYNC is what calls it — **with a
+  control run**: all 9 fail against the previous commit, reported rather than
+  crashed.
+
+### A live dry run needs the real cost, not the residual row count (v9.62.4)
+
+Asked for directly: a dry run against a real database reported "22,862 rows
+still missing" and read as the wall this feature was meant to remove — that
+figure is grade ROWS, not Cricket Australia CALLS, and the gap between the two
+is the whole reason the propagation phases exist.
+
+- **`plan_api_phase` works out the real call count from data already held,
+  with no request made.** It unions grades into the same components the two
+  propagation phases spread along — a shared CA grade guid, one club's own
+  grade name — and walks the outstanding seasons in the order the API phase
+  would, counting a call only when it touches a component nothing has resolved
+  yet. One fetched season can settle several components at once, which is
+  exactly what collapses 2,750 outstanding seasons into ~33 real calls on the
+  live data.
+- **It is a lower bound, and says so.** It assumes CA answers every season it
+  is asked, so a season CA genuinely has no association for is still counted
+  as a call that resolves something. The real run reports the exact figures;
+  this is what an operator reads before deciding to run it at all.
+- **The dry run prints it after the SQL phases, not before** — it has to run
+  against the state those phases leave behind (rolled back at the very end,
+  not before), or it counts calls for seasons our own data has already
+  answered and inflates the very number it exists to shrink.
+
+### The Club Directory closes what the sync alone cannot (v9.62.5)
+
+Asked directly, on seeing a live dry run: "the club directory displays all of
+the associations linked to every club — why can't this information be used?"
+Good instinct, and it works — but only after checking, not assuming, the two
+things that decide whether it can.
+
+- **`scripts/inspect_association_sources.py` is the check, and it is
+  read-only.** No write, no upstream call. It answers the two questions that
+  decide whether the Directory can be trusted here: do the two id spaces
+  agree, and how many clubs does the Directory show playing in exactly one
+  association (the only case where its answer is exact rather than a guess).
+  Run against the live database it found **0 of 3** association ids shared
+  between `grades.association_id` and `marketing_clubs.associations`, and all
+  3 **names** shared — confirming this repo's own history of PlayHQ-main-graph
+  ids disagreeing with Grassroots-proxy ids, and that the fix has to match on
+  name, never on the Directory's own id.
+- **`propagate_from_directory` is the third phase, and it never writes the
+  Directory's id.** For a club the Directory shows playing in EXACTLY one
+  association, every grade with no association becomes answerable in one
+  step — not by propagating from a known row, but because the WHOLE club is
+  known to mean one thing. A club in several associations says nothing about
+  which one ran a given grade, so it is left untouched, same as the API phase
+  would have to ask it directly.
+- **The target id is resolved by NAME, reused if anything already calls it
+  that, minted only if nothing does.** `HAVING COUNT(DISTINCT association_id)`
+  the same refuse-to-guess guard the other two phases use: a name that already
+  means two different real ids somewhere (two associations sharing a common
+  word) is left alone rather than picking a side. Where nothing anywhere has
+  ever called it that, a deterministic id is minted from the normalised name
+  (`uuid5` in a namespace of its own, never a real CA guid), so two
+  Directory-only clubs naming the same association land on one value even
+  though neither has a synced grade to agree through.
+- **It runs inside the same `propagate_all` loop as the other two, feeding
+  and fed by them** — a whole club filled from the Directory can be the first
+  known row for a guid or a name that unlocks a DIFFERENT club sharing it,
+  exactly the way a synced club's answer already does.
+- **Verified against a real Postgres** (the suite is 30 checks now: a
+  Directory name that already means something reusing that id rather than
+  minting a second one, a name nobody has ever synced being minted once and
+  never colliding with a real id, the ambiguous-name refusal, the
+  more-than-one-association club left for the API, and the gap closing from
+  23 to the 10 nobody can answer with the three new clubs folded into the
+  fixture) **with control runs**: with the phase neutered, 7 of the 30 fail;
+  with the ambiguity guard removed, the refusal check catches it picking a
+  side rather than declining.
+- **Found by running it, not by reading it**: the first cut cast the minted
+  and reused association ids to `uuid[]` in the batch UPDATE, matching the
+  shape of every other id in this feature. `grades.association_id` is `TEXT`,
+  because a real CA/PlayHQ association id is an arbitrary routing code, not
+  guaranteed to be a UUID — the cast crashed on the very first Directory-linked
+  club it touched. Fixed by casting to `text[]`, which is what the column
+  actually is.
+
+### A live run at concurrency deadlocked writing the answers back (v9.62.6)
+
+Found running `--apply` for real, against the live database, not offline: the
+SQL phases committed (15,838 rows, safe — `propagate_all` commits before the
+API phase ever starts), then several concurrent workers into the API phase the
+run crashed on `DeadlockDetectedError`.
+
+- **`apply_associations` WROTE ONE GUID AT A TIME, IN A LOOP, IN WHATEVER
+  ORDER A DICT ITERATED.** Two concurrent workers each writing several guids
+  from their own team payload could lock the same two rows in opposite
+  orders — the textbook two-transaction deadlock, and something no offline
+  suite running single-threaded could ever exercise. It is now ONE UPDATE via
+  `unnest`, the same shape `propagate_from_directory` already uses: a single
+  statement takes every lock it needs in one scan and cannot deadlock against
+  itself, which is what removes the ordering freedom that let two callers'
+  writes cross.
+- **THE SEMAPHORE ONLY CAPPED THE FETCH, NOT THE WRITE.** Once past the
+  concurrency gate on `get_teams`, every worker's write could still land at
+  once with no bound at all on how many concurrent transactions were touching
+  `grades`. The write now happens INSIDE the same semaphore as the fetch, so
+  total concurrency — fetch and write together — is bounded to the configured
+  number rather than only the network half of it.
+- **A DEADLOCK IS STILL A BACKSTOP AWAY FROM A CRASH.** Postgres's own remedy
+  for a deadlock is "retry one of the two transactions" — it is not a data
+  problem, so a bounded retry in a FRESH session (the failed one is unusable
+  once the driver has raised) is the right response rather than losing a run
+  that has already spent its Cricket Australia calls and fetched its answers.
+- **THIS COULD NOT BE FOUND OFFLINE.** The verification suite runs one
+  statement at a time against a real Postgres; a deadlock needs two
+  transactions racing for the same rows in opposite orders, which is a timing
+  condition no single-threaded check reproduces. What the suite CAN and does
+  pin is the structural fix: one call to `apply_associations` with several
+  guids writes every one of them, not just the first, and never re-races
+  against itself.
+- **Verified against a real Postgres** (the suite is 33 checks now: a single
+  call filling several guids at once, each landing its own association rather
+  than the call stopping after the first, and an already-known row still never
+  overwritten) **with a control run**: a version that only ever applies the
+  first guid in the dict fails both new checks, at 1 filled instead of 3.
 
 ### The grade leaderboard and the profile under it (v9.53.13)
 
@@ -1056,6 +1755,136 @@ or correct a player's totals, season blank for a career-only one.
   career-only confirm wording, a dismissed confirm sending nothing, an inline
   season create, the delete and undo requests, the deep-linked tab, no page
   errors, no overflow at 390px).
+
+## The batting order is dragged, and two flags a coach sets during the night (migration 284, v9.63.0, Sep 2026)
+
+Reported off a club's Thursday nets, run from an iPad: getting the right people
+into the batting spots after finding them in the check-in list was slow; there
+was no way to say who was padding up; and a captain on selection night or
+somebody leaving at seven had to be walked up the queue by hand.
+
+- **POINTER EVENTS, NEVER THE HTML5 DRAG API, and that is not a preference.**
+  iOS Safari fires no `dragstart`, `dragover` or `drop` at all, so on the device
+  this screen is actually run from a `draggable` attribute gives nothing and the
+  list cannot be reordered. `dragOrder.js` is pointer-based, which covers a
+  finger, an Apple Pencil and a mouse with one code path.
+- **`touch-action: none` ON THE HANDLE IS WHAT MAKES A TOUCH DRAG START.**
+  Without it the browser claims the gesture as a page scroll before the first
+  `pointermove` ever arrives. It is on the GRIP rather than the row on purpose —
+  the rest of the row keeps its ordinary scrolling, so a thumb can still flick
+  past a twenty-name queue. Playwright cannot simulate that arbitration, so the
+  suite MEASURES it off the computed style rather than inferring it from a mouse
+  drag working.
+- **THE THRESHOLDS ARE SNAPSHOTTED AT PICK-UP, IN PAGE COORDINATES.**
+  Re-measuring after each swap moves the very threshold that caused it and the
+  row oscillates between two slots; and a client-space snapshot shifts under the
+  auto-scroll that a queue taller than an iPad needs, so the row stops advancing
+  the moment the edge scroll takes over.
+- **THE ROWS REORDER UNDER THE FINGER — there is no lifted ghost following it.**
+  One thing moves instead of two, there is no copy to keep in step with a
+  re-render, and the row that has just landed is the row under the finger.
+- **A DRAG HOLDS THE POLL OFF, on the same in-flight counter a write uses.** A
+  poll landing mid-drag adopts the server's older order and pulls the row out
+  from under the finger. The preview is also held until the write comes back, or
+  the row snaps to where it started and forward again a moment later, which
+  reads as the drag having failed.
+- **ONE LIST FROM THE NETS DOWN, which is what makes the drag worth having.**
+  The separate "On now" card and "Up next" list are one "Batting order" now, the
+  first `nets` rows tinted and badged `NET n` — so putting the right player in a
+  batting spot is the same gesture as moving them up the queue, rather than a
+  separate act on a separate card. Who is in, and who is padding up, moved up
+  beside the clock where a player reads them from the nets.
+- **THE ARROW KEYS MOVE A FOCUSED GRIP.** Dragging is a pointer gesture and a
+  screen reader has no pointer; without this the order would be unreachable for
+  anyone not using one. That is also what let the two chevron buttons go.
+- **PADDING UP IS AN EXPLICIT FLAG, NOT THE NEXT N IN THE QUEUE.** The person who
+  pads up is whoever the coach actually spoke to, which on a real night is
+  routinely somebody further down the list. It is SPENT BY A ROTATION at both
+  ends — the group coming out have batted, the group going in have walked to the
+  nets — and cleared when somebody is marked batted or leaves the rotation.
+  Without that it slowly becomes a list of everyone the coach has ever spoken
+  to; somebody further down must keep theirs through the same rotation, or the
+  flag could never be set ahead.
+- **PRIORITY RECORDS A FACT AND MOVES NOBODY.** A tick that silently re-sorted
+  would undo the order the coach had just dragged into place, and with three
+  captains flagged on a selection night nobody could say who was really first.
+  So ticking it ASKS — move them up now, or mark the row — every time. The
+  reason goes into the existing `note`, the field that already holds what
+  somebody said on the way in, pre-filled so a "bowling only" typed at check-in
+  can't be written over. Unlike padding up it survives a turn and a spell out of
+  the rotation, because "leaving at seven" is still true afterwards.
+- **"BAT NEXT" IS THE FRONT OF THE LINE FOR THE NEXT TURN, NOT THE FRONT OF THE
+  LIST.** While a turn is under way the top `nets` names are IN, and dropping
+  somebody above them swaps out a batter mid-knock — worse, the next rotation
+  marks the new arrival as having batted when they never went in. `netsBusy`
+  covers the turn-over-but-not-yet-rotated state for the same reason. Dragging
+  is exempt: that is the coach saying "swap them", explicitly.
+- **THE PAD GLYPH IS A PAIR, AND THE PAIR IS THE WHOLE POINT.** A SINGLE pad at
+  16px is a blob: rendered side by side at 16/22/40/72, every one — outlined or
+  solid, straps inside or out — collapses into a pill, a pair of curly braces or
+  a stack of blocks, and the strap tabs that make it a pad at 72px are the first
+  thing to go. The first cut shipped as `{}` on the row, and a helmet drawn to
+  replace it read as a mushroom; both were caught by screenshotting the real
+  screen, not by reading the code. Two pads side by side is a silhouette
+  nothing else in the set has — domed tops, a strap band, scalloped feet — and
+  it survives all the way down. **Filled, with the strap cut as an EVEN-ODD
+  hole**: a 1.8px outline at 16px leaves nothing inside it, and a notch drawn in
+  the background colour is wrong on the light theme and wrong again over the
+  tinted button, where a hole shows what is actually behind.
+- **THE STRAP BAND IS WHAT STOPS IT READING AS PAUSE**, which is two rounded
+  bars and sits on this very screen a few inches above. Without the band the two
+  swap at 16px — measured by rendering them in the same sheet, which is the only
+  way that kind of collision shows up.
+- **EVERY STATE IS A WORD AS WELL AS A TINT** (`NET n` / `PADDING UP` /
+  `PRIORITY`), the rule this file already records — the green and amber here
+  separate by ΔE 7.2 under protanopia. A row can legitimately be two states at
+  once, which no single colour can say, so the pills are always drawn and only
+  the LEFT EDGE takes a precedence (in a net, then padding up, then priority).
+- **The row action group WRAPS onto its own line** rather than squeezing the
+  name: seven 34px targets plus a name do not fit on one 390px line, and this is
+  run from a tablet in portrait as often as a laptop. Row numbers and the grip
+  read at `--pb-dim`, never `--pb-faintest` (1.64:1).
+- **Verified against a real Postgres** (`backend/verification/verify_net_batting_order.py`,
+  46 checks through the shipped route bodies: migration 284 applied three times
+  to a populated pre-284 table and the lifespan mirror landing on the same
+  schema, both statements read out of the real sources rather than retyped,
+  every pre-284 row reading false, the flag cleared by a batted mark and by
+  leaving the rotation and not resurrected by either coming back, a rotation
+  spending it at both ends while somebody further down keeps theirs, priority
+  surviving both and moving nobody, an over-long reason capped, the drag's own
+  write landing whole, a foreign id ignored without losing anybody, a name the
+  sending device never knew about keeping its place, and every cross-club
+  refusal) **with a control run**: 20 fail against the previous commit.
+- **Driven in Chromium** (`frontend/verification/verify_net_batting_order_browser.mjs`,
+  58: the drag with real mouse-generated pointer events AND with synthetic
+  touch ones, `touch-action` measured off the computed style, the exact order on
+  the wire, no poll running while the finger is down and the poll returning
+  after, the arrow keys, the exact params for every flag, a person in a net not
+  also reading as padding up, the dialog writing NOTHING until answered, a
+  dismissal sending nothing, both bat-next rules, and no overflow at 390px)
+  **with a control run**: it reports the six missing parts by name rather than
+  dying on the first absent locator.
+- **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN.** Both suites read the new
+  keys through `.get`/presence checks so an absent feature is REPORTED rather
+  than raising on the first `KeyError` or missing locator — otherwise the other
+  forty checks say nothing.
+- **PLAYWRIGHT'S `**` GLOB DOES NOT CROSS A `?`.** A glob route for the live
+  poll silently loses `…/live?since=3` to the catch-all, which hands the screen
+  `{}` and takes it down — a page crash a long way from the route that caused
+  it. The suite routes by REGEX throughout.
+- **Three of the first cut's checks were measuring the harness rather than the
+  code**: `NAMES.map(att)` passes `(value, index)` and the stub had them the
+  other way round, so every name was a NUMBER and the screen died inside
+  `Avatar`; an index hardcoded from the original order, after an earlier drag
+  had already moved the list; and "the padding-up line does not name them"
+  scoped to the whole hero, where the in-the-nets line right above legitimately
+  does — that one passed with the bug and failed without it.
+- **NOTICED, NOT FIXED**: `adopt` will take any payload, so a malformed one from
+  a server mid-deploy takes the screen down rather than leaving the last good
+  state on it. Pre-existing, and swallowing it could hide a real fault. The
+  session-register CSV is also unchanged — neither flag is in it, since padding
+  up is transient and the reason behind priority already rides in the note
+  column the register carries.
 
 ## The nets check-in list was hiding players, and turning up isn't batting (migration 273, v9.42.2, Aug 2026)
 
@@ -3745,6 +4574,77 @@ status. So it is a plain admin-ticked fact, the same shape as the existing
 - **No new endpoint** — reuses the existing per-season PATCH, same as
   `is_new_registration`.
 
+## An absent key is not a clear: the member's tier, and one save per page (v9.65.2, Sep 2026)
+
+Reported off Sam Alborn's Accounts page (Applecross, 2025/26): changing the
+Membership Type and saving RESET the Membership Tier to "Needs tier", and with
+two panels edited only one panel's changes survived whichever button was
+pressed.
+
+- **ONE LINE CAUSED THE FIRST HALF, AND ITS OWN COMMENT SAID WHY IT WAS
+  SAFE.** `patch_member_season` read `# fee_schedule_id is always present in
+  the body; treat "" / null as clear.` It was not always present: **two**
+  callers wrote that row without it — the membership panel saving a status, and
+  the Accounts LIST ticking "Registered with PlayHQ" — so each of those writes
+  silently wiped the member's tier and left the club reading "No tier assigned
+  — fees won't calculate." **A comment asserting an invariant is not the
+  invariant**; grep the callers.
+- **THE KEY'S PRESENCE IS THE INTENT** (`model_fields_set`, the rule
+  `select_show_age_under` already keeps): absent means this caller is not
+  editing the tier, null or `""` means clear it. A genuine tri-state, and the
+  three states are what let one save carry several panels.
+- **THE ACCOUNTS LIST NEEDED NO FRONTEND CHANGE.** `togglePlayhq` was already
+  sending only what it meant to change; the server was reading a field it had
+  never been given. Fixing the reader fixes both screens at once, which is why
+  the fix is server-side rather than "make every caller send the tier back" —
+  that would put a stale tier from a browser on the wire and make the list
+  screen able to overwrite a tier it never displayed.
+- **THREE PANELS, TWO ENDPOINTS, ONE ACT OF SAVING.** Membership, Membership
+  Tier and Contact & Notes each had their own button that saved only itself, so
+  an admin who edited two and pressed one silently lost the other. Every button
+  now saves every panel that has been TOUCHED — compared against a baseline
+  captured on load, so an untouched panel writes nothing rather than re-sending
+  fields nobody edited.
+- **EACH ENDPOINT IS WRITTEN ONCE, with everything bound for it.** Membership
+  and Tier both write `fee_member_seasons`; two PATCHes would race and one
+  would overwrite the other's view of the row. The suite asserts one call per
+  endpoint, not merely that both changes landed.
+- **A PANEL SAYS IT IS UNSAVED, AND A BUTTON SAYS WHAT ELSE IT WILL WRITE.**
+  Silently widening what a button does is its own surprise, so a touched panel
+  carries an UNSAVED mark and a button about to write another panel's changes
+  names them above it. With two or more touched the label itself becomes
+  `SAVE ALL CHANGES (n)`.
+- **PRESSING SAVE WITH NOTHING EDITED SENDS NOTHING** and says so, rather than
+  reporting a save that never happened.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_member_fees_form_save.py`, 41 checks through
+  the shipped route bodies: the reported case replayed, the same write from the
+  Accounts list, an explicit null AND an explicit `""` still clearing, a clear
+  not rewriting the carry-forward default, the combined save landing every
+  field of all three panels, every refusal leaving the stored tier exactly as
+  it was, cross-club both ways, and a status-only save opening a season row
+  without inventing a tier for it) **with a control run**: 5 fail against the
+  previous commit, on exactly the reported behaviour.
+- **Driven in Chromium** (`frontend/verification/verify_member_fees_save_browser.mjs`,
+  39: the exact payload on the wire for each button, a membership save saying
+  NOTHING about the tier, one write per endpoint, an untouched panel sending
+  nothing, an intended clear carrying the key with null, the marks and the
+  notes, and no overflow at 390px) **with a control run**: 15 fail.
+- **A CHECK THAT MEASURES THE HARNESS IS NOT A CHECK, twice here.** The
+  backend suite's `reset_tier` used a raw UPDATE and left the ORM's in-memory
+  copy stale, so the next write looked like a no-op and a passing behaviour
+  read as failing — it expires the session now. The browser suite counted
+  `text=UNSAVED`, which matches every ANCESTOR of the pill too (5 for 2 marks),
+  and counted page-view telemetry as a save; both are addressed by their own
+  `data-testid` and a `/usage/` filter.
+- **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN.** The browser suite's
+  first cut clicked `SAVE ALL CHANGES` directly, so against a build without the
+  feature it died on an absent locator after three checks and said nothing
+  about the other thirty-six. `pressSave` falls back to the panel's own label.
+- **NOTICED, NOT FIXED**: nothing warns on navigating away from the page with a
+  panel still marked UNSAVED. The marks make it visible, and a route-leave
+  guard is its own change.
+
 ## BetterFees season rollover: undo, find-and-add, and remove (v9.19.13, Aug 2026)
 
 Reported from Applecross getting 26/27 ready: rolling players over before the
@@ -6050,6 +6950,166 @@ entry and its file, and drag the order.
   what an admin was asked to write), and no transcoding — an admin uploads
   something a browser can already play, and a `.mov` is refused with a sentence
   saying so rather than being stored and failing for every visitor later.
+
+## A two-day match's other two innings, and a card that would not open (v9.54.1, Aug 2026)
+
+Reported by a club trialling the platform, off one email: a 2025/26 first-grade
+grand final showed no second innings, and a game uploaded from a PDF sat in the
+Games list returning `Error: Internal Server Error`.
+
+- **THE BACKEND HAD BEEN RETURNING ALL FOUR INNINGS THE WHOLE TIME, and
+  establishing that first is what stopped this being chased as a sync bug.**
+  `GET /games/{id}/scorecard` answers with `innings_totals` keyed 1-4 and
+  batting/bowling rows against each. `MatchScorecard.jsx` took `innings[0]` and
+  `innings[1]` and dropped the rest, so each side's SECOND innings was gone.
+  Nothing needed re-syncing.
+- **THE MARGIN WAS ALSO WRONG, and only the control run surfaced it.** With
+  half the match missing, `marginText` compared innings 1 against innings 2 and
+  printed **"won by 71 runs"** for a game actually won by 7 wickets. It works
+  off each side's AGGREGATE now, so an innings victory ("by an innings and N
+  runs"), a chase (wickets in hand, read off the LAST innings) and a defence
+  (runs) all fall out of the same function.
+- **`splitSides` FILES AN INNINGS UNDER WHOEVER BATTED, NOT BY ODD/EVEN
+  POSITION.** A follow-on has one side batting twice in a row, so alternating
+  is wrong exactly when it matters; the batting team's own name decides it, and
+  alternating is only the fallback for an innings with no name recorded.
+- **THE WON BADGE IS DECIDED ONCE PER MATCH, from the same split**, so a team's
+  two innings can never disagree about it — the trap `winnerSide`'s own comment
+  already documents for the two-card case, which now has four cards to keep
+  honest.
+- **Two columns means one column per team**, since innings 1 and 3 stack in the
+  first and 2 and 4 in the second. Falls out of the existing `lg:grid-cols-2`
+  rather than being arranged.
+- **Fall of wickets and partnerships needed nothing** — both already grouped on
+  `innings_number`, which the control run confirms (they pass against the
+  broken code).
+
+### `manual_batting_innings` has no `caught_behind`, and the scorecard read it anyway
+
+- **EVERY manually uploaded card 500'd, on every club, from the day photo
+  upload shipped.** `get_scorecard` shares one row-building path between the
+  synced and manual tables (`BI = ManualBattingInnings if is_manual else
+  BattingInnings`) and read `bi.caught_behind` unconditionally. That column is
+  SYNCED-ONLY (migration 075); the manual table never had it, so the row build
+  raised `AttributeError` before the response was assembled.
+- **NULL, not False, and not a new column.** The AI scorecard reader
+  transcribes a dismissal exactly as the card writes it and never judges
+  whether the catcher was the keeper, so there is nothing to store. NULL is the
+  honest answer and every reader already treats it as a plain catch — the same
+  call migration 075's own manual branch made for the effective view.
+- **THIS ONLY BECAME REACHABLE IN v8.76.1's WAKE.** An uploaded card was
+  invisible on the public Games page until the grade-less season-filter fix
+  listed it; the moment it could be clicked, it 500'd. The two are one story,
+  a year apart.
+- **The blast radius was confirmed, not assumed**: probing all 332 of the
+  reporting club's pre-2010 games returned exactly one non-200, the reported
+  game — so the club has one manual card and it is the one that failed.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_manual_scorecard.py`, 24 checks through the
+  SHIPPED route body over a manual game seeded the way the upload commit
+  writes one: the card opening at all, both teams and their totals, the
+  opposition half read out of `extracted_payload` and never linked to one of
+  our players, an untracked boundary count still NULL, and the session usable
+  afterwards) **with a control run**: with the fix stashed the suite dies at
+  check 1 on exactly the reported `AttributeError`.
+- **A CHECK THAT MEASURES THE HARNESS IS NOT A CHECK.** The untracked-boundary
+  check failed on the first cut because setting `fours=None` on the model does
+  NOT store NULL — SQLAlchemy reads an explicit None as "unset" and lets the
+  `server_default="0"` apply. The seed forces it in SQL now.
+- **Driven in Chromium**
+  (`frontend/verification/verify_scorecard_innings_browser.mjs`, 28 checks
+  against the REPORTED MATCH's own live payload: all four innings drawn and
+  labelled in batting order, each carrying its own score, the winner marked on
+  both its cards and neither of the other side's, the header's "31 & 128", the
+  7-wicket margin, and an ordinary one-day game reading exactly as it did)
+  **with a control run**: 12 fail against the previous commit, including the
+  reported "got 2" innings and the wrong margin.
+- **`font-display` alone matches the CREST as well as the team name** —
+  `TeamBadge`'s initials fall back to the same face, so the first cut of the
+  probe read "CS" where the card says "Collegians…". Address the name by its
+  own `.truncate`.
+- **Noticed, NOT fixed**: `_manual_opp_from_payload` sets no `logo_url` on a
+  manual innings, so an uploaded card draws initials badges rather than crests.
+  Pre-existing, and a manual upload has no club GUID to resolve one from.
+
+## A game brings its own season with it (v9.54.2, Aug 2026)
+
+Reported straight after the uploaded-card fix above: the 1974 game is filed
+under **Summer 1999/00**, and the club's season list starts at 1996/97 — so
+there is no filter that finds it.
+
+- **NOTHING WAS BROKEN. THE FORM COULD NOT EXPRESS THE RIGHT ANSWER.**
+  `manual_games.season_id` is NOT NULL and the Upload Scorecard form requires
+  a season, but the dropdown only ever offers seasons the club already holds.
+  A 1974 card at a club whose history starts in 1996 therefore HAD to go in
+  under something wrong. Verified against the live row before touching a line
+  of it: `season_name` reads "Summer 1999/00" for a `played_at` of 1974-11-30.
+- **THE PAGE HAD ITS OWN SEASON BOUNDARY, AND IT DISAGREED WITH THE REST OF
+  THE APP.** `AdminScorecardUpload`'s local `seasonStartYear` used Sep–Dec,
+  while `votes.season_year_for` and `selection_rules`' default `start_month`
+  both count a club year from **July** — so the two answered differently for a
+  July or August fixture. The rule is server-side now
+  (`services/season_resolve.py`) and the page asks rather than deriving.
+- **`season_resolve` IS ONE DEFINITION, NOT A SECOND ONE.** `canonical_name`
+  and `season_start_year` MOVED there out of `scripts/cleanup_seasons`, which
+  imports them back — a tidied season list and a newly uploaded card cannot
+  end up disagreeing about what 1968/69 is called.
+- **A SEASON'S YEAR IS READ OFF ITS NAME FIRST, THEN THE `year` COLUMN.** A
+  manually created season can carry a NULL year (one of the states
+  `cleanup_seasons` exists to repair), so matching on the column alone mints
+  a duplicate beside a season the club already has. The suite seeds a bare
+  "1980/81" with a NULL year and asserts a 1980 game JOINS it.
+- **A YEAR CAN HOLD SEVERAL SEASONS** (Summer and Winter, or a masters comp
+  under its own CA id), so the canonically named one wins, then a synced one,
+  then whatever is left. Picking arbitrarily is how a game lands in the wrong
+  competition.
+- **`season_id` IS OPTIONAL ON THE WIRE NOW, and that is the real fix.** Omit
+  it and `_resolve_game_season` files the game under the season its own date
+  falls in, creating it when the club has none — so any caller gets it right,
+  not just the browser. **An explicit season still wins**: an admin filing a
+  game somewhere deliberate is not something to override.
+- **THE GRADE IS THE OTHER HALF, and forgetting it would have left the fix
+  half-done.** A season minted for a 1974 card has NO grades, so the game
+  would be ungraded and still missing from every grade filter. `grade_name`
+  creates it inside the resolved season — and writes `category` AND
+  `categories`, per the rule that a site setting one must set the other.
+- **THE LOOKUP ENDPOINT IS READ-ONLY ON PURPOSE.** `GET
+  /manual-entries/seasons/for-date` is asked the moment a card is read, long
+  before anybody has decided to import it; minting seasons for cards that are
+  never imported would be worse than the bug. The CREATE happens on the
+  screen's own explicit call, and again server-side at import.
+- **A MISMATCH IS SAID OUT LOUD RATHER THAN REFUSED.** Picking a season the
+  date does not fall in is still allowed — a club may file a game
+  deliberately — but the screen now names both the season picked and the one
+  the date belongs to. Silence there is what let this happen.
+- **The date can be corrected after the read, and the season follows it.**
+  Otherwise fixing a misread year leaves the game filed under the year that
+  was misread.
+- **`python -m app.scripts.refile_manual_game_seasons <org|all>`** moves games
+  already filed wrongly, carrying the grade across BY NAME (pointing at the old
+  grade row would leave the game's grade and season contradicting each other).
+  Dry-run by default: a game an admin deliberately filed outside its date's
+  season is indistinguishable from a mistake by data alone, so a person reads
+  the list first — the `purge_import_only_players` posture.
+- **Verified against a real Postgres** (`backend/verification/verify_season_resolve.py`,
+  42 checks through the shipped route bodies and services: the reported case
+  replayed end to end, the July boundary at both edges, an existing season
+  reused rather than duplicated, a second game joining the season just made,
+  an explicit choice honoured, both refusals, another club's season never
+  offered, the NULL-year name match, the sibling-season preference, and the
+  repair script's dry run / apply / grade carry / idempotent re-run / leave a
+  correctly filed and an undated game alone) **with a control run** that
+  reproduces the report exactly: the old `ManualGameIn` refuses a card with no
+  season, and a 1974-11-30 card then files under "Summer 1999/00".
+- **Driven in Chromium** (`frontend/verification/verify_scorecard_season_browser.mjs`,
+  20 checks: the for-date call on the wire, the exact create payload, the
+  season selected and the note shown, no create for a year the club already
+  has, the mismatch note naming both seasons, the season following a corrected
+  date, and no overflow at 390px) **with a control run**: 10 fail against the
+  previous commit, including the season field reading "— choose —".
+- **`text=Season` ALSO MATCHES THE SIDEBAR'S "2026/27 SEASON"**, which at
+  390px lives inside a closed drawer and never becomes visible — the probe
+  waits on the review form's own date field instead.
 
 ## Writing Voice — always run prose through the humanizer
 
@@ -9405,6 +10465,1309 @@ Branches never touch a shared file, so parallel work merges cleanly. `index.js` 
 **Open follow-ups worth investigating**:
 - `deep_sync_player` (admin-triggered per-player resync via PHQ Partner API) still has a UI surface but is low value now that Grassroots covers all seasons including 25/26. Could be retired or repointed at GR. Low priority — no data pollution.
 - Season-alias URL redirects: visiting `/yearbook/{alias_season_id}` still loads the alias's hidden yearbook record + alias-only stats. The stats queries auto-expand when visiting the canonical URL, but no redirect from alias URL → canonical URL exists yet. Old bookmarks to merged-away seasons are the corner case.
+
+## Stats by competition, and the association that runs a grade (migration 283, v9.60.0, Sep 2026)
+
+Asked for off two PlayHQ screenshots: Applecross plays Summer 2025/26 across
+THREE associations at once, and Hamilton Veterans field one side in several
+competitions of the SAME association in one season. Neither could be
+separated — the stats layer scoped to a season, a grade, a grade CATEGORY and
+a match FORMAT, and to nothing about who ran the competition.
+
+- **THE COMPETITION IS NOT IN THE GRASSROOTS FEED, AND ESTABLISHING THAT IS
+  WHAT DECIDED THE WHOLE DESIGN.** Checked live before a line was written, not
+  inferred: it is absent from `/fixturesladders/organisations/{org}/seasons`,
+  from `/teams`, from `/fixturesladders/grades/{id}`, from
+  `/scores/grades/{id}/matches` and from the full `/scores/matches/{id}`
+  record; six plausible competition endpoints on the proxy all answer 403
+  ("The API key you provided does not have access"), and PlayHQ's own
+  `api.playhq.com/graphql`, where "Border Cup" lives, is CloudFront-403 from
+  this environment — the thing this file already says never to hang a
+  club-facing button on. **A CA season GUID is also GLOBAL, not per
+  competition**: `Summer 2024/25` is `fc1465b6…` for Hamilton AND for Veterans
+  Cricket Victoria, so the season list cannot carry it either.
+- **THE ASSOCIATION IS EXACT, FREE, AND WAS ALREADY ON THE WIRE.**
+  `grade.owningOrganisation` rides on the teams payload `sync` ALREADY fetches
+  to seed its grades, and it was reading only `id` and `name` from it.
+  Verified back to **Summer 1975/76**, so a club's whole history is reachable
+  for ONE call per season. Applecross's 2025/26 resolves to WASTCA, the Perth
+  Scorchers Women's League and the WA Integrated Cricket League with no
+  guessing at all.
+- **SO A COMPETITION IS THE CLUB'S OWN NAMED GROUP OF GRADES, SEEDED ONE PER
+  ASSOCIATION.** The seed alone answers Applecross. It cannot answer Hamilton —
+  Veterans Cricket Victoria runs the Border Cup, an Over 60s competition and
+  the Echuca divisions, so the association is one bucket for three — which is
+  exactly why a club-owned split has to exist and why association-only was
+  rejected. `is_seeded` is cleared the moment a person edits a competition,
+  which is what stops the next sync putting our naming back over theirs.
+- **A GRADE BELONGS TO AT MOST ONE COMPETITION, and that is what makes this
+  expressible at all.** A team plays several (Hamilton's Over 60 Men are in
+  two in one season; Applecross's 7th XI plays One Day Grade 2 AND Grade 3),
+  but each is a DIFFERENT grade row — so grouping by grade separates them with
+  no per-game decision to make.
+- **THE FILTER IS AN INCLUSION, WHERE THE CATEGORY AXIS IS AN EXCLUSION, and
+  the asymmetry is deliberate.** A category filter has a club-wide DEFAULT, so
+  it must be "leave these out" or a club with nothing to exclude would still
+  get a clause. A competition filter is only ever asked for, so "show me only
+  these" is what it means — which also settles the two cases an exclusion
+  could not: a grade in NO competition drops out, and a career residual with
+  no grade drops out, the same call the format axis makes. Counting an import
+  residual towards a competition would invent a figure rather than filter one.
+- **It rides on `GradeScope`, so adding it changed NO query** — all ~35 call
+  sites already route through `clause()`/`bind()`, exactly as the format axis
+  did in v9.26.0. It survives `formats_only()` for the same reason format
+  does: it is never a default, so it can only be there because somebody asked.
+- **EXPRESSED AS A SUBQUERY ON `grades.competition_id`, not a resolved list of
+  grade ids.** An established club has hundreds of grade rows against a handful
+  of competitions, so this binds 1-5 uuids and reads `ix_grades_competition`.
+  **Measured at platform scale** (848 grade rows, 25,440 games, 76,320
+  innings): a competition-filtered leaderboard is **53ms against the existing
+  match-type filter's 292ms** on the same data — the subquery narrows the games
+  by index before the per-innings unions are scanned, where the format CASE has
+  to be evaluated per row.
+- **IT FAILS CLOSED.** An id that is junk, not a uuid, or another club's is
+  dropped in `resolve_scope` before it reaches SQL — and an all-junk selection
+  is then an ACTIVE filter matching NOTHING, never an inactive one matching
+  everything. Failing open on an id a browser got wrong would hand a club
+  figures it never asked for, which is the worse direction (the same lesson
+  v9.58.2's case-folding fix records).
+- **THE COMPETITION HALF REACHES A GRADE-LESS MANUAL GAME AND THE OTHER TWO
+  DELIBERATELY DO NOT.** `_fetch_manual_games_as_list` takes the scope now: a
+  manual game with no grade is rightly KEPT by a category or format filter ("a
+  row we cannot classify is not a row we know to be junior") and must DROP
+  under a competition one, or a club filtering to the Border Cup finds an
+  uploaded scorecard from another competition in the list. Resolving the scope
+  had to move ABOVE the manual fetch in `list_games` for that.
+- **A FILTER AND A BREAKDOWN ARE BOTH WANTED, AND THEY ARE DIFFERENT
+  QUESTIONS.** `services/competition_stats.py` enumerates: the club's record
+  per competition, every grade under its own competition (the TEAM half), and
+  a player's batting/bowling/fielding/appearances per competition. Every
+  average is recomputed from that competition's own counts, never an average
+  of averages, and overs are converted to balls before anything is divided.
+- **`unattributed` is on every player payload, and the screen says it out
+  loud.** A competition figure comes from the scorecards, so a BetterImport
+  career carries rows with no grade that belong to no competition — reported,
+  never folded into one, and the panel explains why the rows do not add up to
+  the career total.
+- **The un-grouped bucket is SHOWN, never dropped** ("Other grades"), the same
+  rule the `unattributed` column on the by-grade grid follows.
+- **`services/competition_ddl.py` is the ONE copy alembic and the lifespan
+  mirror both run**, per the `vote_medal_ddl` rule. **Numbered 283, not
+  282**: the rate-qualification work landed on `main` as 282 while this was
+  in flight, and two migrations sharing a revision id break Alembic
+  outright — check `origin/main` before numbering one.
+  `grades.competition_id` is **ON DELETE SET NULL**: deleting a competition
+  un-groups its grades and never deletes a grade or a game, and the confirm
+  says so rather than warning about a loss that cannot happen.
+- **The filter row is NOT drawn for a club with fewer than two competitions** —
+  a control that can only ever answer "everything" is worse than none, the same
+  call `ageFilterOptions` and the Fees/Training notes make. Most of the
+  platform therefore never sees it.
+- **`python -m app.scripts.backfill_grade_associations <org|all> [--apply]`**
+  fills in the history an incremental sync no longer scans — ONE call per
+  season, not per grade. Dry-run by default. **Run against the live CA feed for
+  both reported clubs**: Applecross 19 grades across its three associations,
+  Hamilton 6 across its one, and an idempotent re-run writes nothing.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_stats_by_competition.py`, 89 checks through the
+  shipped services and route bodies: migration 282 applied three times to a
+  populated pre-283 schema, the FK's referential action read out of
+  `pg_constraint`, the association written by the shipped `_resolve_org_grade`
+  on a new AND an existing grade and never erased by a blank, the seeding's
+  skip-don't-replace at both levels, the reported Hamilton split, every figure
+  of the club and player breakdowns, the filter on the leaderboard / games list
+  / player profile, two competitions at once, an import residual counted
+  unfiltered and in no competition, all four fail-closed cases, cross-club
+  refusal from both sides, and every admin route body) **with a control run**
+  reporting the feature absent, and **driven in Chromium**
+  (`frontend/verification/verify_competitions_browser.mjs`, 41: the row on all
+  five screens with the exact params on the wire, a single-competition club
+  offered no row at all, the profile's lazy COMPETITIONS panel and its
+  unattributed note, the Manage Grades panel's assign/rename/create/delete
+  payloads, a dismissed delete sending nothing, no page errors, no overflow at
+  390px) **with a control run**: 19 of the 41 fail against the previous commit.
+- **A HARNESS TABLE THAT MERELY LOOKS RIGHT IS WORSE THAN NONE.** The suite's
+  first `audit_logs` used `organisation_id` where the lifespan uses `org_id`;
+  `audit_log` swallows its own failure, so the caller's transaction was left
+  ABORTED and the competition it had just created silently vanished — three
+  unrelated checks failed with no hint why. Copy the lifespan's DDL column for
+  column.
+- **Also caught by running it**: `games` has no `organisation_id` of its own
+  (the effective view derives it), `manual_batting_innings` keys on
+  `manual_game_id`, and a manual game cannot have a `game_appearances` row.
+- **Two checks were measuring the harness rather than the code and had to be
+  fixed**: the control club was used as the OPPOSITION on every fixture, which
+  by the app's own `home_org_id`/`away_org_id` rule made all 15 genuinely its
+  own; and a `document.querySelectorAll('div')` row locator matched an ancestor
+  and drove the first `<select>` on the screen instead of the intended grade's.
+- **NOTICED, NOT FIXED**: `get_player_team_breakdown` (the season x grade grid)
+  is not grouped by competition — it is its own attribution pass with the
+  `max(held, claimed)` reconciliation against CA's per-grade rows, and threading
+  a third dimension through it is a bigger change than this. The grid's grades
+  are already separated per competition by the FILTER, and the new
+  Analysis -> Competitions panel answers the enumeration.
+- **Not built**: nothing reads PlayHQ's own competition name, and nothing
+  should until that API is reachable without a WAF in the way. The AFL silo is
+  untouched — `services/afl/grade_labels.py` has its own vocabulary and would
+  need its own pass.
+
+### The club groups its own older seasons, and reads them back (v9.61.0)
+
+Asked for straight after the filter shipped: a club admin should be able to run
+`backfill_grade_associations` themselves when the app notices a competition has
+been renamed or added, watch it happen, and come back later if they would
+rather. Plus the club-level breakdown, which existed as an endpoint nothing
+called.
+
+- **THE GAP IS REAL AND NOTHING SAID SO.** A competition can only hold a grade
+  Cricket Australia has told us the association for, and an incremental sync
+  only scans the seasons that could still have been in play — so an established
+  club's older seasons sit outside every competition it has just finished
+  naming, showing under "Other grades" with no explanation. Nothing was wrong
+  with those matches; they simply could not be found.
+- **`services/competition_grouping.run_grouping` IS THE ONE IMPLEMENTATION, and
+  the script now calls it rather than owning it.** Two copies of "fill in the
+  associations and re-seed" is how the button and the command line start
+  disagreeing about what grouping means. The script keeps its own reasons to
+  exist: it takes `all`, it has a dry run, and it needs nobody logged in.
+- **IT REUSES `sync_runs` UNDER A NEW KIND, `competition_grouping`, WHICH IS
+  DELIBERATELY NOT ONE OF THE TWO THE PLATFORM RESUMES.** `_FULL_SYNC_KINDS`
+  (`org_full`, `org_hard_refresh`) is an allowlist the Setup Wizard, All Clubs
+  and `wizard_analytics` all read as "this club's history has been pulled", so
+  a new kind can never be mistaken for it; and `main.py`'s restart self-heal
+  only resumes those two, so a run cut off by a deploy is finalised as errored
+  and started again rather than resumed behind an admin's back. That is right
+  here precisely because the job is cheap and idempotent. **No migration** —
+  progress rides in the run's own `stats` JSONB, which `update_sync_run`
+  merges rather than replaces.
+- **SAFE TO RUN TWICE, AND THAT IS WHAT LETS THE BUTTON CARRY NO WARNING.** Only
+  a grade with NO association is written, an association CA omits never erases
+  one we hold, and the seeder is skip-don't-replace — so a competition the club
+  has renamed or split keeps its own naming and a second run over a finished
+  club writes nothing at all.
+- **ONE RUN PER CLUB.** Two would fetch the same seasons twice and race each
+  other's writes for nothing, so `POST /admin/competitions/grouping` hands back
+  the IN-FLIGHT run rather than starting a second — which is also what lets a
+  screen reloading mid-job rejoin the same bar instead of launching another.
+- **ONE SEASON'S UPSTREAM HICCUP IS NOT THE JOB.** That season is counted as
+  failed and the rest of the club is still grouped, which beats an
+  all-or-nothing pass a flaky upstream can stop halfway. The result says how
+  many could not be read, so running it again later is an obvious next step
+  rather than a mystery.
+- **`needs_grouping` IS THE ONLY FIELD A SCREEN READS, and it is seasons the
+  job can ACT on, never grades left un-grouped.** An admin may have deliberately
+  left a grade out; a button that would write nothing is worse than no button.
+  `grades_ungrouped` is reported beside it for context and is never the trigger.
+- **DISMISSED, NEVER GONE.** "Not now" is a per-user, per-club localStorage flag
+  read in the state initialiser (never an effect, or the prompt renders for one
+  frame before snapping shut), and what it leaves behind is one quiet line
+  still offering the job. `useDismissed` is a local four-line twin of the
+  Clubhouse kit's `usePref` rather than an import, per the nets rule — that
+  module is a different bundle and a remembered dismissal should not pull it
+  into this page's first paint.
+- **CLUB ADMIN AND SUPER ADMIN ARE ONE PATH, not two.** The endpoints carry
+  `MANAGE_MERGES` — the capability Manage Grades already runs on, since
+  grouping a grade is the same kind of act as merging one — and a super admin
+  implies every capability, so acting as a club gives them the same button on
+  the same screen with no super-admin-only surface to keep in step. The command
+  line stays the operator's way in for the platform-wide sweep (`all`) and for
+  a club nobody is logged in to. There is deliberately NO Better HQ screen for
+  it: the club that has just named its competitions is the one who knows
+  whether the older seasons matter, and a sweep run for them from outside would
+  arrive with no explanation attached.
+- **`--no-group` WAS A SILENT NO-OP** in the first cut of the refactor (a
+  ternary whose branches were identical), so the flag is a real `group=False`
+  parameter on `run_grouping` now: fill the associations in and stop, for an
+  operator who does not want to touch a club's own naming. The button never
+  passes it.
+- **THE CLUB PAGE OPENS ON THE WHOLE HISTORY, not the newest season.** The
+  question it answers is which competitions the club plays in, and a club that
+  has moved between them has most of that answer outside the current year. It
+  draws a season picker and NO grade picker — the page IS the grade breakdown,
+  so a grade filter above it would be filtering the answer out.
+- **`/{slug}/competitions` is a club section, so four lists had to learn it**:
+  the Navbar's own `CLUB_SECTIONS` and `statsActive`, `SponsorFooter`'s copy and
+  `FaviconManager`'s. None is a reserved ROOT segment question — the route is
+  two segments deep — but a club page whose crest and sponsor footer go missing
+  is the same class of bug the `/videos` note records.
+- **Verified against a real Postgres** (the suite is 117 checks now: both team
+  payload shapes and a grade with no owning organisation skipped, the gap and
+  its `needs_grouping` trigger, the association and its short name stored,
+  `group=False` leaving the competitions alone, grouping then placing the
+  newly-filled grade, a second run writing nothing, a blank association not
+  erasing one held, a failed season counted rather than raised, a dry run
+  writing nothing, the two route bodies, one background task queued, a second
+  press handed the same run, a screen rejoining it, and another club's run never
+  picked up as this club's) **with a control run**: the grouping half reports
+  itself missing against the previous commit while all 89 earlier checks still
+  pass.
+- **A `check` FOR `triggered_by_user_id` NEEDS A REAL `users` ROW.** `sync_runs`
+  has a foreign key on it, so the stand-in object with an invented id every
+  other route check in this suite uses cannot start a run.
+- **Driven in Chromium** (the suite is 70 checks now: the prompt and the number
+  it names, "Not now" and the quiet line it leaves, the dismissal surviving a
+  reload and clearing bringing it back, the POST on the wire, the bar carrying
+  a real percentage and MOVING between two reads, the season it is on, the
+  result naming what it did, no prompt at all for a club with nothing to fetch,
+  and the public page's competitions, records and grades at 1440 and 390 with a
+  grade measured as sitting inside its own competition's card) **with a control
+  run**: 23 of the 70 fail against the previous commit.
+- **THE FINISHED JOB'S OWN RESULT WENT MISSING, AND ONLY THE BROWSER FOUND
+  IT.** `CompetitionManager.load()` put the whole section back into its loading
+  state on every refresh, so the panel's `onDone` unmounted the very component
+  that was about to report. The spinner belongs to the FIRST load; a refresh
+  after an edit swaps the data in place, which also stops every assign, rename
+  and delete blanking the section on its way through.
+- **A CONTROL RUN MUST REPORT, NOT CRASH.** The first cut clicked "Not now"
+  unguarded, so the control run died on a missing button after two failures and
+  said nothing about the other twenty-one. Every interaction in that block is
+  behind a presence check now, and "the bar moved" treats a locator that finds
+  nothing from the start as a failure rather than as an unchanged bar.
+
+### Which of the forty queries the record book is waiting on (Sep 2026)
+
+Reported off Hamilton Veterans' Records page with Competition set to All, and
+asked as "do the new grade-to-competition linkages need more indexes".
+
+- **THEY DO NOT, AND THE MEASUREMENT SAYS THE OPPOSITE.** With Competition set
+  to All the frontend omits the param, `competition_active` is false and
+  `competition_clause` returns an empty string, so the SQL is byte-for-byte
+  what it was before migration 283 — which is also all that commit did to
+  `records.py`, thread one parameter into `resolve_scope`. Timed against the
+  live site: **unfiltered 15.0/15.1/15.7s, the same request narrowed to one
+  competition 2.4/2.2s**, a season 2.7s, a match type 3.4s. A filter makes it
+  six times FASTER, because the clause narrows the games through
+  `ix_grades_competition` before the per-innings unions are scanned.
+- **AND IT IS NOT THIS CLUB.** Applecross unfiltered is **16.6/16.8s** on the
+  same measurement, so it is not Hamilton's imported history either. All-time
+  records is slow for everybody.
+- **ONE REQUEST RUNS ~40 AGGREGATIONS, EACH AWAITED IN TURN**, and the round
+  trips are not the cost: a season filter cuts every one of them down and the
+  whole thing drops under two seconds. The scans are the cost.
+- **SO `q` TIMES EVERY QUERY AND NAMES IT AFTER THE BOARD IT BUILDS.**
+  `_query_label` reads the caller's frame and scans BACK to the nearest
+  `name = await q(` — a multi-line call reports its line differently across
+  Python versions (the statement's first line before 3.11, the exact position
+  after), so scanning back is what makes the label right either way. Zero edits
+  at 40 call sites, and the label is what the board is called on the payload
+  anyway. It costs **10.3us per query, 0.4ms for a whole request**, against the
+  15,000ms being diagnosed.
+- **`_timed` WRAPS THE READS THAT ARE NOT BOARDS**, or the report would not add
+  up to the request: `resolve_scope` (which does its own reads for the club
+  default categories, its grade formats and now its competitions),
+  `resolve_season_filter`, the manual partnership records, the hidden-players
+  check and the two `org_available_*` calls in the payload builder.
+- **IT IS DECLARED WITH `timings`, ABOVE ITS FIRST USE.** The first cut put it
+  where `q` is defined, three hundred lines below the `resolve_scope` call that
+  uses it — the temporal-dead-zone trap the Roster note already documents. A
+  closure defined further down the body does not exist yet when an earlier line
+  runs.
+- **THE BREAKDOWN IS SERVED ONLY TO A VIEWER WHO MAY ALREADY SEE THE CLUB'S
+  PRIVATE DATA.** `?debug_timing=1` returns `_query_timings` (total, query
+  time, the remainder that is Python, and every query slowest first) for the
+  club's own admins and Better staff, reusing the `user_can_view_org_private`
+  call the endpoint already makes for hidden players. Everyone else gets the
+  ordinary payload with no extra key.
+- **A SLOW REQUEST LOGS ITS WORST OFFENDERS; AN ORDINARY ONE LOGS NOTHING.**
+  `SLOW_RECORDS_LOG_MS` (2000) is the gate — this is a public page, and a line
+  per visit is how a log stops being read. That is also why the log exists
+  alongside the payload: a signed-out visitor's slow load is the one nobody can
+  ask for a breakdown of.
+- **A SIGNED-OUT VISITOR PAYS FOR ONE QUERY AN ADMIN DOES NOT** — working out
+  which players the club has hidden, which an admin may see anyway. Found by a
+  check that compared the logged count against the payload's and disagreed by
+  one; it asserts the asymmetry now rather than being loosened.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_records_timing.py`, 35 checks through the
+  SHIPPED route body: the ordinary payload unchanged and carrying no extra key,
+  the breakdown withheld from a signed-out visitor and from a user with no
+  membership here, every query named rather than reported as a line number, the
+  six boards and three non-board reads named individually, slowest first, the
+  parts summing to the total, the log firing once when slow and not at all when
+  not, and a season-filtered request timed the same way) **with a control run**:
+  it reports the instrumentation absent rather than 35 identical errors.
+- **NOT DONE, and this only measures**: nothing is cached and nothing runs
+  concurrently yet. The two obvious fixes once the log names the culprits are
+  caching an unfiltered board on the club's last successful sync, and running
+  the independent queries on their own sessions — an `AsyncSession` is not
+  concurrency-safe, so `asyncio.gather` over the existing one is not the move.
+
+
+### And what the timing said: a compiler and a platform-wide scan (Sep 2026)
+
+The log came back flat — 28 queries, 13,287ms of query time, the eight slowest
+between 900 and 1,027ms with nothing dominant. `EXPLAIN (ANALYZE, BUFFERS)` on
+production (`ops/diagnostics/records_slow_board.sql`) named both halves, and
+the hypothesis that led there was WRONG.
+
+- **THE `unplayed` SUBQUERY IS 15ms, NOT THE PROBLEM.** It reads as the
+  suspect — an uncorrelated derived table aggregating every abandoned fixture
+  platform-wide, recomputed per reference — and it is genuinely cheap:
+  `ix_games_status_not_played` narrows it to 488 games and the three anti-joins
+  are index-only scans. **Measured before it was believed.**
+- **HALF OF EVERY BOARD IS THE JIT COMPILER.** A board reading
+  `v_effective_player_season_stats` plans at **cost 5,340,376**, past
+  `jit_above_cost` (100k) and both `jit_optimize_above_cost` and
+  `jit_inline_above_cost` (500k) — so Postgres compiles **177 functions in
+  505ms** (238ms optimising, 210ms emitting) to run a query that then takes
+  ~580ms. Fourteen references to that view is **~7s of the 13.3s spent
+  compiling**. `get_records` now runs `SET LOCAL jit = off` FIRST: transaction
+  -scoped, so no pooled connection carries it away, and there is nothing here
+  JIT can win back — these are sub-second queries over a wide UNION view, not
+  the minute-long scans it exists for.
+- **THE OTHER HALF IS MIGRATION 060'S ORG SCOPING, RUN ONCE PER ROW OF THE
+  PLATFORM.** Its `WHERE EXISTS (players JOIN seasons ...)` is planned as a
+  correlated SubPlan, so the `api` branch is a **Seq Scan over all 315,288
+  `player_season_stats` rows with the subplan executed 315,288 times** — 2.2
+  MILLION buffer hits, 483ms — and the club filter is applied only afterwards,
+  by a hash join to the 101 players who were wanted all along. The same board
+  reading the base table instead of the view is **2.1ms**.
+- **A VIEW IS WHERE A RULE BELONGS AND ALSO WHERE A PREDICATE GOES TO DIE.**
+  Both halves are the price of one-place correctness: the 060 scoping and the
+  266 washout correction both live in the view so every reader moves together,
+  and both are therefore paid per reference, uncapped by the club being asked
+  about. Keep the rule there; the fix is to give the planner something
+  selective on the view's own `player_id` up front, not to scatter the rule.
+- **`ops/diagnostics/records_pushdown_test.sql` tests exactly that** — the
+  board as it is, against the same board with the club's players bound as an
+  array, plus an EXCEPT both ways proving the two return identical rows, and
+  the JIT cost measured by switching it back on. Not yet run.
+- **`_query_timings` entries carry `n`**, where in the request each query ran,
+  which is what makes "the JIT setting is issued FIRST" assertable rather than
+  a check that cannot fail.
+
+
+### Name the club's players, and the record book stops reading the platform (Sep 2026)
+
+`EXPLAIN (ANALYZE)` on production, through
+`ops/diagnostics/records_pushdown_test.sql`, on one board of the record book:
+
+| | Execution |
+|---|---|
+| A. today: join `players`, filter the club, JIT off | **514ms** |
+| B. `pss.player_id = ANY (SELECT id FROM players WHERE org = ...)` | **49,815ms** |
+| C. `pss.player_id = ANY (ARRAY(SELECT ...))` | **0.877ms** |
+| D. do A and C agree | 54 rows each, **0 differences either way** |
+| E. A again with JIT back on | 769ms |
+
+- **A BOUND ARRAY AND A SUBQUERY ARE NOT THE SAME THING, AND THE GAP IS
+  57,000x.** `= ANY (SELECT ...)` is planned as a semi-join against the
+  un-narrowed view — 49.8 SECONDS, ninety-seven times WORSE than doing nothing
+  at all. `= ANY (array)` is a plain restriction on the view's own column,
+  pushed into each UNION ALL branch, reading `idx_pss_player`. **Never "tidy"
+  the array back into a subquery**; the comment above `pss_club_clause` says so
+  where somebody would be tempted.
+- **THE NEW CLAUSE IS LOGICALLY REDUNDANT, WHICH IS WHY IT IS SAFE.** Every
+  board already joins `players p ON pss.player_id = p.id` and filters
+  `p.organisation_id`, so `pss.player_id = ANY(the club's players)` cannot
+  change a row — it only tells the planner something it could not work out for
+  itself. D proves it empirically rather than by reading the SQL, and the suite
+  seeds a rival club's bigger scorer and asserts he appears on no board of
+  ours.
+- **ONE CHEAP LOOKUP FEEDS ALL FOURTEEN.** `club_player_ids` is resolved once
+  per request (an index-only scan of `uq_players_org_id`, 101 rows) and bound
+  into every board.
+- **CAST, BECAUSE A CLUB WITH NO PLAYERS BINDS AN EMPTY LIST** and asyncpg
+  cannot infer an array's type from one — the same trap the vote-medals note
+  records for a bare `:param IS NULL`. An empty array correctly matches
+  nothing.
+- **THE CLAUSE RIDES WITH `pss_gender_clause`, which appears at exactly the
+  fourteen sites that read the view and nowhere else**, so threading it was one
+  substitution rather than fourteen hand edits. The suite asserts it
+  STRUCTURALLY — every `+ pss_gender_clause + ` must be preceded by
+  `pss_club_clause` — so a board added later cannot quietly put the
+  platform-wide scan back. Checked by breaking one on purpose: it reports
+  "13 of 14".
+- **Verified against a real Postgres** (the suite is 47 checks now: the club's
+  players resolved once, its own top scorer leading its board, both its
+  scorers still on it, a rival club's bigger scorer on no board, and a club
+  with no players answering with empty boards rather than raising) **with a
+  control run** reporting the instrumentation absent.
+- **THE BOUND FORM SURVIVES PLAN CACHING, WHICH IS THE ONE THING THAT COULD
+  HAVE UNDONE THIS.** asyncpg prepares its statements, and Postgres builds a
+  custom plan for the first five executions before weighing a generic one — a
+  generic plan that discarded the array's selectivity would put the seq scan
+  straight back for every warmed-up connection, which is exactly the state a
+  live pool is in. Section F of the diagnostic prepares the board with a bound
+  `uuid[]` and runs it six times: **0.957, 0.602, 0.513, 0.654, 0.589, 1.070ms**.
+  The sixth is the one that matters and it holds. No `plan_cache_mode` needed.
+  An empty array (section G) is 0.017ms.
+
+
+### A career has two match counts, and a filter switches between them (Sep 2026)
+
+Reported off Rob Wilton's profile: **333 matches with Competition set to All,
+337 with one competition picked**. A filter that INCREASES a total is
+incoherent however it is explained.
+
+- **NEITHER FIGURE IS WRONG. THEY ARE DIFFERENT SOURCES.** With no filter the
+  header reads `SUM(player_season_stats.matches)`, Cricket Australia's own
+  season totals. CA's aggregates carry no grade (the `api` branch of
+  `v_effective_player_season_stats` hardcodes `grade_id` NULL), so they can say
+  nothing about a competition, a grade type or a format — the moment any scope
+  is active every figure is recomputed from the per-innings scorecards instead.
+  `?categories=senior` gives the identical 337, so this predates competitions
+  entirely and has been there since the grade-category filter (migration 228).
+- **THE FOUR EXTRA GAMES ARE ALL REAL, and naming them is what stopped this
+  being fixed the obvious way.** Every one is `source=api`, `status=COMPLETED`,
+  with a real grade, date and opponent: a one-off appearance in a second grade
+  that season (10th Grade, 9th Grade, One Day 4), an intra-club Applecross Red
+  v Applecross Black fixture, and games with no result recorded. No manual
+  upload, no duplicate, no other club's game. **1993/94 runs the other way** —
+  CA counts 14 where we hold 13 — which is a genuinely missing scorecard.
+- **SO THE OBVIOUS FIX WAS `max(held, claimed)`, THE RULE THE BY-GRADE GRID
+  ALREADY USES, AND THE PLATFORM MEASUREMENT KILLED IT.**
+  `ops/diagnostics/career_matches_sources.sql` over all 95,151 players:
+
+  | | players | |
+  |---|---|---|
+  | the two sources agree | 38,795 | 41% |
+  | we hold MORE than CA counts | 19,439 | 20%, worst **+221** |
+  | CA claims MORE than we hold | 36,917 | 39%, worst **-484** |
+
+  Adopting the higher figure would rewrite the headline career match count for
+  **19,439 players**, one of them by 221 — a mass rewrite, not a correction.
+  And it would do nothing for the 36,917 whose filtered view already DROPS,
+  which is the LARGER half of the same problem: a club whose old seasons
+  arrived as totals has few scorecards to filter, so any filter reads far
+  lower. **The grid can apply `max(held, claimed)` because it compares per
+  season AND grade against CA's own per-grade rows (`player_season_grade_stats`)
+  and carries an `attributed_unknown` column for what it cannot place. The
+  career header has neither.**
+- **THE DUPLICATE HYPOTHESIS IS RULED OUT**: no manual upload duplicates a
+  synced game on the same club, date and grade, anywhere on the platform (0
+  rows). The extra held games are genuinely held.
+- **SO THE NUMBERS MUST NOT MOVE. The page has to say which source it used**,
+  the way `RateFootnote` marks a strike rate drawn from fewer innings than the
+  figure beside it. Same rule as that one: only where the figure is short, and
+  never on every number in the app.
+- **Worth a look separately, NOT part of this**: Nairne's Sam Morgan reads CA
+  127 against 348 held, and Sunrise's Jackey Patel CA **0** against 98 held. A
+  player with a hundred games and no season aggregate at all is its own
+  question.
+
+
+### Say the two figures differ before anybody adds them up (v9.63.1)
+
+Asked for directly after the diagnosis above: "the concept of ALL being one
+number, then the sum of all matches display for each competition filter
+tallying to a different number is confusing... tell the user about it
+pre-emptively and explain why the numbers dont add up — don't allow the user to
+discover that the numbers don't add up. That looks like a mistake."
+
+- **NOTHING IS RENUMBERED, AND THE PLATFORM MEASUREMENT IS WHY.** The obvious
+  fix is `max(held, claimed)`, the rule the by-grade grid already applies. It
+  was measured before it was believed
+  (`ops/diagnostics/career_matches_sources.sql`, all 95,151 players): the two
+  sources agree for 41%, we hold MORE than CA counts for 20% (worst **+221**)
+  and CA counts more for 39% (worst **-484**). Adopting the higher figure
+  rewrites the headline career match count for **19,439 players** and does
+  nothing for the 36,917 whose filtered view already reads LOWER, which is the
+  larger half of the same problem. **The grid can do it because it compares per
+  season AND grade against CA's own `player_season_grade_stats` and carries an
+  `attributed_unknown` column for what it cannot place. The career header has
+  neither.** So the figures stay and the page explains itself.
+- **`services/match_coverage.py` READS BOTH FIGURES ITSELF, never the caller's
+  current one, and that is the whole design.** With a filter on, the caller's
+  figure has ALREADY switched to the scorecards — so a note derived from it
+  compares them against themselves and draws nothing at exactly the moment
+  somebody is looking at a moved number. The difference is a fact about the
+  career, not about the view, so the note reads identically either way.
+  Asserted, not assumed: the suite drives a genuinely active scope and compares
+  the two payloads.
+- **A GRADE-LESS GAME COUNTS AS HELD.** An uploaded scorecard with no grade
+  belongs to no competition, but we DO have the match — filing it under "we
+  hold no scorecard for this" blames the wrong thing and sends an admin looking
+  for a game that is right there. The first cut inner-joined `grades` and got
+  this wrong; season now comes from `v_effective_games.season_id`, the house
+  rule migration 169 already set. That is what makes the panel's own arithmetic
+  close: **rows + unattributed == breakdown_matches**, leaving only the career
+  total to explain.
+- **THE SURPLUS IS ITS OWN FIGURE, never a negative "missing" one.** `337 of
+  333` is the shape of a bug, not an explanation, so `without_scorecard` and
+  `extra_scorecards` are separate and every line of copy branches on which
+  applies. Both directions are ordinary — 20% of players against 39% — so
+  neither is the "normal" one.
+- **THE NOTE DRAWS ONLY WHERE THE TWO GENUINELY DIFFER**, the rule
+  `rate_coverage` already keeps: a note on every player is noise that teaches
+  people to stop reading notes. The payload is presence-aware, so a career with
+  nothing to explain keeps its exact shape.
+- **A LAST-N-GAMES OR DATE WINDOW DRAWS NOTHING.** That headline is a slice of a
+  career rather than the career, so comparing it against a career total would
+  mean nothing.
+- **THE COPY MAKES NO CAUSAL CLAIM IT CANNOT PROVE.** The first cut said a
+  missing scorecard is "usually an older season the club's records never
+  reached" — plausible, unverified, and quoted back at us the first time it is
+  wrong. It says what the query actually establishes: we hold no game row for
+  it at all, so there is nothing waiting to be filed.
+- **THIS IS NOT THE COMPETITION FEATURE'S DOING.** `?categories=senior`
+  reproduces it exactly, and that axis shipped with migration 228. Also ruled
+  out empirically: Applecross (22 grades), Payneham (112) and Hamilton Veterans
+  (4) each have ZERO grades outside a competition and their per-competition
+  figures sum exactly, and no manual game duplicates a synced one anywhere on
+  the platform (0 rows).
+- **A NEW CLUB IS GROUPED THE MOMENT ITS FIRST SYNC LANDS**, not at 02:30.
+  `_sync_safe` calls `maybe_group_club` on the SUCCESS path only — after
+  `finish_sync_run` and above the pause/cancel and crash handlers, so a sync
+  that did not complete never triggers it — and both onboarding paths (self-
+  serve registration and a super admin's New Club) reach it through
+  `_onboard_club_core`. A Full Rebuild does the same on its own true-success
+  branch, since a rebuild rewrites every grade and that is when the
+  associations are freshest. `maybe_group_club` owns the decision and settles,
+  so calling it after every full sync costs nothing once a club is done. **The
+  nightly job stays** — a club that played nothing in a period never reaches a
+  sync at all, which is the entire reason that pass exists.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_match_coverage.py`, 33 checks through the
+  shipped service and route bodies: both directions, the grade-less boundary,
+  the silence where the two agree, a season-total-only career, cross-club both
+  ways, the season scope, the career figure the note quotes being the headline
+  the page draws, the note surviving an active filter, and a last-N window
+  drawing none; plus the competitions suite is 136 now, with the onboarding and
+  rebuild hooks pinned structurally) **with control runs**: with the service
+  absent the suite reports it rather than crashing; with the route left unwired
+  5 of the 33 fail; with the two hooks neutered 4 of the 136 fail.
+- **A CHECK THAT MATCHES THE WORD RATHER THAN THE CALL CANNOT FAIL.** Every
+  hook site carries a comment naming `maybe_group_club`, so the first cut
+  passed with the call itself renamed away. It matches
+  `competition_grouping.maybe_group_club(` now, and the ordering checks return
+  False for an absent part rather than raising, so a control run REPORTS them.
+- **Driven in Chromium** (`verify_match_coverage_browser.mjs`, 22: the note on
+  the UNFILTERED view, the headline read out of its own element, both
+  directions' wording, the explainer opening and closing, nothing drawn where
+  the two agree, and no overflow at 390px) **with a control run**: 10 of the 22
+  fail against the previous commit.
+- **`MATCHES212` HAS NO WORD BOUNDARY**, so `/\b212\b/` fails on a correct
+  page; and the headline COUNTS UP, so reading it straight away catches
+  `MATCHES187` mid-animation. The suite waits for the figure to stop moving and
+  reads it out of its own `.pb-num`, never out of the tile's whole text — the
+  note beside it quotes numbers too.
+- **AND THE BY-GRADE GRID IS A THIRD NUMBER (v9.63.2).** Reported straight
+  after: Applecross's Tristram Fletcher reads **309** on the career header,
+  **313** in the note beside it, and **314** on Analysis -> Team. Three rules,
+  three questions, none of them wrong:
+  - **309** is `SUM(player_season_stats.matches)`, Cricket Australia's count of
+    matches played, with no grade on it at all.
+  - **313** is the matches we hold a game row for, which is what any filter
+    counts from — grade-less uploads included.
+  - **314** is `get_player_team_breakdown`'s own reconciliation: per season AND
+    grade it takes `max(scorecards held, CA's per-grade figure)`, adds a
+    season's unplaceable shortfall, and INNER JOINS `grades`, so it drops a
+    grade-less game and adds a match CA credits to a grade we hold no scorecard
+    for. The `5 *` on One Day Grade 1 is exactly that second half.
+  **The grid's rule is the right one for a grade breakdown** — `max` is what
+  keeps it self-healing when a shared fixture the other club synced first drops
+  off the scorecard side — so the fix is again to SAY SO, not to renumber.
+- **THE GRID'S NOTE IS SUMMED FROM ITS OWN ROWS, never asserted.** `held` is the
+  rows' `scorecard_matches`, `added` is the sum of the asterisks, and the two
+  plus `unattributed` equal the printed total, so a reader can check every part
+  of it against the table above. A sentence merely claiming the total is "worked
+  out differently" tells nobody anything. The grade-less line is
+  `breakdown_matches - held`, which is the one figure that needs the header's
+  own coverage block — both are season-scoped the same way
+  (`resolve_season_filter(..., include_shared=True)`) and neither is
+  grade-scoped, so they are comparable.
+- **A GRID THAT ALREADY ADDS UP SAYS NOTHING**, the same rule as the header.
+- **THE ASTERISK FOOTNOTE WAS WRONG AND IS CORRECTED IN PLACE.** It claimed the
+  figure is "attributed to a grade only when the player played in a single grade
+  that season" — true of the gap heuristic, and NOT of the `exact` branch, which
+  sets `attributed_unknown` from `claimed > held` with no such condition. It now
+  states what the mark means and confines the single-grade rule to the branch
+  that actually applies it.
+- **NOTICED, NOT FIXED**: the grid carries no grade-type, format or competition
+  scope at all, so the Men's/Women's pills above it move the header and leave
+  the grid alone. Right for "every grade this player has appeared in", wrong the
+  moment somebody reads the two as the same question; it needs its own look.
+
+## Which lens a panel is under, said on the panel (v9.64.0, Sep 2026)
+
+Asked for after the three-number diagnosis above: "what should I do next so
+that the user is always accurately and clearly informed about the different
+lenses they are looking through at the data."
+
+- **THE FILTER BAR IS PAGE-LEVEL AND ONLY REACHED ELEVEN OF EIGHTEEN PANELS.**
+  It sits above the TAB bar, so every tab renders under it. Audited before
+  building anything: `/stats`, dismissals, by-position, by-grade,
+  bowling-by-grade, bowling-dismissals, bowling-by-batter-position, by-venue,
+  by-opposition, seasons and partnerships take the scope; competitions,
+  formats, team-breakdown, teammates, captain-stats, milestones and rankings do
+  not. A club filtering to Men's on Batting found the women's grades back on
+  Milestones one click later with nothing saying why.
+- **THREE REASONS, NOT ONE, WHICH IS WHY A SINGLE DISCLAIMER WOULD BE WRONG.**
+  `components/FilterReach.jsx` carries the vocabulary: `enumeration` (the panel
+  IS the list of every value — filtering Competitions to one competition leaves
+  a one-row table), `career` (a fact about a whole career), `unfiltered` (a gap,
+  said out loud until it is closed). One list, so a panel added later has to
+  declare itself rather than quietly inheriting a promise the bar cannot keep.
+- **THE NOTE NAMES ONLY THE FILTERS ACTUALLY ON.** Mentioning Match type when
+  nobody has touched it reads as a fault in a control they never used, so
+  `activeFilterNames` reads `category_active` / `format_active` /
+  `competition_active` off the scope the payload already returns. Nothing at
+  all is drawn with every filter on All, which is most visits — the rule
+  `rate_coverage` and the coverage note already keep.
+- **MILESTONES ARE DELIBERATELY NEVER FILTERED.** "247 runs to 5,000" is a
+  career fact and is what the notification bell reports; recomputing it under a
+  Men's-only filter would give a number nobody can act on and would change what
+  a club is told is coming up. Same for an honour — a Life Membership is not a
+  men's honour or a T20 honour. Both now SAY it rather than being silently
+  exempt.
+
+### The grid answers to the bar now, and a match type is the exception
+
+- **`get_player_team_breakdown` takes the scope, and the three halves of it
+  reach different parts of the function.** The scorecard side is per-game and
+  takes the whole scope (`clause("gr.id", game_alias="g")` — the category is
+  expressed against the joined grade while the format is still read off each
+  game's own `match_format`). CA's per-grade aggregate and the club's own
+  per-grade corrections carry a GRADE, so a category or competition filter is
+  answerable against them and a FORMAT is not: `kind='aggregate'` emits
+  `AND FALSE`, the same call `GradeScope` already makes everywhere else.
+- **THE SEASON-TOTAL GAP HEURISTIC IS SKIPPED ENTIRELY UNDER AN ACTIVE SCOPE**,
+  and that half is load-bearing. `v_effective_player_season_stats` has no grade
+  at all, so under a filter it counts matches the filter has just excluded —
+  and the heuristic would hand that difference to an in-scope grade, inventing
+  matches in it. Nothing to compare against is the honest answer.
+- **The payload reports `scope: {active, aggregate_excluded}`**, so the screen
+  can say the asterisked matches have gone and why, rather than leaving a
+  shorter grid to read as data going missing. Presence-aware: an unfiltered
+  request keeps the payload's exact shape.
+- **The card's subtitle moves with it.** "Every grade this player has appeared
+  in" stops being true the moment the bar narrows the table.
+
+### A CLUB DEFAULT IS ALREADY A FILTER, and it broke the note one level down
+
+- **Found by adding a junior grade to the verification fixture, not by reading
+  the code.** `resolve_scope_for_player` applies the club's own default, so a
+  club with a junior programme has `scope.active` TRUE with nobody having
+  touched a control — and the headline is then neither career figure.
+  v9.63.1's filtered copy read "Counted from the 313 matches we hold a
+  scorecard for" beside a headline showing something else entirely, which is
+  the exact class of mistake that note exists to prevent.
+- **So the note never claims to be the headline.** Filtered, it names both
+  sources instead: "Filtered figures are counted from the N matches we hold a
+  scorecard for, not the M in Cricket Australia's season totals." True whatever
+  the figure above it happens to read.
+- **`GradeTotalNote` is scope-aware for the same reason.** Its grade-less line
+  is `breakdown_matches - held`, and `breakdown_matches` is deliberately
+  scope-INDEPENDENT — so subtracting a FILTERED `held` from it would report
+  every match the filter just excluded as one with no grade, the opposite of
+  true. Suppressed while the grid is scoped.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_match_coverage.py` is 46 checks now: the junior
+  grade in and out of the grid, the club default excluding it, an explicitly
+  all-category request reading as no scope at all, the aggregate dropped under
+  a match type and kept under a category one, the grid under a format filter
+  holding nothing it does not have a scorecard for, and the club default moving
+  the headline off both career figures) **with a control run**: with
+  `scope_active` forced false, 6 of the 46 fail.
+- **Driven in Chromium** (`verify_match_coverage_browser.mjs`, 44: each reach
+  note in its own words, the note naming only the active filters, nothing drawn
+  with every filter on All, the Milestones line, and the club-default case
+  where the headline is neither career number) **with a control run**: with
+  `FilterReachNote` stubbed to null, 5 fail.
+- **NOTICED, NOT FIXED**: `teammates` and `captain-stats` still do not take the
+  scope — they now SAY so rather than being silently unfiltered, which was the
+  point, but closing them is its own change. Club rankings are unfiltered too
+  and are arguably a career fact like a milestone; that needs a decision rather
+  than a pass.
+
+### The review, and what it changed (v9.64.1)
+
+Asked to review 1, 2 and 3 above honestly. Two of the design calls were wrong,
+and one had been pushed to `main` without being measured.
+
+- **THE BLANKET SKIP DROPPED REAL MATCHES ON THE DEFAULT VIEW, and the control
+  run reproduces it exactly.** v9.64.0 skipped the season-total gap heuristic
+  under ANY active scope. A club with a junior programme has the club default
+  active on every visit, so every senior player there whose older seasons
+  predate CA's per-grade data had their grid total drop with nobody touching a
+  control — in the suite, a senior-only player read `matches: 5,
+  attributed_unknown: 0` where the unfiltered read gives `9` and `4`. **Gated
+  per season now, not switched off**: an unscoped per-season count is compared
+  against the scoped one, a season where they differ is `mixed` and its gap is
+  not this filter's to place, and a season where they agree is one the total
+  describes exactly, so the heuristic runs as ever. The payload reports
+  `seasons_left_to_scorecards` and the grid says it. The suite asserts a
+  senior-only player's grid is BYTE-IDENTICAL under the club default and with
+  no scope at all, which is the property the first cut broke.
+- **THE REACH NOTES FIRE ON WHAT WAS PICKED, NEVER ON THE CLUB DEFAULT.** Six
+  tabs carrying "the filter above does not apply here" on every visit to a
+  junior-programme club, about a filter nobody turned on, is the "a note on
+  everything teaches people to stop reading notes" rule broken behind a
+  condition that is true by default for a large share of clubs. `FilterReach`
+  takes the RAW selection (`catParam`/`fmtParam`/`compParam`, null where
+  untouched), not the resolved scope — the frontend already knew the
+  difference. The default is announced once, by the header, and once is enough.
+- **A MARK ON THE TAB LABEL SAYS IT BEFORE THE TAB IS OPENED.**
+  `FilterReachDot` on Competitions, Formats, Milestones and Honours, drawn only
+  while something is picked. `presskit.TabBar` already accepts a node as a
+  label, so the main bar needed no change.
+- **TEAMMATES AND CAPTAIN ARE CLOSED, NOT DECLARED.** Both are per-game reads.
+  `iq_teammates` has one "our games" universe CTE and every read is built on
+  it, so `_og_cte(scope)` narrows the list and the with/without split
+  together; every captain query joins `v_effective_games g` and interpolates
+  one `club` string, so the scope rides on that string rather than being
+  pasted into six places.
+- **Found while closing it**: the season table was sent the category and
+  format halves and never the competition — same class of gap as the grid.
+- **Verified against a real Postgres** (`verify_match_coverage.py` is 59
+  checks now: the senior-only player byte-identical under the club default, a
+  mixed player's senior-only season still placing its gap while his mixed
+  season is left to the scorecards, the count reported, the two totals
+  differing by exactly the junior scorecards plus the unplaceable gap, and the
+  teammate and captaincy counts each dropping the shared junior game under
+  Men's) **with two control runs**: the blanket skip this replaces fails 7, and
+  the two new scopes neutered fail 2. **Driven in Chromium** (49: nothing
+  marked or noted under the club default, the pick made by pressing the real
+  Juniors pill, the dots on both bars before the tabs are opened, each note
+  naming Grade type and NOT Match type, Teammates carrying no note and the pick
+  on the wire to it, and the grid's per-season line) **with a control run**:
+  the notes and dots stubbed to null fail 5 and leave the silence checks green.
+- **THE FILTER ROW IS GATED ON THE CLUB HAVING A SEASON**, so a stub that
+  answers `[]` for `/organisations/{id}/seasons` renders no pill to press and
+  every pick-driven check fails with the pick never made. Found by probing the
+  rendered buttons, not by reading the harness.
+- **NOTICED, NOT FIXED**: club rankings are still unfiltered and carry no
+  note. They are arguably a career fact like a milestone, and that is a
+  decision rather than a pass.
+
+### Hamilton's second ask was unmet in the panel built for the first (v9.64.2)
+
+Asked to review whether the competition layer satisfied Hamilton Veterans'
+request — "batting strike rates and bowling economy rates will be handy ...
+however balls faced counting did not commence until specific competitions from
+2013 onwards" — and it did not, at the one place he would look.
+
+- **`competition_stats.player_competition_breakdown` DIVIDED `SUM(runs)` BY
+  `SUM(balls)` ACROSS EVERY INNINGS IN THE COMPETITION.** That is the exact
+  shape migration 282 removed from every other rate in the app (`rate_coverage`,
+  v9.59.0), and this query shipped as 283 — one migration later — without it.
+  For a competition with pre-2013 innings every run lands in the numerator and
+  only the typed-in balls in the denominator: the suite's four-innings case
+  reads 125.00 where 75.00 is right, and the control run reproduces the 125.
+  Economy had the milder version of the same thing through a spell with no
+  overs recorded.
+- **Fixed with the module that already existed**: `rc.batting_rate_columns`
+  and `rc.bowling_rate_columns` ride alongside the plain sums, the rate is
+  `rc.strike_rate(covered_runs, covered_balls)`, and `strike_rate_coverage` /
+  `economy_coverage` ride on the payload. Runs, innings and wickets are still
+  the whole competition's — only the ratio changes source, per the 282 rule.
+- **`FormatCompareTable` already took a `coverage` accessor per row** and drew
+  the dagger and footnote itself, so the panel needed two row definitions
+  changed and nothing else. The Formats page had been doing this since 282;
+  the Competitions page beside it had not.
+- **A CHECK FOR A RATE NEEDS AN INNINGS THE RATE CANNOT USE.** The competition
+  suite's fixture wrote `balls = runs + 10` for every innings, so every rate in
+  it was fully covered and the bug could never have shown. The new case carries
+  an un-balled innings with runs (the sync's stored zero), a genuine 0 off 0
+  (covered — it contributes nothing to either half) and a spell with no overs.
+- **Verified against a real Postgres** (`verify_match_coverage.py` is 66
+  checks: 75.00 from 3 of 4, the 0(0) counted as covered, economy 4.00 from 2
+  of 3, runs and wickets still whole) **with a control run** that reads 125.0
+  and 5.0; the competitions suite unchanged at 136. **Driven in Chromium**
+  (`verify_competitions_browser.mjs`): the partially-covered rate carries the
+  dagger, the complete one beside it does not, and the footnote under the
+  table says why.
+
+### The order of the competition pills is the club's to set (v9.65.0)
+
+Reported: the pills on a club's public stats pages come out in whatever order
+the sync first met the competitions, and a club fielding sides in several
+should be able to lead with the one that matters.
+
+- **NOTHING NEW ON THE BACKEND, and checking that first is what kept this
+  small.** `club_competitions.display_order` has existed since migration 283,
+  `competitions.reorder_competitions` stamps it by position,
+  `POST /admin/competitions/reorder` is routed and `api.adminReorderCompetitions`
+  was already written. `list_competitions` sorts on it and
+  `org_available_competitions` is that list filtered, so every pill row and both
+  breakdown surfaces already read the order — nobody could set it.
+- **A SWAP SENDS THE WHOLE LIST, not the moved pair.** The server stamps
+  positions over every id it is given, so a partial list would renumber two
+  rows against stale neighbours; sending all of them is also what makes a
+  foreign or stale id skippable without leaving a gap, the rule
+  `reorder_plan_tree` and `reorder_agenda_items` already follow.
+- **Arrows, not drag.** Two to five cards in a vertical list, on a screen an
+  admin visits once. `dragOrder.js` exists for the nets batting order because
+  that is run from an iPad mid-session; this is not that.
+- **`MANAGE GRADES` IS NOW `GRADES & COMPETITIONS`**, in the sidebar and as the
+  page's own heading. The screen has owned competitions since 9.60 and the name
+  said nothing about it; a club admin looking for where to manage them had no
+  reason to open it. Display only — the route, the capability and every stored
+  row are untouched, the same call the BetterAdmin rename made.
+- **`/admin/grades#competitions` scrolls to the panel**, so a guide or a link
+  can land on it rather than the top of a long page. Gated on the data having
+  loaded, or there is nothing to scroll to yet.
+- **Driven in Chromium** (the suite is 78 now: the control on every card, the
+  whole list on the wire in its new order, the cards actually moving, the first
+  and last ends disabled, the sentence saying the order drives the public
+  filter, and the page named for competitions) **with a control run**: with the
+  arrows removed, 4 fail.
+- **A CHECK THAT COMPARES THE PAYLOAD AGAINST THE STUB'S OWN STATE CANNOT
+  FAIL.** The first cut asserted the sent ids differed from `comps`, which the
+  stub had already reordered — so it compared the payload with itself. It
+  captures the order BEFORE the click now and asserts the two swapped ends.
+  The stub also has to APPLY the reorder, or "the list actually moves" is
+  measuring a redraw.
+
+## Naming a club or a contact outright (v9.58.3, Sep 2026)
+
+Asked for on the internal Segments screen straight after the rules above:
+explicitly include or exclude every contact at a specific club, or specific
+contacts.
+
+- **THEY ARE ORDINARY ANDed RULES, NOT UNION-STYLE OVERRIDES, and that is the
+  one design decision here.** `is any of` NARROWS the audience to what is
+  picked; it does not add those people on top of what the other rules matched.
+  The exclude half — the one this was really asked for — is identical either
+  way, and a union INCLUDE could send to somebody an earlier rule had
+  deliberately left out, which is the worse direction to be wrong in. The suite
+  asserts the narrowing against a second rule rather than checking the field in
+  isolation.
+- **NEITHER JOINS THE MARKETING CLUB, and that is what makes the exclusion
+  correct.** `marketing_club_id NOT IN (…)` is NULL for a contact with no
+  directory club, which SQL reads as not-matching — so a naive "is none of club
+  X" silently drops every hand-added contact as well. `_pick_clause`'s
+  `nullable` argument ORs `IS NULL` back in on the exclude side, and an inner
+  join would have thrown them away before the clause was even reached. The
+  suite pins both: the excluded club's contacts gone, the club-less ones kept.
+- **A JUNK ID IS DROPPED, BUT AN ALL-JUNK VALUE MUST NOT THEN READ AS "NO
+  FILTER" any more loosely than an empty one does.** An empty selection drops
+  the rule, the same as every other multi-value field — a picker nobody has
+  chosen from yet must not empty the audience. Unlike the `_DIR_MC_FIELDS`
+  rules, an unpicked rule here does not narrow to directory-linked contacts
+  either, since there is no join to do it.
+- **THE SERVER SEARCHES; THE DIRECTORY IS NEVER SHIPPED TO THE BROWSER.**
+  `GET /segments/entities?kind=club|contact&q=&ids=` is the same call
+  `PersonSearch` makes, and it does two jobs in one because they answer one
+  question — what is this id called. `ids` is answered WHATEVER `q` is, so a
+  saved rule renders its chosen names before anybody types and a chosen row can
+  still be un-picked once the search box has moved on. Everything is scoped to
+  the acting org's own contacts, so a club id off a browser can only ever name
+  a club this org actually holds contacts for.
+- **A response is DROPPED if the box has moved on**, per the `PersonSearch`
+  rule — a slow search for "sm" must not land on top of the results for
+  "smith".
+- **The endpoint carries the same scope guard as the engine** — a club build is
+  refused outright rather than being handed a searchable list it could never
+  build a rule from.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_primary_admin_segment.py` is 74 checks now:
+  naming one club and two, the exclusion keeping the club-less contacts, one
+  contact both ways, the narrowing composed with another rule, a junk id
+  dropped while the real one still applies, an empty and an all-junk value
+  filtering nobody, and the endpoint searching, hydrating a chosen id under a
+  non-matching query, never offering another org's contacts, and refusing an
+  unknown kind and a club build) **with a control run**: 17 fail against the
+  previous commit, every naming rule matching the WHOLE audience rather than
+  narrowing it — which is the failing-open direction the checks exist to catch.
+- **A CHECK THAT COMPARES TWO WIDENED SETS CANNOT FAIL.** "a junk id is
+  dropped, the real one still applies" passed against the broken code on the
+  first cut, because both sides came back as everybody; it asserts the narrowed
+  set is genuinely narrower now. The endpoint import is guarded so a control
+  run reports it absent rather than crashing the rest of the suite.
+
+## Targeting the clubs nobody at the club ever ran (v9.58.0, Sep 2026)
+
+Asked for on the internal Segments screen: a rule for whether a club's Primary
+Club Admin is blank, so the contacts at a club a super admin created or synced
+and no real person ever took over — in practice a test club — can be included
+in a List or Segment, or left out of one.
+
+- **THREE STATES, NOT A YES/NO, AND THAT IS THE WHOLE DESIGN.** "No primary
+  admin" is true of two completely different things: a club on the platform
+  that nobody ever took over (the test club) and an ordinary PROSPECT, which
+  has no club record to have an admin at all. A yes/no would fold them
+  together, and "exclude the clubs with no primary admin" would then quietly
+  drop every prospect in the directory — almost the entire outreach audience.
+  `assigned` / `unassigned` / `not_onboarded` keep them apart.
+- **A MULTI-SELECT IS WHAT MAKES *EXCLUDE* EXPRESSIBLE.** Rules are ANDed and
+  there is no NOT, so a single-select could only ever include. The three states
+  PARTITION every directory club, so picking `unassigned` targets the test
+  clubs and picking the other two leaves them out. The suite asserts the
+  partition — the union of the three equals the whole audience with no overlap —
+  rather than checking each in isolation. Same `input: 'multi'` shape
+  `had_demo` and `is_trialing` already use.
+- **`unassigned` IS "NOBODY IS THE PRIMARY", NOT "NOBODY IS AN ADMIN".** A club
+  with a `club_admin` who was never made primary still reads as unassigned,
+  because the question is who owns the club relationship. A `club_member`
+  membership can never be the primary at all.
+- **The predicate is the two conditions `trial_engagement.org_has_primary_admin`
+  already uses** (`role='club_admin'` AND `is_primary_admin`), expressed as a
+  correlated EXISTS. The suite runs both over every seeded club and asserts they
+  classify it the same way, rather than taking the mirroring on trust.
+- **`existing_org_id` is `ON DELETE SET NULL`**, so "not NULL" reliably means an
+  org row exists and `not_onboarded` needs no second EXISTS to confirm it.
+- **A selection that resolves to nothing behaves exactly as the existing club
+  rules do** — the condition is dropped but the MarketingClub join still
+  applies, so the audience narrows to directory-linked contacts and no further.
+  The check compares it against `had_demo` on the same data rather than
+  asserting a rule of its own.
+- **WON, AND ANYTHING BUT WON (v9.58.1), asked for straight after.** Won / not
+  won is a clean PARTITION of every directory club, so unlike the three-state
+  rule above it needs no multi-select: one single select answers both
+  directions.
+- **WON-NESS COMES FROM THE STAGE, not `crm_deals.status`** — the same rule
+  `sales_commissions.deal_state` follows, and for the same reason: every writer
+  derives status from the stage so the two normally agree, but the live data has
+  rows where they disagree and the stage is what a reader sees on the board. The
+  suite seeds both contradictions and asserts the stage wins each way.
+- **SCOPED THROUGH THE STAGE'S OWN PIPELINE, never `crm_deals.scope`.** A club's
+  own CRM deal — a sponsorship renewal, a grant — must never read as
+  BetterCricket having sold them something, and the pipeline is the authority on
+  whose board a stage belongs to.
+- **AN ARCHIVED DEAL IS OFF THE PIPELINE, so off this rule**, which is what
+  every other CRM read does, the commission report included. The one documented
+  exception (`_last_attributed_deal_for_club`, which keeps archived deals so an
+  upsell inherits its rep) is about who EARNED a club, a different question from
+  where the club sits now.
+- **A VOCABULARY VALUE IS MATCHED CASE-INSENSITIVELY (v9.58.2), and the failure
+  mode is why it matters.** An unrecognised value drops the CONDITION, so a rule
+  saying `WON` did not narrow to the won clubs — it WIDENED the segment to
+  everyone. Failing open on a capital letter is the worst direction there is for
+  an email audience. `_vocab` / `_vocab_list` fold the case for `deal_won`,
+  `primary_admin` and `trial_status`; the picker only ever writes the lowercase
+  key, but a saved segment or a hand-made request can carry anything.
+- **THE STAGE'S NAME AND KEY NEVER ENTER THE TEST.** Won-ness reads
+  `crm_stages.is_won`, a boolean, so a stage called "won", "WON" or "Closed Won"
+  behaves identically — that half was never case-sensitive, and the suite pins
+  it by renaming the stage mid-run.
+- **Deliberately only two options.** `crm_stages` also carries `is_lost`, so
+  open / lost / no-deal could each be their own state — but that is not what was
+  asked, and "anything but Won" is the useful counterpart to "Won".
+- **Verified against a real Postgres**
+  (`backend/verification/verify_primary_admin_segment.py`, 33 checks through the
+  shipped segment engine: each state on its own, the reported case found, the
+  prospects NOT swept in with it, the exclude built from the other two, the
+  partition, an admin who is not primary, a plain member, another club's primary
+  not counting for this one, a contact with no directory club matched by no
+  state, and the scope guard still refusing a club that names it; plus Won
+  finding only the club that bought, a club's own won deal not counting, an
+  archived one not counting, "anything but Won" covering open / lost / no deal
+  at all, the two states partitioning, and a status/stage contradiction resolved
+  by the stage both ways) **with a control run**: with the change reverted the
+  unknown field is dropped entirely, so every rule matches the whole audience,
+  and with only the case folding reverted `"Won"` matches all six seeded clubs
+  against `"won"`'s one.
+
+## How many clubs an audience reaches (v9.57.0, Sep 2026)
+
+Asked for on BetterCricket's internal BetterComms: the live readout under a
+List and under a Segment says "79 contacts match · 79 reachable by email" —
+add the number of distinct clubs behind it.
+
+- **A CLUB IS THE CONTACT'S LINKED DIRECTORY ROW, so the figure SELF-GATES.**
+  Only a BetterCricket outreach contact carries a `marketing_club_id`; a club's
+  own members have none, so the count is 0 there and the readout simply does not
+  draw it. That is why no context flag had to be threaded anywhere — the same
+  call `ageFilterOptions` and the Fees/Training notes make, that a control which
+  can only ever answer one thing is worse than none.
+- **COUNTED AMONG THE REACHABLE CONTACTS, per the ask.** The question is how many
+  clubs an email would actually land at, not how many are represented in the
+  match.
+- **`/segments/resolve` CAPS ITS CONTACT LIST AT 5000 AND ITS COUNT IS EXACT**,
+  so deriving the figure in the browser from that slice would stop at the cap and
+  contradict the count beside it in the same sentence. `audience_figures`
+  computes it server-side over the WHOLE audience. **`reachable` and
+  `other_route` moved there too** — they were derived from the capped slice and
+  had the same silent under-report; three numbers in one sentence have to be
+  measured the same way. The browser prefers the server's figures and keeps the
+  old client-side derivation only as a fallback for an older server mid-deploy.
+- **THE LISTS SCREEN NEEDS NO SERVER FIGURE**, because
+  `GET /lists/{id}/members` returns every member uncapped and each row already
+  carries its club link. `clubCount` in `crudShell.jsx` is that one rule, used
+  there and as the segment fallback; `routers/comms.py::audience_figures` mirrors
+  it, and the suite runs the REAL JavaScript function (lifted out of the file and
+  evaluated in node) against the Python one on the same rows rather than checking
+  the source for a phrase — a structural check would pass on a rule that behaved
+  differently.
+- **A blank address is matched but not reachable, and so contributes no club.**
+  `comms_contacts.email` is NOT NULL but a blank one is storable, and it is not a
+  person an email reaches.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_audience_clubs.py`, 19 checks through the shipped
+  route bodies: three officers at one club counting once, a club whose only
+  contact is unreachable not counted, a contact belonging to no club inventing
+  none, a club's own audience reporting 0, 6001 contacts across 6000 clubs all
+  counted so the cap is proved not to apply, the list endpoint returning
+  everything uncapped, and the two languages agreeing on the awkward cases)
+  **with a control run**: with the frontend reverted, 7 fail and the JS rule is
+  reported absent rather than crashing the suite.
+- **A LIFESPAN-ONLY COLUMN OR TABLE BREAKS A `create_all` HARNESS**, and this
+  route body reaches three of them through `reconcile_contacts_from_directory`:
+  `fee_members.member_category`, `member_membership_types` and
+  `player_achievements`. The suite creates them by hand, per the note this file
+  already carries about raw-SQL tables being invisible to the ORM.
+
+## Every club admin, on one internal list (v9.56.0, Sep 2026)
+
+Asked for: a club admin should land on BetterCricket's own contact list the
+moment they become one — a self-serve registration, a super admin creating a
+club and naming its primary admin, a primary admin being reassigned — plus a
+script that backfills everyone who is already one.
+
+- **THE PRIMARY ADMIN IS NOT A ROLE, IT IS A FLAG.** `club_memberships.role` is
+  `club_admin` and `is_primary_admin` rides on top, so "Club Admin or Primary
+  Club Admin" is one query. The ongoing sync therefore covers every
+  `club_admin`, not only the primary — otherwise the backfill seeds ordinary
+  club admins once and nothing ever maintains them, and the list drifts the
+  first time a club adds a second admin.
+- **`services/admin_contact_list.py::sync` IS THE WHOLE JOB, and the live hooks
+  and the backfill script are the same code over different scopes** — one club
+  or the platform. That is what makes it idempotent enough to run on every
+  membership write, and what stops the script and the hooks disagreeing about
+  who belongs.
+- **IT RUNS ON ITS OWN SESSION, AFTER THE CALLER'S COMMIT, AND NEVER RAISES.**
+  A marketing-list failure must not take down a club registration — and it must
+  not share the caller's transaction either, which is the trap this file already
+  documents twice: a swallowed database error leaves the transaction aborted and
+  the commit that actually matters fails behind it. `run_sync` is that rule
+  named; `queue_sync` fires it where the caller has its own post-commit point,
+  and `background_tasks.add_task(run_sync, …)` where the commit happens after the
+  code returns (`sales_workspace._nominate_primary_admin`, whose caller commits).
+- **CALL IT AFTER THE COMMIT.** The task reads its own session, so a hook fired
+  mid-transaction finds no membership and quietly does nothing — the one way
+  this can silently fail at its job. The suite asserts it structurally: every
+  hook line must have a `commit()` between it and the top of its own enclosing
+  function. A 12-line lookback passed `create_club`, whose commit sits 20 lines
+  up behind a long `except` block.
+- **UPSERT ONLY — nothing here removes anybody.** Losing the role does not take
+  a person off the list; that is a decision for a person on the Lists screen.
+- **AN OPT-OUT IS NEVER OVERRIDDEN, and that is not the same as skipping the
+  contact.** An unsubscribed / bounced / complained / globally-suppressed admin
+  still has their contact row kept current, but is NOT put back on the list —
+  `comms_lists` drops a suppressed contact from every list, and re-adding them
+  here would fight it on every run. `comms_segments.sendable_where` is the one
+  definition of "can be sent to" and is what decides, so "on this list" can
+  never mean something different from "reachable by a send".
+- **`services/comms_contacts.py` is now the ONE copy of the upsert**, moved out
+  of `routers/comms.py` (which delegates) because it is called from outside a
+  request too. It carries the rule that must never be relaxed: a suppressed
+  address is never resurrected. Everything else FILLS rather than clobbers, so a
+  name a super admin typed always wins over one derived here.
+- **THE CONTACT IS LINKED TO THE CLUB'S DIRECTORY ROW**, which is what makes
+  `{{club}}`, `{{association}}` and — the reason it matters — `{{trial_days_left}}`
+  resolve for these recipients. An email to club admins about their trial is
+  exactly what this list is for, and without the link every one of those tokens
+  renders blank. A club with no directory row leaves it NULL rather than guessing.
+- **AN ARCHIVED CLUB'S ADMINS ARE LEFT OUT**, the house rule `auto_sync`
+  eligibility and the Twenty pushes already follow. Anyone already on the list
+  stays — nothing removes — they just stop being added by a later run.
+- **AN ADMIN WITH NO EMAIL IS REPORTED, NOT DROPPED.** `users.email` is nullable
+  and `UserCreate` carries no email field at all, so a super admin's newly
+  created club_admin genuinely has none until `patch_user` sets one — which is
+  hooked too. That count is what says the list is short of the roster.
+- **AN EXISTING LIST OF THAT NAME IS ADOPTED, NEVER DUPLICATED**, and its
+  `source`/`origin` are left alone: a list a person made by hand is theirs and
+  this only fills it. `comms_lists` is unique on (organisation_id, name), so
+  matching by name is exact.
+- **THE DRY RUN HAS TO PROJECT A CONTACT THAT DOES NOT EXIST YET.** The first
+  cut counted list additions by querying `comms_contacts`, so a run that would
+  add everybody reported "0 to add" and read as nothing to do. It now counts the
+  rows it would create (subscribed by construction, unless the ADDRESS itself is
+  globally suppressed) and the suite asserts the dry run's figures are exactly
+  what applying does. Found by running the script, not by reading it.
+- **`python -m app.scripts.sync_admin_contact_list [<org-id-or-slug>] [--apply]`**
+  is the backfill, dry-run by default per the house rule.
+- **The AFL silo is deliberately untouched.** `routers/afl/users_admin.py` and
+  `afl/super_clubs.py` write the same shared columns, but that backend runs on
+  its own database where the cricket outreach org does not exist.
+- **ADD NEW USER TAKES AN EMAIL AND A MOBILE (v9.56.1), which is what makes the
+  create-time hook actually land somebody.** `UserCreate` carried neither, so a
+  super admin's newly created club_admin had no address and could only reach the
+  list once someone edited them afterwards. Both are OPTIONAL — a super admin
+  naming an account on someone's behalf often has neither yet, and login is by
+  username — and validated exactly as `patch_user` validates them: format only,
+  never for uniqueness, since `users.email` stopped being DB-unique at migration
+  145 and the edit form allows a repeat. `_INVITE_EMAIL_RE` and `_clean_mobile`
+  are the same two the rest of that router uses, so the create and edit forms
+  cannot disagree about what a valid address is.
+- **A COMMENT THAT JUSTIFIES ITSELF BY ANOTHER FORM'S GAP GOES STALE WITH IT.**
+  Both `patch_user` and `SuperUsers.jsx` explained their optional email with
+  "this create form doesn't collect one" — true until it did. Corrected in place
+  rather than left to mislead the next reader; the field stays optional, for the
+  reason above.
+- **The form validates BEFORE `setSaving(true)`**, or a rejected form leaves the
+  button disabled with no way out. The suite asserts the ordering, not just the
+  presence of the check.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_admin_contact_list.py`, 69 checks through the
+  shipped service, script logic and route bodies: who lands on the list and who
+  does not, the club_member / super_admin / sales / archived exclusions, the
+  list adopted rather than duplicated, a re-run creating nothing twice, all four
+  suppression states kept off and their rows kept current, resubscribing putting
+  them back, the directory link making the trial countdown resolve, a hand-typed
+  name surviving, per-club scoping, two admins sharing one address, the dry run
+  matching the apply, and `super_set_primary_admin` / `create_user` / `patch_user`
+  driven as real route bodies, plus the address stored folded and trimmed, the
+  two refusals creating no account at all, neither field required, a repeat
+  address allowed, and a club admin created WITH an address landing on the list
+  with no follow-up edit) **with control runs**: with the router hooks reverted,
+  8 fail — the route bodies add nobody at all; with the create form reverted,
+  12 fail.
+
+## A club admin's mobile is already written down at their club (v9.67.0, Sep 2026)
+
+Asked for: for every club admin we hold no mobile number for, look at their club
+in the directory, find that person's record, and store their mobile against the
+user account.
+
+- **NEITHER FLOW THAT CREATES A CLUB ADMIN INSISTS ON A MOBILE, WHICH IS WHY THE
+  GAP EXISTS.** `admin_identity.validate_admin_fields` takes `require_mobile`
+  precisely so a super admin creating a club on somebody's behalf can leave it
+  blank, and an admin invited to an existing club (`create_club_user`) is never
+  asked for one at all. The number is frequently already on file about the same
+  person a table away.
+- **THREE PLACES A CLUB HOLDS A PHONE NUMBER, and all three are read** —
+  `fee_members.mobile`, the linked `players.phone` the Directory itself falls
+  back to (a read-through player with no member row included), and the Clubs
+  Directory contact for their club through `marketing_clubs.existing_org_id`.
+  That third one is the case a Clubhouse-only reading would have missed: a
+  brand-new club's first admin is usually its secretary, and that is the list
+  their mobile is on before anybody has built the club's own Directory.
+- **AN EMAIL MATCH IS AN IDENTITY; A NAME MATCH IS NOT.** So every email match
+  beats every name match whatever source it came from, and where a NAME match
+  turns up two different numbers it REFUSES rather than picking — a shared
+  surname and first name at one club is the shape of a father and son, the same
+  reason `_name_variant_pairs` is never bulk-mergeable. Two different numbers
+  under one EMAIL is one person with two recorded numbers, so there the source
+  order decides (the club's own member record, then the player behind it, then
+  the Clubs Directory contact).
+- **THE NUMBER HAS TO BE A MOBILE, AND `admin_identity.mobile_valid` IS THE ONE
+  RULE.** `players.phone` and `fee_members.mobile` are free text and routinely
+  hold a clubroom landline — `(08) 9364 1234` matches a person perfectly well
+  and is not a mobile. It is REPORTED with the number rather than stored, so an
+  operator can see it is a landline instead of wondering why the match did
+  nothing. Writing a landline into a field the platform will one day text is
+  worse than leaving it blank.
+- **SCOPED TO THEIR OWN CLUB, and the join is org-scoped as well as keyed.** A
+  `fee_members` row can point at another club's player (the cross-club leak this
+  file already documents for exactly this join), so without
+  `p.organisation_id = fm.organisation_id` this would serve a stranger's mobile
+  as if it were the admin's. Caught by the control run, not by reading it.
+- **NOTHING IS EVER OVERWRITTEN.** Only an admin whose `mobile_number` is blank
+  is considered at all, so a run is idempotent and a second writes nothing. No
+  network call either — everything read is already ours — so it is quick enough
+  to run platform-wide.
+- **`admin_contact_list.admin_rows` IS THE ONE DEFINITION OF "A CLUB ADMIN"**,
+  reused rather than re-queried: the primary is that same role carrying
+  `is_primary_admin`, a super_admin or sales membership is Better staff, and an
+  archived club is left out. Two copies is how this and the contact-list sync
+  start disagreeing about who counts.
+- **`python -m app.scripts.backfill_admin_mobiles [<org|all>] [--apply]
+  [--email-only]`**, dry run by default per the house rule. `--email-only` is
+  the strictest pass for an operator who does not want name matching at all.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_admin_mobile_backfill.py`, 53 checks through the
+  shipped service: the reported case, a name match where the addresses differ,
+  "Nolan, Sarah" reading as "Sarah Nolan", an email match beating a name match,
+  the member's number over the linked player's, a read-through player, the Clubs
+  Directory contact, the landline refused, two of one name refused while one
+  number spelled two ways is not a conflict, an archived member record ignored,
+  another club's records never reached, the foreign-player leak, a super admin
+  and a club member not counted, an archived club left out, the dry run writing
+  nothing and reporting exactly what applying does, and a second run writing
+  nothing) **with a control run**: with the org scoping, the mobile check and
+  the ambiguity refusal neutered, 7 fail — the leak among them.
+- **NOTICED, NOT FIXED**: nothing fills this in at account-creation time. The
+  lookup is a plain service call and the obvious follow-up is running it for the
+  one club when an admin is created, but that was not what was asked and a live
+  hook needs its own look at what happens when the club's records arrive later.
+
+## A club's trial, as an audience and as a number in the email (v9.55.0, Aug 2026)
+
+Asked for on BetterComms → Segments: reach the contacts whose club is in a trial
+finishing within N days, and the ones whose club's trial has already run out, and
+be able to splice the day count into the template.
+
+- **DIRECTORY SCOPE ONLY, and that is not a judgement call.** In the club scope
+  every contact belongs to the ONE sending club, so "is the club in a trial" is
+  all-or-nothing and answers nothing; a prospect's trial state is also
+  BetterCricket's own sales data. `DIR_TRIAL_FIELDS` sits with the other
+  outreach fields and the suite asserts the club field set carries none of them,
+  per the hard scope rule in `PROJECT_RULES.md`.
+- **`services/club_trial_window.py` IS THE ONE DEFINITION, and that is the whole
+  point of the feature.** The segment picks the audience and the merge variable
+  writes the number into the body, so an email saying "9 days" inside an
+  audience built as "at most 7 days" would be the failure. The segment SQL and
+  the merge vars read the same subquery and the same day arithmetic; the suite
+  asserts the printed figure is EXACTLY the segment boundary (in at `<= n`, out
+  at `<= n-1`) rather than merely close.
+- **AN EXPIRED TRIAL'S ROW STAYS `status='trial'` WITH A PAST END** — that is
+  what `module_subscriptions.sweep_expired_trials` deliberately leaves behind, so
+  a past `trial_ends_at` on a `trial` row IS the expired state. A converted club
+  has no `trial` rows and correctly reads as neither.
+- **THE WINDOW IS `MAX(trial_ends_at)` ACROSS THE CLUB'S MODULES.** A club is
+  still trialing while any one module is live, and has expired only once every
+  one has run out. Verified both ways: a club with one finished and one live
+  module reads as in a trial off the live one's countdown.
+- **`ends_at` CANNOT ANSWER "HAS A TRIAL", which is why the subquery carries a
+  `has_trial` marker.** It is NULL both for a club with no trial and for one
+  whose only trial has no end date — opposite answers. The first cut used it as
+  the test and an open-ended trial fell out of every option including "no trial
+  on record"; the verification caught it.
+- **AN OPEN-ENDED TRIAL ANSWERS NEITHER QUESTION.** It reads as running, never
+  as expired, and carries no day count — telling a club whose trial is still
+  going that it has finished is the one thing this must not do. Silence where
+  the data cannot answer, the same discipline the selection rules keep.
+- **DAYS-SINCE HAS ITS OWN FLOOR, NEVER THE NEGATION OF DAYS-LEFT.** Both count
+  whole days elapsed, so each floors towards its own end: a trial that finished
+  3.2 days ago has been over for 3 whole days, and negating `days_left` (which
+  floors to -4) reports 4. Caught by the suite, not by reading the code. Note
+  `crm.trial_days_remaining_by_club` still negates its signed figure for the CRM
+  card's expired badge and carries that off-by-one; it was left alone rather
+  than widened into this change.
+- **A FIGURE THAT DOES NOT APPLY RENDERS BLANK, NEVER `0`.** "0 days left" to a
+  club that is not on a trial is a lie. Every directory club gets an entry in
+  the batched lookup — including one never onboarded — so the token resolves to
+  empty rather than going out as a literal `{{trial_days_left}}`.
+- **THE TRIAL FIGURES ARE NOT IN `EDITABLE_MERGE_KEYS`.** They are computed
+  facts, and a hand-typed override would print a number the audience disagrees
+  with. `_apply_overrides` is the one place that rule lives now, and
+  `_contact_vars` is the one per-recipient builder the preview, the test send
+  and the real send all call — the send's only difference is fetching the whole
+  batch's windows in one query, which the suite asserts agrees contact for
+  contact with the one-at-a-time path.
+- **`{{trial_end_date}}` rides along free from the same lookup** because a
+  countdown written at send time is wrong by the next morning, and an email is
+  routinely read days later.
+- **SUPER-ADMIN ONLY, AND NOW ENFORCED ON THE SERVER RATHER THAN JUST IN THE
+  SCREEN.** The frontend gate was already sound (`SegmentsRoute.jsx` mounts
+  `InternalSegments`, the only importer of `DIRECTORY_FIELD_DEFS`, on
+  `can_switch_clubs && is_marketing_org`) — but the ENGINE refused nothing: a
+  hand-made request from a club admin returned nothing only because the
+  `MarketingClub` join happens to be empty for a club's own contacts.
+  `directory_rules_allowed` is that boundary named, reading the same
+  `org_is_outreach` that `/auth/me`'s `is_marketing_org` does, so the screen and
+  the engine cannot disagree about who may ask.
+- **IT FAILS CLOSED, AND THAT DIRECTION IS THE WHOLE POINT.** A directory rule in
+  a club context empties the audience (`where(false())`) rather than being
+  dropped — dropping it would WIDEN the segment to the club's entire list, and
+  silently emailing everyone is far worse than reaching nobody. The write paths
+  refuse with a 422 as well, so a club gets a sentence rather than a segment that
+  can only ever resolve to nobody. The guard logs when it fires: an empty
+  audience nobody can explain is the worst way to find out.
+- **THE FIVE JOIN-LESS DIRECTORY FIELDS ARE A REAL BEHAVIOUR CHANGE.**
+  `exported` / `emailed` / `opened` / `clicked` / `enquired` add no
+  `MarketingClub` join, so they genuinely DID evaluate against a club's own
+  contacts before this — the control run has a club naming `emailed` getting its
+  whole list back. No club-facing screen can build one, and the terms are
+  defined against outreach sends and prospect enquiries so they mean nothing for
+  a club's own members; a segment saved before the two field sets were split
+  apart is the only way one could exist, and it now reads as nobody instead.
+  **The trial fields alone could not have proved the guard works** — their join
+  already emptied them, so those checks pass against the unguarded code too.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_club_trial_segments.py`, 73 checks through the
+  shipped segment engine and route bodies: both scenarios, every boundary, a
+  multi-module club either side of the line, the open-ended cases, a converted
+  club, an un-onboarded prospect, the send gate still excluding an unsubscribed
+  contact on a live trial, another club's contacts never reached, the SQL and
+  Python day counts agreeing row by row, and the figures rendered into a real
+  email, plus the super-admin boundary from both sides) **with two control
+  runs**: with the segment engine reverted every trial rule is silently dropped
+  and the audience comes back as all 12 contacts; with only the scope guard
+  removed, a club naming `emailed` gets its whole list.
 
 ## Comms has no sync step: it reads the live Directory (v9.12.0, Aug 2026)
 

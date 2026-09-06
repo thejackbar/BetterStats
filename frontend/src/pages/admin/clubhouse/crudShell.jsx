@@ -43,6 +43,21 @@ export function reachability(c) {
   return { key: 'none', label: 'No address', tone: 'block' }
 }
 
+// How many distinct clubs an audience reaches. A club is the contact's linked
+// Clubs Directory row, which only a BetterCricket outreach contact carries — a
+// club's own members have none, so this is 0 there and the readout doesn't draw
+// it. Counted among the REACHABLE contacts only: the question is how many clubs
+// an email would actually land at. Mirrored server-side by
+// routers/comms.py::audience_figures, which computes it over the whole audience
+// rather than the capped preview slice.
+export function clubCount(contacts) {
+  const seen = new Set()
+  for (const c of contacts || []) {
+    if (reachability(c).key === 'email' && c.marketing_club_id) seen.add(c.marketing_club_id)
+  }
+  return seen.size
+}
+
 // The two panes. `bare` on the layout is what lets this fill the screen: the
 // list rail scrolls on its own and the record beside it scrolls on its own,
 // rather than the whole page scrolling as one. Below 900px `.ch-listpane`
@@ -134,7 +149,7 @@ export function RecordTitleRow({ name, onName, placeholder, blurb, readOnly = fa
 // rather than stored. `children` replaces the whole sentence for a record whose
 // headline number is not a count of people.
 export function CountBar({
-  counting, total, reachable, otherRoute, noun = 'person', nounPlural = 'people',
+  counting, total, reachable, otherRoute, clubs, noun = 'person', nounPlural = 'people',
   countingText = 'Working out who matches…', children,
 }) {
   return (
@@ -145,6 +160,9 @@ export function CountBar({
           <b style={{ color: 'var(--pb-accent-ink)' }}>{total}</b> {total === 1 ? `${noun} matches` : `${nounPlural} match`}
           {' · '}<b style={{ color: 'var(--pb-positive-ink)' }}>{reachable}</b> reachable by email
           {otherRoute > 0 && <> · <b style={{ color: '#f5b542' }}>{otherRoute}</b> need another route</>}
+          {/* Drawn only where a club is a real distinction: a club emailing its
+              own members is one club, so the figure would say nothing. */}
+          {clubs > 0 && <> · <b style={{ color: 'var(--pb-accent-ink)' }}>{clubs}</b> {clubs === 1 ? 'club' : 'clubs'}</>}
         </span>
       ))}
     </div>

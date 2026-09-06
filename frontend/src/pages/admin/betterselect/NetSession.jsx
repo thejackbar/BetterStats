@@ -22,6 +22,7 @@ import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import { PbSpinner } from '../../../lib/presskit'
 import { Icon, Btn, Avatar, RoleChips, Search, Empty, NumText, usePref } from './ui'
+import { useDragOrder } from './dragOrder'
 
 const POLL_MS = 2500
 const TONE_COLOR = { info: 'var(--pb-accent)', amber: 'var(--pb-amber)', red: 'var(--pb-red)' }
@@ -50,6 +51,10 @@ export default function NetSession() {
   const [audioReady, setAudioReady] = useState(false)
   const [ending, setEnding] = useState(false)
   const [tick, setTick] = useState(() => Date.now())
+  // The attendee whose priority tick is being answered. Ticking priority asks
+  // a question — move them up, or just flag it — rather than silently doing
+  // one of the two. See PriorityModal.
+  const [priorityFor, setPriorityFor] = useState(null)
   // The row-button key: on until this coach turns it off, per person and per
   // browser, so one coach putting it away doesn't take it from the next.
   const [showKey, setShowKey] = usePref('nets_row_key', true)
@@ -256,6 +261,13 @@ export default function NetSession() {
   const waiting = useMemo(() => attendees.filter((a) => !a.batted && a.bats !== false), [attendees])
   const sittingOut = useMemo(() => attendees.filter((a) => !a.batted && a.bats === false), [attendees])
   const done = useMemo(() => attendees.filter((a) => a.batted), [attendees])
+  const nets = (settings && settings.nets) || 1
+  // The turn is finished but nobody has rotated yet, so the top group have had
+  // their knock even though nothing has recorded it. `bumpToNext` needs to know:
+  // dropping a priority player above them here would have the next rotation
+  // mark that player as batted when they never went in.
+  const turnOver = !running && remaining <= 0 && waiting.length > 0
+  const netsBusy = running || turnOver
   // The night is over: no clock, no check-in, and the QR code lands nowhere.
   // Read off the server rather than a local flag, so a coach who ends it on the
   // phone by the nets sees the laptop in the clubroom follow on its next poll.
@@ -278,6 +290,9 @@ export default function NetSession() {
     act(() => api.nmAddAttendee(id, { guest_name: n }))
   }
   const reorder = (ids) => act(() => api.nmReorderQueue(id, ids))
+  // Keyboard's answer to the drag handle: a grip with focus takes the arrow
+  // keys. Dragging is a pointer gesture and a screen reader has no pointer, so
+  // without this the order would be unreachable for anyone not using one.
   const move = (attId, dir) => {
     const ids = waiting.map((a) => a.id)
     const i = ids.indexOf(attId)
@@ -286,8 +301,38 @@ export default function NetSession() {
     ;[ids[i], ids[j]] = [ids[j], ids[i]]
     reorder(ids)
   }
-  const bumpToFront = (attId) => reorder([attId, ...waiting.map((a) => a.id).filter((x) => x !== attId)])
+  // "BAT NEXT" IS THE FRONT OF THE LINE FOR THE NEXT TURN, WHICH IS NOT THE
+  // FRONT OF THE LIST. While a turn is under way the top `nets` names are in
+  // the nets, and dropping somebody above them would swap out a batter
+  // mid-knock — and worse, the next rotation would mark the new arrival as
+  // having batted when they never went in. So they go in behind whoever is
+  // currently in. With the nets idle there is nobody to go behind, and the
+  // front of the list is the front of the line.
+  const bumpToNext = (attId) => {
+    const rows = ((liveRef.current && liveRef.current.attendees) || [])
+      .filter((a) => !a.batted && a.bats !== false)
+      .map((a) => a.id)
+    const hold = netsBusy ? rows.slice(0, nets).filter((x) => x !== attId) : []
+    const rest = rows.filter((x) => x !== attId && !hold.includes(x))
+    return reorder([...hold, attId, ...rest])
+  }
   const setBatted = (attId, batted) => act(() => api.nmPatchAttendee(id, attId, { batted }))
+  // Told to get their gear on. Transient by design — the server clears it when
+  // they walk into a net, so the strip on the fence always answers "who is next
+  // in" rather than slowly becoming everyone the coach has ever spoken to.
+  const setPaddingUp = (attId, on) => act(() => api.nmPatchAttendee(id, attId, { padding_up: on }))
+  // Un-ticking is just an un-tick. Ticking asks the question.
+  const togglePriority = (p) => {
+    if (p.priority) { act(() => api.nmPatchAttendee(id, p.id, { priority: false })); return }
+    setPriorityFor(p)
+  }
+  const savePriority = async ({ reason, batNext }) => {
+    const target = priorityFor
+    setPriorityFor(null)
+    if (!target) return
+    await act(() => api.nmPatchAttendee(id, target.id, { priority: true, note: reason }))
+    if (batNext) await bumpToNext(target.id)
+  }
   // Moving someone in or out of the rotation. Coming back in puts them at the
   // back of the queue, which is the server's call, not this screen's.
   const setBats = (attId, bats) => act(() => api.nmPatchAttendee(id, attId, { bats }))
@@ -299,6 +344,34 @@ export default function NetSession() {
   const rotate = () => { unlockAudio(); act(() => api.nmRotate(id, true, timer && timer.turn_seq)) }
 
   const patchSettings = (partial) => act(() => api.nmUpdateSession(id, { settings: { ...settings, ...partial } }))
+
+  // ── The batting order, and dragging it ────────────────────────────────────
+  // A DRAG HOLDS THE POLL OFF for as long as it lasts, on the same in-flight
+  // counter a write uses. Without it a poll landing mid-drag adopts the
+  // server's older order and the row is pulled out from under the finger.
+  const waitingIds = useMemo(() => waiting.map((a) => a.id), [waiting])
+  const dragActive = useCallback((on) => { inflightRef.current += on ? 1 : -1 }, [])
+  const drag = useDragOrder({
+    ids: waitingIds,
+    onCommit: reorder,
+    enabled: canEdit && !ended,
+    onActive: dragActive,
+  })
+  const byId = useMemo(() => new Map(waiting.map((a) => [a.id, a])), [waiting])
+  // The preview wins while a drag is in flight, so the whole screen — the
+  // names under the clock included — moves with the finger rather than only
+  // the list.
+  const battingOrder = useMemo(() => (
+    drag.order ? drag.order.map((x) => byId.get(x)).filter(Boolean) : waiting
+  ), [drag.order, byId, waiting])
+  // The queue IS the batting order: the first `nets` names are in the nets and
+  // the rest are the line behind them. One list, so dragging somebody into a
+  // batting spot is the same gesture as moving them up the queue — which is
+  // the thing that was slow.
+  const onNow = useMemo(() => battingOrder.slice(0, nets), [battingOrder, nets])
+  // Only somebody still WAITING can be padding up: the flag is about the turn
+  // to come, so it says nothing about a person already in a net.
+  const paddingUp = useMemo(() => battingOrder.slice(nets).filter((a) => a.padding_up), [battingOrder, nets])
 
   // ── Ending the night ──────────────────────────────────────────────────────
   // Confirmed, because it closes the QR code as well as stopping the clock —
@@ -338,12 +411,8 @@ export default function NetSession() {
     )
   }
 
-  const nets = settings.nets
-  const onNow = waiting.slice(0, nets)
-  const upNext = waiting.slice(nets)
   const timerColor = activeTone ? TONE_COLOR[activeTone] : 'var(--pb-text)'
   const pct = settings.duration_seconds ? Math.max(0, Math.min(100, (remaining / settings.duration_seconds) * 100)) : 0
-  const turnOver = !running && remaining <= 0 && onNow.length > 0
 
   return (
     <BetterSelectLayout
@@ -456,6 +525,31 @@ export default function NetSession() {
             )}
             {turnOver && <div className="mt-3 text-[13px] text-pb-faint">Turn over — hit <b className="text-pb-text">Next group</b> to rotate.</div>}
 
+            {/* Who is in, and who has been told to get ready. Both belong here
+                rather than further down the page: this is the block a player
+                standing at the nets reads off the iPad on the fence, and the
+                whole reason for flagging anybody is that it can be read from
+                there. Names are big and the label is beside them, so neither
+                line needs the colour to be understood. */}
+            {!ended && (
+              <div className="w-full max-w-[560px] mt-5 flex flex-col gap-1.5" data-nets-hero>
+                <HeroLine
+                  slot="nets"
+                  label={nets > 1 ? 'In the nets' : 'In the net'}
+                  people={onNow}
+                  color="var(--pb-accent)"
+                  empty="Nobody in yet"
+                />
+                <HeroLine
+                  slot="padding"
+                  label="Padding up"
+                  people={paddingUp}
+                  color="var(--pb-positive)"
+                  empty={canEdit ? 'Nobody flagged — tap the pad on the batting order' : 'Nobody flagged yet'}
+                />
+              </div>
+            )}
+
             {/* Controls. An ended session shows what happened instead of a
                 Start button that would quietly put the night back on. */}
             {ended ? (
@@ -496,33 +590,17 @@ export default function NetSession() {
           )}
         </div>
 
-        {/* On now */}
-        <div>
-          <div className="flex items-center gap-2 mb-2"><span className="font-display font-bold text-[15px]">On now</span><span className="font-mono text-[11px] text-pb-faint">{onNow.length}/{nets} nets</span></div>
-          {onNow.length === 0 ? (
-            <div className="pb-card px-4 py-8 text-center"><Empty>No one batting yet. Check players in, then hit Start.</Empty></div>
-          ) : (
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {onNow.map((p, i) => (
-                <div key={p.id} className="pb-card px-3.5 py-3 flex items-center gap-3" style={{ borderColor: 'color-mix(in srgb, var(--pb-accent) 30%, transparent)' }}>
-                  <span className="font-mono text-[11px] text-pb-accent w-5 shrink-0">N{i + 1}</span>
-                  <Avatar player={{ ...p, id: p.player_id }} size={38} />
-                  <div className="flex-1 min-w-0">
-                    <div className="font-display font-semibold text-[14px] truncate">{p.name}{p.is_guest && <span className="font-mono text-[9px] text-pb-faint ml-1">GUEST</span>}</div>
-                    <RoleChips roles={(p.skill_positions || []).slice(0, 3)} muted />
-                  </div>
-                  {canEdit && <Btn variant="ghost" sm icon="check" onClick={() => setBatted(p.id, true)} title="Mark done / next in">Out</Btn>}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Up next + Done */}
+        {/* The batting order + Done */}
         <div className="grid lg:grid-cols-[1fr_320px] gap-4 items-start">
-          <div className="pb-card px-4 py-3.5">
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="font-display font-bold text-[15px]">Up next</span>
+          {/* ONE LIST FROM THE NETS DOWN, and that is what makes the drag
+              worth having: getting the right player into a batting spot is
+              now the same gesture as moving them up the queue, rather than a
+              separate act performed on a separate card. The rows in the nets
+              carry their own tint and a NET n badge so the boundary is still
+              obvious. */}
+          <div className="pb-card px-4 py-3.5" data-batting-order>
+            <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
+              <span className="font-display font-bold text-[15px]">Batting order</span>
               <div className="flex items-center gap-3">
                 {canEdit && (
                   <button onClick={() => setShowKey((k) => !k)}
@@ -530,7 +608,9 @@ export default function NetSession() {
                     {showKey ? 'Hide key' : 'Key'}
                   </button>
                 )}
-                <span className="font-mono text-[11px] text-pb-faint">{upNext.length} waiting</span>
+                <span className="font-mono text-[11px] text-pb-faint">
+                  {onNow.length}/{nets} in · {Math.max(0, battingOrder.length - nets)} waiting
+                </span>
               </div>
             </div>
 
@@ -540,26 +620,29 @@ export default function NetSession() {
                 them and would rather have the rows. */}
             {canEdit && showKey && <RowKey />}
 
-            {upNext.length === 0 ? <Empty className="py-3">Queue is empty.</Empty> : (
+            {battingOrder.length === 0 ? (
+              <Empty className="py-3">Nobody in the order yet. Check players in, then hit Start.</Empty>
+            ) : (
               <div className="flex flex-col">
-                {upNext.map((p, i) => (
-                  <div key={p.id} className="flex items-center gap-2.5 py-2 border-b pb-hairline last:border-0">
-                    <span className="font-mono text-[11px] text-pb-faintest w-5 shrink-0">{i + 1}</span>
-                    <Avatar player={{ ...p, id: p.player_id }} size={30} />
-                    <div className="flex-1 min-w-0">
-                      <div className="font-display font-medium text-[13.5px] truncate">{p.name}{p.is_guest && <span className="font-mono text-[9px] text-pb-faint ml-1">GUEST</span>}</div>
-                    </div>
-                    {canEdit && (
-                      <div className="flex items-center gap-0.5 text-pb-faint">
-                        <button onClick={() => bumpToFront(p.id)} title="Bat next" className="p-1 hover:text-pb-accent"><Icon name="batNext" size={16} /></button>
-                        <button onClick={() => move(p.id, -1)} title="Move up" className="p-1 hover:text-pb-text"><Icon name="chevron" size={15} className="-rotate-90" /></button>
-                        <button onClick={() => move(p.id, 1)} title="Move down" className="p-1 hover:text-pb-text"><Icon name="chevron" size={15} className="rotate-90" /></button>
-                        <button onClick={() => setBatted(p.id, true)} title="Mark as batted" className="p-1 hover:text-pb-accent"><Icon name="batDone" size={16} /></button>
-                        <button onClick={() => setBats(p.id, false)} title="Not batting — here tonight, but out of the rotation" className="p-1 hover:text-pb-amber"><Icon name="batNotOut" size={16} /></button>
-                        <button onClick={() => removeAttendee(p.id)} title="Remove" className="p-1 hover:text-pb-red"><Icon name="close" size={15} /></button>
-                      </div>
-                    )}
-                  </div>
+                {battingOrder.map((p, i) => (
+                  <OrderRow
+                    key={p.id}
+                    p={p}
+                    i={i}
+                    inNet={i < nets}
+                    canEdit={canEdit}
+                    dragging={drag.dragId === p.id}
+                    anyDragging={drag.dragging}
+                    innerRef={drag.register(p.id)}
+                    handleProps={drag.handleProps(p.id)}
+                    onMove={(dir) => move(p.id, dir)}
+                    onBatNext={() => bumpToNext(p.id)}
+                    onPadUp={() => setPaddingUp(p.id, !p.padding_up)}
+                    onPriority={() => togglePriority(p)}
+                    onBatted={() => setBatted(p.id, true)}
+                    onSitOut={() => setBats(p.id, false)}
+                    onRemove={() => removeAttendee(p.id)}
+                  />
                 ))}
               </div>
             )}
@@ -623,18 +706,154 @@ export default function NetSession() {
       {checkInOpen && (
         <CheckInModal roster={roster} inSession={inSession} onAdd={addPlayer} onGuest={addGuest} onClose={() => setCheckInOpen(false)} />
       )}
+
+      {priorityFor && (
+        <PriorityModal person={priorityFor} netsBusy={netsBusy} onClose={() => setPriorityFor(null)} onSave={savePriority} />
+      )}
     </BetterSelectLayout>
   )
 }
 
+/* ── Who is in, and who is next ───────────────────────────────────────────────
+ * The two lines a player reads off the iPad on the fence from twenty metres
+ * away. The LABEL is beside the names rather than the colour carrying the
+ * difference on its own: this app's own green and amber separate by ΔE 7.2
+ * under protanopia, so a state told only in colour is a state some people on
+ * the sidelines can't read. */
+function HeroLine({ slot, label, people, color, empty }) {
+  const has = people.length > 0
+  return (
+    <div data-hero-line={slot} className="flex items-baseline gap-2.5 justify-center flex-wrap">
+      <span className="font-mono text-[10px] uppercase tracking-wide3 shrink-0" style={{ color: has ? color : 'var(--pb-faintest)' }}>
+        {label}
+      </span>
+      {has ? (
+        <span className="font-display font-bold text-[17px] leading-snug" style={{ color }}>
+          {people.map((p) => p.name).join(' · ')}
+        </span>
+      ) : (
+        <span className="text-[12.5px] text-pb-faintest">{empty}</span>
+      )}
+    </div>
+  )
+}
+
+/* ── One name in the batting order ────────────────────────────────────────────
+ * Every state is spelled out as a word as well as tinted, for the reason
+ * HeroLine gives — and because a row can legitimately be two of them at once
+ * (a priority player who has been told to pad up), which no single colour can
+ * say. The left edge takes whichever is most immediate: in a net, then padding
+ * up, then priority.
+ *
+ * The action group WRAPS onto its own line rather than squeezing the name,
+ * because this screen is run from a tablet held in portrait as often as a
+ * laptop and seven 34px targets plus a name do not fit on one 390px line. */
+function OrderRow({
+  p, i, inNet, canEdit, dragging, anyDragging, innerRef, handleProps,
+  onMove, onBatNext, onPadUp, onPriority, onBatted, onSitOut, onRemove,
+}) {
+  const edge = inNet ? 'var(--pb-accent)' : p.padding_up ? 'var(--pb-positive)' : p.priority ? 'var(--pb-amber)' : null
+  return (
+    <div
+      ref={innerRef}
+      data-att={p.id}
+      className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 py-2 pl-2 border-b pb-hairline last:border-0"
+      style={{
+        borderLeft: `3px solid ${edge || 'transparent'}`,
+        background: dragging
+          ? 'color-mix(in srgb, var(--pb-accent) 12%, var(--pb-surface2))'
+          : inNet ? 'color-mix(in srgb, var(--pb-accent) 6%, transparent)' : undefined,
+        // Lifted while held, so the row under the finger is obvious without a
+        // second element chasing it around the page.
+        boxShadow: dragging ? '0 6px 18px rgba(0,0,0,.28)' : undefined,
+        borderRadius: dragging ? 8 : undefined,
+        // Off during a drag: the rows are moving under the pointer, and a
+        // transition makes the list feel like it is lagging behind the finger.
+        transition: anyDragging ? 'none' : 'background .15s',
+      }}
+    >
+      {canEdit && (
+        <button
+          {...handleProps}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowUp') { e.preventDefault(); onMove(-1) }
+            else if (e.key === 'ArrowDown') { e.preventDefault(); onMove(1) }
+          }}
+          title="Drag to move — or use the arrow keys"
+          aria-label={`Move ${p.name} in the batting order`}
+          data-grip
+          className="shrink-0 w-8 h-9 flex items-center justify-center rounded text-pb-dim hover:text-pb-text focus:outline-none focus:text-pb-accent cursor-grab"
+        >
+          <Icon name="grip" size={17} />
+        </button>
+      )}
+      {/* --pb-dim, never --pb-faintest: this app's palest token computes to
+          1.64:1 against the surface, and a batting position is read off an
+          iPad on a fence from several metres away. */}
+      <span className="font-mono text-[11px] w-5 shrink-0 text-right" style={{ color: inNet ? 'var(--pb-accent)' : 'var(--pb-dim)' }}>{i + 1}</span>
+      <Avatar player={{ ...p, id: p.player_id }} size={30} />
+      <div className="flex-1 min-w-[140px]">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="font-display font-medium text-[13.5px] truncate max-w-full">{p.name}</span>
+          {p.is_guest && <span className="font-mono text-[9px] text-pb-faint">GUEST</span>}
+          {inNet && <Tag color="var(--pb-accent)">NET {i + 1}</Tag>}
+          {p.padding_up && !inNet && <Tag color="var(--pb-positive)">PADDING UP</Tag>}
+          {p.priority && <Tag color="var(--pb-amber)">PRIORITY</Tag>}
+        </div>
+        {p.note && <div className="text-[11px] text-pb-faint truncate">{p.note}</div>}
+      </div>
+      {canEdit && (
+        <div className="flex items-center gap-0.5 text-pb-faint ml-auto">
+          <RowBtn on={p.padding_up} color="var(--pb-positive)" icon="padUp" onClick={onPadUp}
+            title={p.padding_up ? 'Not padding up after all' : 'Padding up — tell everyone they’re next in'} />
+          <RowBtn on={p.priority} color="var(--pb-amber)" icon="flag" onClick={onPriority}
+            title={p.priority ? 'Clear priority' : 'Priority — needs to bat early tonight'} />
+          <RowBtn icon="batNext" onClick={onBatNext} title="Bat next" />
+          <RowBtn icon="batDone" onClick={onBatted} title="Mark as batted" />
+          <RowBtn icon="batNotOut" color="var(--pb-amber)" onClick={onSitOut} title="Not batting — here tonight, but out of the rotation" />
+          <RowBtn icon="close" color="var(--pb-red)" onClick={onRemove} title="Remove" />
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* A row action. 34px square rather than the 24 a bare `p-1` gives, because
+ * every one of these is tapped with a thumb on a tablet in the dark. */
+function RowBtn({ icon, title, onClick, on = false, color }) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      aria-label={title}
+      aria-pressed={color && on ? true : undefined}
+      className="w-[34px] h-[34px] flex items-center justify-center rounded-lg shrink-0"
+      style={on ? { color, background: `color-mix(in srgb, ${color} 16%, transparent)` } : undefined}
+    >
+      <Icon name={icon} size={icon === 'close' ? 15 : 16} />
+    </button>
+  )
+}
+
+function Tag({ color, children }) {
+  return (
+    <span className="font-mono text-[9px] uppercase tracking-wide2 px-1.5 py-[1px] rounded shrink-0"
+      style={{ color, background: `color-mix(in srgb, ${color} 14%, transparent)` }}>
+      {children}
+    </span>
+  )
+}
+
 /* ── What the row buttons mean ────────────────────────────────────────────────
- * The queue's controls are five small glyphs on a crowded row, and three of
- * them are bats doing different things. Spelling them out once above the list
- * beats a coach discovering them by tapping — and it costs a line, which is why
- * it can be put away. */
+ * The order's controls are small glyphs on a crowded row, and three of them are
+ * bats doing different things. Spelling them out once above the list beats a
+ * coach discovering them by tapping — and it costs a line, which is why it can
+ * be put away. */
 const ROW_KEY = [
+  { icon: 'grip', label: 'Drag to move' },
+  { icon: 'padUp', label: 'Padding up' },
+  { icon: 'flag', label: 'Priority' },
   { icon: 'batNext', label: 'Bat next' },
-  { icon: 'chevron', label: 'Move up or down', rotate: true },
   { icon: 'batDone', label: 'Mark as batted' },
   { icon: 'batNotOut', label: 'Not batting' },
   { icon: 'close', label: 'Remove' },
@@ -644,10 +863,66 @@ function RowKey() {
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mb-2.5 px-2.5 py-2 rounded-lg bg-pb-surface2/50">
       {ROW_KEY.map((k) => (
         <span key={k.icon} className="inline-flex items-center gap-1.5 text-[11.5px] text-pb-faint">
-          <Icon name={k.icon} size={15} className={k.rotate ? '-rotate-90' : ''} />
+          <Icon name={k.icon} size={15} />
           {k.label}
         </span>
       ))}
+    </div>
+  )
+}
+
+/* ── Ticking priority asks a question ─────────────────────────────────────────
+ * "Needs to bat early" and "put them there" are two different acts, and the
+ * flag deliberately does not do the second on its own. A tick that silently
+ * re-sorted the order would undo the order the coach had just dragged into
+ * place, and with three captains flagged on a selection night nobody could say
+ * who was actually first. So the coach chooses, every time: move them up now,
+ * or mark it and deal with it when the current turn ends.
+ *
+ * The reason goes into the attendee's existing note — the field that already
+ * holds what somebody said on the way in, which is exactly the same sentence.
+ * It opens pre-filled with whatever is already there so a "bowling only" typed
+ * at check-in can't be quietly written over. */
+function PriorityModal({ person, netsBusy, onClose, onSave }) {
+  const [reason, setReason] = useState(person.note || '')
+  return (
+    <div onClick={onClose} className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/60 backdrop-blur-sm">
+      <div onClick={(e) => e.stopPropagation()} className="w-full sm:w-[420px] bg-pb-surface sm:rounded-2xl rounded-t-2xl border border-pb-hairline2 overflow-hidden shadow-2xl">
+        <div className="flex items-start gap-3 px-4 py-3.5 border-b pb-hairline">
+          <div className="flex-1">
+            <div className="font-mono text-[10px] uppercase tracking-wide3" style={{ color: 'var(--pb-amber)' }}>Priority</div>
+            <div className="font-display font-bold text-[16px]">{person.name}</div>
+          </div>
+          <button onClick={onClose} className="text-pb-faint hover:text-pb-text p-1"><Icon name="close" size={18} /></button>
+        </div>
+        <div className="px-4 py-3.5 flex flex-col gap-3">
+          <label className="flex flex-col gap-1.5">
+            <span className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint">Why (optional)</span>
+            <input
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              maxLength={120}
+              autoFocus
+              placeholder="Leaving at 7 / captain, selection night"
+              className="bg-pb-surface2 border border-pb-hairline rounded-lg px-3 h-[38px] text-sm focus:outline-none focus:border-pb-accent"
+            />
+          </label>
+          <div className="flex flex-col gap-2">
+            <Btn variant="primary" icon="batNext" onClick={() => onSave({ reason, batNext: true })}>
+              Bat next
+            </Btn>
+            <Btn variant="soft" icon="flag" onClick={() => onSave({ reason, batNext: false })}>
+              Just flag them
+            </Btn>
+          </div>
+          <p className="text-[12px] text-pb-faint leading-snug">
+            <b className="text-pb-dim">Bat next</b> moves them to the front of the line
+            {netsBusy ? ', behind whoever is in the nets right now.' : '.'}{' '}
+            <b className="text-pb-dim">Just flag them</b> leaves the order alone and marks the row, so
+            you can move them up when it suits.
+          </p>
+        </div>
+      </div>
     </div>
   )
 }

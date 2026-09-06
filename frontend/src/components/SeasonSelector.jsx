@@ -1,7 +1,7 @@
 import { formatSeason } from '../lib/cricketFormat'
 import { CATEGORY_LABELS, TOGGLEABLE_CATEGORIES, scopeNote } from '../lib/gradeCategories'
 import {
-  FilterPillRow, gradeTypeOptions, matchFormatOptions,
+  FilterPillRow, competitionOptions, gradeTypeOptions, matchFormatOptions,
 } from './GradeFilterPills'
 
 export default function SeasonSelector({
@@ -41,6 +41,16 @@ export default function SeasonSelector({
   matchFormat = null,
   setMatchFormat = () => {},
   availableFormats = [],
+  // The competition — the club's own named group of grades. A club plays
+  // several: Applecross across three associations in one season, Hamilton
+  // Veterans across three competitions of ONE association. `competition` is a
+  // single competition id, or null for every competition. The row is drawn
+  // only for a club that has more than one, so it never appears where it
+  // could only answer "everything".
+  competition = null,
+  setCompetition = () => {},
+  availableCompetitions = [],
+  showCompetitionFilter = false,
   // What the club counts when no grade type is picked, so "All" can say what it
   // actually leaves out instead of quietly dropping a club's juniors.
   defaultCategories = null,
@@ -70,6 +80,7 @@ export default function SeasonSelector({
 
   const typeOptions = gradeTypeOptions(availableCategories)
   const formatOptions = matchFormatOptions(availableFormats)
+  const compOptions = competitionOptions(availableCompetitions)
 
   // "All" means the club's own default, which normally leaves juniors out. Say
   // so, and only while it is actually true — a club with no junior programme
@@ -156,6 +167,22 @@ export default function SeasonSelector({
           pills on the club dashboard: a woman playing in a men's grade was
           being counted as women's cricket, and a men's grade with a
           mis-recorded player gender vanished from the men's figures. */}
+      {/* Competition — which competition these figures are from. Cricket
+          Australia publishes the ASSOCIATION on every grade and no competition
+          at all, so a competition is the club's own named group of grades,
+          seeded one per association. It is what separates a club playing three
+          associations in one season, and a side playing two competitions of
+          one association in one season. */}
+      {showCompetitionFilter && compOptions.length > 0 && (
+        <FilterPillRow
+          label="Competition"
+          options={compOptions}
+          value={competition}
+          onChange={setCompetition}
+          title={opt => `Only ${opt.label}`}
+        />
+      )}
+
       {showGradeTypeFilter && (
         <FilterPillRow
           label="Grade Type"

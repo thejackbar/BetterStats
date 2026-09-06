@@ -82,6 +82,33 @@ const ICON_PATHS = {
     <path d="M5.4 18.6L11.6 12.4" strokeWidth="5.6" /><path d="M12.9 11.1L18.4 5.6" strokeWidth="1.9" />
     <path d="M15.1 17.2l2.4 2.4 4.2-5.4" stroke="var(--pb-accent)" strokeWidth="1.9" />
   </>,
+  // Getting ready, rather than batting — so deliberately NOT a fourth bat.
+  // Three bats on one row already ask a lot of a glance.
+  //
+  // A PAIR OF PADS, AND THE PAIR IS THE WHOLE POINT. A single pad at 16px is a
+  // blob: rendered side by side at 16/22/40/72 it collapses into a pill, a
+  // pair of curly braces or a stack of blocks whichever way it is drawn, and
+  // the strap tabs that make it a pad at 72px are the first thing to go. Two
+  // of them side by side is a silhouette nothing else in this set has, and it
+  // survives all the way down.
+  //
+  // FILLED, WITH THE STRAP CUT AS AN EVEN-ODD HOLE. A 1.8px outline at 16px
+  // leaves nothing inside it, and a notch drawn in the background colour would
+  // be wrong on the light theme and wrong again over the tinted button — a
+  // hole shows whatever is actually behind.
+  //
+  // The strap band is also what stops it reading as PAUSE, which is two
+  // rounded bars and sits on this very screen a few inches above. Without the
+  // band the two are close enough at 16px to swap.
+  padUp: (
+    <path
+      fillRule="evenodd" clipRule="evenodd" fill="currentColor" stroke="none"
+      d="M7 3.2c-2.26 0-4.1 1.84-4.1 4.1V17.6c0 1.9.9 3.3 2.1 3.3.9 0 1.2-1.2 2-1.2s1.1 1.2 2 1.2c1.2 0 2.1-1.4 2.1-3.3V7.3c0-2.26-1.84-4.1-4.1-4.1z M2.9 8.6h8.2v1.7H2.9z M17 3.2c-2.26 0-4.1 1.84-4.1 4.1V17.6c0 1.9.9 3.3 2.1 3.3.9 0 1.2-1.2 2-1.2s1.1 1.2 2 1.2c1.2 0 2.1-1.4 2.1-3.3V7.3c0-2.26-1.84-4.1-4.1-4.1z M12.9 8.6h8.2v1.7h-8.2z"
+    />
+  ),
+  // Flagged, in the club's own word for it. A star would have collided with
+  // the Selection nav icon, which is already one.
+  flag: <><path d="M6 21V3.8" /><path d="M6 4.5h11l-2.3 4.2L17 13H6z" /></>,
 }
 
 /* ── A per-person, per-browser screen preference ──────────────────────────────
