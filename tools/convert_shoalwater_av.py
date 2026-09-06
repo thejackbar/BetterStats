@@ -20,6 +20,17 @@ vote fields are Delphi ``Currency`` (``int64`` scaled by 10,000), where
 ``-10000`` (ie ``-1.0``) means "not recorded".  Dates are Delphi/Excel day
 numbers from 1899-12-30.
 
+The club also keeps the same season as separate ``.PLR`` (players), ``.FIX``
+(fixtures), ``.MCH`` (matches) and ``.DAT`` files. Checked against the 1993
+set, the ``.AV`` is a complete and self-consistent export of them: its
+fixtures agree with ``.FIX`` on date, team and opponent for all 41 shared
+slots, and its scorelines agree with ``.MCH`` on all 35. It renumbers the
+players - ``.PLR`` keeps ids stable across seasons and the ``.AV`` does not -
+but its match blocks use its own numbering, so resolving through its own
+embedded roster names the same eleven in the same order as ``.MCH`` resolved
+through ``.PLR``. ``.DAT`` is blank, like the ``.AV``'s own player-stats
+region: the program recomputed averages rather than storing them.
+
 **Overs are cricket notation, not decimals** — ``93.3`` is 93 overs and 3
 balls.  Confirmed against the data: the fractional digit is never above 5.
 Anything that sums or divides overs therefore converts to balls first.
@@ -156,18 +167,29 @@ def parse_players(buf: bytes) -> dict:
 
 
 def parse_fixtures(buf: bytes) -> dict:
+    """Keyed by the match slot the fixture POINTS AT, not by its own position.
+
+    The fixture array is held in date order, and each record's first field is
+    the slot of its match record. The two coincide only when the fixtures were
+    entered in slot order, which happens to be true of 1992 and of no other
+    season - so reading the array position instead pairs a scorecard with
+    another match's date, opponent and team. The tell is that the stored slots
+    are a permutation of 0..n-1 rather than a run.
+    """
     fixtures = {}
-    for idx in range(FIXTURE_N):
-        off = FIXTURE_BASE + idx * FIXTURE_REC
-        if i16(buf, off) < 0:
+    for pos in range(FIXTURE_N):
+        off = FIXTURE_BASE + pos * FIXTURE_REC
+        slot = i16(buf, off)
+        if slot < 0 or slot >= MATCH_N:
             continue
         name = text(buf, off + 20, 34)
         if not name:
             continue
         serial = struct.unpack_from("<d", buf, off + 2)[0]
         date = EPOCH + datetime.timedelta(days=serial) if serial > 0 else None
-        fixtures[idx] = {
-            "index": idx, "date": date, "team": i16(buf, off + 18), "name": name,
+        fixtures[slot] = {
+            "index": slot, "order": pos, "date": date,
+            "team": i16(buf, off + 18), "name": name,
         }
     return fixtures
 
@@ -592,14 +614,11 @@ NOTES = [
                      "not in the format at all."),
     ("Bowling flags", "An unidentified bitmask, present only on bowlers. Passed through raw."),
     ("Same player, two grades", "The Data quality sheet lists every date where one person is "
-                               "named in more than one grade. Nobody plays twice in an "
-                               "afternoon, so either the grade is wrong on one of them or the "
-                               "date is a round stamp covering competitions that ran on "
-                               "different days. It does NOT affect what to import: a season "
-                               "and career total is the same figure either way, because the "
-                               "same match is counted once whichever grade it is filed under. "
-                               "Only the per-grade breakdown is affected, and grades can be "
-                               "merged after import if this turns out to matter."),
+                               "named in more than one grade, which nobody can be. It runs to "
+                               "a handful of rows out of 9,384 player-dates - the club's own "
+                               "slips. Squads for different grades on one day do not overlap "
+                               "at all, and a player spends a median 93% of a season in one "
+                               "grade, so the grade split can be trusted."),
     ("Which file to import", "betterimport_season_stats.csv. There is one, deliberately."),
     ("", ""),
     ("Checks run against the files' own arithmetic", ""),
