@@ -7111,6 +7111,108 @@ there is no filter that finds it.
   390px lives inside a closed drawer and never becomes visible — the probe
   waits on the review form's own date field instead.
 
+## A club brings its history across from CricketStatz (migration 285, v9.67.0, Sep 2026)
+
+Asked for directly: a club pastes the address of its own CricketStatz stats
+page (`https://www2.cricketstatz.com/ss/w?mode=104&club=93931&team=0&season=`)
+and BetterCricket pulls ALL of its data across, the record book included.
+
+- **THE PUBLIC REPORTS ARE MACHINE-READABLE, AND THE CHAIN IS THREE DEEP.**
+  Every report is served by the documented embed endpoint
+  `/ss/linkreport?mode=<N>&club=<id>&web=1`, which answers with
+  `document.write("<table>…")` — HTML tables in a JS string. Mode 12 is the
+  match list, each row linking `mode=100&match=<id>`, which is the full
+  two-team scorecard. 182 modes exist; ~180 of them are record boards.
+- **`limit` CAPS A REPORT AT 999 ROWS, so matches are pulled SEASON BY
+  SEASON.** An all-time pull of a club with a long history silently truncates,
+  and a truncated history is worse than a slow one. The club's own page carries
+  the season dropdown, but it lists every season back to **1860 regardless of
+  the club**, so it is a list of CANDIDATES to probe, never trusted. One
+  all-time pull answers it for most clubs; only a club that overflows 999 needs
+  every season walked.
+- **COLUMN LAYOUTS VARY BY ERA, and reading them positionally is silently
+  wrong.** A modern card is `R M B SR 4s 6s`; a 1995 one is `R M 4s 6s`, with
+  no balls faced and no strike rate. `_column_map` reads the header row —
+  without it, boundaries are filed as balls faced and nothing complains.
+- **A DISMISSAL IS READ CLAUSE BY CLAUSE, from each `span.ss_block`'s own
+  how-out marker.** A modern card links the fielder and bowler (each carrying a
+  stable `playerid`); an older one prints a bare name, or `N/A` where the
+  scorer recorded none. Reading roles off the markers rather than by position
+  is what still credits the bowler when the fielder did not resolve.
+  **Splitting on the block's OPENING tag is load-bearing** — a clause nests its
+  own `ss_howout` span, so a non-greedy match to the first `</span>` stops
+  inside it and loses every name. The first cut did exactly that and lost all
+  102 bowler credits in the corpus.
+- **CAPTAIN / KEEPER / DUCK ARE `title=` ATTRIBUTES, never the emoji.** The
+  glyphs vary by era and encoding; `title='Duck'` does not. Caught behind is
+  then derived structurally — the keeper is marked on the FIELDING side's own
+  batting card — the same signal `sync.py` takes from CA's fielding rows.
+- **ONLY OUR OWN PLAYERS GET `players` ROWS.** A card carries both sides, and
+  minting a row per opponent is the cross-club leak `purge_foreign_members`
+  exists to clean up. The opposition half is kept on
+  `manual_games.extracted_payload`, which the match view already renders from.
+- **IDENTITY IS CRICKETSTATZ'S OWN `playerid`**, not the printed name — their
+  reports abbreviate inconsistently across eras ("Tommy A McSwain").
+  `manual_games.cricketstatz_match_id` makes a re-import correct rather than
+  double.
+- **A PLACEHOLDER IS NOT A PERSON.** A real Under-9 card recorded no names at
+  all — every batter reads `N/A`. They all resolved to one player and the
+  second innings row hit `uq_manual_batting_game_inns_player`. With no id
+  behind it there is nothing to identify, so the row is left out; the match
+  still imports with its result and its full card.
+- **A ROLLBACK DISCARDS THE SEASON THE CACHE IS STILL HOLDING, and that is how
+  one bad card cost 97 good ones.** The failure above rolled back, taking the
+  flushed season and grade with it, while `caches` went on serving their ids —
+  so every later match in that season failed on a dangling FK. **Clear the
+  caches on rollback**, and commit **one match at a time**: the commit costs
+  nothing beside the fetch that precedes it, and it is the honest unit of work.
+  **Found by running it against a real club, not by reading it** — 137 walked,
+  40 written.
+- **`py_compile` AND `vite build` BOTH PASSED ON A DEAD FEATURE.** The first
+  real run failed on `ManualGame.cricketstatz_match_id` not existing: the
+  columns were added in raw-SQL DDL and never mapped on the ORM model — the
+  same trap the `fee_members.archived_at` note already documents.
+- **NUMBERED 285, NOT 282.** Local was at 281 while `origin/main` had reached
+  284; two migrations sharing a revision id break Alembic outright. Check
+  `origin/main` before numbering one.
+- **THE RECORD BOOK IS CAPTURED GENERICALLY** (`cricketstatz_records`: title,
+  headers, rows as JSONB, one live copy per club per mode) — there are ~180
+  report shapes and modelling each is neither possible nor useful. Kept as its
+  own archive rather than merged into our computed records: ours come from the
+  scorecards we now hold, theirs cover whatever their data covers, and a record
+  book that silently blends two sources cannot be checked against either.
+- **REPORTS GO DARK WHEN A SUBSCRIPTION LAPSES** — `Error: Subscription
+  expired`, which is exactly the state a club switching away lands in.
+  `unwrap` raises a typed error for it so "their subscription ended" is not
+  read as "this club has no matches". Their FAQ also says the database is
+  deleted 12 months after expiry.
+- **THE CLIENT SAYS WHO IT IS AND GOES GENTLY** — concurrency 3, a delay
+  between requests, a 30-minute cache so a preview and the import that follows
+  share one pull. This is a club exporting its OWN records, one club at a time,
+  on demand. **Their `robots.txt` disallows `/ss/`**, which was raised before
+  building and the call was made to proceed on the data-portability reading; it
+  is why the design never enumerates club ids or sweeps the site.
+- **Verified against a real Postgres** (99 checks through the shipped parsers,
+  import service and route bodies over real captured reports: a modern card, a
+  1995 one, an abandoned innings, a result-only match, an unnamed junior card,
+  the record boards, the migration applied three times, a re-import doubling
+  nothing, and undo taking the matches while keeping the people) and **driven
+  in Chromium** (30: the exact address on the wire, the preview's cap notice,
+  a running import's progress and polling, the record boards, a dismissed undo
+  sending nothing, no page errors, no overflow at 390px) — plus a **live run
+  against the real club**: 137 of 137 matches, 2 seasons, 16 grades, 148
+  players, 1,426 innings, 41 record boards, nothing unreadable.
+- **Two browser checks passed against a broken page first**: `/sync-runs` and
+  `/sync-logs` answer with bare ARRAYS, and stubbing them as objects rendered
+  the error boundary and then measured that.
+- **NOTICED, NOT BUILT**: `mode=106` is a **Ball by Ball** report — richer than
+  anything CA gives us, and the one thing that would lift the phase/matchup
+  analysis the BetterIQ brief calls out of reach. Also unbuilt: their
+  league-scoped JSON API (`/ss/getplayers.aspx` etc., reference data only, no
+  stats) and the full JSON database extract a level-8 CricketStatz account can
+  download, which would be the sanctioned path if a club would rather hand over
+  a file than a link.
+
 ## Writing Voice — always run prose through the humanizer
 
 Any user-facing prose you write or edit (marketing copy, changelog entries, UI
