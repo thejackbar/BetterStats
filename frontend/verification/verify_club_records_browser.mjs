@@ -39,7 +39,10 @@ const CLUB_RECORDS = {
     games_with_a_total: 16, exact_totals: 2, approximate_totals: 14,
     note: 'A total is exact when the club holds the scorecard’s own innings figure, which counts extras.',
   },
-  grade_scope: { categories: ['senior'], active: false },
+  grade_scope: {
+    categories: ['senior'], formats: ['t20'], competition_names: ['Saturday Grade'],
+    active: true, category_active: true, format_active: true, competition_active: true,
+  },
   boards: {
     highest_totals: {
       rows: [game('g1', { value: 300 }), game('g2', { value: 250, exact: false, our: 250 })],
@@ -52,7 +55,8 @@ const CLUB_RECORDS = {
       rows: [game('g1', { value: 481, innCount: 2, our: 481 })], approximate: 0 },
     highest_match_aggregates: {
       rows: [game('g1', { value: 583, innCount: 2, our: 481, opp_runs: 102 })], approximate: 0 },
-    highest_chases: { rows: [game('g6', { value: 155, inn: 2, away: true })], approximate: 0 },
+    highest_chases: { rows: [{ ...game('g6', { value: 251, inn: 2, away: true }),
+                               chased_with: 240, innings_wickets: 5 }], approximate: 0 },
     most_extras_conceded: { rows: [game('g1', { value: 8, inn: 2 })], approximate: 0 },
     narrowest_wins_runs: { rows: [game('g12', { value: 3, unit: 'runs' })], approximate: 0 },
     narrowest_wins_wickets: { rows: [game('g13', { value: 1, unit: 'wickets' })], approximate: 0 },
@@ -71,7 +75,14 @@ const CLUB_RECORDS = {
     },
     longest_unbeaten_streak: {
       rows: [{ value: 4, from: '2026-01-11', to: '2026-01-14', from_season: 'Summer 2025/26',
-               to_season: 'Summer 2025/26', wins: 3, draws: 1, exact: true }],
+               to_season: 'Summer 2025/26', wins: 3, losses: 0, draws: 1,
+               grades: ["Men's First Grade"], opponents: ['A', 'B', 'C', 'D'], exact: true }],
+      approximate: 0,
+    },
+    longest_losing_streak: {
+      rows: [{ value: 2, from: '2026-02-01', to: '2026-02-08', from_season: 'Summer 2025/26',
+               to_season: 'Summer 2025/26', wins: 0, losses: 2, draws: 0,
+               grades: ["Men's First Grade"], opponents: ['E', 'F'], exact: true }],
       approximate: 0,
     },
     best_seasons: {
@@ -168,8 +179,41 @@ const openClubTab = async (page) => {
     'HEAVIEST DEFEATS (RUNS)', 'HEAVIEST DEFEATS (WICKETS)',
     'HIGHEST MATCH TOTALS', 'HIGHEST MATCH AGGREGATES', 'HIGHEST SUCCESSFUL CHASES',
     'MOST EXTRAS CONCEDED', 'NARROWEST WINS (RUNS)', 'NARROWEST WINS (WICKETS)',
-    'LONGEST WINNING RUN', 'LONGEST UNBEATEN RUN', 'HEAD TO HEAD', 'SEASON BY SEASON',
+    'LONGEST WINNING RUN', 'LONGEST UNBEATEN RUN', 'LONGEST LOSING RUN',
+    'HEAD TO HEAD', 'SEASON BY SEASON',
   ].every((t) => body.includes(t)), 'a board is missing')
+
+  // The chase board ranks the TARGET; the runs we made getting there ride
+  // alongside, or a 251 beside a 240 innings reads as an error.
+  const chaseCard = page.locator('div.pb-card', { hasText: 'HIGHEST SUCCESSFUL CHASES' }).first()
+  const chaseTxt = await chaseCard.innerText()
+  ck('the chase board is headed by the target, not by runs made',
+     /TARGET/.test(chaseTxt) && /Made/.test(chaseTxt), chaseTxt.slice(0, 120))
+  ck('the chase row shows the target and what we made',
+     chaseTxt.includes('251') && chaseTxt.includes('5/240'), chaseTxt.slice(0, 200))
+  ck('the chase board says the target is what is ranked',
+     chaseTxt.includes('the target we ran down'))
+
+  const loseCard = page.locator('div.pb-card', { hasText: 'LONGEST LOSING RUN' }).first()
+  const loseTxt = await loseCard.innerText()
+  ck('the losing run counts losses, not wins', /Lost/.test(loseTxt), loseTxt.slice(0, 120))
+  ck('the losing run reports its own length', loseTxt.includes('2'))
+
+  ck('the extras board says it only uses cards that add up',
+     body.includes('from cards that add up'))
+
+  // A filter that IS working reads as broken when the top of a 25-row board
+  // doesn't visibly move, so the scope has to be stated.
+  ck('the board says what it covers', /COVERING 16 MATCHES/.test(body), body.slice(0, 200))
+  ck('the scope names the competition in play', body.includes('Saturday Grade'))
+  ck('the scope names the grade type', body.includes('Senior'))
+  ck('the scope names the match type', body.includes('T20'))
+
+  const q = clubCalls.join(' ')
+  ck('gender is never on the wire for a team board', !q.includes('gender='))
+  ck('the gender and captain pills are withdrawn on the club board',
+     !(await page.locator('button', { hasText: /^(Male|Female)$/ }).count())
+     && !(await page.locator('button', { hasText: /^Captain$/ }).count()))
 
   // The rename the club asked for: "defended against" described nothing.
   ck('the opposition boards are named for the opposition',

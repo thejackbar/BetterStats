@@ -1822,6 +1822,13 @@ async def get_club_records(
             "'all'. Matched per FIXTURE against each game's own match_format."
         ),
     ),
+    competitions: str | None = Query(
+        None,
+        description=(
+            "Comma-separated competition ids to count. An inclusion, unlike the "
+            "category axis — a grade in no competition drops out."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """The CLUB's own records — team totals, margins, streaks, seasons.
@@ -1836,7 +1843,8 @@ async def get_club_records(
     absent for the same reason — both are attributes of a person, and a team
     total has neither.
     """
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
+    scope = await grade_scope.resolve_scope(
+        db, org_id, categories, formats=formats, competitions=competitions)
     if grade_id or grade_name:
         # An explicitly picked grade beats the CATEGORY default and keeps the
         # FORMAT half — the same rule get_records applies above.

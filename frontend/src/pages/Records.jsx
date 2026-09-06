@@ -619,17 +619,30 @@ function ScoreCell({ runs, wkts }) {
 // `innings` marks a board whose VALUE is a single innings rather than a
 // match figure. A two-day match puts two rows on such a board, so each says
 // which innings it was — without it they read as a duplicated game.
-function GameBoard({ title, board, suffix, note, innings = false }) {
+function GameBoard({ title, board, suffix, note, innings = false, chase = false }) {
   const rows = board?.rows || []
   const multi = innings && rows.some(r => (r.our_innings_count || 0) > 1
                                        || (r.their_innings_count || 0) > 1)
   return (
     <RecordSection title={title} filter={note} empty={!rows.length}>
       <RecordTable
-        headers={multi
-          ? ['Match', 'Inns', suffix ? suffix.toUpperCase() : 'VALUE']
-          : ['Match', suffix ? suffix.toUpperCase() : 'VALUE', 'Result']}
-        rows={rows.map((r, i) => multi ? [
+        headers={chase
+          ? ['Match', 'TARGET', 'Made']
+          : multi
+            ? ['Match', 'Inns', suffix ? suffix.toUpperCase() : 'VALUE']
+            : ['Match', suffix ? suffix.toUpperCase() : 'VALUE', 'Result']}
+        rows={rows.map((r, i) => chase ? [
+          <span key={r.game_id || i}><RankNum rank={i + 1} /><GameCell r={r} /></span>,
+          <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>{r.value}</span>,
+          // What we made getting there — without it a 251 target beside a
+          // 240-run innings reads as an error rather than a chase.
+          <span className="text-pb-faint">
+            {r.chased_with != null
+              ? `${r.innings_wickets != null && r.innings_wickets < 10
+                    ? `${r.innings_wickets}/` : ''}${r.chased_with}`
+              : '—'}
+          </span>,
+        ] : multi ? [
           <span key={r.game_id || i}><RankNum rank={i + 1} /><GameCell r={r} /></span>,
           <span className="text-pb-faint">{ordinalInnings(r.innings_number)}</span>,
           <Val r={r} suffix={suffix} wkts={r.innings_wickets} />,
@@ -651,7 +664,7 @@ function ordinalInnings(n) {
   return n == null ? '—' : (['1st', '2nd', '3rd', '4th'][n - 1] || `${n}`)
 }
 
-function StreakBoard({ title, board }) {
+function StreakBoard({ title, board, losses = false }) {
   const rows = board?.rows || []
   return (
     // Consecutive COMPLETED matches in date order across whatever the filters
@@ -660,7 +673,7 @@ function StreakBoard({ title, board }) {
     <RecordSection title={title} empty={!rows.length}
                    filter="consecutive matches, in date order">
       <RecordTable
-        headers={['Run', 'Games', 'Won', 'Grades']}
+        headers={['Run', 'Games', losses ? 'Lost' : 'Won', 'Grades']}
         rows={rows.map((r, i) => [
           <span key={i}>
             <RankNum rank={i + 1} />
@@ -672,7 +685,9 @@ function StreakBoard({ title, board }) {
             </span>
           </span>,
           <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>{r.value}</span>,
-          <span className="text-pb-faint">{r.wins}{r.draws ? ` (${r.draws} drawn)` : ''}</span>,
+          <span className="text-pb-faint">
+            {losses ? r.losses : r.wins}{r.draws ? ` (${r.draws} drawn)` : ''}
+          </span>,
           <span className="text-pb-faint text-[11px]">
             {(r.grades || []).join(', ') || '—'}
           </span>,
@@ -682,11 +697,36 @@ function StreakBoard({ title, board }) {
   )
 }
 
-function ClubTab({ data }) {
+const CATEGORY_LABELS = {
+  senior: 'Senior', junior: 'Juniors', womens: "Women's",
+  masters: 'Masters', mixed: 'Mixed',
+}
+const FORMAT_LABELS = { two_day: 'Two day', one_day: 'One day', t20: 'T20' }
+
+// Named from the scope the SERVER reports back, never from the page's own
+// filter state — what a reader needs is what the figures actually cover, and
+// the two can differ (an explicitly picked grade drops the category half).
+function describeScope(scope, { season, grade, finals }) {
+  const parts = []
+  if (season) parts.push(season)
+  if (grade) parts.push(grade)
+  if (scope?.competition_active && (scope.competition_names || []).length)
+    parts.push(scope.competition_names.join(', '))
+  if (scope?.category_active && (scope.categories || []).length)
+    parts.push(scope.categories.map(c => CATEGORY_LABELS[c] || c).join(' + '))
+  if (scope?.format_active && (scope.formats || []).length)
+    parts.push(scope.formats.map(f => FORMAT_LABELS[f] || f).join(' + '))
+  if (finals) parts.push('Finals only')
+  return parts.length ? parts.join(' · ') : 'All grades, all seasons'
+}
+
+function ClubTab({ data, seasonLabel, gradeLabel, finalsOnly }) {
   if (!data) return <PbSpinner />
   const b = data.boards || {}
   const s = data.summary || {}
   const cov = data.coverage || {}
+  const scopeLine = describeScope(data.grade_scope, {
+    season: seasonLabel, grade: gradeLabel, finals: finalsOnly })
 
   if (!s.played) {
     return (
@@ -700,6 +740,16 @@ function ClubTab({ data }) {
 
   return (
     <div className="space-y-4">
+      {/* WHAT THESE FIGURES COVER. Every filter above genuinely narrows the
+          board, but the top of a 25-row board drawn from decades of cricket
+          often doesn't visibly move — so a filter that IS working reads as one
+          that isn't. Saying the scope out loud, with the match count beside
+          it, is what makes it checkable. */}
+      {scopeLine && (
+        <p className="font-mono text-[10px] tracking-wide3 text-pb-faint px-1">
+          COVERING {s.played} {s.played === 1 ? 'MATCH' : 'MATCHES'} · {scopeLine}
+        </p>
+      )}
       <div className="pb-card px-5 py-4 flex flex-wrap gap-x-8 gap-y-3">
         {[
           ['PLAYED', s.played], ['WON', s.wins], ['LOST', s.losses],
@@ -742,9 +792,9 @@ function ClubTab({ data }) {
         <GameBoard title="HIGHEST MATCH AGGREGATES" board={b.highest_match_aggregates}
                    suffix="runs" note="both sides, whole match" />
         <GameBoard title="HIGHEST SUCCESSFUL CHASES" board={b.highest_chases}
-                   suffix="runs" note="the innings we chased in" innings />
+                   suffix="runs" note="the target we ran down" chase />
         <GameBoard title="MOST EXTRAS CONCEDED" board={b.most_extras_conceded}
-                   suffix="extras" note="one innings, where recorded" innings />
+                   suffix="extras" note="one innings, from cards that add up" innings />
         <GameBoard title="NARROWEST WINS (RUNS)" board={b.narrowest_wins_runs}
                    suffix="runs" />
         <GameBoard title="NARROWEST WINS (WICKETS)" board={b.narrowest_wins_wickets}
@@ -755,6 +805,8 @@ function ClubTab({ data }) {
         <GameBoard title="HEAVIEST DEFEATS (WICKETS)" board={b.heaviest_defeats_wickets} suffix="wkts" />
         <StreakBoard title="LONGEST WINNING RUN" board={b.longest_win_streak} />
         <StreakBoard title="LONGEST UNBEATEN RUN" board={b.longest_unbeaten_streak} />
+        <StreakBoard title="LONGEST LOSING RUN" board={b.longest_losing_streak}
+                     losses />
       </div>
 
       <RecordSection title="HEAD TO HEAD" filter="every club we have played"
@@ -1067,11 +1119,13 @@ export default function Records() {
     api.getClubRecords(orgId, {
       seasonId: selectedSeason, gradeName: selectedGradeName,
       finalsOnly, categories: categoriesParam, formats: formatsParam,
+      competitions: competitionsParam,
     })
       .then(setClubRecords)
       .catch(() => setClubRecords(null))
       .finally(() => setClubLoadingRecs(false))
-  }, [orgId, tab, selectedSeason, selectedGradeName, finalsOnly, categoriesParam, formatsParam])
+  }, [orgId, tab, selectedSeason, selectedGradeName, finalsOnly, categoriesParam,
+      formatsParam, competitionsParam])
 
   useEffect(() => {
     if (!orgId) return
@@ -1124,6 +1178,8 @@ export default function Records() {
             showCompetitionFilter
             showGradeTypeFilter
             showMatchFormatFilter
+            showGenderFilter={tab !== 'club'}
+            showCaptainFilter={tab !== 'club'}
           />
           {orgGrades.length > 0 && (
             <div className="flex items-center gap-2">
@@ -1150,7 +1206,14 @@ export default function Records() {
             ? <PbSpinner message="Loading club records…" />
             : !clubRecords
               ? <p className="text-pb-faint text-sm py-8 text-center">No club records available.</p>
-              : <ClubTab data={clubRecords} />
+              : <ClubTab
+                  data={clubRecords}
+                  seasonLabel={selectedSeason
+                    ? formatSeason(seasons.find(x => x.id === selectedSeason)?.name)
+                    : null}
+                  gradeLabel={selectedGradeName}
+                  finalsOnly={finalsOnly}
+                />
         ) : loading ? <PbSpinner message="Loading records…" /> : !records ? (
           <p className="text-pb-faint text-sm py-8 text-center">No records data available.</p>
         ) : (
