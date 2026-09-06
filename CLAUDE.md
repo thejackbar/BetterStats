@@ -7186,6 +7186,45 @@ and BetterCricket pulls ALL of its data across, the record book included.
   `unwrap` raises a typed error for it so "their subscription ended" is not
   read as "this club has no matches". Their FAQ also says the database is
   deleted 12 months after expiry.
+### The preview's "earliest" was the earliest of the most recent 999 (v9.67.3)
+
+Reported off the preview card: **EARLIEST 2014** for a club whose history runs
+back to 1953/54.
+
+- **THE ALL-TIME LIST IS CAPPED AT 999 MATCHES, so its earliest date says
+  nothing about how far the club goes back** — only how far 999 matches
+  reaches. For a busy club that is about a decade. The figure was not
+  approximate, it was answering a different question.
+- **THE RECORD BOARDS ARE THE FLOOR, AND A FLOOR IS HONEST WHERE A GUESS IS
+  NOT.** A record dated 1954 is proof there was a season in 1954, so the
+  minimum year across a handful of all-time boards can only ever UNDERSTATE the
+  span, never overstate it. The card says "back to at least 1954" and the first
+  pass then reports the real answer (1953). Same reasoning that kept the boards
+  out of the season-probing decision: sound as a floor, unsound as a bound.
+- **Five boards, not all 41** — this runs on a preview, before the club has
+  committed to anything, and they are cached for the import that follows.
+- **A CHECK THAT MATCHES MORE THAN IT MEANS IS NOT PRECISE.** "Back to at
+  least" appears in the card's label AND in the note under it, so asserting it
+  appears exactly once failed against correct output. It asserts the phrase is
+  present and that the old flat `Earliest` label is gone.
+
+### An imported grade is classified on the way in (v9.67.3)
+
+Asked for directly: create grades, seasons and players the way the other stat
+import pages do.
+
+- **A GRADE WITH NO CATEGORY CANNOT BE TOLD APART BY THE GRADE TYPE FILTER**,
+  so a club's imported juniors would sit inside its senior careers — the exact
+  thing migration 228 exists to prevent. The importer was writing a bare
+  `Grade(name=…)`.
+- **BOTH COLUMNS, per the rule this file already sets**: `category=
+  suggest_category(name)` AND `categories=list(suggest_categories(name))`, or a
+  "Girls Under 16" lands as junior alone and loses its women's half.
+- **`grassroots_id=None` is written explicitly** on both the season and the
+  grade — the documented "not from a sync" marker every other importer sets.
+- Players needed nothing: the reference importers create a bare
+  `Player(id, organisation_id, name)` and let the column defaults stand.
+
 ### Find out what there is before pulling it (v9.67.2)
 
 Asked while watching a live run: "it says season 10 of 167 but I know there

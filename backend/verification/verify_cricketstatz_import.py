@@ -424,6 +424,31 @@ async def verify_import(engine, session_maker) -> tuple:
             check("grades came across, juniors included",
                   set(grades) == {"A-GRADE", "G-GRADE", "UNDER 9"}, str(grades))
 
+            classified = (await db.execute(text("""
+                SELECT g.name, g.category, g.categories, g.grassroots_id
+                  FROM grades g JOIN seasons s ON s.id = g.season_id
+                 WHERE s.organisation_id = :org ORDER BY g.name
+            """), {"org": str(org_id)})).mappings().all()
+            check("every grade is classified on the way in, like the other importers",
+                  all(c["category"] for c in classified),
+                  str([(c["name"], c["category"]) for c in classified]))
+            check("both category columns are written, never just the one",
+                  all(c["categories"] for c in classified),
+                  str([(c["name"], c["categories"]) for c in classified]))
+            junior = next(c for c in classified if c["name"] == "UNDER 9")
+            check("a junior grade is filed as junior, so it stays out of senior careers",
+                  junior["category"] == "junior", str(junior["category"]))
+            senior = next(c for c in classified if c["name"] == "A-GRADE")
+            check("a senior grade is filed as senior", senior["category"] == "senior",
+                  str(senior["category"]))
+            check("an imported grade is marked as not from a sync",
+                  all(c["grassroots_id"] is None for c in classified))
+            marker = (await db.execute(text("""
+                SELECT COUNT(*) FROM seasons
+                 WHERE organisation_id = :org AND grassroots_id IS NOT NULL
+            """), {"org": str(org_id)})).scalar()
+            check("and so is an imported season", marker == 0, str(marker))
+
             # Only OUR players — the cross-club leak rule.
             players = (await db.execute(text("""
                 SELECT name, cricketstatz_player_id FROM players

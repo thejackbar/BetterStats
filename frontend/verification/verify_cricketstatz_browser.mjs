@@ -25,7 +25,9 @@ const PREVIEW = {
   club_id: '93931', club_name: 'Keon Park Cricket Club', seasons_offered: 167,
   teams: ['Keon Park 1st-XI', 'Keon Park 2nd-XI', 'Keon Park 3rd-XI'],
   matches_found: 999, truncated: true,
-  earliest: '1974-01-12', latest: '2026-03-07', record_reports: 41,
+  // The capped list only reaches 2014; the record boards prove 1954, which is
+  // a floor rather than the exact earliest — hence the "at least".
+  earliest: '1954', latest: '2026', earliest_at_least: true, record_reports: 41,
 }
 
 const RECORDS = [
@@ -179,6 +181,18 @@ const run = async () => {
      (await page.locator('text=999+').count()) > 0)
   ck('a capped list says there are more, rather than reading as the whole history',
      (await page.locator('text=/caps one list at 999/').count()) === 1)
+  // The capped list's own earliest date is the earliest of the most RECENT
+  // 999 matches — it read 2014 for a club whose history starts in 1953.
+  // The phrase appears in the card's label AND in the note, so count it as
+  // present rather than exactly once — what matters is that the old flat
+  // "Earliest" claim is gone.
+  ck('a span it cannot know yet is labelled as a floor, not stated as fact',
+     (await page.locator('text=/Back to at least/i').count()) > 0
+     && (await page.getByText('Earliest', { exact: true }).count()) === 0)
+  ck('and the floor is the year the record boards prove',
+     (await page.locator('text=1954').first().count()) > 0)
+  ck('it says the first pass will find the real answer',
+     (await page.locator('text=/tell you exactly what it found/').count()) === 1)
   ck('the preview reports the record boards',
      (await page.locator('text=41').first().count()) > 0)
   ck('the club\'s own teams are shown',

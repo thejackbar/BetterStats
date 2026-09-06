@@ -45,6 +45,7 @@ from app.models.db import (
     Season,
 )
 from app.services import cricketstatz_client as client
+from app.services.grade_labels import suggest_categories, suggest_category
 from app.services.cricketstatz_parse import RECORD_REPORTS, CricketStatzError
 
 logger = logging.getLogger(__name__)
@@ -109,6 +110,7 @@ async def resolve_season(db: AsyncSession, org_id, label: str, value: str,
     season = Season(
         id=_derived_id(org_id, "season", str(year)),
         organisation_id=org_id,
+        grassroots_id=None,          # the documented "not from a sync" marker
         name=season_name(year, southern),
         year=year,
     )
@@ -138,10 +140,17 @@ async def resolve_grade(db: AsyncSession, org_id, season: Season,
         cache[key] = existing
         return existing
 
+    # Classified on the way in, the same as every other importer: a grade with
+    # no category cannot be told apart by the Grade type filter, so a club's
+    # juniors would sit inside its senior careers. Both columns are written —
+    # `category` alone loses the second half of a "Girls Under 16".
     grade = Grade(
         id=_derived_id(org_id, "grade", f"{season.id}:{clean.lower()}"),
         season_id=season.id,
+        grassroots_id=None,
         name=clean,
+        category=suggest_category(clean),
+        categories=list(suggest_categories(clean)),
     )
     db.add(grade)
     await db.flush()
@@ -625,6 +634,23 @@ async def inspect_club(url: str) -> dict:
     capped = len(all_time) >= 999
     dates = sorted(m["date"] for m in all_time if m.get("date"))
 
+    earliest = dates[0][:4] if dates else None
+    latest = dates[-1][:4] if dates else None
+    at_least = False
+    if capped:
+        # The list is the most RECENT 999 matches, so its earliest date says
+        # nothing about how far the club goes back — it read 2014 for a club
+        # whose history starts in 1953. The all-time record boards carry dates
+        # from across the whole history, and a record dated 1954 PROVES there
+        # was a season in 1954, so this is a floor rather than a guess. It can
+        # understate (a quiet season need not reach a top-100 board), never
+        # overstate, and the first pass finds the real answer.
+        span = await _span_from_records(club_id)
+        if span:
+            earliest = str(min(span[0], int(earliest or span[0])))
+            latest = str(max(span[1], int(latest or span[1])))
+            at_least = True
+
     return {
         "club_id": club_id,
         "club_name": page["club_name"],
@@ -632,10 +658,35 @@ async def inspect_club(url: str) -> dict:
         "teams": [t["name"] for t in teams] or [t["name"] for t in page["teams"]],
         "matches_found": len(all_time),
         "truncated": capped,
-        "earliest": dates[0] if dates else None,
-        "latest": dates[-1] if dates else None,
+        "earliest": earliest,
+        "latest": latest,
+        # True when the span is a floor read off the record boards rather than
+        # the exact range, so the screen can say "at least" instead of stating
+        # a year it cannot know yet.
+        "earliest_at_least": at_least,
         "record_reports": len(RECORD_REPORTS),
     }
+
+
+# Boards that reach across a club's whole history, so a date on one is proof a
+# season existed. Deliberately a handful rather than all 41 — this runs on a
+# preview, before the club has committed to anything.
+_SPAN_REPORTS = (72, 7, 6, 27, 50)
+_YEAR = re.compile(r"\b(19\d{2}|20\d{2})\b")
+
+
+async def _span_from_records(club_id: str) -> Optional[tuple[int, int]]:
+    """The years the club's all-time record boards actually reach."""
+    years: set[int] = set()
+    for mode in _SPAN_REPORTS:
+        try:
+            report = await client.fetch_report(club_id, mode)
+        except Exception:
+            continue
+        for row in report.get("rows", []):
+            for value in row.get("values", []):
+                years.update(int(y) for y in _YEAR.findall(str(value)))
+    return (min(years), max(years)) if years else None
 
 
 # ── working out what there is to pull, before pulling it ─────────────────────

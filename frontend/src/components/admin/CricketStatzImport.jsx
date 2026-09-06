@@ -200,15 +200,19 @@ export default function CricketStatzImport() {
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   <StatCard label="Matches found" value={
                     preview.truncated ? `${preview.matches_found}+` : preview.matches_found} />
-                  <StatCard label="Earliest" value={preview.earliest?.slice(0, 4) || '—'} />
-                  <StatCard label="Latest" value={preview.latest?.slice(0, 4) || '—'} />
+                  <StatCard
+                    label={preview.earliest_at_least ? 'Back to at least' : 'Earliest'}
+                    value={preview.earliest || '—'} />
+                  <StatCard label="Latest" value={preview.latest || '—'} />
                   <StatCard label="Record boards" value={preview.record_reports} />
                 </div>
                 {preview.truncated && (
                   <Note>
                     CricketStatz caps one list at 999 matches, so there are more
-                    than this. The import walks your history season by season,
-                    which picks up every one of them.
+                    than this — and that list only reaches back as far as those
+                    999 go. Your record boards show cricket back to at least{' '}
+                    {preview.earliest}. The import checks every season first and
+                    will tell you exactly what it found before it pulls anything.
                   </Note>
                 )}
                 {!!preview.teams?.length && (
