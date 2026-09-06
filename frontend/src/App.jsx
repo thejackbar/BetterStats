@@ -109,7 +109,6 @@ const AdminPartnershipRecords = lazy(() => import('./pages/admin/AdminPartnershi
 const AdminManualEntries = lazy(() => import('./pages/admin/AdminManualEntries'))
 const AdminScorecardUpload = lazy(() => import('./pages/admin/AdminScorecardUpload'))
 const AdminImport = lazy(() => import('./pages/admin/AdminImport'))
-const AdminCricketStatzImport = lazy(() => import('./pages/admin/AdminCricketStatzImport'))
 const AdminPlayerImport = lazy(() => import('./pages/admin/AdminPlayerImport'))
 const AdminMilestones = lazy(() => import('./pages/admin/AdminMilestones'))
 const AdminActivityLog = lazy(() => import('./pages/admin/AdminActivityLog'))
@@ -456,7 +455,6 @@ export default function App() {
           <Route path="/admin/manual-entries" element={<ProtectedRoute requireCore><AdminManualEntries /></ProtectedRoute>} />
           <Route path="/admin/upload-scorecard" element={<ProtectedRoute requireCore><AdminScorecardUpload /></ProtectedRoute>} />
           <Route path="/admin/import" element={<ProtectedRoute requireCore><AdminImport /></ProtectedRoute>} />
-          <Route path="/admin/cricketstatz" element={<ProtectedRoute requireCore><AdminCricketStatzImport /></ProtectedRoute>} />
           <Route path="/admin/milestones" element={<ProtectedRoute requireCore><AdminMilestones /></ProtectedRoute>} />
           <Route path="/admin/activity" element={<ProtectedRoute requireActivePlan><AdminActivityLog /></ProtectedRoute>} />
           <Route path="/admin/changelog" element={<ProtectedRoute><AdminChangelog /></ProtectedRoute>} />

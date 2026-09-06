@@ -7186,6 +7186,12 @@ and BetterCricket pulls ALL of its data across, the record book included.
   `unwrap` raises a typed error for it so "their subscription ended" is not
   read as "this club has no matches". Their FAQ also says the database is
   deleted 12 months after expiry.
+- **IT LIVES ON DATA SYNC, not a screen of its own.** Bringing a history in is
+  a sync action like the others — it just points at another platform instead of
+  Cricket Australia — so `components/admin/CricketStatzImport.jsx` is a panel
+  mounted inside `AdminSync.jsx` rather than a route. The first cut made it its
+  own page with a card on Data Sync linking across, which is a second place to
+  look for one job.
 - **THE CLIENT SAYS WHO IT IS AND GOES GENTLY** — concurrency 3, a delay
   between requests, a 30-minute cache so a preview and the import that follows
   share one pull. This is a club exporting its OWN records, one club at a time,

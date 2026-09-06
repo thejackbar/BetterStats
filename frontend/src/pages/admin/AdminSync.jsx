@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
+import CricketStatzImport from '../../components/admin/CricketStatzImport'
 import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import LoadingBar, { ProgressBar } from '../../components/ProgressBar'
 import { useToast } from '../../contexts/ToastContext'
@@ -210,27 +210,10 @@ export default function AdminSync() {
           />
         )}
 
-        {/* Coming from CricketStatz. Its own screen rather than a fourth
-            button here: the sync actions all talk to Cricket Australia and run
-            on a club that is already set up, whereas this is a one-off move of
-            a club's whole history off another platform. */}
-        <div className="pb-card p-5 mb-8">
-          <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-2 uppercase">
-            Coming from CricketStatz?
-          </p>
-          <p className="text-[13px] text-pb-dim mb-3 max-w-2xl">
-            If your club keeps its records on CricketStatz, paste the address of
-            your own stats page and we will bring the lot across — every season,
-            every match, every scorecard, and your record book.
-          </p>
-          <Link
-            to="/admin/cricketstatz"
-            className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] font-semibold"
-            style={{ background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }}
-          >
-            Import from CricketStatz
-          </Link>
-        </div>
+        {/* Bringing a history in from CricketStatz is a sync action like the
+            others, so it lives on this screen rather than a page of its own —
+            it just points at another platform instead of Cricket Australia. */}
+        <CricketStatzImport />
 
         {/* Trigger card */}
         <div className="pb-card p-5 mb-8">

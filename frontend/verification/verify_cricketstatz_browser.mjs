@@ -1,5 +1,5 @@
-// Drives the real /admin/cricketstatz screen in Chromium with the API stubbed
-// at the network layer.
+// Drives the CricketStatz importer where it actually lives — on the real
+// /admin/sync screen — in Chromium, with the API stubbed at the network layer.
 //
 //   npx vite --port 5198 &
 //   node frontend/verification/verify_cricketstatz_browser.mjs [baseUrl]
@@ -66,6 +66,13 @@ const routes = (page, calls, state) => page.route('**/api/**', async (route) => 
       entitlements: { modules: [], status: 'active' },
     })
   }
+  // Data Sync's own surface. /sync-runs and /sync-logs answer with bare
+  // ARRAYS — an object stub renders the error boundary and measures that.
+  if (url.includes('/club-admin/settings')) return json({ id: 'org-1', name: 'Keon Park' })
+  if (url.includes('/sync-logs')) return json([])
+  if (url.includes('/sync-runs')) return json([])
+  if (url.includes('/sync-requests')) return json([])
+  if (url.includes('/sync-drift')) return json({ status: 'clean' })
   if (url.includes('/cricketstatz/inspect')) return json(PREVIEW)
   if (url.includes('/cricketstatz/import') && method === 'POST') {
     state.phase = 'running'
@@ -107,25 +114,6 @@ const routes = (page, calls, state) => page.route('**/api/**', async (route) => 
   return json({})
 })
 
-// The Data Sync screen needs its own small surface to render at all.
-const syncRoutes = (page, calls) => page.route('**/api/**', async (route) => {
-  const url = route.request().url()
-  calls.push({ url, method: route.request().method() })
-  const json = (b) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(b) })
-  if (url.includes('/auth/me')) {
-    return json({ id: 'boss', username: 'boss', display_name: 'Boss', role: 'club_admin',
-                  club_slug: 'keon-park', entitlements: { modules: [], status: 'active' } })
-  }
-  if (url.includes('/club-admin/settings')) return json({ id: 'org-1', name: 'Keon Park' })
-  // Both of these answer with a bare ARRAY — a {runs:[]} stub renders the
-  // error boundary instead of the screen, and then measures that.
-  if (url.includes('/sync-logs')) return json([])
-  if (url.includes('/sync-runs')) return json([])
-  if (url.includes('/sync-requests')) return json([])
-  if (url.includes('/sync-drift')) return json({ status: 'clean' })
-  return json({})
-})
-
 async function open(ctx, path, calls, state) {
   const page = await ctx.newPage()
   const errors = []
@@ -137,8 +125,7 @@ async function open(ctx, path, calls, state) {
     if (/net::ERR_/.test(m.text())) return
     errors.push(m.text())
   })
-  if (state) await routes(page, calls, state)
-  else await syncRoutes(page, calls)
+  await routes(page, calls, state)
   await page.goto(`${BASE}${path}`, { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(1400)
   return { page, errors }
@@ -152,9 +139,13 @@ const run = async () => {
   // ── the screen itself ─────────────────────────────────────────────────
   const calls = []
   const state = makeState()
-  const { page, errors } = await open(ctx, '/admin/cricketstatz', calls, state)
+  const { page, errors } = await open(ctx, '/admin/sync', calls, state)
 
-  ck('the screen renders', (await page.locator('text=Import from CricketStatz').count()) > 0)
+  ck('the importer sits on the Data Sync screen, not a page of its own',
+     page.url().endsWith('/admin/sync')
+     && (await page.locator('text=Import from CricketStatz').count()) > 0, page.url())
+  ck('it sits alongside the other sync actions',
+     (await page.locator('text=Sync Actions').count()) > 0)
   ck('it asks for the club\'s own stats page',
      (await page.locator('input[placeholder*="cricketstatz.com"]').count()) === 1)
   ck('nothing is imported before it is asked for',
@@ -239,6 +230,10 @@ const run = async () => {
   ck('an accepted undo reaches the wire',
      calls.some((c) => /\/imports\/[^/]+\/undo/.test(c.url)))
 
+  // Nothing should be left pointing at a screen that no longer exists.
+  ck('no link to a standalone importer screen remains',
+     (await page.locator('a[href="/admin/cricketstatz"]').count()) === 0)
+
   ck('no page errors', errors.length === 0, errors[0])
 
   const overflow = await page.evaluate(() => {
@@ -251,26 +246,6 @@ const run = async () => {
     document.documentElement.scrollWidth - document.documentElement.clientWidth)
   ck('no sideways overflow at 390px', narrow <= 0, `${narrow}px`)
   await page.close()
-
-  // ── the way in from Data Sync ─────────────────────────────────────────
-  const syncCalls = []
-  const { page: sync, errors: syncErrors } = await open(ctx, '/admin/sync', syncCalls, null)
-  // The sidebar links there too, so scope this to the card on the screen
-  // itself — that is the way in the ask was about.
-  const card = sync.locator('div.pb-card', { hasText: 'Coming from CricketStatz' })
-  const link = card.locator('a[href="/admin/cricketstatz"]')
-  ck('Data Sync carries the way in', (await link.count()) === 1,
-     `${await link.count()} links in the card`)
-  ck('and says what it is for',
-     (await sync.locator('text=/Coming from CricketStatz/').count()) === 1)
-  if (await link.count()) {
-    await link.first().click()
-    await sync.waitForTimeout(900)
-    ck('it lands on the import screen', sync.url().endsWith('/admin/cricketstatz'), sync.url())
-  } else {
-    ck('it lands on the import screen', false, 'no link')
-  }
-  ck('no page errors on Data Sync', syncErrors.length === 0, syncErrors[0])
 
   await browser.close()
   console.log(`\n${pass} passed, ${fail} failed`)

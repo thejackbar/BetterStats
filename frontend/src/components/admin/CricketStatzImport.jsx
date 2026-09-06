@@ -1,10 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '../../lib/api'
-import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import {
   Button, TextInput, Field, Note, Caption, StatCard, TableWrap, TableHead,
   TableRow, Cell, Badge, SegButtons, Empty,
-} from '../../components/admin/ui'
+} from './ui'
 import { useToast } from '../../contexts/ToastContext'
 
 const HISTORY_COLS = 'minmax(160px,1fr) 180px 110px 90px 90px'
@@ -33,7 +32,7 @@ function Bar({ value }) {
   )
 }
 
-export default function AdminCricketStatzImport() {
+export default function CricketStatzImport() {
   const toast = useToast()
   const [url, setUrl] = useState('')
   const [checking, setChecking] = useState(false)
@@ -118,11 +117,16 @@ export default function AdminCricketStatzImport() {
   const done = status?.import?.status === 'complete'
 
   return (
-    <BetterStatsLayout
-      title="Import from CricketStatz"
-      caption="Bring your whole club history across from your own CricketStatz site"
-    >
-      <div className="max-w-4xl space-y-4">
+    <div className="pb-card p-5 mb-8" id="cricketstatz">
+      <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 uppercase">
+        Import from CricketStatz
+      </p>
+      <p className="text-[13px] text-pb-dim mb-4 max-w-2xl">
+        If your club keeps its records on CricketStatz, paste the address of your
+        own stats page and we will bring the lot across — every season, every
+        match, every scorecard, and your record book.
+      </p>
+      <div className="space-y-4">
         <SegButtons
           value={tab}
           onChange={setTab}
@@ -297,7 +301,7 @@ export default function AdminCricketStatzImport() {
             )
         )}
       </div>
-    </BetterStatsLayout>
+    </div>
   )
 }
 

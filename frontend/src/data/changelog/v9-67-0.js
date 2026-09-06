@@ -12,6 +12,6 @@ export default {
     'Matches you have already brought across are corrected rather than duplicated, so you can run it again after your club tidies something up on their end.',
     'A junior match nobody recorded names for still comes across with its result and its full card, instead of every unnamed batter piling onto one player.',
     'You can see what a site holds before importing anything, watch the progress as it runs, and undo an import — which takes the matches and record boards back out and leaves your people alone.',
-    'Reached from Data Sync, or from Import from CricketStatz under Data Import.',
+    'It lives on Data Sync, alongside the buttons that pull your latest games from Cricket Australia.',
   ],
 }
