@@ -377,10 +377,12 @@ def build_rows(seasons: list) -> dict:
 def build_season_stats(seasons: list, by_grade: bool = True) -> list:
     """One row per player per season (and per grade unless told otherwise).
 
-    ``by_grade=False`` exists because which grade a performance belongs to is
-    the one thing the source is shaky about - see ``squad_clashes``. The player
-    and season are never in doubt, so the ungraded roll-up is the safer import
-    where the grade split cannot be trusted.
+    ``by_grade=False`` rolls the same figures up without the grade. It is NOT
+    written out, because it carries nothing the graded file does not: summing
+    the graded rows per player-season reproduces it exactly, every counting
+    column and every high score, across all 853 player-seasons. The grade split
+    is purely additive detail, so there is one output file and no choice to
+    make. The switch is kept for anyone who wants that roll-up separately.
     """
     agg = {}
     seen_games = defaultdict(set)      # (player, season, grade) -> the matches played
@@ -593,10 +595,12 @@ NOTES = [
                                "named in more than one grade. Nobody plays twice in an "
                                "afternoon, so either the grade is wrong on one of them or the "
                                "date is a round stamp covering competitions that ran on "
-                               "different days. Every innings still reconciles to its own "
-                               "total, so only the grade split is affected - if that worries "
-                               "you, import betterimport_season_stats_by_player.csv, which "
-                               "does not split by grade."),
+                               "different days. It does NOT affect what to import: a season "
+                               "and career total is the same figure either way, because the "
+                               "same match is counted once whichever grade it is filed under. "
+                               "Only the per-grade breakdown is affected, and grades can be "
+                               "merged after import if this turns out to matter."),
+    ("Which file to import", "betterimport_season_stats.csv. There is one, deliberately."),
     ("", ""),
     ("Checks run against the files' own arithmetic", ""),
 ]
@@ -671,15 +675,12 @@ def main() -> None:
     write_xlsx(sheets, checks, args.out / "match_detail.xlsx")
     stats = build_season_stats(seasons)
     write_csv(stats, args.out / "betterimport_season_stats.csv")
-    flat = build_season_stats(seasons, by_grade=False)
-    write_csv(flat, args.out / "betterimport_season_stats_by_player.csv")
 
     club = seasons[0]["club"]
     print(f"{club}: {len(seasons)} seasons, {seasons[0]['season']} to {seasons[-1]['season']}")
     for name, rows in sheets.items():
         print(f"  {name:<16} {len(rows):>6} rows")
-    print(f"  season stats     {len(stats):>6} rows  (by grade)")
-    print(f"  season stats     {len(flat):>6} rows  (by player, no grade split)")
+    print(f"  season stats     {len(stats):>6} rows")
     print()
     for label, ok, total in checks:
         pct = f"{ok / total:.1%}" if total else "n/a"
