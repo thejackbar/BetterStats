@@ -912,6 +912,11 @@ async def get_scorecard(
             # Authoritative innings totals from GR innings objects (wickets/extras
             # only — `runs` is deliberately not read from here, see below).
             gr_inn_totals: dict[int, dict] = {}
+            # How many batting rows actually contributed runs to each innings.
+            # An innings CA never scored individually has none, which is the
+            # one case the bat-only sum below cannot answer — see the
+            # finalise loop.
+            inn_bat_rows: dict[int, int] = {}
             all_seen_batting_pids: set[str] = set()
             our_inn_nums: list[int] = []
             opp_inn_nums: list[int] = []
@@ -923,7 +928,9 @@ async def get_scorecard(
                 gr_inn_totals[inn_num] = {
                     "wickets": inn.get("numberOfWicketsFallen"),
                     "extras": inn.get("totalExtras"),
+                    "runs_scored": inn.get("runsScored"),
                 }
+                inn_bat_rows.setdefault(inn_num, 0)
                 _bt_is_ours = _our_tid is not None and bt_id == _our_tid
                 (our_inn_nums if _bt_is_ours else opp_inn_nums).append(inn_num)
                 new_innings_totals[inn_num] = {
@@ -983,6 +990,7 @@ async def get_scorecard(
                     if not is_dnb:
                         totals = new_innings_totals[inn_num]
                         totals["runs"] += base["runs"] or 0
+                        inn_bat_rows[inn_num] = inn_bat_rows.get(inn_num, 0) + 1
                         if not base["not_out"] and base["dismissal_type"]:
                             totals["wickets"] += 1
 
@@ -1065,6 +1073,22 @@ async def get_scorecard(
                     totals["wickets"] = gr_tot["wickets"]
                 if gr_tot.get("extras") is not None:
                     totals["extras"] = gr_tot["extras"]
+
+                # AN INNINGS CA NEVER SCORED INDIVIDUALLY. Some innings reach
+                # us as a total and nothing else — no batting rows at all,
+                # just `runsScored`. The bat-only sum above is then 0, and
+                # since the frontend adds extras on top the innings rendered
+                # as its extras alone: a real 102 all out showing as 8.
+                #
+                # `runs` still means the batters' runs, so the contract is
+                # unchanged and the frontend needs no edit — the figure is
+                # simply recovered as total minus extras, which is what
+                # `runsScored` is made of by definition. Guarded on there
+                # being NO contributing rows, so an innings we do hold cards
+                # for is never second-guessed by an upstream total.
+                if not inn_bat_rows.get(inn_num) and gr_tot.get("runs_scored") is not None:
+                    _extras = totals.get("extras") or 0
+                    totals["runs"] = max(0, int(gr_tot["runs_scored"]) - int(_extras))
 
             # Everything above built cleanly — swap it in as the page's data.
             # (Left untouched on any exception, including a GR outage above,

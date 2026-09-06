@@ -14,6 +14,10 @@ VERSIONS = Path(__file__).resolve().parent.parent / "alembic" / "versions"
 FILES = [
     "038_effective_per_game_views.py",
     "075_batting_caught_behind.py",
+    # 092 is the ONLY definition of v_effective_fall_of_wickets — 147 redefines
+    # its partnerships sibling but not this one, so without 092 a harness that
+    # reads fall of wickets dies on a missing relation.
+    "092_manual_partnerships_fow.py",
     "093_manual_bowler_wickets.py",
     "147_fillin_partnerships_fielding_names.py",
     "252_statlab_residual_grade_label.py",
