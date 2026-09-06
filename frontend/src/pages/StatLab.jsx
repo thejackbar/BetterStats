@@ -26,6 +26,7 @@ const TARGETS = [
   { key: 'innings_list',     label: 'Innings list',      shape: 'list',      dim: 'innings' },
   { key: 'spell_list',       label: 'Bowling spells',    shape: 'list',      dim: 'spell' },
   { key: 'match_list',       label: 'Match list',        shape: 'list',      dim: 'match' },
+  { key: 'team_innings_list', label: 'Team innings',     shape: 'list',      dim: 'team_innings' },
   { key: 'partnership_list', label: 'Partnerships',      shape: 'list',      dim: 'partnership' },
 ]
 
@@ -284,10 +285,12 @@ const PRESET_GROUPS = [
   {
     key: 'match', label: 'Match', defaultOpen: false,
     items: [
-      { type: 'preset', label: 'Highest team scores',      target: 'match_list', sortBy: 'team_runs',    sortDir: 'desc', filters: [], context: {} },
-      { type: 'preset', label: 'Lowest team scores',       target: 'match_list', sortBy: 'team_runs',    sortDir: 'asc',  filters: [{ field: 'team_runs', op: 'gt', value: '0' }], context: {} },
-      { type: 'preset', label: 'Highest opposition scores',target: 'match_list', sortBy: 'opp_runs',     sortDir: 'desc', filters: [], context: {} },
-      { type: 'preset', label: 'Lowest opposition scores', target: 'match_list', sortBy: 'opp_runs',     sortDir: 'asc',  filters: [{ field: 'opp_runs', op: 'gt', value: '0' }, { field: 'opp_wickets', op: 'gte', value: '10' }], context: {} },
+      { type: 'preset', label: 'Highest innings totals',   target: 'team_innings_list', sortBy: 'runs', sortDir: 'desc', filters: [{ field: 'is_ours', op: 'eq', value: '1' }], context: {} },
+      { type: 'preset', label: 'Lowest all-out totals',    target: 'team_innings_list', sortBy: 'runs', sortDir: 'asc',  filters: [{ field: 'is_ours', op: 'eq', value: '1' }, { field: 'runs', op: 'gt', value: '0' }, { field: 'wickets', op: 'gte', value: '10' }], context: {} },
+      { type: 'preset', label: 'Highest opposition totals',target: 'team_innings_list', sortBy: 'runs', sortDir: 'desc', filters: [{ field: 'is_ours', op: 'eq', value: '0' }], context: {} },
+      { type: 'preset', label: 'Lowest opposition totals', target: 'team_innings_list', sortBy: 'runs', sortDir: 'asc',  filters: [{ field: 'is_ours', op: 'eq', value: '0' }, { field: 'runs', op: 'gt', value: '0' }, { field: 'wickets', op: 'gte', value: '10' }], context: {} },
+      { type: 'preset', label: 'Most extras conceded',     target: 'team_innings_list', sortBy: 'extras', sortDir: 'desc', filters: [{ field: 'is_ours', op: 'eq', value: '0' }], context: {} },
+      { type: 'preset', label: 'Highest match totals',     target: 'match_list', sortBy: 'team_runs',    sortDir: 'desc', filters: [], context: {} },
       { type: 'preset', label: 'Biggest winning margins',  target: 'match_list', sortBy: 'margin_runs',  sortDir: 'desc', filters: [{ field: 'margin_runs', op: 'gt', value: '0' }], context: { result: 'won' } },
       { type: 'preset', label: 'Closest wins',             target: 'match_list', sortBy: 'margin_runs',  sortDir: 'asc',  filters: [{ field: 'margin_runs', op: 'gt', value: '0' }], context: { result: 'won' } },
       { type: 'preset', label: 'Biggest defeats',          target: 'match_list', sortBy: 'margin_runs',  sortDir: 'asc',  filters: [{ field: 'margin_runs', op: 'lt', value: '0' }], context: { result: 'lost' } },
@@ -327,6 +330,7 @@ const COLUMN_SETS = {
   innings_list:     ['runs','balls','fours','sixes','strike_rate','batting_position'],
   spell_list:       ['overs','maidens','runs','wickets','economy'],
   match_list:       ['team_runs','team_wickets','opp_runs','opp_wickets','margin_runs'],
+  team_innings_list:['runs','wickets','extras','innings_number'],
   partnership_list: ['runs','balls','wicket_number','batter1_runs','batter2_runs'],
 }
 

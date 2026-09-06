@@ -114,75 +114,81 @@ WITH our_games AS (
     AND g.result IS NOT NULL
     {season_clause}{grade_clause}{finals_clause}
 ),
-bat AS (
+-- ONE ROW PER INNINGS, NOT PER GAME, and that is the whole correction here.
+-- A two-day match bats each side twice, so grouping by game alone reported a
+-- club's "highest total" as its two innings ADDED TOGETHER — the reported
+-- 8-323 and 8-158 reading as a 481 that was never scored. A total is an
+-- innings; a match aggregate is a different record and gets its own board.
+our_bat AS (
     -- OUR rows only. A both-synced fixture is ONE games row carrying BOTH
     -- clubs' innings, so without the player scope this sums the opposition's
-    -- runs into ours, counts their dismissals into wkts_lost (up to 20), and
-    -- makes batted_first true for everyone.
-    SELECT bi.game_id,
-           SUM(bi.runs) AS our_runs,
+    -- runs into ours and counts their dismissals as our wickets.
+    SELECT bi.game_id, bi.innings_number,
+           SUM(bi.runs) AS bat_runs,
            COUNT(*) FILTER (
                WHERE bi.did_not_bat IS NOT TRUE
                  AND NOT bi.not_out
                  AND bi.dismissal_type IS NOT NULL
-           ) AS wkts_lost,
-           BOOL_OR(bi.innings_number = 1) AS batted_first,
-           ARRAY_AGG(DISTINCT bi.innings_number) AS our_innings_nums
+           ) AS wkts_lost
     FROM v_effective_batting_innings bi
     JOIN our_games og ON og.id = bi.game_id
     JOIN players p ON p.id = bi.player_id AND p.organisation_id = CAST(:org AS UUID)
     WHERE bi.did_not_bat IS NOT TRUE
-    GROUP BY bi.game_id
+    GROUP BY bi.game_id, bi.innings_number
 ),
-bowl AS (
-    -- Same scope on the bowler: opp_runs = the runs OUR bowlers conceded.
-    SELECT bs.game_id,
-           SUM(bs.runs) AS opp_runs,
+their_bat AS (
+    -- The innings our bowlers bowled in — which is the opposition batting,
+    -- and is knowable even in a match we never batted in at all. That case
+    -- is exactly why this is its own CTE rather than "the innings we didn't
+    -- bat in": a drawn two-day game where the other side batted once and we
+    -- never got in had NO our-side innings to subtract from, so the whole
+    -- exact-total path was skipped and the figure fell back to a bat sum.
+    SELECT bs.game_id, bs.innings_number,
+           SUM(bs.runs) AS bowl_runs,
            SUM(bs.wickets) AS wkts_taken
     FROM v_effective_bowling_spells bs
     JOIN our_games og ON og.id = bs.game_id
     JOIN players p ON p.id = bs.player_id AND p.organisation_id = CAST(:org AS UUID)
-    GROUP BY bs.game_id
+    GROUP BY bs.game_id, bs.innings_number
+),
+stored AS (
+    -- GR's own per-innings figure: the batters' runs PLUS extras. Keyed on
+    -- `innings_number`, which sync writes from GR's `inningsOrder` for BOTH
+    -- this column and batting_innings/bowling_spells — so the three line up.
+    SELECT og.id AS game_id,
+           (elem->>'innings_number')::int AS innings_number,
+           NULLIF(elem->>'runs_scored', '')::numeric AS runs_scored,
+           NULLIF(elem->>'wickets', '')::numeric AS wickets,
+           NULLIF(elem->>'extras', '')::numeric AS extras
+    FROM our_games og,
+         LATERAL jsonb_array_elements(COALESCE(og.innings_totals, '[]'::jsonb)) elem
 )
 SELECT og.id::text AS game_id, og.played_at, og.venue, og.opp_club_name,
        og.match_format, og.home_team, og.away_team, og.is_final,
        og.grade_id::text AS grade_id, og.grade_name,
        og.season_id::text AS season_id, og.season_name, og.season_year,
        og.result, og.our_venue,
-       b.our_runs, b.wkts_lost, b.batted_first,
-       bw.opp_runs, bw.wkts_taken,
-       ours.exact_runs AS our_exact_runs, ours.exact_wkts AS our_exact_wkts,
-       ours.ok AS our_exact_ok,
-       theirs.exact_runs AS opp_exact_runs, theirs.exact_wkts AS opp_exact_wkts,
-       theirs.ok AS opp_exact_ok
+       inn.side, inn.innings_number,
+       inn.bat_runs, inn.stored_runs, inn.wkts, inn.stored_wkts, inn.extras
 FROM our_games og
-LEFT JOIN bat b ON b.game_id = og.id
-LEFT JOIN bowl bw ON bw.game_id = og.id
--- Prefer GR's own true per-innings total (bat runs PLUS extras) over the
--- bat-only sum, but only when EVERY innings on our side of the match has a
--- stored, non-null runs_scored. A partial match — a two-day game with one
--- innings backfilled and one not — would add an exact figure to an
--- approximate one and reconcile with neither, so it is all or nothing.
-LEFT JOIN LATERAL (
-    SELECT SUM((elem->>'runs_scored')::numeric) AS exact_runs,
-           SUM((elem->>'wickets')::numeric) AS exact_wkts,
-           (COUNT(*) = COALESCE(array_length(b.our_innings_nums, 1), 0)
-            AND BOOL_AND(elem->>'runs_scored' IS NOT NULL)) AS ok
-    FROM jsonb_array_elements(og.innings_totals) elem
-    WHERE (elem->>'innings_number')::int = ANY(b.our_innings_nums)
-) ours ON og.innings_totals IS NOT NULL AND b.our_innings_nums IS NOT NULL
--- The opposition's own true total is the mirror image: the innings we did
--- NOT bat in. Same all-or-nothing rule, and it needs at least one such
--- innings to exist or a one-innings-a-side game we batted both halves of
--- would report a 0 total for them.
-LEFT JOIN LATERAL (
-    SELECT SUM((elem->>'runs_scored')::numeric) AS exact_runs,
-           SUM((elem->>'wickets')::numeric) AS exact_wkts,
-           (COUNT(*) > 0 AND BOOL_AND(elem->>'runs_scored' IS NOT NULL)) AS ok
-    FROM jsonb_array_elements(og.innings_totals) elem
-    WHERE NOT ((elem->>'innings_number')::int = ANY(b.our_innings_nums))
-) theirs ON og.innings_totals IS NOT NULL AND b.our_innings_nums IS NOT NULL
-ORDER BY og.played_at ASC, og.id ASC
+JOIN LATERAL (
+    SELECT 'us'::text AS side, b.innings_number,
+           b.bat_runs, st.runs_scored AS stored_runs,
+           b.wkts_lost AS wkts, st.wickets AS stored_wkts, st.extras
+    FROM our_bat b
+    LEFT JOIN stored st ON st.game_id = b.game_id
+                       AND st.innings_number = b.innings_number
+    WHERE b.game_id = og.id
+    UNION ALL
+    SELECT 'them'::text, t.innings_number,
+           t.bowl_runs, st.runs_scored,
+           t.wkts_taken, st.wickets, st.extras
+    FROM their_bat t
+    LEFT JOIN stored st ON st.game_id = t.game_id
+                       AND st.innings_number = t.innings_number
+    WHERE t.game_id = og.id
+) inn ON TRUE
+ORDER BY og.played_at ASC, og.id ASC, inn.innings_number ASC
 """
 
 
@@ -197,7 +203,12 @@ async def per_game(
     scope_clause: str = "",
     extra_params: Optional[dict] = None,
 ) -> list[dict]:
-    """One row per game the club played, with both sides' totals resolved.
+    """One row per game, each carrying its innings on both sides.
+
+    The SQL returns one row per INNINGS; this folds them back into games.
+    Doing the fold here rather than in SQL is what lets a match-level figure
+    (a margin, a match aggregate) and an innings-level one (a total) come
+    from the same read without either being re-derived.
 
     `grade_name_clause` is passed in rather than rebuilt because the caller
     (routers/records.py) already owns the merge-aware grade match — a second
@@ -230,45 +241,67 @@ async def per_game(
     )
     res = await db.execute(text(sql), params)
 
-    out: list[dict] = []
+    games: dict[str, dict] = {}
+    order: list[str] = []
     for r in res.mappings():
-        d = dict(r)
+        gid = r["game_id"]
+        g = games.get(gid)
+        if g is None:
+            g = {
+                "game_id": gid,
+                "played_at": _fmt_date(r["played_at"]),
+                "venue": r["venue"], "opp_club_name": r["opp_club_name"],
+                "match_format": r["match_format"],
+                "home_team": r["home_team"], "away_team": r["away_team"],
+                "is_final": r["is_final"], "grade_id": r["grade_id"],
+                "grade_name": r["grade_name"], "season_id": r["season_id"],
+                "season_name": r["season_name"], "season_year": r["season_year"],
+                "result": r["result"], "our_venue": r["our_venue"],
+                "our_innings": [], "their_innings": [],
+            }
+            games[gid] = g
+            order.append(gid)
 
-        # Our total: the true figure when we hold every innings of it, else
-        # the bat-only sum. `exact` rides along on the row because a record
-        # book ranks these against each other and the two are not the same
-        # kind of number — see the module docstring.
-        our_exact = d.pop("our_exact_runs", None)
-        our_ok = d.pop("our_exact_ok", None)
-        our_exact_wkts = d.pop("our_exact_wkts", None)
-        if our_ok and our_exact is not None:
-            d["our_runs"] = int(our_exact)
-            d["our_exact"] = True
-            if our_exact_wkts is not None:
-                d["wkts_lost"] = int(our_exact_wkts)
-        else:
-            d["our_runs"] = int(d["our_runs"]) if d.get("our_runs") is not None else None
-            d["our_exact"] = False
-            d["wkts_lost"] = int(d["wkts_lost"]) if d.get("wkts_lost") is not None else None
+        # The true figure where GR holds it, the bat/bowl sum where it does
+        # not. `exact` rides on each INNINGS, because a match can genuinely
+        # have one of each — a two-day game with only its first innings
+        # backfilled — and a record book must never present the two as one
+        # kind of number. See the module docstring.
+        stored, wkts_stored = r["stored_runs"], r["stored_wkts"]
+        exact = stored is not None
+        runs = int(stored) if exact else (
+            int(r["bat_runs"]) if r["bat_runs"] is not None else None)
+        wkts = (int(wkts_stored) if exact and wkts_stored is not None
+                else (int(r["wkts"]) if r["wkts"] is not None else None))
+        if runs is None:
+            continue
+        entry = {"innings_number": r["innings_number"], "runs": runs,
+                 "wickets": wkts, "exact": exact,
+                 "extras": int(r["extras"]) if r["extras"] is not None else None}
+        (g["our_innings"] if r["side"] == "us" else g["their_innings"]).append(entry)
 
-        opp_exact = d.pop("opp_exact_runs", None)
-        opp_ok = d.pop("opp_exact_ok", None)
-        opp_exact_wkts = d.pop("opp_exact_wkts", None)
-        if opp_ok and opp_exact is not None:
-            d["opp_runs"] = int(opp_exact)
-            d["opp_exact"] = True
-            d["wkts_taken"] = (
-                int(opp_exact_wkts) if opp_exact_wkts is not None
-                else (int(d["wkts_taken"]) if d.get("wkts_taken") is not None else None)
-            )
-        else:
-            d["opp_runs"] = int(d["opp_runs"]) if d.get("opp_runs") is not None else None
-            d["opp_exact"] = False
-            d["wkts_taken"] = int(d["wkts_taken"]) if d.get("wkts_taken") is not None else None
-
-        d["played_at"] = _fmt_date(d.get("played_at"))
-        d["batted_first"] = bool(d.get("batted_first"))
-        out.append(d)
+    out: list[dict] = []
+    for gid in order:
+        g = games[gid]
+        ours, theirs = g["our_innings"], g["their_innings"]
+        # `batted_first` is read off our own lowest innings number, so it is
+        # right for a shared fixture whichever club synced it.
+        first_ours = min((i["innings_number"] for i in ours), default=None)
+        first_theirs = min((i["innings_number"] for i in theirs), default=None)
+        g["batted_first"] = (
+            first_ours is not None
+            and (first_theirs is None or first_ours < first_theirs))
+        # Match-level sums, for the margin and match-aggregate boards. A
+        # margin is a MATCH figure — in a two-innings game a side wins by the
+        # difference of its two totals against the other's two, not of one
+        # innings against one.
+        g["our_runs"] = sum(i["runs"] for i in ours) if ours else None
+        g["opp_runs"] = sum(i["runs"] for i in theirs) if theirs else None
+        g["wkts_lost"] = (sum(i["wickets"] or 0 for i in ours) if ours else None)
+        g["wkts_taken"] = (sum(i["wickets"] or 0 for i in theirs) if theirs else None)
+        g["our_exact"] = bool(ours) and all(i["exact"] for i in ours)
+        g["opp_exact"] = bool(theirs) and all(i["exact"] for i in theirs)
+        out.append(g)
     return out
 
 
@@ -288,10 +321,15 @@ def _row(g: dict, **extra) -> dict:
         "grade_name": g.get("grade_name"),
         "is_final": bool(g.get("is_final")),
         "result": g.get("result"),
+        # The MATCH figures, always — what the scoreboard read at the end.
+        # An innings board additionally carries its own `value`,
+        # `innings_number` and `innings_wickets`.
         "our_runs": g.get("our_runs"),
         "our_wickets": g.get("wkts_lost"),
         "opp_runs": g.get("opp_runs"),
         "opp_wickets": g.get("wkts_taken"),
+        "our_innings_count": len(g.get("our_innings") or []),
+        "their_innings_count": len(g.get("their_innings") or []),
     }
     base.update(extra)
     return base
@@ -321,37 +359,72 @@ def _is_loss(g: dict) -> bool:
 
 
 def _totals_boards(games: list[dict]) -> dict:
-    """Highest and lowest, for and against."""
-    ours = [g for g in games if g.get("our_runs") is not None]
-    theirs = [g for g in games if g.get("opp_runs") is not None]
+    """Highest and lowest, for and against — PER INNINGS.
 
-    highest = sorted(ours, key=lambda g: (-g["our_runs"], g["played_at"] or ""))
-    conceded = sorted(theirs, key=lambda g: (-g["opp_runs"], g["played_at"] or ""))
+    A total is one innings. The reported bug was this ranking a two-day
+    match's two innings added together (8-323 and 8-158 reading as 481), a
+    score nobody made. The match aggregate is a real record too, and it is
+    its own board below rather than being confused with this one.
+    """
+    ours, theirs = [], []
+    for g in games:
+        for i in g["our_innings"]:
+            ours.append((g, i))
+        for i in g["their_innings"]:
+            theirs.append((g, i))
+
+    def _row_of(g, i, **extra):
+        return _row(g, value=i["runs"], exact=i["exact"],
+                    innings_number=i["innings_number"],
+                    innings_wickets=i["wickets"], **extra)
+
+    def _desc(pairs):
+        return sorted(pairs, key=lambda p: (-p[1]["runs"], p[0]["played_at"] or ""))
+
+    def _asc(pairs):
+        return sorted(pairs, key=lambda p: (p[1]["runs"], p[0]["played_at"] or ""))
 
     # A low-total board only takes completed innings — see ALL_OUT_WICKETS.
     # Without it, every short chase is a club record low.
-    lowest = sorted(
-        [g for g in ours if (g.get("wkts_lost") or 0) >= ALL_OUT_WICKETS],
-        key=lambda g: (g["our_runs"], g["played_at"] or ""),
-    )
-    bowled_out = sorted(
-        [g for g in theirs if (g.get("wkts_taken") or 0) >= ALL_OUT_WICKETS],
-        key=lambda g: (g["opp_runs"], g["played_at"] or ""),
-    )
+    lowest = [p for p in ours if (p[1]["wickets"] or 0) >= ALL_OUT_WICKETS]
+    bowled_out = [p for p in theirs if (p[1]["wickets"] or 0) >= ALL_OUT_WICKETS]
 
     return {
-        "highest_totals": _board(
-            [_row(g, value=g["our_runs"], exact=g["our_exact"]) for g in highest]
-        ),
-        "lowest_totals": _board(
-            [_row(g, value=g["our_runs"], exact=g["our_exact"]) for g in lowest]
-        ),
-        "highest_conceded": _board(
-            [_row(g, value=g["opp_runs"], exact=g["opp_exact"]) for g in conceded]
-        ),
-        "lowest_conceded": _board(
-            [_row(g, value=g["opp_runs"], exact=g["opp_exact"]) for g in bowled_out]
-        ),
+        "highest_totals": _board([_row_of(g, i) for g, i in _desc(ours)]),
+        "lowest_totals": _board([_row_of(g, i) for g, i in _asc(lowest)]),
+        "highest_conceded": _board([_row_of(g, i) for g, i in _desc(theirs)]),
+        "lowest_conceded": _board([_row_of(g, i) for g, i in _asc(bowled_out)]),
+    }
+
+
+def _aggregate_boards(games: list[dict]) -> dict:
+    """Match aggregates — the record the innings boards must not be.
+
+    Asked for directly once the highest-total board was found to be summing
+    a two-day match's innings: that IS a real record, it is just a different
+    one. Two of them, because they answer different questions — the biggest
+    total ONE side made across a match, and the most runs scored by BOTH
+    sides in a match (the high-scoring-game record).
+    """
+    ours = [g for g in games if g.get("our_runs") is not None]
+    both = [g for g in games
+            if g.get("our_runs") is not None and g.get("opp_runs") is not None]
+
+    # Only worth drawing where a match genuinely had more than one innings a
+    # side — in a one-day competition the aggregate IS the total, and two
+    # boards showing the same number twice is noise.
+    multi = [g for g in ours if len(g["our_innings"]) > 1]
+
+    by_ours = sorted(multi, key=lambda g: (-g["our_runs"], g["played_at"] or ""))
+    by_match = sorted(both, key=lambda g: (-(g["our_runs"] + g["opp_runs"]),
+                                           g["played_at"] or ""))
+    return {
+        "highest_match_totals": _board([
+            _row(g, value=g["our_runs"], exact=g["our_exact"],
+                 innings_count=len(g["our_innings"])) for g in by_ours]),
+        "highest_match_aggregates": _board([
+            _row(g, value=g["our_runs"] + g["opp_runs"],
+                 exact=bool(g["our_exact"] and g["opp_exact"])) for g in by_match]),
     }
 
 
@@ -363,8 +436,17 @@ def _margin_boards(games: list[dict]) -> dict:
     first and defends wins BY RUNS, a side that chases wins BY WICKETS. Ten
     wickets and ten runs are not the same size of win, and ordering them
     together would put a nervy two-wicket win above a 200-run thrashing.
+
+    A RUNS margin is a MATCH figure — in a two-innings game a side wins by
+    the difference of its two totals against the other's two. A WICKETS
+    margin is not: it is ten minus the wickets the chasing side lost in the
+    innings it chased in, so it reads that LAST innings alone. Summing
+    wickets across a two-day match gives up to twenty and a nonsense margin.
     """
     by_runs, by_wickets, defeats_runs, defeats_wickets = [], [], [], []
+
+    def _last(innings):
+        return max(innings, key=lambda i: i["innings_number"]) if innings else None
 
     for g in games:
         our, opp = g.get("our_runs"), g.get("opp_runs")
@@ -373,38 +455,29 @@ def _margin_boards(games: list[dict]) -> dict:
         won, lost = _is_win(g), _is_loss(g)
         if not won and not lost:
             continue
+        exact = bool(g["our_exact"] and g["opp_exact"])
 
-        # Who batted first decides which unit the margin is in. `batted_first`
-        # is read off our own innings numbers, so it is right for a shared
-        # fixture whichever club synced it.
         if g.get("batted_first"):
             if won and our > opp:
-                by_runs.append(_row(
-                    g, value=our - opp, unit="runs",
-                    exact=bool(g["our_exact"] and g["opp_exact"]),
-                ))
+                by_runs.append(_row(g, value=our - opp, unit="runs", exact=exact))
             elif lost:
-                # We set a total and they passed it — we lost by their
-                # wickets in hand, which is what the scoreboard says.
-                wkts = g.get("wkts_taken")
-                if wkts is not None and wkts <= ALL_OUT_WICKETS:
-                    defeats_wickets.append(_row(
-                        g, value=ALL_OUT_WICKETS - wkts, unit="wickets",
-                        exact=bool(g["our_exact"] and g["opp_exact"]),
-                    ))
+                # We set a total and they passed it — the margin is their
+                # wickets in hand at the end, which is what the scoreboard
+                # says, so it reads their LAST innings.
+                last = _last(g["their_innings"])
+                w = last["wickets"] if last else None
+                if w is not None and 0 <= w <= ALL_OUT_WICKETS:
+                    defeats_wickets.append(
+                        _row(g, value=ALL_OUT_WICKETS - w, unit="wickets", exact=exact))
         else:
             if won:
-                wkts = g.get("wkts_lost")
-                if wkts is not None and wkts <= ALL_OUT_WICKETS:
-                    by_wickets.append(_row(
-                        g, value=ALL_OUT_WICKETS - wkts, unit="wickets",
-                        exact=bool(g["our_exact"] and g["opp_exact"]),
-                    ))
+                last = _last(g["our_innings"])
+                w = last["wickets"] if last else None
+                if w is not None and 0 <= w <= ALL_OUT_WICKETS:
+                    by_wickets.append(
+                        _row(g, value=ALL_OUT_WICKETS - w, unit="wickets", exact=exact))
             elif lost and opp > our:
-                defeats_runs.append(_row(
-                    g, value=opp - our, unit="runs",
-                    exact=bool(g["our_exact"] and g["opp_exact"]),
-                ))
+                defeats_runs.append(_row(g, value=opp - our, unit="runs", exact=exact))
 
     def _desc(rows):
         return sorted(rows, key=lambda r: (-r["value"], r["played_at"] or ""))
@@ -415,6 +488,118 @@ def _margin_boards(games: list[dict]) -> dict:
         "heaviest_defeats_runs": _board(_desc(defeats_runs)),
         "heaviest_defeats_wickets": _board(_desc(defeats_wickets)),
     }
+
+
+def _chase_and_close_boards(games: list[dict]) -> dict:
+    """The records a close finish makes, and the run chases.
+
+    CricketStatz carries narrowest-margin and highest-successful-chase boards
+    and they are among the most read of its match records; both fall out of
+    the margin arithmetic already done above, so they cost one more pass
+    rather than one more query.
+    """
+    narrow_runs, narrow_wkts, chases = [], [], []
+
+    def _last(innings):
+        return max(innings, key=lambda i: i["innings_number"]) if innings else None
+
+    for g in games:
+        our, opp = g.get("our_runs"), g.get("opp_runs")
+        if our is None or opp is None or not _is_win(g):
+            continue
+        exact = bool(g["our_exact"] and g["opp_exact"])
+        if g.get("batted_first"):
+            if our > opp:
+                narrow_runs.append(_row(g, value=our - opp, unit="runs", exact=exact))
+        else:
+            last = _last(g["our_innings"])
+            w = last["wickets"] if last else None
+            if w is not None and 0 <= w <= ALL_OUT_WICKETS:
+                narrow_wkts.append(
+                    _row(g, value=ALL_OUT_WICKETS - w, unit="wickets", exact=exact))
+            # A successful chase is the total we made in the innings we
+            # chased in — the LAST one — not the match aggregate. A club
+            # chasing 300 in the fourth innings of a two-day game is the
+            # record; adding its first innings to that answers nothing.
+            if last is not None:
+                chases.append(_row(
+                    g, value=last["runs"], exact=last["exact"],
+                    innings_number=last["innings_number"],
+                    innings_wickets=last["wickets"]))
+
+    return {
+        "narrowest_wins_runs": _board(
+            sorted(narrow_runs, key=lambda r: (r["value"], r["played_at"] or ""))),
+        "narrowest_wins_wickets": _board(
+            sorted(narrow_wkts, key=lambda r: (r["value"], r["played_at"] or ""))),
+        "highest_chases": _board(
+            sorted(chases, key=lambda r: (-r["value"], r["played_at"] or ""))),
+    }
+
+
+def _extras_board(games: list[dict]) -> dict:
+    """Most extras in an innings we bowled.
+
+    Only OUR bowling innings: extras we gave away is a record about this
+    club. What the opposition's bowlers sprayed is their business, and
+    ranking the two together would make a club's worst discipline record
+    depend on who it happened to play.
+
+    Silent where the club holds no stored innings figure at all — extras
+    live only on GR's own innings total, so a bat-only history genuinely
+    cannot answer this and an empty board says that better than a wrong one.
+    """
+    rows = []
+    for g in games:
+        for i in g["their_innings"]:
+            if i.get("extras") is not None:
+                rows.append(_row(g, value=i["extras"], exact=True,
+                                 innings_number=i["innings_number"],
+                                 innings_runs=i["runs"]))
+    return {"most_extras_conceded": _board(
+        sorted(rows, key=lambda r: (-r["value"], r["played_at"] or "")))}
+
+
+def _opposition_board(games: list[dict]) -> dict:
+    """Head to head, one row per club we have played.
+
+    CricketStatz's single best team report, and the one thing on this page a
+    club will actually go looking for by name. Ranked by matches played —
+    who we play most is the question; win rate rides alongside so a reader
+    can judge it without a second board that would rank a one-off 100%.
+    """
+    by_opp: dict[str, dict] = {}
+    for g in games:
+        opp = g.get("opp_club_name")
+        if not opp:
+            continue
+        o = by_opp.setdefault(opp, {
+            "opponent": opp, "played": 0, "wins": 0, "losses": 0, "draws": 0,
+            "runs_for": 0, "runs_against": 0, "exact": True,
+            "first": g.get("played_at"), "last": g.get("played_at"),
+        })
+        o["played"] += 1
+        if _is_win(g):
+            o["wins"] += 1
+        elif _is_loss(g):
+            o["losses"] += 1
+        else:
+            o["draws"] += 1
+        if g.get("our_runs") is not None:
+            o["runs_for"] += g["our_runs"]
+            o["exact"] = o["exact"] and g["our_exact"]
+        if g.get("opp_runs") is not None:
+            o["runs_against"] += g["opp_runs"]
+            o["exact"] = o["exact"] and g["opp_exact"]
+        if g.get("played_at"):
+            o["last"] = g["played_at"]
+
+    rows = []
+    for o in by_opp.values():
+        o["win_rate"] = round(100.0 * o["wins"] / o["played"], 1) if o["played"] else 0.0
+        rows.append(o)
+    return {"head_to_head": _board(
+        sorted(rows, key=lambda r: (-r["played"], -r["wins"], r["opponent"])))}
 
 
 def _streak_boards(games: list[dict]) -> dict:
@@ -446,10 +631,22 @@ def _streak_boards(games: list[dict]) -> dict:
         out = []
         for a, b in found:
             span = games[a:b + 1]
+            grades = []
+            for gm in span:
+                gn = gm.get("grade_name")
+                if gn and gn not in grades:
+                    grades.append(gn)
             out.append({
                 "value": len(span),
                 "from": span[0].get("played_at"),
                 "to": span[-1].get("played_at"),
+                # WHICH GRADES THE RUN CROSSED. Unfiltered, a streak is the
+                # club's whole fixture list in date order, so a run can hop
+                # between grades on the same weekend and read as a mystery.
+                # Naming them makes it checkable, and the grade filter above
+                # the board narrows it to one when that is the question.
+                "grades": grades,
+                "opponents": [gm.get("opp_club_name") for gm in span],
                 "from_season": span[0].get("season_name"),
                 "to_season": span[-1].get("season_name"),
                 "first_game_id": span[0].get("game_id"),
@@ -529,7 +726,11 @@ def assemble(games: list[dict]) -> dict:
 
     boards: dict = {}
     boards.update(_totals_boards(games))
+    boards.update(_aggregate_boards(games))
     boards.update(_margin_boards(games))
+    boards.update(_chase_and_close_boards(games))
+    boards.update(_extras_board(games))
+    boards.update(_opposition_board(games))
     boards.update(_streak_boards(games))
     boards.update(_season_boards(games))
 

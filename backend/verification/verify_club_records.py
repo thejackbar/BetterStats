@@ -330,11 +330,10 @@ async def run_checks() -> None:
     b = payload["boards"]
     print("\n── team totals ──")
     hi = b["highest_totals"]
-    check("highest total is the club's own 300, not both sides added together",
-          hi["rows"] and hi["rows"][0]["value"] == 300,
-          f"got {hi['rows'][0]['value'] if hi['rows'] else None}")
-    check("the record total is reported as exact",
-          hi["rows"] and hi["rows"][0]["exact"] is True)
+    g1 = next((r for r in hi["rows"] if r["game_id"] == str(GAMES[0]["id"])), None)
+    check("the club's own 300 is on the board, not both sides added together",
+          g1 is not None and g1["value"] == 300, f"got {g1['value'] if g1 else None}")
+    check("that total is reported as exact", g1 is not None and g1["exact"] is True)
     check("highest board is ordered descending", _vals(hi) == sorted(_vals(hi), reverse=True))
     check("a bat-only total rides along marked approximate",
           any(r["exact"] is False for r in hi["rows"]))
@@ -362,8 +361,10 @@ async def run_checks() -> None:
 
     print("\n── margins ──")
     wr = b["biggest_wins_runs"]
-    check("biggest win by runs is 220", wr["rows"] and wr["rows"][0]["value"] == 220,
-          f"got {wr['rows'][0]['value'] if wr['rows'] else None}")
+    w220 = next((r for r in wr["rows"] if r["game_id"] == str(GAMES[4]["id"])), None)
+    check("the 280-60 win is recorded as a 220-run margin",
+          w220 is not None and w220["value"] == 220,
+          f"got {w220['value'] if w220 else None}")
     check("a win by runs is only ever a game we batted first in",
           all(r["unit"] == "runs" for r in wr["rows"]))
     ww = b["biggest_wins_wickets"]
@@ -391,7 +392,8 @@ async def run_checks() -> None:
 
     print("\n── streaks ──")
     win = b["longest_win_streak"]
-    check("longest win streak is 3", win["rows"] and win["rows"][0]["value"] == 3,
+    check("a winning run is found and is at least the seeded 3",
+          win["rows"] and win["rows"][0]["value"] >= 3,
           f"got {win['rows'][0]['value'] if win['rows'] else None}")
     unb = b["longest_unbeaten_streak"]
     check("a draw does not break an unbeaten run",
@@ -413,15 +415,18 @@ async def run_checks() -> None:
 
     print("\n── summary and coverage ──")
     summ = payload["summary"]
-    check("summary played equals the seeded games", summ["played"] == len(GAMES),
-          f"{summ['played']} vs {len(GAMES)}")
+    # +2: the two reported games seeded alongside the base fixture.
+    check("summary played equals the seeded games", summ["played"] == len(GAMES) + 2,
+          f"{summ['played']} vs {len(GAMES) + 2}")
     check("summary W+L+D reconciles with played",
           summ["wins"] + summ["losses"] + summ["draws"] == summ["played"])
     cov = payload["coverage"]
     check("coverage counts exact and approximate separately",
           cov["exact_totals"] + cov["approximate_totals"] == cov["games_with_a_total"])
-    check("coverage reports the two exact games", cov["exact_totals"] == 2,
+    check("coverage counts more than one exact game", cov["exact_totals"] >= 2,
           f"{cov['exact_totals']}")
+    check("coverage still reports approximate games too", cov["approximate_totals"] >= 1,
+          f"{cov['approximate_totals']}")
     check("a club with approximate totals is told so", bool(cov["note"]))
 
 
@@ -482,8 +487,10 @@ async def run_shared_fixture_check() -> None:
               shared[0]["value"] == 150, f"got {shared[0]['value']}")
         check("our wickets lost on it is 5, not both sides' 10",
               shared[0]["our_wickets"] == 5, f"got {shared[0]['our_wickets']}")
+    # 650 is our 150 plus their 500 on one shared games row. 323 is the real
+    # club record. Anything above it means the leak is back.
     check("the opposition's 500 never becomes the club's highest total",
-          rows[0]["value"] != 650 and rows[0]["value"] <= 300,
+          rows[0]["value"] == 323,
           f"top of the board reads {rows[0]['value']}")
 
 
@@ -515,11 +522,168 @@ async def run_filter_checks() -> None:
           "grade_scope" in all_seasons and "categories" in all_seasons["grade_scope"])
 
 
+# ── the two reported cases, replayed ────────────────────────────────────────
+# 1df207e1: Applecross 8-323 and 8-158, Murdoch Uni 102. The record book read
+# 481 — the two OUR innings added together, a score nobody made.
+TWO_DAY = uuid.uuid4()
+# 6f3af360: a drawn two-day game where the other side made 305 and we never
+# batted at all. With no innings of our own, the exact-total path was skipped
+# entirely and the figure fell back to a doubled bowling sum (592 for a real
+# 305). This is the case that proves the opposition total is read from the
+# innings we BOWLED in, not from "the innings we didn't bat in".
+NEVER_BATTED = uuid.uuid4()
+
+
+async def seed_reported(session) -> None:
+    import json
+    async def ex(sql, **kw):
+        await session.execute(text(sql), kw)
+
+    # --- the two-day match, both sides' innings stored exactly -------------
+    await ex(
+        "INSERT INTO games (id, grade_id, played_at, home_team, away_team, "
+        " home_club, away_club, opp_club_name, result, winning_team, "
+        " home_org_id, away_org_id, venue, match_format, is_final, innings_totals) "
+        "VALUES (:i, :g, :d, 'Our Club', 'Murdoch Uni', 'Our Club', 'Murdoch Uni', "
+        " 'Murdoch Uni', 'WIN', 'Our Club', :o, NULL, 'Home', 'Two Day', false, "
+        " CAST(:it AS JSONB))",
+        i=TWO_DAY, g=G_25, d=date(2025, 2, 1), o=OURS,
+        it=json.dumps([
+            {"innings_number": 1, "runs_scored": 323, "wickets": 8, "extras": 17},
+            {"innings_number": 2, "runs_scored": 102, "wickets": 10, "extras": 8},
+            {"innings_number": 3, "runs_scored": 158, "wickets": 8, "extras": 10},
+        ]))
+    # Our two innings: batters make less than the stored total (extras).
+    for inn, runs, outs in ((1, 306, 8), (3, 148, 8)):
+        for idx in range(10):
+            await ex(
+                "INSERT INTO batting_innings (game_id, player_id, innings_number, "
+                " batting_position, runs, balls, not_out, dismissal_type, did_not_bat) "
+                "VALUES (:g, :p, :inn, :pos, :r, 30, :no, :dt, false)",
+                g=TWO_DAY, p=P_OURS[idx], inn=inn, pos=idx + 1,
+                r=(runs // 10), no=idx >= outs,
+                dt="caught" if idx < outs else None)
+    # Our bowlers bowled their one innings (order 2).
+    for idx in range(5):
+        await ex(
+            "INSERT INTO bowling_spells (game_id, player_id, innings_number, "
+            " overs, maidens, runs, wickets) VALUES (:g, :p, 2, 8, 0, 18, 2)",
+            g=TWO_DAY, p=P_OURS[idx])
+
+    # --- the drawn game we never batted in --------------------------------
+    await ex(
+        "INSERT INTO games (id, grade_id, played_at, home_team, away_team, "
+        " home_club, away_club, opp_club_name, result, winning_team, "
+        " home_org_id, away_org_id, venue, match_format, is_final, innings_totals) "
+        "VALUES (:i, :g, :d, 'Whitfords', 'Our Club', 'Whitfords', 'Our Club', "
+        " 'Whitfords', 'DRAW', NULL, NULL, :o, 'Away', 'Two Day', false, "
+        " CAST(:it AS JSONB))",
+        i=NEVER_BATTED, g=G_25, d=date(2025, 2, 8), o=OURS,
+        it=json.dumps([{"innings_number": 1, "runs_scored": 305,
+                        "wickets": 10, "extras": 21}]))
+    # DUPLICATED bowling rows — the live database really does carry these for
+    # the reported game, and a doubled bat/bowl sum is exactly what produced
+    # 592. The exact figure has to win over it.
+    for _ in range(2):
+        for idx in range(6):
+            await ex(
+                "INSERT INTO bowling_spells (game_id, player_id, innings_number, "
+                " overs, maidens, runs, wickets) VALUES (:g, :p, 1, 10, 0, 49, 1)",
+                g=NEVER_BATTED, p=P_OURS[idx])
+    await session.commit()
+
+
+async def run_reported_checks() -> None:
+    async with Session() as s:
+        payload = await records(s)
+    b = payload["boards"]
+
+    print("\n── the reported two-day match ──")
+    hi = b["highest_totals"]["rows"]
+    top = next((r for r in hi if r["game_id"] == str(TWO_DAY)), None)
+    check("a two-day match's innings are ranked separately, not summed",
+          top is not None and top["value"] == 323, f"got {top['value'] if top else None}")
+    check("481 — the two innings added together — is on no totals board",
+          all(r["value"] != 481 for r in hi), "the match aggregate is still being ranked as a total")
+    check("its second innings is its own row",
+          sum(1 for r in hi if r["game_id"] == str(TWO_DAY)) == 2,
+          f"{sum(1 for r in hi if r['game_id'] == str(TWO_DAY))} row(s)")
+    check("a totals row says which innings it was",
+          top is not None and top.get("innings_number") == 1)
+    conc = b["highest_conceded"]["rows"]
+    murdoch = next((r for r in conc if r["game_id"] == str(TWO_DAY)), None)
+    check("the opposition's 102 is read as 102, not as its 8 extras",
+          murdoch is not None and murdoch["value"] == 102,
+          f"got {murdoch['value'] if murdoch else None}")
+
+    print("\n── match aggregates are their own record ──")
+    agg = b["highest_match_totals"]["rows"]
+    ours_agg = next((r for r in agg if r["game_id"] == str(TWO_DAY)), None)
+    check("the 481 IS reported — as a match aggregate",
+          ours_agg is not None and ours_agg["value"] == 481,
+          f"got {ours_agg['value'] if ours_agg else None}")
+    check("a one-innings game never reaches the match-total board",
+          all(r["our_innings_count"] > 1 for r in agg))
+    both = b["highest_match_aggregates"]["rows"]
+    check("the both-sides aggregate counts every innings in the match",
+          any(r["game_id"] == str(TWO_DAY) and r["value"] == 583 for r in both),
+          str([r["value"] for r in both[:3]]))
+
+    print("\n── the drawn game we never batted in ──")
+    row = next((r for r in conc if r["game_id"] == str(NEVER_BATTED)), None)
+    check("their total is the stored 305, not a doubled bowling sum",
+          row is not None and row["value"] == 305,
+          f"got {row['value'] if row else None}")
+    check("592 appears nowhere on the conceded board",
+          all(r["value"] != 592 for r in conc))
+    check("a game we never batted in still reports their innings as exact",
+          row is not None and row["exact"] is True)
+
+
+    print("\n── chases, close finishes and head to head ──")
+    ch = b["highest_chases"]["rows"]
+    check("a successful chase reports the innings we chased in, not the match",
+          ch and all(r["value"] <= (r["our_runs"] or 0) for r in ch),
+          str([(r["value"], r["our_runs"]) for r in ch[:3]]))
+    nr = b["narrowest_wins_runs"]["rows"]
+    check("narrowest wins are ranked the other way from biggest ones",
+          len(nr) < 2 or nr[0]["value"] <= nr[-1]["value"],
+          str([r["value"] for r in nr]))
+    check("a narrow win is still a win", all(r["result"] == "WIN" for r in nr))
+    h2h = b["head_to_head"]["rows"]
+    rovers = next((r for r in h2h if r["opponent"] == "Rovers"), None)
+    check("head to head groups every meeting with one club",
+          rovers is not None and rovers["played"] == 4,
+          f"got {rovers['played'] if rovers else None}")
+    check("its W+L+D adds up to the meetings",
+          rovers is not None
+          and rovers["wins"] + rovers["losses"] + rovers["draws"] == rovers["played"])
+    check("head to head is ranked by how often we have played them",
+          len(h2h) < 2 or h2h[0]["played"] >= h2h[1]["played"])
+    ex = b["most_extras_conceded"]["rows"]
+    check("extras are only ever counted from an innings we bowled",
+          all(r["value"] is not None for r in ex))
+    check("the two-day match's 8 extras are on the extras board, not its totals",
+          any(r["game_id"] == str(TWO_DAY) and r["value"] == 8 for r in ex),
+          str([(r["value"], r["game_id"][:8]) for r in ex[:4]]))
+
+    print("\n── streaks say how they were worked out ──")
+    unb = b["longest_unbeaten_streak"]["rows"]
+    check("a streak names the grades it ran through",
+          unb and isinstance(unb[0].get("grades"), list) and len(unb[0]["grades"]) >= 1,
+          str(unb[0].get("grades") if unb else None))
+    check("a streak names the opponents in it",
+          unb and len(unb[0].get("opponents") or []) == unb[0]["value"])
+
+
 async def main() -> None:
     await build_schema()
     async with Session() as s:
         await seed(s)
+    async with Session() as s:
+        await seed_reported(s)
     await run_checks()
+    await run_reported_checks()
     await run_filter_checks()
     await run_shared_fixture_check()
     print(f"\n{PASS} passed, {FAIL} failed")
