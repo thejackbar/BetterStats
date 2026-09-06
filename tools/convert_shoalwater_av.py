@@ -786,7 +786,13 @@ NOTES = [
                                "slips. Squads for different grades on one day do not overlap "
                                "at all, and a player spends a median 93% of a season in one "
                                "grade, so the grade split can be trusted."),
-    ("Which file to import", "betterimport_season_stats.csv. There is one, deliberately."),
+    ("Which file to import", "manual_games_scorecards.csv - the same matches as this "
+                             "workbook, one row per player per match, in the columns "
+                             "BetterCricket's scorecard import reads. It lands real match "
+                             "records, so match pages and partnerships work."),
+    ("", "betterimport_season_stats.csv is the simpler alternative: season totals per "
+         "player, no match detail. Import ONE of the two, never both - the same runs "
+         "would be counted twice."),
     ("", ""),
     ("Checks run against the files' own arithmetic", ""),
 ]
