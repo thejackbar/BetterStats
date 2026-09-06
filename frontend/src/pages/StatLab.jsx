@@ -162,9 +162,14 @@ const PRESET_GROUPS = [
       { type: 'derived', key: 'consecutive_no_duck',           label: 'Most consecutive scores without a duck', description: 'Longest streak of innings without a duck.' },
       { type: 'derived', key: 'golden_ducks',                  label: 'Most golden ducks',         description: 'Out for 0 off 0 or 1 ball.' },
       { type: 'derived', key: 'duck_pairs',                    label: 'Duck pairs',                description: 'Ducks in both innings of the same match.' },
-      // Scores ranges
+      // Scores ranges. The preset lists the innings themselves (one row per
+      // innings); the derived report beside it counts them per player, which
+      // is the "who gets stuck in the nineties" question rather than
+      // "which innings ended there". Two different reports, so both are listed.
       { type: 'preset', label: 'Most 90s',                     target: 'innings_list',  sortBy: 'runs',                sortDir: 'desc', filters: [{ field: 'runs', op: 'gte', value: '90' }, { field: 'runs', op: 'lt', value: '100' }], context: {} },
+      { type: 'derived', key: 'most_90s',                      label: 'Most innings in the 90s',  description: 'Per-player count of innings scored in the 90s.' },
       { type: 'preset', label: 'Most 40s',                     target: 'innings_list',  sortBy: 'runs',                sortDir: 'desc', filters: [{ field: 'runs', op: 'gte', value: '40' }, { field: 'runs', op: 'lt', value: '50' }], context: {} },
+      { type: 'derived', key: 'most_40s',                      label: 'Most innings in the 40s',  description: 'Per-player count of innings scored in the 40s.' },
       // Hundreds
       { type: 'preset', label: 'Most hundreds (career)',       target: 'player_career', sortBy: 'hundreds',            sortDir: 'desc', filters: [{ field: 'hundreds', op: 'gte', value: '1' }], context: {} },
       { type: 'preset', label: 'Most hundreds in a season',    target: 'player_season', sortBy: 'hundreds',            sortDir: 'desc', filters: [{ field: 'hundreds', op: 'gte', value: '1' }], context: {} },
@@ -260,6 +265,9 @@ const PRESET_GROUPS = [
       { type: 'derived', key: 'ducks_inflicted',                   label: 'Most ducks inflicted',      description: 'Bowlers who dismissed batters for 0 most often.' },
       { type: 'derived', key: 'golden_ducks_inflicted',            label: 'Most golden ducks inflicted', description: 'Bowlers who dismissed batters for 0 off 0–1 balls.' },
       { type: 'derived', key: 'bowler_fielder_combo',              label: 'Top bowler/fielder combinations', description: 'Most productive bowler+catcher partnerships.' },
+      // The batter's side of this ("Highest C&B count") is under Batting; this
+      // is the bowler's, ranked by caught-and-bowled wickets taken.
+      { type: 'derived', key: 'caught_and_bowled_bowler',           label: 'Highest C&B count (bowler)', description: 'Bowlers ranked by caught-and-bowled wickets taken.' },
       { type: 'derived', key: 'top_opening_bowlers',               label: 'Top opening bowlers by match count', description: 'Players who most often take the new ball.' },
       { type: 'derived', key: 'most_wickets_in_match',             label: 'Most wickets taken in a match', description: 'Most wickets by one bowler across both innings.' },
       { type: 'preset', label: 'On this day — bowling',            target: 'spell_list',    sortBy: 'wickets',             sortDir: 'desc', filters: [], context: { on_this_day: true } },

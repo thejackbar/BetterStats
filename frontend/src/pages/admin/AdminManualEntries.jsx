@@ -4,6 +4,7 @@ import { api } from '../../lib/api'
 import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import Dropdown from '../../components/Dropdown'
 import { formatSeason } from '../../lib/cricketFormat'
+import ManualGamesImportWizard from '../../components/admin/ManualGamesImportWizard'
 
 const INPUT_CLS = 'w-full bg-pb-surface2 border pb-hairline text-pb-text text-sm rounded px-3 py-2 focus:outline-none focus:border-pb-accent'
 const LABEL_CLS = 'font-mono text-[10px] text-pb-faint block mb-1'
@@ -14,6 +15,7 @@ const BTN_DANGER = 'inline-flex items-center px-3 py-1.5 border border-red-400/4
 const TABS = [
   { key: 'season', label: 'Adjustments', hint: 'Add or correct a player\'s totals. Leave season blank to apply as a career-only adjustment.' },
   { key: 'game', label: 'Manual Games', hint: 'Add full or partial historical scorecards' },
+  { key: 'import', label: 'Import Scorecards', hint: 'Bring a whole history in from a spreadsheet, creating the seasons, grades and players it needs' },
   { key: 'audit', label: 'Audit & Undo', hint: 'Reverse any previous change' },
 ]
 
@@ -1592,6 +1594,12 @@ export default function AdminManualEntries() {
         )}
         {activeTab === 'game' && (
           <ManualGamesTab key={tick + ':game'} players={players} seasons={seasons} grades={grades} knownValues={knownValues} refreshAll={refreshAll} onPending={onPending} onSeasonCreated={onSeasonCreated} onGradeCreated={onGradeCreated} />
+        )}
+        {activeTab === 'import' && (
+          // A STABLE key, deliberately: the wizard owns its own state and
+          // reports what it just imported, so remounting it on the refresh
+          // it asks for would wipe that report the instant it appeared.
+          <ManualGamesImportWizard key="import" onDone={refreshAll} />
         )}
         {activeTab === 'audit' && (
           <AuditTab key={tick + ':audit'} refreshAll={refreshAll} onPending={onPending} />

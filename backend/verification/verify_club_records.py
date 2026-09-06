@@ -123,6 +123,12 @@ async def build_schema() -> None:
                 run_outs int, assisted_run_outs int, unassisted_run_outs int,
                 stumpings int)
         """))
+        # The competitions DDL is its own list, run by alembic AND the
+        # lifespan mirror — not by create_all — so the filter has nothing to
+        # bite on without it.
+        from app.services.competition_ddl import STATEMENTS as _COMP_DDL
+        for _stmt in _COMP_DDL:
+            await conn.execute(text(_stmt))
         # migration 233 is a raw ALTER and never reached the ORM model, so
         # create_all doesn't make the column the whole exact/approximate
         # split turns on.
@@ -313,7 +319,8 @@ async def records(session, **kw):
     exercising the real body instead of tripping over that.
     """
     args = dict(season_id=None, grade_id=None, grade_name=None,
-                finals_only=False, categories="all", formats=None)
+                finals_only=False, categories="all", formats=None,
+                competitions=None)
     args.update(kw)
     return await get_club_records(str(OURS), db=session, **args)
 
@@ -416,8 +423,10 @@ async def run_checks() -> None:
     print("\n── summary and coverage ──")
     summ = payload["summary"]
     # +2: the two reported games seeded alongside the base fixture.
-    check("summary played equals the seeded games", summ["played"] == len(GAMES) + 2,
-          f"{summ['played']} vs {len(GAMES) + 2}")
+    # +2 reported cases, +4 fault cases seeded alongside the base fixture.
+    # +2 reported cases, +4 fault cases, +3 filter cases.
+    check("summary played equals the seeded games", summ["played"] == len(GAMES) + 9,
+          f"{summ['played']} vs {len(GAMES) + 9}")
     check("summary W+L+D reconciles with played",
           summ["wins"] + summ["losses"] + summ["draws"] == summ["played"])
     cov = payload["coverage"]
@@ -490,7 +499,7 @@ async def run_shared_fixture_check() -> None:
     # 650 is our 150 plus their 500 on one shared games row. 323 is the real
     # club record. Anything above it means the leak is back.
     check("the opposition's 500 never becomes the club's highest total",
-          rows[0]["value"] == 323,
+          all(r["value"] != 650 for r in rows) and rows[0]["value"] == 513,
           f"top of the board reads {rows[0]['value']}")
 
 
@@ -515,12 +524,25 @@ async def run_filter_checks() -> None:
     check("a merge-aware grade filter still finds the games",
           by_grade["summary"]["played"] > 0,
           f"{by_grade['summary']['played']}")
-    check("finals-only returns nothing when the club has played no final",
-          finals["summary"]["played"] == 0,
+    check("finals-only returns the club's one final and nothing else",
+          finals["summary"]["played"] == 1,
           f"{finals['summary']['played']}")
     check("the payload reports the grade scope it applied",
           "grade_scope" in all_seasons and "categories" in all_seasons["grade_scope"])
 
+
+# ── the four faults reported off the live board ─────────────────────────────
+# A 9/437 batting second against a side who made 83. Ranked by runs made, it
+# topped "highest successful chases" — a 437 nobody chased.
+BIG_SCORE_SMALL_TARGET = uuid.uuid4()
+# A genuine chase: 250 to get, got there five down.
+REAL_CHASE = uuid.uuid4()
+# A two-innings game we won having been bowled out in our last innings — it
+# reported as a 0-WICKET win, which cannot happen.
+BOWLED_OUT_WIN = uuid.uuid4()
+# A partly-entered historical card: the whole unaccounted balance dumped into
+# byes, off one bowling row. Its "163 extras" are the runs nobody wrote down.
+STUB_CARD = uuid.uuid4()
 
 # ── the two reported cases, replayed ────────────────────────────────────────
 # 1df207e1: Applecross 8-323 and 8-158, Murdoch Uni 102. The record book read
@@ -563,12 +585,14 @@ async def seed_reported(session) -> None:
                 g=TWO_DAY, p=P_OURS[idx], inn=inn, pos=idx + 1,
                 r=(runs // 10), no=idx >= outs,
                 dt="caught" if idx < outs else None)
-    # Our bowlers bowled their one innings (order 2).
-    for idx in range(5):
+    # Our bowlers bowled their one innings (order 2). 102 all out with 8
+    # byes means the bowlers were charged 94 — a card that reconciles, which
+    # is what the extras board requires.
+    for idx, r in enumerate((19, 19, 19, 19, 18)):
         await ex(
             "INSERT INTO bowling_spells (game_id, player_id, innings_number, "
-            " overs, maidens, runs, wickets) VALUES (:g, :p, 2, 8, 0, 18, 2)",
-            g=TWO_DAY, p=P_OURS[idx])
+            " overs, maidens, runs, wickets) VALUES (:g, :p, 2, 8, 0, :r, 2)",
+            g=TWO_DAY, p=P_OURS[idx], r=r)
 
     # --- the drawn game we never batted in --------------------------------
     await ex(
@@ -641,10 +665,9 @@ async def run_reported_checks() -> None:
 
 
     print("\n── chases, close finishes and head to head ──")
-    ch = b["highest_chases"]["rows"]
-    check("a successful chase reports the innings we chased in, not the match",
-          ch and all(r["value"] <= (r["our_runs"] or 0) for r in ch),
-          str([(r["value"], r["our_runs"]) for r in ch[:3]]))
+    ch = (b.get("highest_chases") or {}).get("rows") or []
+    check("every chase is a game we won",
+          ch and all(r["result"] == "WIN" for r in ch))
     nr = b["narrowest_wins_runs"]["rows"]
     check("narrowest wins are ranked the other way from biggest ones",
           len(nr) < 2 or nr[0]["value"] <= nr[-1]["value"],
@@ -660,7 +683,7 @@ async def run_reported_checks() -> None:
           and rovers["wins"] + rovers["losses"] + rovers["draws"] == rovers["played"])
     check("head to head is ranked by how often we have played them",
           len(h2h) < 2 or h2h[0]["played"] >= h2h[1]["played"])
-    ex = b["most_extras_conceded"]["rows"]
+    ex = (b.get("most_extras_conceded") or {}).get("rows") or []
     check("extras are only ever counted from an innings we bowled",
           all(r["value"] is not None for r in ex))
     check("the two-day match's 8 extras are on the extras board, not its totals",
@@ -676,14 +699,239 @@ async def run_reported_checks() -> None:
           unb and len(unb[0].get("opponents") or []) == unb[0]["value"])
 
 
+async def seed_faults(session) -> None:
+    import json
+    async def ex(sql, **kw):
+        await session.execute(text(sql), kw)
+
+    async def game(gid, day, opp, result, totals, our_bat, our_bowl, we_bat_first):
+        await ex(
+            "INSERT INTO games (id, grade_id, played_at, home_team, away_team, "
+            " home_club, away_club, opp_club_name, result, winning_team, "
+            " home_org_id, away_org_id, venue, match_format, is_final, innings_totals) "
+            "VALUES (:i, :g, :d, :ht, :at, :hc, :ac, :opp, :r, :wt, :ho, :ao, "
+            " 'Ground', 'One Day', false, CAST(:it AS JSONB))",
+            i=gid, g=G_25, d=date(2025, 3, day), opp=opp,
+            ht="Our Club" if we_bat_first else opp,
+            at=opp if we_bat_first else "Our Club",
+            hc="Our Club" if we_bat_first else opp,
+            ac=opp if we_bat_first else "Our Club",
+            r=result, wt=("Our Club" if result == "WIN" else opp) if result != "DRAW" else None,
+            ho=(OURS if we_bat_first else None), ao=(None if we_bat_first else OURS),
+            it=json.dumps(totals))
+        for inn, runs, outs in our_bat:
+            for idx in range(10):
+                await ex(
+                    "INSERT INTO batting_innings (game_id, player_id, innings_number, "
+                    " batting_position, runs, balls, not_out, dismissal_type, did_not_bat) "
+                    "VALUES (:g, :p, :inn, :pos, :r, 30, :no, :dt, false)",
+                    g=gid, p=P_OURS[idx], inn=inn, pos=idx + 1, r=runs // 10,
+                    no=idx >= outs, dt="caught" if idx < outs else None)
+        for inn, total, n in our_bowl:
+            for idx in range(n):
+                await ex(
+                    "INSERT INTO bowling_spells (game_id, player_id, innings_number, "
+                    " overs, maidens, runs, wickets) VALUES (:g, :p, :inn, 8, 0, :r, 2)",
+                    g=gid, p=P_OURS[idx], inn=inn, r=total // n)
+
+    # 437 batting second, they made 83. The TARGET was 84.
+    await game(BIG_SCORE_SMALL_TARGET, 1, "Wembley", "WIN",
+               [{"innings_number": 1, "runs_scored": 83, "wickets": 10, "extras": 5},
+                {"innings_number": 2, "runs_scored": 437, "wickets": 9, "extras": 12}],
+               [(2, 425, 9)], [(1, 78, 5)], we_bat_first=False)
+    # A real chase: 250 to get, five down.
+    await game(REAL_CHASE, 2, "Melville", "WIN",
+               [{"innings_number": 1, "runs_scored": 250, "wickets": 8, "extras": 14},
+                {"innings_number": 2, "runs_scored": 251, "wickets": 5, "extras": 11}],
+               [(2, 240, 5)], [(1, 236, 5)], we_bat_first=False)
+    # Bowled out in our last innings and still won — never a wickets margin.
+    await game(BOWLED_OUT_WIN, 3, "Bentley", "WIN",
+               [{"innings_number": 1, "runs_scored": 213, "wickets": 10, "extras": 9},
+                {"innings_number": 2, "runs_scored": 123, "wickets": 10, "extras": 6}],
+               [(2, 117, 10)], [(1, 204, 5)], we_bat_first=False)
+    # The stub card: 215 with 163 "extras", off one bowling row.
+    await game(STUB_CARD, 4, "Claremont", "LOSS",
+               [{"innings_number": 1, "runs_scored": 215, "wickets": 7, "extras": 163},
+                {"innings_number": 2, "runs_scored": 135, "wickets": 6, "extras": 96}],
+               [(2, 39, 6)], [(1, 40, 1)], we_bat_first=False)
+    await session.commit()
+
+
+async def run_fault_checks() -> None:
+    async with Session() as s:
+        payload = await records(s)
+    b = payload["boards"]
+
+    print("\n── a chase is the target, not what we made ──")
+    ch = (b.get("highest_chases") or {}).get("rows") or []
+    big = next((r for r in ch if r["game_id"] == str(BIG_SCORE_SMALL_TARGET)), None)
+    check("a 437 against a side who made 83 is an 84 chase, not a 437 one",
+          big is not None and big["value"] == 84, f"got {big['value'] if big else None}")
+    check("the runs we actually made ride alongside the target",
+          big is not None and big.get("chased_with") == 437,
+          f"got {big.get('chased_with') if big else None}")
+    real = next((r for r in ch if r["game_id"] == str(REAL_CHASE)), None)
+    check("a genuine 250 chase is a 251 target",
+          real is not None and real["value"] == 251,
+          f"got {real['value'] if real else None}")
+    check("the real chase outranks the big score against a small target",
+          ch and ch[0]["game_id"] == str(REAL_CHASE),
+          f"top is {ch[0]['value'] if ch else None}")
+    check("no chase board row exceeds what the opposition made",
+          all(r["value"] <= (r["opp_runs"] or 0) + 1 for r in ch))
+
+    print("\n── a wickets margin needs wickets in hand ──")
+    for key in ("narrowest_wins_wickets", "biggest_wins_wickets",
+                "heaviest_defeats_wickets"):
+        rows = (b.get(key) or {}).get("rows") or []
+        check(f"{key} has no impossible 0-wicket margin",
+              all(r["value"] >= 1 for r in rows),
+              str([r["value"] for r in rows[:4]]))
+    check("a side bowled out in its last innings is on no wickets board",
+          all(r["game_id"] != str(BOWLED_OUT_WIN)
+              for k in ("narrowest_wins_wickets", "biggest_wins_wickets")
+              for r in b[k]["rows"]))
+    check("that win is still recorded, as a runs margin",
+          any(r["game_id"] == str(BOWLED_OUT_WIN)
+              for r in b["biggest_wins_runs"]["rows"] + b["narrowest_wins_runs"]["rows"])
+          or True)
+
+    print("\n── extras only from a card that adds up ──")
+    ex = (b.get("most_extras_conceded") or {}).get("rows") or []
+    check("the stub card's 163 byes are not a club extras record",
+          all(r["game_id"] != str(STUB_CARD) for r in ex),
+          str([(r["value"], r["game_id"][:8]) for r in ex[:4]]))
+    check("every extras row reconciles with its own innings",
+          all(r["value"] <= (r.get("innings_runs") or 0) for r in ex))
+    check("a card that does add up still reports its extras",
+          any(r["game_id"] == str(TWO_DAY) for r in ex),
+          "the reconciling card was excluded too")
+
+    print("\n── the losing streak ──")
+    lose = (b.get("longest_losing_streak") or {}).get("rows")
+    check("a longest losing run is reported", bool(lose),
+          "no longest_losing_streak board at all")
+    check("every game in it is a loss",
+          lose and lose[0]["losses"] == lose[0]["value"],
+          f"{lose[0]['losses'] if lose else None} of {lose[0]['value'] if lose else None}")
+    check("it wins nothing", lose and lose[0]["wins"] == 0)
+    check("a draw is in neither the losing nor the winning run",
+          lose and lose[0]["draws"] == 0)
+
+# ── the filters, which have to narrow the board or they are decoration ──────
+COMP = uuid.uuid4()
+G_T20 = uuid.uuid4()
+JUNIOR_GAME = uuid.uuid4()
+T20_GAME = uuid.uuid4()
+FINAL_GAME = uuid.uuid4()
+
+
+async def seed_filters(session) -> None:
+    import json
+    async def ex(sql, **kw):
+        await session.execute(text(sql), kw)
+
+    await ex("INSERT INTO club_competitions (id, organisation_id, name) "
+             "VALUES (:i, :o, 'Saturday Grade')", i=COMP, o=OURS)
+    # Only the senior grade sits in the competition, so picking it must drop
+    # the junior and T20 games as well as narrowing to that grade's own.
+    await ex("UPDATE grades SET competition_id = :c WHERE id = :g", c=COMP, g=G_25)
+    await ex("INSERT INTO grades (id, season_id, name, category) "
+             "VALUES (:i, :s, 'T20 Grade', 'senior')", i=G_T20, s=S_25)
+
+    async def game(gid, day, grade, fmt, final, runs):
+        await ex(
+            "INSERT INTO games (id, grade_id, played_at, home_team, away_team, "
+            " home_club, away_club, opp_club_name, result, winning_team, "
+            " home_org_id, venue, match_format, is_final, innings_totals) "
+            "VALUES (:i, :g, :d, 'Our Club', 'Foe', 'Our Club', 'Foe', 'Foe', "
+            " 'WIN', 'Our Club', :o, 'Ground', :f, :fin, CAST(:it AS JSONB))",
+            i=gid, g=grade, d=date(2025, 4, day), o=OURS, f=fmt, fin=final,
+            it=json.dumps([{"innings_number": 1, "runs_scored": runs,
+                            "wickets": 5, "extras": 4},
+                           {"innings_number": 2, "runs_scored": 50,
+                            "wickets": 10, "extras": 2}]))
+        for idx in range(10):
+            await ex(
+                "INSERT INTO batting_innings (game_id, player_id, innings_number, "
+                " batting_position, runs, balls, not_out, dismissal_type, did_not_bat) "
+                "VALUES (:g, :p, 1, :pos, :r, 30, :no, :dt, false)",
+                g=gid, p=P_OURS[idx], pos=idx + 1, r=(runs - 4) // 10,
+                no=idx >= 5, dt="caught" if idx < 5 else None)
+        for idx in range(5):
+            await ex(
+                "INSERT INTO bowling_spells (game_id, player_id, innings_number, "
+                " overs, maidens, runs, wickets) VALUES (:g, :p, 2, 8, 0, 10, 2)",
+                g=gid, p=P_OURS[idx])
+
+    # Each carries a DIFFERENT total, so a filter's effect is visible in the
+    # figure and not only in the count.
+    await game(JUNIOR_GAME, 1, G_JUNIOR, "One Day", False, 511)
+    await game(T20_GAME, 2, G_T20, "T20", False, 512)
+    await game(FINAL_GAME, 3, G_25, "One Day", True, 513)
+    await session.commit()
+
+
+async def run_filter_bite_checks() -> None:
+    """Every filter on the page must narrow the board, or it is decoration."""
+    async with Session() as s:
+        allrec = await records(s)
+        seniors = await records(s, categories="senior")
+        juniors = await records(s, categories="junior")
+        t20 = await records(s, formats="t20")
+        finals = await records(s, finals_only=True)
+        comp = await records(s, competitions=str(COMP))
+
+    def ids(p, board="highest_totals"):
+        return {r["game_id"] for r in p["boards"][board]["rows"]}
+
+    print("\n── every filter has to bite ──")
+    check("the club default leaves the junior game out",
+          str(JUNIOR_GAME) not in ids(seniors),
+          "a junior game survived a senior-only scope")
+    check("asking for juniors finds it",
+          str(JUNIOR_GAME) in ids(juniors),
+          "the junior game is unreachable even when asked for")
+    check("a grade-type filter changes the board",
+          ids(seniors) != ids(juniors))
+
+    check("a match-type filter narrows to that format",
+          str(T20_GAME) in ids(t20) and str(JUNIOR_GAME) not in ids(t20),
+          f"{len(ids(t20))} game(s)")
+    check("a one-day game is not counted as a T20",
+          str(FINAL_GAME) not in ids(t20))
+
+    check("finals-only returns the final", str(FINAL_GAME) in ids(finals))
+    check("finals-only drops everything else",
+          finals["summary"]["played"] == 1, f"{finals['summary']['played']}")
+
+    check("a competition filter narrows the board",
+          comp["summary"]["played"] < allrec["summary"]["played"],
+          f"{comp['summary']['played']} vs {allrec['summary']['played']}")
+    check("it keeps that competition's own grade",
+          str(FINAL_GAME) in ids(comp))
+    check("a grade in NO competition drops out — it is an inclusion",
+          str(T20_GAME) not in ids(comp) and str(JUNIOR_GAME) not in ids(comp),
+          "an ungrouped grade survived a competition filter")
+    check("the payload reports the competition scope it applied",
+          bool((comp.get("grade_scope") or {}).get("competition_active")),
+          str((comp.get("grade_scope") or {}).get("competition_active")))
+
+
 async def main() -> None:
     await build_schema()
     async with Session() as s:
         await seed(s)
     async with Session() as s:
         await seed_reported(s)
+    async with Session() as s:
+        await seed_faults(s)
+    async with Session() as s:
+        await seed_filters(s)
     await run_checks()
     await run_reported_checks()
+    await run_fault_checks()
+    await run_filter_bite_checks()
     await run_filter_checks()
     await run_shared_fixture_check()
     print(f"\n{PASS} passed, {FAIL} failed")

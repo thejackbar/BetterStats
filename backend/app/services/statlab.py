@@ -5334,13 +5334,18 @@ DERIVED_QUERIES: dict[str, dict] = {
     },
     # Score-range counts (renamed from list presets in the UI)
     "most_90s": {
-        "label": "Most 90s",
+        # Named for the COUNT, not the innings. A preset in the same menu group
+        # lists the innings themselves under "Most 90s"; the page heading is
+        # taken from this label, so a shared name would render two different
+        # reports under one title.
+        "label": "Most innings in the 90s",
         "description": "Per-player count of innings scored in the 90s (90-99 inclusive).",
         "fn": derived_most_90s,
         "columns": [{"key": "scores_in_90s", "label": "90s", "decimal": False}],
     },
     "most_40s": {
-        "label": "Most 40s",
+        # Same split as most_90s above.
+        "label": "Most innings in the 40s",
         "description": "Per-player count of innings scored in the 40s (40-49 inclusive).",
         "fn": derived_most_40s,
         "columns": [{"key": "scores_in_40s", "label": "40s", "decimal": False}],

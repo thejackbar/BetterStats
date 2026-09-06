@@ -27,3 +27,8 @@ frontend/dist/
 
 # Generated sync-watch snapshots (tools/sync_watch.py output)
 sync_snapshots/
+
+# A club's own member records — converted from their .AV files in this
+# session. Never in a public repo: the converter (tools/convert_shoalwater_av.py)
+# is the part worth keeping, the data is the club's.
+data/shoalwater-av/

@@ -275,8 +275,15 @@ async def per_game(
                 else (int(r["wkts"]) if r["wkts"] is not None else None))
         if runs is None:
             continue
+        # `bat_runs` is our batting sum on our side and our BOWLING sum on
+        # theirs — the raw figure before the stored total is preferred. Kept
+        # because the extras board needs to know whether the card reconciles,
+        # which is a question about the rows we hold, not about the total.
+        raw = int(r["bat_runs"]) if r["bat_runs"] is not None else None
         entry = {"innings_number": r["innings_number"], "runs": runs,
                  "wickets": wkts, "exact": exact,
+                 "bowl_runs": raw if r["side"] != "us" else None,
+                 "bat_runs": raw if r["side"] == "us" else None,
                  "extras": int(r["extras"]) if r["extras"] is not None else None}
         (g["our_innings"] if r["side"] == "us" else g["their_innings"]).append(entry)
 
@@ -466,14 +473,14 @@ def _margin_boards(games: list[dict]) -> dict:
                 # says, so it reads their LAST innings.
                 last = _last(g["their_innings"])
                 w = last["wickets"] if last else None
-                if w is not None and 0 <= w <= ALL_OUT_WICKETS:
+                if w is not None and 0 <= w < ALL_OUT_WICKETS:
                     defeats_wickets.append(
                         _row(g, value=ALL_OUT_WICKETS - w, unit="wickets", exact=exact))
         else:
             if won:
                 last = _last(g["our_innings"])
                 w = last["wickets"] if last else None
-                if w is not None and 0 <= w <= ALL_OUT_WICKETS:
+                if w is not None and 0 <= w < ALL_OUT_WICKETS:
                     by_wickets.append(
                         _row(g, value=ALL_OUT_WICKETS - w, unit="wickets", exact=exact))
             elif lost and opp > our:
@@ -514,18 +521,25 @@ def _chase_and_close_boards(games: list[dict]) -> dict:
         else:
             last = _last(g["our_innings"])
             w = last["wickets"] if last else None
-            if w is not None and 0 <= w <= ALL_OUT_WICKETS:
+            if w is not None and 0 <= w < ALL_OUT_WICKETS:
                 narrow_wkts.append(
                     _row(g, value=ALL_OUT_WICKETS - w, unit="wickets", exact=exact))
-            # A successful chase is the total we made in the innings we
-            # chased in — the LAST one — not the match aggregate. A club
-            # chasing 300 in the fourth innings of a two-day game is the
-            # record; adding its first innings to that answers nothing.
+            # A CHASE IS THE TARGET, NOT WHAT WE HAPPENED TO MAKE.
+            # Ranking the runs scored batting last put a 9/437 against a
+            # side who made 83 at the top of this board — a 437 nobody
+            # chased. The record is the total we had to overhaul: their
+            # whole match total, less anything we had already made before
+            # the innings we chased in, plus the one run that wins it.
             if last is not None:
-                chases.append(_row(
-                    g, value=last["runs"], exact=last["exact"],
-                    innings_number=last["innings_number"],
-                    innings_wickets=last["wickets"]))
+                before = sum(i["runs"] for i in g["our_innings"]
+                             if i["innings_number"] < last["innings_number"])
+                target = opp - before + 1
+                if target > 0:
+                    chases.append(_row(
+                        g, value=target, exact=exact,
+                        innings_number=last["innings_number"],
+                        chased_with=last["runs"],
+                        innings_wickets=last["wickets"]))
 
     return {
         "narrowest_wins_runs": _board(
@@ -538,24 +552,41 @@ def _chase_and_close_boards(games: list[dict]) -> dict:
 
 
 def _extras_board(games: list[dict]) -> dict:
-    """Most extras in an innings we bowled.
+    """Most extras in an innings we bowled — from cards that reconcile.
 
     Only OUR bowling innings: extras we gave away is a record about this
     club. What the opposition's bowlers sprayed is their business, and
     ranking the two together would make a club's worst discipline record
     depend on who it happened to play.
 
+    THE RECONCILIATION TEST IS THE WHOLE BOARD. A partly-entered historical
+    card carries the innings total and almost no individual rows, and
+    whoever typed it in put the entire unaccounted balance into BYES — so
+    `totalExtras` on those innings is not extras at all, it is the runs
+    nobody wrote down. The reported case is a 215 with "163 extras", all
+    byes, off ONE stored bowling row.
+
+    A bowler is charged everything except byes, leg byes and penalties, so
+    a complete card satisfies `bowlers' runs + extras >= the innings
+    total`. A stub fails it by however much was never entered. That is a
+    fact about the card rather than a threshold somebody picked, which is
+    why it is the test rather than a cap on how big an extras figure may be.
+
     Silent where the club holds no stored innings figure at all — extras
     live only on GR's own innings total, so a bat-only history genuinely
-    cannot answer this and an empty board says that better than a wrong one.
+    cannot answer this, and an empty board says so better than a wrong one.
     """
     rows = []
     for g in games:
         for i in g["their_innings"]:
-            if i.get("extras") is not None:
-                rows.append(_row(g, value=i["extras"], exact=True,
-                                 innings_number=i["innings_number"],
-                                 innings_runs=i["runs"]))
+            extras, runs, bowled = i.get("extras"), i.get("runs"), i.get("bowl_runs")
+            if extras is None or runs is None or bowled is None:
+                continue
+            if bowled + extras < runs:
+                continue  # the card does not add up; see above
+            rows.append(_row(g, value=extras, exact=True,
+                             innings_number=i["innings_number"],
+                             innings_runs=runs))
     return {"most_extras_conceded": _board(
         sorted(rows, key=lambda r: (-r["value"], r["played_at"] or "")))}
 
@@ -609,9 +640,10 @@ def _streak_boards(games: list[dict]) -> dict:
     than each board sorting for itself — a streak is the one record here
     that is about sequence rather than size.
 
-    A DRAW BREAKS A WINNING STREAK BUT NOT AN UNBEATEN ONE, which is what
-    makes the two boards different questions rather than one under two
-    names. A washed-out fixture never reaches here at all (it has no result,
+    A DRAW BREAKS A WINNING STREAK BUT NOT AN UNBEATEN ONE, and it breaks a
+    LOSING streak too — a side that did not lose did not lose, however
+    little it won. That is what makes these three different questions
+    rather than one under three names. A washed-out fixture never reaches here at all (it has no result,
     so `our_games` drops it): it is not a match the club failed to win, and
     letting it end a streak would punish a club for the weather.
     """
@@ -652,6 +684,7 @@ def _streak_boards(games: list[dict]) -> dict:
                 "first_game_id": span[0].get("game_id"),
                 "last_game_id": span[-1].get("game_id"),
                 "wins": sum(1 for g in span if _is_win(g)),
+                "losses": sum(1 for g in span if _is_loss(g)),
                 "draws": sum(1 for g in span if not _is_win(g) and not _is_loss(g)),
                 # A streak is a span of games, not one figure read off a
                 # scorecard, so it is exact whatever the totals were.
@@ -662,6 +695,10 @@ def _streak_boards(games: list[dict]) -> dict:
     return {
         "longest_win_streak": _board(_runs(_is_win)),
         "longest_unbeaten_streak": _board(_runs(lambda g: not _is_loss(g))),
+        # Asked for alongside the other two. A club's worst run is a record
+        # it will happily quote, and leaving it out while showing the best
+        # one reads as the record book flattering the club.
+        "longest_losing_streak": _board(_runs(_is_loss)),
     }
 
 
