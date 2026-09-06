@@ -65,6 +65,22 @@ B_CATCHES, B_WK_CATCHES, B_STUMPINGS, B_BYES = 52, 56, 60, 64
 B_VOTES = 82
 
 NOT_OUT = 11          # value of B_HOWOUT for a batter who was not out
+
+# Only NOT_OUT is proven (the count of dismissed batters matches the innings
+# wickets in 840 of 847 innings). The other five are supported by counting an
+# independent population in the same files and finding the same magnitude:
+# our batters were run out 443 times against 404 wickets we took that were not
+# credited to a bowler, and stumped 184 times against 204 stumpings by our own
+# keepers. Their shares (caught 47%, bowled 27%, lbw 9%) are ordinary club
+# rates. Everything else is left as a raw code rather than guessed at.
+DISMISSALS = {0: "Bowled", 1: "Caught", 2: "LBW", 3: "Stumped",
+              4: "Run out", NOT_OUT: "Not out"}
+
+
+def dismissal_label(code) -> str:
+    if code is None:
+        return ""
+    return DISMISSALS.get(code, f"code {code}")
 DID_NOT_BAT = 255     # value of B_POSITION for a player who was not in the order
 EPOCH = datetime.date(1899, 12, 30)
 
@@ -329,6 +345,7 @@ def build_rows(seasons: list) -> dict:
                                         "Batting position": b["position"], "Runs": b["runs"],
                                         "4s": b["fours"], "6s": b["sixes"],
                                         "Not out": "Y" if b["not_out"] else "",
+                                        "Dismissal": dismissal_label(b["dismissal_code"]),
                                         "Dismissal code": b["dismissal_code"]})
                     if b["bowled"]:
                         bowling.append({**common, "Player": who, "Overs": b["overs"],
@@ -357,8 +374,14 @@ def build_rows(seasons: list) -> dict:
             "Players": players}
 
 
-def build_season_stats(seasons: list) -> list:
-    """One row per player per season per grade, in BetterImport's own vocabulary."""
+def build_season_stats(seasons: list, by_grade: bool = True) -> list:
+    """One row per player per season (and per grade unless told otherwise).
+
+    ``by_grade=False`` exists because which grade a performance belongs to is
+    the one thing the source is shaky about - see ``squad_clashes``. The player
+    and season are never in doubt, so the ungraded roll-up is the safer import
+    where the grade split cannot be trusted.
+    """
     agg = {}
     seen_games = defaultdict(set)      # (player, season, grade) -> the matches played
     for s in seasons:
@@ -374,12 +397,13 @@ def build_season_stats(seasons: list) -> list:
                     name = s["players"].get(b["player_id"], {}).get("name")
                     if not name:
                         continue
-                    k = (name, s["season"], grade_label(team))
+                    k = (name, s["season"], grade_label(team) if by_grade else "")
                     row = agg.setdefault(k, {
                         "innings": 0, "runs": 0, "not_outs": 0, "hs": None, "hs_no": False,
                         "fours": 0, "sixes": 0, "balls": 0, "maidens": 0, "conceded": 0,
                         "wickets": 0, "catches": 0, "wk_catches": 0, "stumpings": 0,
-                        "spells": 0, "votes": 0.0,
+                        "spells": 0, "votes": 0.0, "fifties": 0, "hundreds": 0,
+                        "ducks": 0, "five_fors": 0, "best": None,
                     })
                     # a two-day match is one game however many legs a player appears in
                     seen_games[k].add(key)
@@ -390,6 +414,13 @@ def build_season_stats(seasons: list) -> list:
                         row["sixes"] += b["sixes"] or 0
                         if b["not_out"]:
                             row["not_outs"] += 1
+                        if b["runs"] >= 100:
+                            row["hundreds"] += 1
+                        elif b["runs"] >= 50:
+                            row["fifties"] += 1
+                        # out for nothing. A 0 not out is not a duck
+                        if b["runs"] == 0 and not b["not_out"]:
+                            row["ducks"] += 1
                         best = row["hs"]
                         better = best is None or b["runs"] > best
                         # an equal score that was not out is the better high score
@@ -402,6 +433,12 @@ def build_season_stats(seasons: list) -> list:
                         row["maidens"] += b["maidens"] or 0
                         row["conceded"] += b["conceded"] or 0
                         row["wickets"] += b["wickets"] or 0
+                        w, rc = b["wickets"] or 0, b["conceded"] or 0
+                        if w >= 5:
+                            row["five_fors"] += 1
+                        # best figures: most wickets, then fewest runs
+                        if row["best"] is None or (w, -rc) > (row["best"][0], -row["best"][1]):
+                            row["best"] = (w, rc)
                     row["catches"] += b["catches"] or 0
                     row["wk_catches"] += b["wk_catches"] or 0
                     row["stumpings"] += b["stumpings"] or 0
@@ -418,15 +455,60 @@ def build_season_stats(seasons: list) -> list:
             "Games": len(seen_games[(name, season, grade)]),
             "Innings": r["innings"], "Runs": r["runs"], "NO": r["not_outs"],
             "HS": hs, "Avg": avg, "4s": r["fours"], "6s": r["sixes"],
-            "Wickets": r["wickets"], "Overs": balls_to_overs(r["balls"]) if r["spells"] else "",
+            "50s": r["fifties"], "100s": r["hundreds"], "Ducks": r["ducks"],
+            "Bowling Innings": r["spells"], "Wickets": r["wickets"],
+            "Overs": balls_to_overs(r["balls"]) if r["spells"] else "",
             "Maidens": r["maidens"], "Runs Conceded": r["conceded"] if r["spells"] else "",
-            "Bowl Avg": bowl_avg, "Econ": econ,
+            "Bowl Avg": bowl_avg, "Econ": econ, "5WI": r["five_fors"],
+            "Best": f"{r['best'][0]}-{r['best'][1]}" if r["best"] else "",
             "Catches": (r["catches"] or 0) + (r["wk_catches"] or 0),
             "Catches WK": r["wk_catches"], "Stumpings": r["stumpings"],
             "Votes": round(r["votes"], 0) if r["votes"] else "",
         })
-    rows.sort(key=lambda x: (x["Season"], x["Grade"], x["Player"]))
+    if not by_grade:
+        for r in rows:
+            del r["Grade"]
+        rows.sort(key=lambda x: (x["Season"], x["Player"]))
+    else:
+        rows.sort(key=lambda x: (x["Season"], x["Grade"], x["Player"]))
     return rows
+
+
+def squad_clashes(seasons: list) -> list:
+    """Player-dates where the files name one person in more than one grade.
+
+    Nobody plays two matches on one afternoon, so either the grade a
+    performance is filed under is wrong, or the stored date is a round stamp
+    shared by competitions that ran on different days. The files cannot tell
+    us which, and the figures themselves are sound either way - every innings
+    still reconciles to its own total. It matters only for the grade split, so
+    it is listed here rather than silently dropped or silently kept.
+    """
+    out = []
+    for s_ in seasons:
+        by_date = defaultdict(lambda: defaultdict(list))
+        for m in s_["matches"]:
+            if not m["has_play"]:
+                continue
+            for b in m["blocks"]:
+                by_date[m["date"]][b["player_id"]].append((m, b))
+        for date in sorted(by_date, key=lambda d: d or datetime.date.min):
+            for pid, hits in by_date[date].items():
+                grades = {h[0]["team"] for h in hits}
+                if len(grades) < 2:
+                    continue
+                name = s_["players"].get(pid, {}).get("name", f"#{pid}")
+                for m, b in sorted(hits, key=lambda h: h[0]["team"]):
+                    out.append({
+                        "Season": s_["season"], "Date": date, "Player": name,
+                        "Grade": grade_label(m["team"]), "Opponent": m["opponent"],
+                        "Ground": m["ground"],
+                        "Runs": b["runs"] if b["batted"] else "",
+                        "Overs": b["overs"] if b["bowled"] else "",
+                        "Wickets": b["wickets"] if b["bowled"] else "",
+                        "Grades named that day": len(grades),
+                    })
+    return out
 
 
 # ── verification ─────────────────────────────────────────────────────────────
@@ -507,6 +589,14 @@ NOTES = [
     ("Not recorded", "Balls faced, run outs and the bowler or fielder who took a wicket are "
                      "not in the format at all."),
     ("Bowling flags", "An unidentified bitmask, present only on bowlers. Passed through raw."),
+    ("Same player, two grades", "The Data quality sheet lists every date where one person is "
+                               "named in more than one grade. Nobody plays twice in an "
+                               "afternoon, so either the grade is wrong on one of them or the "
+                               "date is a round stamp covering competitions that ran on "
+                               "different days. Every innings still reconciles to its own "
+                               "total, so only the grade split is affected - if that worries "
+                               "you, import betterimport_season_stats_by_player.csv, which "
+                               "does not split by grade."),
     ("", ""),
     ("Checks run against the files' own arithmetic", ""),
 ]
@@ -576,16 +666,20 @@ def main() -> None:
     args.out.mkdir(parents=True, exist_ok=True)
 
     sheets = build_rows(seasons)
+    sheets["Data quality"] = squad_clashes(seasons)
     checks = verify(seasons)
     write_xlsx(sheets, checks, args.out / "match_detail.xlsx")
     stats = build_season_stats(seasons)
     write_csv(stats, args.out / "betterimport_season_stats.csv")
+    flat = build_season_stats(seasons, by_grade=False)
+    write_csv(flat, args.out / "betterimport_season_stats_by_player.csv")
 
     club = seasons[0]["club"]
     print(f"{club}: {len(seasons)} seasons, {seasons[0]['season']} to {seasons[-1]['season']}")
     for name, rows in sheets.items():
         print(f"  {name:<16} {len(rows):>6} rows")
-    print(f"  season stats     {len(stats):>6} rows")
+    print(f"  season stats     {len(stats):>6} rows  (by grade)")
+    print(f"  season stats     {len(flat):>6} rows  (by player, no grade split)")
     print()
     for label, ok, total in checks:
         pct = f"{ok / total:.1%}" if total else "n/a"
