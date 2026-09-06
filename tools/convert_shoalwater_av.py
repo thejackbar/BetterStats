@@ -327,6 +327,25 @@ def grade_label(team: int) -> str:
     return f"Grade {team}" if team and team > 0 else "Grade (unknown)"
 
 
+def group_legs(season: dict) -> list:
+    """One entry per real match, with its legs in order.
+
+    A 1992-97 two-day match is stored as two records sharing a date, a team and
+    an opponent; every reader here has to count that as one match or the games
+    played figure doubles.  Yields (match_id, date, team, opponent, legs).
+    """
+    groups = defaultdict(list)
+    for m in season["matches"]:
+        groups[(m["date"], m["team"], m["opponent"])].append(m)
+    out = []
+    for n, key in enumerate(sorted(groups,
+                                   key=lambda k: (k[0] or datetime.date.min, k[1], k[2])), 1):
+        date, team, opponent = key
+        out.append((f"{season['year']}-{n:03d}", date, team, opponent,
+                    sorted(groups[key], key=lambda m: (m["leg"] or 0, m["index"]))))
+    return out
+
+
 def build_rows(seasons: list) -> dict:
     """Flatten every season into the sheets, collapsing two-day legs into one match."""
     matches, batting, bowling, fielding, fow_rows, votes, players = [], [], [], [], [], [], []
@@ -336,15 +355,8 @@ def build_rows(seasons: list) -> dict:
             players.append({"Season": s["season"], "Player ID": p["player_id"],
                             "Player": p["name"], "Surname": p["surname"],
                             "Initial": p["initial"], "First name": p["first_name"]})
-        # group the legs of a two-day match under one match id
-        groups = defaultdict(list)
-        for m in s["matches"]:
-            groups[(m["date"], m["team"], m["opponent"])].append(m)
-        for key in sorted(groups, key=lambda k: (k[0] or datetime.date.min, k[1], k[2])):
-            legs = sorted(groups[key], key=lambda m: (m["leg"] or 0, m["index"]))
+        for mid, date, team, opponent, legs in group_legs(s):
             match_no += 1
-            mid = f"{s['year']}-{match_no:03d}"
-            date, team, opponent = key
             our_runs = sum(l["us"]["total"] for l in legs if l["us"]["played"])
             their_runs = sum(l["them"]["total"] for l in legs if l["them"]["played"])
             both = any(l["us"]["played"] for l in legs) and any(l["them"]["played"] for l in legs)
@@ -439,6 +451,7 @@ def build_season_stats(seasons: list, by_grade: bool = True) -> list:
                         "wickets": 0, "catches": 0, "wk_catches": 0, "stumpings": 0,
                         "spells": 0, "votes": 0.0, "fifties": 0, "hundreds": 0,
                         "ducks": 0, "five_fors": 0, "best": None,
+                        "wides": 0, "no_balls": 0,
                     })
                     # a two-day match is one game however many legs a player appears in
                     seen_games[k].add(key)
@@ -468,6 +481,8 @@ def build_season_stats(seasons: list, by_grade: bool = True) -> list:
                         row["maidens"] += b["maidens"] or 0
                         row["conceded"] += b["conceded"] or 0
                         row["wickets"] += b["wickets"] or 0
+                        row["wides"] += b["wides"] or 0
+                        row["no_balls"] += b["no_balls"] or 0
                         w, rc = b["wickets"] or 0, b["conceded"] or 0
                         if w >= 5:
                             row["five_fors"] += 1
@@ -495,6 +510,7 @@ def build_season_stats(seasons: list, by_grade: bool = True) -> list:
             "Overs": balls_to_overs(r["balls"]) if r["spells"] else "",
             "Maidens": r["maidens"], "Runs Conceded": r["conceded"] if r["spells"] else "",
             "Bowl Avg": bowl_avg, "Econ": econ, "5WI": r["five_fors"],
+            "Wides": r["wides"], "No Balls": r["no_balls"],
             "Best": f"{r['best'][0]}-{r['best'][1]}" if r["best"] else "",
             "Catches": (r["catches"] or 0) + (r["wk_catches"] or 0),
             "Catches WK": r["wk_catches"], "Stumpings": r["stumpings"],
@@ -650,6 +666,87 @@ def verify(seasons: list) -> list:
     ]
 
 
+GAME_CSV_COLUMNS = [
+    "game_key", "played_at", "opposition", "venue", "season_name", "grade_name",
+    "is_final", "match_format", "home_team", "away_team", "winning_team", "result",
+    "player_name", "innings_number", "batting_position",
+    "batting_runs", "batting_balls", "batting_fours", "batting_sixes",
+    "batting_not_out", "did_not_bat", "dismissal_type",
+    "bowling_overs", "bowling_maidens", "bowling_runs", "bowling_wickets",
+    "bowling_wides", "bowling_no_balls",
+    "fielding_catches", "fielding_catches_wk", "fielding_run_outs", "fielding_stumpings",
+]
+
+
+def build_game_rows(seasons: list, club: str) -> list:
+    """One row per player per match, in the Manual Games importer's own columns.
+
+    This is the richer of the two ways in: it lands real per-game scorecards
+    rather than season totals.  A two-day match is ONE game here, its two legs
+    separated by innings_number, so the games played figure agrees with the
+    workbook and the season CSV.  Blank means the format does not record it -
+    balls faced and run outs are not in these files at all - and a blank is
+    right where a zero would read as a recorded nought.
+    """
+    rows = []
+    for s in seasons:
+        for mid, date, team, opponent, legs in group_legs(s):
+            played = [l for l in legs if l["has_play"]]
+            if not played:
+                continue
+            ours = sum(l["us"]["total"] for l in legs if l["us"]["played"])
+            theirs = sum(l["them"]["total"] for l in legs if l["them"]["played"])
+            result = winner = ""
+            if any(l["us"]["played"] for l in legs) and any(l["them"]["played"] for l in legs):
+                result = "Won" if ours > theirs else "Lost" if ours < theirs else "Tie"
+                winner = club if result == "Won" else opponent if result == "Lost" else ""
+            # A two-day match's two legs are our first and second innings, but
+            # both records routinely store innings number 1 - so the stored
+            # number is only usable when the legs actually disagree about it.
+            stored = [l["us"]["innings_no"] for l in played]
+            distinct = len(set(stored)) == len(stored) and all(stored)
+            for n, l in enumerate(played, 1):
+                innings = l["us"]["innings_no"] if distinct else n
+                for b in l["blocks"]:
+                    name = s["players"].get(b["player_id"], {}).get("name")
+                    if not name:
+                        continue
+                    rows.append({
+                        "game_key": mid,
+                        "played_at": date.isoformat() if date else "",
+                        "opposition": opponent, "venue": l["ground"],
+                        "season_name": s["season"], "grade_name": grade_label(team),
+                        "is_final": "", "match_format": "",
+                        "home_team": "", "away_team": "",
+                        "winning_team": winner, "result": result,
+                        "player_name": name,
+                        "innings_number": innings,
+                        "batting_position": b["position"] or "",
+                        "batting_runs": b["runs"] if b["batted"] else "",
+                        "batting_balls": "",                       # not in the format
+                        "batting_fours": b["fours"] if b["batted"] else "",
+                        "batting_sixes": b["sixes"] if b["batted"] else "",
+                        "batting_not_out": "true" if b["batted"] and b["not_out"] else
+                                           "false" if b["batted"] else "",
+                        "did_not_bat": "true" if not b["batted"] else "false",
+                        # only the labels the data proves; an unmapped code is
+                        # left blank rather than imported as a made-up method
+                        "dismissal_type": DISMISSALS.get(b["dismissal_code"], "")
+                                          if b["batted"] and not b["not_out"] else "",
+                        "bowling_overs": b["overs"] if b["bowled"] else "",
+                        "bowling_maidens": b["maidens"] if b["bowled"] else "",
+                        "bowling_runs": b["conceded"] if b["bowled"] else "",
+                        "bowling_wickets": b["wickets"] if b["bowled"] else "",
+                        "bowling_wides": b["wides"] if b["bowled"] else "",
+                        "bowling_no_balls": b["no_balls"] if b["bowled"] else "",
+                        "fielding_catches": b["catches"] or "",
+                        "fielding_catches_wk": b["wk_catches"] or "",
+                        "fielding_run_outs": "",                   # not in the format
+                        "fielding_stumpings": b["stumpings"] or "",
+                    })
+    return rows
+
+
 # ── output ───────────────────────────────────────────────────────────────────
 
 NOTES = [
@@ -671,11 +768,17 @@ NOTES = [
                         "Games played counts the match once."),
     ("Opposition", "The program only ever stored this club's own players, so there are no "
                    "opposition batting or bowling cards - only their innings totals."),
-    ("Dismissals", "Only 'not out' is certain (code 11, confirmed because the count of "
-                   "dismissed batters matches the innings wickets). The other codes are "
-                   "passed through raw rather than guessed at."),
-    ("Not recorded", "Balls faced, run outs and the bowler or fielder who took a wicket are "
-                     "not in the format at all."),
+    ("Dismissals", "Codes 11 and 12 are not outs, proved rather than assumed: with both "
+                   "read that way the count of dismissed batters equals the innings wickets "
+                   "in all 916 innings that record both. That also proves every OTHER code "
+                   "is a dismissal. 0-4 read as bowled, caught, LBW, stumped and run out, "
+                   "which the shares back up (caught 47.6% of dismissals, bowled 27.0, LBW "
+                   "8.9, run out 6.1, stumped 2.5). The raw code is in its own column beside "
+                   "the label, and a code the mapping does not cover is left unlabelled "
+                   "rather than guessed at."),
+    ("Not recorded", "Balls faced, batting strike rate, run outs and the bowler or fielder "
+                     "who took a wicket are not in the format at all. They are left blank, "
+                     "never zeroed - a zero would read as a recorded nought."),
     ("Bowling flags", "An unidentified bitmask, present only on bowlers. Passed through raw."),
     ("Same player, two grades", "The Data quality sheet lists every date where one person is "
                                "named in more than one grade, which nobody can be. It runs to "
@@ -759,12 +862,15 @@ def main() -> None:
     write_xlsx(sheets, checks, args.out / "match_detail.xlsx")
     stats = build_season_stats(seasons)
     write_csv(stats, args.out / "betterimport_season_stats.csv")
+    games = build_game_rows(seasons, seasons[0]["club"])
+    write_csv(games, args.out / "manual_games_scorecards.csv")
 
     club = seasons[0]["club"]
     print(f"{club}: {len(seasons)} seasons, {seasons[0]['season']} to {seasons[-1]['season']}")
     for name, rows in sheets.items():
         print(f"  {name:<16} {len(rows):>6} rows")
     print(f"  season stats     {len(stats):>6} rows")
+    print(f"  game scorecards  {len(games):>6} rows")
     print()
     for label, ok, total in checks:
         pct = f"{ok / total:.1%}" if total else "n/a"
