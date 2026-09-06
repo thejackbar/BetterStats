@@ -697,11 +697,36 @@ function StreakBoard({ title, board, losses = false }) {
   )
 }
 
-function ClubTab({ data }) {
+const CATEGORY_LABELS = {
+  senior: 'Senior', junior: 'Juniors', womens: "Women's",
+  masters: 'Masters', mixed: 'Mixed',
+}
+const FORMAT_LABELS = { two_day: 'Two day', one_day: 'One day', t20: 'T20' }
+
+// Named from the scope the SERVER reports back, never from the page's own
+// filter state — what a reader needs is what the figures actually cover, and
+// the two can differ (an explicitly picked grade drops the category half).
+function describeScope(scope, { season, grade, finals }) {
+  const parts = []
+  if (season) parts.push(season)
+  if (grade) parts.push(grade)
+  if (scope?.competition_active && (scope.competition_names || []).length)
+    parts.push(scope.competition_names.join(', '))
+  if (scope?.category_active && (scope.categories || []).length)
+    parts.push(scope.categories.map(c => CATEGORY_LABELS[c] || c).join(' + '))
+  if (scope?.format_active && (scope.formats || []).length)
+    parts.push(scope.formats.map(f => FORMAT_LABELS[f] || f).join(' + '))
+  if (finals) parts.push('Finals only')
+  return parts.length ? parts.join(' · ') : 'All grades, all seasons'
+}
+
+function ClubTab({ data, seasonLabel, gradeLabel, finalsOnly }) {
   if (!data) return <PbSpinner />
   const b = data.boards || {}
   const s = data.summary || {}
   const cov = data.coverage || {}
+  const scopeLine = describeScope(data.grade_scope, {
+    season: seasonLabel, grade: gradeLabel, finals: finalsOnly })
 
   if (!s.played) {
     return (
@@ -715,6 +740,16 @@ function ClubTab({ data }) {
 
   return (
     <div className="space-y-4">
+      {/* WHAT THESE FIGURES COVER. Every filter above genuinely narrows the
+          board, but the top of a 25-row board drawn from decades of cricket
+          often doesn't visibly move — so a filter that IS working reads as one
+          that isn't. Saying the scope out loud, with the match count beside
+          it, is what makes it checkable. */}
+      {scopeLine && (
+        <p className="font-mono text-[10px] tracking-wide3 text-pb-faint px-1">
+          COVERING {s.played} {s.played === 1 ? 'MATCH' : 'MATCHES'} · {scopeLine}
+        </p>
+      )}
       <div className="pb-card px-5 py-4 flex flex-wrap gap-x-8 gap-y-3">
         {[
           ['PLAYED', s.played], ['WON', s.wins], ['LOST', s.losses],
@@ -1084,11 +1119,13 @@ export default function Records() {
     api.getClubRecords(orgId, {
       seasonId: selectedSeason, gradeName: selectedGradeName,
       finalsOnly, categories: categoriesParam, formats: formatsParam,
+      competitions: competitionsParam,
     })
       .then(setClubRecords)
       .catch(() => setClubRecords(null))
       .finally(() => setClubLoadingRecs(false))
-  }, [orgId, tab, selectedSeason, selectedGradeName, finalsOnly, categoriesParam, formatsParam])
+  }, [orgId, tab, selectedSeason, selectedGradeName, finalsOnly, categoriesParam,
+      formatsParam, competitionsParam])
 
   useEffect(() => {
     if (!orgId) return
@@ -1141,6 +1178,8 @@ export default function Records() {
             showCompetitionFilter
             showGradeTypeFilter
             showMatchFormatFilter
+            showGenderFilter={tab !== 'club'}
+            showCaptainFilter={tab !== 'club'}
           />
           {orgGrades.length > 0 && (
             <div className="flex items-center gap-2">
@@ -1167,7 +1206,14 @@ export default function Records() {
             ? <PbSpinner message="Loading club records…" />
             : !clubRecords
               ? <p className="text-pb-faint text-sm py-8 text-center">No club records available.</p>
-              : <ClubTab data={clubRecords} />
+              : <ClubTab
+                  data={clubRecords}
+                  seasonLabel={selectedSeason
+                    ? formatSeason(seasons.find(x => x.id === selectedSeason)?.name)
+                    : null}
+                  gradeLabel={selectedGradeName}
+                  finalsOnly={finalsOnly}
+                />
         ) : loading ? <PbSpinner message="Loading records…" /> : !records ? (
           <p className="text-pb-faint text-sm py-8 text-center">No records data available.</p>
         ) : (

@@ -123,6 +123,12 @@ async def build_schema() -> None:
                 run_outs int, assisted_run_outs int, unassisted_run_outs int,
                 stumpings int)
         """))
+        # The competitions DDL is its own list, run by alembic AND the
+        # lifespan mirror — not by create_all — so the filter has nothing to
+        # bite on without it.
+        from app.services.competition_ddl import STATEMENTS as _COMP_DDL
+        for _stmt in _COMP_DDL:
+            await conn.execute(text(_stmt))
         # migration 233 is a raw ALTER and never reached the ORM model, so
         # create_all doesn't make the column the whole exact/approximate
         # split turns on.
@@ -313,7 +319,8 @@ async def records(session, **kw):
     exercising the real body instead of tripping over that.
     """
     args = dict(season_id=None, grade_id=None, grade_name=None,
-                finals_only=False, categories="all", formats=None)
+                finals_only=False, categories="all", formats=None,
+                competitions=None)
     args.update(kw)
     return await get_club_records(str(OURS), db=session, **args)
 
@@ -417,8 +424,9 @@ async def run_checks() -> None:
     summ = payload["summary"]
     # +2: the two reported games seeded alongside the base fixture.
     # +2 reported cases, +4 fault cases seeded alongside the base fixture.
-    check("summary played equals the seeded games", summ["played"] == len(GAMES) + 6,
-          f"{summ['played']} vs {len(GAMES) + 6}")
+    # +2 reported cases, +4 fault cases, +3 filter cases.
+    check("summary played equals the seeded games", summ["played"] == len(GAMES) + 9,
+          f"{summ['played']} vs {len(GAMES) + 9}")
     check("summary W+L+D reconciles with played",
           summ["wins"] + summ["losses"] + summ["draws"] == summ["played"])
     cov = payload["coverage"]
@@ -491,7 +499,7 @@ async def run_shared_fixture_check() -> None:
     # 650 is our 150 plus their 500 on one shared games row. 323 is the real
     # club record. Anything above it means the leak is back.
     check("the opposition's 500 never becomes the club's highest total",
-          all(r["value"] != 650 for r in rows) and rows[0]["value"] == 437,
+          all(r["value"] != 650 for r in rows) and rows[0]["value"] == 513,
           f"top of the board reads {rows[0]['value']}")
 
 
@@ -516,8 +524,8 @@ async def run_filter_checks() -> None:
     check("a merge-aware grade filter still finds the games",
           by_grade["summary"]["played"] > 0,
           f"{by_grade['summary']['played']}")
-    check("finals-only returns nothing when the club has played no final",
-          finals["summary"]["played"] == 0,
+    check("finals-only returns the club's one final and nothing else",
+          finals["summary"]["played"] == 1,
           f"{finals['summary']['played']}")
     check("the payload reports the grade scope it applied",
           "grade_scope" in all_seasons and "categories" in all_seasons["grade_scope"])
@@ -810,6 +818,105 @@ async def run_fault_checks() -> None:
     check("a draw is in neither the losing nor the winning run",
           lose and lose[0]["draws"] == 0)
 
+# ── the filters, which have to narrow the board or they are decoration ──────
+COMP = uuid.uuid4()
+G_T20 = uuid.uuid4()
+JUNIOR_GAME = uuid.uuid4()
+T20_GAME = uuid.uuid4()
+FINAL_GAME = uuid.uuid4()
+
+
+async def seed_filters(session) -> None:
+    import json
+    async def ex(sql, **kw):
+        await session.execute(text(sql), kw)
+
+    await ex("INSERT INTO club_competitions (id, organisation_id, name) "
+             "VALUES (:i, :o, 'Saturday Grade')", i=COMP, o=OURS)
+    # Only the senior grade sits in the competition, so picking it must drop
+    # the junior and T20 games as well as narrowing to that grade's own.
+    await ex("UPDATE grades SET competition_id = :c WHERE id = :g", c=COMP, g=G_25)
+    await ex("INSERT INTO grades (id, season_id, name, category) "
+             "VALUES (:i, :s, 'T20 Grade', 'senior')", i=G_T20, s=S_25)
+
+    async def game(gid, day, grade, fmt, final, runs):
+        await ex(
+            "INSERT INTO games (id, grade_id, played_at, home_team, away_team, "
+            " home_club, away_club, opp_club_name, result, winning_team, "
+            " home_org_id, venue, match_format, is_final, innings_totals) "
+            "VALUES (:i, :g, :d, 'Our Club', 'Foe', 'Our Club', 'Foe', 'Foe', "
+            " 'WIN', 'Our Club', :o, 'Ground', :f, :fin, CAST(:it AS JSONB))",
+            i=gid, g=grade, d=date(2025, 4, day), o=OURS, f=fmt, fin=final,
+            it=json.dumps([{"innings_number": 1, "runs_scored": runs,
+                            "wickets": 5, "extras": 4},
+                           {"innings_number": 2, "runs_scored": 50,
+                            "wickets": 10, "extras": 2}]))
+        for idx in range(10):
+            await ex(
+                "INSERT INTO batting_innings (game_id, player_id, innings_number, "
+                " batting_position, runs, balls, not_out, dismissal_type, did_not_bat) "
+                "VALUES (:g, :p, 1, :pos, :r, 30, :no, :dt, false)",
+                g=gid, p=P_OURS[idx], pos=idx + 1, r=(runs - 4) // 10,
+                no=idx >= 5, dt="caught" if idx < 5 else None)
+        for idx in range(5):
+            await ex(
+                "INSERT INTO bowling_spells (game_id, player_id, innings_number, "
+                " overs, maidens, runs, wickets) VALUES (:g, :p, 2, 8, 0, 10, 2)",
+                g=gid, p=P_OURS[idx])
+
+    # Each carries a DIFFERENT total, so a filter's effect is visible in the
+    # figure and not only in the count.
+    await game(JUNIOR_GAME, 1, G_JUNIOR, "One Day", False, 511)
+    await game(T20_GAME, 2, G_T20, "T20", False, 512)
+    await game(FINAL_GAME, 3, G_25, "One Day", True, 513)
+    await session.commit()
+
+
+async def run_filter_bite_checks() -> None:
+    """Every filter on the page must narrow the board, or it is decoration."""
+    async with Session() as s:
+        allrec = await records(s)
+        seniors = await records(s, categories="senior")
+        juniors = await records(s, categories="junior")
+        t20 = await records(s, formats="t20")
+        finals = await records(s, finals_only=True)
+        comp = await records(s, competitions=str(COMP))
+
+    def ids(p, board="highest_totals"):
+        return {r["game_id"] for r in p["boards"][board]["rows"]}
+
+    print("\n── every filter has to bite ──")
+    check("the club default leaves the junior game out",
+          str(JUNIOR_GAME) not in ids(seniors),
+          "a junior game survived a senior-only scope")
+    check("asking for juniors finds it",
+          str(JUNIOR_GAME) in ids(juniors),
+          "the junior game is unreachable even when asked for")
+    check("a grade-type filter changes the board",
+          ids(seniors) != ids(juniors))
+
+    check("a match-type filter narrows to that format",
+          str(T20_GAME) in ids(t20) and str(JUNIOR_GAME) not in ids(t20),
+          f"{len(ids(t20))} game(s)")
+    check("a one-day game is not counted as a T20",
+          str(FINAL_GAME) not in ids(t20))
+
+    check("finals-only returns the final", str(FINAL_GAME) in ids(finals))
+    check("finals-only drops everything else",
+          finals["summary"]["played"] == 1, f"{finals['summary']['played']}")
+
+    check("a competition filter narrows the board",
+          comp["summary"]["played"] < allrec["summary"]["played"],
+          f"{comp['summary']['played']} vs {allrec['summary']['played']}")
+    check("it keeps that competition's own grade",
+          str(FINAL_GAME) in ids(comp))
+    check("a grade in NO competition drops out — it is an inclusion",
+          str(T20_GAME) not in ids(comp) and str(JUNIOR_GAME) not in ids(comp),
+          "an ungrouped grade survived a competition filter")
+    check("the payload reports the competition scope it applied",
+          bool((comp.get("grade_scope") or {}).get("competition_active")),
+          str((comp.get("grade_scope") or {}).get("competition_active")))
+
 
 async def main() -> None:
     await build_schema()
@@ -819,9 +926,12 @@ async def main() -> None:
         await seed_reported(s)
     async with Session() as s:
         await seed_faults(s)
+    async with Session() as s:
+        await seed_filters(s)
     await run_checks()
     await run_reported_checks()
     await run_fault_checks()
+    await run_filter_bite_checks()
     await run_filter_checks()
     await run_shared_fixture_check()
     print(f"\n{PASS} passed, {FAIL} failed")

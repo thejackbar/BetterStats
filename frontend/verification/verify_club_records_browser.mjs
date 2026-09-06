@@ -39,7 +39,10 @@ const CLUB_RECORDS = {
     games_with_a_total: 16, exact_totals: 2, approximate_totals: 14,
     note: 'A total is exact when the club holds the scorecard’s own innings figure, which counts extras.',
   },
-  grade_scope: { categories: ['senior'], active: false },
+  grade_scope: {
+    categories: ['senior'], formats: ['t20'], competition_names: ['Saturday Grade'],
+    active: true, category_active: true, format_active: true, competition_active: true,
+  },
   boards: {
     highest_totals: {
       rows: [game('g1', { value: 300 }), game('g2', { value: 250, exact: false, our: 250 })],
@@ -198,6 +201,19 @@ const openClubTab = async (page) => {
 
   ck('the extras board says it only uses cards that add up',
      body.includes('from cards that add up'))
+
+  // A filter that IS working reads as broken when the top of a 25-row board
+  // doesn't visibly move, so the scope has to be stated.
+  ck('the board says what it covers', /COVERING 16 MATCHES/.test(body), body.slice(0, 200))
+  ck('the scope names the competition in play', body.includes('Saturday Grade'))
+  ck('the scope names the grade type', body.includes('Senior'))
+  ck('the scope names the match type', body.includes('T20'))
+
+  const q = clubCalls.join(' ')
+  ck('gender is never on the wire for a team board', !q.includes('gender='))
+  ck('the gender and captain pills are withdrawn on the club board',
+     !(await page.locator('button', { hasText: /^(Male|Female)$/ }).count())
+     && !(await page.locator('button', { hasText: /^Captain$/ }).count()))
 
   // The rename the club asked for: "defended against" described nothing.
   ck('the opposition boards are named for the opposition',
