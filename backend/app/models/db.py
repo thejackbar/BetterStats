@@ -474,6 +474,9 @@ class Organisation(Base):
     # and rotatable. require_pin lets a club drop the PIN gate (anyone who picks
     # their name is trusted) — the spec's optional per-club toggle.
     availability_link_token = Column(Text, nullable=True)
+    # The club's own CricketStatz club number (migration 285), remembered
+    # once an import runs so a later one needs no re-typing.
+    cricketstatz_club_id = Column(Text, nullable=True)
     availability_self_service_enabled = Column(Boolean, nullable=False, server_default="false", default=False)
     availability_require_pin = Column(Boolean, nullable=False, server_default="true", default=True)
     # ─── BetterFantasyCricket: public fantasy link (migration 087) ────────────
@@ -1299,6 +1302,11 @@ class Player(Base):
     # real player (migration 147) — e.g. a pasted PlayHQ profile URL for their
     # own future reference. Not parsed or verified; see claim-fill-in.
     claim_note = Column(Text, nullable=True)
+    # This player's id on the club's own CricketStatz site (migration 285).
+    # Stable across eras and unique within the club, so it identifies a person
+    # far more reliably than the printed name, which their reports abbreviate
+    # inconsistently ("Tommy A McSwain").
+    cricketstatz_player_id = Column(Text, nullable=True)
     # The BetterImport batch that minted this player (migration 234) — set only
     # when the import commit itself creates the row, NULL for synced or
     # hand-added players. Undoing that batch deletes the player again if the
@@ -2173,6 +2181,12 @@ class ManualGame(Base):
     # opposition batting/bowling, fall of wickets, toss, extras). Source of truth for
     # rendering the OPPOSITION half of the match view (migration 091).
     extracted_payload = Column(JSONB, nullable=True)
+    # The match's id on the club's own CricketStatz site, and the import batch
+    # that wrote it (migration 285) — the pair is what makes a re-import
+    # correct this match rather than add a second copy of it, and what lets a
+    # whole import be undone as a unit.
+    cricketstatz_match_id = Column(Text, nullable=True)
+    cricketstatz_import_id = Column(UUID(as_uuid=True), nullable=True)
     created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)

@@ -15,7 +15,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.config.settings import settings
 from app.auth.modules import require_module
 from app.routers import instructional_videos
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, public_net_checkin, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, cricketstatz, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, public_net_checkin, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
     stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
     club_diary, social_media, votes, public_votes, roles_activities, club_room, roster, facility_requests, directory, \
     public_club_room, sales_workspace, sales_commissions, honours
@@ -4260,6 +4260,13 @@ async def lifespan(app: FastAPI):
         for _stmt in _COMPETITION_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 285: importing a club's history from its own public
+        # CricketStatz site. Same one-copy rule — this list and alembic's 285
+        # both run services/cricketstatz_ddl.STATEMENTS.
+        from app.services.cricketstatz_ddl import STATEMENTS as _CRICKETSTATZ_DDL
+        for _stmt in _CRICKETSTATZ_DDL:
+            await conn.execute(text(_stmt))
+
     # Migration 178: Member self-service portal, Stripe Connect fee payments,
     # reminder automation. See services/member_portal_auth.py,
     # services/stripe_connect_client.py, services/member_reminders.py.
@@ -5958,6 +5965,7 @@ app.include_router(public_stripe_connect.router)  # Member portal: Stripe Connec
 app.include_router(public_member_portal.router)   # Member self-service portal (public, unauthenticated, flag-gated)
 app.include_router(manual_entries.router)
 app.include_router(imports.router)  # BetterImport — overlap-safe historical CSV import
+app.include_router(cricketstatz.router)  # import a club's own CricketStatz history
 app.include_router(player_import.router)  # BetterImport (profiles) — bulk player contact/profile CSV import
 app.include_router(klubpro_migration.router)  # KlubPro → BetterStats migration (super-admin onboarding)
 app.include_router(marketing.router)  # Marketing club directory crawl + outreach (super-admin)

@@ -719,3 +719,98 @@ def _mark_caught_behind(card: dict) -> None:
                 b["caught_behind"] = f["source_player_id"] in ids if ids else None
             else:
                 b["caught_behind"] = None
+
+
+# ── the record book (mode=3..265) ────────────────────────────────────────────
+
+_TITLE_DIV = re.compile(r"<div[^>]*class='[^']*ss_title[^']*'[^>]*>(.*?)</div>", re.S | re.I)
+_FILTERS_DIV = re.compile(r"<div[^>]*class='[^']*ss_filters[^']*'[^>]*>(.*?)</div>", re.S | re.I)
+
+
+def parse_report(body: str) -> dict:
+    """A record/leaderboard report as a plain table.
+
+    CricketStatz publishes 180-odd of these (top run aggregates, highest
+    innings totals, biggest winning margins…). They share one shape — a title,
+    a header row, then rows — so they are captured generically rather than
+    modelled one by one. Any player link's ``playerid`` is kept alongside the
+    row so a record can still be tied to a player after the import.
+    """
+    text = unwrap(body)
+
+    title = ""
+    t = _TITLE_DIV.search(text)
+    if t:
+        title = _text(t.group(1))
+    scope = ""
+    f = _FILTERS_DIV.search(text)
+    if f:
+        scope = _text(f.group(1))
+
+    headers: list[str] = []
+    rows: list[dict] = []
+    for cells in _rows(text):
+        values = [_text(c) for _, c in cells]
+        if not any(values):
+            continue
+        is_head = any("ss_tablehead" in a for a, _ in cells)
+        if not headers and (is_head or not rows):
+            # The first row is the header when it carries no data row's shape.
+            if is_head or not any(v.strip().isdigit() for v in values[:1]):
+                headers = [v.replace("\n", " ").strip() for v in values]
+                continue
+        rows.append({
+            "values": values,
+            "players": _players_in(" ".join(c for _, c in cells)),
+        })
+
+    return {"title": title, "scope": scope, "headers": headers, "rows": rows}
+
+
+# The record book worth importing. Deliberately a curated list rather than all
+# ~180 modes: these are the ones a club actually keeps on an honour board, and
+# every extra report is another request against someone else's server.
+RECORD_REPORTS: tuple[tuple[int, str, str], ...] = (
+    # (mode, section, title as CricketStatz names it)
+    (4, "batting", "Top Run Aggregates"),
+    (6, "batting", "Top Run Scores"),
+    (3, "batting", "Top Batting Averages"),
+    (64, "batting", "Top Batting Strike Rates"),
+    (29, "batting", "Most Runs in a Season"),
+    (43, "batting", "Centurions"),
+    (44, "batting", "Most Hundreds"),
+    (54, "batting", "Most Fifties"),
+    (65, "batting", "Most Sixes"),
+    (23, "batting", "Most Boundaries"),
+    (32, "batting", "Most Ducks"),
+    (5, "bowling", "Top Wicket Takers"),
+    (7, "bowling", "Best Bowling in an Innings"),
+    (38, "bowling", "Best Bowling in a Match"),
+    (8, "bowling", "Top Bowling Averages"),
+    (9, "bowling", "Top Economy Rates"),
+    (66, "bowling", "Top Bowling Strike Rates"),
+    (30, "bowling", "Most Wickets in a Season"),
+    (48, "bowling", "Most Five Wicket Innings"),
+    (41, "bowling", "Hat Tricks"),
+    (13, "fielding", "Top Wicket Keeping"),
+    (33, "fielding", "Top Catches"),
+    (18, "fielding", "Top Catches by Field"),
+    (46, "fielding", "Top Run Outs"),
+    (50, "fielding", "Top Catches in a Match"),
+    (27, "team", "Highest Innings Totals"),
+    (28, "team", "Lowest Innings Totals"),
+    (62, "team", "Highest Successful Run Chases"),
+    (72, "team", "Highest Winning Margins by Runs"),
+    (73, "team", "Narrowest Winning Margins by Runs"),
+    (74, "team", "Highest Winning Margins by Wkts"),
+    (75, "team", "Narrowest Winning Margins by Wkts"),
+    (35, "team", "Most Wins"),
+    (21, "team", "Most Matches Played"),
+    (22, "partnerships", "Top Partnerships"),
+    (49, "partnerships", "Top Partnerships by Wicket"),
+    (203, "partnerships", "Most Century Partnerships by Pair"),
+    (37, "allround", "Top All-Rounders"),
+    (19, "allround", "MVP Points"),
+    (45, "club", "Longest Serving by Duration"),
+    (213, "club", "Most Grand Final Wins"),
+)
