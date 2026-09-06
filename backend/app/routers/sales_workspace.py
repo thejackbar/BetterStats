@@ -1808,6 +1808,11 @@ async def extend_trial(
             db, org_id=club.existing_org_id, club_name=club.name, full_name=person.full_name,
             email=to_email, background_tasks=background_tasks,
         )
+        # A newly named primary admin belongs on BetterCricket's internal
+        # club-admin list. Queued as a background task rather than fired here,
+        # so it runs after the commit below rather than racing it.
+        from app.services.admin_contact_list import run_sync as _admin_contact_sync
+        background_tasks.add_task(_admin_contact_sync, club.existing_org_id)
 
     await db.commit()
 

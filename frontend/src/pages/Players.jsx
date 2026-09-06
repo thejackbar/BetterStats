@@ -36,7 +36,8 @@ export default function Players() {
   const {
     available: availableCategories, availableFormats, defaultCategories,
     gradeType, setGradeType, matchFormat, setMatchFormat,
-    categoriesParam, formatsParam,
+    categoriesParam, formatsParam, competitionsParam,
+    competition, setCompetition, availableCompetitions,
   } = useGradeFilters(orgId)
 
   const [players, setPlayers] = useState([])
@@ -56,21 +57,21 @@ export default function Players() {
 
   useEffect(() => {
     if (!orgId) return
-    api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5000, finalsOnly, categories: categoriesParam, formats: formatsParam })
+    api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5000, finalsOnly, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam })
       .then(rows => {
         const map = {}
         rows.forEach(r => { map[r.player_id] = r })
         setBattingStats(map)
       })
       .catch(() => {})
-    api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5000, finalsOnly, categories: categoriesParam, formats: formatsParam })
+    api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5000, finalsOnly, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam })
       .then(rows => {
         const map = {}
         rows.forEach(r => { map[r.player_id] = r })
         setBowlingStats(map)
       })
       .catch(() => {})
-  }, [orgId, selectedSeason, selectedGrade, finalsOnly, categoriesParam, formatsParam])
+  }, [orgId, selectedSeason, selectedGrade, finalsOnly, categoriesParam, formatsParam, competitionsParam])
 
   const filtered = useMemo(() => {
     if (!search.trim()) return players
@@ -135,9 +136,13 @@ export default function Players() {
             setGradeType={setGradeType}
             matchFormat={matchFormat}
             setMatchFormat={setMatchFormat}
+            competition={competition}
+            setCompetition={setCompetition}
+            availableCompetitions={availableCompetitions}
             availableCategories={availableCategories}
             availableFormats={availableFormats}
             defaultCategories={defaultCategories}
+            showCompetitionFilter
             showGradeTypeFilter
             showMatchFormatFilter
             showGenderFilter={false}

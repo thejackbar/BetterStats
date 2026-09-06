@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.grade_labels import suggest_category
 from app.services import iq_filters
+from app.services import rate_coverage as rc
 from app.services.iq_filters import (
     grade_canonical_label,
     grade_match_clause,
@@ -630,7 +631,7 @@ async def _attack_structure(session: AsyncSession, org_id: str, season_id: str |
                 JOIN v_effective_games g ON g.id = bs.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
-                WHERE s.organisation_id = CAST(:org AS UUID) AND bs.overs IS NOT NULL {season_clause}
+                WHERE s.organisation_id = CAST(:org AS UUID) AND {rc.bowling_covered_sql("bs")} {season_clause}
             )
             SELECT p.id::text AS id, COALESCE(p.display_name_override, p.name) AS name,
                    p.bowling_type AS bt, SUM(sp.balls) AS balls,
@@ -1041,7 +1042,7 @@ async def _discipline(session: AsyncSession, org_id: str, season_id: str | None,
                 JOIN v_effective_games g ON g.id = bs.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
-                WHERE s.organisation_id = CAST(:org AS UUID) AND bs.overs IS NOT NULL {season_clause}
+                WHERE s.organisation_id = CAST(:org AS UUID) AND {rc.bowling_covered_sql("bs")} {season_clause}
             )
             SELECT p.id::text AS id, COALESCE(p.display_name_override, p.name) AS name,
                    SUM(sp.balls) AS balls, SUM(sp.runs) AS runs,
@@ -1215,7 +1216,7 @@ async def _collapse_bowlers(session: AsyncSession, org_id: str, season_id: str |
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
             WHERE s.organisation_id = CAST(:org AS UUID) {season_clause}
-              AND bs.overs IS NOT NULL
+              AND {rc.bowling_covered_sql("bs")}
             GROUP BY 1
             """
         ),
@@ -1323,7 +1324,7 @@ async def _role_ratings(session: AsyncSession, org_id: str, season_id: str | Non
                         ELSE 'Tail' END AS bucket,
                    COUNT(*) AS inns,
                    SUM(bi.runs) AS runs,
-                   COUNT(*) FILTER (WHERE NOT bi.not_out AND bi.dismissal_type IS NOT NULL) AS outs
+                   COUNT(*) FILTER (WHERE NOT bi.not_out) AS outs
             FROM v_effective_batting_innings bi
             JOIN players p ON p.id = bi.player_id AND p.organisation_id = CAST(:org AS UUID)
             JOIN v_effective_games g ON g.id = bi.game_id

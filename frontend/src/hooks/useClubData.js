@@ -42,18 +42,18 @@ export function useClubData(orgId) {
   }
 }
 
-export function useRecentGames(orgId, { seasonId, gradeId, categories, formats } = {}) {
+export function useRecentGames(orgId, { seasonId, gradeId, categories, formats, competitions } = {}) {
   const [games, setGames] = useState([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (!orgId) return
     setLoading(true)
-    api.listGames(orgId, { seasonId, gradeId, limit: 10, categories, formats })
+    api.listGames(orgId, { seasonId, gradeId, limit: 10, categories, formats, competitions })
       .then(setGames)
       .catch(() => setGames([]))
       .finally(() => setLoading(false))
-  }, [orgId, seasonId, gradeId, categories, formats])
+  }, [orgId, seasonId, gradeId, categories, formats, competitions])
 
   return { games, loading }
 }

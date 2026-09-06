@@ -65,7 +65,7 @@ function MilestoneRow({ m }) {
 
 const MILESTONE_CATS = { batting: 'Batting', bowling: 'Bowling', fielding: 'Fielding', matches: 'Matches Played' }
 
-function MilestonesSection({ milestones, loading }) {
+function MilestonesSection({ milestones, loading, error }) {
   const PER_COL = 8
 
   const grouped = {}
@@ -77,6 +77,8 @@ function MilestonesSection({ milestones, loading }) {
   const cats = ['batting', 'bowling', 'fielding', 'matches'].filter(c => grouped[c])
 
   if (loading) return <PbSpinner message="Loading milestones…" />
+  // Say what went wrong rather than reporting a failure as an empty club.
+  if (error) return <p className="text-pb-red text-sm py-4">{error}</p>
   if (!cats.length) return <p className="text-pb-faint text-sm py-4">No upcoming milestones.</p>
 
   return (
@@ -129,19 +131,22 @@ export default function Dashboard() {
   const {
     gradeType, setGradeType, matchFormat, setMatchFormat,
     available: availableCategories, availableFormats, defaultCategories,
-    categoriesParam, formatsParam,
+    categoriesParam, formatsParam, competitionsParam,
+    competition, setCompetition, availableCompetitions,
   } = gradeFilters
   const { games, loading: gamesLoading } = useRecentGames(orgId, {
     seasonId: selectedSeason,
     gradeId: selectedGrade,
     categories: categoriesParam,
     formats: formatsParam,
+    competitions: competitionsParam,
   })
 
   const [topBatters, setTopBatters] = useState([])
   const [topBowlers, setTopBowlers] = useState([])
   const [summary, setSummary] = useState(null)
   const [milestones, setMilestones] = useState([])
+  const [milestonesError, setMilestonesError] = useState(null)
   const [fixtures, setFixtures] = useState([])
   const [statsLoading, setStatsLoading] = useState(true)
   const [milestonesLoading, setMilestonesLoading] = useState(true)
@@ -159,7 +164,7 @@ export default function Dashboard() {
   useEffect(() => {
     if (!orgId) return
     setStatsLoading(true)
-    const scope = { categories: categoriesParam, formats: formatsParam }
+    const scope = { categories: categoriesParam, formats: formatsParam, competitions: competitionsParam }
     Promise.allSettled([
       api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5, finalsOnly, ...scope }),
       api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5, finalsOnly, ...scope }),
@@ -171,12 +176,17 @@ export default function Dashboard() {
         if (s.status === 'fulfilled') setSummary(s.value)
       })
       .finally(() => setStatsLoading(false))
-  }, [orgId, selectedSeason, selectedGrade, finalsOnly, categoriesParam, formatsParam])
+  }, [orgId, selectedSeason, selectedGrade, finalsOnly, categoriesParam, formatsParam, competitionsParam])
 
   useEffect(() => {
     if (!orgId) return
+    // A failed request is NOT an empty club. Swallowing the error here is
+    // what made a 60s timeout read as "No upcoming milestones" on a club
+    // whose admin report listed 23 of them.
+    setMilestonesError(null)
     api.getUpcomingMilestones(orgId, 200)
-      .then(setMilestones).catch(() => setMilestones([]))
+      .then(rows => { setMilestones(rows); setMilestonesError(null) })
+      .catch(e => { setMilestones([]); setMilestonesError(e?.message || 'Could not load milestones.') })
       .finally(() => setMilestonesLoading(false))
     api.getOrgFixtures(orgId)
       .then(setFixtures).catch(() => setFixtures([]))
@@ -246,9 +256,13 @@ export default function Dashboard() {
             setGradeType={setGradeType}
             matchFormat={matchFormat}
             setMatchFormat={setMatchFormat}
+            competition={competition}
+            setCompetition={setCompetition}
+            availableCompetitions={availableCompetitions}
             availableCategories={availableCategories}
             availableFormats={availableFormats}
             defaultCategories={defaultCategories}
+            showCompetitionFilter
             showGradeTypeFilter
             showMatchFormatFilter
             showGenderFilter={false}
@@ -339,9 +353,14 @@ export default function Dashboard() {
           </Card>
 
           {/* Upcoming milestones preview */}
+          {/* Ranked by how BIG the milestone is (target² / needed), not by how
+              near it is — a 500th run outranks a 50th game two away. The old
+              CLOSEST FIRST label described an order this panel has never had. */}
           <Card title="MILESTONES IN REACH"
-                action={<span className="text-2xs font-mono tracking-wide2 text-pb-faint">CLOSEST FIRST</span>}>
-            {milestonesLoading ? <PbSpinner /> : (
+                action={<span className="text-2xs font-mono tracking-wide2 text-pb-faint">BIGGEST FIRST</span>}>
+            {milestonesLoading ? <PbSpinner /> : milestonesError ? (
+              <p className="text-pb-red text-sm py-2">{milestonesError}</p>
+            ) : (
               <ul className="flex flex-col gap-3">
                 {milestones.slice(0, 5).length === 0
                   ? <p className="text-pb-faint text-sm py-2">No upcoming milestones.</p>
@@ -436,6 +455,7 @@ export default function Dashboard() {
           <MilestonesSection
             milestones={milestones}
             loading={milestonesLoading}
+            error={milestonesError}
           />
         </Card>
 

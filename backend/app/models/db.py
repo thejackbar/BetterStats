@@ -331,6 +331,16 @@ class Organisation(Base):
     # of zeroes (migration 229). Only ever affects the default, never an explicit
     # pick. See services/grade_scope.resolve_scope_for_player.
     stats_auto_show_played_grades = Column(Boolean, nullable=False, server_default="true", default=True)
+    # Fewest COVERED innings/spells a player needs before a strike rate or an
+    # economy is published for them on a leaderboard (migration 282). Covered
+    # means the innings carries a ball count that can carry its runs — see
+    # services/rate_coverage.py. NULL means no club preference and the platform
+    # default applies, which is 0: nothing has ever qualified these boards, and
+    # switching a number on for every club would drop players off their own
+    # leaderboard without anybody choosing it. Read through
+    # services/stats_display.py, never directly.
+    stats_min_rate_innings = Column(Integer, nullable=True)
+    stats_min_rate_spells = Column(Integer, nullable=True)
     # ─── AFL — optional public leaderboard categories (migration 217) ────────
     # Games and Goals are always shown; a club decides whether Best on Ground
     # and its two vote-tally leaderboards (Club/Competition Best & Fairest —
@@ -1147,6 +1157,40 @@ class Season(Base):
     player_stats = relationship("PlayerSeasonStats", back_populates="season")
 
 
+class ClubCompetition(Base):
+    """A named group of a club's grades — the competition they were played in.
+
+    Cricket Australia's feed has no competition level (see
+    services/competition_ddl.py for what was checked), so this is the club's
+    own. Seeded one per association by
+    ``services/competitions.seed_competitions_for_org`` so a club that plays
+    one association's grades needs to do nothing, and editable for the club
+    the association alone cannot separate: Veterans Cricket Victoria runs the
+    Border Cup, an Over 60s competition and the Echuca divisions, and reading
+    all three as one competition is the bug this exists to fix.
+    """
+
+    # Case-folded uniqueness on (organisation_id, lower(name)) lives in a unique
+    # INDEX created by services/competition_ddl — Postgres cannot express
+    # lower(name) in a UniqueConstraint, so there is no __table_args__ here.
+    __tablename__ = "club_competitions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(
+        UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False
+    )
+    name = Column(Text, nullable=False)
+    # The association this competition sits under, where it has one. NULL for a
+    # competition a club invented that spans associations.
+    association_id = Column(Text, nullable=True)
+    association_name = Column(Text, nullable=True)
+    display_order = Column(Integer, nullable=True)
+    # True on a row this app seeded, cleared the moment a person edits it, so a
+    # later re-seed can never overwrite a club's own naming.
+    is_seeded = Column(Boolean, nullable=False, server_default="false", default=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
 class Grade(Base):
     __tablename__ = "grades"
 
@@ -1198,6 +1242,26 @@ class Grade(Base):
     # than a scramble. Set across a whole grade name at once by the admin,
     # like display_name_override and category.
     display_order = Column(Integer, nullable=True)
+    # The association that runs this grade (migration 283), straight from CA's
+    # `grade.owningOrganisation`. `association_id` is the association's own CA
+    # organisation GUID, which is what makes two clubs' spellings of one
+    # association resolve to the same thing. NULL for a grade synced before
+    # this shipped (filled by scripts/backfill_grade_associations.py) or for a
+    # grade created by hand, which has no association at all.
+    association_id = Column(Text, nullable=True)
+    association_name = Column(Text, nullable=True)
+    association_short_name = Column(Text, nullable=True)
+    # The club's own competition this grade belongs to (migration 283).
+    # Cricket Australia does not publish a competition level, so this is a
+    # named group of grades the club owns — seeded one per association, split
+    # and renamed by the club where one association runs several competitions.
+    # ON DELETE SET NULL: deleting a competition un-groups its grades, it never
+    # deletes a grade or a game.
+    competition_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("club_competitions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     season = relationship("Season", back_populates="grades")
     games = relationship("Game", back_populates="grade")
@@ -1753,8 +1817,29 @@ class NetAttendance(Base):
     # it means a net stands empty when their turn comes round (migration 273).
     bats = Column(Boolean, nullable=False, server_default="true")
     # What they said on the way in ("bowling only", "sore back"). Never required.
+    # Doubles as the reason behind `priority` — a coach ticking someone up the
+    # order is answering the same question ("leaving at 7", "captain, selection
+    # night"), and two free-text fields for one sentence is how they drift.
     note = Column(Text, nullable=True)
     position = Column(Integer, nullable=True)
+    # Migration 284. Two flags a coach sets during the night, both about the
+    # batting order and neither derivable from it:
+    #
+    #   padding_up — told to get their gear on for the next turn. Deliberately
+    #     NOT "the next N in the queue": the person who pads up is whoever the
+    #     coach actually spoke to, and on a Thursday night that is routinely not
+    #     the next name on the list. It is transient — cleared the moment they
+    #     go into a net, are marked as batted, or drop out of the rotation.
+    #
+    #   priority — needs to bat early tonight (a captain on selection night,
+    #     someone leaving at seven). It says nothing about where they SIT: the
+    #     coach chooses between moving them up and simply flagging it, because a
+    #     flag that silently re-sorted the order would fight the order the coach
+    #     had just set, and several of them would leave nobody able to say who
+    #     is genuinely first. It outlives a turn, since it is a fact about their
+    #     night rather than about one rotation.
+    padding_up = Column(Boolean, nullable=False, server_default="false")
+    priority = Column(Boolean, nullable=False, server_default="false")
     # 'admin' (a manager tapped the name) or 'self' (the player scanned the QR
     # code or tapped the NFC tag on the way in). Mirrors
     # player_availability.source and exists for the same reason: a self

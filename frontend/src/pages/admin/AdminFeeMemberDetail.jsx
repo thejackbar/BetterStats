@@ -16,6 +16,32 @@ const STATUS_OPTIONS = [
 const FORMAT_LABEL = { two_day: 'Two Day', one_day: 'One Day', t20: 'T20', women: "Women's" }
 const inp = 'w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
 
+const SECTION_LABEL = { membership: 'Membership', tier: 'Membership Tier', contact: 'Contact & Notes' }
+const SECTION_ORDER = ['membership', 'tier', 'contact']
+// A form is unchanged when every field reads the same as it did on load.
+// Nullish is folded to '' so a field the server sent as null and one the admin
+// has never typed in don't read as an edit.
+const sameForm = (a, b) => Object.keys(a).every(k => (a[k] ?? '') === (b[k] ?? ''))
+
+// Sits above a panel's own button when OTHER panels are also unsaved, so
+// pressing it is never a surprise about what else it writes.
+function AlsoSaving({ dirtySections, self }) {
+  const others = dirtySections.filter(k => k !== self)
+  if (!others.length) return null
+  return (
+    <p data-testid="also-saving" className="font-mono text-[9.5px] text-pb-amber mb-2 leading-relaxed">
+      Also saving your unsaved changes to {others.map(k => SECTION_LABEL[k]).join(' and ')}.
+    </p>
+  )
+}
+
+function UnsavedPill() {
+  return (
+    <span data-testid="unsaved-mark"
+      className="font-mono text-[9px] tracking-wide2 text-pb-amber border border-pb-amber/40 rounded px-1.5 py-0.5">UNSAVED</span>
+  )
+}
+
 function StatusBadge({ status }) {
   if (status === 'financial')
     return <span className="font-mono text-[9px] tracking-wide2 text-green-300 bg-green-900/40 border border-green-600/30 rounded px-1.5 py-0.5">FINANCIAL</span>
@@ -305,9 +331,11 @@ export default function AdminFeeMemberDetail() {
   const [membershipForm, setMembershipForm] = useState({
     membership_type_id: '', is_life_member: false, is_honorary: false, honorary_expires_at: '', status: 'active',
   })
-  const [savingContact, setSavingContact] = useState(false)
-  const [savingTier, setSavingTier] = useState(false)
-  const [savingMembership, setSavingMembership] = useState(false)
+  // What was loaded, so each panel can tell whether it has been touched. The
+  // three panels write to two endpoints between them, so a save has to know
+  // which of them the admin actually edited rather than sending every field.
+  const [baseline, setBaseline] = useState({ contact: null, tier: null, membership: null })
+  const [savingFrom, setSavingFrom] = useState(null)
 
   // Resolve a season if it wasn't passed in the URL.
   useEffect(() => {
@@ -340,42 +368,77 @@ export default function AdminFeeMemberDetail() {
         honorary_expires_at: d.member.honorary_expires_at || '',
         status: d.member_season?.status || 'active',
       })
+      setBaseline({
+        contact: {
+          full_name: d.member.full_name || '', email: d.member.email || '',
+          mobile: d.member.mobile || '', notes: d.member.notes || '',
+        },
+        tier: {
+          fee_schedule_id: d.member_season?.fee_schedule_id || '',
+          is_new_registration: d.member_season?.is_new_registration || false,
+          membership_payment_method: d.member_season?.membership_payment_method || '',
+          playhq_registered: d.member_season?.playhq_registered || false,
+        },
+        membership: {
+          membership_type_id: d.member.membership_type_id || '',
+          is_life_member: d.member.is_life_member || false,
+          is_honorary: d.member.is_honorary || false,
+          honorary_expires_at: d.member.honorary_expires_at || '',
+          status: d.member_season?.status || 'active',
+        },
+      })
     }).catch(e => toast.error(e.message))
     api.feeListSchedule(seasonId).then(setTiers).catch(() => setTiers([]))
     api.feeListMembershipTypes().then(d => setMembershipTypes(d.types || [])).catch(() => {})
   }, [memberId, seasonId])
   useEffect(() => { load() }, [load])
 
-  async function saveContact() {
-    setSavingContact(true)
-    try { await api.feePatchMember(memberId, contact); toast.success('Saved'); load() }
-    catch (e) { toast.error(e.message) } finally { setSavingContact(false) }
+  // Three panels, two endpoints, one act of saving. An admin routinely edits
+  // more than one panel before pressing anything, so every button saves every
+  // panel that has been touched rather than its own — pressing SAVE TIER and
+  // silently losing the type they changed a moment earlier is the reported bug.
+  const dirty = {
+    membership: baseline.membership ? !sameForm(membershipForm, baseline.membership) : false,
+    tier: baseline.tier ? !sameForm(tierForm, baseline.tier) : false,
+    contact: baseline.contact ? !sameForm(contact, baseline.contact) : false,
   }
-  async function saveTier() {
-    setSavingTier(true)
+  const dirtySections = SECTION_ORDER.filter(k => dirty[k])
+  // With more than one panel touched, the button itself says what it will do,
+  // so the invitation isn't only in the note above it.
+  const saveLabel = own => (dirtySections.length > 1 ? `SAVE ALL CHANGES (${dirtySections.length})` : own)
+
+  async function saveAll(from) {
+    if (!dirtySections.length) { toast.info('No changes to save'); return }
+    setSavingFrom(from)
     try {
-      await api.feePatchMemberSeason(memberId, {
-        season_id: seasonId,
-        fee_schedule_id: tierForm.fee_schedule_id || null,
-        is_new_registration: tierForm.is_new_registration,
-        membership_payment_method: tierForm.membership_payment_method || null,
-        playhq_registered: tierForm.playhq_registered,
-      })
-      toast.success('Tier saved'); load()
-    } catch (e) { toast.error(e.message) } finally { setSavingTier(false) }
-  }
-  async function saveMembership() {
-    setSavingMembership(true)
-    try {
-      await api.feePatchMember(memberId, {
+      // Each endpoint is written ONCE with everything bound for it, so two
+      // panels touching the same row can't race or overwrite each other.
+      const memberPatch = {}
+      if (dirty.contact) Object.assign(memberPatch, contact)
+      if (dirty.membership) Object.assign(memberPatch, {
         membership_type_id: membershipForm.membership_type_id || '',
         is_life_member: membershipForm.is_life_member,
         is_honorary: membershipForm.is_honorary,
         honorary_expires_at: membershipForm.honorary_expires_at || '',
       })
-      await api.feePatchMemberSeason(memberId, { season_id: seasonId, status: membershipForm.status })
-      toast.success('Membership saved'); load()
-    } catch (e) { toast.error(e.message) } finally { setSavingMembership(false) }
+      const seasonPatch = {}
+      if (dirty.membership) seasonPatch.status = membershipForm.status
+      // Only ever send the tier when the tier panel was edited — the server
+      // reads the key's presence as the intent to change it.
+      if (dirty.tier) Object.assign(seasonPatch, {
+        fee_schedule_id: tierForm.fee_schedule_id || null,
+        is_new_registration: tierForm.is_new_registration,
+        membership_payment_method: tierForm.membership_payment_method || null,
+        playhq_registered: tierForm.playhq_registered,
+      })
+
+      if (Object.keys(memberPatch).length) await api.feePatchMember(memberId, memberPatch)
+      if (Object.keys(seasonPatch).length) await api.feePatchMemberSeason(memberId, { season_id: seasonId, ...seasonPatch })
+      toast.success(dirtySections.length > 1
+        ? `Saved ${dirtySections.length} sections`
+        : `${SECTION_LABEL[dirtySections[0]]} saved`)
+      load()
+    } catch (e) { toast.error(e.message) } finally { setSavingFrom(null) }
   }
 
   if (data === null) return <BetterFeesLayout><PbSpinner message="Loading member…" /></BetterFeesLayout>
@@ -410,7 +473,10 @@ export default function AdminFeeMemberDetail() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 mb-8">
           {/* Membership panel */}
           <div className="pb-card p-5">
-            <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-3 uppercase">Membership</p>
+            <div className="flex items-center gap-2 mb-3">
+              <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">Membership</p>
+              {dirty.membership && <UnsavedPill />}
+            </div>
             <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">TYPE</label>
             <select className={`${inp} mb-3`} value={membershipForm.membership_type_id}
               onChange={e => setMembershipForm(f => ({ ...f, membership_type_id: e.target.value }))}>
@@ -439,15 +505,19 @@ export default function AdminFeeMemberDetail() {
                   onChange={e => setMembershipForm(f => ({ ...f, honorary_expires_at: e.target.value }))} />
               </div>
             )}
-            <button onClick={saveMembership} disabled={savingMembership}
+            <AlsoSaving dirtySections={dirtySections} self="membership" />
+            <button onClick={() => saveAll('membership')} disabled={savingFrom !== null}
               className="w-full py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>
-              {savingMembership ? 'SAVING…' : 'SAVE MEMBERSHIP'}
+              {savingFrom === 'membership' ? 'SAVING…' : saveLabel('SAVE MEMBERSHIP')}
             </button>
           </div>
 
           {/* Tier panel */}
           <div className="pb-card p-5">
-            <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-3 uppercase">Membership Tier</p>
+            <div className="flex items-center gap-2 mb-3">
+              <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">Membership Tier</p>
+              {dirty.tier && <UnsavedPill />}
+            </div>
             {f.needs_tier && <p className="font-mono text-[11px] text-pb-amber mb-3">⚠ No tier assigned — fees won’t calculate.</p>}
             <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">TIER</label>
             <select className={`${inp} mb-3`} value={tierForm.fee_schedule_id}
@@ -471,15 +541,19 @@ export default function AdminFeeMemberDetail() {
                 onChange={e => setTierForm(t => ({ ...t, playhq_registered: e.target.checked }))} />
               Registered with PlayHQ this season
             </label>
-            <button onClick={saveTier} disabled={savingTier}
+            <AlsoSaving dirtySections={dirtySections} self="tier" />
+            <button onClick={() => saveAll('tier')} disabled={savingFrom !== null}
               className="w-full py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>
-              {savingTier ? 'SAVING…' : 'SAVE TIER'}
+              {savingFrom === 'tier' ? 'SAVING…' : saveLabel('SAVE TIER')}
             </button>
           </div>
 
           {/* Contact panel */}
           <div className="pb-card p-5">
-            <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-3 uppercase">Contact &amp; Notes</p>
+            <div className="flex items-center gap-2 mb-3">
+              <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">Contact &amp; Notes</p>
+              {dirty.contact && <UnsavedPill />}
+            </div>
             <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">NAME</label>
             <input className={`${inp} mb-3`} value={contact.full_name} onChange={e => setContact(c => ({ ...c, full_name: e.target.value }))} />
             {/* One person record, shared with the Directory. The value shown
@@ -501,9 +575,10 @@ export default function AdminFeeMemberDetail() {
             )}
             <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">NOTES</label>
             <textarea rows={2} className={`${inp} mb-4`} value={contact.notes} onChange={e => setContact(c => ({ ...c, notes: e.target.value }))} />
-            <button onClick={saveContact} disabled={savingContact}
+            <AlsoSaving dirtySections={dirtySections} self="contact" />
+            <button onClick={() => saveAll('contact')} disabled={savingFrom !== null}
               className="w-full py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-text hover:border-pb-accent disabled:opacity-50">
-              {savingContact ? 'SAVING…' : 'SAVE CONTACT'}
+              {savingFrom === 'contact' ? 'SAVING…' : saveLabel('SAVE CONTACT')}
             </button>
           </div>
         </div>

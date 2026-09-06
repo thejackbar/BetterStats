@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, text
 from sqlalchemy.exc import IntegrityError
@@ -1228,6 +1228,245 @@ async def apply_grade_suggestions(
             updated += res.rowcount or 0
     await db.commit()
     return {"updated": updated, "grades": len(pending)}
+
+
+# ---------------------------------------------------------------------------
+# Competitions (migration 282)
+#
+# A club plays across several competitions, sometimes several run by ONE
+# association and sometimes across associations in the same season. Cricket
+# Australia publishes the association on every grade and no competition at
+# all, so the association is synced and the competition is the club's own
+# named group of grades — see services/competitions.py for the evidence.
+#
+# These sit on the Manage Grades capability (MANAGE_MERGES) because that is
+# the screen that already owns "what is this grade, and how does the club
+# read it": its name, its category, its formats and its order. A competition
+# is the same kind of decision.
+# ---------------------------------------------------------------------------
+
+
+class CompetitionCreate(BaseModel):
+    name: str
+    # Optional: the association this competition belongs to, so a competition
+    # a club adds by hand under an association it already plays is recognised
+    # as that association's rather than reading as unaffiliated.
+    association_id: str | None = None
+
+
+class CompetitionRename(BaseModel):
+    name: str
+
+
+class CompetitionAssign(BaseModel):
+    # The grade NAME, not an id: a grade is one thing to a club across every
+    # season it ran, so assigning it moves all of its season rows at once —
+    # the same rule the category and display-order editors on this screen
+    # already follow.
+    grade_name: str
+    # None un-groups the grade rather than deleting anything.
+    competition_id: str | None = None
+
+
+class CompetitionReorder(BaseModel):
+    competition_ids: list[str]
+
+
+@router.get("/competitions")
+async def list_club_competitions(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+):
+    """The club's competitions, its grades and which competition each is in.
+
+    One request for the whole screen: the competitions with what they hold,
+    every grade name with its current competition, and the associations CA
+    reports — which is what the "group these for me" button is built from.
+    """
+    from app.services import competitions as comp_svc
+    return {
+        "competitions": await comp_svc.list_competitions(db, club.id),
+        "grades": await comp_svc.competition_grades(db, club.id),
+        "associations": await comp_svc.org_associations(db, club.id),
+    }
+
+
+@router.post("/competitions")
+async def create_club_competition(
+    req: CompetitionCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_cap(MANAGE_MERGES)),
+    club: Organisation = Depends(get_current_club),
+):
+    from app.services import competitions as comp_svc
+    try:
+        created = await comp_svc.create_competition(
+            db, club.id, req.name, req.association_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    from app.services.audit_log import log_activity
+    await log_activity(
+        db, org_id=str(club.id), user_id=current_user.id,
+        action="create_competition", target_type="competition",
+        target_id=created["id"], details={"name": created["name"]},
+    )
+    await db.commit()
+    return created
+
+
+@router.patch("/competitions/{competition_id}")
+async def rename_club_competition(
+    competition_id: str,
+    req: CompetitionRename,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_cap(MANAGE_MERGES)),
+    club: Organisation = Depends(get_current_club),
+):
+    from app.services import competitions as comp_svc
+    try:
+        await comp_svc.rename_competition(db, club.id, competition_id, req.name)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    from app.services.audit_log import log_activity
+    await log_activity(
+        db, org_id=str(club.id), user_id=current_user.id,
+        action="rename_competition", target_type="competition",
+        target_id=competition_id, details={"name": req.name},
+    )
+    await db.commit()
+    return {"status": "renamed"}
+
+
+@router.delete("/competitions/{competition_id}")
+async def delete_club_competition(
+    competition_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_cap(MANAGE_MERGES)),
+    club: Organisation = Depends(get_current_club),
+):
+    """Delete a competition. Its grades are un-grouped, never deleted.
+
+    Nothing about a game, a stat or a grade's own name changes — the grades
+    simply stop being grouped, and can be put in another competition.
+    """
+    from app.services import competitions as comp_svc
+    try:
+        await comp_svc.delete_competition(db, club.id, competition_id)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    from app.services.audit_log import log_activity
+    await log_activity(
+        db, org_id=str(club.id), user_id=current_user.id,
+        action="delete_competition", target_type="competition",
+        target_id=competition_id, details={},
+    )
+    await db.commit()
+    return {"status": "deleted"}
+
+
+@router.post("/competitions/assign")
+async def assign_grade_to_competition(
+    req: CompetitionAssign,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_cap(MANAGE_MERGES)),
+    club: Organisation = Depends(get_current_club),
+):
+    from app.services import competitions as comp_svc
+    try:
+        moved = await comp_svc.assign_grade(
+            db, club.id, req.grade_name, req.competition_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    await db.commit()
+    return {"status": "assigned", "season_rows": moved}
+
+
+@router.post("/competitions/reorder")
+async def reorder_club_competitions(
+    req: CompetitionReorder,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_cap(MANAGE_MERGES)),
+    club: Organisation = Depends(get_current_club),
+):
+    from app.services import competitions as comp_svc
+    await comp_svc.reorder_competitions(db, club.id, req.competition_ids)
+    await db.commit()
+    return {"status": "reordered"}
+
+
+@router.get("/competitions/grouping")
+async def competition_grouping_state(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+):
+    """Is anything still outside this club's competitions, and is a job running.
+
+    Read on every visit to Manage Grades, which is what turns the prompt on
+    the moment an admin finishes naming their competitions. A club with
+    nothing to fetch reports `needs_grouping: false` and the screen offers
+    nothing, because a button that would write nothing is worse than no
+    button.
+    """
+    from app.services import competition_grouping as grouping
+    state = await grouping.grouping_gap(db, club.id)
+    state["running_run_id"] = await grouping.running_run_id(db, club.id)
+    return state
+
+
+@router.post("/competitions/grouping")
+async def start_competition_grouping(
+    background: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_cap(MANAGE_MERGES)),
+    club: Organisation = Depends(get_current_club),
+):
+    """Fetch the missing associations and group what that unlocks.
+
+    One Cricket Australia call per season, so it runs in the background and
+    the screen polls `GET /club-admin/sync-runs/{id}` for the bar. Returns the
+    run id either way: a club that already has one in flight is handed THAT
+    run rather than a second one, so two admins pressing the button at the
+    same moment watch the same job instead of racing each other's writes.
+
+    Safe to run twice by construction, so there is no confirm on it: only a
+    grade with no association is written, and the seeder never renames or
+    re-points a competition the club has edited.
+    """
+    from app.services import competition_grouping as grouping
+    from app.services.sync import start_sync_run
+
+    existing = await grouping.running_run_id(db, club.id)
+    if existing:
+        return {"run_id": existing, "status": "already_running"}
+
+    run_id = await start_sync_run(
+        club.id, grouping.RUN_KIND, triggered_by_user_id=current_user.id,
+    )
+    background.add_task(grouping.run_grouping_job, club.id, run_id)
+    return {"run_id": str(run_id), "status": "started"}
+
+
+@router.post("/competitions/seed")
+async def seed_club_competitions(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_cap(MANAGE_MERGES)),
+    club: Organisation = Depends(get_current_club),
+):
+    """Group every un-grouped grade, one competition per association.
+
+    SKIP, NEVER REPLACE — a competition the club has renamed or split is left
+    exactly as it is, so pressing this twice cannot undo anyone's work. It is
+    the same function every sync runs, offered as a button for a club that
+    wants its grades grouped now rather than after the next sync.
+    """
+    from app.services import competitions as comp_svc
+    result = await comp_svc.seed_competitions_for_org(db, club.id)
+    await db.commit()
+    return result
 
 
 @router.get("/grade-merge-history")

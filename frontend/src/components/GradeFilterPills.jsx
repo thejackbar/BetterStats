@@ -52,13 +52,35 @@ export function matchFormatOptions(availableFormats = []) {
     .map(f => ({ key: f, label: FORMAT_LABELS[f] || f }))
 }
 
+// The club's own competitions, in the order it reads them.
+//
+// A club with FEWER THAN TWO is offered none at all, and that is deliberate:
+// filtering to your only competition is a control that can only ever answer
+// "everything", which is the same call ageFilterOptions and the Fees/Training
+// source notes make. It is also exactly the club for whom this whole feature
+// is a no-op, so the row correctly disappears for most of the platform.
+export function competitionOptions(availableCompetitions = []) {
+  if (!availableCompetitions || availableCompetitions.length < 2) return []
+  return availableCompetitions.map(c => ({ key: String(c.id), label: c.name }))
+}
+
 // The two rows together, for a screen that just wants both.
 export function GradeFilterPills({
   gradeType, setGradeType, matchFormat, setMatchFormat,
-  availableCategories = [], availableFormats = [], labelClass,
+  competition, setCompetition,
+  availableCategories = [], availableFormats = [], availableCompetitions = [],
+  labelClass,
 }) {
   return (
     <>
+      <FilterPillRow
+        label="Competition"
+        options={competitionOptions(availableCompetitions)}
+        value={competition}
+        onChange={setCompetition}
+        title={opt => `Only ${opt.label}`}
+        labelClass={labelClass}
+      />
       <FilterPillRow
         label="Grade Type"
         options={gradeTypeOptions(availableCategories)}

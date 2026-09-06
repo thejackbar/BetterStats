@@ -39,7 +39,6 @@ USAGE
 from __future__ import annotations
 
 import asyncio
-import re
 import sys
 import uuid
 
@@ -48,28 +47,12 @@ from sqlalchemy import text
 from app.models.db import async_session_maker
 from app.services.season_aliases import load_reverse_alias_map
 
-# "1968/69", "1968-69", "1968/1969" — anywhere in the name, so the synced
-# "Summer 1968/69" parses too (grouping needs both sides of a pair).
-_TOKEN = re.compile(r"(\d{4})\s*[/\-–]\s*(\d{2}|\d{4})")
-
-
-def season_start_year(name: str) -> int | None:
-    """The starting year of the season a name refers to, or None.
-
-    Only accepts a consecutive pair ("1968/69", "1968/1969") — a name like
-    "1968/72" is somebody's own labelling, not a season token we understand.
-    """
-    m = _TOKEN.search(name or "")
-    if not m:
-        return None
-    start = int(m.group(1))
-    end_raw = m.group(2)
-    expected = (start + 1) % 100 if len(end_raw) == 2 else start + 1
-    return start if int(end_raw) == expected else None
-
-
-def canonical_name(start: int) -> str:
-    return f"Summer {start}/{(start + 1) % 100:02d}"
+# Both of these used to live here. They moved to season_resolve when the
+# scorecard upload started needing the same two answers ("which year is this
+# season?" and "what is that year called?"), and are imported rather than
+# copied so a tidied season list and a newly uploaded card cannot end up
+# disagreeing about what 1968/69 is named.
+from app.services.season_resolve import canonical_name, season_start_year  # noqa: F401
 
 
 def _data_note(s) -> str:

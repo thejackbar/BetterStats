@@ -16,6 +16,7 @@ from app.routers.auth import get_current_user, get_optional_user, user_can_view_
 from app.auth.capabilities import require_cap, MANAGE_PLAYERS
 from app.services.squad_membership import sync_squad_membership
 from app.services.name_format import name_sort_key
+from app.services import rate_coverage as rc
 from app.services.aggregations import (
     get_career_batting, get_career_bowling, get_career_fielding,
     get_career_batting_from_innings, get_career_bowling_from_spells, get_career_fielding_from_stats,
@@ -42,17 +43,18 @@ router = APIRouter(prefix="/players", tags=["players"])
 
 async def _resolve_player_scope(
     db: AsyncSession, player: Player, categories: Optional[str],
-    formats: Optional[str] = None,
+    formats: Optional[str] = None, competitions: Optional[str] = None,
 ):
     """Same grade-type and match-type scope the career/grade breakdowns use, for
     the rest of the Analysis-tab sub-endpoints (dismissals, by-position,
     by-venue, by-opposition, partnerships, ...). Every one of them reads the same
     per-game rows the scoped career totals do, so a player with the Juniors
-    filter on, or Match Type set to T20, must not have an out-of-scope game
-    reappear in one of these without the other."""
+    filter on, or Match Type set to T20 or one competition, must not have an
+    out-of-scope game reappear in one of these without the other."""
     org = await db.get(Organisation, player.organisation_id) if player.organisation_id else None
     scope, _ = await grade_scope.resolve_scope_for_player(
         db, player.organisation_id, str(player.id), categories, formats=formats,
+        competitions=competitions,
         auto_widen=bool(org.stats_auto_show_played_grades) if org else True,
     )
     return scope
@@ -191,6 +193,14 @@ async def get_player_stats(
             "no format filter."
         ),
     ),
+    competitions: Optional[str] = Query(
+        None,
+        description=(
+            "Comma-separated club competition ids to count. Narrows a career to "
+            "one competition — the ask a player in several of them in one season "
+            "cannot otherwise answer. Omitted applies no competition filter."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     player = await db.get(Player, uuid.UUID(player_id))
@@ -200,6 +210,7 @@ async def get_player_stats(
     org = await db.get(Organisation, player.organisation_id) if player.organisation_id else None
     scope, auto_shown = await grade_scope.resolve_scope_for_player(
         db, player.organisation_id, player_id, categories, formats=formats,
+        competitions=competitions,
         auto_widen=bool(org.stats_auto_show_played_grades) if org else True,
     )
     use_game_filter = last_n_games or start_date or end_date
@@ -217,6 +228,27 @@ async def get_player_stats(
     batting_innings = await get_player_batting_innings(db, player_id, season_id, grade_id, scope=scope)
     bowling_spells = await get_player_bowling_spells(db, player_id, season_id, grade_id, scope=scope)
 
+    # How much of this career a breakdown can reach at all. Told UP FRONT, on
+    # the unfiltered view as well as a filtered one, so nobody discovers for
+    # themselves that the per-competition figures do not sum to the career
+    # total and reads it as a mistake. None when the two sources agree, which
+    # is the common case and draws nothing. Skipped for a last-N-games or
+    # date window, where the headline is a slice of a career rather than the
+    # career and the comparison would mean nothing.
+    # See services/match_coverage.py.
+    coverage = None
+    if player.organisation_id and not use_game_filter:
+        try:
+            from app.services import match_coverage
+            coverage = await match_coverage.career_coverage(
+                db, player_id, player.organisation_id, season_id)
+        except Exception:
+            # A note about the figures must never take the figures down.
+            await db.rollback()
+            import logging
+            logging.getLogger(__name__).exception(
+                "match coverage failed for player %s", player_id)
+
     return {
         "player": {"id": str(player.id), "name": player.name, "display_name": player.display_name, "claimed": player.claimed, "organisation_id": str(player.organisation_id), "playhq_id": player.playhq_id, "photo_url": player.photo_url, "is_overseas": player.is_overseas, "overseas_country": player.overseas_country, **(await _public_player_attrs(db, player))},
         "career_batting": _str_keys(batting),
@@ -224,11 +256,22 @@ async def get_player_stats(
         "career_fielding": _str_keys(fielding),
         "batting_innings": [_str_keys(i) for i in batting_innings],
         "bowling_spells": [_str_keys(s) for s in bowling_spells],
+        # Present only when the career total and what a filter can count from
+        # differ, so a payload that has nothing to explain keeps its exact
+        # shape — the presence-aware rule `_with_rate_coverage` already uses.
+        **({"match_coverage": coverage} if coverage else {}),
         # Lets the profile say which categories these figures cover, and offer
         # only the toggles this club's grades actually justify.
         "grade_scope": {
             **scope.as_meta(),
             "available": await grade_scope.org_available_categories(db, player.organisation_id),
+            # The competitions this club can be filtered by, so the profile can
+            # draw the row without a second request. Empty for a club that plays
+            # one competition, and the row then doesn't render — a control that
+            # can only answer "everything" is worse than none.
+            "available_competitions": await grade_scope.org_available_competitions(
+                db, player.organisation_id
+            ),
             # True when the club default would have left this player with nothing
             # at all, so the categories they actually played were added back. The
             # profile says so rather than quietly showing a wider set than the
@@ -236,6 +279,32 @@ async def get_player_stats(
             "auto_shown": auto_shown,
         },
     }
+
+
+@router.get("/{player_id}/competitions")
+async def get_player_competitions(
+    player_id: str,
+    season_id: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """This player's batting, bowling, fielding and appearances per competition.
+
+    The competition FILTER narrows every other panel to one competition; this
+    enumerates them, so a player who turned out in the Border Cup and the Over
+    60s competition in one season can be read side by side rather than by
+    switching a filter back and forth.
+
+    Deliberately takes no `categories`/`formats` scope. Slicing a career three
+    ways at once buys nothing here, and the same call `get_player_formats`
+    already makes for the same reason.
+    """
+    player = await db.get(Player, uuid.UUID(player_id))
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+    from app.services import competition_stats
+    return await competition_stats.player_competition_breakdown(
+        db, player_id, player.organisation_id, season_id
+    )
 
 
 @router.get("/{player_id}/formats")
@@ -268,24 +337,26 @@ async def get_player_formats(
 @router.get("/{player_id}/dismissals")
 async def get_player_dismissals(
     player_id: str, categories: Optional[str] = Query(None),
-    formats: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
+    formats: Optional[str] = Query(None),
+    competitions: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
 ):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    scope = await _resolve_player_scope(db, player, categories, formats)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
     return await get_dismissal_breakdown(db, player_id, scope=scope)
 
 
 @router.get("/{player_id}/by-position")
 async def get_player_by_position(
     player_id: str, categories: Optional[str] = Query(None),
-    formats: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
+    formats: Optional[str] = Query(None),
+    competitions: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
 ):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    scope = await _resolve_player_scope(db, player, categories, formats)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
     return await get_batting_by_position(db, player_id, scope=scope)
 
 
@@ -294,6 +365,7 @@ async def get_player_by_grade(
     player_id: str,
     categories: Optional[str] = Query(None),
     formats: Optional[str] = Query(None),
+    competitions: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
@@ -302,7 +374,7 @@ async def get_player_by_grade(
         raise HTTPException(status_code=404, detail="Player not found")
     org_id = str(player.organisation_id)
     public_only = not await user_can_view_org_private(db, viewer, org_id)
-    scope = await _resolve_player_scope(db, player, categories, formats)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
     return await get_batting_by_grade(db, player_id, org_id, public_only=public_only, scope=scope)
 
 
@@ -311,6 +383,7 @@ async def get_player_bowling_by_grade(
     player_id: str,
     categories: Optional[str] = Query(None),
     formats: Optional[str] = Query(None),
+    competitions: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
@@ -319,77 +392,98 @@ async def get_player_bowling_by_grade(
         raise HTTPException(status_code=404, detail="Player not found")
     org_id = str(player.organisation_id)
     public_only = not await user_can_view_org_private(db, viewer, org_id)
-    scope = await _resolve_player_scope(db, player, categories, formats)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
     return await get_bowling_by_grade(db, player_id, org_id, public_only=public_only, scope=scope)
 
 
 @router.get("/{player_id}/bowling-dismissals")
 async def get_player_bowling_dismissals(
     player_id: str, categories: Optional[str] = Query(None),
-    formats: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
+    formats: Optional[str] = Query(None),
+    competitions: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
 ):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    scope = await _resolve_player_scope(db, player, categories, formats)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
     return await get_bowling_dismissal_breakdown(db, player_id, scope=scope)
 
 
 @router.get("/{player_id}/bowling-by-batter-position")
 async def get_player_bowling_by_batter_position(
     player_id: str, categories: Optional[str] = Query(None),
-    formats: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
+    formats: Optional[str] = Query(None),
+    competitions: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
 ):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    scope = await _resolve_player_scope(db, player, categories, formats)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
     return await get_bowling_by_batter_position(db, player_id, scope=scope)
 
 
 @router.get("/{player_id}/by-venue")
 async def get_player_by_venue_endpoint(
     player_id: str, categories: Optional[str] = Query(None),
-    formats: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
+    formats: Optional[str] = Query(None),
+    competitions: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
 ):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    scope = await _resolve_player_scope(db, player, categories, formats)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
     return await get_player_by_venue(db, player_id, scope=scope)
 
 
 @router.get("/{player_id}/by-opposition")
 async def get_player_by_opposition_endpoint(
     player_id: str, categories: Optional[str] = Query(None),
-    formats: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
+    formats: Optional[str] = Query(None),
+    competitions: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
 ):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    scope = await _resolve_player_scope(db, player, categories, formats)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
     return await get_player_by_opposition(db, player_id, scope=scope)
 
 
 @router.get("/{player_id}/teammates")
-async def get_player_teammates(player_id: str, db: AsyncSession = Depends(get_db)):
+async def get_player_teammates(
+    player_id: str,
+    categories: Optional[str] = Query(None),
+    formats: Optional[str] = Query(None),
+    competitions: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
     """Every player this player has shared a side with, most games together first,
-    with the team's record over those shared games. Public (career)."""
+    with the team's record over those shared games. Public; takes the page's
+    grade-type / match-type / competition scope like every other Analysis panel."""
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    result = await iq_teammates.teammates(db, str(player.organisation_id), player_id)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
+    result = await iq_teammates.teammates(db, str(player.organisation_id), player_id, scope=scope)
     return result or {"player": {"player_id": player_id, "name": player.name}, "teammates": []}
 
 
 @router.get("/{player_id}/teammates/{teammate_id}")
-async def get_player_teammate_split(player_id: str, teammate_id: str, db: AsyncSession = Depends(get_db)):
+async def get_player_teammate_split(
+    player_id: str,
+    teammate_id: str,
+    categories: Optional[str] = Query(None),
+    formats: Optional[str] = Query(None),
+    competitions: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
     """This player's batting, bowling and the team's record split by whether the
     teammate was also in the side (the with-vs-without comparison). Public."""
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    result = await iq_teammates.with_split(db, str(player.organisation_id), player_id, teammate_id)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
+    result = await iq_teammates.with_split(
+        db, str(player.organisation_id), player_id, teammate_id, scope=scope)
     if result is None:
         raise HTTPException(status_code=404, detail="Player or teammate not found")
     return result
@@ -399,13 +493,20 @@ async def get_player_teammate_split(player_id: str, teammate_id: str, db: AsyncS
 async def get_player_team_breakdown_endpoint(
     player_id: str,
     season_id: Optional[str] = Query(None),
+    categories: Optional[str] = Query(None),
+    formats: Optional[str] = Query(None),
+    competitions: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
+    # The filter bar sits above every tab, so this grid answers to it like the
+    # rest of the Analysis panels. Without it a club filtering to Men's on the
+    # Batting tab found the women's grades back on Team, one click away.
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
     return await get_player_team_breakdown(
-        db, player_id, str(player.organisation_id), season_id
+        db, player_id, str(player.organisation_id), season_id, scope=scope
     )
 
 
@@ -426,6 +527,7 @@ async def get_player_seasons(
     player_id: str,
     categories: Optional[str] = Query(None),
     formats: Optional[str] = Query(None),
+    competitions: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     player = await db.get(Player, uuid.UUID(player_id))
@@ -434,6 +536,7 @@ async def get_player_seasons(
     org = await db.get(Organisation, player.organisation_id) if player.organisation_id else None
     scope, _ = await grade_scope.resolve_scope_for_player(
         db, player.organisation_id, player_id, categories, formats=formats,
+        competitions=competitions,
         auto_widen=bool(org.stats_auto_show_played_grades) if org else True,
     )
     return await get_season_by_season(db, player_id, include_prior=True, scope=scope)
@@ -476,12 +579,13 @@ async def get_player_milestones_endpoint(player_id: str, db: AsyncSession = Depe
 @router.get("/{player_id}/partnerships")
 async def get_player_partnerships_endpoint(
     player_id: str, categories: Optional[str] = Query(None),
-    formats: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
+    formats: Optional[str] = Query(None),
+    competitions: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
 ):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    scope = await _resolve_player_scope(db, player, categories, formats)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
     rows = await get_player_partnerships(db, player_id, scope=scope)
     return [_str_keys(r) for r in rows]
 
@@ -568,7 +672,13 @@ async def get_player_upcoming_milestones(player_id: str, db: AsyncSession = Depe
 
 
 @router.get("/{player_id}/captain-stats")
-async def get_player_captain_stats(player_id: str, db: AsyncSession = Depends(get_db)):
+async def get_player_captain_stats(
+    player_id: str,
+    categories: Optional[str] = Query(None),
+    formats: Optional[str] = Query(None),
+    competitions: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
     pid = uuid.UUID(player_id)
     # Captaincy is a club's own record: a shared CA participant GUID means a
     # player's rows can sit on another club's game, and captaining a side for
@@ -576,6 +686,16 @@ async def get_player_captain_stats(player_id: str, db: AsyncSession = Depends(ge
     # aggregations._club_game_clause.
     params: dict = {"pid": pid}
     club = await _club_game_clause(db, player_id, params)
+    # The filter bar is page-level, so "matches captained in men's grades" is
+    # a real question this tab has to answer. Every query below joins
+    # v_effective_games as `g` and interpolates `club`, so the scope rides on
+    # that one string rather than being pasted into six places.
+    player = await db.get(Player, pid)
+    if player:
+        scope = await _resolve_player_scope(db, player, categories, formats, competitions)
+        if scope.active:
+            scope.bind(params)
+            club = club + scope.clause("g.grade_id")
 
     summary_res = await db.execute(text("""
         SELECT
@@ -629,27 +749,45 @@ async def get_player_captain_stats(player_id: str, db: AsyncSession = Depends(ge
             COUNT(DISTINCT bs.game_id) AS games,
             COALESCE(SUM(bs.wickets), 0) AS wickets,
             ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.wickets), 0), 2) AS average,
-            ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.overs), 0), 2) AS economy
+            -- Overs are cricket notation (10.2 is 10 overs and 2 balls), so they
+            -- are converted to balls before dividing, and only the spells that
+            -- carry an overs figure answer the rate. Summing the notation and
+            -- dividing by it is two bugs in one line: 10.2 + 10.2 is 20 overs 4
+            -- balls, not 20.4, and a spell that reached us without an overs
+            -- figure would put its runs over somebody else's overs.
+            -- See services/rate_coverage.py.
+            """ + rc.economy_sql("bs") + """ AS economy,
+            """ + rc.bowling_covered_count_sql("bs") + """ AS econ_counted,
+            COUNT(*) AS econ_of
         FROM v_effective_bowling_spells bs
         JOIN v_effective_games g ON g.id = bs.game_id
         JOIN game_appearances ga ON ga.game_id = bs.game_id AND ga.player_id = bs.player_id AND ga.is_captain = TRUE
         WHERE bs.player_id = :pid""" + club + """
     """), params)
-    bowl_cap = dict(bowl_cap_res.mappings().first() or {})
+    bowl_cap = rc.with_coverage(dict(bowl_cap_res.mappings().first() or {}))
 
     bowl_not_res = await db.execute(text("""
         SELECT
             COUNT(DISTINCT bs.game_id) AS games,
             COALESCE(SUM(bs.wickets), 0) AS wickets,
             ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.wickets), 0), 2) AS average,
-            ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.overs), 0), 2) AS economy
+            -- Overs are cricket notation (10.2 is 10 overs and 2 balls), so they
+            -- are converted to balls before dividing, and only the spells that
+            -- carry an overs figure answer the rate. Summing the notation and
+            -- dividing by it is two bugs in one line: 10.2 + 10.2 is 20 overs 4
+            -- balls, not 20.4, and a spell that reached us without an overs
+            -- figure would put its runs over somebody else's overs.
+            -- See services/rate_coverage.py.
+            """ + rc.economy_sql("bs") + """ AS economy,
+            """ + rc.bowling_covered_count_sql("bs") + """ AS econ_counted,
+            COUNT(*) AS econ_of
         FROM v_effective_bowling_spells bs
         JOIN v_effective_games g ON g.id = bs.game_id
         LEFT JOIN game_appearances ga ON ga.game_id = bs.game_id AND ga.player_id = bs.player_id AND ga.is_captain = TRUE
         WHERE bs.player_id = :pid""" + club + """
           AND ga.game_id IS NULL
     """), params)
-    bowl_not = dict(bowl_not_res.mappings().first() or {})
+    bowl_not = rc.with_coverage(dict(bowl_not_res.mappings().first() or {}))
 
     by_season_res = await db.execute(text("""
         WITH captain_games AS (

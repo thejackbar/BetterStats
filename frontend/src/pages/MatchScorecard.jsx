@@ -106,23 +106,70 @@ function winnerSide(winner, teamA, teamB) {
   return a > b ? 'a' : 'b'
 }
 
-// "Won by N wickets" (chasing side won) or "won by N runs" (defending side
-// won) — derived from the two innings totals themselves, since the backend
-// doesn't store a pre-written margin string. Wickets-margin only makes sense
-// for the side that batted second; a first-innings win is always by runs.
-function marginText(game, innings1, innings2) {
-  if (!game.winning_team || !innings1 || !innings2) return null
-  const first = innings1, second = innings2
-  const wonBattingSecond = winnerSide(game.winning_team, first.battingTeam, second.battingTeam) === 'b'
-  if (wonBattingSecond && second.wickets != null) {
-    const left = 10 - second.wickets
+// Split the innings between the two sides. A two-day match gives each side
+// TWO innings (1 and 3 are one team, 2 and 4 the other), so nothing here can
+// assume "innings 1 = team A, innings 2 = team B and that's the lot" — that
+// assumption is what dropped the second innings of a two-innings game off
+// this page entirely. Sides are keyed on the batting team's own name rather
+// than on odd/even position, so a follow-on (where one side bats twice in a
+// row) still files each innings under whoever actually batted.
+function splitSides(inningsData) {
+  const a = [], b = []
+  const nameA = inningsData[0]?.battingTeam || ''
+  for (const inn of inningsData) {
+    // No name recorded → fall back to alternating, which is right for the
+    // ordinary case and no worse than guessing for anything else.
+    if (!inn.battingTeam || !nameA) {
+      (inningsData.indexOf(inn) % 2 === 0 ? a : b).push(inn)
+      continue
+    }
+    const sameAsA = teamMatchScore(inn.battingTeam, nameA)
+    const other = b[0]?.battingTeam
+    ;(sameAsA >= (other ? teamMatchScore(inn.battingTeam, other) : 0) && sameAsA > 0 ? a : b).push(inn)
+  }
+  return { a, b, nameA, nameB: b[0]?.battingTeam || '' }
+}
+
+function sideRuns(side) {
+  const scored = side.filter(i => i.runs != null)
+  return scored.length ? scored.reduce((s, i) => s + i.runs, 0) : null
+}
+
+// "Won by N wickets" (chasing side won), "won by N runs" (defending side won),
+// or "by an innings and N runs" — derived from the innings totals themselves,
+// since the backend stores no pre-written margin string. Works off each side's
+// AGGREGATE, so a two-innings match is judged on both innings the way cricket
+// actually scores it, not on the first two alone.
+function marginText(game, inningsData) {
+  if (!game.winning_team || inningsData.length < 2) return null
+  const { a, b, nameA, nameB } = splitSides(inningsData)
+  if (!a.length || !b.length) return null
+
+  const side = winnerSide(game.winning_team, nameA, nameB)
+  if (!side) return null
+  const winner = side === 'a' ? a : b
+  const loser = side === 'a' ? b : a
+  const winnerRuns = sideRuns(winner)
+  const loserRuns = sideRuns(loser)
+  if (winnerRuns == null || loserRuns == null) return null
+
+  // An innings victory: the winner batted once, the loser twice, and one
+  // innings still outscored both of theirs.
+  if (winner.length < loser.length && winnerRuns > loserRuns) {
+    const by = winnerRuns - loserRuns
+    return `won by an innings and ${by} run${by === 1 ? '' : 's'}`
+  }
+
+  // Batted last and still had wickets standing → a chase, so the margin is
+  // wickets in hand rather than runs.
+  const last = inningsData[inningsData.length - 1]
+  if (winner.includes(last) && last.wickets != null && last.wickets < 10) {
+    const left = 10 - last.wickets
     if (left > 0) return `won by ${left} wicket${left === 1 ? '' : 's'}`
   }
-  if (first.runs != null && second.runs != null) {
-    const diff = Math.abs(first.runs - second.runs)
-    if (diff > 0) return `won by ${diff} run${diff === 1 ? '' : 's'}`
-  }
-  return null
+
+  const diff = Math.abs(winnerRuns - loserRuns)
+  return diff > 0 ? `won by ${diff} run${diff === 1 ? '' : 's'}` : null
 }
 
 // A club crest pulled live from Grassroots (nested under a GR team's
@@ -161,7 +208,7 @@ function MatchHeader({ game, innings }) {
     const rr = (runs != null && balls > 0) ? (runs / (balls / 6)).toFixed(2) : null
     return { ...inn, runs, wickets, oversStr, rr, battingTeam: t.batting_team || '', logoUrl: t.logo_url || null }
   })
-  const margin = marginText(game, inningsData[0], inningsData[1])
+  const margin = marginText(game, inningsData)
   const competition = [game.grade?.name, game.season?.name].filter(Boolean).join(' · ')
 
   // The header is deliberately home/away, NOT batting order — this is the
@@ -171,44 +218,60 @@ function MatchHeader({ game, innings }) {
   // see their own "INNINGS 1"/"INNINGS 2" labels, unchanged by this.)
   // Matched via battingTeam since the away side bats first as often as home
   // does, so innings array order alone can't place them.
+  // Each side carries ALL of its innings, not just one — in a two-day match a
+  // team bats twice and the header reads "30 & 124", the way a scorecard is
+  // written. Taking inningsData[0]/[1] here is what used to hide half a
+  // two-innings game.
   const homeTeam = game.home_team || ''
   const awayTeam = game.away_team || ''
-  let homeInn = inningsData[0], awayInn = inningsData[1]
-  if (awayInn && homeTeam &&
-      teamMatchScore(awayInn.battingTeam, homeTeam) > teamMatchScore(homeInn?.battingTeam, homeTeam)) {
-    homeInn = inningsData[1]
-    awayInn = inningsData[0]
+  const { a: sideA, b: sideB } = splitSides(inningsData)
+  let homeInns = sideA, awayInns = sideB
+  if (sideB.length && homeTeam &&
+      teamMatchScore(sideB[0]?.battingTeam, homeTeam) > teamMatchScore(sideA[0]?.battingTeam, homeTeam)) {
+    homeInns = sideB
+    awayInns = sideA
   }
   const winner = (game.winning_team || '').trim()
   const side = winnerSide(winner, homeTeam, awayTeam)
   const homeWon = side === 'a'
   const awayWon = side === 'b'
 
-  const Side = ({ label, teamName, inn, won, align }) => (
-    <div
-      className={`px-3 sm:px-6 py-4 flex flex-col ${align === 'right' ? 'items-end text-right' : 'items-start text-left'} gap-1`}
-      style={won ? { background: 'rgba(34,197,94,0.06)' } : undefined}
-    >
-      <div className="font-mono text-[9px] tracking-wide3 text-pb-faintest">{label}</div>
-      <div className={`flex items-center gap-2.5 ${align === 'right' ? 'flex-row-reverse' : ''}`}>
-        <TeamBadge name={teamName} logoUrl={inn?.logoUrl} size={32} />
-        <div className="font-display font-bold text-[14px] sm:text-[18px] text-pb-text tracking-tight leading-tight">
-          {teamName || '—'}
+  const Side = ({ label, teamName, inns = [], won, align }) => {
+    // "30 & 124" — a side's innings read as one score line, which is how a
+    // two-innings card is written and the only way both fit on the header.
+    const scores = inns.map(i => fmtScore(i.runs, i.wickets)).filter(s => s != null)
+    // Overs/RR only make sense against a single innings; on a two-innings
+    // match the per-innings cards below carry them instead.
+    const single = inns.length === 1 ? inns[0] : null
+    return (
+      <div
+        className={`px-3 sm:px-6 py-4 flex flex-col ${align === 'right' ? 'items-end text-right' : 'items-start text-left'} gap-1`}
+        style={won ? { background: 'rgba(34,197,94,0.06)' } : undefined}
+      >
+        <div className="font-mono text-[9px] tracking-wide3 text-pb-faintest">{label}</div>
+        <div className={`flex items-center gap-2.5 ${align === 'right' ? 'flex-row-reverse' : ''}`}>
+          <TeamBadge name={teamName} logoUrl={inns[0]?.logoUrl} size={32} />
+          <div className="font-display font-bold text-[14px] sm:text-[18px] text-pb-text tracking-tight leading-tight">
+            {teamName || '—'}
+          </div>
+          {won && <WinnerTag />}
         </div>
-        {won && <WinnerTag />}
+        {scores.length > 0 && (
+          <div
+            className={`font-mono font-bold leading-none ${scores.length > 1 ? 'text-[20px] sm:text-[28px]' : 'text-[26px] sm:text-[38px]'}`}
+            style={{ color: won ? 'var(--pb-positive)' : 'var(--pb-dim)' }}
+          >
+            {scores.join(' & ')}
+          </div>
+        )}
+        {single?.oversStr && (
+          <div className="font-mono text-[10px] text-pb-faint tracking-wide2">
+            {single.oversStr} overs{single.rr ? ` · RR ${single.rr}` : ''}
+          </div>
+        )}
       </div>
-      {inn && fmtScore(inn.runs, inn.wickets) != null && (
-        <div className="font-mono font-bold text-[26px] sm:text-[38px] leading-none" style={{ color: won ? 'var(--pb-positive)' : 'var(--pb-dim)' }}>
-          {fmtScore(inn.runs, inn.wickets)}
-        </div>
-      )}
-      {inn?.oversStr && (
-        <div className="font-mono text-[10px] text-pb-faint tracking-wide2">
-          {inn.oversStr} overs{inn.rr ? ` · RR ${inn.rr}` : ''}
-        </div>
-      )}
-    </div>
-  )
+    )
+  }
 
   return (
     <div className="pb-card overflow-hidden mb-5">
@@ -216,7 +279,7 @@ function MatchHeader({ game, innings }) {
         <div className="px-5 pt-3 font-mono text-[10px] tracking-wide3 text-pb-faint">{competition}</div>
       )}
       <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 sm:gap-4 px-2 sm:px-4 py-1">
-        <Side label="HOME" teamName={homeTeam} inn={homeInn} won={homeWon} align="left" />
+        <Side label="HOME" teamName={homeTeam} inns={homeInns} won={homeWon} align="left" />
         <div className="flex flex-col items-center justify-center gap-1.5 px-2 min-w-[90px] sm:min-w-[130px]">
           <ResultPill result={game.result || 'N/R'} />
           {margin && (
@@ -228,7 +291,7 @@ function MatchHeader({ game, innings }) {
             </div>
           )}
         </div>
-        <Side label="AWAY" teamName={awayTeam} inn={awayInn} won={awayWon} align="right" />
+        <Side label="AWAY" teamName={awayTeam} inns={awayInns} won={awayWon} align="right" />
       </div>
     </div>
   )
@@ -744,19 +807,27 @@ export default function MatchScorecard() {
     ],
   }))
 
-  const inn1 = innings[0] || { num: 1, batting: [], bowling: [] }
-  const inn2 = innings[1] || { num: 2, batting: [], bowling: [] }
-  const hasInn2 = inn2.batting.length > 0 || inn2.bowling.length > 0
-
-  // Determine team names per innings from batting_team if available
-  const t1 = (game.innings_totals || {})[inn1.num] || {}
-  const t2 = (game.innings_totals || {})[inn2.num] || {}
+  // One card per innings the match actually had. A two-day game has four, and
+  // taking only innings[0] and innings[1] here is what hid the second innings
+  // of both sides — the backend has always returned all of them.
   // Never fall back to home_team/away_team by innings index — the away team bats
   // first as often as the home team does, so that guess is frequently backwards.
-  const inn1Team = t1.batting_team || '1ST INNINGS'
-  const inn2Team = t2.batting_team || '2ND INNINGS'
-  // Decided once for the pair, so the two cards can never both claim the win.
-  const wonSide = winnerSide(game.winning_team, inn1Team, inn2Team)
+  const cards = innings.map((inn, i) => {
+    const t = (game.innings_totals || {})[inn.num] || {}
+    return {
+      ...inn,
+      total: t,
+      battingTeam: t.batting_team || '',
+      teamName: t.batting_team || `INNINGS ${i + 1}`,
+      label: `INNINGS ${i + 1}`,
+    }
+  })
+  // Which of the two sides each card belongs to, by the same rule the header
+  // uses, so the WON badge is decided once for the match and a team's two
+  // innings can never disagree about it.
+  const { a: cardsA, nameA, nameB } = splitSides(cards)
+  const wonSide = winnerSide(game.winning_team, nameA, nameB)
+  const opponentOf = c => (cardsA.includes(c) ? nameB : nameA)
 
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">
@@ -775,35 +846,27 @@ export default function MatchScorecard() {
             <div className="py-12 text-center text-pb-faint">No scorecard data available for this match.</div>
           </Card>
         ) : (
-          <div className={`grid gap-4 ${hasInn2 ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}>
-            {/* Each team's own card: their batting, then — nested underneath —
-                the opponent's bowling figures from bowling at them. */}
-            <TeamCard
-              label="INNINGS 1"
-              teamName={inn1Team}
-              opponentName={inn2Team}
-              won={wonSide === 'a'}
-              batting={inn1.batting}
-              bowling={inn1.bowling}
-              inningsTotal={t1}
-              fmtName={fmtName}
-              canManage={canManage}
-              onClaim={setClaimTarget}
-            />
-            {hasInn2 && (
+          <div className={`grid gap-4 ${cards.length > 1 ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}>
+            {/* Each innings gets its own card: that side's batting, then —
+                nested underneath — the opponent's bowling figures from bowling
+                at them. Two columns, so a two-innings match reads as one
+                column per team (innings 1 and 3 above each other, 2 and 4
+                beside them). */}
+            {cards.map(c => (
               <TeamCard
-                label="INNINGS 2"
-                teamName={inn2Team}
-                opponentName={inn1Team}
-                won={wonSide === 'b'}
-                batting={inn2.batting}
-                bowling={inn2.bowling}
-                inningsTotal={t2}
+                key={c.num}
+                label={c.label}
+                teamName={c.teamName}
+                opponentName={opponentOf(c)}
+                won={!!wonSide && wonSide === (cardsA.includes(c) ? 'a' : 'b')}
+                batting={c.batting}
+                bowling={c.bowling}
+                inningsTotal={c.total}
                 fmtName={fmtName}
                 canManage={canManage}
                 onClaim={setClaimTarget}
               />
-            )}
+            ))}
           </div>
         )}
 

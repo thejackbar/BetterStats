@@ -4,9 +4,11 @@ from typing import Optional
 from datetime import date as date_cls
 import uuid
 
-from app.services.milestone_rules import next_threshold, reach_window
+from app.services import milestone_scan
+from app.services.club_grades import club_game_sql
 from app.services.grade_scope import GradeScope
 from app.services.game_status import NOT_PLAYED_SQL_LIST, appearance_counts_as_match
+from app.services import rate_coverage as rc
 
 # "Does this roster appearance count as a match played" — one definition,
 # interpolated into every query below that counts matches off
@@ -122,6 +124,7 @@ def _residual_totals_cte(scope: GradeScope, season_ids, params: dict) -> str:
                 COALESCE(SUM(pss.fours), 0) AS total_fours,
                 COALESCE(SUM(pss.sixes), 0) AS total_sixes,
                 COALESCE(SUM(pss.wickets), 0) AS total_wickets,
+                COALESCE(SUM(pss.bowling_innings), 0) AS bowling_innings,
                 COALESCE(SUM(pss.runs_conceded), 0) AS bowling_runs,
                 COALESCE(SUM(pss.overs), 0) AS total_overs,
                 COALESCE(SUM(pss.bowling_balls), 0) AS bowling_balls,
@@ -159,7 +162,7 @@ async def _career_residuals(
     `kind='aggregate'` clause says so in SQL.
     """
     params: dict = {"pid": player_id, "sources": list(_RESIDUAL_SOURCES)}
-    season_ids = await resolve_season_filter_no_org(session, season_id)
+    season_ids = await resolve_season_filter_no_org(session, season_id, include_shared=True)
     # Matches the unscoped career query's own behaviour: naming a season excludes
     # the NULL-season career lump, because a NULL never matches a season filter.
     season_clause = " AND pss.season_id = ANY(:sids)" if season_ids else ""
@@ -183,6 +186,7 @@ async def _career_residuals(
                 COALESCE(SUM(pss.fours), 0) AS total_fours,
                 COALESCE(SUM(pss.sixes), 0) AS total_sixes,
                 COALESCE(SUM(pss.wickets), 0) AS total_wickets,
+                COALESCE(SUM(pss.bowling_innings), 0) AS bowling_innings,
                 COALESCE(SUM(pss.runs_conceded), 0) AS bowling_runs,
                 COALESCE(SUM(pss.overs), 0) AS total_overs,
                 COALESCE(SUM(pss.bowling_balls), 0) AS bowling_balls,
@@ -228,7 +232,7 @@ async def _game_season_clause(session: AsyncSession, season_id, params: dict) ->
     """
     if not season_id:
         return ""
-    season_ids = await resolve_season_filter_no_org(session, season_id)
+    season_ids = await resolve_season_filter_no_org(session, season_id, include_shared=True)
     if not season_ids:
         return ""
     params["career_season_ids"] = season_ids
@@ -247,6 +251,58 @@ async def _player_org_id(session: AsyncSession, player_id: str) -> Optional[str]
     )
     org = row.scalar()
     return str(org) if org else None
+
+
+# "This game is our club's", for a query that already binds :org_id.
+#
+# A fixture between two synced clubs is ONE `games` row, and its grade — and so
+# its season — belongs to whichever club synced it first. NEITHER club owns it:
+# both played it and both hold scorecards against it. Testing
+# `seasons.organisation_id` therefore hands the whole match to one club and
+# hides it from the other, which is why every board here asks whether we were
+# one of the two SIDES instead. See services/club_grades.py.
+_OURS_GAMES = club_game_sql("g", "org_id")
+
+
+def _matches_played_cte(season_clause: str, scope_clause: str) -> str:
+    """Per player, the distinct in-scope matches they PLAYED — the "M" column.
+
+    A board's games figure was ``COUNT(DISTINCT game_id)`` over its own
+    per-innings rows, which counts matches the player BATTED in (or bowled in,
+    or fielded in), not matches played. Beside an INN column that already means
+    innings, M has to mean matches — and the profile's own MATCHES figure
+    already does (:func:`_scoped_games_played`), so the two disagreed by every
+    game a player was picked for and did not get a bat in.
+
+    Unions the four ways we know somebody was in a game, the same set that
+    function unions. **The games are narrowed FIRST** so the three per-innings
+    tables are not scanned platform-wide, the shape ``records.py``'s
+    ``grade_scoped_games`` already uses.
+    """
+    return f"""
+        board_games AS (
+            SELECT g.id
+            FROM v_effective_games g
+            JOIN seasons s ON s.id = g.season_id
+            WHERE {_OURS_GAMES}{season_clause}{scope_clause}
+        ), matches_played AS (
+            SELECT ap.player_id, COUNT(DISTINCT ap.game_id) AS games
+            FROM (
+                SELECT bi.player_id, bi.game_id FROM v_effective_batting_innings bi
+                 WHERE bi.game_id IN (SELECT id FROM board_games)
+                UNION
+                SELECT bs.player_id, bs.game_id FROM v_effective_bowling_spells bs
+                 WHERE bs.game_id IN (SELECT id FROM board_games)
+                UNION
+                SELECT fs.player_id, fs.game_id FROM v_effective_fielding_stats fs
+                 WHERE fs.game_id IN (SELECT id FROM board_games)
+                UNION
+                SELECT ga.player_id, ga.game_id FROM game_appearances ga
+                 WHERE ga.game_id IN (SELECT id FROM board_games)
+                   AND {_APPEARANCE_PLAYED}
+            ) ap
+            GROUP BY ap.player_id
+        )"""
 
 
 async def _club_game_clause(
@@ -377,13 +433,21 @@ async def get_career_batting(
         not_outs = _n(pg.get("not_outs")) + _n(r.get("not_outs"))
         balls = _n(pg.get("total_balls")) + _n(r.get("total_balls"))
         highs = [h for h in (pg.get("high_score"), r.get("high_score")) if h is not None]
+        # The strike rate comes only from the innings that carry a ball count,
+        # never from `runs` above. An aggregate-only residual has no innings
+        # behind it at all, so it contributes runs and no coverage — which is
+        # the whole point. See services/rate_coverage.py.
+        cov_runs = _n(pg.get("covered_runs"))
+        cov_balls = _n(pg.get("covered_balls"))
+        cov_inns = _n(pg.get("covered_innings"))
         return {
             **await _career_identity(session, player_id),
             "innings": innings,
             "total_runs": runs,
             "high_score": max(highs) if highs else None,
             "average": _ratio(runs, innings - not_outs),
-            "strike_rate": _ratio(runs * 100, balls),
+            "strike_rate": rc.strike_rate(cov_runs, cov_balls),
+            "strike_rate_coverage": rc.coverage(cov_inns, max(innings, cov_inns)),
             "fifties": _n(pg.get("fifties")) + _n(r.get("fifties")),
             "hundreds": _n(pg.get("hundreds")) + _n(r.get("hundreds")),
             "ducks": _n(pg.get("ducks")) + _n(r.get("ducks")),
@@ -421,7 +485,70 @@ async def get_career_batting(
         params,
     )
     row = result.mappings().first()
-    return dict(row) if row else None
+    if not row:
+        return None
+    return {**dict(row), **await _batting_rate_from_innings(session, player_id, season_id, row["innings"])}
+
+
+async def _batting_rate_from_innings(
+    session: AsyncSession,
+    player_id: str,
+    season_id: Optional[str],
+    aggregate_innings,
+) -> dict:
+    """Replace an aggregate strike rate with one worked out per innings.
+
+    CA's season aggregate carries a runs total and a balls total that need not
+    describe the same innings: a season scored partly on paper reports every
+    run and only the balls somebody typed in. Nothing in that one row can
+    separate them, so the fix is to stop reading it and re-derive the rate from
+    the scorecards we hold, which is where the two halves stay together.
+
+    A season we hold no scorecards for at all keeps the aggregate figure and is
+    reported as an aggregate basis rather than a fraction — there is nothing to
+    count innings against, and withholding every historical club's strike rate
+    would be a worse answer than saying where it came from.
+    """
+    pg = await get_career_batting_from_innings(session, player_id, season_id=season_id) or {}
+    counted = _n(pg.get("covered_innings"))
+    if not counted:
+        return {"strike_rate_coverage": {**rc.coverage(0, _n(aggregate_innings)), "basis": "aggregate"}}
+    return {
+        "strike_rate": rc.strike_rate(_n(pg.get("covered_runs")), _n(pg.get("covered_balls"))),
+        "strike_rate_coverage": {
+            **rc.coverage(counted, max(_n(aggregate_innings), counted)),
+            "basis": "innings",
+        },
+    }
+
+
+async def _bowling_rate_from_spells(
+    session: AsyncSession,
+    player_id: str,
+    season_id: Optional[str],
+    aggregate_spells,
+) -> dict:
+    """The bowling twin of :func:`_batting_rate_from_innings`.
+
+    Milder in practice: a scorer who records nothing else still records the
+    overs, so most clubs come out fully covered and no note is drawn.
+    """
+    pg = await get_career_bowling_from_spells(session, player_id, season_id=season_id) or {}
+    counted = _n(pg.get("covered_spells"))
+    if not counted:
+        return {"economy_coverage": {**rc.coverage(0, _n(aggregate_spells)), "basis": "aggregate"}}
+    balls = _n(pg.get("covered_bowl_balls"))
+    return {
+        "economy": rc.economy(_n(pg.get("covered_conceded")), balls),
+        "bowling_strike_rate": (
+            round(balls / _n(pg.get("covered_wickets")), 2)
+            if _n(pg.get("covered_wickets")) else None
+        ),
+        "economy_coverage": {
+            **rc.coverage(counted, max(_n(aggregate_spells), counted)),
+            "basis": "innings",
+        },
+    }
 
 
 async def get_career_bowling(
@@ -438,11 +565,20 @@ async def get_career_bowling(
         conceded = _n(pg.get("total_runs")) + _n(r.get("bowling_runs"))
         balls = _n(pg.get("total_balls")) + _n(r.get("bowling_balls"))
         best = [w for w in (pg.get("best_figures_wickets"), r.get("best_bowling_wickets")) if w is not None]
+        # Economy and balls-per-wicket read only the spells that carry an overs
+        # figure, for the same reason the strike rate above reads only the
+        # innings that carry a ball count.
+        cov_conceded = _n(pg.get("covered_conceded"))
+        cov_balls = _n(pg.get("covered_bowl_balls"))
+        cov_wkts = _n(pg.get("covered_wickets"))
+        cov_spells = _n(pg.get("covered_spells"))
+        spells = _n(pg.get("spells")) + _n(r.get("bowling_innings"))
         return {
             **await _career_identity(session, player_id),
             "total_wickets": wickets,
             "average": _ratio(conceded, wickets),
-            "economy": _ratio(conceded * 6, balls),
+            "economy": rc.economy(cov_conceded, cov_balls),
+            "economy_coverage": rc.coverage(cov_spells, max(spells, cov_spells)),
             "best_figures_wickets": max(best) if best else None,
             # Only the per-game side can name the actual figures — a residual
             # branch carries the wicket count but its `best_bowling_figures`
@@ -453,7 +589,7 @@ async def get_career_bowling(
             "total_overs": _n(pg.get("total_overs")) + _n(r.get("total_overs")),
             "total_runs": conceded,
             "five_fors": _n(pg.get("five_fors")) + _n(r.get("five_fors")),
-            "bowling_strike_rate": _ratio(balls, wickets),
+            "bowling_strike_rate": _ratio(cov_balls, cov_wkts),
             "games": matches + _n(r.get("games")),
         }
     season_ids = await resolve_season_filter_no_org(session, season_id)
@@ -480,6 +616,7 @@ async def get_career_bowling(
                 COALESCE(SUM(pss.overs), 0) AS total_overs,
                 COALESCE(SUM(pss.runs_conceded), 0) AS total_runs,
                 COALESCE(SUM(pss.five_wicket_innings), 0) AS five_fors,
+                COALESCE(SUM(pss.bowling_innings), 0) AS bowling_innings,
                 ROUND(SUM(pss.bowling_balls)::numeric / NULLIF(SUM(pss.wickets), 0), 2) AS bowling_strike_rate
             FROM players p
             LEFT JOIN v_effective_player_season_stats pss ON pss.player_id = p.id{season_clause}
@@ -489,7 +626,12 @@ async def get_career_bowling(
         params,
     )
     row = result.mappings().first()
-    return dict(row) if row else None
+    if not row:
+        return None
+    return {
+        **dict(row),
+        **await _bowling_rate_from_spells(session, player_id, season_id, row["bowling_innings"]),
+    }
 
 
 async def get_career_fielding(
@@ -671,7 +813,8 @@ async def get_career_batting_from_innings(
             COALESCE(SUM(runs), 0) AS total_runs,
             MAX(runs) AS high_score,
             ROUND(SUM(runs)::numeric / NULLIF(COUNT(*) - SUM(not_out::int), 0), 2) AS average,
-            ROUND(SUM(runs)::numeric / NULLIF(SUM(balls), 0) * 100, 2) AS strike_rate,
+            {rc.strike_rate_sql('q')} AS strike_rate,
+            {rc.batting_rate_columns('q')},
             COALESCE(SUM(CASE WHEN runs >= 50 AND runs < 100 THEN 1 ELSE 0 END), 0) AS fifties,
             COALESCE(SUM(CASE WHEN runs >= 100 THEN 1 ELSE 0 END), 0) AS hundreds,
             COALESCE(SUM(CASE WHEN runs = 0 AND NOT not_out THEN 1 ELSE 0 END), 0) AS ducks,
@@ -683,7 +826,7 @@ async def get_career_batting_from_innings(
             -- rather than trying to average two averages.
             COALESCE(SUM(not_out::int), 0) AS not_outs,
             COALESCE(SUM(balls), 0) AS total_balls
-        FROM qualifying
+        FROM qualifying q
     """
     result = await session.execute(text(sql), params)
     row = result.mappings().first()
@@ -739,7 +882,8 @@ async def get_career_bowling_from_spells(
         SELECT
             COALESCE(SUM(wickets), 0) AS total_wickets,
             ROUND(SUM(runs)::numeric / NULLIF(SUM(wickets), 0), 2) AS average,
-            ROUND(SUM(runs)::numeric * 6 / NULLIF(SUM(FLOOR(overs) * 6 + ROUND((overs - FLOOR(overs)) * 10)), 0), 2) AS economy,
+            {rc.economy_sql('q')} AS economy,
+            {rc.bowling_rate_columns('q')},
             (SELECT wickets FROM qualifying ORDER BY wickets DESC, runs ASC LIMIT 1) AS best_figures_wickets,
             (SELECT wickets::text || '/' || runs::text FROM qualifying ORDER BY wickets DESC, runs ASC LIMIT 1) AS best_bowling_figures,
             COALESCE(SUM(maidens), 0) AS total_maidens,
@@ -749,12 +893,13 @@ async def get_career_bowling_from_spells(
             COALESCE(SUM(runs), 0) AS total_runs,
             COALESCE(SUM(CASE WHEN wickets >= 5 THEN 1 ELSE 0 END), 0) AS five_fors,
             COUNT(DISTINCT game_id) AS games,
-            ROUND(SUM(overs)::numeric * 6 / NULLIF(SUM(wickets), 0), 2) AS bowling_strike_rate,
+            COUNT(*) AS spells,
+            {rc.bowling_strike_rate_sql('q')} AS bowling_strike_rate,
             -- Balls bowled, from cricket's own overs notation (10.2 = 10 overs
             -- and 2 balls, not 10.2 overs). Exposed for the same blending reason
             -- as batting's not_outs.
             COALESCE(SUM(FLOOR(overs) * 6 + ROUND((overs - FLOOR(overs)) * 10)), 0) AS total_balls
-        FROM qualifying
+        FROM qualifying q
     """
     result = await session.execute(text(sql), params)
     row = result.mappings().first()
@@ -879,7 +1024,7 @@ async def get_fielding_leaderboard(
     if grade_id or grade_name:
         scope = scope.formats_only() if scope is not None else None
 
-    season_ids = await resolve_season_filter(session, org_id, season_id)
+    season_ids = await resolve_season_filter(session, org_id, season_id, include_shared=True)
 
     finals_clause = " AND g.is_final = TRUE" if finals_only else ""
     scope_clause = scope.clause("g.grade_id") if _scoped(scope) else ""
@@ -1041,7 +1186,7 @@ async def get_fielding_leaderboard(
             -- synced clubs is a single `games` row carrying BOTH clubs' fielding
             -- rows, so scoping the game alone puts the opposition on our board.
             JOIN players p ON p.id = fs.player_id AND p.organisation_id = CAST(:org_id AS UUID)
-            WHERE s.organisation_id = CAST(:org_id AS UUID)
+            WHERE {_OURS_GAMES}
               AND g.is_final = TRUE{season_clause}{scope_clause}{gender_clause}{overseas_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit
@@ -1069,7 +1214,7 @@ async def get_fielding_leaderboard(
             JOIN game_appearances gap ON gap.game_id = fs.game_id AND gap.player_id = fs.player_id AND gap.is_captain = TRUE
             -- Player-scoped for the same reason as the finals branch above.
             JOIN players p ON p.id = fs.player_id AND p.organisation_id = CAST(:org_id AS UUID)
-            WHERE s.organisation_id = CAST(:org_id AS UUID){season_clause}{scope_clause}{gender_clause}{overseas_clause}
+            WHERE {_OURS_GAMES}{season_clause}{scope_clause}{gender_clause}{overseas_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit
         """
@@ -1082,19 +1227,21 @@ async def get_fielding_leaderboard(
         # be answered from per-game rows plus the aggregate-only residuals.
         season_clause = " AND g.season_id = ANY(:season_ids)" if season_ids else ""
         residual_cte = _residual_totals_cte(scope, season_ids, params)
+        matches_cte = _matches_played_cte(season_clause, scope_clause)
         base = f"""
             WITH {residual_cte}, qualifying AS (
                 SELECT fs.player_id, fs.game_id, fs.catches, fs.catches_wk, fs.run_outs, fs.stumpings
                 FROM v_effective_fielding_stats fs
                 JOIN v_effective_games g ON g.id = fs.game_id
                 JOIN seasons s ON s.id = g.season_id
-                WHERE s.organisation_id = CAST(:org_id AS UUID){season_clause}{scope_clause}
-            )
+                WHERE {_OURS_GAMES}{season_clause}{scope_clause}
+            ), {matches_cte}
             SELECT * FROM (
                 SELECT
                     p.id AS player_id,
                     COALESCE(p.display_name_override, p.name) AS name,
-                    COUNT(DISTINCT q.game_id) + COALESCE(MAX(rt.games), 0) AS games,
+                    -- Matches PLAYED, not matches fielded in: see _matches_played_cte.
+                    COALESCE(MAX(mp.games), 0) + COALESCE(MAX(rt.games), 0) AS games,
                     COALESCE(SUM(q.catches), 0) + COALESCE(MAX(rt.total_catches), 0) AS total_catches,
                     COALESCE(SUM(q.catches_wk), 0) + COALESCE(MAX(rt.total_catches_wk), 0) AS total_catches_wk,
                     COALESCE(SUM(q.catches - q.catches_wk), 0) + COALESCE(MAX(rt.total_catches_non_wk), 0) AS total_catches_non_wk,
@@ -1105,6 +1252,7 @@ async def get_fielding_leaderboard(
                         + COALESCE(MAX(rt.total_stumpings), 0) AS total_dismissals
                 FROM players p
                 LEFT JOIN qualifying q ON q.player_id = p.id
+                LEFT JOIN matches_played mp ON mp.player_id = p.id
                 LEFT JOIN residual_totals rt ON rt.player_id = p.id
                 WHERE p.organisation_id = :org_id{gender_clause}{overseas_clause}
                   AND (q.player_id IS NOT NULL OR rt.player_id IS NOT NULL)
@@ -1155,7 +1303,7 @@ async def get_player_batting_innings(
     grade_id: Optional[str] = None,
     scope: Optional[GradeScope] = None,
 ) -> list[dict]:
-    season_ids = await resolve_season_filter_no_org(session, season_id)
+    season_ids = await resolve_season_filter_no_org(session, season_id, include_shared=True)
     clauses = ["bi.player_id = :pid"]
     params: dict = {"pid": player_id}
     clauses.append(
@@ -1179,7 +1327,11 @@ async def get_player_batting_innings(
                 bi.balls,
                 bi.fours,
                 bi.sixes,
-                bi.strike_rate,
+                -- Derived from this innings' own runs and balls. Nothing
+                -- writes batting_innings.strike_rate for a synced innings, so
+                -- reading the column drew a dash on every row. See
+                -- services/rate_coverage.py.
+                {rc.innings_strike_rate_sql('bi')} AS strike_rate,
                 bi.dismissal_type,
                 bi.not_out,
                 bi.batting_position,
@@ -1212,7 +1364,7 @@ async def get_player_bowling_spells(
     grade_id: Optional[str] = None,
     scope: Optional[GradeScope] = None,
 ) -> list[dict]:
-    season_ids = await resolve_season_filter_no_org(session, season_id)
+    season_ids = await resolve_season_filter_no_org(session, season_id, include_shared=True)
     clauses = ["bs.player_id = :pid"]
     params: dict = {"pid": player_id}
     clauses.append(
@@ -1389,12 +1541,25 @@ async def get_batting_by_position(
                 COUNT(*) AS innings,
                 SUM(bi.runs) AS runs,
                 ROUND(
+                    -- innings - not outs, the one formula. An innings whose
+                    -- dismissal was never read (an uploaded card with the
+                    -- column left blank) used to drop out of the denominator
+                    -- here and stay in it on the career header, so a player
+                    -- had two averages on one profile.
                     SUM(bi.runs)::numeric /
-                    NULLIF(COUNT(*) FILTER (WHERE NOT bi.not_out AND bi.dismissal_type IS NOT NULL), 0),
+                    NULLIF(COUNT(*) FILTER (WHERE NOT bi.not_out), 0),
                     2
                 ) AS average,
                 MAX(bi.runs) AS high_score,
-                ROUND(AVG(bi.strike_rate), 1) AS avg_strike_rate
+                -- Was AVG(bi.strike_rate): an average of per-innings rates,
+                -- which weights a four-ball cameo the same as a hundred-ball
+                -- innings — and over a column nothing writes, so it read blank
+                -- on every row anyway. The rate is the covered runs over the
+                -- covered balls, and rides with a coverage pair like every
+                -- other rate in the app.
+                {rc.strike_rate_sql('bi')} AS avg_strike_rate,
+                {rc.batting_covered_count_sql('bi')} AS sr_counted,
+                COUNT(*) AS sr_of
             FROM v_effective_batting_innings bi
             JOIN v_effective_games g ON g.id = bi.game_id
             WHERE bi.player_id = :pid
@@ -1407,7 +1572,7 @@ async def get_batting_by_position(
         """),
         params,
     )
-    return [dict(r) for r in result.mappings()]
+    return [_with_rate_coverage(dict(r)) for r in result.mappings()]
 
 
 async def get_batting_by_grade(
@@ -1435,8 +1600,13 @@ async def get_batting_by_grade(
                 COUNT(*) AS innings,
                 SUM(bi.runs) AS runs,
                 ROUND(
+                    -- innings - not outs, the one formula. An innings whose
+                    -- dismissal was never read (an uploaded card with the
+                    -- column left blank) used to drop out of the denominator
+                    -- here and stay in it on the career header, so a player
+                    -- had two averages on one profile.
                     SUM(bi.runs)::numeric /
-                    NULLIF(COUNT(*) FILTER (WHERE NOT bi.not_out AND bi.dismissal_type IS NOT NULL), 0),
+                    NULLIF(COUNT(*) FILTER (WHERE NOT bi.not_out), 0),
                     2
                 ) AS average,
                 MAX(bi.runs) AS high_score
@@ -1536,6 +1706,7 @@ async def get_player_team_breakdown(
     player_id: str,
     org_id: Optional[str] = None,
     season_id: Optional[str] = None,
+    scope: Optional[GradeScope] = None,
 ) -> dict:
     """Per-grade match breakdown for a single player.
 
@@ -1569,10 +1740,40 @@ async def get_player_team_breakdown(
     rows. Scoping both sides keeps `max(held, claimed)` self-healing — a shared
     fixture the other club synced first drops off the scorecard side but is
     still claimed by CA's per-grade row, so nothing is lost.
+
+    **The grade-type, match-type and competition scope applies here too, and the
+    three halves of it reach different parts of this function.** The filter bar
+    sits above every tab, so a grid that ignored it showed a club the women's
+    grades it had just filtered out of the Batting tab one click away.
+
+    - The scorecard side is per-game, so it takes the whole scope.
+    - CA's per-grade aggregate (`player_season_grade_stats`) and the club's own
+      per-grade corrections carry a GRADE, so a category or competition filter
+      is answerable against them — but a FORMAT is recorded per fixture, so it
+      is not. `kind='aggregate'` emits `AND FALSE`, and under a match-type
+      filter the grid becomes what we hold scorecards for and nothing else.
+    - CA's per-SEASON total has no grade at all. For a season in which the
+      filter excluded nothing it describes the player exactly and the gap
+      heuristic runs as ever; for a season where it did, the total covers
+      matches the filter removed and the heuristic is skipped for that season
+      alone, or it would hand out-of-scope matches to an in-scope grade.
     """
     season_clause_gr = ""
     season_clause_pss = ""
     params: dict = {"pid": player_id, "org_id": org_id}
+    # Bound once, beside the params dict every query below shares — the trap
+    # the leaderboards hit when a clause was built in one branch and its
+    # parameter bound in another.
+    scope_active = bool(scope and scope.active)
+    game_scope_clause = ""
+    grade_agg_clause = ""
+    if scope_active:
+        scope.bind(params)
+        # The category half is expressed against the joined `grades` row while
+        # the format is still read off each game's own match_format, so the
+        # games alias has to be named explicitly.
+        game_scope_clause = scope.clause("gr.id", game_alias="g")
+        grade_agg_clause = scope.clause("gr.id", "aggregate")
     # A game is this club's when it owns the fixture or is one of the two sides
     # — the same predicate `_club_game_clause` and `iq_trends._ours_clause` use,
     # so a shared fixture the other club synced first is still counted as ours.
@@ -1582,7 +1783,7 @@ async def get_player_team_breakdown(
             " AND (g.organisation_id = CAST(:org_id AS UUID)"
             " OR g.home_org_id = CAST(:org_id AS UUID)"
             " OR g.away_org_id = CAST(:org_id AS UUID))")
-    season_ids = await resolve_season_filter(session, org_id, season_id) if season_id else None
+    season_ids = await resolve_season_filter(session, org_id, season_id, include_shared=True) if season_id else None
     if season_ids:
         season_clause_gr = " AND gr.season_id = ANY(:sids)"
         season_clause_pss = " AND pss.season_id = ANY(:sids)"
@@ -1630,7 +1831,7 @@ async def get_player_team_breakdown(
                   AND gr2.display_name_override IS NOT NULL
                 LIMIT 1
             ) gdn ON TRUE
-            WHERE TRUE {club_games_clause}{season_clause_gr}
+            WHERE TRUE {club_games_clause}{season_clause_gr}{game_scope_clause}
             GROUP BY COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name))
             ORDER BY matches DESC, grade_name
         """),
@@ -1694,7 +1895,7 @@ async def get_player_team_breakdown(
                   AND gr2.display_name_override IS NOT NULL
                 LIMIT 1
             ) gdn ON TRUE
-            WHERE TRUE {club_games_clause}{season_clause_gr}
+            WHERE TRUE {club_games_clause}{season_clause_gr}{game_scope_clause}
             GROUP BY gr.season_id, COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name))
         """),
         params,
@@ -1758,6 +1959,49 @@ async def get_player_team_breakdown(
         sid = _canonical_season(r["season_id"])
         season_aggregate[sid] = season_aggregate.get(sid, 0) + int(r["matches"] or 0)
 
+    # WHICH SEASONS THE FILTER ACTUALLY NARROWED. CA's per-season total covers
+    # every grade, so under a filter it counts matches the filter has just
+    # excluded — and the gap heuristic below would hand that difference to an
+    # in-scope grade, inventing matches in it. But a season in which EVERY
+    # match the player played is inside the filter is a season the total
+    # describes exactly, and dropping its shortfall would lose real matches
+    # from the grid on a club whose default already excludes a category —
+    # which is every senior player at a club with a junior programme, on every
+    # visit, with nobody having touched a control. So the heuristic is gated
+    # per season, not switched off: it runs where the filter excluded nothing
+    # and is skipped where it did. Measured the first time it was written as a
+    # blanket skip, and this is the correction.
+    mixed_seasons: set = set()
+    if scope_active:
+        unscoped = await session.execute(
+            text(f"""
+                WITH appearances AS (
+                    SELECT bi.game_id FROM v_effective_batting_innings bi WHERE bi.player_id = CAST(:pid AS UUID)
+                    UNION
+                    SELECT bs.game_id FROM v_effective_bowling_spells bs WHERE bs.player_id = CAST(:pid AS UUID)
+                    UNION
+                    SELECT fs.game_id FROM v_effective_fielding_stats fs WHERE fs.player_id = CAST(:pid AS UUID)
+                    UNION
+                    SELECT ga.game_id FROM game_appearances ga WHERE ga.player_id = CAST(:pid AS UUID)
+                      AND {_APPEARANCE_PLAYED}
+                )
+                SELECT gr.season_id AS season_id, COUNT(DISTINCT ap.game_id) AS games
+                FROM appearances ap
+                JOIN v_effective_games g  ON g.id = ap.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                WHERE TRUE {club_games_clause}{season_clause_gr}
+                GROUP BY gr.season_id
+            """),
+            params,
+        )
+        all_by_season: dict = {}
+        for r in unscoped.mappings():
+            sid = _canonical_season(r["season_id"])
+            all_by_season[sid] = all_by_season.get(sid, 0) + int(r["games"] or 0)
+        for sid, total in all_by_season.items():
+            if total > sum(season_grade_games.get(sid, {}).values()):
+                mixed_seasons.add(sid)
+
     # Exact per-(season,grade) aggregate from CA (when synced). Source of truth.
     per_grade_agg = await session.execute(
         text(f"""
@@ -1786,6 +2030,7 @@ async def get_player_team_breakdown(
             ) gdn ON TRUE
             WHERE psgs.player_id = CAST(:pid AS UUID)
               {(" AND psgs.season_id = ANY(:sids)") if season_ids else ""}
+              {grade_agg_clause}
         """),
         params,
     )
@@ -1832,6 +2077,7 @@ async def get_player_team_breakdown(
             WHERE pss.player_id = CAST(:pid AS UUID)
               AND pss.source = 'manual_aggregate'
               {season_clause_pss}
+              {grade_agg_clause}
             GROUP BY pss.season_id,
                      COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name))
         """),
@@ -1851,6 +2097,7 @@ async def get_player_team_breakdown(
     cells: dict = {}              # season_id -> {grade_name: matches}
     cell_unknown: dict = {}       # (season_id, grade_name) -> matches with no scorecard
     season_unattributed: dict = {}  # season_id -> matches we can't place in a grade
+    seasons_left_to_scorecards = 0  # gap skipped: the filter excluded matches
 
     manual_by_season: dict = {}
     for (msid, mgn), mval in manual_cells.items():
@@ -1881,7 +2128,11 @@ async def get_player_team_breakdown(
             # it can only have come from.
             row_cells = {gn: ct for gn, ct in scorecards.items() if ct > 0}
             gap = (season_aggregate.get(sid) or 0) - sum(scorecards.values())
-            if gap > 0:
+            if gap > 0 and sid in mixed_seasons:
+                # The total covers matches the filter excluded, so the gap is
+                # not this filter's to place. The scorecards stand alone.
+                seasons_left_to_scorecards += 1
+            elif gap > 0:
                 if len(row_cells) == 1:
                     gn = next(iter(row_cells))
                     row_cells[gn] += gap
@@ -1974,6 +2225,19 @@ async def get_player_team_breakdown(
         "season_rows": season_rows,
         "unattributed": unattributed,
         "total_aggregate_matches": total_aggregate,
+        # What the active filter could and could not reach, so the screen can
+        # say why the asterisked matches have gone rather than leaving a
+        # shorter grid to be read as data going missing. Presence-aware: a
+        # request with no filter keeps the payload's exact shape.
+        **({"scope": {
+            "active": True,
+            # A match type is recorded on a FIXTURE, so Cricket Australia's own
+            # per-grade figures cannot answer it and drop out entirely.
+            "aggregate_excluded": bool(scope.format_active),
+            # Seasons whose CA total covers matches the filter excluded, so
+            # the shortfall could not be placed and the scorecards stand alone.
+            "seasons_left_to_scorecards": seasons_left_to_scorecards,
+        }} if scope_active else {}),
     }
 
 
@@ -2084,7 +2348,8 @@ async def _season_by_season_scoped(
                     SUM(CASE WHEN bi.runs >= 100 THEN 1 ELSE 0 END) AS hundreds,
                     SUM(CASE WHEN bi.runs = 0 AND NOT bi.not_out THEN 1 ELSE 0 END) AS ducks,
                     SUM(bi.fours) AS total_fours,
-                    SUM(bi.sixes) AS total_sixes
+                    SUM(bi.sixes) AS total_sixes,
+                    {rc.batting_rate_columns('bi')}
                 FROM v_effective_batting_innings bi
                 JOIN scoped_games sg ON sg.game_id = bi.game_id
                 WHERE bi.player_id = CAST(:pid AS UUID)
@@ -2099,6 +2364,8 @@ async def _season_by_season_scoped(
                     SUM(bs.overs) AS total_overs,
                     SUM(FLOOR(bs.overs) * 6 + ROUND((bs.overs - FLOOR(bs.overs)) * 10)) AS bowling_balls,
                     SUM(bs.maidens) AS total_maidens,
+                    COUNT(*) AS spells,
+                    {rc.bowling_rate_columns('bs')},
                     MAX(bs.wickets) AS best_bowling_wickets,
                     SUM(CASE WHEN bs.wickets >= 5 THEN 1 ELSE 0 END) AS five_fors,
                     (ARRAY_AGG(bs.wickets::text || '-' || bs.runs::text
@@ -2156,6 +2423,7 @@ async def _season_by_season_scoped(
                     SUM(pss.fours) AS total_fours,
                     SUM(pss.sixes) AS total_sixes,
                     SUM(pss.wickets) AS total_wickets,
+                    SUM(pss.bowling_innings) AS bowling_innings,
                     SUM(pss.runs_conceded) AS bowling_runs_conceded,
                     SUM(pss.overs) AS total_overs,
                     SUM(pss.bowling_balls) AS bowling_balls,
@@ -2188,8 +2456,20 @@ async def _season_by_season_scoped(
                 ROUND((COALESCE(bat.total_runs, 0) + COALESCE(resid.total_runs, 0))::numeric
                     / NULLIF((COALESCE(bat.batting_innings, 0) + COALESCE(resid.batting_innings, 0))
                              - (COALESCE(bat.not_outs, 0) + COALESCE(resid.not_outs, 0)), 0), 2) AS batting_average,
-                ROUND((COALESCE(bat.total_runs, 0) + COALESCE(resid.total_runs, 0))::numeric
-                    / NULLIF(COALESCE(bat.balls_faced, 0) + COALESCE(resid.balls_faced, 0), 0) * 100, 2) AS strike_rate,
+                -- Only the innings that carry a ball count. A residual has no
+                -- innings behind it, so it adds runs above and no coverage here.
+                CASE WHEN COALESCE(bat.covered_innings, 0) > 0
+                     THEN ROUND(bat.covered_runs::numeric
+                                / NULLIF(bat.covered_balls, 0) * 100, 2)
+                     -- Nothing to re-derive from: an imported season with no
+                     -- scorecards keeps its own figure rather than reading
+                     -- blank, and says where it came from.
+                     ELSE ROUND((COALESCE(bat.total_runs, 0) + COALESCE(resid.total_runs, 0))::numeric
+                                / NULLIF(COALESCE(bat.balls_faced, 0)
+                                         + COALESCE(resid.balls_faced, 0), 0) * 100, 2)
+                END AS strike_rate,
+                COALESCE(bat.covered_innings, 0) AS sr_counted,
+                COALESCE(bat.batting_innings, 0) + COALESCE(resid.batting_innings, 0) AS sr_of,
                 COALESCE(bat.fifties, 0) + COALESCE(resid.fifties, 0) AS fifties,
                 COALESCE(bat.hundreds, 0) + COALESCE(resid.hundreds, 0) AS hundreds,
                 COALESCE(bat.not_outs, 0) + COALESCE(resid.not_outs, 0) AS not_outs,
@@ -2201,8 +2481,16 @@ async def _season_by_season_scoped(
                 COALESCE(bowl.total_overs, 0) + COALESCE(resid.total_overs, 0) AS total_overs,
                 ROUND((COALESCE(bowl.bowling_runs_conceded, 0) + COALESCE(resid.bowling_runs_conceded, 0))::numeric
                     / NULLIF(COALESCE(bowl.total_wickets, 0) + COALESCE(resid.total_wickets, 0), 0), 2) AS bowling_average,
-                ROUND((COALESCE(bowl.bowling_runs_conceded, 0) + COALESCE(resid.bowling_runs_conceded, 0))::numeric
-                    / NULLIF(COALESCE(bowl.bowling_balls, 0) + COALESCE(resid.bowling_balls, 0), 0) * 6, 2) AS economy,
+                CASE WHEN COALESCE(bowl.covered_spells, 0) > 0
+                     THEN ROUND(bowl.covered_conceded::numeric
+                                / NULLIF(bowl.covered_bowl_balls, 0) * 6, 2)
+                     ELSE ROUND((COALESCE(bowl.bowling_runs_conceded, 0)
+                                 + COALESCE(resid.bowling_runs_conceded, 0))::numeric
+                                / NULLIF(COALESCE(bowl.bowling_balls, 0)
+                                         + COALESCE(resid.bowling_balls, 0), 0) * 6, 2)
+                END AS economy,
+                COALESCE(bowl.covered_spells, 0) AS econ_counted,
+                COALESCE(bowl.spells, 0) + COALESCE(resid.bowling_innings, 0) AS econ_of,
                 GREATEST(bowl.best_bowling_wickets, resid.best_bowling_wickets) AS best_bowling_wickets,
                 -- The figures string follows whichever side holds the better
                 -- wicket count; a residual's figures are the club's own book
@@ -2233,7 +2521,16 @@ async def _season_by_season_scoped(
         """),
         params,
     )
-    return [dict(r) for r in res.mappings()]
+    return [_with_rate_coverage(dict(r)) for r in res.mappings()]
+
+
+def _with_rate_coverage(row: dict) -> dict:
+    """The one rule lives in services/rate_coverage.py; this is the local name.
+
+    Two copies of "what a coverage pair looks like" is how a leaderboard and a
+    router start disagreeing about whether a figure is short.
+    """
+    return rc.with_coverage(row)
 
 
 async def get_season_by_season(
@@ -2273,6 +2570,32 @@ async def get_season_by_season(
                 FROM v_effective_player_season_stats pss
                 LEFT JOIN season_fold sf ON sf.raw_id = pss.season_id
                 WHERE pss.player_id = :pid
+            ),
+            -- CA's season row carries every run and only the balls somebody
+            -- typed in, and nothing in that one row can separate the two. So
+            -- the rates below are re-derived from the scorecards we hold,
+            -- where runs and balls stay together. See rate_coverage.py.
+            covered_bat AS (
+                SELECT COALESCE(sf.fold_id, g.season_id) AS sid,
+                    """ + rc.batting_rate_columns("bi") + """
+                FROM v_effective_batting_innings bi
+                JOIN v_effective_games g ON g.id = bi.game_id
+                LEFT JOIN season_fold sf ON sf.raw_id = g.season_id
+                WHERE bi.player_id = :pid
+                  AND g.season_id IS NOT NULL
+                  AND NOT COALESCE(bi.did_not_bat, FALSE)
+                  AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
+                GROUP BY 1
+            ),
+            covered_bowl AS (
+                SELECT COALESCE(sf.fold_id, g.season_id) AS sid,
+                    """ + rc.bowling_rate_columns("bs") + """
+                FROM v_effective_bowling_spells bs
+                JOIN v_effective_games g ON g.id = bs.game_id
+                LEFT JOIN season_fold sf ON sf.raw_id = g.season_id
+                WHERE bs.player_id = :pid
+                  AND g.season_id IS NOT NULL
+                GROUP BY 1
             )
             SELECT
                 s.id AS season_id,
@@ -2283,7 +2606,14 @@ async def get_season_by_season(
                 SUM(p.runs) AS total_runs,
                 MAX(p.high_score) AS high_score,
                 ROUND(SUM(p.runs)::numeric / NULLIF(SUM(p.batting_innings) - SUM(p.not_outs), 0), 2) AS batting_average,
-                ROUND(SUM(p.runs)::numeric / NULLIF(SUM(p.balls_faced), 0) * 100, 2) AS strike_rate,
+                CASE WHEN COALESCE(MAX(cb.covered_innings), 0) > 0
+                     THEN ROUND(MAX(cb.covered_runs)::numeric
+                                / NULLIF(MAX(cb.covered_balls), 0) * 100, 2)
+                     ELSE ROUND(SUM(p.runs)::numeric
+                                / NULLIF(SUM(p.balls_faced), 0) * 100, 2)
+                END AS strike_rate,
+                COALESCE(MAX(cb.covered_innings), 0) AS sr_counted,
+                SUM(p.batting_innings) AS sr_of,
                 SUM(p.fifties) AS fifties,
                 SUM(p.hundreds) AS hundreds,
                 SUM(p.not_outs) AS not_outs,
@@ -2294,7 +2624,14 @@ async def get_season_by_season(
                 SUM(p.runs_conceded) AS bowling_runs_conceded,
                 SUM(p.overs) AS total_overs,
                 ROUND(SUM(p.runs_conceded)::numeric / NULLIF(SUM(p.wickets), 0), 2) AS bowling_average,
-                ROUND(SUM(p.runs_conceded)::numeric / NULLIF(SUM(p.bowling_balls), 0) * 6, 2) AS economy,
+                CASE WHEN COALESCE(MAX(cw.covered_spells), 0) > 0
+                     THEN ROUND(MAX(cw.covered_conceded)::numeric
+                                / NULLIF(MAX(cw.covered_bowl_balls), 0) * 6, 2)
+                     ELSE ROUND(SUM(p.runs_conceded)::numeric
+                                / NULLIF(SUM(p.bowling_balls), 0) * 6, 2)
+                END AS economy,
+                COALESCE(MAX(cw.covered_spells), 0) AS econ_counted,
+                SUM(p.bowling_innings) AS econ_of,
                 MAX(p.best_bowling_wickets) AS best_bowling_wickets,
                 (ARRAY_AGG(p.best_bowling_figures
                     ORDER BY p.best_bowling_wickets DESC NULLS LAST,
@@ -2309,6 +2646,8 @@ async def get_season_by_season(
                 SUM(p.stumpings) AS total_stumpings
             FROM per_pss p
             JOIN seasons s ON s.id = p.canonical_season_id
+            LEFT JOIN covered_bat cb ON cb.sid = p.canonical_season_id
+            LEFT JOIN covered_bowl cw ON cw.sid = p.canonical_season_id
             GROUP BY s.id, s.name, s.year
             ORDER BY s.year DESC NULLS LAST, s.name
         """),
@@ -2318,7 +2657,7 @@ async def get_season_by_season(
             "bundle_cap": _HISTORICAL_BUNDLE_MATCH_CAP,
         },
     )
-    rows = [dict(r) for r in result.mappings()]
+    rows = [_with_rate_coverage(dict(r)) for r in result.mappings()]
 
     # Pull out CA's pre-migration "bundle" seasons (cumulative career totals dumped
     # on the earliest season — see _HISTORICAL_BUNDLE_MATCH_CAP). They aren't real
@@ -2387,6 +2726,12 @@ async def get_season_by_season(
     prior = dict(prior_res.mappings().first() or {})
     if (prior.get("matches") or prior.get("total_runs") or prior.get("total_wickets")
             or prior.get("total_catches")):
+        # No scorecards sit behind this lump by construction, so its rate can
+        # only ever be the aggregate one and says so.
+        prior["sr_counted"] = prior["econ_counted"] = 0
+        prior["sr_of"] = _n(prior.get("batting_innings"))
+        prior["econ_of"] = 0
+        _with_rate_coverage(prior)
         prior["season_id"] = None
         prior["season_name"] = "Prior Seasons & Adjustments"
         prior["year"] = None
@@ -2510,87 +2855,43 @@ async def get_upcoming_milestones_for_org(
     org_id: str,
     limit: int = 20,
 ) -> list[dict]:
-    result = await session.execute(
-        text("""
-            WITH recent_seasons AS (
-                SELECT s.id
-                FROM seasons s
-                JOIN v_effective_player_season_stats pss ON pss.season_id = s.id
-                JOIN players p ON p.id = pss.player_id
-                WHERE p.organisation_id = :org_id
-                GROUP BY s.id, s.year, s.name
-                ORDER BY s.year DESC NULLS LAST, s.name DESC
-                LIMIT 3
-            ),
-            active_players AS (
-                SELECT DISTINCT pss.player_id
-                FROM v_effective_player_season_stats pss
-                WHERE pss.season_id IN (SELECT id FROM recent_seasons)
-            )
-            SELECT
-                p.id AS player_id,
-                COALESCE(p.display_name_override, p.name) AS name,
-                COALESCE(SUM(pss.runs), 0) AS career_runs,
-                COALESCE(SUM(pss.wickets), 0) AS career_wickets,
-                COALESCE(SUM(pss.matches), 0) AS career_matches,
-                COALESCE(SUM(pss.catches), 0) AS career_catches
-            FROM players p
-            LEFT JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
-            WHERE p.organisation_id = :org_id
-              AND p.id IN (SELECT player_id FROM active_players)
-            GROUP BY p.id, p.name, p.display_name_override
-            HAVING COALESCE(SUM(pss.runs), 0) > 0 OR COALESCE(SUM(pss.wickets), 0) > 0
-        """),
-        {"org_id": org_id}
-    )
-    rows = [dict(r) for r in result.mappings()]
+    """The club's in-reach career milestones, biggest-milestone first.
+
+    Reads ``milestone_scan``, the one definition the Records page and the
+    admin report also read, so the three surfaces cannot disagree about who
+    is close to what. This used to run its own query over
+    ``v_effective_player_season_stats`` joined on ``player_id`` alone, which
+    built the whole five-branch view on every request and timed out at
+    nginx's 60s ``/api/`` limit for at least one club — where the panel then
+    rendered "No upcoming milestones" rather than an error. See that module.
+    """
+    rows = await milestone_scan.upcoming_career_milestones(session, org_id)
 
     # Score formula: milestone_value² / needed.
     # Heavily weights milestone size so 500-from-9000 beats 1-from-100.
     def importance_score(target, needed):
         return (target ** 2) / (needed + 1)
 
-    CATEGORY_MAP = {
-        "runs": "batting",
-        "wickets": "bowling",
-        "matches": "matches",
-        "catches": "fielding",
-    }
-
-    upcoming = []
-    for row in rows:
-        player_id = str(row["player_id"])
-        name = row["name"]
-        totals = {
-            "runs":    int(row["career_runs"]    or 0),
-            "wickets": int(row["career_wickets"] or 0),
-            "matches": int(row["career_matches"] or 0),
-            "catches": int(row["career_catches"] or 0),
+    upcoming = [
+        {
+            "player_id": r["player_id"],
+            # This payload has always named the player ``name``; the reports
+            # call the same field ``player_name``. Renaming it here would
+            # blank the dashboard rows and the notification bell.
+            "name": r["player_name"],
+            "type": r["type"],
+            "category": r["category"],
+            "current": r["current"],
+            "target": r["target"],
+            "needed": r["needed"],
+            "score": importance_score(r["target"], r["needed"]),
         }
-
-        for stat, current in totals.items():
-            target = next_threshold(stat, current)
-            if target is None:
-                continue
-            needed = target - current
-            # Same in-reach window as the player profile — dashboard only
-            # surfaces milestones that are genuinely imminent.
-            if needed > reach_window(stat, target):
-                continue
-            upcoming.append({
-                "player_id": player_id,
-                "name": name,
-                "type": stat,
-                "category": CATEGORY_MAP[stat],
-                "current": current,
-                "target": target,
-                "needed": needed,
-                "score": importance_score(target, needed),
-            })
-
+        for r in rows
+    ]
     upcoming.sort(key=lambda x: x["score"], reverse=True)
 
-    # Return top 50 per category — frontend handles pagination
+    # Cap per category so one busy category can't crowd the others out of a
+    # column-per-category layout, then honour the caller's own limit.
     per_cat = 50
     counts: dict = {}
     result = []
@@ -2599,7 +2900,7 @@ async def get_upcoming_milestones_for_org(
         if counts.get(cat, 0) < per_cat:
             result.append(item)
             counts[cat] = counts.get(cat, 0) + 1
-    return result
+    return result[:limit] if limit and limit > 0 else result
 
 
 async def get_recently_achieved_milestones_for_org(
@@ -2817,6 +3118,27 @@ async def get_player_activity(session: AsyncSession, player_id: str) -> dict:
     }
 
 
+def _board_minimums(params: dict, rules, keyword: str = "WHERE") -> str:
+    """Build a leaderboard's minimum-qualification clause.
+
+    Each rule is (expression, operator, placeholder, param name, value); a value
+    of 0 or less drops the rule entirely, so a board nobody has set a minimum on
+    is byte-for-byte the query it always was.
+
+    The rate minimums are deliberately counted on COVERED innings and spells,
+    never on innings in scope. A player with ten innings and three ball counts
+    has a three-innings strike rate, and letting that clear a ten-innings bar is
+    exactly what the bar exists to stop.
+    """
+    parts = []
+    for expr, op, placeholder, name, value in rules:
+        if not value or int(value) <= 0:
+            continue
+        parts.append(f"{expr} {op} {placeholder}")
+        params[name] = int(value)
+    return (" " + keyword + " " + " AND ".join(parts)) if parts else ""
+
+
 async def get_batting_leaderboard_extended(
     session: AsyncSession,
     org_id: str,
@@ -2825,6 +3147,7 @@ async def get_batting_leaderboard_extended(
     sort_by: str = "total_runs",
     limit: int = 20,
     min_runs: int = 0,
+    min_rate_innings: int = 0,
     grade_name: Optional[str] = None,
     finals_only: Optional[bool] = None,
     captain_only: Optional[bool] = None,
@@ -2839,7 +3162,7 @@ async def get_batting_leaderboard_extended(
     if sort_by not in ALLOWED_SORTS:
         sort_by = "total_runs"
 
-    season_ids = await resolve_season_filter(session, org_id, season_id)
+    season_ids = await resolve_season_filter(session, org_id, season_id, include_shared=True)
 
     # A grade the viewer picked by name beats the CATEGORY default. Someone who
     # has chosen "Under 14s" from the grade dropdown plainly wants the juniors,
@@ -2926,8 +3249,12 @@ async def get_batting_leaderboard_extended(
                     ROUND((COALESCE(SUM(q.runs), 0) + COALESCE(MAX(it.total_runs), 0))::numeric
                         / NULLIF((COUNT(q.player_id) + COALESCE(MAX(it.innings), 0))
                                  - (COALESCE(SUM(q.not_out::int), 0) + COALESCE(MAX(it.not_outs), 0)), 0), 2) AS average,
-                    ROUND((COALESCE(SUM(q.runs), 0) + COALESCE(MAX(it.total_runs), 0))::numeric
-                        / NULLIF(COALESCE(SUM(q.balls), 0) + COALESCE(MAX(it.total_balls), 0), 0) * 100, 2) AS strike_rate,
+                    -- The residual is an aggregate: its runs and its balls need
+                    -- not describe the same innings, so it adds runs above and
+                    -- nothing here. See services/rate_coverage.py.
+                    {rc.strike_rate_sql('q')} AS strike_rate,
+                    {rc.batting_covered_count_sql('q')} AS sr_counted,
+                    COUNT(q.player_id) + COALESCE(MAX(it.innings), 0) AS sr_of,
                     SUM(CASE WHEN q.runs >= 50 AND q.runs < 100 THEN 1 ELSE 0 END) + COALESCE(MAX(it.fifties), 0) AS fifties,
                     SUM(CASE WHEN q.runs >= 100 THEN 1 ELSE 0 END) + COALESCE(MAX(it.hundreds), 0) AS hundreds,
                     SUM(CASE WHEN q.runs = 0 AND NOT q.not_out THEN 1 ELSE 0 END) + COALESCE(MAX(it.ducks), 0) AS ducks,
@@ -2942,12 +3269,13 @@ async def get_batting_leaderboard_extended(
                 GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             ) t
         """
-        if min_runs > 0:
-            base += " WHERE total_runs >= :min_runs"
-            params["min_runs"] = min_runs
+        base += _board_minimums(
+            params, [("total_runs", ">=", ":min_runs", "min_runs", min_runs),
+                     ("sr_counted", ">=", ":min_rate_innings",
+                      "min_rate_innings", min_rate_innings)])
         base += f" ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit"
         result = await session.execute(text(base), params)
-        return [dict(r) for r in result.mappings()]
+        return [_with_rate_coverage(dict(r)) for r in result.mappings()]
 
     if grade_name:
         params["grade_name"] = grade_name
@@ -2998,8 +3326,12 @@ async def get_batting_leaderboard_extended(
                     ROUND((COALESCE(SUM(q.runs), 0) + COALESCE(MAX(it.total_runs), 0))::numeric
                         / NULLIF((COUNT(q.player_id) + COALESCE(MAX(it.innings), 0))
                                  - (COALESCE(SUM(q.not_out::int), 0) + COALESCE(MAX(it.not_outs), 0)), 0), 2) AS average,
-                    ROUND((COALESCE(SUM(q.runs), 0) + COALESCE(MAX(it.total_runs), 0))::numeric
-                        / NULLIF(COALESCE(SUM(q.balls), 0) + COALESCE(MAX(it.total_balls), 0), 0) * 100, 2) AS strike_rate,
+                    -- The residual is an aggregate: its runs and its balls need
+                    -- not describe the same innings, so it adds runs above and
+                    -- nothing here. See services/rate_coverage.py.
+                    {rc.strike_rate_sql('q')} AS strike_rate,
+                    {rc.batting_covered_count_sql('q')} AS sr_counted,
+                    COUNT(q.player_id) + COALESCE(MAX(it.innings), 0) AS sr_of,
                     SUM(CASE WHEN q.runs >= 50 AND q.runs < 100 THEN 1 ELSE 0 END) + COALESCE(MAX(it.fifties), 0) AS fifties,
                     SUM(CASE WHEN q.runs >= 100 THEN 1 ELSE 0 END) + COALESCE(MAX(it.hundreds), 0) AS hundreds,
                     SUM(CASE WHEN q.runs = 0 AND NOT q.not_out THEN 1 ELSE 0 END) + COALESCE(MAX(it.ducks), 0) AS ducks,
@@ -3014,12 +3346,13 @@ async def get_batting_leaderboard_extended(
                 GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             ) t
         """
-        if min_runs > 0:
-            base += " WHERE total_runs >= :min_runs"
-            params["min_runs"] = min_runs
+        base += _board_minimums(
+            params, [("total_runs", ">=", ":min_runs", "min_runs", min_runs),
+                     ("sr_counted", ">=", ":min_rate_innings",
+                      "min_rate_innings", min_rate_innings)])
         base += f" ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit"
         result = await session.execute(text(base), params)
-        return [dict(r) for r in result.mappings()]
+        return [_with_rate_coverage(dict(r)) for r in result.mappings()]
 
     if finals_only:
         # When finals_only=True with no grade filter, switch to per-game query
@@ -3031,7 +3364,7 @@ async def get_batting_leaderboard_extended(
                 JOIN v_effective_games g ON g.id = bi.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id{captain_join}
-                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                WHERE {_OURS_GAMES}
                   AND g.is_final = TRUE{season_clause}{scope_clause}
                   AND NOT COALESCE(bi.did_not_bat, FALSE)
                   AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
@@ -3043,7 +3376,9 @@ async def get_batting_leaderboard_extended(
                 COALESCE(SUM(q.runs), 0) AS total_runs,
                 MAX(q.runs) AS high_score,
                 ROUND(SUM(q.runs)::numeric / NULLIF(COUNT(*) - SUM(q.not_out::int), 0), 2) AS average,
-                ROUND(SUM(q.runs)::numeric / NULLIF(SUM(q.balls), 0) * 100, 2) AS strike_rate,
+                {rc.strike_rate_sql('q')} AS strike_rate,
+                {rc.batting_covered_count_sql('q')} AS sr_counted,
+                COUNT(*) AS sr_of,
                 SUM(CASE WHEN q.runs >= 50 AND q.runs < 100 THEN 1 ELSE 0 END) AS fifties,
                 SUM(CASE WHEN q.runs >= 100 THEN 1 ELSE 0 END) AS hundreds,
                 SUM(CASE WHEN q.runs = 0 AND NOT q.not_out THEN 1 ELSE 0 END) AS ducks,
@@ -3055,12 +3390,13 @@ async def get_batting_leaderboard_extended(
             WHERE p.organisation_id = :org_id{gender_clause}{overseas_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
         """
-        if min_runs > 0:
-            base += " HAVING SUM(q.runs) >= :min_runs"
-            params["min_runs"] = min_runs
+        base += _board_minimums(
+            params, [("SUM(q.runs)", ">=", ":min_runs", "min_runs", min_runs),
+                     (rc.batting_covered_count_sql('q'), ">=", ":min_rate_innings",
+                      "min_rate_innings", min_rate_innings)], keyword="HAVING")
         base += f" ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit"
         result = await session.execute(text(base), params)
-        return [dict(r) for r in result.mappings()]
+        return [_with_rate_coverage(dict(r)) for r in result.mappings()]
 
     elif captain_only:
         season_clause = " AND s.id = ANY(:season_ids)" if season_ids else ""
@@ -3072,7 +3408,7 @@ async def get_batting_leaderboard_extended(
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
                 JOIN game_appearances gap ON gap.game_id = bi.game_id AND gap.player_id = bi.player_id AND gap.is_captain = TRUE
-                WHERE s.organisation_id = CAST(:org_id AS UUID){season_clause}{scope_clause}
+                WHERE {_OURS_GAMES}{season_clause}{scope_clause}
                   AND NOT COALESCE(bi.did_not_bat, FALSE)
                   AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
             )
@@ -3083,7 +3419,9 @@ async def get_batting_leaderboard_extended(
                 COALESCE(SUM(q.runs), 0) AS total_runs,
                 MAX(q.runs) AS high_score,
                 ROUND(SUM(q.runs)::numeric / NULLIF(COUNT(*) - SUM(q.not_out::int), 0), 2) AS average,
-                ROUND(SUM(q.runs)::numeric / NULLIF(SUM(q.balls), 0) * 100, 2) AS strike_rate,
+                {rc.strike_rate_sql('q')} AS strike_rate,
+                {rc.batting_covered_count_sql('q')} AS sr_counted,
+                COUNT(*) AS sr_of,
                 SUM(CASE WHEN q.runs >= 50 AND q.runs < 100 THEN 1 ELSE 0 END) AS fifties,
                 SUM(CASE WHEN q.runs >= 100 THEN 1 ELSE 0 END) AS hundreds,
                 SUM(CASE WHEN q.runs = 0 AND NOT q.not_out THEN 1 ELSE 0 END) AS ducks,
@@ -3095,12 +3433,13 @@ async def get_batting_leaderboard_extended(
             WHERE p.organisation_id = :org_id{gender_clause}{overseas_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
         """
-        if min_runs > 0:
-            base += " HAVING SUM(q.runs) >= :min_runs"
-            params["min_runs"] = min_runs
+        base += _board_minimums(
+            params, [("SUM(q.runs)", ">=", ":min_runs", "min_runs", min_runs),
+                     (rc.batting_covered_count_sql('q'), ">=", ":min_rate_innings",
+                      "min_rate_innings", min_rate_innings)], keyword="HAVING")
         base += f" ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit"
         result = await session.execute(text(base), params)
-        return [dict(r) for r in result.mappings()]
+        return [_with_rate_coverage(dict(r)) for r in result.mappings()]
 
     if _scoped(scope):
         # The plain all-grades board normally reads CA's season aggregates, which
@@ -3111,16 +3450,17 @@ async def get_batting_leaderboard_extended(
         # so a manual game entered without a grade is not silently dropped.
         season_clause = " AND g.season_id = ANY(:season_ids)" if season_ids else ""
         residual_cte = _residual_totals_cte(scope, season_ids, params)
+        matches_cte = _matches_played_cte(season_clause, scope_clause)
         base = f"""
             WITH qualifying AS (
                 SELECT bi.player_id, bi.game_id, bi.runs, bi.balls, bi.fours, bi.sixes, bi.not_out
                 FROM v_effective_batting_innings bi
                 JOIN v_effective_games g ON g.id = bi.game_id
                 JOIN seasons s ON s.id = g.season_id
-                WHERE s.organisation_id = CAST(:org_id AS UUID){season_clause}{scope_clause}
+                WHERE {_OURS_GAMES}{season_clause}{scope_clause}
                   AND NOT COALESCE(bi.did_not_bat, FALSE)
                   AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
-            ), {residual_cte}
+            ), {matches_cte}, {residual_cte}
             SELECT * FROM (
                 SELECT
                     p.id AS player_id,
@@ -3131,30 +3471,38 @@ async def get_batting_leaderboard_extended(
                     ROUND((COALESCE(SUM(q.runs), 0) + COALESCE(MAX(rt.total_runs), 0))::numeric
                         / NULLIF((COUNT(q.player_id) + COALESCE(MAX(rt.innings), 0))
                                  - (COALESCE(SUM(q.not_out::int), 0) + COALESCE(MAX(rt.not_outs), 0)), 0), 2) AS average,
-                    ROUND((COALESCE(SUM(q.runs), 0) + COALESCE(MAX(rt.total_runs), 0))::numeric
-                        / NULLIF(COALESCE(SUM(q.balls), 0) + COALESCE(MAX(rt.total_balls), 0), 0) * 100, 2) AS strike_rate,
+                    -- The residual is an aggregate: its runs and its balls need
+                    -- not describe the same innings, so it adds runs above and
+                    -- nothing here. See services/rate_coverage.py.
+                    {rc.strike_rate_sql('q')} AS strike_rate,
+                    {rc.batting_covered_count_sql('q')} AS sr_counted,
+                    COUNT(q.player_id) + COALESCE(MAX(rt.innings), 0) AS sr_of,
                     SUM(CASE WHEN q.runs >= 50 AND q.runs < 100 THEN 1 ELSE 0 END) + COALESCE(MAX(rt.fifties), 0) AS fifties,
                     SUM(CASE WHEN q.runs >= 100 THEN 1 ELSE 0 END) + COALESCE(MAX(rt.hundreds), 0) AS hundreds,
                     SUM(CASE WHEN q.runs = 0 AND NOT q.not_out THEN 1 ELSE 0 END) + COALESCE(MAX(rt.ducks), 0) AS ducks,
-                    COUNT(DISTINCT q.game_id) + COALESCE(MAX(rt.games), 0) AS games,
+                    -- Matches PLAYED, not matches batted: see _matches_played_cte.
+                    COALESCE(MAX(mp.games), 0) + COALESCE(MAX(rt.games), 0) AS games,
                     COALESCE(SUM(q.fours), 0) + COALESCE(MAX(rt.total_fours), 0) AS total_fours,
                     COALESCE(SUM(q.sixes), 0) + COALESCE(MAX(rt.total_sixes), 0) AS total_sixes
                 FROM players p
                 LEFT JOIN qualifying q ON q.player_id = p.id
+                LEFT JOIN matches_played mp ON mp.player_id = p.id
                 LEFT JOIN residual_totals rt ON rt.player_id = p.id
                 WHERE p.organisation_id = :org_id{gender_clause}{overseas_clause}
                   AND (q.player_id IS NOT NULL OR rt.player_id IS NOT NULL)
                 GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             ) t
         """
-        if min_runs > 0:
-            base += " WHERE total_runs >= :min_runs"
-            params["min_runs"] = min_runs
+        base += _board_minimums(
+            params, [("total_runs", ">=", ":min_runs", "min_runs", min_runs),
+                     ("sr_counted", ">=", ":min_rate_innings",
+                      "min_rate_innings", min_rate_innings)])
         base += f" ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit"
         result = await session.execute(text(base), params)
-        return [dict(r) for r in result.mappings()]
+        return [_with_rate_coverage(dict(r)) for r in result.mappings()]
 
-    base = """
+    cov_season = " AND g.season_id = ANY(:season_ids)" if season_ids else ""
+    base = "WITH" + _covered_bat_cte(cov_season) + """
         SELECT
             p.id AS player_id,
             COALESCE(p.display_name_override, p.name) AS name,
@@ -3162,7 +3510,14 @@ async def get_batting_leaderboard_extended(
             SUM(pss.runs) AS total_runs,
             MAX(pss.high_score) AS high_score,
             ROUND(SUM(pss.runs)::numeric / NULLIF(SUM(pss.batting_innings) - SUM(pss.not_outs), 0), 2) AS average,
-            ROUND(SUM(pss.runs)::numeric / NULLIF(SUM(pss.balls_faced), 0) * 100, 2) AS strike_rate,
+            CASE WHEN COALESCE(MAX(cb.covered_innings), 0) > 0
+                 THEN ROUND(MAX(cb.covered_runs)::numeric
+                            / NULLIF(MAX(cb.covered_balls), 0) * 100, 2)
+                 ELSE ROUND(SUM(pss.runs)::numeric
+                            / NULLIF(SUM(pss.balls_faced), 0) * 100, 2)
+            END AS strike_rate,
+            COALESCE(MAX(cb.covered_innings), 0) AS sr_counted,
+            SUM(pss.batting_innings) AS sr_of,
             SUM(pss.fifties) AS fifties,
             SUM(pss.hundreds) AS hundreds,
             COALESCE(SUM(pss.sixes), 0) AS total_sixes,
@@ -3171,6 +3526,7 @@ async def get_batting_leaderboard_extended(
             SUM(pss.matches) AS games
         FROM v_effective_player_season_stats pss
         JOIN players p ON p.id = pss.player_id
+        LEFT JOIN covered_bat cb ON cb.player_id = p.id
         -- No seasons join: career-level (NULL-season) import / manual-career rows
         -- (the "Prior Seasons & Adjustments" bucket) belong in the all-seasons
         -- total. A specific-season filter below still excludes them (a NULL
@@ -3186,13 +3542,51 @@ async def get_batting_leaderboard_extended(
     elif overseas == "exclude":
         base += " AND (p.is_overseas IS NULL OR p.is_overseas = FALSE)"
     base += " GROUP BY p.id, COALESCE(p.display_name_override, p.name)"
-    if min_runs > 0:
-        base += " HAVING SUM(pss.runs) >= :min_runs"
-        params["min_runs"] = min_runs
+    base += _board_minimums(
+        params, [("SUM(pss.runs)", ">=", ":min_runs", "min_runs", min_runs),
+                 ("COALESCE(MAX(cb.covered_innings), 0)", ">=", ":min_rate_innings",
+                  "min_rate_innings", min_rate_innings)], keyword="HAVING")
     base += f" ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit"
 
     result = await session.execute(text(base), params)
-    return [dict(r) for r in result.mappings()]
+    return [_with_rate_coverage(dict(r)) for r in result.mappings()]
+
+
+def _covered_bat_cte(season_clause: str) -> str:
+    """Per-player covered batting halves, for a board built on season aggregates.
+
+    CA's season row cannot say which of its runs had a ball count behind them,
+    so a board that sorts on strike rate has to re-derive one from the
+    scorecards. A player we hold none for keeps the aggregate figure.
+    """
+    return f"""
+        covered_bat AS (
+            SELECT bi.player_id,
+                {rc.batting_rate_columns('bi')}
+            FROM v_effective_batting_innings bi
+            JOIN v_effective_games g ON g.id = bi.game_id
+            JOIN players cp ON cp.id = bi.player_id AND cp.organisation_id = :org_id
+            WHERE NOT COALESCE(bi.did_not_bat, FALSE)
+              AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
+              {season_clause}
+            GROUP BY bi.player_id
+        )
+    """
+
+
+def _covered_bowl_cte(season_clause: str) -> str:
+    """The bowling twin of :func:`_covered_bat_cte`."""
+    return f"""
+        covered_bowl AS (
+            SELECT bs.player_id,
+                {rc.bowling_rate_columns('bs')}
+            FROM v_effective_bowling_spells bs
+            JOIN v_effective_games g ON g.id = bs.game_id
+            JOIN players cp ON cp.id = bs.player_id AND cp.organisation_id = :org_id
+            WHERE TRUE{season_clause}
+            GROUP BY bs.player_id
+        )
+    """
 
 
 async def get_bowling_leaderboard_extended(
@@ -3204,6 +3598,7 @@ async def get_bowling_leaderboard_extended(
     limit: int = 20,
     min_overs: int = 0,
     min_wickets: int = 0,
+    min_rate_spells: int = 0,
     grade_name: Optional[str] = None,
     finals_only: Optional[bool] = None,
     captain_only: Optional[bool] = None,
@@ -3218,7 +3613,7 @@ async def get_bowling_leaderboard_extended(
     if sort_by not in ALLOWED_SORTS:
         sort_by = "total_wickets"
 
-    season_ids = await resolve_season_filter(session, org_id, season_id)
+    season_ids = await resolve_season_filter(session, org_id, season_id, include_shared=True)
 
     # An explicitly picked grade beats the category default, format half kept —
     # see the note in get_batting_leaderboard_extended.
@@ -3265,6 +3660,7 @@ async def get_bowling_leaderboard_extended(
             SELECT ied.player_id,
                 COALESCE(SUM(ied.matches), 0) AS games,
                 COALESCE(SUM(ied.wickets), 0) AS total_wickets,
+                COALESCE(SUM(ied.bowling_innings), 0) AS bowling_innings,
                 COALESCE(SUM(ied.runs_conceded), 0) AS total_runs_conceded,
                 COALESCE(SUM(ied.overs), 0) AS total_overs,
                 COALESCE(SUM(ied.maidens), 0) AS total_maidens,
@@ -3314,7 +3710,9 @@ async def get_bowling_leaderboard_extended(
                 ORDER BY bq.player_id, bq.wickets DESC, bq.runs ASC
             ){import_cte}
             SELECT
-                player_id, name, games, total_wickets, average, economy, total_maidens, total_overs, five_fors,
+                player_id, name, games, total_wickets, average, economy,
+                econ_counted, econ_of,
+                total_maidens, total_overs, five_fors,
                 CASE WHEN COALESCE(sc_wkts, -1) >= COALESCE(im_wkts, -1) THEN sc_wkts ELSE im_wkts END AS best_figures_wickets,
                 CASE WHEN COALESCE(sc_wkts, -1) >= COALESCE(im_wkts, -1) THEN sc_runs ELSE NULL END AS best_figures_runs,
                 CASE WHEN COALESCE(sc_wkts, -1) >= COALESCE(im_wkts, -1) THEN sc_bb ELSE im_bb END AS best_bowling_figures
@@ -3326,8 +3724,12 @@ async def get_bowling_leaderboard_extended(
                     COALESCE(SUM(bq.wickets), 0) + COALESCE(MAX(it.total_wickets), 0) AS total_wickets,
                     ROUND((COALESCE(SUM(bq.runs), 0) + COALESCE(MAX(it.total_runs_conceded), 0))::numeric
                         / NULLIF(COALESCE(SUM(bq.wickets), 0) + COALESCE(MAX(it.total_wickets), 0), 0), 2) AS average,
-                    ROUND((COALESCE(SUM(bq.runs), 0) + COALESCE(MAX(it.total_runs_conceded), 0))::numeric
-                        / NULLIF(COALESCE(SUM(bq.overs), 0) + COALESCE(MAX(it.total_overs), 0), 0), 2) AS economy,
+                    -- An aggregate residual's runs and overs need not describe
+                    -- the same spell, so the rate reads only the spells that
+                    -- carry an overs figure. See services/rate_coverage.py.
+                    {rc.economy_sql('bq')} AS economy,
+                    {rc.bowling_covered_count_sql('bq')} AS econ_counted,
+                    COUNT(bq.player_id) + COALESCE(MAX(it.bowling_innings), 0) AS econ_of,
                     COALESCE(SUM(bq.maidens), 0) + COALESCE(MAX(it.total_maidens), 0) AS total_maidens,
                     COALESCE(SUM(bq.overs), 0) + COALESCE(MAX(it.total_overs), 0) AS total_overs,
                     COALESCE(SUM(CASE WHEN bq.wickets >= 5 THEN 1 ELSE 0 END), 0) + COALESCE(MAX(it.five_fors), 0) AS five_fors,
@@ -3352,11 +3754,14 @@ async def get_bowling_leaderboard_extended(
         if min_wickets > 0:
             having_clauses.append("total_wickets >= :min_wickets")
             params["min_wickets"] = min_wickets
+        if min_rate_spells > 0:
+            having_clauses.append("econ_counted >= :min_rate_spells")
+            params["min_rate_spells"] = min_rate_spells
         if having_clauses:
             base += " WHERE " + " AND ".join(having_clauses)
         base += f" {order_clause} LIMIT :limit"
         result = await session.execute(text(base), params)
-        return [dict(r) for r in result.mappings()]
+        return [_with_rate_coverage(dict(r)) for r in result.mappings()]
 
     if grade_name:
         params["grade_name"] = grade_name
@@ -3388,7 +3793,9 @@ async def get_bowling_leaderboard_extended(
                 ORDER BY bq.player_id, bq.wickets DESC, bq.runs ASC
             ){import_cte}
             SELECT
-                player_id, name, games, total_wickets, average, economy, total_maidens, total_overs, five_fors,
+                player_id, name, games, total_wickets, average, economy,
+                econ_counted, econ_of,
+                total_maidens, total_overs, five_fors,
                 CASE WHEN COALESCE(sc_wkts, -1) >= COALESCE(im_wkts, -1) THEN sc_wkts ELSE im_wkts END AS best_figures_wickets,
                 CASE WHEN COALESCE(sc_wkts, -1) >= COALESCE(im_wkts, -1) THEN sc_runs ELSE NULL END AS best_figures_runs,
                 CASE WHEN COALESCE(sc_wkts, -1) >= COALESCE(im_wkts, -1) THEN sc_bb ELSE im_bb END AS best_bowling_figures
@@ -3400,8 +3807,12 @@ async def get_bowling_leaderboard_extended(
                     COALESCE(SUM(bq.wickets), 0) + COALESCE(MAX(it.total_wickets), 0) AS total_wickets,
                     ROUND((COALESCE(SUM(bq.runs), 0) + COALESCE(MAX(it.total_runs_conceded), 0))::numeric
                         / NULLIF(COALESCE(SUM(bq.wickets), 0) + COALESCE(MAX(it.total_wickets), 0), 0), 2) AS average,
-                    ROUND((COALESCE(SUM(bq.runs), 0) + COALESCE(MAX(it.total_runs_conceded), 0))::numeric
-                        / NULLIF(COALESCE(SUM(bq.overs), 0) + COALESCE(MAX(it.total_overs), 0), 0), 2) AS economy,
+                    -- An aggregate residual's runs and overs need not describe
+                    -- the same spell, so the rate reads only the spells that
+                    -- carry an overs figure. See services/rate_coverage.py.
+                    {rc.economy_sql('bq')} AS economy,
+                    {rc.bowling_covered_count_sql('bq')} AS econ_counted,
+                    COUNT(bq.player_id) + COALESCE(MAX(it.bowling_innings), 0) AS econ_of,
                     COALESCE(SUM(bq.maidens), 0) + COALESCE(MAX(it.total_maidens), 0) AS total_maidens,
                     COALESCE(SUM(bq.overs), 0) + COALESCE(MAX(it.total_overs), 0) AS total_overs,
                     COALESCE(SUM(CASE WHEN bq.wickets >= 5 THEN 1 ELSE 0 END), 0) + COALESCE(MAX(it.five_fors), 0) AS five_fors,
@@ -3426,11 +3837,14 @@ async def get_bowling_leaderboard_extended(
         if min_wickets > 0:
             having_clauses.append("total_wickets >= :min_wickets")
             params["min_wickets"] = min_wickets
+        if min_rate_spells > 0:
+            having_clauses.append("econ_counted >= :min_rate_spells")
+            params["min_rate_spells"] = min_rate_spells
         if having_clauses:
             base += " WHERE " + " AND ".join(having_clauses)
         base += f" {order_clause} LIMIT :limit"
         result = await session.execute(text(base), params)
-        return [dict(r) for r in result.mappings()]
+        return [_with_rate_coverage(dict(r)) for r in result.mappings()]
 
     if finals_only:
         # When finals_only=True with no grade filter, switch to per-game query
@@ -3446,7 +3860,7 @@ async def get_bowling_leaderboard_extended(
                 JOIN v_effective_games g ON g.id = bs.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id{captain_join}
-                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                WHERE {_OURS_GAMES}
                   AND g.is_final = TRUE{season_clause}
                 ORDER BY bs.player_id, bs.wickets DESC, bs.runs ASC
             )
@@ -3456,7 +3870,9 @@ async def get_bowling_leaderboard_extended(
                 COUNT(DISTINCT bs.game_id) AS games,
                 COALESCE(SUM(bs.wickets), 0) AS total_wickets,
                 ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.wickets), 0), 2) AS average,
-                ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.overs), 0), 2) AS economy,
+                {rc.economy_sql('bs')} AS economy,
+                {rc.bowling_covered_count_sql('bs')} AS econ_counted,
+                COUNT(*) AS econ_of,
                 bsf.best_figures_wickets,
                 bsf.best_figures_runs,
                 bsf.best_bowling_figures,
@@ -3469,7 +3885,7 @@ async def get_bowling_leaderboard_extended(
             JOIN seasons s ON s.id = gr.season_id{captain_join}
             JOIN players p ON p.id = bs.player_id
             LEFT JOIN best_spell bsf ON bsf.player_id = p.id
-            WHERE s.organisation_id = CAST(:org_id AS UUID)
+            WHERE {_OURS_GAMES}
               AND g.is_final = TRUE{season_clause}
               AND p.organisation_id = :org_id{gender_clause}{overseas_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name), bsf.best_figures_wickets, bsf.best_figures_runs, bsf.best_bowling_figures
@@ -3481,11 +3897,15 @@ async def get_bowling_leaderboard_extended(
         if min_wickets > 0:
             having_clauses.append("COALESCE(SUM(bs.wickets), 0) >= :min_wickets")
             params["min_wickets"] = min_wickets
+        if min_rate_spells > 0:
+            having_clauses.append(
+                rc.bowling_covered_count_sql('bs') + " >= :min_rate_spells")
+            params["min_rate_spells"] = min_rate_spells
         if having_clauses:
             base += " HAVING " + " AND ".join(having_clauses)
         base += f" {order_clause} LIMIT :limit"
         result = await session.execute(text(base), params)
-        return [dict(r) for r in result.mappings()]
+        return [_with_rate_coverage(dict(r)) for r in result.mappings()]
 
     elif captain_only:
         season_clause = " AND s.id = ANY(:season_ids)" if season_ids else ""
@@ -3501,7 +3921,7 @@ async def get_bowling_leaderboard_extended(
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
                 JOIN game_appearances gap ON gap.game_id = bs.game_id AND gap.player_id = bs.player_id AND gap.is_captain = TRUE
-                WHERE s.organisation_id = CAST(:org_id AS UUID){season_clause}
+                WHERE {_OURS_GAMES}{season_clause}
                 ORDER BY bs.player_id, bs.wickets DESC, bs.runs ASC
             )
             SELECT
@@ -3510,7 +3930,9 @@ async def get_bowling_leaderboard_extended(
                 COUNT(DISTINCT bs.game_id) AS games,
                 COALESCE(SUM(bs.wickets), 0) AS total_wickets,
                 ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.wickets), 0), 2) AS average,
-                ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.overs), 0), 2) AS economy,
+                {rc.economy_sql('bs')} AS economy,
+                {rc.bowling_covered_count_sql('bs')} AS econ_counted,
+                COUNT(*) AS econ_of,
                 bsf.best_figures_wickets,
                 bsf.best_figures_runs,
                 bsf.best_bowling_figures,
@@ -3524,7 +3946,7 @@ async def get_bowling_leaderboard_extended(
             JOIN game_appearances gap ON gap.game_id = bs.game_id AND gap.player_id = bs.player_id AND gap.is_captain = TRUE
             JOIN players p ON p.id = bs.player_id
             LEFT JOIN best_spell bsf ON bsf.player_id = p.id
-            WHERE s.organisation_id = CAST(:org_id AS UUID){season_clause}
+            WHERE {_OURS_GAMES}{season_clause}
               AND p.organisation_id = :org_id{gender_clause}{overseas_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name), bsf.best_figures_wickets, bsf.best_figures_runs, bsf.best_bowling_figures
         """
@@ -3535,16 +3957,21 @@ async def get_bowling_leaderboard_extended(
         if min_wickets > 0:
             having_clauses.append("COALESCE(SUM(bs.wickets), 0) >= :min_wickets")
             params["min_wickets"] = min_wickets
+        if min_rate_spells > 0:
+            having_clauses.append(
+                rc.bowling_covered_count_sql('bs') + " >= :min_rate_spells")
+            params["min_rate_spells"] = min_rate_spells
         if having_clauses:
             base += " HAVING " + " AND ".join(having_clauses)
         base += f" {order_clause} LIMIT :limit"
         result = await session.execute(text(base), params)
-        return [dict(r) for r in result.mappings()]
+        return [_with_rate_coverage(dict(r)) for r in result.mappings()]
 
     if _scoped(scope):
         # See get_batting_leaderboard_extended's equivalent branch.
         season_clause = " AND g.season_id = ANY(:season_ids)" if season_ids else ""
         residual_cte = _residual_totals_cte(scope, season_ids, params)
+        matches_cte = _matches_played_cte(season_clause, scope_clause)
         base = f"""
             WITH {residual_cte}, qualifying AS (
                 SELECT bs.player_id, bs.game_id, bs.wickets, bs.runs, bs.maidens, bs.overs,
@@ -3552,18 +3979,20 @@ async def get_bowling_leaderboard_extended(
                 FROM v_effective_bowling_spells bs
                 JOIN v_effective_games g ON g.id = bs.game_id
                 JOIN seasons s ON s.id = g.season_id
-                WHERE s.organisation_id = CAST(:org_id AS UUID){season_clause}{scope_clause}
-            )
+                WHERE {_OURS_GAMES}{season_clause}{scope_clause}
+            ), {matches_cte}
             SELECT * FROM (
                 SELECT
                     p.id AS player_id,
                     COALESCE(p.display_name_override, p.name) AS name,
-                    COUNT(DISTINCT q.game_id) + COALESCE(MAX(rt.games), 0) AS games,
+                    -- Matches PLAYED, not matches bowled in: see _matches_played_cte.
+                    COALESCE(MAX(mp.games), 0) + COALESCE(MAX(rt.games), 0) AS games,
                     COALESCE(SUM(q.wickets), 0) + COALESCE(MAX(rt.total_wickets), 0) AS total_wickets,
                     ROUND((COALESCE(SUM(q.runs), 0) + COALESCE(MAX(rt.bowling_runs), 0))::numeric
                         / NULLIF(COALESCE(SUM(q.wickets), 0) + COALESCE(MAX(rt.total_wickets), 0), 0), 2) AS average,
-                    ROUND((COALESCE(SUM(q.runs), 0) + COALESCE(MAX(rt.bowling_runs), 0))::numeric
-                        / NULLIF(COALESCE(SUM(q.balls), 0) + COALESCE(MAX(rt.bowling_balls), 0), 0) * 6, 2) AS economy,
+                    {rc.economy_sql('q')} AS economy,
+                    {rc.bowling_covered_count_sql('q')} AS econ_counted,
+                    COUNT(q.player_id) + COALESCE(MAX(rt.bowling_innings), 0) AS econ_of,
                     GREATEST(MAX(q.wickets), MAX(rt.best_bowling_wickets)) AS best_figures_wickets,
                     -- Best figures are named from the per-spell rows only: a
                     -- residual branch knows how many wickets but its figures
@@ -3582,6 +4011,7 @@ async def get_bowling_leaderboard_extended(
                     COALESCE(SUM(q.balls), 0) + COALESCE(MAX(rt.bowling_balls), 0) AS total_balls
                 FROM players p
                 LEFT JOIN qualifying q ON q.player_id = p.id
+                LEFT JOIN matches_played mp ON mp.player_id = p.id
                 LEFT JOIN residual_totals rt ON rt.player_id = p.id
                 WHERE p.organisation_id = :org_id{gender_clause}{overseas_clause}
                   AND (q.player_id IS NOT NULL OR rt.player_id IS NOT NULL)
@@ -3599,16 +4029,24 @@ async def get_bowling_leaderboard_extended(
             base += " WHERE " + " AND ".join(having)
         base += f" {order_clause} LIMIT :limit"
         result = await session.execute(text(base), params)
-        return [dict(r) for r in result.mappings()]
+        return [_with_rate_coverage(dict(r)) for r in result.mappings()]
 
-    base = """
+    cov_season = " AND g.season_id = ANY(:season_ids)" if season_ids else ""
+    base = "WITH" + _covered_bowl_cte(cov_season) + """
         SELECT
             p.id AS player_id,
             COALESCE(p.display_name_override, p.name) AS name,
             SUM(pss.matches) AS games,
             SUM(pss.wickets) AS total_wickets,
             ROUND(SUM(pss.runs_conceded)::numeric / NULLIF(SUM(pss.wickets), 0), 2) AS average,
-            ROUND(SUM(pss.runs_conceded)::numeric / NULLIF(SUM(pss.bowling_balls), 0) * 6, 2) AS economy,
+            CASE WHEN COALESCE(MAX(cw.covered_spells), 0) > 0
+                 THEN ROUND(MAX(cw.covered_conceded)::numeric
+                            / NULLIF(MAX(cw.covered_bowl_balls), 0) * 6, 2)
+                 ELSE ROUND(SUM(pss.runs_conceded)::numeric
+                            / NULLIF(SUM(pss.bowling_balls), 0) * 6, 2)
+            END AS economy,
+            COALESCE(MAX(cw.covered_spells), 0) AS econ_counted,
+            SUM(pss.bowling_innings) AS econ_of,
             MAX(pss.best_bowling_wickets) AS best_figures_wickets,
             (ARRAY_AGG(pss.best_bowling_figures
                 ORDER BY pss.best_bowling_wickets DESC NULLS LAST,
@@ -3623,6 +4061,7 @@ async def get_bowling_leaderboard_extended(
             COALESCE(SUM(pss.five_wicket_innings), 0) AS five_fors
         FROM v_effective_player_season_stats pss
         JOIN players p ON p.id = pss.player_id
+        LEFT JOIN covered_bowl cw ON cw.player_id = p.id
         -- No seasons join: career-level (NULL-season) import / manual-career rows
         -- (the "Prior Seasons & Adjustments" bucket) belong in the all-seasons
         -- total. A specific-season filter below still excludes them (a NULL
@@ -3645,12 +4084,15 @@ async def get_bowling_leaderboard_extended(
     if min_wickets > 0:
         having_clauses.append("SUM(pss.wickets) >= :min_wickets")
         params["min_wickets"] = min_wickets
+    if min_rate_spells > 0:
+        having_clauses.append("COALESCE(MAX(cw.covered_spells), 0) >= :min_rate_spells")
+        params["min_rate_spells"] = min_rate_spells
     if having_clauses:
         base += " HAVING " + " AND ".join(having_clauses)
     base += f" {order_clause} LIMIT :limit"
 
     result = await session.execute(text(base), params)
-    return [dict(r) for r in result.mappings()]
+    return [_with_rate_coverage(dict(r)) for r in result.mappings()]
 
 
 async def get_bowling_by_grade(
@@ -3877,7 +4319,14 @@ async def get_player_by_opposition(
                     COUNT(*) FILTER (WHERE bi.did_not_bat IS NOT TRUE AND bi.runs IS NOT NULL) AS innings,
                     COALESCE(SUM(bi.runs) FILTER (WHERE bi.did_not_bat IS NOT TRUE), 0) AS total_runs,
                     MAX(bi.runs) FILTER (WHERE bi.did_not_bat IS NOT TRUE) AS high_score,
-                    COUNT(*) FILTER (WHERE bi.did_not_bat IS NOT TRUE AND NOT bi.not_out AND bi.dismissal_type IS NOT NULL) AS dismissals
+                    -- innings - not outs, the one formula every other average in
+                    -- the app uses. This used to also require a non-NULL
+                    -- dismissal_type, so an uploaded card whose dismissal column
+                    -- was left unread dropped out of the denominator here and
+                    -- stayed in it everywhere else, giving one player two
+                    -- averages on the same profile.
+                    COUNT(*) FILTER (WHERE bi.did_not_bat IS NOT TRUE AND bi.runs IS NOT NULL
+                                       AND NOT bi.not_out) AS dismissals
                 FROM v_effective_batting_innings bi
                 JOIN player_games pg ON pg.game_id = bi.game_id
                 WHERE bi.player_id = CAST(:pid AS UUID)
@@ -3979,7 +4428,14 @@ async def get_player_by_venue(
                     COUNT(*) FILTER (WHERE bi.did_not_bat IS NOT TRUE AND bi.runs IS NOT NULL) AS innings,
                     COALESCE(SUM(bi.runs) FILTER (WHERE bi.did_not_bat IS NOT TRUE), 0) AS total_runs,
                     MAX(bi.runs) FILTER (WHERE bi.did_not_bat IS NOT TRUE) AS high_score,
-                    COUNT(*) FILTER (WHERE bi.did_not_bat IS NOT TRUE AND NOT bi.not_out AND bi.dismissal_type IS NOT NULL) AS dismissals
+                    -- innings - not outs, the one formula every other average in
+                    -- the app uses. This used to also require a non-NULL
+                    -- dismissal_type, so an uploaded card whose dismissal column
+                    -- was left unread dropped out of the denominator here and
+                    -- stayed in it everywhere else, giving one player two
+                    -- averages on the same profile.
+                    COUNT(*) FILTER (WHERE bi.did_not_bat IS NOT TRUE AND bi.runs IS NOT NULL
+                                       AND NOT bi.not_out) AS dismissals
                 FROM v_effective_batting_innings bi
                 JOIN v_effective_games g ON g.id = bi.game_id
                 WHERE bi.player_id = CAST(:pid AS UUID)
@@ -4252,7 +4708,7 @@ async def get_club_summary(
         base.update(await _club_results(session, org_id, grade_id=grade_id, scope=fmt_scope))
         return base
 
-    season_ids = await resolve_season_filter(session, org_id, season_id)
+    season_ids = await resolve_season_filter(session, org_id, season_id, include_shared=True)
 
     # A grade-type or match-type filter is only answerable from the per-innings
     # scorecards: CA's season aggregates carry no grade at all (the `api` branch
@@ -4480,7 +4936,7 @@ async def _sirs_base_clauses(session, org_id, season_id, grade_name, finals_only
     over the category default, same rule as the leaderboards.
     """
     season_clause = ""
-    season_ids = await resolve_season_filter(session, org_id, season_id) if season_id else None
+    season_ids = await resolve_season_filter(session, org_id, season_id, include_shared=True) if season_id else None
     if season_ids:
         params["season_ids"] = season_ids
         season_clause = " AND s.id = ANY(:season_ids)"
@@ -4544,7 +5000,7 @@ async def get_sirs_batting(
         JOIN seasons s ON s.id = gr.season_id
         JOIN players p ON p.id = bi.player_id{captain_join}
         WHERE p.organisation_id = CAST(:org_id AS UUID)
-          AND s.organisation_id = CAST(:org_id AS UUID)
+          AND {_OURS_GAMES}
           AND bi.runs >= 100
           AND NOT COALESCE(bi.did_not_bat, FALSE)
           AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb'){season_clause}{finals_clause}{grade_clause}{gender_clause}{overseas_clause}
@@ -4593,7 +5049,7 @@ async def get_sirs_bowling_innings(
         JOIN seasons s ON s.id = gr.season_id
         JOIN players p ON p.id = bs.player_id{captain_join}
         WHERE p.organisation_id = CAST(:org_id AS UUID)
-          AND s.organisation_id = CAST(:org_id AS UUID)
+          AND {_OURS_GAMES}
           AND bs.wickets >= 7{season_clause}{finals_clause}{grade_clause}{gender_clause}{overseas_clause}
         GROUP BY p.id, COALESCE(p.display_name_override, p.name)
         ORDER BY haul_count DESC NULLS LAST
@@ -4633,7 +5089,7 @@ async def get_sirs_bowling_match(
             JOIN seasons s ON s.id = gr.season_id
             JOIN players p ON p.id = bs.player_id{captain_join}
             WHERE p.organisation_id = CAST(:org_id AS UUID)
-              AND s.organisation_id = CAST(:org_id AS UUID){season_clause}{finals_clause}{grade_clause}{gender_clause}{overseas_clause}
+              AND {_OURS_GAMES}{season_clause}{finals_clause}{grade_clause}{gender_clause}{overseas_clause}
             GROUP BY bs.player_id, bs.game_id
             HAVING SUM(bs.wickets) >= 10
         )

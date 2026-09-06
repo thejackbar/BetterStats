@@ -37,6 +37,7 @@ from app.services import module_subscriptions as mod_subs
 from app.services import comms_limits
 from app.services import club_requests
 from app.services import club_lock
+from app.services import stats_display
 from app.services import stripe_client
 from stripe import error as stripe_error
 from datetime import date as _date, datetime as _datetime, timezone as _timezone, timedelta as _timedelta
@@ -160,6 +161,17 @@ def _push_club_to_twenty(org_id, force_hot: bool = False, crm_trigger: Optional[
     task = asyncio.create_task(_run())
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
+
+
+def _queue_admin_contact_sync(club_id) -> None:
+    """Put this club's admins on BetterCricket's internal club-admin list.
+
+    Fire-and-forget on its own session, so it can never fail the request that
+    created the admin. CALL IT AFTER THE COMMIT — the task reads its own session
+    and would not see an uncommitted membership. Imported lazily to keep the
+    router's import graph as it is."""
+    from app.services.admin_contact_list import queue_sync
+    queue_sync(club_id)
 
 
 router = APIRouter(prefix="/club-admin", tags=["club-admin"])
@@ -824,6 +836,12 @@ class SettingsPatch(BaseModel):
     # When the default would leave a player with nothing (a junior who has never
     # played a senior game), show them the grades they did play (migration 229).
     stats_auto_show_played_grades: Optional[bool] = None
+    # Fewest COVERED innings/spells before a rate is published on a board.
+    # A genuine tri-state on the wire: null clears the club's preference back to
+    # the platform default, 0 switches the qualification off. So this is read
+    # through model_fields_set, not `is not None` — see patch_settings.
+    stats_min_rate_innings: Optional[int] = None
+    stats_min_rate_spells: Optional[int] = None
     # Club crest beside the club name in public page headers (migration 226).
     public_header_logo: Optional[bool] = None
     # Who may open a committee document the club uploaded (migration 218).
@@ -975,6 +993,9 @@ async def get_settings(
         ),
         "available_grade_categories": await grade_scope.org_available_categories(db, club.id),
         "stats_auto_show_played_grades": bool(club.stats_auto_show_played_grades),
+        "stats_min_rate_innings": club.stats_min_rate_innings,
+        "stats_min_rate_spells": club.stats_min_rate_spells,
+        "effective_rate_minimums": await stats_display.club_rate_minimums(db, club.id),
         "public_header_logo": bool(club.public_header_logo),
         "committee_docs_office_bearer_only": bool(club.committee_docs_office_bearer_only),
         "diary_start_month": club.diary_start_month or 7,
@@ -1048,6 +1069,11 @@ async def patch_settings(
         club.stats_grade_categories = list(picked) if picked else None
     if data.stats_auto_show_played_grades is not None:
         club.stats_auto_show_played_grades = bool(data.stats_auto_show_played_grades)
+    # Present-but-null means "back to the platform default", which `is not None`
+    # could never express — the same tri-state select_show_age_under needs.
+    for _field in ("stats_min_rate_innings", "stats_min_rate_spells"):
+        if _field in data.model_fields_set:
+            setattr(club, _field, stats_display.clean_minimum(getattr(data, _field)))
     if data.public_header_logo is not None:
         club.public_header_logo = bool(data.public_header_logo)
     if data.committee_docs_office_bearer_only is not None:
@@ -2748,6 +2774,10 @@ async def create_club(
             ),
         )
 
+    # The Primary Club Admin this club was just created with belongs on
+    # BetterCricket's internal club-admin list.
+    _queue_admin_contact_sync(org.id)
+
     # Provision the club's SES tenant in the background (best-effort, no-op when
     # tenant provisioning isn't configured). Never blocks club creation.
     from app.services import ses_tenants
@@ -3303,6 +3333,7 @@ async def super_set_primary_admin(
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     await db.commit()
+    _queue_admin_contact_sync(uuid.UUID(club_id))
     return {"ok": True}
 
 
@@ -3349,6 +3380,7 @@ async def transfer_primary_admin(
     db: AsyncSession = Depends(get_db),
 ):
     """The current primary admin hands the role to another club_admin in their club."""
+
     m = (await db.execute(
         select(ClubMembership).where(ClubMembership.user_id == current_user.id)
     )).scalar_one_or_none()
@@ -3361,6 +3393,7 @@ async def transfer_primary_admin(
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     await db.commit()
+    _queue_admin_contact_sync(club.id)
     return {"ok": True}
 
 
@@ -4060,6 +4093,15 @@ class UserCreate(BaseModel):
     username: str
     password: str
     display_name: Optional[str] = None
+    # Both optional: a super admin creating an account on someone's behalf
+    # often has neither yet, and login is by username regardless. An email is
+    # what puts a club admin on BetterCricket's internal admin contact list
+    # (services/admin_contact_list.py), so an account created without one waits
+    # for a later edit to get there. Validated the same way patch_user does —
+    # format only, never checked for uniqueness (users.email stopped being
+    # DB-unique at migration 145).
+    email: Optional[str] = None
+    mobile_number: Optional[str] = None
     club_id: str
     role: str = "club_admin"
 
@@ -4266,6 +4308,11 @@ async def create_user(
     if len(data.password) < 10:
         raise HTTPException(status_code=422, detail="Password must be at least 10 characters")
 
+    email = (data.email or "").strip().lower()
+    if email and not _INVITE_EMAIL_RE.match(email):
+        raise HTTPException(status_code=422, detail="That doesn't look like a valid email address")
+    mobile = _clean_mobile(data.mobile_number)
+
     role = data.role if data.role in ("super_admin", "club_admin", "sales") else "club_admin"
 
     if role == "sales":
@@ -4292,6 +4339,8 @@ async def create_user(
         username=username,
         password_hash=_hash_password(data.password),
         display_name=data.display_name,
+        email=email or None,
+        mobile_number=mobile,
     )
     db.add(user)
     await db.flush()
@@ -4304,8 +4353,12 @@ async def create_user(
         from app.services.memberships import ensure_primary_admin
         await ensure_primary_admin(db, club.id)
     await db.commit()
+    if membership.role == "club_admin":
+        _queue_admin_contact_sync(club.id)
 
-    return {"id": str(user.id), "username": user.username, "club_id": str(club.id), "role": membership.role}
+    return {"id": str(user.id), "username": user.username, "email": user.email,
+            "mobile_number": user.mobile_number, "club_id": str(club.id),
+            "role": membership.role}
 
 
 class PasswordReset(BaseModel):
@@ -4378,8 +4431,8 @@ async def patch_user(
 
     if "email" in fields:
         email = (fields["email"] or "").strip().lower()
-        # Optional here (unlike the per-club Users page) — this router's own
-        # create_user doesn't collect an email, so some accounts have none.
+        # Optional, and stays that way: create_user collects an email now, but
+        # it doesn't demand one, and every account made before it did has none.
         if email and not _INVITE_EMAIL_RE.match(email):
             raise HTTPException(status_code=422, detail="That doesn't look like a valid email address")
         user.email = email or None
@@ -4440,6 +4493,11 @@ async def patch_user(
         membership.role = new_role
 
     await db.commit()
+    # A role change is one of the ways someone BECOMES a club admin, so it syncs
+    # too — without this the list would only ever pick up admins created as
+    # admins, and quietly miss anyone promoted from club_member.
+    if membership and membership.role == "club_admin":
+        _queue_admin_contact_sync(membership.club_id)
     return {
         "id": str(user.id),
         "username": user.username,
@@ -4785,6 +4843,20 @@ async def hard_refresh_org(
                     _logger.info(f"HardRefresh: yearbook auto-generate for {org_id_str}: {yb_result}")
                 except Exception as ye:
                     _logger.warning(f"HardRefresh: yearbook auto-generate failed for {org_id_str}: {ye}")
+
+                # And group the club's grades into competitions, for the same
+                # reason and on the same true-success branch: a rebuild rewrites
+                # every grade, so this is the moment the associations behind the
+                # grouping are freshest. `maybe_group_club` owns the decision and
+                # never raises — a club whose remaining gap is Cricket Australia's
+                # own is skipped without a single call.
+                try:
+                    from app.services import competition_grouping
+                    grp = await competition_grouping.maybe_group_club(club.id)
+                    if grp.get("ran"):
+                        _logger.info(f"HardRefresh: competition grouping for {org_id_str}: {grp}")
+                except Exception as ge:
+                    _logger.warning(f"HardRefresh: competition grouping failed for {org_id_str}: {ge}")
 
             # Refresh planner statistics. A hard refresh delete+reinserts the
             # org's whole game-level dataset and rewrites player_season_stats,
@@ -5663,6 +5735,7 @@ async def list_milestones_report(
     from app.services.milestone_rules import (
         next_threshold, reach_window, crossed_thresholds, is_displayable,
     )
+    from app.services import milestone_scan
 
     org_id = str(club.id)
     _CAT = {
@@ -5762,70 +5835,15 @@ async def list_milestones_report(
             })
 
     # ------------------------------------------------------------------
-    # Upcoming: active players only (stats in last 3 seasons)
+    # Upcoming: active players only (stats in last 3 seasons).
+    # milestone_scan is the one definition of this — shared with the public
+    # Records page and the club dashboard, so the three surfaces cannot
+    # disagree about who is close to what.
     # ------------------------------------------------------------------
     current_year = datetime.date.today().year
     cutoff = current_year - 2
 
-    totals_rows = await db.execute(
-        _text("""
-            WITH active_ids AS (
-                SELECT DISTINCT pss.player_id
-                FROM player_season_stats pss
-                JOIN seasons s ON s.id = pss.season_id
-                WHERE s.organisation_id = :org_id
-                  AND (s.year IS NULL OR s.year >= :cutoff)
-            )
-            SELECT
-                p.id::text AS player_id,
-                COALESCE(p.display_name_override, p.name) AS player_name,
-                p.gender AS gender,
-                COALESCE(SUM(pss.runs), 0)    AS total_runs,
-                COALESCE(SUM(pss.wickets), 0) AS total_wickets,
-                COALESCE(SUM(pss.matches), 0) AS total_matches,
-                COALESCE(SUM(pss.catches), 0) AS total_catches
-            FROM players p
-            JOIN active_ids ai ON ai.player_id = p.id
-            JOIN player_season_stats pss ON pss.player_id = p.id
-                -- Only this org's seasons (shared cross-club GUID guard, migration 060)
-                AND EXISTS (
-                    SELECT 1 FROM seasons s2
-                    WHERE s2.id = pss.season_id AND s2.organisation_id = :org_id
-                )
-            WHERE p.organisation_id = :org_id AND p.is_player = TRUE
-            GROUP BY p.id, COALESCE(p.display_name_override, p.name), p.gender
-            ORDER BY COALESCE(p.display_name_override, p.name)
-        """),
-        {"org_id": org_id, "cutoff": cutoff},
-    )
-
-    upcoming = []
-    stat_defs = [
-        ("runs",    "batting",  "total_runs"),
-        ("wickets", "bowling",  "total_wickets"),
-        ("matches", "matches",  "total_matches"),
-        ("catches", "fielding", "total_catches"),
-    ]
-    for r in totals_rows.mappings().all():
-        for mt, cat, col in stat_defs:
-            current = int(r[col] or 0)
-            target = next_threshold(mt, current)
-            if target is None:
-                continue
-            needed = target - current
-            if needed > reach_window(mt, target):
-                continue
-            upcoming.append({
-                "player_id": r["player_id"],
-                "player_name": r["player_name"],
-                "gender": r["gender"],
-                "type": mt,
-                "category": cat,
-                "current": current,
-                "target": target,
-                "needed": needed,
-                "detail": None,
-            })
+    upcoming = list(await milestone_scan.upcoming_career_milestones(db, org_id))
 
     # Upcoming: grade milestones for active players
     gu_rows = await db.execute(

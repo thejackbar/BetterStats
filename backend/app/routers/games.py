@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, text
+from sqlalchemy import false, select, text
 from typing import Optional
 import logging
 import uuid
@@ -8,9 +8,10 @@ import uuid
 logger = logging.getLogger(__name__)
 
 from app.models.db import Game, Grade, Season, Organisation, BattingInnings, BowlingSpell, FieldingStat, Player, ManualGame, ManualBattingInnings, ManualBowlingSpell, ManualFieldingStat, get_db
-from app.services import grade_scope
+from app.services import dismissal, grade_scope
 from app.services.aggregations import get_game_fall_of_wickets, get_game_partnerships
 from app.services.sync import _caught_by_keeper, _innings_keeper_names
+from app.services import rate_coverage as rc
 
 router = APIRouter(prefix="/games", tags=["games"])
 
@@ -21,14 +22,32 @@ async def _fetch_manual_games_as_list(
     season_id: Optional[str],
     grade_id: Optional[str],
     finals_only: Optional[bool],
+    scope=None,
 ) -> list[dict]:
-    """Return manual_games for this org shaped like the API game-list entries."""
+    """Return manual_games for this org shaped like the API game-list entries.
+
+    THE COMPETITION HALF OF A SCOPE IS APPLIED HERE AND THE OTHER TWO ARE NOT,
+    and the asymmetry is the point. A grade-less manual game (Grade is optional
+    on Upload Scorecard) is deliberately kept by a category or format filter —
+    a row we cannot classify is not a row we know to be junior. A COMPETITION
+    filter is an INCLUSION, so the same row is not in the competition being
+    asked for and has to drop, or a club filtering to the Border Cup would find
+    an uploaded scorecard from another competition in the list.
+    """
     q = (
         select(ManualGame, Grade, Season)
         .join(Season, Season.id == ManualGame.season_id)
         .outerjoin(Grade, Grade.id == ManualGame.grade_id)
         .where(ManualGame.organisation_id == org_id)
     )
+    if scope is not None and getattr(scope, "competition_active", False):
+        if scope.competitions:
+            q = q.where(Grade.competition_id.in_(
+                [uuid.UUID(str(c)) for c in scope.competitions]))
+        else:
+            # Competitions were asked for and none of them are this club's.
+            # Nothing matches — never everything.
+            q = q.where(false())
     if season_id:
         q = q.where(ManualGame.season_id == uuid.UUID(season_id))
     if grade_id:
@@ -77,10 +96,32 @@ async def list_games(
             "Omitted applies no format filter."
         ),
     ),
+    competitions: Optional[str] = Query(
+        None,
+        description=(
+            "Comma-separated club competition ids to count. A competition is "
+            "the club's own named group of grades (services/competitions.py), "
+            "seeded one per association — so this is what tells one "
+            "association's cricket from another's, and one competition of an "
+            "association from the next. Omitted applies no competition filter."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ):
+    # Grade-type / match-type / competition scope. An explicitly picked grade
+    # beats the category half, the same rule the leaderboards follow. Resolved
+    # BEFORE the manual games are fetched because they need the competition
+    # half of it — see _fetch_manual_games_as_list for why that one axis
+    # reaches a grade-less manual game when the other two deliberately don't.
+    scope = await grade_scope.resolve_scope(
+        db, org_id, categories, formats=formats, competitions=competitions)
+    if grade_id:
+        # A picked grade beats the CATEGORY half only — a grade plays more than
+        # one format, so Match Type still has to bite inside it.
+        scope = scope.formats_only()
+
     manual_games = await _fetch_manual_games_as_list(
-        db, uuid.UUID(org_id), season_id, grade_id, finals_only,
+        db, uuid.UUID(org_id), season_id, grade_id, finals_only, scope,
     )
 
     # Recent games come from our own synced data (DB-first). Manual games are
@@ -141,16 +182,6 @@ async def list_games(
         params["grade_id"] = grade_id
     if finals_only:
         clauses.append("g.is_final = TRUE")
-    # Grade-type / match-type scope. An explicitly picked grade beats it, the
-    # same rule the leaderboards follow. Manual games are fetched separately
-    # above and a manual game may have no grade at all, so they are deliberately
-    # left alone — the scope clause's own `IS NULL OR` half makes the same call
-    # for a grade-less row on this side.
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
-    if grade_id:
-        # A picked grade beats the CATEGORY half only — a grade plays more than
-        # one format, so Match Type still has to bite inside it.
-        scope = scope.formats_only()
     if scope.active:
         clauses.append(scope.clause("g.grade_id").removeprefix(" AND ").strip())
         scope.bind(params)
@@ -358,7 +389,7 @@ async def _gr_scorecard_response(game_id: str) -> Optional[dict]:
                 "strike_rate": _to_float(row.get("strikeRate")),
                 "dismissal_type": None if is_dnb else (row.get("dismissalText") or dt_long.lower() or None),
                 "caught_behind": dt_long == "Caught" and _caught_by_keeper(row.get("dismissalText") or "", keeper_names),
-                "not_out": dt_id == 1,
+                "not_out": dismissal.is_not_out(dt_id, dt_long),
                 "did_not_bat": is_dnb,
                 "batting_position": row.get("batOrder"),
             })
@@ -555,9 +586,22 @@ async def get_scorecard(
             "balls": bi.balls,
             "fours": bi.fours,
             "sixes": bi.sixes,
-            "strike_rate": float(bi.strike_rate) if bi.strike_rate is not None else None,
+            # Derived from this row's own runs and balls: nothing writes
+            # batting_innings.strike_rate for a synced innings, so reading the
+            # column left the column blank whenever the live Grassroots rebuild
+            # below could not run. A stored figure (a hand-entered manual
+            # innings) is the fallback. See services/rate_coverage.py.
+            "strike_rate": rc.innings_strike_rate(bi.runs, bi.balls, bi.strike_rate),
             "dismissal_type": bi.dismissal_type,
-            "caught_behind": bi.caught_behind,
+            # `caught_behind` is a SYNCED-only column (migration 075) —
+            # `manual_batting_innings` has no equivalent, because the AI
+            # scorecard reader transcribes a dismissal exactly as the card
+            # writes it and never judges whether the catcher was the keeper.
+            # Reading it off a manual row raised AttributeError and took the
+            # whole endpoint down with a 500, so an uploaded card could be
+            # listed on the Games page and never opened. NULL is the honest
+            # answer and every reader already treats it as a plain catch.
+            "caught_behind": None if is_manual else bi.caught_behind,
             "not_out": bi.not_out,
             "batting_position": bi.batting_position,
             "did_not_bat": bool(bi.did_not_bat),
@@ -916,7 +960,7 @@ async def get_scorecard(
                         "strike_rate": _to_float(row.get("strikeRate")),
                         "dismissal_type": dismissal_str,
                         "caught_behind": caught_behind,
-                        "not_out": dt_id == 1,
+                        "not_out": dismissal.is_not_out(dt_id, dt_long),
                         "batting_position": row.get("batOrder"),
                         "did_not_bat": is_dnb,
                     }

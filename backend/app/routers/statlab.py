@@ -159,6 +159,16 @@ async def statlab_query(
             "no format filter."
         ),
     ),
+    competitions: Optional[str] = Query(
+        None,
+        description=(
+            "Comma-separated club competition ids to count. A competition is "
+            "the club's own named group of grades (services/competitions.py), "
+            "seeded one per association — so this is what tells one "
+            "association's cricket from another's, and one competition of an "
+            "association from the next. Omitted applies no competition filter."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """Run a StatLab query against one of the registered targets.
@@ -172,7 +182,7 @@ async def statlab_query(
         except json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="filter_tree must be valid JSON")
     ctx = _ctx_from_request(request)
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
+    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions)
     ctx[svc._SCOPE_KEY] = scope
     try:
         result = await svc.run_query(
@@ -223,12 +233,22 @@ async def statlab_derived(
             "no format filter."
         ),
     ),
+    competitions: Optional[str] = Query(
+        None,
+        description=(
+            "Comma-separated club competition ids to count. A competition is "
+            "the club's own named group of grades (services/competitions.py), "
+            "seeded one per association — so this is what tells one "
+            "association's cricket from another's, and one competition of an "
+            "association from the next. Omitted applies no competition filter."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     if name not in svc.DERIVED_QUERIES:
         raise HTTPException(status_code=400, detail=f"Unknown derived query: {name}")
     ctx = _ctx_from_request(request)
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
+    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions)
     ctx[svc._SCOPE_KEY] = scope
     try:
         result = await svc.run_derived(db, name=name, org_id=org_id, limit=limit, page=page, context=ctx)

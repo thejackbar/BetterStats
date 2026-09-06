@@ -1,6 +1,10 @@
 import asyncio
 import datetime
+import linecache
+import logging
 import re
+import sys
+import time
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, select
@@ -12,8 +16,66 @@ from sqlalchemy import select as sa_select
 from app.services import playhq_client
 from app.services import grade_scope
 from app.services import club_records
+from app.services.club_grades import club_game_sql
+from app.services.game_status import appearance_counts_as_match
 from app.services.grade_labels import suggest_category
 from app.services import player_visibility
+from app.services import rate_coverage as rc
+from app.services.aggregations import _with_rate_coverage
+
+# "This game is our club's", for the per-game record boards.
+#
+# A fixture between two synced clubs is ONE `games` row whose grade — and so
+# whose season — belongs to whichever club synced it first. Neither club owns
+# it: both played it. Testing `seasons.organisation_id` gave the whole match to
+# one of them, so the other club's own record innings simply never appeared on
+# its own records page. See services/club_grades.py.
+_OURS_GAMES = club_game_sql("g", "org_id")
+_APPEARANCE_PLAYED = appearance_counts_as_match("ga")
+
+# This record book has always set its own qualification floors (20 wickets for
+# a bowling average, 50 overs for an economy). These two are their siblings: a
+# strike rate off three innings is a real figure and not a club record.
+MIN_SEASON_SR_INNINGS = 10
+MIN_SEASON_ECON_BALLS = 300  # 50 overs, matching the all-time economy floor
+
+logger = logging.getLogger(__name__)
+
+# One request to this endpoint runs ~40 separate aggregations, each awaited in
+# turn, and an all-time board scans a club's whole history. When the page is
+# slow the question is always WHICH of the forty, and the answer has never been
+# knowable from outside: it is one HTTP request either way.
+#
+# So `q` times every query it runs and names it after the variable the result
+# lands in, which is what the boards are called on the payload anyway. A slow
+# request logs the worst offenders; nothing is logged for an ordinary one, or
+# a public page would write a line per visit.
+SLOW_RECORDS_LOG_MS = 2000.0
+SLOW_RECORDS_LOG_TOP = 8
+
+_ASSIGN_RE = re.compile(r"^\s*(\w+)\s*=\s*await\s+q\(")
+
+
+def _query_label(depth: int = 2) -> str:
+    """The name of the variable the awaited query is being assigned to.
+
+    A multi-line call reports its line differently across Python versions (the
+    statement's first line before 3.11, the exact position after), so this
+    scans BACK from wherever the frame says it is to the nearest
+    ``name = await q(``. Falls back to the line number, which still identifies
+    the query, just less readably.
+    """
+    try:
+        frame = sys._getframe(depth)
+        path, lineno = frame.f_code.co_filename, frame.f_lineno
+        for n in range(lineno, max(lineno - 200, 0), -1):
+            m = _ASSIGN_RE.match(linecache.getline(path, n))
+            if m:
+                return m.group(1)
+        return f"line:{lineno}"
+    except Exception:  # a label is a diagnostic, never a reason to fail a request
+        return "unknown"
+
 
 router = APIRouter(prefix="/records", tags=["records"])
 
@@ -124,13 +186,65 @@ async def get_records(
             "Omitted applies no format filter."
         ),
     ),
+    competitions: str | None = Query(
+        None,
+        description=(
+            "Comma-separated club competition ids to count. A competition is "
+            "the club's own named group of grades (services/competitions.py), "
+            "seeded one per association — so this is what tells one "
+            "association's cricket from another's, and one competition of an "
+            "association from the next. Omitted applies no competition filter."
+        ),
+    ),
+    debug_timing: bool = Query(
+        False,
+        description=(
+            "Return a per-query timing breakdown as `_query_timings`, slowest "
+            "first. Diagnostic: this endpoint runs ~40 aggregations in one "
+            "request, and this is how to see which of them a slow page is "
+            "waiting on. Only answered for a viewer who may already see the "
+            "club's private data (its own admins and Better staff); everyone "
+            "else gets the ordinary payload."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
+    request_started = time.perf_counter()
+    # Every query this request runs, in the order it ran, as
+    # {label, ms, rows}. Filled by `q` below.
+    timings: list[dict] = []
+
+    async def _timed(label: str, coro):
+        """Run an awaitable and record what it cost, under a given name."""
+        started = time.perf_counter()
+        try:
+            return await coro
+        finally:
+            timings.append({
+                "n": len(timings),          # where in the request it ran
+                "label": label,
+                "ms": round((time.perf_counter() - started) * 1000, 1),
+                "rows": None,
+            })
+
     # An explicitly picked grade beats the category default: someone who chose
     # "Under 14s" wants the juniors. Resolved to nothing in that case, so every
     # clause below sees an inactive scope and emits no SQL.
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
+    # Postgres JIT-compiles any statement it costs above `jit_above_cost`, and
+    # every board that reads `v_effective_player_season_stats` plans at ~5.3M —
+    # past the inline and optimise thresholds too. Measured on production: 177
+    # functions, 505ms to COMPILE a board that then runs in ~580ms, and this
+    # endpoint reads that view fourteen times. There is nothing here JIT can win
+    # back: these are sub-second analytical queries over a wide UNION view, not
+    # the minutes-long scans it exists to speed up. SET LOCAL, so it lasts
+    # exactly this transaction and no pooled connection carries it away.
+    await _timed("SET LOCAL jit = off", db.execute(text("SET LOCAL jit = off")))
+
+    scope = await _timed(
+        "resolve_scope",
+        grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions),
+    )
     if grade_id or grade_name:
         scope = scope.formats_only()
     scope_active = bool(scope is not None and scope.active)
@@ -159,7 +273,10 @@ async def get_records(
 
     # Expand canonical season to include any merged-in alias seasons.
     from app.services.season_aliases import resolve_season_filter
-    season_ids = await resolve_season_filter(db, org_id, season_id)
+    season_ids = await _timed(
+        "resolve_season_filter",
+        resolve_season_filter(db, org_id, season_id, include_shared=True),
+    )
 
     p = {"org_id": org_id, "limit": _LIMIT}
     if season_ids:
@@ -217,6 +334,35 @@ async def get_records(
     # Inline WHERE additions for player_season_stats aggregate queries
     pss_season_clause  = "AND pss.season_id = ANY(:season_ids) " if season_ids else ""
     pss_gender_clause  = "AND p.gender = :gender " if gender else ""
+
+    # THE CLUB HAS TO REACH THE VIEW, NOT JUST THE PLAYERS TABLE BESIDE IT.
+    # Every board below joins `players p` and filters `p.organisation_id`, and
+    # that lands too late: the planner builds the whole of
+    # v_effective_player_season_stats for every club on the platform — a seq
+    # scan of all 315,288 player_season_stats rows with migration 060's
+    # org-scoping EXISTS run as a correlated subplan once per row, 2.2 MILLION
+    # buffer hits, ~480ms — and only then hash-joins the 101 players that were
+    # wanted all along. Naming those players up front is a plain restriction on
+    # the view's OWN player_id, which pushes into each UNION ALL branch and
+    # reads idx_pss_player. Measured on production: one board 514ms -> 0.9ms,
+    # returning the same 54 rows either way.
+    #
+    # IT MUST BE A BOUND ARRAY AND NEVER A SUBQUERY. The same board written
+    # `pss.player_id = ANY (SELECT id FROM players WHERE organisation_id = ...)`
+    # is planned as a semi-join against the un-narrowed view and takes 49.8
+    # SECONDS — 57,000x worse than the array and 97x worse than doing nothing
+    # at all. Do not "tidy" this back into a subquery.
+    #
+    # CAST, because a club with no players binds an EMPTY list and asyncpg
+    # cannot infer an array's type from one: the same trap the vote-medals note
+    # in CLAUDE.md documents for a bare `:param IS NULL`. An empty array
+    # correctly matches nothing, which is what a club with no players holds.
+    club_ids_res = await _timed("club_player_ids", db.execute(
+        text("SELECT id FROM players WHERE organisation_id = :org_id"),
+        {"org_id": org_id},
+    ))
+    p["club_player_ids"] = [str(r[0]) for r in club_ids_res]
+    pss_club_clause = "AND pss.player_id = ANY(CAST(:club_player_ids AS uuid[])) "
     gender_clause      = f" AND p.gender = :gender" if gender else ""
 
     # When grade_name active: game-level join/where templates for batting and bowling
@@ -260,8 +406,21 @@ async def get_records(
     )
 
     async def q(sql: str, params: dict | None = None) -> list[dict]:
+        label = _query_label()
+        started = time.perf_counter()
         rows = await db.execute(text(sql), params or p)
-        return [dict(r) for r in rows.mappings().all()]
+        # A row carrying sr_counted / econ_counted has its coverage folded into
+        # the pair every rate rides with; every other row passes through
+        # untouched, so nothing in this book changes shape for a query that
+        # never asked. See services/rate_coverage.py.
+        out = [_with_rate_coverage(dict(r)) for r in rows.mappings().all()]
+        timings.append({
+            "n": len(timings),
+            "label": label,
+            "ms": round((time.perf_counter() - started) * 1000, 1),
+            "rows": len(out),
+        })
+        return out
 
     # Whether to use per-game queries (required for grade_name or finals_only)
     # A category exclusion forces the per-game path for the same reason a
@@ -349,7 +508,7 @@ async def get_records(
             FROM players p
             JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
-              """ + pss_season_clause + pss_gender_clause + """
+              """ + pss_season_clause + pss_club_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING SUM(pss.runs) > 0
             ORDER BY runs DESC LIMIT :limit
@@ -391,7 +550,7 @@ async def get_records(
             FROM players p
             JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
-              """ + pss_season_clause + pss_gender_clause + """
+              """ + pss_season_clause + pss_club_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING (SUM(pss.batting_innings) - SUM(pss.not_outs)) >= 10
             ORDER BY average DESC LIMIT :limit
@@ -418,7 +577,7 @@ async def get_records(
             FROM players p
             JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
-              """ + pss_season_clause + pss_gender_clause + """
+              """ + pss_season_clause + pss_club_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING SUM(pss.fifties) > 0
             ORDER BY fifties DESC LIMIT :limit
@@ -445,7 +604,7 @@ async def get_records(
             FROM players p
             JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
-              """ + pss_season_clause + pss_gender_clause + """
+              """ + pss_season_clause + pss_club_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING SUM(pss.hundreds) > 0
             ORDER BY hundreds DESC LIMIT :limit
@@ -470,7 +629,7 @@ async def get_records(
             FROM players p
             JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
-              """ + pss_season_clause + pss_gender_clause + """
+              """ + pss_season_clause + pss_club_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING SUM(pss.ducks) > 0
             ORDER BY ducks DESC LIMIT :limit
@@ -497,9 +656,49 @@ async def get_records(
             JOIN players p ON p.id = pss.player_id
             JOIN seasons s ON s.id = pss.season_id
             WHERE p.organisation_id = :org_id AND pss.runs > 0
-              """ + ("AND pss.season_id = ANY(:season_ids) " if season_ids else "") + pss_gender_clause + """
+              """ + ("AND pss.season_id = ANY(:season_ids) " if season_ids else "") + pss_club_clause + pss_gender_clause + """
             ORDER BY pss.runs DESC LIMIT :limit
         """)
+
+    # A strike rate record is SEASON by season, never all time, and it is
+    # deliberately built from per-innings rows on both paths rather than from a
+    # season aggregate. CA's season row carries every run and only the balls
+    # somebody typed in, so an all-time figure blends decades of differently
+    # scored seasons into one number nobody can check. A range of seasons is a
+    # real question and StatLab is where it gets answered — the screen says so.
+    #
+    # The floor is this record book's own, set alongside its neighbours (20
+    # wickets for a bowling average, 50 overs for an economy): a strike rate
+    # off three innings is a real figure and not a club record.
+    best_strike_rate_season = await q(f"""
+        SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+               {rc.strike_rate_sql('bi')} AS strike_rate,
+               {rc.batting_covered_count_sql('bi')} AS sr_counted,
+               COUNT(*) AS sr_of,
+               SUM(bi.runs) FILTER (WHERE {rc.batting_covered_sql('bi')}) AS runs,
+               s.name AS season_name, s.year AS season_year
+        FROM players p {_eff_bat_join}
+        {_eff_bat_where}
+        GROUP BY p.id, COALESCE(p.display_name_override, p.name), s.id, s.name, s.year
+        HAVING {rc.batting_covered_count_sql('bi')} >= {MIN_SEASON_SR_INNINGS}
+        ORDER BY strike_rate DESC NULLS LAST LIMIT :limit
+    """)
+
+    best_economy_season = await q(f"""
+        SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+               {rc.economy_sql('bs')} AS economy,
+               {rc.bowling_covered_count_sql('bs')} AS econ_counted,
+               COUNT(*) AS econ_of,
+               SUM(bs.wickets) FILTER (WHERE {rc.bowling_covered_sql('bs')}) AS wickets,
+               ROUND(SUM(bs.overs) FILTER (WHERE {rc.bowling_covered_sql('bs')}), 1) AS overs,
+               s.name AS season_name, s.year AS season_year
+        FROM players p {_eff_bowl_join}
+        {_eff_bowl_where}
+        GROUP BY p.id, COALESCE(p.display_name_override, p.name), s.id, s.name, s.year
+        HAVING SUM({rc.overs_to_balls_sql('bs.overs')}) FILTER (WHERE {rc.bowling_covered_sql('bs')})
+               >= {MIN_SEASON_ECON_BALLS}
+        ORDER BY economy ASC NULLS LAST LIMIT :limit
+    """)
 
     # ── Bowling ────────────────────────────────────────────────────────────────────────
 
@@ -532,7 +731,7 @@ async def get_records(
             FROM players p
             JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
-              """ + pss_season_clause + pss_gender_clause + """
+              """ + pss_season_clause + pss_club_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING SUM(pss.wickets) > 0
             ORDER BY wickets DESC LIMIT :limit
@@ -572,7 +771,7 @@ async def get_records(
             FROM players p
             JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
-              """ + pss_season_clause + pss_gender_clause + """
+              """ + pss_season_clause + pss_club_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING SUM(pss.wickets) >= 20
             ORDER BY average ASC LIMIT :limit
@@ -581,14 +780,15 @@ async def get_records(
     if use_game_level:
         top_economy = await q(f"""
             SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
-                   ROUND(SUM(bs.runs)::numeric /
-                       NULLIF(SUM(bs.overs), 0), 2) AS economy,
+                   {rc.economy_sql('bs')} AS economy,
+                   {rc.bowling_covered_count_sql('bs')} AS econ_counted,
+                   COUNT(*) AS econ_of,
                    COALESCE(SUM(bs.wickets), 0) AS wickets,
                    ROUND(SUM(bs.overs), 1) AS overs
             FROM players p {_eff_bowl_join}
             {_eff_bowl_where}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
-            HAVING SUM(bs.overs) >= 50
+            HAVING SUM(bs.overs) FILTER (WHERE {rc.bowling_covered_sql('bs')}) >= 50
             ORDER BY economy ASC LIMIT :limit
         """)
     else:
@@ -601,7 +801,7 @@ async def get_records(
             FROM players p
             JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
-              """ + pss_season_clause + pss_gender_clause + """
+              """ + pss_season_clause + pss_club_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING SUM(pss.bowling_balls) >= 300
             ORDER BY economy ASC LIMIT :limit
@@ -626,7 +826,7 @@ async def get_records(
             FROM players p
             JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
-              """ + pss_season_clause + pss_gender_clause + """
+              """ + pss_season_clause + pss_club_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING SUM(pss.five_wicket_innings) > 0
             ORDER BY five_fors DESC LIMIT :limit
@@ -653,7 +853,7 @@ async def get_records(
             JOIN players p ON p.id = pss.player_id
             JOIN seasons s ON s.id = pss.season_id
             WHERE p.organisation_id = :org_id AND pss.wickets > 0
-              """ + ("AND pss.season_id = ANY(:season_ids) " if season_ids else "") + pss_gender_clause + """
+              """ + ("AND pss.season_id = ANY(:season_ids) " if season_ids else "") + pss_club_clause + pss_gender_clause + """
             ORDER BY pss.wickets DESC LIMIT :limit
         """)
 
@@ -815,7 +1015,9 @@ async def get_records(
         if manual_grade_name:
             manual_stmt = manual_stmt.where(ManualPartnershipRecord.grade_name == manual_grade_name)
         manual_stmt = manual_stmt.order_by(ManualPartnershipRecord.runs.desc())
-        manual_res = await db.execute(manual_stmt)
+        manual_res = await _timed(
+            "manual_partnership_records", db.execute(manual_stmt)
+        )
         for r in manual_res.scalars().all():
             manual_rows.append({
                 "batter1_id": str(r.batter1_id) if r.batter1_id else None,
@@ -874,7 +1076,7 @@ async def get_records(
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
             JOIN players p ON p.id = ga.player_id
-            WHERE s.organisation_id = CAST(:org_id AS UUID)
+            WHERE {_OURS_GAMES}
               AND ga.is_captain = TRUE
               AND p.organisation_id = :org_id
               {_gw_season}
@@ -969,7 +1171,7 @@ async def get_records(
                 JOIN v_effective_games g ON g.id = bi.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
-                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                WHERE {_OURS_GAMES}
                   {_match_grade_filter}
                   {_gw_season}
                   {finals_clause}
@@ -979,7 +1181,7 @@ async def get_records(
                 JOIN v_effective_games g ON g.id = bs.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
-                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                WHERE {_OURS_GAMES}
                   {_match_grade_filter}
                   {_gw_season}
                   {finals_clause}
@@ -989,7 +1191,22 @@ async def get_records(
                 JOIN v_effective_games g ON g.id = fs.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
-                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                WHERE {_OURS_GAMES}
+                  {_match_grade_filter}
+                  {_gw_season}
+                  {finals_clause}
+                UNION
+                -- Named in the side and did nothing measurable in it: still a
+                -- match played, which is what this board counts. Without this
+                -- arm "most matches" reads as "most matches you did something
+                -- in", and disagrees with the same player's own MATCHES.
+                SELECT ga.player_id, ga.game_id, gr.season_id
+                FROM game_appearances ga
+                JOIN v_effective_games g ON g.id = ga.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                JOIN seasons s ON s.id = gr.season_id
+                WHERE {_OURS_GAMES}
+                  AND {_APPEARANCE_PLAYED}
                   {_match_grade_filter}
                   {_gw_season}
                   {finals_clause}
@@ -1012,7 +1229,7 @@ async def get_records(
             FROM players p
             JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
-              """ + pss_season_clause + pss_gender_clause + """
+              """ + pss_season_clause + pss_club_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING SUM(pss.matches) > 0
             ORDER BY matches DESC LIMIT :limit
@@ -1028,7 +1245,7 @@ async def get_records(
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
             JOIN players p ON p.id = ga.player_id
-            WHERE s.organisation_id = CAST(:org_id AS UUID)
+            WHERE {_OURS_GAMES}
               AND ga.is_captain = TRUE
               AND p.organisation_id = :org_id
               {_gw_season}
@@ -1064,7 +1281,7 @@ async def get_records(
                 JOIN v_effective_games g ON g.id = bi.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
-                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                WHERE {_OURS_GAMES}
                   {_match_grade_filter}
                   {_gw_season}
                   {finals_clause}
@@ -1074,7 +1291,7 @@ async def get_records(
                 JOIN v_effective_games g ON g.id = bs.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
-                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                WHERE {_OURS_GAMES}
                   {_match_grade_filter}
                   {_gw_season}
                   {finals_clause}
@@ -1084,7 +1301,7 @@ async def get_records(
                 JOIN v_effective_games g ON g.id = fs.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
-                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                WHERE {_OURS_GAMES}
                   {_match_grade_filter}
                   {_gw_season}
                   {finals_clause}
@@ -1107,7 +1324,7 @@ async def get_records(
             FROM players p
             JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
-              """ + pss_season_clause + pss_gender_clause + """
+              """ + pss_season_clause + pss_club_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING COUNT(DISTINCT pss.season_id) > 0
             ORDER BY seasons DESC LIMIT :limit
@@ -1125,7 +1342,7 @@ async def get_records(
                 JOIN v_effective_games g ON g.id = bi.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
-                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                WHERE {_OURS_GAMES}
                   {_match_grade_filter}
                   {_gw_season}
                   {finals_clause}
@@ -1142,7 +1359,7 @@ async def get_records(
                 JOIN v_effective_games g ON g.id = bs.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
-                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                WHERE {_OURS_GAMES}
                   {_match_grade_filter}
                   {_gw_season}
                   {finals_clause}
@@ -1176,7 +1393,7 @@ async def get_records(
             FROM players p
             JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
-              """ + pss_season_clause + pss_gender_clause + """
+              """ + pss_season_clause + pss_club_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING SUM(pss.runs) >= 1000 AND SUM(pss.wickets) >= 100
             ORDER BY index_score DESC LIMIT :limit
@@ -1288,11 +1505,14 @@ async def get_records(
     # here in one pass. Done on the payload rather than inside the ~40
     # builders above so a board added later is covered without anyone
     # remembering; see services/player_visibility.py.
-    hidden = (
-        set() if await user_can_view_org_private(db, viewer, org_id)
-        else await player_visibility.hidden_player_ids(db, org_id)
+    can_view_private = await _timed(
+        "user_can_view_org_private", user_can_view_org_private(db, viewer, org_id)
     )
-    return player_visibility.prune_hidden({
+    hidden = (
+        set() if can_view_private
+        else await _timed("hidden_player_ids", player_visibility.hidden_player_ids(db, org_id))
+    )
+    payload = player_visibility.prune_hidden({
         # What these figures actually cover, plus the categories this club's
         # grades justify offering a toggle for.
         "grade_scope": {
@@ -1300,8 +1520,12 @@ async def get_records(
                 "categories": [], "excluded_categories": [],
                 "formats": None, "excluded_formats": [], "active": False,
             }),
-            "available": await grade_scope.org_available_categories(db, org_id),
-            "available_formats": await grade_scope.org_available_formats(db, org_id),
+            "available": await _timed(
+                "org_available_categories", grade_scope.org_available_categories(db, org_id)
+            ),
+            "available_formats": await _timed(
+                "org_available_formats", grade_scope.org_available_formats(db, org_id)
+            ),
         },
         "batting": {
             "top_career_runs":   top_career_runs,
@@ -1311,6 +1535,7 @@ async def get_records(
             "most_hundreds":     most_hundreds,
             "most_ducks":        most_ducks,
             "most_runs_season":  most_runs_season,
+            "best_strike_rate_season": best_strike_rate_season,
         },
         "bowling": {
             "top_career_wickets":   top_career_wickets,
@@ -1319,6 +1544,7 @@ async def get_records(
             "top_economy":          top_economy,
             "most_five_fors":       most_five_fors,
             "most_wickets_season":  most_wickets_season,
+            "best_economy_season":  best_economy_season,
         },
         "partnerships": partnerships_flat,
         "team": {
@@ -1329,6 +1555,33 @@ async def get_records(
             "top_allrounders": top_allrounders,
         },
     }, hidden)
+
+    # What the request actually spent, and on what. Attached only for a viewer
+    # who may already see this club's private data, and logged only when the
+    # request was slow — a public page must not write a line per visit, and the
+    # ordinary payload must not grow a key for everybody else.
+    query_ms = sum(t["ms"] for t in timings)
+    total_ms = (time.perf_counter() - request_started) * 1000
+    if total_ms >= SLOW_RECORDS_LOG_MS:
+        worst = sorted(timings, key=lambda t: t["ms"], reverse=True)[:SLOW_RECORDS_LOG_TOP]
+        logger.warning(
+            "slow records request org=%s season=%s grade=%s scope_active=%s "
+            "total=%.0fms queries=%d query_time=%.0fms slowest=[%s]",
+            org_id, season_id, grade_name or grade_id, scope_active,
+            total_ms, len(timings), query_ms,
+            ", ".join(f"{t['label']} {t['ms']:.0f}ms" for t in worst),
+        )
+    if debug_timing and can_view_private:
+        payload["_query_timings"] = {
+            "total_ms": round(total_ms, 1),
+            "query_ms": round(query_ms, 1),
+            # Whatever is left is Python: assembling, de-duplicating and
+            # pruning the boards rather than waiting on the database.
+            "other_ms": round(total_ms - query_ms, 1),
+            "query_count": len(timings),
+            "queries": sorted(timings, key=lambda t: t["ms"], reverse=True),
+        }
+    return payload
 
 
 @router.get("/{org_id}/milestones")
@@ -1358,6 +1611,7 @@ async def get_records_milestones(
     from app.services.milestone_rules import (
         next_threshold, reach_window, crossed_thresholds, is_displayable,
     )
+    from app.services import milestone_scan
 
     _CAT = {
         "runs": "batting", "wickets": "bowling", "catches": "fielding", "matches": "matches",
@@ -1403,63 +1657,11 @@ async def get_records_milestones(
                 "detail": r["detail"],
             })
 
-        # Career-wide: upcoming (active players only, last 3 seasons)
-        totals_rows = await db.execute(
-            text("""
-                WITH active_ids AS (
-                    SELECT DISTINCT pss.player_id
-                    FROM player_season_stats pss
-                    JOIN seasons s ON s.id = pss.season_id
-                    WHERE s.organisation_id = :org_id
-                      AND (s.year IS NULL OR s.year >= :cutoff)
-                )
-                SELECT
-                    p.id::text AS player_id,
-                    COALESCE(p.display_name_override, p.name) AS player_name,
-                    p.gender AS gender,
-                    COALESCE(SUM(pss.runs), 0)    AS total_runs,
-                    COALESCE(SUM(pss.wickets), 0) AS total_wickets,
-                    COALESCE(SUM(pss.matches), 0) AS total_matches,
-                    COALESCE(SUM(pss.catches), 0) AS total_catches
-                FROM players p
-                JOIN active_ids ai ON ai.player_id = p.id
-                JOIN player_season_stats pss ON pss.player_id = p.id
-                    AND EXISTS (
-                        SELECT 1 FROM seasons s2
-                        WHERE s2.id = pss.season_id AND s2.organisation_id = :org_id
-                    )
-                WHERE p.organisation_id = :org_id AND p.is_player = TRUE
-                GROUP BY p.id, COALESCE(p.display_name_override, p.name), p.gender
-                ORDER BY COALESCE(p.display_name_override, p.name)
-            """),
-            {"org_id": org_id, "cutoff": cutoff},
-        )
-        stat_defs = [
-            ("runs",    "batting",  "total_runs"),
-            ("wickets", "bowling",  "total_wickets"),
-            ("matches", "matches",  "total_matches"),
-            ("catches", "fielding", "total_catches"),
-        ]
-        for r in totals_rows.mappings().all():
-            for mt, cat, col in stat_defs:
-                current = int(r[col] or 0)
-                target = next_threshold(mt, current)
-                if target is None:
-                    continue
-                needed = target - current
-                if needed > reach_window(mt, target):
-                    continue
-                upcoming.append({
-                    "player_id": r["player_id"],
-                    "player_name": r["player_name"],
-                    "gender": r["gender"],
-                    "type": mt,
-                    "category": cat,
-                    "current": current,
-                    "target": target,
-                    "needed": needed,
-                    "detail": None,
-                })
+        # Career-wide: upcoming (active players only, last 3 seasons).
+        # milestone_scan is the one definition of this — shared with the club
+        # dashboard and the admin Milestones report, so the three surfaces
+        # cannot disagree about who is close to what.
+        upcoming.extend(await milestone_scan.upcoming_career_milestones(db, org_id))
     else:
         # ------------------------------------------------------------------
         # Grade-scoped: runs / wickets / catches / matches within one grade,

@@ -16,18 +16,24 @@ See docs/bettercomms-architecture.md.
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Optional
 
-from sqlalchemy import select, func, exists, or_, text, cast, String, Integer, column, false
+from sqlalchemy import select, func, exists, and_, or_, text, cast, String, Integer, column, false
 from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import (
     CommsContact, EmailSuppression, Player, PlayerSeasonStats, PlayerAvailability, Season,
     MarketingClub, Organisation, CommsRecipient, EmailEvent, ClubOnboardingRequest,
+    ClubMembership, CrmDeal, CrmPipeline, CrmStage,
 )
 from app.services.club_directory import _RESOLVED_VISITS
+from app.services import club_trial_window
+from app.services.marketing_org import org_is_outreach
+
+logger = logging.getLogger(__name__)
 
 # Field groups decide which joins a definition needs.
 CONTACT_FIELDS = {"tag", "source"}
@@ -52,21 +58,49 @@ SPECIAL_FIELDS = {"availability", "owes_money"}
 # the club sits (its state, association, our outreach pipeline status, and whether
 # the club is already a customer). All read data we already hold — no new tracking.
 DIR_YESNO_FIELDS = {"exported", "emailed", "opened", "clicked", "enquired"}
+# Where the club sits on BetterCricket's OWN sales pipeline. Won / not won is a
+# clean partition of every directory club, so one single-select answers both
+# directions: pick Won to reach the clubs that bought, pick the other to reach
+# everyone else.
+DIR_DEAL_FIELDS = {"deal_won"}
+# Naming a club or a person outright, rather than describing them. Both are
+# ORDINARY RULES and are ANDed with everything else like any other, so "is any
+# of" NARROWS the audience to those clubs/people — it does not add them on top
+# of what the other rules matched. "is none of" is the counterpart and is what
+# takes a test club or one person out of a send.
+#
+# Neither needs the MarketingClub join: the club rule reads the contact's own
+# ``marketing_club_id`` and the contact rule its id. That is not a shortcut — an
+# inner join would drop every contact with no directory club, so "is none of
+# club X" would quietly lose the hand-added contacts too.
+DIR_PICK_FIELDS = {"club_is", "contact_is"}
 # Multi-value (the rule value is a list of keys; match = ANY).
-DIR_MULTI_FIELDS = {"is_trialing", "requested_trial", "had_demo", "visited_page"}
+DIR_MULTI_FIELDS = {"is_trialing", "requested_trial", "had_demo", "visited_page",
+                    "primary_admin"}
 DIR_CLUB_FIELDS = {"club_state", "association", "country", "directory_status", "customer_status",
-                   "is_trialing", "requested_trial", "had_demo", "visited_page"}
+                   "is_trialing", "requested_trial", "had_demo", "visited_page",
+                   "primary_admin"} | DIR_DEAL_FIELDS
+# Where the club's own trial actually stands, read off its subscription rows via
+# services/club_trial_window.py — the SAME definition the {{trial_days_left}} /
+# {{trial_days_since_expiry}} merge variables resolve from, so the number an
+# email prints is the number the audience was picked on. `trial_status` answers
+# in-a-trial / expired outright; the two numeric fields narrow it ("ends within
+# 7 days", "expired in the last month"). A club with no tracked trial has no
+# number, so it can never be swept into either by a bound alone.
+DIR_TRIAL_FIELDS = {"trial_status", "trial_days_left", "trial_days_since_expiry"}
 # Numeric club-level metrics: page views / distinct visitors (from the same
 # UTM-resolved usage_events attribution the Club Directory + engagement score
 # use) and the cached Twenty engagement score. gte/lte only (no strict < / >
 # — mirrors the Club Directory's own engagement-score filter).
 DIR_METRIC_FIELDS = {"page_views", "distinct_visitors", "engagement_score"}
-DIRECTORY_FIELDS = DIR_YESNO_FIELDS | DIR_CLUB_FIELDS | DIR_METRIC_FIELDS
+DIRECTORY_FIELDS = (DIR_YESNO_FIELDS | DIR_CLUB_FIELDS | DIR_METRIC_FIELDS
+                    | DIR_TRIAL_FIELDS | DIR_PICK_FIELDS)
 # Directory fields that need the linked MarketingClub joined in (visited_page
 # correlates a usage_events row on marketing_clubs.utm_code; the trial/demo
 # fields read marketing_clubs columns; the metric fields read/join off it too).
 _DIR_MC_FIELDS = {"club_state", "association", "country", "directory_status", "customer_status",
-                  "is_trialing", "requested_trial", "had_demo", "visited_page"} | DIR_METRIC_FIELDS
+                  "is_trialing", "requested_trial", "had_demo", "visited_page",
+                  "primary_admin"} | DIR_METRIC_FIELDS | DIR_TRIAL_FIELDS | DIR_DEAL_FIELDS
 # The two visit-count fields need the extra usage_events aggregate join;
 # engagement_score reads straight off marketing_clubs.engagement_score.
 _DIR_VISIT_FIELDS = {"page_views", "distinct_visitors"}
@@ -89,6 +123,133 @@ _VISIT_PATH_SQL = {
     "contact": "split_part(ue.path, '?', 1) ~* '^/contact(/|$)'",
 }
 _DEMO_STATUSES = ("in_trial", "trial_expired", "customer")
+
+# Where a club stands on having somebody at the club actually running it. The
+# three states PARTITION every directory row, which is what lets one rule both
+# include and exclude: picking `unassigned` targets the test clubs, picking the
+# other two leaves them out.
+#
+#   assigned       — somebody at the club is its Primary Club Admin
+#   unassigned     — the club is on the platform, but nobody ever was. A super
+#                    admin created or synced it and no real contact took it
+#                    over: in practice, a test club.
+#   not_onboarded  — there is no club record at all, so there is nobody to be
+#                    its admin. An ordinary prospect, NOT a test club — which is
+#                    the whole reason this is three states and not a yes/no.
+#                    Lumping these in with `unassigned` would make "exclude the
+#                    clubs with no primary admin" quietly drop every prospect in
+#                    the directory, i.e. almost the entire audience.
+_PRIMARY_ADMIN_STATES = ("assigned", "unassigned", "not_onboarded")
+
+
+def _has_primary_admin_clause():
+    """Correlated EXISTS: this directory club's org has a Primary Club Admin.
+    The same two conditions ``trial_engagement.org_has_primary_admin`` uses —
+    the primary flag is only ever set on a club_admin, and the suite asserts the
+    two agree row for row rather than taking that on trust."""
+    return exists().where(
+        ClubMembership.club_id == MarketingClub.existing_org_id,
+        ClubMembership.role == "club_admin",
+        ClubMembership.is_primary_admin.is_(True),
+    )
+
+
+def _uuid_list(val) -> list:
+    """The ids in a rule value, junk dropped. A rule can arrive from a saved
+    segment or a hand-made request, so a value that is not a uuid is ignored
+    rather than raising — but see _pick_clause for why an ALL-junk value must
+    not then read as "no filter"."""
+    out = []
+    for raw in _as_list(val):
+        try:
+            out.append(uuid.UUID(str(raw)))
+        except (ValueError, TypeError, AttributeError):
+            continue
+    return out
+
+
+def _pick_clause(col, val, op, *, nullable: bool):
+    """``col IN (ids)`` / ``col NOT IN (ids)`` for a rule that names rows outright.
+
+    An empty selection drops the rule, the same as every other multi-value field
+    — a picker nobody has chosen from yet must not empty the audience.
+
+    ``nullable`` matters for the exclude side: ``marketing_club_id NOT IN (…)``
+    is NULL for a contact that has no club, which SQL treats as not-matching, so
+    "is none of club X" would silently drop every contact with no directory club
+    at all. They are exactly the people an exclusion should LEAVE ALONE.
+    """
+    ids = _uuid_list(val)
+    if not ids:
+        return None
+    if op == "not_in":
+        clause = ~col.in_(ids)
+        return or_(col.is_(None), clause) if nullable else clause
+    return col.in_(ids)
+
+
+def _won_deal_clause():
+    """Correlated EXISTS: this directory club has a deal sitting in a WON stage
+    on BetterCricket's own sales pipeline.
+
+    WON-NESS COMES FROM THE STAGE, not ``crm_deals.status`` — the same rule
+    ``sales_commissions.deal_state`` follows, and for the same reason: the two
+    normally agree because every writer derives status from the stage, but the
+    live data has rows where they disagree, and the stage is what a reader sees
+    on the board.
+
+    Scoped through the STAGE'S OWN PIPELINE rather than ``crm_deals.scope``, so
+    a club's own CRM deal (a sponsorship renewal, a grant) can never read as
+    BetterCricket having sold them something. Archived deals are excluded, which
+    is what every other CRM read does (the commission report included): the
+    question is where the club sits on the pipeline, and an archived deal is off
+    it.
+    """
+    return (
+        select(CrmDeal.id)
+        .join(CrmStage, CrmStage.id == CrmDeal.stage_id)
+        .join(CrmPipeline, CrmPipeline.id == CrmStage.pipeline_id)
+        .where(
+            CrmDeal.marketing_club_id == MarketingClub.id,
+            CrmDeal.archived_at.is_(None),
+            CrmPipeline.scope == "platform",
+            CrmStage.is_won.is_(True),
+        )
+        .exists()
+    )
+
+
+def _primary_admin_clause(val):
+    states = [v for v in _vocab_list(val) if v in _PRIMARY_ADMIN_STATES]
+    if not states:
+        return None
+    onboarded = MarketingClub.existing_org_id.isnot(None)
+    has_admin = _has_primary_admin_clause()
+    parts = []
+    if "assigned" in states:
+        parts.append(and_(onboarded, has_admin))
+    if "unassigned" in states:
+        parts.append(and_(onboarded, ~has_admin))
+    if "not_onboarded" in states:
+        parts.append(MarketingClub.existing_org_id.is_(None))
+    return or_(*parts) if len(parts) > 1 else parts[0]
+
+
+def _vocab(val) -> str:
+    """One value from a fixed vocabulary, matched case-insensitively.
+
+    The picker only ever writes the lowercase key, but a rule can also arrive
+    from a saved segment or a hand-made request, and "WON" meaning something
+    different from "won" is a trap: an unrecognised value drops the CONDITION,
+    which WIDENS the segment to everyone rather than narrowing it. Failing open
+    on a typo is the worst direction for an email audience.
+    """
+    return str(val or "").strip().lower()
+
+
+def _vocab_list(val) -> list:
+    """:func:`_vocab` over a multi-select's list of values."""
+    return [v.strip().lower() for v in _as_list(val)]
 
 
 def _as_list(val):
@@ -220,14 +381,82 @@ def _visit_stats_subquery():
     ).subquery()
 
 
-def _directory_condition(rule: dict, cust, visits=None):
+def _trial_condition(rule: dict, trials):
+    """A WHERE clause for one club-trial field, off the joined trial window.
+
+    ``trials`` is the outer-joined per-org window (see
+    club_trial_window.trial_window_subquery), so a contact whose club has no
+    tracked trial reads NULL in every column here.
+
+    The day count is FLOORed exactly as ``club_trial_window.days_left`` floors
+    it in Python, so "at most 7 days left" matches precisely the clubs whose
+    email will print ``{{trial_days_left}}`` as 7 or fewer.
+
+    An OPEN-ENDED trial (a trial row with no end date) is excluded from both
+    numeric answers and never reads as expired — it has no countdown, and
+    telling a club whose trial is still running that it has finished is the one
+    thing this must not do.
+    """
+    field = (rule or {}).get("field")
+    val = (rule or {}).get("value")
+    if trials is None:
+        return None
+
+    ends = trials.c.ends_at
+    open_ended = func.coalesce(trials.c.open_ended, false())
+    # Non-NULL for every club the subquery emitted. ``ends_at`` cannot stand in
+    # for this: it is NULL both for a club with no trial and for one whose only
+    # trial has no end date, and those are opposite answers.
+    has_trial = trials.c.has_trial.isnot(None)
+    days = club_trial_window.days_left_sql(ends)
+    # A live, dated trial: an end date that has not passed, with no open-ended
+    # row alongside it to muddy the countdown.
+    live = and_(has_trial, ends.isnot(None), ~open_ended, days >= 0)
+    # Expired: every trial row the club holds has run out.
+    gone = and_(has_trial, ends.isnot(None), ~open_ended, days < 0)
+
+    if field == "trial_status":
+        v = _vocab(val)
+        if v == "in_trial":
+            # Open-ended counts as in a trial; it just has no countdown.
+            return and_(has_trial, or_(open_ended, days >= 0))
+        if v == "expired":
+            return gone
+        if v == "none":
+            # No trial row at all (never onboarded, or converted / removed).
+            return ~has_trial
+        return None
+
+    n = _num(val)
+    if n is None:
+        return None
+    if field == "trial_days_left":
+        # "at most N" is the scenario this exists for: the trial finishes within
+        # N days. "at least N" is the mirror, for holding fire on a club that has
+        # only just started.
+        cmp = days <= n if (rule or {}).get("op") == "lte" else days >= n
+        return and_(live, cmp)
+    if field == "trial_days_since_expiry":
+        # Its own FLOOR, never the negation of days-left — see
+        # club_trial_window.days_since for why that is off by one.
+        since = club_trial_window.days_since_sql(ends)
+        cmp = since <= n if (rule or {}).get("op") == "lte" else since >= n
+        return and_(gone, cmp)
+    return None
+
+
+def _directory_condition(rule: dict, cust, visits=None, trials=None):
     """A WHERE clause for one directory (outreach) field. ``cust`` is the aliased
     customer Organisation (joined via the marketing club's existing_org_id), only
     set when a customer_status rule is present. ``visits`` is the joined
     per-club page-view/visitor subquery, only set when a page_views /
-    distinct_visitors rule is present."""
+    distinct_visitors rule is present. ``trials`` is the joined per-org trial
+    window, only set when a trial_* rule is present."""
     field = (rule or {}).get("field")
     val = (rule or {}).get("value")
+    op = (rule or {}).get("op")
+    if field in DIR_TRIAL_FIELDS:
+        return _trial_condition(rule, trials)
 
     if field == "exported":
         return CommsContact.marketing_club_id.isnot(None) if _yes(val) else CommsContact.marketing_club_id.is_(None)
@@ -263,6 +492,22 @@ def _directory_condition(rule: dict, cust, visits=None):
     if field == "requested_trial":
         keys = _as_list(val)
         return or_(*[MarketingClub.requested_trial_modules.contains([k]) for k in keys]) if keys else None
+    if field == "club_is":
+        return _pick_clause(CommsContact.marketing_club_id, val, op, nullable=True)
+    if field == "contact_is":
+        return _pick_clause(CommsContact.id, val, op, nullable=False)
+    if field == "deal_won":
+        v = _vocab(val)
+        if v == "won":
+            return _won_deal_clause()
+        if v == "not_won":
+            # Everything else: an open deal, a lost one, or no deal at all. The
+            # two states partition every directory club, so this one select
+            # answers both "who bought" and "who hasn't".
+            return ~_won_deal_clause()
+        return None
+    if field == "primary_admin":
+        return _primary_admin_clause(val)
     if field == "had_demo":
         states = [s for s in _as_list(val) if s in _DEMO_STATUSES]
         return MarketingClub.demo_status.in_(states) if states else None
@@ -363,10 +608,40 @@ async def _current_year(session: AsyncSession, org_id) -> Optional[int]:
             Season.organisation_id == org_id, Season.year.isnot(None)))
 
 
+def directory_rules_allowed(club) -> bool:
+    """Only BetterCricket's own outreach org may build on the directory fields.
+
+    They describe a PROSPECT club and its trial / pipeline state — BetterCricket's
+    sales data, not a club's own — and in a club's context they answer nothing
+    anyway, since every one of its contacts belongs to the single sending club.
+    This is the same boundary SegmentsRoute.jsx picks the internal builder on
+    (``org_is_outreach``, via /auth/me's ``is_marketing_org``), so the screen and
+    the engine cannot disagree about who may ask.
+    """
+    return org_is_outreach(club)
+
+
 async def build_query(session: AsyncSession, club, definition: dict):
     """A SELECT of the matching, sendable CommsContact rows for this club."""
     rules = [r for r in ((definition or {}).get("rules") or []) if r and r.get("field") in ALL_FIELDS]
     q = select(CommsContact).where(*sendable_where(club.id))
+
+    # A directory rule reaching a club's own audience can only be a hand-made
+    # request — no club-facing screen can build one. FAIL CLOSED rather than
+    # dropping the rule: dropping it would WIDEN the audience to everyone, and
+    # silently emailing a club's whole list is the worse direction by far. It
+    # returns nothing today because the MarketingClub join is empty for a club's
+    # own contacts, but that is incidental; this makes it deliberate and
+    # independent of how the joins happen to be built.
+    foreign = sorted({r["field"] for r in rules if r["field"] in DIRECTORY_FIELDS})
+    if foreign and not directory_rules_allowed(club):
+        # Logged rather than swallowed: an empty audience nobody can explain is
+        # the worst way to find out this fired, and only a hand-made request (or
+        # a segment saved before the two field sets were split apart) can reach
+        # it at all.
+        logger.warning("BetterComms: dropping segment for club %s — directory-only "
+                       "rules in a club context: %s", club.id, ", ".join(foreign))
+        return q.where(false())
 
     if any(r["field"] in (PLAYER_FIELDS | STAT_FIELDS) for r in rules):
         q = q.join(Player, Player.id == CommsContact.player_id)
@@ -383,6 +658,14 @@ async def build_query(session: AsyncSession, club, definition: dict):
     if any(r["field"] in _DIR_VISIT_FIELDS for r in rules):
         visits = _visit_stats_subquery()
         q = q.outerjoin(visits, visits.c.cid == cast(MarketingClub.id, String))
+    # The club's trial window, keyed on the org the prospect was onboarded into.
+    # OUTER joined: a directory club that never became an org still has to reach
+    # the WHERE, so "no tracked trial" can be answered rather than silently
+    # dropping the contact.
+    trials = None
+    if any(r["field"] in DIR_TRIAL_FIELDS for r in rules):
+        trials = club_trial_window.trial_window_subquery()
+        q = q.outerjoin(trials, trials.c.org_id == MarketingClub.existing_org_id)
 
     # Who owes, resolved once against the club's newest season.
     owing_ids = None
@@ -412,7 +695,7 @@ async def build_query(session: AsyncSession, club, definition: dict):
 
     for rule in rules:
         if rule["field"] in DIRECTORY_FIELDS:
-            cond = _directory_condition(rule, cust, visits)
+            cond = _directory_condition(rule, cust, visits, trials)
         else:
             cond = _condition(rule, stats, club.id, owing_ids)
         if cond is not None:

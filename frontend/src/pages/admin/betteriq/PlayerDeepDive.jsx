@@ -10,6 +10,7 @@ import {
   SplitBar, StackedBar, Card, Note, Tag, Segmented, Empty, Delta, KV,
   a2, LoadingBar, fmtCount, fmtOvers, fmtPct, runsPhrase,
 } from './ui'
+import { RateMark, RateNote } from '../../../components/RateCoverage'
 import { Radar } from './viz'
 import ScoutingCard from './ScoutingCard'
 
@@ -147,7 +148,7 @@ export function BattingStyleCard({ deep }) {
     <Card eyebrow="batting profile" title="Style & situation" right={bs?.profile ? <Tag tone="accent">{bs.profile}</Tag> : null}>
       {bs && (
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-          {[['Strike rate', a2(bs.strike_rate)], ['Boundary %', fmtPct(bs.boundary_pct)], ['Balls/boundary', a2(bs.balls_per_boundary)], ['4s / 6s', `${num(bs.fours, 0)}/${num(bs.sixes, 0)}`]].map(([l, v]) => (
+          {[['Strike rate', <>{a2(bs.strike_rate)}<RateMark coverage={bs.strike_rate_coverage} /></>], ['Boundary %', fmtPct(bs.boundary_pct)], ['Balls/boundary', a2(bs.balls_per_boundary)], ['4s / 6s', `${num(bs.fours, 0)}/${num(bs.sixes, 0)}`]].map(([l, v]) => (
             <div key={l} className="text-center"><div className="iq-headline iq-num" style={{ fontSize: 20 }}>{v}</div><div className="iq-eyebrow mt-0.5" style={{ fontSize: 8.5 }}>{l}</div></div>
           ))}
         </div>
@@ -163,6 +164,7 @@ export function BattingStyleCard({ deep }) {
         </div>
       )}
       <Note>Boundary % is the share of runs from 4s and 6s. Dot-ball and ball-range splits need ball-by-ball data we don't hold.</Note>
+      {bs && <RateNote coverage={bs.strike_rate_coverage} className="mt-1" />}
     </Card>
   )
 }

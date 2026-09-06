@@ -2,13 +2,13 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../../../lib/api'
 import { Button, Caption, INPUT_CLS } from '../../../components/admin/ui'
-import { RecordListPane, RecordTitleRow, CountBar, reachability } from './crudShell'
+import { RecordListPane, RecordTitleRow, CountBar, reachability, clubCount } from './crudShell'
 import { RuleRow, newRule } from '../bettercomms/segmentFields'
 
 // The count bar and the reachability rule are shared furniture now — Lists and
 // Emails report their own reach the same way. Re-exported so the two segment
 // screens' imports are unchanged.
-export { CountBar, reachability }
+export { CountBar, reachability, clubCount }
 
 // The segment builder's engine and its field-agnostic furniture.
 //
@@ -196,8 +196,13 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
 
   const contacts = resolved?.contacts || []
   const total = resolved?.count ?? 0
-  const reachable = contacts.filter(c => reachability(c).key === 'email').length
-  const otherRoute = contacts.filter(c => reachability(c).key === 'guardian').length
+  // The server computes these over the WHOLE audience; `contacts` is a capped
+  // preview slice, so deriving them here would quietly stop at the cap. The
+  // client-side fallback is only for a browser talking to a server that predates
+  // the figures being sent.
+  const reachable = resolved?.reachable ?? contacts.filter(c => reachability(c).key === 'email').length
+  const otherRoute = resolved?.other_route ?? contacts.filter(c => reachability(c).key === 'guardian').length
+  const clubs = resolved?.clubs ?? clubCount(contacts)
 
   const save = async (noun = 'Segment') => {
     if (!draft?.name.trim()) { setError(`Give the ${noun.toLowerCase()} a name.`); return }
@@ -255,7 +260,7 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
 
   return {
     segments, sizes, opts, selId, setSelId, draft, setDraft,
-    contacts, total, reachable, otherRoute, counting,
+    contacts, total, reachable, otherRoute, clubs, counting,
     busy, error, toast, setToast,
     save, duplicate, remove, startNew, emailThese,
   }

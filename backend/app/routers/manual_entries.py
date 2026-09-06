@@ -24,7 +24,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import select, func, delete as sa_delete, text as _t
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -48,7 +48,14 @@ from app.models.db import (
     get_db,
 )
 from app.routers.auth import get_current_club, get_current_user
+from app.services import dismissal
 from app.services.grade_labels import suggest_categories, suggest_category
+from app.services.season_resolve import (
+    ensure_grade as _ensure_grade,
+    ensure_season_for_year as _ensure_season_for_year,
+    resolve_for_date as _resolve_season_for_date,
+    season_year_for_date as _season_year_for_date,
+)
 from app.services.sync import _compute_milestones
 
 router = APIRouter(prefix="/club-admin/manual-entries", tags=["manual-entries"])
@@ -126,6 +133,22 @@ class ManualBattingIn(BaseModel):
     not_out: bool = False
     did_not_bat: bool = False
 
+    @model_validator(mode="after")
+    def _not_out_follows_the_dismissal(self):
+        """A card whose dismissal reads "retired not out" or "retired hurt"
+        describes an innings that never ended in a wicket, so the flag has to
+        agree with the text however the row was typed in.
+
+        Raised only in that direction. A blank or unreadable dismissal with the
+        flag already set is a legitimate card ("not out" written with nothing
+        beside it), so nothing here ever clears a flag somebody set. Applied on
+        the model rather than in one route so the manual game form, the photo
+        upload and any other caller land on the same answer.
+        """
+        if not self.not_out and dismissal.is_not_out(dismissal_type=self.dismissal_type):
+            self.not_out = True
+        return self
+
 
 class ManualBowlingIn(BaseModel):
     player_id: str
@@ -148,8 +171,18 @@ class ManualFieldingIn(BaseModel):
 
 
 class ManualGameIn(BaseModel):
-    season_id: str
+    # Optional since the season a game belongs to is derivable from its own
+    # date: omit it and the server files the game under that season, creating
+    # it when the club has none (a 1974 card at a club whose list starts in
+    # 1996 had nowhere to go, so it went in under whatever the dropdown
+    # offered). An explicit id still wins — an admin filing a game somewhere
+    # deliberate is not something to override.
+    season_id: Optional[str] = None
     grade_id: Optional[str] = None
+    # Used only when no grade_id is given: names the grade to file this game
+    # under, created inside the resolved season if it has no grade by that
+    # name yet. A season minted for a 1974 card starts with no grades at all.
+    grade_name: Optional[str] = None
     played_at: Optional[str] = None  # YYYY-MM-DD
     home_team: Optional[str] = None
     away_team: Optional[str] = None
@@ -394,6 +427,28 @@ async def list_grades_with_season(
         }
         for g, s in rows.all()
     ]
+
+
+@router.get("/seasons/for-date")
+async def season_for_date(
+    played_at: str,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Which season a match on this date belongs to, and whether we hold it.
+
+    Read-only on purpose: the upload screen asks this the moment a card is
+    read, long before anybody has decided to import it, and minting seasons
+    for cards that are never imported would be worse than the bug.
+    `season: null` with an `expected_name` is the answer that matters — it
+    is a year the club has no row for, which is exactly the state that used
+    to leave a 1974 game filed under 1999/00.
+    """
+    played = _parse_date(played_at)
+    if played is None:
+        raise HTTPException(status_code=422, detail="A valid date is required")
+    return await _resolve_season_for_date(db, club.id, played, create=False)
 
 
 class SeasonCreateIn(BaseModel):
@@ -1404,6 +1459,65 @@ async def check_scorecard_duplicate(
     return {"matches": matches}
 
 
+async def _resolve_game_season(
+    db: AsyncSession,
+    club: Organisation,
+    data: ManualGameIn,
+    user_id: uuid.UUID,
+) -> tuple[uuid.UUID, Optional[uuid.UUID]]:
+    """The season and grade a manual game goes under.
+
+    An explicitly chosen season always wins — an admin filing a game
+    somewhere deliberate is not something to second-guess. With none given,
+    the game's own date decides, and the season is created when the club
+    does not have that year yet. That is the whole fix for a 1974 card at a
+    club whose season list starts in 1996: it used to be filed under
+    whatever the dropdown happened to offer.
+    """
+    played = _parse_date(data.played_at)
+
+    if data.season_id:
+        season_id = _to_uuid(data.season_id, "season")
+        season = await _assert_season_in_org(db, season_id, club.id)
+    else:
+        year = _season_year_for_date(played)
+        if year is None:
+            raise HTTPException(
+                status_code=422,
+                detail="A game needs either a season or a date to work one out from.",
+            )
+        season, created = await _ensure_season_for_year(db, club.id, year)
+        if created:
+            await _log_edit(
+                db, org_id=club.id, user_id=user_id, action="create",
+                target_table="seasons", target_id=str(season.id),
+                summary=f"Added season '{season.name}' for an uploaded game",
+                before=None, after=_row_to_dict(season),
+            )
+
+    if data.grade_id:
+        grade_id = _to_uuid(data.grade_id, "grade")
+        await _assert_grade_in_season(db, grade_id, season.id)
+        return season.id, grade_id
+
+    # A season minted for an old card has no grades at all, so a named grade
+    # is created inside it rather than leaving the game ungraded — which is
+    # what left an uploaded game out of every grade filter.
+    if data.grade_name:
+        grade, created = await _ensure_grade(db, season, data.grade_name)
+        if grade is not None:
+            if created:
+                await _log_edit(
+                    db, org_id=club.id, user_id=user_id, action="create",
+                    target_table="grades", target_id=str(grade.id),
+                    summary=f"Added grade '{grade.name}' to {season.name} for an uploaded game",
+                    before=None, after=_row_to_dict(grade),
+                )
+            return season.id, grade.id
+
+    return season.id, None
+
+
 @router.post("/games")
 async def create_manual_game(
     data: ManualGameIn,
@@ -1411,11 +1525,7 @@ async def create_manual_game(
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
-    season_id = _to_uuid(data.season_id, "season")
-    grade_id = _to_uuid(data.grade_id, "grade") if data.grade_id else None
-    await _assert_season_in_org(db, season_id, club.id)
-    if grade_id:
-        await _assert_grade_in_season(db, grade_id, season_id)
+    season_id, grade_id = await _resolve_game_season(db, club, data, current_user.id)
 
     game = ManualGame(
         organisation_id=club.id,
@@ -1497,11 +1607,7 @@ async def update_manual_game(
     # deletes these rows, and the objects are expired after the final commit.
     old_player_ids = _extract_player_ids(list(old_batting) + list(old_bowling) + list(old_fielding))
 
-    season_id = _to_uuid(data.season_id, "season")
-    grade_id = _to_uuid(data.grade_id, "grade") if data.grade_id else None
-    await _assert_season_in_org(db, season_id, club.id)
-    if grade_id:
-        await _assert_grade_in_season(db, grade_id, season_id)
+    season_id, grade_id = await _resolve_game_season(db, club, data, current_user.id)
 
     game.season_id = season_id
     game.grade_id = grade_id
@@ -2320,7 +2426,11 @@ async def import_manual_games(
                         fours=_parse_int(raw.get("batting_fours")),
                         sixes=_parse_int(raw.get("batting_sixes")),
                         dismissal_type=(raw.get("dismissal_type") or "").strip() or None,
-                        not_out=_parse_bool(raw.get("batting_not_out")),
+                        # Same rule as ManualBattingIn: a spreadsheet naming a
+                        # retired-not-out or retired-hurt dismissal is naming a
+                        # not out, whether or not the sheet has that column.
+                        not_out=(_parse_bool(raw.get("batting_not_out"))
+                                 or dismissal.is_not_out(dismissal_type=raw.get("dismissal_type"))),
                         did_not_bat=_parse_bool(raw.get("did_not_bat")),
                     ))
 
