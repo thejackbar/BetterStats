@@ -619,17 +619,30 @@ function ScoreCell({ runs, wkts }) {
 // `innings` marks a board whose VALUE is a single innings rather than a
 // match figure. A two-day match puts two rows on such a board, so each says
 // which innings it was — without it they read as a duplicated game.
-function GameBoard({ title, board, suffix, note, innings = false }) {
+function GameBoard({ title, board, suffix, note, innings = false, chase = false }) {
   const rows = board?.rows || []
   const multi = innings && rows.some(r => (r.our_innings_count || 0) > 1
                                        || (r.their_innings_count || 0) > 1)
   return (
     <RecordSection title={title} filter={note} empty={!rows.length}>
       <RecordTable
-        headers={multi
-          ? ['Match', 'Inns', suffix ? suffix.toUpperCase() : 'VALUE']
-          : ['Match', suffix ? suffix.toUpperCase() : 'VALUE', 'Result']}
-        rows={rows.map((r, i) => multi ? [
+        headers={chase
+          ? ['Match', 'TARGET', 'Made']
+          : multi
+            ? ['Match', 'Inns', suffix ? suffix.toUpperCase() : 'VALUE']
+            : ['Match', suffix ? suffix.toUpperCase() : 'VALUE', 'Result']}
+        rows={rows.map((r, i) => chase ? [
+          <span key={r.game_id || i}><RankNum rank={i + 1} /><GameCell r={r} /></span>,
+          <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>{r.value}</span>,
+          // What we made getting there — without it a 251 target beside a
+          // 240-run innings reads as an error rather than a chase.
+          <span className="text-pb-faint">
+            {r.chased_with != null
+              ? `${r.innings_wickets != null && r.innings_wickets < 10
+                    ? `${r.innings_wickets}/` : ''}${r.chased_with}`
+              : '—'}
+          </span>,
+        ] : multi ? [
           <span key={r.game_id || i}><RankNum rank={i + 1} /><GameCell r={r} /></span>,
           <span className="text-pb-faint">{ordinalInnings(r.innings_number)}</span>,
           <Val r={r} suffix={suffix} wkts={r.innings_wickets} />,
@@ -651,7 +664,7 @@ function ordinalInnings(n) {
   return n == null ? '—' : (['1st', '2nd', '3rd', '4th'][n - 1] || `${n}`)
 }
 
-function StreakBoard({ title, board }) {
+function StreakBoard({ title, board, losses = false }) {
   const rows = board?.rows || []
   return (
     // Consecutive COMPLETED matches in date order across whatever the filters
@@ -660,7 +673,7 @@ function StreakBoard({ title, board }) {
     <RecordSection title={title} empty={!rows.length}
                    filter="consecutive matches, in date order">
       <RecordTable
-        headers={['Run', 'Games', 'Won', 'Grades']}
+        headers={['Run', 'Games', losses ? 'Lost' : 'Won', 'Grades']}
         rows={rows.map((r, i) => [
           <span key={i}>
             <RankNum rank={i + 1} />
@@ -672,7 +685,9 @@ function StreakBoard({ title, board }) {
             </span>
           </span>,
           <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>{r.value}</span>,
-          <span className="text-pb-faint">{r.wins}{r.draws ? ` (${r.draws} drawn)` : ''}</span>,
+          <span className="text-pb-faint">
+            {losses ? r.losses : r.wins}{r.draws ? ` (${r.draws} drawn)` : ''}
+          </span>,
           <span className="text-pb-faint text-[11px]">
             {(r.grades || []).join(', ') || '—'}
           </span>,
@@ -742,9 +757,9 @@ function ClubTab({ data }) {
         <GameBoard title="HIGHEST MATCH AGGREGATES" board={b.highest_match_aggregates}
                    suffix="runs" note="both sides, whole match" />
         <GameBoard title="HIGHEST SUCCESSFUL CHASES" board={b.highest_chases}
-                   suffix="runs" note="the innings we chased in" innings />
+                   suffix="runs" note="the target we ran down" chase />
         <GameBoard title="MOST EXTRAS CONCEDED" board={b.most_extras_conceded}
-                   suffix="extras" note="one innings, where recorded" innings />
+                   suffix="extras" note="one innings, from cards that add up" innings />
         <GameBoard title="NARROWEST WINS (RUNS)" board={b.narrowest_wins_runs}
                    suffix="runs" />
         <GameBoard title="NARROWEST WINS (WICKETS)" board={b.narrowest_wins_wickets}
@@ -755,6 +770,8 @@ function ClubTab({ data }) {
         <GameBoard title="HEAVIEST DEFEATS (WICKETS)" board={b.heaviest_defeats_wickets} suffix="wkts" />
         <StreakBoard title="LONGEST WINNING RUN" board={b.longest_win_streak} />
         <StreakBoard title="LONGEST UNBEATEN RUN" board={b.longest_unbeaten_streak} />
+        <StreakBoard title="LONGEST LOSING RUN" board={b.longest_losing_streak}
+                     losses />
       </div>
 
       <RecordSection title="HEAD TO HEAD" filter="every club we have played"
