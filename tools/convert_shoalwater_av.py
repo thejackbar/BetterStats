@@ -76,16 +76,25 @@ B_CATCHES, B_WK_CATCHES, B_STUMPINGS, B_BYES = 52, 56, 60, 64
 B_VOTES = 82
 
 NOT_OUT = 11          # value of B_HOWOUT for a batter who was not out
+RETIRED_NOT_OUT = 12  # a second not-out kind - see NOT_OUT_CODES
+NOT_OUT_CODES = frozenset({NOT_OUT, RETIRED_NOT_OUT})
 
-# Only NOT_OUT is proven (the count of dismissed batters matches the innings
-# wickets in 840 of 847 innings). The other five are supported by counting an
+# 11 and 12 are both proven, by the same identity: counting the dismissed
+# batters against the innings' own wickets figure. With 11 alone that holds in
+# 908 of 916 innings; adding 12 (8 innings across fifteen seasons) makes it 916
+# of 916, and those 8 ARE the 8 failures. Every other unexplained code makes the
+# identity worse, so 7, 10, 13, 14, 15, 29 and 37 are all genuine dismissals
+# whatever they are called. A retired not out is not a dismissal and a retired
+# out is, which is the same rule BetterStats itself keeps.
+# The five below are supported by counting an
 # independent population in the same files and finding the same magnitude:
 # our batters were run out 443 times against 404 wickets we took that were not
 # credited to a bowler, and stumped 184 times against 204 stumpings by our own
 # keepers. Their shares (caught 47%, bowled 27%, lbw 9%) are ordinary club
 # rates. Everything else is left as a raw code rather than guessed at.
 DISMISSALS = {0: "Bowled", 1: "Caught", 2: "LBW", 3: "Stumped",
-              4: "Run out", NOT_OUT: "Not out"}
+              4: "Run out", NOT_OUT: "Not out",
+              RETIRED_NOT_OUT: "Not out (retired)"}
 
 
 def dismissal_label(code) -> str:
@@ -249,7 +258,7 @@ def parse_blocks(rec: bytes) -> list:
             "runs": runs,
             "fours": opt(i16(rec, off + B_FOURS)),
             "sixes": opt(i16(rec, off + B_SIXES)),
-            "not_out": howout == NOT_OUT,
+            "not_out": howout in NOT_OUT_CODES,
             "dismissal_code": opt(howout),
             "bowled": overs is not None,
             "overs": overs,
