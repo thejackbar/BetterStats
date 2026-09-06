@@ -48,12 +48,14 @@ from app.models.db import (
     get_db,
 )
 from app.routers.auth import get_current_club, get_current_user
-from app.services import dismissal
+from app.services import dismissal, import_cleanup
+from app.services import import_ingest as ingest
 from app.services.grade_labels import suggest_categories, suggest_category
 from app.services.season_resolve import (
     ensure_grade as _ensure_grade,
     ensure_season_for_year as _ensure_season_for_year,
     resolve_for_date as _resolve_season_for_date,
+    season_start_year as _season_start_year,
     season_year_for_date as _season_year_for_date,
 )
 from app.services.sync import _compute_milestones
@@ -1816,6 +1818,7 @@ async def undo_edit(
     # same reasoning as the create/update/delete/import endpoints above: an
     # undo changes career totals just like the original edit did.
     undo_player_ids: set = set()
+    removed_refs: dict = {}
 
     async def _game_children_player_ids(gid) -> set:
         b = (await db.execute(select(ManualBattingInnings.player_id).where(ManualBattingInnings.manual_game_id == gid))).scalars().all()
@@ -1880,6 +1883,14 @@ async def undo_edit(
                 if row and row.organisation_id == club.id:
                     undo_player_ids |= await _game_children_player_ids(gid)
                     await db.delete(row)
+            await db.flush()
+            # The wizard also creates the reference data the sheet needed, so
+            # undoing has to take that back or the club is left with seasons
+            # and people it never asked for. Order matters: the games are gone
+            # first, then a grade or season is only removed once nothing points
+            # at it, and a player only when nothing real has attached since -
+            # which is import_cleanup's own rule, not a second copy of it.
+            removed_refs = await _undo_created_refs(db, club.id, after)
         else:
             raise HTTPException(status_code=400, detail=f"Cannot undo import on {table}")
     elif action == "delete":
@@ -2016,7 +2027,7 @@ async def undo_edit(
     log.undone_by_user_id = current_user.id
     await db.commit()
     await _recompute_milestones(db, club.id, undo_player_ids)
-    return {"undone": True}
+    return {"undone": True, **({"removed": removed_refs} if removed_refs else {})}
 
 
 # ─── CSV bulk import: per-season aggregates ──────────────────────────────────
@@ -2321,6 +2332,190 @@ def _has_any_value(*vals) -> bool:
     return any(v not in (None, "", "0", 0) for v in vals)
 
 
+# ─── the shared per-game writer ──────────────────────────────────────────────
+#
+# One writer, two callers: the wizard's commit step and the strict single-shot
+# endpoint below it. Two copies is how the two start disagreeing about what a
+# scorecard row means.
+
+
+async def _write_games(
+    db: AsyncSession,
+    *,
+    club: Organisation,
+    user_id: uuid.UUID,
+    by_game: dict,
+    season_for: callable,
+    grade_for: callable,
+    player_for: callable,
+) -> tuple[list[str], list[dict], set]:
+    """Write every grouped game, returning (created ids, errors, player ids).
+
+    The three resolvers are what separate the two callers: the strict endpoint
+    hands back None for anything the club does not already hold, so the row is
+    refused; the wizard hands back the season, grade and player it has just
+    created on the admin's say-so.
+
+    Each game is written inside its OWN SAVEPOINT. A game rolls back whole when
+    one of its rows fails — a scorecard missing a batter is worse than one that
+    never arrived — and the savepoint is what lets the games either side of it
+    survive. Deleting the children by hand instead cannot: a constraint the
+    flush trips leaves the whole session needing a rollback, which would take
+    every game already written down with it.
+    """
+    created_game_ids: list[str] = []
+    errors: list[dict] = []
+    affected_player_ids: set = set()
+
+    for game_key, group in by_game.items():
+        first_row_num, first = group[0]
+        game_player_ids: set = set()
+        game_id = None
+        try:
+            async with db.begin_nested():
+                sname = (first.get("season_name") or "").strip()
+                if not sname:
+                    raise ValueError("season_name is required (on the first row for this game_key)")
+                season = season_for(sname)
+                if not season:
+                    raise ValueError(f"Season not found: '{sname}'")
+                gname = (first.get("grade_name") or "").strip()
+                grade = None
+                if gname:
+                    grade = grade_for(season, gname)
+                    if grade is _NO_GRADE:
+                        grade = None     # the admin confirmed this label is no grade
+                    elif not grade:
+                        raise ValueError(f"Grade '{gname}' not found in season '{sname}'")
+                played_at = None
+                if first.get("played_at"):
+                    try:
+                        played_at = date_cls.fromisoformat(first["played_at"].strip())
+                    except Exception:
+                        raise ValueError(f"Invalid played_at date: {first['played_at']!r}")
+
+                game = ManualGame(
+                    organisation_id=club.id,
+                    season_id=season.id,
+                    grade_id=grade.id if grade else None,
+                    played_at=played_at,
+                    home_team=(first.get("home_team") or "").strip() or None,
+                    away_team=(first.get("away_team") or "").strip() or None,
+                    opposition=(first.get("opposition") or "").strip() or None,
+                    venue=(first.get("venue") or "").strip() or None,
+                    result=(first.get("result") or "").strip() or None,
+                    winning_team=(first.get("winning_team") or "").strip() or None,
+                    is_final=_parse_bool(first.get("is_final")),
+                    match_format=(first.get("match_format") or "").strip() or None,
+                    notes=None,
+                    created_by_user_id=user_id,
+                )
+                db.add(game)
+                await db.flush()
+                game_id = str(game.id)
+
+                # Fielding is ONE row per player per MATCH, not per innings —
+                # which is what `uq_manual_fielding_game_player` says — so a
+                # player who took a catch in each innings of a two-day match is
+                # accumulated here and written once. Batting and bowling really
+                # are per innings and are written as they come.
+                fielding: dict = {}
+
+                for row_num, raw in group:
+                    pname = (raw.get("player_name") or "").strip()
+                    if not pname:
+                        continue  # blank player rows are silently ignored
+                    player = player_for(pname)
+                    if player is _SKIP_PLAYER:
+                        continue  # the admin said to leave this name out
+                    if not player:
+                        raise ValueError(f"row {row_num}: player not found: '{pname}'")
+                    innings_number = _parse_int(raw.get("innings_number")) or 1
+
+                    bruns = raw.get("batting_runs")
+                    bballs = raw.get("batting_balls")
+                    if _has_any_value(bruns, bballs, raw.get("dismissal_type"),
+                                      raw.get("did_not_bat"), raw.get("batting_not_out")):
+                        db.add(ManualBattingInnings(
+                            manual_game_id=game.id,
+                            player_id=player.id,
+                            innings_number=innings_number,
+                            batting_position=_parse_int(raw.get("batting_position"), nullable=True),
+                            runs=_parse_int(bruns),
+                            balls=_parse_int(bballs, nullable=True),
+                            fours=_parse_int(raw.get("batting_fours")),
+                            sixes=_parse_int(raw.get("batting_sixes")),
+                            dismissal_type=(raw.get("dismissal_type") or "").strip() or None,
+                            # Same rule as ManualBattingIn: a spreadsheet naming a
+                            # retired-not-out or retired-hurt dismissal is naming a
+                            # not out, whether or not the sheet has that column.
+                            not_out=(_parse_bool(raw.get("batting_not_out"))
+                                     or dismissal.is_not_out(dismissal_type=raw.get("dismissal_type"))),
+                            did_not_bat=_parse_bool(raw.get("did_not_bat")),
+                        ))
+
+                    bovers = raw.get("bowling_overs")
+                    bwkts = raw.get("bowling_wickets")
+                    bownruns = raw.get("bowling_runs")
+                    if _has_any_value(bovers, bwkts, bownruns):
+                        db.add(ManualBowlingSpell(
+                            manual_game_id=game.id,
+                            player_id=player.id,
+                            innings_number=innings_number,
+                            overs=_parse_float(bovers) if bovers not in (None, "") else None,
+                            maidens=_parse_int(raw.get("bowling_maidens")),
+                            runs=_parse_int(bownruns),
+                            wickets=_parse_int(bwkts),
+                            wides=_parse_int(raw.get("bowling_wides")),
+                            no_balls=_parse_int(raw.get("bowling_no_balls")),
+                        ))
+
+                    fcatch = raw.get("fielding_catches")
+                    fro = raw.get("fielding_run_outs")
+                    fstump = raw.get("fielding_stumpings")
+                    fwk = raw.get("fielding_catches_wk")
+                    if _has_any_value(fcatch, fro, fstump, fwk):
+                        agg = fielding.setdefault(player.id, {
+                            "catches": 0, "catches_wk": 0, "run_outs": 0, "stumpings": 0})
+                        agg["catches"] += _parse_int(fcatch) or 0
+                        agg["catches_wk"] += _parse_int(fwk) or 0
+                        agg["run_outs"] += _parse_int(fro) or 0
+                        agg["stumpings"] += _parse_int(fstump) or 0
+                    game_player_ids.add(player.id)
+
+                for pid, agg in fielding.items():
+                    db.add(ManualFieldingStat(manual_game_id=game.id, player_id=pid, **agg))
+                await db.flush()
+        except Exception as e:
+            errors.append({"row": first_row_num, "error": f"Game '{game_key}': {e}", "data": first})
+            continue
+
+        created_game_ids.append(game_id)
+        affected_player_ids |= game_player_ids
+
+    return created_game_ids, errors, affected_player_ids
+
+
+# Sentinels the resolvers hand back for an answer the admin actually gave, as
+# opposed to one we could not find. "Leave this person out" and "that label is
+# not a grade" are decisions, and neither must take the whole match down the
+# way a genuinely unresolvable name does.
+_SKIP_PLAYER = object()
+_NO_GRADE = object()
+
+
+def _group_by_game(rows: list[dict]) -> tuple[dict, list[dict]]:
+    by_game: dict[str, list[tuple[int, dict]]] = {}
+    errors: list[dict] = []
+    for row_num, raw in enumerate(rows, start=2):  # row 1 = header
+        gk = (raw.get("game_key") or "").strip()
+        if not gk:
+            errors.append({"row": row_num, "error": "Missing game_key", "data": raw})
+            continue
+        by_game.setdefault(gk, []).append((row_num, raw))
+    return by_game, errors
+
+
 @router.post("/games/import")
 async def import_manual_games(
     file: UploadFile = File(...),
@@ -2328,6 +2523,12 @@ async def import_manual_games(
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
+    """Strict single-shot import: every season, grade and player must exist.
+
+    Kept for a caller that has already lined its reference data up and wants
+    one request. The wizard below is the one with a review step, and is what
+    the screen uses.
+    """
     content = (await file.read()).decode("utf-8-sig", errors="replace")
     reader = csv.DictReader(io.StringIO(content))
     if not reader.fieldnames:
@@ -2342,144 +2543,14 @@ async def import_manual_games(
     season_lookup = _build_season_lookup(seasons)
     grade_lookup = _build_grade_lookup(grades)
 
-    # Group rows by game_key first so all rows of one game become one manual_game.
-    rows = list(reader)
-    by_game: dict[str, list[tuple[int, dict]]] = {}
-    errors: list[dict] = []
-    for row_num, raw in enumerate(rows, start=2):
-        gk = (raw.get("game_key") or "").strip()
-        if not gk:
-            errors.append({"row": row_num, "error": "Missing game_key", "data": raw})
-            continue
-        by_game.setdefault(gk, []).append((row_num, raw))
-
-    created_game_ids: list[str] = []
-    affected_player_ids: set = set()
-
-    for game_key, group in by_game.items():
-        first_row_num, first = group[0]
-        try:
-            sname = (first.get("season_name") or "").strip()
-            if not sname:
-                raise ValueError("season_name is required (on the first row for this game_key)")
-            season = season_lookup.get(sname.lower())
-            if not season:
-                raise ValueError(f"Season not found: '{sname}'")
-            gname = (first.get("grade_name") or "").strip()
-            grade = None
-            if gname:
-                grade = grade_lookup.get((season.id, gname.lower()))
-                if not grade:
-                    raise ValueError(f"Grade '{gname}' not found in season '{sname}'")
-            played_at = None
-            if first.get("played_at"):
-                try:
-                    played_at = date_cls.fromisoformat(first["played_at"].strip())
-                except Exception:
-                    raise ValueError(f"Invalid played_at date: {first['played_at']!r}")
-
-            game = ManualGame(
-                organisation_id=club.id,
-                season_id=season.id,
-                grade_id=grade.id if grade else None,
-                played_at=played_at,
-                home_team=(first.get("home_team") or "").strip() or None,
-                away_team=(first.get("away_team") or "").strip() or None,
-                opposition=(first.get("opposition") or "").strip() or None,
-                venue=(first.get("venue") or "").strip() or None,
-                result=(first.get("result") or "").strip() or None,
-                winning_team=(first.get("winning_team") or "").strip() or None,
-                is_final=_parse_bool(first.get("is_final")),
-                match_format=(first.get("match_format") or "").strip() or None,
-                notes=None,
-                created_by_user_id=current_user.id,
-            )
-            db.add(game)
-            await db.flush()
-        except Exception as e:
-            errors.append({"row": first_row_num, "error": f"Game '{game_key}': {e}", "data": first})
-            continue
-
-        # Children
-        game_had_error = False
-        game_player_ids: set = set()
-        for row_num, raw in group:
-            try:
-                pname = (raw.get("player_name") or "").strip()
-                if not pname:
-                    continue  # blank player rows are silently ignored
-                player = player_lookup.get(pname.lower())
-                if not player:
-                    raise ValueError(f"Player not found: '{pname}'")
-                innings_number = _parse_int(raw.get("innings_number")) or 1
-
-                bruns = raw.get("batting_runs")
-                bballs = raw.get("batting_balls")
-                if _has_any_value(bruns, bballs, raw.get("dismissal_type"), raw.get("did_not_bat"), raw.get("batting_not_out")):
-                    db.add(ManualBattingInnings(
-                        manual_game_id=game.id,
-                        player_id=player.id,
-                        innings_number=innings_number,
-                        batting_position=_parse_int(raw.get("batting_position"), nullable=True),
-                        runs=_parse_int(bruns),
-                        balls=_parse_int(bballs, nullable=True),
-                        fours=_parse_int(raw.get("batting_fours")),
-                        sixes=_parse_int(raw.get("batting_sixes")),
-                        dismissal_type=(raw.get("dismissal_type") or "").strip() or None,
-                        # Same rule as ManualBattingIn: a spreadsheet naming a
-                        # retired-not-out or retired-hurt dismissal is naming a
-                        # not out, whether or not the sheet has that column.
-                        not_out=(_parse_bool(raw.get("batting_not_out"))
-                                 or dismissal.is_not_out(dismissal_type=raw.get("dismissal_type"))),
-                        did_not_bat=_parse_bool(raw.get("did_not_bat")),
-                    ))
-
-                bovers = raw.get("bowling_overs")
-                bwkts = raw.get("bowling_wickets")
-                bownruns = raw.get("bowling_runs")
-                if _has_any_value(bovers, bwkts, bownruns):
-                    db.add(ManualBowlingSpell(
-                        manual_game_id=game.id,
-                        player_id=player.id,
-                        innings_number=innings_number,
-                        overs=_parse_float(bovers) if bovers not in (None, "") else None,
-                        maidens=_parse_int(raw.get("bowling_maidens")),
-                        runs=_parse_int(bownruns),
-                        wickets=_parse_int(bwkts),
-                        wides=_parse_int(raw.get("bowling_wides")),
-                        no_balls=_parse_int(raw.get("bowling_no_balls")),
-                    ))
-
-                fcatch = raw.get("fielding_catches")
-                fro = raw.get("fielding_run_outs")
-                fstump = raw.get("fielding_stumpings")
-                fwk = raw.get("fielding_catches_wk")
-                if _has_any_value(fcatch, fro, fstump, fwk):
-                    db.add(ManualFieldingStat(
-                        manual_game_id=game.id,
-                        player_id=player.id,
-                        catches=_parse_int(fcatch),
-                        catches_wk=_parse_int(fwk),
-                        run_outs=_parse_int(fro),
-                        stumpings=_parse_int(fstump),
-                    ))
-                game_player_ids.add(player.id)
-            except Exception as e:
-                errors.append({"row": row_num, "error": f"Game '{game_key}', player '{raw.get('player_name')}': {e}", "data": raw})
-                game_had_error = True
-
-        if game_had_error:
-            # Roll back the game if any of its child rows errored, so partial
-            # scorecards don't sneak in. The whole game_key needs to be fixed
-            # and re-uploaded.
-            await db.execute(sa_delete(ManualBattingInnings).where(ManualBattingInnings.manual_game_id == game.id))
-            await db.execute(sa_delete(ManualBowlingSpell).where(ManualBowlingSpell.manual_game_id == game.id))
-            await db.execute(sa_delete(ManualFieldingStat).where(ManualFieldingStat.manual_game_id == game.id))
-            await db.delete(game)
-            await db.flush()
-        else:
-            created_game_ids.append(str(game.id))
-            affected_player_ids |= game_player_ids
+    by_game, errors = _group_by_game(list(reader))
+    created_game_ids, write_errors, affected_player_ids = await _write_games(
+        db, club=club, user_id=current_user.id, by_game=by_game,
+        season_for=lambda nm: season_lookup.get(nm.lower()),
+        grade_for=lambda season, nm: grade_lookup.get((season.id, nm.lower())),
+        player_for=lambda nm: player_lookup.get(nm.lower()),
+    )
+    errors += write_errors
 
     summary = {
         "games_created": len(created_game_ids),
@@ -2501,3 +2572,467 @@ async def import_manual_games(
         await db.commit()
         await _recompute_milestones(db, club.id, affected_player_ids)
     return summary
+
+
+# ─── the same import, with a review step ─────────────────────────────────────
+#
+# The strict endpoint above refuses a row naming a season, grade or player the
+# club does not hold, which for a club importing a whole history means every
+# row. This is the same import with the historical-stats wizard's own shape:
+# preview -> resolve -> commit -> undo, the admin confirming what gets created
+# before anything is written.
+#
+# Players are the reason this is a review step rather than a switch. Seasons
+# and grades match on an exact name or they do not, so creating one is safe.
+# A person is not: this codebase already carries the scars of a name matcher
+# putting a father and son on one record, so an unmatched name is proposed,
+# never auto-created.
+
+
+class GameResolveRequest(BaseModel):
+    filename: Optional[str] = None
+    rows: list[dict] = Field(default_factory=list)
+    # raw sheet label -> an id/name, or one of the '__…__' choices below
+    player_overrides: dict = Field(default_factory=dict)   # player id | '__new__' | '__skip__'
+    season_overrides: dict = Field(default_factory=dict)   # season id | '__new__'
+    grade_overrides: dict = Field(default_factory=dict)    # grade name | '__new__' | '__none__'
+
+
+_MAX_GAME_UPLOAD_BYTES = 8 * 1024 * 1024
+
+
+def _apply_player_overrides(matches: dict, overrides: dict) -> None:
+    """Same vocabulary as the historical-stats wizard's own override step."""
+    for name, choice in (overrides or {}).items():
+        if name not in matches:
+            matches[name] = {"candidates": []}
+        if choice == "__skip__":
+            matches[name].update(player_id=None, status="skip")
+        elif choice == "__new__":
+            matches[name].update(player_id=None, status="new")
+        elif choice:
+            matches[name].update(player_id=str(choice), status="manual", confidence=1.0)
+
+
+def _canon_header(h: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", (h or "").strip().lower()).strip("_")
+
+
+_GAME_HEADER_BY_CANON = {_canon_header(c): c for c in GAME_CSV_COLUMNS}
+_GAME_REQUIRED = ("game_key", "season_name", "player_name")
+
+
+def _read_game_csv(content: str) -> tuple[list[dict], list[str], list[str]]:
+    """CSV text -> (rows keyed by our own column names, unknown headers, missing).
+
+    Header matching folds case, spaces and punctuation, so a sheet whose
+    header reads "Batting Runs" or "batting-runs" lands on `batting_runs`
+    rather than being reported as a column nobody asked for.
+    """
+    reader = csv.DictReader(io.StringIO(content))
+    if not reader.fieldnames:
+        raise HTTPException(status_code=422, detail="CSV is empty or missing a header row")
+    mapping, unknown = {}, []
+    for h in reader.fieldnames:
+        canon = _GAME_HEADER_BY_CANON.get(_canon_header(h))
+        if canon:
+            mapping[h] = canon
+        else:
+            unknown.append(h)
+    missing = [c for c in _GAME_REQUIRED if c not in mapping.values()]
+    rows = [{mapping[h]: (v or "") for h, v in raw.items() if h in mapping} for raw in reader]
+    return rows, unknown, missing
+
+
+def _season_label_year(label: str) -> Optional[int]:
+    return _season_start_year(label)
+
+
+async def _resolve_games(db: AsyncSession, club: Organisation, req: GameResolveRequest) -> dict:
+    """Match the sheet's seasons, grades and players against what the club holds.
+
+    Shared by /resolve and /commit so the review screen and the write can never
+    disagree about what is about to be created. Returns the review payload plus
+    the private `_plan` the commit reads.
+    """
+    rows = req.rows or []
+    by_game, group_errors = _group_by_game(rows)
+
+    season_labels, grade_labels, names = [], [], []
+    grade_pairs: dict = {}          # grade label -> the season labels it is used in
+    for group in by_game.values():
+        first = group[0][1]
+        sl = (first.get("season_name") or "").strip()
+        gl = (first.get("grade_name") or "").strip()
+        if sl and sl not in season_labels:
+            season_labels.append(sl)
+        if gl:
+            if gl not in grade_labels:
+                grade_labels.append(gl)
+            if sl:
+                grade_pairs.setdefault(gl, set()).add(sl)
+        for _n, raw in group:
+            nm = (raw.get("player_name") or "").strip()
+            if nm and nm not in names:
+                names.append(nm)
+
+    seasons = (await db.execute(
+        select(Season).where(Season.organisation_id == club.id)
+    )).scalars().all()
+    grades = (await db.execute(
+        select(Grade).join(Season, Season.id == Grade.season_id)
+        .where(Season.organisation_id == club.id)
+    )).scalars().all()
+    players = (await db.execute(
+        select(Player).where(Player.organisation_id == club.id)
+    )).scalars().all()
+
+    smatch = ingest.match_seasons(
+        season_labels, [(s.id, s.name, s.year) for s in seasons])
+    grade_names = sorted({(g.display_name_override or g.name or "").strip()
+                          for g in grades if (g.display_name_override or g.name)})
+    gmatch = ingest.match_grades(grade_labels, grade_names)
+    pmatch = ingest.match_players(
+        names, [(p.id, (p.display_name_override or p.name or "")) for p in players])
+
+    # A season or grade the club does not hold is proposed for creation rather
+    # than left unresolved: there is no identity question to get wrong, and the
+    # whole point of the review step is to say so before writing it.
+    for lb, m in smatch.items():
+        if not m.get("season_id"):
+            m.update(season_id=None, is_prior=False, status="new", will_create=True)
+    for lb, m in gmatch.items():
+        if not m.get("grade_name"):
+            m.update(grade_name=lb, status="new", will_create=True)
+    for lb, choice in (req.season_overrides or {}).items():
+        m = smatch.setdefault(lb, {"candidates": []})
+        if choice == "__new__":
+            m.update(season_id=None, status="new", will_create=True)
+        elif choice:
+            m.update(season_id=str(choice), status="manual", will_create=False)
+    for lb, choice in (req.grade_overrides or {}).items():
+        m = gmatch.setdefault(lb, {"candidates": []})
+        if choice == "__none__":
+            m.update(grade_name=None, status="ungraded", will_create=False)
+        elif choice == "__new__":
+            m.update(grade_name=lb, status="new", will_create=True)
+        elif choice:
+            m.update(grade_name=str(choice), status="manual", will_create=False)
+    _apply_player_overrides(pmatch, req.player_overrides)
+
+    # What the sheet itself holds for each name, so two people sharing a
+    # surname can be told apart on the review screen without opening the file.
+    sheet: dict = {}
+    for group in by_game.values():
+        year = _season_label_year((group[0][1].get("season_name") or "").strip())
+        for _n, raw in group:
+            nm = (raw.get("player_name") or "").strip()
+            if not nm:
+                continue
+            s = sheet.setdefault(nm, {"games": 0, "runs": 0, "wickets": 0, "years": set()})
+            s["games"] += 1
+            s["runs"] += _parse_int(raw.get("batting_runs")) or 0
+            s["wickets"] += _parse_int(raw.get("bowling_wickets")) or 0
+            if year:
+                s["years"].add(year)
+
+    def _sheet_for(nm):
+        s = sheet.get(nm)
+        if not s:
+            return None
+        yrs = sorted(s["years"])
+        return {"games": s["games"], "runs": s["runs"], "wickets": s["wickets"],
+                "first_year": (yrs[0] if yrs else None),
+                "last_year": (yrs[-1] if yrs else None)}
+
+    unresolved = [n for n, m in pmatch.items()
+                  if not m.get("player_id") and m.get("status") not in ("new", "skip")]
+    new_players = [n for n, m in pmatch.items() if m.get("status") == "new"]
+    new_seasons = [lb for lb, m in smatch.items() if m.get("will_create")]
+    new_grade_names = sorted({m.get("grade_name") for lb, m in gmatch.items()
+                              if m.get("will_create") and m.get("grade_name")})
+
+    # A grade is per season, so the count of grade rows to create is one per
+    # (season, grade) pair the sheet actually uses - not one per label.
+    def _resolved_grade_name(label):
+        return (gmatch.get(label) or {}).get("grade_name")
+
+    grade_rows_to_create = 0
+    existing_grade_keys = {(g.season_id, (g.name or "").strip().lower()) for g in grades}
+    existing_grade_keys |= {(g.season_id, (g.display_name_override or "").strip().lower())
+                            for g in grades if g.display_name_override}
+    season_id_by_label = {lb: (m.get("season_id") and uuid.UUID(m["season_id"]))
+                          for lb, m in smatch.items()}
+    for gl, used_in in grade_pairs.items():
+        name = _resolved_grade_name(gl)
+        if not name:
+            continue
+        for sl in used_in:
+            sid = season_id_by_label.get(sl)
+            if sid is None or (sid, name.strip().lower()) not in existing_grade_keys:
+                grade_rows_to_create += 1
+
+    warnings = []
+    if unresolved:
+        warnings.append(
+            f"{len(unresolved)} player name(s) still need an answer: "
+            + ", ".join(unresolved[:8]) + ("…" if len(unresolved) > 8 else "")
+            + " — match each to a player, create them, or leave them out. A name "
+              "left unanswered stops its whole match importing, because a "
+              "scorecard missing a batter is worse than one that never arrived."
+        )
+    ambiguous = [n for n, m in pmatch.items() if m.get("status") == "ambiguous"]
+    if ambiguous:
+        warnings.append(f"{len(ambiguous)} name(s) match two players — merge those first: "
+                        + ", ".join(ambiguous[:5]))
+    if group_errors:
+        warnings.append(f"{len(group_errors)} row(s) have no game_key and will be skipped.")
+
+    return {
+        "games": len(by_game),
+        "rows": len(rows),
+        "seasons": [{"raw_label": lb, **m} for lb, m in smatch.items()],
+        "grades": [{"raw_label": lb, "used_in_seasons": sorted(grade_pairs.get(lb, ())), **m}
+                   for lb, m in gmatch.items()],
+        "players": [{"raw_name": n, "sheet": _sheet_for(n), **m} for n, m in pmatch.items()],
+        "grade_options": grade_names,
+        "warnings": warnings,
+        "row_errors": group_errors[:50],
+        "will_create": {
+            "seasons": len(new_seasons),
+            "grades": grade_rows_to_create,
+            "players": len(new_players),
+        },
+        "totals": {
+            "players_matched": sum(1 for m in pmatch.values() if m.get("player_id")),
+            "players_new": len(new_players),
+            "players_skipped": sum(1 for m in pmatch.values() if m.get("status") == "skip"),
+            "players_unresolved": len(unresolved),
+        },
+        "_plan": {"by_game": by_game, "smatch": smatch, "gmatch": gmatch,
+                  "pmatch": pmatch, "grade_pairs": {k: sorted(v) for k, v in grade_pairs.items()},
+                  "unresolved": unresolved},
+    }
+
+
+@router.post("/games/import/preview")
+async def preview_manual_games(
+    file: UploadFile = File(...),
+    current_user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
+    club: Organisation = Depends(get_current_club),
+):
+    """Parse an uploaded scorecard CSV. No DB writes; the client holds the rows."""
+    data = await file.read()
+    if not data:
+        raise HTTPException(422, "Empty file.")
+    if len(data) > _MAX_GAME_UPLOAD_BYTES:
+        raise HTTPException(413, "File too large (max 8 MB).")
+    rows, unknown, missing = _read_game_csv(data.decode("utf-8-sig", errors="replace"))
+    if missing:
+        raise HTTPException(422, "The sheet is missing required column(s): "
+                                 + ", ".join(missing)
+                                 + ". Download the template to see every column.")
+    if not rows:
+        raise HTTPException(422, "The sheet has a header row and nothing under it.")
+    return {
+        "filename": file.filename,
+        "columns": GAME_CSV_COLUMNS,
+        "unknown_columns": unknown,
+        "row_count": len(rows),
+        "sample_rows": rows[:10],
+        "rows": rows,
+    }
+
+
+@router.post("/games/import/resolve")
+async def resolve_manual_games(
+    req: GameResolveRequest,
+    current_user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """What this sheet will create, and which names still need an answer.
+
+    Idempotent and read-only — call it again each time the admin changes a
+    match, which is exactly what the review screen does.
+    """
+    out = await _resolve_games(db, club, req)
+    out.pop("_plan", None)
+    return out
+
+
+@router.post("/games/import/commit")
+async def commit_manual_games(
+    req: GameResolveRequest,
+    current_user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create the confirmed seasons, grades and players, then write the games.
+
+    Reference data is created ONCE, up front, before the per-game loop. A game
+    rolls back whole when one of its rows fails, so a season created inside
+    that loop would go down with it and leave the next game pointing at
+    nothing.
+    """
+    resolved = await _resolve_games(db, club, req)
+    plan = resolved["_plan"]
+    if plan["unresolved"]:
+        raise HTTPException(422, resolved["warnings"][0])
+    if not plan["by_game"]:
+        raise HTTPException(422, "Nothing to import — no rows carry a game_key.")
+
+    created_season_ids: list[str] = []
+    created_grade_ids: list[str] = []
+    created_player_ids: list[str] = []
+
+    # 1. Seasons. A created season takes the sheet's own label as its name, so
+    #    the admin gets the season they were shown rather than one renamed
+    #    under them; `year` comes off that label where it names one.
+    season_by_label: dict = {}
+    for lb, m in plan["smatch"].items():
+        if m.get("season_id"):
+            season_by_label[lb] = await db.get(Season, uuid.UUID(m["season_id"]))
+            if not season_by_label[lb] or season_by_label[lb].organisation_id != club.id:
+                raise HTTPException(422, f"Season '{lb}' does not belong to this club.")
+            continue
+        season = Season(
+            id=uuid.uuid4(), organisation_id=club.id,
+            grassroots_id=None,          # the documented "not from a sync" marker
+            name=lb, year=_season_label_year(lb),
+        )
+        db.add(season)
+        created_season_ids.append(str(season.id))
+        season_by_label[lb] = season
+    await db.flush()
+
+    # 2. Grades, one per (season, grade name) the sheet actually uses.
+    grade_by_key: dict = {}
+    for gl, season_labels in plan["grade_pairs"].items():
+        name = (plan["gmatch"].get(gl) or {}).get("grade_name")
+        if not name:
+            for sl in season_labels:     # the admin confirmed "no grade"
+                season = season_by_label.get(sl)
+                if season is not None:
+                    grade_by_key[(season.id, gl)] = _NO_GRADE
+            continue
+        for sl in season_labels:
+            season = season_by_label.get(sl)
+            if not season:
+                continue
+            grade, made = await _ensure_grade(db, season, name)
+            if grade is None:
+                continue
+            if made:
+                created_grade_ids.append(str(grade.id))
+            grade_by_key[(season.id, gl)] = grade
+
+    # 3. Players the admin ticked. import_batch_id is deliberately left NULL —
+    #    that column points at an ImportBatch, which this path has none of; the
+    #    undo finds them from the ids recorded on the audit entry instead.
+    player_by_name: dict = {}
+    for nm, m in plan["pmatch"].items():
+        if m.get("status") == "skip":
+            player_by_name[nm] = _SKIP_PLAYER
+            continue
+        if m.get("player_id"):
+            p = await db.get(Player, uuid.UUID(m["player_id"]))
+            if not p or p.organisation_id != club.id:
+                raise HTTPException(422, f"Player '{nm}' does not belong to this club.")
+            player_by_name[nm] = p
+            continue
+        p = Player(id=uuid.uuid4(), name=nm, organisation_id=club.id)
+        db.add(p)
+        created_player_ids.append(str(p.id))
+        player_by_name[nm] = p
+    await db.flush()
+
+    created_game_ids, errors, affected_player_ids = await _write_games(
+        db, club=club, user_id=current_user.id, by_game=plan["by_game"],
+        season_for=lambda sl: season_by_label.get(sl),
+        grade_for=lambda season, gl: grade_by_key.get((season.id, gl)),
+        player_for=lambda nm: player_by_name.get(nm),
+    )
+    errors += resolved["row_errors"]
+
+    if not created_game_ids:
+        await db.rollback()
+        raise HTTPException(422, "Nothing imported — every game had a row that failed. "
+                                 "Fix the errors listed and upload again.")
+
+    await _log_edit(
+        db,
+        org_id=club.id,
+        user_id=current_user.id,
+        action="import",
+        target_table="manual_games",
+        target_id=f"bulk:{len(created_game_ids)}games",
+        summary=(f"CSV import — manual games: {len(created_game_ids)} games, "
+                 f"{len(created_season_ids)} season(s), {len(created_grade_ids)} grade(s) and "
+                 f"{len(created_player_ids)} player(s) created, {len(errors)} row errors"),
+        before=None,
+        after={"created_game_ids": created_game_ids,
+               "created_season_ids": created_season_ids,
+               "created_grade_ids": created_grade_ids,
+               "created_player_ids": created_player_ids,
+               "filename": req.filename,
+               "errors": errors[:20]},
+    )
+    await db.commit()
+    await _recompute_milestones(db, club.id, affected_player_ids)
+    return {
+        "games_created": len(created_game_ids),
+        "seasons_created": len(created_season_ids),
+        "grades_created": len(created_grade_ids),
+        "players_created": len(created_player_ids),
+        "errors": len(errors),
+        "errors_detail": errors[:50],
+    }
+
+
+async def _undo_created_refs(db: AsyncSession, org_id: uuid.UUID, after: dict) -> dict:
+    """Remove the seasons, grades and players an import created, if nothing needs them.
+
+    Called only after the import's own games are already deleted, so the
+    in-use guards see the state the club is actually left in. Anything still
+    referenced is kept and counted rather than forced — an undo must never take
+    down data that arrived some other way, which is the whole reason
+    `import_cleanup` exists rather than a blanket delete here.
+    """
+    removed = {"players": 0, "players_kept": 0, "grades": 0, "grades_kept": 0,
+               "seasons": 0, "seasons_kept": 0}
+
+    pids = [_to_uuid(x, "player") for x in (after.get("created_player_ids") or [])]
+    if pids:
+        deletable, kept = await import_cleanup.deletable_players(db, org_id, pids)
+        if deletable:
+            removed["players"] = await import_cleanup.delete_players(db, org_id, deletable)
+        removed["players_kept"] = len(kept)
+        await db.flush()
+
+    for gid in (_to_uuid(x, "grade") for x in (after.get("created_grade_ids") or [])):
+        grade = await db.get(Grade, gid)
+        if not grade:
+            continue
+        season = await db.get(Season, grade.season_id)
+        if not season or season.organisation_id != org_id:
+            continue
+        if await _grade_in_use(db, gid):
+            removed["grades_kept"] += 1
+            continue
+        await db.delete(grade)
+        removed["grades"] += 1
+    await db.flush()
+
+    for sid in (_to_uuid(x, "season") for x in (after.get("created_season_ids") or [])):
+        season = await db.get(Season, sid)
+        if not season or season.organisation_id != org_id:
+            continue
+        if await _season_in_use(db, sid):
+            removed["seasons_kept"] += 1
+            continue
+        await db.delete(season)
+        removed["seasons"] += 1
+    await db.flush()
+
+    return removed
