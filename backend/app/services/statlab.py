@@ -174,6 +174,20 @@ MATCH_METRICS: dict[str, str] = {
     "played_at": "played_at",
 }
 
+# One row per TEAM INNINGS — ours or the opposition's — which is what a club
+# record about a total is actually about. `match_list` beside it stays a row
+# per MATCH: in a two-day game the two answer different questions, and the
+# reported bug on the Records page was exactly the two being conflated (a
+# club's "highest total" reading as its two innings added together).
+TEAM_INNINGS_METRICS: dict[str, str] = {
+    "is_ours": "is_ours",
+    "runs": "runs",
+    "wickets": "wickets",
+    "extras": "extras",
+    "innings_number": "innings_number",
+    "played_at": "played_at",
+}
+
 PARTNERSHIP_METRICS: dict[str, str] = {
     "runs": "runs",
     "balls": "balls",
@@ -199,6 +213,7 @@ TARGETS: dict[str, dict] = {
     "innings_list":     {"metrics": INNINGS_METRICS,     "default_sort": "runs"},
     "spell_list":       {"metrics": SPELL_METRICS,       "default_sort": "wickets"},
     "match_list":       {"metrics": MATCH_METRICS,       "default_sort": "team_runs"},
+    "team_innings_list": {"metrics": TEAM_INNINGS_METRICS, "default_sort": "runs"},
     "partnership_list": {"metrics": PARTNERSHIP_METRICS, "default_sort": "runs"},
 }
 
@@ -2358,6 +2373,33 @@ async def query_match_list(
             LEFT JOIN players pb ON pb.id = bs.player_id AND pb.organisation_id = :org_id
             GROUP BY gu.game_id
         ),
+        side_innings AS (
+            SELECT gu.game_id, bi.innings_number, 'us'::text AS side
+            FROM game_universe gu
+            JOIN v_effective_batting_innings bi ON bi.game_id = gu.game_id
+            JOIN players p ON p.id = bi.player_id AND p.organisation_id = :org_id
+            WHERE bi.did_not_bat IS NOT TRUE
+            GROUP BY gu.game_id, bi.innings_number
+            UNION ALL
+            SELECT gu.game_id, bs.innings_number, 'them'::text
+            FROM game_universe gu
+            JOIN v_effective_bowling_spells bs ON bs.game_id = gu.game_id
+            JOIN players pb ON pb.id = bs.player_id AND pb.organisation_id = :org_id
+            GROUP BY gu.game_id, bs.innings_number
+        ),
+        match_exact AS (
+            SELECT si.game_id, si.side,
+                   SUM(st.runs_scored) AS exact_runs
+            FROM side_innings si
+            JOIN games g ON g.id = si.game_id
+            LEFT JOIN LATERAL (
+                SELECT NULLIF(e->>'runs_scored', '')::numeric AS runs_scored
+                FROM jsonb_array_elements(COALESCE(g.innings_totals, '[]'::jsonb)) e
+                WHERE (e->>'innings_number')::int = si.innings_number
+            ) st ON TRUE
+            GROUP BY si.game_id, si.side
+            HAVING BOOL_AND(st.runs_scored IS NOT NULL)
+        ),
         rows AS (
             SELECT DISTINCT
                 gu.game_id::text                            AS game_id,
@@ -2373,14 +2415,150 @@ async def query_match_list(
                 END                                         AS opposition,
                 gu.result                                   AS result,
                 gu.is_final                                 AS is_final,
-                COALESCE(bat_scores.team_runs, 0)           AS team_runs,
+                COALESCE(ours.exact_runs, bat_scores.team_runs, 0)::int  AS team_runs,
                 COALESCE(bat_scores.team_wickets, 0)        AS team_wickets,
-                COALESCE(bowl_scores.opp_runs, 0)           AS opp_runs,
+                COALESCE(theirs.exact_runs, bowl_scores.opp_runs, 0)::int AS opp_runs,
                 COALESCE(bowl_scores.opp_wickets, 0)        AS opp_wickets,
-                (COALESCE(bat_scores.team_runs, 0) - COALESCE(bowl_scores.opp_runs, 0)) AS margin_runs
+                (COALESCE(ours.exact_runs, bat_scores.team_runs, 0)
+                 - COALESCE(theirs.exact_runs, bowl_scores.opp_runs, 0))::int AS margin_runs,
+                (ours.exact_runs IS NOT NULL AND theirs.exact_runs IS NOT NULL) AS is_exact
             FROM game_universe gu
             LEFT JOIN bat_scores  ON bat_scores.game_id  = gu.game_id
             LEFT JOIN bowl_scores ON bowl_scores.game_id = gu.game_id
+            -- GR's own per-innings totals (batters PLUS extras) where we hold
+            -- EVERY innings on that side. All or nothing: mixing an exact
+            -- innings with an approximate one gives a match figure that
+            -- reconciles with neither. Same rule club_records.py applies, so
+            -- StatLab and the record book cannot disagree about a match.
+            LEFT JOIN match_exact ours   ON ours.game_id = gu.game_id AND ours.side = 'us'
+            LEFT JOIN match_exact theirs ON theirs.game_id = gu.game_id AND theirs.side = 'them'
+        )
+        SELECT * FROM rows
+        {where_sql}
+        ORDER BY {sort_by} {sort_dir} NULLS LAST, played_at DESC
+        LIMIT :limit OFFSET :offset
+    """
+
+    params["offset"] = offset
+    result = await session.execute(text(_inline_helpers(sql)), params)
+    return [dict(r) for r in result.mappings()]
+
+
+async def query_team_innings_list(
+    session: AsyncSession,
+    *,
+    org_id: str,
+    sort_by: str,
+    sort_dir: str,
+    limit: int,
+    metric_filters: list[str] | None,
+    filter_tree: dict | None,
+    offset: int = 0,
+    context: dict,
+) -> list[dict]:
+    """One row per TEAM INNINGS, ours and the opposition's.
+
+    This is the target a club record about a total is built from — highest
+    innings total, lowest all-out, most extras conceded, worst innings
+    against a given opponent — any of which a reader can now assemble with
+    the ordinary StatLab filters rather than waiting for a board.
+
+    `match_list` beside it is a row per MATCH and stays that way. In a
+    two-day game the two are different numbers, and conflating them is
+    exactly what put a club's two innings on the Records page as one score
+    nobody made.
+
+    The total is GR's own stored per-innings figure (batters PLUS extras)
+    where we hold it, and the bat/bowl sum where we do not — the same
+    fall-back `services/club_records.py` applies, so the two surfaces cannot
+    report a different figure for the same innings. `is_exact` says which,
+    because a bat-only sum reads low by however many extras were bowled.
+    """
+    sort_by, sort_dir, limit = _validated("team_innings_list", sort_by, sort_dir, limit)
+
+    mc, mp, _ic, _ip, pc, pp, _ = _build_context_filters(context)
+    metric_clause_sql, metric_params = _compile_metric_clause(
+        metric_filters, filter_tree, TEAM_INNINGS_METRICS)
+    params = {"org_id": org_id, "limit": limit, **mp, **pp, **metric_params}
+    where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
+
+    universe = _game_universe_sql(mc)
+    sql = f"""
+        WITH {universe},
+        stored AS (
+            SELECT gu.game_id,
+                   (elem->>'innings_number')::int AS innings_number,
+                   NULLIF(elem->>'runs_scored', '')::numeric AS runs_scored,
+                   NULLIF(elem->>'wickets', '')::numeric AS wickets,
+                   NULLIF(elem->>'extras', '')::numeric AS extras
+            FROM game_universe gu
+            JOIN games g ON g.id = gu.game_id
+            CROSS JOIN LATERAL
+                jsonb_array_elements(COALESCE(g.innings_totals, '[]'::jsonb)) elem
+        ),
+        our_bat AS (
+            -- OUR players only: a both-synced fixture is one games row
+            -- carrying both clubs' innings.
+            SELECT gu.game_id, bi.innings_number,
+                   SUM(bi.runs) AS runs,
+                   COUNT(*) FILTER (
+                       WHERE bi.not_out = FALSE
+                         AND bi.dismissal_type IS NOT NULL
+                         AND LOWER(bi.dismissal_type) NOT IN ('absent', 'did not bat', 'dnb')
+                         AND bi.did_not_bat IS NOT TRUE
+                   ) AS wickets
+            FROM game_universe gu
+            JOIN v_effective_batting_innings bi ON bi.game_id = gu.game_id
+            JOIN players p ON p.id = bi.player_id AND p.organisation_id = :org_id
+            WHERE bi.did_not_bat IS NOT TRUE
+            GROUP BY gu.game_id, bi.innings_number
+        ),
+        their_bat AS (
+            -- The innings OUR bowlers bowled in — knowable even in a match
+            -- we never batted in, which is the case a "the innings we did
+            -- not bat in" rule cannot answer at all.
+            SELECT gu.game_id, bs.innings_number,
+                   SUM(bs.runs) AS runs, SUM(bs.wickets) AS wickets
+            FROM game_universe gu
+            JOIN v_effective_bowling_spells bs ON bs.game_id = gu.game_id
+            JOIN players pb ON pb.id = bs.player_id AND pb.organisation_id = :org_id
+            GROUP BY gu.game_id, bs.innings_number
+        ),
+        sides AS (
+            SELECT game_id, innings_number, 'us'::text AS side, runs, wickets FROM our_bat
+            UNION ALL
+            SELECT game_id, innings_number, 'them'::text, runs, wickets FROM their_bat
+        ),
+        rows AS (
+            SELECT
+                gu.game_id::text            AS game_id,
+                gu.played_at                AS played_at,
+                gu.display_grade_name       AS grade_name,
+                gu.season_name              AS season_name,
+                gu.season_year              AS season_year,
+                gu.club_team                AS club_team,
+                CASE
+                    WHEN gu.club_team = gu.home_team THEN gu.away_team
+                    WHEN gu.club_team = gu.away_team THEN gu.home_team
+                    ELSE NULL
+                END                         AS opposition,
+                gu.result                   AS result,
+                gu.is_final                 AS is_final,
+                sd.side                     AS side,
+                (CASE WHEN sd.side = 'us' THEN 1 ELSE 0 END) AS is_ours,
+                CASE WHEN sd.side = 'us' THEN gu.club_team ELSE
+                    CASE WHEN gu.club_team = gu.home_team THEN gu.away_team
+                         ELSE gu.home_team END
+                END                         AS batting_team,
+                sd.innings_number           AS innings_number,
+                COALESCE(st.runs_scored, sd.runs)::int    AS runs,
+                COALESCE(st.wickets, sd.wickets)::int     AS wickets,
+                st.extras::int                            AS extras,
+                (st.runs_scored IS NOT NULL)              AS is_exact
+            FROM game_universe gu
+            JOIN sides sd ON sd.game_id = gu.game_id
+            LEFT JOIN stored st ON st.game_id = sd.game_id
+                               AND st.innings_number = sd.innings_number
         )
         SELECT * FROM rows
         {where_sql}
@@ -5303,6 +5481,7 @@ TARGET_DISPATCH = {
     "innings_list":     query_innings_list,
     "spell_list":       query_spell_list,
     "match_list":       query_match_list,
+    "team_innings_list": query_team_innings_list,
     "partnership_list": query_partnership_list,
 }
 

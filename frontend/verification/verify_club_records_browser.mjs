@@ -28,6 +28,8 @@ const game = (id, o) => ({
   is_final: !!o.final, result: o.result || 'WIN',
   our_runs: o.our ?? 300, our_wickets: o.ourW ?? 8,
   opp_runs: o.opp_runs ?? 120, opp_wickets: o.oppW ?? 10,
+  our_innings_count: o.innCount ?? 1, their_innings_count: 1,
+  innings_number: o.inn ?? 1, innings_wickets: o.innW ?? null,
   value: o.value, unit: o.unit, exact: o.exact !== false,
 })
 
@@ -46,6 +48,18 @@ const CLUB_RECORDS = {
     lowest_totals: { rows: [game('g3', { value: 35, our: 35, ourW: 10, result: 'LOSS' })], approximate: 0 },
     highest_conceded: { rows: [game('g9', { value: 400, opp_runs: 400, result: 'LOSS' })], approximate: 0 },
     lowest_conceded: { rows: [game('g10', { value: 22, opp_runs: 22 })], approximate: 0 },
+    highest_match_totals: {
+      rows: [game('g1', { value: 481, innCount: 2, our: 481 })], approximate: 0 },
+    highest_match_aggregates: {
+      rows: [game('g1', { value: 583, innCount: 2, our: 481, opp_runs: 102 })], approximate: 0 },
+    highest_chases: { rows: [game('g6', { value: 155, inn: 2, away: true })], approximate: 0 },
+    most_extras_conceded: { rows: [game('g1', { value: 8, inn: 2 })], approximate: 0 },
+    narrowest_wins_runs: { rows: [game('g12', { value: 3, unit: 'runs' })], approximate: 0 },
+    narrowest_wins_wickets: { rows: [game('g13', { value: 1, unit: 'wickets' })], approximate: 0 },
+    head_to_head: {
+      rows: [{ opponent: 'Rovers', played: 4, wins: 2, losses: 1, draws: 1,
+               win_rate: 50.0, runs_for: 900, runs_against: 700, exact: false }],
+      approximate: 0 },
     biggest_wins_runs: { rows: [game('g5', { value: 220, unit: 'runs' })], approximate: 0 },
     biggest_wins_wickets: { rows: [game('g6', { value: 9, unit: 'wickets', away: true })], approximate: 0 },
     heaviest_defeats_runs: { rows: [game('g7', { value: 160, unit: 'runs', result: 'LOSS' })], approximate: 0 },
@@ -149,11 +163,23 @@ const openClubTab = async (page) => {
   const body = await page.locator('main').innerText()
   ck('the club summary strip renders', /PLAYED/.test(body) && /SEASONS/.test(body))
   ck('every asked-for board is drawn', [
-    'HIGHEST TEAM TOTALS', 'LOWEST TEAM TOTALS', 'HIGHEST TOTALS CONCEDED',
-    'LOWEST TOTALS DEFENDED AGAINST', 'BIGGEST WINS (RUNS)', 'BIGGEST WINS (WICKETS)',
+    'HIGHEST TEAM TOTALS', 'LOWEST TEAM TOTALS', 'HIGHEST OPPOSITION TOTALS',
+    'LOWEST OPPOSITION TOTALS', 'BIGGEST WINS (RUNS)', 'BIGGEST WINS (WICKETS)',
     'HEAVIEST DEFEATS (RUNS)', 'HEAVIEST DEFEATS (WICKETS)',
-    'LONGEST WINNING RUN', 'LONGEST UNBEATEN RUN', 'SEASON BY SEASON',
+    'HIGHEST MATCH TOTALS', 'HIGHEST MATCH AGGREGATES', 'HIGHEST SUCCESSFUL CHASES',
+    'MOST EXTRAS CONCEDED', 'NARROWEST WINS (RUNS)', 'NARROWEST WINS (WICKETS)',
+    'LONGEST WINNING RUN', 'LONGEST UNBEATEN RUN', 'HEAD TO HEAD', 'SEASON BY SEASON',
   ].every((t) => body.includes(t)), 'a board is missing')
+
+  // The rename the club asked for: "defended against" described nothing.
+  ck('the opposition boards are named for the opposition',
+     !body.includes('DEFENDED AGAINST') && body.includes('LOWEST OPPOSITION TOTALS'))
+  ck('a match aggregate is named as one, never as a total',
+     body.includes('HIGHEST MATCH AGGREGATES') && body.includes('both sides, whole match'))
+  ck('an innings board says it is one innings', body.includes('one innings'))
+  ck('head to head lists the opponent', body.includes('Rovers'))
+  ck('a streak says how it was worked out',
+     body.includes('consecutive matches, in date order'))
 
   ck('the record total is on screen', body.includes('300'))
   ck('a wickets margin is drawn in wickets, not runs', /9\s*wkts/.test(body))
