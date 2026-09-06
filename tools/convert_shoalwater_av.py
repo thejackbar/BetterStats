@@ -109,7 +109,9 @@ def currency(buf: bytes, off: int):
 
 
 def text(buf: bytes, off: int, length: int) -> str:
-    return buf[off:off + length].decode("latin-1").replace("\x00", " ").strip()
+    """Padding is spaces, but a field can also carry NUL or the 0xFF sentinel."""
+    raw = buf[off:off + length].decode("latin-1")
+    return raw.replace("\x00", " ").replace("\xff", " ").strip()
 
 
 def opt(value: int):
@@ -182,7 +184,7 @@ def parse_fixtures(buf: bytes) -> dict:
         slot = i16(buf, off)
         if slot < 0 or slot >= MATCH_N:
             continue
-        name = text(buf, off + 20, 34)
+        name = text(buf, off + 20, 32)
         if not name:
             continue
         serial = struct.unpack_from("<d", buf, off + 2)[0]
@@ -498,6 +500,59 @@ def build_season_stats(seasons: list, by_grade: bool = True) -> list:
     return rows
 
 
+FIX_REC = 34            # sibling fixture file: slot, date, team, name
+MCH_REC = 1756          # sibling match file: 604-byte header then 12 blocks of 96
+MCH_GROUND = 24
+
+
+def cross_check(source: Path, seasons: list) -> list:
+    """Check the .AV against the club's own .FIX and .MCH files where present.
+
+    The .AV is a complete, self-consistent export and is what the conversion
+    reads. These siblings are an independent record of the same seasons, so
+    they are used to CHECK it, never to feed it - mixing a fixture label from
+    one version onto a scorecard from another is how a match ends up under the
+    wrong date.
+    """
+    out = []
+    for s in seasons:
+        year = str(s["year"])
+        fix_p, mch_p = source / f"DATA{year}.FIX", source / f"DATA{year}.MCH"
+        mine = {m["index"]: m for m in s["matches"]}
+        row = {"Season": s["season"], "Fixtures checked": "", "Fixtures agreeing": "",
+               "Grounds checked": "", "Grounds agreeing": ""}
+        if fix_p.exists():
+            buf = fix_p.read_bytes()
+            n = ok = 0
+            for i in range(len(buf) // FIX_REC):
+                off = i * FIX_REC
+                slot = i16(buf, off)
+                if slot < 0 or slot not in mine:
+                    continue
+                name = text(buf, off + 12, 22)
+                serial = struct.unpack_from("<d", buf, off + 2)[0]
+                if not name or serial <= 0:
+                    continue
+                n += 1
+                m = mine[slot]
+                if (EPOCH + datetime.timedelta(days=serial), i16(buf, off + 10), name) == \
+                        (m["date"], m["team"], m["name"]):
+                    ok += 1
+            row["Fixtures checked"], row["Fixtures agreeing"] = n, ok
+        if mch_p.exists():
+            buf = mch_p.read_bytes()
+            n = ok = 0
+            for slot, m in mine.items():
+                g = text(buf, slot * MCH_REC + MCH_GROUND, 22)
+                if not g or not m["ground"]:
+                    continue
+                n += 1
+                ok += (g == m["ground"])
+            row["Grounds checked"], row["Grounds agreeing"] = n, ok
+        out.append(row)
+    return out
+
+
 def squad_clashes(seasons: list) -> list:
     """Player-dates where the files name one person in more than one grade.
 
@@ -690,6 +745,7 @@ def main() -> None:
 
     sheets = build_rows(seasons)
     sheets["Data quality"] = squad_clashes(seasons)
+    sheets["Cross-check"] = cross_check(args.source, seasons)
     checks = verify(seasons)
     write_xlsx(sheets, checks, args.out / "match_detail.xlsx")
     stats = build_season_stats(seasons)
