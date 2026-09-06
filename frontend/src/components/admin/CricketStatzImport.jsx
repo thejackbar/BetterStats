@@ -98,6 +98,20 @@ export default function CricketStatzImport() {
     } finally { setStarting(false) }
   }
 
+  async function stop(id) {
+    if (!window.confirm(
+      'Stop this import?\n\nWhat it has already brought across is kept — you '
+      + 'can start it again and it will pick the rest up without doubling '
+      + 'anything.')) return
+    try {
+      await api.csStop(id)
+      toast?.success?.('Import stopped.')
+      await loadStatus(); await loadRest()
+    } catch (e) {
+      toast?.error?.(e?.detail || 'Could not stop that import.')
+    }
+  }
+
   async function undo(id) {
     if (!window.confirm(
       'Remove every match and record this import brought across?\n\n'
@@ -115,6 +129,14 @@ export default function CricketStatzImport() {
 
   const p = status?.import?.progress || {}
   const done = status?.import?.status === 'complete'
+  const stalled = !!status?.import?.stalled
+  const since = status?.import?.seconds_since_progress
+  // The one thing that separates a long import from a dead one. A full
+  // history is thousands of matches, so the same figures sitting there for a
+  // minute is ordinary — how long since it last moved is not.
+  const heartbeat = running && since != null
+    ? (since < 90 ? ' · still going' : ` · last moved ${Math.round(since / 60)} min ago`)
+    : ''
 
   return (
     <div className="pb-card p-5 mb-8" id="cricketstatz">
@@ -207,22 +229,31 @@ export default function CricketStatzImport() {
                     status.import.status === 'complete' ? 'ok'
                       : status.import.status === 'error' ? 'block' : 'accent'}>
                     {status.import.status === 'running'
-                      ? (PHASES[status.import.phase] || 'Working')
+                      ? (PHASES[p.phase || status.import.phase] || 'Working')
                       : status.import.status}
                   </Badge>
                 </div>
 
                 {running && (
                   <>
-                    <Bar value={p.matches_total
-                      ? pct(p.matches_done, p.matches_total)
-                      : pct(p.seasons_done, p.seasons_total)} />
+                    <Bar value={pct(p.seasons_done, p.seasons_total)} />
                     <Caption>
                       {p.seasons_total
                         ? `Season ${p.seasons_done} of ${p.seasons_total}`
                         : 'Working out your seasons'}
-                      {p.matches_total ? ` · ${p.matches_done} of ${p.matches_total} matches` : ''}
+                      {p.matches_total ? ` · ${p.matches_done} matches so far` : ''}
+                      {heartbeat}
                     </Caption>
+                    {stalled && (
+                      <Note toneKey="block">
+                        This import has not moved for {Math.round(
+                          (status.import.seconds_since_progress || 0) / 60)} minutes,
+                        so it has most likely stopped. Everything it brought
+                        across before then has been kept. Stop it and start
+                        again — the matches already in are recognised, so it
+                        will not double anything.
+                      </Note>
+                    )}
                   </>
                 )}
 
@@ -233,6 +264,14 @@ export default function CricketStatzImport() {
                   <StatCard label="Record boards" value={p.records || 0} />
                 </div>
 
+                {running && (
+                  <div>
+                    <Button variant="quiet-danger" size="sm"
+                            onClick={() => stop(status.import.id)}>
+                      Stop this import
+                    </Button>
+                  </div>
+                )}
                 {status.import.error && <Note toneKey="block">{status.import.error}</Note>}
                 {done && (
                   <Note toneKey="ok">

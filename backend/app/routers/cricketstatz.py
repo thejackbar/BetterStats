@@ -37,6 +37,7 @@ from app.models.db import Organisation, User, get_db
 from app.routers.auth import get_current_club, get_current_user
 from app.services import cricketstatz_import as importer
 from app.services.cricketstatz_client import CricketStatzUnavailable
+from app.services.cricketstatz_import import STALL_AFTER_SECONDS
 from app.services.cricketstatz_parse import CricketStatzError, parse_club_url
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,7 @@ _RUNNING: dict[str, asyncio.Task] = {}
 
 class ClubUrl(BaseModel):
     url: str
+
 
 
 def _handle(exc: Exception) -> HTTPException:
@@ -90,15 +92,29 @@ async def start_import(
         )
 
     running = (await db.execute(text("""
-        SELECT id FROM cricketstatz_imports
+        SELECT id,
+               EXTRACT(EPOCH FROM (NOW() - COALESCE(updated_at, started_at))) AS quiet
+          FROM cricketstatz_imports
          WHERE organisation_id = :org AND status = 'running'
          ORDER BY started_at DESC LIMIT 1
     """), {"org": str(club.id)})).first()
     if running:
-        raise HTTPException(
-            status_code=409,
-            detail="An import is already running for this club.",
-        )
+        # An import whose process was lost (a redeploy, a restart) leaves its
+        # row 'running' with nothing behind it. Without this the club is locked
+        # out of ever trying again.
+        if (running[1] or 0) > STALL_AFTER_SECONDS:
+            await db.execute(text("""
+                UPDATE cricketstatz_imports
+                   SET status = 'error', finished_at = NOW(),
+                       error = 'Stopped responding — the import was restarted.'
+                 WHERE id = :id
+            """), {"id": str(running[0])})
+            await db.commit()
+        else:
+            raise HTTPException(
+                status_code=409,
+                detail="An import is already running for this club.",
+            )
 
     import_id = uuid.uuid4()
     await db.execute(text("""
@@ -130,16 +146,29 @@ async def status(db: AsyncSession = Depends(get_db),
     """The running import, or the most recent one."""
     row = (await db.execute(text("""
         SELECT id, club_id, club_name, source_url, status, phase, progress,
-               stats, error, started_at, finished_at, undone_at
+               stats, error, started_at, finished_at, undone_at, updated_at,
+               EXTRACT(EPOCH FROM (NOW() - COALESCE(updated_at, started_at)))
+                   AS seconds_since_progress,
+               EXTRACT(EPOCH FROM (NOW() - started_at)) AS seconds_running
           FROM cricketstatz_imports
          WHERE organisation_id = :org
          ORDER BY started_at DESC LIMIT 1
     """), {"org": str(club.id)})).mappings().first()
+    club_id = getattr(club, "cricketstatz_club_id", None)
     if not row:
-        return {"import": None,
-                "club_id": getattr(club, "cricketstatz_club_id", None)}
-    return {"import": dict(row),
-            "club_id": getattr(club, "cricketstatz_club_id", None)}
+        return {"import": None, "club_id": club_id}
+
+    data = dict(row)
+    for key in ("seconds_since_progress", "seconds_running"):
+        if data.get(key) is not None:
+            data[key] = int(data[key])
+    # A club watching a full history come across sees the same figures for
+    # long stretches, so say plainly whether it is still moving.
+    data["stalled"] = bool(
+        data["status"] == "running"
+        and (data.get("seconds_since_progress") or 0) > STALL_AFTER_SECONDS
+    )
+    return {"import": data, "club_id": club_id}
 
 
 @router.get("/imports")
@@ -174,6 +203,38 @@ async def undo(import_id: uuid.UUID,
             detail="That import is still running — wait for it to finish first.",
         )
     return await importer.undo_import(db, club.id, import_id)
+
+
+@router.post("/imports/{import_id}/stop")
+async def stop(import_id: uuid.UUID,
+               db: AsyncSession = Depends(get_db),
+               club: Organisation = Depends(get_current_club)):
+    """Stop an import that is still marked as running.
+
+    What it has already written is kept — every match is committed as its own
+    unit of work — so this ends the run rather than undoing it. Use undo to
+    take the matches back out.
+    """
+    owned = (await db.execute(text("""
+        SELECT status FROM cricketstatz_imports
+         WHERE id = :id AND organisation_id = :org
+    """), {"id": str(import_id), "org": str(club.id)})).first()
+    if not owned:
+        raise HTTPException(status_code=404, detail="No such import.")
+    if owned[0] != "running":
+        raise HTTPException(status_code=409, detail="That import is not running.")
+
+    task = _RUNNING.pop(str(import_id), None)
+    if task is not None:
+        task.cancel()
+    await db.execute(text("""
+        UPDATE cricketstatz_imports
+           SET status = 'stopped', finished_at = NOW(),
+               error = 'Stopped by an administrator.'
+         WHERE id = :id
+    """), {"id": str(import_id)})
+    await db.commit()
+    return {"stopped": True}
 
 
 @router.get("/records")

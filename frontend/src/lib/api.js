@@ -1790,6 +1790,8 @@ export const api = {
     }),
   csStatus: () => request('/club-admin/cricketstatz/status'),
   csImports: () => request('/club-admin/cricketstatz/imports'),
+  csStop: (id) =>
+    request(`/club-admin/cricketstatz/imports/${id}/stop`, { method: 'POST' }),
   csUndo: (id) =>
     request(`/club-admin/cricketstatz/imports/${id}/undo`, { method: 'POST' }),
   csRecords: () => request('/club-admin/cricketstatz/records'),

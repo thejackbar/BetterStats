@@ -136,9 +136,13 @@ async def fetch_results(club_id: str, season: Optional[str] = None) -> list[dict
 
 async def fetch_scorecard(club_id: str, match_id: str) -> dict:
     """The full two-team scorecard for one match."""
+    # Deliberately uncached: a scorecard is fetched once per import and never
+    # again, so keeping thousands of ~20KB bodies alive for the cache's TTL
+    # holds a club's whole history in memory to no purpose.
     card = parse_scorecard(await _get(
         "linkreport",
         {"mode": MODE_MATCH, "match": match_id, "club": club_id, "web": 1},
+        cache=False,
     ))
     card["source_match_id"] = str(match_id)
     return card

@@ -271,6 +271,11 @@ async def verify_schema(engine) -> None:
              WHERE indexname = 'uq_players_org_cricketstatz'
         """))).scalar()
         check("a player's CricketStatz id is unique within the club", n == 1)
+        beat = (await conn.execute(text("""
+            SELECT COUNT(*) FROM information_schema.columns
+             WHERE table_name = 'cricketstatz_imports' AND column_name = 'updated_at'
+        """))).scalar()
+        check("an import carries a heartbeat (migration 286)", beat == 1)
 
 
 # ── the import, end to end ───────────────────────────────────────────────────
@@ -561,6 +566,60 @@ async def verify_import(engine, session_maker) -> tuple:
         importer.client = real_client
 
 
+async def verify_heartbeat(session_maker, org_id) -> None:
+    print("\nHeartbeat and a run that stops responding")
+
+    async with session_maker() as db:
+        beat = (await db.execute(text("""
+            SELECT updated_at IS NOT NULL FROM cricketstatz_imports
+             WHERE organisation_id = :org ORDER BY started_at DESC LIMIT 1
+        """), {"org": str(org_id)})).scalar()
+        check("an import records when it last moved", beat is True)
+
+    # A run whose process was lost sits 'running' with nothing behind it.
+    stalled_id = uuid.uuid4()
+    async with session_maker() as db:
+        await db.execute(text("""
+            INSERT INTO cricketstatz_imports
+                (id, organisation_id, club_id, status, phase, started_at, updated_at)
+            VALUES (:id, :org, '93931', 'running', 'matches',
+                    NOW() - INTERVAL '2 hours', NOW() - INTERVAL '90 minutes')
+        """), {"id": str(stalled_id), "org": str(org_id)})
+        await db.commit()
+
+    async with session_maker() as db:
+        row = (await db.execute(text("""
+            SELECT status,
+                   EXTRACT(EPOCH FROM (NOW() - COALESCE(updated_at, started_at))) AS quiet
+              FROM cricketstatz_imports WHERE id = :id
+        """), {"id": str(stalled_id)})).mappings().first()
+        quiet = int(row["quiet"])
+        check("a run silent for 90 minutes reads as stalled",
+              quiet > importer.STALL_AFTER_SECONDS, f"{quiet}s")
+        check("the stall threshold is minutes, not seconds — a slow request is "
+              "not a dead run", importer.STALL_AFTER_SECONDS >= 120,
+              str(importer.STALL_AFTER_SECONDS))
+
+    # A fresh run is NOT mistaken for a stalled one.
+    live_id = uuid.uuid4()
+    async with session_maker() as db:
+        await db.execute(text("""
+            INSERT INTO cricketstatz_imports
+                (id, organisation_id, club_id, status, phase, started_at, updated_at)
+            VALUES (:id, :org, '93931', 'running', 'matches', NOW(), NOW())
+        """), {"id": str(live_id), "org": str(org_id)})
+        await db.commit()
+        quiet = int((await db.execute(text("""
+            SELECT EXTRACT(EPOCH FROM (NOW() - updated_at)) FROM cricketstatz_imports
+             WHERE id = :id
+        """), {"id": str(live_id)})).scalar())
+        check("an import that just moved is not called stalled",
+              quiet < importer.STALL_AFTER_SECONDS, f"{quiet}s")
+        await db.execute(text("DELETE FROM cricketstatz_imports WHERE id IN (:a,:b)"),
+                         {"a": str(stalled_id), "b": str(live_id)})
+        await db.commit()
+
+
 async def verify_undo(session_maker, org_id, import_id, player_count) -> None:
     print("\nUndo")
     async with session_maker() as db:
@@ -625,6 +684,7 @@ async def main() -> int:
 
     await verify_schema(engine)
     org_id, import_id, players = await verify_import(engine, session_maker)
+    await verify_heartbeat(session_maker, org_id)
     await verify_undo(session_maker, org_id, import_id, players)
     await verify_downgrade(engine)
     await engine.dispose()

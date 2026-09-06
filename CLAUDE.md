@@ -7186,6 +7186,51 @@ and BetterCricket pulls ALL of its data across, the record book included.
   `unwrap` raises a typed error for it so "their subscription ended" is not
   read as "this club has no matches". Their FAQ also says the database is
   deleted 12 months after expiry.
+### A working import that read as a hung one (migration 286, v9.67.1)
+
+Reported off a live run with a screenshot: Cockburn on **season 10 of 167**, a
+bar sitting at 94%, and the badge still reading "working out which seasons you
+played" after 1,227 matches.
+
+- **NOTHING WAS HUNG. THE SCREEN COULD NOT SAY OTHERWISE, and that is the
+  actual defect.** A full history is thousands of matches at roughly one
+  scorecard a second, so the same figures sitting there for a minute is the
+  ordinary case. There was no record of when the row last moved, so neither a
+  club nor I could tell a long run from a dead one.
+- **`updated_at` IS THE ONE THING THAT ANSWERS IT.** Every progress write is
+  now a heartbeat, and `/status` returns the seconds since it. The screen says
+  "still going" under 90 seconds and names the gap after that.
+- **THE BAR WAS MEASURED AGAINST A TOTAL THAT GROWS WITH IT.**
+  `matches_total` only counts the seasons walked SO FAR, so `matches_done /
+  matches_total` sits near full from the first season — 1227/1298 is 94% on
+  season 10 of 167. Seasons are the bounded, monotonic measure and are what
+  the bar tracks now. **The control run reads 95% against the old
+  expression**, which is the reported screenshot.
+- **THE PHASE BADGE READ THE COLUMN AND THE RUN ONLY UPDATED THE BLOB.** The
+  `phase` column was set to `seasons` once and then not again until `done`, so
+  it was stuck for the whole import. Both move together now, and the screen
+  prefers the blob.
+- **THE PLAYERS FIGURE WAS THE CURRENT SEASON'S CACHE**, so it fell back every
+  season instead of climbing. Counted from the club's own rows now.
+- **A RUN WHOSE PROCESS DIED LOCKED THE CLUB OUT FOR EVER.** The
+  already-running guard had no notion of a stale row, so a redeploy mid-import
+  left `status='running'` with nothing behind it and every later attempt got a
+  409. A run silent past `STALL_AFTER_SECONDS` (5 minutes — one 30s request
+  plus a season probe is the longest honest gap) is closed out as errored and
+  the new one starts. There is a Stop button too.
+- **A SCORECARD IS NO LONGER CACHED.** It is fetched once per import and never
+  again, so holding thousands of ~20KB bodies for the cache's TTL kept a whole
+  club's history in memory for nothing.
+- **THE HEARTBEAT ALSO BEATS MID-SEASON**, every 5 matches rather than only
+  between seasons — a season of 130 matches was 90 seconds of apparent
+  silence.
+- **Verified** (the suite is 104 checks: the heartbeat recorded, a 90-minute
+  silence reading as stalled, a just-moved run NOT reading as stalled, and the
+  threshold being minutes rather than seconds) and **driven in Chromium** (34,
+  the reported run replayed exactly: the bar on seasons, the "still going"
+  line, the stalled notice, and the Stop control) **with a control run**: the
+  old bar reports 95%.
+
 - **IT LIVES ON DATA SYNC, not a screen of its own.** Bringing a history in is
   a sync action like the others — it just points at another platform instead of
   Cricket Australia — so `components/admin/CricketStatzImport.jsx` is a panel

@@ -47,6 +47,12 @@ from app.services.cricketstatz_parse import RECORD_REPORTS, CricketStatzError
 
 logger = logging.getLogger(__name__)
 
+# The longest gap a healthy run can leave between heartbeats is one slow
+# request (the client times out at 30s) plus a season probe. Five minutes of
+# silence is not a slow import, it is a dead one — the process was redeployed
+# or the task was lost.
+STALL_AFTER_SECONDS = 300
+
 # uuid5 namespace so a CricketStatz id maps to the same row every run.
 _NS = uuid.UUID("6f9a1c2e-5b7d-4e3a-9c81-0d5f2a7b4e60")
 
@@ -645,6 +651,9 @@ async def _set_progress(session_maker, import_id, **fields) -> None:
         else:
             sets.append(f"{key} = :{key}")
             params[key] = value
+    # A progress write is also the heartbeat: it is the only thing that tells a
+    # long import from a dead one.
+    sets.append("updated_at = NOW()")
     async with session_maker() as db:
         await db.execute(text(
             f"UPDATE cricketstatz_imports SET {', '.join(sets)} WHERE id = :id"), params)
@@ -699,6 +708,8 @@ async def run_import(session_maker, org_id, import_id, club_id: str) -> None:
 
         # ── matches, season by season ───────────────────────────────────────
         progress["phase"] = "matches"
+        await _set_progress(session_maker, import_id, phase="matches",
+                            progress=progress)
         for s_idx, season in enumerate(seasons):
             try:
                 rows = await client.fetch_results(club_id, season["value"])
@@ -757,15 +768,21 @@ async def run_import(session_maker, org_id, import_id, club_id: str) -> None:
                         note(f"match {row['source_match_id']}: {exc}")
                     progress["matches_done"] += 1
 
-                    if (m_idx + 1) % 10 == 0:
+                    if (m_idx + 1) % 5 == 0:
                         await _set_progress(session_maker, import_id,
                                             progress=progress)
-            progress["players"] = len(caches["players"])
+            async with session_maker() as db:
+                progress["players"] = (await db.execute(text("""
+                    SELECT COUNT(*) FROM players
+                     WHERE organisation_id = :org
+                       AND cricketstatz_player_id IS NOT NULL
+                """), {"org": str(org_id)})).scalar() or 0
             await _set_progress(session_maker, import_id, progress=progress)
 
         # ── the record book ─────────────────────────────────────────────────
         progress["phase"] = "records"
-        await _set_progress(session_maker, import_id, progress=progress)
+        await _set_progress(session_maker, import_id, phase="records",
+                            progress=progress)
 
         def record_progress(done, total, saved):
             progress["records"] = saved

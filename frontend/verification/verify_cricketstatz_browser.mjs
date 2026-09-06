@@ -48,7 +48,7 @@ const IMPORTS = [{
 // The import's own life cycle: nothing, then running, then complete — so the
 // screen's polling can be observed rather than assumed.
 function makeState() {
-  return { phase: 'none', polls: 0 }
+  return { phase: 'none', polls: 0, quiet: 4 }
 }
 
 const routes = (page, calls, state) => page.route('**/api/**', async (route) => {
@@ -78,6 +78,7 @@ const routes = (page, calls, state) => page.route('**/api/**', async (route) => 
     state.phase = 'running'
     return json({ import_id: 'imp-2', status: 'running' })
   }
+  if (/\/cricketstatz\/imports\/[^/]+\/stop/.test(url)) return json({ stopped: true })
   if (/\/cricketstatz\/imports\/[^/]+\/undo/.test(url)) {
     return json({ matches_removed: 1243, records_removed: 41 })
   }
@@ -99,11 +100,17 @@ const routes = (page, calls, state) => page.route('**/api/**', async (route) => 
         started_at: '2026-09-06T02:00:00Z',
         finished_at: running ? null : '2026-09-06T02:40:00Z',
         undone_at: null,
+        updated_at: '2026-09-06T02:05:00Z',
+        seconds_since_progress: state.quiet ?? 4,
+        seconds_running: 900,
+        stalled: !!state.quiet && state.quiet > 300,
         progress: {
           phase: running ? 'matches' : 'done',
-          seasons_done: running ? 12 : 41, seasons_total: 41,
-          matches_done: running ? 380 : 1243, matches_total: 1243,
-          scorecards: running ? 356 : 1190, players: running ? 210 : 604,
+          // The reported run exactly: season 10 of 167, with the matches
+          // figure sitting near its own running total.
+          seasons_done: running ? 10 : 167, seasons_total: 167,
+          matches_done: running ? 1227 : 1243, matches_total: running ? 1298 : 1243,
+          scorecards: running ? 1225 : 1190, players: running ? 166 : 604,
           records: running ? 0 : 41,
           notes: running ? [] : ['match 3082412: no scorecard published'],
         },
@@ -179,10 +186,24 @@ const run = async () => {
 
   ck('a running import says which phase it is in',
      (await page.locator('text=/Bringing your matches across/i').count()) > 0)
-  ck('it reports progress against the real totals',
-     (await page.locator('text=/380 of 1243 matches/').count()) > 0)
+  ck('it reports how many matches are in so far',
+     (await page.locator('text=/1227 matches so far/').count()) > 0)
   ck('it reports the seasons walked',
-     (await page.locator('text=/Season 12 of 41/').count()) > 0)
+     (await page.locator('text=/Season 10 of 167/').count()) > 0)
+
+  // The bar has to track the bounded measure. Against the matches figure it
+  // read 94% on season 10 of 167 — a working import that looked stuck.
+  const barPct = await page.evaluate(() => {
+    const fills = [...document.querySelectorAll('div[style*="width"]')]
+      .filter((d) => /%/.test(d.style.width) && d.style.background)
+    return fills.length ? parseFloat(fills[fills.length - 1].style.width) : null
+  })
+  ck('the progress bar tracks seasons, not a total that grows with it',
+     barPct !== null && barPct > 3 && barPct < 12, `${barPct}%`)
+  ck('it says it is still going, so a quiet minute does not read as a hang',
+     (await page.locator('text=/still going/').count()) > 0)
+  ck('a running import can be stopped',
+     (await page.getByRole('button', { name: /Stop this import/ }).count()) === 1)
 
   const before = calls.filter((c) => c.url.includes('/cricketstatz/status')).length
   await page.waitForTimeout(5600)
@@ -192,6 +213,21 @@ const run = async () => {
      (await page.locator('text=/Your history is in/').count()) > 0)
   ck('what it could not read is offered without shouting',
      (await page.locator('text=/could not read/').count()) > 0)
+
+  // ── a run that has stopped responding ─────────────────────────────────
+  {
+    const quietCalls = []
+    const quietState = { phase: 'running', polls: -50, quiet: 5400 }
+    const quiet = await ctx.newPage()
+    await routes(quiet, quietCalls, quietState)
+    await quiet.goto(`${BASE}/admin/sync`, { waitUntil: 'domcontentloaded' })
+    await quiet.waitForTimeout(1600)
+    ck('a run that has not moved for 90 minutes says so rather than spinning',
+       (await quiet.locator('text=/has not moved for 90 minutes/').count()) === 1)
+    ck('and says what was kept',
+       (await quiet.locator('text=/has been kept/').count()) > 0)
+    await quiet.close()
+  }
 
   // ── the record book ───────────────────────────────────────────────────
   await page.getByRole('button', { name: /Record book/ }).click()
@@ -229,6 +265,15 @@ const run = async () => {
   await page.waitForTimeout(600)
   ck('an accepted undo reaches the wire',
      calls.some((c) => /\/imports\/[^/]+\/undo/.test(c.url)))
+
+  page.once('dialog', (d) => d.dismiss())
+  const stopBtn = page.getByRole('button', { name: /Stop this import/ })
+  if (await stopBtn.count()) {
+    await stopBtn.click()
+    await page.waitForTimeout(400)
+  }
+  ck('a dismissed stop sends nothing',
+     !calls.some((c) => /\/imports\/[^/]+\/stop/.test(c.url)))
 
   // Nothing should be left pointing at a screen that no longer exists.
   ck('no link to a standalone importer screen remains',
