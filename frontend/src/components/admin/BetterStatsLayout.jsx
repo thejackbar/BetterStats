@@ -28,6 +28,7 @@ export const GROUPS = [
     items: [
       { to: '/admin/sync', label: 'Data Sync', icon: 'reset', cap: CAP.RUN_SYNC, desc: 'Pull the latest games and stats from Cricket Australia.' },
       { to: '/admin/import', label: 'Import Stats', icon: 'sheet', cap: CAP.MANAGE_MANUAL_ENTRIES, desc: 'Load historical stats from a file.' },
+      { to: '/admin/cricketstatz', label: 'Import from CricketStatz', icon: 'reset', cap: CAP.MANAGE_MANUAL_ENTRIES, desc: 'Bring your whole history across from your CricketStatz site.' },
       { to: '/admin/upload-scorecard', label: 'Upload Scorecard', icon: 'sheet', cap: CAP.MANAGE_MANUAL_ENTRIES, desc: 'Read an old paper scorecard from a photo.' },
       { to: '/admin/manual-entries', label: 'Manual Entries', icon: 'list', cap: CAP.MANAGE_MANUAL_ENTRIES, desc: "Hand-enter a game we can't sync." },
       { to: '/admin/milestones', label: 'Milestones', icon: 'check', cap: CAP.MANAGE_MILESTONES, desc: 'Review and manage player milestones.' },

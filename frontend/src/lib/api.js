@@ -1779,6 +1779,20 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ action, admin_note: adminNote }),
     }),
+  // Importing a club's own history from its public CricketStatz site.
+  csInspect: (url) =>
+    request('/club-admin/cricketstatz/inspect', {
+      method: 'POST', body: JSON.stringify({ url }),
+    }),
+  csStartImport: (url) =>
+    request('/club-admin/cricketstatz/import', {
+      method: 'POST', body: JSON.stringify({ url }),
+    }),
+  csStatus: () => request('/club-admin/cricketstatz/status'),
+  csImports: () => request('/club-admin/cricketstatz/imports'),
+  csUndo: (id) =>
+    request(`/club-admin/cricketstatz/imports/${id}/undo`, { method: 'POST' }),
+  csRecords: () => request('/club-admin/cricketstatz/records'),
   adminHardRefreshOrg: () =>
     request('/club-admin/hard-refresh', { method: 'POST' }),
   adminBackfillAggregates: () =>
