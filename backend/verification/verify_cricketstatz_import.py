@@ -164,6 +164,18 @@ def verify_parsers() -> dict:
           and not thin["innings"],
           f"{thin['date']} {thin['division']} innings={len(thin['innings'])}")
 
+    juniors = parse_scorecard(fixture("card_unnamed_juniors.txt"))
+    check("a junior card with no names still parses its innings",
+          len(juniors["innings"]) == 3, str(len(juniors["innings"])))
+    unnamed = [b for i in juniors["innings"] for b in i["batters"]
+               if importer.is_placeholder_name(b["batter"]["name"])]
+    check("its unnamed batters are recognised as placeholders, not people",
+          len(unnamed) >= 15, str(len(unnamed)))
+    check("'N/A' is a placeholder and a real name is not",
+          importer.is_placeholder_name("N/A")
+          and importer.is_placeholder_name("********")
+          and not importer.is_placeholder_name("Brad Quinsee"))
+
     aggregates = parse_report(fixture("record_aggregates.txt"))
     check("record book: title and headers",
           aggregates["title"] == "Top Run Aggregates"
@@ -272,6 +284,7 @@ class StubSite:
             "3177313": fixture("card_modern.txt"),
             "3082300": fixture("card_1995.txt"),
             "3082136": fixture("card_result_only.txt"),
+            "3176144": fixture("card_unnamed_juniors.txt"),
         }
         self.rows = [
             {"source_match_id": "3177313", "round": "SEMI FINAL",
@@ -287,6 +300,11 @@ class StubSite:
              "division": "A-GRADE", "venue": "Donath #01",
              "result": "Keon Park 1's 'A-Grade' won on 1st Innings by 14 runs",
              "winning_team": "Keon Park 1's 'A-Grade'"},
+            {"source_match_id": "3176144", "round": "05",
+             "date": "2026-02-25", "end_date": None,
+             "home_team": "Keon Park U/9", "away_team": "Laurimar U/9 (White)",
+             "division": "UNDER 9", "venue": "Donath #01",
+             "result": "Match Drawn", "winning_team": ""},
             {"source_match_id": "3082136", "round": "02",
              "date": "1985-11-02", "end_date": None,
              "home_team": "Keon Park 1's 'A-Grade'", "away_team": "A-Grade Oakhill",
@@ -304,11 +322,11 @@ class StubSite:
         if season is None:
             return list(self.rows)
         if season == "2025S":
-            return [self.rows[0]]
+            return [self.rows[0], self.rows[1]]
         if season == "1995S":
-            return [self.rows[1]]
-        if season == "1985S":
             return [self.rows[2]]
+        if season == "1985S":
+            return [self.rows[3]]
         return []
 
     async def fetch_scorecard(self, club_id, match_id):
@@ -361,9 +379,9 @@ async def verify_import(engine, session_maker) -> tuple:
                   f"{row['status']}: {row['error']}")
             check("the club's own name was read", row["club_name"] == "Keon Park Cricket Club")
             progress = row["progress"] or {}
-            check("every match was walked", progress.get("matches_done") == 3,
+            check("every match was walked", progress.get("matches_done") == 4,
                   str(progress.get("matches_done")))
-            check("the scorecards were counted", progress.get("scorecards") == 2,
+            check("the scorecards were counted", progress.get("scorecards") == 3,
                   str(progress.get("scorecards")))
 
             games = (await db.execute(text("""
@@ -372,7 +390,7 @@ async def verify_import(engine, session_maker) -> tuple:
                   FROM manual_games WHERE organisation_id = :org
                  ORDER BY played_at
             """), {"org": str(org_id)})).mappings().all()
-            check("every match was written", len(games) == 3, str(len(games)))
+            check("every match was written", len(games) == 4, str(len(games)))
             check("a result-only match is kept, not dropped",
                   any(g["cricketstatz_match_id"] == "3082136" for g in games))
             recent = next(g for g in games if g["cricketstatz_match_id"] == "3177313")
@@ -396,7 +414,8 @@ async def verify_import(engine, session_maker) -> tuple:
                 SELECT g.name FROM grades g JOIN seasons s ON s.id = g.season_id
                  WHERE s.organisation_id = :org ORDER BY g.name
             """), {"org": str(org_id)})).scalars().all()
-            check("grades came across", set(grades) == {"A-GRADE", "G-GRADE"}, str(grades))
+            check("grades came across, juniors included",
+                  set(grades) == {"A-GRADE", "G-GRADE", "UNDER 9"}, str(grades))
 
             # Only OUR players — the cross-club leak rule.
             players = (await db.execute(text("""
@@ -462,6 +481,35 @@ async def verify_import(engine, session_maker) -> tuple:
             check("a keeper's catch counts in the total as well as the keeper column",
                   (field[1] or 0) <= (field[0] or 0), str(field))
 
+            # An unnamed junior side must not collapse onto one shared
+            # "N/A" player — that is what the one-innings-per-player index
+            # refuses, and the failure used to cascade through the season.
+            na = (await db.execute(text("""
+                SELECT COUNT(*) FROM players
+                 WHERE organisation_id = :org AND lower(name) IN ('n/a','na','unknown')
+            """), {"org": str(org_id)})).scalar()
+            check("a card with no names creates no player called 'N/A'",
+                  na == 0, str(na))
+            juniors_in = (await db.execute(text("""
+                SELECT COUNT(*) FROM manual_games
+                 WHERE organisation_id = :org AND cricketstatz_match_id = '3176144'
+            """), {"org": str(org_id)})).scalar()
+            check("the unnamed junior match is still imported, names or not",
+                  juniors_in == 1, str(juniors_in))
+            kept_card = (await db.execute(text("""
+                SELECT jsonb_array_length(extracted_payload->'innings')
+                  FROM manual_games
+                 WHERE organisation_id = :org AND cricketstatz_match_id = '3176144'
+            """), {"org": str(org_id)})).scalar()
+            check("and its full card is kept even where we could not name anyone",
+                  kept_card == 3, str(kept_card))
+            later = (await db.execute(text("""
+                SELECT COUNT(*) FROM manual_games
+                 WHERE organisation_id = :org AND cricketstatz_match_id = '3177313'
+            """), {"org": str(org_id)})).scalar()
+            check("a match we cannot fully read does not cost the season its others",
+                  later == 1, str(later))
+
             records = (await db.execute(text("""
                 SELECT mode, title, row_count FROM cricketstatz_records
                  WHERE organisation_id = :org ORDER BY mode
@@ -488,7 +536,7 @@ async def verify_import(engine, session_maker) -> tuple:
                 SELECT COUNT(*) FROM manual_games WHERE organisation_id = :org
             """), {"org": str(org_id)})).scalar()
             check("a re-import updates the same matches rather than doubling them",
-                  again == 3, str(again))
+                  again == 4, str(again))
             bat_again = (await db.execute(text("""
                 SELECT COUNT(*) FROM manual_batting_innings b
                   JOIN manual_games g ON g.id = b.manual_game_id
@@ -518,7 +566,7 @@ async def verify_undo(session_maker, org_id, import_id, player_count) -> None:
     async with session_maker() as db:
         result = await importer.undo_import(db, org_id, import_id)
         check("every match the import wrote was removed",
-              result["matches_removed"] == 3, str(result))
+              result["matches_removed"] == 4, str(result))
         check("the record book was removed with it",
               result["records_removed"] == 3, str(result))
 

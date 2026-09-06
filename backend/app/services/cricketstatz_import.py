@@ -147,6 +147,27 @@ def _clean_name(name: str) -> str:
     return re.sub(r"\s+", " ", (name or "").strip())
 
 
+# What a scorer writes when they did not record who it was. Junior cards are
+# routinely entered this way — a real Under-9 match came back with every batter
+# named "N/A" — and treating that as a person collapses a whole side onto one
+# player, which then fails on the one-innings-per-player index.
+_PLACEHOLDER_NAMES = {
+    "n/a", "na", "n.a.", "-", "--", "?", "unknown", "unsure",
+    "tbc", "tba", "not recorded", "no name",
+}
+
+
+def is_placeholder_name(name: str) -> bool:
+    """Is this a stand-in rather than somebody's name?"""
+    clean = _clean_name(name).lower()
+    if not clean:
+        return True
+    if clean in _PLACEHOLDER_NAMES:
+        return True
+    # The redaction CA uses for juniors, which these cards carry too.
+    return bool(re.fullmatch(r"\*+", clean))
+
+
 async def resolve_player(db: AsyncSession, org_id, person: dict,
                          cache: dict) -> Optional[Player]:
     """Our player row for one of OUR players on a CricketStatz card.
@@ -156,6 +177,12 @@ async def resolve_player(db: AsyncSession, org_id, person: dict,
     """
     source_id = (person or {}).get("source_player_id")
     name = _clean_name((person or {}).get("name", ""))
+    # A placeholder is not a person. With no id behind it there is nothing to
+    # identify, so the row is left out rather than inventing a player called
+    # "N/A" that every unnamed batter in the club would then share. The match
+    # itself is still imported, and its full card is kept on the game.
+    if not source_id and is_placeholder_name(name):
+        return None
     if not name and not source_id:
         return None
 
@@ -389,12 +416,16 @@ async def import_match(db: AsyncSession, org_id, import_id, card: dict,
 
 async def _write_our_batting(db, org_id, game, inn, seq, caches) -> None:
     """Our batting card, its fall of wickets and the stands behind it."""
-    resolved: dict[int, Optional[Player]] = {}
-    for pos, b in enumerate(inn.get("batters", [])):
+    seen: set = set()
+    for b in inn.get("batters", []):
         player = await resolve_player(db, org_id, b.get("batter"), caches["players"])
-        resolved[pos] = player
         if player is None:
             continue
+        # One innings row per player: a card can list the same person twice,
+        # and the unique index refuses the second. Keep the first.
+        if player.id in seen:
+            continue
+        seen.add(player.id)
         db.add(ManualBattingInnings(
             manual_game_id=game.id, player_id=player.id, innings_number=seq,
             batting_position=b.get("batting_position"),
@@ -706,16 +737,29 @@ async def run_import(session_maker, org_id, import_id, club_id: str) -> None:
                             db, org_id, import_id, card, row, is_ours, caches)
                         if skipped:
                             note(skipped)
+                        # One match is the unit of work. Committing per match
+                        # rather than in batches costs nothing beside the fetch
+                        # that precedes it, and means one unreadable match
+                        # cannot roll back the ones already done.
+                        await db.commit()
                     except Exception as exc:
                         await db.rollback()
+                        # A rollback throws away every row flushed since the
+                        # last commit — including the season, grade and player
+                        # rows resolved for this match. The caches would still
+                        # be holding their ids, so the next match would insert
+                        # against a season that no longer exists and fail on a
+                        # dangling foreign key, and so would every match after
+                        # it. Clear them so they are resolved again.
+                        caches["seasons"].clear()
+                        caches["grades"].clear()
+                        caches["players"].clear()
                         note(f"match {row['source_match_id']}: {exc}")
                     progress["matches_done"] += 1
 
                     if (m_idx + 1) % 10 == 0:
-                        await db.commit()
                         await _set_progress(session_maker, import_id,
                                             progress=progress)
-                await db.commit()
             progress["players"] = len(caches["players"])
             await _set_progress(session_maker, import_id, progress=progress)
 
