@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../lib/api'
+import CricketStatzImport from '../../components/admin/CricketStatzImport'
 import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import LoadingBar, { ProgressBar } from '../../components/ProgressBar'
 import { useToast } from '../../contexts/ToastContext'
@@ -208,6 +209,11 @@ export default function AdminSync() {
             busy={hardRefreshing || syncing || backfilling || cleaningOpp || !orgId}
           />
         )}
+
+        {/* Bringing a history in from CricketStatz is a sync action like the
+            others, so it lives on this screen rather than a page of its own —
+            it just points at another platform instead of Cricket Australia. */}
+        <CricketStatzImport />
 
         {/* Trigger card */}
         <div className="pb-card p-5 mb-8">

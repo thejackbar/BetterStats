@@ -26,7 +26,7 @@ export const GROUPS = [
     icon: 'plus',
     desc: 'Pull in, upload and hand-enter your match data and records.',
     items: [
-      { to: '/admin/sync', label: 'Data Sync', icon: 'reset', cap: CAP.RUN_SYNC, desc: 'Pull the latest games and stats from Cricket Australia.' },
+      { to: '/admin/sync', label: 'Data Sync', icon: 'reset', cap: CAP.RUN_SYNC, desc: 'Pull the latest games and stats, or bring a history in from CricketStatz.' },
       { to: '/admin/import', label: 'Import Stats', icon: 'sheet', cap: CAP.MANAGE_MANUAL_ENTRIES, desc: 'Load historical stats from a file.' },
       { to: '/admin/upload-scorecard', label: 'Upload Scorecard', icon: 'sheet', cap: CAP.MANAGE_MANUAL_ENTRIES, desc: 'Read an old paper scorecard from a photo.' },
       { to: '/admin/manual-entries', label: 'Manual Entries', icon: 'list', cap: CAP.MANAGE_MANUAL_ENTRIES, desc: "Hand-enter a game we can't sync." },
