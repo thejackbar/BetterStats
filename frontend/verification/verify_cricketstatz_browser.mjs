@@ -48,7 +48,7 @@ const IMPORTS = [{
 // The import's own life cycle: nothing, then running, then complete — so the
 // screen's polling can be observed rather than assumed.
 function makeState() {
-  return { phase: 'none', polls: 0, quiet: 4 }
+  return { phase: 'none', polls: 0, quiet: 4, planning: false }
 }
 
 const routes = (page, calls, state) => page.route('**/api/**', async (route) => {
@@ -105,13 +105,19 @@ const routes = (page, calls, state) => page.route('**/api/**', async (route) => 
         seconds_running: 900,
         stalled: !!state.quiet && state.quiet > 300,
         progress: {
-          phase: running ? 'matches' : 'done',
-          // The reported run exactly: season 10 of 167, with the matches
-          // figure sitting near its own running total.
-          seasons_done: running ? 10 : 167, seasons_total: 167,
-          matches_done: running ? 1227 : 1243, matches_total: running ? 1298 : 1243,
-          scorecards: running ? 1225 : 1190, players: running ? 166 : 604,
+          phase: state.planning ? 'seasons' : (running ? 'matches' : 'done'),
+          // The reported run, but against the real total the first pass finds:
+          // season 10 of the 73 actually played, of 3556 matches.
+          candidates_done: state.planning ? 40 : 167, candidates_total: 167,
+          current_season: '1995-96',
+          seasons_done: running ? 10 : 73, seasons_total: 73,
+          matches_done: running ? 1227 : 3556, matches_total: 3556,
+          scorecards: running ? 1225 : 3500, players: running ? 166 : 604,
           records: running ? 0 : 41,
+          plan: {
+            season_count: 73, match_count: 3556,
+            earliest: 1953, latest: 2025, estimated_minutes: 59, seasons: [],
+          },
           notes: running ? [] : ['match 3082412: no scorecard published'],
         },
       },
@@ -186,20 +192,24 @@ const run = async () => {
 
   ck('a running import says which phase it is in',
      (await page.locator('text=/Bringing your matches across/i').count()) > 0)
-  ck('it reports how many matches are in so far',
-     (await page.locator('text=/1227 matches so far/').count()) > 0)
-  ck('it reports the seasons walked',
-     (await page.locator('text=/Season 10 of 167/').count()) > 0)
+  ck('it reports progress against the real total the first pass found',
+     (await page.locator('text=/1227 of 3556 matches/').count()) > 0)
+  ck('it reports which season it is on, of the ones actually played',
+     (await page.locator('text=/Season 10 of 73/').count()) > 0)
+  ck('it says what the first pass found, so the size of the job is visible',
+     (await page.locator('text=/Found 73 seasons you played, 1953 to 2025/').count()) > 0)
+  ck('and roughly how long it will take',
+     (await page.locator('text=/about 59 minutes/').count()) > 0)
 
-  // The bar has to track the bounded measure. Against the matches figure it
-  // read 94% on season 10 of 167 — a working import that looked stuck.
+  // Against a total that grew as it went, this same run drew 94% on its tenth
+  // season of 167 — a working import that looked finished, then stuck.
   const barPct = await page.evaluate(() => {
     const fills = [...document.querySelectorAll('div[style*="width"]')]
       .filter((d) => /%/.test(d.style.width) && d.style.background)
     return fills.length ? parseFloat(fills[fills.length - 1].style.width) : null
   })
-  ck('the progress bar tracks seasons, not a total that grows with it',
-     barPct !== null && barPct > 3 && barPct < 12, `${barPct}%`)
+  ck('the bar reflects real progress, not a near-full figure from season one',
+     barPct !== null && barPct > 30 && barPct < 40, `${barPct}%`)
   ck('it says it is still going, so a quiet minute does not read as a hang',
      (await page.locator('text=/still going/').count()) > 0)
   ck('a running import can be stopped',
@@ -213,6 +223,30 @@ const run = async () => {
      (await page.locator('text=/Your history is in/').count()) > 0)
   ck('what it could not read is offered without shouting',
      (await page.locator('text=/could not read/').count()) > 0)
+
+  // ── the first pass ────────────────────────────────────────────────────
+  {
+    const firstCalls = []
+    const firstState = { phase: 'running', polls: -50, quiet: 4, planning: true }
+    const first = await ctx.newPage()
+    await routes(first, firstCalls, firstState)
+    await first.goto(`${BASE}/admin/sync`, { waitUntil: 'domcontentloaded' })
+    await first.waitForTimeout(1600)
+    ck('the first pass says it is checking which seasons were played',
+       (await first.locator('text=/Checking which seasons you played/').count()) > 0)
+    ck('and counts the candidates as it goes',
+       (await first.locator('text=/Checking season 40 of 167/').count()) === 1)
+    ck('it does not pretend to a matches figure it has not worked out yet',
+       (await first.locator('text=/of 3556 matches/').count()) === 0)
+    const pct0 = await first.evaluate(() => {
+      const fills = [...document.querySelectorAll('div[style*="width"]')]
+        .filter((d) => /%/.test(d.style.width) && d.style.background)
+      return fills.length ? parseFloat(fills[fills.length - 1].style.width) : null
+    })
+    ck('the first pass draws against the candidates it is working through',
+       pct0 !== null && pct0 > 18 && pct0 < 30, `${pct0}%`)
+    await first.close()
+  }
 
   // ── a run that has stopped responding ─────────────────────────────────
   {

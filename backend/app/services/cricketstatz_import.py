@@ -21,8 +21,10 @@ Three rules this follows, each of them the codebase's own:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
+import time
 import uuid
 from datetime import date, datetime
 from typing import Optional
@@ -636,6 +638,66 @@ async def inspect_club(url: str) -> dict:
     }
 
 
+# ── working out what there is to pull, before pulling it ─────────────────────
+
+async def plan_seasons(club_id: str, seasons: list[dict], on_progress=None
+                       ) -> list[tuple[dict, list[dict]]]:
+    """Find which of the site's candidate seasons this club actually played.
+
+    CricketStatz offers every season back to 1860 whatever the club, so the
+    dropdown is a list of candidates. Every one is probed — a club's history
+    can have gaps, and stopping at the first run of empty years would silently
+    truncate it — but the probes run concurrently under the client's own
+    semaphore, so 167 candidates cost well under a minute rather than two.
+
+    The season's match rows are kept, so the import that follows re-reads
+    nothing: the plan IS the work list, and knowing the real total up front is
+    what lets the progress bar mean something.
+    """
+    done = 0
+    found: list[tuple[dict, list[dict]]] = []
+
+    async def probe(season: dict) -> None:
+        nonlocal done
+        try:
+            rows = await client.fetch_results(club_id, season["value"])
+        except CricketStatzError:
+            raise
+        except Exception as exc:
+            logger.warning("CricketStatz season %s failed: %s", season["value"], exc)
+            rows = []
+        done += 1
+        if rows:
+            found.append((season, rows))
+        if on_progress:
+            on_progress(done, len(seasons), len(found),
+                        sum(len(r) for _, r in found))
+
+    await asyncio.gather(*(probe(s) for s in seasons))
+    # Oldest first, so a club watching it sees its history fill forwards.
+    found.sort(key=lambda pair: season_year(pair[0]["label"], pair[0]["value"]) or 0)
+    return found
+
+
+def plan_summary(found: list[tuple[dict, list[dict]]]) -> dict:
+    """What the plan amounts to, for the screen and the record."""
+    years = [season_year(s["label"], s["value"]) for s, _ in found]
+    years = [y for y in years if y]
+    total = sum(len(rows) for _, rows in found)
+    return {
+        "seasons": [
+            {"label": s["label"], "value": s["value"], "matches": len(rows)}
+            for s, rows in found
+        ],
+        "season_count": len(found),
+        "match_count": total,
+        "earliest": min(years) if years else None,
+        "latest": max(years) if years else None,
+        # About a second a match, measured against the live site.
+        "estimated_minutes": max(1, round(total * 1.0 / 60)),
+    }
+
+
 # ── the whole import ─────────────────────────────────────────────────────────
 
 async def _set_progress(session_maker, import_id, **fields) -> None:
@@ -671,6 +733,7 @@ async def run_import(session_maker, org_id, import_id, club_id: str) -> None:
         "phase": "starting", "seasons_done": 0, "seasons_total": 0,
         "matches_done": 0, "matches_total": 0, "scorecards": 0,
         "records": 0, "players": 0, "notes": [],
+        "candidates_done": 0, "candidates_total": 0, "current_season": None,
     }
 
     def note(message: str) -> None:
@@ -704,23 +767,42 @@ async def run_import(session_maker, org_id, import_id, club_id: str) -> None:
             seasons = page["seasons"]
 
         progress["seasons_total"] = len(seasons)
+        progress["candidates_total"] = len(seasons)
         await _set_progress(session_maker, import_id, progress=progress)
+
+        # ── first pass: what is there, and where ────────────────────────────
+        # Probing every candidate season first costs under a minute and buys
+        # the real total. Discovering it as we went meant `matches_total` grew
+        # with `matches_done`, so a bar drawn against it sat near full from the
+        # first season and told a club nothing.
+        last_beat = 0.0
+
+        def planning(done, total, found, matches):
+            nonlocal last_beat
+            progress["candidates_done"] = done
+            progress["seasons_total"] = found
+            progress["matches_total"] = matches
+            now = time.monotonic()
+            if now - last_beat > 1.0 or done == total:
+                last_beat = now
+                asyncio.create_task(_set_progress(
+                    session_maker, import_id, progress=dict(progress)))
+
+        plan = await plan_seasons(club_id, seasons, planning)
+        summary = plan_summary(plan)
+        progress["seasons_total"] = summary["season_count"]
+        progress["matches_total"] = summary["match_count"]
+        progress["plan"] = summary
+        await _set_progress(session_maker, import_id, phase="planned",
+                            progress=progress, stats=summary)
 
         # ── matches, season by season ───────────────────────────────────────
         progress["phase"] = "matches"
         await _set_progress(session_maker, import_id, phase="matches",
                             progress=progress)
-        for s_idx, season in enumerate(seasons):
-            try:
-                rows = await client.fetch_results(club_id, season["value"])
-            except CricketStatzError:
-                raise
-            except Exception as exc:
-                note(f"{season['label']}: could not load ({exc})")
-                rows = []
-
+        for s_idx, (season, rows) in enumerate(plan):
             progress["seasons_done"] = s_idx + 1
-            progress["matches_total"] += len(rows)
+            progress["current_season"] = season["label"]
             await _set_progress(session_maker, import_id, progress=progress)
 
             if not rows:

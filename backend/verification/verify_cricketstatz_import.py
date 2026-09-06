@@ -285,6 +285,7 @@ class StubSite:
 
     def __init__(self):
         self.scorecard_calls = 0
+        self.season_probes = 0
         self.cards = {
             "3177313": fixture("card_modern.txt"),
             "3082300": fixture("card_1995.txt"),
@@ -326,6 +327,7 @@ class StubSite:
     async def fetch_results(self, club_id, season=None):
         if season is None:
             return list(self.rows)
+        self.season_probes += 1
         if season == "2025S":
             return [self.rows[0], self.rows[1]]
         if season == "1995S":
@@ -566,6 +568,48 @@ async def verify_import(engine, session_maker) -> tuple:
         importer.client = real_client
 
 
+async def verify_planning() -> None:
+    print("\nThe first pass — what there is, and where")
+
+    page = parse_club_page(fixture("club_page.html"))
+    stub = StubSite()
+    real = importer.client
+    importer.client = stub
+    try:
+        plan = await importer.plan_seasons("93931", page["seasons"])
+    finally:
+        importer.client = real
+
+    played = {s["value"] for s, _ in plan}
+    check("the seasons the club actually played are found",
+          played == {"2025S", "1995S", "1985S"}, str(played))
+    check("the 160-odd candidate seasons with nothing in them are left out",
+          len(plan) == 3 and len(page["seasons"]) > 100,
+          f"{len(plan)} of {len(page['seasons'])}")
+    check("a season's matches are kept, so the import re-reads nothing",
+          all(rows for _, rows in plan))
+    check("the plan runs oldest first, so a history fills forwards",
+          [s["value"] for s, _ in plan] == ["1985S", "1995S", "2025S"],
+          str([s["value"] for s, _ in plan]))
+
+    summary = importer.plan_summary(plan)
+    check("the plan names the real total up front",
+          summary["match_count"] == 4 and summary["season_count"] == 3,
+          str((summary["match_count"], summary["season_count"])))
+    check("and the club's real span", (summary["earliest"], summary["latest"])
+          == (1985, 2025), str((summary["earliest"], summary["latest"])))
+    check("with an estimate of how long it will take",
+          summary["estimated_minutes"] >= 1)
+    check("every season in the plan carries its own match count",
+          all("matches" in row for row in summary["seasons"]))
+
+    # Every candidate is probed. A club's history can have gaps, so stopping at
+    # the first run of empty years would silently truncate it.
+    check("every candidate season is probed, not just a guessed range",
+          stub.season_probes == len(page["seasons"]),
+          f"{stub.season_probes} of {len(page['seasons'])}")
+
+
 async def verify_heartbeat(session_maker, org_id) -> None:
     print("\nHeartbeat and a run that stops responding")
 
@@ -675,6 +719,7 @@ async def main() -> int:
 
     parsed = verify_parsers()
     verify_team_matcher()
+    await verify_planning()
     verify_partnerships(parsed["modern"])
 
     engine = create_async_engine(DB_URL, echo=False)

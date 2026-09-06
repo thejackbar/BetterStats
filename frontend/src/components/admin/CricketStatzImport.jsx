@@ -11,7 +11,8 @@ const HISTORY_MIN_W = 660
 
 const PHASES = {
   starting: 'Getting started',
-  seasons: 'Working out which seasons you played',
+  seasons: 'Checking which seasons you played',
+  planned: 'Ready to pull',
   matches: 'Bringing your matches across',
   records: 'Copying your record book',
   done: 'Finished',
@@ -130,6 +131,11 @@ export default function CricketStatzImport() {
   const p = status?.import?.progress || {}
   const done = status?.import?.status === 'complete'
   const stalled = !!status?.import?.stalled
+  // The first pass reads every candidate season to find the real total, so
+  // until it lands there is no meaningful matches figure to draw against.
+  const planning = running && ['starting', 'seasons'].includes(
+    p.phase || status?.import?.phase)
+  const plan = p.plan
   const since = status?.import?.seconds_since_progress
   // The one thing that separates a long import from a dead one. A full
   // history is thousands of matches, so the same figures sitting there for a
@@ -236,12 +242,18 @@ export default function CricketStatzImport() {
 
                 {running && (
                   <>
-                    <Bar value={pct(p.seasons_done, p.seasons_total)} />
+                    <Bar value={planning
+                      ? pct(p.candidates_done, p.candidates_total)
+                      : pct(p.matches_done, p.matches_total)} />
                     <Caption>
-                      {p.seasons_total
-                        ? `Season ${p.seasons_done} of ${p.seasons_total}`
-                        : 'Working out your seasons'}
-                      {p.matches_total ? ` · ${p.matches_done} matches so far` : ''}
+                      {planning
+                        ? `Checking season ${p.candidates_done} of ${p.candidates_total}`
+                          + (p.seasons_total ? ` · ${p.seasons_total} played so far` : '')
+                        : `Season ${p.seasons_done} of ${p.seasons_total}`
+                          + (p.current_season ? ` (${p.current_season})` : '')}
+                      {!planning && p.matches_total
+                        ? ` · ${p.matches_done} of ${p.matches_total} matches`
+                        : ''}
                       {heartbeat}
                     </Caption>
                     {stalled && (
@@ -257,6 +269,14 @@ export default function CricketStatzImport() {
                   </>
                 )}
 
+                {plan && (
+                  <Caption>
+                    {`Found ${plan.season_count} seasons you played`}
+                    {plan.earliest ? `, ${plan.earliest} to ${plan.latest}` : ''}
+                    {` · ${plan.match_count} matches`}
+                    {running ? ` · about ${plan.estimated_minutes} minutes` : ''}
+                  </Caption>
+                )}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   <StatCard label="Matches" value={p.matches_done || 0} />
                   <StatCard label="Scorecards" value={p.scorecards || 0} />

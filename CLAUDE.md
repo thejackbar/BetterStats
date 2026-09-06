@@ -7186,6 +7186,44 @@ and BetterCricket pulls ALL of its data across, the record book included.
   `unwrap` raises a typed error for it so "their subscription ended" is not
   read as "this club has no matches". Their FAQ also says the database is
   deleted 12 months after expiry.
+### Find out what there is before pulling it (v9.67.2)
+
+Asked while watching a live run: "it says season 10 of 167 but I know there
+are 40-50 seasons for Cockburn, so why is it parsing all 167" — and is a first
+pass that works out where the data is, then plans the pull, worth building.
+
+- **IT IS, AND THE REASON IS THE PROGRESS BAR, NOT THE SAVING.** The 167
+  candidate probes are ~1 minute of a ~60 minute run. What discovering
+  seasons as it went really cost was the DENOMINATOR: `matches_total` only
+  counted the seasons walked so far, so it climbed with `matches_done` and any
+  bar drawn against it sat near full from the first season. A first pass gives
+  the real total up front, which is what makes every figure after it mean
+  something.
+- **`plan_seasons` PROBES EVERY CANDIDATE, CONCURRENTLY.** 167 candidates in
+  **56 seconds** against the live site, under the client's own semaphore. It
+  keeps each season's match rows, so the import that follows re-reads nothing —
+  the plan IS the work list.
+- **EVERY CANDIDATE IS PROBED, and the temptation not to was measured and
+  rejected.** Bounding the range by the dates on the all-time record boards
+  looked clean and cut 167 to 73 — but those boards are top-100 lists, so a
+  quiet early season need never appear on one. Checked against the live club:
+  the boards span **1954-2026** while the club's real earliest season is
+  **1953**. It would have silently dropped a season, which is the one thing
+  this must not do. A history can have gaps, so stopping at a run of empty
+  years is out for the same reason.
+- **WHAT IT FOUND FOR THE REPORTED CLUB**: 73 seasons actually played,
+  1953-2025, 3,556 matches, ~59 minutes — with 94 candidate seasons skipped as
+  empty. The club sees that before committing, and the bar then runs against
+  3,556 rather than a figure that grows underneath it.
+- **THE PLAN IS ORDERED OLDEST FIRST**, so a club watching sees its history
+  fill forwards rather than arriving backwards.
+- **Verified** (the suite is 113 checks: the played seasons found and the empty
+  candidates left out, the rows kept, the oldest-first order, the summary's
+  total, span and estimate, and — structurally — that every candidate is
+  probed rather than a guessed range) and **driven in Chromium** (40: the first
+  pass counting candidates and NOT pretending to a matches figure it has not
+  worked out yet, then the bar against the real total, and the plan's own line).
+
 ### A working import that read as a hung one (migration 286, v9.67.1)
 
 Reported off a live run with a screenshot: Cockburn on **season 10 of 167**, a
