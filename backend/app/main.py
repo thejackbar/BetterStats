@@ -4282,6 +4282,14 @@ async def lifespan(app: FastAPI):
         for _stmt in _CRICKETSTATZ_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 287: configurable club notifications — the switches a club
+        # sets, each admin's own opt-out, and the record of what was raised and
+        # who was told. Same one-copy rule — this list and alembic's 287 both
+        # run services/notification_ddl.STATEMENTS.
+        from app.services.notification_ddl import STATEMENTS as _NOTIFICATION_DDL
+        for _stmt in _NOTIFICATION_DDL:
+            await conn.execute(text(_stmt))
+
     # Migration 178: Member self-service portal, Stripe Connect fee payments,
     # reminder automation. See services/member_portal_auth.py,
     # services/stripe_connect_client.py, services/member_reminders.py.

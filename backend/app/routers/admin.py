@@ -9,6 +9,8 @@ import json
 import logging
 from difflib import SequenceMatcher
 
+from app.services.session_safety import rollback_keeping
+
 log = logging.getLogger(__name__)
 
 from app.services.grassroots_scores_client import get_match_scorecard
@@ -1850,23 +1852,11 @@ async def _org_logo_for_team(team_name: str, db: AsyncSession) -> str | None:
 async def _rollback_keeping(db: AsyncSession, *instances) -> None:
     """Roll back a best-effort read without stranding the caller's ORM objects.
 
-    ``rollback()`` expires everything the session has loaded, whatever
-    ``expire_on_commit`` says. So a swallowed failure here leaves ``club`` — the
-    instance ``get_current_club`` loaded on this same session — expired, and the
-    next plain attribute read on it two hundred lines below (``club.id``, in
-    ``_org_for_team``) is a lazy refresh. A lazy refresh inside an async request
-    raises ``greenlet_spawn has not been called``, which is then what the caller
-    reports instead of the read that actually failed. Refreshing here is one
-    awaited query and hands back an object the rest of the request can read.
+    Thin alias for the one definition in ``services/session_safety.py`` — the
+    rule is the same wherever a router swallows a database error, so it lives in
+    one place rather than as a copy per router.
     """
-    await db.rollback()
-    for inst in instances:
-        if inst is None:
-            continue
-        try:
-            await db.refresh(inst)
-        except Exception:
-            log.exception("post-rollback refresh failed for %r", type(inst).__name__)
+    await rollback_keeping(db, *instances)
 
 
 def _team_id_from_inn(inn: dict) -> str | None:
