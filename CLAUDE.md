@@ -7469,7 +7469,7 @@ back to 1953/54.
   appears exactly once failed against correct output. It asserts the phrase is
   present and that the old flat `Earliest` label is gone.
 
-### A SEASON CHANGES OVER AS ITS OWN MATCHES LAND (v9.68.5, Sep 2026)
+### A SEASON CHANGES OVER AS ITS OWN MATCHES LAND (v9.69.2, Sep 2026)
 
 Reported off Keon Park's Records with the import still going: duplicate high
 scores again, on **season 57 of 73**, with the count "past 1900 scorecards and
@@ -7558,7 +7558,7 @@ PlayHQ data."
   at a season with neither source in it for as long as the import took — and a
   run that died halfway would leave it that way for good. **This shipped as one
   write at the END of the whole run, which is the other half of the same
-  mistake and was reported the same week — see v9.68.5 below.** It is per
+  mistake and was reported the same week — see v9.69.2 above.** It is per
   SEASON now, as each one's own matches land.
 - **THERE IS DELIBERATELY NO OPTION THAT KEEPS BOTH.** The earlier
   `include_synced_years` boolean had one, and holding two copies IS the double
