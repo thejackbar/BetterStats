@@ -26,6 +26,11 @@ STATEMENTS: tuple[str, ...] = (
     # views' own test is an index lookup rather than a scan.
     "CREATE INDEX IF NOT EXISTS ix_seasons_stats_source "
     "ON seasons (organisation_id) WHERE stats_source IS NOT NULL",
+    # EVERY COLUMN THE LIVE VIEW HAS HAS TO BE HERE. `CREATE OR REPLACE VIEW`
+    # cannot drop one, so a definition copied from an older migration fails
+    # outright on a real database ("cannot drop columns from view") — which is
+    # what a deploy hit when this was written from 169's shape and lost
+    # `status`, the column migration 266 added. 266's is the current shape.
     """CREATE OR REPLACE VIEW v_effective_games AS
         SELECT
             g.id, g.grade_id, g.played_at, g.home_team, g.away_team,
@@ -35,7 +40,8 @@ STATEMENTS: tuple[str, ...] = (
             'api'::text AS source,
             g.home_org_id, g.away_org_id,
             gr.season_id AS season_id,
-            s.organisation_id AS organisation_id
+            s.organisation_id AS organisation_id,
+            g.status AS status
         FROM games g
         LEFT JOIN grades gr ON gr.id = g.grade_id
         LEFT JOIN seasons s ON s.id = gr.season_id
@@ -59,7 +65,8 @@ STATEMENTS: tuple[str, ...] = (
             NULL::uuid AS home_org_id,
             NULL::uuid AS away_org_id,
             mg.season_id AS season_id,
-            mg.organisation_id AS organisation_id
+            mg.organisation_id AS organisation_id,
+            NULL::text AS status
         FROM manual_games mg""",
     """CREATE OR REPLACE VIEW v_effective_player_season_stats AS
     SELECT
@@ -375,7 +382,8 @@ DOWNGRADE: tuple[str, ...] = (
             'api'::text AS source,
             g.home_org_id, g.away_org_id,
             gr.season_id AS season_id,
-            s.organisation_id AS organisation_id
+            s.organisation_id AS organisation_id,
+            g.status AS status
         FROM games g
         LEFT JOIN grades gr ON gr.id = g.grade_id
         LEFT JOIN seasons s ON s.id = gr.season_id
@@ -393,7 +401,8 @@ DOWNGRADE: tuple[str, ...] = (
             NULL::uuid AS home_org_id,
             NULL::uuid AS away_org_id,
             mg.season_id AS season_id,
-            mg.organisation_id AS organisation_id
+            mg.organisation_id AS organisation_id,
+            NULL::text AS status
         FROM manual_games mg""",
     """CREATE OR REPLACE VIEW v_effective_player_season_stats AS
     SELECT

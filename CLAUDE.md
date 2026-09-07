@@ -7372,6 +7372,36 @@ PlayHQ data."
   the app is unaffected, but the divergence is real and is worth a look on its
   own.
 
+#### A view definition copied from an older migration cannot be applied (v9.68.4.1)
+
+Found by a deploy, not by the suite: 287 crash-looped the backend on
+`InvalidTableDefinition: cannot drop columns from view`, so the setting never
+reached a single club.
+
+- **`CREATE OR REPLACE VIEW` CANNOT DROP A COLUMN, so a replacement has to
+  carry every column the live view already has.** 287's `v_effective_games`
+  was written from migration 169's shape and lost `status` — the column
+  migration 266 added — in BOTH the upgrade and the downgrade, so the
+  downgrade would have failed the same way. **266's is the current shape**;
+  the comment above the statement says so where somebody would otherwise
+  reach for 169's again. `v_effective_player_season_stats` was diffed against
+  266's own definition and is identical apart from the added predicate.
+- **THE SUITE COULD NOT HAVE CAUGHT IT, AND THAT IS THE REAL FIX.**
+  `verify_schema` DROPS `v_effective_games` before running the superseded
+  DDL (legitimately — the `raw_payload` type change cannot go through the
+  view), so `CREATE OR REPLACE` was always creating the view FRESH and there
+  was never a column to drop. It rebuilds the view in **266's own definition,
+  read out of the migration file rather than retyped**, before 287 replaces
+  it — so the replace is a real replace of what production holds — and
+  asserts the view still carries `status` afterwards.
+- **Re-verified against a real Postgres** (194 checks) **with a control run**:
+  with the column removed again the suite dies on exactly the deploy's
+  `cannot drop columns from view`.
+- **A HARNESS THAT BUILDS A VIEW FROM SCRATCH IS NOT TESTING A REPLACE.**
+  Anywhere a suite drops an object the migration is meant to REPLACE, it has
+  to put the live shape back first, or the one failure mode that matters
+  cannot occur.
+
 ### THE SAME CRICKET FROM TWO SOURCES COUNTS IT TWICE (v9.68.3, Sep 2026)
 
 Reported off Keon Park's Records mid-import: the Highest Individual Scores

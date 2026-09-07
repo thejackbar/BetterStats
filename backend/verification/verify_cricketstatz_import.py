@@ -50,6 +50,29 @@ from app.services.cricketstatz_parse import (  # noqa: E402
 )
 from app.services.cricketstatz_awards import classify_note, season_label
 
+MIGRATIONS = Path(__file__).resolve().parent.parent / "alembic" / "versions"
+
+
+def _migration_sql(filename: str, const: str) -> str:
+    """Read a view definition out of the real migration rather than retyping it.
+
+    Migration 287 REPLACES v_effective_games, so the harness has to build the
+    live shape first — 266's, which carries `status`. Creating the view fresh
+    from 287's own DDL cannot fail the way production does: `CREATE OR REPLACE
+    VIEW` refuses to drop a column, and there is no column to drop when the
+    view did not exist a moment ago.
+    """
+    import re
+
+    body = (MIGRATIONS / filename).read_text()
+    m = re.search(const + r' = """(.*?)"""', body, re.S)
+    assert m, f"{const} not found in {filename}"
+    return m.group(1)
+
+
+EFFECTIVE_GAMES_266 = _migration_sql(
+    "266_game_status_unplayed_matches.py", "EFFECTIVE_GAMES_WITH_STATUS")
+
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "cricketstatz"
 DB_URL = os.environ.get(
     "DATABASE_URL",
@@ -315,6 +338,11 @@ async def verify_schema(engine) -> None:
             await conn.execute(text(
                 "ALTER TABLE games ALTER COLUMN raw_payload TYPE jsonb "
                 "USING raw_payload::text::jsonb"))
+            # Rebuilt in migration 266's own shape BEFORE 287 replaces it, so
+            # the replace is a real replace of what production holds. Without
+            # this the view is created fresh from 287's definition and a
+            # dropped column — the error a live deploy hit — cannot show.
+            await conn.execute(text(EFFECTIVE_GAMES_266))
             # Migration 287 rides here too: the same idempotent-three-times
             # rule, and the views it replaces have to exist before the overlap
             # checks below can read them.
@@ -327,6 +355,14 @@ async def verify_schema(engine) -> None:
                AND table_name LIKE 'cricketstatz%'
         """))).all()}
         check("applied three times without error", True)
+        # CREATE OR REPLACE VIEW cannot drop a column, so a definition written
+        # from an older migration's shape fails outright on a real database.
+        gcols = {r[0] for r in (await conn.execute(text("""
+            SELECT column_name FROM information_schema.columns
+             WHERE table_name = 'v_effective_games'
+        """))).all()}
+        check("the games view keeps every column it had", "status" in gcols,
+              str(sorted(gcols)))
         check("both tables exist",
               tables == {"cricketstatz_imports", "cricketstatz_records"}, str(tables))
         cols = {r[0] for r in (await conn.execute(text("""
