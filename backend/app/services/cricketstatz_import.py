@@ -1405,6 +1405,28 @@ async def undo_import(db: AsyncSession, org_id, import_id) -> dict:
     await db.execute(text(
         "UPDATE cricketstatz_imports SET undone_at = NOW() WHERE id = :imp"),
         {"imp": str(import_id)})
+    # A SEASON LEFT WITH NEITHER SOURCE IS THE ONE STATE THIS MUST NOT LEAVE.
+    # Making CricketStatz the record for a season only ever HIDES the synced
+    # copy (migration 287) — so undoing the import that replaced it, without
+    # taking the marker off, removes the CricketStatz matches AND leaves the
+    # club's own Cricket Australia data still hidden. The season then reads
+    # empty on every screen with nothing to say why.
+    #
+    # Cleared per season rather than club-wide: a season still holding an
+    # imported match from ANOTHER import is still genuinely read from
+    # CricketStatz and keeps its marker. Only a season this undo has just
+    # emptied goes back to the sync.
+    handed_back = (await db.execute(text("""
+        UPDATE seasons s SET stats_source = NULL
+         WHERE s.organisation_id = :org
+           AND s.stats_source = 'cricketstatz'
+           AND NOT EXISTS (
+                 SELECT 1 FROM manual_games mg
+                  WHERE mg.season_id = s.id
+                    AND mg.cricketstatz_import_id IS NOT NULL)
+        RETURNING s.year
+    """), {"org": str(org_id)})).scalars().all()
     await db.commit()
     return {"matches_removed": len(removed), "records_removed": len(records),
-            "awards_removed": len(awards)}
+            "awards_removed": len(awards),
+            "seasons_handed_back": sorted(y for y in handed_back if y)}

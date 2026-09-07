@@ -7525,6 +7525,33 @@ we're way over what I expect".
   seasons are marked by the old end-of-run write. The board corrects itself the
   moment the run completes.
 
+### AND UNDOING ONE HAD TO HAND THOSE SEASONS BACK (v9.69.3, Sep 2026)
+
+Found while checking a live club's figures after the fix above, not from a
+report — and it is the same "neither source" failure reached from the other
+end.
+
+- **UNDO REMOVED THE IMPORTED MATCHES AND LEFT THE MARKER STANDING.** Making
+  CricketStatz the record only ever HIDES the synced copy (migration 287), so
+  an undo that deletes the imported matches without clearing
+  `seasons.stats_source` leaves the season reading from NEITHER — empty on
+  every screen, with nothing to say why, and the club's own Cricket Australia
+  data sitting there untouched and invisible. The recovery was a Super Admin
+  pressing "hand back", which nobody would know to do.
+- **CLEARED PER SEASON, NEVER CLUB-WIDE.** A season still holding an imported
+  match from ANOTHER import is still genuinely read from CricketStatz and keeps
+  its marker; only a season this undo has just emptied goes back to the sync.
+  `NOT EXISTS (... cricketstatz_import_id IS NOT NULL)` is the whole test.
+- **THE UNDO SAYS WHICH SEASONS WENT BACK** (`seasons_handed_back`), and the
+  confirm says it will happen before it does — a season quietly changing source
+  is exactly the kind of move that reads as data going missing.
+- **Verified against a real Postgres** (the suite is 205 checks now: two
+  superseded seasons with their synced games hidden, undo handing back only the
+  one it emptied, the synced games counted again, the count reported, and the
+  season another import still covers keeping CricketStatz as its record) **with
+  a control run**: with the clear removed, all 4 fail — the club's synced games
+  read as 0 with the imported ones gone too.
+
 ### AND WHICH SOURCE IS THE RECORD IS THE CLUB'S CALL (migration 287, v9.68.4)
 
 Asked for straight after: "CricketStatz should overwrite PlayHQ in the same way

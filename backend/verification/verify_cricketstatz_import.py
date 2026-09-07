@@ -1301,6 +1301,78 @@ async def verify_synced_overlap(engine, session_maker) -> None:
     check("and a season the run never reached is left to the sync",
           2025 not in part_marked, str(part_marked))
 
+    # UNDOING AN IMPORT THAT REPLACED A SEASON MUST HAND IT BACK. Making
+    # CricketStatz the record only HIDES the synced copy, so an undo that
+    # removes the imported matches and leaves the marker standing leaves the
+    # season reading from NEITHER source — the one state migration 287 exists
+    # to prevent, reached from the other end.
+    undo_org = uuid.uuid4()
+    imp_a, imp_b = uuid.uuid4(), uuid.uuid4()
+    async with session_maker() as db:
+        await db.execute(text("""
+            INSERT INTO organisations (id, name, slug, is_active)
+            VALUES (:o, 'Undo Test CC', 'undo-test-cc', true)
+        """), {"o": str(undo_org)})
+        for imp in (imp_a, imp_b):
+            await db.execute(text("""
+                INSERT INTO cricketstatz_imports
+                    (id, organisation_id, club_id, source_url, status, phase)
+                VALUES (:id, :o, '93931', 'u', 'complete', 'done')
+            """), {"id": str(imp), "o": str(undo_org)})
+        # 1995 is this import's alone; 2025 also holds a second import's match,
+        # so it is still genuinely read from CricketStatz and keeps its marker.
+        held = {}
+        for year, imps in ((1995, (imp_a,)), (2025, (imp_a, imp_b))):
+            sid, grid = uuid.uuid4(), uuid.uuid4()
+            held[year] = sid
+            await db.execute(text("""
+                INSERT INTO seasons (id, organisation_id, name, year, stats_source)
+                VALUES (:s, :o, :n, :y, 'cricketstatz')
+            """), {"s": str(sid), "o": str(undo_org),
+                   "n": f"Summer {year}/{str(year+1)[2:]}", "y": year})
+            await db.execute(text("""
+                INSERT INTO grades (id, season_id, name) VALUES (:g, :s, 'A-GRADE')
+            """), {"g": str(grid), "s": str(sid)})
+            await db.execute(text("""
+                INSERT INTO games (id, grade_id, played_at, home_team, away_team)
+                VALUES (:i, :g, CAST(:d AS date), 'Undo Test CC', 'Panton Hill')
+            """), {"i": str(uuid.uuid4()), "g": str(grid), "d": date(year, 11, 5)})
+            for imp in imps:
+                await db.execute(text("""
+                    INSERT INTO manual_games
+                        (id, organisation_id, season_id, played_at, opposition,
+                         cricketstatz_import_id)
+                    VALUES (:i, :o, :s, CAST(:d AS date), 'Panton Hill', :imp)
+                """), {"i": str(uuid.uuid4()), "o": str(undo_org), "s": str(sid),
+                       "d": date(year, 11, 5), "imp": str(imp)})
+        await db.commit()
+
+    async with session_maker() as db:
+        hidden = (await db.execute(text("""
+            SELECT COUNT(*) FROM v_effective_games
+             WHERE organisation_id = :o AND source = 'api'
+        """), {"o": str(undo_org)})).scalar()
+    check("both replaced seasons start with their synced games hidden",
+          hidden == 0, str(hidden))
+
+    async with session_maker() as db:
+        undone = await importer.undo_import(db, undo_org, imp_a)
+    async with session_maker() as db:
+        still_marked = await importer.superseded_years(db, undo_org)
+        counted = (await db.execute(text("""
+            SELECT s.year FROM v_effective_games g
+              JOIN seasons s ON s.id = g.season_id
+             WHERE g.organisation_id = :o AND g.source = 'api'
+        """), {"o": str(undo_org)})).scalars().all()
+    check("undoing hands back a season it has emptied",
+          1995 not in still_marked, str(still_marked))
+    check("so the club's own synced games are counted again",
+          list(counted) == [1995], str(counted))
+    check("and the undo says which seasons went back to the sync",
+          undone.get("seasons_handed_back") == [1995], str(undone))
+    check("a season another import still covers keeps CricketStatz as its record",
+          still_marked == [2025], str(still_marked))
+
 
 async def verify_undo(session_maker, org_id, import_id, player_count) -> None:
     print("\nUndo")

@@ -141,13 +141,20 @@ export default function CricketStatzImport() {
     if (!window.confirm(
       'Remove every match and record this import brought across?\n\n'
       + 'Players and seasons are kept — only the imported matches and record '
-      + 'boards go.')) return
+      + 'boards go. Any season this import was the record for goes back to '
+      + 'your Cricket Australia sync.')) return
     setUndoing(id)
     try {
       const r = await api.csUndo(id)
+      const back = r.seasons_handed_back || []
       toast?.success?.(
         `Removed ${r.matches_removed} matches, ${r.records_removed} record `
-        + `boards and ${r.awards_removed || 0} honours.`)
+        + `boards and ${r.awards_removed || 0} honours.`
+        // A season this import was the record for is now back on the sync —
+        // say so, or the club is left wondering where those matches went.
+        + (back.length
+          ? ` ${back.length} season(s) went back to your Cricket Australia sync.`
+          : ''))
       await loadStatus(); await loadRest()
     } catch (e) {
       toast?.error?.(e?.detail || 'Could not undo that import.')
