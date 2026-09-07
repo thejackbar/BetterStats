@@ -107,7 +107,8 @@ const routes = (page, calls, state) => page.route('**/api/**', async (route) => 
         seconds_running: 900,
         stalled: !!state.quiet && state.quiet > 300,
         progress: {
-          phase: state.planning ? 'seasons' : (running ? 'matches' : 'done'),
+          phase: state.reading ? 'notes'
+            : state.planning ? 'seasons' : (running ? 'matches' : 'done'),
           // The reported run, but against the real total the first pass finds:
           // season 10 of the 73 actually played, of 3556 matches.
           candidates_done: state.planning ? 40 : 167, candidates_total: 167,
@@ -116,6 +117,8 @@ const routes = (page, calls, state) => page.route('**/api/**', async (route) => 
           matches_done: running ? 1227 : 3556, matches_total: 3556,
           scorecards: running ? 1225 : 3500, players: running ? 166 : 604,
           records: running ? 0 : 41,
+          notes_done: state.reading ? 120 : 0, notes_total: 604,
+          awards: state.reading ? 88 : (running ? 0 : 141),
           plan: {
             season_count: 73, match_count: 3556,
             earliest: 1953, latest: 2025, estimated_minutes: 59, seasons: [],
@@ -237,6 +240,12 @@ const run = async () => {
      (await page.locator('text=/Your history is in/').count()) > 0)
   ck('what it could not read is offered without shouting',
      (await page.locator('text=/could not read/').count()) > 0)
+  ck('the honour board it read out of the notes is counted',
+     (await page.evaluate(() => {
+       const card = [...document.querySelectorAll('*')].find(
+         (el) => el.children.length === 0 && el.textContent.trim() === 'Honours')
+       return card ? (card.parentElement?.textContent || '') : ''
+     })).includes('141'))
 
   // ── the first pass ────────────────────────────────────────────────────
   {
@@ -260,6 +269,34 @@ const run = async () => {
     ck('the first pass draws against the candidates it is working through',
        pct0 !== null && pct0 > 18 && pct0 < 30, `${pct0}%`)
     await first.close()
+  }
+
+  // ── the honour board pass ─────────────────────────────────────────────
+  {
+    const notesCalls = []
+    const notesState = { phase: 'running', polls: -50, quiet: 4, reading: true }
+    const notes = await ctx.newPage()
+    await routes(notes, notesCalls, notesState)
+    await notes.goto(`${BASE}/admin/sync`, { waitUntil: 'domcontentloaded' })
+    await notes.waitForTimeout(1600)
+    ck('the honour-board pass says what it is doing',
+       (await notes.locator('text=/Reading your honour board/').count()) > 0)
+    ck('and counts players rather than matches',
+       (await notes.locator('text=/Player 120 of 604/').count()) === 1)
+    ck('naming what it has found',
+       (await notes.locator('text=/88 honours found/').count()) === 1)
+    ck('it does not report a match figure it is no longer working through',
+       (await notes.locator('text=/of 3556 matches/').count()) === 0)
+    const pctNotes = await notes.evaluate(() => {
+      const fills = [...document.querySelectorAll('div[style*="width"]')]
+        .filter((d) => /%/.test(d.style.width) && d.style.background)
+      return fills.length ? parseFloat(fills[fills.length - 1].style.width) : null
+    })
+    // 120 of 604 players, not 1227 of 3556 matches — a bar left on the match
+    // total would sit near 34% and read as though nothing were happening.
+    ck('the bar is drawn against the players it is reading',
+       pctNotes !== null && pctNotes > 15 && pctNotes < 25, `${pctNotes}%`)
+    await notes.close()
   }
 
   // ── a run that has stopped responding ─────────────────────────────────

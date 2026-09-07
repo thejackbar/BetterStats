@@ -45,6 +45,7 @@ from app.models.db import (
     Season,
 )
 from app.services import cricketstatz_client as client
+from app.services.cricketstatz_awards import classify_note
 from app.services.import_ingest import match_players
 from app.services.grade_labels import suggest_categories, suggest_category
 from app.services.cricketstatz_parse import RECORD_REPORTS, CricketStatzError
@@ -636,6 +637,188 @@ async def import_records(db: AsyncSession, org_id, import_id, club_id: str,
     return saved
 
 
+
+# ── the honour board, out of the players' own notes ──────────────────────────
+
+async def import_notes(db: AsyncSession, org_id, import_id, club_id: str,
+                       on_progress=None, note=None) -> dict:
+    """Read each player's CricketStatz Notes and file what they say as awards.
+
+    A club that has kept its notes properly has written its honour board there
+    — life membership, first-grade caps, trophies, captaincies. Only lines the
+    classifier RECOGNISES become achievements: the same block routinely carries
+    plain biography ("COLLINGWOOD FC (313 Games)"), and putting a football
+    career on a cricket club's honour board is worse than reading nothing.
+
+    Every achievement created carries the import's own id as its
+    `import_batch_id`, so undoing the import removes them and the club's Awards
+    screen lists the batch alongside its own CSV imports.
+    """
+    players = (await db.execute(text("""
+        SELECT id, COALESCE(display_name_override, name) AS name,
+               cricketstatz_player_id
+          FROM players
+         WHERE organisation_id = :org AND cricketstatz_player_id IS NOT NULL
+         ORDER BY name
+    """), {"org": str(org_id)})).mappings().all()
+
+    definitions: set[tuple] = set()
+    created = 0
+    moved = 0
+    read = 0
+    unread: list[str] = []
+
+    for idx, player in enumerate(players):
+        try:
+            lines = await client.fetch_player_notes(
+                club_id, player["cricketstatz_player_id"])
+        except CricketStatzError:
+            raise
+        except Exception as exc:
+            logger.warning("CricketStatz notes for %s failed: %s",
+                           player["cricketstatz_player_id"], exc)
+            if on_progress:
+                on_progress(idx + 1, len(players), created)
+            continue
+        if lines:
+            read += 1
+        for line in lines:
+            award = classify_note(line)
+            if not award:
+                # Recorded rather than dropped: a club can see what its notes
+                # said that we did not file, instead of wondering.
+                if len(unread) < 50:
+                    unread.append(line)
+                continue
+            key = (award["category"], award["subcategory"], award["achievement"])
+            if key not in definitions:
+                await ensure_award_definition(db, org_id, *key)
+                definitions.add(key)
+            existing = await _existing_achievement(db, org_id, player["id"], award)
+            if existing:
+                # A re-import re-stamps its matches and its record boards onto
+                # the new import, so an honour it already read has to follow
+                # them — otherwise undoing the latest import would leave the
+                # honour board behind, pointing at an import that is gone.
+                # Only ever a row a CricketStatz import wrote: an honour the
+                # club typed in by hand is not this import's to claim, and
+                # claiming it would let an undo delete the club's own record.
+                if existing["ours"] and str(existing["batch"]) != str(import_id):
+                    await db.execute(text("""
+                        UPDATE player_achievements SET import_batch_id = :batch
+                         WHERE id = :id
+                    """), {"batch": str(import_id), "id": existing["id"]})
+                    moved += 1
+                continue
+            await db.execute(text("""
+                INSERT INTO player_achievements
+                    (org_id, player_id, player_name, season, season_end,
+                     category, subcategory, achievement, detail,
+                     import_batch_id)
+                VALUES (:org, :pid, :pname, :season, :season_end, :category,
+                        :subcategory, :achievement, :detail, :batch)
+            """), {
+                "org": str(org_id), "pid": str(player["id"]),
+                "pname": player["name"], "season": award["season"],
+                "season_end": award["season_end"], "category": award["category"],
+                "subcategory": award["subcategory"],
+                "achievement": award["achievement"], "detail": award["detail"],
+                "batch": str(import_id),
+            })
+            created += 1
+        if (idx + 1) % 10 == 0:
+            await db.commit()
+        if on_progress:
+            on_progress(idx + 1, len(players), created)
+
+    if created or moved:
+        # The Awards screen lists imports out of this table, so the batch row is
+        # what makes a notes pass visible — and undoable — beside a CSV upload.
+        # Counted from the honours now carrying it rather than from what this
+        # pass happened to create: a re-import carries an honour it read the
+        # first time, and a batch holding twelve that reports none reads as a
+        # mistake.
+        held = (await db.execute(text("""
+            SELECT COUNT(*) FROM player_achievements
+             WHERE org_id = :org AND import_batch_id = :id
+        """), {"org": str(org_id), "id": str(import_id)})).scalar() or 0
+        await db.execute(text("""
+            INSERT INTO achievement_import_batches
+                (id, org_id, filename, row_count, created_count, status)
+            VALUES (:id, :org, 'CricketStatz player notes', :rows, :made,
+                    'imported')
+            ON CONFLICT (id) DO UPDATE SET
+                row_count = EXCLUDED.row_count,
+                created_count = EXCLUDED.created_count,
+                status = 'imported'
+        """), {"id": str(import_id), "org": str(org_id),
+               "rows": read, "made": held})
+    await db.commit()
+    if note and unread:
+        note(f"{len(unread)} note line(s) were not read as awards, "
+             f"e.g. {unread[0]!r}. Nothing was guessed at.")
+    return {"players_read": read, "awards_created": created,
+            "awards_carried": moved, "unread": len(unread)}
+
+
+async def _existing_achievement(db: AsyncSession, org_id, player_id,
+                                award: dict) -> Optional[dict]:
+    """Has this player already got this honour, and did an import write it?
+
+    A re-import must not hand somebody a second life membership, and a club may
+    have typed the honour in by hand before ever importing. Matched on the
+    player, the award and its season — which is what a duplicate IS. `ours`
+    says whether the row came from a CricketStatz import of this club's, which
+    is what decides whether the row may be re-stamped onto a later one.
+    """
+    row = (await db.execute(text("""
+        SELECT pa.id,
+               pa.import_batch_id AS batch,
+               EXISTS (SELECT 1 FROM cricketstatz_imports ci
+                        WHERE ci.id = pa.import_batch_id
+                          AND ci.organisation_id = :org) AS ours
+          FROM player_achievements pa
+         WHERE pa.org_id = :org AND pa.player_id = :pid
+           AND pa.category = :category AND pa.achievement = :achievement
+           AND COALESCE(pa.season, '') = COALESCE(:season, '')
+         LIMIT 1
+    """), {
+        "org": str(org_id), "pid": str(player_id),
+        "category": award["category"], "achievement": award["achievement"],
+        "season": award["season"],
+    })).mappings().first()
+    return dict(row) if row else None
+
+
+async def ensure_award_definition(db: AsyncSession, org_id, category,
+                                  subcategory, achievement) -> None:
+    """Put an award on the club's own catalogue if it is not there already.
+
+    Without this an imported honour exists on a player and nowhere in the list
+    the Awards screen offers, so nobody could add a second winner of the same
+    trophy without retyping its name.
+    """
+    exists = (await db.execute(text("""
+        SELECT 1 FROM org_award_definitions
+         WHERE org_id = :org AND lower(category) = lower(:category)
+           AND lower(COALESCE(subcategory, '')) = lower(COALESCE(:sub, ''))
+           AND lower(achievement) = lower(:achievement)
+         LIMIT 1
+    """), {"org": str(org_id), "category": category, "sub": subcategory,
+           "achievement": achievement})).scalar()
+    if exists:
+        return
+    await db.execute(text("""
+        INSERT INTO org_award_definitions
+            (id, org_id, category, subcategory, achievement, sort_order)
+        VALUES (gen_random_uuid(), :org, :category, :sub, :achievement,
+                COALESCE((SELECT MAX(sort_order) + 1 FROM org_award_definitions
+                           WHERE org_id = :org), 1000))
+    """), {"org": str(org_id), "category": category, "sub": subcategory,
+           "achievement": achievement})
+
+
+
 def _json(value) -> str:
     import json
     return json.dumps(value, ensure_ascii=False)
@@ -821,6 +1004,7 @@ async def run_import(session_maker, org_id, import_id, club_id: str) -> None:
         "phase": "starting", "seasons_done": 0, "seasons_total": 0,
         "matches_done": 0, "matches_total": 0, "scorecards": 0,
         "records": 0, "players": 0, "notes": [],
+        "notes_done": 0, "notes_total": 0, "awards": 0, "notes_read": 0,
         "candidates_done": 0, "candidates_total": 0, "current_season": None,
     }
 
@@ -965,6 +1149,30 @@ async def run_import(session_maker, org_id, import_id, club_id: str) -> None:
             progress["records"] = await import_records(
                 db, org_id, import_id, club_id, record_progress)
 
+        # ── the honour board out of the players' own notes ──────────────────
+        progress["phase"] = "notes"
+        await _set_progress(session_maker, import_id, phase="notes",
+                            progress=progress)
+
+        def notes_progress(done, total, made):
+            progress["notes_done"] = done
+            progress["notes_total"] = total
+            progress["awards"] = made
+        async with session_maker() as db:
+            try:
+                summary_notes = await import_notes(
+                    db, org_id, import_id, club_id, notes_progress, note)
+                progress["awards"] = summary_notes["awards_created"]
+                progress["notes_read"] = summary_notes["players_read"]
+            except CricketStatzError:
+                raise
+            except Exception as exc:
+                # An honour board is worth having and is not what the import is
+                # for: a failure here must not lose a history already written.
+                await db.rollback()
+                logger.exception("CricketStatz notes pass failed")
+                note(f"player notes could not be read: {exc}")
+
         progress["phase"] = "done"
         async with session_maker() as db:
             counts = (await db.execute(text("""
@@ -1010,8 +1218,24 @@ async def undo_import(db: AsyncSession, org_id, import_id) -> dict:
          WHERE organisation_id = :org AND import_id = :imp
         RETURNING id
     """), {"org": str(org_id), "imp": str(import_id)})).fetchall()
+    # The honour board this import read out of the players' notes. Achievements
+    # carry the import's own id as their batch, so they go with it.
+    awards = (await db.execute(text("""
+        DELETE FROM player_achievements
+         WHERE org_id = :org AND import_batch_id = :imp
+        RETURNING id
+    """), {"org": str(org_id), "imp": str(import_id)})).fetchall()
+    await db.execute(text("""
+        UPDATE achievement_import_batches
+           SET status = 'undone', undone_at = NOW()
+         WHERE id = :imp AND org_id = :org
+    """), {"imp": str(import_id), "org": str(org_id)})
+    # Award definitions are deliberately KEPT: a trophy the club now has in its
+    # catalogue may already have a second winner typed in by hand, and a
+    # catalogue entry holds no claim about anybody.
     await db.execute(text(
         "UPDATE cricketstatz_imports SET undone_at = NOW() WHERE id = :imp"),
         {"imp": str(import_id)})
     await db.commit()
-    return {"matches_removed": len(removed), "records_removed": len(records)}
+    return {"matches_removed": len(removed), "records_removed": len(records),
+            "awards_removed": len(awards)}

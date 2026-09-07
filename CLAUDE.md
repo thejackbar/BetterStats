@@ -7256,6 +7256,95 @@ back to 1953/54.
   appears exactly once failed against correct output. It asserts the phrase is
   present and that the old flat `Earliest` label is gone.
 
+### The honour board is written in the notes (v9.68.0)
+
+Asked for with the duplicate fix: "the notes in CricketStatz contain some
+awards - it's worth us being smart at reading this notes and converting them
+to awards/honours".
+
+- **A CLUB THAT KEEPS ITS NOTES PROPERLY HAS WRITTEN ITS HONOUR BOARD THERE.**
+  Sampled live before designing anything: **64 of 75 players carry notes, 143
+  lines**, in one house style — `LIFE MEMBER ~ 1992-93`, `A-GRADE CAP AND DEBUT
+  #102 (1982-83)`, `5x TED GARLAND BATTING AVERAGE WINNER`, `SENIOR HEAD COACH
+  (2011-15, 2023-25)`, `N.M.C.A. - HALL OF FAME`.
+- **AN UNRECOGNISED NOTE IS NOT AN AWARD, and that is the whole design.** The
+  same block carries plain biography — `COLLINGWOOD FC (313 Games)`,
+  `ESSENDON FC / MELBOURNE FC (95/3 Games)`, `wk` — and a football career on a
+  cricket club's honour board is worse than reading nothing. 111 of the 117
+  distinct lines classify; the six that do not are left alone and REPORTED, so
+  a club can see what its notes said that we did not file.
+- **A TWO-YEAR TOKEN IS A SEASON ONLY WHEN THE SECOND HALF IS THE FIRST PLUS
+  ONE.** `1982-83` is a season; `2011-15` is a five-year coaching stint. The
+  one test separates them and holds at the century (`1999-00` is a season,
+  `1998-00` is a two-year span) — getting it wrong files a stint under a season
+  that never existed. `_span_end` rolls the century over for the far end, or
+  `1998-00` ends in 1900.
+- **AN `Nx` PREFIX MEANS THE LINE IS SOMETHING WON N TIMES, NEVER A ROLE.**
+  That is what separates `2x N.M.C.A. TEAM OF THE YEAR - CAPTAIN` (an award
+  that happens to name a role) from `INAUGURAL K.P.C.C. 'A' GRADE CAPTAIN
+  (1962-63)` (a captaincy). Checked before the role vocabulary, deliberately.
+- **A TROPHY WON FIVE TIMES IS ONE HONOUR THAT SAYS SO, not five season-less
+  rows.** There is no per-season breakdown behind an `Nx`, so five rows nobody
+  could check is the wrong answer; `Won 5 times` in the detail is the honest
+  one.
+- **EVERY HONOUR IS ADDED TO THE CLUB'S OWN AWARD CATALOGUE**
+  (`ensure_award_definition`), or an imported trophy exists on a player and
+  nowhere in the list the Awards screen offers — so a second winner could only
+  be added by retyping its name. Subcategories are `ROLE_TYPE_TO_SUBCATEGORY`'s
+  own (`Captains`, `Coaches`), so `office_bearers.sync_award_definitions`
+  reconciles them into BetterClubhouse's role catalogue rather than minting a
+  parallel vocabulary.
+- **A RE-IMPORT CARRIES AN HONOUR ONTO THE NEW IMPORT, the way it already
+  carries its matches and its record boards.** Found by running it: without the
+  re-stamp, undoing the latest import removes the matches and leaves the honour
+  board behind pointing at an import that is gone. **Only ever a row a
+  CricketStatz import wrote** (`ci.organisation_id` checked): an honour the club
+  typed in by hand is not the import's to claim, and claiming it would let an
+  undo delete the club's own record.
+- **THE BATCH ROW COUNTS WHAT NOW CARRIES IT, not what this pass created.** A
+  re-import creates nothing and carries twelve, and a batch holding twelve that
+  reports none reads as a mistake.
+- **The award DEFINITIONS survive an undo.** A trophy now in the catalogue may
+  already have a second winner typed in by hand, and a catalogue entry holds no
+  claim about anybody.
+- **The page's own URL carries the player's name as a slug and the name is
+  decoration** — the club number and the player id resolve it, so a fixed
+  placeholder is used rather than re-deriving a slug we would have to keep in
+  step with however the club spells them.
+- **The notes pass is its own phase and cannot lose a history already
+  written.** It runs after the matches and the record book, on its own session,
+  and a failure is noted rather than raised — one request per player is the
+  longest part of an import and an honour board is not what the import is for.
+- **Verified against a real Postgres** (`verify_cricketstatz_import.py` is 178
+  checks now: every line of the real captured notes read off the page, both
+  season rules and both spans, the life membership, the cap and its number, the
+  emoji not riding into an award's name, the trophy won thirteen times, the
+  initialisms and `McFarlane` kept as the club wrote them, the captaincy and the
+  coaching stint as roles, the football career and `wk` left alone, the
+  catalogue filled, a re-read creating nothing, and undo taking the honours,
+  marking the batch undone and keeping the catalogue) **with two control runs**:
+  with the classifier neutered 36 of the 178 fail; with only the re-stamp
+  neutered, 5 — the undo leaving twelve honours behind.
+- **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN.** The first cut read
+  `classify_note(...)["season"]` directly, so with nothing classifying it died
+  on the first subscript and said nothing about the other thirty. Every read
+  goes through `got()` now. Two checks also PASSED against the broken code — "a
+  cap with no season still reads as a cap" and "the emoji does not ride into the
+  name" are both trivially true of `None` — so each asserts the classification
+  exists as well.
+- **A HARNESS TABLE THAT MERELY LOOKS RIGHT IS WORSE THAN NONE.** The three
+  awards tables are lifespan-created raw SQL, invisible to `create_all`; they
+  are copied into the suite column for column from `main.py`.
+- **THE STUB REMEMBERS WHICH PLAYER GOT WHICH NOTES.** Keyed on call order it
+  served nothing at all on the second import, so the carry-over checks were
+  measuring the harness rather than the code.
+- **NOT BUILT**: no endpoint runs the notes pass alone. A club that imported
+  before this shipped gets its honour board by re-importing — matches are
+  recognised and updated rather than doubled — which is the same path the
+  record book already takes. The player page also carries `Batting: Right
+  Handed` and `Bowling: Right Arm Pace`, which map onto `players.batting_hand`
+  and `.bowling_type`; that is a different change from the one asked for.
+
 ### An imported grade is classified on the way in (v9.67.3)
 
 Asked for directly: create grades, seasons and players the way the other stat

@@ -28,6 +28,7 @@ import httpx
 
 from app.services.cricketstatz_parse import (
     CricketStatzError,
+    parse_player_notes,
     parse_club_page,
     parse_report,
     parse_results,
@@ -152,6 +153,18 @@ async def fetch_teams(club_id: str) -> list[dict]:
     from app.services.cricketstatz_parse import parse_teams
     return parse_teams(await _get(
         "linkreport", {"mode": MODE_TEAMS, "club": club_id, "web": 1}))
+
+
+async def fetch_player_notes(club_id: str, player_id: str) -> list[str]:
+    """The free-text Notes block off one player's page.
+
+    The page's own URL carries the player's name as a slug, but the name is
+    decoration — the club number and the player id are what resolve it — so a
+    fixed placeholder is used rather than re-deriving a slug we would then have
+    to keep in step with however the club spells them.
+    """
+    return parse_player_notes(await _get(
+        "p/x/", {"club": club_id, "playerid": player_id}))
 
 
 async def fetch_report(club_id: str, mode: int) -> dict:

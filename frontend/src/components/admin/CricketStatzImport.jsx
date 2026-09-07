@@ -15,6 +15,7 @@ const PHASES = {
   planned: 'Ready to pull',
   matches: 'Bringing your matches across',
   records: 'Copying your record book',
+  notes: 'Reading your honour board',
   done: 'Finished',
 }
 
@@ -121,7 +122,9 @@ export default function CricketStatzImport() {
     setUndoing(id)
     try {
       const r = await api.csUndo(id)
-      toast?.success?.(`Removed ${r.matches_removed} matches and ${r.records_removed} record boards.`)
+      toast?.success?.(
+        `Removed ${r.matches_removed} matches, ${r.records_removed} record `
+        + `boards and ${r.awards_removed || 0} honours.`)
       await loadStatus(); await loadRest()
     } catch (e) {
       toast?.error?.(e?.detail || 'Could not undo that import.')
@@ -135,6 +138,9 @@ export default function CricketStatzImport() {
   // until it lands there is no meaningful matches figure to draw against.
   const planning = running && ['starting', 'seasons'].includes(
     p.phase || status?.import?.phase)
+  // The honour-board pass counts players, not matches, so it draws against its
+  // own total rather than sitting at whatever the match bar last read.
+  const reading = running && (p.phase || status?.import?.phase) === 'notes'
   const plan = p.plan
   const since = status?.import?.seconds_since_progress
   // The one thing that separates a long import from a dead one. A full
@@ -248,14 +254,19 @@ export default function CricketStatzImport() {
                   <>
                     <Bar value={planning
                       ? pct(p.candidates_done, p.candidates_total)
-                      : pct(p.matches_done, p.matches_total)} />
+                      : reading
+                        ? pct(p.notes_done, p.notes_total)
+                        : pct(p.matches_done, p.matches_total)} />
                     <Caption>
                       {planning
                         ? `Checking season ${p.candidates_done} of ${p.candidates_total}`
                           + (p.seasons_total ? ` · ${p.seasons_total} played so far` : '')
-                        : `Season ${p.seasons_done} of ${p.seasons_total}`
-                          + (p.current_season ? ` (${p.current_season})` : '')}
-                      {!planning && p.matches_total
+                        : reading
+                          ? `Player ${p.notes_done} of ${p.notes_total}`
+                            + (p.awards ? ` · ${p.awards} honours found` : '')
+                          : `Season ${p.seasons_done} of ${p.seasons_total}`
+                            + (p.current_season ? ` (${p.current_season})` : '')}
+                      {!planning && !reading && p.matches_total
                         ? ` · ${p.matches_done} of ${p.matches_total} matches`
                         : ''}
                       {heartbeat}
@@ -281,11 +292,12 @@ export default function CricketStatzImport() {
                     {running ? ` · about ${plan.estimated_minutes} minutes` : ''}
                   </Caption>
                 )}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                   <StatCard label="Matches" value={p.matches_done || 0} />
                   <StatCard label="Scorecards" value={p.scorecards || 0} />
                   <StatCard label="Players" value={p.players || 0} />
                   <StatCard label="Record boards" value={p.records || 0} />
+                  <StatCard label="Honours" value={p.awards || 0} />
                 </div>
 
                 {running && (

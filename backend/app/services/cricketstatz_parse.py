@@ -727,6 +727,29 @@ _TITLE_DIV = re.compile(r"<div[^>]*class='[^']*ss_title[^']*'[^>]*>(.*?)</div>",
 _FILTERS_DIV = re.compile(r"<div[^>]*class='[^']*ss_filters[^']*'[^>]*>(.*?)</div>", re.S | re.I)
 
 
+
+_NOTES_BLOCK = re.compile(
+    r"Notes:\s*</b>\s*</td>\s*<td[^>]*>(.*?)</td>", re.I | re.S)
+
+
+def parse_player_notes(page_html: str) -> list[str]:
+    """The free-text Notes block off a CricketStatz player page, line by line.
+
+    The block is one table cell with `<br>` between entries, so the breaks are
+    the only structure it has. Returns the lines exactly as the club wrote
+    them; deciding which are awards is `cricketstatz_awards.classify_note`'s
+    job, not this one's.
+    """
+    match = _NOTES_BLOCK.search(page_html or "")
+    if not match:
+        return []
+    lines = []
+    for part in re.split(r"<br\s*/?>", match.group(1), flags=re.I):
+        cleaned = _text(part)
+        if cleaned:
+            lines.append(cleaned)
+    return lines
+
 def parse_report(body: str) -> dict:
     """A record/leaderboard report as a plain table.
 

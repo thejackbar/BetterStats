@@ -39,12 +39,14 @@ from app.services.cricketstatz_parse import (  # noqa: E402
     CricketStatzError,
     parse_club_page,
     parse_club_url,
+    parse_player_notes,
     parse_report,
     parse_results,
     parse_scorecard,
     parse_teams,
     unwrap,
 )
+from app.services.cricketstatz_awards import classify_note, season_label
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "cricketstatz"
 DB_URL = os.environ.get(
@@ -53,6 +55,52 @@ DB_URL = os.environ.get(
 )
 
 PASS, FAIL = [], []
+
+# Lifespan-created (raw SQL in main.py), so the ORM's create_all never makes
+# them. Kept here in the same shape the app builds.
+AWARD_DDL = (
+    """
+    CREATE TABLE IF NOT EXISTS player_achievements (
+        id SERIAL PRIMARY KEY,
+        org_id UUID NOT NULL,
+        player_id UUID,
+        player_name TEXT NOT NULL,
+        season TEXT,
+        season_end TEXT,
+        category TEXT NOT NULL,
+        subcategory TEXT,
+        achievement TEXT NOT NULL,
+        detail TEXT,
+        import_batch_id UUID,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS achievement_import_batches (
+        id UUID PRIMARY KEY,
+        org_id UUID NOT NULL,
+        filename TEXT,
+        row_count INTEGER NOT NULL DEFAULT 0,
+        created_count INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'imported',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        undone_at TIMESTAMPTZ
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS org_award_definitions (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        org_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+        category TEXT NOT NULL,
+        subcategory TEXT,
+        achievement TEXT,
+        display_name TEXT,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        active BOOLEAN NOT NULL DEFAULT true,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+)
 
 # Players the club already holds before the import runs.
 HELD_PLAYER = uuid.UUID("11111111-1111-4111-8111-111111111111")
@@ -290,6 +338,8 @@ class StubSite:
     def __init__(self):
         self.scorecard_calls = 0
         self.season_probes = 0
+        self.note_calls = 0
+        self.notes_by_player = {}
         self.cards = {
             "3177313": fixture("card_modern.txt"),
             "3082300": fixture("card_1995.txt"),
@@ -345,6 +395,25 @@ class StubSite:
         card = parse_scorecard(self.cards[str(match_id)])
         card["source_match_id"] = str(match_id)
         return card
+
+    async def fetch_player_notes(self, club_id, player_id):
+        # A player with a full honour board, one with only a life membership
+        # and a cap, and one whose notes are biography — every line real,
+        # captured live. Assigned per player and REMEMBERED, so a second import
+        # reads the same notes back the way the real site would; keying on call
+        # order alone would serve nothing at all on the second pass and the
+        # checks would be measuring the harness.
+        key = str(player_id)
+        if key not in self.notes_by_player:
+            fixtures = [
+                parse_player_notes(fixture("player_notes_rich.txt")),
+                parse_player_notes(fixture("player_notes_plain.txt")),
+                ["COLLINGWOOD FC (313 Games)", "wk"],
+            ]
+            idx = len(self.notes_by_player)
+            self.notes_by_player[key] = fixtures[idx] if idx < len(fixtures) else []
+        self.note_calls += 1
+        return self.notes_by_player[key]
 
     async def fetch_report(self, club_id, mode):
         by_mode = {4: "record_aggregates.txt", 27: "record_totals.txt",
@@ -761,6 +830,181 @@ async def verify_heartbeat(session_maker, org_id) -> None:
         await db.commit()
 
 
+
+# ── the honour board out of a player's own notes ─────────────────────────────
+
+def got(line: str, field: str = None):
+    """One field of a classified note, or None when it was not classified.
+
+    A control run in which nothing classifies has to REPORT each check rather
+    than raising on the first subscript and saying nothing about the other
+    thirty.
+    """
+    found = classify_note(line)
+    if field is None:
+        return found
+    return (found or {}).get(field)
+
+
+def verify_notes() -> None:
+    print("\nPlayer notes read as awards")
+
+    lines = parse_player_notes(fixture("player_notes_rich.txt"))
+    check("every note line is read off the page", len(lines) == 10, str(len(lines)))
+    check("the block's own line breaks are the only structure it has",
+          lines[0] == "LIFE MEMBER ~ 1969-70", lines[0])
+    check("a page with no Notes block reads as none",
+          parse_player_notes("<html><body>nothing here</body></html>") == [])
+
+    # "1982-83" is a season; "2011-15" is a stretch of years. The one test is
+    # whether the second half is the first plus one.
+    check("a consecutive pair is a season", season_label("1982", "83") == "1982/83")
+    check("and it holds across the century", season_label("1999", "00") == "1999/00")
+    check("a wider pair is not a season", season_label("2011", "15") is None)
+    check("nor is one that only looks like it crosses a century",
+          season_label("1998", "00") is None)
+
+    life = classify_note("LIFE MEMBER ~ 1992-93")
+    check("a life membership is filed as one",
+          (life or {}).get("category") == "Life Membership", str(life))
+    check("with the season the club gave it", (life or {}).get("season") == "1992/93", str(life))
+    check("the bracketed form of the same line reads the same",
+          got("LIFE MEMBER (2009-10)", "season") == "2009/10")
+
+    cap = classify_note("A-GRADE CAP AND DEBUT \U0001f9e2 #102 (1982-83)")
+    check("a first-grade cap is a milestone",
+          (cap or {}).get("subcategory") == "Cap Number", str(cap))
+    check("named for the grade it was awarded in",
+          (cap or {}).get("achievement") == "A Grade Cap", str(cap))
+    check("carrying the cap number", (cap or {}).get("detail") == "#102", str(cap))
+    check("the emoji does not ride into the award's name",
+          bool(cap) and "\U0001f9e2" not in (cap.get("achievement") or ""),
+          str(cap))
+    check("the club's other spelling of the same thing reads the same",
+          got("'A' GRADE CAP ~ #103 (1982-83)", "achievement") == "A Grade Cap")
+    bare = got("A-GRADE CAP AND DEBUT #212")
+    check("a cap with no season recorded still reads as a cap",
+          bool(bare) and bare["subcategory"] == "Cap Number"
+          and bare["season"] is None, str(bare))
+
+    won = classify_note("5x TED GARLAND BATTING AVERAGE WINNER")
+    check("a trophy won several times is one award, not five",
+          (won or {}).get("times") == 5, str(won))
+    check("saying how many times it was won", (won or {}).get("detail") == "Won 5 times", str(won))
+    check("under a name a person would recognise",
+          (won or {}).get("achievement") == "Ted Garland Batting Average Winner", str(won))
+    check("an association's initials are left as the club wrote them",
+          got("3x N.M.C.A. TEAM OF THE YEAR", "achievement")
+          == "N.M.C.A. Team of the Year")
+    check("and so is a name the club cased itself",
+          got("4x BILL McFARLANE CLUB CHAMPION", "achievement")
+          == "Bill McFarlane Club Champion")
+
+    # An "Nx" prefix means the line is something won N times, which is what
+    # separates a team-of-the-year award naming a captain from a captaincy.
+    counted = classify_note("2x N.M.C.A. TEAM OF THE YEAR - CAPTAIN")
+    check("an award that names a role is still an award",
+          (counted or {}).get("category") == "Club Award", str(counted))
+    captain = classify_note("INAUGURAL K.P.C.C. 'A' GRADE CAPTAIN (1962-63)")
+    check("a captaincy is a role, not a trophy",
+          (captain or {}).get("subcategory") == "Captains", str(captain))
+    check("filed under the season it was held", (captain or {}).get("season") == "1962/63")
+
+    coach = classify_note("SENIOR HEAD COACH (2011-15, 2023-25)")
+    check("a coaching stint is a role", (coach or {}).get("subcategory") == "Coaches",
+          str(coach))
+    check("recorded across both ends of the stretch",
+          ((coach or {}).get("season"), (coach or {}).get("season_end"))
+          == ("2011", "2025"), str(coach))
+    check("with every stint it names kept",
+          (coach or {}).get("detail") == "2011-15, 2023-25", str(coach))
+    check("a stint crossing a century ends where it really ended",
+          got("SENIOR HEAD COACH (1998-00)", "season_end") == "2000")
+
+    check("the hall of fame is its own honour",
+          (classify_note("N.M.C.A. - HALL OF FAME") or {}).get("category")
+          == "Hall of Fame")
+
+    # THE ONE THING THIS MUST NOT DO. The same block carries plain biography,
+    # and a football career on a cricket club's honour board is worse than
+    # reading nothing at all.
+    check("a football career is not a cricket honour",
+          classify_note("COLLINGWOOD FC (313 Games)") is None)
+    check("nor is a two-club one", classify_note("ESSENDON FC / MELBOURNE FC (95/3 Games)") is None)
+    check("a playing note is left alone", classify_note("wk") is None)
+    check("and so is an empty line", classify_note("   ") is None)
+
+
+async def verify_award_import(session_maker, org_id, import_id) -> None:
+    print("\nThe honour board, written")
+
+    async with session_maker() as db:
+        rows = (await db.execute(text("""
+            SELECT player_name, category, subcategory, achievement, season,
+                   season_end, detail, import_batch_id
+              FROM player_achievements WHERE org_id = :org
+             ORDER BY player_name, achievement
+        """), {"org": str(org_id)})).mappings().all()
+
+    check("the honour board was written", len(rows) == 12, str(len(rows)))
+    check("every honour carries the import as its batch",
+          all(str(r["import_batch_id"]) == str(import_id) for r in rows))
+    check("a player whose notes are biography got no honours at all",
+          len({r["player_name"] for r in rows}) == 2,
+          str(sorted({r["player_name"] for r in rows})))
+    check("the life membership landed",
+          any(r["category"] == "Life Membership" and r["season"] == "1969/70"
+              for r in rows))
+    check("so did the cap, with its number",
+          any(r["achievement"] == "A Grade Cap" and r["detail"] == "#1" for r in rows))
+    check("and the hall of fame",
+          any(r["category"] == "Hall of Fame" for r in rows))
+    check("a trophy won thirteen times is one row that says so",
+          any(r["detail"] == "Won 13 times" for r in rows), "")
+
+    async with session_maker() as db:
+        defs = (await db.execute(text("""
+            SELECT category, subcategory, achievement FROM org_award_definitions
+             WHERE org_id = :org
+        """), {"org": str(org_id)})).mappings().all()
+    names = {d["achievement"] for d in defs}
+    check("each honour was added to the club's own award catalogue",
+          {"Life Membership", "Hall of Fame", "A Grade Cap"} <= names,
+          str(sorted(names)))
+    check("so a second winner can be picked from the list rather than retyped",
+          "Ted Garland Batting Average Winner" in names)
+
+    async with session_maker() as db:
+        batch = (await db.execute(text("""
+            SELECT filename, created_count, status FROM achievement_import_batches
+             WHERE id = :id
+        """), {"id": str(import_id)})).mappings().first()
+    check("the Awards screen lists it alongside its own imports",
+          batch is not None and batch["created_count"] == 12, str(batch))
+
+    # A re-read must not hand anybody a second life membership.
+    stub = StubSite()
+    real_client = importer.client
+    importer.client = stub
+    try:
+        async with session_maker() as db:
+            again = await importer.import_notes(db, org_id, import_id, "93931")
+    finally:
+        importer.client = real_client
+    check("reading the same notes again creates nothing",
+          again["awards_created"] == 0, str(again))
+    check("and carries none onto a different import either",
+          again["awards_carried"] == 0, str(again))
+    check("and says what it could not read rather than dropping it silently",
+          again["unread"] == 2, str(again))
+
+    async with session_maker() as db:
+        total = (await db.execute(text(
+            "SELECT COUNT(*) FROM player_achievements WHERE org_id = :org"),
+            {"org": str(org_id)})).scalar()
+    check("so the honour board is the same size afterwards", total == 12, str(total))
+
+
 async def verify_undo(session_maker, org_id, import_id, player_count) -> None:
     print("\nUndo")
     async with session_maker() as db:
@@ -769,6 +1013,8 @@ async def verify_undo(session_maker, org_id, import_id, player_count) -> None:
               result["matches_removed"] == 4, str(result))
         check("the record book was removed with it",
               result["records_removed"] == 3, str(result))
+        check("and the honour board it read out of the notes",
+              result["awards_removed"] == 12, str(result))
 
     async with session_maker() as db:
         left = (await db.execute(text("""
@@ -789,6 +1035,19 @@ async def verify_undo(session_maker, org_id, import_id, player_count) -> None:
             SELECT undone_at IS NOT NULL FROM cricketstatz_imports WHERE id = :id
         """), {"id": str(import_id)})).scalar()
         check("the import is recorded as undone", marked is True)
+        left_awards = (await db.execute(text(
+            "SELECT COUNT(*) FROM player_achievements WHERE org_id = :org"),
+            {"org": str(org_id)})).scalar()
+        check("no honour is left behind", left_awards == 0, str(left_awards))
+        undone = (await db.execute(text("""
+            SELECT status FROM achievement_import_batches WHERE id = :id
+        """), {"id": str(import_id)})).scalar()
+        check("the Awards screen shows the batch as undone", undone == "undone", str(undone))
+        kept_defs = (await db.execute(text(
+            "SELECT COUNT(*) FROM org_award_definitions WHERE org_id = :org"),
+            {"org": str(org_id)})).scalar()
+        check("the award catalogue is kept — a trophy is not the import's to unmake",
+              kept_defs > 0, str(kept_defs))
 
 
 async def verify_downgrade(engine) -> None:
@@ -818,14 +1077,22 @@ async def main() -> int:
     verify_team_matcher()
     await verify_planning()
     verify_partnerships(parsed["modern"])
+    verify_notes()
 
     engine = create_async_engine(DB_URL, echo=False)
     session_maker = async_sessionmaker(engine, expire_on_commit=False)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # The awards tables are created by the app's lifespan in raw SQL, not
+        # by the ORM, so `create_all` does not know about them. Copied from
+        # main.py column for column — a harness table that merely looks right
+        # is worse than none.
+        for statement in AWARD_DDL:
+            await conn.execute(text(statement))
 
     await verify_schema(engine)
     org_id, import_id, players = await verify_import(engine, session_maker)
+    await verify_award_import(session_maker, org_id, import_id)
     await verify_repair(session_maker, org_id)
     await verify_heartbeat(session_maker, org_id)
     await verify_undo(session_maker, org_id, import_id, players)
