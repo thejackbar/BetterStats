@@ -746,3 +746,39 @@ DOWNGRADE: tuple[str, ...] = (
     "DROP INDEX IF EXISTS ix_seasons_stats_source",
     "ALTER TABLE seasons DROP COLUMN IF EXISTS stats_source",
 )
+
+
+# ── the schema must actually match the code ──────────────────────────────────
+# Cost a whole afternoon to find, so it is checked from now on. `stats_source`
+# was set on 73 of a club's seasons and `v_effective_games` carried no clause
+# to act on it — the marker was live, the view was not, and every screen
+# counted both sources with nothing anywhere reporting a problem. The
+# statements above apply cleanly when run by hand, so the DDL was never wrong;
+# the boot path simply had not run them, and alembic's own version table said
+# otherwise. A migration recorded as applied is not evidence that its effect is
+# in the database.
+VERIFIED_VIEWS: tuple[tuple[str, str], ...] = (
+    ("v_effective_games", "stats_source"),
+    ("v_effective_player_season_stats", "stats_source"),
+)
+
+
+async def verify(conn) -> dict[str, bool]:
+    """Which of the effective views actually carry their source clause.
+
+    Read back out of `pg_get_viewdef`, so it reports what Postgres holds rather
+    than what the code says it should. A view missing from the database at all
+    reads as False rather than raising — a boot check must report, never be the
+    thing that stops the app.
+    """
+    from sqlalchemy import text as _text
+
+    found: dict[str, bool] = {}
+    for view, needle in VERIFIED_VIEWS:
+        try:
+            body = (await conn.execute(_text(
+                "SELECT pg_get_viewdef(to_regclass(:v))"), {"v": view})).scalar()
+        except Exception:
+            body = None
+        found[view] = bool(body) and needle in body
+    return found

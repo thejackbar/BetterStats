@@ -35,6 +35,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # no
 from app.models.db import Base  # noqa: E402
 from app.services import cricketstatz_import as importer  # noqa: E402
 from app.services.cricketstatz_ddl import DOWNGRADE, STATEMENTS  # noqa: E402
+from app.services import superseded_ddl as importer_ddl  # noqa: E402
 from app.services.superseded_ddl import BACKFILL  # noqa: E402
 from app.services.superseded_ddl import DOWNGRADE as SUPERSEDED_DOWNGRADE  # noqa: E402
 from app.services.superseded_ddl import STATEMENTS as SUPERSEDED_DDL  # noqa: E402
@@ -1430,6 +1431,36 @@ async def verify_synced_overlap(engine, session_maker) -> None:
     # lifespan mirror both run — never by reaching for the backfill constant
     # on its own. A check that applies it directly passes whether or not it is
     # actually wired in, which is not a check.
+    # THE SCHEMA MUST MATCH THE CODE, AND THE ONLY WAY TO KNOW IS TO READ IT
+    # BACK. Found live: 73 seasons marked and the view carrying no clause to
+    # act on them, with alembic reporting the migration applied.
+    async with engine.begin() as conn:
+        before = await importer_ddl.verify(conn)
+        # A view without the clause is REPORTED, not raised on — a boot check
+        # must never be the thing that stops the app.
+        await conn.execute(text("""
+            CREATE OR REPLACE VIEW v_effective_games AS
+            SELECT g.id, g.grade_id, g.played_at, g.home_team, g.away_team,
+                   g.home_club, g.away_club, g.opp_org_id, g.opp_club_name,
+                   g.result, g.winning_team, g.is_final, g.raw_payload,
+                   g.venue, g.match_format, 'api'::text AS source,
+                   g.home_org_id, g.away_org_id, gr.season_id AS season_id,
+                   s.organisation_id AS organisation_id, g.status AS status
+              FROM games g
+              LEFT JOIN grades gr ON gr.id = g.grade_id
+              LEFT JOIN seasons s ON s.id = gr.season_id
+        """))
+        stale = await importer_ddl.verify(conn)
+        for statement in SUPERSEDED_DDL:
+            await conn.execute(text(statement))
+        after = await importer_ddl.verify(conn)
+    check("a view carrying its source clause is reported as sound",
+          all(before.values()), str(before))
+    check("a view that has lost it is caught rather than assumed",
+          stale.get("v_effective_games") is False, str(stale))
+    check("and applying the shipped statements puts it back",
+          all(after.values()), str(after))
+
     check("the repair is part of the shipped statement list",
           any("UPDATE seasons" in st and "cricketstatz_import_id" in st
               for st in SUPERSEDED_DDL),

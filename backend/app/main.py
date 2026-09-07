@@ -4299,9 +4299,23 @@ async def lifespan(app: FastAPI):
         # it also syncs, so the same match is not counted from two sources.
         # Applied on read in the effective views — nothing is deleted and
         # clearing the marker puts the synced copy straight back.
-        from app.services.superseded_ddl import STATEMENTS as _SUPERSEDED_DDL
-        for _stmt in _SUPERSEDED_DDL:
+        from app.services import superseded_ddl as _superseded
+        for _stmt in _superseded.STATEMENTS:
             await conn.execute(text(_stmt))
+        # AND THEN READ THE SCHEMA BACK. A club was found with its seasons
+        # marked and the view carrying no clause to act on them, counting both
+        # its sources on every screen, with alembic's version table reporting
+        # the migration as applied. The statements were right; something in the
+        # boot path had not run them. Nothing anywhere noticed, which is what
+        # made it expensive — so this says so, loudly, rather than assuming.
+        for _view, _ok in (await _superseded.verify(conn)).items():
+            if not _ok:
+                logger.error(
+                    "SCHEMA MISMATCH: %s does not carry its source clause. A "
+                    "club holding both a CricketStatz import and a Cricket "
+                    "Australia sync will count the same match twice until "
+                    "services/superseded_ddl.STATEMENTS is applied to this "
+                    "database.", _view)
 
         # Migration 288: configurable club notifications — the switches a club
         # sets, each admin's own opt-out, and the record of what was raised and

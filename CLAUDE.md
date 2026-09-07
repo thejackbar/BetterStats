@@ -7525,6 +7525,43 @@ we're way over what I expect".
   seasons are marked by the old end-of-run write. The board corrects itself the
   moment the run completes.
 
+### A MIGRATION RECORDED AS APPLIED IS NOT EVIDENCE ITS EFFECT IS THERE (v9.69.5, Sep 2026)
+
+The end of the same report, and the most expensive part of it. The club's
+seasons were correctly marked — 73 of 74 reading `cricketstatz` — and
+`v_effective_games` **carried no clause to act on them**. The marker was live,
+the view was not, and every screen counted both sources.
+
+- **THE DDL WAS NEVER WRONG.** Run by hand against that same database, all five
+  statements applied cleanly and the site was correct within seconds: 2002/03
+  went 171 to 86, 2011/12 208 to 117, the club 5,345 games to 3,563, and
+  Michael White's career landed on CricketStatz's own figures exactly
+  (325/324/8,405). So the boot path had simply not run them — while
+  `alembic_version` said 290.
+- **AND NOTHING ANYWHERE NOTICED, WHICH IS WHAT MADE IT EXPENSIVE.** Three
+  rounds were spent inferring a cause from the outside — a snapshot that went
+  stale, a run predating a deploy, a marker that would not set — each plausible,
+  each wrong, because production's schema could disagree with the code and no
+  surface reported it. **The one question that settled it took a single
+  `pg_get_viewdef`.**
+- **SO THE BOOT READS THE SCHEMA BACK.** `superseded_ddl.verify(conn)` asks
+  `pg_get_viewdef` what Postgres actually holds, and the lifespan logs a
+  SCHEMA MISMATCH error naming the view and the consequence. It reports and
+  never raises — a check that stops the app is worse than the thing it checks
+  for, and this one exists precisely because a silent mismatch is survivable
+  for months.
+- **A view absent from the database reads as False rather than raising**, for
+  the same reason: `to_regclass` returns NULL rather than erroring on a name
+  that is not there.
+- **Verified against a real Postgres** (the suite is 215 checks now: a sound
+  view reported sound, a view deliberately replaced with its pre-287 definition
+  caught, and the shipped statements putting it back) **with a control run**: a
+  `verify` that always answers "fine" fails the middle check, which is the only
+  one of the three that can catch a real mismatch.
+- **NOT ESTABLISHED, and worth saying plainly**: why the boot path did not run
+  the statements on that deploy is still unknown. The check now reports it the
+  moment it happens rather than after a club reports doubled figures.
+
 ### ONE SOURCE PER SEASON, DECIDED BY THE DATA (migration 290, v9.69.4, Sep 2026)
 
 Reported off Keon Park's Records with the import running: duplicates again, and
