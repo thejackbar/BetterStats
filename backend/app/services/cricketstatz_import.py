@@ -311,6 +311,146 @@ def build_team_matcher(club_name: str, team_names: list[str]):
     return is_ours
 
 
+# ── matches the club already holds ───────────────────────────────────────────
+#
+# A CricketStatz import writes `manual_games`, and the club's Cricket Australia
+# sync writes `games`. Every stats read unions the two (`v_effective_games`,
+# `v_effective_batting_innings`, and their siblings), so a match that arrives
+# down BOTH paths is counted twice — and because a doubling scales runs and
+# dismissals together it leaves the AVERAGE untouched, which is why it reads as
+# plausible figures rather than obvious nonsense. Only the counts move.
+#
+# Reported live from a club whose CricketStatz history reaches back to 1953:
+# the Highest Individual Scores board listed the same innings twice for every
+# season Cricket Australia also covers, and once for every season only
+# CricketStatz has.
+#
+# **THE SYNC WINS.** Where the club already holds a fixture, the imported copy
+# is not written — the same call `routers/afl/result_imports.py` documents for
+# its own upload ("a game the PlayHQ sync already holds is never touched").
+# Cricket Australia's row is the one a later sync refreshes and the one the
+# season aggregates are keyed to; a second copy beside it could only ever drift.
+
+# Words that say what KIND of club it is rather than which one, plus the grade
+# words that trail a team name. Stripped so "Melville Cricket Club" and
+# "Melville CC" are one opposition, and "Cockburn CC 1st Grade" and
+# "Cockburn 1st XI" are one side.
+_CLUB_NOISE = re.compile(
+    r"\b(cricket|club|cc|cricketclub|inc|the)\b", re.I)
+_GRADE_NOISE = re.compile(
+    r"\b(grade|division|div|xi|xis|eleven|team|side|s)\b", re.I)
+
+
+def opponent_key(name: str) -> str:
+    """The opposition club, reduced to what both systems agree on.
+
+    Deliberately NOT fuzzy. Two clubs in one association really can share a
+    word ("South Perth" and "South Fremantle"), and folding those would drop a
+    genuine match as a duplicate — the worse error of the two, because the
+    doubling this guard exists to stop is at least visible.
+    """
+    words = [w for w in _CLUB_NOISE.sub(" ", _norm_team(name)).split() if w]
+    return " ".join(words)
+
+
+def _side_key(name: str) -> str:
+    """Which of the club's own sides this is, as a plain number.
+
+    **A letter grade IS an ordinal**, and folding the two is what makes the
+    common case a confident match rather than a guess: Australian club cricket
+    calls the firsts "A Grade" in one system and "1st Grade" in the other, and
+    the reported club is exactly that shape. So "A Grade", "1st Grade" and
+    "Cockburn 1st XI" all reduce to "1".
+
+    A name that says nothing about which side it is returns "" — the caller
+    treats that as "cannot tell", never as "not the same fixture".
+    """
+    text_ = _GRADE_NOISE.sub(" ", _norm_team(name))
+    for word in text_.split():
+        if re.fullmatch(r"\d+(st|nd|rd|th)?", word):
+            return re.sub(r"(st|nd|rd|th)$", "", word)
+        if re.fullmatch(r"[a-f]", word):
+            return str(ord(word) - ord("a") + 1)
+    return ""
+
+
+async def synced_fixture_index(db: AsyncSession, org_id) -> dict:
+    """Every fixture this club already holds from the sync, keyed by day and
+    opposition.
+
+    Grouped rather than flat because a club fields several sides on one
+    afternoon against the same opposition — the Firsts and the Seconds both
+    play Melville — so a date-and-opponent match alone would read the whole
+    day's card as one fixture and drop every other grade's match. That is the
+    lesson `result_imports._synced_index` already records for the AFL upload.
+
+    Each entry carries a ``claimed`` flag: the guard may never skip more
+    imported matches for one (day, opposition) than there are synced games in
+    it, so a THIRD side the sync does not hold still comes in.
+    """
+    rows = await db.execute(text("""
+        SELECT g.id, g.played_at, g.home_team, g.away_team, g.opp_club_name,
+               gr.name AS grade_name
+        FROM games g
+        JOIN grades gr ON gr.id = g.grade_id
+        JOIN seasons s ON s.id = gr.season_id
+        WHERE s.organisation_id = :org AND g.played_at IS NOT NULL
+    """), {"org": str(org_id)})
+    index: dict = {}
+    for r in rows:
+        # The opposition is whichever side is not ours. `opp_club_name` is set
+        # by the sync and is the direct answer; the two team names are the
+        # fallback for a row that predates it, and both are indexed so a name
+        # the card spells the other way still finds it.
+        names = {opponent_key(x) for x in
+                 (r.opp_club_name, r.home_team, r.away_team) if x}
+        entry = {
+            "game_id": str(r.id),
+            "grade_key": _side_key(r.grade_name or ""),
+            "team_keys": {_side_key(x) for x in (r.home_team, r.away_team) if x},
+            "claimed": False,
+        }
+        for nm in names:
+            if nm:
+                index.setdefault((r.played_at.isoformat(), nm), []).append(entry)
+    return index
+
+
+def claim_synced_fixture(index: dict, *, played_on, opposition: str,
+                         division: str, our_side: str):
+    """The synced game this imported match is a second copy of, or None.
+
+    Claimed greedily and in one direction only:
+
+      1. an entry whose grade or team names the SAME side as the card wins,
+         because that is a confident match on two independent signals;
+      2. failing that, any unclaimed entry in the group is taken — one club
+         plays one opponent once on a given day per side, and the two systems
+         disagreeing about what a grade is called is expected rather than
+         evidence of a different fixture;
+      3. once every entry in the group is claimed, nothing more is skipped, so
+         a side the sync does not hold is imported rather than lost.
+    """
+    if not index or played_on is None:
+        return None
+    entries = index.get((played_on.isoformat(), opponent_key(opposition)))
+    if not entries:
+        return None
+    wanted = _side_key(division) or _side_key(our_side)
+    if wanted:
+        for entry in entries:
+            if entry["claimed"]:
+                continue
+            if entry["grade_key"] == wanted or wanted in entry["team_keys"]:
+                entry["claimed"] = True
+                return entry
+    for entry in entries:
+        if not entry["claimed"]:
+            entry["claimed"] = True
+            return entry
+    return None
+
+
 # ── partnerships ─────────────────────────────────────────────────────────────
 
 def derive_partnerships(batters: list[dict], fow: list[dict],
@@ -444,6 +584,43 @@ async def import_match(db: AsyncSession, org_id, import_id, card: dict,
     if existing is not None and str(existing.id) in caches.get("hand_edited", ()):
         return (f"{source_id}: left as you have it — this match has been edited "
                 f"by hand, so the import did not write over it")
+
+    # ── the club may already hold this fixture ───────────────────────────────
+    # Cricket Australia's own row and an imported copy of the same match both
+    # land in `v_effective_games`, so keeping both counts every innings of it
+    # twice. The sync's row wins: it is the one a later sync refreshes and the
+    # one the season aggregates are keyed to.
+    held = claim_synced_fixture(
+        caches.get("synced_fixtures"),
+        played_on=played_on, opposition=opposition,
+        division=label, our_side=our_side or home or away)
+    if held is not None:
+        # COUNTED, NOT NOTED. A club with twenty seasons of overlap would fill
+        # the 200-note cap with the same sentence and crowd out the notes that
+        # need reading — an unreadable match, a name close to an existing
+        # player. One summary line is written at the end instead.
+        tally = caches.setdefault("held_tally", {"skipped": 0, "removed": 0})
+        if existing is None:
+            tally["skipped"] += 1
+            return None
+        # A copy an EARLIER run of this import wrote, before the guard existed.
+        # Removing it is the import taking back its own work — the one thing
+        # the standing rule allows a function to delete — and it is what makes
+        # a re-import the repair for a club already carrying duplicates. A
+        # game somebody has edited by hand never reaches here: that is checked
+        # above and returns first.
+        # Written as raw SQL rather than db.delete(existing) so the standing
+        # audit sees it: verification/verify_merge_carry.py scans app/ for
+        # `DELETE FROM manual_*` and fails on any site nobody has justified, and
+        # an ORM delete of an instance is invisible to it. Every child table is
+        # ON DELETE CASCADE on manual_games.id, so this takes the innings with
+        # it.
+        await db.execute(text("DELETE FROM manual_games WHERE id = :g"),
+                         {"g": str(existing.id)})
+        db.expunge(existing)
+        await db.flush()
+        tally["removed"] += 1
+        return None
 
     game = existing or ManualGame(
         id=_derived_id(org_id, "match", source_id),
@@ -1032,6 +1209,7 @@ async def run_import(session_maker, org_id, import_id, club_id: str) -> None:
         "records": 0, "players": 0, "notes": [],
         "notes_done": 0, "notes_total": 0, "awards": 0, "notes_read": 0,
         "candidates_done": 0, "candidates_total": 0, "current_season": None,
+        "already_synced": 0, "duplicates_removed": 0,
     }
 
     def note(message: str) -> None:
@@ -1099,6 +1277,12 @@ async def run_import(session_maker, org_id, import_id, club_id: str) -> None:
         # on by hand, so a re-import never writes over their scorecard.
         async with session_maker() as db:
             hand_edited = await hand_edited_games(db, org_id)
+            # Read once for the whole club, and SHARED across every season: the
+            # claim is greedy, so a synced game claimed by one season's match
+            # must not be offered to another's.
+            synced_fixtures = await synced_fixture_index(db, org_id)
+        # Shared across every season, so the summary counts the whole run.
+        held_tally = {"skipped": 0, "removed": 0}
 
         progress["phase"] = "matches"
         await _set_progress(session_maker, import_id, phase="matches",
@@ -1114,6 +1298,7 @@ async def run_import(session_maker, org_id, import_id, club_id: str) -> None:
             caches = {
                 "seasons": {}, "grades": {}, "players": {}, "roster": None,
                 "near_matches": {}, "hand_edited": hand_edited,
+                "synced_fixtures": synced_fixtures, "held_tally": held_tally,
                 "season_label": season["label"], "season_value": season["value"],
             }
             async with session_maker() as db:
@@ -1168,6 +1353,17 @@ async def run_import(session_maker, org_id, import_id, club_id: str) -> None:
                 note(f"{new_name}: added as a new player — close to "
                      f"{', '.join(candidates)}. Check Merge Duplicates.")
             await _set_progress(session_maker, import_id, progress=progress)
+
+        progress["already_synced"] = held_tally["skipped"]
+        progress["duplicates_removed"] = held_tally["removed"]
+        if held_tally["skipped"]:
+            note(f"{held_tally['skipped']} match(es) were left as Cricket "
+                 f"Australia has them — your club already had those results, "
+                 f"so they were not added a second time.")
+        if held_tally["removed"]:
+            note(f"{held_tally['removed']} duplicate match(es) from an earlier "
+                 f"run were removed — they repeated results you already had "
+                 f"from Cricket Australia.")
 
         # ── the record book ─────────────────────────────────────────────────
         progress["phase"] = "records"
@@ -1229,6 +1425,80 @@ async def run_import(session_maker, org_id, import_id, club_id: str) -> None:
         await _set_progress(session_maker, import_id, status="error",
                             error=f"{type(exc).__name__}: {exc}",
                             progress=progress, finished_at=datetime.utcnow())
+
+
+async def remove_duplicate_imported_games(db: AsyncSession, org_id,
+                                          *, apply: bool = False) -> dict:
+    """Clear the duplicates an import written before the guard existed left behind.
+
+    A club already carrying them should not have to sit through another
+    hour-long import to be rid of them — and re-running one is the ONLY other
+    way, since undoing the import would take the pre-sync history with it, which
+    is the half only CricketStatz has.
+
+    The rule is the guard's, applied to what is already stored: for each
+    imported match, is there a synced game for the same day and opposition that
+    nothing has claimed yet? Claimed greedily and per group, so a side the sync
+    does not hold is never removed.
+
+    **A match somebody has edited by hand is never removed**, whatever it
+    duplicates. Correcting a scorecard costs a club hours and there is no
+    upstream to re-pull it from; it is reported instead, for a person to decide.
+
+    Dry run by default, per the house rule — an imported match that duplicates
+    nothing looks identical to one that does until this has been read.
+    """
+    index = await synced_fixture_index(db, org_id)
+    hand_edited = await hand_edited_games(db, org_id)
+
+    rows = (await db.execute(text("""
+        SELECT mg.id, mg.played_at, mg.opposition, mg.home_team, mg.away_team,
+               gr.name AS grade_name
+        FROM manual_games mg
+        LEFT JOIN grades gr ON gr.id = mg.grade_id
+        WHERE mg.organisation_id = :org
+          AND mg.cricketstatz_match_id IS NOT NULL
+          AND mg.played_at IS NOT NULL
+        ORDER BY mg.played_at, mg.id
+    """), {"org": str(org_id)})).mappings().all()
+
+    doomed: list[dict] = []
+    kept_by_hand: list[dict] = []
+    for r in rows:
+        held = claim_synced_fixture(
+            index, played_on=r["played_at"],
+            opposition=r["opposition"] or r["away_team"] or r["home_team"] or "",
+            division=r["grade_name"] or "",
+            our_side=r["home_team"] or r["away_team"] or "")
+        if held is None:
+            continue
+        entry = {"game_id": str(r["id"]),
+                 "played_at": r["played_at"].isoformat(),
+                 "opposition": r["opposition"]}
+        if str(r["id"]) in hand_edited:
+            kept_by_hand.append(entry)
+            continue
+        doomed.append(entry)
+
+    removed = 0
+    if apply and doomed:
+        # Children are ON DELETE CASCADE on manual_games.id, so the innings go
+        # with the match. Written as raw SQL so verify_merge_carry's audit sees
+        # it — see the note at the delete site in import_match.
+        result = await db.execute(
+            text("DELETE FROM manual_games WHERE id = ANY(CAST(:ids AS uuid[]))"),
+            {"ids": [d["game_id"] for d in doomed]})
+        removed = result.rowcount or 0
+
+    return {
+        "imported_games": len(rows),
+        "duplicates": len(doomed),
+        "removed": removed,
+        "kept_hand_edited": len(kept_by_hand),
+        "hand_edited": kept_by_hand[:20],
+        "sample": doomed[:20],
+        "applied": bool(apply),
+    }
 
 
 async def undo_import(db: AsyncSession, org_id, import_id) -> dict:

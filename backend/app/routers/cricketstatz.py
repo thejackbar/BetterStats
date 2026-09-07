@@ -205,6 +205,45 @@ async def undo(import_id: uuid.UUID,
     return await importer.undo_import(db, club.id, import_id)
 
 
+@router.post("/repair-duplicates")
+async def repair_duplicates(apply: bool = False,
+                            db: AsyncSession = Depends(get_db),
+                            club: Organisation = Depends(get_current_club)):
+    """Remove imported matches that duplicate a game the club already had.
+
+    An import written before the already-synced guard existed copied every
+    fixture Cricket Australia also covers, so each of those innings is counted
+    twice on every board. A re-import now clears them as it goes, but that is an
+    hour of upstream calls a club should not have to spend twice — and undoing
+    the import is not the answer either, since it would take the pre-sync
+    history with it, which is the half only CricketStatz has.
+
+    Dry run unless ``apply`` is set, so a club can see what would go first. A
+    match somebody has edited by hand is never removed, whatever it duplicates;
+    those come back in ``hand_edited`` for a person to look at.
+    """
+    running = (await db.execute(text("""
+        SELECT 1 FROM cricketstatz_imports
+         WHERE organisation_id = :org AND status = 'running'
+    """), {"org": str(club.id)})).first()
+    if running:
+        # The import claims synced fixtures greedily as it goes, so repairing
+        # underneath a live run would have the two disagreeing about which copy
+        # is the duplicate.
+        raise HTTPException(
+            status_code=409,
+            detail="An import is still running — wait for it to finish, "
+                   "then run this.",
+        )
+    result = await importer.remove_duplicate_imported_games(
+        db, club.id, apply=apply)
+    if apply:
+        await db.commit()
+    else:
+        await db.rollback()
+    return result
+
+
 @router.post("/imports/{import_id}/stop")
 async def stop(import_id: uuid.UUID,
                db: AsyncSession = Depends(get_db),

@@ -112,7 +112,10 @@ ALLOWED_DELETES = {
     ("app/routers/manual_entries.py", "the editor replacing a game it is saving"),
     # Restoring a snapshot on undo: the rows going in are the ones coming back.
     ("app/routers/manual_entries.py", "undo putting a snapshot back"),
-    # Undoing an import removes what that import wrote, scoped by its own id.
+    # Undoing an import removes what that import wrote, scoped by its own id;
+    # and a re-import taking back a duplicate of a match the club already holds
+    # from the sync — its own copy, never a hand-typed one (a game somebody has
+    # edited is checked first and left standing).
     ("app/services/cricketstatz_import.py", "an import undoing its own work"),
 }
 ALLOWED_FILES = {f for f, _ in ALLOWED_DELETES}

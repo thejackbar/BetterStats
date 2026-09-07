@@ -46,6 +46,8 @@ export default function CricketStatzImport() {
   const [starting, setStarting] = useState(false)
   const [tab, setTab] = useState('import')
   const [undoing, setUndoing] = useState(null)
+  const [repair, setRepair] = useState(null)
+  const [repairing, setRepairing] = useState(false)
   const pollRef = useRef(null)
 
   const running = status?.import?.status === 'running'
@@ -129,6 +131,39 @@ export default function CricketStatzImport() {
     } catch (e) {
       toast?.error?.(e?.detail || 'Could not undo that import.')
     } finally { setUndoing(null) }
+  }
+
+  // ── the repair for a club imported before the already-synced guard ────────
+  // Those imports copied every fixture Cricket Australia also covers, so each
+  // of those innings is counted twice on every board. A re-import clears them
+  // as it goes, but that is an hour of upstream calls a club should not have to
+  // spend twice — and undoing the import would take the pre-sync history with
+  // it, which is the half only CricketStatz has.
+  async function checkDuplicates() {
+    setRepairing(true)
+    try {
+      const r = await api.csRepairDuplicates(false)
+      setRepair(r)
+      if (!r.duplicates) toast?.success?.('Nothing is doubled up — every imported match is one you did not already have.')
+    } catch (e) {
+      toast?.error?.(e?.detail || 'Could not check for duplicates.')
+    } finally { setRepairing(false) }
+  }
+
+  async function removeDuplicates() {
+    if (!window.confirm(
+      `Remove ${repair.duplicates} imported match${repair.duplicates === 1 ? '' : 'es'} `
+      + 'that repeat results you already have from Cricket Australia?\n\n'
+      + 'Your own copy of each stays. Nothing you have edited by hand is touched.')) return
+    setRepairing(true)
+    try {
+      const r = await api.csRepairDuplicates(true)
+      setRepair(r)
+      toast?.success?.(`Removed ${r.removed} duplicate match${r.removed === 1 ? '' : 'es'}.`)
+      await loadStatus()
+    } catch (e) {
+      toast?.error?.(e?.detail || 'Could not remove those duplicates.')
+    } finally { setRepairing(false) }
   }
 
   const p = status?.import?.progress || {}
@@ -309,6 +344,28 @@ export default function CricketStatzImport() {
                   </div>
                 )}
                 {status.import.error && <Note toneKey="block">{status.import.error}</Note>}
+                {/* A club that also syncs from Cricket Australia will already
+                    have its recent seasons, and those matches are deliberately
+                    not brought in a second time — saying so is the difference
+                    between a number that looks short and one that is explained. */}
+                {!!(p.already_synced || p.duplicates_removed) && (
+                  <Note>
+                    {!!p.already_synced && (
+                      <div>
+                        {p.already_synced} match{p.already_synced === 1 ? '' : 'es'} you
+                        already had from Cricket Australia {p.already_synced === 1 ? 'was' : 'were'} left
+                        as {p.already_synced === 1 ? 'it is' : 'they are'}, so those results are
+                        counted once rather than twice.
+                      </div>
+                    )}
+                    {!!p.duplicates_removed && (
+                      <div className={p.already_synced ? 'mt-1.5' : ''}>
+                        {p.duplicates_removed} duplicate{p.duplicates_removed === 1 ? '' : 's'} from
+                        an earlier run {p.duplicates_removed === 1 ? 'was' : 'were'} removed.
+                      </div>
+                    )}
+                  </Note>
+                )}
                 {done && (
                   <Note toneKey="ok">
                     Your history is in. It now shows on your players' profiles,
@@ -325,6 +382,62 @@ export default function CricketStatzImport() {
                       {p.notes.slice(0, 50).map((n, i) => <li key={i}>{n}</li>)}
                     </ul>
                   </details>
+                )}
+              </div>
+            )}
+
+            {/* Only offered once an import has finished — repairing underneath a
+                live run would have the two disagreeing about which copy is the
+                duplicate, which is why the server refuses it too. */}
+            {!running && !!status?.import && (
+              <div className="rounded-lg border pb-hairline p-3.5">
+                <div className="text-sm text-pb-text">Results counted twice?</div>
+                <p className="text-[12px] text-pb-dim mt-1 leading-[1.55]">
+                  If your club also syncs from Cricket Australia, an import run
+                  before August 2026 copied the seasons you already had — so those
+                  matches are counted twice on every board. This finds them and
+                  leaves your own copy of each. Anything you have edited by hand
+                  is never touched.
+                </p>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <Button variant="soft" size="sm" disabled={repairing}
+                          onClick={checkDuplicates}>
+                    {repairing ? 'Checking…' : 'Check for duplicates'}
+                  </Button>
+                  {!!repair?.duplicates && !repair?.applied && (
+                    <Button variant="danger" size="sm" disabled={repairing}
+                            onClick={removeDuplicates}>
+                      Remove {repair.duplicates}
+                    </Button>
+                  )}
+                </div>
+                {repair && (
+                  <div className="mt-3">
+                    <Note toneKey={repair.duplicates ? 'warn' : 'ok'}>
+                      {repair.duplicates === 0
+                        ? 'Nothing is doubled up — every imported match is one you did not already have.'
+                        : repair.applied
+                          ? `Removed ${repair.removed} duplicate match${repair.removed === 1 ? '' : 'es'}. Your boards will read correctly now.`
+                          : `${repair.duplicates} of your ${repair.imported_games} imported matches repeat results you already have.`}
+                      {!!repair.kept_hand_edited && (
+                        <div className="mt-1.5">
+                          {repair.kept_hand_edited} more look like duplicates but you have
+                          edited them, so they are yours rather than the import's to remove.
+                          Open those in Manual Entries if they should go.
+                        </div>
+                      )}
+                    </Note>
+                    {!repair.applied && !!repair.sample?.length && (
+                      <ul className="mt-2 text-[12px] text-pb-faint space-y-0.5">
+                        {repair.sample.map(d => (
+                          <li key={d.game_id}>{d.played_at} v {d.opposition || '—'}</li>
+                        ))}
+                        {repair.duplicates > repair.sample.length && (
+                          <li>and {repair.duplicates - repair.sample.length} more</li>
+                        )}
+                      </ul>
+                    )}
+                  </div>
                 )}
               </div>
             )}

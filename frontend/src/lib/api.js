@@ -1816,6 +1816,12 @@ export const api = {
   csUndo: (id) =>
     request(`/club-admin/cricketstatz/imports/${id}/undo`, { method: 'POST' }),
   csRecords: () => request('/club-admin/cricketstatz/records'),
+  // Clears matches an earlier import copied on top of games the club already
+  // had from Cricket Australia. Dry run unless `apply` — the club sees what
+  // would go before anything does.
+  csRepairDuplicates: (apply = false) =>
+    request(`/club-admin/cricketstatz/repair-duplicates?apply=${apply ? 'true' : 'false'}`,
+      { method: 'POST' }),
   adminHardRefreshOrg: () =>
     request('/club-admin/hard-refresh', { method: 'POST' }),
   adminBackfillAggregates: () =>

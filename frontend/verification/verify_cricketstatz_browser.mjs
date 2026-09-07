@@ -50,7 +50,8 @@ const IMPORTS = [{
 // The import's own life cycle: nothing, then running, then complete — so the
 // screen's polling can be observed rather than assumed.
 function makeState() {
-  return { phase: 'none', polls: 0, quiet: 4, planning: false }
+  return { phase: 'none', polls: 0, quiet: 4, planning: false,
+           duplicates: 0, handEdited: 0, alreadySynced: 0 }
 }
 
 const routes = (page, calls, state) => page.route('**/api/**', async (route) => {
@@ -79,6 +80,23 @@ const routes = (page, calls, state) => page.route('**/api/**', async (route) => 
   if (url.includes('/cricketstatz/import') && method === 'POST') {
     state.phase = 'running'
     return json({ import_id: 'imp-2', status: 'running' })
+  }
+  if (url.includes('/cricketstatz/repair-duplicates')) {
+    const apply = /apply=true/.test(url)
+    if (apply) state.duplicatesRemoved = state.duplicates
+    const found = apply ? 0 : state.duplicates
+    return json({
+      imported_games: 3556,
+      duplicates: apply ? state.duplicates : found,
+      removed: apply ? state.duplicates : 0,
+      kept_hand_edited: state.handEdited ?? 0,
+      hand_edited: [],
+      sample: found
+        ? [{ game_id: 'g1', played_at: '2003-01-18', opposition: 'Melville CC' },
+           { game_id: 'g2', played_at: '2003-01-25', opposition: 'Fremantle CC' }]
+        : [],
+      applied: apply,
+    })
   }
   if (/\/cricketstatz\/imports\/[^/]+\/stop/.test(url)) return json({ stopped: true })
   if (/\/cricketstatz\/imports\/[^/]+\/undo/.test(url)) {
@@ -123,6 +141,8 @@ const routes = (page, calls, state) => page.route('**/api/**', async (route) => 
             season_count: 73, match_count: 3556,
             earliest: 1953, latest: 2025, estimated_minutes: 59, seasons: [],
           },
+          already_synced: running ? 0 : (state.alreadySynced ?? 0),
+          duplicates_removed: 0,
           notes: running ? [] : ['match 3082412: no scorecard published'],
         },
       },
@@ -359,6 +379,104 @@ const run = async () => {
   }
   ck('a dismissed stop sends nothing',
      !calls.some((c) => /\/imports\/[^/]+\/stop/.test(c.url)))
+
+  // ── results counted twice ─────────────────────────────────────────────
+  // An import run before the already-synced guard copied every fixture Cricket
+  // Australia also covers, so each of those innings is counted twice on every
+  // board. The club must be able to clear that without spending another hour
+  // on a re-import.
+  {
+    const c2 = []
+    const st2 = makeState()
+    st2.phase = 'complete'
+    st2.duplicates = 154
+    st2.handEdited = 2
+    const { page: p2, errors: e2 } = await open(ctx, '/admin/sync', c2, st2)
+
+    // A CONTROL RUN MUST REPORT, NOT CRASH. Without this the suite dies on the
+    // first absent locator and says nothing about the checks after it.
+    const hasPanel = (await p2.locator('text=Results counted twice?').count()) > 0
+    ck('a finished import offers a way to check for doubled-up results', hasPanel)
+    if (!hasPanel) {
+      for (const missing of [
+        'checking is a DRY RUN — nothing is removed until it is asked for',
+        'and it says how many of the imported matches repeat what the club has',
+        'a match somebody has edited is reported, not quietly removed',
+        'the club can see which matches before deciding',
+        'a dismissed confirm removes nothing',
+        'accepting it asks the server to apply',
+        'and the club is told what went',
+      ]) ck(missing, false, 'the repair panel is not present in this build')
+      await p2.close()
+    } else {
+
+    c2.length = 0
+    await p2.locator('button', { hasText: /check for duplicates/i }).click()
+    await p2.waitForTimeout(700)
+    const check = c2.find((c) => /repair-duplicates/.test(c.url))
+    ck('checking is a DRY RUN — nothing is removed until it is asked for',
+       !!check && /apply=false/.test(check.url), check?.url)
+    ck('and it says how many of the imported matches repeat what the club has',
+       (await p2.locator('text=/154 of your 3556 imported matches/').count()) > 0)
+    ck('a match somebody has edited is reported, not quietly removed',
+       (await p2.locator('text=/2 more look like duplicates/').count()) > 0)
+    ck('the club can see which matches before deciding',
+       (await p2.locator('text=/2003-01-18 v Melville CC/').count()) > 0)
+
+    // Dismissing the confirm must send NOTHING.
+    c2.length = 0
+    await p2.evaluate(() => { window.confirm = () => false })
+    await p2.locator('button', { hasText: /^Remove 154$/ }).click()
+    await p2.waitForTimeout(500)
+    ck('a dismissed confirm removes nothing',
+       !c2.some((c) => /apply=true/.test(c.url)), JSON.stringify(c2.map(c => c.url)))
+
+    c2.length = 0
+    await p2.evaluate(() => { window.confirm = () => true })
+    await p2.locator('button', { hasText: /^Remove 154$/ }).click()
+    await p2.waitForTimeout(800)
+    ck('accepting it asks the server to apply',
+       c2.some((c) => /repair-duplicates\?apply=true/.test(c.url)),
+       JSON.stringify(c2.map(c => c.url)))
+    ck('and the club is told what went',
+       (await p2.locator('text=/Removed 154 duplicate matches/').count()) > 0)
+    ck('no page errors', e2.length === 0, e2[0])
+    await p2.close()
+    }
+  }
+
+  // A club with nothing doubled up is told so plainly rather than left to guess.
+  {
+    const c3 = []
+    const st3 = makeState()
+    st3.phase = 'complete'
+    const { page: p3 } = await open(ctx, '/admin/sync', c3, st3)
+    const btn = p3.locator('button', { hasText: /check for duplicates/i })
+    if (await btn.count()) {
+      await btn.click()
+      await p3.waitForTimeout(700)
+    }
+    ck('a club with nothing doubled up is told so',
+       (await p3.locator('text=/Nothing is doubled up/').count()) > 0)
+    ck('and is offered no Remove button it does not need',
+       (await btn.count()) > 0 &&
+       (await p3.locator('button', { hasText: /^Remove / }).count()) === 0)
+    await p3.close()
+  }
+
+  // The import's own summary explains why a count looks short.
+  {
+    const c4 = []
+    const st4 = makeState()
+    st4.phase = 'complete'
+    st4.alreadySynced = 154
+    const { page: p4 } = await open(ctx, '/admin/sync', c4, st4)
+    ck('a finished import says what it left as Cricket Australia has it',
+       (await p4.locator('text=/154 matches you already had from Cricket Australia/').count()) > 0)
+    ck('and says why, so a shorter figure reads as explained rather than missing',
+       (await p4.locator('text=/counted once rather than twice/').count()) > 0)
+    await p4.close()
+  }
 
   // Nothing should be left pointing at a screen that no longer exists.
   ck('no link to a standalone importer screen remains',

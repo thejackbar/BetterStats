@@ -7544,6 +7544,110 @@ in 2002/03 for a man capped in 1982-83.
   usually has its own, and each needs its own de-dup decision — which is a
   different change from stopping a career being deleted.
 
+### AN IMPORT MUST NOT COPY A MATCH THE CLUB ALREADY HAS (v9.69.1, Sep 2026)
+
+Reported off a live import, mid-run: the record boards were "massively
+overcounting" and Highest Individual Scores listed the same innings twice —
+Heath Shephard's 270 at ranks 1 AND 2, Princely Emmanuel's 206* at 3 and 4,
+Shannon McCleish's 173* at 7 and 8.
+
+- **`import_match` LOOKED FOR AN EXISTING MATCH BY `cricketstatz_match_id` AND
+  NOTHING ELSE**, so it had no idea the club already held that fixture as a
+  SYNCED game. Both then sit in `v_effective_games`, and every stats read unions
+  the synced and manual tables — so each innings of every overlapping match was
+  counted twice. The import knew nothing about the `games` table at all: `grep`
+  for it returns two hits, both about hand-edited manual games.
+- **A DOUBLING IS INVISIBLE IN AN AVERAGE, which is why it reads as plausible
+  figures rather than obvious nonsense.** Runs and dismissals double together,
+  so the average is unchanged and only the counts move. That is what let 14,758
+  career runs at 36.62 sit on screen looking internally consistent.
+- **THE SCREENSHOT NAMED THE CAUSE BEFORE THE CODE DID.** Every duplicated row
+  was from a season Cricket Australia also covers (2002/03, 2011/12, 2013/14);
+  every un-duplicated one was from before the sync could reach (1969/70,
+  1991/92, 1994/95). And the arithmetic agreed: CricketStatz reports 10,444
+  career runs for the reported player against the board's 14,758, a surplus of
+  4,314 — a partial overcount, exactly what "only the overlapping era is
+  doubled" predicts, and NOT what a flat doubling would give.
+- **REPRODUCED BEFORE ANYTHING WAS CHANGED**, through the shipped `import_match`
+  against a real Postgres: seed a synced game with a 270, import the same
+  fixture from CricketStatz, read the board — two rows.
+- **THE SYNC WINS.** Cricket Australia's row is the one a later sync refreshes
+  and the one the season aggregates are keyed to; a second copy beside it could
+  only ever drift. Same call `routers/afl/result_imports.py` already documents
+  for its own upload ("a game the PlayHQ sync already holds is never touched"),
+  which is where the guard's shape comes from.
+- **GROUPED BY (DAY, OPPOSITION), NEVER FLAT.** A club fields several sides on
+  one afternoon against the same opposition — the Firsts and the Seconds both
+  play Melville — so a date-and-opponent match alone reads the whole day's card
+  as one fixture and drops every other grade's. The lesson
+  `result_imports._synced_index` already records.
+- **A LETTER GRADE IS AN ORDINAL, and folding them is what makes the common case
+  a confident match rather than a guess.** "A Grade", "1st Grade" and "Cockburn
+  1st XI" all reduce to "1" (`_side_key`), because the two systems routinely
+  name the same eleven differently and the reported club is exactly that shape.
+- **THE CLAIM IS GREEDY AND BOUNDED, so a side the sync does not hold still
+  comes in.** Each synced game may be claimed once; when a group's entries are
+  all claimed, nothing more is skipped. The guard can therefore never remove
+  more matches than the club actually holds. The index and its claims are shared
+  across the WHOLE import, not per season — a synced game claimed by one
+  season's match must not be offered to another's.
+- **`opponent_key` IS DELIBERATELY NOT FUZZY.** Two clubs in one association
+  really can share a word ("South Perth", "South Fremantle"), and folding those
+  would drop a genuine match as a duplicate — the worse error, because the
+  doubling this exists to stop is at least visible.
+- **A RE-IMPORT IS THE REPAIR, and the delete is the import taking back its own
+  work** — the one thing the standing manual-data rule allows. A game somebody
+  has edited by hand is checked FIRST and returns before the guard is reached,
+  so a person's scorecard is never removed however much it duplicates.
+- **WRITTEN AS RAW SQL SO THE AUDIT SEES IT.** `verify_merge_carry` scans `app/`
+  for `DELETE FROM manual_*` and fails on any site nobody has justified — and an
+  ORM `db.delete(instance)` is invisible to that regex. Writing the delete in the
+  form the scanner reads is what keeps the enforcement honest; the allowlist
+  entry carries the reason.
+- **COUNTED, NOT NOTED PER MATCH.** A club with twenty seasons of overlap would
+  fill the 200-note cap with one sentence and crowd out the notes that need
+  reading (an unreadable match, a name close to an existing player). One summary
+  line, plus `already_synced` / `duplicates_removed` on the progress payload, and
+  the screen says so where the counts are — a figure that looks short then reads
+  as explained rather than missing.
+- **A CLUB ALREADY IN THIS STATE IS NOT MADE TO RE-IMPORT.**
+  `remove_duplicate_imported_games` applies the same rule to what is already
+  stored, behind `POST /club-admin/cricketstatz/repair-duplicates` (dry run
+  unless `apply`) and `python -m app.scripts.repair_cricketstatz_duplicates`.
+  **Undoing the import is NOT the answer** — it would take the pre-sync history
+  with it, which is the half only CricketStatz has. Refused while an import is
+  running, or the two would disagree about which copy is the duplicate.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_cricketstatz_duplicate_games.py`, 28 checks
+  through the shipped `import_match` and the record boards' own join: the
+  reported case, a season only CricketStatz has still imported, two sides on one
+  afternoon both recognised while a third the sync lacks still comes in, a
+  different opponent and a different day both imported, a re-import clearing a
+  duplicate it created, a hand-edited game left standing, and the repair's dry
+  run / apply / idempotent re-run) **with a control run**: with the guard
+  neutered 11 of the 28 fail, the day reading `[44, 61, 270, 270]`.
+- **Driven in Chromium** (the CricketStatz suite is 62 checks now: the dry run
+  on the wire, what it reports, a hand-edited game named rather than removed, a
+  dismissed confirm sending nothing, the apply, a club with nothing doubled up
+  told so and offered no button, and the import summary explaining what it left
+  alone) **with a control run**: with the panel removed the new checks REPORT
+  rather than the suite dying on the first absent locator — which the first cut
+  did, and which is not a control run.
+- **THE HARNESS CARD HAD TO BE THE PARSER'S OWN SHAPE.** The first cut wrote a
+  flat `{name, runs}` batter; `_write_our_batting` reads a nested `batter` dict,
+  so it stored no innings at all and every check about the board would have
+  measured nothing. Found by probing what the import actually wrote, not by
+  reading it.
+- **NOTICED, NOT SETTLED**: where a group's names do not line up, the greedy
+  claim decides WHICH of two same-day fixtures is treated as the duplicate, and
+  that depends on the order the rows arrive. The COUNT is right either way — no
+  doubling, no loss — and the two are the same day against the same opponent, so
+  the practical difference is small; but it is not identity. Also open, and the
+  bigger question: where CA and CricketStatz both cover a season, the club now
+  sees CA's figures for it. If CricketStatz is the fuller record there, that is a
+  per-season source decision nobody has made yet — compare a season's totals on
+  both before assuming the union is complete.
+
 ### The honour board is written in the notes (v9.68.0)
 
 Asked for with the duplicate fix: "the notes in CricketStatz contain some
