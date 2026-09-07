@@ -1784,9 +1784,14 @@ export const api = {
     request('/club-admin/cricketstatz/inspect', {
       method: 'POST', body: JSON.stringify({ url }),
     }),
-  csStartImport: (url) =>
+  csStartImport: (url, syncedYears = 'skip') =>
     request('/club-admin/cricketstatz/import', {
-      method: 'POST', body: JSON.stringify({ url }),
+      method: 'POST',
+      body: JSON.stringify({ url, synced_years: syncedYears }),
+    }),
+  csClearSuperseded: (years = null) =>
+    request('/club-admin/cricketstatz/superseded/clear', {
+      method: 'POST', body: JSON.stringify({ years }),
     }),
   csStatus: () => request('/club-admin/cricketstatz/status'),
   csImports: () => request('/club-admin/cricketstatz/imports'),

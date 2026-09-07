@@ -381,6 +381,92 @@ _FINAL_WORDS = re.compile(
     r"\b(final|semi|elim|qualif|prelim|grand)\b", re.I)
 
 
+
+
+# ── the club's own history, already synced ───────────────────────────────────
+
+async def synced_coverage(db: AsyncSession, org_id) -> dict:
+    """Seasons the club ALREADY holds synced games for, and how many.
+
+    A club that syncs from Cricket Australia and then imports its whole
+    CricketStatz history ends up holding the same cricket twice — every match
+    from the year the sync reaches back to appears once as a synced game and
+    once as an imported one, so every career total, average and record board
+    counts it twice. Reported live off a real club: 2,324 imported matches
+    beside ~3,000 synced ones, and a batter's career reading 14,966 runs where
+    CricketStatz has 10,444.
+
+    Keyed on the SEASON's year, so a November and the following March both land
+    in the same season the club played.
+    """
+    rows = (await db.execute(text("""
+        SELECT s.year AS year, COUNT(*) AS games
+          FROM games g
+          JOIN grades gr ON gr.id = g.grade_id
+          JOIN seasons s ON s.id = gr.season_id
+         WHERE s.organisation_id = :org AND s.year IS NOT NULL
+         GROUP BY s.year
+    """), {"org": str(org_id)})).mappings().all()
+    return {int(r["year"]): int(r["games"]) for r in rows}
+
+
+
+async def mark_seasons_superseded(db: AsyncSession, org_id, years) -> int:
+    """Say CricketStatz is the record for these seasons of this club.
+
+    A marker on the season, read by `v_effective_games` and
+    `v_effective_player_season_stats` (migration 287): the synced side of those
+    two views steps aside while the imported matches are rolled up as normal,
+    so the season is counted once. Nothing is deleted — the club's Cricket
+    Australia data stays, the sync keeps it current underneath, and clearing
+    the marker brings it straight back.
+    """
+    if not years:
+        return 0
+    result = await db.execute(text("""
+        UPDATE seasons SET stats_source = 'cricketstatz'
+         WHERE organisation_id = :org AND year = ANY(CAST(:years AS int[]))
+           AND stats_source IS DISTINCT FROM 'cricketstatz'
+    """), {"org": str(org_id), "years": [int(y) for y in years]})
+    return result.rowcount or 0
+
+
+async def clear_seasons_superseded(db: AsyncSession, org_id, years=None) -> int:
+    """Hand the seasons back to the sync. Instant — nothing has to be re-pulled."""
+    sql = ("UPDATE seasons SET stats_source = NULL"
+           " WHERE organisation_id = :org AND stats_source = 'cricketstatz'")
+    params = {"org": str(org_id)}
+    if years:
+        sql += " AND year = ANY(CAST(:years AS int[]))"
+        params["years"] = [int(y) for y in years]
+    return (await db.execute(text(sql), params)).rowcount or 0
+
+
+async def superseded_years(db: AsyncSession, org_id) -> list:
+    rows = (await db.execute(text("""
+        SELECT year FROM seasons
+         WHERE organisation_id = :org AND stats_source = 'cricketstatz'
+           AND year IS NOT NULL
+         ORDER BY year
+    """), {"org": str(org_id)})).scalars().all()
+    return [int(y) for y in rows]
+
+
+async def hand_edited_games(db: AsyncSession, org_id) -> set:
+    """Manual games somebody has created, edited or imported by hand.
+
+    One query for the whole club, so the import's own per-match check costs
+    nothing. An edit that was later undone does not count — the club took it
+    back, so there is nothing of theirs to protect.
+    """
+    rows = (await db.execute(text("""
+        SELECT DISTINCT target_id FROM manual_edit_logs
+         WHERE organisation_id = :org AND target_table = 'manual_games'
+           AND undone_at IS NULL
+    """), {"org": str(org_id)})).scalars().all()
+    return {str(r) for r in rows}
+
+
 async def import_match(db: AsyncSession, org_id, import_id, card: dict,
                        row: dict, is_ours, caches: dict) -> Optional[str]:
     """Write one CricketStatz match. Returns a note when something was skipped."""
@@ -418,6 +504,16 @@ async def import_match(db: AsyncSession, org_id, import_id, card: dict,
             ManualGame.organisation_id == org_id,
             ManualGame.cricketstatz_match_id == source_id)
     )).scalars().first()
+
+    # A GAME SOMEBODY HAS WORKED ON BY HAND IS NEVER OVERWRITTEN. Entering or
+    # correcting a scorecard costs a club hours, so a re-import refreshing what
+    # the import itself wrote must stop at the first row a person has touched —
+    # and say so, rather than reverting their work silently. `manual_edit_logs`
+    # is the signal because the import writes none of its own: any un-undone
+    # row against this game means somebody edited it through Manual Entries.
+    if existing is not None and str(existing.id) in caches.get("hand_edited", ()):
+        return (f"{source_id}: left as you have it — this match has been edited "
+                f"by hand, so the import did not write over it")
 
     game = existing or ManualGame(
         id=_derived_id(org_id, "match", source_id),
@@ -993,7 +1089,8 @@ async def _set_progress(session_maker, import_id, **fields) -> None:
         await db.commit()
 
 
-async def run_import(session_maker, org_id, import_id, club_id: str) -> None:
+async def run_import(session_maker, org_id, import_id, club_id: str,
+                     synced_years: str = "skip") -> None:
     """Pull the club's whole CricketStatz history. Never raises.
 
     Runs as a detached background task, so its own session is opened here and
@@ -1005,6 +1102,8 @@ async def run_import(session_maker, org_id, import_id, club_id: str) -> None:
         "matches_done": 0, "matches_total": 0, "scorecards": 0,
         "records": 0, "players": 0, "notes": [],
         "notes_done": 0, "notes_total": 0, "awards": 0, "notes_read": 0,
+        "skipped_synced_years": [], "replaced_synced_years": [],
+        "synced_years": [],
         "candidates_done": 0, "candidates_total": 0, "current_season": None,
     }
 
@@ -1061,6 +1160,46 @@ async def run_import(session_maker, org_id, import_id, club_id: str) -> None:
                     session_maker, import_id, progress=dict(progress)))
 
         plan = await plan_seasons(club_id, seasons, planning)
+
+        # A club that already syncs from Cricket Australia holds those seasons
+        # once. Importing them again does not correct anything — it counts the
+        # same cricket twice on every career total and every record board — so
+        # the years the sync already covers are left out unless the club has
+        # asked for them. CricketStatz is for the history the sync cannot
+        # reach, and the club is told exactly which years were skipped.
+        async with session_maker() as db:
+            covered = await synced_coverage(db, org_id)
+        overlap = []
+        for season, _rows in plan:
+            year = season_year(season["label"], season["value"])
+            if year is not None and covered.get(year):
+                overlap.append(year)
+        overlap.sort()
+
+        skipped_years, replaced_years = [], []
+        if overlap and synced_years == "skip":
+            skipped_years = overlap
+            plan = [(sn, rows) for sn, rows in plan
+                    if season_year(sn["label"], sn["value"]) not in set(overlap)]
+            note(f"{len(skipped_years)} season(s) already covered by your "
+                 f"Cricket Australia sync were left out "
+                 f"({skipped_years[0]}-{skipped_years[-1]}), so those matches "
+                 f"are not counted twice.")
+        elif overlap and synced_years == "cricketstatz":
+            # The club has said its CricketStatz history is the record for the
+            # seasons it also syncs. The seasons are marked AFTER the matches
+            # are in, below — marking first would leave the club with neither
+            # source showing while the import walked, and a run that failed
+            # halfway would leave it that way.
+            replaced_years = overlap
+            note(f"{len(replaced_years)} season(s) you also sync will read from "
+                 f"CricketStatz ({replaced_years[0]}-{replaced_years[-1]}). "
+                 f"Your Cricket Australia data is kept and steps aside.")
+
+        progress["skipped_synced_years"] = skipped_years
+        progress["replaced_synced_years"] = replaced_years
+        progress["synced_years"] = sorted(covered)
+
         summary = plan_summary(plan)
         progress["seasons_total"] = summary["season_count"]
         progress["matches_total"] = summary["match_count"]
@@ -1069,6 +1208,11 @@ async def run_import(session_maker, org_id, import_id, club_id: str) -> None:
                             progress=progress, stats=summary)
 
         # ── matches, season by season ───────────────────────────────────────
+        # Read once for the whole club: which games a person has already worked
+        # on by hand, so a re-import never writes over their scorecard.
+        async with session_maker() as db:
+            hand_edited = await hand_edited_games(db, org_id)
+
         progress["phase"] = "matches"
         await _set_progress(session_maker, import_id, phase="matches",
                             progress=progress)
@@ -1082,7 +1226,7 @@ async def run_import(session_maker, org_id, import_id, club_id: str) -> None:
 
             caches = {
                 "seasons": {}, "grades": {}, "players": {}, "roster": None,
-                "near_matches": {},
+                "near_matches": {}, "hand_edited": hand_edited,
                 "season_label": season["label"], "season_value": season["value"],
             }
             async with session_maker() as db:
@@ -1137,6 +1281,17 @@ async def run_import(session_maker, org_id, import_id, club_id: str) -> None:
                 note(f"{new_name}: added as a new player — close to "
                      f"{', '.join(candidates)}. Check Merge Duplicates.")
             await _set_progress(session_maker, import_id, progress=progress)
+
+        # ── the seasons CricketStatz is now the record for ──────────────────
+        # Marked only now, with the matches already written: the views step the
+        # synced copy aside the moment the marker lands, so marking first would
+        # leave a club looking at a season with neither source in it for as
+        # long as the import took, and a run that died halfway would leave it
+        # that way for good.
+        if replaced_years:
+            async with session_maker() as db:
+                await mark_seasons_superseded(db, org_id, replaced_years)
+                await db.commit()
 
         # ── the record book ─────────────────────────────────────────────────
         progress["phase"] = "records"

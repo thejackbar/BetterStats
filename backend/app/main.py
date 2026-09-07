@@ -4295,6 +4295,14 @@ async def lifespan(app: FastAPI):
         for _stmt in _CRICKETSTATZ_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 287: a club can say CricketStatz is the record for a season
+        # it also syncs, so the same match is not counted from two sources.
+        # Applied on read in the effective views — nothing is deleted and
+        # clearing the marker puts the synced copy straight back.
+        from app.services.superseded_ddl import STATEMENTS as _SUPERSEDED_DDL
+        for _stmt in _SUPERSEDED_DDL:
+            await conn.execute(text(_stmt))
+
     # Migration 178: Member self-service portal, Stripe Connect fee payments,
     # reminder automation. See services/member_portal_auth.py,
     # services/stripe_connect_client.py, services/member_reminders.py.

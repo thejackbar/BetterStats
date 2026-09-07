@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import sys
 import uuid
 from datetime import date
@@ -27,6 +28,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.models.db import Base
 from app.routers.admin import _merge_players_core, undo_merge, UndoMergeRequest
 from app.services import merge_carry
+from app.services import cricketstatz_import as importer
 
 DB_URL = os.environ.get(
     "DATABASE_URL",
@@ -94,6 +96,71 @@ class FakeUser:
 def check(name: str, ok: bool, detail: str = "") -> None:
     (PASS if ok else FAIL).append(name)
     print(f"  {'PASS' if ok else 'FAIL'}  {name}" + (f"  — {detail}" if detail and not ok else ""))
+
+
+
+# ── the rule, enforced rather than written down ──────────────────────────────
+#
+# NEVER REMOVE A GAME A CLUB ENTERED BY HAND. Typing a scorecard in costs a
+# club hours, and there is no upstream to re-pull it from. Every place in the
+# codebase that can delete a manual game or its children is listed below with
+# the reason it is allowed to; anything not on the list fails this check, so a
+# new one cannot be added without somebody saying why.
+ALLOWED_DELETES = {
+    # The manual-game editor replacing a game's own rows as it saves it — that
+    # IS the person's edit, not a loss.
+    ("app/routers/manual_entries.py", "the editor replacing a game it is saving"),
+    # Restoring a snapshot on undo: the rows going in are the ones coming back.
+    ("app/routers/manual_entries.py", "undo putting a snapshot back"),
+    # Undoing an import removes what that import wrote, scoped by its own id.
+    ("app/services/cricketstatz_import.py", "an import undoing its own work"),
+}
+ALLOWED_FILES = {f for f, _ in ALLOWED_DELETES}
+
+DELETE_PATTERN = re.compile(
+    r"DELETE\s+FROM\s+(manual_\w+)|sa_delete\(\s*(Manual\w+)", re.I)
+
+
+def verify_no_new_delete_sites() -> None:
+    print("\nNothing new may delete a manually entered game")
+    root = Path(__file__).resolve().parent.parent / "app"
+    offenders = []
+    sites = 0
+    for path in sorted(root.rglob("*.py")):
+        rel = str(path.relative_to(root.parent))
+        for lineno, line in enumerate(path.read_text().splitlines(), 1):
+            if not DELETE_PATTERN.search(line):
+                continue
+            sites += 1
+            if rel not in ALLOWED_FILES:
+                offenders.append(f"{rel}:{lineno}")
+    check("every place that deletes a manual row is one we have justified",
+          not offenders,
+          "unlisted: " + ", ".join(offenders) if offenders else "")
+    check("and the list is not empty, so the search itself still works",
+          sites >= 8, str(sites))
+
+    # The merge is the one that got this wrong: it deleted rather than moved.
+    # Every manual table has to be on the carry list or the next merge loses it.
+    models = (root / "models" / "db.py").read_text()
+    manual_tables = set(re.findall(r'__tablename__\s*=\s*["\'](manual_\w+)', models))
+    # `manual_games` itself hangs off the ORGANISATION, not a player, so a merge
+    # never reaches it; `manual_edit_logs` is the audit trail.
+    manual_tables -= {"manual_games", "manual_edit_logs"}
+    carried = {t for t, _c, _i, _u in merge_carry.CARRIED}
+    player_linked = set()
+    for table in manual_tables:
+        block = models[models.index(f'"{table}"'):]
+        block = block[:block.find("class ", 10)] if "class " in block[10:] else block[:2000]
+        if 'ForeignKey("players.id"' in block:
+            player_linked.add(table)
+    missing = sorted(player_linked - carried)
+    # A vacuous pass is the failure mode here: if the scan found no
+    # player-linked manual table at all, "none are missing" is trivially true.
+    check("the scan finds the manual tables that point at a player",
+          len(player_linked) >= 8, f"{len(player_linked)}: {sorted(player_linked)}")
+    check("every manual table that points at a player is carried by a merge",
+          not missing, ", ".join(missing))
 
 
 async def seed(db) -> dict:
@@ -182,6 +249,87 @@ async def seed(db) -> dict:
     return {"season": season, "games": games}
 
 
+
+async def verify_hand_edit_guard(session_maker) -> None:
+    """A re-import must not write over a match somebody has worked on by hand."""
+    print("\nA hand-edited match is never written over")
+    org = uuid.uuid4()
+    season = uuid.uuid4()
+    imported, edited = uuid.uuid4(), uuid.uuid4()
+    async with session_maker() as db:
+        await db.execute(text("""
+            INSERT INTO organisations (id, name, slug, is_active)
+            VALUES (:o, 'Edited CC', 'edited-cc', true)
+        """), {"o": str(org)})
+        await db.execute(text("""
+            INSERT INTO seasons (id, organisation_id, name, year)
+            VALUES (:s, :o, 'Summer 2001/02', 2001)
+        """), {"s": str(season), "o": str(org)})
+        for gid, match in ((imported, "900001"), (edited, "900002")):
+            await db.execute(text("""
+                INSERT INTO manual_games (id, organisation_id, season_id, played_at,
+                                          opposition, cricketstatz_match_id)
+                VALUES (:g, :o, :s, CAST('2001-11-03' AS date), 'Lalor', :m)
+            """), {"g": str(gid), "o": str(org), "s": str(season), "m": match})
+        # Somebody corrected the second one through Manual Entries.
+        await db.execute(text("""
+            INSERT INTO manual_edit_logs
+                (organisation_id, action, target_table, target_id, summary)
+            VALUES (:o, 'update', 'manual_games', :t, 'fixed the opposition')
+        """), {"o": str(org), "t": str(edited)})
+        # And an edit on the first one that was later taken back.
+        await db.execute(text("""
+            INSERT INTO manual_edit_logs
+                (organisation_id, action, target_table, target_id, summary, undone_at)
+            VALUES (:o, 'update', 'manual_games', :t, 'reverted', NOW())
+        """), {"o": str(org), "t": str(imported)})
+        await db.commit()
+
+    async with session_maker() as db:
+        touched = await importer.hand_edited_games(db, org)
+    check("a match somebody edited is recognised as theirs",
+          str(edited) in touched, str(touched))
+    check("an edit that was undone does not count — they took it back",
+          str(imported) not in touched, str(touched))
+
+    caches = {"seasons": {}, "grades": {}, "players": {}, "roster": None,
+              "near_matches": {}, "hand_edited": touched,
+              "season_label": "Summer 2001/02", "season_value": "2001S"}
+    card = {"source_match_id": "900002", "date": "2001-11-03",
+            "home_team": "Edited CC", "away_team": "Somebody Else",
+            "venue": "Elsewhere", "result": "Match Drawn", "innings": []}
+    row = {"source_match_id": "900002", "division": "A-GRADE",
+           "round": "03", "date": "2001-11-03"}
+    async with session_maker() as db:
+        note = await importer.import_match(
+            db, org, uuid.uuid4(), card, row, lambda n: "Edited" in (n or ""), caches)
+        await db.commit()
+    check("the import leaves it alone and says so",
+          bool(note) and "edited by hand" in note, str(note))
+    async with session_maker() as db:
+        after = (await db.execute(text(
+            "SELECT opposition, venue FROM manual_games WHERE id = :g"),
+            {"g": str(edited)})).mappings().first()
+    check("their own figures are exactly as they left them",
+          after["opposition"] == "Lalor" and after["venue"] is None, str(dict(after)))
+
+    # The one nobody has touched is refreshed as normal, which is what makes a
+    # re-import the recovery path for a club that has lost rows.
+    card["source_match_id"] = "900001"
+    row["source_match_id"] = "900001"
+    async with session_maker() as db:
+        note = await importer.import_match(
+            db, org, uuid.uuid4(), card, row, lambda n: "Edited" in (n or ""), caches)
+        await db.commit()
+    check("a match nobody has touched is still refreshed", note is None, str(note))
+    async with session_maker() as db:
+        after = (await db.execute(text(
+            "SELECT venue FROM manual_games WHERE id = :g"),
+            {"g": str(imported)})).mappings().first()
+    check("so a re-import can put back what was lost",
+          after["venue"] == "Elsewhere", str(dict(after)))
+
+
 async def counts(db, player_id) -> dict:
     out = {}
     for table, column in (("manual_batting_innings", "player_id"),
@@ -203,6 +351,8 @@ async def main() -> int:
         await conn.run_sync(Base.metadata.create_all)
         for statement in EXTRA_DDL:
             await conn.execute(text(statement))
+
+    verify_no_new_delete_sites()
 
     print("\nThe reported case: merging a duplicate must not lose a career")
     async with session_maker() as db:
@@ -301,6 +451,8 @@ async def main() -> int:
           back_keep["manual_batting_innings"] + back_remove["manual_batting_innings"] == 6,
           f"{back_keep} / {back_remove}")
 
+
+    await verify_hand_edit_guard(session_maker)
 
     await engine.dispose()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")

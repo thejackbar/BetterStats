@@ -1,5 +1,61 @@
 # BetterStats — Claude Session Notes
 
+## NEVER DELETE OR OVERWRITE WHAT A CLUB TYPED IN BY HAND (v9.68.2, Sep 2026)
+
+**Set as a standing rule, after a merge deleted half a player's career.** A
+club entering a season of scorecards spends hours on it, and unlike a synced
+game there is **no upstream to re-pull it from** — a deleted manual row is
+gone. So:
+
+> **A manual game, its innings, and a hand-typed correction are the club's own
+> work. A function may ADD to them and it may MOVE them; it may only remove or
+> replace what it wrote ITSELF, and never what a person wrote.**
+
+Where this has already gone wrong, and what each case teaches:
+
+- **A MERGE MOVES A RECORD; IT NEVER DELETES ONE.** `_merge_players_core` was
+  written for the SYNCED per-game tables and reached no `manual_*` table at
+  all — and every one of them is `ON DELETE CASCADE` on `players.id`, so
+  removing the merged-away player destroyed their whole hand-entered and
+  imported career. `services/merge_carry.CARRIED` is the list it now carries;
+  **a table that records what a player DID belongs on it.** See the v9.68.1
+  note.
+- **AN IMPORT REPLACES WHAT THAT IMPORT WROTE, AND STOPS AT ANYTHING A PERSON
+  HAS TOUCHED.** `cricketstatz_import.import_match` refreshes a match it
+  created, matched on `cricketstatz_match_id`, so it can never reach a game
+  somebody typed in. On top of that, `hand_edited_games` reads
+  `manual_edit_logs` — which the import writes none of, so any un-undone row
+  means a person edited that match through Manual Entries — and the import
+  **skips it and says so** rather than reverting their correction silently. An
+  edit that was later undone does not count: the club took it back.
+- **A FULL REBUILD DELETES FROM `games`, NEVER `manual_games`**, and it must
+  stay that way. It exists to re-pull from Cricket Australia; a manual game has
+  nothing to re-pull.
+- **SEASON AND GRADE DELETES ALREADY REFUSE** while a manual game or a manual
+  adjustment points at them (`_season_in_use` / `_grade_in_use`). Both FKs
+  cascade, so those two checks are the only thing between a tidy-up and a lost
+  season.
+- **DE-DUPLICATING IS NOT DELETING, and the line is that the two rows describe
+  ONE thing.** A merge drops the removed record's row for an innings the keeper
+  already holds, because they are the same innings read under two identities.
+  It must never drop an innings only one of them had — the suite asserts the
+  total row count falls by exactly the number of genuine duplicates.
+
+**THE RULE IS ENFORCED, NOT JUST WRITTEN DOWN.**
+`backend/verification/verify_merge_carry.py` scans `app/` for every `DELETE
+FROM manual_*` and `sa_delete(Manual*)` and fails on any site not on its
+`ALLOWED_DELETES` list with a stated reason — so a new one cannot be added
+without somebody justifying it — and separately asserts every manual table
+carrying a `players.id` foreign key is on the merge's carry list. Both were
+checked by breaking them on purpose: an unjustified delete elsewhere in `app/`
+fails the first, and dropping one table off `CARRIED` fails the second.
+
+**When a club HAS lost rows this way, say what recovers them.** A CricketStatz
+import re-writes the same matches (deterministic `cricketstatz_match_id`, and
+`import_match` upserts), so re-running it is the recovery — onto the one record
+that was kept. A club's hand-typed history has no such path, which is the whole
+reason for the rule.
+
 ## A FIXTURE BELONGS TO BOTH CLUBS. Read it that way, every time (v9.62.0, Sep 2026)
 
 **THIS HAS NOW BEEN REPORTED FOUR TIMES** — the second club's Games list
@@ -7255,6 +7311,137 @@ back to 1953/54.
   least" appears in the card's label AND in the note under it, so asserting it
   appears exactly once failed against correct output. It asserts the phrase is
   present and that the old flat `Earliest` label is gone.
+
+### AND WHICH SOURCE IS THE RECORD IS THE CLUB'S CALL (migration 287, v9.68.4)
+
+Asked for straight after: "CricketStatz should overwrite PlayHQ in the same way
+a historical import does where we believe the CricketStatz data more than the
+PlayHQ data."
+
+- **`seasons.stats_source = 'cricketstatz'` IS THAT DECISION, AND IT IS APPLIED
+  ON READ.** The same call migration 060 made for cross-club scoping and 266
+  for washouts: correct it in the effective view, once, so every reader moves
+  together. Nothing is deleted, the sync keeps running and keeps the synced copy
+  current underneath, and clearing the marker puts it straight back with no
+  re-pull and no migration. A club changing its mind is one UPDATE.
+- **TWO VIEWS CARRY IT, AND BOTH ALREADY HAD THE JOIN.** `v_effective_games`'s
+  synced branch already `LEFT JOIN`s seasons, and
+  `v_effective_player_season_stats`'s `api` branch already has a `WHERE EXISTS`
+  reaching the season for the org check — so this is one extra condition in each
+  rather than a new join, and it costs nothing on a club that has superseded
+  nothing.
+- **BOTH HALVES ARE NEEDED AND THEY ARE DIFFERENT HALVES.** The games view stops
+  the synced MATCHES being counted; the season-stats view stops Cricket
+  Australia's own season AGGREGATES being counted. Suppressing only the games
+  would leave every career total still reading from both, since a career sums
+  `v_effective_player_season_stats`. The suite pins each separately, and the
+  control run fails on exactly those two.
+- **THE IMPORTED SEASON IS STILL COUNTED — ONCE.** The view's own `manual_game`
+  branch (migration 037) rolls the imported matches up per (player, season,
+  grade), so stepping the synced side aside leaves the CricketStatz figures
+  standing rather than emptying the season.
+- **THE SEASONS ARE MARKED AFTER THE MATCHES ARE IN, never before.** The views
+  act the moment the marker lands, so marking first would leave the club looking
+  at a season with neither source in it for as long as the import took — and a
+  run that died halfway would leave it that way for good.
+- **THERE IS DELIBERATELY NO OPTION THAT KEEPS BOTH.** The earlier
+  `include_synced_years` boolean had one, and holding two copies IS the double
+  count this exists to prevent. It is `synced_years: 'skip' | 'cricketstatz'`
+  now — leave those seasons to the sync, or make CricketStatz the record for
+  them.
+- **HANDING A SEASON BACK IS INSTANT** (`POST /superseded/clear`), because the
+  marker was the only thing hiding the synced copy. The confirm says the
+  imported matches stay imported, so both will count until the import is undone
+  — which is true, and is the one thing a club could otherwise get wrong.
+- **The sync is deliberately NOT stopped for a superseded season.** Keeping it
+  running is what makes handing the season back instant and complete; stopping
+  it would trade that for a saving nobody asked for and a Full Rebuild later.
+- **Verified against a real Postgres** (`verify_cricketstatz_import.py` is 193
+  checks now: the seasons marked, the synced games and CA's own season totals
+  both stopping being counted, the imported matches still counted, the raw rows
+  still present, and handing them back counting the synced games again) **with
+  two control runs**: with the two view clauses removed 2 fail, and with the
+  'cricketstatz' branch neutered, 4.
+- **A CHECK WITH NOTHING TO SUPPRESS CANNOT FAIL.** The first cut had no
+  `player_season_stats` row in the fixture at all, so "CA's own season totals go
+  too" passed with the clause removed. The fixture seeds one per synced season
+  now, and asserts the raw rows survive.
+- **`games.raw_payload` IS `JSON` ON THE ORM MODEL AND `JSONB` IN THE DATABASE
+  THE MIGRATIONS BUILD**, so a `create_all` harness gets the narrower type and
+  the view's own `NULL::jsonb` cannot union with it. The suite reconciles it;
+  the app is unaffected, but the divergence is real and is worth a look on its
+  own.
+
+### THE SAME CRICKET FROM TWO SOURCES COUNTS IT TWICE (v9.68.3, Sep 2026)
+
+Reported off Keon Park's Records mid-import: the Highest Individual Scores
+board listed every top score twice — Heath Shephard 270 twice, Princely
+Emmanuel 206* twice, David Nelson 171 twice — and Brad Quinsee's career read
+**14,966 runs from 495 innings where CricketStatz has 10,444 from 367**.
+
+- **THE IMPORT WAS FAITHFUL. THE CLUB WAS HOLDING THE SAME MATCHES FROM TWO
+  SOURCES.** Established by measurement, not inference: CricketStatz serves
+  **3,556** matches for club 93931 across all 167 seasons and exactly **4** on
+  15 Mar 2003; BetterCricket held **5,416** and **8**. Grouping the club's
+  games by grade name splits cleanly into three families — the shouty
+  CricketStatz names (`A-GRADE`, `UNDER 12`, 2,324 games, 1953-2026, every one
+  with `games.status` NULL), and Cricket Australia's own (`NMCA - Jika Shield`,
+  `03 - All Things Safety Wear Mash Shield`, ~3,000 games, every one carrying a
+  status). **The club syncs from CA and imported its whole CricketStatz history
+  on top.** Every match from the year the sync reaches back to existed twice.
+- **THE OLD SEASONS WERE THE TELL.** 1969/70, 1991/92 and 1994/95 appeared
+  ONCE on the board while 2002/03, 2011/12 and 2013/14 appeared twice — exactly
+  the years CA covers. A pure query fan-out would have doubled all of them.
+- **RULED OUT FIRST, EACH BY A QUERY RATHER THAN BY READING THE CODE**: the
+  source (999 all-time rows, 999 distinct ids, no fixture repeated in one
+  response, no match id under two seasons), a duplicated game (5,020 of 5,037
+  fixtures had exactly one row — the 17 with two are a real U12 and U14 side
+  playing the same club on one day), a repeated innings in a card (25 cards of
+  2002S, none), the team matcher (correct on twelve real names), and a JOIN
+  fan-out (`v_effective_games` and `v_effective_batting_innings` are plain
+  UNION ALLs, and every join in `records.py`'s batting chain is on a primary
+  key). The paging artefact that briefly suggested a fan-out was mine:
+  `/organisations/{id}/results` ignores `limit`, so concatenated "pages" are
+  the same rows over again.
+- **SO THE IMPORT SKIPS THE SEASONS THE SYNC ALREADY COVERS**, keyed on the
+  SEASON's year so a November and the following March land together
+  (`synced_coverage`). CricketStatz is for the history the sync cannot
+  reach — a club onboarded through Cricket Australia typically has a decade,
+  and CricketStatz has seventy years.
+- **IT IS A SKIP, NOT A MERGE, AND THAT IS THE HONEST LINE.** Deciding which of
+  two records of one match wins would mean matching a CricketStatz fixture to a
+  CA one across two naming schemes ("Keon Park 1's 'A-Grade'" against "Keon
+  Park CC 1st XI") and then overwriting a live, self-maintaining source with a
+  frozen snapshot. Leaving the covered years alone keeps one record of each
+  match and needs no guess.
+- **A CLUB CAN ASK FOR THEM ANYWAY** (`include_synced_years`), because a club
+  that trusts CricketStatz over its own sync is entitled to — but it is opt-in,
+  the checkbox says it will hold both, and the default can never double a
+  club's records by accident.
+- **THE OVERLAP IS ON SCREEN BEFORE ANYTHING RUNS.** `inspect_club` reports
+  `synced_games` and `synced_years`, so the preview names how many matches the
+  club already syncs and which years are being left out — rather than the club
+  discovering it later as a career total half as large again as it should be.
+  The running import repeats it, and it lands in the import's own notes.
+- **RECOVERY for a club already in this state**: undo the CricketStatz import
+  (it removes exactly what that import wrote, matches, record boards and
+  honours alike) and run it again. The default now leaves the synced years
+  alone.
+- **Verified against a real Postgres** (`verify_cricketstatz_import.py` is 186
+  checks now: the covered years known and a year the sync cannot reach not
+  claimed, the covered seasons left out of the plan, no manual game written in
+  them, the older history still imported, the club told, the opt-in bringing
+  them across, and a club that has never synced having nothing to skip) **with
+  a control run**: 3 of the 186 fail with the guard neutered, and the seasons
+  the sync covers are imported on top.
+- **NOTICED, NOT FIXED**: nothing detects the overlap for a club that ALREADY
+  holds both. The undo-and-re-import above is the path; a screen that reports
+  "these N matches are held twice" would be its own change.
+- **ALSO NOTICED**: `v_effective_batting_innings` emits `batting_innings.id`
+  and `manual_batting_innings.id` unchanged, and both are `SERIAL` — so the
+  view's `id` is NOT unique for a club holding both. Nothing in the record
+  queries keys on it today, which is why this has never bitten, but it is one
+  `DISTINCT ON (id)` away from being a real bug.
 
 ### A MERGE MOVES A RECORD; IT MUST NEVER DELETE ONE (v9.68.1)
 

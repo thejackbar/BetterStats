@@ -25,7 +25,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from typing import Optional
+from typing import Optional, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -55,6 +55,12 @@ _RUNNING: dict[str, asyncio.Task] = {}
 
 class ClubUrl(BaseModel):
     url: str
+    # What to do with the seasons the club ALREADY syncs from Cricket
+    # Australia. 'skip' (the default) imports only the history the sync cannot
+    # reach; 'cricketstatz' imports them too and marks those seasons so the
+    # synced copy steps aside. There is deliberately no option that keeps both
+    # — that is the double count this exists to prevent.
+    synced_years: Literal["skip", "cricketstatz"] = "skip"
 
 
 
@@ -68,12 +74,47 @@ def _handle(exc: Exception) -> HTTPException:
 
 
 @router.post("/inspect")
-async def inspect(body: ClubUrl, club: Organisation = Depends(get_current_club)):
-    """What the club's CricketStatz site holds — shown before anything runs."""
+async def inspect(
+    body: ClubUrl,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """What the club's CricketStatz site holds — shown before anything runs.
+
+    Also what the club ALREADY holds from its Cricket Australia sync, so the
+    overlap is on screen before an import runs rather than discovered later as
+    a career total that reads half as much again as it should.
+    """
     try:
-        return await importer.inspect_club(body.url)
+        found = await importer.inspect_club(body.url)
     except Exception as exc:
         raise _handle(exc)
+    covered = await importer.synced_coverage(db, club.id)
+    found["synced_years"] = sorted(covered)
+    found["synced_games"] = sum(covered.values())
+    found["superseded_years"] = await importer.superseded_years(db, club.id)
+    return found
+
+
+class SupersedeBody(BaseModel):
+    years: Optional[list[int]] = None
+
+
+@router.post("/superseded/clear")
+async def clear_superseded(
+    body: SupersedeBody,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Hand seasons back to the Cricket Australia sync.
+
+    Instant and complete: the marker is all that was hiding the synced copy,
+    so clearing it brings it back with nothing to re-pull.
+    """
+    cleared = await importer.clear_seasons_superseded(db, club.id, body.years)
+    await db.commit()
+    return {"cleared": cleared,
+            "superseded_years": await importer.superseded_years(db, club.id)}
 
 
 @router.post("/import")
@@ -133,7 +174,8 @@ async def start_import(
     # Detached, and held so it is not garbage-collected mid-run — the same
     # pattern the opposition-dossier builder uses.
     task = asyncio.create_task(
-        importer.run_import(async_session_maker, club.id, import_id, club_id))
+        importer.run_import(async_session_maker, club.id, import_id, club_id,
+                            synced_years=body.synced_years))
     _RUNNING[str(import_id)] = task
     task.add_done_callback(lambda _t: _RUNNING.pop(str(import_id), None))
 

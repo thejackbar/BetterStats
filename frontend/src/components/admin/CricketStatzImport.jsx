@@ -45,6 +45,13 @@ export default function CricketStatzImport() {
   const [records, setRecords] = useState([])
   const [starting, setStarting] = useState(false)
   const [tab, setTab] = useState('import')
+  // A club that already syncs from Cricket Australia holds those seasons once.
+  // Bringing them in again does not correct anything — it counts the same
+  // cricket twice on every career total — so it is opt-in.
+  // What to do with the seasons the club already syncs from Cricket
+  // Australia: leave them to the sync, or make CricketStatz the record for
+  // them. There is no third option that keeps both — that is the double count.
+  const [syncedYears, setSyncedYears] = useState('skip')
   const [undoing, setUndoing] = useState(null)
   const pollRef = useRef(null)
 
@@ -92,12 +99,28 @@ export default function CricketStatzImport() {
   async function start() {
     setStarting(true); setError('')
     try {
-      await api.csStartImport(url)
+      await api.csStartImport(url, syncedYears)
       toast?.success?.('Import started — this page will keep you posted.')
       await loadStatus()
     } catch (e) {
       setError(e?.detail || e?.message || 'Could not start the import.')
     } finally { setStarting(false) }
+  }
+
+  async function handOverBack() {
+    if (!window.confirm(
+      'Hand these seasons back to Cricket Australia?\n\nYour synced matches '
+      + 'start counting again straight away — nothing has to be re-pulled. The '
+      + 'CricketStatz matches for those seasons stay imported, so both will be '
+      + 'counted until you undo the import.'
+    )) return
+    try {
+      await api.csClearSuperseded()
+      toast?.success?.('Those seasons read from Cricket Australia again.')
+      setPreview(await api.csInspect(url))
+    } catch (e) {
+      setError(e?.detail || e?.message || 'Could not hand those seasons back.')
+    }
   }
 
   async function stop(id) {
@@ -226,6 +249,58 @@ export default function CricketStatzImport() {
                     {preview.teams.length > 8 ? ` and ${preview.teams.length - 8} more` : ''}
                   </Caption>
                 )}
+                {preview.synced_games > 0 && (
+                  <Note toneKey="warn">
+                    <div className="font-semibold">
+                      You already sync {preview.synced_games.toLocaleString()} matches
+                      from Cricket Australia
+                      {preview.synced_years?.length
+                        ? `, covering ${preview.synced_years[0]}\u2013${preview.synced_years[preview.synced_years.length - 1]}`
+                        : ''}.
+                    </div>
+                    <div className="mt-1">
+                      One match must only be counted once, so pick which source
+                      is the record for those seasons. Everything before them
+                      comes across either way.
+                    </div>
+                    <div className="mt-2 space-y-2">
+                      <label className="flex items-start gap-2 cursor-pointer">
+                        <input type="radio" name="cs-synced" className="mt-1"
+                               checked={syncedYears === 'skip'}
+                               onChange={() => setSyncedYears('skip')} />
+                        <span>
+                          <b>Leave those seasons to Cricket Australia.</b>{' '}
+                          They stay as they are and the import brings across the
+                          history your sync cannot reach.
+                        </span>
+                      </label>
+                      <label className="flex items-start gap-2 cursor-pointer">
+                        <input type="radio" name="cs-synced" className="mt-1"
+                               checked={syncedYears === 'cricketstatz'}
+                               onChange={() => setSyncedYears('cricketstatz')} />
+                        <span>
+                          <b>Use CricketStatz for those seasons too.</b>{' '}
+                          Your Cricket Australia data is kept and steps aside,
+                          so nothing is deleted and you can hand those seasons
+                          back at any time.
+                        </span>
+                      </label>
+                    </div>
+                  </Note>
+                )}
+                {!!preview.superseded_years?.length && (
+                  <Note>
+                    {`CricketStatz is currently the record for `}
+                    {preview.superseded_years.length} season(s)
+                    {` (${preview.superseded_years[0]}\u2013${preview.superseded_years[preview.superseded_years.length - 1]}). `}
+                    Your Cricket Australia data for them is kept, just not counted.
+                    <div className="mt-2">
+                      <Button variant="quiet" size="sm" onClick={handOverBack}>
+                        Hand them back to Cricket Australia
+                      </Button>
+                    </div>
+                  </Note>
+                )}
                 <Note>
                   A full history can take a while — it reads every match's
                   scorecard one at a time, gently, so we are not hammering
@@ -284,6 +359,22 @@ export default function CricketStatzImport() {
                   </>
                 )}
 
+                {!!p.replaced_synced_years?.length && (
+                  <Caption>
+                    {`${p.replaced_synced_years.length} season(s) you also sync `}
+                    {`will read from CricketStatz `}
+                    {`(${p.replaced_synced_years[0]}\u2013${p.replaced_synced_years[p.replaced_synced_years.length - 1]}). `}
+                    {`Your Cricket Australia data is kept and steps aside.`}
+                  </Caption>
+                )}
+                {!!p.skipped_synced_years?.length && (
+                  <Caption>
+                    {`${p.skipped_synced_years.length} season(s) already covered by `}
+                    {`your Cricket Australia sync were left out `}
+                    {`(${p.skipped_synced_years[0]}\u2013${p.skipped_synced_years[p.skipped_synced_years.length - 1]}), `}
+                    {`so those matches are not counted twice.`}
+                  </Caption>
+                )}
                 {plan && (
                   <Caption>
                     {`Found ${plan.season_count} seasons you played`}
