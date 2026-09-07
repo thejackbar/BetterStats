@@ -960,10 +960,27 @@ async def meeting_room(meeting_id: str, _: User = _require, club: Organisation =
     present. A secretary mid-meeting should not wait on six requests."""
     m = await _meeting_or_404(db, club, meeting_id)
     room = await committee_service.meeting_room(db, club.id, m)
-    # The club's own name, so a minutes document downloaded from this screen can
-    # be headed by the club rather than by the meeting alone. One field on a
-    # fetch the screen already makes, rather than a second request for a name.
-    room["club"] = {"name": club.name, "short_name": club.short_name}
+    # The club's own name and branding, so a minutes document downloaded from
+    # this screen is headed by the club rather than by the meeting alone. One
+    # field on a fetch the screen already makes, rather than a second request.
+    #
+    # The colours come from `theme_config`, which is what actually themes the
+    # site — `primary_color` / `accent_color` are the legacy pair nothing paints
+    # from any more, and reading them here would head the document in colours
+    # the club has not used for years. Falling back to the platform green rather
+    # than to those two, so a club that never set a theme gets the same band
+    # everything else on its screens already draws.
+    theme = club.theme_config if isinstance(club.theme_config, dict) else {}
+    room["club"] = {
+        "name": club.name,
+        "short_name": club.short_name,
+        "accent": theme.get("accent") or "#16c784",
+        "accent2": theme.get("accent2") or theme.get("chart_wickets") or "#3b82f6",
+        # Same precedence services/social_rounds._club_dict uses: the club's own
+        # uploaded bytes are served from our domain, so the crest still resolves
+        # for a club whose external logo_url has gone stale.
+        "logo": club.logo_url or (f"/api/images/organisations/{club.id}/logo" if club.logo_data else None),
+    }
     return room
 
 

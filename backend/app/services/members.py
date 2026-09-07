@@ -21,6 +21,8 @@ import uuid
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.player_kit import clean_kit_size
+
 # Non-player kinds a person can be tagged with (drives the Directory filters). A
 # linked player is a "Player" implicitly and is never given a category here.
 MEMBER_CATEGORIES = ["volunteer", "parent", "committee", "life_member", "third_party", "official", "other"]
@@ -35,7 +37,8 @@ def normalise_category(v):
 
 async def create_person(db: AsyncSession, org_id, *, full_name, email=None, mobile=None,
                         member_category=None, notes=None, player_id=None,
-                        membership_type_id=None, current_tier=None) -> str:
+                        membership_type_id=None, current_tier=None,
+                        shirt_size=None, pants_size=None) -> str:
     """Insert a fee_members row and return its id. `player_id` NULL = a non-player.
     Fee-specific fields (`membership_type_id`, `current_tier`) are accepted so
     BetterFees can create the person and its tier in one go; ClubManager leaves
@@ -46,12 +49,15 @@ async def create_person(db: AsyncSession, org_id, *, full_name, email=None, mobi
     mid = uuid.uuid4()
     await db.execute(text("""
         INSERT INTO fee_members (id, organisation_id, player_id, full_name, email, mobile,
-                                 member_category, notes, membership_type_id, current_tier)
-        VALUES (:id, :org, :pid, :name, :email, :mobile, :cat, :notes, :mt, :tier)
+                                 member_category, notes, membership_type_id, current_tier,
+                                 shirt_size, pants_size)
+        VALUES (:id, :org, :pid, :name, :email, :mobile, :cat, :notes, :mt, :tier,
+                :shirt_size, :pants_size)
     """), {"id": mid, "org": org_id, "pid": player_id, "name": full_name[:200],
            "email": (email or None), "mobile": (mobile or None),
            "cat": normalise_category(member_category), "notes": (notes or None),
-           "mt": membership_type_id, "tier": current_tier})
+           "mt": membership_type_id, "tier": current_tier,
+           "shirt_size": clean_kit_size(shirt_size), "pants_size": clean_kit_size(pants_size)})
     return str(mid)
 
 
@@ -71,6 +77,14 @@ async def update_person(db: AsyncSession, org_id, member_id, **fields) -> None:
     if "membership_type_id" in fields:
         sets.append("membership_type_id = :mt")
         params["mt"] = fields["membership_type_id"]
+    # The club's kit sizes (migration 289). Present-and-blank clears; an ABSENT
+    # key leaves the stored value alone, which is what lets the Directory save
+    # one panel without touching another. Never normalised to a vocabulary —
+    # see services/player_kit.py for why.
+    for k in ("shirt_size", "pants_size"):
+        if k in fields:
+            sets.append(f"{k} = :{k}")
+            params[k] = clean_kit_size(fields[k])
     if not sets:
         return
     await db.execute(text(

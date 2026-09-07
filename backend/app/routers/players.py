@@ -36,6 +36,7 @@ from app.services import iq_teammates
 from app.services import grade_scope
 from app.services.player_aliases import normalise_name_key, seed_alias_on_rename
 from app.services.player_age import age_on, dob_error, visible_age
+from app.services.player_kit import clean_shirt_number
 from app.services.player_formats import player_format_splits
 
 router = APIRouter(prefix="/players", tags=["players"])
@@ -948,6 +949,12 @@ class PlayerProfileUpdate(BaseModel):
     # DATE column; an explicit null clears it (the PATCH reads exclude_unset,
     # so a present null IS the intent).
     date_of_birth: Optional[date] = None
+    # The number on their shirt (migration 289). A playing attribute, so it is
+    # Core and edited here; the two KIT SIZES beside it in the BetterAdmin
+    # Directory are a different question and live on the person spine. "" or
+    # null clears it — the PATCH reads exclude_unset, so a present blank IS the
+    # intent.
+    shirt_number: Optional[str] = None
 
 
 def _profile_fields(player: Player) -> dict:
@@ -984,6 +991,7 @@ def _profile_fields(player: Player) -> dict:
         "is_public": player.is_public is not False,
         "is_financial_override": player.is_financial_override,
         "trained_override": player.trained_override,
+        "shirt_number": player.shirt_number,
     }
 
 
@@ -1190,6 +1198,10 @@ async def update_player_profile(
         err = dob_error(data["date_of_birth"])
         if err:
             raise HTTPException(status_code=422, detail=err)
+    # One rule for what a shirt number is, shared with the Directory and the
+    # bulk importer — see services/player_kit.py.
+    if "shirt_number" in data:
+        data["shirt_number"] = clean_shirt_number(data["shirt_number"])
     # Capture the effective display name before display_name_override changes,
     # so a rename via this route also gets remembered as an alias — same as
     # the plain-name rename_player endpoint above.

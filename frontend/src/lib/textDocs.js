@@ -59,12 +59,85 @@ export function docFilename(...parts) {
 // Plain text becomes one paragraph per line, so a blank line survives the trip.
 const textBlocks = (body) => String(body || '').split('\n').map(text => ({ type: 'para', text }))
 
-function docBlocks({ title, subtitle, body, blocks }) {
+// `header` is whatever sits ABOVE the title — the club's colour band and its
+// crest. It is a separate argument rather than the head of `blocks` because
+// `title` is ALSO the PDF's own /Info Title, so the caller has to keep passing
+// it as a string; emitting a title block itself would print the club name
+// twice.
+function docBlocks({ title, subtitle, body, blocks, header }) {
   const out = []
+  out.push(...(header || []))
   if (title) out.push({ type: 'title', text: title })
   if (subtitle) out.push({ type: 'subtitle', text: subtitle })
   out.push(...(blocks && blocks.length ? blocks : textBlocks(body)))
   return out
+}
+
+/* ── a club's own colours and crest ──────────────────────────────────────── */
+
+// #RGB or #RRGGBB → 'RRGGBB' upper case, or null. Word wants the bare six
+// characters and the PDF wants the three components, so both readers work off
+// this one parse rather than each doing their own.
+export function hex6(v) {
+  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(v || '').trim())
+  if (!m) return null
+  const h = m[1]
+  return (h.length === 3 ? h.split('').map(c => c + c).join('') : h).toUpperCase()
+}
+
+const rgb01 = (h) => [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16) / 255)
+
+// A club crest, ready to embed, or null.
+//
+// JPEG, NOT the original file, and that is the whole reason this exists: a JPEG
+// goes into a PDF verbatim under /DCTDecode and into a .docx as an ordinary
+// media part, whereas a PNG would need its own decoder here to become either.
+// The canvas does the decoding the browser already knows how to do.
+//
+// THE CANVAS IS FILLED WHITE FIRST. A club crest is almost always a
+// transparent PNG and JPEG has no alpha, so without it every logo lands as a
+// black box on a white page.
+//
+// Returns null rather than throwing on anything that can go wrong — a crest
+// that will not load, an external URL that taints the canvas, a club with no
+// logo at all. The document is still worth having without it.
+export function clubLogoJpeg(url, { maxWidth = 260, maxHeight = 90 } = {}) {
+  if (!url) return Promise.resolve(null)
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onerror = () => resolve(null)
+    img.onload = () => {
+      try {
+        const nw = img.naturalWidth || img.width
+        const nh = img.naturalHeight || img.height
+        if (!nw || !nh) return resolve(null)
+        // Rendered at 3x the printed size so the crest is not soft in print,
+        // then placed at maxWidth/maxHeight points by the two writers.
+        const scale = Math.min(maxWidth / nw, maxHeight / nh, 1) * 3
+        const w = Math.max(1, Math.round(nw * scale))
+        const h = Math.max(1, Math.round(nh * scale))
+        const canvas = document.createElement('canvas')
+        canvas.width = w
+        canvas.height = h
+        const ctx = canvas.getContext('2d')
+        ctx.fillStyle = '#ffffff'
+        ctx.fillRect(0, 0, w, h)
+        ctx.drawImage(img, 0, 0, w, h)
+        const data = canvas.toDataURL('image/jpeg', 0.92)
+        const b64 = data.slice(data.indexOf(',') + 1)
+        const bin = atob(b64)
+        const bytes = new Uint8Array(bin.length)
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+        resolve({ jpeg: bytes, width: w, height: h, ptWidth: w / 3, ptHeight: h / 3 })
+      } catch {
+        // A tainted canvas (a crest served from another origin with no CORS
+        // header) throws on toDataURL. No crest is a better document than none.
+        resolve(null)
+      }
+    }
+    img.src = url
+  })
 }
 
 /* ── zip, stored ─────────────────────────────────────────────────────────── */
@@ -181,8 +254,59 @@ function table(block) {
     + `</w:tbl>${para('', { after: 80 })}`
 }
 
-function blockToDocx(b) {
+// The club's colour band.
+//
+// A SHADED PARAGRAPH, NEVER A TABLE. A one-row table would let each half carry
+// its own fill and is the obvious way to draw a two-colour band — and it puts a
+// structure into the document that is not a table: Word counts it, a reader
+// announces it, and anything walking the document's tables meets a band before
+// it meets the meeting details. Two stacked single-colour paragraphs give the
+// club both of its colours with none of that, and the PDF draws the identical
+// pair of rectangles.
+//
+// `w:line` with `lineRule="exact"` is what sets the height — twentieths of a
+// point, like every other spacing value here — and the tiny `w:sz` stops the
+// run's own font from forcing the paragraph taller than the band.
+function bandDocx(b) {
+  const fill = hex6(b.colour)
+  if (!fill) return ''
+  const h = Math.max(20, Math.round((b.height ?? 8) * 20))
+  return `<w:p><w:pPr><w:shd w:val="clear" w:color="auto" w:fill="${fill}"/>`
+    + `<w:spacing w:before="0" w:after="${b.after ?? 0}" w:line="${h}" w:lineRule="exact"/>`
+    + `<w:rPr>${FONT}<w:sz w:val="2"/></w:rPr></w:pPr></w:p>`
+}
+
+// An inline image, centred. EMU are 12700 to the point, which is the unit every
+// size in a <w:drawing> is given in.
+const EMU = 12700
+
+function imageDocx(b, rid) {
+  const cx = Math.round((b.ptWidth || 1) * EMU)
+  const cy = Math.round((b.ptHeight || 1) * EMU)
+  return `<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="${b.after ?? 100}"/></w:pPr><w:r>`
+    + `<w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">`
+    + `<wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${rid}" name="Club crest"/>`
+    + `<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">`
+    + `<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">`
+    + `<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">`
+    + `<pic:nvPicPr><pic:cNvPr id="${rid}" name="Club crest"/><pic:cNvPicPr/></pic:nvPicPr>`
+    + `<pic:blipFill><a:blip r:embed="rId${rid}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>`
+    + `<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>`
+    + `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>`
+    + `</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`
+}
+
+function blockToDocx(b, ctx) {
   switch (b.type) {
+    case 'band': return bandDocx(b)
+    case 'image': {
+      // Registered here rather than in a pre-pass, so an image block that never
+      // reaches the document never mints a relationship pointing at a media
+      // part that does not exist.
+      if (!b.jpeg || !ctx) return ''
+      const rid = ctx.images.push(b) + 100
+      return imageDocx(b, rid)
+    }
     case 'title':
       return String(b.text).split('\n')
         .map(t => para(t, { bold: true, size: 34, after: 40, align: 'center' })).join('')
@@ -208,20 +332,25 @@ function blockToDocx(b) {
   }
 }
 
-export function downloadDocx({ filename, title, subtitle, body, blocks }) {
-  const parts = docBlocks({ title, subtitle, body, blocks }).map(blockToDocx).join('')
+export function downloadDocx({ filename, title, subtitle, body, blocks, header }) {
+  const ctx = { images: [] }
+  const parts = docBlocks({ title, subtitle, body, blocks, header }).map(b => blockToDocx(b, ctx)).join('')
 
+  // The drawing namespaces are declared on <w:document> whether or not an image
+  // is present: Word reads the root element's declarations, and a namespace
+  // used by a part it has already begun parsing cannot be introduced later.
   const document = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${parts}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr></w:body></w:document>`
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><w:body>${parts}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr></w:body></w:document>`
 
   const contentTypes = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>${ctx.images.length ? '<Default Extension="jpeg" ContentType="image/jpeg"/>' : ''}<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`
 
   const rels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`
 
   const docRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>`
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${ctx.images.map((_, i) =>
+    `<Relationship Id="rId${i + 101}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image${i + 1}.jpeg"/>`).join('')}</Relationships>`
 
   const bytes = zip([
     // [Content_Types].xml goes first, which is what a reader expects to meet.
@@ -229,6 +358,7 @@ export function downloadDocx({ filename, title, subtitle, body, blocks }) {
     { name: '_rels/.rels', data: enc.encode(rels) },
     { name: 'word/_rels/document.xml.rels', data: enc.encode(docRels) },
     { name: 'word/document.xml', data: enc.encode(document) },
+    ...ctx.images.map((img, i) => ({ name: `word/media/image${i + 1}.jpeg`, data: img.jpeg })),
   ])
 
   save(bytes, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', `${filename}.docx`)
@@ -413,6 +543,19 @@ function layout(blocks) {
       case 'table':
         push(...tableOps(b))
         break
+      case 'band':
+        if (hex6(b.colour)) {
+          push({ kind: 'band', colour: b.colour, height: b.height ?? 8 })
+          push({ kind: 'gap', height: (b.after ?? 0) / 20 })
+        }
+        break
+      case 'image':
+        if (b.jpeg) {
+          push({ kind: 'image', jpeg: b.jpeg, pxWidth: b.width, pxHeight: b.height,
+                 height: b.ptHeight || 1, width: b.ptWidth || 1 })
+          push({ kind: 'gap', height: (b.after ?? 100) / 20 })
+        }
+        break
       case 'spacer':
         push({ kind: 'gap', height: b.height ?? 8 })
         break
@@ -451,21 +594,38 @@ function tableOps(b) {
   return ops
 }
 
-export function downloadPdf({ filename, title, subtitle, body, blocks }) {
-  const ops = layout(docBlocks({ title, subtitle, body, blocks }))
+export function downloadPdf({ filename, title, subtitle, body, blocks, header }) {
+  const ops = layout(docBlocks({ title, subtitle, body, blocks, header }))
+  // One XObject per distinct image, collected before paging so every page's
+  // /Resources can name them all — a band or a crest is only ever on page one
+  // today, but a page whose resources omit an XObject it draws renders blank
+  // with no error anywhere.
+  const images = []
+  const imageMeta = new Map()
+  const imageIndex = (op) => {
+    let i = images.indexOf(op.jpeg)
+    if (i < 0) {
+      i = images.push(op.jpeg) - 1
+      imageMeta.set(op.jpeg, { pxWidth: op.pxWidth, pxHeight: op.pxHeight })
+    }
+    return i
+  }
 
   // Paged before anything is drawn. A table header repeats on each page it runs
   // onto, or the columns on page two mean nothing.
   const pages = [[]]
   let y = PAGE_H - MARGIN
-  let header = null
+  // The table header that repeats onto the next page. Named apart from the
+  // document's own `header` blocks (the club band and crest), which appear
+  // once, at the top of page one.
+  let repeatHeader = null
   const room = (h) => y - h >= MARGIN
   const newPage = () => {
     pages.push([])
     y = PAGE_H - MARGIN
-    if (header) {
-      pages[pages.length - 1].push({ ...header, y: y - header.height })
-      y -= header.height
+    if (repeatHeader) {
+      pages[pages.length - 1].push({ ...repeatHeader, y: y - repeatHeader.height })
+      y -= repeatHeader.height
     }
   }
 
@@ -474,7 +634,7 @@ export function downloadPdf({ filename, title, subtitle, body, blocks }) {
   // was then false for everything after it and `y` never recovered, which put
   // each element on a page of its own, 19 pages for a two-page document.
   const heightOf = (op) => {
-    const h = op.kind === 'row' ? op.height
+    const h = (op.kind === 'row' || op.kind === 'band' || op.kind === 'image') ? op.height
       : op.kind === 'rule' ? (op.gap || 0)
         : (op.size || 0) * 1.32 + (op.gap || 0)
     return Number.isFinite(h) ? h : 0
@@ -482,9 +642,9 @@ export function downloadPdf({ filename, title, subtitle, body, blocks }) {
 
   for (const op of ops) {
     if (op.kind === 'gap') { y -= op.height || 0; continue }
-    if (op.kind === 'row' && op.repeat) header = op
+    if (op.kind === 'row' && op.repeat) repeatHeader = op
     // A table that has finished resets the repeating header.
-    if (op.kind !== 'row') header = null
+    if (op.kind !== 'row') repeatHeader = null
 
     const h = heightOf(op)
     // A heading alone at the foot of a page reads as a mistake, so it moves to
@@ -493,7 +653,12 @@ export function downloadPdf({ filename, title, subtitle, body, blocks }) {
     if (!room(need) && pages[pages.length - 1].length) newPage()
     pages[pages.length - 1].push({
       ...op,
-      y: op.kind === 'row' ? y - op.height : y - (op.size || 0) * 1.02,
+      // A row, a band and an image are all boxes drawn from their BOTTOM-left,
+      // so each sits a full height below the cursor; a line of text is drawn
+      // from its baseline.
+      y: (op.kind === 'row' || op.kind === 'band' || op.kind === 'image')
+        ? y - op.height
+        : y - (op.size || 0) * 1.02,
     })
     y -= h
   }
@@ -503,6 +668,21 @@ export function downloadPdf({ filename, title, subtitle, body, blocks }) {
     for (const op of page) {
       if (op.kind === 'rule') {
         s = s.concat(ascii(`0.78 0.78 0.78 RG 0.6 w ${MARGIN} ${(op.y + 3).toFixed(2)} m ${(PAGE_W - MARGIN).toFixed(2)} ${(op.y + 3).toFixed(2)} l S\n`))
+        continue
+      }
+      if (op.kind === 'band') {
+        const [r, g, b2] = rgb01(hex6(op.colour))
+        s = s.concat(ascii(`${r.toFixed(3)} ${g.toFixed(3)} ${b2.toFixed(3)} rg `
+          + `${MARGIN} ${op.y.toFixed(2)} ${COL.toFixed(2)} ${op.height.toFixed(2)} re f\n0 g\n`))
+        continue
+      }
+      if (op.kind === 'image') {
+        // `cm` scales the unit square the image is drawn into, so the two
+        // numbers are the printed SIZE in points, not the pixel dimensions.
+        const w = op.width, h = op.height
+        const ix = MARGIN + (COL - w) / 2
+        s = s.concat(ascii(`q ${w.toFixed(2)} 0 0 ${h.toFixed(2)} ${ix.toFixed(2)} ${op.y.toFixed(2)} cm `
+          + `/Im${imageIndex(op)} Do Q\n`))
         continue
       }
       if (op.kind === 'row') {
@@ -544,10 +724,18 @@ export function downloadPdf({ filename, title, subtitle, body, blocks }) {
   })
 
   // 1 catalog, 2 pages, 3 Arial, 4 Arial Bold, 5 info, 7/8 the font
-  // descriptors, then a page object and a content object per page. 6 is
-  // deliberately unused so the pair of descriptors can sit together.
+  // descriptors, then a page object and a content object per page, then one
+  // object per embedded image. 6 is deliberately unused so the pair of
+  // descriptors can sit together.
+  //
+  // The image ids come LAST because `images` is only complete once every
+  // stream has been written — an image is registered as it is drawn.
   const firstPage = 9
   const pageIds = pages.map((_, i) => firstPage + i * 2)
+  const firstImage = firstPage + pages.length * 2
+  const xobjects = images.length
+    ? `/XObject << ${images.map((_, i) => `/Im${i} ${firstImage + i} 0 R`).join(' ')} >>`
+    : ''
   const bodies = []
   const put = (n, data) => { bodies[n] = data instanceof Uint8Array ? data : enc.encode(data) }
 
@@ -566,10 +754,24 @@ export function downloadPdf({ filename, title, subtitle, body, blocks }) {
 
   pages.forEach((_, i) => {
     const id = pageIds[i]
-    put(id, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${id + 1} 0 R >>`)
+    put(id, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> ${xobjects} >> /Contents ${id + 1} 0 R >>`)
     put(id + 1, new Uint8Array([
       ...ascii(`<< /Length ${streams[i].length} >>\nstream\n`),
       ...streams[i],
+      ...ascii('\nendstream'),
+    ]))
+  })
+
+  // A JPEG goes in verbatim under /DCTDecode — the canvas that produced it
+  // always writes a 3-channel baseline image, so /DeviceRGB is exact rather
+  // than a guess. This is the whole reason a crest is converted to JPEG before
+  // it gets here: a PNG would need its own decoder in this file.
+  images.forEach((jpeg, i) => {
+    const meta = imageMeta.get(jpeg) || { pxWidth: 1, pxHeight: 1 }
+    put(firstImage + i, new Uint8Array([
+      ...ascii(`<< /Type /XObject /Subtype /Image /Width ${meta.pxWidth} /Height ${meta.pxHeight} `
+        + `/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>\nstream\n`),
+      ...jpeg,
       ...ascii('\nendstream'),
     ]))
   })

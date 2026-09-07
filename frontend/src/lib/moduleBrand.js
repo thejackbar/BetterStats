@@ -27,7 +27,8 @@ export const MODULE_BRAND = {
   socials: { name: 'BetterSocials', accent: '#EC4899', accentRgb: '236 72 153', logo: socialsLogo },
   // BetterAdmin — the merged back office (BetterFees / BetterComms /
   // BetterMerch / BetterClubManager before the merge, and briefly branded
-  // BetterClubhouse after it). It keeps the amber and the `admin` key, which is
+  // BetterClubhouse briefly, and BetterAdmin again). It keeps the amber and the
+  // `admin` key, which is
   // still what the billing and entitlement registries are keyed on.
   admin:   { name: 'BetterAdmin', accent: '#F59E0B', accentRgb: '245 158 11', logo: adminLogo },
   iq:      { name: 'BetterIQ',      accent: '#A855F7', accentRgb: '168 85 247', logo: iqLogo },

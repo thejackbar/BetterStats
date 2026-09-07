@@ -3594,6 +3594,19 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE players ADD COLUMN IF NOT EXISTS hero_photo_url TEXT"
         ))
+        # Migration 289: the club's kit record. The NUMBER is a playing
+        # attribute and lives on the player (Core); the two SIZES are kit
+        # management and live on the person spine the Directory edits, since a
+        # coach or a scorer takes a polo size and has no players row.
+        await conn.execute(text(
+            "ALTER TABLE players ADD COLUMN IF NOT EXISTS shirt_number TEXT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE fee_members ADD COLUMN IF NOT EXISTS shirt_size TEXT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE fee_members ADD COLUMN IF NOT EXISTS pants_size TEXT"
+        ))
         await conn.execute(text(
             "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
             "select_show_age BOOLEAN NOT NULL DEFAULT false"

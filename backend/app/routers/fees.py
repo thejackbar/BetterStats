@@ -760,11 +760,22 @@ class MemberImportCommit(BaseModel):
     season_id: str
 
 
+def _guard_member_import(club: Organisation, csv_text: str) -> None:
+    from app.routers.directory import _guard_import
+    _guard_import(club, csv_text)
+
+
 @router.post("/members/import/preview")
 async def members_import_preview(data: MemberImportPreview, _: User = _require, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
     """Preview a non-player member CSV — the SAME shared importer the ClubManager
     Directory uses. Players are imported in Stats."""
     from app.services import member_import as member_import_svc
+    # The same kit-size gate the Directory's own upload applies. It can never
+    # fire from here — this router is behind the fees module, and holding any
+    # of the four keys IS holding the bundle the sizes belong to — but the two
+    # callers of one importer must not be able to disagree about what a sheet
+    # may carry.
+    _guard_member_import(club, data.csv)
     return await member_import_svc.preview(db, club.id, data.csv)
 
 
@@ -773,6 +784,7 @@ async def members_import_commit(data: MemberImportCommit, _: User = _require, cl
     """Import non-player members via the shared importer, then open a fee season
     row (as "needs tier") for each so they appear in this season's members list."""
     from app.services import member_import as member_import_svc
+    _guard_member_import(club, data.csv)
     season = await _season_or_404(db, club, data.season_id)
     result = await member_import_svc.commit(db, club.id, data.csv)
     result["added_to_season"] = await member_import_svc.open_member_seasons(

@@ -29,6 +29,7 @@ const FIELDS = [
   ['is_public', 'Show on public website', false, 'Show / Hide.'],
   ['financial', 'Fees status', false, 'Financial / Not financial. Only sets it — clear it on the profile.'],
   ['training', 'Training', false, 'At training / Not at training.'],
+  ['shirt_number', 'Shirt number', false, 'Kept exactly as written, so "07" stays "07".'],
 ]
 const FIELD_LABEL = {
   player_name: 'Player name', player_first_name: 'First name', player_last_name: 'Surname',
@@ -69,13 +70,15 @@ const SIMPLE = {
   is_public: { label: 'Website', fmt: (v) => (v === false ? 'Hidden' : v === true ? 'Shown' : '—') },
   is_financial_override: { label: 'Fees', fmt: (v) => (v === true ? 'Financial' : v === false ? 'Not financial' : 'Automatic') },
   trained_override: { label: 'Training', fmt: (v) => (v === true ? 'At training' : v === false ? 'Not at training' : 'Automatic') },
+  shirt_number: { label: 'Shirt no.', fmt: (v) => v || '—' },
 }
 function changeRows(p) {
   const rows = []
   const cur = p.current || {}, prop = p.proposed || {}
   for (const f of ['email', 'phone', 'gender', 'player_role', 'batting_hand',
                    'date_of_birth', 'is_opening_batsman', 'is_overseas', 'overseas_country',
-                   'status', 'is_public', 'is_financial_override', 'trained_override']) {
+                   'status', 'is_public', 'is_financial_override', 'trained_override',
+                   'shirt_number']) {
     if (f in prop) rows.push({ label: SIMPLE[f].label, from: SIMPLE[f].fmt(cur[f]), to: SIMPLE[f].fmt(prop[f]) })
   }
   if ('bowling_action' in prop || 'bowling_type' in prop) {
