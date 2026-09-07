@@ -1150,6 +1150,11 @@ class Season(Base):
     # Australia season GUID lives in grassroots_id — it is shared across clubs
     # so it cannot be the primary key.
     grassroots_id = Column(Text, nullable=True)
+    # Which source is the record for this season (migration 287). NULL is
+    # the ordinary case; 'cricketstatz' means the club's imported history
+    # wins and the effective views step the synced copy aside, so one
+    # match is never counted from two sources.
+    stats_source = Column(Text, nullable=True)
     name = Column(Text, nullable=False)
     year = Column(Integer)
     synced_at = Column(TIMESTAMP(timezone=True))

@@ -7312,6 +7312,66 @@ back to 1953/54.
   appears exactly once failed against correct output. It asserts the phrase is
   present and that the old flat `Earliest` label is gone.
 
+### AND WHICH SOURCE IS THE RECORD IS THE CLUB'S CALL (migration 287, v9.68.4)
+
+Asked for straight after: "CricketStatz should overwrite PlayHQ in the same way
+a historical import does where we believe the CricketStatz data more than the
+PlayHQ data."
+
+- **`seasons.stats_source = 'cricketstatz'` IS THAT DECISION, AND IT IS APPLIED
+  ON READ.** The same call migration 060 made for cross-club scoping and 266
+  for washouts: correct it in the effective view, once, so every reader moves
+  together. Nothing is deleted, the sync keeps running and keeps the synced copy
+  current underneath, and clearing the marker puts it straight back with no
+  re-pull and no migration. A club changing its mind is one UPDATE.
+- **TWO VIEWS CARRY IT, AND BOTH ALREADY HAD THE JOIN.** `v_effective_games`'s
+  synced branch already `LEFT JOIN`s seasons, and
+  `v_effective_player_season_stats`'s `api` branch already has a `WHERE EXISTS`
+  reaching the season for the org check — so this is one extra condition in each
+  rather than a new join, and it costs nothing on a club that has superseded
+  nothing.
+- **BOTH HALVES ARE NEEDED AND THEY ARE DIFFERENT HALVES.** The games view stops
+  the synced MATCHES being counted; the season-stats view stops Cricket
+  Australia's own season AGGREGATES being counted. Suppressing only the games
+  would leave every career total still reading from both, since a career sums
+  `v_effective_player_season_stats`. The suite pins each separately, and the
+  control run fails on exactly those two.
+- **THE IMPORTED SEASON IS STILL COUNTED — ONCE.** The view's own `manual_game`
+  branch (migration 037) rolls the imported matches up per (player, season,
+  grade), so stepping the synced side aside leaves the CricketStatz figures
+  standing rather than emptying the season.
+- **THE SEASONS ARE MARKED AFTER THE MATCHES ARE IN, never before.** The views
+  act the moment the marker lands, so marking first would leave the club looking
+  at a season with neither source in it for as long as the import took — and a
+  run that died halfway would leave it that way for good.
+- **THERE IS DELIBERATELY NO OPTION THAT KEEPS BOTH.** The earlier
+  `include_synced_years` boolean had one, and holding two copies IS the double
+  count this exists to prevent. It is `synced_years: 'skip' | 'cricketstatz'`
+  now — leave those seasons to the sync, or make CricketStatz the record for
+  them.
+- **HANDING A SEASON BACK IS INSTANT** (`POST /superseded/clear`), because the
+  marker was the only thing hiding the synced copy. The confirm says the
+  imported matches stay imported, so both will count until the import is undone
+  — which is true, and is the one thing a club could otherwise get wrong.
+- **The sync is deliberately NOT stopped for a superseded season.** Keeping it
+  running is what makes handing the season back instant and complete; stopping
+  it would trade that for a saving nobody asked for and a Full Rebuild later.
+- **Verified against a real Postgres** (`verify_cricketstatz_import.py` is 193
+  checks now: the seasons marked, the synced games and CA's own season totals
+  both stopping being counted, the imported matches still counted, the raw rows
+  still present, and handing them back counting the synced games again) **with
+  two control runs**: with the two view clauses removed 2 fail, and with the
+  'cricketstatz' branch neutered, 4.
+- **A CHECK WITH NOTHING TO SUPPRESS CANNOT FAIL.** The first cut had no
+  `player_season_stats` row in the fixture at all, so "CA's own season totals go
+  too" passed with the clause removed. The fixture seeds one per synced season
+  now, and asserts the raw rows survive.
+- **`games.raw_payload` IS `JSON` ON THE ORM MODEL AND `JSONB` IN THE DATABASE
+  THE MIGRATIONS BUILD**, so a `create_all` harness gets the narrower type and
+  the view's own `NULL::jsonb` cannot union with it. The suite reconciles it;
+  the app is unaffected, but the divergence is real and is worth a look on its
+  own.
+
 ### THE SAME CRICKET FROM TWO SOURCES COUNTS IT TWICE (v9.68.3, Sep 2026)
 
 Reported off Keon Park's Records mid-import: the Highest Individual Scores
