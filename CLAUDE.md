@@ -7186,6 +7186,54 @@ and BetterCricket pulls ALL of its data across, the record book included.
   `unwrap` raises a typed error for it so "their subscription ended" is not
   read as "this club has no matches". Their FAQ also says the database is
   deleted 12 months after expiry.
+### The club already held its players, spelled its own way (v9.67.4)
+
+Reported off the live leaderboard: Brad Quinsee read 9,850 runs where
+CricketStatz says 10,444 — and the board listed him TWICE, along with "Michael
+B. White" beside "Michael White", "Shannon J. McCleish" beside "Shannon
+McCleish", and Ryan Docherty twice.
+
+- **EVERY DUPLICATE WAS A uuid5 BESIDE A uuid4, which names the cause exactly.**
+  A v5 id is one this import derived; a v4 is a row the club already had. Read
+  off the live API: `Brad Quinsee`/`Quinsee, Brad`, `Michael B. White`/`White,
+  Michael`, `Shannon J. McCleish`/`McCleish, Shannon`. **The club holds its
+  players surname-first and CricketStatz writes them first-name-first**, so
+  matching on the raw spelling matched none of them and minted a second record
+  for every player the club already had — each then carrying half a career.
+- **`resolve_player` DID AN EXACT `ilike` AND NOTHING ELSE.** The fix is not a
+  cleverer regex, it is to use `import_ingest.match_players` — the pipeline
+  BetterImport, the scorecard reader and Merge Duplicates already share, whose
+  `_normalise_name` turns "Quinsee, Brad" into "brad quinsee" and whose
+  `_middles_compatible` reads "Michael B. White" as "Michael White". **This is
+  what "create names like the other stat import pages do" means**, and it is
+  the one part of that instruction the first cut missed while doing seasons and
+  grades properly.
+- **ONLY `exact` IS TAKEN, and that is the matcher's own rule rather than
+  caution.** Its `exact` already covers the middle-initial case. Below that it
+  deliberately returns no id: an initial is not an identity, so "Crosta, T"
+  must not swallow a Torey, a Tim and a Tom, and two of the club's own records
+  sharing a name is the shape of a father and son. Those get their own record
+  and are REPORTED by name in the import's notes, pointing at Merge Duplicates.
+- **A ROLLBACK DROPS THE ROSTER CACHE TOO.** It holds players flushed since the
+  last commit, so a stale copy would match against rows that no longer exist —
+  the same reason the season and grade caches are cleared there.
+- **A NEWLY CREATED PLAYER IS APPENDED TO THE ROSTER**, or the next card
+  spelling the same new name differently mints a second row inside one import.
+- **A RE-IMPORT DOES NOT REPAIR A CLUB ALREADY IN THIS STATE**, which is worth
+  knowing before suggesting one: `resolve_player` finds its own row by the
+  CricketStatz id before it ever looks at a name.
+  `python -m app.scripts.merge_cricketstatz_duplicates <org|all> [--apply]` is
+  the repair, merging through the SAME `_merge_players_core` the Merge
+  Duplicates screen uses, so every per-game table is reassigned and the merge is
+  undoable. The club's own record is the one KEPT — it carries the photo, the
+  squad and the committee role. Dry run by default.
+- **`plan_for_org` IS PURE AND THE ROUTER IMPORT IS DEFERRED INTO `main`**, so
+  the planning half can be verified without dragging the auth stack in.
+- **Verified** (the suite is 127 checks: the club's held player matched rather
+  than duplicated, the middle-initial case, the bare initial deliberately NOT
+  merged and reported instead, and the repair finding the reported pair while
+  keeping the club's own record).
+
 ### The preview's "earliest" was the earliest of the most recent 999 (v9.67.3)
 
 Reported off the preview card: **EARLIEST 2014** for a club whose history runs

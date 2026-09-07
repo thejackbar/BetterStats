@@ -45,6 +45,7 @@ from app.models.db import (
     Season,
 )
 from app.services import cricketstatz_client as client
+from app.services.import_ingest import match_players
 from app.services.grade_labels import suggest_categories, suggest_category
 from app.services.cricketstatz_parse import RECORD_REPORTS, CricketStatzError
 
@@ -185,12 +186,27 @@ def is_placeholder_name(name: str) -> bool:
     return bool(re.fullmatch(r"\*+", clean))
 
 
+async def _roster(db: AsyncSession, org_id) -> list[tuple[str, str]]:
+    """The club's existing players, as the shared matcher wants them."""
+    rows = (await db.execute(text("""
+        SELECT id, COALESCE(display_name_override, name) FROM players
+         WHERE organisation_id = :org
+    """), {"org": str(org_id)})).all()
+    return [(str(r[0]), r[1] or "") for r in rows]
+
+
 async def resolve_player(db: AsyncSession, org_id, person: dict,
-                         cache: dict) -> Optional[Player]:
+                         caches: dict) -> Optional[Player]:
     """Our player row for one of OUR players on a CricketStatz card.
 
     Matched on CricketStatz's own player id first (stable across eras), then
-    on an exact name already in the club, before a new row is created.
+    against the club's EXISTING roster through `import_ingest.match_players` —
+    the same pipeline BetterImport, the scorecard reader and Merge Duplicates
+    use. An exact-string check is not enough and the difference is not
+    cosmetic: a club already holds its players as "Quinsee, Brad" while
+    CricketStatz writes "Brad Quinsee", and matching on the raw spelling minted
+    a second record for every player the club already had — so its leaderboard
+    listed the same person twice, each with half a career.
     """
     source_id = (person or {}).get("source_player_id")
     name = _clean_name((person or {}).get("name", ""))
@@ -204,8 +220,8 @@ async def resolve_player(db: AsyncSession, org_id, person: dict,
         return None
 
     key = source_id or f"name:{name.lower()}"
-    if key in cache:
-        return cache[key]
+    if key in caches["players"]:
+        return caches["players"][key]
 
     player: Optional[Player] = None
     if source_id:
@@ -215,10 +231,27 @@ async def resolve_player(db: AsyncSession, org_id, person: dict,
         )).scalars().first()
 
     if player is None and name:
-        player = (await db.execute(
-            select(Player).where(Player.organisation_id == org_id,
-                                 Player.name.ilike(name))
-        )).scalars().first()
+        # The roster is reloaded whenever it has been cleared — a rollback
+        # discards any player flushed since the last commit, so a cached list
+        # holding them would match against rows that no longer exist.
+        if caches.get("roster") is None:
+            caches["roster"] = await _roster(db, org_id)
+        decision = match_players([name], caches["roster"]).get(name) or {}
+        # Only an exact match is taken, which is the matcher's own rule: its
+        # 'exact' covers a plain match AND the middle-initial case ("Michael B.
+        # White" onto the club's "White, Michael"). Everything below that is
+        # left alone deliberately — an initial is not an identity, so "Crosta,
+        # T" must not swallow a Torey, a Tim and a Tom, and two of the club's
+        # own records sharing a name is the shape of a father and son. Those
+        # get their own record and are reported, for Merge Duplicates to settle.
+        chosen = decision.get("player_id") if decision.get("status") == "exact" else None
+        if not chosen and decision.get("candidates"):
+            near = caches.setdefault("near_matches", {})
+            near.setdefault(name, [c.get("name") for c in decision["candidates"][:3]])
+        if chosen:
+            player = (await db.execute(
+                select(Player).where(Player.id == uuid.UUID(chosen))
+            )).scalars().first()
         if player is not None and source_id and not player.cricketstatz_player_id:
             # Tie the existing record to its CricketStatz identity so later
             # runs match on the id rather than the spelling.
@@ -233,8 +266,12 @@ async def resolve_player(db: AsyncSession, org_id, person: dict,
         )
         db.add(player)
         await db.flush()
+        # So the next name in this same import matches the row just created
+        # rather than minting a second one beside it.
+        if caches.get("roster") is not None:
+            caches["roster"].append((str(player.id), player.name))
 
-    cache[key] = player
+    caches["players"][key] = player
     return player
 
 
@@ -435,7 +472,7 @@ async def _write_our_batting(db, org_id, game, inn, seq, caches) -> None:
     """Our batting card, its fall of wickets and the stands behind it."""
     seen: set = set()
     for b in inn.get("batters", []):
-        player = await resolve_player(db, org_id, b.get("batter"), caches["players"])
+        player = await resolve_player(db, org_id, b.get("batter"), caches)
         if player is None:
             continue
         # One innings row per player: a card can list the same person twice,
@@ -458,7 +495,7 @@ async def _write_our_batting(db, org_id, game, inn, seq, caches) -> None:
 
     for fall in inn.get("fall_of_wickets", []):
         person = fall.get("batter") or {}
-        player = await resolve_player(db, org_id, person, caches["players"])
+        player = await resolve_player(db, org_id, person, caches)
         db.add(ManualFallOfWicket(
             manual_game_id=game.id, innings_number=seq,
             wicket_number=fall.get("wicket_number") or 0,
@@ -472,9 +509,9 @@ async def _write_our_batting(db, org_id, game, inn, seq, caches) -> None:
                                      inn.get("fall_of_wickets", []),
                                      inn.get("runs")):
         b1 = await resolve_player(db, org_id, (stand["batter1"] or {}).get("batter"),
-                                  caches["players"]) if stand.get("batter1") else None
+                                  caches) if stand.get("batter1") else None
         b2 = await resolve_player(db, org_id, (stand["batter2"] or {}).get("batter"),
-                                  caches["players"]) if stand.get("batter2") else None
+                                  caches) if stand.get("batter2") else None
         db.add(ManualPartnership(
             manual_game_id=game.id, innings_number=seq,
             wicket_number=stand["wicket_number"] or 0,
@@ -491,7 +528,7 @@ async def _write_our_bowling(db, org_id, game, inn, seq, caches, fielding) -> No
     fielding credit lives — the dismissal names the fielder and the bowler.
     """
     for spell in inn.get("bowlers", []):
-        player = await resolve_player(db, org_id, spell.get("bowler"), caches["players"])
+        player = await resolve_player(db, org_id, spell.get("bowler"), caches)
         if player is None:
             continue
         db.add(ManualBowlingSpell(
@@ -511,9 +548,9 @@ async def _write_our_bowling(db, org_id, game, inn, seq, caches, fielding) -> No
         kind = b.get("dismissal_type")
         if not kind:
             continue
-        bowler = await resolve_player(db, org_id, b.get("bowler"), caches["players"]) \
+        bowler = await resolve_player(db, org_id, b.get("bowler"), caches) \
             if b.get("bowler") else None
-        fielder = await resolve_player(db, org_id, b.get("fielder"), caches["players"]) \
+        fielder = await resolve_player(db, org_id, b.get("fielder"), caches) \
             if b.get("fielder") else None
 
         if bowler is not None:
@@ -860,7 +897,8 @@ async def run_import(session_maker, org_id, import_id, club_id: str) -> None:
                 continue
 
             caches = {
-                "seasons": {}, "grades": {}, "players": {},
+                "seasons": {}, "grades": {}, "players": {}, "roster": None,
+                "near_matches": {},
                 "season_label": season["label"], "season_value": season["value"],
             }
             async with session_maker() as db:
@@ -898,6 +936,7 @@ async def run_import(session_maker, org_id, import_id, club_id: str) -> None:
                         caches["seasons"].clear()
                         caches["grades"].clear()
                         caches["players"].clear()
+                        caches["roster"] = None
                         note(f"match {row['source_match_id']}: {exc}")
                     progress["matches_done"] += 1
 
@@ -910,6 +949,9 @@ async def run_import(session_maker, org_id, import_id, club_id: str) -> None:
                      WHERE organisation_id = :org
                        AND cricketstatz_player_id IS NOT NULL
                 """), {"org": str(org_id)})).scalar() or 0
+            for new_name, candidates in (caches.get("near_matches") or {}).items():
+                note(f"{new_name}: added as a new player — close to "
+                     f"{', '.join(candidates)}. Check Merge Duplicates.")
             await _set_progress(session_maker, import_id, progress=progress)
 
         # ── the record book ─────────────────────────────────────────────────

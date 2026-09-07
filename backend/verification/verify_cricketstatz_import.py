@@ -54,6 +54,10 @@ DB_URL = os.environ.get(
 
 PASS, FAIL = [], []
 
+# Players the club already holds before the import runs.
+HELD_PLAYER = uuid.UUID("11111111-1111-4111-8111-111111111111")
+HELD_MIDDLE = uuid.UUID("22222222-2222-4222-8222-222222222222")
+
 
 def check(name: str, ok: bool, detail: str = "") -> None:
     (PASS if ok else FAIL).append(name)
@@ -359,6 +363,14 @@ async def verify_import(engine, session_maker) -> tuple:
             INSERT INTO organisations (id, name, slug, is_active)
             VALUES (:id, 'Keon Park Cricket Club', 'keon-park', true)
         """), {"id": str(org_id)})
+        # The club already holds its players, spelled the way a club's own
+        # records spell them — surname first, and one with a middle initial the
+        # CricketStatz card does not carry. This is the reported case.
+        await db.execute(text("""
+            INSERT INTO players (id, organisation_id, name) VALUES
+                (:a, :org, 'McSwain, Tommy A'),
+                (:b, :org, 'Crosta, T')
+        """), {"a": str(HELD_PLAYER), "b": str(HELD_MIDDLE), "org": str(org_id)})
         await db.commit()
 
     stub = StubSite()
@@ -455,12 +467,36 @@ async def verify_import(engine, session_maker) -> tuple:
                  WHERE organisation_id = :org
             """), {"org": str(org_id)})).mappings().all()
             names = {p["name"] for p in players}
-            check("our own players were created",
-                  "Tommy A McSwain" in names and "Warren Stewart Snr" in names)
+            check("our own players were created", "Warren Stewart Snr" in names)
+            # The reported bug: the club holds "Quinsee, Brad" while the card
+            # says "Brad Quinsee", and matching on the raw spelling minted a
+            # second record for every player the club already had.
+            check("a player the club already held is matched, not duplicated",
+                  "McSwain, Tommy A" in names and "Tommy A McSwain" not in names,
+                  str(sorted(n for n in names if "McSwain" in n)))
+            held = (await db.execute(text("""
+                SELECT COUNT(*) FROM players
+                 WHERE organisation_id = :org AND id = :pid
+                   AND cricketstatz_player_id IS NOT NULL
+            """), {"org": str(org_id), "pid": str(HELD_PLAYER)})).scalar()
+            check("and the record the club already had is the one that was used",
+                  held == 1, str(held))
+            # An initial is not an identity — "Crosta, T" could be a Torey, a
+            # Tim or a Tom — so this is deliberately NOT merged, and is
+            # reported instead for Merge Duplicates to settle.
+            crosta = sorted(n for n in names if "Crosta" in n)
+            check("a bare initial is never merged into a full name on a guess",
+                  crosta == ["Crosta, T", "Torey Crosta"], str(crosta))
+            notes = " ".join((row["progress"] or {}).get("notes") or [])
+            check("and a near match is reported so it can be merged by hand",
+                  "Torey Crosta" in notes and "Merge Duplicates" in notes,
+                  notes[:120])
             check("an opponent who only ever batted against us is not one of our players",
                   "Jon Bunn" not in names, "Jon Bunn was created")
-            check("every player carries their CricketStatz id",
-                  all(p["cricketstatz_player_id"] for p in players))
+            check("every player the import resolved carries their CricketStatz id",
+                  all(p["cricketstatz_player_id"] for p in players
+                      if p["name"] != "Crosta, T"),
+                  str([p["name"] for p in players if not p["cricketstatz_player_id"]]))
 
             bat = (await db.execute(text("""
                 SELECT b.runs, b.balls, b.fours, b.dismissal_type, b.not_out, p.name
@@ -635,6 +671,42 @@ async def verify_planning() -> None:
           f"{stub.season_probes} of {len(page['seasons'])}")
 
 
+async def verify_repair(session_maker, org_id) -> None:
+    """The repair for a club imported before names were matched properly."""
+    print("\nRepairing a club imported before names were matched")
+    from app.scripts.merge_cricketstatz_duplicates import plan_for_org
+
+    # Recreate the reported state: the club's own record beside the one an
+    # earlier import minted for the same person.
+    stray = uuid.uuid4()
+    async with session_maker() as db:
+        await db.execute(text("""
+            INSERT INTO players (id, organisation_id, name, cricketstatz_player_id)
+            VALUES (:id, :org, 'Brad Quinsee', '99000001')
+        """), {"id": str(stray), "org": str(org_id)})
+        held = uuid.uuid4()
+        await db.execute(text("""
+            INSERT INTO players (id, organisation_id, name)
+            VALUES (:id, :org, 'Quinsee, Brad')
+        """), {"id": str(held), "org": str(org_id)})
+        await db.commit()
+
+        plan = await plan_for_org(db, org_id)
+        pairs = {(k_name, r_name) for _, k_name, _, r_name in plan}
+        check("the reported duplicate is found",
+              ("Quinsee, Brad", "Brad Quinsee") in pairs, str(pairs))
+        check("the club's own record is the one kept",
+              all(k_id != str(stray) for k_id, _, _, _ in plan))
+        check("a bare initial is not merged on a guess",
+              not any("Crosta" in r for _, _, _, r in plan), str(pairs))
+        check("a player with no CricketStatz id is never the one removed",
+              all(r_id != str(held) for _, _, r_id, _ in plan))
+
+        await db.execute(text("DELETE FROM players WHERE id IN (:a,:b)"),
+                         {"a": str(stray), "b": str(held)})
+        await db.commit()
+
+
 async def verify_heartbeat(session_maker, org_id) -> None:
     print("\nHeartbeat and a run that stops responding")
 
@@ -754,6 +826,7 @@ async def main() -> int:
 
     await verify_schema(engine)
     org_id, import_id, players = await verify_import(engine, session_maker)
+    await verify_repair(session_maker, org_id)
     await verify_heartbeat(session_maker, org_id)
     await verify_undo(session_maker, org_id, import_id, players)
     await verify_downgrade(engine)
