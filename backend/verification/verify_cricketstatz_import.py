@@ -1526,6 +1526,70 @@ async def verify_synced_overlap(engine, session_maker) -> None:
           f"handed={again}")
 
 
+async def verify_notes_pass(engine, session_maker, org_id, import_id) -> None:
+    """The honour board on its own, without re-pulling a single scorecard.
+
+    The notes pass is the LAST phase of an import, so it is the first thing a
+    run loses when it is cut off — reported live: a club whose whole history
+    imported and whose every player read zero honours.
+    """
+    print("\nThe honour board on its own")
+    async with session_maker() as db:
+        await db.execute(text(
+            "DELETE FROM player_achievements WHERE import_batch_id = :i"),
+            {"i": str(import_id)})
+        await db.commit()
+        gone = (await db.execute(text(
+            "SELECT COUNT(*) FROM player_achievements WHERE import_batch_id = :i"),
+            {"i": str(import_id)})).scalar()
+    check("a club that lost its honour board has none", gone == 0, str(gone))
+
+    real_client = importer.client
+    stub = StubSite()
+    importer.client = stub
+    before_cards = stub.scorecard_calls
+    try:
+        await importer.run_notes_pass(session_maker, org_id, import_id, "93931")
+    finally:
+        importer.client = real_client
+
+    async with session_maker() as db:
+        made = (await db.execute(text(
+            "SELECT COUNT(*) FROM player_achievements WHERE import_batch_id = :i"),
+            {"i": str(import_id)})).scalar()
+        state = (await db.execute(text(
+            "SELECT status, phase FROM cricketstatz_imports WHERE id = :i"),
+            {"i": str(import_id)})).first()
+    check("running the notes pass alone puts it back", made == 12, str(made))
+    check("and re-pulls no scorecards to do it",
+          stub.scorecard_calls == before_cards,
+          f"{before_cards} → {stub.scorecard_calls}")
+    check("the run reports itself finished", tuple(state) == ("complete", "done"),
+          str(state))
+
+    # It reuses the import's own batch, so undoing that import still takes them.
+    async with session_maker() as db:
+        batched = (await db.execute(text("""
+            SELECT COUNT(*) FROM player_achievements
+             WHERE org_id = :o AND import_batch_id = :i
+        """), {"o": str(org_id), "i": str(import_id)})).scalar()
+    check("filed under the import's own batch, so undo still removes them",
+          batched == made, f"{batched} of {made}")
+
+    # A second pass over a club whose notes are already read adds nothing.
+    importer.client = StubSite()
+    try:
+        await importer.run_notes_pass(session_maker, org_id, import_id, "93931")
+    finally:
+        importer.client = real_client
+    async with session_maker() as db:
+        again = (await db.execute(text(
+            "SELECT COUNT(*) FROM player_achievements WHERE import_batch_id = :i"),
+            {"i": str(import_id)})).scalar()
+    check("a second pass re-stamps rather than duplicating", again == made,
+          f"{again} vs {made}")
+
+
 async def verify_undo(session_maker, org_id, import_id, player_count) -> None:
     print("\nUndo")
     async with session_maker() as db:
@@ -1624,6 +1688,7 @@ async def main() -> int:
     await verify_synced_overlap(engine, session_maker)
     await verify_repair(session_maker, org_id)
     await verify_heartbeat(session_maker, org_id)
+    await verify_notes_pass(engine, session_maker, org_id, import_id)
     await verify_undo(session_maker, org_id, import_id, players)
     await verify_downgrade(engine)
     await engine.dispose()

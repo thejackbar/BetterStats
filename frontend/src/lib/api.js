@@ -1814,6 +1814,8 @@ export const api = {
     request('/club-admin/cricketstatz/superseded/clear', {
       method: 'POST', body: JSON.stringify({ years }),
     }),
+  csReadNotes: () =>
+    request('/club-admin/cricketstatz/notes', { method: 'POST' }),
   csStatus: () => request('/club-admin/cricketstatz/status'),
   csImports: () => request('/club-admin/cricketstatz/imports'),
   csStop: (id) =>

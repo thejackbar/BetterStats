@@ -7525,6 +7525,39 @@ we're way over what I expect".
   seasons are marked by the old end-of-run write. The board corrects itself the
   moment the run completes.
 
+### THE HONOUR BOARD RUNS ON ITS OWN (v9.69.6, Sep 2026)
+
+Asked while checking the awards: a club whose whole CricketStatz history had
+imported — 3,556 matches — read **zero honours on every player**.
+
+- **THE NOTES PASS IS THE LAST PHASE OF AN IMPORT, so it is the first thing a
+  run loses.** Matches, then the record book, then the honour board. A redeploy,
+  a stop or a network failure after the matches are in leaves a club with its
+  whole history and no honours, and the only recovery was to re-import — which
+  re-pulls every scorecard for a pass that needs none of them. `NOT BUILT: no
+  endpoint runs the notes pass alone` is what the v9.68.0 note said; this is it.
+- **IT REUSES THE IMPORT'S OWN BATCH ID**, so the honours it writes are removed
+  by undoing that import exactly as if they had been read during it, and the
+  Awards screen lists them under the same batch. A separate batch would leave a
+  club able to undo the import and keep an honour board pointing at it.
+- **IT RUNS AGAINST THE MOST RECENT IMPORT THAT HAS NOT BEEN UNDONE**, and
+  refuses when there is none: the honour board is read off the players the
+  import creates, so there is nothing to read notes for.
+- **A SECOND PASS RE-STAMPS RATHER THAN DUPLICATING**, the same guard the
+  import's own re-read already uses.
+- **THE BUTTON IS ONLY OFFERED WHERE THERE IS NOTHING TO SHOW** — a club whose
+  honours are already in does not need it, and a control that can only answer
+  "everything is fine" is worse than none.
+- **Verified against a real Postgres** (the suite is 221 checks now: a club that
+  has lost its honour board, the pass putting all 12 back, NO scorecard re-pulled
+  to do it, the run reporting itself finished, the honours filed under the
+  import's own batch so undo still takes them, and a second pass adding nothing)
+  **with a control run**: with the pass removed, 2 fail — the board stays empty
+  and the undo reports no honours to remove.
+- **NOT ESTABLISHED**: why the live run's notes phase produced nothing. It may
+  never have been reached. The pass is now recoverable either way, which is the
+  part that matters to a club.
+
 ### A MIGRATION RECORDED AS APPLIED IS NOT EVIDENCE ITS EFFECT IS THERE (v9.69.5, Sep 2026)
 
 The end of the same report, and the most expensive part of it. The club's

@@ -182,6 +182,50 @@ async def start_import(
     return {"import_id": str(import_id), "status": "running"}
 
 
+@router.post("/notes")
+async def read_player_notes(
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Read the club's player notes and file the honour board, on its own.
+
+    The notes pass is the LAST phase of an import, so it is the first thing a
+    run loses when it is cut off — and re-importing to recover it would re-pull
+    every scorecard for a pass that needs none of them. Runs against the club's
+    most recent import, reusing its batch id, so undoing that import still
+    removes the honours it writes.
+    """
+    row = (await db.execute(text("""
+        SELECT id, club_id,
+               EXTRACT(EPOCH FROM (NOW() - COALESCE(updated_at, started_at))) AS quiet,
+               status
+          FROM cricketstatz_imports
+         WHERE organisation_id = :org AND undone_at IS NULL
+         ORDER BY started_at DESC LIMIT 1
+    """), {"org": str(club.id)})).first()
+    if not row:
+        raise HTTPException(
+            status_code=409,
+            detail="Import your CricketStatz history first — the honour board "
+                   "is read off the players it creates.",
+        )
+    if row[3] == "running" and (row[2] or 0) <= STALL_AFTER_SECONDS:
+        raise HTTPException(
+            status_code=409,
+            detail="An import is already running for this club.",
+        )
+
+    from app.models.db import async_session_maker
+
+    import_id = row[0]
+    task = asyncio.create_task(
+        importer.run_notes_pass(async_session_maker, club.id, import_id,
+                                row[1]))
+    _RUNNING[str(import_id)] = task
+    task.add_done_callback(lambda _t: _RUNNING.pop(str(import_id), None))
+    return {"import_id": str(import_id), "status": "running"}
+
+
 @router.get("/status")
 async def status(db: AsyncSession = Depends(get_db),
                  club: Organisation = Depends(get_current_club)):

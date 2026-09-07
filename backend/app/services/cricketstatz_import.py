@@ -1404,6 +1404,54 @@ async def run_import(session_maker, org_id, import_id, club_id: str,
                             progress=progress, finished_at=datetime.utcnow())
 
 
+async def run_notes_pass(session_maker, org_id, import_id, club_id: str) -> None:
+    """Read the club's player notes and file the honour board. Never raises.
+
+    THE HONOUR BOARD IS THE LAST PHASE OF AN IMPORT, so it is the first thing
+    lost when a run is cut off — a redeploy, a stop, a network failure after
+    the matches are in. Re-importing to recover it would re-pull every
+    scorecard for a pass that needs none of them, so it runs on its own here.
+
+    Reuses the import's own batch id, so the honours it writes are removed by
+    undoing that import exactly as if they had been read during it, and the
+    Awards screen lists them under the same batch. A second run over a club
+    whose notes are already read re-stamps rather than duplicating.
+    """
+    progress = {"phase": "notes", "notes_done": 0, "notes_total": 0,
+                "awards": 0, "notes_read": 0, "notes": []}
+
+    def note(message: str) -> None:
+        if len(progress["notes"]) < 200:
+            progress["notes"].append(message)
+
+    def on_progress(done, total, made):
+        progress["notes_done"] = done
+        progress["notes_total"] = total
+        progress["awards"] = made
+
+    try:
+        await _set_progress(session_maker, import_id, status="running",
+                            phase="notes", progress=progress)
+        async with session_maker() as db:
+            summary = await import_notes(db, org_id, import_id, club_id,
+                                         on_progress, note)
+        progress["awards"] = summary["awards_created"]
+        progress["notes_read"] = summary["players_read"]
+        progress["phase"] = "done"
+        await _set_progress(session_maker, import_id, status="complete",
+                            phase="done", progress=progress,
+                            finished_at=datetime.utcnow())
+    except CricketStatzError as exc:
+        await _set_progress(session_maker, import_id, status="error",
+                            error=str(exc), progress=progress,
+                            finished_at=datetime.utcnow())
+    except Exception as exc:  # a failed pass must report, never vanish
+        logger.exception("CricketStatz notes pass failed")
+        await _set_progress(session_maker, import_id, status="error",
+                            error=f"{type(exc).__name__}: {exc}",
+                            progress=progress, finished_at=datetime.utcnow())
+
+
 async def undo_import(db: AsyncSession, org_id, import_id) -> dict:
     """Remove everything one import wrote.
 

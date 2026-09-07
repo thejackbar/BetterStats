@@ -53,6 +53,7 @@ export default function CricketStatzImport() {
   // them. There is no third option that keeps both — that is the double count.
   const [syncedYears, setSyncedYears] = useState('skip')
   const [undoing, setUndoing] = useState(null)
+  const [readingNotes, setReadingNotes] = useState(false)
   const pollRef = useRef(null)
 
   const running = status?.import?.status === 'running'
@@ -105,6 +106,17 @@ export default function CricketStatzImport() {
     } catch (e) {
       setError(e?.detail || e?.message || 'Could not start the import.')
     } finally { setStarting(false) }
+  }
+
+  async function readNotes() {
+    setReadingNotes(true)
+    setError('')
+    try {
+      await api.csReadNotes()
+      await loadStatus()
+    } catch (e) {
+      setError(e?.detail || e?.message || 'Could not read the player notes.')
+    } finally { setReadingNotes(false) }
   }
 
   async function handOverBack() {
@@ -410,6 +422,24 @@ export default function CricketStatzImport() {
                             onClick={() => stop(status.import.id)}>
                       Stop this import
                     </Button>
+                  </div>
+                )}
+                {/* The honour board is the LAST phase of an import, so it is
+                    the first thing lost when a run is cut off. Offered on its
+                    own rather than making a club re-pull every scorecard for a
+                    pass that needs none of them. */}
+                {!running && !p.awards && (
+                  <div>
+                    <Button variant="quiet" size="sm" onClick={readNotes}
+                            disabled={readingNotes}>
+                      {readingNotes ? 'Reading…' : 'Read player notes for awards'}
+                    </Button>
+                    <Caption>
+                      {'Reads each player\u2019s CricketStatz notes and files '}
+                      {'what they say \u2014 life membership, caps, trophies, '}
+                      {'captaincies \u2014 onto their honour board. No matches '}
+                      {'are re-pulled.'}
+                    </Caption>
                   </div>
                 )}
                 {status.import.error && <Note toneKey="block">{status.import.error}</Note>}
