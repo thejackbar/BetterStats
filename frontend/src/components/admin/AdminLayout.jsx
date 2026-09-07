@@ -48,6 +48,9 @@ const NAV_SECTIONS = [
     heading: 'Account',
     items: [
       { to: '/admin/activity', label: 'Activity Log', cap: CAP.MANAGE_USERS },
+      // No capability: every admin may choose what reaches their own inbox.
+      // The club-wide half of that screen is gated inside it, and on the server.
+      { to: '/admin/notifications', label: 'Notifications', cap: null },
       { to: '/admin/account', label: 'Plan & Billing', cap: null },
       { to: '/admin/settings', label: 'Settings', cap: CAP.MANAGE_SETTINGS },
       { to: '/admin/users', label: 'Users', cap: CAP.MANAGE_USERS },
@@ -220,7 +223,11 @@ export default function AdminLayout({ children }) {
 
   // Auto-open on login if there's anything unseen (sync runs, milestones,
   // pending requests, or a changelog entry newer than last_seen_version).
-  // Super Admin only — the bell itself only renders for that role now.
+  //
+  // STILL Super Admin only, now that the bell itself is not. Opening a panel
+  // over a club admin the moment they log in is a different decision from
+  // giving them the bell, and nobody has asked for it — the badge is how they
+  // find out there is something there.
   useEffect(() => {
     if (!justLoggedIn || !user) return
     let cancelled = false
@@ -349,11 +356,19 @@ export default function AdminLayout({ children }) {
                 SETUP GUIDE
               </button>
             )}
-            {user?.role === 'super_admin' && (
-              <div className="hidden sm:block">
-                <NotificationBell onOpen={openBell} refreshTrigger={bellRefresh} />
-              </div>
-            )}
+            {/* THE BELL IS FOR EVERY ADMIN, NOT ONLY BetterCricket'S OWN STAFF.
+                It was gated on super_admin while the panel was internal, and the
+                gate outlived the reason for it: everything the panel shows is
+                the CLUB's own — its syncs, its milestones, its pending requests,
+                and since v9.69.0 the notifications the club configured for
+                itself. Safe to lift because the gate was never the real check:
+                every endpoint behind it is club-scoped through get_current_club
+                and refuses nothing on role (PRIVILEGED_ROLES only ever WIDENS a
+                capability check there). Same call v9.6.1 made for the
+                BetterClubhouse screens. */}
+            <div className="hidden sm:block">
+              <NotificationBell onOpen={openBell} refreshTrigger={bellRefresh} />
+            </div>
             <span className="hidden sm:block font-mono text-[11px] text-pb-faint">
               {user?.display_name || user?.username}
               {user?.role === 'super_admin' && (
@@ -462,14 +477,12 @@ export default function AdminLayout({ children }) {
                     SETUP GUIDE
                   </button>
                 )}
-                {user?.role === 'super_admin' && (
-                  <button
-                    onClick={() => { setMobileOpen(false); openBell() }}
-                    className="inline-flex items-center gap-1.5 font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors border pb-hairline rounded px-2.5 py-1"
-                  >
-                    NOTIFICATIONS
-                  </button>
-                )}
+                <button
+                  onClick={() => { setMobileOpen(false); openBell() }}
+                  className="inline-flex items-center gap-1.5 font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors border pb-hairline rounded px-2.5 py-1"
+                >
+                  NOTIFICATIONS
+                </button>
               </div>
             </div>
 
@@ -644,9 +657,10 @@ export default function AdminLayout({ children }) {
         </main>
       </div>
 
-      {user?.role === 'super_admin' && (
-        <NotificationModal isOpen={bellOpen} summary={bellSummary} error={bellError} onClose={closeBell} onClear={clearBell} />
-      )}
+      {/* Mounted for every admin, alongside the bell above. Gating the MODAL
+          separately is how a lifted gate half-works: the bell renders, it opens
+          nothing, and the click reads as broken. */}
+      <NotificationModal isOpen={bellOpen} summary={bellSummary} error={bellError} onClose={closeBell} onClear={clearBell} />
     </div>
   )
 }

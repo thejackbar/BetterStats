@@ -1639,6 +1639,27 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ app_version: appVersion || null }),
     }),
+  // Configurable notifications (migration 287) — the catalogue a club chooses
+  // from, the switches it sets, each admin's own opt-out, and the stored feed.
+  getNotificationSettings: () => request('/club-admin/notifications/settings'),
+  patchNotificationSettings: (patch) =>
+    request('/club-admin/notifications/settings', { method: 'PATCH', body: JSON.stringify(patch) }),
+  putNotificationRule: (eventKey, patch) =>
+    request(`/club-admin/notifications/settings/events/${encodeURIComponent(eventKey)}`,
+      { method: 'PUT', body: JSON.stringify(patch) }),
+  putNotificationPreference: (eventKey, channels) =>
+    request(`/club-admin/notifications/settings/preferences/${encodeURIComponent(eventKey)}`,
+      { method: 'PUT', body: JSON.stringify({ channels }) }),
+  runNotificationScanNow: () =>
+    request('/club-admin/notifications/settings/run-now', { method: 'POST' }),
+  getNotificationFeed: ({ limit = 30, unreadOnly = false } = {}) =>
+    request(`/club-admin/notifications/feed?limit=${limit}&unread_only=${unreadOnly ? 'true' : 'false'}`),
+  markNotificationFeedRead: (notificationIds) =>
+    request('/club-admin/notifications/feed/read', {
+      method: 'POST',
+      // null means every unread one — what "mark all read" sends.
+      body: JSON.stringify({ notification_ids: notificationIds || null }),
+    }),
   // Club Setup Wizard (always available; /state fails only without a club context)
   getOnboardingWizardState: () => request('/club-admin/onboarding-wizard/state'),
   getSetupFlow: () => request('/club-admin/onboarding-wizard/flow'),

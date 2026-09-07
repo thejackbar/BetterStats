@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { CHANGELOG } from '../data/changelog'
+import { api } from '../lib/api'
 
 const KIND_LABELS = {
   org_full: 'Sync Now',
@@ -43,6 +44,40 @@ function relativeTime(isoString) {
   if (days === 1) return 'yesterday'
   if (days < 7) return `${days} days ago`
   return new Date(isoString).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })
+}
+
+// One of the club's own configurable notifications (migration 287).
+//
+// Unlike every other section in this panel — which is recomputed from source
+// data on each poll — these are a STORED record with their own read state, so a
+// row that has been read stays visible and simply stops counting. The severity
+// is the club's own vocabulary, not a colour invented here.
+const ALERT_TONE = {
+  info: 'var(--pb-accent)',
+  warning: '#f59e0b',
+  urgent: 'var(--pb-negative)',
+}
+
+function AlertRow({ alert, onClose }) {
+  const color = ALERT_TONE[alert.severity] || ALERT_TONE.info
+  const body = (
+    <>
+      <div className="flex items-start gap-2">
+        <span className="mt-1.5 w-2 h-2 rounded-full shrink-0" style={{ background: color }} />
+        <div className="min-w-0 flex-1">
+          <span className={`text-sm ${alert.read ? 'text-pb-dim' : 'text-pb-text'}`}>{alert.title}</span>
+          {alert.body && <p className="text-xs text-pb-faint mt-0.5 leading-[1.5]">{alert.body}</p>}
+          <p className="text-[10px] text-pb-faintest mt-1">{relativeTime(alert.created_at)}</p>
+        </div>
+      </div>
+    </>
+  )
+  const cls = 'block px-3 py-2.5 rounded-lg border pb-hairline hover:bg-pb-surface2 transition'
+  // Only a link when there is somewhere to go — an anchor that goes nowhere
+  // reads as broken the first time somebody clicks it.
+  return alert.link
+    ? <Link to={alert.link} onClick={onClose} className={cls}>{body}</Link>
+    : <div className={cls}>{body}</div>
 }
 
 function SectionHead({ title, color }) {
@@ -128,6 +163,8 @@ export default function NotificationModal({ isOpen, summary, error, onClose, onC
   // can't shift within the same day).
   const [cleared, setCleared] = useState(false)
   const [clearing, setClearing] = useState(false)
+  const [readAlerts, setReadAlerts] = useState(false)
+  const [readingAlerts, setReadingAlerts] = useState(false)
 
   useEffect(() => {
     if (!isOpen) return
@@ -137,7 +174,7 @@ export default function NotificationModal({ isOpen, summary, error, onClose, onC
   }, [isOpen, onClose])
 
   // Fresh open starts un-cleared so genuinely new items show again.
-  useEffect(() => { if (isOpen) setCleared(false) }, [isOpen])
+  useEffect(() => { if (isOpen) { setCleared(false); setReadAlerts(false) } }, [isOpen])
 
   if (!isOpen) return null
 
@@ -149,6 +186,11 @@ export default function NotificationModal({ isOpen, summary, error, onClose, onC
   const pendingCount = summary?.pending_sync_requests || 0
   const pendingReportsCount = summary?.pending_reports_count || 0
   const failedSyncs = syncRuns.filter(r => r.status === 'error')
+  // The club's own configurable notifications. `readAlerts` is local so
+  // pressing "Mark read" settles the section immediately rather than waiting
+  // for the next poll to come back.
+  const alerts = summary?.alerts || []
+  const unreadAlerts = alerts.filter(a => !a.read && !readAlerts).length
 
   const hasSinceLastVisit = syncRuns.length > 0 || newMilestones.length > 0
   // Only the time-based items are "readable" — pending requests / report
@@ -166,7 +208,22 @@ export default function NotificationModal({ isOpen, summary, error, onClose, onC
     }
   }
 
+  const handleReadAlerts = async () => {
+    if (readingAlerts) return
+    setReadingAlerts(true)
+    try {
+      await api.markNotificationFeedRead(null)
+      setReadAlerts(true)
+    } catch {
+      // A failed mark-read is not worth taking the panel down for — the rows
+      // are still there and the next attempt will do it.
+    } finally {
+      setReadingAlerts(false)
+    }
+  }
+
   const hasAnything =
+    alerts.length > 0 ||
     newEntries.length > 0 ||
     hasSinceLastVisit ||
     upcoming.length > 0 ||
@@ -236,6 +293,38 @@ export default function NotificationModal({ isOpen, summary, error, onClose, onC
               </svg>
               <span>All caught up.{upcoming.length > 0 ? " Here's what's coming up." : ''}</span>
             </div>
+          )}
+
+          {/* The club's own configurable notifications (migration 287) — first,
+              because these are what the club actually asked to be told about;
+              everything below is what the bell has always computed for itself. */}
+          {alerts.length > 0 && (
+            <section>
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <SectionHead title="For your club" color="var(--pb-accent)" />
+                {unreadAlerts > 0 && (
+                  <button
+                    onClick={handleReadAlerts}
+                    disabled={readingAlerts}
+                    className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faint hover:text-pb-text transition disabled:opacity-50"
+                  >
+                    {readingAlerts ? 'Marking…' : `Mark ${unreadAlerts} read`}
+                  </button>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                {alerts.map(a => (
+                  <AlertRow key={a.id} alert={{ ...a, read: a.read || readAlerts }} onClose={onClose} />
+                ))}
+              </div>
+              <Link
+                to="/admin/notifications"
+                onClick={onClose}
+                className="block mt-2 font-mono text-[9px] tracking-wide2 uppercase text-pb-faintest hover:text-pb-text transition"
+              >
+                Choose what you are told about
+              </Link>
+            </section>
           )}
 
           {/* Sync Failures — top callout when scheduled syncs have errored */}

@@ -1,13 +1,17 @@
 """Notification endpoints — lightweight count poll + full summary on modal open."""
 import logging
 from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from pydantic import BaseModel
 from typing import Optional
 
-from app.auth.capabilities import MANAGE_REPORTS, membership_has_capability, PRIVILEGED_ROLES
+from app.auth.capabilities import (
+    MANAGE_REPORTS, MANAGE_SETTINGS, membership_has_capability, PRIVILEGED_ROLES,
+    require_cap,
+)
 from app.models.db import (
     ClubMembership, User, Organisation, Player, PlayerSyncRequest, SavedReport,
     SyncRun, Milestone, get_db,
@@ -15,6 +19,11 @@ from app.models.db import (
 from app.routers.auth import get_current_user, get_current_club
 from app.services.aggregations import get_upcoming_milestones_for_org
 from app.auth.modules import org_entitled_modules
+from app.services import email_service
+from app.services.session_safety import rollback_keeping
+from app.services import notification_events as ev
+from app.services import notification_scan
+from app.services import notifications as notif
 from app.services.merch import merch_alerts as get_merch_alerts
 from app.services.assets import asset_alerts as get_asset_alerts, count_asset_alerts
 
@@ -76,6 +85,7 @@ def _empty_count(last_seen_version: Optional[str]) -> dict:
         "failed_sync_count": 0,
         "pending_reports_count": 0,
         "merch_alert_count": 0,
+        "alert_count": 0,
         "last_seen_version": last_seen_version,
     }
 
@@ -92,6 +102,8 @@ def _empty_summary(last_seen_version: Optional[str]) -> dict:
         "pending_sync_requests": 0,
         "pending_reports_count": 0,
         "merch_alerts": {"low_stock": [], "expiring": [], "service_due": [], "total": 0},
+        "alerts": [],
+        "alert_count": 0,
     }
 
 
@@ -201,8 +213,16 @@ async def _build_notifications_count(
         return await count_asset_alerts(db, org_id)
     asset_alert_count = await _safe(db, _asset_count, 0, what="count.assets")
 
+    # The configurable notifications this club has actually subscribed to
+    # (migration 288) — a stored record with its own read state, unlike the
+    # live sections above, which are recomputed from source data every poll.
+    alert_count = await _safe(
+        db, lambda: notif.unread_count(db, user_id, org_id), 0, what="count.alerts")
+
     return {
-        "unseen_count": sync_count + milestone_count + pending_count + pending_reports_count + merch_alert_count + asset_alert_count,
+        "unseen_count": (sync_count + milestone_count + pending_count + pending_reports_count
+                         + merch_alert_count + asset_alert_count + alert_count),
+        "alert_count": alert_count,
         "failed_sync_count": failed_sync_count,
         "pending_reports_count": pending_reports_count,
         "merch_alert_count": merch_alert_count,
@@ -347,9 +367,14 @@ async def _build_notifications_summary(
         return await get_asset_alerts(db, org_id)
     assets = await _safe(db, _assets, _empty_assets, what="summary.assets")
 
+    alerts = await _safe(
+        db, lambda: notif.feed(db, user_id, org_id, limit=20), [], what="summary.alerts")
+    alert_count = sum(1 for a in alerts if not a.get("read"))
+
     unseen_count = (len(sync_runs) + len(new_milestones) + pending_count + pending_reports_count
                     + (merch.get("total", 0) if isinstance(merch, dict) else 0)
-                    + (assets.get("total", 0) if isinstance(assets, dict) else 0))
+                    + (assets.get("total", 0) if isinstance(assets, dict) else 0)
+                    + alert_count)
     failed_sync_count = sum(1 for r in sync_runs if r["status"] == "error")
 
     return {
@@ -364,6 +389,8 @@ async def _build_notifications_summary(
         "pending_reports_count": pending_reports_count,
         "merch_alerts": merch,
         "asset_alerts": assets,
+        "alerts": alerts,
+        "alert_count": alert_count,
     }
 
 
@@ -382,3 +409,236 @@ async def mark_notifications_seen(
         current_user.last_seen_app_version = payload.app_version
     await db.commit()
     return {"ok": True}
+
+
+# ─── Configurable notifications (migration 288) ──────────────────────────────
+#
+# The bell above is computed live from source data and always has been; these
+# endpoints are the CONFIGURABLE half — the catalogue a club chooses from, the
+# switches it sets, each admin's own opt-out, and the record of what was
+# actually raised and read. They live in this router rather than one of their
+# own so "notifications" is one place, and the bell can serve the stored feed
+# alongside its live sections without a second fetch.
+
+class ClubNotificationSettingsPatch(BaseModel):
+    """Only a field PRESENT is written — see notifications.save_club_settings.
+    A screen saving one toggle must not blank the rest of the row."""
+    enabled: Optional[bool] = None
+    email_enabled: Optional[bool] = None
+    in_app_enabled: Optional[bool] = None
+    email_frequency: Optional[str] = None
+    email_weekday: Optional[int] = None
+
+
+class EventRulePatch(BaseModel):
+    enabled: Optional[bool] = None
+    channels: Optional[dict] = None
+    config: Optional[dict] = None
+
+
+class UserPreferencePatch(BaseModel):
+    channels: dict
+
+
+class MarkReadPayload(BaseModel):
+    #: Absent or empty means every unread notification for this person at this
+    #: club — what "mark all read" sends.
+    notification_ids: Optional[list[str]] = None
+
+
+def _event_payload(event, rule: dict, entitled) -> dict:
+    return {
+        "key": event.key,
+        "label": event.label,
+        "description": event.description,
+        "category": event.category,
+        "severity": event.severity,
+        "module": event.module,
+        "capability": event.capability,
+        "config_fields": [
+            {
+                "key": f.key, "label": f.label, "hint": f.hint, "default": f.default,
+                "minimum": f.minimum, "maximum": f.maximum, "unit": f.unit,
+            }
+            for f in event.config_fields
+        ],
+        "enabled": rule["enabled"],
+        "channels": rule["channels"],
+        "config": rule["config"],
+        "default_enabled": event.default_enabled,
+        "default_channels": event.default_channels,
+    }
+
+
+@router.get("/notifications/settings")
+async def get_notification_settings(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Everything the settings screen draws, in one fetch.
+
+    The catalogue is filtered to what this club can actually receive — an event
+    belonging to a module the club does not hold is neither listed nor
+    configurable, because a club should never be asked to choose about
+    something it can never be sent.
+    """
+    entitled = org_entitled_modules(club)
+    rules = await notif.club_rules(db, club.id)
+    prefs = await notif.user_preferences(db, current_user.id, club.id)
+    user_role = await _get_user_role(db, current_user.id)
+    membership = (await db.execute(
+        select(ClubMembership).where(ClubMembership.user_id == current_user.id,
+                                     ClubMembership.club_id == club.id)
+    )).scalar_one_or_none()
+
+    events = []
+    for event in ev.EVENT_TYPES:
+        if not notif.event_available(event, entitled):
+            continue
+        payload = _event_payload(event, rules[event.key], entitled)
+        # Whether THIS person would be a recipient. An event gated on a
+        # capability they do not hold is still listed (they may be configuring
+        # it for the club) but is shown as not reaching them, rather than
+        # offering a personal opt-out that would do nothing.
+        payload["receives"] = (
+            event.capability is None
+            or (membership is not None
+                and membership_has_capability(membership.role, membership.capabilities, event.capability))
+            or user_role in PRIVILEGED_ROLES
+        )
+        payload["my_channels"] = prefs.get(event.key, {})
+        events.append(payload)
+
+    can_manage = (user_role in PRIVILEGED_ROLES) or (
+        membership is not None
+        and membership_has_capability(membership.role, membership.capabilities, MANAGE_SETTINGS))
+
+    return {
+        "club": await notif.club_settings(db, club.id),
+        "can_manage_club_settings": can_manage,
+        "categories": [{"key": k, "label": label} for k, label in ev.CATEGORIES],
+        "channels": [{"key": c, "label": ev.CHANNEL_LABELS[c]} for c in ev.CHANNELS],
+        "events": events,
+        "my_blanket_optout": prefs.get(ev.ALL_EVENTS, {}),
+        "my_email": (current_user.email or "").strip() or None,
+        "email_provider_live": email_service.get_email_provider().name != "console",
+    }
+
+
+@router.patch("/notifications/settings",
+              dependencies=[Depends(require_cap(MANAGE_SETTINGS))])
+async def patch_notification_settings(
+    payload: ClubNotificationSettingsPatch,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """The club's master switches. ``enabled: false`` is the kill switch — the
+    scan skips the club entirely, so nothing is raised on any channel."""
+    saved = await notif.save_club_settings(
+        db, club.id, payload.model_dump(exclude_unset=True), user_id=current_user.id)
+    await db.commit()
+    return saved
+
+
+@router.put("/notifications/settings/events/{event_key}",
+            dependencies=[Depends(require_cap(MANAGE_SETTINGS))])
+async def put_notification_rule(
+    event_key: str,
+    payload: EventRulePatch,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    event = ev.get_event(event_key)
+    if event is None:
+        raise HTTPException(404, "Unknown notification event")
+    if not notif.event_available(event, org_entitled_modules(club)):
+        # Refused rather than stored: a rule for an event this club can never
+        # receive would read as configured and do nothing.
+        raise HTTPException(402, "This club does not hold the module that event belongs to")
+    saved = await notif.save_rule(
+        db, club.id, event_key,
+        enabled=payload.enabled, channels=payload.channels, config=payload.config)
+    await db.commit()
+    return saved
+
+
+@router.put("/notifications/settings/preferences/{event_key}")
+async def put_notification_preference(
+    event_key: str,
+    payload: UserPreferencePatch,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """One admin's own opt-out, at this club.
+
+    Deliberately NOT gated on MANAGE_SETTINGS: choosing what lands in your own
+    inbox is not a club-wide decision, and an admin who cannot edit the club's
+    branding is still entitled to stop being emailed. It can only ever silence
+    a channel, never switch on one the club has turned off — see
+    notifications.channel_allowed.
+    """
+    try:
+        saved = await notif.save_user_preference(
+            db, current_user.id, club.id, event_key, payload.channels)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    await db.commit()
+    return {"event_key": event_key, "channels": saved}
+
+
+@router.get("/notifications/feed")
+async def get_notification_feed(
+    limit: int = 30,
+    unread_only: bool = False,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    limit = max(1, min(100, limit))
+    items = await notif.feed(db, current_user.id, club.id, limit=limit, unread_only=unread_only)
+    return {"items": items, "unread": await notif.unread_count(db, current_user.id, club.id)}
+
+
+@router.post("/notifications/feed/read")
+async def mark_notification_feed_read(
+    payload: MarkReadPayload,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        updated = await notif.mark_read(db, current_user.id, club.id, payload.notification_ids)
+    except DBAPIError:
+        # A malformed id off a browser is a bad request, not a 500. The cast is
+        # what raises, so this catches it rather than validating the shape twice.
+        # Rolled back through the shared helper: a bare rollback EXPIRES the
+        # instances this request's own dependencies loaded, and the next plain
+        # attribute read on one of them raises a greenlet error a long way from
+        # here. See services/session_safety.py.
+        await rollback_keeping(db, current_user, club)
+        raise HTTPException(400, "Invalid notification id")
+    await db.commit()
+    return {"marked_read": updated, "unread": await notif.unread_count(db, current_user.id, club.id)}
+
+
+@router.post("/notifications/settings/run-now",
+             dependencies=[Depends(require_cap(MANAGE_SETTINGS))])
+async def run_notification_scan_now(
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Run this club's scan on demand, so a club that has just set its
+    notifications up can see them work rather than waiting for tomorrow.
+
+    Safe to press repeatedly: the scan re-reports everything it can see and the
+    dedupe key decides what is genuinely new, so a second press raises nothing.
+    Email is NOT dispatched here — the digest is the daily job's to send, and a
+    button that emailed every admin on each press would be a way to spam a club
+    with one click.
+    """
+    result = await notification_scan.scan_org(db, club)
+    await db.commit()
+    return result

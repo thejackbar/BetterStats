@@ -56,6 +56,163 @@ import re-writes the same matches (deterministic `cricketstatz_match_id`, and
 that was kept. A club's hand-typed history has no such path, which is the whole
 reason for the rule.
 
+## A club decides what it is told about (migration 288, v9.69.0, Sep 2026)
+
+Asked for as a configurable notification system a club admin manages — emails
+first, the in-app bell alongside them, room for other channels later — covering
+milestones past and upcoming and "other events club admins should be aware of",
+with a per-admin opt-out and a club-wide off switch. Then, mid-build, the case
+that decided the shape of the settings: volunteer and official certifications
+(Working With Children, RSA, first aid) tracked for currency, **with the notice
+period before expiry left for the club to define**.
+
+- **THE CATALOGUE IS CODE, THE CHOICES ARE DATA, and that split is the whole
+  design.** Every event needs a source that can find it, so a row in a table
+  describing an event nothing can produce would be a promise the platform
+  cannot keep. `services/notification_events.EVENT_TYPES` is the list; adding
+  one means an `EventType` there AND a source in `notification_scan.SOURCES`.
+  The settings screen is drawn from that list, so nothing else needs editing —
+  and the suite asserts the two sets match, so a half-added event fails rather
+  than appearing on screen and doing nothing.
+- **A CLUB WITH NO ROWS BEHAVES EXACTLY AS THE REGISTRY DECLARES.** Nothing is
+  written until somebody changes something, which is what lets a default be
+  changed in code with no backfill and no club silently keeping an old one. The
+  same call `organisations.stats_min_rate_innings` makes with NULL.
+- **THE NOTICE PERIOD IS PER EVENT, NOT PER CLUB, and the report is why.** A
+  Working With Children renewal takes weeks to come back and a first aid
+  refresher is a weekend, so one club-wide "warn me N days ahead" would have to
+  mean two things at once. `EventType.config_fields` declares the numbers an
+  event owns, with bounds enforced server-side — an out-of-range value is
+  CLAMPED rather than refused, because the alternative is a source silently
+  reading a lead time of -5 and looking backwards through time.
+- **AN ALREADY-LAPSED CERTIFICATE IS RAISED WHATEVER THE NOTICE PERIOD.** It is
+  the most urgent case there is, and a club switching this on should hear about
+  the ones already expired rather than only the ones about to. Verified both
+  ways: narrowing the period drops the one now out of reach and keeps the
+  lapsed one.
+- **EVERY DEDUPE KEY NAMES THE FACT, NEVER THE RUN THAT NOTICED IT.**
+  `milestone:<player>:runs:5000` is true forever; a certificate's key carries
+  its expiry DATE, so **renewing it creates a genuinely new fact to warn about
+  next time and an unchanged one is raised exactly once**. That is what lets a
+  source re-report everything it can see on every pass and let the unique index
+  on `(organisation_id, dedupe_key)` decide what is new — a read-then-write
+  check would race a manual scan against the nightly one.
+- **THE ONE EXCEPTION IS LOW STOCK, AND IT IS DELIBERATE.** Standing state, not
+  an event: keying on the variant alone would mention it once ever and then
+  never again, keying on the day would nag. The ISO week is in the key, so it
+  is a weekly reminder while it lasts.
+- **SIX CONDITIONS, ONE FUNCTION.** `notifications.channel_allowed` is the
+  whole subscription decision — the club's kill switch, the channel's club-level
+  switch, the event's own switch, that channel on that event, and the person's
+  opt-out — plus the two that need the database (the module gate, and the
+  recipient's capability). Two copies of this is how the settings screen and the
+  scan start disagreeing about whether a club is subscribed to something. Each
+  of the six is asserted failing closed on its own.
+- **AN OPT-OUT SILENCES; IT NEVER SWITCHES SOMETHING ON.** A person can stop a
+  channel the club has turned on, and cannot turn on one the club has turned
+  off. `event_key = '*'` (`ALL_EVENTS`) is the whole-club opt-out, checked as a
+  floor under every event.
+- **CAPABILITY IS A FILTER ON WHO IS TOLD, NEVER ON WHO MAY CONFIGURE.** A
+  report awaiting approval reaches the people who can approve one, the rule the
+  bell already applied. Choosing what lands in your OWN inbox is deliberately
+  not gated on `MANAGE_SETTINGS` — an admin who cannot edit the club's branding
+  is still entitled to stop being emailed.
+- **RECIPIENTS ARE `club_admin` AND `club_member`, and the second half is not an
+  oversight.** A club_member is somebody the club gave admin-app access to with
+  an explicit allowlist — the volunteer coordinator holding
+  `MANAGE_QUALIFICATIONS` is exactly who should be told a WWCC is lapsing.
+  `admin_contact_list.admin_rows` correctly uses `club_admin` alone because it
+  answers a DIFFERENT question (who administers a club, for BetterCricket's own
+  outreach); reusing it here would send a club's compliance warnings past the
+  person whose job it is. **Found by the verification** — the first cut reused
+  it and the capability check came back empty.
+- **A super_admin or sales membership is never a recipient.** That is
+  BetterCricket's own staff, and staff acting as a club must not be emailed that
+  club's milestones.
+- **ONE DIGEST PER RECIPIENT, NOT ONE EMAIL PER FACT.** Three milestones and a
+  lapsing WWCC are one email — the call `trial_lifecycle` already makes, and the
+  difference between a system people read and one they filter. A delivery is
+  marked sent only once the provider has accepted it, so an outage retries
+  tomorrow rather than silently dropping a certificate; a refusal is recorded
+  with its reason ON THE ROW, which is what makes "they say they never got it"
+  answerable months later.
+- **A FIRST RUN IS CAPPED** (`MAX_PER_EVENT`). An established club switching
+  this on has a decade of history in reach of the sources; without a cap one
+  club's backlog fills a table and an inbox.
+- **THE `sync_completed` EVENT DEFAULTS TO THE BELL AND NOT THE INBOX**, and a
+  sync that brought nothing in is not raised at all. A notification system that
+  emails "nothing changed" every morning is one nobody reads within a fortnight.
+- **A CHANNEL IS TEXT, NOT A COLUMN.** Adding SMS or push later is a value in
+  `notification_events.CHANNELS` plus a sender — no migration on a live table,
+  and a channel absent from an event's `default_channels` map is OFF, so a new
+  one is opt-in rather than switching itself on for every club overnight.
+- **THE BELL WAS SUPER-ADMIN-ONLY, WHICH WOULD HAVE MADE THE IN-APP CHANNEL
+  REACH NOBODY IT IS FOR.** Both the `NotificationBell` and the
+  `NotificationModal` were gated on `role === 'super_admin'` in `AdminLayout` —
+  a gate from when the panel was internal that outlived its reason, the same
+  shape v9.6.1 removed from the BetterClubhouse screens. Safe to lift because
+  the gate was never the real check: every endpoint behind it is club-scoped
+  through `get_current_club` and refuses nothing on role (`PRIVILEGED_ROLES`
+  only ever WIDENS a capability check there). **They were two separate gates,
+  and lifting one and not the other leaves a bell that opens nothing** — the
+  suite asserts the panel actually opens, not merely that the bell renders.
+  Auto-open on login stays staff-only: opening a panel over a club admin the
+  moment they log in is a different decision from giving them the bell.
+- **`services/session_safety.rollback_keeping` is now the ONE definition**,
+  lifted out of `routers/admin.py` (which delegates). A bare `rollback()`
+  EXPIRES every instance the request's own dependencies loaded, and the next
+  plain attribute read on one is a lazy refresh that raises a greenlet error a
+  long way from the swallowed failure — the v9.53.5.1 trap. Found here by the
+  verification hitting it in its own harness.
+- **`clean_config`'s FALLBACK DIRECTION IS LOAD-BEARING, and the first cut had
+  it backwards.** A SAVE passes the club's current config as the base, so
+  typing nonsense into the notice period leaves what they had set alone; a READ
+  passes nothing, so a stored value gone bad falls back to the registry default,
+  which is the only other thing it could mean. Getting it the wrong way round
+  quietly reset a club's own setting on the next save — **found by running it**.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_notifications.py`, 103 checks through the
+  shipped services and route bodies: the DDL applied three times, alembic and
+  the lifespan mirror running the same shared list, the registry defaults for a
+  club with no rows, every source, the retired milestone threshold never
+  announced, a second scan announcing nothing twice, the notice period at both
+  ends and a renewal as its own fact, all four switches failing closed
+  separately, the capability and module gates both ways, an opt-out per event
+  and whole-club, one digest per recipient marked sent only on acceptance, a
+  refusal recorded and retried, the weekly cadence on and off its day, the feed
+  and mark-read scoped to one person and one club from both sides, and every
+  route body incl. three refusals and a malformed id as a 400) **with two
+  control runs**: with the services absent it REPORTS the feature missing rather
+  than dying on an ImportError, and with the capability gate, the opt-out and
+  the retired-threshold filter neutered, 7 of the 103 fail on exactly those
+  three behaviours.
+- **Driven in Chromium** (`frontend/verification/verify_notifications_browser.mjs`,
+  48: the exact params on the wire for every control — a channel toggle sending
+  that channel ALONE rather than the whole rule back, an event switch sending
+  `enabled` alone, the notice period sending `config` alone and only when it
+  changed, the personal opt-out going to the preferences endpoint and never to
+  the rule endpoint that would change it for everybody — a club without the
+  Settings permission still choosing its own inbox, an event that does not reach
+  this person offering no personal toggle, Check now never emailing anybody, and
+  the bell opening and its rows linking) **with a control run** that reports the
+  screen absent rather than dying on the first missing locator.
+- **THREE CHECKS COULD NOT HAVE FAILED AS FIRST WRITTEN.** "The panel offers a
+  way to the settings screen" matched the SIDEBAR nav item, which is on every
+  admin page and there whether the modal opens or not — it is scoped to the open
+  panel now. And two locators were written in the source's casing against
+  CSS-`uppercase` text, which `innerText` returns transformed: the trap this file
+  already records, hit twice in one suite.
+- **`uncheck({ force: true })` VERIFIES THE NEW STATE ONCE AND THROWS.** With
+  `force` Playwright skips its retry loop, and these toggles only settle after a
+  round trip (PUT, then a reload of the whole payload). Click and wait instead.
+- **NOTICED, NOT BUILT**: nothing prunes old notifications — a club's record of
+  what it was told is not something a nightly job should quietly delete, and a
+  retention rule is a decision for a person. There is no per-event digest
+  frequency (the cadence is club-wide), no SMS or push (a channel and a sender
+  away), and the AFL silo is untouched. `member_reminders` still emails the
+  MEMBER about their own lapsing qualification through the member portal — a
+  different audience from this, and deliberately left alone.
+
 ## A FIXTURE BELONGS TO BOTH CLUBS. Read it that way, every time (v9.62.0, Sep 2026)
 
 **THIS HAS NOW BEEN REPORTED FOUR TIMES** — the second club's Games list

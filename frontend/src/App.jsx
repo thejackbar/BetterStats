@@ -98,6 +98,7 @@ const AdminPlayers = lazy(() => import('./pages/admin/AdminPlayers'))
 const AdminGames = lazy(() => import('./pages/admin/AdminGames'))
 const AdminSeasons = lazy(() => import('./pages/admin/AdminSeasons'))
 const AdminSettings = lazy(() => import('./pages/admin/AdminSettings'))
+const AdminNotifications = lazy(() => import('./pages/admin/AdminNotifications'))
 const AdminAccount = lazy(() => import('./pages/admin/AdminAccount'))
 const AdminAwards = lazy(() => import('./pages/admin/AdminAwards'))
 const AdminAwardDefinitions = lazy(() => import('./pages/admin/AdminAwardDefinitions'))
@@ -505,6 +506,10 @@ export default function App() {
           <Route path="/admin/fantasy/leagues" element={<ProtectedRoute requireModule="fantasy"><FantasyLeagues /></ProtectedRoute>} />
           <Route path="/admin/settings" element={<ProtectedRoute requireActivePlan><AdminSettings /></ProtectedRoute>} />
           <Route path="/admin/account" element={<ProtectedRoute><AdminAccount /></ProtectedRoute>} />
+          {/* Any admin may choose what reaches their own inbox; the club-wide
+              half of the screen is gated on MANAGE_SETTINGS inside the page and
+              on the server, so the route itself needs no capability. */}
+          <Route path="/admin/notifications" element={<ProtectedRoute><AdminNotifications /></ProtectedRoute>} />
           <Route path="/admin/sponsors" element={<ProtectedRoute requireCore><AdminSponsors /></ProtectedRoute>} />
           <Route path="/admin/club-room" element={<ProtectedRoute requireCore><AdminClubRoom /></ProtectedRoute>} />
           {/* Standalone full-screen player, no surrounding sidebar — same pattern as
