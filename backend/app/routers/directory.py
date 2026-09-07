@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import User, Organisation, MembershipType, get_db
 from app.routers.auth import get_current_club
-from app.auth.modules import BILLABLE_MODULE_NAMES, MODULE_ADMIN, MODULE_GROUPS, org_has_module
+from app.auth.modules import MODULE_ADMIN, MODULE_GROUPS, module_display_name, org_has_module
 from app.auth.capabilities import (
     require_cap, require_any_cap,
     MANAGE_MEMBERS, MANAGE_VOLUNTEERS, MANAGE_COMMITTEE, MANAGE_QUALIFICATIONS, MANAGE_FEES,
@@ -84,10 +84,7 @@ def _guard_kit_sizes(club: Organisation, fields: dict) -> None:
     from a Stats-only club never sends one and is unaffected."""
     if not any(f in fields for f in KIT_SIZE_FIELDS) or _kit_sizes_allowed(club):
         return
-    # BILLABLE_MODULE_NAMES, not MODULE_META: the umbrella has no MODULE_META
-    # entry at all (it is a bundle of four keys rather than one built module),
-    # so reading it there names the module "admin" to a club.
-    name = BILLABLE_MODULE_NAMES.get(MODULE_ADMIN, MODULE_ADMIN)
+    name = module_display_name(MODULE_ADMIN)
     raise HTTPException(status_code=402, detail={
         "code": "module_not_entitled",
         "module": MODULE_ADMIN,
@@ -420,13 +417,22 @@ class ImportBody(BaseModel):
     csv: str
 
 
+def _guard_import(club: Organisation, csv_text: str) -> None:
+    """A sheet carrying a kit-size column is gated the same way the person form
+    is — on the SHEET'S OWN COLUMNS, so a club is refused before it uploads
+    rather than after some rows have quietly lost a value."""
+    _guard_kit_sizes(club, {f: None for f in import_svc.columns_used(csv_text)})
+
+
 @router.post("/import/preview")
 async def import_preview(data: ImportBody, _: User = _import, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    _guard_import(club, data.csv)
     return await import_svc.preview(db, club.id, data.csv)
 
 
 @router.post("/import/commit")
 async def import_commit(data: ImportBody, _: User = _import, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    _guard_import(club, data.csv)
     result = await import_svc.commit(db, club.id, data.csv)
     await db.commit()
     return result

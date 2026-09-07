@@ -7622,13 +7622,52 @@ split is the answer**, per direct instruction after the options were put:
   build that never emits them. Each is paired now: the set AND the clear, the
   entitled club's payload AND the other one's.
 - **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN.** Every read of a new key
-  goes through `.get`, and every import of the shipped code through `load()`, so
-  a build without the feature REPORTS each check rather than dying on the first
-  `KeyError`.
-- **NOTICED, NOT BUILT**: the Directory's own CSV member import
-  (`name,email,mobile,category,roles`) takes no sizes, so a club with a
-  spreadsheet of them still types them in one at a time. That importer is its
-  own thing and was not what was asked.
+  goes through `.get`, every import of the shipped code through `load()`, and
+  every new module attribute through `getattr` — and the suite BAILS after the
+  migration section when anything is missing, reporting it, rather than reaching
+  the first `None.something`. Found by running the control: it died on
+  `players_router.update_player_profile` and said nothing about the other forty
+  checks.
+- **Verified with the importer** (the suite is 68 checks now) **with a control
+  run**: with the number resolution and the two size writes neutered, 7 fail —
+  including the second record a sheet of kit sizes would mint.
+- **THE MEMBER CSV IMPORT TAKES ALL THREE (v9.69.1)**, asked for straight
+  after. `name | email | mobile | category | roles | shirt size | pants size |
+  shirt number`, through the ONE shared importer both the Directory and
+  BetterFees Members already call.
+- **THE THREE COLUMNS DO NOT WRITE TO THE SAME TABLE, so a number has to find a
+  player before it means anything.** The sizes land on `fee_members`; the number
+  lands on `players.shirt_number` or nowhere. Resolution is the matched member's
+  own link, else an exact name match against the club's players — and **a name
+  held by two players resolves to NEITHER**, the refuse-to-guess rule, because a
+  number written onto the wrong Jack Smith is worse than a number not written.
+  Every skip is reported in the preview, with the reason, BEFORE the club
+  commits.
+- **A NEW PERSON ROW IS LINKED TO THE PLAYER OF THAT NAME, and without it the
+  feature is broken for the case it exists for.** A club uploading kit sizes for
+  its players would otherwise mint a second, unlinked record for every one of
+  them and the Directory would show the whole club twice. Only on an
+  unambiguous match to a player with no person row yet — the same row
+  `ensure_for_player` would have made. An EXISTING member row is never
+  re-pointed at a player, which is the direction that could steal a record.
+- **THE GATE IS ON THE SHEET'S OWN COLUMNS, not on what a row happens to carry**,
+  so a club without BetterAdmin is refused at the PREVIEW rather than after some
+  rows have quietly lost a value. `columns_used` is what the router reads;
+  `routers/fees.py` calls the same guard, where it can never fire (that router is
+  behind the fees module and holding any of the four IS holding the bundle) —
+  two callers of one importer must not disagree about what a sheet may carry.
+- **A BARE `shirt` COLUMN IS CLAIMED BY NEITHER.** It is as likely to be a size
+  as a number, and guessing wrong puts a size in a number field.
+- **A SHEET THAT SAYS NOTHING ABOUT A FIELD LEAVES IT ALONE**, the importer's own
+  existing rule, extended to the sizes rather than worked around.
+- **`BetterClubhouse` IS GONE FROM EVERY NAME A CLUB READS (v9.69.1).** The
+  backend's `BILLABLE_MODULE_NAMES[MODULE_ADMIN]` still said it while the
+  sidebar said BetterAdmin, so a 402 named a module that no longer exists.
+  **`modules.module_display_name(key)` is now the ONE place the backend names a
+  module** — `MODULE_META` first, `BILLABLE_MODULE_NAMES` second — which also
+  fixes `require_module("admin")`'s own message, since the umbrella is a bundle
+  of four keys and has no `MODULE_META` entry to read. Changelog entries keep
+  the old name: they are the record of what happened at the time.
 
 ### The minutes go out on the club's own letterhead (v9.69.0)
 

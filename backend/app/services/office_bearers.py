@@ -1,14 +1,14 @@
 """One catalogue behind two modules: BetterStats Awards of category "Office
-Bearer" and BetterClubhouse's roles.
+Bearer" and BetterAdmin's roles.
 
 BetterStats is the core module and may be all a club ever buys. A club using
 only BetterStats still records who its President was in 2019, as an achievement
 with a category, a subcategory and an achievement name — three free-text
-columns that describe exactly what BetterClubhouse stores properly as a role
+columns that describe exactly what BetterAdmin stores properly as a role
 type and a role.
 
 Left alone, those become two parallel vocabularies, and the club that later
-trials BetterClubhouse finds an empty Roles screen and a decade of office
+trials BetterAdmin finds an empty Roles screen and a decade of office
 bearers stranded in the awards table. So the awards catalogue is kept in step
 with ``club_roles`` / ``club_role_types`` from the outset:
 
@@ -22,7 +22,7 @@ before this existed is lost; roles are PUBLISHED back so the awards dropdown
 offers what the club actually holds. A club with no roles at all gets the
 committee starter set, so the dropdown is never empty.
 
-Nothing here needs the club to hold BetterClubhouse. That is the point — the
+Nothing here needs the club to hold BetterAdmin. That is the point — the
 rows are written the Clubhouse way whether or not the module is ever paid for.
 """
 from __future__ import annotations
@@ -151,7 +151,7 @@ async def sync_award_definitions(session: AsyncSession, org_id, *, seed_if_empty
       not one already. Both sources matter: the definitions are the dropdown, but
       a club's real vocabulary is what it has written down, and the two drift
       (an award imported from a spreadsheet never had a definition behind it).
-      This is what makes the transition to BetterClubhouse a no-op — by the time
+      This is what makes the transition to BetterAdmin a no-op — by the time
       they subscribe, the roles are already there.
     · PUBLISH — every committee/captain/coach role becomes an Office Bearer
       definition if it is not one already, so the awards dropdown offers what
@@ -256,7 +256,7 @@ async def adopt_awards_as_terms(session: AsyncSession, org_id) -> dict:
 
     The club-facing point of the whole exercise: a club that tracked its office
     bearers in BetterStats Awards for years, then subscribes to
-    BetterClubhouse, should find its committee history already on the Committee
+    BetterAdmin, should find its committee history already on the Committee
     screen rather than a blank slate beside a full awards list.
 
     Only awards naming a COMMITTEE role are adopted — a 1st XI Captain award is

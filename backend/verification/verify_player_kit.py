@@ -96,6 +96,8 @@ players_router = load("routers/players.py", lambda: __import__("app.routers.play
 directory_router = load("routers/directory.py", lambda: __import__("app.routers.directory", fromlist=["x"]))
 directory_svc = load("services/directory.py", lambda: __import__("app.services.directory", fromlist=["x"]))
 profile_import = load("services/profile_import.py", lambda: __import__("app.services.profile_import", fromlist=["x"]))
+member_import = load("services/member_import.py", lambda: __import__("app.services.member_import", fromlist=["x"]))
+auth_modules = load("auth/modules.py", lambda: __import__("app.auth.modules", fromlist=["x"]))
 
 ORG = uuid.uuid4()          # holds BetterAdmin
 STATS_ONLY = uuid.uuid4()   # Core and nothing else
@@ -247,11 +249,15 @@ async def stored(session, table, col, key_col, key):
         f"SELECT {col} FROM {table} WHERE {key_col} = :k"), {"k": key})).scalar_one_or_none()
 
 
-async def main() -> None:
-    if MISSING:
-        for m in MISSING:
-            check(f"the shipped code is present ({m.split(':')[0]})", False, m)
+async def report_and_exit() -> None:
+    await engine.dispose()
+    print(f"\n{PASS} passed, {FAIL} failed")
+    for f in FAILURES:
+        print("  FAILED:", f)
+    sys.exit(1 if FAIL else 0)
 
+
+async def main() -> None:
     print("\n-- migration 287, applied to a populated pre-287 schema --")
     await build_schema()
     async with Session() as session:
@@ -291,6 +297,17 @@ async def main() -> None:
     async with Session() as session:
         after2 = {t: await columns_of(session, t) for t in ("players", "fee_members")}
         check("and lands on the same schema the migration does", after2 == after)
+
+    # EVERY SECTION BELOW READS THE SHIPPED CODE, so a build that does not have
+    # it is REPORTED here and the suite stops — rather than reaching the first
+    # `None.something` and dying on a traceback that says nothing about the
+    # other forty checks. The migration section above needs none of it, which is
+    # why it runs first.
+    if MISSING:
+        for m in MISSING:
+            check(f"the shipped code is present ({m.split(':')[0]})", False, m)
+        print("\n-- the feature is absent, so the remaining sections did not run --")
+        await report_and_exit()
 
     print("\n-- what a shirt number IS --")
     if player_kit:
@@ -462,11 +479,137 @@ async def main() -> None:
               "shirt_number" not in patch and any("shirt number" in n.lower() for n in notes),
               f"{patch} {notes}")
 
-    await engine.dispose()
-    print(f"\n{PASS} passed, {FAIL} failed")
-    for f in FAILURES:
-        print("  FAILED:", f)
-    sys.exit(1 if FAIL else 0)
+    print("\n-- the module is called BetterAdmin --")
+    # getattr, never a bare attribute read: a build without the helper must
+    # REPORT that rather than take the rest of the suite down with it.
+    name_of_module = getattr(auth_modules, "module_display_name", None) if auth_modules else None
+    check("there is ONE place the backend names a module", name_of_module is not None)
+    if name_of_module:
+        check("the backend names the umbrella BetterAdmin",
+              name_of_module("admin") == "BetterAdmin", str(name_of_module("admin")))
+        check("and still names an ordinary module from its own metadata",
+              name_of_module("fees") == "BetterFees")
+        check("an unknown key falls back to itself rather than to None",
+              name_of_module("nope") == "nope")
+
+    print("\n-- the Directory CSV import --")
+    imp = member_import if getattr(member_import, "columns_used", None) else None
+    check("the member importer knows which columns a sheet carries", imp is not None)
+    if imp:
+        cols = imp.columns_used("Name,Email,Shirt Size,Pant Size,Player Number\nA,b,c,d,e")
+        check("a club's own header wording maps to all three kit columns",
+              {"shirt_size", "pants_size", "shirt_number"} <= cols, str(sorted(cols)))
+        # The deliberate refusal: "shirt" is as likely to be a size column as a
+        # number one, and guessing wrong puts a size in a number field.
+        bare = imp.columns_used("Name,Shirt\nA,b")
+        check("a bare \u201cshirt\u201d column is claimed by neither",
+              "shirt_size" not in bare and "shirt_number" not in bare, str(sorted(bare)))
+        check("a sheet with no kit columns reports none",
+              not (set(imp.KIT_SIZE_FIELDS) & imp.columns_used("Name,Email\nA,b")))
+    if not imp:
+        print("   (the import section did not run — the importer has no kit columns)")
+
+    SHEET_ORG = uuid.uuid4()
+    async with Session() as session:
+        if not imp:
+            await report_and_exit()
+        # Two players sharing a name, so the refuse-to-guess rule has something
+        # to refuse; plus one whose kit the sheet is really about.
+        session.add(Organisation(id=SHEET_ORG, name="Sheet CC", slug="sheet"))
+        await session.flush()
+        o = await session.get(Organisation, SHEET_ORG)
+        o.module_overrides = ["fees", "comms", "merch", "crm"]
+        P_KIT, P_TWIN_A, P_TWIN_B = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        session.add(Player(id=P_KIT, organisation_id=SHEET_ORG, name="Hind, Darren"))
+        session.add(Player(id=P_TWIN_A, organisation_id=SHEET_ORG, name="Smith, Jack"))
+        session.add(Player(id=P_TWIN_B, organisation_id=SHEET_ORG, name="Smith, Jack"))
+        await session.commit()
+
+        # A surname-first name carries a comma, so it is QUOTED — an unquoted
+        # one shifts every column after it and the sheet reads as a different
+        # person entirely.
+        SHEET = (
+            'name,email,category,shirt size,pants size,shirt number\n'
+            '"Hind, Darren",,,XL,34,42\n'
+            '"Smith, Jack",,,L,32,7\n'
+            'Bev the Coach,bev@example.com,volunteer,M,,9\n'
+        )
+        pv = await imp.preview(session, SHEET_ORG, SHEET)
+        rows = {r["name"]: r for r in pv["rows"]}
+        check("the preview reads the sizes off the sheet",
+              rows["Hind, Darren"]["shirt_size"] == "XL" and rows["Hind, Darren"]["pants_size"] == "34")
+        check("and names the player a number will go to",
+              rows["Hind, Darren"]["player"] == "Hind, Darren", str(rows["Hind, Darren"]))
+        check("A NAME HELD BY TWO PLAYERS RESOLVES TO NEITHER",
+              rows["Smith, Jack"]["player"] is None
+              and "more than one" in (rows["Smith, Jack"]["number_skipped"] or ""),
+              str(rows["Smith, Jack"]))
+        check("a number against somebody who does not play is reported, not stored",
+              rows["Bev the Coach"]["player"] is None
+              and "no player" in (rows["Bev the Coach"]["number_skipped"] or ""))
+
+        res = await imp.commit(session, SHEET_ORG, SHEET)
+        await session.commit()
+        check("the number landed on the PLAYER record",
+              await stored(session, "players", "shirt_number", "id", P_KIT) == "42")
+        check("and on neither of the two who share a name",
+              await stored(session, "players", "shirt_number", "id", P_TWIN_A) is None
+              and await stored(session, "players", "shirt_number", "id", P_TWIN_B) is None)
+        check("the counts say what happened", res["numbers_set"] == 1 and res["numbers_skipped"] == 2,
+              str(res))
+        mrows = (await session.execute(text(
+            "SELECT full_name, player_id, shirt_size, pants_size FROM fee_members "
+            "WHERE organisation_id = :o ORDER BY full_name"), {"o": SHEET_ORG})).mappings().all()
+        by = {r["full_name"]: r for r in mrows}
+        check("the sizes landed on the person spine",
+              by["Hind, Darren"]["shirt_size"] == "XL" and by["Hind, Darren"]["pants_size"] == "34")
+        check("A SHEET OF KIT SIZES DOES NOT MINT A SECOND RECORD FOR A PLAYER — "
+              "the new person row is linked to the player of that name",
+              str(by["Hind, Darren"]["player_id"]) == str(P_KIT), str(by["Hind, Darren"]["player_id"]))
+        check("an ambiguous name is left unlinked rather than guessed at",
+              by["Smith, Jack"]["player_id"] is None)
+        check("a non-player still gets their size with no player attached",
+              by["Bev the Coach"]["shirt_size"] == "M" and by["Bev the Coach"]["player_id"] is None)
+        check("exactly one person row per sheet row", len(mrows) == 3, str(len(mrows)))
+
+        # A re-run tops up rather than duplicating — the importer's own rule,
+        # which the kit columns must not break.
+        res2 = await imp.commit(session, SHEET_ORG, SHEET)
+        await session.commit()
+        again = (await session.execute(text(
+            "SELECT COUNT(*) FROM fee_members WHERE organisation_id = :o"), {"o": SHEET_ORG})).scalar()
+        check("a re-run adds nobody", res2["created"] == 0 and again == 3, f"{res2} / {again}")
+
+        # A sheet that says nothing about a size must not wipe one.
+        await imp.commit(session, SHEET_ORG, 'name,email\n"Hind, Darren",darren@example.com\n')
+        await session.commit()
+        kept = (await session.execute(text(
+            "SELECT shirt_size, email FROM fee_members WHERE organisation_id = :o AND full_name = :n"),
+            {"o": SHEET_ORG, "n": "Hind, Darren"})).mappings().first()
+        check("a sheet with no size column leaves the stored size alone",
+              kept["shirt_size"] == "XL" and kept["email"] == "darren@example.com", str(dict(kept)))
+
+    print("\n-- and the same gate on an uploaded sheet --")
+    async with Session() as session:
+        status = None
+        try:
+            await directory_router.import_preview(
+                data=directory_router.ImportBody(csv="name,shirt size\nA,L\n"),
+                _=USER, club=await org_of(session, STATS_ONLY), db=session)
+        except HTTPException as e:
+            status, detail = e.status_code, e.detail
+        check("a Stats-only club uploading sizes is refused BEFORE it commits",
+              status == 402, str(status))
+        check("and told the module by the name it reads on screen",
+              status == 402 and "BetterAdmin" in (detail or {}).get("message", ""),
+              str(detail))
+        ok_preview = await directory_router.import_preview(
+            data=directory_router.ImportBody(csv="name,email\nA,a@b.c\n"),
+            _=USER, club=await org_of(session, STATS_ONLY), db=session)
+        check("while a sheet with no kit columns still imports for that club",
+              ok_preview["total"] == 1)
+
+    await report_and_exit()
 
 
 if __name__ == "__main__":

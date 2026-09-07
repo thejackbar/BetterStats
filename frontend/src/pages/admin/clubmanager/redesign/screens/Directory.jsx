@@ -1408,17 +1408,23 @@ export default function Directory({ st, patch, narrow }) {
           <div onClick={e => e.stopPropagation()} style={{ width: 'min(560px, 100%)', maxHeight: '86vh', overflowY: 'auto', background: C.surface, border: `1px solid ${C.hair2}`, borderRadius: 12, padding: 20 }}>
             <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 4 }}>Import people from CSV</div>
             <div style={{ fontSize: 12.5, color: C.faint, marginBottom: 14, lineHeight: 1.5 }}>
-              Non-players and external contacts. Columns: <span style={{ fontFamily: MONO, fontSize: 11 }}>name, email, mobile, category, roles</span> (only <span style={{ fontFamily: MONO, fontSize: 11 }}>name</span> required; <span style={{ fontFamily: MONO, fontSize: 11 }}>roles</span> is a comma-separated list of role titles). Matched to existing people by name, so a re-run tops up rather than duplicates. Players are imported in Stats.
+              Columns: <span style={{ fontFamily: MONO, fontSize: 11 }}>name, email, mobile, category, roles</span>{kitSizes && <>, <span style={{ fontFamily: MONO, fontSize: 11 }}>shirt size, pants size, shirt number</span></>} (only <span style={{ fontFamily: MONO, fontSize: 11 }}>name</span> required; <span style={{ fontFamily: MONO, fontSize: 11 }}>roles</span> is a comma-separated list of role titles). Matched to existing people by name, so a re-run tops up rather than duplicates.
+              {kitSizes && <> A <span style={{ fontFamily: MONO, fontSize: 11 }}>shirt number</span> is a playing attribute, so it is written to the player of that name — the preview says which one, or why it found none. Everything else is imported in Stats.</>}
             </div>
             {imp.result ? (
               <div style={{ background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 8, padding: 14, fontSize: 13, color: C.text }}>
                 Imported. {imp.result.created} added, {imp.result.updated} updated, {imp.result.roles_added} role assignments.
+                {!!imp.result.sizes_set && <> {imp.result.sizes_set} kit {imp.result.sizes_set === 1 ? 'size' : 'sizes'} recorded.</>}
+                {!!imp.result.numbers_set && <> {imp.result.numbers_set} shirt {imp.result.numbers_set === 1 ? 'number' : 'numbers'} set.</>}
+                {!!imp.result.numbers_skipped && <> {imp.result.numbers_skipped} {imp.result.numbers_skipped === 1 ? 'number' : 'numbers'} had no player to go on.</>}
                 <div style={{ marginTop: 12 }}><button onClick={() => setImp(null)} style={btnP}>Done</button></div>
               </div>
             ) : (
               <>
                 <input type="file" accept=".csv,text/csv" onChange={e => onImportFile(e.target.files?.[0])} style={{ fontSize: 12.5, color: C.dim, marginBottom: 8 }} />
-                <textarea value={imp.text} onChange={e => setImp(m => ({ ...m, text: e.target.value, preview: null }))} placeholder={'name,email,mobile,category,roles\nJane Doe,jane@x.com,0400000000,parent,"Canteen Manager, First Aid Officer"'}
+                <textarea value={imp.text} onChange={e => setImp(m => ({ ...m, text: e.target.value, preview: null }))} placeholder={kitSizes
+                  ? 'name,email,mobile,category,roles,shirt size,pants size,shirt number\nJane Doe,jane@x.com,0400000000,parent,"Canteen Manager",L,14,\nDarren Hind,,,,,XL,34,42'
+                  : 'name,email,mobile,category,roles\nJane Doe,jane@x.com,0400000000,parent,"Canteen Manager, First Aid Officer"'}
                   style={{ ...inp, minHeight: 120, fontFamily: MONO, fontSize: 11.5, resize: 'vertical' }} />
                 {imp.preview && (
                   <div style={{ marginTop: 12, background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 8, padding: 12 }}>
@@ -1431,10 +1437,21 @@ export default function Directory({ st, patch, narrow }) {
                           {r.category && <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>{r.category}</span>}
                           {r.roles.length > 0 && <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.accent }}>{r.roles.join(', ')}</span>}
                           {r.unknown_roles.length > 0 && <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.warn }} title="Not a known role — skipped">?{r.unknown_roles.join(', ')}</span>}
+                          {/* Only ever drawn for a row that carries one, so a
+                              sheet with no kit columns reads exactly as it did. */}
+                          {(r.shirt_size || r.pants_size) && (
+                            <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }} title="Kit size">
+                              {[r.shirt_size, r.pants_size].filter(Boolean).join(' / ')}
+                            </span>
+                          )}
+                          {r.shirt_number && (r.player
+                            ? <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.accent }} title={`Shirt number for ${r.player}`}>#{r.shirt_number}</span>
+                            : <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.warn }} title={`#${r.shirt_number} not imported — ${r.number_skipped}`}>#{r.shirt_number} ?</span>)}
                         </div>
                       ))}
                     </div>
                     {imp.preview.rows.some(r => r.unknown_roles.length > 0) && <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.warn, marginTop: 8 }}>Role titles marked ? aren’t set up yet and will be skipped — add them in Areas &amp; Roles first.</div>}
+                    {imp.preview.rows.some(r => r.number_skipped) && <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.warn, marginTop: 8 }}>A number marked ? has no player to go on — {[...new Set(imp.preview.rows.filter(r => r.number_skipped).map(r => r.number_skipped))].join('; ')}. The rest of the row still imports.</div>}
                   </div>
                 )}
                 <div style={{ display: 'flex', gap: 8, marginTop: 16, justifyContent: 'flex-end' }}>

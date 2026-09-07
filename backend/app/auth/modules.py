@@ -57,7 +57,7 @@ MANAGED_MODULES = ALL_MODULES + (MODULE_CORE,)
 # only group today (fees + comms + merch move together); everything else is 1:1.
 # Subscriptions, trials and requests act on billable modules; entitlement gating
 # still uses the underlying keys.
-MODULE_ADMIN = "admin"     # BetterClubhouse umbrella (was BetterAdmin)
+MODULE_ADMIN = "admin"     # BetterAdmin umbrella (fees + comms + merch + crm)
 MODULE_GROUPS: dict[str, tuple[str, ...]] = {
     MODULE_ADMIN: (MODULE_FEES, MODULE_COMMS, MODULE_MERCH, MODULE_CRM),
 }
@@ -69,10 +69,13 @@ BILLABLE_MODULE_NAMES = {
     MODULE_SOCIALS: "BetterSocials",
     # The merged back office. The key stays "admin" — entitlement, billing and
     # every stored subscription row are keyed on it — but a club reads the
-    # module by this name. The Stripe Product created from
-    # services/billing_pricing.py still carries the old name until it is renamed
-    # in the Stripe dashboard, and so does the public pricing page.
-    MODULE_ADMIN: "BetterClubhouse",
+    # module by this name. It was briefly BetterClubhouse; BetterAdmin is the
+    # name, and this is the one place the backend says it, so the sidebar and a
+    # 402 can no longer disagree. The Stripe Product created from
+    # services/billing_pricing.py still carries whatever it was created with
+    # until it is renamed in the Stripe dashboard, and so does the public
+    # pricing page.
+    MODULE_ADMIN: "BetterAdmin",
     MODULE_IQ: "BetterIQ",
     MODULE_FANTASY: "BetterFantasyCricket",
 }
@@ -410,6 +413,19 @@ def entitlement_summary(org, role: str | None = None) -> dict:
 
 # ─── FastAPI dependency factory ──────────────────────────────────────────────
 
+def module_display_name(module: str) -> str:
+    """What a club calls this module.
+
+    MODULE_META alone is not enough: the BetterAdmin umbrella is a bundle of
+    four entitlement keys rather than one built module, so it has no entry there
+    at all — and every 402 raised for it used to tell a club that "admin is not
+    included in your plan". BILLABLE_MODULE_NAMES is where the umbrella's name
+    lives, so the two are read in turn.
+    """
+    meta = MODULE_META.get(module, {})
+    return meta.get("name") or BILLABLE_MODULE_NAMES.get(module) or module
+
+
 def require_module(module: str):
     """Gate a route (or a whole router) behind a club's module entitlement.
 
@@ -453,13 +469,12 @@ def require_module(module: str):
         if membership.role == "super_admin":
             return club
         if not org_has_module(club, module):
-            meta = MODULE_META.get(module, {})
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 detail={
                     "code": "module_not_entitled",
                     "module": module,
-                    "message": f"{meta.get('name', module)} is not included in your club's plan.",
+                    "message": f"{module_display_name(module)} is not included in your club's plan.",
                 },
             )
         return club

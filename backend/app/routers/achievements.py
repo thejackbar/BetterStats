@@ -248,7 +248,7 @@ async def create_achievement(body: AchievementCreate, db: AsyncSession = Depends
     # An Office Bearer award names a club role, so record WHICH one. The text
     # columns stay exactly as they were — this is an extra link, so every
     # existing reader is untouched — but it means a club adopting
-    # BetterClubhouse later already has the role, not a string to migrate.
+    # BetterAdmin later already has the role, not a string to migrate.
     role_id = await _link_office_bearer_role(db, body.org_id, new_id, body.category,
                                              body.subcategory, body.achievement)
     await db.commit()
