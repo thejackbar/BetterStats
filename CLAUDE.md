@@ -7341,6 +7341,54 @@ played" after 1,227 matches.
   download, which would be the sanctioned path if a club would rather hand over
   a file than a link.
 
+## The mobile was already mandatory; the form never said so (v9.67.3.1, Sep 2026)
+
+Asked for on the self-serve trial signup: make the club admin's mobile number a
+mandatory field.
+
+- **IT ALREADY WAS, AND CHECKING THAT FIRST IS WHAT KEPT THIS SMALL.** Both the
+  as-you-type validator and the final `/submit` revalidation call
+  `admin_identity.validate_admin_fields(..., require_mobile=True)`, and the
+  public router re-registers those same handlers — so a registration without a
+  mobile has never been accepted, on either path. The modal's CONTINUE is gated
+  on the server's own `valid`, so it was already unpressable. **Nothing about
+  what is accepted changed.**
+- **THE GAP WAS ENTIRELY PRESENTATION, and that is a real defect rather than a
+  cosmetic one.** Every field on that step looked identical, none was marked
+  required, and the mobile carried a placeholder that reads like a hint for an
+  optional one — so the only way to learn it was mandatory was a dead CONTINUE
+  button. A rule the server enforces and the form withholds is a rule the
+  registrant discovers by being stopped.
+- **EVERY FIELD ON THE STEP IS MARKED, NOT JUST THE MOBILE.** All six are
+  equally required (each errors when blank), so marking the one that was asked
+  about would imply the other five are optional — a new wrong impression in
+  place of the old one.
+- **A BLANK MANDATORY FIELD SAYS IT IS REQUIRED.** The blank branch used to
+  return the FORMAT message ("Enter a valid Australian mobile number, or an
+  international number starting with +"), which reads as though something was
+  mistyped and sends a registrant looking for a fault in an empty box. The
+  format message still stands for a value that IS typed and wrong; only the
+  blank branch changed, so the `require_mobile=False` path (Super Admin → New
+  Club, which never reaches it) is untouched.
+- **Verified through the shipped `validate_admin_fields` itself** — blank,
+  whitespace-only, junk digits, a clubroom landline, a valid AU mobile and a
+  valid international one, each under `require_mobile` both ways, confirming the
+  super-admin path still accepts a blank.
+- **Driven in Chromium**
+  (`frontend/verification/verify_trial_admin_mobile_browser.mjs`, 13 checks
+  through /trial's own way in — search, pick the club, Set up my club: the
+  marker on the label, the note naming the mobile, `aria-required`, CONTINUE
+  dead while blank, the required wording, a landline refused, a real mobile
+  unlocking it, the number on the wire as typed, and no overflow at 390px)
+  **with a control run**: 4 of the 13 fail against the previous commit — and the
+  OTHER NINE PASSING IS THE FINDING, since they are what prove the field was
+  already enforced.
+- **A CHECK WHOSE ANSWER COMES FROM THE STUB CANNOT PROVE THE SERVER.** The
+  harness's `validate-admin` mirrors the shipped rule including its wording, so
+  the two message checks show the FORM renders what the server sends, not what
+  the server sends — the header says so, and the Python run above is what covers
+  the other half.
+
 ## Writing Voice — always run prose through the humanizer
 
 Any user-facing prose you write or edit (marketing copy, changelog entries, UI

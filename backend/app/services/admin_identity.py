@@ -98,10 +98,13 @@ async def validate_admin_fields(
 
     mobile = (mobile_number or "").strip()
     if not mobile:
+        # A blank mandatory field says it is required. Describing the FORMAT of
+        # a value nobody has typed reads as though something was mistyped, and
+        # sends the registrant looking for a fault in an empty box.
         if require_mobile:
             errors["mobile_number"] = (
-                "Enter a valid Australian mobile number, or an international "
-                "number starting with +"
+                "Mobile number is required — an Australian mobile, or an "
+                "international number starting with +"
             )
     elif not mobile_valid(mobile):
         errors["mobile_number"] = (

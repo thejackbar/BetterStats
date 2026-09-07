@@ -28,6 +28,14 @@ const orgName = (org) => org.name || org.shortName || org.organisationName || or
 
 const FIELD_CLS = 'w-full bg-pb-surface2 text-pb-text border pb-hairline rounded px-3 py-2 text-sm outline-none focus:border-pb-accent'
 
+// Every field on the admin-details step is mandatory — the server refuses the
+// registration without it (services/admin_identity.validate_admin_fields, which
+// this flow calls with require_mobile=True, since the registrant IS the club's
+// own admin being asked for their own number). The marker is here so a person
+// reads that off the form rather than discovering it from a dead CONTINUE
+// button; it is presentation only, the server is what enforces it.
+const Req = () => <span className="text-pb-red ml-0.5" title="Required">*</span>
+
 // Shared "already registered" wording for both the search-step duplicate
 // card and the prepare-step 409 fallback, so the two surfaces read
 // identically. `slug` links the club name itself to its public page;
@@ -754,51 +762,62 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
 
           {step === 'admin' && (
             <div className="space-y-3">
+              <p className="font-mono text-[10px] text-pb-faint">
+                Every field is required, mobile number included — we use it to reach
+                the club's admin about their trial.
+              </p>
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="font-mono text-[10px] text-pb-faint block mb-1">First name</label>
+                  <label className="font-mono text-[10px] text-pb-faint block mb-1">First name<Req /></label>
                   <input type="text" value={adminForm.first_name}
                     onChange={(e) => setAdminField('first_name', e.target.value)}
+                    aria-required="true"
                     className={FIELD_CLS} />
                   {adminErrors.first_name && <p className="font-mono text-[10px] text-pb-red mt-1">{adminErrors.first_name}</p>}
                 </div>
                 <div>
-                  <label className="font-mono text-[10px] text-pb-faint block mb-1">Last name</label>
+                  <label className="font-mono text-[10px] text-pb-faint block mb-1">Last name<Req /></label>
                   <input type="text" value={adminForm.last_name}
                     onChange={(e) => setAdminField('last_name', e.target.value)}
+                    aria-required="true"
                     className={FIELD_CLS} />
                   {adminErrors.last_name && <p className="font-mono text-[10px] text-pb-red mt-1">{adminErrors.last_name}</p>}
                 </div>
               </div>
 
               <div>
-                <label className="font-mono text-[10px] text-pb-faint block mb-1">Preferred display name</label>
+                <label className="font-mono text-[10px] text-pb-faint block mb-1">Preferred display name<Req /></label>
                 <input type="text" value={adminForm.display_name}
                   onChange={(e) => editAdminField('display_name', e.target.value)}
+                  aria-required="true"
                   className={FIELD_CLS} />
                 {adminErrors.display_name && <p className="font-mono text-[10px] text-pb-red mt-1">{adminErrors.display_name}</p>}
               </div>
 
               <div>
-                <label className="font-mono text-[10px] text-pb-faint block mb-1">Username</label>
+                <label className="font-mono text-[10px] text-pb-faint block mb-1">Username<Req /></label>
                 <input type="text" value={adminForm.username}
                   onChange={(e) => editAdminField('username', e.target.value)}
+                  aria-required="true"
                   className={FIELD_CLS} />
                 {adminErrors.username && <p className="font-mono text-[10px] text-pb-red mt-1">{adminErrors.username}</p>}
               </div>
 
               <div>
-                <label className="font-mono text-[10px] text-pb-faint block mb-1">Email address</label>
+                <label className="font-mono text-[10px] text-pb-faint block mb-1">Email address<Req /></label>
                 <input type="email" value={adminForm.email}
                   onChange={(e) => setAdminField('email', e.target.value)}
+                  aria-required="true"
                   className={FIELD_CLS} />
                 {adminErrors.email && <p className="font-mono text-[10px] text-pb-red mt-1">{adminErrors.email}</p>}
               </div>
 
               <div>
-                <label className="font-mono text-[10px] text-pb-faint block mb-1">Mobile number</label>
+                <label className="font-mono text-[10px] text-pb-faint block mb-1">Mobile number<Req /></label>
                 <input type="tel" value={adminForm.mobile_number}
                   onChange={(e) => setAdminField('mobile_number', e.target.value)}
+                  aria-required="true"
                   placeholder="04XX XXX XXX"
                   className={FIELD_CLS} />
                 {adminErrors.mobile_number && <p className="font-mono text-[10px] text-pb-red mt-1">{adminErrors.mobile_number}</p>}
