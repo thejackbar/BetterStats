@@ -1370,7 +1370,7 @@ class Player(Base):
     # payload; every other surface gets the derived age instead, and only
     # when the club's own BetterSelect setting allows it.
     date_of_birth = Column(Date, nullable=True)
-    # The number on their shirt (migration 287). A PLAYING attribute, so it
+    # The number on their shirt (migration 288). A PLAYING attribute, so it
     # lives here and is Core: a team sheet, a lineup post and a scorecard all
     # want it, and a club running only BetterStats has all three. TEXT rather
     # than an integer so "07" and "00" survive, the same call
@@ -2864,7 +2864,7 @@ class FeeMember(Base):
     # sponsor's contact had nowhere to carry one. Read precedence is the same as
     # email/mobile: this value, falling back to the linked player's.
     gender = Column(Text, nullable=True)
-    # Migration 287. What size kit this person takes — free text, never a
+    # Migration 288. What size kit this person takes — free text, never a
     # vocabulary: a club buys from whichever supplier it buys from, and
     # "Youth 12", "2XL" and "34" are all answers somebody has to be able to
     # type. On the person spine rather than on `players` because a coach, a

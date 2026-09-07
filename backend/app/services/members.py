@@ -77,7 +77,7 @@ async def update_person(db: AsyncSession, org_id, member_id, **fields) -> None:
     if "membership_type_id" in fields:
         sets.append("membership_type_id = :mt")
         params["mt"] = fields["membership_type_id"]
-    # The club's kit sizes (migration 287). Present-and-blank clears; an ABSENT
+    # The club's kit sizes (migration 288). Present-and-blank clears; an ABSENT
     # key leaves the stored value alone, which is what lets the Directory save
     # one panel without touching another. Never normalised to a vocabulary —
     # see services/player_kit.py for why.

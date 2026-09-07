@@ -40,7 +40,7 @@ VALUE_FIELDS = (
     # it one player at a time.
     "date_of_birth", "is_opening_batsman", "is_overseas", "overseas_country",
     "status", "is_public", "financial", "training",
-    # The number on their shirt (migration 287). Importable because a club
+    # The number on their shirt (migration 288). Importable because a club
     # assigning numbers does it in a spreadsheet, and a field added to the
     # profile and not to this list goes missing here with nothing to say so.
     # The two KIT SIZES are deliberately NOT here: they live on the person

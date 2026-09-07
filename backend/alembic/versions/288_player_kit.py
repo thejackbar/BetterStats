@@ -25,13 +25,13 @@ day this lands. Nothing anywhere normalises a size to a vocabulary: a club buys
 from whichever supplier it buys from, and "Youth 12", "2XL" and "34" are all
 real answers somebody has to be able to type.
 
-Revision ID: 287
-Revises: 286
+Revision ID: 288
+Revises: 287
 """
 from alembic import op
 
-revision = "287"
-down_revision = "286"
+revision = "288"
+down_revision = "287"
 branch_labels = None
 depends_on = None
 

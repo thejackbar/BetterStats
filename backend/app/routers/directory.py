@@ -49,7 +49,7 @@ class MemberUpsert(BaseModel):
     # "" clears it. Settable here so a club with no BetterFees can still say
     # what kind of member someone is.
     membership_type_id: Optional[str] = None
-    # The club's kit sizes (migration 287). BetterAdmin only — a Stats-only
+    # The club's kit sizes (migration 288). BetterAdmin only — a Stats-only
     # club has no screen where a size does anything, so the two fields are
     # WITHHELD from its payload rather than sent and hidden, and a write that
     # names one is refused with the ordinary 402 upsell. The shirt NUMBER is

@@ -949,7 +949,7 @@ class PlayerProfileUpdate(BaseModel):
     # DATE column; an explicit null clears it (the PATCH reads exclude_unset,
     # so a present null IS the intent).
     date_of_birth: Optional[date] = None
-    # The number on their shirt (migration 287). A playing attribute, so it is
+    # The number on their shirt (migration 288). A playing attribute, so it is
     # Core and edited here; the two KIT SIZES beside it in the BetterAdmin
     # Directory are a different question and live on the person spine. "" or
     # null clears it — the PATCH reads exclude_unset, so a present blank IS the

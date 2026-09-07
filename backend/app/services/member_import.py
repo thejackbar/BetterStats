@@ -12,7 +12,7 @@ CSV columns (header row, case-insensitive; only `name` is required):
 `roles` is a comma/semicolon-separated list of club role titles.
 
 THE THREE KIT COLUMNS DO NOT ALL WRITE TO THE SAME TABLE, for the reason
-migration 287 records: the two SIZES belong to the person (a coach and a scorer
+migration 288 records: the two SIZES belong to the person (a coach and a scorer
 take a polo size, and neither is a player) and land on `fee_members`; the
 NUMBER is a playing attribute and lands on `players.shirt_number`. So a number
 has to resolve to one of the club's players before it means anything, and a row
@@ -41,7 +41,7 @@ _CANON = {
     "mobile": "mobile", "phone": "mobile", "phone_number": "mobile",
     "category": "category", "type": "category", "member_type": "category",
     "roles": "roles", "role": "roles",
-    # Kit (migration 287). "shirt" on its own is deliberately NOT mapped: it is
+    # Kit (migration 288). "shirt" on its own is deliberately NOT mapped: it is
     # as likely to be a size column as a number one, and guessing wrong puts a
     # size in a number field. A club whose header is that vague picks the
     # column itself by renaming it.

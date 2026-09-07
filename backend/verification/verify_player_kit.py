@@ -18,7 +18,7 @@ suite exists to hold:
     write one.
 
 What is asserted:
-  * migration 287 applied three times to a populated pre-287 schema, and the
+  * migration 288 applied three times to a populated pre-288 schema, and the
     lifespan mirror landing on the same columns;
   * a number stored exactly as the club writes it — "07" stays "07" — and
     length-capped rather than allowed to hold a paragraph;
@@ -116,14 +116,14 @@ class _User:
 
 USER = _User()
 
-# Every column migration 287 adds, and the table it belongs to.
+# Every column migration 288 adds, and the table it belongs to.
 NEW_COLUMNS = (("players", "shirt_number"), ("fee_members", "shirt_size"), ("fee_members", "pants_size"))
 
 
 def migration_statements() -> list[str]:
     """The migration's own upgrade body, read out of the file rather than
     retyped — a suite that retypes the SQL is checking its own copy."""
-    src = (Path(__file__).resolve().parent.parent / "alembic" / "versions" / "287_player_kit.py").read_text()
+    src = (Path(__file__).resolve().parent.parent / "alembic" / "versions" / "288_player_kit.py").read_text()
     body = src.split("def upgrade()")[1].split("def downgrade()")[0]
     return re.findall(r'"([^"]*ALTER TABLE[^"]*)"', body)
 
@@ -164,6 +164,24 @@ def lifespan_extras() -> list[str]:
             out.append(m.group(1).rstrip())
         else:
             MISSING.append(f"lifespan DDL for {t}")
+        # THE CREATE IS NOT THE WHOLE TABLE. Every column added to one of these
+        # since it was written lives in its own ALTER further down the lifespan,
+        # so a harness that takes the CREATE alone leaves a table that merely
+        # looks right — and the next suite to share this database meets it with
+        # a column missing and fails for a reason that has nothing to do with
+        # the code it is checking. (verify_cricketstatz_import.py met exactly
+        # that: it creates `player_achievements` IF NOT EXISTS, found the one
+        # this harness had left behind, and died on a missing `season_end`.)
+        #
+        # Matched to the CLOSING DOUBLE QUOTE, not to the first quote of any
+        # kind: a default value is single-quoted INSIDE the Python string
+        # ("... DEFAULT 'volunteer'"), and stopping there truncates the
+        # statement to a syntax error. A statement written as adjacent
+        # concatenated literals is joined back up.
+        for m in re.finditer(
+            r'"(ALTER TABLE ' + t + r' ADD COLUMN IF NOT EXISTS [^"]*)"((?:\s*"[^"]*")*)', src
+        ):
+            out.append(m.group(1) + "".join(re.findall(r'"([^"]*)"', m.group(2))))
     return out + list(LIFESPAN_COLUMNS)
 
 
@@ -177,7 +195,7 @@ async def build_schema() -> None:
             await conn.execute(text(stmt))
 
 
-async def strip_to_pre287() -> None:
+async def strip_to_pre288() -> None:
     """Take the three columns back off a POPULATED schema, so the migration has
     something to do and something to do it around. Seeded first and stripped
     after, because the ORM writes every mapped column on an insert and cannot
@@ -258,12 +276,12 @@ async def report_and_exit() -> None:
 
 
 async def main() -> None:
-    print("\n-- migration 287, applied to a populated pre-287 schema --")
+    print("\n-- migration 288, applied to a populated pre-288 schema --")
     await build_schema()
     async with Session() as session:
         await seed(session)
         await session.commit()
-    await strip_to_pre287()
+    await strip_to_pre288()
     async with Session() as session:
         before = {t: await columns_of(session, t) for t in ("players", "fee_members")}
         check("the schema really starts without the three columns",
@@ -284,7 +302,7 @@ async def main() -> None:
         check("and nothing already in the tables was disturbed", rows == 3, str(rows))
         # The one club-facing consequence of getting the default wrong: every
         # row that existed before must read as "not recorded", never as "".
-        check("every pre-287 row reads as no number and no size recorded",
+        check("every pre-288 row reads as no number and no size recorded",
               await stored(session, "players", "shirt_number", "id", PLAYER) is None
               and await stored(session, "fee_members", "shirt_size", "id", COACH) is None)
 

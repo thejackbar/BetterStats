@@ -1,7 +1,7 @@
 export default {
   version: 'v9.69.0',
-  date: '2026-09-07',
-  sortKey: '2026-09-07T22:00:00Z',
+  date: '2026-09-13',
+  sortKey: '2026-09-13T22:00:00Z',
   title: 'Shirt numbers, kit sizes, and minutes on your own letterhead',
   items: [
     'A player now has a shirt number, on their profile and in the Directory. It is stored exactly as you write it, so “07” stays “07”, and it is part of BetterStats — every club has one.',

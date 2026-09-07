@@ -7740,7 +7740,7 @@ played" after 1,227 matches.
   download, which would be the sanctioned path if a club would rather hand over
   a file than a link.
 
-## Three kit fields that do not live in one place (migration 287, v9.69.0, Sep 2026)
+## Three kit fields that do not live in one place (migration 288, v9.69.0, Sep 2026)
 
 Asked for as "store player shirt number, shirt size and pants size in the
 BetterAdmin Directory", with the question of whether to reserve the lot for
@@ -7756,6 +7756,10 @@ split is the answer**, per direct instruction after the options were put:
   canteen volunteer all get a club polo and `players` has nowhere to put their
   size** — which is also why they could never have gone on the player record.
 
+- **NUMBERED 288, NOT 287.** `origin/main` had reached 287 (CricketStatz as the
+  record for a season) while this was in flight, and two migrations sharing a
+  revision id break Alembic outright. Check `origin/main` before numbering one —
+  this file has now recorded that trap three times.
 - **`admin` IS NOT AN ENTITLEMENT KEY, and the first cut of the gate was wrong
   for every club on the platform.** It is the BILLABLE umbrella;
   `MODULE_GROUPS[MODULE_ADMIN]` grants `fees`/`comms`/`merch`/`crm`, and
@@ -7797,7 +7801,7 @@ split is the answer**, per direct instruction after the options were put:
   the team sheet as a number the club chose.
 - **Verified against a real Postgres**
   (`backend/verification/verify_player_kit.py`, 43 checks through the shipped
-  route bodies: migration 287 applied three times to a populated pre-287 schema
+  route bodies: migration 288 applied three times to a populated pre-288 schema
   and the lifespan mirror landing on the same columns, "07" and "00" surviving,
   a non-player holding a size, a Stats-only club still numbering its players and
   never receiving a size, the 402 and its shape, a size minting the person row
@@ -7808,6 +7812,17 @@ split is the answer**, per direct instruction after the options were put:
   build with no column, and "the Stats-only payload lacks the size keys" of a
   build that never emits them. Each is paired now: the set AND the clear, the
   entitled club's payload AND the other one's.
+- **A HARNESS THAT TAKES A LIFESPAN TABLE'S `CREATE` ALONE LEAVES A TABLE THAT
+  MERELY LOOKS RIGHT.** Every column added since one of those tables was written
+  lives in its own ALTER further down the lifespan, so the harness has to pull
+  those too — the suites share one database and none of them drops the schema.
+  `verify_cricketstatz_import.py` met exactly that: it creates
+  `player_achievements` IF NOT EXISTS, found the one this harness had left
+  behind, and died on a missing `season_end` that had nothing to do with the
+  code it was checking. **The ALTER is matched to its CLOSING DOUBLE QUOTE, not
+  to the first quote of any kind**: a default value is single-quoted inside the
+  Python string (`"... DEFAULT 'volunteer'"`), and stopping there truncates the
+  statement to a syntax error.
 - **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN.** Every read of a new key
   goes through `.get`, every import of the shipped code through `load()`, and
   every new module attribute through `getattr` — and the suite BAILS after the

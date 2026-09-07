@@ -3594,7 +3594,7 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE players ADD COLUMN IF NOT EXISTS hero_photo_url TEXT"
         ))
-        # Migration 287: the club's kit record. The NUMBER is a playing
+        # Migration 288: the club's kit record. The NUMBER is a playing
         # attribute and lives on the player (Core); the two SIZES are kit
         # management and live on the person spine the Directory edits, since a
         # coach or a scorer takes a polo size and has no players row.
