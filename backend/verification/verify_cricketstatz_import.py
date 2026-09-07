@@ -1024,6 +1024,67 @@ async def verify_award_import(session_maker, org_id, import_id) -> None:
 
 
 
+
+async def verify_migration_287_applies(engine) -> None:
+    """287 must apply to a database that is at 286, not to an empty one.
+
+    `CREATE OR REPLACE VIEW` cannot drop a column, so re-issuing an OLDER
+    definition of a view aborts the migration — and the container runs
+    `alembic upgrade head && uvicorn`, so a failed migration means the API
+    never starts. The first cut took `v_effective_games` from migration 169,
+    which predates the `status` column 266 added, and took production down.
+
+    A suite that builds the views from 287's own SQL cannot catch that: it has
+    to build them the way the migrations leave them FIRST, which is what
+    `_view_ddl` is for.
+    """
+    print("\nMigration 287 against a database at 286")
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _view_ddl import view_statements
+
+    async with engine.begin() as conn:
+        await conn.execute(text("DROP VIEW IF EXISTS v_effective_games CASCADE"))
+        # Production's games.raw_payload is jsonb; the ORM model says JSON, so a
+        # create_all harness needs reconciling before the migrations' own views
+        # will build. The app is unaffected.
+        await conn.execute(text(
+            "ALTER TABLE games ALTER COLUMN raw_payload TYPE jsonb "
+            "USING raw_payload::text::jsonb"))
+        for _name, sql in view_statements():
+            await conn.execute(text(sql))
+    before = await _view_columns(engine, "v_effective_games")
+    check("the database is at 286 with every migrated view in place",
+          "status" in before, str(sorted(before)))
+
+    # Three times: alembic runs it once and the lifespan mirror re-runs the
+    # whole list on every boot. Caught rather than raised — a migration that
+    # aborts IS the outage, and a control run has to report it rather than kill
+    # the suite and say nothing about the other checks.
+    failure = None
+    try:
+        for _ in range(3):
+            async with engine.begin() as conn:
+                for statement in SUPERSEDED_DDL:
+                    await conn.execute(text(statement))
+    except Exception as exc:
+        failure = str(exc).splitlines()[0][:160]
+    check("287 applies three times without error", failure is None, failure or "")
+    after = await _view_columns(engine, "v_effective_games")
+    check("and drops no column the view already had",
+          before <= after, str(sorted(before - after)))
+    async with engine.begin() as conn:
+        await conn.execute(text("SELECT COUNT(*) FROM v_effective_player_season_stats"))
+    check("both views are still readable afterwards", True)
+
+
+async def _view_columns(engine, view: str) -> set:
+    async with engine.begin() as conn:
+        return set((await conn.execute(text("""
+            SELECT column_name FROM information_schema.columns
+             WHERE table_name = :v
+        """), {"v": view})).scalars().all())
+
+
 async def verify_synced_overlap(engine, session_maker) -> None:
     """A club that already syncs must not have the same cricket imported twice.
 
@@ -1282,6 +1343,7 @@ async def main() -> int:
     await verify_schema(engine)
     org_id, import_id, players = await verify_import(engine, session_maker)
     await verify_award_import(session_maker, org_id, import_id)
+    await verify_migration_287_applies(engine)
     await verify_synced_overlap(engine, session_maker)
     await verify_repair(session_maker, org_id)
     await verify_heartbeat(session_maker, org_id)

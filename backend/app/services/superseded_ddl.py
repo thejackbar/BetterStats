@@ -4,8 +4,7 @@ A club that syncs from Cricket Australia and also imports its CricketStatz
 history holds the same matches twice, and every career total, average and
 record board counts them twice (reported live: a batter reading 14,966 runs
 where CricketStatz has 10,444). A club may decide CricketStatz is the record
-for a season it already syncs — the same call BetterImport lets a club make
-about its own uploaded history.
+for a season it already syncs.
 
 `seasons.stats_source = 'cricketstatz'` is that decision, and it is applied
 **on read, in the effective views**, the way migration 060's org scoping and
@@ -17,6 +16,13 @@ about its own uploaded history.
 
 Only the SYNCED side steps aside. The imported matches are rolled up by the
 view's own `manual_game` branch, so the season is still counted — once.
+
+**BOTH DEFINITIONS ARE TAKEN FROM MIGRATION 266, THE LAST ONE TO DEFINE EACH,
+and that is not a detail.** `CREATE OR REPLACE VIEW` cannot drop a column, so
+re-issuing an OLDER definition of a view aborts — the first cut took
+`v_effective_games` from 169, which predates the `status` column 266 added, and
+the migration failed on every boot and took the API down with it. When adding a
+clause to a view here, start from the newest definition and diff it.
 """
 from __future__ import annotations
 
@@ -27,40 +33,42 @@ STATEMENTS: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS ix_seasons_stats_source "
     "ON seasons (organisation_id) WHERE stats_source IS NOT NULL",
     """CREATE OR REPLACE VIEW v_effective_games AS
-        SELECT
-            g.id, g.grade_id, g.played_at, g.home_team, g.away_team,
-            g.home_club, g.away_club, g.opp_org_id, g.opp_club_name,
-            g.result, g.winning_team, g.is_final,
-            g.raw_payload, g.venue, g.match_format,
-            'api'::text AS source,
-            g.home_org_id, g.away_org_id,
-            gr.season_id AS season_id,
-            s.organisation_id AS organisation_id
-        FROM games g
-        LEFT JOIN grades gr ON gr.id = g.grade_id
-        LEFT JOIN seasons s ON s.id = gr.season_id
-        -- A season the club has said CricketStatz is the record for
-        -- keeps its imported matches and steps its synced ones aside,
-        -- so one match is never counted from two sources. Filtered on
-        -- READ: nothing is deleted, the sync keeps working, and
-        -- clearing the marker brings the synced copy straight back.
-        WHERE s.stats_source IS DISTINCT FROM 'cricketstatz'
-        UNION ALL
-        SELECT
-            mg.id, mg.grade_id, mg.played_at, mg.home_team, mg.away_team,
-            NULL::text AS home_club,
-            NULL::text AS away_club,
-            NULL::text AS opp_org_id,
-            mg.opposition AS opp_club_name,
-            mg.result, mg.winning_team, mg.is_final,
-            NULL::jsonb AS raw_payload,
-            mg.venue, mg.match_format,
-            'manual'::text AS source,
-            NULL::uuid AS home_org_id,
-            NULL::uuid AS away_org_id,
-            mg.season_id AS season_id,
-            mg.organisation_id AS organisation_id
-        FROM manual_games mg""",
+    SELECT
+        g.id, g.grade_id, g.played_at, g.home_team, g.away_team,
+        g.home_club, g.away_club, g.opp_org_id, g.opp_club_name,
+        g.result, g.winning_team, g.is_final,
+        g.raw_payload, g.venue, g.match_format,
+        'api'::text AS source,
+        g.home_org_id, g.away_org_id,
+        gr.season_id AS season_id,
+        s.organisation_id AS organisation_id,
+        g.status AS status
+    FROM games g
+    LEFT JOIN grades gr ON gr.id = g.grade_id
+    LEFT JOIN seasons s ON s.id = gr.season_id
+    -- A season the club has said CricketStatz is the record for keeps its
+    -- imported matches and steps its synced ones aside, so one match is
+    -- never counted from two sources. Filtered on READ: nothing is
+    -- deleted, the sync keeps working, and clearing the marker brings the
+    -- synced copy straight back.
+    WHERE s.stats_source IS DISTINCT FROM 'cricketstatz'
+    UNION ALL
+    SELECT
+        mg.id, mg.grade_id, mg.played_at, mg.home_team, mg.away_team,
+        NULL::text AS home_club,
+        NULL::text AS away_club,
+        NULL::text AS opp_org_id,
+        mg.opposition AS opp_club_name,
+        mg.result, mg.winning_team, mg.is_final,
+        NULL::jsonb AS raw_payload,
+        mg.venue, mg.match_format,
+        'manual'::text AS source,
+        NULL::uuid AS home_org_id,
+        NULL::uuid AS away_org_id,
+        mg.season_id AS season_id,
+        mg.organisation_id AS organisation_id,
+        NULL::text AS status
+    FROM manual_games mg""",
     """CREATE OR REPLACE VIEW v_effective_player_season_stats AS
     SELECT
         player_id, season_id,
@@ -124,10 +132,10 @@ STATEMENTS: tuple[str, ...] = (
         JOIN seasons s ON s.id = pss.season_id
         WHERE pl.id = pss.player_id
           AND (pl.organisation_id IS NULL OR pl.organisation_id = s.organisation_id)
-          -- Cricket Australia's own season totals for a season the
-          -- club has said CricketStatz is the record for. The
-          -- 'manual_game' branch below rolls the imported matches up
-          -- instead, so the season is counted once.
+          -- Cricket Australia's own season totals for a season the club
+          -- has said CricketStatz is the record for. The 'manual_game'
+          -- branch below rolls the imported matches up instead, so the
+          -- season is counted once.
           AND s.stats_source IS DISTINCT FROM 'cricketstatz'
     )
 
@@ -363,38 +371,40 @@ STATEMENTS: tuple[str, ...] = (
 )
 
 # The views have to stop referencing the column before it can be dropped, so
-# the downgrade puts migrations 169 and 266's own definitions back rather than
-# dropping the views and leaving every reader broken.
+# the downgrade puts migration 266's own definitions back rather than dropping
+# the views and leaving every reader broken.
 DOWNGRADE: tuple[str, ...] = (
     """CREATE OR REPLACE VIEW v_effective_games AS
-        SELECT
-            g.id, g.grade_id, g.played_at, g.home_team, g.away_team,
-            g.home_club, g.away_club, g.opp_org_id, g.opp_club_name,
-            g.result, g.winning_team, g.is_final,
-            g.raw_payload, g.venue, g.match_format,
-            'api'::text AS source,
-            g.home_org_id, g.away_org_id,
-            gr.season_id AS season_id,
-            s.organisation_id AS organisation_id
-        FROM games g
-        LEFT JOIN grades gr ON gr.id = g.grade_id
-        LEFT JOIN seasons s ON s.id = gr.season_id
-        UNION ALL
-        SELECT
-            mg.id, mg.grade_id, mg.played_at, mg.home_team, mg.away_team,
-            NULL::text AS home_club,
-            NULL::text AS away_club,
-            NULL::text AS opp_org_id,
-            mg.opposition AS opp_club_name,
-            mg.result, mg.winning_team, mg.is_final,
-            NULL::jsonb AS raw_payload,
-            mg.venue, mg.match_format,
-            'manual'::text AS source,
-            NULL::uuid AS home_org_id,
-            NULL::uuid AS away_org_id,
-            mg.season_id AS season_id,
-            mg.organisation_id AS organisation_id
-        FROM manual_games mg""",
+    SELECT
+        g.id, g.grade_id, g.played_at, g.home_team, g.away_team,
+        g.home_club, g.away_club, g.opp_org_id, g.opp_club_name,
+        g.result, g.winning_team, g.is_final,
+        g.raw_payload, g.venue, g.match_format,
+        'api'::text AS source,
+        g.home_org_id, g.away_org_id,
+        gr.season_id AS season_id,
+        s.organisation_id AS organisation_id,
+        g.status AS status
+    FROM games g
+    LEFT JOIN grades gr ON gr.id = g.grade_id
+    LEFT JOIN seasons s ON s.id = gr.season_id
+    UNION ALL
+    SELECT
+        mg.id, mg.grade_id, mg.played_at, mg.home_team, mg.away_team,
+        NULL::text AS home_club,
+        NULL::text AS away_club,
+        NULL::text AS opp_org_id,
+        mg.opposition AS opp_club_name,
+        mg.result, mg.winning_team, mg.is_final,
+        NULL::jsonb AS raw_payload,
+        mg.venue, mg.match_format,
+        'manual'::text AS source,
+        NULL::uuid AS home_org_id,
+        NULL::uuid AS away_org_id,
+        mg.season_id AS season_id,
+        mg.organisation_id AS organisation_id,
+        NULL::text AS status
+    FROM manual_games mg""",
     """CREATE OR REPLACE VIEW v_effective_player_season_stats AS
     SELECT
         player_id, season_id,
