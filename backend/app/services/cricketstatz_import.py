@@ -382,6 +382,34 @@ _FINAL_WORDS = re.compile(
 
 
 
+
+# ── the club's own history, already synced ───────────────────────────────────
+
+async def synced_coverage(db: AsyncSession, org_id) -> dict:
+    """Seasons the club ALREADY holds synced games for, and how many.
+
+    A club that syncs from Cricket Australia and then imports its whole
+    CricketStatz history ends up holding the same cricket twice — every match
+    from the year the sync reaches back to appears once as a synced game and
+    once as an imported one, so every career total, average and record board
+    counts it twice. Reported live off a real club: 2,324 imported matches
+    beside ~3,000 synced ones, and a batter's career reading 14,966 runs where
+    CricketStatz has 10,444.
+
+    Keyed on the SEASON's year, so a November and the following March both land
+    in the same season the club played.
+    """
+    rows = (await db.execute(text("""
+        SELECT s.year AS year, COUNT(*) AS games
+          FROM games g
+          JOIN grades gr ON gr.id = g.grade_id
+          JOIN seasons s ON s.id = gr.season_id
+         WHERE s.organisation_id = :org AND s.year IS NOT NULL
+         GROUP BY s.year
+    """), {"org": str(org_id)})).mappings().all()
+    return {int(r["year"]): int(r["games"]) for r in rows}
+
+
 async def hand_edited_games(db: AsyncSession, org_id) -> set:
     """Manual games somebody has created, edited or imported by hand.
 
@@ -1019,7 +1047,8 @@ async def _set_progress(session_maker, import_id, **fields) -> None:
         await db.commit()
 
 
-async def run_import(session_maker, org_id, import_id, club_id: str) -> None:
+async def run_import(session_maker, org_id, import_id, club_id: str,
+                     include_synced_years: bool = False) -> None:
     """Pull the club's whole CricketStatz history. Never raises.
 
     Runs as a detached background task, so its own session is opened here and
@@ -1031,6 +1060,7 @@ async def run_import(session_maker, org_id, import_id, club_id: str) -> None:
         "matches_done": 0, "matches_total": 0, "scorecards": 0,
         "records": 0, "players": 0, "notes": [],
         "notes_done": 0, "notes_total": 0, "awards": 0, "notes_read": 0,
+        "skipped_synced_years": [], "synced_years": [],
         "candidates_done": 0, "candidates_total": 0, "current_season": None,
     }
 
@@ -1087,6 +1117,34 @@ async def run_import(session_maker, org_id, import_id, club_id: str) -> None:
                     session_maker, import_id, progress=dict(progress)))
 
         plan = await plan_seasons(club_id, seasons, planning)
+
+        # A club that already syncs from Cricket Australia holds those seasons
+        # once. Importing them again does not correct anything — it counts the
+        # same cricket twice on every career total and every record board — so
+        # the years the sync already covers are left out unless the club has
+        # asked for them. CricketStatz is for the history the sync cannot
+        # reach, and the club is told exactly which years were skipped.
+        async with session_maker() as db:
+            covered = await synced_coverage(db, org_id)
+        skipped_years = []
+        if covered and not include_synced_years:
+            kept = []
+            for season, rows in plan:
+                year = season_year(season["label"], season["value"])
+                if year is not None and covered.get(year):
+                    skipped_years.append(year)
+                    continue
+                kept.append((season, rows))
+            plan = kept
+        skipped_years.sort()
+        progress["skipped_synced_years"] = skipped_years
+        progress["synced_years"] = sorted(covered)
+        if skipped_years:
+            note(f"{len(skipped_years)} season(s) already covered by your "
+                 f"Cricket Australia sync were left out "
+                 f"({skipped_years[0]}-{skipped_years[-1]}), so those matches "
+                 f"are not counted twice.")
+
         summary = plan_summary(plan)
         progress["seasons_total"] = summary["season_count"]
         progress["matches_total"] = summary["match_count"]

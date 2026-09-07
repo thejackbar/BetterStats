@@ -7312,6 +7312,77 @@ back to 1953/54.
   appears exactly once failed against correct output. It asserts the phrase is
   present and that the old flat `Earliest` label is gone.
 
+### THE SAME CRICKET FROM TWO SOURCES COUNTS IT TWICE (v9.68.3, Sep 2026)
+
+Reported off Keon Park's Records mid-import: the Highest Individual Scores
+board listed every top score twice — Heath Shephard 270 twice, Princely
+Emmanuel 206* twice, David Nelson 171 twice — and Brad Quinsee's career read
+**14,966 runs from 495 innings where CricketStatz has 10,444 from 367**.
+
+- **THE IMPORT WAS FAITHFUL. THE CLUB WAS HOLDING THE SAME MATCHES FROM TWO
+  SOURCES.** Established by measurement, not inference: CricketStatz serves
+  **3,556** matches for club 93931 across all 167 seasons and exactly **4** on
+  15 Mar 2003; BetterCricket held **5,416** and **8**. Grouping the club's
+  games by grade name splits cleanly into three families — the shouty
+  CricketStatz names (`A-GRADE`, `UNDER 12`, 2,324 games, 1953-2026, every one
+  with `games.status` NULL), and Cricket Australia's own (`NMCA - Jika Shield`,
+  `03 - All Things Safety Wear Mash Shield`, ~3,000 games, every one carrying a
+  status). **The club syncs from CA and imported its whole CricketStatz history
+  on top.** Every match from the year the sync reaches back to existed twice.
+- **THE OLD SEASONS WERE THE TELL.** 1969/70, 1991/92 and 1994/95 appeared
+  ONCE on the board while 2002/03, 2011/12 and 2013/14 appeared twice — exactly
+  the years CA covers. A pure query fan-out would have doubled all of them.
+- **RULED OUT FIRST, EACH BY A QUERY RATHER THAN BY READING THE CODE**: the
+  source (999 all-time rows, 999 distinct ids, no fixture repeated in one
+  response, no match id under two seasons), a duplicated game (5,020 of 5,037
+  fixtures had exactly one row — the 17 with two are a real U12 and U14 side
+  playing the same club on one day), a repeated innings in a card (25 cards of
+  2002S, none), the team matcher (correct on twelve real names), and a JOIN
+  fan-out (`v_effective_games` and `v_effective_batting_innings` are plain
+  UNION ALLs, and every join in `records.py`'s batting chain is on a primary
+  key). The paging artefact that briefly suggested a fan-out was mine:
+  `/organisations/{id}/results` ignores `limit`, so concatenated "pages" are
+  the same rows over again.
+- **SO THE IMPORT SKIPS THE SEASONS THE SYNC ALREADY COVERS**, keyed on the
+  SEASON's year so a November and the following March land together
+  (`synced_coverage`). CricketStatz is for the history the sync cannot
+  reach — a club onboarded through Cricket Australia typically has a decade,
+  and CricketStatz has seventy years.
+- **IT IS A SKIP, NOT A MERGE, AND THAT IS THE HONEST LINE.** Deciding which of
+  two records of one match wins would mean matching a CricketStatz fixture to a
+  CA one across two naming schemes ("Keon Park 1's 'A-Grade'" against "Keon
+  Park CC 1st XI") and then overwriting a live, self-maintaining source with a
+  frozen snapshot. Leaving the covered years alone keeps one record of each
+  match and needs no guess.
+- **A CLUB CAN ASK FOR THEM ANYWAY** (`include_synced_years`), because a club
+  that trusts CricketStatz over its own sync is entitled to — but it is opt-in,
+  the checkbox says it will hold both, and the default can never double a
+  club's records by accident.
+- **THE OVERLAP IS ON SCREEN BEFORE ANYTHING RUNS.** `inspect_club` reports
+  `synced_games` and `synced_years`, so the preview names how many matches the
+  club already syncs and which years are being left out — rather than the club
+  discovering it later as a career total half as large again as it should be.
+  The running import repeats it, and it lands in the import's own notes.
+- **RECOVERY for a club already in this state**: undo the CricketStatz import
+  (it removes exactly what that import wrote, matches, record boards and
+  honours alike) and run it again. The default now leaves the synced years
+  alone.
+- **Verified against a real Postgres** (`verify_cricketstatz_import.py` is 186
+  checks now: the covered years known and a year the sync cannot reach not
+  claimed, the covered seasons left out of the plan, no manual game written in
+  them, the older history still imported, the club told, the opt-in bringing
+  them across, and a club that has never synced having nothing to skip) **with
+  a control run**: 3 of the 186 fail with the guard neutered, and the seasons
+  the sync covers are imported on top.
+- **NOTICED, NOT FIXED**: nothing detects the overlap for a club that ALREADY
+  holds both. The undo-and-re-import above is the path; a screen that reports
+  "these N matches are held twice" would be its own change.
+- **ALSO NOTICED**: `v_effective_batting_innings` emits `batting_innings.id`
+  and `manual_batting_innings.id` unchanged, and both are `SERIAL` — so the
+  view's `id` is NOT unique for a club holding both. Nothing in the record
+  queries keys on it today, which is why this has never bitten, but it is one
+  `DISTINCT ON (id)` away from being a real bug.
+
 ### A MERGE MOVES A RECORD; IT MUST NEVER DELETE ONE (v9.68.1)
 
 Reported off Brad Quinsee's profile the day after the duplicate fix: merging

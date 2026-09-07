@@ -22,6 +22,7 @@ import asyncio
 import os
 import sys
 import uuid
+from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -1005,6 +1006,114 @@ async def verify_award_import(session_maker, org_id, import_id) -> None:
     check("so the honour board is the same size afterwards", total == 12, str(total))
 
 
+
+async def verify_synced_overlap(engine, session_maker) -> None:
+    """A club that already syncs must not have the same cricket imported twice.
+
+    Reported off a live club: 2,324 imported matches beside ~3,000 synced ones,
+    a record board listing every top score twice, and a career reading 14,966
+    runs where CricketStatz has 10,444. The import was faithful — the club was
+    simply holding the same matches from two sources.
+    """
+    print("\nA club that already syncs from Cricket Australia")
+    org = uuid.uuid4()
+    async with session_maker() as db:
+        await db.execute(text("""
+            INSERT INTO organisations (id, name, slug, is_active)
+            VALUES (:o, 'Keon Park Cricket Club', 'keon-park-2', true)
+        """), {"o": str(org)})
+        # The club's sync covers 1995 and 2025; nothing before that.
+        for year, gid in ((1995, uuid.uuid4()), (2025, uuid.uuid4())):
+            sid, grid = uuid.uuid4(), uuid.uuid4()
+            await db.execute(text("""
+                INSERT INTO seasons (id, organisation_id, name, year)
+                VALUES (:s, :o, :n, :y)
+            """), {"s": str(sid), "o": str(org), "n": f"Summer {year}/{str(year+1)[2:]}",
+                   "y": year})
+            await db.execute(text("""
+                INSERT INTO grades (id, season_id, name) VALUES (:g, :s, 'NMCA - Jika Shield')
+            """), {"g": str(grid), "s": str(sid)})
+            await db.execute(text("""
+                INSERT INTO games (id, grade_id, played_at, home_team, away_team)
+                VALUES (:i, :g, CAST(:d AS date), 'Keon Park CC 1st XI', 'Panton Hill')
+            """), {"i": str(gid), "g": str(grid), "d": date(year, 11, 5)})
+        await db.commit()
+
+    async with session_maker() as db:
+        covered = await importer.synced_coverage(db, org)
+    check("the years the sync already covers are known",
+          sorted(covered) == [1995, 2025], str(covered))
+    check("and a year it does not reach is not claimed", 1985 not in covered)
+
+    stub = StubSite()
+    real_client = importer.client
+    importer.client = stub
+    try:
+        import_id = uuid.uuid4()
+        async with session_maker() as db:
+            await db.execute(text("""
+                INSERT INTO cricketstatz_imports
+                    (id, organisation_id, club_id, source_url, status, phase)
+                VALUES (:id, :org, '93931', 'https://www2.cricketstatz.com/ss/w?club=93931',
+                        'running', 'starting')
+            """), {"id": str(import_id), "org": str(org)})
+            await db.commit()
+        await importer.run_import(session_maker, org, import_id, "93931")
+    finally:
+        importer.client = real_client
+
+    async with session_maker() as db:
+        row = (await db.execute(text(
+            "SELECT progress FROM cricketstatz_imports WHERE id = :id"),
+            {"id": str(import_id)})).scalar() or {}
+        years = (await db.execute(text("""
+            SELECT DISTINCT s.year FROM manual_games mg
+              JOIN seasons s ON s.id = mg.season_id
+             WHERE mg.organisation_id = :o ORDER BY s.year
+        """), {"o": str(org)})).scalars().all()
+    check("the seasons the sync covers are left out",
+          sorted(row.get("skipped_synced_years") or []) == [1995, 2025],
+          str(row.get("skipped_synced_years")))
+    check("so the same match is not counted twice",
+          1995 not in years and 2025 not in years, str(years))
+    check("and the history the sync cannot reach still comes across",
+          1985 in years, str(years))
+    check("the club is told which years were left out",
+          any("counted twice" in n for n in (row.get("notes") or [])),
+          str(row.get("notes")))
+
+    # A club that WANTS CricketStatz for those years can say so.
+    stub2 = StubSite()
+    importer.client = stub2
+    try:
+        second = uuid.uuid4()
+        async with session_maker() as db:
+            await db.execute(text("""
+                INSERT INTO cricketstatz_imports
+                    (id, organisation_id, club_id, source_url, status, phase)
+                VALUES (:id, :org, '93931', 'u', 'running', 'starting')
+            """), {"id": str(second), "org": str(org)})
+            await db.commit()
+        await importer.run_import(session_maker, org, second, "93931",
+                                  include_synced_years=True)
+    finally:
+        importer.client = real_client
+    async with session_maker() as db:
+        years2 = (await db.execute(text("""
+            SELECT DISTINCT s.year FROM manual_games mg
+              JOIN seasons s ON s.id = mg.season_id
+             WHERE mg.organisation_id = :o ORDER BY s.year
+        """), {"o": str(org)})).scalars().all()
+    check("asking for them anyway brings them across",
+          1995 in years2 and 2025 in years2, str(years2))
+
+    # A club with no sync at all is untouched by any of this.
+    fresh = uuid.uuid4()
+    async with session_maker() as db:
+        covered_none = await importer.synced_coverage(db, fresh)
+    check("a club that has never synced has nothing to skip", covered_none == {})
+
+
 async def verify_undo(session_maker, org_id, import_id, player_count) -> None:
     print("\nUndo")
     async with session_maker() as db:
@@ -1093,6 +1202,7 @@ async def main() -> int:
     await verify_schema(engine)
     org_id, import_id, players = await verify_import(engine, session_maker)
     await verify_award_import(session_maker, org_id, import_id)
+    await verify_synced_overlap(engine, session_maker)
     await verify_repair(session_maker, org_id)
     await verify_heartbeat(session_maker, org_id)
     await verify_undo(session_maker, org_id, import_id, players)
