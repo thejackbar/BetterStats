@@ -1103,7 +1103,7 @@ async def run_import(session_maker, org_id, import_id, club_id: str,
         "records": 0, "players": 0, "notes": [],
         "notes_done": 0, "notes_total": 0, "awards": 0, "notes_read": 0,
         "skipped_synced_years": [], "replaced_synced_years": [],
-        "synced_years": [],
+        "replaced_done": 0, "synced_years": [],
         "candidates_done": 0, "candidates_total": 0, "current_season": None,
     }
 
@@ -1271,6 +1271,22 @@ async def run_import(session_maker, org_id, import_id, club_id: str,
                     if (m_idx + 1) % 5 == 0:
                         await _set_progress(session_maker, import_id,
                                             progress=progress)
+            # THIS SEASON IS MARKED THE MOMENT ITS OWN MATCHES ARE IN, not at
+            # the end of the run. Marking every season up front would leave the
+            # ones not yet walked showing neither source; leaving it all to the
+            # end leaves every season already walked counted TWICE for the
+            # forty minutes the import takes, which is what a club sees and
+            # reports as duplicates on its record board. Per season, after its
+            # matches commit, there is no window for either: a season is either
+            # still on Cricket Australia or fully across, never both and never
+            # neither — and a run that stops halfway leaves exactly that.
+            year = season_year(season["label"], season["value"])
+            if year is not None and year in set(replaced_years):
+                async with session_maker() as db:
+                    await mark_seasons_superseded(db, org_id, [year])
+                    await db.commit()
+                progress["replaced_done"] = (progress.get("replaced_done") or 0) + 1
+
             async with session_maker() as db:
                 progress["players"] = (await db.execute(text("""
                     SELECT COUNT(*) FROM players
@@ -1282,12 +1298,10 @@ async def run_import(session_maker, org_id, import_id, club_id: str,
                      f"{', '.join(candidates)}. Check Merge Duplicates.")
             await _set_progress(session_maker, import_id, progress=progress)
 
-        # ── the seasons CricketStatz is now the record for ──────────────────
-        # Marked only now, with the matches already written: the views step the
-        # synced copy aside the moment the marker lands, so marking first would
-        # leave a club looking at a season with neither source in it for as
-        # long as the import took, and a run that died halfway would leave it
-        # that way for good.
+        # Backstop. Each season is marked as its own matches land (above), so
+        # by here this normally writes nothing — it exists for a season whose
+        # own year could not be read off its label, which would otherwise be
+        # imported and then never marked.
         if replaced_years:
             async with session_maker() as db:
                 await mark_seasons_superseded(db, org_id, replaced_years)

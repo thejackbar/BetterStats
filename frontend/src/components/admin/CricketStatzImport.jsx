@@ -361,8 +361,14 @@ export default function CricketStatzImport() {
 
                 {!!p.replaced_synced_years?.length && (
                   <Caption>
+                    {/* A season changes over as its own matches land, not at
+                        the end of the run, so while it is going this says how
+                        far through that changeover it is — a club watching a
+                        record board can see which years have moved. */}
                     {`${p.replaced_synced_years.length} season(s) you also sync `}
-                    {`will read from CricketStatz `}
+                    {running
+                      ? `read from CricketStatz as they come across (${p.replaced_done || 0} of ${p.replaced_synced_years.length} so far) `
+                      : `read from CricketStatz `}
                     {`(${p.replaced_synced_years[0]}\u2013${p.replaced_synced_years[p.replaced_synced_years.length - 1]}). `}
                     {`Your Cricket Australia data is kept and steps aside.`}
                   </Caption>

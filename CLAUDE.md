@@ -7469,6 +7469,62 @@ back to 1953/54.
   appears exactly once failed against correct output. It asserts the phrase is
   present and that the old flat `Earliest` label is gone.
 
+### A SEASON CHANGES OVER AS ITS OWN MATCHES LAND (v9.68.5, Sep 2026)
+
+Reported off Keon Park's Records with the import still going: duplicate high
+scores again, on **season 57 of 73**, with the count "past 1900 scorecards and
+we're way over what I expect".
+
+- **THE IMPORT WAS FINE. MY OWN CHANGEOVER WAS THE BUG, and it is the mistake
+  v9.68.4 warns about pointed the other way.** That note argues against marking
+  the seasons UP FRONT, correctly: the views act the instant the marker lands,
+  so a season not yet walked would read from neither source. It then landed as
+  one write at the END of the whole run — which leaves every season ALREADY
+  walked reading from BOTH for the forty-odd minutes the rest of it takes. A
+  club watching its own record board sees exactly that and reports duplicates.
+- **THE EVIDENCE SAID WHICH HALF WAS WRONG BEFORE ANY CODE WAS READ.** The
+  board doubled 2002/03 — a season the run had passed — and showed 2011/12 and
+  2013/14 singly, seasons it had not reached. Only the walked seasons were
+  double, which is the signature of a changeover that has not happened yet, not
+  of an import writing twice.
+- **PER SEASON, AFTER ITS OWN MATCHES COMMIT, THERE IS NO WINDOW FOR EITHER.**
+  A season is on Cricket Australia or fully across, never both and never
+  neither — and a run that stops halfway leaves precisely that state rather
+  than a club to repair. It is the same unit the matches already commit in:
+  one match at a time inside a season, one marker per season.
+- **THE END-OF-RUN WRITE STAYS AS A BACKSTOP**, for a season whose own year
+  cannot be read off its label — which would otherwise be imported and then
+  never marked at all.
+- **THE SCREEN SAYS HOW FAR THROUGH THE CHANGEOVER IT IS** (`replaced_done`),
+  because the changeover is now something a club can watch happen. The caption
+  used to promise it in the future tense, which is exactly the reading that
+  makes a doubled board look like a fault rather than a queue.
+- **Verified against a real Postgres** (the suite is 200 checks now: the run cut
+  off part way by refusing a scorecard from the LAST season in the plan — a real
+  network failure, the one exception `run_import` re-raises rather than noting —
+  then the walked season marked and the unreached one left to the sync) **with
+  TWO control runs, one per check**: marking only at the end fails "a season
+  already walked is marked before the run moves on"; marking up front fails "a
+  season the run never reached is left to the sync". The pair fails both ways,
+  which is what stops either wrong design passing.
+- **A CONTROL THAT DOES NOT ACTUALLY STOP THE RUN PROVES NOTHING.** The first
+  cut raised from a patched `import_match`, which sits inside a `try/except
+  Exception` that notes the failure and carries on — so every season was still
+  walked, the end-of-run backstop marked everything, and both checks passed
+  against the broken code. It refuses a SCORECARD now, the one place a
+  `CricketStatzError` propagates.
+- **A CHECK THAT LEAVES THE FIXTURE CHANGED BREAKS ITS NEIGHBOURS.** The
+  part-way run clears the markers and re-marks only one year, so it runs at the
+  END of its section rather than in the middle of it — three later checks read
+  as failing until it was moved.
+- **Driven in Chromium** (52: the count of shared seasons moved so far while
+  running, the future-tense promise gone, and the count dropped once every one
+  has moved) **with a control run**: 2 fail.
+- **NOT FIXED BY THIS, and worth saying plainly**: an import already in flight
+  when this deploys still doubles until it finishes, because its remaining
+  seasons are marked by the old end-of-run write. The board corrects itself the
+  moment the run completes.
+
 ### AND WHICH SOURCE IS THE RECORD IS THE CLUB'S CALL (migration 287, v9.68.4)
 
 Asked for straight after: "CricketStatz should overwrite PlayHQ in the same way
@@ -7500,7 +7556,10 @@ PlayHQ data."
 - **THE SEASONS ARE MARKED AFTER THE MATCHES ARE IN, never before.** The views
   act the moment the marker lands, so marking first would leave the club looking
   at a season with neither source in it for as long as the import took — and a
-  run that died halfway would leave it that way for good.
+  run that died halfway would leave it that way for good. **This shipped as one
+  write at the END of the whole run, which is the other half of the same
+  mistake and was reported the same week — see v9.68.5 below.** It is per
+  SEASON now, as each one's own matches land.
 - **THERE IS DELIBERATELY NO OPTION THAT KEEPS BOTH.** The earlier
   `include_synced_years` boolean had one, and holding two copies IS the double
   count this exists to prevent. It is `synced_years: 'skip' | 'cricketstatz'`

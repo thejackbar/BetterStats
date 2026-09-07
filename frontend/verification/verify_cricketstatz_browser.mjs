@@ -118,6 +118,10 @@ const routes = (page, calls, state) => page.route('**/api/**', async (route) => 
           scorecards: running ? 1225 : 3500, players: running ? 166 : 604,
           records: running ? 0 : 41,
           notes_done: state.reading ? 120 : 0, notes_total: 604,
+          // The 26 seasons this club also syncs. A season changes over as its
+          // own matches land, so part way through only some have moved.
+          replaced_synced_years: Array.from({ length: 26 }, (_, i) => 2000 + i),
+          replaced_done: running ? 4 : 26,
           awards: state.reading ? 88 : (running ? 0 : 141),
           plan: {
             season_count: 73, match_count: 3556,
@@ -231,6 +235,14 @@ const run = async () => {
      (await page.locator('text=/still going/').count()) > 0)
   ck('a running import can be stopped',
      (await page.getByRole('button', { name: /Stop this import/ }).count()) === 1)
+  // Reported off a live record board: a club watching mid-run saw duplicate
+  // high scores, because every season already walked was still counted from
+  // both sources. Each one changes over as its own matches land now, and the
+  // screen says how far through that is rather than promising it for later.
+  ck('it says how many of the shared seasons have moved across so far',
+     (await page.locator('text=/4 of 26 so far/').count()) > 0)
+  ck('and does not promise it as something still to come',
+     (await page.locator('text=/will read from CricketStatz/').count()) === 0)
 
   const before = calls.filter((c) => c.url.includes('/cricketstatz/status')).length
   await page.waitForTimeout(5600)
@@ -238,6 +250,8 @@ const run = async () => {
   ck('a running import is polled rather than left stale', after > before, `${before} → ${after}`)
   ck('it says so when it finishes',
      (await page.locator('text=/Your history is in/').count()) > 0)
+  ck('and once it is done the count is dropped, since they have all moved',
+     (await page.locator('text=/so far/').count()) === 0)
   ck('what it could not read is offered without shouting',
      (await page.locator('text=/could not read/').count()) > 0)
   ck('the honour board it read out of the notes is counted',

@@ -1202,6 +1202,7 @@ async def verify_synced_overlap(engine, session_maker) -> None:
     check("and marks them as read from CricketStatz",
           marked == [1995, 2025], str(marked))
 
+
     # THE POINT OF THE WHOLE THING: the synced side must stop being counted.
     async with session_maker() as db:
         synced_left = (await db.execute(text("""
@@ -1253,6 +1254,52 @@ async def verify_synced_overlap(engine, session_maker) -> None:
     async with session_maker() as db:
         covered_none = await importer.synced_coverage(db, fresh)
     check("a club that has never synced has nothing to skip", covered_none == {})
+
+    # MID-RUN, A SEASON ALREADY WALKED MUST NOT BE COUNTED TWICE. Marking every
+    # season only at the END leaves each finished season reading from BOTH
+    # sources for as long as the rest of the import takes — reported off a live
+    # record board as duplicate high scores. Marking them all UP FRONT is the
+    # other wrong answer: a season not yet walked would then read from NEITHER.
+    # The pair below fails against each of those, one check each.
+    #
+    # The run is cut off part way by refusing a scorecard from the LAST season
+    # in the plan (oldest first, so 1985 then 1995 then 2025) — a real network
+    # failure, the one exception `run_import` re-raises rather than noting.
+    stub3 = StubSite()
+    last_season_matches = {"3177313", "3082300"}
+
+    async def refuse_last_season(club_id, match_id):
+        if str(match_id) in last_season_matches:
+            raise importer.CricketStatzError("stopped part way")
+        return await StubSite.fetch_scorecard(stub3, club_id, match_id)
+    stub3.fetch_scorecard = refuse_last_season
+    importer.client = stub3
+
+    third = uuid.uuid4()
+    async with session_maker() as db:
+        await importer.clear_seasons_superseded(db, org)
+        await db.execute(text("""
+            INSERT INTO cricketstatz_imports
+                (id, organisation_id, club_id, source_url, status, phase)
+            VALUES (:id, :org, '93931', 'u', 'running', 'starting')
+        """), {"id": str(third), "org": str(org)})
+        await db.commit()
+    try:
+        await importer.run_import(session_maker, org, third, "93931",
+                                  synced_years="cricketstatz")
+    finally:
+        importer.client = real_client
+
+    async with session_maker() as db:
+        part_marked = await importer.superseded_years(db, org)
+        status3 = (await db.execute(text(
+            "SELECT status FROM cricketstatz_imports WHERE id = :i"),
+            {"i": str(third)})).scalar()
+    check("the part-way run really did stop", status3 == "error", str(status3))
+    check("a season already walked is marked before the run moves on",
+          1995 in part_marked, str(part_marked))
+    check("and a season the run never reached is left to the sync",
+          2025 not in part_marked, str(part_marked))
 
 
 async def verify_undo(session_maker, org_id, import_id, player_count) -> None:
