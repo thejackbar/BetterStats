@@ -20,6 +20,8 @@ import {
   bowlingLabel, bowlingFromLabel, bowls, normalizeGender, ageFromDob,
 } from '../../lib/playerAttributes'
 import { splitDisplayName, joinDisplayName } from '../../lib/nameFormat'
+import { useAuth } from '../../contexts/AuthContext'
+import { ADMIN_MODULE_KEYS } from '../../lib/modules'
 
 const ROLE_LABEL = { '': '—' }
 
@@ -42,9 +44,10 @@ function PSelect({ value, onChange, options }) {
     </select>
   )
 }
-function PInput({ value, onChange, placeholder, type }) {
+function PInput({ value, onChange, placeholder, type, maxLength }) {
   return (
     <input type={type || 'text'} value={value || ''} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
+      maxLength={maxLength}
       className="w-full bg-pb-surface2 text-pb-text border border-pb-hairline2 rounded-lg px-2.5 py-2 text-[13.5px] outline-none focus:border-pb-accent placeholder:text-pb-faint" />
   )
 }
@@ -408,6 +411,16 @@ function AliasManager({ playerId }) {
 function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, onPhotoChange, heroPhotoUrl, onHeroPhotoChange }) {
   const bowlingLabelVal = bowlingLabel(draft.bowling_action, draft.bowling_type)
   const age = ageFromDob(draft.date_of_birth)
+  // Where the two KIT SIZES live. They are not on this record and never will
+  // be — a size belongs to the PERSON, so a coach or a scorer can hold one,
+  // and the person spine is BetterAdmin's. The line says which screen holds
+  // them so nobody hunts for a field that is somewhere else on purpose.
+  // `admin` is the BILLABLE umbrella, never an entitlement key — a club that
+  // buys BetterAdmin is granted fees / comms / merch / crm, so hasModule('admin')
+  // is false for every club there has ever been. The Clubhouse nav gates on the
+  // child keys for the same reason.
+  const { hasModule } = useAuth()
+  const hasAdmin = ADMIN_MODULE_KEYS.some(hasModule)
   return (
     <div className="px-5 py-[18px]">
       <div className="font-mono text-[10px] uppercase tracking-wide3 text-pb-faint mb-3.5">Details</div>
@@ -461,6 +474,25 @@ function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, o
         </Field>
         <Field label="Phone" half>
           <PInput value={draft.phone} onChange={(v) => set('phone', v)} placeholder="—" />
+        </Field>
+        {/* The number on their shirt. A playing attribute, so it lives here
+            and every club has it — a team sheet, a lineup post and a
+            scorecard all want it, and a club running only BetterStats has all
+            three. Text, not a number input: "07" and "00" are numbers clubs
+            really issue and a numeric field turns them into 7 and 0. The two
+            KIT SIZES are a different question and live in the BetterAdmin
+            Directory, on the person spine, where a coach or a scorer can hold
+            one too. */}
+        <Field label={
+          <span className="flex items-center justify-between gap-2">
+            <span>Shirt number</span>
+            <span className="font-mono text-[9.5px] tracking-wide2 shrink-0 text-pb-faint">
+              {hasAdmin ? 'SIZES IN THE DIRECTORY' : 'SIZES \u00b7 BETTERADMIN'}
+            </span>
+          </span>
+        } half>
+          <PInput value={draft.shirt_number} onChange={(v) => set('shirt_number', v)}
+            placeholder="—" maxLength={4} />
         </Field>
       </div>
 
@@ -558,6 +590,10 @@ export function Profile({ profile, draft, setDraft, dirty, saved, onSave, canEdi
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2.5 flex-wrap">
               <h2 className="m-0 font-display font-extrabold text-2xl truncate">{playerName}</h2>
+              {/* Read off the draft, so it moves as the number is typed. Drawn
+                  only when the club has recorded one — a "#—" beside every
+                  player is a reproach about a field most clubs never fill in. */}
+              {draft.shirt_number && <Tag tone="faint">#{draft.shirt_number}</Tag>}
               {squad && <Tag tone="accent">{squad.name} squad</Tag>}
               {draft.is_overseas && <Tag tone="amber">Overseas{draft.overseas_country ? ` · ${draft.overseas_country}` : ''}</Tag>}
               {draft.status === 'inactive' && <Tag tone="faint">Inactive</Tag>}
@@ -648,6 +684,7 @@ export function draftFromProfile(p) {
     // "YYYY-MM-DD" or '' — the shape <input type="date"> speaks. The age is
     // always derived from this, never carried in the draft.
     date_of_birth: p.date_of_birth || '',
+    shirt_number: p.shirt_number || '',
   }
 }
 
@@ -681,5 +718,7 @@ export function patchFromDraft(d) {
     trained_override: d.trained_override ?? null,
     // Cleared as an explicit null, same reason as the two overrides above.
     date_of_birth: norm(d.date_of_birth),
+    // Blank clears it, same rule as every other optional text field here.
+    shirt_number: norm(d.shirt_number),
   }
 }

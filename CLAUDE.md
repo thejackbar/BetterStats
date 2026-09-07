@@ -7553,6 +7553,152 @@ played" after 1,227 matches.
   download, which would be the sanctioned path if a club would rather hand over
   a file than a link.
 
+## Three kit fields that do not live in one place (migration 287, v9.69.0, Sep 2026)
+
+Asked for as "store player shirt number, shirt size and pants size in the
+BetterAdmin Directory", with the question of whether to reserve the lot for
+BetterAdmin as an upsell. **The three are not the same kind of fact and the
+split is the answer**, per direct instruction after the options were put:
+
+- **`players.shirt_number` is a PLAYING attribute and is CORE.** A team sheet, a
+  lineup post and a scorecard all want it, and a club running nothing but
+  BetterStats has every one of those surfaces — so gating it would leave a Core
+  club unable to put a number on its own team sheet.
+- **`fee_members.shirt_size` / `.pants_size` are KIT MANAGEMENT and are
+  BetterAdmin's.** They sit on the person spine because **a coach, a scorer and a
+  canteen volunteer all get a club polo and `players` has nowhere to put their
+  size** — which is also why they could never have gone on the player record.
+
+- **`admin` IS NOT AN ENTITLEMENT KEY, and the first cut of the gate was wrong
+  for every club on the platform.** It is the BILLABLE umbrella;
+  `MODULE_GROUPS[MODULE_ADMIN]` grants `fees`/`comms`/`merch`/`crm`, and
+  `ALL_MODULES` — which `org_entitled_modules` filters `module_overrides`
+  through — does not contain it. So `org_has_module(club, "admin")` is **False
+  for every club there has ever been**, and the gate would have withheld kit
+  sizes from the clubs that had paid for them. The Clubhouse nav has always
+  gated on the child keys for this reason. **Caught by the verification, not by
+  reading the code.** `ADMIN_MODULE_KEYS` is the frontend's copy of the same
+  four, since `hasModule('admin')` is false there too.
+- **A SIZE IS WITHHELD FROM A CLUB WITHOUT THE MODULE, never sent and hidden**
+  — the `visible_age` rule. `kit_sizes` on the payload says which, and a write
+  naming one is refused with the ordinary 402 upsell shape. The NUMBER rides on
+  that same payload either way, which is the whole point of the split.
+- **THE 402's MODULE NAME COMES FROM `BILLABLE_MODULE_NAMES`, NOT
+  `MODULE_META`.** The umbrella has no `MODULE_META` entry at all, so reading it
+  there names the module "admin" to a club. **Noticed, not fixed**:
+  `require_module("admin")`'s own message has exactly that gap, and the backend
+  name ("BetterClubhouse") disagrees with the frontend's ("BetterAdmin") — a
+  rename that only went half way, and its own change.
+- **NOTHING NORMALISES A SIZE TO A VOCABULARY.** A club buys from whichever
+  supplier it buys from, and "Youth 12", "2XL" and "34" are all answers somebody
+  has to be able to type; a controlled list leaves a club sizing in centimetres
+  with nowhere to put the truth. `services/player_kit.py` is the one rule for all
+  three writers (the profile, the Directory, the bulk importer) — trim, collapse
+  inner whitespace, cap the length.
+- **A NUMBER IS TEXT**, the call `afl_player_game_lines.jumper_number` already
+  makes: a club that issues "07" or "00" means it, and an integer column quietly
+  makes them 7 and 0.
+- **The Directory writes the number through the PLAYER route**, not a second
+  copy of the column — so the number on the Directory and the number on the
+  player's own profile are one field. Present-and-blank clears, ABSENT leaves
+  alone, on all three, which is what lets one panel save without touching
+  another.
+- **The bulk importer takes it**, because a club assigning numbers does it in a
+  spreadsheet and the note this file already carries says a profile field left
+  out of that list goes missing with nothing to say so. Something too long to be
+  a shirt number is **REPORTED, not clipped** — a silently clipped value reads on
+  the team sheet as a number the club chose.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_player_kit.py`, 43 checks through the shipped
+  route bodies: migration 287 applied three times to a populated pre-287 schema
+  and the lifespan mirror landing on the same columns, "07" and "00" surviving,
+  a non-player holding a size, a Stats-only club still numbering its players and
+  never receiving a size, the 402 and its shape, a size minting the person row
+  for a read-through player, cross-club, and the importer's three cases) **with
+  a control run**: 30 of the 43 fail against the previous commit.
+- **A CHECK THAT PASSES ON A COLUMN THAT NEVER HELD ANYTHING IS NOT A CHECK.**
+  Four did on the first cut — "a present blank clears it" is trivially true of a
+  build with no column, and "the Stats-only payload lacks the size keys" of a
+  build that never emits them. Each is paired now: the set AND the clear, the
+  entitled club's payload AND the other one's.
+- **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN.** Every read of a new key
+  goes through `.get`, and every import of the shipped code through `load()`, so
+  a build without the feature REPORTS each check rather than dying on the first
+  `KeyError`.
+- **NOTICED, NOT BUILT**: the Directory's own CSV member import
+  (`name,email,mobile,category,roles`) takes no sizes, so a club with a
+  spreadsheet of them still types them in one at a time. That importer is its
+  own thing and was not what was asked.
+
+### The minutes go out on the club's own letterhead (v9.69.0)
+
+Asked for alongside: a club logo and a header band in the club's colours on the
+Committee Meeting Minutes.
+
+- **THE COLOURS COME FROM `theme_config`, NOT `primary_color` / `accent_color`.**
+  That legacy pair themes nothing any more (the v8.70.2 note), so reading them
+  would head the document in colours the club has not used for years.
+- **A SHADED PARAGRAPH, NEVER A TABLE, and the existing suite is what settled
+  it.** A one-row table lets each half of the band carry its own fill and is the
+  obvious way to draw a two-colour one — and it makes the letterhead the
+  document's FIRST table, which broke 11 checks in
+  `verify_minutes_download_browser.mjs` that read the meeting details out of
+  `tables[0]`. Word counts it, a reader announces it, and anything walking the
+  document's tables meets a band before it meets the meeting. Two stacked
+  single-colour paragraphs give the club both colours with none of that, and the
+  PDF draws the identical pair of rectangles. **That suite passes unchanged,
+  107/107.**
+- **THE CREST IS CONVERTED TO JPEG IN THE BROWSER, and that is the whole reason
+  it can be embedded at all.** A JPEG goes into a PDF verbatim under
+  `/DCTDecode` and into a `.docx` as an ordinary media part; a PNG would need a
+  decoder in `textDocs.js`, which has no dependency and is not getting one. The
+  canvas does the decoding the browser already knows how to do.
+- **THE CANVAS IS FILLED WHITE FIRST.** A club crest is almost always a
+  transparent PNG and JPEG has no alpha, so without it every logo lands as a
+  black box on a white page.
+- **`clubLogoJpeg` RETURNS NULL RATHER THAN THROWING** — a crest that will not
+  load, an external URL that taints the canvas, a club with no logo. The band
+  draws on its own and the document is still worth having.
+- **`header` is its own argument to `docBlocks`, not the head of `blocks`**,
+  because `title` is ALSO the PDF's `/Info` Title: emitting a title block instead
+  would print the club name twice.
+- **`downloadPdf`'s own `header` variable is the REPEATING TABLE HEADER** and had
+  to be renamed — a document `header` and a table header are two different things
+  in one function.
+- **The image objects are numbered LAST**, after the pages, because `images` is
+  only complete once every content stream has been written; a page whose
+  `/Resources` omits an XObject it draws renders **blank with no error anywhere**.
+- **PLAYWRIGHT MATCHES ROUTES MOST-RECENTLY-REGISTERED FIRST.** The crest route
+  is registered AFTER the `**/api/**` catch-all, not before it. The other way
+  round, the catch-all answers the `<img>` with `{}`, the canvas has nothing to
+  draw, and every "no crest" check passes for the wrong reason.
+- **`unzip` GLOB-MATCHES THE MEMBER NAME ITSELF**, so `[Content_Types].xml` reads
+  as a character class and matches nothing even with no shell involved. The
+  brackets have to be escaped.
+- **Driven in Chromium** (`frontend/verification/verify_minutes_letterhead_browser.mjs`,
+  38 checks against the real meeting room: the band in the club's OWN colours read
+  out of both files, the crest as a real JPEG media part with a relationship the
+  drawing references and as a `/DCTDecode` XObject the page's `/Resources` names,
+  the band not being a table, a club with no crest and a crest that 404s both
+  still getting their band with no dangling part, and every xref row pointing at
+  the object it claims) **with a control run**: 21 of the 38 fail against the
+  previous commit.
+
+### Sponsors: written up, not built (Sep 2026)
+
+Rockingham Mandurah want their sponsors more prominent, and two of them hold
+naming rights on specific grounds. Per direct instruction the implementation is
+a separate piece of work; the finding is in
+**`docs/sponsor-prominence-and-venue-naming-rights.md`**. The short of it:
+**more templates is not the fix**. A sponsor reaches 2 of the 62 template
+components, always as one of exactly two identical logo boxes in a 56px footer
+(`ScSponsorFooter`'s `const slots = [0, 1]`), and the event templates take a
+sponsor's NAME as a string and cannot draw a logo at all. A tier on
+`org_sponsors` reaches every template; a `sponsor_venues` table keyed on the
+club's OWN distinct `games.venue` / `fixtures.venue` strings (picked, never
+typed, so there is no fuzzy match to fail silently) is what makes a ground
+naming right expressible.
+
 ## Writing Voice — always run prose through the humanizer
 
 Any user-facing prose you write or edit (marketing copy, changelog entries, UI

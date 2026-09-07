@@ -193,6 +193,12 @@ export function coreLiveFromPlan(plan) {
 // back-office umbrella, so its toggle covers all four backend module keys (fees
 // + comms + merch + crm). `modules` are the backend entitlement keys (app/auth/modules.py
 // ALL_MODULES); Core (BetterStats) is always on and isn't a toggle.
+// The entitlement keys BetterAdmin grants. `admin` itself is the BILLABLE
+// umbrella and is never in a club's `entitlements.modules`, so asking
+// hasModule('admin') is always false — anything wanting "does this club have
+// BetterAdmin" reads these. Mirrors the backend's MODULE_GROUPS[MODULE_ADMIN].
+export const ADMIN_MODULE_KEYS = ['fees', 'comms', 'merch', 'crm']
+
 export const MODULE_TOGGLES = [
   // BetterStats (Core) is the base every club gets — managed first, controls the
   // public site (its trial/cancel gates the club, per the backend org_core_live).

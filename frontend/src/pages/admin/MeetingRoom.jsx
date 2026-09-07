@@ -5,7 +5,7 @@ import { useToast } from '../../contexts/ToastContext'
 import BetterClubhouseLayout from '../../components/admin/BetterClubhouseLayout'
 import { PbSpinner } from '../../lib/presskit'
 import { ObjectiveSelect, useObjectives, objectiveLabel } from '../../components/admin/clubmanager/governance'
-import { downloadDocx, downloadPdf, docFilename } from '../../lib/textDocs'
+import { downloadDocx, downloadPdf, docFilename, clubLogoJpeg } from '../../lib/textDocs'
 import { buildMinutesDoc } from '../../components/admin/clubmanager/minutesDoc'
 
 // The meeting room — one screen a secretary runs a meeting from.
@@ -985,7 +985,7 @@ export function MeetingRoomPanel({ meetingId, onMeta, inlineHeader = false, onEx
   // to carry that sentence. The meeting's own name and date ride along, or a
   // file called Minutes.pdf in somebody's downloads folder says nothing about
   // which meeting it came from.
-  function downloadField(field, format) {
+  async function downloadField(field, format) {
     const isMinutes = field === 'minutes'
     const text = (isMinutes ? minutesRef.current?.value : notesRef.current?.value) || ''
     if (!text.trim()) return
@@ -999,10 +999,16 @@ export function MeetingRoomPanel({ meetingId, onMeta, inlineHeader = false, onEx
       // objective each serves and how everyone voted, then the actions table.
       // Built from the RECORD, so nothing the screen holds can be left out of
       // it by a paragraph that did not happen to mention it.
+      // The crest is fetched and turned into something a document can carry
+      // only at the moment somebody asks for one — it is a canvas round trip
+      // and a club downloads minutes once a month, not on every render. It
+      // resolves to null for a club with no logo, or one whose logo cannot be
+      // read, and the letterhead then draws the colour band alone.
+      const logo = await clubLogoJpeg(data.club?.logo)
       write({
         filename: docFilename(title, when, 'Minutes'),
         ...buildMinutesDoc({
-          club: data.club, meeting, agendaItems: items, motions, actions,
+          club: data.club, logo, meeting, agendaItems: items, motions, actions,
           attendance, pool, objectives, minutesText: text,
         }),
       })

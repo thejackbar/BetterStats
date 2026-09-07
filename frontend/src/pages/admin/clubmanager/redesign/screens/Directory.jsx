@@ -162,6 +162,11 @@ export default function Directory({ st, patch, narrow }) {
   const canEditPlayers = hasCapability(CAP.MANAGE_PLAYERS)
   const [people, setPeople] = useState(null)   // null = loading
   const [memberTypes, setMemberTypes] = useState([])  // the club's membership-type catalogue
+  // Whether this club holds the module that owns the kit record. Read off the
+  // payload rather than from entitlement here, because the server WITHHOLDS
+  // the two size values for a club without it — so the flag and the data can
+  // never disagree about whether the fields exist.
+  const [kitSizes, setKitSizes] = useState(false)
   // The club's own gender / squad / fee-tier vocabularies, and which season the
   // tiers belong to (a tier is per-season, so the screen has to say which).
   const [opts, setOpts] = useState({ genders: [], squads: [], tiers: [], tier_season: null })
@@ -183,6 +188,7 @@ export default function Directory({ st, patch, narrow }) {
   const reload = () => api.dirPeople(st.dirShowArchived).then(res => {
     setPeople(res?.people || [])
     setMemberTypes(res?.membership_types || [])
+    setKitSizes(!!res?.kit_sizes)
     setOpts({
       genders: res?.genders || [], squads: res?.squads || [],
       tiers: res?.tiers || [], tier_season: res?.tier_season || null,
@@ -364,6 +370,29 @@ export default function Directory({ st, patch, narrow }) {
       patch({ dirSel: mid })
     } catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
   }
+  // The club's kit record. The two SIZES are on the person spine, so saving one
+  // mints the member row for a read-through player the same way every other
+  // field here does. The NUMBER is a playing attribute on `players`, so it goes
+  // through the player-profile route — one writer for that column, and it stays
+  // editable for a club that has BetterStats and nothing else.
+  const saveKitSize = async (p, key, value) => {
+    setBusy(true)
+    try {
+      let mid = p.member_id
+      if (!mid && p.player_id) mid = (await api.dirEnsureMemberForPlayer(p.player_id)).member_id
+      if (!mid) return
+      await api.dirUpdateMember(mid, { [key]: value })
+      await reload()
+      patch({ dirSel: mid })
+    } catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
+  }
+  const saveShirtNumber = async (p, value) => {
+    if (!p.player_id) return
+    setBusy(true)
+    try { await api.bsUpdatePlayerProfile(p.player_id, { shirt_number: value }); await reload() }
+    catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
+  }
+
   // Playing status is the Stats active/inactive flag, and the Directory filters
   // on it — so it has to be settable here too, or "Former players" is a filter
   // with nothing behind it.
@@ -1018,6 +1047,52 @@ export default function Directory({ st, patch, narrow }) {
                   An honour, not a membership type — a life member is still whatever kind of member they already were.
                 </div>
               </Card>
+
+              {/* The club's kit record. NOT one of the three axes — it says
+                  nothing about what kind of member somebody is — so it sits
+                  after them rather than among them. Drawn only when there is
+                  something to record: a non-player at a club without
+                  BetterAdmin has neither a number nor a size, and a card that
+                  can only ever be empty is worse than no card. */}
+              {(sel.player_id || kitSizes) && (
+                <Card title="KIT">
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                    {/* Only a player has a number: it is stored on the player
+                        record, and a canteen volunteer has no shirt to put one
+                        on. Saved through the Stats profile route, so the number
+                        here and the number on the player's own profile are the
+                        same field rather than two that can drift. */}
+                    {sel.player_id && (
+                      <div style={{ minWidth: 96 }}>
+                        <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginBottom: 4 }}>SHIRT NUMBER</div>
+                        <input disabled={busy} defaultValue={sel.shirt_number || ''} key={sel.key + ':num'}
+                          maxLength={4} placeholder="—"
+                          onBlur={e => { if (e.target.value !== (sel.shirt_number || '')) saveShirtNumber(sel, e.target.value) }}
+                          onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                          style={{ ...inp, width: 92 }} />
+                      </div>
+                    )}
+                    {/* Free text on purpose — a club buys from whichever
+                        supplier it buys from, and "Youth 12", "2XL" and "34"
+                        are all answers somebody has to be able to type. */}
+                    {kitSizes && [['shirt_size', 'SHIRT SIZE'], ['pants_size', 'PANTS SIZE']].map(([k, label]) => (
+                      <div key={k} style={{ minWidth: 120 }}>
+                        <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginBottom: 4 }}>{label}</div>
+                        <input disabled={busy} defaultValue={sel[k] || ''} key={sel.key + ':' + k}
+                          maxLength={24} placeholder="—"
+                          onBlur={e => { if (e.target.value !== (sel[k] || '')) saveKitSize(sel, k, e.target.value) }}
+                          onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                          style={{ ...inp, width: 118 }} />
+                      </div>
+                    ))}
+                  </div>
+                  {!sel.member_id && kitSizes && (
+                    <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginTop: 8 }}>
+                      Recording a size adds this player to the member directory.
+                    </div>
+                  )}
+                </Card>
+              )}
 
               {/* AXIS 2 — what they do. */}
               <Card title="ROLES">

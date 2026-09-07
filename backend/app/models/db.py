@@ -1365,6 +1365,14 @@ class Player(Base):
     # payload; every other surface gets the derived age instead, and only
     # when the club's own BetterSelect setting allows it.
     date_of_birth = Column(Date, nullable=True)
+    # The number on their shirt (migration 287). A PLAYING attribute, so it
+    # lives here and is Core: a team sheet, a lineup post and a scorecard all
+    # want it, and a club running only BetterStats has all three. TEXT rather
+    # than an integer so "07" and "00" survive, the same call
+    # afl_player_game_lines.jumper_number already makes. The two KIT SIZES are
+    # a different question and sit on fee_members, where a non-playing member
+    # can hold one too.
+    shirt_number = Column(Text, nullable=True)
 
     organisation = relationship("Organisation", back_populates="players")
     batting_innings = relationship("BattingInnings", back_populates="player")
@@ -2851,6 +2859,15 @@ class FeeMember(Base):
     # sponsor's contact had nowhere to carry one. Read precedence is the same as
     # email/mobile: this value, falling back to the linked player's.
     gender = Column(Text, nullable=True)
+    # Migration 287. What size kit this person takes — free text, never a
+    # vocabulary: a club buys from whichever supplier it buys from, and
+    # "Youth 12", "2XL" and "34" are all answers somebody has to be able to
+    # type. On the person spine rather than on `players` because a coach, a
+    # scorer and a canteen volunteer all get a club polo and none of them is a
+    # player. Edited in the BetterAdmin Directory; the shirt NUMBER beside them
+    # on that screen is a playing attribute and lives on `players`.
+    shirt_size = Column(Text, nullable=True)
+    pants_size = Column(Text, nullable=True)
     is_honorary = Column(Boolean, nullable=False, server_default="false", default=False)
     honorary_expires_at = Column(Date, nullable=True)  # NULL + is_honorary = perpetual
     # Soft-delete (migration 212). The Directory hides an archived person and
