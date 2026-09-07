@@ -1276,6 +1276,21 @@ async def lifespan(app: FastAPI):
             await conn.execute(text(
                 f"ALTER TABLE merge_logs ADD COLUMN IF NOT EXISTS {_col} JSONB DEFAULT '[]'"
             ))
+        # Everything else that records what a player DID — the manual per-game
+        # tables (an uploaded scorecard, and every match a CricketStatz import
+        # wrote), the manual adjustments and the honour board. All of them
+        # cascade-deleted with the removed player before this, so a merge
+        # destroyed the removed record's whole career. One JSONB blob keyed
+        # "<table>.<column>" rather than a column per table, since the shape is
+        # uniform — see services/merge_carry.py.
+        await conn.execute(text(
+            "ALTER TABLE merge_logs ADD COLUMN IF NOT EXISTS "
+            "carried_row_ids JSONB DEFAULT '{}'"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE merge_logs ADD COLUMN IF NOT EXISTS "
+            "removed_cricketstatz_player_id TEXT"
+        ))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS merge_pair_ignores (
                 id SERIAL PRIMARY KEY,

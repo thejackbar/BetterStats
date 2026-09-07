@@ -7256,6 +7256,81 @@ back to 1953/54.
   appears exactly once failed against correct output. It asserts the phrase is
   present and that the old flat `Earliest` label is gone.
 
+### A MERGE MOVES A RECORD; IT MUST NEVER DELETE ONE (v9.68.1)
+
+Reported off Brad Quinsee's profile the day after the duplicate fix: merging
+his two records dropped roughly half his career — 178 matches and 4,925 runs
+where CricketStatz has 367 innings and 10,444 runs, and a season table starting
+in 2002/03 for a man capped in 1982-83.
+
+- **`_merge_players_core` WAS WRITTEN FOR THE SYNCED CAREER AND NEVER TOUCHED
+  THE MANUAL ONE.** It reassigns `batting_innings`, `bowling_spells`,
+  `game_appearances`, `player_season_stats` and friends — and not one
+  `manual_*` table, which is where an uploaded scorecard AND **every match a
+  CricketStatz import writes** actually live. All of them are `ON DELETE
+  CASCADE` on `players.id`, so the delete at the end of the merge **destroyed**
+  the removed record's whole career rather than moving it, with nothing in the
+  undo log to hand back. **This is the fourth time this function has had this
+  bug** (`bowler_wickets`, `player_season_grade_stats`, `imported_stats` before
+  it) and the AFL merge's own note documents the fifth.
+- **THE HONOUR BOARD WENT THE OTHER WAY AND WAS JUST AS LOST.**
+  `player_achievements` has no foreign key at all, so its rows were ORPHANED
+  rather than deleted — quieter, and invisible on every screen, since each read
+  joins `players`.
+- **`services/merge_carry.CARRIED` IS THE LIST, and it is one definition shared
+  by the merge and the undo** so the two cannot disagree about what moved. A
+  table that records what a player DID belongs on it. `merge_logs.carried_row_ids`
+  is one JSONB blob keyed `"<table>.<column>"` rather than a column per table,
+  since the shape is uniform.
+- **THE KEEPER'S ROW WINS A COLLISION, and the join is `IS NOT DISTINCT FROM`,
+  not `=`.** Part of a unique key can be NULL — a season adjustment with no
+  grade is the club's whole-season correction — and `=` never matches it, so
+  the duplicate would slip through and the move would then fail on the very
+  index the de-dup exists for.
+- **AN ID'S TYPE SURVIVES THE JSONB ROUND TRIP, deliberately.** asyncpg infers a
+  bound array's type from its ELEMENTS, so a list of strings cannot be cast to
+  `int[]` at the other end however the SQL is written. Integer ids are kept as
+  integers and only the UUID table's as strings. Found by running it.
+- **A TABLE THAT IS NOT THERE IS SKIPPED, not a 500.** `player_achievements` and
+  `club_honour_entries` are lifespan-created raw SQL, so a database that has not
+  run it has not got them; `to_regclass` is what stops a merge failing over one.
+- **THE IMPORT'S OWN IDENTITY MOVES ONTO THE KEEPER** when the keeper has none,
+  the same call the existing code makes for `playhq_id` — the column is uniquely
+  indexed per club, so two identities cannot sit on one row, and the undo takes
+  it back off.
+- **RECOVERY FOR A CLUB THIS HAS ALREADY HIT: re-run the CricketStatz import.**
+  Match ids are deterministic (`cricketstatz_match_id`) and `import_match`
+  upserts, so every deleted innings is written again — onto the ONE kept record,
+  since `resolve_player` no longer finds the removed CricketStatz id and the
+  name now matches the keeper exactly. Undoing the merge cannot help: those
+  merge_logs rows were written before `carried_row_ids` existed, and the rows
+  they would point at are gone.
+- **Verified against a real Postgres** (`backend/verification/verify_merge_carry.py`,
+  21 checks through the SHIPPED `_merge_players_core` and `undo_merge` bodies:
+  the reported shape replayed — one person held twice, each with part of the
+  career — no innings destroyed, the bowling and fielding carried, an innings
+  both records held kept once, the hand-typed season and career corrections
+  alive, the honour following the person, the import identity moved, the merge
+  log naming exactly what moved, no row left pointing at a player who no longer
+  exists, and undo handing every one of them back while the keeper keeps its
+  own) **with a control run**: 14 of the 21 fail against the previous
+  behaviour, the keeper left with only its own 2 innings of 7.
+- **A CHECK THAT PASSES AGAINST THE BROKEN CODE IS NOT A CHECK.** "the honour
+  goes back with it" is trivially true when the honour was orphaned rather than
+  moved — it asserts the keeper has none now. The orphan sweep moved ABOVE the
+  undo for the same reason: after the removed player is re-created, an orphan is
+  no longer an orphan.
+- **THE AUDIT IS REPEATABLE and is what found the rest.** Walk every
+  `ForeignKey("players.id")` in `models/db.py`, resolve each to its table AND
+  its ORM class, and flag any the merge body names neither of. It reported 41.
+- **NOTICED, NOT FIXED**: the merge still does not carry `net_attendance`,
+  `team_members`, `family_members`, `player_availability`,
+  `player_availability_periods`, `fixture_lineups`, `fee_members`,
+  `comms_contacts`, `merch_movements` or any of the eleven fantasy tables.
+  Those describe where a person stands NOW rather than what they did, the keeper
+  usually has its own, and each needs its own de-dup decision — which is a
+  different change from stopping a career being deleted.
+
 ### The honour board is written in the notes (v9.68.0)
 
 Asked for with the duplicate fix: "the notes in CricketStatz contain some

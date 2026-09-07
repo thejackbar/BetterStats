@@ -29,6 +29,7 @@ from app.services.grade_labels import (
 # Reused rather than copied so the two never disagree about what a name is.
 from app.services.import_ingest import _name_parts, _middles_compatible
 from app.services.player_aliases import seed_alias_on_rename
+from app.services import merge_carry
 from app.services.import_reconcile import reconcile_imported_totals
 from app.auth.modules import require_module
 
@@ -575,9 +576,18 @@ async def _merge_players_core(
             else:
                 await db.execute(delete(PlayerSeasonStats).where(PlayerSeasonStats.id == stat.id))
 
+        # --- Every other table that records what this player DID ---------------
+        # The manual per-game tables (an uploaded scorecard, and every match a
+        # CricketStatz import wrote), the manual adjustments, and the honour
+        # board. All but the honour board are ON DELETE CASCADE, so before this
+        # the removal below DELETED them outright — a merge silently destroyed
+        # the removed record's whole imported career. See services/merge_carry.
+        carried = await merge_carry.carry_rows(db, keep_id, remove_id)
+
         # Save data needed for undo log before player is deleted
         keep_original_playhq_id = keep.playhq_id
         removed_playhq_id = remove.playhq_id
+        removed_cricketstatz_id = getattr(remove, "cricketstatz_player_id", None)
         removed_name = remove.name
         removed_display_name = remove.display_name_override or remove.name
 
@@ -595,6 +605,12 @@ async def _merge_players_core(
         # --- Now safe to copy playhq_id to keep (remove is deleted in this transaction) ---
         if not keep.playhq_id and removed_playhq_id:
             keep.playhq_id = removed_playhq_id
+        # A club's own player merged with an imported one takes the import's
+        # identity, so a later CricketStatz run matches on the id rather than
+        # the spelling. Only when the keeper has none — the column is uniquely
+        # indexed per club, and two identities cannot sit on one row.
+        if removed_cricketstatz_id and not getattr(keep, "cricketstatz_player_id", None):
+            keep.cricketstatz_player_id = removed_cricketstatz_id
 
         # --- Write merge log ---
         await db.execute(
@@ -607,7 +623,7 @@ async def _merge_players_core(
                     fielding_stat_ids, fall_of_wicket_ids,
                     batter1_partnership_ids, batter2_partnership_ids, milestone_ids,
                     bowler_wicket_ids, fielder_wicket_ids, grade_stat_ids, appearance_game_ids,
-                    imported_stat_ids
+                    imported_stat_ids, carried_row_ids, removed_cricketstatz_player_id
                 ) VALUES (
                     :org_id, :keep_id, :keep_name,
                     :remove_id, :remove_name, :remove_playhq_id,
@@ -616,7 +632,7 @@ async def _merge_players_core(
                     :field_ids, :fow_ids,
                     :b1_ids, :b2_ids, :mil_ids,
                     :bw_ids, :fw_ids, :grade_ids, :appear_ids,
-                    :imported_ids
+                    :imported_ids, CAST(:carried AS JSONB), :removed_cs_id
                 )
             """),
             {
@@ -640,6 +656,8 @@ async def _merge_players_core(
                 "grade_ids": json.dumps(moved_grade_stat_ids),
                 "appear_ids": json.dumps([str(g) for g in moved_appearance_game_ids]),
                 "imported_ids": json.dumps(moved_imported_ids),
+                "carried": json.dumps(carried),
+                "removed_cs_id": removed_cricketstatz_id,
             },
         )
 
@@ -659,6 +677,7 @@ async def _merge_players_core(
                     "appearances": len(moved_appearance_game_ids),
                     "milestones": len(_ids(milestone_rows)),
                     "imported_stats": len(moved_imported_ids),
+                    **merge_carry.carried_summary(carried),
                 },
             },
         )
@@ -687,7 +706,9 @@ async def _merge_players_core(
         except Exception:
             log.exception("merge_players: post-merge reconcile_imported_totals failed org=%s", org_id)
 
-    return {"status": "merged", "kept_player_id": str(keep_id), "removed_player_id": str(remove_id)}
+    return {"status": "merged", "kept_player_id": str(keep_id),
+            "removed_player_id": str(remove_id),
+            "carried": merge_carry.carried_summary(carried)}
 
 
 @router.post("/merge-players")
@@ -1659,7 +1680,27 @@ async def undo_merge(req: UndoMergeRequest, db: AsyncSession = Depends(get_db), 
             ),
             {"pid": str(remove_id), "kid": str(keep_id), "ids": appear_ids},
         )
-    imported_ids = _jlist(log.get("imported_stat_ids"))
+    # The manual per-game tables, the manual adjustments and the honour board —
+    # everything the merge carried across rather than letting the delete cascade
+    # take it. One definition shared with the merge (services/merge_carry), so
+    # the two cannot disagree about what moved.
+    carried = log.get("carried_row_ids")
+    if isinstance(carried, str):
+        carried = json.loads(carried or "{}")
+    await merge_carry.restore_rows(db, remove_id, carried or {})
+    if log.get("removed_cricketstatz_player_id"):
+        # The keeper only took it because it had none of its own, so handing it
+        # back cannot collide with one it already held.
+        await db.execute(text("""
+            UPDATE players SET cricketstatz_player_id = NULL
+             WHERE id = :kid AND cricketstatz_player_id = :cs
+        """), {"kid": str(keep_id), "cs": log["removed_cricketstatz_player_id"]})
+        await db.flush()
+        await db.execute(text(
+            "UPDATE players SET cricketstatz_player_id = :cs WHERE id = :rid"),
+            {"cs": log["removed_cricketstatz_player_id"], "rid": str(remove_id)})
+
+        imported_ids = _jlist(log.get("imported_stat_ids"))
     if imported_ids:
         await db.execute(
             text("UPDATE imported_stats SET player_id = :pid WHERE id = ANY(:ids)"),
