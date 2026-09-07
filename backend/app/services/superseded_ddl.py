@@ -14,8 +14,23 @@ for a season it already syncs.
 * the sync keeps running and keeps the synced copy current underneath,
 * clearing the marker puts it straight back, with no re-sync and no migration.
 
-Only the SYNCED side steps aside. The imported matches are rolled up by the
-view's own `manual_game` branch, so the season is still counted — once.
+**ONE SOURCE PER SEASON. NEVER BOTH.** Three states, and the invariant is that
+a season holding CricketStatz matches is never left in the third:
+
+* `'cricketstatz'` — count the imported matches, step the synced side aside.
+* `'playhq'`       — count the synced games, step the imported side aside.
+* NULL             — count both, which is only ever safe because a season that
+                     receives a CricketStatz match is set to `'cricketstatz'`
+                     in the SAME transaction as the match (see
+                     `cricketstatz_import.import_match`), so NULL and imported
+                     matches cannot coexist.
+
+The earlier design worked the overlap out ONCE at the start of a run and marked
+the seasons as it walked them. Anything that changed `games` in between — a
+Full Rebuild finishing, a sync landing — left that snapshot wrong, and the club
+counted both sources with nothing on screen to say so. Reported live: a career
+reading 14,966 runs against CricketStatz's 10,444, and every shared season
+holding exactly synced + imported. **Decide it from the data, not from a step.**
 
 **BOTH DEFINITIONS ARE TAKEN FROM MIGRATION 266, THE LAST ONE TO DEFINE EACH,
 and that is not a detail.** `CREATE OR REPLACE VIEW` cannot drop a column, so
@@ -68,7 +83,10 @@ STATEMENTS: tuple[str, ...] = (
         mg.season_id AS season_id,
         mg.organisation_id AS organisation_id,
         NULL::text AS status
-    FROM manual_games mg""",
+    FROM manual_games mg
+    LEFT JOIN seasons ms ON ms.id = mg.season_id
+    WHERE mg.cricketstatz_import_id IS NULL
+       OR ms.stats_source IS DISTINCT FROM 'playhq'""",
     """CREATE OR REPLACE VIEW v_effective_player_season_stats AS
     SELECT
         player_id, season_id,
@@ -281,12 +299,21 @@ STATEMENTS: tuple[str, ...] = (
         WITH player_games AS (
             SELECT mg.id AS manual_game_id, mg.season_id, mg.grade_id, mbi.player_id
             FROM manual_games mg JOIN manual_batting_innings mbi ON mbi.manual_game_id = mg.id
+            LEFT JOIN seasons ms ON ms.id = mg.season_id
+            WHERE mg.cricketstatz_import_id IS NULL
+               OR ms.stats_source IS DISTINCT FROM 'playhq'
             UNION
             SELECT mg.id, mg.season_id, mg.grade_id, mbs.player_id
             FROM manual_games mg JOIN manual_bowling_spells mbs ON mbs.manual_game_id = mg.id
+            LEFT JOIN seasons ms ON ms.id = mg.season_id
+            WHERE mg.cricketstatz_import_id IS NULL
+               OR ms.stats_source IS DISTINCT FROM 'playhq'
             UNION
             SELECT mg.id, mg.season_id, mg.grade_id, mfs.player_id
             FROM manual_games mg JOIN manual_fielding_stats mfs ON mfs.manual_game_id = mg.id
+            LEFT JOIN seasons ms ON ms.id = mg.season_id
+            WHERE mg.cricketstatz_import_id IS NULL
+               OR ms.stats_source IS DISTINCT FROM 'playhq'
         )
         SELECT
             pg.player_id,
@@ -373,6 +400,23 @@ STATEMENTS: tuple[str, ...] = (
 # The views have to stop referencing the column before it can be dropped, so
 # the downgrade puts migration 266's own definitions back rather than dropping
 # the views and leaving every reader broken.
+
+BACKFILL = """
+    UPDATE seasons s SET stats_source = 'cricketstatz'
+     WHERE s.stats_source IS NULL
+       AND EXISTS (SELECT 1 FROM manual_games mg
+                    WHERE mg.season_id = s.id
+                      AND mg.cricketstatz_import_id IS NOT NULL)
+"""
+
+# SELF-HEALING, AND THAT IS THE POINT. Any season holding a CricketStatz match
+# with no source recorded is one the club is counting twice, whatever put it in
+# that state — an import that predates this rule, a run cut off before it could
+# mark, a snapshot of the overlap that went stale mid-run. Guarded on NULL, so
+# it never overrides a decision the club has made and a second run writes
+# nothing.
+STATEMENTS = STATEMENTS + (BACKFILL,)
+
 DOWNGRADE: tuple[str, ...] = (
     """CREATE OR REPLACE VIEW v_effective_games AS
     SELECT

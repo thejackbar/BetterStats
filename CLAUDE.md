@@ -7525,6 +7525,78 @@ we're way over what I expect".
   seasons are marked by the old end-of-run write. The board corrects itself the
   moment the run completes.
 
+### ONE SOURCE PER SEASON, DECIDED BY THE DATA (migration 290, v9.69.4, Sep 2026)
+
+Reported off Keon Park's Records with the import running: duplicates again, and
+a career at **14,966 runs against CricketStatz's 10,444** — the exact figure
+v9.68.3 was supposed to have settled.
+
+- **MEASURED, NOT INFERRED, AND THE MEASUREMENT NAMED THE CAUSE.** Every shared
+  season held EXACTLY synced + imported — 2002: 85 + 86 = 171, 2005: 91 + 104 =
+  195, 2011: 91 + 117 = 208, 2013: 81 + 95 = 176, 2019: 65 + 82 = 147 — against
+  CricketStatz's own per-season counts fetched live. Pre-2000 seasons, which
+  the sync does not reach, held the imported copy alone. So the import was
+  faithful and nothing was being written twice: the synced side simply was not
+  stepping aside.
+- **THE CHOICE WAS A SNAPSHOT TAKEN ONCE, AND THAT IS THE WHOLE BUG.**
+  `synced_coverage` ran at the START of the run and the overlap was frozen from
+  it. A club whose synced games were not in `games` at that instant — a Full
+  Rebuild still running, a sync that had not landed — read as having NO overlap,
+  so nothing was skipped, nothing was marked, and once the synced side arrived
+  the club counted both with nothing on screen to say so. v9.69.2 moved the
+  marking earlier and could not help: the list it marks from was already wrong.
+- **SO THE RULE IS AN INVARIANT NOW, NOT A STEP.** A season that receives a
+  CricketStatz match is set to `'cricketstatz'` **in the same transaction as the
+  match**, in `import_match`. There is no ordering to get right, no end-of-run
+  write, nothing to recompute, and a run that dies halfway leaves every season
+  it walked correct.
+- **UNCONDITIONAL, WHICH IS WHAT REMOVES THE DEPENDENCE.** A season the sync
+  does not reach has no synced games to step aside, so marking it costs nothing
+  — and the marker then owes nothing to the overlap having been worked out
+  right. The club's PlayHQ-or-CricketStatz choice is expressed by whether the
+  matches are imported at all (`skip` writes none into a shared season), which
+  is the honest expression of it.
+- **THREE STATES, AND NULL IS ONLY SAFE BECAUSE OF THE INVARIANT.**
+  `'cricketstatz'` counts the imported side, `'playhq'` counts the synced side,
+  NULL counts both — which can never double, because NULL and imported matches
+  cannot coexist.
+- **HANDING A SEASON BACK SETS `'playhq'`, NOT NULL, and the old confirm
+  admitted the bug in writing**: "both will be counted until you undo the
+  import". A club asking for PlayHQ back was being given the double count. The
+  imported side steps aside instead, so exactly one source is counted whichever
+  way the club decides.
+- **IT IS NEVER APPLIED TO A SEASON THE SYNC DOES NOT REACH.** There is nothing
+  to hand back to, and `'playhq'` there would hide the imported matches and
+  leave the season empty — the "neither source" failure from the far end.
+- **THE BACKFILL IS IN `STATEMENTS`, SO IT SELF-HEALS ON EVERY BOOT.** Any
+  season holding a CricketStatz match with no source recorded is one the club is
+  counting twice, whatever put it there. Guarded on NULL, so it never overrides
+  a decision the club has made and a second run writes nothing. **It repairs the
+  reported club with no re-import.**
+- **MIGRATION 290 RE-RUNS 287'S OWN STATEMENT LIST.** Every statement is
+  idempotent, so a database already at 287 picks up the added clauses and the
+  backfill; the lifespan mirror does the same on every boot.
+- **`resolve_season` HANDS BACK A `Season`, NOT AN ID**, so the first cut's raw
+  `UPDATE ... WHERE id = :s` bound a repr and raised — swallowed by the
+  per-match `except` as a note, with **zero matches written**. Setting it on the
+  ORM row instead needs no cast and leaves no stale in-memory copy. Found by
+  running it.
+- **THE SUITE HAS TO UNWIND NEWEST-FIRST.** 287's views read
+  `manual_games.cricketstatz_import_id`, so 285's downgrade cannot drop that
+  column while they stand. Alembic gets this right for free; the suite did not.
+- **Verified against a real Postgres** (`verify_cricketstatz_import.py`, 212
+  checks: the reported failure replayed — the import writing while `games` is
+  empty, then the sync landing on top — every season it wrote into marked, the
+  synced side not counted with it, handing back counting the synced game
+  INSTEAD of as well, a season with no synced games left alone, and the repair
+  asserted to be part of the shipped statement list rather than reached for
+  directly) **with two control runs**: the snapshot design fails 5, reporting
+  the reported `{'api': 1, 'manual': 1}`; hand-back clearing to NULL fails 2.
+- **A CHECK THAT MATCHES MORE THAN IT MEANS IS NOT A CHECK.** "the repair is
+  part of the shipped statement list" first looked for a statement carrying both
+  `cricketstatz_import_id` and `stats_source` — which the VIEWS now do, so it
+  passed with the backfill unwired. It matches `UPDATE seasons` now.
+
 ### AND UNDOING ONE HAD TO HAND THOSE SEASONS BACK (v9.69.3, Sep 2026)
 
 Found while checking a live club's figures after the fix above, not from a

@@ -432,12 +432,28 @@ async def mark_seasons_superseded(db: AsyncSession, org_id, years) -> int:
 
 
 async def clear_seasons_superseded(db: AsyncSession, org_id, years=None) -> int:
-    """Hand the seasons back to the sync. Instant — nothing has to be re-pulled."""
-    sql = ("UPDATE seasons SET stats_source = NULL"
-           " WHERE organisation_id = :org AND stats_source = 'cricketstatz'")
+    """Hand the seasons back to the sync. Instant — nothing has to be re-pulled.
+
+    Sets `'playhq'`, NOT NULL, and that is the whole difference. NULL means
+    "count what is here", which for a season holding both an imported and a
+    synced copy is the double count this exists to prevent — handing a season
+    back used to show BOTH, and said so in the confirm. `'playhq'` steps the
+    imported side aside instead, so exactly one source is counted either way.
+
+    Only ever applied to a season the sync actually reaches. A season with no
+    synced games has nothing to hand back to, and marking it `'playhq'` would
+    hide its imported matches and leave the season empty — the "neither source"
+    failure reached from the far end.
+    """
+    sql = ("""UPDATE seasons s SET stats_source = 'playhq'
+                WHERE s.organisation_id = :org
+                  AND s.stats_source = 'cricketstatz'
+                  AND EXISTS (SELECT 1 FROM games g
+                                JOIN grades gr ON gr.id = g.grade_id
+                               WHERE gr.season_id = s.id)""")
     params = {"org": str(org_id)}
     if years:
-        sql += " AND year = ANY(CAST(:years AS int[]))"
+        sql += " AND s.year = ANY(CAST(:years AS int[]))"
         params["years"] = [int(y) for y in years]
     return (await db.execute(text(sql), params)).rowcount or 0
 
@@ -487,6 +503,25 @@ async def import_match(db: AsyncSession, org_id, import_id, card: dict,
         db, org_id, caches["season_label"], caches["season_value"], caches["seasons"])
     if season is None:
         return f"{source_id}: no season"
+    # ONE SOURCE PER SEASON, DECIDED BY THE DATA RATHER THAN BY A STEP.
+    # A season that holds a CricketStatz match is read from CricketStatz — set
+    # here, in the SAME transaction as the match itself, so the two can never
+    # be out of step. The earlier design worked the overlap out once at the
+    # start of the run and marked the seasons afterwards; anything that changed
+    # `games` in between (a Full Rebuild finishing, a sync landing) left that
+    # snapshot wrong and the club counting both sources with nothing to say so.
+    #
+    # Unconditional: a season the sync does not reach has no synced games to
+    # step aside, so marking it costs nothing and removes the dependence on the
+    # overlap being right. An explicit 'playhq' is the club's own decision and
+    # is never overwritten.
+    # Written on the ORM row rather than as a raw UPDATE: `resolve_season`
+    # hands back a Season, the session is already holding it, and a raw
+    # statement would leave that instance's own copy stale. A rollback expires
+    # it and clears the cache, so the next match resolves and sets it again.
+    if season.stats_source is None:
+        season.stats_source = "cricketstatz"
+        await db.flush()
     grade = await resolve_grade(db, org_id, season, label, caches["grades"])
 
     home = card.get("home_team") or row.get("home_team") or ""
@@ -1419,7 +1454,7 @@ async def undo_import(db: AsyncSession, org_id, import_id) -> dict:
     handed_back = (await db.execute(text("""
         UPDATE seasons s SET stats_source = NULL
          WHERE s.organisation_id = :org
-           AND s.stats_source = 'cricketstatz'
+           AND s.stats_source IN ('cricketstatz', 'playhq')
            AND NOT EXISTS (
                  SELECT 1 FROM manual_games mg
                   WHERE mg.season_id = s.id

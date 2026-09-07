@@ -111,8 +111,8 @@ export default function CricketStatzImport() {
     if (!window.confirm(
       'Hand these seasons back to Cricket Australia?\n\nYour synced matches '
       + 'start counting again straight away — nothing has to be re-pulled. The '
-      + 'CricketStatz matches for those seasons stay imported, so both will be '
-      + 'counted until you undo the import.'
+      + 'CricketStatz matches for those seasons stay imported but stop being '
+      + 'counted, so each season is still counted once.'
     )) return
     try {
       await api.csClearSuperseded()

@@ -35,6 +35,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # no
 from app.models.db import Base  # noqa: E402
 from app.services import cricketstatz_import as importer  # noqa: E402
 from app.services.cricketstatz_ddl import DOWNGRADE, STATEMENTS  # noqa: E402
+from app.services.superseded_ddl import BACKFILL  # noqa: E402
+from app.services.superseded_ddl import DOWNGRADE as SUPERSEDED_DOWNGRADE  # noqa: E402
 from app.services.superseded_ddl import STATEMENTS as SUPERSEDED_DDL  # noqa: E402
 from app.services.cricketstatz_parse import (  # noqa: E402
     RECORD_REPORTS,
@@ -1085,6 +1087,15 @@ async def _view_columns(engine, view: str) -> set:
         """), {"v": view})).scalars().all())
 
 
+
+async def _source_of(session_maker, season_id):
+    """What the season records as its source — the whole invariant in one read."""
+    async with session_maker() as db:
+        return (await db.execute(text(
+            "SELECT stats_source FROM seasons WHERE id = :s"),
+            {"s": str(season_id)})).scalar()
+
+
 async def verify_synced_overlap(engine, session_maker) -> None:
     """A club that already syncs must not have the same cricket imported twice.
 
@@ -1199,8 +1210,12 @@ async def verify_synced_overlap(engine, session_maker) -> None:
         marked = await importer.superseded_years(db, org)
     check("asking for CricketStatz brings those seasons across",
           1995 in years2 and 2025 in years2, str(years2))
-    check("and marks them as read from CricketStatz",
-          marked == [1995, 2025], str(marked))
+    # EVERY season the import writes into is marked, not just the shared ones.
+    # A season the sync does not reach has no synced games to step aside, so
+    # marking it costs nothing — and it is what removes the dependence on the
+    # overlap having been worked out correctly at the start of the run.
+    check("and marks every season it wrote into as read from CricketStatz",
+          marked == [1985, 1995, 2025], str(marked))
 
 
     # THE POINT OF THE WHOLE THING: the synced side must stop being counted.
@@ -1373,6 +1388,112 @@ async def verify_synced_overlap(engine, session_maker) -> None:
     check("a season another import still covers keeps CricketStatz as its record",
           still_marked == [2025], str(still_marked))
 
+    # THE REPORTED FAILURE, REPLAYED. The overlap was worked out ONCE at the
+    # start of the run: a club whose synced games were not in `games` at that
+    # moment (a Full Rebuild still running, a sync that had not landed) read as
+    # having no overlap at all, so nothing was skipped and nothing was marked —
+    # and once the synced side arrived the club counted BOTH. Live: every
+    # shared season holding exactly synced + imported, a career at 14,966
+    # against CricketStatz's 10,444.
+    late = uuid.uuid4()
+    late_imp = uuid.uuid4()
+    late_season, late_grade = uuid.uuid4(), uuid.uuid4()
+    async with session_maker() as db:
+        await db.execute(text("""
+            INSERT INTO organisations (id, name, slug, is_active)
+            VALUES (:o, 'Late Sync CC', 'late-sync-cc', true)
+        """), {"o": str(late)})
+        await db.execute(text("""
+            INSERT INTO cricketstatz_imports
+                (id, organisation_id, club_id, source_url, status, phase)
+            VALUES (:i, :o, '93931', 'u', 'complete', 'done')
+        """), {"i": str(late_imp), "o": str(late)})
+        await db.execute(text("""
+            INSERT INTO seasons (id, organisation_id, name, year)
+            VALUES (:s, :o, 'Summer 2002/03', 2002)
+        """), {"s": str(late_season), "o": str(late)})
+        await db.execute(text("""
+            INSERT INTO grades (id, season_id, name) VALUES (:g, :s, 'A-GRADE')
+        """), {"g": str(late_grade), "s": str(late_season)})
+        # The import writes its match while the club holds NO synced games —
+        # so the old overlap check would have found nothing to mark.
+        await db.execute(text("""
+            INSERT INTO manual_games
+                (id, organisation_id, season_id, played_at, opposition,
+                 cricketstatz_import_id)
+            VALUES (:i, :o, :s, CAST(:d AS date), 'Panton Hill', :imp)
+        """), {"i": str(uuid.uuid4()), "o": str(late), "s": str(late_season),
+               "d": date(2002, 11, 5), "imp": str(late_imp)})
+        await db.commit()
+
+    # Repaired by the SHIPPED statement list — what alembic's 290 and the
+    # lifespan mirror both run — never by reaching for the backfill constant
+    # on its own. A check that applies it directly passes whether or not it is
+    # actually wired in, which is not a check.
+    check("the repair is part of the shipped statement list",
+          any("UPDATE seasons" in st and "cricketstatz_import_id" in st
+              for st in SUPERSEDED_DDL),
+          "BACKFILL is not in STATEMENTS")
+    async with engine.begin() as conn:
+        for statement in SUPERSEDED_DDL:
+            await conn.execute(text(statement))
+
+    # NOW the synced side arrives — a Full Rebuild finishing, or the next sync.
+    async with session_maker() as db:
+        await db.execute(text("""
+            INSERT INTO games (id, grade_id, played_at, home_team, away_team)
+            VALUES (:i, :g, CAST(:d AS date), 'Late Sync CC', 'Panton Hill')
+        """), {"i": str(uuid.uuid4()), "g": str(late_grade),
+               "d": date(2002, 11, 5)})
+        await db.commit()
+
+    async with session_maker() as db:
+        counted = (await db.execute(text("""
+            SELECT source, COUNT(*) FROM v_effective_games
+             WHERE organisation_id = :o GROUP BY source
+        """), {"o": str(late)})).all()
+    by_source = {r[0]: r[1] for r in counted}
+    check("a season that holds CricketStatz matches is never left unsourced",
+          await _source_of(session_maker, late_season) == 'cricketstatz',
+          await _source_of(session_maker, late_season))
+    check("so a sync landing afterwards is not counted on top of it",
+          by_source.get('api', 0) == 0 and by_source.get('manual', 0) == 1,
+          str(by_source))
+
+    # And handing it back counts the synced game INSTEAD, never as well.
+    async with session_maker() as db:
+        handed = await importer.clear_seasons_superseded(db, late)
+        await db.commit()
+    async with session_maker() as db:
+        counted2 = (await db.execute(text("""
+            SELECT source, COUNT(*) FROM v_effective_games
+             WHERE organisation_id = :o GROUP BY source
+        """), {"o": str(late)})).all()
+    by_source2 = {r[0]: r[1] for r in counted2}
+    check("handing a season back counts the synced game",
+          by_source2.get('api', 0) == 1, str(by_source2))
+    check("and steps the imported side aside rather than showing both",
+          by_source2.get('manual', 0) == 0, str(by_source2))
+    check("the club's own choice is recorded, not just cleared",
+          handed == 1 and await _source_of(session_maker, late_season) == 'playhq',
+          f"handed={handed}")
+
+    # A season the sync does not reach has nothing to hand back to — marking it
+    # 'playhq' would hide its imported matches and leave it empty.
+    lonely = uuid.uuid4()
+    async with session_maker() as db:
+        await db.execute(text("""
+            INSERT INTO seasons (id, organisation_id, name, year, stats_source)
+            VALUES (:s, :o, 'Summer 1969/70', 1969, 'cricketstatz')
+        """), {"s": str(lonely), "o": str(late)})
+        await db.commit()
+    async with session_maker() as db:
+        again = await importer.clear_seasons_superseded(db, late)
+        await db.commit()
+    check("a season with no synced games is left alone rather than emptied",
+          again == 0 and await _source_of(session_maker, lonely) == 'cricketstatz',
+          f"handed={again}")
+
 
 async def verify_undo(session_maker, org_id, import_id, player_count) -> None:
     print("\nUndo")
@@ -1422,6 +1543,12 @@ async def verify_undo(session_maker, org_id, import_id, player_count) -> None:
 async def verify_downgrade(engine) -> None:
     print("\nDowngrade")
     async with engine.begin() as conn:
+        # 287's downgrade FIRST, and the order is not incidental: its views
+        # read manual_games.cricketstatz_import_id, so dropping 285's column
+        # while they still stand fails on the dependency. Alembic unwinds
+        # newest-first for exactly this reason; the suite has to as well.
+        for statement in SUPERSEDED_DOWNGRADE:
+            await conn.execute(text(statement))
         for statement in DOWNGRADE:
             await conn.execute(text(statement))
         left = (await conn.execute(text("""
