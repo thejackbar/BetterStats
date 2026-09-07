@@ -1,5 +1,61 @@
 # BetterStats — Claude Session Notes
 
+## NEVER DELETE OR OVERWRITE WHAT A CLUB TYPED IN BY HAND (v9.68.2, Sep 2026)
+
+**Set as a standing rule, after a merge deleted half a player's career.** A
+club entering a season of scorecards spends hours on it, and unlike a synced
+game there is **no upstream to re-pull it from** — a deleted manual row is
+gone. So:
+
+> **A manual game, its innings, and a hand-typed correction are the club's own
+> work. A function may ADD to them and it may MOVE them; it may only remove or
+> replace what it wrote ITSELF, and never what a person wrote.**
+
+Where this has already gone wrong, and what each case teaches:
+
+- **A MERGE MOVES A RECORD; IT NEVER DELETES ONE.** `_merge_players_core` was
+  written for the SYNCED per-game tables and reached no `manual_*` table at
+  all — and every one of them is `ON DELETE CASCADE` on `players.id`, so
+  removing the merged-away player destroyed their whole hand-entered and
+  imported career. `services/merge_carry.CARRIED` is the list it now carries;
+  **a table that records what a player DID belongs on it.** See the v9.68.1
+  note.
+- **AN IMPORT REPLACES WHAT THAT IMPORT WROTE, AND STOPS AT ANYTHING A PERSON
+  HAS TOUCHED.** `cricketstatz_import.import_match` refreshes a match it
+  created, matched on `cricketstatz_match_id`, so it can never reach a game
+  somebody typed in. On top of that, `hand_edited_games` reads
+  `manual_edit_logs` — which the import writes none of, so any un-undone row
+  means a person edited that match through Manual Entries — and the import
+  **skips it and says so** rather than reverting their correction silently. An
+  edit that was later undone does not count: the club took it back.
+- **A FULL REBUILD DELETES FROM `games`, NEVER `manual_games`**, and it must
+  stay that way. It exists to re-pull from Cricket Australia; a manual game has
+  nothing to re-pull.
+- **SEASON AND GRADE DELETES ALREADY REFUSE** while a manual game or a manual
+  adjustment points at them (`_season_in_use` / `_grade_in_use`). Both FKs
+  cascade, so those two checks are the only thing between a tidy-up and a lost
+  season.
+- **DE-DUPLICATING IS NOT DELETING, and the line is that the two rows describe
+  ONE thing.** A merge drops the removed record's row for an innings the keeper
+  already holds, because they are the same innings read under two identities.
+  It must never drop an innings only one of them had — the suite asserts the
+  total row count falls by exactly the number of genuine duplicates.
+
+**THE RULE IS ENFORCED, NOT JUST WRITTEN DOWN.**
+`backend/verification/verify_merge_carry.py` scans `app/` for every `DELETE
+FROM manual_*` and `sa_delete(Manual*)` and fails on any site not on its
+`ALLOWED_DELETES` list with a stated reason — so a new one cannot be added
+without somebody justifying it — and separately asserts every manual table
+carrying a `players.id` foreign key is on the merge's carry list. Both were
+checked by breaking them on purpose: an unjustified delete elsewhere in `app/`
+fails the first, and dropping one table off `CARRIED` fails the second.
+
+**When a club HAS lost rows this way, say what recovers them.** A CricketStatz
+import re-writes the same matches (deterministic `cricketstatz_match_id`, and
+`import_match` upserts), so re-running it is the recovery — onto the one record
+that was kept. A club's hand-typed history has no such path, which is the whole
+reason for the rule.
+
 ## A FIXTURE BELONGS TO BOTH CLUBS. Read it that way, every time (v9.62.0, Sep 2026)
 
 **THIS HAS NOW BEEN REPORTED FOUR TIMES** — the second club's Games list

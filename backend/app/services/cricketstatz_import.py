@@ -381,6 +381,22 @@ _FINAL_WORDS = re.compile(
     r"\b(final|semi|elim|qualif|prelim|grand)\b", re.I)
 
 
+
+async def hand_edited_games(db: AsyncSession, org_id) -> set:
+    """Manual games somebody has created, edited or imported by hand.
+
+    One query for the whole club, so the import's own per-match check costs
+    nothing. An edit that was later undone does not count — the club took it
+    back, so there is nothing of theirs to protect.
+    """
+    rows = (await db.execute(text("""
+        SELECT DISTINCT target_id FROM manual_edit_logs
+         WHERE organisation_id = :org AND target_table = 'manual_games'
+           AND undone_at IS NULL
+    """), {"org": str(org_id)})).scalars().all()
+    return {str(r) for r in rows}
+
+
 async def import_match(db: AsyncSession, org_id, import_id, card: dict,
                        row: dict, is_ours, caches: dict) -> Optional[str]:
     """Write one CricketStatz match. Returns a note when something was skipped."""
@@ -418,6 +434,16 @@ async def import_match(db: AsyncSession, org_id, import_id, card: dict,
             ManualGame.organisation_id == org_id,
             ManualGame.cricketstatz_match_id == source_id)
     )).scalars().first()
+
+    # A GAME SOMEBODY HAS WORKED ON BY HAND IS NEVER OVERWRITTEN. Entering or
+    # correcting a scorecard costs a club hours, so a re-import refreshing what
+    # the import itself wrote must stop at the first row a person has touched —
+    # and say so, rather than reverting their work silently. `manual_edit_logs`
+    # is the signal because the import writes none of its own: any un-undone
+    # row against this game means somebody edited it through Manual Entries.
+    if existing is not None and str(existing.id) in caches.get("hand_edited", ()):
+        return (f"{source_id}: left as you have it — this match has been edited "
+                f"by hand, so the import did not write over it")
 
     game = existing or ManualGame(
         id=_derived_id(org_id, "match", source_id),
@@ -1069,6 +1095,11 @@ async def run_import(session_maker, org_id, import_id, club_id: str) -> None:
                             progress=progress, stats=summary)
 
         # ── matches, season by season ───────────────────────────────────────
+        # Read once for the whole club: which games a person has already worked
+        # on by hand, so a re-import never writes over their scorecard.
+        async with session_maker() as db:
+            hand_edited = await hand_edited_games(db, org_id)
+
         progress["phase"] = "matches"
         await _set_progress(session_maker, import_id, phase="matches",
                             progress=progress)
@@ -1082,7 +1113,7 @@ async def run_import(session_maker, org_id, import_id, club_id: str) -> None:
 
             caches = {
                 "seasons": {}, "grades": {}, "players": {}, "roster": None,
-                "near_matches": {},
+                "near_matches": {}, "hand_edited": hand_edited,
                 "season_label": season["label"], "season_value": season["value"],
             }
             async with session_maker() as db:
