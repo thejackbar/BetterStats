@@ -159,12 +159,19 @@ then hands the visitor the StreamYard link. Webinar Mon 21 Sep 2026.
   runs**: the resubmission guard neutered fails 2, the bot guards neutered fail 4,
   and with the service absent it REPORTS the feature rather than dying on the
   first ImportError.
-- **Driven in Chromium** (`frontend/verification/verify_webinar_browser.mjs`: no
-  conversion on page load or on either validation failure, the exact payload on
-  the wire, the conversion fired once with `content_category: 'webinar'` sharing
-  the server's event_id, the button refusing a second press while in flight, the
-  resubmission and server-error paths both claiming nothing, both date-driven
-  states, the promo measured as below the search box, and no overflow at 390px).
+- **Driven in Chromium** (`frontend/verification/verify_webinar_browser.mjs`, 87:
+  no conversion on page load or on either validation failure, the exact payload
+  on the wire, the conversion fired once with `content_category: 'webinar'`
+  sharing the server's event_id, the button refusing a second press while in
+  flight, the resubmission and server-error paths both claiming nothing, both
+  date-driven states, the promo measured as below the search box, and no
+  overflow at 390px) **with a control run**: firing the conversion regardless of
+  `created` fails the resubmission checks.
+- **`waitUntil: 'networkidle'` NEVER SETTLES ON THIS APP**, and it hangs the
+  suite rather than failing it: `HeartbeatBeacon` pings every ~25s for as long
+  as the tab is open, so the network is never idle. Wait for the element the
+  checks are about. Killing a hung run also leaves its Chromium behind, and
+  those pile up until the next launch hangs too.
 - **A CHECK THAT MEASURES THE HARNESS IS NOT A CHECK, twice here.**
   `addInitScript` cannot stub `gtag` — `index.html` unconditionally redefines it
   (`function gtag(){dataLayer.push(arguments)}`) after the init script runs, so
