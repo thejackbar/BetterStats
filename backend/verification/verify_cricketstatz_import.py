@@ -1594,6 +1594,141 @@ async def verify_synced_overlap(engine, session_maker) -> None:
           first_held == second_held == third_held,
           f"{first_held} {second_held} {third_held}")
 
+    # AND THE SEASON AGGREGATE HAS TO COUNT THE PAIR ONCE TOO. Reported off
+    # Brad Quinsee's profile after the pairing was working: the innings list
+    # read 336 innings and 16 hundreds — his own hand count — while the career
+    # header two inches above it read 508, 15,333 and 28. Every season from
+    # 2002/03, exactly the era both sources cover, was EXACTLY double the
+    # innings beneath it, to the run: 914 against 457, 1,136 against 568.
+    #
+    # `pair_prefers_import` is why. The per-innings views drop Cricket
+    # Australia's copy and keep the imported one, which is right. But
+    # `player_season_stats` is a SEASON TOTAL with no per-match granularity —
+    # there is no row to drop — so CA's own figure still carries that match,
+    # and the manual rollup beside it carried the imported copy as well.
+    # Counting the same match in both halves is the one thing this must not do.
+    agg_org, agg_imp = uuid.uuid4(), uuid.uuid4()
+    agg_season, agg_grade = uuid.uuid4(), uuid.uuid4()
+    agg_game, agg_manual, agg_player = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    async with session_maker() as db:
+        await db.execute(text("""
+            INSERT INTO organisations (id, name, slug, is_active)
+            VALUES (:o, 'Aggregate Test CC', 'aggregate-test-cc', true)
+        """), {"o": str(agg_org)})
+        await db.execute(text("""
+            INSERT INTO cricketstatz_imports
+                (id, organisation_id, club_id, source_url, status, phase)
+            VALUES (:i, :o, '93931', 'u', 'complete', 'done')
+        """), {"i": str(agg_imp), "o": str(agg_org)})
+        await db.execute(text("""
+            INSERT INTO seasons (id, organisation_id, name, year)
+            VALUES (:s, :o, 'Summer 2006/07', 2006)
+        """), {"s": str(agg_season), "o": str(agg_org)})
+        await db.execute(text(
+            "INSERT INTO grades (id, season_id, name) VALUES (:g, :s, 'A')"),
+            {"g": str(agg_grade), "s": str(agg_season)})
+        await db.execute(text("""
+            INSERT INTO players (id, organisation_id, name)
+            VALUES (:p, :o, 'Quinsee, Brad')
+        """), {"p": str(agg_player), "o": str(agg_org)})
+        # The synced fixture, with NO scorecard of ours behind it — which is
+        # exactly when the imported copy is the better record and wins the pair.
+        await db.execute(text("""
+            INSERT INTO games (id, grade_id, played_at, home_team, away_team,
+                               opp_club_name)
+            VALUES (:i, :g, CAST(:d AS date), 'Aggregate Test CC', 'Reservoir',
+                    'Reservoir')
+        """), {"i": str(agg_game), "g": str(agg_grade), "d": date(2006, 11, 4)})
+        # Cricket Australia's own season total for the SAME match.
+        await db.execute(text("""
+            INSERT INTO player_season_stats
+                (player_id, season_id, matches, batting_innings, runs,
+                 not_outs, hundreds, high_score)
+            VALUES (:p, :s, 1, 1, 120, 0, 1, 120)
+        """), {"p": str(agg_player), "s": str(agg_season)})
+        # And the imported card for it.
+        await db.execute(text("""
+            INSERT INTO manual_games
+                (id, organisation_id, season_id, grade_id, played_at,
+                 home_team, away_team, opposition, cricketstatz_import_id,
+                 cricketstatz_match_id)
+            VALUES (:i, :o, :s, :g, CAST(:d AS date), 'Aggregate Test CC',
+                    'Reservoir', 'Reservoir', :imp, 'agg-1')
+        """), {"i": str(agg_manual), "o": str(agg_org), "s": str(agg_season),
+               "g": str(agg_grade), "d": date(2006, 11, 4), "imp": str(agg_imp)})
+        await db.execute(text("""
+            INSERT INTO manual_batting_innings
+                (manual_game_id, player_id, innings_number, runs,
+                 did_not_bat, not_out)
+            VALUES (:g, :p, 1, 120, false, false)
+        """), {"g": str(agg_manual), "p": str(agg_player)})
+        await db.commit()
+
+    async with session_maker() as db:
+        agg_res = await match_pairing.reconcile_org(db, agg_org)
+    check("the synced fixture with no card of ours prefers the imported copy",
+          agg_res.get("paired") == 1 and agg_res.get("prefer_import") == 1,
+          str(agg_res))
+
+    async def _agg_totals():
+        async with session_maker() as db:
+            row = (await db.execute(text("""
+                SELECT COALESCE(SUM(matches), 0) AS m,
+                       COALESCE(SUM(batting_innings), 0) AS i,
+                       COALESCE(SUM(runs), 0) AS r,
+                       COALESCE(SUM(hundreds), 0) AS h
+                  FROM v_effective_player_season_stats
+                 WHERE player_id = :p
+            """), {"p": str(agg_player)})).mappings().first()
+            return dict(row)
+
+    totals = await _agg_totals()
+    check("the season aggregate counts the paired match's runs once",
+          totals["r"] == 120, str(totals))
+    check("and its innings once",
+          totals["i"] == 1, str(totals))
+    check("and its hundred once",
+          totals["h"] == 1, str(totals))
+    check("and the match itself once",
+          totals["m"] == 1, str(totals))
+
+    # THE INNINGS LIST AND THE HEADER HAVE TO DESCRIBE THE SAME CAREER. The
+    # per-innings views keep the imported copy here, so the two are drawn from
+    # different rows for the same match — and must still agree on the total.
+    async with session_maker() as db:
+        listed = (await db.execute(text("""
+            SELECT COALESCE(SUM(runs), 0) FROM v_effective_batting_innings
+             WHERE player_id = :p AND NOT did_not_bat
+        """), {"p": str(agg_player)})).scalar()
+    check("and the innings list beneath it reads the same runs",
+          listed == totals["r"], f"list={listed} header={totals['r']}")
+
+    # An imported match Cricket Australia does NOT hold is still counted, which
+    # is the other half of the union and the thing a suppression must not break.
+    solo_manual = uuid.uuid4()
+    async with session_maker() as db:
+        await db.execute(text("""
+            INSERT INTO manual_games
+                (id, organisation_id, season_id, grade_id, played_at,
+                 home_team, away_team, opposition, cricketstatz_import_id,
+                 cricketstatz_match_id)
+            VALUES (:i, :o, :s, :g, CAST(:d AS date), 'Aggregate Test CC',
+                    'Epping', 'Epping', :imp, 'agg-2')
+        """), {"i": str(solo_manual), "o": str(agg_org), "s": str(agg_season),
+               "g": str(agg_grade), "d": date(2006, 12, 9), "imp": str(agg_imp)})
+        await db.execute(text("""
+            INSERT INTO manual_batting_innings
+                (manual_game_id, player_id, innings_number, runs,
+                 did_not_bat, not_out)
+            VALUES (:g, :p, 1, 55, false, false)
+        """), {"g": str(solo_manual), "p": str(agg_player)})
+        await db.commit()
+    async with session_maker() as db:
+        await match_pairing.reconcile_org(db, agg_org)
+    totals2 = await _agg_totals()
+    check("a match only CricketStatz holds is added on top",
+          totals2["r"] == 175 and totals2["m"] == 2, str(totals2))
+
     # THE REPORTED FAILURE, REPLAYED. The overlap used to be worked out ONCE at
     # the start of the run: a club whose synced games were not in `games` at
     # that moment (a Full Rebuild still running, a sync that had not landed)

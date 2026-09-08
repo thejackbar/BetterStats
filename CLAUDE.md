@@ -7630,7 +7630,10 @@ describes choosing a winner per season describes the design this replaces.
   Australia's matches and nothing else; the `manual_game` rollup beside it
   counts only the imported matches that are NOT paired, i.e. the ones CA does
   not have. Neither half can reach the other's matches, so no third branch and
-  no suppression is needed. The same reasoning retires `services/season_source.py`
+  no suppression is needed. **CORRECTED in v9.70.6 below: the first cut of that
+  filter also kept a paired match whose pair `pair_prefers_import`, which counts
+  it twice — a season total has no row for CA's copy to step aside with. At this
+  level a paired match is never counted from the import at all.** The same reasoning retires `services/season_source.py`
   — CA's per-grade aggregate (`player_season_grade_stats`) is counted in full
   and the imported scorecards paired away before they reach the grid's `held`
   side, so the by-grade cell is a union rather than a sum of two records of one
@@ -7739,6 +7742,57 @@ simply not run, and nothing anywhere said so.
   reporting whether or not anything changed, and the nightly retry registered)
   and the four real seasons replayed end to end through the shipped
   `reconcile_org` and the shipped script: 706 games -> 404, 302 pairs written.
+
+### PREFERRING THE IMPORTED COPY IS A PER-INNINGS DECISION, NEVER AN AGGREGATE ONE (v9.70.6, Sep 2026)
+
+Reported off Brad Quinsee's profile once the pairing was finally running: the
+innings list read **336 innings, 9,914 runs and 16 hundreds** — the club's own
+hand count — while the career header two inches above it read **508, 15,333 and
+28**, and the Players list said 547 matches.
+
+- **MEASURED PER SEASON, AND THE SHAPE NAMED THE CAUSE BEFORE ANY CODE WAS
+  READ.** Every season up to 2001/02 — the years only CricketStatz covers —
+  matched the innings list almost exactly. Every season from 2002/03, exactly
+  the era BOTH sources hold, was **double the innings beneath it, to the run**:
+  914 against 457, 1,136 against 568, 1,064 against 532, 4 hundreds against 2.
+  So the per-innings views were pairing correctly and
+  `v_effective_player_season_stats` was not.
+- **`pair_prefers_import` IS WHY, AND THE HOLE IS IN THE DESIGN RATHER THAN THE
+  WIRING.** The per-innings views are per-MATCH, so a paired synced game steps
+  aside (`_SYNCED_SOURCE_JOIN`) and the imported copy answers — which is the
+  whole point of preferring it where Cricket Australia holds no scorecard of
+  ours. `player_season_stats` is a SEASON TOTAL with no per-match granularity:
+  **there is no row to drop**, so CA's own figure carries that match whatever
+  we do. Keeping the imported copy beside it in the `manual_game` rollup is the
+  same match counted twice.
+- **SO AT THE AGGREGATE LEVEL A PAIRED MATCH IS NEVER COUNTED FROM THE IMPORT,
+  `pair_prefers_import` OR NOT.** The rule there is CA's totals PLUS the
+  imported matches CA does not have at all. **Preferring the imported copy is a
+  decision about which scorecard to SHOW**, and it stays where there is a row
+  to drop. The v9.70.0 note claimed "neither half can reach the other's
+  matches, so no suppression is needed" — true only while the flag is false,
+  and it is corrected in place rather than left to mislead the next reader.
+- **THE HEADER AND THE LIST ARE THEN DRAWN FROM DIFFERENT ROWS FOR THE SAME
+  MATCH, AND THAT IS FINE.** For a prefer-import pair the header counts CA's
+  figure and the list shows the imported card. They describe one match and
+  agree on the total, which the suite asserts directly rather than checking
+  each in isolation. Where they legitimately differ — CA counting a match we
+  hold no scorecard for at all — `match_coverage` already explains it.
+- **NOTHING IS RE-PAIRED, RE-IMPORTED OR MIGRATED.** It is a view definition,
+  `CREATE OR REPLACE`d by the lifespan on every boot with the column list
+  untouched, so a deploy is the whole fix and every club's figures correct
+  themselves on the next page load.
+- **THE GAP EXISTED BECAUSE THE SUITE ONLY EVER CHECKED `v_effective_games`
+  THERE.** The prefer-import fixture asserted the synced fixture stepped aside
+  and counted the manual rows, and never once summed the season aggregate — so
+  six views were verified and the seventh was not. It is asserted now, on runs,
+  innings, hundreds and matches.
+- **Verified against a real Postgres** (the suite is 294 checks: a prefer-import
+  pair counted once on all four figures, the innings list beneath it reading the
+  same runs, and a match only CricketStatz holds still added on top) **with a
+  control run**: with the flag put back into the aggregate branch, 6 fail —
+  reporting 240 runs and 2 hundreds where 120 and 1 are right, the reported
+  doubling in miniature.
 
 ### AND THEN IT REFUSED ITS OWN WORK (v9.70.5, Sep 2026)
 
