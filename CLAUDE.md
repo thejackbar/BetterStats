@@ -7525,6 +7525,56 @@ we're way over what I expect".
   seasons are marked by the old end-of-run write. The board corrects itself the
   moment the run completes.
 
+### EVERY EFFECTIVE VIEW APPLIES THE SEASON'S SOURCE (migration 291, v9.69.8, Sep 2026)
+
+Reported off the record boards with a screenshot: Heath Shephard's 270 listed
+TWICE for 2002/03, Princely Emmanuel's 206\* twice, David Nelson's 171 twice,
+and a career at **14,806 runs from 527 matches**. Said plainly: *we should
+NEVER double count games.*
+
+- **287 FILTERED TWO VIEWS AND THERE ARE EIGHT.** `v_effective_games` and
+  `v_effective_player_season_stats` carried the rule; the six PER-INNINGS
+  views — batting, bowling, fielding, fall of wickets, partnerships, bowler
+  wickets — never did. So for a season read from CricketStatz both the synced
+  innings and the imported innings were present, and every century, wicket and
+  catch was counted from two sources. The record boards read per-innings rows,
+  which is why they doubled while the club's game count looked right.
+- **THE FIX IS THE RULE APPLIED EVERYWHERE, NOT ANOTHER PATCH.** All eight now
+  live in `superseded_ddl.STATEMENTS`, and `VERIFIED_VIEWS` names all eight, so
+  the boot check that reads the schema back covers every one of them. A ninth
+  effective view added later must join this list or the check will not know
+  about it.
+- **EACH IS TAKEN FROM THE MIGRATION THAT LAST DEFINED IT** (075, 038, 147,
+  092, 147, 093), the rule this file already records — `CREATE OR REPLACE VIEW`
+  cannot change the output columns, so re-issuing an older definition aborts.
+- **EVERY COLUMN IS QUALIFIED, because joining `games` makes a bare `id`
+  ambiguous.** The originals selected unqualified names; the filtered form
+  cannot.
+- **LEFT JOIN THROUGHOUT, and that half is load-bearing.** An innings whose
+  game has no grade is ordinary — a manual upload need not carry one — and an
+  inner join would drop it silently. With a LEFT JOIN the season is NULL and
+  `NULL IS DISTINCT FROM 'cricketstatz'` is TRUE, so it is kept, exactly as
+  `v_effective_games` already does it. The suite pins it.
+- **THE JOINS ARE ALL ON PRIMARY KEYS, so they add no rows.** A view that
+  fanned out would inflate every figure it feeds rather than deflating it.
+- **THE DOWNGRADE HAD TO LEARN THEM TOO.** Undoing 287 drops
+  `seasons.stats_source`, which fails while six views still reference it —
+  found by running it. `_per_innings(..., filtered=False)` regenerates the same
+  column list with the joins removed, from the SAME spec list, so the two
+  directions cannot drift.
+- **Verified against a real Postgres** (the suite is 234 checks now: the same
+  270 from both sources counted once under each choice, all six views dropping
+  the superseded side, and an innings on a grade-less game kept) **with a
+  control run**: with the per-innings views left unfiltered, 18 fail —
+  reporting the reported `{'api': 1, 'manual': 1}` and the boot check naming
+  all six.
+- **FIVE OF THE NEW CHECKS COULD NOT HAVE FAILED AS FIRST WRITTEN.** They
+  asserted 0 rows in the five non-batting views for a game that had no rows in
+  those tables at all. The fixture seeds one synced row in each now.
+- **The neighbouring suites were re-run rather than assumed**: club records 93,
+  season fold 65, shared fixtures 38, retired not out 71, rate coverage 105,
+  match coverage 66.
+
 ### THE PER-GRADE AGGREGATE IS A SECOND TABLE, AND IT DOUBLED TOO (v9.69.7, Sep 2026)
 
 Reported after an undo and a fresh import: a career back to nearly 600 games.
