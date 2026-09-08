@@ -1454,6 +1454,15 @@ async def verify_synced_overlap(engine, session_maker) -> None:
         for statement in SUPERSEDED_DDL:
             await conn.execute(text(statement))
         after = await importer_ddl.verify(conn)
+    # MIGRATION 291 GAVE `manual_batting_innings` ITS OWN `caught_behind`, and
+    # this module re-issues that view LAST in the lifespan — so selecting NULL
+    # there would silently revert someone else's feature on every boot.
+    batting = next(st for st in SUPERSEDED_DDL
+                   if "VIEW v_effective_batting_innings" in st)
+    check("the batting view keeps 291's manual caught_behind",
+          "NULL::boolean AS caught_behind" not in batting
+          and batting.count("caught_behind") >= 2, batting[-400:])
+
     check("a view carrying its source clause is reported as sound",
           all(before.values()), str(before))
     check("a view that has lost it is caught rather than assumed",

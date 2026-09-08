@@ -43,6 +43,11 @@ from __future__ import annotations
 
 STATEMENTS: tuple[str, ...] = (
     "ALTER TABLE seasons ADD COLUMN IF NOT EXISTS stats_source TEXT",
+    # Migration 291's column, guarded here too: this module re-issues
+    # v_effective_batting_innings, which reads it, and a view cannot be
+    # created against a column that is not there yet.
+    "ALTER TABLE manual_batting_innings ADD COLUMN IF NOT EXISTS "
+    "caught_behind BOOLEAN",
     # Tiny by construction — only the seasons a club has re-sourced — so the
     # views' own test is an index lookup rather than a scan.
     "CREATE INDEX IF NOT EXISTS ix_seasons_stats_source "
@@ -464,7 +469,10 @@ _PER_INNINGS_SPECS = (
         "t.id, t.manual_game_id AS game_id, t.player_id, t.innings_number, "
         "t.runs, t.balls, t.fours, t.sixes, t.strike_rate, t.dismissal_type, "
         "t.not_out, t.batting_position, t.did_not_bat, 'manual'::text AS source, "
-        "NULL::boolean AS caught_behind",
+        # Migration 291 gave manual_batting_innings its own caught_behind, and
+        # this module re-issues the view LAST in the lifespan — selecting NULL
+        # here would silently revert that feature on every boot.
+        "t.caught_behind",
     ),
     (
         "v_effective_bowling_spells", "bowling_spells", "manual_bowling_spells",

@@ -9,15 +9,15 @@ record board listing the same 270 twice and a career at 14,806 runs.
 Re-runs services/superseded_ddl.STATEMENTS, which 287 and 290 also run. Every
 statement is idempotent.
 
-Revision ID: 291
-Revises: 290
+Revision ID: 292
+Revises: 291
 """
 from alembic import op
 
 from app.services.superseded_ddl import STATEMENTS
 
-revision = "291"
-down_revision = "290"
+revision = "292"
+down_revision = "291"
 branch_labels = None
 depends_on = None
 

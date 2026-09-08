@@ -7574,6 +7574,15 @@ NEVER double count games.*
 - **The neighbouring suites were re-run rather than assumed**: club records 93,
   season fold 65, shared fixtures 38, retired not out 71, rate coverage 105,
   match coverage 66.
+- **THIS MODULE NOW OWNS `v_effective_batting_innings`, WHICH MEANS IT CARRIES
+  EVERYONE ELSE'S CHANGES TO IT.** Migration 291 landed on `main` in parallel,
+  giving `manual_batting_innings` its own `caught_behind` and re-issuing the
+  view to select it. `superseded_ddl` re-issues that view LAST in the lifespan,
+  so selecting `NULL::boolean` there would silently revert that feature on
+  every boot. The suite pins it structurally. **A change to any of these eight
+  views has to be made HERE, or it lasts until the next restart.** The
+  migration was renumbered 291 → 292 for the same collision — check
+  `origin/main` at the moment you merge, not only when you first number one.
 
 ### THE PER-GRADE AGGREGATE IS A SECOND TABLE, AND IT DOUBLED TOO (v9.69.7, Sep 2026)
 
