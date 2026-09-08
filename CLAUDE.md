@@ -104,6 +104,14 @@ then hands the visitor the StreamYard link. Webinar Mon 21 Sep 2026.
   a fetch in front of the H1 is a fetch in front of LCP); the suite asserts the
   two copies agree rather than trusting them, the arrangement `billing_pricing.py`
   and `pricing.js` already have.
+- **THE SERVER DECIDES WHETHER THE EVENT HAS PASSED; THE LOCAL CLOCK ONLY
+  COVERS THE FIRST PAINT.** Found by the browser suite: the first cut derived
+  `past` from the mirrored date alone and ignored the server's own `is_past`, so
+  a visitor whose device clock is days out would be shown the wrong state
+  entirely — offered a recording that does not exist yet, or sent to a stream
+  that has already finished. `webinarState({ isPast })` takes the server's
+  answer whenever it has one and falls back to the clock until the request
+  lands. Seven checks failed on exactly this.
 - **THE RECORDING LINK IS A SETTING, NOT A CONSTANT.** It does not exist until
   after the event, and the hour afterwards is when interest peaks — waiting on a
   deploy would spend it. `platform_settings.webinar_recording_url` (a new

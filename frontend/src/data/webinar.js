@@ -50,12 +50,20 @@ export function isWebinarPast(now = new Date()) {
   return now >= webinarEnd()
 }
 
-// Everything either page needs to render, from the one constant. `recordingUrl`
-// comes from the server (a super admin pastes it into General Settings after
-// the event) — until then a past event says the recording is coming rather
-// than offering a link that goes nowhere.
-export function webinarState({ now = new Date(), recordingUrl = null } = {}) {
-  const past = isWebinarPast(now)
+// Everything either page needs to render, from the one constant.
+//
+// `isPast` is the SERVER's own answer (`GET /public/webinar`) and wins whenever
+// it is given: the server's clock is right, and a visitor whose device clock is
+// days out would otherwise be shown the wrong state entirely — offered a
+// recording that does not exist yet, or sent to a stream that has finished.
+// The local clock is the fallback, so the first paint is correct before the
+// request lands rather than waiting on it.
+//
+// `recordingUrl` also comes from the server (a super admin pastes it into
+// General Settings after the event). Until then a past event says the recording
+// is coming rather than offering a link that goes nowhere.
+export function webinarState({ now = new Date(), recordingUrl = null, isPast = null } = {}) {
+  const past = typeof isPast === 'boolean' ? isPast : isWebinarPast(now)
   return {
     past,
     // What the button does, and what the success state hands over.

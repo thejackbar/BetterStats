@@ -451,7 +451,12 @@ export default function Demo() {
   }, [])
 
   const state = {
-    ...webinarState({ recordingUrl: details?.recording_available ? details.watch_url : null }),
+    ...webinarState({
+      // The server decides whether the event has been and gone; the local
+      // constant only covers the moment before its answer arrives.
+      isPast: typeof details?.is_past === 'boolean' ? details.is_past : null,
+      recordingUrl: details?.recording_available ? details.watch_url : null,
+    }),
     roles: details?.roles || ['President', 'Secretary', 'Committee', 'Coach', 'Captain', 'Player', 'Other'],
   }
 
