@@ -8040,6 +8040,51 @@ figure.
   writes the old definitions. It will announce itself in the database log the
   next time it tries, and a club's figures no longer depend on finding it.
 
+### IT WAS OUR OWN BOOT PATH, TWO THOUSAND LINES LATER (v9.70.11, Sep 2026)
+
+`app/main.py` applies the superseded views at **line 4319** and verifies them
+three lines on — which is why the boot honestly logged `8 of 8`. At **line
+5786** the migration 266 mirror loads that migration's module by file path and
+re-executes `EFFECTIVE_GAMES_WITH_STATUS` and `SEASON_STATS_NET_OF_UNPLAYED`:
+266's own, pre-pairing definitions of the same two views. Every boot, on every
+club holding both sources, that put the duplicates straight back.
+
+- **IT SUCCEEDS SILENTLY BECAUSE THE COLUMN LISTS MATCH.** The pairing clause
+  is a join and a WHERE, not a column, so 266's version has exactly the columns
+  ours has and `CREATE OR REPLACE VIEW` takes it without a word. The six
+  per-innings views were never touched because 266 does not define them — which
+  is the "six current, two stale" state that matches no version of this code
+  and sent four rounds of diagnosis looking for an external process.
+- **THE FIX IS ORDER OF OWNERSHIP, NOT A GUARD.** `superseded_ddl` owns both
+  views now, so the mirror applies 266's COLUMN and INDEX and nothing else. The
+  module that owns them guarantees `games.status` itself, since it runs first.
+- **THE GUARD COLUMN WAS THE WRONG ANSWER AND IT TOOK THE SITE DOWN.** Adding a
+  column no older definition has makes the overwrite fail loudly instead of
+  silently — sound reasoning, and it turned a silent revert into a crash-loop
+  at boot, because the process doing the overwriting was ours. Reverted within
+  minutes. **A guard that converts a silent failure into a hard one has to be
+  preceded by knowing who trips it.**
+- **AND THAT CRASH IS WHAT NAMED IT.** Four rounds of instrumenting the app,
+  reading the database log and chasing a second compose project found nothing;
+  one hard failure printed the offending statement and the traceback pointed at
+  the lifespan. Worth remembering both ways: the guard was premature AND it
+  answered the question.
+- **THE GREP THAT MISSED IT.** `grep "v_effective_games" app/main.py` returns
+  one comment — the SQL lives in the migration file and main.py only names the
+  CONSTANTS. **Searching a lifespan for a view's own name is not enough when a
+  mirror imports its statements.** Search for what executes, not only for what
+  is written.
+- **The hourly `repair_effective_views` (v9.70.8) stays.** It is the net for a
+  database already overwritten, and for anything that drops and recreates
+  rather than replacing.
+- **Verified against a real Postgres** (the suite is 305 checks: the mirror no
+  longer naming either view, still applying the column and index, and the
+  owning module guaranteeing that column itself) **with a control run**: with
+  the two view statements put back in the mirror, the check fails. Every
+  neighbouring suite re-run: club records 93, match coverage 66, competitions
+  136, rate coverage 105, season fold 65, shared fixtures 38, retired not out
+  71, boundary counts 27.
+
 ### AND POSTGRES'S OWN LOG NAMED THE SHAPE OF IT (v9.70.8, Sep 2026)
 
 The boot check logged **8 of 8** and two of the views were the pre-pairing

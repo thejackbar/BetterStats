@@ -74,6 +74,12 @@ STATEMENTS: tuple[str, ...] = (
     # created against a column that is not there yet.
     "ALTER TABLE manual_batting_innings ADD COLUMN IF NOT EXISTS "
     "caught_behind BOOLEAN",
+    # Migration 266's column, guarded for the same reason: this module owns
+    # v_effective_games and v_effective_player_season_stats, both of which read
+    # `games.status`, and it runs BEFORE the 266 mirror further down the boot.
+    "ALTER TABLE games ADD COLUMN IF NOT EXISTS status TEXT",
+    "CREATE INDEX IF NOT EXISTS ix_games_status_not_played "
+    "ON games (status) WHERE status IN ('ABANDONED', 'CANCELLED')",
     # Tiny by construction — only the seasons a club has re-sourced — so the
     # views' own test is an index lookup rather than a scan.
     "CREATE INDEX IF NOT EXISTS ix_seasons_stats_source "

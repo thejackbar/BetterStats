@@ -5803,12 +5803,19 @@ async def lifespan(app: FastAPI):
         _spec = _ilu.spec_from_file_location("_bs_migration_266", _mig_path)
         _mig266 = _ilu.module_from_spec(_spec)
         _spec.loader.exec_module(_mig266)
-        for _stmt in (
-            _mig266.ADD_STATUS,
-            _mig266.ADD_INDEX,
-            _mig266.EFFECTIVE_GAMES_WITH_STATUS,
-            _mig266.SEASON_STATS_NET_OF_UNPLAYED,
-        ):
+        # THE COLUMN AND ITS INDEX ONLY. The two views 266 defines are owned by
+        # services/superseded_ddl now, which re-issues them further UP this
+        # function with the match-pairing clause on top of everything 266 had.
+        #
+        # Re-issuing 266's versions here put them straight back, every boot,
+        # silently — the pairing clause is a join and a WHERE, so the column
+        # lists match and CREATE OR REPLACE accepts it without a word. A club
+        # holding both a CricketStatz import and a Cricket Australia sync then
+        # counted every shared match twice: one reported career read 547
+        # matches and 28 hundreds against the club's own 372 and 17. The boot
+        # check three lines after the superseded block logged "8 of 8" and was
+        # telling the truth; this ran two thousand lines later and undid it.
+        for _stmt in (_mig266.ADD_STATUS, _mig266.ADD_INDEX):
             await conn.execute(text(_stmt))
 
     # Ensure uploads directory exists

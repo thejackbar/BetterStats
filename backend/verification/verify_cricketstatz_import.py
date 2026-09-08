@@ -2077,6 +2077,7 @@ def verify_matcher() -> None:
     # leaves a club counting both sources with nothing on screen to say so.
     root = Path(__file__).resolve().parent.parent / "app"
     main_src = (root / "main.py").read_text()
+    pairing_ddl_src = (root / "services" / "superseded_ddl.py").read_text()
     check("the boot re-derives the pairing for a club that holds an import",
           "match_pairing" in main_src and "_run_match_pairing_sweep" in main_src)
     orgs_src = (root / "routers" / "organisations.py").read_text()
@@ -2115,6 +2116,25 @@ def verify_matcher() -> None:
           "Effective views carrying their source clause" in main_src)
     check("and it still names each view that is missing its clause",
           "SCHEMA MISMATCH" in main_src)
+
+    # AND NOTHING FURTHER DOWN THE BOOT PUTS THE OLD DEFINITION BACK. This is
+    # what was actually happening: the superseded block applies all eight views
+    # and verifies them, and two thousand lines later the migration 266 mirror
+    # re-issued ITS versions of the two it defines. The pairing clause is a
+    # join and a WHERE, so the column lists match and CREATE OR REPLACE takes
+    # it silently — every boot, on every club holding both sources, one
+    # reported career reading 547 matches and 28 hundreds against its own 372
+    # and 17. The boot check logged "8 of 8" and was right; this undid it after.
+    check("the migration 266 mirror no longer re-issues the two views this "
+          "module owns",
+          "_mig266.EFFECTIVE_GAMES_WITH_STATUS" not in main_src
+          and "_mig266.SEASON_STATS_NET_OF_UNPLAYED" not in main_src)
+    check("but it still applies the column and index those views read",
+          "_mig266.ADD_STATUS" in main_src and "_mig266.ADD_INDEX" in main_src)
+    check("and the module that owns them guarantees that column itself, since "
+          "it runs first",
+          "ALTER TABLE games ADD COLUMN IF NOT EXISTS status TEXT"
+          in pairing_ddl_src)
 
     # AND A VIEW THAT LOSES ITS CLAUSE AFTER BOOT IS PUT BACK. The boot
     # verified 8 of 8 and two were the pre-pairing definition again minutes
