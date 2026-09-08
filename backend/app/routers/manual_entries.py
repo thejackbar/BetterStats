@@ -132,6 +132,9 @@ class ManualBattingIn(BaseModel):
     sixes: Optional[int] = 0
     strike_rate: Optional[float] = None
     dismissal_type: Optional[str] = None
+    # NULL means the card does not say, which reads as a plain catch (migration
+    # 291). Only a source that genuinely records the keeper's catch sets it.
+    caught_behind: Optional[bool] = None
     not_out: bool = False
     did_not_bat: bool = False
 
@@ -1058,6 +1061,7 @@ async def _replace_game_children(
             sixes=x.sixes,
             strike_rate=x.strike_rate,
             dismissal_type=x.dismissal_type,
+            caught_behind=x.caught_behind,
             not_out=x.not_out,
             did_not_bat=x.did_not_bat,
         ))
@@ -2291,7 +2295,7 @@ GAME_CSV_COLUMNS = [
     "is_final", "match_format", "home_team", "away_team", "winning_team", "result",
     "player_name", "innings_number", "batting_position",
     "batting_runs", "batting_balls", "batting_fours", "batting_sixes",
-    "batting_not_out", "did_not_bat", "dismissal_type",
+    "batting_not_out", "did_not_bat", "dismissal_type", "batting_caught_behind",
     "bowling_overs", "bowling_maidens", "bowling_runs", "bowling_wickets",
     "bowling_wides", "bowling_no_balls",
     "fielding_catches", "fielding_catches_wk", "fielding_run_outs", "fielding_stumpings",
@@ -2446,6 +2450,12 @@ async def _write_games(
                             fours=_parse_int(raw.get("batting_fours")),
                             sixes=_parse_int(raw.get("batting_sixes")),
                             dismissal_type=(raw.get("dismissal_type") or "").strip() or None,
+                            # Blank stays NULL — "the sheet does not say" is a
+                            # different answer from "not the keeper", and only
+                            # NULL reads as a plain catch downstream.
+                            caught_behind=(_parse_bool(raw["batting_caught_behind"])
+                                           if (raw.get("batting_caught_behind") or "").strip()
+                                           else None),
                             # Same rule as ManualBattingIn: a spreadsheet naming a
                             # retired-not-out or retired-hurt dismissal is naming a
                             # not out, whether or not the sheet has that column.

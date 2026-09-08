@@ -295,6 +295,12 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE batting_innings ADD COLUMN IF NOT EXISTS caught_behind BOOLEAN"
         ))
+        # Migration 291: the MANUAL side carries it too now. A hand-entered or
+        # imported card that knows the keeper took the catch had that fact
+        # thrown away by the hardcoded NULL this replaces.
+        await conn.execute(text(
+            "ALTER TABLE manual_batting_innings ADD COLUMN IF NOT EXISTS caught_behind BOOLEAN"
+        ))
         await conn.execute(text("""
             CREATE OR REPLACE VIEW v_effective_batting_innings AS
             SELECT
@@ -310,7 +316,7 @@ async def lifespan(app: FastAPI):
                 runs, balls, fours, sixes, strike_rate,
                 dismissal_type, not_out, batting_position, did_not_bat,
                 'manual'::text AS source,
-                NULL::boolean AS caught_behind
+                caught_behind
             FROM manual_batting_innings
         """))
         # Bowling: flag caught-behind on bowler_wickets (migration 076). Read

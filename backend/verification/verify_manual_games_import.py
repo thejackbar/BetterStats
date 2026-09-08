@@ -121,6 +121,11 @@ def game_row(**kw) -> dict:
     return row
 
 
+# The sheet a club's converted history actually looks like. Dismissals are
+# in BetterStats' OWN stored vocabulary — short and lowercase, per
+# sync._GR_DISMISSAL_SHORT — because that is what the donut's CASE matches
+# on, case-sensitively. A human-readable 'Caught' falls through to ELSE and
+# draws its own slice beside the real one.
 # The sheet a club's converted history actually looks like: a season, a grade
 # and most of the people are new, one person is already on the roster, one is
 # the same person under a slightly different spelling.
@@ -131,7 +136,7 @@ SHEET = [
              winning_team="Shoalwater Bay", result="Won",
              player_name="Guest, Rob", innings_number="1", batting_position="1",
              batting_runs="19", batting_fours="2", batting_sixes="0",
-             batting_not_out="false", did_not_bat="false", dismissal_type="Bowled",
+             batting_not_out="false", did_not_bat="false", dismissal_type="b",
              bowling_overs="8.0", bowling_maidens="1", bowling_runs="30",
              bowling_wickets="2", fielding_catches="1"),
     game_row(game_key="1992-001", played_at="1992-10-17", opposition="Mandurah",
@@ -141,18 +146,26 @@ SHEET = [
     game_row(game_key="1992-001", played_at="1992-10-17", opposition="Mandurah",
              venue="Peelwood", season_name="1992/93", grade_name="Grade 2",
              player_name="Barlow, Craig R", innings_number="1", batting_position="3",
-             batting_runs="12", did_not_bat="false", dismissal_type="Caught"),
+             batting_runs="12", did_not_bat="false", dismissal_type="c",
+             batting_caught_behind="true"),
+    # A PLAIN catch, so "the keeper's one is not swept in with the ordinary
+    # ones" has something to be true about. An already-matched name, to leave
+    # the unresolved count alone.
+    game_row(game_key="1992-001", played_at="1992-10-17", opposition="Mandurah",
+             venue="Peelwood", season_name="1992/93", grade_name="Grade 2",
+             player_name="Held, Harry", innings_number="1", batting_position="4",
+             batting_runs="8", did_not_bat="false", dismissal_type="c"),
     # second leg of the same two-day match, as its own innings
     game_row(game_key="1992-001", played_at="1992-10-17", opposition="Mandurah",
              venue="Peelwood", season_name="1992/93", grade_name="Grade 2",
              player_name="Guest, Rob", innings_number="2", batting_position="1",
-             batting_runs="4", did_not_bat="false", dismissal_type="LBW"),
+             batting_runs="4", did_not_bat="false", dismissal_type="lbw"),
     # a second match, in a season the club DOES hold, under its existing grade
     game_row(game_key="2010-001", played_at="2010-11-13", opposition="Bayswater",
              venue="Hyde Park", season_name="Summer 2010/11", grade_name="1st Grade",
              player_name="Held, Harry", innings_number="1", batting_position="4",
              batting_runs="45", batting_balls="60", did_not_bat="false",
-             dismissal_type="Run out", bowling_overs="8.2", bowling_maidens="2",
+             dismissal_type="run out", bowling_overs="8.2", bowling_maidens="2",
              bowling_runs="25", bowling_wickets="3", bowling_wides="1",
              fielding_catches_wk="2", fielding_stumpings="1"),
 ]
@@ -358,11 +371,20 @@ async def main() -> None:
             and old.venue == "Hyde Park"))
 
         bat = (await session.execute(select(ManualBattingInnings))).scalars().all()
-        check("every batting row is written", len(bat) == 5, str(len(bat)))
+        check("every batting row is written", len(bat) == 6, str(len(bat)))
         check("a not out is flagged", any(b.not_out for b in bat))
         check("the second leg is its own innings, not a duplicate of the first",
               sorted({b.innings_number for b in bat}) == [1, 2],
               str(sorted({b.innings_number for b in bat})))
+        cb = [b for b in bat if b.caught_behind]
+        check("a keeper's catch is stored as one — the sheet said so and the "
+              "column now exists to hold it (migration 291)",
+              len(cb) == 1 and cb[0].dismissal_type == "c",
+              str([(b.dismissal_type, b.caught_behind) for b in bat]))
+        check("and a plain catch stays NULL, not false — the card saying "
+              "nothing is a different answer from the card saying not the keeper",
+              all(b.caught_behind is None for b in bat if b not in cb),
+              str([b.caught_behind for b in bat]))
         bowl = (await session.execute(select(ManualBowlingSpell))).scalars().all()
         check("bowling figures land, overs in cricket notation",
               sorted(round(float(b.overs), 1) for b in bowl) == [8.0, 8.2],
@@ -372,6 +394,38 @@ async def main() -> None:
         check("keeper catches and stumpings are kept apart",
               any(f.catches_wk == 2 and f.stumpings == 1 for f in fld),
               str([(f.catches, f.catches_wk, f.stumpings) for f in fld]))
+
+    print("\n-- AND IT REACHES THE DONUT, which is the whole point of storing it --")
+    async with Session() as session:
+        rows = (await session.execute(text("""
+            SELECT CASE
+                WHEN bi.not_out THEN 'not out'
+                WHEN bi.dismissal_type IS NULL THEN 'unknown'
+                WHEN bi.dismissal_type = 'b' OR bi.dismissal_type LIKE 'b %' THEN 'bowled'
+                WHEN (bi.dismissal_type = 'c' OR bi.dismissal_type LIKE 'c %')
+                     AND bi.caught_behind IS TRUE THEN 'caught behind'
+                WHEN bi.dismissal_type = 'c' OR bi.dismissal_type LIKE 'c %' THEN 'caught'
+                WHEN bi.dismissal_type = 'lbw' OR bi.dismissal_type LIKE 'lbw %' THEN 'lbw'
+                WHEN bi.dismissal_type = 'st' OR bi.dismissal_type LIKE 'st %' THEN 'stumped'
+                WHEN bi.dismissal_type LIKE 'run out%' THEN 'run out'
+                ELSE bi.dismissal_type END AS kind,
+                COUNT(*) AS n
+            FROM v_effective_batting_innings bi
+            WHERE bi.runs IS NOT NULL AND bi.did_not_bat IS NOT TRUE
+            GROUP BY 1
+        """))).mappings().all()
+        kinds = {r["kind"]: r["n"] for r in rows}
+        # The SHIPPED CASE, run over the SHIPPED view — this is what the
+        # profile's How I Get Out donut actually asks.
+        check("the view serves the flag through from the manual table rather "
+              "than the hardcoded NULL it used to",
+              kinds.get("caught behind") == 1, str(kinds))
+        check("and a plain catch is still just a catch, not swept in with it",
+              kinds.get("caught") == 1, str(kinds))
+        check("the run out, the LBW and the bowled all classify too — none of "
+              "them falls through to a slice named after itself",
+              kinds.get("run out") == 1 and kinds.get("lbw") == 1
+              and kinds.get("bowled") == 1, str(kinds))
 
     print("\n-- THE UNDO TAKES BACK WHAT IT CREATED, AND ONLY THAT --")
     async with Session() as session:

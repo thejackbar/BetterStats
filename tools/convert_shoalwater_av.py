@@ -112,12 +112,22 @@ DISMISSALS = {0: "Bowled", 1: "Caught", 2: "LBW", 3: "Stumped",
 # branch and becomes its own slice sitting beside the real one. Verified in
 # Postgres against the shipped CASE rather than reasoned about.
 #
-# `c wk` and `c & b` both start "c " and so read as catches, which is right for
-# both. The keeper detail survives only in this text: `manual_batting_innings`
-# has no `caught_behind` column (the synced table does, migration 075), so a
-# manual game cannot fill the donut's own caught-behind slice.
+# A KEEPER'S CATCH IS A PLAIN `c` PLUS THE FLAG, which is exactly how the sync
+# stores one - the scorecard appends its own "(wk)" from `caught_behind`, so
+# spelling it in the text as well renders "c wk (wk)". Migration 291 gave
+# `manual_batting_innings` that column, so the club's own code 14 now survives
+# all the way to the How I Get Out donut instead of being read out of a
+# thirty-year-old file and dropped at the last step.
+#
+# `c & b` keeps its text: there is no flag for caught and bowled, and it still
+# starts "c " so it reads as a catch.
 IMPORT_DISMISSALS = {0: "b", 1: "c", 2: "lbw", 3: "st", 4: "run out",
-                     13: "c & b", 14: "c wk"}
+                     13: "c & b", 14: "c"}
+
+# The codes that ARE a catch by the wicket keeper, carried as the flag rather
+# than as words. A set, so a second such code can be added without touching
+# anything that reads it.
+CAUGHT_BEHIND_CODES = frozenset({14})
 
 
 def dismissal_label(code) -> str:
@@ -696,7 +706,7 @@ GAME_CSV_COLUMNS = [
     "is_final", "match_format", "home_team", "away_team", "winning_team", "result",
     "player_name", "innings_number", "batting_position",
     "batting_runs", "batting_balls", "batting_fours", "batting_sixes",
-    "batting_not_out", "did_not_bat", "dismissal_type",
+    "batting_not_out", "did_not_bat", "dismissal_type", "batting_caught_behind",
     "bowling_overs", "bowling_maidens", "bowling_runs", "bowling_wickets",
     "bowling_wides", "bowling_no_balls",
     "fielding_catches", "fielding_catches_wk", "fielding_run_outs", "fielding_stumpings",
@@ -758,6 +768,12 @@ def build_game_rows(seasons: list, club: str) -> list:
                         # left blank rather than imported as a made-up method
                         "dismissal_type": IMPORT_DISMISSALS.get(b["dismissal_code"], "")
                                           if b["batted"] and not b["not_out"] else "",
+                        # Blank, never "false": the card saying nothing is a
+                        # different answer from the card saying it was not the
+                        # keeper, and only blank reads as a plain catch.
+                        "batting_caught_behind":
+                            "true" if (b["batted"] and not b["not_out"]
+                                       and b["dismissal_code"] in CAUGHT_BEHIND_CODES) else "",
                         "bowling_overs": b["overs"] if b["bowled"] else "",
                         "bowling_maidens": b["maidens"] if b["bowled"] else "",
                         "bowling_runs": b["conceded"] if b["bowled"] else "",

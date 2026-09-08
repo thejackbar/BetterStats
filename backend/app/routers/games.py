@@ -593,15 +593,15 @@ async def get_scorecard(
             # innings) is the fallback. See services/rate_coverage.py.
             "strike_rate": rc.innings_strike_rate(bi.runs, bi.balls, bi.strike_rate),
             "dismissal_type": bi.dismissal_type,
-            # `caught_behind` is a SYNCED-only column (migration 075) —
-            # `manual_batting_innings` has no equivalent, because the AI
-            # scorecard reader transcribes a dismissal exactly as the card
-            # writes it and never judges whether the catcher was the keeper.
-            # Reading it off a manual row raised AttributeError and took the
-            # whole endpoint down with a 500, so an uploaded card could be
-            # listed on the Games page and never opened. NULL is the honest
-            # answer and every reader already treats it as a plain catch.
-            "caught_behind": None if is_manual else bi.caught_behind,
+            # Carried on BOTH tables now (migration 291). It used to be
+            # synced-only, and reading it off a manual row raised
+            # AttributeError and took the whole endpoint down with a 500 — an
+            # uploaded card could be listed on the Games page and never
+            # opened. It is a real column on both sides, so the branch is
+            # gone. NULL still means the card does not say, which every reader
+            # treats as a plain catch; the AI scorecard reader sets none, and
+            # a source that genuinely records the keeper's catch does.
+            "caught_behind": bi.caught_behind,
             "not_out": bi.not_out,
             "batting_position": bi.batting_position,
             "did_not_bat": bool(bi.did_not_bat),

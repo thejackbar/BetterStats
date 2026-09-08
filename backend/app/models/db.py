@@ -2230,6 +2230,10 @@ class ManualBattingInnings(Base):
     sixes = Column(Integer, server_default="0", nullable=True)
     strike_rate = Column(Numeric(6, 2), nullable=True)
     dismissal_type = Column(Text, nullable=True)
+    # NULL = the card does not say (migration 291), which every reader treats
+    # as a plain catch. Only a source that genuinely records the keeper's catch
+    # sets it — the synced table has carried the same flag since 075.
+    caught_behind = Column(Boolean, nullable=True)
     not_out = Column(Boolean, server_default="false", nullable=False)
     did_not_bat = Column(Boolean, server_default="false", nullable=False)
 
