@@ -2104,6 +2104,18 @@ def verify_matcher() -> None:
     check("and it says what it did whether or not anything changed",
           'logger.info("Match pairing for %s: %s", _org, res)' in main_src)
 
+    # AND THE SCHEMA CHECK SAYS SO EVERY BOOT, NOT ONLY WHEN IT IS WRONG.
+    # Reported live: two of the eight views were the pre-pairing definition
+    # while the other six were current — a state no version of this code can
+    # produce, since all eight are applied in one transaction. The check had
+    # been finding it on every boot and only ever logged on failure, so
+    # "ran and found nothing" and "never ran" were indistinguishable from
+    # outside. Same lesson the sweep above already records.
+    check("the effective-view check reports on every boot, not only on failure",
+          "Effective views carrying their source clause" in main_src)
+    check("and it still names each view that is missing its clause",
+          "SCHEMA MISMATCH" in main_src)
+
     # A CARD QUERY BOUND TO THE CLUB'S PLAYERS ALONE SCANS THE WHOLE PLATFORM'S
     # `batting_innings`, which is slow enough to be killed by a statement
     # timeout — and a pairing pass that dies there is a club counting twice.

@@ -4324,14 +4324,27 @@ async def lifespan(app: FastAPI):
         # the migration as applied. The statements were right; something in the
         # boot path had not run them. Nothing anywhere noticed, which is what
         # made it expensive — so this says so, loudly, rather than assuming.
-        for _view, _ok in (await _superseded.verify(conn)).items():
-            if not _ok:
-                logger.error(
-                    "SCHEMA MISMATCH: %s does not carry its source clause. A "
-                    "club holding both a CricketStatz import and a Cricket "
-                    "Australia sync will count the same match twice until "
-                    "services/superseded_ddl.STATEMENTS is applied to this "
-                    "database.", _view)
+        #
+        # AND IT SAYS SO WHETHER OR NOT ANYTHING IS WRONG. Reported live a
+        # second time: six of the eight views were current and two were the
+        # pre-pairing definition, which no version of this code can produce —
+        # all eight are applied in this one transaction. The check had been
+        # running and finding it every boot; a log that only speaks up on
+        # failure is one nobody has a reason to read, so "ran and found
+        # nothing" and "never ran" looked identical from outside. Same lesson
+        # the match-pairing sweep already records.
+        _views_ok = await _superseded.verify(conn)
+        _views_bad = [v for v, ok in _views_ok.items() if not ok]
+        logger.info("Effective views carrying their source clause: %d of %d%s",
+                    len(_views_ok) - len(_views_bad), len(_views_ok),
+                    "" if not _views_bad else " — MISSING: " + ", ".join(_views_bad))
+        for _view in _views_bad:
+            logger.error(
+                "SCHEMA MISMATCH: %s does not carry its source clause. A "
+                "club holding both a CricketStatz import and a Cricket "
+                "Australia sync will count the same match twice until "
+                "services/superseded_ddl.STATEMENTS is applied to this "
+                "database.", _view)
 
         # Migration 288: configurable club notifications — the switches a club
         # sets, each admin's own opt-out, and the record of what was raised and

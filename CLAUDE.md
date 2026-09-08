@@ -7743,6 +7743,67 @@ simply not run, and nothing anywhere said so.
   and the four real seasons replayed end to end through the shipped
   `reconcile_org` and the shipped script: 706 games -> 404, 302 pairs written.
 
+### THE VIEW IN THE DATABASE WAS NOT THE VIEW IN THE CODE (v9.70.7, Sep 2026)
+
+The end of the same report, and the most expensive part of it. Brad Quinsee's
+career read **547 matches, 15,333 runs, 28 hundreds** against an innings list
+of 336, 9,914 and 16 — his club's own hand count — with **nine shared seasons
+at exactly 2.000x on BOTH runs and innings at once**. Two fixes were shipped
+against it (v9.70.5, v9.70.6), both real bugs, neither this one.
+
+- **THE PAIRING WAS RIGHT AND THE VIEW COULD NOT ACT ON IT.** Read off
+  production: `v_effective_batting_innings` and its five per-innings siblings
+  carried the pairing clause (`superseded_by_game_id` twice each);
+  `v_effective_games` and `v_effective_player_season_stats` carried it **zero
+  times** — they were the pre-pairing definitions. So every imported match was
+  correctly paired, correctly dropped from the innings list, and still counted
+  in the season aggregate beside Cricket Australia's own figure for the same
+  match.
+- **A STATE NO VERSION OF THIS CODE CAN PRODUCE, WHICH IS WHY IT TOOK SO
+  LONG.** All eight views are applied by one loop over
+  `superseded_ddl.STATEMENTS` inside a single `engine.begin()` transaction,
+  with no try/except anywhere around it — verified by parsing the AST, not by
+  reading. Six current and two stale is not a partial application; it is the
+  two having been replaced afterwards by something. **What that something is
+  is NOT established** — the deployed module's own statements were confirmed
+  correct (`x2` and `x3`) and applying them by hand succeeded immediately.
+- **THE REPAIR IS THOSE TWO STATEMENTS, AND NOTHING ELSE.** No migration, no
+  re-pairing, no re-import: `CREATE OR REPLACE VIEW` with the column list
+  untouched. Brad went to **372 / 344 / 10,152 / 17** the moment they ran,
+  against CricketStatz's own 10,444, with `without_scorecard` falling from 173
+  to 0.
+- **THE BOOT CHECK HAD BEEN FINDING IT EVERY BOOT AND SAYING SO TO NOBODY.**
+  `superseded_ddl.verify` has reported both views since v9.69.5 — and only ever
+  logged on FAILURE, so "ran and found nothing" and "never ran" were
+  indistinguishable from outside, and a `grep SCHEMA MISMATCH` over the last
+  day found nothing at all. It logs the count on every boot now, missing views
+  named. **Exactly the lesson v9.70.4 records for the pairing sweep, in the
+  check written to catch that same class of problem.**
+- **THREE CHECKS COULD NOT HAVE FAILED, AND EACH ONE COST A ROUND TRIP.** The
+  diagnostic asked whether the deployed view still carried `pair_prefers_import`
+  — absent from the fixed view AND from the pre-pairing one, so it answered
+  False for both and read as "the fix is live". The needle that separates the
+  three states is how many times the view mentions `superseded_by_game_id`:
+  **3 for the current aggregate view, 2 for a current per-innings view, 0 for a
+  pre-pairing one.** `VERIFIED_VIEWS` already needles that column, which is why
+  `verify()` was right all along and the hand-rolled probe was not.
+- **`python -m app.scripts.inspect_player_aggregate <player> [year]`** is the
+  read-only diagnostic that ended it: the career header split per branch of the
+  view, every row emitted for one season, the raw `player_season_stats` rows
+  behind them, and what `pg_get_viewdef` actually holds. **`ops/` is not in the
+  backend image** — only `backend/` is copied — so a diagnostic has to live in
+  `app/scripts/` to be runnable in the container at all.
+- **THE ORDER THAT WORKED, after three that did not**: measure the ratio per
+  season (nine at exactly 2.000 is arithmetic, not coverage); split the figure
+  by the view's own `source` column; then read the view definition back out of
+  Postgres. The first two say WHICH branch, the third says WHY — and only the
+  third can catch a database that disagrees with the code.
+- **STILL OPEN**: what replaces those two view definitions after the lifespan
+  has applied them. Until that is found, a deploy can silently put a club back
+  to counting both its sources — which is what the every-boot log line now
+  makes visible within seconds rather than after a club reports a doubled
+  career.
+
 ### PREFERRING THE IMPORTED COPY IS A PER-INNINGS DECISION, NEVER AN AGGREGATE ONE (v9.70.6, Sep 2026)
 
 Reported off Brad Quinsee's profile once the pairing was finally running: the
