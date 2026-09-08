@@ -55,6 +55,7 @@ never be paired away — the standing rule at the top of CLAUDE.md.
 """
 from __future__ import annotations
 
+import asyncio
 import re
 from datetime import timedelta
 from dataclasses import dataclass, field
@@ -328,7 +329,11 @@ def assign(imported: list[MatchRow], synced: list[MatchRow]) -> dict[str, tuple[
             if key is not None:
                 scored.append((key, imp.id, syn.id))
 
-    scored.sort(key=lambda row: row[0], reverse=True)
+    # THE IDS ARE THE FINAL TIEBREAK, so the same data always gives the same
+    # assignment. Without them the order of equally-scored candidates follows
+    # frozenset iteration, which is not stable between processes — and a pass
+    # that keeps re-pairing tied clusters writes rows every night for nothing.
+    scored.sort(key=lambda row: (row[0], row[1], row[2]), reverse=True)
     synced_by_id = {m.id: m for m in synced}
     imported_by_id = {m.id: m for m in imported}
     taken: set[str] = set()
@@ -366,11 +371,20 @@ _SYNCED_SQL = """
 # OUR OWN BATTERS, NEVER THE OPPOSITION'S. A fixture between two synced clubs
 # is ONE `games` row carrying both clubs' innings, so a signature built without
 # this join would compare our card against theirs.
+#
+# BOUND TO THE GAMES WE HAVE ALREADY LOADED, and that is not a tidy-up.
+# Filtering on the PLAYER alone left Postgres scanning the whole platform's
+# `batting_innings` — millions of rows for one club's question — which is slow
+# enough to be killed by a statement timeout, and a pairing pass that dies
+# there leaves the club counting both sources with nothing on screen to say so.
+# An id array is a plain restriction the planner pushes into the index; the
+# same lesson the record boards' own timing work records.
 _SYNCED_CARD_SQL = """
     SELECT bi.game_id::text AS id, bi.player_id::text AS player_id, bi.runs
       FROM batting_innings bi
       JOIN players p ON p.id = bi.player_id AND p.organisation_id = :org
-     WHERE NOT bi.did_not_bat AND bi.runs IS NOT NULL
+     WHERE bi.game_id = ANY(CAST(:ids AS UUID[]))
+       AND NOT bi.did_not_bat AND bi.runs IS NOT NULL
 """
 
 _IMPORTED_SQL = """
@@ -387,9 +401,7 @@ _IMPORTED_CARD_SQL = """
     SELECT mbi.manual_game_id::text AS id, mbi.player_id::text AS player_id,
            mbi.runs
       FROM manual_batting_innings mbi
-      JOIN manual_games mg ON mg.id = mbi.manual_game_id
-     WHERE mg.organisation_id = :org
-       AND mg.cricketstatz_import_id IS NOT NULL
+     WHERE mbi.manual_game_id = ANY(CAST(:ids AS UUID[]))
        AND NOT mbi.did_not_bat AND mbi.runs IS NOT NULL
 """
 
@@ -412,20 +424,20 @@ async def load_sides(db: AsyncSession, org_id, season_ids=None
     two sources routinely file the same year under different season rows, so a
     date window is what actually reaches the twin.
     """
-    imp_sql, imp_card_sql = _IMPORTED_SQL, _IMPORTED_CARD_SQL
+    imp_sql = _IMPORTED_SQL
     params = {"org": str(org_id)}
     if season_ids:
-        clause = "\n       AND mg.season_id = ANY(CAST(:seasons AS UUID[]))"
-        imp_sql += clause
-        imp_card_sql += clause
+        imp_sql += "\n       AND mg.season_id = ANY(CAST(:seasons AS UUID[]))"
         params["seasons"] = [str(x) for x in season_ids]
 
     club_tokens = team_tokens((await db.execute(
         text(_CLUB_NAME_SQL), {"org": str(org_id)})).scalar() or "")
 
-    imp_cards = await _cards(db, imp_card_sql, params)
     imported: list[MatchRow] = []
-    for row in (await db.execute(text(imp_sql), params)).mappings():
+    imp_rows = (await db.execute(text(imp_sql), params)).mappings().all()
+    imp_cards = await _cards(db, _IMPORTED_CARD_SQL,
+                             {"ids": [r["id"] for r in imp_rows]})
+    for row in imp_rows:
         ours, opp = split_sides(row["home_team"], row["away_team"],
                                 row["opposition"], club_tokens)
         imported.append(MatchRow(row["id"], row["played_at"], opp,
@@ -441,9 +453,12 @@ async def load_sides(db: AsyncSession, org_id, season_ids=None
                        "    OR (w.played_at >= :from_day AND w.played_at <= :to_day)")
             syn_params |= {"from_day": min(dates) - span, "to_day": max(dates) + span}
 
-    syn_cards = await _cards(db, _SYNCED_CARD_SQL, {"org": str(org_id)})
+    syn_rows = (await db.execute(text(syn_sql), syn_params)).mappings().all()
+    syn_cards = await _cards(db, _SYNCED_CARD_SQL,
+                             {"org": str(org_id),
+                              "ids": [r["id"] for r in syn_rows]})
     synced: list[MatchRow] = []
-    for row in (await db.execute(text(syn_sql), syn_params)).mappings():
+    for row in syn_rows:
         ours, opp = split_sides(row["home_team"], row["away_team"],
                                 row["opposition"], club_tokens)
         synced.append(MatchRow(row["id"], row["played_at"], opp,
@@ -460,7 +475,11 @@ async def reconcile_org(db: AsyncSession, org_id, *, season_ids=None,
                 "prefer_import": 0, "only_cricketstatz": 0, "only_synced": 0,
                 "changed": 0}
 
-    pairs = assign(imported, synced)
+    # OFF THE EVENT LOOP. Matching a club's whole history is seconds of solid
+    # CPU (6.7s for 3,500 matches each side), and running that inline freezes
+    # every other request the API is serving — including the health check a
+    # deploy waits on.
+    pairs = await asyncio.to_thread(assign, imported, synced)
 
     current_sql = """
         SELECT id::text AS id, superseded_by_game_id::text AS pair,
@@ -478,20 +497,57 @@ async def reconcile_org(db: AsyncSession, org_id, *, season_ids=None,
         for row in (await db.execute(text(current_sql), cur_params)).mappings()
     }
 
-    changed = 0
+    # CLEAR EVERY CHANGING ROW BEFORE SETTING ANY OF THEM, AND THAT ORDERING IS
+    # THE WHOLE POINT. `uq_manual_games_superseded_by_game` allows one imported
+    # match per synced game, and a re-derivation routinely MOVES a game from
+    # one imported match to another. Writing row by row, the new holder's
+    # UPDATE can land while the old one still carries it — two rows on one game
+    # for an instant, the unique index refuses it, and the whole transaction
+    # rolls back having written nothing.
+    #
+    # Reported live, and it is what stopped the pairing dead: every run after
+    # the first — the boot sweep, the button and the script alike — died here
+    # and left the club counting both its sources.
+    #
+    # A row keeping its pair cannot be the conflict: the assignment is
+    # one-to-one, so a game moving to a new holder means the old holder's own
+    # value changes too, which puts it in this same list.
+    clear_ids: list[str] = []
+    set_ids: list[str] = []
+    set_games: list[str] = []
+    set_prefers: list[bool] = []
     for imp in imported:
         want = pairs.get(imp.id)
         have = current.get(imp.id, (None, False))
         now = (want[0], want[1]) if want else (None, False)
         if (have[0] or None, bool(have[1])) == now:
             continue
-        changed += 1
+        clear_ids.append(imp.id)
+        if now[0] is not None:
+            set_ids.append(imp.id)
+            set_games.append(now[0])
+            set_prefers.append(bool(now[1]))
+    changed = len(clear_ids)
+
+    if clear_ids:
         await db.execute(text("""
             UPDATE manual_games
-               SET superseded_by_game_id = CAST(:pair AS UUID),
-                   pair_prefers_import = :prefer
-             WHERE id = CAST(:id AS UUID)
-        """), {"id": imp.id, "pair": now[0], "prefer": now[1]})
+               SET superseded_by_game_id = NULL, pair_prefers_import = false
+             WHERE id = ANY(CAST(:ids AS UUID[]))
+        """), {"ids": clear_ids})
+    if set_ids:
+        # One statement rather than a loop: it takes every lock it needs in one
+        # scan, so it cannot race itself — the shape `apply_associations` was
+        # rewritten into after a live deadlock.
+        await db.execute(text("""
+            UPDATE manual_games m
+               SET superseded_by_game_id = v.game_id,
+                   pair_prefers_import = v.prefer
+              FROM (SELECT unnest(CAST(:ids AS UUID[])) AS id,
+                           unnest(CAST(:games AS UUID[])) AS game_id,
+                           unnest(CAST(:prefers AS BOOLEAN[])) AS prefer) v
+             WHERE m.id = v.id
+        """), {"ids": set_ids, "games": set_games, "prefers": set_prefers})
 
     if commit and changed:
         await db.commit()

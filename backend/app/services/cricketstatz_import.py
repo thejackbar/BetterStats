@@ -45,6 +45,7 @@ from app.models.db import (
     Season,
 )
 from app.services import cricketstatz_client as client
+from app.services import boundary_counts
 from app.services import match_pairing
 from app.services.cricketstatz_awards import classify_note
 from app.services.import_ingest import match_players
@@ -573,8 +574,13 @@ async def _write_our_batting(db, org_id, game, inn, seq, caches) -> None:
             batting_position=b.get("batting_position"),
             runs=b.get("runs") or 0,
             balls=b.get("balls"),
-            fours=b.get("fours"),
-            sixes=b.get("sixes"),
+            # The same arithmetic guard the sync applies. A hand-kept card can
+            # carry a boundary count that cannot fit the runs beside it, and a
+            # figure like that belongs on no record board.
+            fours=boundary_counts.clean(b.get("runs") or 0, b.get("fours"),
+                                        b.get("sixes"))[0],
+            sixes=boundary_counts.clean(b.get("runs") or 0, b.get("fours"),
+                                        b.get("sixes"))[1],
             strike_rate=b.get("strike_rate"),
             dismissal_type=b.get("dismissal_type"),
             not_out=bool(b.get("not_out")),

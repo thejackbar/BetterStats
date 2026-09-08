@@ -1,8 +1,8 @@
 export default {
   version: 'v9.71.0',
-  date: '2026-09-15',
-  // Above v9.70.3, or SITE_VERSION never reaches this release.
-  sortKey: '2026-09-15T18:00:00Z',
+  date: '2026-09-17',
+  // Above v9.70.9, or SITE_VERSION never reaches this release.
+  sortKey: '2026-09-17T10:00:00Z',
   title: 'The old external CRM is gone; your engagement scores are not',
   items: [
     'BetterCricket used to push a copy of every prospect club into a second, external CRM. That system has been shut down, and every last connection to it has been taken out — the export, the nightly lead and task scan, the credentials and the dashboard widgets.',

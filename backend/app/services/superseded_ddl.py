@@ -330,18 +330,33 @@ STATEMENTS: tuple[str, ...] = (
         mg_agg.stumpings,
         NULL::text AS grade_label
     FROM (
+        -- A PAIRED IMPORTED MATCH IS NEVER COUNTED HERE, `pair_prefers_import`
+        -- OR NOT, AND THAT IS THE ONE PLACE THIS RULE DIFFERS FROM THE VIEWS
+        -- BESIDE IT. Those are per-match, so a paired synced game can step
+        -- aside and let the imported copy answer. `player_season_stats` is a
+        -- SEASON TOTAL with no per-match granularity: there is no row to drop,
+        -- so Cricket Australia's own figure carries that match whatever we do.
+        -- Counting the imported copy as well is the same match twice —
+        -- reported off a live profile as a career reading 15,333 runs and 28
+        -- hundreds beside an innings list of 9,914 and 16, every shared season
+        -- exactly double the innings beneath it.
+        --
+        -- So at this level the rule is Cricket Australia's totals PLUS the
+        -- imported matches CA does not have at all. Preferring the imported
+        -- copy is a decision about which scorecard to SHOW, and it stays
+        -- per-innings, where there is a row to drop.
         WITH player_games AS (
             SELECT mg.id AS manual_game_id, mg.season_id, mg.grade_id, mbi.player_id
             FROM manual_games mg JOIN manual_batting_innings mbi ON mbi.manual_game_id = mg.id
-            WHERE mg.superseded_by_game_id IS NULL OR mg.pair_prefers_import
+            WHERE mg.superseded_by_game_id IS NULL
             UNION
             SELECT mg.id, mg.season_id, mg.grade_id, mbs.player_id
             FROM manual_games mg JOIN manual_bowling_spells mbs ON mbs.manual_game_id = mg.id
-            WHERE mg.superseded_by_game_id IS NULL OR mg.pair_prefers_import
+            WHERE mg.superseded_by_game_id IS NULL
             UNION
             SELECT mg.id, mg.season_id, mg.grade_id, mfs.player_id
             FROM manual_games mg JOIN manual_fielding_stats mfs ON mfs.manual_game_id = mg.id
-            WHERE mg.superseded_by_game_id IS NULL OR mg.pair_prefers_import
+            WHERE mg.superseded_by_game_id IS NULL
         )
         SELECT
             pg.player_id,

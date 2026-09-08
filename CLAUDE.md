@@ -7889,7 +7889,10 @@ describes choosing a winner per season describes the design this replaces.
   Australia's matches and nothing else; the `manual_game` rollup beside it
   counts only the imported matches that are NOT paired, i.e. the ones CA does
   not have. Neither half can reach the other's matches, so no third branch and
-  no suppression is needed. The same reasoning retires `services/season_source.py`
+  no suppression is needed. **CORRECTED in v9.70.6 below: the first cut of that
+  filter also kept a paired match whose pair `pair_prefers_import`, which counts
+  it twice — a season total has no row for CA's copy to step aside with. At this
+  level a paired match is never counted from the import at all.** The same reasoning retires `services/season_source.py`
   — CA's per-grade aggregate (`player_season_grade_stats`) is counted in full
   and the imported scorecards paired away before they reach the grid's `held`
   side, so the by-grade cell is a union rather than a sum of two records of one
@@ -7949,6 +7952,311 @@ describes choosing a winner per season describes the design this replaces.
   matches still counted twice, and nothing on screen names them. The obvious
   follow-up is a "these look like the same match — are they?" review list, built
   from the near misses the matcher already scores and declines.
+
+### THE PAIRING WAS RIGHT AND NEVER RAN (v9.70.4, Sep 2026)
+
+Reported after v9.70.2 deployed: still 547 matches and 28 hundreds, and the
+club's 2002/03 still holding all 171 games. **The code was correct — replaying
+that club's four real seasons through the SHIPPED `reconcile_org` against a
+local Postgres takes 706 games to 404 and writes 302 pairs.** So the pass had
+simply not run, and nothing anywhere said so.
+
+- **A SILENT LOG CANNOT TELL "RAN AND FOUND NOTHING" FROM "NEVER RAN", and that
+  is what cost the round trip.** The boot sweep logged only when `changed` was
+  non-zero. It logs the club count on the way in and every club's result on the
+  way out now, and a failure logs its traceback rather than one line.
+- **A BARE `asyncio.create_task` IS NOT KEPT ALIVE.** The loop holds a weak
+  reference, so a task that suspends on its first await can be collected before
+  it runs — the trap `iq_opponent`'s own `_BUILD_TASKS` already documents.
+  `main._BACKGROUND_TASKS` holds it and discards it on completion.
+- **A CARD QUERY BOUND TO THE CLUB'S PLAYERS ALONE SCANNED THE WHOLE
+  PLATFORM'S `batting_innings`.** `_SYNCED_CARD_SQL` filtered on
+  `players.organisation_id` and nothing else, so one club's question read every
+  innings on the platform. Both card queries bind the ids of the games already
+  loaded (`= ANY(CAST(:ids AS UUID[]))`), which is the plain restriction the
+  planner pushes into the index — the same lesson the record boards' timing
+  work records, and the reason `load_sides` now reads its rows BEFORE their
+  cards.
+- **MATCHING A WHOLE HISTORY IS SECONDS OF SOLID CPU AND MUST NOT SIT ON THE
+  EVENT LOOP.** Measured with a realistic card distribution (a squad of 60,
+  scores skewed low, so the (player, runs) index buckets are big): 217
+  candidates per imported match at the median and **6.7s** for 3,500 each side.
+  Inline, that freezes every other request the API is serving, the health check
+  a deploy waits on included. `asyncio.to_thread` — verified by running a 50ms
+  heartbeat alongside it, which ticked 119 times during the pass.
+- **AND IT IS RETRIED NIGHTLY** (`jobs/scheduler.pair_all_imported_matches`,
+  02:50 Perth). A pass that only ever fires at boot leaves a club counting both
+  sources indefinitely if that one firing is lost, which is exactly what
+  happened. Costs nothing once it has run: it re-derives and writes only what
+  changed, and a club holding no import never appears in the list.
+- **`python -m app.scripts.pair_imported_matches [<org|all>] [--apply]`** is
+  the way to fix a club now and to see what happened, without waiting on any
+  trigger. Dry run by default, per the house rule; a club that fails is named
+  with its error rather than taking the run down.
+- **THE CAUSE OF THE ONE LOST FIRING IS STILL NOT ESTABLISHED** — the log
+  carried nothing to establish it with, which is the first thing fixed above.
+  Every one of the four changes stands on its own merits regardless.
+- **Verified** (the suite is 277 checks now: both card queries bound to an id
+  list, the matching off the event loop, the boot task held, the sweep
+  reporting whether or not anything changed, and the nightly retry registered)
+  and the four real seasons replayed end to end through the shipped
+  `reconcile_org` and the shipped script: 706 games -> 404, 302 pairs written.
+
+### AND POSTGRES'S OWN LOG NAMED THE SHAPE OF IT (v9.70.8, Sep 2026)
+
+The boot check logged **8 of 8** and two of the views were the pre-pairing
+definition again minutes later, on a running system. `log_statement` is off, so
+Postgres only records a statement that ERRORS — and the database log already
+held the answer, once per minute, on a fresh backend pid each time:
+
+    ERROR:  cannot drop columns from view
+    STATEMENT:  CREATE OR REPLACE VIEW v_effective_games AS ...
+                mg.season_id AS season_id, mg.organisation_id AS organisation_id
+                FROM manual_games mg
+
+- **THAT DEFINITION IS MIGRATION 169's**, ending at `organisation_id` with no
+  `status` column — the one 266 added. So a process outside this codebase was
+  applying a PRE-266 definition, failing, and retrying every 60 seconds.
+- **AND IT EXPLAINS WHY ONLY TWO OF THE EIGHT MOVED.** Our
+  `v_effective_games` adds no COLUMNS — the pairing clause is a join and a
+  WHERE — so a **266-era** definition has the identical column list and
+  `CREATE OR REPLACE` accepts it silently, taking the pairing clause with it. A
+  **169-era** one fails loudly. Same for the season-stats view. The six
+  per-innings views are newer than anything that process knows about, so it
+  never touches them. Six current and two stale, which no version of this code
+  can produce, is exactly what an older one overwriting two of them looks like.
+- **A SILENT SUCCESS IS INVISIBLE UNTIL YOU ASK FOR IT.** `log_statement =
+  'ddl'` (a reload, no restart) is what makes the writer name itself —
+  `log_line_prefix` carrying `%h` and `%a` gives the client host and
+  application. **The failing statements were free evidence that had been in the
+  log the whole time**; reach for the DATABASE log before instrumenting the
+  application.
+- **WHAT IS STILL OPEN**: which process. The pre-266 loop had stopped by the
+  time this was found (zero occurrences the following day), and the successful
+  writes were never logged. `log_statement='ddl'` is on now, so the next one is
+  named.
+- **SO THE APP STOPS DEPENDING ON THE BOOT GETTING IT RIGHT.**
+  `jobs/scheduler.repair_effective_views` runs hourly: `superseded_ddl.verify`,
+  and where a view has lost its clause it re-applies the SHIPPED `STATEMENTS`
+  and logs what it repaired. It writes nothing when nothing is wrong, which is
+  every deployment that holds no import. **This is not a substitute for finding
+  the process** — it is what stops a club's career doubling in the meantime,
+  because the cost of waiting is paid by whoever reads their own total.
+- **THE JOB IS EXERCISED, NOT GREPPED FOR.** The suite applies the pre-pairing
+  definitions out of `superseded_ddl.DOWNGRADE` — the same shape the older
+  image writes — asserts the boot's own check sees them, runs the SHIPPED
+  `repair_effective_views`, and asserts all eight come back and a second run
+  writes nothing.
+- **Verified against a real Postgres** (the suite is 302 checks) **with a
+  control run**: with the job removed, 3 fail and the rest are REPORTED rather
+  than crashing on the import.
+- **A FUNCTION INSERTED MID-BODY SPLITS THE ONE IT LANDS IN.** The first cut
+  put `verify_view_repair` after a check inside `verify_matcher`, so the rest of
+  that function became part of the new one and died on a `NameError` for a local
+  defined above the split. Caught by running it; a structural check would not
+  have seen it.
+
+### THE VIEW IN THE DATABASE WAS NOT THE VIEW IN THE CODE (v9.70.7, Sep 2026)
+
+The end of the same report, and the most expensive part of it. Brad Quinsee's
+career read **547 matches, 15,333 runs, 28 hundreds** against an innings list
+of 336, 9,914 and 16 — his club's own hand count — with **nine shared seasons
+at exactly 2.000x on BOTH runs and innings at once**. Two fixes were shipped
+against it (v9.70.5, v9.70.6), both real bugs, neither this one.
+
+- **THE PAIRING WAS RIGHT AND THE VIEW COULD NOT ACT ON IT.** Read off
+  production: `v_effective_batting_innings` and its five per-innings siblings
+  carried the pairing clause (`superseded_by_game_id` twice each);
+  `v_effective_games` and `v_effective_player_season_stats` carried it **zero
+  times** — they were the pre-pairing definitions. So every imported match was
+  correctly paired, correctly dropped from the innings list, and still counted
+  in the season aggregate beside Cricket Australia's own figure for the same
+  match.
+- **A STATE NO VERSION OF THIS CODE CAN PRODUCE, WHICH IS WHY IT TOOK SO
+  LONG.** All eight views are applied by one loop over
+  `superseded_ddl.STATEMENTS` inside a single `engine.begin()` transaction,
+  with no try/except anywhere around it — verified by parsing the AST, not by
+  reading. Six current and two stale is not a partial application; it is the
+  two having been replaced afterwards by something. **What that something is
+  is NOT established** — the deployed module's own statements were confirmed
+  correct (`x2` and `x3`) and applying them by hand succeeded immediately.
+- **THE REPAIR IS THOSE TWO STATEMENTS, AND NOTHING ELSE.** No migration, no
+  re-pairing, no re-import: `CREATE OR REPLACE VIEW` with the column list
+  untouched. Brad went to **372 / 344 / 10,152 / 17** the moment they ran,
+  against CricketStatz's own 10,444, with `without_scorecard` falling from 173
+  to 0.
+- **THE BOOT CHECK HAD BEEN FINDING IT EVERY BOOT AND SAYING SO TO NOBODY.**
+  `superseded_ddl.verify` has reported both views since v9.69.5 — and only ever
+  logged on FAILURE, so "ran and found nothing" and "never ran" were
+  indistinguishable from outside, and a `grep SCHEMA MISMATCH` over the last
+  day found nothing at all. It logs the count on every boot now, missing views
+  named. **Exactly the lesson v9.70.4 records for the pairing sweep, in the
+  check written to catch that same class of problem.**
+- **THREE CHECKS COULD NOT HAVE FAILED, AND EACH ONE COST A ROUND TRIP.** The
+  diagnostic asked whether the deployed view still carried `pair_prefers_import`
+  — absent from the fixed view AND from the pre-pairing one, so it answered
+  False for both and read as "the fix is live". The needle that separates the
+  three states is how many times the view mentions `superseded_by_game_id`:
+  **3 for the current aggregate view, 2 for a current per-innings view, 0 for a
+  pre-pairing one.** `VERIFIED_VIEWS` already needles that column, which is why
+  `verify()` was right all along and the hand-rolled probe was not.
+- **`python -m app.scripts.inspect_player_aggregate <player> [year]`** is the
+  read-only diagnostic that ended it: the career header split per branch of the
+  view, every row emitted for one season, the raw `player_season_stats` rows
+  behind them, and what `pg_get_viewdef` actually holds. **`ops/` is not in the
+  backend image** — only `backend/` is copied — so a diagnostic has to live in
+  `app/scripts/` to be runnable in the container at all.
+- **THE ORDER THAT WORKED, after three that did not**: measure the ratio per
+  season (nine at exactly 2.000 is arithmetic, not coverage); split the figure
+  by the view's own `source` column; then read the view definition back out of
+  Postgres. The first two say WHICH branch, the third says WHY — and only the
+  third can catch a database that disagrees with the code.
+- **STILL OPEN**: what replaces those two view definitions after the lifespan
+  has applied them. Until that is found, a deploy can silently put a club back
+  to counting both its sources — which is what the every-boot log line now
+  makes visible within seconds rather than after a club reports a doubled
+  career.
+
+### PREFERRING THE IMPORTED COPY IS A PER-INNINGS DECISION, NEVER AN AGGREGATE ONE (v9.70.6, Sep 2026)
+
+Reported off Brad Quinsee's profile once the pairing was finally running: the
+innings list read **336 innings, 9,914 runs and 16 hundreds** — the club's own
+hand count — while the career header two inches above it read **508, 15,333 and
+28**, and the Players list said 547 matches.
+
+- **MEASURED PER SEASON, AND THE SHAPE NAMED THE CAUSE BEFORE ANY CODE WAS
+  READ.** Every season up to 2001/02 — the years only CricketStatz covers —
+  matched the innings list almost exactly. Every season from 2002/03, exactly
+  the era BOTH sources hold, was **double the innings beneath it, to the run**:
+  914 against 457, 1,136 against 568, 1,064 against 532, 4 hundreds against 2.
+  So the per-innings views were pairing correctly and
+  `v_effective_player_season_stats` was not.
+- **`pair_prefers_import` IS WHY, AND THE HOLE IS IN THE DESIGN RATHER THAN THE
+  WIRING.** The per-innings views are per-MATCH, so a paired synced game steps
+  aside (`_SYNCED_SOURCE_JOIN`) and the imported copy answers — which is the
+  whole point of preferring it where Cricket Australia holds no scorecard of
+  ours. `player_season_stats` is a SEASON TOTAL with no per-match granularity:
+  **there is no row to drop**, so CA's own figure carries that match whatever
+  we do. Keeping the imported copy beside it in the `manual_game` rollup is the
+  same match counted twice.
+- **SO AT THE AGGREGATE LEVEL A PAIRED MATCH IS NEVER COUNTED FROM THE IMPORT,
+  `pair_prefers_import` OR NOT.** The rule there is CA's totals PLUS the
+  imported matches CA does not have at all. **Preferring the imported copy is a
+  decision about which scorecard to SHOW**, and it stays where there is a row
+  to drop. The v9.70.0 note claimed "neither half can reach the other's
+  matches, so no suppression is needed" — true only while the flag is false,
+  and it is corrected in place rather than left to mislead the next reader.
+- **THE HEADER AND THE LIST ARE THEN DRAWN FROM DIFFERENT ROWS FOR THE SAME
+  MATCH, AND THAT IS FINE.** For a prefer-import pair the header counts CA's
+  figure and the list shows the imported card. They describe one match and
+  agree on the total, which the suite asserts directly rather than checking
+  each in isolation. Where they legitimately differ — CA counting a match we
+  hold no scorecard for at all — `match_coverage` already explains it.
+- **NOTHING IS RE-PAIRED, RE-IMPORTED OR MIGRATED.** It is a view definition,
+  `CREATE OR REPLACE`d by the lifespan on every boot with the column list
+  untouched, so a deploy is the whole fix and every club's figures correct
+  themselves on the next page load.
+- **THE GAP EXISTED BECAUSE THE SUITE ONLY EVER CHECKED `v_effective_games`
+  THERE.** The prefer-import fixture asserted the synced fixture stepped aside
+  and counted the manual rows, and never once summed the season aggregate — so
+  six views were verified and the seventh was not. It is asserted now, on runs,
+  innings, hundreds and matches.
+- **Verified against a real Postgres** (the suite is 294 checks: a prefer-import
+  pair counted once on all four figures, the innings list beneath it reading the
+  same runs, and a match only CricketStatz holds still added on top) **with a
+  control run**: with the flag put back into the aggregate branch, 6 fail —
+  reporting 240 runs and 2 hundreds where 120 and 1 are right, the reported
+  doubling in miniature.
+
+### AND THEN IT REFUSED ITS OWN WORK (v9.70.5, Sep 2026)
+
+Reported by running the script: **Cockburn Cricket Club AND Keon Park** both
+failed with `duplicate key value violates unique constraint
+"uq_manual_games_superseded_by_game"`, and the pairing had written nothing on
+either. So the pass shipped in v9.70.4 ran the first time and then gave up
+silently on every run after it — the boot sweep, the nightly job, the button
+and the script alike.
+
+- **A RE-DERIVATION MOVES A GAME FROM ONE IMPORTED MATCH TO ANOTHER, AND THE
+  INDEX ONLY ALLOWS ONE HOLDER.** The write was row by row, so the new holder's
+  UPDATE could land while the old one still carried the game — two rows on one
+  game for an instant, the unique index refuses it, and the WHOLE transaction
+  rolls back having written nothing. Nothing partial, nothing logged beyond the
+  error: a club counting both its sources with the pass reporting a failure
+  nobody was reading.
+- **CLEAR EVERY CHANGING ROW FIRST, THEN SET THEM IN ONE STATEMENT.** A row
+  keeping its pair cannot be the conflict — the assignment is one-to-one, so a
+  game moving to a new holder means the old holder's own value changes too,
+  which puts it in the same list. The set is one `unnest` UPDATE rather than a
+  loop, which takes every lock it needs in one scan, the shape
+  `apply_associations` was rewritten into after the v9.62.6 deadlock.
+- **AND THE ASSIGNMENT WAS NOT STABLE BETWEEN RUNS**, which is the quieter half
+  of the same report: `--apply` wrote 302 rows and a second `--apply` wrote 2
+  more, for ever. Where several of our sides play one club on one day with no
+  scorecards, every combination scores identically, so which imported match
+  takes which synced game came down to the order equally-scored candidates were
+  walked in — and that followed frozenset iteration, which is not stable
+  between processes. **The ids are the final tiebreak now**, so the same data
+  always gives the same assignment and a settled club is never rewritten.
+- **A THREE-PASS CHECK IN ONE PROCESS CANNOT CATCH IT, and finding that out is
+  what made the check honest.** Within one process the hash seed is fixed, so
+  the DB idempotency checks pass against the broken code. What fails is
+  `assign` run over the SAME rows in three different ORDERS — the property
+  actually at stake — since the sort was stable and a tie therefore kept
+  whatever order it was handed. The DB pass-writes-nothing checks are kept
+  beside it: they are a real property of the write path, just not this bug's.
+- **Verified against a real Postgres** (the suite is 287 checks now: two
+  imported matches each holding the other's game re-derived without dying on
+  the index and each landing on its own, a four-way cluster paired off one for
+  one, a second and third pass writing nothing, and the same rows in three
+  orders giving one assignment) **with two control runs**: with the row-by-row
+  write restored, 3 fail reporting the club's own error verbatim; with the id
+  tiebreak removed, the order check fails and every DB check still passes,
+  which is exactly why it is there.
+
+### A COUNT THAT CANNOT FIT THE RUNS IS NOT A COUNT (v9.70.3, Sep 2026)
+
+Reported off StatLab's most-sixes board: Nathan Sammit **30 sixes in an innings
+of 8 runs**, and Rasika Thanippullige 11 sixes off 7.
+
+- **IT IS CRICKET AUSTRALIA'S OWN DATA, AND THAT WAS ESTABLISHED BEFORE
+  ANYTHING WAS CHANGED.** The reported innings was traced to one match (Cameron
+  U12 v Keon Park U12, 17 Nov 2006), which BOTH sources hold. CricketStatz's own
+  card reads `R 8, M 0, 4s 1, 6s 0` and our import stored exactly that; the
+  synced row for the same match reads `runs 8, balls 0, fours 1, sixes 30`,
+  confirmed by fetching it live rather than inferred from the code. A scorer
+  twenty years ago typed something else into the sixes box and CA has carried it
+  since. **No re-sync repairs it and no parser fix reaches it.**
+- **SIX RUNS PER SIX IS ARITHMETIC, NOT A JUDGEMENT.** `fours * 4 + sixes * 6 <=
+  runs` holds for every innings ever played, so a count that breaks it is not a
+  boundary count. `services/boundary_counts.clean` is the one rule, applied by
+  the sync's per-innings write, by the season aggregate a career's totals are
+  summed from, and by the CricketStatz import.
+- **IT READS AS NOT RECORDED, NEVER AS ZERO** — the same call `sync.py` already
+  makes for a missing ball count. A 0 says the batter hit no boundaries, which
+  is a different claim from "this column cannot be read", and a NULL keeps it
+  out of a total without asserting anything.
+- **EACH COLUMN IS JUDGED ON ITS OWN FIRST.** In the reported innings the single
+  four fits the 8 runs perfectly well and only the sixes do not, so nulling both
+  would throw away a good figure. Only where the pair still cannot fit together
+  (6 fours and a six in 24 runs) does the other go too.
+- **THE RUNS ARE NEVER TOUCHED.** They are what every other figure on the row is
+  reconciled against, and a bad boundary count is no reason to doubt them.
+- **`python -m app.scripts.backfill_boundary_counts <org|all> --apply`** repairs
+  what is stored — no network at all, since the runs are on the row beside the
+  counts. Dry run by default, per the house rule.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_boundary_counts.py`, 27 checks through the
+  shipped rule and the shipped backfill: the reported innings losing only the
+  count that cannot fit, an ordinary innings untouched, a genuine none kept as a
+  none, six-off-one-ball standing and a six in a five-run innings not, the pair
+  that is possible apart and not together, the runs unchanged on the stored row,
+  another club's rows not this club's to repair, a second run repairing nothing,
+  and **the SQL mirror and the Python rule agreeing on all 300 randomised rows**)
+  **with a control run**: with the rule neutered 6 of the 27 fail.
+- **NOTICED, NOT FIXED**: nothing flags these rows to a club. The counts simply
+  stop being published. A "these figures could not be read" list would be its
+  own change, and the same arithmetic would build it.
 
 ### OUR OWN CLUB'S NAME IS ON BOTH SIDES OF EVERY MATCH (v9.70.2, Sep 2026)
 
