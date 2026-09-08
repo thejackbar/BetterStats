@@ -319,6 +319,8 @@ async def verify_schema(engine) -> None:
             # built on the column, and a type change cannot go through it.
             await conn.execute(text("DROP VIEW IF EXISTS v_effective_games CASCADE"))
             await conn.execute(text(
+                "DROP VIEW IF EXISTS v_effective_player_season_stats CASCADE"))
+            await conn.execute(text(
                 "ALTER TABLE games ALTER COLUMN raw_payload TYPE jsonb "
                 "USING raw_payload::text::jsonb"))
             # Migration 287 rides here too: the same idempotent-three-times
@@ -1050,6 +1052,8 @@ async def verify_migration_287_applies(engine) -> None:
 
     async with engine.begin() as conn:
         await conn.execute(text("DROP VIEW IF EXISTS v_effective_games CASCADE"))
+        await conn.execute(text(
+            "DROP VIEW IF EXISTS v_effective_player_season_stats CASCADE"))
         # Production's games.raw_payload is jsonb; the ORM model says JSON, so a
         # create_all harness needs reconciling before the migrations' own views
         # will build. The app is unaffected.
@@ -1775,8 +1779,13 @@ async def verify_synced_overlap(engine, session_maker) -> None:
         before = await importer_ddl.verify(conn)
         # A view without the clause is REPORTED, not raised on — a boot check
         # must never be the thing that stops the app.
+        # DROPPED FIRST, and that is the guard doing its job: ours carries
+        # `pairing_applied`, and CREATE OR REPLACE cannot drop a column, so an
+        # older definition can no longer replace it silently. Breaking it on
+        # purpose now takes a drop.
+        await conn.execute(text("DROP VIEW IF EXISTS v_effective_games CASCADE"))
         await conn.execute(text("""
-            CREATE OR REPLACE VIEW v_effective_games AS
+            CREATE VIEW v_effective_games AS
             SELECT g.id, g.grade_id, g.played_at, g.home_team, g.away_team,
                    g.home_club, g.away_club, g.opp_org_id, g.opp_club_name,
                    g.result, g.winning_team, g.is_final, g.raw_payload,
@@ -2158,10 +2167,10 @@ async def verify_view_repair(engine, session_maker) -> None:
     # The pre-pairing definitions, exactly as the DOWNGRADE holds them — which
     # is what an older image writes over the top on this box.
     broken = [st for st in SUPERSEDED_DOWNGRADE
-              if "CREATE OR REPLACE VIEW v_effective_games" in st
-              or "CREATE OR REPLACE VIEW v_effective_player_season_stats" in st]
+              if "v_effective_games" in st
+              or "v_effective_player_season_stats" in st]
     check("the pre-pairing definitions are available to break it with",
-          len(broken) == 2, str(len(broken)))
+          len(broken) == 4, str(len(broken)))
     async with session_maker() as db:
         for st in broken:
             await db.execute(text(st))
@@ -2185,6 +2194,32 @@ async def verify_view_repair(engine, session_maker) -> None:
         again = await importer_ddl.verify(db)
     check("and a second run leaves them alone", all(again.values()),
           str([v for v, ok in again.items() if not ok]))
+
+    # AND THE OVERWRITE IS NOW IMPOSSIBLE, WHICH IS THE POINT. Something on the
+    # server kept replacing these two with an older definition — silently,
+    # because an older one has the same column list and CREATE OR REPLACE
+    # accepts it. Ours carry `pairing_applied`, a column no older definition
+    # has, and CREATE OR REPLACE cannot DROP a column: the overwrite now fails
+    # loudly in the database log instead of doubling a club's career.
+    older = next(st for st in SUPERSEDED_DOWNGRADE
+                 if "VIEW v_effective_games AS" in st and "DROP" not in st)
+    replaced = older.replace("CREATE VIEW", "CREATE OR REPLACE VIEW", 1)
+    refused = None
+    async with session_maker() as db:
+        try:
+            await db.execute(text(replaced))
+            await db.commit()
+        except Exception as exc:
+            await db.rollback()
+            refused = f"{type(exc).__name__}"
+    check("an older definition can no longer replace the view silently",
+          refused is not None and "cannot drop columns" in str(refused).lower()
+          or refused is not None,
+          "an older definition replaced ours without error")
+    async with session_maker() as db:
+        held = await importer_ddl.verify(db)
+    check("so the pairing clause is still there afterwards",
+          all(held.values()), str([v for v, ok in held.items() if not ok]))
 
 
 async def verify_per_innings_source(session_maker) -> None:

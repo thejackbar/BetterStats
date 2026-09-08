@@ -88,7 +88,8 @@ STATEMENTS: tuple[str, ...] = (
         g.home_org_id, g.away_org_id,
         gr.season_id AS season_id,
         s.organisation_id AS organisation_id,
-        g.status AS status
+        g.status AS status,
+        TRUE AS pairing_applied
     FROM games g
     LEFT JOIN grades gr ON gr.id = g.grade_id
     LEFT JOIN seasons s ON s.id = gr.season_id
@@ -114,7 +115,8 @@ STATEMENTS: tuple[str, ...] = (
         NULL::uuid AS away_org_id,
         mg.season_id AS season_id,
         mg.organisation_id AS organisation_id,
-        NULL::text AS status
+        NULL::text AS status,
+        TRUE AS pairing_applied
     FROM manual_games mg
     -- An imported match paired to a synced game is the SAME match, so it is
     -- counted once. Everything unpaired counts — including every game a club
@@ -139,7 +141,8 @@ STATEMENTS: tuple[str, ...] = (
         wides, no_balls,
         catches, catches_wk, catches_non_wk, run_outs,
         assisted_run_outs, unassisted_run_outs, stumpings,
-        NULL::text AS grade_label
+        NULL::text AS grade_label,
+        TRUE AS pairing_applied
     FROM player_season_stats pss
     LEFT JOIN (
         -- One row per (player, season): how many abandoned or cancelled
@@ -232,7 +235,8 @@ STATEMENTS: tuple[str, ...] = (
         0 AS assisted_run_outs,
         fielding_run_outs AS unassisted_run_outs,
         fielding_stumpings AS stumpings,
-        NULL::text AS grade_label
+        NULL::text AS grade_label,
+        TRUE AS pairing_applied
     FROM manual_season_adjustments
 
     UNION ALL
@@ -280,7 +284,8 @@ STATEMENTS: tuple[str, ...] = (
         0 AS assisted_run_outs,
         fielding_run_outs AS unassisted_run_outs,
         fielding_stumpings AS stumpings,
-        NULL::text AS grade_label
+        NULL::text AS grade_label,
+        TRUE AS pairing_applied
     FROM manual_career_adjustments
 
     UNION ALL
@@ -328,7 +333,8 @@ STATEMENTS: tuple[str, ...] = (
         0 AS assisted_run_outs,
         mg_agg.run_outs AS unassisted_run_outs,
         mg_agg.stumpings,
-        NULL::text AS grade_label
+        NULL::text AS grade_label,
+        TRUE AS pairing_applied
     FROM (
         -- A PAIRED IMPORTED MATCH IS NEVER COUNTED HERE, `pair_prefers_import`
         -- OR NOT, AND THAT IS THE ONE PLACE THIS RULE DIFFERS FROM THE VIEWS
@@ -436,7 +442,8 @@ STATEMENTS: tuple[str, ...] = (
         0 AS assisted_run_outs,
         run_outs AS unassisted_run_outs,
         stumpings,
-        grade_label
+        grade_label,
+        TRUE AS pairing_applied
     FROM import_effective_deltas""",
 )
 
@@ -581,7 +588,12 @@ _DROP_PAIR: tuple[str, ...] = (
 # so the originals go back first and the drops come last. Found by running it:
 # dropping first fails while six views still reference them.
 DOWNGRADE: tuple[str, ...] = PER_INNINGS_ORIGINALS + (
-    """CREATE OR REPLACE VIEW v_effective_games AS
+    # These two carry `pairing_applied`, and CREATE OR REPLACE cannot drop a
+    # column — which is the whole point of that column, and why the downgrade
+    # has to drop them first. Nothing depends on either view.
+    "DROP VIEW IF EXISTS v_effective_games",
+    "DROP VIEW IF EXISTS v_effective_player_season_stats",
+    """CREATE VIEW v_effective_games AS
     SELECT
         g.id, g.grade_id, g.played_at, g.home_team, g.away_team,
         g.home_club, g.away_club, g.opp_org_id, g.opp_club_name,
@@ -612,7 +624,7 @@ DOWNGRADE: tuple[str, ...] = PER_INNINGS_ORIGINALS + (
         mg.organisation_id AS organisation_id,
         NULL::text AS status
     FROM manual_games mg""",
-    """CREATE OR REPLACE VIEW v_effective_player_season_stats AS
+    """CREATE VIEW v_effective_player_season_stats AS
     SELECT
         player_id, season_id,
         NULL::uuid AS grade_id,

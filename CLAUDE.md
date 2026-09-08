@@ -8002,6 +8002,44 @@ simply not run, and nothing anywhere said so.
   and the four real seasons replayed end to end through the shipped
   `reconcile_org` and the shipped script: 706 games -> 404, 302 pairs written.
 
+### AN OLDER DEFINITION CAN NO LONGER REPLACE THE VIEW (v9.70.9, Sep 2026)
+
+Reported plainly, after four rounds of diagnosis: *we should just be fixing the
+duplicates.* Right. The duplicate logic was correct and verified; what kept
+bringing them back was a process on the server rewriting two view definitions,
+and an hourly repair only puts them back AFTER a club has seen the wrong
+figure.
+
+- **THE OVERWRITE SUCCEEDS ONLY BECAUSE THE COLUMN LISTS MATCH.** The pairing
+  clause is a join and a WHERE, so our `v_effective_games` has exactly the
+  columns a 266-era definition has, and `CREATE OR REPLACE VIEW` accepts it
+  without a word. A 169-era one, which lacks `status`, already fails with
+  `cannot drop columns from view` — the failure this whole hunt was read off.
+- **SO BOTH VIEWS NOW CARRY `pairing_applied`, a column no older definition
+  has.** `CREATE OR REPLACE VIEW` can append a column and cannot drop one, so
+  ours replaces what is there and nothing older can replace ours. The overwrite
+  fails loudly in the database log instead of silently doubling a career.
+  Nothing selects `*` from either view and nothing depends on them, both
+  checked before adding it.
+- **THE DOWNGRADE HAS TO DROP FIRST**, for the same reason — a `CREATE OR
+  REPLACE` back to the pre-pairing shape is exactly what is now refused. Same
+  call migration 266's downgrade already had to make.
+- **THE HOURLY REPAIR STAYS.** It is the net for a database that was already
+  overwritten before this shipped, and for anything that drops and recreates
+  rather than replacing. Belt and braces, not one or the other.
+- **AND THE SUITE PROVES THE GUARD RATHER THAN DESCRIBING IT**: it takes the
+  pre-pairing definition out of `DOWNGRADE`, turns it back into a `CREATE OR
+  REPLACE`, applies it, and asserts it is REFUSED and the clause survives.
+  Three harness sites that used to break a view by replacing it now have to
+  drop it first, which is itself the guard working.
+- **Verified against a real Postgres** (the suite is 304 checks) and every
+  neighbouring suite re-run against the changed views: club records 93, match
+  coverage 66, competitions 136, rate coverage 105, season fold 65, shared
+  fixtures 38, retired not out 71, boundary counts 27.
+- **STILL NOT ESTABLISHED, and now it does not matter as much**: which process
+  writes the old definitions. It will announce itself in the database log the
+  next time it tries, and a club's figures no longer depend on finding it.
+
 ### AND POSTGRES'S OWN LOG NAMED THE SHAPE OF IT (v9.70.8, Sep 2026)
 
 The boot check logged **8 of 8** and two of the views were the pre-pairing
