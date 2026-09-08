@@ -2,11 +2,12 @@ export default {
   version: 'v9.70.1',
   date: '2026-09-15',
   // Above v9.70.0, or SITE_VERSION never reaches this release.
-  sortKey: '2026-09-15T16:00:00Z',
-  title: 'The duplicate check now actually finds the duplicates',
+  sortKey: '2026-09-15T14:00:00Z',
+  title: 'Manage Grades points out the duplicates for you',
   items: [
-    'The check that works out which imported match is one your sync already holds was comparing your own club name, which is on both sides of every match — so nearly everything looked identical and almost nothing was matched up. Careers were reading far too high as a result.',
-    'It now compares the opposition, with your own club taken off first, and uses which of your sides played to tell apart the two fixtures you play against one club on the same day.',
-    'Measured on four of one club’s real seasons: 706 games held between the two sources, down to 404 once the duplicates are matched up.',
+    'Grades & Competitions now suggests the grades that look like one grade written two ways — a sponsor added to the name, punctuation changed, or Cricket Australia spelling it differently in a later season.',
+    'Each suggestion says which way round it will merge, which seasons each name was played in and which association ran it, so you can check before pressing anything. You can swap the direction, or say the two are genuinely different grades and never be asked again.',
+    'It will not offer to merge grades that only differ by a number, a letter, a colour or a match type — 5th Grade and 6th Grade, One Day Grade 2 and Grade 4, or a two-day grade and its one-day counterpart are left well alone.',
+    'Nothing is merged until you press Merge, and every merge can still be undone.',
   ],
 }

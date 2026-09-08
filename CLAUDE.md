@@ -213,6 +213,115 @@ period before expiry left for the club to define**.
   MEMBER about their own lapsing qualification through the member portal — a
   different audience from this, and deliberately left alone.
 
+## Suggested duplicate grades: the discriminator rule (migration 294, v9.70.1, Sep 2026)
+
+Asked for on Manage Grades: a smarter way of merging potential duplicates by
+suggesting them, and whether Cricket Australia's grade ID could help. Merging
+was two manual dropdowns and nothing computed a candidate pair.
+
+- **THE CA GRADE GUID CANNOT DO THIS, AND THAT WAS MEASURED BEFORE ANYTHING WAS
+  BUILT.** It is minted FRESH EVERY SEASON: across three seasons of a real club's
+  live `fixturesladders/organisations/{org}/teams` payload, **0 of 43 grade guids
+  repeated**, while the same grade NAME carried three different guids. The unique
+  index on `(season_id, grassroots_id)` already forbids a repeat inside a season,
+  so there is no pair of rows a shared guid could ever link. **The
+  `owningOrganisation.id` on the very same payload IS stable across all three
+  seasons** — that is the CA id this uses, and it was already stored as
+  `grades.association_id` (migration 283).
+- **EDIT DISTANCE IS NOT MERELY WEAKER ON GRADE NAMES, IT IS BACKWARDS.** Scored
+  against a real club's own grade list, the genuinely DIFFERENT grades outscore
+  the real duplicates: `One Day Grade 2`/`One Day Grade 4` **0.933**,
+  `Twenty20 Div 2`/`Div 3` 0.929, `PSWL South A`/`South B` 0.917 — against
+  `A Grade`/`A Grade (Gatorade)` **0.560** and `F Grade`/`F Grade Colts Cup`
+  0.583. **No threshold separates the two columns.** At the player matcher's 0.90
+  the screen would offer to merge a club's One Day Grade 2 into its Grade 4 while
+  missing the sponsor suffix entirely. **So `admin._fuzzy_name_pairs` must never
+  be pointed at grade names.** The reason is structural: a player's names differ
+  by SPELLING VARIANCE, where an edit distance means something; a grade's differ
+  by a DISCRIMINATOR — a number, a letter, a colour — that IS the whole meaning of
+  the name, and edit distance reads it as noise.
+- **THE RULE IS THEREFORE TOKEN-AWARE: the discriminating tokens must be
+  IDENTICAL, and only decoration may differ.** Every tier in
+  `services/grade_duplicates.py` is gated on that one test, which is what makes
+  even the loosest of them safe. Three tiers: `same_name` (identical once
+  decoration is stripped), `extra_words` (one name says everything the other does
+  and more) and `word_typo` (one word differs and is ≥0.80 alike — consulted
+  ONLY after the discriminators have matched, so it cannot repeat the mistake
+  this module exists to avoid).
+- **A NUMBER, A BARE LETTER AND A COLOUR ARE DISCRIMINATORS.** "One Day Grade 5
+  Black" and "... 5 Gold" are two real grades whose names are otherwise
+  identical, so a colour has to count.
+- **SO IS THE MATCH FORMAT THE NAME ANNOUNCES, and leaving it out was a real
+  bug the first run caught.** "1st Grade" and "One Day Grade 1" share a number
+  and differ only by the words "one day", so a word-subset rule alone read the
+  second as the first with decoration and offered to merge a club's whole one-day
+  competition into its two-day one. Format is an axis this platform filters on, so
+  naming one is identity. Read off the RAW name via `suggest_formats`, which is
+  what catches `A Grade (One Day)` — a parenthetical the sponsor strip removes.
+- **EVERY SYNONYM EXPANDS AN ABBREVIATION; none contracts one.** Folding
+  `division` to `div` left the misspelt `Divsion` compared against a three-letter
+  stub (0.60, reads as a different word); expanding compares like with like
+  (0.93). `_PREFIX_SYNONYMS` is separate and only fires on letters stuck to a
+  number (U14, Yr9), so a BARE "u" is still read as a grade tier the way "A
+  Grade" is. **Both found by running it, not by reading it.**
+- **THE ASSOCIATION IS A VETO; THE CATEGORY IS ONLY A CAUTION.** Two names run by
+  associations we KNOW to be different are not one grade, whatever they are
+  called. A classification clash is NOT a veto — a club really does merge a
+  junior-sounding cup name into the senior grade it belongs to (this file's own
+  shared-fixture note records "F Grade Colts Cup" merged into senior "F Grade"),
+  and refusing it would block a merge the platform has already seen happen.
+  Coexisting in a season is a caution too, never a veto: CA's older spelling
+  turning up mid-season is real.
+- **ONLY `same_name` IS EVER BULK-SAFE**, and not even then if the two coexisted
+  in a season — `BULK_SAFE_KINDS` is an allowlist, mirroring `MergeTools`'
+  `isExactPair`, so a tier added later is manual-confirm until somebody decides
+  otherwise.
+- **THE DIRECTION IS A SUGGESTION, NOT A DECISION.** The fuller record is kept
+  (games, then the newer season, then the shorter name) and the card offers to
+  flip it, because which spelling a club wants on its own leaderboard is the
+  club's call.
+- **THE PAIRS ARE BUILT FROM WHAT THE SCREEN ALREADY DRAWS** (`list_grades_with_stats`),
+  so a pair can never name a grade the table does not list and an already-merged
+  group is one row and therefore never suggested against itself. A merged group
+  answers for every name in it, so it carries its aliases' seasons and
+  associations too.
+- **`grade_merge_pair_ignores` (294) keys on NAMES, not grade ids**, because a
+  grade name spans one row per season and every merge here is name-to-name.
+  Stored sorted, so dismissing a pair either way round is one row.
+  `services/grade_ignore_ddl.py` is the ONE copy alembic and the lifespan mirror
+  both run, per the `vote_medal_ddl` rule.
+- **NUMBERED 294 after checking `origin/main`**, which had reached 293 — two
+  migrations sharing a revision id break Alembic outright.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_grade_duplicates.py`, 67 checks through the
+  shipped service and route bodies: the whole calibration table re-run as checks
+  both ways, every discriminator rule, the DDL applied three times and again over
+  a POPULATED table, the sponsored spelling and the punctuation-only rename
+  offered, the junior cup offered with its clash as a caution, the three
+  destructive pairs refused, the association veto, cross-club both ways,
+  dismissal in both directions landing one row, two refusals, and an
+  already-merged group not suggested against itself) **with two control runs**:
+  with the token rule swapped for the player matcher's 0.90 SequenceMatcher, **18
+  of the 67 fail — four of them offering to merge genuinely different grades**;
+  with the service absent the suite REPORTS it by name rather than dying on the
+  first ImportError.
+- **Driven in Chromium** (`frontend/verification/verify_grade_duplicates_browser.mjs`,
+  29: the exact merge on the wire, flipping the direction sending the other way
+  round, a dismissal going to the ignore endpoint and never a merge, the weaker
+  tier's warning drawn once and not twice, a club with nothing to sort out shown
+  no panel at all, and no overflow at 390px) **with a control run**: with the
+  panel removed it reports 23 missing checks rather than crashing — which it DID
+  on the first cut, dying on the first absent locator after two checks, so every
+  interaction goes through `press()` now.
+- **NOTICED, NOT BUILT**: opponent overlap. Two grades that are really one tier
+  play largely the same set of clubs, which is the strongest confirmation
+  available from our own data — but it needs club-name matching against
+  `home_team`/`away_team` (`club_match_keys` territory) and a wrong-looking stat
+  on a merge card is worse than none. The season span shown on each card is the
+  cheap half of the same idea. The AFL silo's own Merge Grades screen
+  (`routers/afl/merge.py`) is untouched and would need its own pass — its
+  categories are single-valued and it has no association column.
+
 ## A FIXTURE BELONGS TO BOTH CLUBS. Read it that way, every time (v9.62.0, Sep 2026)
 
 **THIS HAS NOW BEEN REPORTED FOUR TIMES** — the second club's Games list
@@ -7582,7 +7691,7 @@ describes choosing a winner per season describes the design this replaces.
   follow-up is a "these look like the same match — are they?" review list, built
   from the near misses the matcher already scores and declines.
 
-### OUR OWN CLUB'S NAME IS ON BOTH SIDES OF EVERY MATCH (v9.70.1, Sep 2026)
+### OUR OWN CLUB'S NAME IS ON BOTH SIDES OF EVERY MATCH (v9.70.2, Sep 2026)
 
 Reported off the live site after v9.70.0: no duplicate high scores, but a
 career of 547 matches and 28 hundreds where the club counts about 370 and 16.

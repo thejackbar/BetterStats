@@ -474,6 +474,12 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ org_id: orgId, alias_name: aliasName, canonical_name: canonicalName }),
     }),
+  gradeMergeCandidates: (orgId) => request(`/admin/grade-merge-candidates?org_id=${orgId}`),
+  ignoreGradePair: (orgId, nameA, nameB) =>
+    request('/admin/ignore-grade-pair', {
+      method: 'POST',
+      body: JSON.stringify({ org_id: orgId, name_a: nameA, name_b: nameB }),
+    }),
   getGradeMergeHistory: (orgId) => request(`/admin/grade-merge-history?org_id=${orgId}`),
   undoGradeMerge: (mergeLogId, orgId) =>
     request('/admin/undo-grade-merge', {
