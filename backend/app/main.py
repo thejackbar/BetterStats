@@ -1301,6 +1301,10 @@ async def lifespan(app: FastAPI):
                 UNIQUE (org_id, player_a_id, player_b_id)
             )
         """))
+        # Mirrors migration 291 — the ONE copy lives in the service.
+        from app.services.grade_ignore_ddl import STATEMENTS as _GRADE_IGNORE_DDL
+        for _stmt in _GRADE_IGNORE_DDL:
+            await conn.execute(text(_stmt))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS grade_merge_logs (
                 id SERIAL PRIMARY KEY,
