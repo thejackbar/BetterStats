@@ -11,9 +11,11 @@ const HISTORY_MIN_W = 660
 
 const PHASES = {
   starting: 'Getting started',
-  seasons: 'Working out which seasons you played',
+  seasons: 'Checking which seasons you played',
+  planned: 'Ready to pull',
   matches: 'Bringing your matches across',
   records: 'Copying your record book',
+  notes: 'Reading your honour board',
   done: 'Finished',
 }
 
@@ -43,7 +45,15 @@ export default function CricketStatzImport() {
   const [records, setRecords] = useState([])
   const [starting, setStarting] = useState(false)
   const [tab, setTab] = useState('import')
+  // A club that already syncs from Cricket Australia holds those seasons once.
+  // Bringing them in again does not correct anything — it counts the same
+  // cricket twice on every career total — so it is opt-in.
+  // What to do with the seasons the club already syncs from Cricket
+  // Australia: leave them to the sync, or make CricketStatz the record for
+  // them. There is no third option that keeps both — that is the double count.
+  const [syncedYears, setSyncedYears] = useState('skip')
   const [undoing, setUndoing] = useState(null)
+  const [readingNotes, setReadingNotes] = useState(false)
   const pollRef = useRef(null)
 
   const running = status?.import?.status === 'running'
@@ -90,7 +100,7 @@ export default function CricketStatzImport() {
   async function start() {
     setStarting(true); setError('')
     try {
-      await api.csStartImport(url)
+      await api.csStartImport(url, syncedYears)
       toast?.success?.('Import started — this page will keep you posted.')
       await loadStatus()
     } catch (e) {
@@ -98,15 +108,65 @@ export default function CricketStatzImport() {
     } finally { setStarting(false) }
   }
 
+  async function readNotes() {
+    setReadingNotes(true)
+    setError('')
+    try {
+      await api.csReadNotes()
+      await loadStatus()
+    } catch (e) {
+      setError(e?.detail || e?.message || 'Could not read the player notes.')
+    } finally { setReadingNotes(false) }
+  }
+
+  async function handOverBack() {
+    if (!window.confirm(
+      'Hand these seasons back to Cricket Australia?\n\nYour synced matches '
+      + 'start counting again straight away — nothing has to be re-pulled. The '
+      + 'CricketStatz matches for those seasons stay imported but stop being '
+      + 'counted, so each season is still counted once.'
+    )) return
+    try {
+      await api.csClearSuperseded()
+      toast?.success?.('Those seasons read from Cricket Australia again.')
+      setPreview(await api.csInspect(url))
+    } catch (e) {
+      setError(e?.detail || e?.message || 'Could not hand those seasons back.')
+    }
+  }
+
+  async function stop(id) {
+    if (!window.confirm(
+      'Stop this import?\n\nWhat it has already brought across is kept — you '
+      + 'can start it again and it will pick the rest up without doubling '
+      + 'anything.')) return
+    try {
+      await api.csStop(id)
+      toast?.success?.('Import stopped.')
+      await loadStatus(); await loadRest()
+    } catch (e) {
+      toast?.error?.(e?.detail || 'Could not stop that import.')
+    }
+  }
+
   async function undo(id) {
     if (!window.confirm(
       'Remove every match and record this import brought across?\n\n'
       + 'Players and seasons are kept — only the imported matches and record '
-      + 'boards go.')) return
+      + 'boards go. Any season this import was the record for goes back to '
+      + 'your Cricket Australia sync.')) return
     setUndoing(id)
     try {
       const r = await api.csUndo(id)
-      toast?.success?.(`Removed ${r.matches_removed} matches and ${r.records_removed} record boards.`)
+      const back = r.seasons_handed_back || []
+      toast?.success?.(
+        `Removed ${r.matches_removed} matches, ${r.records_removed} record `
+        + `boards and ${r.awards_removed || 0} honours.`
+        // A season this import was the record for is now back on the sync —
+        // say so, or the club is left wondering where those matches went.
+        + (back.length
+          ? ` ${back.length} season(s) went back to your Cricket Australia sync.`
+          : ''))
       await loadStatus(); await loadRest()
     } catch (e) {
       toast?.error?.(e?.detail || 'Could not undo that import.')
@@ -115,6 +175,22 @@ export default function CricketStatzImport() {
 
   const p = status?.import?.progress || {}
   const done = status?.import?.status === 'complete'
+  const stalled = !!status?.import?.stalled
+  // The first pass reads every candidate season to find the real total, so
+  // until it lands there is no meaningful matches figure to draw against.
+  const planning = running && ['starting', 'seasons'].includes(
+    p.phase || status?.import?.phase)
+  // The honour-board pass counts players, not matches, so it draws against its
+  // own total rather than sitting at whatever the match bar last read.
+  const reading = running && (p.phase || status?.import?.phase) === 'notes'
+  const plan = p.plan
+  const since = status?.import?.seconds_since_progress
+  // The one thing that separates a long import from a dead one. A full
+  // history is thousands of matches, so the same figures sitting there for a
+  // minute is ordinary — how long since it last moved is not.
+  const heartbeat = running && since != null
+    ? (since < 90 ? ' · still going' : ` · last moved ${Math.round(since / 60)} min ago`)
+    : ''
 
   return (
     <div className="pb-card p-5 mb-8" id="cricketstatz">
@@ -172,21 +248,77 @@ export default function CricketStatzImport() {
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   <StatCard label="Matches found" value={
                     preview.truncated ? `${preview.matches_found}+` : preview.matches_found} />
-                  <StatCard label="Earliest" value={preview.earliest?.slice(0, 4) || '—'} />
-                  <StatCard label="Latest" value={preview.latest?.slice(0, 4) || '—'} />
+                  <StatCard
+                    label={preview.earliest_at_least ? 'Back to at least' : 'Earliest'}
+                    value={preview.earliest || '—'} />
+                  <StatCard label="Latest" value={preview.latest || '—'} />
                   <StatCard label="Record boards" value={preview.record_reports} />
                 </div>
                 {preview.truncated && (
                   <Note>
                     CricketStatz caps one list at 999 matches, so there are more
-                    than this. The import walks your history season by season,
-                    which picks up every one of them.
+                    than this — and that list only reaches back as far as those
+                    999 go. Your record boards show cricket back to at least{' '}
+                    {preview.earliest}. The import checks every season first and
+                    will tell you exactly what it found before it pulls anything.
                   </Note>
                 )}
                 {!!preview.teams?.length && (
                   <Caption>Teams: {preview.teams.slice(0, 8).join(', ')}
                     {preview.teams.length > 8 ? ` and ${preview.teams.length - 8} more` : ''}
                   </Caption>
+                )}
+                {preview.synced_games > 0 && (
+                  <Note toneKey="warn">
+                    <div className="font-semibold">
+                      You already sync {preview.synced_games.toLocaleString()} matches
+                      from Cricket Australia
+                      {preview.synced_years?.length
+                        ? `, covering ${preview.synced_years[0]}\u2013${preview.synced_years[preview.synced_years.length - 1]}`
+                        : ''}.
+                    </div>
+                    <div className="mt-1">
+                      One match must only be counted once, so pick which source
+                      is the record for those seasons. Everything before them
+                      comes across either way.
+                    </div>
+                    <div className="mt-2 space-y-2">
+                      <label className="flex items-start gap-2 cursor-pointer">
+                        <input type="radio" name="cs-synced" className="mt-1"
+                               checked={syncedYears === 'skip'}
+                               onChange={() => setSyncedYears('skip')} />
+                        <span>
+                          <b>Leave those seasons to Cricket Australia.</b>{' '}
+                          They stay as they are and the import brings across the
+                          history your sync cannot reach.
+                        </span>
+                      </label>
+                      <label className="flex items-start gap-2 cursor-pointer">
+                        <input type="radio" name="cs-synced" className="mt-1"
+                               checked={syncedYears === 'cricketstatz'}
+                               onChange={() => setSyncedYears('cricketstatz')} />
+                        <span>
+                          <b>Use CricketStatz for those seasons too.</b>{' '}
+                          Your Cricket Australia data is kept and steps aside,
+                          so nothing is deleted and you can hand those seasons
+                          back at any time.
+                        </span>
+                      </label>
+                    </div>
+                  </Note>
+                )}
+                {!!preview.superseded_years?.length && (
+                  <Note>
+                    {`CricketStatz is currently the record for `}
+                    {preview.superseded_years.length} season(s)
+                    {` (${preview.superseded_years[0]}\u2013${preview.superseded_years[preview.superseded_years.length - 1]}). `}
+                    Your Cricket Australia data for them is kept, just not counted.
+                    <div className="mt-2">
+                      <Button variant="quiet" size="sm" onClick={handOverBack}>
+                        Hand them back to Cricket Australia
+                      </Button>
+                    </div>
+                  </Note>
                 )}
                 <Note>
                   A full history can take a while — it reads every match's
@@ -207,32 +339,109 @@ export default function CricketStatzImport() {
                     status.import.status === 'complete' ? 'ok'
                       : status.import.status === 'error' ? 'block' : 'accent'}>
                     {status.import.status === 'running'
-                      ? (PHASES[status.import.phase] || 'Working')
+                      ? (PHASES[p.phase || status.import.phase] || 'Working')
                       : status.import.status}
                   </Badge>
                 </div>
 
                 {running && (
                   <>
-                    <Bar value={p.matches_total
-                      ? pct(p.matches_done, p.matches_total)
-                      : pct(p.seasons_done, p.seasons_total)} />
+                    <Bar value={planning
+                      ? pct(p.candidates_done, p.candidates_total)
+                      : reading
+                        ? pct(p.notes_done, p.notes_total)
+                        : pct(p.matches_done, p.matches_total)} />
                     <Caption>
-                      {p.seasons_total
-                        ? `Season ${p.seasons_done} of ${p.seasons_total}`
-                        : 'Working out your seasons'}
-                      {p.matches_total ? ` · ${p.matches_done} of ${p.matches_total} matches` : ''}
+                      {planning
+                        ? `Checking season ${p.candidates_done} of ${p.candidates_total}`
+                          + (p.seasons_total ? ` · ${p.seasons_total} played so far` : '')
+                        : reading
+                          ? `Player ${p.notes_done} of ${p.notes_total}`
+                            + (p.awards ? ` · ${p.awards} honours found` : '')
+                          : `Season ${p.seasons_done} of ${p.seasons_total}`
+                            + (p.current_season ? ` (${p.current_season})` : '')}
+                      {!planning && !reading && p.matches_total
+                        ? ` · ${p.matches_done} of ${p.matches_total} matches`
+                        : ''}
+                      {heartbeat}
                     </Caption>
+                    {stalled && (
+                      <Note toneKey="block">
+                        This import has not moved for {Math.round(
+                          (status.import.seconds_since_progress || 0) / 60)} minutes,
+                        so it has most likely stopped. Everything it brought
+                        across before then has been kept. Stop it and start
+                        again — the matches already in are recognised, so it
+                        will not double anything.
+                      </Note>
+                    )}
                   </>
                 )}
 
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {!!p.replaced_synced_years?.length && (
+                  <Caption>
+                    {/* A season changes over as its own matches land, not at
+                        the end of the run, so while it is going this says how
+                        far through that changeover it is — a club watching a
+                        record board can see which years have moved. */}
+                    {`${p.replaced_synced_years.length} season(s) you also sync `}
+                    {running
+                      ? `read from CricketStatz as they come across (${p.replaced_done || 0} of ${p.replaced_synced_years.length} so far) `
+                      : `read from CricketStatz `}
+                    {`(${p.replaced_synced_years[0]}\u2013${p.replaced_synced_years[p.replaced_synced_years.length - 1]}). `}
+                    {`Your Cricket Australia data is kept and steps aside.`}
+                  </Caption>
+                )}
+                {!!p.skipped_synced_years?.length && (
+                  <Caption>
+                    {`${p.skipped_synced_years.length} season(s) already covered by `}
+                    {`your Cricket Australia sync were left out `}
+                    {`(${p.skipped_synced_years[0]}\u2013${p.skipped_synced_years[p.skipped_synced_years.length - 1]}), `}
+                    {`so those matches are not counted twice.`}
+                  </Caption>
+                )}
+                {plan && (
+                  <Caption>
+                    {`Found ${plan.season_count} seasons you played`}
+                    {plan.earliest ? `, ${plan.earliest} to ${plan.latest}` : ''}
+                    {` · ${plan.match_count} matches`}
+                    {running ? ` · about ${plan.estimated_minutes} minutes` : ''}
+                  </Caption>
+                )}
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                   <StatCard label="Matches" value={p.matches_done || 0} />
                   <StatCard label="Scorecards" value={p.scorecards || 0} />
                   <StatCard label="Players" value={p.players || 0} />
                   <StatCard label="Record boards" value={p.records || 0} />
+                  <StatCard label="Honours" value={p.awards || 0} />
                 </div>
 
+                {running && (
+                  <div>
+                    <Button variant="quiet-danger" size="sm"
+                            onClick={() => stop(status.import.id)}>
+                      Stop this import
+                    </Button>
+                  </div>
+                )}
+                {/* The honour board is the LAST phase of an import, so it is
+                    the first thing lost when a run is cut off. Offered on its
+                    own rather than making a club re-pull every scorecard for a
+                    pass that needs none of them. */}
+                {!running && !p.awards && (
+                  <div>
+                    <Button variant="quiet" size="sm" onClick={readNotes}
+                            disabled={readingNotes}>
+                      {readingNotes ? 'Reading…' : 'Read player notes for awards'}
+                    </Button>
+                    <Caption>
+                      {'Reads each player\u2019s CricketStatz notes and files '}
+                      {'what they say \u2014 life membership, caps, trophies, '}
+                      {'captaincies \u2014 onto their honour board. No matches '}
+                      {'are re-pulled.'}
+                    </Caption>
+                  </div>
+                )}
                 {status.import.error && <Note toneKey="block">{status.import.error}</Note>}
                 {done && (
                   <Note toneKey="ok">

@@ -79,6 +79,12 @@ export default function Navbar() {
   // The BetterCricket marketing-outreach org is not a real club — it has no public
   // pages — so suppress the club nav/links and point the logo back at the admin app.
   const marketingAdmin = pathname.startsWith('/admin') && !!user?.is_marketing_org;
+  // The BetterCricket build version belongs on the admin app, not on a club's own
+  // public site — a visitor reading a club's stats has no use for it, and it reads
+  // as our branding on their page. Path-based rather than role-based: every /admin
+  // route is already behind ProtectedRoute, so this is exactly the Super Admin and
+  // Club Admin surface.
+  const showVersion = pathname.startsWith('/admin');
   const lookupSlug = marketingAdmin ? '' : ((pathname.startsWith('/admin') && user?.club_slug) ? user.club_slug : urlSlug);
   const { club, inactive, notFound } = useClub(lookupSlug);
   // A paused (403) or unknown (404) slug isn't a usable club — the page shows the
@@ -196,7 +202,7 @@ export default function Navbar() {
             <div className="hidden md:block leading-tight">
               <div className="text-pb-text text-[13px] font-semibold tracking-tight">{displayName}</div>
               <div className="text-pb-faint text-[10px] font-mono tracking-wide2">
-                {customLogo ? slug?.toUpperCase() : "BETTER CRICKET"} · {SITE_VERSION}
+                {customLogo ? slug?.toUpperCase() : "BETTER CRICKET"}{showVersion ? ` · ${SITE_VERSION}` : ''}
               </div>
             </div>
             <div className="md:hidden text-pb-text text-[13px] font-bold tracking-wide2">{displayShort}</div>

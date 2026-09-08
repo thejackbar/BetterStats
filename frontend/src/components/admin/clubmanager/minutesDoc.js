@@ -192,8 +192,36 @@ function actionLine(t, { nameOf, objectiveOf }) {
 
 /* ── the document ────────────────────────────────────────────────────────── */
 
+// The club's letterhead: a band in its own colours, its crest, then its name.
+//
+// A COMMITTEE'S MINUTES ARE THE CLUB'S DOCUMENT, and until now the only thing
+// on the page that said so was the club's name in capitals. The band is the
+// club's two theme colours — the same pair every one of its screens is painted
+// from — so a document filed with an association reads as theirs at a glance.
+//
+// The crest is optional and silently absent when there is none, or when it
+// could not be turned into something a document can carry (see
+// textDocs.clubLogoJpeg). A missing crest costs the header nothing; a broken
+// image in its place would cost it everything.
+function letterhead(club, logo) {
+  const accent = club?.accent || '#16c784'
+  const accent2 = club?.accent2 || accent
+  // Two rules rather than one split in half: the club's PRIMARY colour is the
+  // club's colour and the second is an accent under it, which is how a
+  // letterhead is normally ruled. It also keeps the band a pair of shaded
+  // PARAGRAPHS in Word rather than a table — see textDocs.bandDocx.
+  const header = [
+    { type: 'band', colour: accent, height: 9, after: 0 },
+    { type: 'band', colour: accent2, height: 3, after: logo ? 200 : 260 },
+  ]
+  if (logo && logo.jpeg) {
+    header.push({ type: 'image', ...logo, after: 120 })
+  }
+  return header
+}
+
 export function buildMinutesDoc({
-  club, meeting, agendaItems = [], motions = [], actions = [],
+  club, logo = null, meeting, agendaItems = [], motions = [], actions = [],
   attendance = [], pool = [], objectives = [], minutesText = '',
 }) {
   const poolName = new Map(pool.map(p => [p.member_id, p.full_name]))
@@ -357,7 +385,20 @@ export function buildMinutesDoc({
 
   const when = longDate(meeting.scheduled_at)
   const heading = `${plain(meeting.title) || 'Meeting'} Committee Meeting Minutes`
+  // A hairline in the club's own colour under the title block, so the
+  // letterhead reads as one thing rather than as a band floating above a page
+  // of text. It goes on the FRONT of `blocks` rather than into the header,
+  // because the header is everything ABOVE the club's name and this sits below
+  // it.
+  blocks.unshift({
+    type: 'band',
+    colour: club?.accent || '#16c784',
+    height: 2.5,
+    after: 40,
+  })
+
   return {
+    header: letterhead(club, logo),
     title: (club?.name || '').toUpperCase() || 'COMMITTEE MEETING MINUTES',
     subtitle: [heading, [when, meeting.location].filter(Boolean).join(`  ${BULLET}  `)]
       .filter(Boolean).join('\n'),

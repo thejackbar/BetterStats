@@ -1,5 +1,218 @@
 # BetterStats — Claude Session Notes
 
+## NEVER DELETE OR OVERWRITE WHAT A CLUB TYPED IN BY HAND (v9.68.2, Sep 2026)
+
+**Set as a standing rule, after a merge deleted half a player's career.** A
+club entering a season of scorecards spends hours on it, and unlike a synced
+game there is **no upstream to re-pull it from** — a deleted manual row is
+gone. So:
+
+> **A manual game, its innings, and a hand-typed correction are the club's own
+> work. A function may ADD to them and it may MOVE them; it may only remove or
+> replace what it wrote ITSELF, and never what a person wrote.**
+
+Where this has already gone wrong, and what each case teaches:
+
+- **A MERGE MOVES A RECORD; IT NEVER DELETES ONE.** `_merge_players_core` was
+  written for the SYNCED per-game tables and reached no `manual_*` table at
+  all — and every one of them is `ON DELETE CASCADE` on `players.id`, so
+  removing the merged-away player destroyed their whole hand-entered and
+  imported career. `services/merge_carry.CARRIED` is the list it now carries;
+  **a table that records what a player DID belongs on it.** See the v9.68.1
+  note.
+- **AN IMPORT REPLACES WHAT THAT IMPORT WROTE, AND STOPS AT ANYTHING A PERSON
+  HAS TOUCHED.** `cricketstatz_import.import_match` refreshes a match it
+  created, matched on `cricketstatz_match_id`, so it can never reach a game
+  somebody typed in. On top of that, `hand_edited_games` reads
+  `manual_edit_logs` — which the import writes none of, so any un-undone row
+  means a person edited that match through Manual Entries — and the import
+  **skips it and says so** rather than reverting their correction silently. An
+  edit that was later undone does not count: the club took it back.
+- **A FULL REBUILD DELETES FROM `games`, NEVER `manual_games`**, and it must
+  stay that way. It exists to re-pull from Cricket Australia; a manual game has
+  nothing to re-pull.
+- **SEASON AND GRADE DELETES ALREADY REFUSE** while a manual game or a manual
+  adjustment points at them (`_season_in_use` / `_grade_in_use`). Both FKs
+  cascade, so those two checks are the only thing between a tidy-up and a lost
+  season.
+- **DE-DUPLICATING IS NOT DELETING, and the line is that the two rows describe
+  ONE thing.** A merge drops the removed record's row for an innings the keeper
+  already holds, because they are the same innings read under two identities.
+  It must never drop an innings only one of them had — the suite asserts the
+  total row count falls by exactly the number of genuine duplicates.
+
+**THE RULE IS ENFORCED, NOT JUST WRITTEN DOWN.**
+`backend/verification/verify_merge_carry.py` scans `app/` for every `DELETE
+FROM manual_*` and `sa_delete(Manual*)` and fails on any site not on its
+`ALLOWED_DELETES` list with a stated reason — so a new one cannot be added
+without somebody justifying it — and separately asserts every manual table
+carrying a `players.id` foreign key is on the merge's carry list. Both were
+checked by breaking them on purpose: an unjustified delete elsewhere in `app/`
+fails the first, and dropping one table off `CARRIED` fails the second.
+
+**When a club HAS lost rows this way, say what recovers them.** A CricketStatz
+import re-writes the same matches (deterministic `cricketstatz_match_id`, and
+`import_match` upserts), so re-running it is the recovery — onto the one record
+that was kept. A club's hand-typed history has no such path, which is the whole
+reason for the rule.
+
+## A club decides what it is told about (migration 288, v9.69.0, Sep 2026)
+
+Asked for as a configurable notification system a club admin manages — emails
+first, the in-app bell alongside them, room for other channels later — covering
+milestones past and upcoming and "other events club admins should be aware of",
+with a per-admin opt-out and a club-wide off switch. Then, mid-build, the case
+that decided the shape of the settings: volunteer and official certifications
+(Working With Children, RSA, first aid) tracked for currency, **with the notice
+period before expiry left for the club to define**.
+
+- **THE CATALOGUE IS CODE, THE CHOICES ARE DATA, and that split is the whole
+  design.** Every event needs a source that can find it, so a row in a table
+  describing an event nothing can produce would be a promise the platform
+  cannot keep. `services/notification_events.EVENT_TYPES` is the list; adding
+  one means an `EventType` there AND a source in `notification_scan.SOURCES`.
+  The settings screen is drawn from that list, so nothing else needs editing —
+  and the suite asserts the two sets match, so a half-added event fails rather
+  than appearing on screen and doing nothing.
+- **A CLUB WITH NO ROWS BEHAVES EXACTLY AS THE REGISTRY DECLARES.** Nothing is
+  written until somebody changes something, which is what lets a default be
+  changed in code with no backfill and no club silently keeping an old one. The
+  same call `organisations.stats_min_rate_innings` makes with NULL.
+- **THE NOTICE PERIOD IS PER EVENT, NOT PER CLUB, and the report is why.** A
+  Working With Children renewal takes weeks to come back and a first aid
+  refresher is a weekend, so one club-wide "warn me N days ahead" would have to
+  mean two things at once. `EventType.config_fields` declares the numbers an
+  event owns, with bounds enforced server-side — an out-of-range value is
+  CLAMPED rather than refused, because the alternative is a source silently
+  reading a lead time of -5 and looking backwards through time.
+- **AN ALREADY-LAPSED CERTIFICATE IS RAISED WHATEVER THE NOTICE PERIOD.** It is
+  the most urgent case there is, and a club switching this on should hear about
+  the ones already expired rather than only the ones about to. Verified both
+  ways: narrowing the period drops the one now out of reach and keeps the
+  lapsed one.
+- **EVERY DEDUPE KEY NAMES THE FACT, NEVER THE RUN THAT NOTICED IT.**
+  `milestone:<player>:runs:5000` is true forever; a certificate's key carries
+  its expiry DATE, so **renewing it creates a genuinely new fact to warn about
+  next time and an unchanged one is raised exactly once**. That is what lets a
+  source re-report everything it can see on every pass and let the unique index
+  on `(organisation_id, dedupe_key)` decide what is new — a read-then-write
+  check would race a manual scan against the nightly one.
+- **THE ONE EXCEPTION IS LOW STOCK, AND IT IS DELIBERATE.** Standing state, not
+  an event: keying on the variant alone would mention it once ever and then
+  never again, keying on the day would nag. The ISO week is in the key, so it
+  is a weekly reminder while it lasts.
+- **SIX CONDITIONS, ONE FUNCTION.** `notifications.channel_allowed` is the
+  whole subscription decision — the club's kill switch, the channel's club-level
+  switch, the event's own switch, that channel on that event, and the person's
+  opt-out — plus the two that need the database (the module gate, and the
+  recipient's capability). Two copies of this is how the settings screen and the
+  scan start disagreeing about whether a club is subscribed to something. Each
+  of the six is asserted failing closed on its own.
+- **AN OPT-OUT SILENCES; IT NEVER SWITCHES SOMETHING ON.** A person can stop a
+  channel the club has turned on, and cannot turn on one the club has turned
+  off. `event_key = '*'` (`ALL_EVENTS`) is the whole-club opt-out, checked as a
+  floor under every event.
+- **CAPABILITY IS A FILTER ON WHO IS TOLD, NEVER ON WHO MAY CONFIGURE.** A
+  report awaiting approval reaches the people who can approve one, the rule the
+  bell already applied. Choosing what lands in your OWN inbox is deliberately
+  not gated on `MANAGE_SETTINGS` — an admin who cannot edit the club's branding
+  is still entitled to stop being emailed.
+- **RECIPIENTS ARE `club_admin` AND `club_member`, and the second half is not an
+  oversight.** A club_member is somebody the club gave admin-app access to with
+  an explicit allowlist — the volunteer coordinator holding
+  `MANAGE_QUALIFICATIONS` is exactly who should be told a WWCC is lapsing.
+  `admin_contact_list.admin_rows` correctly uses `club_admin` alone because it
+  answers a DIFFERENT question (who administers a club, for BetterCricket's own
+  outreach); reusing it here would send a club's compliance warnings past the
+  person whose job it is. **Found by the verification** — the first cut reused
+  it and the capability check came back empty.
+- **A super_admin or sales membership is never a recipient.** That is
+  BetterCricket's own staff, and staff acting as a club must not be emailed that
+  club's milestones.
+- **ONE DIGEST PER RECIPIENT, NOT ONE EMAIL PER FACT.** Three milestones and a
+  lapsing WWCC are one email — the call `trial_lifecycle` already makes, and the
+  difference between a system people read and one they filter. A delivery is
+  marked sent only once the provider has accepted it, so an outage retries
+  tomorrow rather than silently dropping a certificate; a refusal is recorded
+  with its reason ON THE ROW, which is what makes "they say they never got it"
+  answerable months later.
+- **A FIRST RUN IS CAPPED** (`MAX_PER_EVENT`). An established club switching
+  this on has a decade of history in reach of the sources; without a cap one
+  club's backlog fills a table and an inbox.
+- **THE `sync_completed` EVENT DEFAULTS TO THE BELL AND NOT THE INBOX**, and a
+  sync that brought nothing in is not raised at all. A notification system that
+  emails "nothing changed" every morning is one nobody reads within a fortnight.
+- **A CHANNEL IS TEXT, NOT A COLUMN.** Adding SMS or push later is a value in
+  `notification_events.CHANNELS` plus a sender — no migration on a live table,
+  and a channel absent from an event's `default_channels` map is OFF, so a new
+  one is opt-in rather than switching itself on for every club overnight.
+- **THE BELL WAS SUPER-ADMIN-ONLY, WHICH WOULD HAVE MADE THE IN-APP CHANNEL
+  REACH NOBODY IT IS FOR.** Both the `NotificationBell` and the
+  `NotificationModal` were gated on `role === 'super_admin'` in `AdminLayout` —
+  a gate from when the panel was internal that outlived its reason, the same
+  shape v9.6.1 removed from the BetterClubhouse screens. Safe to lift because
+  the gate was never the real check: every endpoint behind it is club-scoped
+  through `get_current_club` and refuses nothing on role (`PRIVILEGED_ROLES`
+  only ever WIDENS a capability check there). **They were two separate gates,
+  and lifting one and not the other leaves a bell that opens nothing** — the
+  suite asserts the panel actually opens, not merely that the bell renders.
+  Auto-open on login stays staff-only: opening a panel over a club admin the
+  moment they log in is a different decision from giving them the bell.
+- **`services/session_safety.rollback_keeping` is now the ONE definition**,
+  lifted out of `routers/admin.py` (which delegates). A bare `rollback()`
+  EXPIRES every instance the request's own dependencies loaded, and the next
+  plain attribute read on one is a lazy refresh that raises a greenlet error a
+  long way from the swallowed failure — the v9.53.5.1 trap. Found here by the
+  verification hitting it in its own harness.
+- **`clean_config`'s FALLBACK DIRECTION IS LOAD-BEARING, and the first cut had
+  it backwards.** A SAVE passes the club's current config as the base, so
+  typing nonsense into the notice period leaves what they had set alone; a READ
+  passes nothing, so a stored value gone bad falls back to the registry default,
+  which is the only other thing it could mean. Getting it the wrong way round
+  quietly reset a club's own setting on the next save — **found by running it**.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_notifications.py`, 103 checks through the
+  shipped services and route bodies: the DDL applied three times, alembic and
+  the lifespan mirror running the same shared list, the registry defaults for a
+  club with no rows, every source, the retired milestone threshold never
+  announced, a second scan announcing nothing twice, the notice period at both
+  ends and a renewal as its own fact, all four switches failing closed
+  separately, the capability and module gates both ways, an opt-out per event
+  and whole-club, one digest per recipient marked sent only on acceptance, a
+  refusal recorded and retried, the weekly cadence on and off its day, the feed
+  and mark-read scoped to one person and one club from both sides, and every
+  route body incl. three refusals and a malformed id as a 400) **with two
+  control runs**: with the services absent it REPORTS the feature missing rather
+  than dying on an ImportError, and with the capability gate, the opt-out and
+  the retired-threshold filter neutered, 7 of the 103 fail on exactly those
+  three behaviours.
+- **Driven in Chromium** (`frontend/verification/verify_notifications_browser.mjs`,
+  48: the exact params on the wire for every control — a channel toggle sending
+  that channel ALONE rather than the whole rule back, an event switch sending
+  `enabled` alone, the notice period sending `config` alone and only when it
+  changed, the personal opt-out going to the preferences endpoint and never to
+  the rule endpoint that would change it for everybody — a club without the
+  Settings permission still choosing its own inbox, an event that does not reach
+  this person offering no personal toggle, Check now never emailing anybody, and
+  the bell opening and its rows linking) **with a control run** that reports the
+  screen absent rather than dying on the first missing locator.
+- **THREE CHECKS COULD NOT HAVE FAILED AS FIRST WRITTEN.** "The panel offers a
+  way to the settings screen" matched the SIDEBAR nav item, which is on every
+  admin page and there whether the modal opens or not — it is scoped to the open
+  panel now. And two locators were written in the source's casing against
+  CSS-`uppercase` text, which `innerText` returns transformed: the trap this file
+  already records, hit twice in one suite.
+- **`uncheck({ force: true })` VERIFIES THE NEW STATE ONCE AND THROWS.** With
+  `force` Playwright skips its retry loop, and these toggles only settle after a
+  round trip (PUT, then a reload of the whole payload). Click and wait instead.
+- **NOTICED, NOT BUILT**: nothing prunes old notifications — a club's record of
+  what it was told is not something a nightly job should quietly delete, and a
+  retention rule is a decision for a person. There is no per-event digest
+  frequency (the cadence is club-wide), no SMS or push (a channel and a sender
+  away), and the AFL silo is untouched. `member_reminders` still emails the
+  MEMBER about their own lapsing qualification through the member portal — a
+  different audience from this, and deliberately left alone.
+
 ## A FIXTURE BELONGS TO BOTH CLUBS. Read it that way, every time (v9.62.0, Sep 2026)
 
 **THIS HAS NOW BEEN REPORTED FOUR TIMES** — the second club's Games list
@@ -7186,6 +7399,737 @@ and BetterCricket pulls ALL of its data across, the record book included.
   `unwrap` raises a typed error for it so "their subscription ended" is not
   read as "this club has no matches". Their FAQ also says the database is
   deleted 12 months after expiry.
+### The club already held its players, spelled its own way (v9.67.4)
+
+Reported off the live leaderboard: Brad Quinsee read 9,850 runs where
+CricketStatz says 10,444 — and the board listed him TWICE, along with "Michael
+B. White" beside "Michael White", "Shannon J. McCleish" beside "Shannon
+McCleish", and Ryan Docherty twice.
+
+- **EVERY DUPLICATE WAS A uuid5 BESIDE A uuid4, which names the cause exactly.**
+  A v5 id is one this import derived; a v4 is a row the club already had. Read
+  off the live API: `Brad Quinsee`/`Quinsee, Brad`, `Michael B. White`/`White,
+  Michael`, `Shannon J. McCleish`/`McCleish, Shannon`. **The club holds its
+  players surname-first and CricketStatz writes them first-name-first**, so
+  matching on the raw spelling matched none of them and minted a second record
+  for every player the club already had — each then carrying half a career.
+- **`resolve_player` DID AN EXACT `ilike` AND NOTHING ELSE.** The fix is not a
+  cleverer regex, it is to use `import_ingest.match_players` — the pipeline
+  BetterImport, the scorecard reader and Merge Duplicates already share, whose
+  `_normalise_name` turns "Quinsee, Brad" into "brad quinsee" and whose
+  `_middles_compatible` reads "Michael B. White" as "Michael White". **This is
+  what "create names like the other stat import pages do" means**, and it is
+  the one part of that instruction the first cut missed while doing seasons and
+  grades properly.
+- **ONLY `exact` IS TAKEN, and that is the matcher's own rule rather than
+  caution.** Its `exact` already covers the middle-initial case. Below that it
+  deliberately returns no id: an initial is not an identity, so "Crosta, T"
+  must not swallow a Torey, a Tim and a Tom, and two of the club's own records
+  sharing a name is the shape of a father and son. Those get their own record
+  and are REPORTED by name in the import's notes, pointing at Merge Duplicates.
+- **A ROLLBACK DROPS THE ROSTER CACHE TOO.** It holds players flushed since the
+  last commit, so a stale copy would match against rows that no longer exist —
+  the same reason the season and grade caches are cleared there.
+- **A NEWLY CREATED PLAYER IS APPENDED TO THE ROSTER**, or the next card
+  spelling the same new name differently mints a second row inside one import.
+- **A RE-IMPORT DOES NOT REPAIR A CLUB ALREADY IN THIS STATE**, which is worth
+  knowing before suggesting one: `resolve_player` finds its own row by the
+  CricketStatz id before it ever looks at a name.
+  `python -m app.scripts.merge_cricketstatz_duplicates <org|all> [--apply]` is
+  the repair, merging through the SAME `_merge_players_core` the Merge
+  Duplicates screen uses, so every per-game table is reassigned and the merge is
+  undoable. The club's own record is the one KEPT — it carries the photo, the
+  squad and the committee role. Dry run by default.
+- **`plan_for_org` IS PURE AND THE ROUTER IMPORT IS DEFERRED INTO `main`**, so
+  the planning half can be verified without dragging the auth stack in.
+- **Verified** (the suite is 127 checks: the club's held player matched rather
+  than duplicated, the middle-initial case, the bare initial deliberately NOT
+  merged and reported instead, and the repair finding the reported pair while
+  keeping the club's own record).
+
+### The preview's "earliest" was the earliest of the most recent 999 (v9.67.3)
+
+Reported off the preview card: **EARLIEST 2014** for a club whose history runs
+back to 1953/54.
+
+- **THE ALL-TIME LIST IS CAPPED AT 999 MATCHES, so its earliest date says
+  nothing about how far the club goes back** — only how far 999 matches
+  reaches. For a busy club that is about a decade. The figure was not
+  approximate, it was answering a different question.
+- **THE RECORD BOARDS ARE THE FLOOR, AND A FLOOR IS HONEST WHERE A GUESS IS
+  NOT.** A record dated 1954 is proof there was a season in 1954, so the
+  minimum year across a handful of all-time boards can only ever UNDERSTATE the
+  span, never overstate it. The card says "back to at least 1954" and the first
+  pass then reports the real answer (1953). Same reasoning that kept the boards
+  out of the season-probing decision: sound as a floor, unsound as a bound.
+- **Five boards, not all 41** — this runs on a preview, before the club has
+  committed to anything, and they are cached for the import that follows.
+- **A CHECK THAT MATCHES MORE THAN IT MEANS IS NOT PRECISE.** "Back to at
+  least" appears in the card's label AND in the note under it, so asserting it
+  appears exactly once failed against correct output. It asserts the phrase is
+  present and that the old flat `Earliest` label is gone.
+
+### A SEASON CHANGES OVER AS ITS OWN MATCHES LAND (v9.69.2, Sep 2026)
+
+Reported off Keon Park's Records with the import still going: duplicate high
+scores again, on **season 57 of 73**, with the count "past 1900 scorecards and
+we're way over what I expect".
+
+- **THE IMPORT WAS FINE. MY OWN CHANGEOVER WAS THE BUG, and it is the mistake
+  v9.68.4 warns about pointed the other way.** That note argues against marking
+  the seasons UP FRONT, correctly: the views act the instant the marker lands,
+  so a season not yet walked would read from neither source. It then landed as
+  one write at the END of the whole run — which leaves every season ALREADY
+  walked reading from BOTH for the forty-odd minutes the rest of it takes. A
+  club watching its own record board sees exactly that and reports duplicates.
+- **THE EVIDENCE SAID WHICH HALF WAS WRONG BEFORE ANY CODE WAS READ.** The
+  board doubled 2002/03 — a season the run had passed — and showed 2011/12 and
+  2013/14 singly, seasons it had not reached. Only the walked seasons were
+  double, which is the signature of a changeover that has not happened yet, not
+  of an import writing twice.
+- **PER SEASON, AFTER ITS OWN MATCHES COMMIT, THERE IS NO WINDOW FOR EITHER.**
+  A season is on Cricket Australia or fully across, never both and never
+  neither — and a run that stops halfway leaves precisely that state rather
+  than a club to repair. It is the same unit the matches already commit in:
+  one match at a time inside a season, one marker per season.
+- **THE END-OF-RUN WRITE STAYS AS A BACKSTOP**, for a season whose own year
+  cannot be read off its label — which would otherwise be imported and then
+  never marked at all.
+- **THE SCREEN SAYS HOW FAR THROUGH THE CHANGEOVER IT IS** (`replaced_done`),
+  because the changeover is now something a club can watch happen. The caption
+  used to promise it in the future tense, which is exactly the reading that
+  makes a doubled board look like a fault rather than a queue.
+- **Verified against a real Postgres** (the suite is 200 checks now: the run cut
+  off part way by refusing a scorecard from the LAST season in the plan — a real
+  network failure, the one exception `run_import` re-raises rather than noting —
+  then the walked season marked and the unreached one left to the sync) **with
+  TWO control runs, one per check**: marking only at the end fails "a season
+  already walked is marked before the run moves on"; marking up front fails "a
+  season the run never reached is left to the sync". The pair fails both ways,
+  which is what stops either wrong design passing.
+- **A CONTROL THAT DOES NOT ACTUALLY STOP THE RUN PROVES NOTHING.** The first
+  cut raised from a patched `import_match`, which sits inside a `try/except
+  Exception` that notes the failure and carries on — so every season was still
+  walked, the end-of-run backstop marked everything, and both checks passed
+  against the broken code. It refuses a SCORECARD now, the one place a
+  `CricketStatzError` propagates.
+- **A CHECK THAT LEAVES THE FIXTURE CHANGED BREAKS ITS NEIGHBOURS.** The
+  part-way run clears the markers and re-marks only one year, so it runs at the
+  END of its section rather than in the middle of it — three later checks read
+  as failing until it was moved.
+- **Driven in Chromium** (52: the count of shared seasons moved so far while
+  running, the future-tense promise gone, and the count dropped once every one
+  has moved) **with a control run**: 2 fail.
+- **NOT FIXED BY THIS, and worth saying plainly**: an import already in flight
+  when this deploys still doubles until it finishes, because its remaining
+  seasons are marked by the old end-of-run write. The board corrects itself the
+  moment the run completes.
+
+### THE PER-GRADE AGGREGATE IS A SECOND TABLE, AND IT DOUBLED TOO (v9.69.7, Sep 2026)
+
+Reported after an undo and a fresh import: a career back to nearly 600 games.
+Not the career header this time — the **by-grade grid**, which was reading
+2002/03 as 28 where CricketStatz has 14, every shared season exactly doubled,
+with the header two inches above it correct.
+
+- **`player_season_grade_stats` IS CRICKET AUSTRALIA'S OWN PER-GRADE AGGREGATE
+  AND THE EFFECTIVE VIEWS DO NOT COVER IT.** Migration 287 filters
+  `v_effective_games` and `v_effective_player_season_stats`; this is a third
+  table, read directly by the grid and by two record boards. Marking a season
+  as read from CricketStatz did nothing to it.
+- **THE GRADE NAMES DO NOT MATCH, WHICH IS WHY IT ADDS RATHER THAN ONE
+  WINNING.** Cricket Australia files the season under "NMCA - Jika Shield";
+  CricketStatz files the same cricket under "A-GRADE". The grid's own
+  `max(held, claimed)` reconciles per (season, GRADE), so it never compares
+  them — they land in different cells and sum. A reconciliation that looks
+  safe is not safe across two sources that name their grades differently.
+- **`services/season_source.ca_aggregate_clause(alias)` is the one definition**,
+  the same shape `grade_scope` and `game_status` already use. Expressed against
+  a `seasons` alias the query already joins, **never as a correlated EXISTS** —
+  these run on the record boards, where a per-row subplan is the trap
+  `records.py`'s own timing notes document.
+- **One of the two record boards joined no `seasons` row at all** and had to be
+  given one; the other already had it.
+- **THE SECOND `JOIN seasons sc` IN THE GRID IS NOT THIS TABLE.** It belongs to
+  the manual per-grade adjustment read, which goes through
+  `v_effective_player_season_stats` and is therefore already filtered. Patching
+  by text match hit both; it is patched by position.
+- **Verified against a real Postgres** (the suite is 225 checks now: CA's
+  figure read on its own, the season switched to CricketStatz dropping those
+  rows AND the grade they were filed under, and handing the season back
+  counting them again) **with a control run**: with the clause emptied, both
+  fail and the grid reports the reported 14 alongside the imported cricket.
+- **NOTICED, NOT FIXED**: `iq_team` and `iq_trends` read the same table for
+  internal analytics, and `import_reconcile` for its own reconciliation. None
+  is a club-facing stats figure and each needs its own look.
+
+### THE HONOUR BOARD RUNS ON ITS OWN (v9.69.6, Sep 2026)
+
+Asked while checking the awards: a club whose whole CricketStatz history had
+imported — 3,556 matches — read **zero honours on every player**.
+
+- **THE NOTES PASS IS THE LAST PHASE OF AN IMPORT, so it is the first thing a
+  run loses.** Matches, then the record book, then the honour board. A redeploy,
+  a stop or a network failure after the matches are in leaves a club with its
+  whole history and no honours, and the only recovery was to re-import — which
+  re-pulls every scorecard for a pass that needs none of them. `NOT BUILT: no
+  endpoint runs the notes pass alone` is what the v9.68.0 note said; this is it.
+- **IT REUSES THE IMPORT'S OWN BATCH ID**, so the honours it writes are removed
+  by undoing that import exactly as if they had been read during it, and the
+  Awards screen lists them under the same batch. A separate batch would leave a
+  club able to undo the import and keep an honour board pointing at it.
+- **IT RUNS AGAINST THE MOST RECENT IMPORT THAT HAS NOT BEEN UNDONE**, and
+  refuses when there is none: the honour board is read off the players the
+  import creates, so there is nothing to read notes for.
+- **A SECOND PASS RE-STAMPS RATHER THAN DUPLICATING**, the same guard the
+  import's own re-read already uses.
+- **THE BUTTON IS ONLY OFFERED WHERE THERE IS NOTHING TO SHOW** — a club whose
+  honours are already in does not need it, and a control that can only answer
+  "everything is fine" is worse than none.
+- **Verified against a real Postgres** (the suite is 221 checks now: a club that
+  has lost its honour board, the pass putting all 12 back, NO scorecard re-pulled
+  to do it, the run reporting itself finished, the honours filed under the
+  import's own batch so undo still takes them, and a second pass adding nothing)
+  **with a control run**: with the pass removed, 2 fail — the board stays empty
+  and the undo reports no honours to remove.
+- **NOT ESTABLISHED**: why the live run's notes phase produced nothing. It may
+  never have been reached. The pass is now recoverable either way, which is the
+  part that matters to a club.
+
+### A MIGRATION RECORDED AS APPLIED IS NOT EVIDENCE ITS EFFECT IS THERE (v9.69.5, Sep 2026)
+
+The end of the same report, and the most expensive part of it. The club's
+seasons were correctly marked — 73 of 74 reading `cricketstatz` — and
+`v_effective_games` **carried no clause to act on them**. The marker was live,
+the view was not, and every screen counted both sources.
+
+- **THE DDL WAS NEVER WRONG.** Run by hand against that same database, all five
+  statements applied cleanly and the site was correct within seconds: 2002/03
+  went 171 to 86, 2011/12 208 to 117, the club 5,345 games to 3,563, and
+  Michael White's career landed on CricketStatz's own figures exactly
+  (325/324/8,405). So the boot path had simply not run them — while
+  `alembic_version` said 290.
+- **AND NOTHING ANYWHERE NOTICED, WHICH IS WHAT MADE IT EXPENSIVE.** Three
+  rounds were spent inferring a cause from the outside — a snapshot that went
+  stale, a run predating a deploy, a marker that would not set — each plausible,
+  each wrong, because production's schema could disagree with the code and no
+  surface reported it. **The one question that settled it took a single
+  `pg_get_viewdef`.**
+- **SO THE BOOT READS THE SCHEMA BACK.** `superseded_ddl.verify(conn)` asks
+  `pg_get_viewdef` what Postgres actually holds, and the lifespan logs a
+  SCHEMA MISMATCH error naming the view and the consequence. It reports and
+  never raises — a check that stops the app is worse than the thing it checks
+  for, and this one exists precisely because a silent mismatch is survivable
+  for months.
+- **A view absent from the database reads as False rather than raising**, for
+  the same reason: `to_regclass` returns NULL rather than erroring on a name
+  that is not there.
+- **Verified against a real Postgres** (the suite is 215 checks now: a sound
+  view reported sound, a view deliberately replaced with its pre-287 definition
+  caught, and the shipped statements putting it back) **with a control run**: a
+  `verify` that always answers "fine" fails the middle check, which is the only
+  one of the three that can catch a real mismatch.
+- **NOT ESTABLISHED, and worth saying plainly**: why the boot path did not run
+  the statements on that deploy is still unknown. The check now reports it the
+  moment it happens rather than after a club reports doubled figures.
+
+### ONE SOURCE PER SEASON, DECIDED BY THE DATA (migration 290, v9.69.4, Sep 2026)
+
+Reported off Keon Park's Records with the import running: duplicates again, and
+a career at **14,966 runs against CricketStatz's 10,444** — the exact figure
+v9.68.3 was supposed to have settled.
+
+- **MEASURED, NOT INFERRED, AND THE MEASUREMENT NAMED THE CAUSE.** Every shared
+  season held EXACTLY synced + imported — 2002: 85 + 86 = 171, 2005: 91 + 104 =
+  195, 2011: 91 + 117 = 208, 2013: 81 + 95 = 176, 2019: 65 + 82 = 147 — against
+  CricketStatz's own per-season counts fetched live. Pre-2000 seasons, which
+  the sync does not reach, held the imported copy alone. So the import was
+  faithful and nothing was being written twice: the synced side simply was not
+  stepping aside.
+- **THE CHOICE WAS A SNAPSHOT TAKEN ONCE, AND THAT IS THE WHOLE BUG.**
+  `synced_coverage` ran at the START of the run and the overlap was frozen from
+  it. A club whose synced games were not in `games` at that instant — a Full
+  Rebuild still running, a sync that had not landed — read as having NO overlap,
+  so nothing was skipped, nothing was marked, and once the synced side arrived
+  the club counted both with nothing on screen to say so. v9.69.2 moved the
+  marking earlier and could not help: the list it marks from was already wrong.
+- **SO THE RULE IS AN INVARIANT NOW, NOT A STEP.** A season that receives a
+  CricketStatz match is set to `'cricketstatz'` **in the same transaction as the
+  match**, in `import_match`. There is no ordering to get right, no end-of-run
+  write, nothing to recompute, and a run that dies halfway leaves every season
+  it walked correct.
+- **UNCONDITIONAL, WHICH IS WHAT REMOVES THE DEPENDENCE.** A season the sync
+  does not reach has no synced games to step aside, so marking it costs nothing
+  — and the marker then owes nothing to the overlap having been worked out
+  right. The club's PlayHQ-or-CricketStatz choice is expressed by whether the
+  matches are imported at all (`skip` writes none into a shared season), which
+  is the honest expression of it.
+- **THREE STATES, AND NULL IS ONLY SAFE BECAUSE OF THE INVARIANT.**
+  `'cricketstatz'` counts the imported side, `'playhq'` counts the synced side,
+  NULL counts both — which can never double, because NULL and imported matches
+  cannot coexist.
+- **HANDING A SEASON BACK SETS `'playhq'`, NOT NULL, and the old confirm
+  admitted the bug in writing**: "both will be counted until you undo the
+  import". A club asking for PlayHQ back was being given the double count. The
+  imported side steps aside instead, so exactly one source is counted whichever
+  way the club decides.
+- **IT IS NEVER APPLIED TO A SEASON THE SYNC DOES NOT REACH.** There is nothing
+  to hand back to, and `'playhq'` there would hide the imported matches and
+  leave the season empty — the "neither source" failure from the far end.
+- **THE BACKFILL IS IN `STATEMENTS`, SO IT SELF-HEALS ON EVERY BOOT.** Any
+  season holding a CricketStatz match with no source recorded is one the club is
+  counting twice, whatever put it there. Guarded on NULL, so it never overrides
+  a decision the club has made and a second run writes nothing. **It repairs the
+  reported club with no re-import.**
+- **MIGRATION 290 RE-RUNS 287'S OWN STATEMENT LIST.** Every statement is
+  idempotent, so a database already at 287 picks up the added clauses and the
+  backfill; the lifespan mirror does the same on every boot.
+- **`resolve_season` HANDS BACK A `Season`, NOT AN ID**, so the first cut's raw
+  `UPDATE ... WHERE id = :s` bound a repr and raised — swallowed by the
+  per-match `except` as a note, with **zero matches written**. Setting it on the
+  ORM row instead needs no cast and leaves no stale in-memory copy. Found by
+  running it.
+- **THE SUITE HAS TO UNWIND NEWEST-FIRST.** 287's views read
+  `manual_games.cricketstatz_import_id`, so 285's downgrade cannot drop that
+  column while they stand. Alembic gets this right for free; the suite did not.
+- **Verified against a real Postgres** (`verify_cricketstatz_import.py`, 212
+  checks: the reported failure replayed — the import writing while `games` is
+  empty, then the sync landing on top — every season it wrote into marked, the
+  synced side not counted with it, handing back counting the synced game
+  INSTEAD of as well, a season with no synced games left alone, and the repair
+  asserted to be part of the shipped statement list rather than reached for
+  directly) **with two control runs**: the snapshot design fails 5, reporting
+  the reported `{'api': 1, 'manual': 1}`; hand-back clearing to NULL fails 2.
+- **A CHECK THAT MATCHES MORE THAN IT MEANS IS NOT A CHECK.** "the repair is
+  part of the shipped statement list" first looked for a statement carrying both
+  `cricketstatz_import_id` and `stats_source` — which the VIEWS now do, so it
+  passed with the backfill unwired. It matches `UPDATE seasons` now.
+
+### AND UNDOING ONE HAD TO HAND THOSE SEASONS BACK (v9.69.3, Sep 2026)
+
+Found while checking a live club's figures after the fix above, not from a
+report — and it is the same "neither source" failure reached from the other
+end.
+
+- **UNDO REMOVED THE IMPORTED MATCHES AND LEFT THE MARKER STANDING.** Making
+  CricketStatz the record only ever HIDES the synced copy (migration 287), so
+  an undo that deletes the imported matches without clearing
+  `seasons.stats_source` leaves the season reading from NEITHER — empty on
+  every screen, with nothing to say why, and the club's own Cricket Australia
+  data sitting there untouched and invisible. The recovery was a Super Admin
+  pressing "hand back", which nobody would know to do.
+- **CLEARED PER SEASON, NEVER CLUB-WIDE.** A season still holding an imported
+  match from ANOTHER import is still genuinely read from CricketStatz and keeps
+  its marker; only a season this undo has just emptied goes back to the sync.
+  `NOT EXISTS (... cricketstatz_import_id IS NOT NULL)` is the whole test.
+- **THE UNDO SAYS WHICH SEASONS WENT BACK** (`seasons_handed_back`), and the
+  confirm says it will happen before it does — a season quietly changing source
+  is exactly the kind of move that reads as data going missing.
+- **Verified against a real Postgres** (the suite is 205 checks now: two
+  superseded seasons with their synced games hidden, undo handing back only the
+  one it emptied, the synced games counted again, the count reported, and the
+  season another import still covers keeping CricketStatz as its record) **with
+  a control run**: with the clear removed, all 4 fail — the club's synced games
+  read as 0 with the imported ones gone too.
+
+### AND WHICH SOURCE IS THE RECORD IS THE CLUB'S CALL (migration 287, v9.68.4)
+
+Asked for straight after: "CricketStatz should overwrite PlayHQ in the same way
+a historical import does where we believe the CricketStatz data more than the
+PlayHQ data."
+
+- **`seasons.stats_source = 'cricketstatz'` IS THAT DECISION, AND IT IS APPLIED
+  ON READ.** The same call migration 060 made for cross-club scoping and 266
+  for washouts: correct it in the effective view, once, so every reader moves
+  together. Nothing is deleted, the sync keeps running and keeps the synced copy
+  current underneath, and clearing the marker puts it straight back with no
+  re-pull and no migration. A club changing its mind is one UPDATE.
+- **TWO VIEWS CARRY IT, AND BOTH ALREADY HAD THE JOIN.** `v_effective_games`'s
+  synced branch already `LEFT JOIN`s seasons, and
+  `v_effective_player_season_stats`'s `api` branch already has a `WHERE EXISTS`
+  reaching the season for the org check — so this is one extra condition in each
+  rather than a new join, and it costs nothing on a club that has superseded
+  nothing.
+- **BOTH HALVES ARE NEEDED AND THEY ARE DIFFERENT HALVES.** The games view stops
+  the synced MATCHES being counted; the season-stats view stops Cricket
+  Australia's own season AGGREGATES being counted. Suppressing only the games
+  would leave every career total still reading from both, since a career sums
+  `v_effective_player_season_stats`. The suite pins each separately, and the
+  control run fails on exactly those two.
+- **THE IMPORTED SEASON IS STILL COUNTED — ONCE.** The view's own `manual_game`
+  branch (migration 037) rolls the imported matches up per (player, season,
+  grade), so stepping the synced side aside leaves the CricketStatz figures
+  standing rather than emptying the season.
+- **THE SEASONS ARE MARKED AFTER THE MATCHES ARE IN, never before.** The views
+  act the moment the marker lands, so marking first would leave the club looking
+  at a season with neither source in it for as long as the import took — and a
+  run that died halfway would leave it that way for good. **This shipped as one
+  write at the END of the whole run, which is the other half of the same
+  mistake and was reported the same week — see v9.69.2 above.** It is per
+  SEASON now, as each one's own matches land.
+- **THERE IS DELIBERATELY NO OPTION THAT KEEPS BOTH.** The earlier
+  `include_synced_years` boolean had one, and holding two copies IS the double
+  count this exists to prevent. It is `synced_years: 'skip' | 'cricketstatz'`
+  now — leave those seasons to the sync, or make CricketStatz the record for
+  them.
+- **HANDING A SEASON BACK IS INSTANT** (`POST /superseded/clear`), because the
+  marker was the only thing hiding the synced copy. The confirm says the
+  imported matches stay imported, so both will count until the import is undone
+  — which is true, and is the one thing a club could otherwise get wrong.
+- **The sync is deliberately NOT stopped for a superseded season.** Keeping it
+  running is what makes handing the season back instant and complete; stopping
+  it would trade that for a saving nobody asked for and a Full Rebuild later.
+- **Verified against a real Postgres** (`verify_cricketstatz_import.py` is 193
+  checks now: the seasons marked, the synced games and CA's own season totals
+  both stopping being counted, the imported matches still counted, the raw rows
+  still present, and handing them back counting the synced games again) **with
+  two control runs**: with the two view clauses removed 2 fail, and with the
+  'cricketstatz' branch neutered, 4.
+- **A CHECK WITH NOTHING TO SUPPRESS CANNOT FAIL.** The first cut had no
+  `player_season_stats` row in the fixture at all, so "CA's own season totals go
+  too" passed with the clause removed. The fixture seeds one per synced season
+  now, and asserts the raw rows survive.
+- **`games.raw_payload` IS `JSON` ON THE ORM MODEL AND `JSONB` IN THE DATABASE
+  THE MIGRATIONS BUILD**, so a `create_all` harness gets the narrower type and
+  the view's own `NULL::jsonb` cannot union with it. The suite reconciles it;
+  the app is unaffected, but the divergence is real and is worth a look on its
+  own.
+
+### THE SAME CRICKET FROM TWO SOURCES COUNTS IT TWICE (v9.68.3, Sep 2026)
+
+Reported off Keon Park's Records mid-import: the Highest Individual Scores
+board listed every top score twice — Heath Shephard 270 twice, Princely
+Emmanuel 206* twice, David Nelson 171 twice — and Brad Quinsee's career read
+**14,966 runs from 495 innings where CricketStatz has 10,444 from 367**.
+
+- **THE IMPORT WAS FAITHFUL. THE CLUB WAS HOLDING THE SAME MATCHES FROM TWO
+  SOURCES.** Established by measurement, not inference: CricketStatz serves
+  **3,556** matches for club 93931 across all 167 seasons and exactly **4** on
+  15 Mar 2003; BetterCricket held **5,416** and **8**. Grouping the club's
+  games by grade name splits cleanly into three families — the shouty
+  CricketStatz names (`A-GRADE`, `UNDER 12`, 2,324 games, 1953-2026, every one
+  with `games.status` NULL), and Cricket Australia's own (`NMCA - Jika Shield`,
+  `03 - All Things Safety Wear Mash Shield`, ~3,000 games, every one carrying a
+  status). **The club syncs from CA and imported its whole CricketStatz history
+  on top.** Every match from the year the sync reaches back to existed twice.
+- **THE OLD SEASONS WERE THE TELL.** 1969/70, 1991/92 and 1994/95 appeared
+  ONCE on the board while 2002/03, 2011/12 and 2013/14 appeared twice — exactly
+  the years CA covers. A pure query fan-out would have doubled all of them.
+- **RULED OUT FIRST, EACH BY A QUERY RATHER THAN BY READING THE CODE**: the
+  source (999 all-time rows, 999 distinct ids, no fixture repeated in one
+  response, no match id under two seasons), a duplicated game (5,020 of 5,037
+  fixtures had exactly one row — the 17 with two are a real U12 and U14 side
+  playing the same club on one day), a repeated innings in a card (25 cards of
+  2002S, none), the team matcher (correct on twelve real names), and a JOIN
+  fan-out (`v_effective_games` and `v_effective_batting_innings` are plain
+  UNION ALLs, and every join in `records.py`'s batting chain is on a primary
+  key). The paging artefact that briefly suggested a fan-out was mine:
+  `/organisations/{id}/results` ignores `limit`, so concatenated "pages" are
+  the same rows over again.
+- **SO THE IMPORT SKIPS THE SEASONS THE SYNC ALREADY COVERS**, keyed on the
+  SEASON's year so a November and the following March land together
+  (`synced_coverage`). CricketStatz is for the history the sync cannot
+  reach — a club onboarded through Cricket Australia typically has a decade,
+  and CricketStatz has seventy years.
+- **IT IS A SKIP, NOT A MERGE, AND THAT IS THE HONEST LINE.** Deciding which of
+  two records of one match wins would mean matching a CricketStatz fixture to a
+  CA one across two naming schemes ("Keon Park 1's 'A-Grade'" against "Keon
+  Park CC 1st XI") and then overwriting a live, self-maintaining source with a
+  frozen snapshot. Leaving the covered years alone keeps one record of each
+  match and needs no guess.
+- **A CLUB CAN ASK FOR THEM ANYWAY** (`include_synced_years`), because a club
+  that trusts CricketStatz over its own sync is entitled to — but it is opt-in,
+  the checkbox says it will hold both, and the default can never double a
+  club's records by accident.
+- **THE OVERLAP IS ON SCREEN BEFORE ANYTHING RUNS.** `inspect_club` reports
+  `synced_games` and `synced_years`, so the preview names how many matches the
+  club already syncs and which years are being left out — rather than the club
+  discovering it later as a career total half as large again as it should be.
+  The running import repeats it, and it lands in the import's own notes.
+- **RECOVERY for a club already in this state**: undo the CricketStatz import
+  (it removes exactly what that import wrote, matches, record boards and
+  honours alike) and run it again. The default now leaves the synced years
+  alone.
+- **Verified against a real Postgres** (`verify_cricketstatz_import.py` is 186
+  checks now: the covered years known and a year the sync cannot reach not
+  claimed, the covered seasons left out of the plan, no manual game written in
+  them, the older history still imported, the club told, the opt-in bringing
+  them across, and a club that has never synced having nothing to skip) **with
+  a control run**: 3 of the 186 fail with the guard neutered, and the seasons
+  the sync covers are imported on top.
+- **NOTICED, NOT FIXED**: nothing detects the overlap for a club that ALREADY
+  holds both. The undo-and-re-import above is the path; a screen that reports
+  "these N matches are held twice" would be its own change.
+- **ALSO NOTICED**: `v_effective_batting_innings` emits `batting_innings.id`
+  and `manual_batting_innings.id` unchanged, and both are `SERIAL` — so the
+  view's `id` is NOT unique for a club holding both. Nothing in the record
+  queries keys on it today, which is why this has never bitten, but it is one
+  `DISTINCT ON (id)` away from being a real bug.
+
+### A MERGE MOVES A RECORD; IT MUST NEVER DELETE ONE (v9.68.1)
+
+Reported off Brad Quinsee's profile the day after the duplicate fix: merging
+his two records dropped roughly half his career — 178 matches and 4,925 runs
+where CricketStatz has 367 innings and 10,444 runs, and a season table starting
+in 2002/03 for a man capped in 1982-83.
+
+- **`_merge_players_core` WAS WRITTEN FOR THE SYNCED CAREER AND NEVER TOUCHED
+  THE MANUAL ONE.** It reassigns `batting_innings`, `bowling_spells`,
+  `game_appearances`, `player_season_stats` and friends — and not one
+  `manual_*` table, which is where an uploaded scorecard AND **every match a
+  CricketStatz import writes** actually live. All of them are `ON DELETE
+  CASCADE` on `players.id`, so the delete at the end of the merge **destroyed**
+  the removed record's whole career rather than moving it, with nothing in the
+  undo log to hand back. **This is the fourth time this function has had this
+  bug** (`bowler_wickets`, `player_season_grade_stats`, `imported_stats` before
+  it) and the AFL merge's own note documents the fifth.
+- **THE HONOUR BOARD WENT THE OTHER WAY AND WAS JUST AS LOST.**
+  `player_achievements` has no foreign key at all, so its rows were ORPHANED
+  rather than deleted — quieter, and invisible on every screen, since each read
+  joins `players`.
+- **`services/merge_carry.CARRIED` IS THE LIST, and it is one definition shared
+  by the merge and the undo** so the two cannot disagree about what moved. A
+  table that records what a player DID belongs on it. `merge_logs.carried_row_ids`
+  is one JSONB blob keyed `"<table>.<column>"` rather than a column per table,
+  since the shape is uniform.
+- **THE KEEPER'S ROW WINS A COLLISION, and the join is `IS NOT DISTINCT FROM`,
+  not `=`.** Part of a unique key can be NULL — a season adjustment with no
+  grade is the club's whole-season correction — and `=` never matches it, so
+  the duplicate would slip through and the move would then fail on the very
+  index the de-dup exists for.
+- **AN ID'S TYPE SURVIVES THE JSONB ROUND TRIP, deliberately.** asyncpg infers a
+  bound array's type from its ELEMENTS, so a list of strings cannot be cast to
+  `int[]` at the other end however the SQL is written. Integer ids are kept as
+  integers and only the UUID table's as strings. Found by running it.
+- **A TABLE THAT IS NOT THERE IS SKIPPED, not a 500.** `player_achievements` and
+  `club_honour_entries` are lifespan-created raw SQL, so a database that has not
+  run it has not got them; `to_regclass` is what stops a merge failing over one.
+- **THE IMPORT'S OWN IDENTITY MOVES ONTO THE KEEPER** when the keeper has none,
+  the same call the existing code makes for `playhq_id` — the column is uniquely
+  indexed per club, so two identities cannot sit on one row, and the undo takes
+  it back off.
+- **RECOVERY FOR A CLUB THIS HAS ALREADY HIT: re-run the CricketStatz import.**
+  Match ids are deterministic (`cricketstatz_match_id`) and `import_match`
+  upserts, so every deleted innings is written again — onto the ONE kept record,
+  since `resolve_player` no longer finds the removed CricketStatz id and the
+  name now matches the keeper exactly. Undoing the merge cannot help: those
+  merge_logs rows were written before `carried_row_ids` existed, and the rows
+  they would point at are gone.
+- **Verified against a real Postgres** (`backend/verification/verify_merge_carry.py`,
+  21 checks through the SHIPPED `_merge_players_core` and `undo_merge` bodies:
+  the reported shape replayed — one person held twice, each with part of the
+  career — no innings destroyed, the bowling and fielding carried, an innings
+  both records held kept once, the hand-typed season and career corrections
+  alive, the honour following the person, the import identity moved, the merge
+  log naming exactly what moved, no row left pointing at a player who no longer
+  exists, and undo handing every one of them back while the keeper keeps its
+  own) **with a control run**: 14 of the 21 fail against the previous
+  behaviour, the keeper left with only its own 2 innings of 7.
+- **A CHECK THAT PASSES AGAINST THE BROKEN CODE IS NOT A CHECK.** "the honour
+  goes back with it" is trivially true when the honour was orphaned rather than
+  moved — it asserts the keeper has none now. The orphan sweep moved ABOVE the
+  undo for the same reason: after the removed player is re-created, an orphan is
+  no longer an orphan.
+- **THE AUDIT IS REPEATABLE and is what found the rest.** Walk every
+  `ForeignKey("players.id")` in `models/db.py`, resolve each to its table AND
+  its ORM class, and flag any the merge body names neither of. It reported 41.
+- **NOTICED, NOT FIXED**: the merge still does not carry `net_attendance`,
+  `team_members`, `family_members`, `player_availability`,
+  `player_availability_periods`, `fixture_lineups`, `fee_members`,
+  `comms_contacts`, `merch_movements` or any of the eleven fantasy tables.
+  Those describe where a person stands NOW rather than what they did, the keeper
+  usually has its own, and each needs its own de-dup decision — which is a
+  different change from stopping a career being deleted.
+
+### The honour board is written in the notes (v9.68.0)
+
+Asked for with the duplicate fix: "the notes in CricketStatz contain some
+awards - it's worth us being smart at reading this notes and converting them
+to awards/honours".
+
+- **A CLUB THAT KEEPS ITS NOTES PROPERLY HAS WRITTEN ITS HONOUR BOARD THERE.**
+  Sampled live before designing anything: **64 of 75 players carry notes, 143
+  lines**, in one house style — `LIFE MEMBER ~ 1992-93`, `A-GRADE CAP AND DEBUT
+  #102 (1982-83)`, `5x TED GARLAND BATTING AVERAGE WINNER`, `SENIOR HEAD COACH
+  (2011-15, 2023-25)`, `N.M.C.A. - HALL OF FAME`.
+- **AN UNRECOGNISED NOTE IS NOT AN AWARD, and that is the whole design.** The
+  same block carries plain biography — `COLLINGWOOD FC (313 Games)`,
+  `ESSENDON FC / MELBOURNE FC (95/3 Games)`, `wk` — and a football career on a
+  cricket club's honour board is worse than reading nothing. 111 of the 117
+  distinct lines classify; the six that do not are left alone and REPORTED, so
+  a club can see what its notes said that we did not file.
+- **A TWO-YEAR TOKEN IS A SEASON ONLY WHEN THE SECOND HALF IS THE FIRST PLUS
+  ONE.** `1982-83` is a season; `2011-15` is a five-year coaching stint. The
+  one test separates them and holds at the century (`1999-00` is a season,
+  `1998-00` is a two-year span) — getting it wrong files a stint under a season
+  that never existed. `_span_end` rolls the century over for the far end, or
+  `1998-00` ends in 1900.
+- **AN `Nx` PREFIX MEANS THE LINE IS SOMETHING WON N TIMES, NEVER A ROLE.**
+  That is what separates `2x N.M.C.A. TEAM OF THE YEAR - CAPTAIN` (an award
+  that happens to name a role) from `INAUGURAL K.P.C.C. 'A' GRADE CAPTAIN
+  (1962-63)` (a captaincy). Checked before the role vocabulary, deliberately.
+- **A TROPHY WON FIVE TIMES IS ONE HONOUR THAT SAYS SO, not five season-less
+  rows.** There is no per-season breakdown behind an `Nx`, so five rows nobody
+  could check is the wrong answer; `Won 5 times` in the detail is the honest
+  one.
+- **EVERY HONOUR IS ADDED TO THE CLUB'S OWN AWARD CATALOGUE**
+  (`ensure_award_definition`), or an imported trophy exists on a player and
+  nowhere in the list the Awards screen offers — so a second winner could only
+  be added by retyping its name. Subcategories are `ROLE_TYPE_TO_SUBCATEGORY`'s
+  own (`Captains`, `Coaches`), so `office_bearers.sync_award_definitions`
+  reconciles them into BetterClubhouse's role catalogue rather than minting a
+  parallel vocabulary.
+- **A RE-IMPORT CARRIES AN HONOUR ONTO THE NEW IMPORT, the way it already
+  carries its matches and its record boards.** Found by running it: without the
+  re-stamp, undoing the latest import removes the matches and leaves the honour
+  board behind pointing at an import that is gone. **Only ever a row a
+  CricketStatz import wrote** (`ci.organisation_id` checked): an honour the club
+  typed in by hand is not the import's to claim, and claiming it would let an
+  undo delete the club's own record.
+- **THE BATCH ROW COUNTS WHAT NOW CARRIES IT, not what this pass created.** A
+  re-import creates nothing and carries twelve, and a batch holding twelve that
+  reports none reads as a mistake.
+- **The award DEFINITIONS survive an undo.** A trophy now in the catalogue may
+  already have a second winner typed in by hand, and a catalogue entry holds no
+  claim about anybody.
+- **The page's own URL carries the player's name as a slug and the name is
+  decoration** — the club number and the player id resolve it, so a fixed
+  placeholder is used rather than re-deriving a slug we would have to keep in
+  step with however the club spells them.
+- **The notes pass is its own phase and cannot lose a history already
+  written.** It runs after the matches and the record book, on its own session,
+  and a failure is noted rather than raised — one request per player is the
+  longest part of an import and an honour board is not what the import is for.
+- **Verified against a real Postgres** (`verify_cricketstatz_import.py` is 178
+  checks now: every line of the real captured notes read off the page, both
+  season rules and both spans, the life membership, the cap and its number, the
+  emoji not riding into an award's name, the trophy won thirteen times, the
+  initialisms and `McFarlane` kept as the club wrote them, the captaincy and the
+  coaching stint as roles, the football career and `wk` left alone, the
+  catalogue filled, a re-read creating nothing, and undo taking the honours,
+  marking the batch undone and keeping the catalogue) **with two control runs**:
+  with the classifier neutered 36 of the 178 fail; with only the re-stamp
+  neutered, 5 — the undo leaving twelve honours behind.
+- **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN.** The first cut read
+  `classify_note(...)["season"]` directly, so with nothing classifying it died
+  on the first subscript and said nothing about the other thirty. Every read
+  goes through `got()` now. Two checks also PASSED against the broken code — "a
+  cap with no season still reads as a cap" and "the emoji does not ride into the
+  name" are both trivially true of `None` — so each asserts the classification
+  exists as well.
+- **A HARNESS TABLE THAT MERELY LOOKS RIGHT IS WORSE THAN NONE.** The three
+  awards tables are lifespan-created raw SQL, invisible to `create_all`; they
+  are copied into the suite column for column from `main.py`.
+- **THE STUB REMEMBERS WHICH PLAYER GOT WHICH NOTES.** Keyed on call order it
+  served nothing at all on the second import, so the carry-over checks were
+  measuring the harness rather than the code.
+- **NOT BUILT**: no endpoint runs the notes pass alone. A club that imported
+  before this shipped gets its honour board by re-importing — matches are
+  recognised and updated rather than doubled — which is the same path the
+  record book already takes. The player page also carries `Batting: Right
+  Handed` and `Bowling: Right Arm Pace`, which map onto `players.batting_hand`
+  and `.bowling_type`; that is a different change from the one asked for.
+
+### An imported grade is classified on the way in (v9.67.3)
+
+Asked for directly: create grades, seasons and players the way the other stat
+import pages do.
+
+- **A GRADE WITH NO CATEGORY CANNOT BE TOLD APART BY THE GRADE TYPE FILTER**,
+  so a club's imported juniors would sit inside its senior careers — the exact
+  thing migration 228 exists to prevent. The importer was writing a bare
+  `Grade(name=…)`.
+- **BOTH COLUMNS, per the rule this file already sets**: `category=
+  suggest_category(name)` AND `categories=list(suggest_categories(name))`, or a
+  "Girls Under 16" lands as junior alone and loses its women's half.
+- **`grassroots_id=None` is written explicitly** on both the season and the
+  grade — the documented "not from a sync" marker every other importer sets.
+- Players needed nothing: the reference importers create a bare
+  `Player(id, organisation_id, name)` and let the column defaults stand.
+
+### Find out what there is before pulling it (v9.67.2)
+
+Asked while watching a live run: "it says season 10 of 167 but I know there
+are 40-50 seasons for Cockburn, so why is it parsing all 167" — and is a first
+pass that works out where the data is, then plans the pull, worth building.
+
+- **IT IS, AND THE REASON IS THE PROGRESS BAR, NOT THE SAVING.** The 167
+  candidate probes are ~1 minute of a ~60 minute run. What discovering
+  seasons as it went really cost was the DENOMINATOR: `matches_total` only
+  counted the seasons walked so far, so it climbed with `matches_done` and any
+  bar drawn against it sat near full from the first season. A first pass gives
+  the real total up front, which is what makes every figure after it mean
+  something.
+- **`plan_seasons` PROBES EVERY CANDIDATE, CONCURRENTLY.** 167 candidates in
+  **56 seconds** against the live site, under the client's own semaphore. It
+  keeps each season's match rows, so the import that follows re-reads nothing —
+  the plan IS the work list.
+- **EVERY CANDIDATE IS PROBED, and the temptation not to was measured and
+  rejected.** Bounding the range by the dates on the all-time record boards
+  looked clean and cut 167 to 73 — but those boards are top-100 lists, so a
+  quiet early season need never appear on one. Checked against the live club:
+  the boards span **1954-2026** while the club's real earliest season is
+  **1953**. It would have silently dropped a season, which is the one thing
+  this must not do. A history can have gaps, so stopping at a run of empty
+  years is out for the same reason.
+- **WHAT IT FOUND FOR THE REPORTED CLUB**: 73 seasons actually played,
+  1953-2025, 3,556 matches, ~59 minutes — with 94 candidate seasons skipped as
+  empty. The club sees that before committing, and the bar then runs against
+  3,556 rather than a figure that grows underneath it.
+- **THE PLAN IS ORDERED OLDEST FIRST**, so a club watching sees its history
+  fill forwards rather than arriving backwards.
+- **Verified** (the suite is 113 checks: the played seasons found and the empty
+  candidates left out, the rows kept, the oldest-first order, the summary's
+  total, span and estimate, and — structurally — that every candidate is
+  probed rather than a guessed range) and **driven in Chromium** (40: the first
+  pass counting candidates and NOT pretending to a matches figure it has not
+  worked out yet, then the bar against the real total, and the plan's own line).
+
+### A working import that read as a hung one (migration 286, v9.67.1)
+
+Reported off a live run with a screenshot: Cockburn on **season 10 of 167**, a
+bar sitting at 94%, and the badge still reading "working out which seasons you
+played" after 1,227 matches.
+
+- **NOTHING WAS HUNG. THE SCREEN COULD NOT SAY OTHERWISE, and that is the
+  actual defect.** A full history is thousands of matches at roughly one
+  scorecard a second, so the same figures sitting there for a minute is the
+  ordinary case. There was no record of when the row last moved, so neither a
+  club nor I could tell a long run from a dead one.
+- **`updated_at` IS THE ONE THING THAT ANSWERS IT.** Every progress write is
+  now a heartbeat, and `/status` returns the seconds since it. The screen says
+  "still going" under 90 seconds and names the gap after that.
+- **THE BAR WAS MEASURED AGAINST A TOTAL THAT GROWS WITH IT.**
+  `matches_total` only counts the seasons walked SO FAR, so `matches_done /
+  matches_total` sits near full from the first season — 1227/1298 is 94% on
+  season 10 of 167. Seasons are the bounded, monotonic measure and are what
+  the bar tracks now. **The control run reads 95% against the old
+  expression**, which is the reported screenshot.
+- **THE PHASE BADGE READ THE COLUMN AND THE RUN ONLY UPDATED THE BLOB.** The
+  `phase` column was set to `seasons` once and then not again until `done`, so
+  it was stuck for the whole import. Both move together now, and the screen
+  prefers the blob.
+- **THE PLAYERS FIGURE WAS THE CURRENT SEASON'S CACHE**, so it fell back every
+  season instead of climbing. Counted from the club's own rows now.
+- **A RUN WHOSE PROCESS DIED LOCKED THE CLUB OUT FOR EVER.** The
+  already-running guard had no notion of a stale row, so a redeploy mid-import
+  left `status='running'` with nothing behind it and every later attempt got a
+  409. A run silent past `STALL_AFTER_SECONDS` (5 minutes — one 30s request
+  plus a season probe is the longest honest gap) is closed out as errored and
+  the new one starts. There is a Stop button too.
+- **A SCORECARD IS NO LONGER CACHED.** It is fetched once per import and never
+  again, so holding thousands of ~20KB bodies for the cache's TTL kept a whole
+  club's history in memory for nothing.
+- **THE HEARTBEAT ALSO BEATS MID-SEASON**, every 5 matches rather than only
+  between seasons — a season of 130 matches was 90 seconds of apparent
+  silence.
+- **Verified** (the suite is 104 checks: the heartbeat recorded, a 90-minute
+  silence reading as stalled, a just-moved run NOT reading as stalled, and the
+  threshold being minutes rather than seconds) and **driven in Chromium** (34,
+  the reported run replayed exactly: the bar on seasons, the "still going"
+  line, the stalled notice, and the Stop control) **with a control run**: the
+  old bar reports 95%.
+
 - **IT LIVES ON DATA SYNC, not a screen of its own.** Bringing a history in is
   a sync action like the others — it just points at another platform instead of
   Cricket Australia — so `components/admin/CricketStatzImport.jsx` is a panel
@@ -7218,6 +8162,208 @@ and BetterCricket pulls ALL of its data across, the record book included.
   stats) and the full JSON database extract a level-8 CricketStatz account can
   download, which would be the sanctioned path if a club would rather hand over
   a file than a link.
+
+## Three kit fields that do not live in one place (migration 289, v9.69.1, Sep 2026)
+
+Asked for as "store player shirt number, shirt size and pants size in the
+BetterAdmin Directory", with the question of whether to reserve the lot for
+BetterAdmin as an upsell. **The three are not the same kind of fact and the
+split is the answer**, per direct instruction after the options were put:
+
+- **`players.shirt_number` is a PLAYING attribute and is CORE.** A team sheet, a
+  lineup post and a scorecard all want it, and a club running nothing but
+  BetterStats has every one of those surfaces — so gating it would leave a Core
+  club unable to put a number on its own team sheet.
+- **`fee_members.shirt_size` / `.pants_size` are KIT MANAGEMENT and are
+  BetterAdmin's.** They sit on the person spine because **a coach, a scorer and a
+  canteen volunteer all get a club polo and `players` has nowhere to put their
+  size** — which is also why they could never have gone on the player record.
+
+- **NUMBERED 289, AFTER TWO COLLISIONS.** `origin/main` reached 287
+  (CricketStatz as the record for a season) and then 288 (configurable
+  notifications) while this was in flight, and two migrations sharing a
+  revision id break Alembic outright. **Re-check `origin/main` at the moment
+  you merge, not only when you first number one** — this file has recorded that
+  trap three times and it still cost two renumbers in one session.
+- **`admin` IS NOT AN ENTITLEMENT KEY, and the first cut of the gate was wrong
+  for every club on the platform.** It is the BILLABLE umbrella;
+  `MODULE_GROUPS[MODULE_ADMIN]` grants `fees`/`comms`/`merch`/`crm`, and
+  `ALL_MODULES` — which `org_entitled_modules` filters `module_overrides`
+  through — does not contain it. So `org_has_module(club, "admin")` is **False
+  for every club there has ever been**, and the gate would have withheld kit
+  sizes from the clubs that had paid for them. The Clubhouse nav has always
+  gated on the child keys for this reason. **Caught by the verification, not by
+  reading the code.** `ADMIN_MODULE_KEYS` is the frontend's copy of the same
+  four, since `hasModule('admin')` is false there too.
+- **A SIZE IS WITHHELD FROM A CLUB WITHOUT THE MODULE, never sent and hidden**
+  — the `visible_age` rule. `kit_sizes` on the payload says which, and a write
+  naming one is refused with the ordinary 402 upsell shape. The NUMBER rides on
+  that same payload either way, which is the whole point of the split.
+- **THE 402's MODULE NAME COMES FROM `BILLABLE_MODULE_NAMES`, NOT
+  `MODULE_META`.** The umbrella has no `MODULE_META` entry at all, so reading it
+  there names the module "admin" to a club. **Noticed, not fixed**:
+  `require_module("admin")`'s own message has exactly that gap, and the backend
+  name ("BetterClubhouse") disagrees with the frontend's ("BetterAdmin") — a
+  rename that only went half way, and its own change.
+- **NOTHING NORMALISES A SIZE TO A VOCABULARY.** A club buys from whichever
+  supplier it buys from, and "Youth 12", "2XL" and "34" are all answers somebody
+  has to be able to type; a controlled list leaves a club sizing in centimetres
+  with nowhere to put the truth. `services/player_kit.py` is the one rule for all
+  three writers (the profile, the Directory, the bulk importer) — trim, collapse
+  inner whitespace, cap the length.
+- **A NUMBER IS TEXT**, the call `afl_player_game_lines.jumper_number` already
+  makes: a club that issues "07" or "00" means it, and an integer column quietly
+  makes them 7 and 0.
+- **The Directory writes the number through the PLAYER route**, not a second
+  copy of the column — so the number on the Directory and the number on the
+  player's own profile are one field. Present-and-blank clears, ABSENT leaves
+  alone, on all three, which is what lets one panel save without touching
+  another.
+- **The bulk importer takes it**, because a club assigning numbers does it in a
+  spreadsheet and the note this file already carries says a profile field left
+  out of that list goes missing with nothing to say so. Something too long to be
+  a shirt number is **REPORTED, not clipped** — a silently clipped value reads on
+  the team sheet as a number the club chose.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_player_kit.py`, 43 checks through the shipped
+  route bodies: migration 289 applied three times to a populated pre-289 schema
+  and the lifespan mirror landing on the same columns, "07" and "00" surviving,
+  a non-player holding a size, a Stats-only club still numbering its players and
+  never receiving a size, the 402 and its shape, a size minting the person row
+  for a read-through player, cross-club, and the importer's three cases) **with
+  a control run**: 30 of the 43 fail against the previous commit.
+- **A CHECK THAT PASSES ON A COLUMN THAT NEVER HELD ANYTHING IS NOT A CHECK.**
+  Four did on the first cut — "a present blank clears it" is trivially true of a
+  build with no column, and "the Stats-only payload lacks the size keys" of a
+  build that never emits them. Each is paired now: the set AND the clear, the
+  entitled club's payload AND the other one's.
+- **A HARNESS THAT TAKES A LIFESPAN TABLE'S `CREATE` ALONE LEAVES A TABLE THAT
+  MERELY LOOKS RIGHT.** Every column added since one of those tables was written
+  lives in its own ALTER further down the lifespan, so the harness has to pull
+  those too — the suites share one database and none of them drops the schema.
+  `verify_cricketstatz_import.py` met exactly that: it creates
+  `player_achievements` IF NOT EXISTS, found the one this harness had left
+  behind, and died on a missing `season_end` that had nothing to do with the
+  code it was checking. **The ALTER is matched to its CLOSING DOUBLE QUOTE, not
+  to the first quote of any kind**: a default value is single-quoted inside the
+  Python string (`"... DEFAULT 'volunteer'"`), and stopping there truncates the
+  statement to a syntax error.
+- **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN.** Every read of a new key
+  goes through `.get`, every import of the shipped code through `load()`, and
+  every new module attribute through `getattr` — and the suite BAILS after the
+  migration section when anything is missing, reporting it, rather than reaching
+  the first `None.something`. Found by running the control: it died on
+  `players_router.update_player_profile` and said nothing about the other forty
+  checks.
+- **Verified with the importer** (the suite is 68 checks now) **with a control
+  run**: with the number resolution and the two size writes neutered, 7 fail —
+  including the second record a sheet of kit sizes would mint.
+- **THE MEMBER CSV IMPORT TAKES ALL THREE (v9.69.1)**, asked for straight
+  after. `name | email | mobile | category | roles | shirt size | pants size |
+  shirt number`, through the ONE shared importer both the Directory and
+  BetterFees Members already call.
+- **THE THREE COLUMNS DO NOT WRITE TO THE SAME TABLE, so a number has to find a
+  player before it means anything.** The sizes land on `fee_members`; the number
+  lands on `players.shirt_number` or nowhere. Resolution is the matched member's
+  own link, else an exact name match against the club's players — and **a name
+  held by two players resolves to NEITHER**, the refuse-to-guess rule, because a
+  number written onto the wrong Jack Smith is worse than a number not written.
+  Every skip is reported in the preview, with the reason, BEFORE the club
+  commits.
+- **A NEW PERSON ROW IS LINKED TO THE PLAYER OF THAT NAME, and without it the
+  feature is broken for the case it exists for.** A club uploading kit sizes for
+  its players would otherwise mint a second, unlinked record for every one of
+  them and the Directory would show the whole club twice. Only on an
+  unambiguous match to a player with no person row yet — the same row
+  `ensure_for_player` would have made. An EXISTING member row is never
+  re-pointed at a player, which is the direction that could steal a record.
+- **THE GATE IS ON THE SHEET'S OWN COLUMNS, not on what a row happens to carry**,
+  so a club without BetterAdmin is refused at the PREVIEW rather than after some
+  rows have quietly lost a value. `columns_used` is what the router reads;
+  `routers/fees.py` calls the same guard, where it can never fire (that router is
+  behind the fees module and holding any of the four IS holding the bundle) —
+  two callers of one importer must not disagree about what a sheet may carry.
+- **A BARE `shirt` COLUMN IS CLAIMED BY NEITHER.** It is as likely to be a size
+  as a number, and guessing wrong puts a size in a number field.
+- **A SHEET THAT SAYS NOTHING ABOUT A FIELD LEAVES IT ALONE**, the importer's own
+  existing rule, extended to the sizes rather than worked around.
+- **`BetterClubhouse` IS GONE FROM EVERY NAME A CLUB READS (v9.69.1).** The
+  backend's `BILLABLE_MODULE_NAMES[MODULE_ADMIN]` still said it while the
+  sidebar said BetterAdmin, so a 402 named a module that no longer exists.
+  **`modules.module_display_name(key)` is now the ONE place the backend names a
+  module** — `MODULE_META` first, `BILLABLE_MODULE_NAMES` second — which also
+  fixes `require_module("admin")`'s own message, since the umbrella is a bundle
+  of four keys and has no `MODULE_META` entry to read. Changelog entries keep
+  the old name: they are the record of what happened at the time.
+
+### The minutes go out on the club's own letterhead (v9.69.0)
+
+Asked for alongside: a club logo and a header band in the club's colours on the
+Committee Meeting Minutes.
+
+- **THE COLOURS COME FROM `theme_config`, NOT `primary_color` / `accent_color`.**
+  That legacy pair themes nothing any more (the v8.70.2 note), so reading them
+  would head the document in colours the club has not used for years.
+- **A SHADED PARAGRAPH, NEVER A TABLE, and the existing suite is what settled
+  it.** A one-row table lets each half of the band carry its own fill and is the
+  obvious way to draw a two-colour one — and it makes the letterhead the
+  document's FIRST table, which broke 11 checks in
+  `verify_minutes_download_browser.mjs` that read the meeting details out of
+  `tables[0]`. Word counts it, a reader announces it, and anything walking the
+  document's tables meets a band before it meets the meeting. Two stacked
+  single-colour paragraphs give the club both colours with none of that, and the
+  PDF draws the identical pair of rectangles. **That suite passes unchanged,
+  107/107.**
+- **THE CREST IS CONVERTED TO JPEG IN THE BROWSER, and that is the whole reason
+  it can be embedded at all.** A JPEG goes into a PDF verbatim under
+  `/DCTDecode` and into a `.docx` as an ordinary media part; a PNG would need a
+  decoder in `textDocs.js`, which has no dependency and is not getting one. The
+  canvas does the decoding the browser already knows how to do.
+- **THE CANVAS IS FILLED WHITE FIRST.** A club crest is almost always a
+  transparent PNG and JPEG has no alpha, so without it every logo lands as a
+  black box on a white page.
+- **`clubLogoJpeg` RETURNS NULL RATHER THAN THROWING** — a crest that will not
+  load, an external URL that taints the canvas, a club with no logo. The band
+  draws on its own and the document is still worth having.
+- **`header` is its own argument to `docBlocks`, not the head of `blocks`**,
+  because `title` is ALSO the PDF's `/Info` Title: emitting a title block instead
+  would print the club name twice.
+- **`downloadPdf`'s own `header` variable is the REPEATING TABLE HEADER** and had
+  to be renamed — a document `header` and a table header are two different things
+  in one function.
+- **The image objects are numbered LAST**, after the pages, because `images` is
+  only complete once every content stream has been written; a page whose
+  `/Resources` omits an XObject it draws renders **blank with no error anywhere**.
+- **PLAYWRIGHT MATCHES ROUTES MOST-RECENTLY-REGISTERED FIRST.** The crest route
+  is registered AFTER the `**/api/**` catch-all, not before it. The other way
+  round, the catch-all answers the `<img>` with `{}`, the canvas has nothing to
+  draw, and every "no crest" check passes for the wrong reason.
+- **`unzip` GLOB-MATCHES THE MEMBER NAME ITSELF**, so `[Content_Types].xml` reads
+  as a character class and matches nothing even with no shell involved. The
+  brackets have to be escaped.
+- **Driven in Chromium** (`frontend/verification/verify_minutes_letterhead_browser.mjs`,
+  38 checks against the real meeting room: the band in the club's OWN colours read
+  out of both files, the crest as a real JPEG media part with a relationship the
+  drawing references and as a `/DCTDecode` XObject the page's `/Resources` names,
+  the band not being a table, a club with no crest and a crest that 404s both
+  still getting their band with no dangling part, and every xref row pointing at
+  the object it claims) **with a control run**: 21 of the 38 fail against the
+  previous commit.
+
+### Sponsors: written up, not built (Sep 2026)
+
+Rockingham Mandurah want their sponsors more prominent, and two of them hold
+naming rights on specific grounds. Per direct instruction the implementation is
+a separate piece of work; the finding is in
+**`docs/sponsor-prominence-and-venue-naming-rights.md`**. The short of it:
+**more templates is not the fix**. A sponsor reaches 2 of the 62 template
+components, always as one of exactly two identical logo boxes in a 56px footer
+(`ScSponsorFooter`'s `const slots = [0, 1]`), and the event templates take a
+sponsor's NAME as a string and cannot draw a logo at all. A tier on
+`org_sponsors` reaches every template; a `sponsor_venues` table keyed on the
+club's OWN distinct `games.venue` / `fixtures.venue` strings (picked, never
+typed, so there is no fuzzy match to fail silently) is what makes a ground
+naming right expressible.
 
 ## Writing Voice — always run prose through the humanizer
 

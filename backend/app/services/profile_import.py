@@ -23,6 +23,7 @@ from typing import Optional
 
 from app.services import player_age
 from app.services.import_ingest import _norm  # shared header normaliser
+from app.services.player_kit import SHIRT_NUMBER_MAX, clean_shirt_number
 from app.services.import_ingest import NAME_FORMAT_LABELS, resolve_row_name  # noqa: F401 — re-exported for callers
 
 
@@ -39,6 +40,13 @@ VALUE_FIELDS = (
     # it one player at a time.
     "date_of_birth", "is_opening_batsman", "is_overseas", "overseas_country",
     "status", "is_public", "financial", "training",
+    # The number on their shirt (migration 289). Importable because a club
+    # assigning numbers does it in a spreadsheet, and a field added to the
+    # profile and not to this list goes missing here with nothing to say so.
+    # The two KIT SIZES are deliberately NOT here: they live on the person
+    # spine, not on `players`, and the Directory's own member import is where
+    # a sheet of them belongs.
+    "shirt_number",
 )
 ALL_FIELDS = (NAME_FIELD,) + VALUE_FIELDS
 
@@ -48,7 +56,8 @@ ALL_FIELDS = (NAME_FIELD,) + VALUE_FIELDS
 PLAYER_FIELDS = ("email", "phone", "gender", "player_role", "batting_hand",
                  "bowling_action", "bowling_type", "date_of_birth",
                  "is_opening_batsman", "is_overseas", "overseas_country",
-                 "status", "is_public", "is_financial_override", "trained_override")
+                 "status", "is_public", "is_financial_override", "trained_override",
+                 "shirt_number")
 
 FIELD_LABELS = {
     "player_name": "Player name",
@@ -69,6 +78,7 @@ FIELD_LABELS = {
     "is_public": "Show on public website",
     "financial": "Fees status",
     "training": "Training",
+    "shirt_number": "Shirt number",
 }
 
 # Display labels for the controlled-vocabulary fields — the exact values offered
@@ -119,6 +129,9 @@ SYNONYMS = {
                   "subs", "subscriptions", "money"],
     "training": ["training", "at training", "attends training", "nets", "training status",
                  "attending training"],
+    "shirt_number": ["shirt number", "shirt no", "shirt", "number", "playing number",
+                     "jumper number", "jumper no", "squad number", "no", "num",
+                     "cap number", "player number"],
 }
 
 
@@ -477,6 +490,18 @@ def row_profile(values: dict) -> tuple[dict, list]:
             notes.append(f"{FIELD_LABELS[field].lower()} “{raw(field)}” not recognised — left unchanged")
         else:
             patch[column] = b
+
+    if raw("shirt_number") is not None:
+        # Kept as written — "07" and "00" are numbers a club really issues, so
+        # nothing here parses it to an int. Something too long to be a shirt
+        # number is REPORTED rather than truncated into one, since a silently
+        # clipped value reads on the team sheet as a number the club chose.
+        n = clean_shirt_number(values["shirt_number"])
+        if n is not None and len(raw("shirt_number")) > SHIRT_NUMBER_MAX:
+            notes.append(f"shirt number \u201c{raw('shirt_number')}\u201d is too long "
+                         f"(max {SHIRT_NUMBER_MAX} characters) \u2014 left unchanged")
+        elif n is not None:
+            patch["shirt_number"] = n
 
     if raw("overseas_country") is not None:
         patch["overseas_country"] = raw("overseas_country")

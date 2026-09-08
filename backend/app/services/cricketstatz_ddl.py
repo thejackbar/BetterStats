@@ -95,9 +95,22 @@ STATEMENTS: tuple[str, ...] = (
     ALTER TABLE organisations
         ADD COLUMN IF NOT EXISTS cricketstatz_club_id TEXT
     """,
+    # A heartbeat (migration 286). Without it there is no way to tell a long
+    # import from a dead one: a full history is thousands of matches, so a
+    # screen showing the same figures for a minute is the normal case, and the
+    # only thing that separates the two is when the row last moved.
+    """
+    ALTER TABLE cricketstatz_imports
+        ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ
+    """,
+    """
+    UPDATE cricketstatz_imports SET updated_at = started_at
+     WHERE updated_at IS NULL
+    """,
 )
 
 DOWNGRADE: tuple[str, ...] = (
+    "ALTER TABLE cricketstatz_imports DROP COLUMN IF EXISTS updated_at",
     "DROP INDEX IF EXISTS uq_manual_games_org_cricketstatz",
     "ALTER TABLE manual_games DROP COLUMN IF EXISTS cricketstatz_import_id",
     "ALTER TABLE manual_games DROP COLUMN IF EXISTS cricketstatz_match_id",

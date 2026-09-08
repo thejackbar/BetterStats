@@ -336,7 +336,7 @@ async def list_award_definitions(
     org_id: str = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    # Office Bearer definitions and BetterClubhouse's role catalogue are the
+    # Office Bearer definitions and BetterAdmin's role catalogue are the
     # same list seen from two screens, so they are reconciled before the read
     # (see services/office_bearers.py). Additive and idempotent both ways.
     # Never fatal: a club should still get its awards list if this hiccups.

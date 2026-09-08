@@ -1276,6 +1276,21 @@ async def lifespan(app: FastAPI):
             await conn.execute(text(
                 f"ALTER TABLE merge_logs ADD COLUMN IF NOT EXISTS {_col} JSONB DEFAULT '[]'"
             ))
+        # Everything else that records what a player DID — the manual per-game
+        # tables (an uploaded scorecard, and every match a CricketStatz import
+        # wrote), the manual adjustments and the honour board. All of them
+        # cascade-deleted with the removed player before this, so a merge
+        # destroyed the removed record's whole career. One JSONB blob keyed
+        # "<table>.<column>" rather than a column per table, since the shape is
+        # uniform — see services/merge_carry.py.
+        await conn.execute(text(
+            "ALTER TABLE merge_logs ADD COLUMN IF NOT EXISTS "
+            "carried_row_ids JSONB DEFAULT '{}'"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE merge_logs ADD COLUMN IF NOT EXISTS "
+            "removed_cricketstatz_player_id TEXT"
+        ))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS merge_pair_ignores (
                 id SERIAL PRIMARY KEY,
@@ -3579,6 +3594,19 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE players ADD COLUMN IF NOT EXISTS hero_photo_url TEXT"
         ))
+        # Migration 289: the club's kit record. The NUMBER is a playing
+        # attribute and lives on the player (Core); the two SIZES are kit
+        # management and live on the person spine the Directory edits, since a
+        # coach or a scorer takes a polo size and has no players row.
+        await conn.execute(text(
+            "ALTER TABLE players ADD COLUMN IF NOT EXISTS shirt_number TEXT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE fee_members ADD COLUMN IF NOT EXISTS shirt_size TEXT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE fee_members ADD COLUMN IF NOT EXISTS pants_size TEXT"
+        ))
         await conn.execute(text(
             "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
             "select_show_age BOOLEAN NOT NULL DEFAULT false"
@@ -4265,6 +4293,36 @@ async def lifespan(app: FastAPI):
         # both run services/cricketstatz_ddl.STATEMENTS.
         from app.services.cricketstatz_ddl import STATEMENTS as _CRICKETSTATZ_DDL
         for _stmt in _CRICKETSTATZ_DDL:
+            await conn.execute(text(_stmt))
+
+        # Migration 287: a club can say CricketStatz is the record for a season
+        # it also syncs, so the same match is not counted from two sources.
+        # Applied on read in the effective views — nothing is deleted and
+        # clearing the marker puts the synced copy straight back.
+        from app.services import superseded_ddl as _superseded
+        for _stmt in _superseded.STATEMENTS:
+            await conn.execute(text(_stmt))
+        # AND THEN READ THE SCHEMA BACK. A club was found with its seasons
+        # marked and the view carrying no clause to act on them, counting both
+        # its sources on every screen, with alembic's version table reporting
+        # the migration as applied. The statements were right; something in the
+        # boot path had not run them. Nothing anywhere noticed, which is what
+        # made it expensive — so this says so, loudly, rather than assuming.
+        for _view, _ok in (await _superseded.verify(conn)).items():
+            if not _ok:
+                logger.error(
+                    "SCHEMA MISMATCH: %s does not carry its source clause. A "
+                    "club holding both a CricketStatz import and a Cricket "
+                    "Australia sync will count the same match twice until "
+                    "services/superseded_ddl.STATEMENTS is applied to this "
+                    "database.", _view)
+
+        # Migration 288: configurable club notifications — the switches a club
+        # sets, each admin's own opt-out, and the record of what was raised and
+        # who was told. Same one-copy rule — this list and alembic's 288 both
+        # run services/notification_ddl.STATEMENTS.
+        from app.services.notification_ddl import STATEMENTS as _NOTIFICATION_DDL
+        for _stmt in _NOTIFICATION_DDL:
             await conn.execute(text(_stmt))
 
     # Migration 178: Member self-service portal, Stripe Connect fee payments,

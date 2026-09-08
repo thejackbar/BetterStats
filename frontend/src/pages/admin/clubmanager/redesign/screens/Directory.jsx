@@ -162,6 +162,11 @@ export default function Directory({ st, patch, narrow }) {
   const canEditPlayers = hasCapability(CAP.MANAGE_PLAYERS)
   const [people, setPeople] = useState(null)   // null = loading
   const [memberTypes, setMemberTypes] = useState([])  // the club's membership-type catalogue
+  // Whether this club holds the module that owns the kit record. Read off the
+  // payload rather than from entitlement here, because the server WITHHOLDS
+  // the two size values for a club without it — so the flag and the data can
+  // never disagree about whether the fields exist.
+  const [kitSizes, setKitSizes] = useState(false)
   // The club's own gender / squad / fee-tier vocabularies, and which season the
   // tiers belong to (a tier is per-season, so the screen has to say which).
   const [opts, setOpts] = useState({ genders: [], squads: [], tiers: [], tier_season: null })
@@ -183,6 +188,7 @@ export default function Directory({ st, patch, narrow }) {
   const reload = () => api.dirPeople(st.dirShowArchived).then(res => {
     setPeople(res?.people || [])
     setMemberTypes(res?.membership_types || [])
+    setKitSizes(!!res?.kit_sizes)
     setOpts({
       genders: res?.genders || [], squads: res?.squads || [],
       tiers: res?.tiers || [], tier_season: res?.tier_season || null,
@@ -364,6 +370,29 @@ export default function Directory({ st, patch, narrow }) {
       patch({ dirSel: mid })
     } catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
   }
+  // The club's kit record. The two SIZES are on the person spine, so saving one
+  // mints the member row for a read-through player the same way every other
+  // field here does. The NUMBER is a playing attribute on `players`, so it goes
+  // through the player-profile route — one writer for that column, and it stays
+  // editable for a club that has BetterStats and nothing else.
+  const saveKitSize = async (p, key, value) => {
+    setBusy(true)
+    try {
+      let mid = p.member_id
+      if (!mid && p.player_id) mid = (await api.dirEnsureMemberForPlayer(p.player_id)).member_id
+      if (!mid) return
+      await api.dirUpdateMember(mid, { [key]: value })
+      await reload()
+      patch({ dirSel: mid })
+    } catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
+  }
+  const saveShirtNumber = async (p, value) => {
+    if (!p.player_id) return
+    setBusy(true)
+    try { await api.bsUpdatePlayerProfile(p.player_id, { shirt_number: value }); await reload() }
+    catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
+  }
+
   // Playing status is the Stats active/inactive flag, and the Directory filters
   // on it — so it has to be settable here too, or "Former players" is a filter
   // with nothing behind it.
@@ -1019,6 +1048,52 @@ export default function Directory({ st, patch, narrow }) {
                 </div>
               </Card>
 
+              {/* The club's kit record. NOT one of the three axes — it says
+                  nothing about what kind of member somebody is — so it sits
+                  after them rather than among them. Drawn only when there is
+                  something to record: a non-player at a club without
+                  BetterAdmin has neither a number nor a size, and a card that
+                  can only ever be empty is worse than no card. */}
+              {(sel.player_id || kitSizes) && (
+                <Card title="KIT">
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                    {/* Only a player has a number: it is stored on the player
+                        record, and a canteen volunteer has no shirt to put one
+                        on. Saved through the Stats profile route, so the number
+                        here and the number on the player's own profile are the
+                        same field rather than two that can drift. */}
+                    {sel.player_id && (
+                      <div style={{ minWidth: 96 }}>
+                        <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginBottom: 4 }}>SHIRT NUMBER</div>
+                        <input disabled={busy} defaultValue={sel.shirt_number || ''} key={sel.key + ':num'}
+                          maxLength={4} placeholder="—"
+                          onBlur={e => { if (e.target.value !== (sel.shirt_number || '')) saveShirtNumber(sel, e.target.value) }}
+                          onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                          style={{ ...inp, width: 92 }} />
+                      </div>
+                    )}
+                    {/* Free text on purpose — a club buys from whichever
+                        supplier it buys from, and "Youth 12", "2XL" and "34"
+                        are all answers somebody has to be able to type. */}
+                    {kitSizes && [['shirt_size', 'SHIRT SIZE'], ['pants_size', 'PANTS SIZE']].map(([k, label]) => (
+                      <div key={k} style={{ minWidth: 120 }}>
+                        <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginBottom: 4 }}>{label}</div>
+                        <input disabled={busy} defaultValue={sel[k] || ''} key={sel.key + ':' + k}
+                          maxLength={24} placeholder="—"
+                          onBlur={e => { if (e.target.value !== (sel[k] || '')) saveKitSize(sel, k, e.target.value) }}
+                          onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                          style={{ ...inp, width: 118 }} />
+                      </div>
+                    ))}
+                  </div>
+                  {!sel.member_id && kitSizes && (
+                    <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginTop: 8 }}>
+                      Recording a size adds this player to the member directory.
+                    </div>
+                  )}
+                </Card>
+              )}
+
               {/* AXIS 2 — what they do. */}
               <Card title="ROLES">
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
@@ -1333,17 +1408,23 @@ export default function Directory({ st, patch, narrow }) {
           <div onClick={e => e.stopPropagation()} style={{ width: 'min(560px, 100%)', maxHeight: '86vh', overflowY: 'auto', background: C.surface, border: `1px solid ${C.hair2}`, borderRadius: 12, padding: 20 }}>
             <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 4 }}>Import people from CSV</div>
             <div style={{ fontSize: 12.5, color: C.faint, marginBottom: 14, lineHeight: 1.5 }}>
-              Non-players and external contacts. Columns: <span style={{ fontFamily: MONO, fontSize: 11 }}>name, email, mobile, category, roles</span> (only <span style={{ fontFamily: MONO, fontSize: 11 }}>name</span> required; <span style={{ fontFamily: MONO, fontSize: 11 }}>roles</span> is a comma-separated list of role titles). Matched to existing people by name, so a re-run tops up rather than duplicates. Players are imported in Stats.
+              Columns: <span style={{ fontFamily: MONO, fontSize: 11 }}>name, email, mobile, category, roles</span>{kitSizes && <>, <span style={{ fontFamily: MONO, fontSize: 11 }}>shirt size, pants size, shirt number</span></>} (only <span style={{ fontFamily: MONO, fontSize: 11 }}>name</span> required; <span style={{ fontFamily: MONO, fontSize: 11 }}>roles</span> is a comma-separated list of role titles). Matched to existing people by name, so a re-run tops up rather than duplicates.
+              {kitSizes && <> A <span style={{ fontFamily: MONO, fontSize: 11 }}>shirt number</span> is a playing attribute, so it is written to the player of that name — the preview says which one, or why it found none. Everything else is imported in Stats.</>}
             </div>
             {imp.result ? (
               <div style={{ background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 8, padding: 14, fontSize: 13, color: C.text }}>
                 Imported. {imp.result.created} added, {imp.result.updated} updated, {imp.result.roles_added} role assignments.
+                {!!imp.result.sizes_set && <> {imp.result.sizes_set} kit {imp.result.sizes_set === 1 ? 'size' : 'sizes'} recorded.</>}
+                {!!imp.result.numbers_set && <> {imp.result.numbers_set} shirt {imp.result.numbers_set === 1 ? 'number' : 'numbers'} set.</>}
+                {!!imp.result.numbers_skipped && <> {imp.result.numbers_skipped} {imp.result.numbers_skipped === 1 ? 'number' : 'numbers'} had no player to go on.</>}
                 <div style={{ marginTop: 12 }}><button onClick={() => setImp(null)} style={btnP}>Done</button></div>
               </div>
             ) : (
               <>
                 <input type="file" accept=".csv,text/csv" onChange={e => onImportFile(e.target.files?.[0])} style={{ fontSize: 12.5, color: C.dim, marginBottom: 8 }} />
-                <textarea value={imp.text} onChange={e => setImp(m => ({ ...m, text: e.target.value, preview: null }))} placeholder={'name,email,mobile,category,roles\nJane Doe,jane@x.com,0400000000,parent,"Canteen Manager, First Aid Officer"'}
+                <textarea value={imp.text} onChange={e => setImp(m => ({ ...m, text: e.target.value, preview: null }))} placeholder={kitSizes
+                  ? 'name,email,mobile,category,roles,shirt size,pants size,shirt number\nJane Doe,jane@x.com,0400000000,parent,"Canteen Manager",L,14,\nDarren Hind,,,,,XL,34,42'
+                  : 'name,email,mobile,category,roles\nJane Doe,jane@x.com,0400000000,parent,"Canteen Manager, First Aid Officer"'}
                   style={{ ...inp, minHeight: 120, fontFamily: MONO, fontSize: 11.5, resize: 'vertical' }} />
                 {imp.preview && (
                   <div style={{ marginTop: 12, background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 8, padding: 12 }}>
@@ -1356,10 +1437,21 @@ export default function Directory({ st, patch, narrow }) {
                           {r.category && <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>{r.category}</span>}
                           {r.roles.length > 0 && <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.accent }}>{r.roles.join(', ')}</span>}
                           {r.unknown_roles.length > 0 && <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.warn }} title="Not a known role — skipped">?{r.unknown_roles.join(', ')}</span>}
+                          {/* Only ever drawn for a row that carries one, so a
+                              sheet with no kit columns reads exactly as it did. */}
+                          {(r.shirt_size || r.pants_size) && (
+                            <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }} title="Kit size">
+                              {[r.shirt_size, r.pants_size].filter(Boolean).join(' / ')}
+                            </span>
+                          )}
+                          {r.shirt_number && (r.player
+                            ? <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.accent }} title={`Shirt number for ${r.player}`}>#{r.shirt_number}</span>
+                            : <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.warn }} title={`#${r.shirt_number} not imported — ${r.number_skipped}`}>#{r.shirt_number} ?</span>)}
                         </div>
                       ))}
                     </div>
                     {imp.preview.rows.some(r => r.unknown_roles.length > 0) && <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.warn, marginTop: 8 }}>Role titles marked ? aren’t set up yet and will be skipped — add them in Areas &amp; Roles first.</div>}
+                    {imp.preview.rows.some(r => r.number_skipped) && <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.warn, marginTop: 8 }}>A number marked ? has no player to go on — {[...new Set(imp.preview.rows.filter(r => r.number_skipped).map(r => r.number_skipped))].join('; ')}. The rest of the row still imports.</div>}
                   </div>
                 )}
                 <div style={{ display: 'flex', gap: 8, marginTop: 16, justifyContent: 'flex-end' }}>

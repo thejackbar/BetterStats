@@ -25,7 +25,9 @@ const PREVIEW = {
   club_id: '93931', club_name: 'Keon Park Cricket Club', seasons_offered: 167,
   teams: ['Keon Park 1st-XI', 'Keon Park 2nd-XI', 'Keon Park 3rd-XI'],
   matches_found: 999, truncated: true,
-  earliest: '1974-01-12', latest: '2026-03-07', record_reports: 41,
+  // The capped list only reaches 2014; the record boards prove 1954, which is
+  // a floor rather than the exact earliest — hence the "at least".
+  earliest: '1954', latest: '2026', earliest_at_least: true, record_reports: 41,
 }
 
 const RECORDS = [
@@ -48,7 +50,7 @@ const IMPORTS = [{
 // The import's own life cycle: nothing, then running, then complete — so the
 // screen's polling can be observed rather than assumed.
 function makeState() {
-  return { phase: 'none', polls: 0 }
+  return { phase: 'none', polls: 0, quiet: 4, planning: false }
 }
 
 const routes = (page, calls, state) => page.route('**/api/**', async (route) => {
@@ -78,6 +80,7 @@ const routes = (page, calls, state) => page.route('**/api/**', async (route) => 
     state.phase = 'running'
     return json({ import_id: 'imp-2', status: 'running' })
   }
+  if (/\/cricketstatz\/imports\/[^/]+\/stop/.test(url)) return json({ stopped: true })
   if (/\/cricketstatz\/imports\/[^/]+\/undo/.test(url)) {
     return json({ matches_removed: 1243, records_removed: 41 })
   }
@@ -99,12 +102,31 @@ const routes = (page, calls, state) => page.route('**/api/**', async (route) => 
         started_at: '2026-09-06T02:00:00Z',
         finished_at: running ? null : '2026-09-06T02:40:00Z',
         undone_at: null,
+        updated_at: '2026-09-06T02:05:00Z',
+        seconds_since_progress: state.quiet ?? 4,
+        seconds_running: 900,
+        stalled: !!state.quiet && state.quiet > 300,
         progress: {
-          phase: running ? 'matches' : 'done',
-          seasons_done: running ? 12 : 41, seasons_total: 41,
-          matches_done: running ? 380 : 1243, matches_total: 1243,
-          scorecards: running ? 356 : 1190, players: running ? 210 : 604,
+          phase: state.reading ? 'notes'
+            : state.planning ? 'seasons' : (running ? 'matches' : 'done'),
+          // The reported run, but against the real total the first pass finds:
+          // season 10 of the 73 actually played, of 3556 matches.
+          candidates_done: state.planning ? 40 : 167, candidates_total: 167,
+          current_season: '1995-96',
+          seasons_done: running ? 10 : 73, seasons_total: 73,
+          matches_done: running ? 1227 : 3556, matches_total: 3556,
+          scorecards: running ? 1225 : 3500, players: running ? 166 : 604,
           records: running ? 0 : 41,
+          notes_done: state.reading ? 120 : 0, notes_total: 604,
+          // The 26 seasons this club also syncs. A season changes over as its
+          // own matches land, so part way through only some have moved.
+          replaced_synced_years: Array.from({ length: 26 }, (_, i) => 2000 + i),
+          replaced_done: running ? 4 : 26,
+          awards: state.reading ? 88 : (running ? 0 : 141),
+          plan: {
+            season_count: 73, match_count: 3556,
+            earliest: 1953, latest: 2025, estimated_minutes: 59, seasons: [],
+          },
           notes: running ? [] : ['match 3082412: no scorecard published'],
         },
       },
@@ -166,6 +188,18 @@ const run = async () => {
      (await page.locator('text=999+').count()) > 0)
   ck('a capped list says there are more, rather than reading as the whole history',
      (await page.locator('text=/caps one list at 999/').count()) === 1)
+  // The capped list's own earliest date is the earliest of the most RECENT
+  // 999 matches — it read 2014 for a club whose history starts in 1953.
+  // The phrase appears in the card's label AND in the note, so count it as
+  // present rather than exactly once — what matters is that the old flat
+  // "Earliest" claim is gone.
+  ck('a span it cannot know yet is labelled as a floor, not stated as fact',
+     (await page.locator('text=/Back to at least/i').count()) > 0
+     && (await page.getByText('Earliest', { exact: true }).count()) === 0)
+  ck('and the floor is the year the record boards prove',
+     (await page.locator('text=1954').first().count()) > 0)
+  ck('it says the first pass will find the real answer',
+     (await page.locator('text=/tell you exactly what it found/').count()) === 1)
   ck('the preview reports the record boards',
      (await page.locator('text=41').first().count()) > 0)
   ck('the club\'s own teams are shown',
@@ -179,10 +213,36 @@ const run = async () => {
 
   ck('a running import says which phase it is in',
      (await page.locator('text=/Bringing your matches across/i').count()) > 0)
-  ck('it reports progress against the real totals',
-     (await page.locator('text=/380 of 1243 matches/').count()) > 0)
-  ck('it reports the seasons walked',
-     (await page.locator('text=/Season 12 of 41/').count()) > 0)
+  ck('it reports progress against the real total the first pass found',
+     (await page.locator('text=/1227 of 3556 matches/').count()) > 0)
+  ck('it reports which season it is on, of the ones actually played',
+     (await page.locator('text=/Season 10 of 73/').count()) > 0)
+  ck('it says what the first pass found, so the size of the job is visible',
+     (await page.locator('text=/Found 73 seasons you played, 1953 to 2025/').count()) > 0)
+  ck('and roughly how long it will take',
+     (await page.locator('text=/about 59 minutes/').count()) > 0)
+
+  // Against a total that grew as it went, this same run drew 94% on its tenth
+  // season of 167 — a working import that looked finished, then stuck.
+  const barPct = await page.evaluate(() => {
+    const fills = [...document.querySelectorAll('div[style*="width"]')]
+      .filter((d) => /%/.test(d.style.width) && d.style.background)
+    return fills.length ? parseFloat(fills[fills.length - 1].style.width) : null
+  })
+  ck('the bar reflects real progress, not a near-full figure from season one',
+     barPct !== null && barPct > 30 && barPct < 40, `${barPct}%`)
+  ck('it says it is still going, so a quiet minute does not read as a hang',
+     (await page.locator('text=/still going/').count()) > 0)
+  ck('a running import can be stopped',
+     (await page.getByRole('button', { name: /Stop this import/ }).count()) === 1)
+  // Reported off a live record board: a club watching mid-run saw duplicate
+  // high scores, because every season already walked was still counted from
+  // both sources. Each one changes over as its own matches land now, and the
+  // screen says how far through that is rather than promising it for later.
+  ck('it says how many of the shared seasons have moved across so far',
+     (await page.locator('text=/4 of 26 so far/').count()) > 0)
+  ck('and does not promise it as something still to come',
+     (await page.locator('text=/will read from CricketStatz/').count()) === 0)
 
   const before = calls.filter((c) => c.url.includes('/cricketstatz/status')).length
   await page.waitForTimeout(5600)
@@ -190,8 +250,83 @@ const run = async () => {
   ck('a running import is polled rather than left stale', after > before, `${before} → ${after}`)
   ck('it says so when it finishes',
      (await page.locator('text=/Your history is in/').count()) > 0)
+  ck('and once it is done the count is dropped, since they have all moved',
+     (await page.locator('text=/so far/').count()) === 0)
   ck('what it could not read is offered without shouting',
      (await page.locator('text=/could not read/').count()) > 0)
+  ck('the honour board it read out of the notes is counted',
+     (await page.evaluate(() => {
+       const card = [...document.querySelectorAll('*')].find(
+         (el) => el.children.length === 0 && el.textContent.trim() === 'Honours')
+       return card ? (card.parentElement?.textContent || '') : ''
+     })).includes('141'))
+
+  // ── the first pass ────────────────────────────────────────────────────
+  {
+    const firstCalls = []
+    const firstState = { phase: 'running', polls: -50, quiet: 4, planning: true }
+    const first = await ctx.newPage()
+    await routes(first, firstCalls, firstState)
+    await first.goto(`${BASE}/admin/sync`, { waitUntil: 'domcontentloaded' })
+    await first.waitForTimeout(1600)
+    ck('the first pass says it is checking which seasons were played',
+       (await first.locator('text=/Checking which seasons you played/').count()) > 0)
+    ck('and counts the candidates as it goes',
+       (await first.locator('text=/Checking season 40 of 167/').count()) === 1)
+    ck('it does not pretend to a matches figure it has not worked out yet',
+       (await first.locator('text=/of 3556 matches/').count()) === 0)
+    const pct0 = await first.evaluate(() => {
+      const fills = [...document.querySelectorAll('div[style*="width"]')]
+        .filter((d) => /%/.test(d.style.width) && d.style.background)
+      return fills.length ? parseFloat(fills[fills.length - 1].style.width) : null
+    })
+    ck('the first pass draws against the candidates it is working through',
+       pct0 !== null && pct0 > 18 && pct0 < 30, `${pct0}%`)
+    await first.close()
+  }
+
+  // ── the honour board pass ─────────────────────────────────────────────
+  {
+    const notesCalls = []
+    const notesState = { phase: 'running', polls: -50, quiet: 4, reading: true }
+    const notes = await ctx.newPage()
+    await routes(notes, notesCalls, notesState)
+    await notes.goto(`${BASE}/admin/sync`, { waitUntil: 'domcontentloaded' })
+    await notes.waitForTimeout(1600)
+    ck('the honour-board pass says what it is doing',
+       (await notes.locator('text=/Reading your honour board/').count()) > 0)
+    ck('and counts players rather than matches',
+       (await notes.locator('text=/Player 120 of 604/').count()) === 1)
+    ck('naming what it has found',
+       (await notes.locator('text=/88 honours found/').count()) === 1)
+    ck('it does not report a match figure it is no longer working through',
+       (await notes.locator('text=/of 3556 matches/').count()) === 0)
+    const pctNotes = await notes.evaluate(() => {
+      const fills = [...document.querySelectorAll('div[style*="width"]')]
+        .filter((d) => /%/.test(d.style.width) && d.style.background)
+      return fills.length ? parseFloat(fills[fills.length - 1].style.width) : null
+    })
+    // 120 of 604 players, not 1227 of 3556 matches — a bar left on the match
+    // total would sit near 34% and read as though nothing were happening.
+    ck('the bar is drawn against the players it is reading',
+       pctNotes !== null && pctNotes > 15 && pctNotes < 25, `${pctNotes}%`)
+    await notes.close()
+  }
+
+  // ── a run that has stopped responding ─────────────────────────────────
+  {
+    const quietCalls = []
+    const quietState = { phase: 'running', polls: -50, quiet: 5400 }
+    const quiet = await ctx.newPage()
+    await routes(quiet, quietCalls, quietState)
+    await quiet.goto(`${BASE}/admin/sync`, { waitUntil: 'domcontentloaded' })
+    await quiet.waitForTimeout(1600)
+    ck('a run that has not moved for 90 minutes says so rather than spinning',
+       (await quiet.locator('text=/has not moved for 90 minutes/').count()) === 1)
+    ck('and says what was kept',
+       (await quiet.locator('text=/has been kept/').count()) > 0)
+    await quiet.close()
+  }
 
   // ── the record book ───────────────────────────────────────────────────
   await page.getByRole('button', { name: /Record book/ }).click()
@@ -229,6 +364,15 @@ const run = async () => {
   await page.waitForTimeout(600)
   ck('an accepted undo reaches the wire',
      calls.some((c) => /\/imports\/[^/]+\/undo/.test(c.url)))
+
+  page.once('dialog', (d) => d.dismiss())
+  const stopBtn = page.getByRole('button', { name: /Stop this import/ })
+  if (await stopBtn.count()) {
+    await stopBtn.click()
+    await page.waitForTimeout(400)
+  }
+  ck('a dismissed stop sends nothing',
+     !calls.some((c) => /\/imports\/[^/]+\/stop/.test(c.url)))
 
   // Nothing should be left pointing at a screen that no longer exists.
   ck('no link to a standalone importer screen remains',

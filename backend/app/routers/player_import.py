@@ -127,6 +127,7 @@ def _current_profile(p: Player) -> dict:
         "is_public": p.is_public is not False,
         "is_financial_override": p.is_financial_override,
         "trained_override": p.trained_override,
+        "shirt_number": p.shirt_number,
         "squad_team_id": str(p.squad_team_id) if p.squad_team_id else None,
     }
 
@@ -497,7 +498,7 @@ async def commit(
 _TEMPLATE_HEADERS = [
     "Name", "Email", "Phone", "Squad", "Role", "Batting", "Bowling", "Gender",
     "Date of birth", "Opening batter", "Overseas", "Overseas country",
-    "Status", "Show on website", "Fees", "Training",
+    "Status", "Show on website", "Fees", "Training", "Shirt number",
 ]
 
 
@@ -508,10 +509,10 @@ def _template_examples(squad_names: list | None = None) -> list:
     return [
         ["Smith, John", "john.smith@example.com", "0412 345 678", first,
          "All Rounder", "Right handed", "Right-arm fast-medium", "Male",
-         "1998-09-14", "No", "No", "", "Active", "Show", "Financial", "At training"],
+         "1998-09-14", "No", "No", "", "Active", "Show", "Financial", "At training", "42"],
         ["Patel, Anjali", "anjali.patel@example.com", "0423 456 789", second,
          "Batter", "Left handed", "", "Female",
-         "2012-03-04", "Yes", "No", "", "Active", "Show", "", ""],
+         "2012-03-04", "Yes", "No", "", "Active", "Show", "", "", "07"],
     ]
 
 
@@ -570,16 +571,18 @@ async def template_xlsx(
         ws.append(row)
     ws.freeze_panes = "A2"
     for i, width in enumerate([22, 28, 16, 22, 20, 16, 22, 10,
-                               14, 14, 11, 18, 11, 16, 14, 15], start=1):
+                               14, 14, 11, 18, 11, 16, 14, 15, 13], start=1):
         ws.column_dimensions[get_column_letter(i)].width = width
     # Written as text, not as Excel dates: the sheet parser reads every cell as
     # a string, and a text cell survives the round trip exactly as typed
     # instead of arriving as a locale-formatted date nobody chose.
-    for row in ws.iter_rows(min_row=2, max_row=ws.max_row,
-                            min_col=headers.index("Date of birth") + 1,
-                            max_col=headers.index("Date of birth") + 1):
-        for c in row:
-            c.number_format = "@"
+    # Shirt number is text for the SAME reason: a club that issues "07" means
+    # it, and a numeric cell renders it as 7.
+    for col in ("Date of birth", "Shirt number"):
+        idx = headers.index(col) + 1
+        for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=idx, max_col=idx):
+            for c in row:
+                c.number_format = "@"
 
     # A hidden "Lists" sheet holds the dropdown values; the main sheet references
     # them by range (sidesteps the 255-char inline-list limit and keeps it tidy).

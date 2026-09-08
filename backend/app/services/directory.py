@@ -122,9 +122,10 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
         SELECT fm.id, fm.full_name, fm.email, fm.mobile, fm.player_id, fm.member_category,
                fm.is_life_member, fm.life_member_since, fm.life_member_detail,
                fm.gender AS member_gender, fm.is_honorary, fm.honorary_expires_at, fm.archived_at,
+               fm.shirt_size, fm.pants_size,
                mt.id AS membership_type_id, mt.name AS membership_type_name, mt.is_playing AS membership_type_playing,
                p.id AS our_player_id, p.photo_url, p.email AS player_email, p.phone AS player_phone,
-               p.status AS player_status, p.gender AS player_gender,
+               p.status AS player_status, p.gender AS player_gender, p.shirt_number,
                t.id AS squad_id, t.name AS squad_name
         FROM fee_members fm
         LEFT JOIN players p ON p.id = fm.player_id AND p.organisation_id = fm.organisation_id
@@ -361,6 +362,13 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
             "squad": squad, "tier": tier,
             "is_honorary": bool(m["is_honorary"]),
             "honorary_expires_at": m["honorary_expires_at"].isoformat() if m["honorary_expires_at"] else None,
+            # The club's kit record. The NUMBER comes from the linked player
+            # (a playing attribute, Core, edited through the player profile
+            # route); the two SIZES come from this spine, so a coach or a
+            # scorer can hold one. A person with no linked player has no
+            # number to hold, which is why it is None rather than "".
+            "shirt_number": m["shirt_number"] if our_pid else None,
+            "shirt_size": m["shirt_size"], "pants_size": m["pants_size"],
             "roles": roles_by.get(mid, []),
             "total_hours": hours_by.get(mid, 0.0),
             "quals_total": q.get("total", 0), "flagged": q.get("expiring", 0),
@@ -370,7 +378,7 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
     # Players with no member row still appear (read-through from Stats/Core).
     extra = (await db.execute(text("""
         SELECT p.id, COALESCE(p.display_name_override, p.name) AS name, p.photo_url, p.email, p.phone,
-               p.status, p.gender, t.id AS squad_id, t.name AS squad_name
+               p.status, p.gender, p.shirt_number, t.id AS squad_id, t.name AS squad_name
         FROM players p
         LEFT JOIN teams t ON t.id = p.squad_team_id AND t.organisation_id = p.organisation_id
         WHERE p.organisation_id = :org
@@ -407,6 +415,11 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
             # player's own, and there is no fee tier without a season row.
             "gender": pgender, "gender_own": None, "squad": psquad, "tier": None,
             "is_honorary": False, "honorary_expires_at": None,
+            # They have a number (it lives on the player), and no sizes — a
+            # size is recorded against the person spine, and this person has
+            # no row on it yet. Recording one mints the row, the same way
+            # ticking a membership type does.
+            "shirt_number": p["shirt_number"], "shirt_size": None, "pants_size": None,
             "roles": [], "total_hours": 0.0, "quals_total": 0, "flagged": 0, "segs": psegs,
         })
 

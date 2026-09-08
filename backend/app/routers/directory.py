@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import User, Organisation, MembershipType, get_db
 from app.routers.auth import get_current_club
+from app.auth.modules import MODULE_ADMIN, MODULE_GROUPS, module_display_name, org_has_module
 from app.auth.capabilities import (
     require_cap, require_any_cap,
     MANAGE_MEMBERS, MANAGE_VOLUNTEERS, MANAGE_COMMITTEE, MANAGE_QUALIFICATIONS, MANAGE_FEES,
@@ -48,6 +49,47 @@ class MemberUpsert(BaseModel):
     # "" clears it. Settable here so a club with no BetterFees can still say
     # what kind of member someone is.
     membership_type_id: Optional[str] = None
+    # The club's kit sizes (migration 289). BetterAdmin only — a Stats-only
+    # club has no screen where a size does anything, so the two fields are
+    # WITHHELD from its payload rather than sent and hidden, and a write that
+    # names one is refused with the ordinary 402 upsell. The shirt NUMBER is
+    # not here: it is a playing attribute on `players`, so the Directory saves
+    # it through the player-profile route, which is Core and already gated on
+    # MANAGE_PLAYERS. "" clears either size.
+    shirt_size: Optional[str] = None
+    pants_size: Optional[str] = None
+
+
+KIT_SIZE_FIELDS = ("shirt_size", "pants_size")
+
+
+def _kit_sizes_allowed(club: Organisation) -> bool:
+    """Whether this club holds the module that owns the kit record.
+
+    `admin` IS NOT AN ENTITLEMENT KEY — it is the billable umbrella, and a club
+    that buys it is granted the four keys underneath (fees / comms / merch /
+    crm). `org_has_module(club, "admin")` is therefore False for EVERY club on
+    the platform, which is what the verification caught: the first cut of this
+    gate would have withheld kit sizes from a club that had paid for them. The
+    Clubhouse nav gates on the child keys for the same reason. There is no way
+    to buy one of the four on its own, so holding any of them is holding the
+    bundle."""
+    return any(org_has_module(club, k) for k in MODULE_GROUPS[MODULE_ADMIN])
+
+
+def _guard_kit_sizes(club: Organisation, fields: dict) -> None:
+    """Refuse a size from a club without BetterAdmin, in the same shape
+    ``require_module`` uses — so the browser renders the upsell it already knows
+    how to render. Only fires when a size is actually NAMED: an ordinary edit
+    from a Stats-only club never sends one and is unaffected."""
+    if not any(f in fields for f in KIT_SIZE_FIELDS) or _kit_sizes_allowed(club):
+        return
+    name = module_display_name(MODULE_ADMIN)
+    raise HTTPException(status_code=402, detail={
+        "code": "module_not_entitled",
+        "module": MODULE_ADMIN,
+        "message": f"Kit sizes are part of {name}.",
+    })
 
 
 class RoleBody(BaseModel):
@@ -90,8 +132,18 @@ async def list_people(include_archived: bool = False, _: User = _read, club: Org
     # Directory's readers don't necessarily hold — so this reads the same
     # service directly rather than sending the screen to an endpoint that would
     # 403 for a volunteer or committee manager.
+    people = await svc.list_people(db, club.id, include_archived=include_archived)
+    # Kit sizes are BetterAdmin's. A club without it never receives the values
+    # at all — sending them and telling the browser not to draw them is a leak
+    # wearing a setting. The shirt NUMBER stays: it is Core.
+    kit_sizes = _kit_sizes_allowed(club)
+    if not kit_sizes:
+        for p in people:
+            p.pop("shirt_size", None)
+            p.pop("pants_size", None)
     return {
-        "people": await svc.list_people(db, club.id, include_archived=include_archived),
+        "people": people,
+        "kit_sizes": kit_sizes,
         "categories": members_svc.MEMBER_CATEGORIES,
         "membership_types": await membership_types_svc.list_types(db, club.id),
         # Gender / squad / fee-tier vocabularies, for the same reason: the
@@ -117,10 +169,12 @@ async def _resolved_type_id(db: AsyncSession, club: Organisation, raw: Optional[
 
 @router.post("/people")
 async def create_member(data: MemberUpsert, _: User = _write, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    _guard_kit_sizes(club, data.model_dump(exclude_unset=True))
     try:
         mid = await members_svc.create_person(db, club.id, full_name=data.full_name, email=data.email,
                                                mobile=data.mobile, member_category=data.member_category, notes=data.notes,
-                                               membership_type_id=await _resolved_type_id(db, club, data.membership_type_id))
+                                               membership_type_id=await _resolved_type_id(db, club, data.membership_type_id),
+                                               shirt_size=data.shirt_size, pants_size=data.pants_size)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     await db.commit()
@@ -130,6 +184,7 @@ async def create_member(data: MemberUpsert, _: User = _write, club: Organisation
 @router.patch("/people/{member_id}")
 async def update_member(member_id: str, data: MemberUpsert, _: User = _write, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
     fields = data.model_dump(exclude_unset=True)
+    _guard_kit_sizes(club, fields)
     if "membership_type_id" in fields:
         fields["membership_type_id"] = await _resolved_type_id(db, club, fields["membership_type_id"])
     await members_svc.update_person(db, club.id, _uuid(member_id), **fields)
@@ -362,13 +417,22 @@ class ImportBody(BaseModel):
     csv: str
 
 
+def _guard_import(club: Organisation, csv_text: str) -> None:
+    """A sheet carrying a kit-size column is gated the same way the person form
+    is — on the SHEET'S OWN COLUMNS, so a club is refused before it uploads
+    rather than after some rows have quietly lost a value."""
+    _guard_kit_sizes(club, {f: None for f in import_svc.columns_used(csv_text)})
+
+
 @router.post("/import/preview")
 async def import_preview(data: ImportBody, _: User = _import, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    _guard_import(club, data.csv)
     return await import_svc.preview(db, club.id, data.csv)
 
 
 @router.post("/import/commit")
 async def import_commit(data: ImportBody, _: User = _import, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    _guard_import(club, data.csv)
     result = await import_svc.commit(db, club.id, data.csv)
     await db.commit()
     return result

@@ -465,6 +465,27 @@ async def send_member_reminders():
         logger.error(f"Member reminder scan failed: {e}")
 
 
+async def run_notification_scan():
+    """Daily configurable-notification pass across every eligible club.
+
+    Two halves in one job (see services/notification_scan.py): ask every enabled
+    source what it can see and record what is new, then send each admin ONE
+    digest of everything still pending for them. A club with notifications
+    switched off is skipped before any query runs, and the email half is skipped
+    on a club set to weekly except on its chosen day.
+
+    Placed at the end of the daily reminder cluster, deliberately AFTER the
+    results sync (01:00) and the trial/member/diary reminders: a milestone can
+    only be noticed once the scorecard carrying it has landed.
+    """
+    from app.services import notification_scan
+    try:
+        stats = await notification_scan.run_all()
+        logger.info(f"Notification scan done: {stats}")
+    except Exception as e:
+        logger.error(f"Notification scan failed: {e}")
+
+
 async def send_diary_reminders():
     """Daily Club Diary reminder scan — opt-in per task definition (off by
     default), not gated by any platform flag since Club Diary is an
@@ -724,6 +745,21 @@ def start_scheduler():
         id="daily_club_diary_reminders",
         replace_existing=True,
     )
+    # Configurable club notifications (migration 287) — raise what each club has
+    # subscribed to, then send one digest per admin. 08:45 Perth, after the
+    # other daily reminder scans and well after the 01:00 results sync, so a
+    # milestone reached at the weekend is noticed the same morning.
+    scheduler.add_job(
+        run_notification_scan,
+        trigger="cron",
+        hour=8,
+        minute=45,
+        timezone=PERTH,
+        id="daily_notification_scan",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
     # Meta Ads HQ dashboard — hourly campaign/ad snapshot (was daily 09:00
     # Perth; hourly per direct request for the self-serve campaign launch, so
     # the dashboard tracks the live campaign through the day). Three insight
@@ -830,7 +866,7 @@ def start_scheduler():
     scheduler.start()
     logger.info("Scheduler started — marketing crawl %s, results sync Sun+Mon 01:00 Perth, "
                 "drift check first Sun 05:00 Perth, Square 04:00, fantasy settle 05:00, "
-                "Twenty engagement 06:00, trial lifecycle nudges 08:00, "
+                "Twenty engagement 06:00, trial lifecycle nudges 08:00, notifications 08:45, "
                 "BetterScout refresh 09:00, Meta Ads snapshot hourly at :05, "
                 "draft tick /15min", marketing_mode)
 

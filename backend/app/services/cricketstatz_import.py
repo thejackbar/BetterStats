@@ -21,8 +21,10 @@ Three rules this follows, each of them the codebase's own:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
+import time
 import uuid
 from datetime import date, datetime
 from typing import Optional
@@ -43,9 +45,18 @@ from app.models.db import (
     Season,
 )
 from app.services import cricketstatz_client as client
+from app.services.cricketstatz_awards import classify_note
+from app.services.import_ingest import match_players
+from app.services.grade_labels import suggest_categories, suggest_category
 from app.services.cricketstatz_parse import RECORD_REPORTS, CricketStatzError
 
 logger = logging.getLogger(__name__)
+
+# The longest gap a healthy run can leave between heartbeats is one slow
+# request (the client times out at 30s) plus a season probe. Five minutes of
+# silence is not a slow import, it is a dead one — the process was redeployed
+# or the task was lost.
+STALL_AFTER_SECONDS = 300
 
 # uuid5 namespace so a CricketStatz id maps to the same row every run.
 _NS = uuid.UUID("6f9a1c2e-5b7d-4e3a-9c81-0d5f2a7b4e60")
@@ -101,6 +112,7 @@ async def resolve_season(db: AsyncSession, org_id, label: str, value: str,
     season = Season(
         id=_derived_id(org_id, "season", str(year)),
         organisation_id=org_id,
+        grassroots_id=None,          # the documented "not from a sync" marker
         name=season_name(year, southern),
         year=year,
     )
@@ -130,10 +142,17 @@ async def resolve_grade(db: AsyncSession, org_id, season: Season,
         cache[key] = existing
         return existing
 
+    # Classified on the way in, the same as every other importer: a grade with
+    # no category cannot be told apart by the Grade type filter, so a club's
+    # juniors would sit inside its senior careers. Both columns are written —
+    # `category` alone loses the second half of a "Girls Under 16".
     grade = Grade(
         id=_derived_id(org_id, "grade", f"{season.id}:{clean.lower()}"),
         season_id=season.id,
+        grassroots_id=None,
         name=clean,
+        category=suggest_category(clean),
+        categories=list(suggest_categories(clean)),
     )
     db.add(grade)
     await db.flush()
@@ -168,12 +187,27 @@ def is_placeholder_name(name: str) -> bool:
     return bool(re.fullmatch(r"\*+", clean))
 
 
+async def _roster(db: AsyncSession, org_id) -> list[tuple[str, str]]:
+    """The club's existing players, as the shared matcher wants them."""
+    rows = (await db.execute(text("""
+        SELECT id, COALESCE(display_name_override, name) FROM players
+         WHERE organisation_id = :org
+    """), {"org": str(org_id)})).all()
+    return [(str(r[0]), r[1] or "") for r in rows]
+
+
 async def resolve_player(db: AsyncSession, org_id, person: dict,
-                         cache: dict) -> Optional[Player]:
+                         caches: dict) -> Optional[Player]:
     """Our player row for one of OUR players on a CricketStatz card.
 
     Matched on CricketStatz's own player id first (stable across eras), then
-    on an exact name already in the club, before a new row is created.
+    against the club's EXISTING roster through `import_ingest.match_players` —
+    the same pipeline BetterImport, the scorecard reader and Merge Duplicates
+    use. An exact-string check is not enough and the difference is not
+    cosmetic: a club already holds its players as "Quinsee, Brad" while
+    CricketStatz writes "Brad Quinsee", and matching on the raw spelling minted
+    a second record for every player the club already had — so its leaderboard
+    listed the same person twice, each with half a career.
     """
     source_id = (person or {}).get("source_player_id")
     name = _clean_name((person or {}).get("name", ""))
@@ -187,8 +221,8 @@ async def resolve_player(db: AsyncSession, org_id, person: dict,
         return None
 
     key = source_id or f"name:{name.lower()}"
-    if key in cache:
-        return cache[key]
+    if key in caches["players"]:
+        return caches["players"][key]
 
     player: Optional[Player] = None
     if source_id:
@@ -198,10 +232,27 @@ async def resolve_player(db: AsyncSession, org_id, person: dict,
         )).scalars().first()
 
     if player is None and name:
-        player = (await db.execute(
-            select(Player).where(Player.organisation_id == org_id,
-                                 Player.name.ilike(name))
-        )).scalars().first()
+        # The roster is reloaded whenever it has been cleared — a rollback
+        # discards any player flushed since the last commit, so a cached list
+        # holding them would match against rows that no longer exist.
+        if caches.get("roster") is None:
+            caches["roster"] = await _roster(db, org_id)
+        decision = match_players([name], caches["roster"]).get(name) or {}
+        # Only an exact match is taken, which is the matcher's own rule: its
+        # 'exact' covers a plain match AND the middle-initial case ("Michael B.
+        # White" onto the club's "White, Michael"). Everything below that is
+        # left alone deliberately — an initial is not an identity, so "Crosta,
+        # T" must not swallow a Torey, a Tim and a Tom, and two of the club's
+        # own records sharing a name is the shape of a father and son. Those
+        # get their own record and are reported, for Merge Duplicates to settle.
+        chosen = decision.get("player_id") if decision.get("status") == "exact" else None
+        if not chosen and decision.get("candidates"):
+            near = caches.setdefault("near_matches", {})
+            near.setdefault(name, [c.get("name") for c in decision["candidates"][:3]])
+        if chosen:
+            player = (await db.execute(
+                select(Player).where(Player.id == uuid.UUID(chosen))
+            )).scalars().first()
         if player is not None and source_id and not player.cricketstatz_player_id:
             # Tie the existing record to its CricketStatz identity so later
             # runs match on the id rather than the spelling.
@@ -216,8 +267,12 @@ async def resolve_player(db: AsyncSession, org_id, person: dict,
         )
         db.add(player)
         await db.flush()
+        # So the next name in this same import matches the row just created
+        # rather than minting a second one beside it.
+        if caches.get("roster") is not None:
+            caches["roster"].append((str(player.id), player.name))
 
-    cache[key] = player
+    caches["players"][key] = player
     return player
 
 
@@ -326,6 +381,108 @@ _FINAL_WORDS = re.compile(
     r"\b(final|semi|elim|qualif|prelim|grand)\b", re.I)
 
 
+
+
+# ── the club's own history, already synced ───────────────────────────────────
+
+async def synced_coverage(db: AsyncSession, org_id) -> dict:
+    """Seasons the club ALREADY holds synced games for, and how many.
+
+    A club that syncs from Cricket Australia and then imports its whole
+    CricketStatz history ends up holding the same cricket twice — every match
+    from the year the sync reaches back to appears once as a synced game and
+    once as an imported one, so every career total, average and record board
+    counts it twice. Reported live off a real club: 2,324 imported matches
+    beside ~3,000 synced ones, and a batter's career reading 14,966 runs where
+    CricketStatz has 10,444.
+
+    Keyed on the SEASON's year, so a November and the following March both land
+    in the same season the club played.
+    """
+    rows = (await db.execute(text("""
+        SELECT s.year AS year, COUNT(*) AS games
+          FROM games g
+          JOIN grades gr ON gr.id = g.grade_id
+          JOIN seasons s ON s.id = gr.season_id
+         WHERE s.organisation_id = :org AND s.year IS NOT NULL
+         GROUP BY s.year
+    """), {"org": str(org_id)})).mappings().all()
+    return {int(r["year"]): int(r["games"]) for r in rows}
+
+
+
+async def mark_seasons_superseded(db: AsyncSession, org_id, years) -> int:
+    """Say CricketStatz is the record for these seasons of this club.
+
+    A marker on the season, read by `v_effective_games` and
+    `v_effective_player_season_stats` (migration 287): the synced side of those
+    two views steps aside while the imported matches are rolled up as normal,
+    so the season is counted once. Nothing is deleted — the club's Cricket
+    Australia data stays, the sync keeps it current underneath, and clearing
+    the marker brings it straight back.
+    """
+    if not years:
+        return 0
+    result = await db.execute(text("""
+        UPDATE seasons SET stats_source = 'cricketstatz'
+         WHERE organisation_id = :org AND year = ANY(CAST(:years AS int[]))
+           AND stats_source IS DISTINCT FROM 'cricketstatz'
+    """), {"org": str(org_id), "years": [int(y) for y in years]})
+    return result.rowcount or 0
+
+
+async def clear_seasons_superseded(db: AsyncSession, org_id, years=None) -> int:
+    """Hand the seasons back to the sync. Instant — nothing has to be re-pulled.
+
+    Sets `'playhq'`, NOT NULL, and that is the whole difference. NULL means
+    "count what is here", which for a season holding both an imported and a
+    synced copy is the double count this exists to prevent — handing a season
+    back used to show BOTH, and said so in the confirm. `'playhq'` steps the
+    imported side aside instead, so exactly one source is counted either way.
+
+    Only ever applied to a season the sync actually reaches. A season with no
+    synced games has nothing to hand back to, and marking it `'playhq'` would
+    hide its imported matches and leave the season empty — the "neither source"
+    failure reached from the far end.
+    """
+    sql = ("""UPDATE seasons s SET stats_source = 'playhq'
+                WHERE s.organisation_id = :org
+                  AND s.stats_source = 'cricketstatz'
+                  AND EXISTS (SELECT 1 FROM games g
+                                JOIN grades gr ON gr.id = g.grade_id
+                               WHERE gr.season_id = s.id)""")
+    params = {"org": str(org_id)}
+    if years:
+        sql += " AND s.year = ANY(CAST(:years AS int[]))"
+        params["years"] = [int(y) for y in years]
+    return (await db.execute(text(sql), params)).rowcount or 0
+
+
+async def superseded_years(db: AsyncSession, org_id) -> list:
+    rows = (await db.execute(text("""
+        SELECT year FROM seasons
+         WHERE organisation_id = :org AND stats_source = 'cricketstatz'
+           AND year IS NOT NULL
+         ORDER BY year
+    """), {"org": str(org_id)})).scalars().all()
+    return [int(y) for y in rows]
+
+
+async def hand_edited_games(db: AsyncSession, org_id) -> set:
+    """Manual games somebody has created, edited or imported by hand.
+
+    One query for the whole club, so the import's own per-match check costs
+    nothing. An edit that was later undone does not count — the club took it
+    back, so there is nothing of theirs to protect.
+    """
+    rows = (await db.execute(text("""
+        SELECT DISTINCT target_id FROM manual_edit_logs
+         WHERE organisation_id = :org AND target_table = 'manual_games'
+           AND undone_at IS NULL
+    """), {"org": str(org_id)})).scalars().all()
+    return {str(r) for r in rows}
+
+
 async def import_match(db: AsyncSession, org_id, import_id, card: dict,
                        row: dict, is_ours, caches: dict) -> Optional[str]:
     """Write one CricketStatz match. Returns a note when something was skipped."""
@@ -346,6 +503,25 @@ async def import_match(db: AsyncSession, org_id, import_id, card: dict,
         db, org_id, caches["season_label"], caches["season_value"], caches["seasons"])
     if season is None:
         return f"{source_id}: no season"
+    # ONE SOURCE PER SEASON, DECIDED BY THE DATA RATHER THAN BY A STEP.
+    # A season that holds a CricketStatz match is read from CricketStatz — set
+    # here, in the SAME transaction as the match itself, so the two can never
+    # be out of step. The earlier design worked the overlap out once at the
+    # start of the run and marked the seasons afterwards; anything that changed
+    # `games` in between (a Full Rebuild finishing, a sync landing) left that
+    # snapshot wrong and the club counting both sources with nothing to say so.
+    #
+    # Unconditional: a season the sync does not reach has no synced games to
+    # step aside, so marking it costs nothing and removes the dependence on the
+    # overlap being right. An explicit 'playhq' is the club's own decision and
+    # is never overwritten.
+    # Written on the ORM row rather than as a raw UPDATE: `resolve_season`
+    # hands back a Season, the session is already holding it, and a raw
+    # statement would leave that instance's own copy stale. A rollback expires
+    # it and clears the cache, so the next match resolves and sets it again.
+    if season.stats_source is None:
+        season.stats_source = "cricketstatz"
+        await db.flush()
     grade = await resolve_grade(db, org_id, season, label, caches["grades"])
 
     home = card.get("home_team") or row.get("home_team") or ""
@@ -363,6 +539,16 @@ async def import_match(db: AsyncSession, org_id, import_id, card: dict,
             ManualGame.organisation_id == org_id,
             ManualGame.cricketstatz_match_id == source_id)
     )).scalars().first()
+
+    # A GAME SOMEBODY HAS WORKED ON BY HAND IS NEVER OVERWRITTEN. Entering or
+    # correcting a scorecard costs a club hours, so a re-import refreshing what
+    # the import itself wrote must stop at the first row a person has touched —
+    # and say so, rather than reverting their work silently. `manual_edit_logs`
+    # is the signal because the import writes none of its own: any un-undone
+    # row against this game means somebody edited it through Manual Entries.
+    if existing is not None and str(existing.id) in caches.get("hand_edited", ()):
+        return (f"{source_id}: left as you have it — this match has been edited "
+                f"by hand, so the import did not write over it")
 
     game = existing or ManualGame(
         id=_derived_id(org_id, "match", source_id),
@@ -418,7 +604,7 @@ async def _write_our_batting(db, org_id, game, inn, seq, caches) -> None:
     """Our batting card, its fall of wickets and the stands behind it."""
     seen: set = set()
     for b in inn.get("batters", []):
-        player = await resolve_player(db, org_id, b.get("batter"), caches["players"])
+        player = await resolve_player(db, org_id, b.get("batter"), caches)
         if player is None:
             continue
         # One innings row per player: a card can list the same person twice,
@@ -441,7 +627,7 @@ async def _write_our_batting(db, org_id, game, inn, seq, caches) -> None:
 
     for fall in inn.get("fall_of_wickets", []):
         person = fall.get("batter") or {}
-        player = await resolve_player(db, org_id, person, caches["players"])
+        player = await resolve_player(db, org_id, person, caches)
         db.add(ManualFallOfWicket(
             manual_game_id=game.id, innings_number=seq,
             wicket_number=fall.get("wicket_number") or 0,
@@ -455,9 +641,9 @@ async def _write_our_batting(db, org_id, game, inn, seq, caches) -> None:
                                      inn.get("fall_of_wickets", []),
                                      inn.get("runs")):
         b1 = await resolve_player(db, org_id, (stand["batter1"] or {}).get("batter"),
-                                  caches["players"]) if stand.get("batter1") else None
+                                  caches) if stand.get("batter1") else None
         b2 = await resolve_player(db, org_id, (stand["batter2"] or {}).get("batter"),
-                                  caches["players"]) if stand.get("batter2") else None
+                                  caches) if stand.get("batter2") else None
         db.add(ManualPartnership(
             manual_game_id=game.id, innings_number=seq,
             wicket_number=stand["wicket_number"] or 0,
@@ -474,7 +660,7 @@ async def _write_our_bowling(db, org_id, game, inn, seq, caches, fielding) -> No
     fielding credit lives — the dismissal names the fielder and the bowler.
     """
     for spell in inn.get("bowlers", []):
-        player = await resolve_player(db, org_id, spell.get("bowler"), caches["players"])
+        player = await resolve_player(db, org_id, spell.get("bowler"), caches)
         if player is None:
             continue
         db.add(ManualBowlingSpell(
@@ -494,9 +680,9 @@ async def _write_our_bowling(db, org_id, game, inn, seq, caches, fielding) -> No
         kind = b.get("dismissal_type")
         if not kind:
             continue
-        bowler = await resolve_player(db, org_id, b.get("bowler"), caches["players"]) \
+        bowler = await resolve_player(db, org_id, b.get("bowler"), caches) \
             if b.get("bowler") else None
-        fielder = await resolve_player(db, org_id, b.get("fielder"), caches["players"]) \
+        fielder = await resolve_player(db, org_id, b.get("fielder"), caches) \
             if b.get("fielder") else None
 
         if bowler is not None:
@@ -582,6 +768,188 @@ async def import_records(db: AsyncSession, org_id, import_id, club_id: str,
     return saved
 
 
+
+# ── the honour board, out of the players' own notes ──────────────────────────
+
+async def import_notes(db: AsyncSession, org_id, import_id, club_id: str,
+                       on_progress=None, note=None) -> dict:
+    """Read each player's CricketStatz Notes and file what they say as awards.
+
+    A club that has kept its notes properly has written its honour board there
+    — life membership, first-grade caps, trophies, captaincies. Only lines the
+    classifier RECOGNISES become achievements: the same block routinely carries
+    plain biography ("COLLINGWOOD FC (313 Games)"), and putting a football
+    career on a cricket club's honour board is worse than reading nothing.
+
+    Every achievement created carries the import's own id as its
+    `import_batch_id`, so undoing the import removes them and the club's Awards
+    screen lists the batch alongside its own CSV imports.
+    """
+    players = (await db.execute(text("""
+        SELECT id, COALESCE(display_name_override, name) AS name,
+               cricketstatz_player_id
+          FROM players
+         WHERE organisation_id = :org AND cricketstatz_player_id IS NOT NULL
+         ORDER BY name
+    """), {"org": str(org_id)})).mappings().all()
+
+    definitions: set[tuple] = set()
+    created = 0
+    moved = 0
+    read = 0
+    unread: list[str] = []
+
+    for idx, player in enumerate(players):
+        try:
+            lines = await client.fetch_player_notes(
+                club_id, player["cricketstatz_player_id"])
+        except CricketStatzError:
+            raise
+        except Exception as exc:
+            logger.warning("CricketStatz notes for %s failed: %s",
+                           player["cricketstatz_player_id"], exc)
+            if on_progress:
+                on_progress(idx + 1, len(players), created)
+            continue
+        if lines:
+            read += 1
+        for line in lines:
+            award = classify_note(line)
+            if not award:
+                # Recorded rather than dropped: a club can see what its notes
+                # said that we did not file, instead of wondering.
+                if len(unread) < 50:
+                    unread.append(line)
+                continue
+            key = (award["category"], award["subcategory"], award["achievement"])
+            if key not in definitions:
+                await ensure_award_definition(db, org_id, *key)
+                definitions.add(key)
+            existing = await _existing_achievement(db, org_id, player["id"], award)
+            if existing:
+                # A re-import re-stamps its matches and its record boards onto
+                # the new import, so an honour it already read has to follow
+                # them — otherwise undoing the latest import would leave the
+                # honour board behind, pointing at an import that is gone.
+                # Only ever a row a CricketStatz import wrote: an honour the
+                # club typed in by hand is not this import's to claim, and
+                # claiming it would let an undo delete the club's own record.
+                if existing["ours"] and str(existing["batch"]) != str(import_id):
+                    await db.execute(text("""
+                        UPDATE player_achievements SET import_batch_id = :batch
+                         WHERE id = :id
+                    """), {"batch": str(import_id), "id": existing["id"]})
+                    moved += 1
+                continue
+            await db.execute(text("""
+                INSERT INTO player_achievements
+                    (org_id, player_id, player_name, season, season_end,
+                     category, subcategory, achievement, detail,
+                     import_batch_id)
+                VALUES (:org, :pid, :pname, :season, :season_end, :category,
+                        :subcategory, :achievement, :detail, :batch)
+            """), {
+                "org": str(org_id), "pid": str(player["id"]),
+                "pname": player["name"], "season": award["season"],
+                "season_end": award["season_end"], "category": award["category"],
+                "subcategory": award["subcategory"],
+                "achievement": award["achievement"], "detail": award["detail"],
+                "batch": str(import_id),
+            })
+            created += 1
+        if (idx + 1) % 10 == 0:
+            await db.commit()
+        if on_progress:
+            on_progress(idx + 1, len(players), created)
+
+    if created or moved:
+        # The Awards screen lists imports out of this table, so the batch row is
+        # what makes a notes pass visible — and undoable — beside a CSV upload.
+        # Counted from the honours now carrying it rather than from what this
+        # pass happened to create: a re-import carries an honour it read the
+        # first time, and a batch holding twelve that reports none reads as a
+        # mistake.
+        held = (await db.execute(text("""
+            SELECT COUNT(*) FROM player_achievements
+             WHERE org_id = :org AND import_batch_id = :id
+        """), {"org": str(org_id), "id": str(import_id)})).scalar() or 0
+        await db.execute(text("""
+            INSERT INTO achievement_import_batches
+                (id, org_id, filename, row_count, created_count, status)
+            VALUES (:id, :org, 'CricketStatz player notes', :rows, :made,
+                    'imported')
+            ON CONFLICT (id) DO UPDATE SET
+                row_count = EXCLUDED.row_count,
+                created_count = EXCLUDED.created_count,
+                status = 'imported'
+        """), {"id": str(import_id), "org": str(org_id),
+               "rows": read, "made": held})
+    await db.commit()
+    if note and unread:
+        note(f"{len(unread)} note line(s) were not read as awards, "
+             f"e.g. {unread[0]!r}. Nothing was guessed at.")
+    return {"players_read": read, "awards_created": created,
+            "awards_carried": moved, "unread": len(unread)}
+
+
+async def _existing_achievement(db: AsyncSession, org_id, player_id,
+                                award: dict) -> Optional[dict]:
+    """Has this player already got this honour, and did an import write it?
+
+    A re-import must not hand somebody a second life membership, and a club may
+    have typed the honour in by hand before ever importing. Matched on the
+    player, the award and its season — which is what a duplicate IS. `ours`
+    says whether the row came from a CricketStatz import of this club's, which
+    is what decides whether the row may be re-stamped onto a later one.
+    """
+    row = (await db.execute(text("""
+        SELECT pa.id,
+               pa.import_batch_id AS batch,
+               EXISTS (SELECT 1 FROM cricketstatz_imports ci
+                        WHERE ci.id = pa.import_batch_id
+                          AND ci.organisation_id = :org) AS ours
+          FROM player_achievements pa
+         WHERE pa.org_id = :org AND pa.player_id = :pid
+           AND pa.category = :category AND pa.achievement = :achievement
+           AND COALESCE(pa.season, '') = COALESCE(:season, '')
+         LIMIT 1
+    """), {
+        "org": str(org_id), "pid": str(player_id),
+        "category": award["category"], "achievement": award["achievement"],
+        "season": award["season"],
+    })).mappings().first()
+    return dict(row) if row else None
+
+
+async def ensure_award_definition(db: AsyncSession, org_id, category,
+                                  subcategory, achievement) -> None:
+    """Put an award on the club's own catalogue if it is not there already.
+
+    Without this an imported honour exists on a player and nowhere in the list
+    the Awards screen offers, so nobody could add a second winner of the same
+    trophy without retyping its name.
+    """
+    exists = (await db.execute(text("""
+        SELECT 1 FROM org_award_definitions
+         WHERE org_id = :org AND lower(category) = lower(:category)
+           AND lower(COALESCE(subcategory, '')) = lower(COALESCE(:sub, ''))
+           AND lower(achievement) = lower(:achievement)
+         LIMIT 1
+    """), {"org": str(org_id), "category": category, "sub": subcategory,
+           "achievement": achievement})).scalar()
+    if exists:
+        return
+    await db.execute(text("""
+        INSERT INTO org_award_definitions
+            (id, org_id, category, subcategory, achievement, sort_order)
+        VALUES (gen_random_uuid(), :org, :category, :sub, :achievement,
+                COALESCE((SELECT MAX(sort_order) + 1 FROM org_award_definitions
+                           WHERE org_id = :org), 1000))
+    """), {"org": str(org_id), "category": category, "sub": subcategory,
+           "achievement": achievement})
+
+
+
 def _json(value) -> str:
     import json
     return json.dumps(value, ensure_ascii=False)
@@ -617,6 +985,23 @@ async def inspect_club(url: str) -> dict:
     capped = len(all_time) >= 999
     dates = sorted(m["date"] for m in all_time if m.get("date"))
 
+    earliest = dates[0][:4] if dates else None
+    latest = dates[-1][:4] if dates else None
+    at_least = False
+    if capped:
+        # The list is the most RECENT 999 matches, so its earliest date says
+        # nothing about how far the club goes back — it read 2014 for a club
+        # whose history starts in 1953. The all-time record boards carry dates
+        # from across the whole history, and a record dated 1954 PROVES there
+        # was a season in 1954, so this is a floor rather than a guess. It can
+        # understate (a quiet season need not reach a top-100 board), never
+        # overstate, and the first pass finds the real answer.
+        span = await _span_from_records(club_id)
+        if span:
+            earliest = str(min(span[0], int(earliest or span[0])))
+            latest = str(max(span[1], int(latest or span[1])))
+            at_least = True
+
     return {
         "club_id": club_id,
         "club_name": page["club_name"],
@@ -624,9 +1009,94 @@ async def inspect_club(url: str) -> dict:
         "teams": [t["name"] for t in teams] or [t["name"] for t in page["teams"]],
         "matches_found": len(all_time),
         "truncated": capped,
-        "earliest": dates[0] if dates else None,
-        "latest": dates[-1] if dates else None,
+        "earliest": earliest,
+        "latest": latest,
+        # True when the span is a floor read off the record boards rather than
+        # the exact range, so the screen can say "at least" instead of stating
+        # a year it cannot know yet.
+        "earliest_at_least": at_least,
         "record_reports": len(RECORD_REPORTS),
+    }
+
+
+# Boards that reach across a club's whole history, so a date on one is proof a
+# season existed. Deliberately a handful rather than all 41 — this runs on a
+# preview, before the club has committed to anything.
+_SPAN_REPORTS = (72, 7, 6, 27, 50)
+_YEAR = re.compile(r"\b(19\d{2}|20\d{2})\b")
+
+
+async def _span_from_records(club_id: str) -> Optional[tuple[int, int]]:
+    """The years the club's all-time record boards actually reach."""
+    years: set[int] = set()
+    for mode in _SPAN_REPORTS:
+        try:
+            report = await client.fetch_report(club_id, mode)
+        except Exception:
+            continue
+        for row in report.get("rows", []):
+            for value in row.get("values", []):
+                years.update(int(y) for y in _YEAR.findall(str(value)))
+    return (min(years), max(years)) if years else None
+
+
+# ── working out what there is to pull, before pulling it ─────────────────────
+
+async def plan_seasons(club_id: str, seasons: list[dict], on_progress=None
+                       ) -> list[tuple[dict, list[dict]]]:
+    """Find which of the site's candidate seasons this club actually played.
+
+    CricketStatz offers every season back to 1860 whatever the club, so the
+    dropdown is a list of candidates. Every one is probed — a club's history
+    can have gaps, and stopping at the first run of empty years would silently
+    truncate it — but the probes run concurrently under the client's own
+    semaphore, so 167 candidates cost well under a minute rather than two.
+
+    The season's match rows are kept, so the import that follows re-reads
+    nothing: the plan IS the work list, and knowing the real total up front is
+    what lets the progress bar mean something.
+    """
+    done = 0
+    found: list[tuple[dict, list[dict]]] = []
+
+    async def probe(season: dict) -> None:
+        nonlocal done
+        try:
+            rows = await client.fetch_results(club_id, season["value"])
+        except CricketStatzError:
+            raise
+        except Exception as exc:
+            logger.warning("CricketStatz season %s failed: %s", season["value"], exc)
+            rows = []
+        done += 1
+        if rows:
+            found.append((season, rows))
+        if on_progress:
+            on_progress(done, len(seasons), len(found),
+                        sum(len(r) for _, r in found))
+
+    await asyncio.gather(*(probe(s) for s in seasons))
+    # Oldest first, so a club watching it sees its history fill forwards.
+    found.sort(key=lambda pair: season_year(pair[0]["label"], pair[0]["value"]) or 0)
+    return found
+
+
+def plan_summary(found: list[tuple[dict, list[dict]]]) -> dict:
+    """What the plan amounts to, for the screen and the record."""
+    years = [season_year(s["label"], s["value"]) for s, _ in found]
+    years = [y for y in years if y]
+    total = sum(len(rows) for _, rows in found)
+    return {
+        "seasons": [
+            {"label": s["label"], "value": s["value"], "matches": len(rows)}
+            for s, rows in found
+        ],
+        "season_count": len(found),
+        "match_count": total,
+        "earliest": min(years) if years else None,
+        "latest": max(years) if years else None,
+        # About a second a match, measured against the live site.
+        "estimated_minutes": max(1, round(total * 1.0 / 60)),
     }
 
 
@@ -645,13 +1115,17 @@ async def _set_progress(session_maker, import_id, **fields) -> None:
         else:
             sets.append(f"{key} = :{key}")
             params[key] = value
+    # A progress write is also the heartbeat: it is the only thing that tells a
+    # long import from a dead one.
+    sets.append("updated_at = NOW()")
     async with session_maker() as db:
         await db.execute(text(
             f"UPDATE cricketstatz_imports SET {', '.join(sets)} WHERE id = :id"), params)
         await db.commit()
 
 
-async def run_import(session_maker, org_id, import_id, club_id: str) -> None:
+async def run_import(session_maker, org_id, import_id, club_id: str,
+                     synced_years: str = "skip") -> None:
     """Pull the club's whole CricketStatz history. Never raises.
 
     Runs as a detached background task, so its own session is opened here and
@@ -662,6 +1136,10 @@ async def run_import(session_maker, org_id, import_id, club_id: str) -> None:
         "phase": "starting", "seasons_done": 0, "seasons_total": 0,
         "matches_done": 0, "matches_total": 0, "scorecards": 0,
         "records": 0, "players": 0, "notes": [],
+        "notes_done": 0, "notes_total": 0, "awards": 0, "notes_read": 0,
+        "skipped_synced_years": [], "replaced_synced_years": [],
+        "replaced_done": 0, "synced_years": [],
+        "candidates_done": 0, "candidates_total": 0, "current_season": None,
     }
 
     def note(message: str) -> None:
@@ -695,28 +1173,95 @@ async def run_import(session_maker, org_id, import_id, club_id: str) -> None:
             seasons = page["seasons"]
 
         progress["seasons_total"] = len(seasons)
+        progress["candidates_total"] = len(seasons)
         await _set_progress(session_maker, import_id, progress=progress)
 
-        # ── matches, season by season ───────────────────────────────────────
-        progress["phase"] = "matches"
-        for s_idx, season in enumerate(seasons):
-            try:
-                rows = await client.fetch_results(club_id, season["value"])
-            except CricketStatzError:
-                raise
-            except Exception as exc:
-                note(f"{season['label']}: could not load ({exc})")
-                rows = []
+        # ── first pass: what is there, and where ────────────────────────────
+        # Probing every candidate season first costs under a minute and buys
+        # the real total. Discovering it as we went meant `matches_total` grew
+        # with `matches_done`, so a bar drawn against it sat near full from the
+        # first season and told a club nothing.
+        last_beat = 0.0
 
+        def planning(done, total, found, matches):
+            nonlocal last_beat
+            progress["candidates_done"] = done
+            progress["seasons_total"] = found
+            progress["matches_total"] = matches
+            now = time.monotonic()
+            if now - last_beat > 1.0 or done == total:
+                last_beat = now
+                asyncio.create_task(_set_progress(
+                    session_maker, import_id, progress=dict(progress)))
+
+        plan = await plan_seasons(club_id, seasons, planning)
+
+        # A club that already syncs from Cricket Australia holds those seasons
+        # once. Importing them again does not correct anything — it counts the
+        # same cricket twice on every career total and every record board — so
+        # the years the sync already covers are left out unless the club has
+        # asked for them. CricketStatz is for the history the sync cannot
+        # reach, and the club is told exactly which years were skipped.
+        async with session_maker() as db:
+            covered = await synced_coverage(db, org_id)
+        overlap = []
+        for season, _rows in plan:
+            year = season_year(season["label"], season["value"])
+            if year is not None and covered.get(year):
+                overlap.append(year)
+        overlap.sort()
+
+        skipped_years, replaced_years = [], []
+        if overlap and synced_years == "skip":
+            skipped_years = overlap
+            plan = [(sn, rows) for sn, rows in plan
+                    if season_year(sn["label"], sn["value"]) not in set(overlap)]
+            note(f"{len(skipped_years)} season(s) already covered by your "
+                 f"Cricket Australia sync were left out "
+                 f"({skipped_years[0]}-{skipped_years[-1]}), so those matches "
+                 f"are not counted twice.")
+        elif overlap and synced_years == "cricketstatz":
+            # The club has said its CricketStatz history is the record for the
+            # seasons it also syncs. The seasons are marked AFTER the matches
+            # are in, below — marking first would leave the club with neither
+            # source showing while the import walked, and a run that failed
+            # halfway would leave it that way.
+            replaced_years = overlap
+            note(f"{len(replaced_years)} season(s) you also sync will read from "
+                 f"CricketStatz ({replaced_years[0]}-{replaced_years[-1]}). "
+                 f"Your Cricket Australia data is kept and steps aside.")
+
+        progress["skipped_synced_years"] = skipped_years
+        progress["replaced_synced_years"] = replaced_years
+        progress["synced_years"] = sorted(covered)
+
+        summary = plan_summary(plan)
+        progress["seasons_total"] = summary["season_count"]
+        progress["matches_total"] = summary["match_count"]
+        progress["plan"] = summary
+        await _set_progress(session_maker, import_id, phase="planned",
+                            progress=progress, stats=summary)
+
+        # ── matches, season by season ───────────────────────────────────────
+        # Read once for the whole club: which games a person has already worked
+        # on by hand, so a re-import never writes over their scorecard.
+        async with session_maker() as db:
+            hand_edited = await hand_edited_games(db, org_id)
+
+        progress["phase"] = "matches"
+        await _set_progress(session_maker, import_id, phase="matches",
+                            progress=progress)
+        for s_idx, (season, rows) in enumerate(plan):
             progress["seasons_done"] = s_idx + 1
-            progress["matches_total"] += len(rows)
+            progress["current_season"] = season["label"]
             await _set_progress(session_maker, import_id, progress=progress)
 
             if not rows:
                 continue
 
             caches = {
-                "seasons": {}, "grades": {}, "players": {},
+                "seasons": {}, "grades": {}, "players": {}, "roster": None,
+                "near_matches": {}, "hand_edited": hand_edited,
                 "season_label": season["label"], "season_value": season["value"],
             }
             async with session_maker() as db:
@@ -754,24 +1299,83 @@ async def run_import(session_maker, org_id, import_id, club_id: str) -> None:
                         caches["seasons"].clear()
                         caches["grades"].clear()
                         caches["players"].clear()
+                        caches["roster"] = None
                         note(f"match {row['source_match_id']}: {exc}")
                     progress["matches_done"] += 1
 
-                    if (m_idx + 1) % 10 == 0:
+                    if (m_idx + 1) % 5 == 0:
                         await _set_progress(session_maker, import_id,
                                             progress=progress)
-            progress["players"] = len(caches["players"])
+            # THIS SEASON IS MARKED THE MOMENT ITS OWN MATCHES ARE IN, not at
+            # the end of the run. Marking every season up front would leave the
+            # ones not yet walked showing neither source; leaving it all to the
+            # end leaves every season already walked counted TWICE for the
+            # forty minutes the import takes, which is what a club sees and
+            # reports as duplicates on its record board. Per season, after its
+            # matches commit, there is no window for either: a season is either
+            # still on Cricket Australia or fully across, never both and never
+            # neither — and a run that stops halfway leaves exactly that.
+            year = season_year(season["label"], season["value"])
+            if year is not None and year in set(replaced_years):
+                async with session_maker() as db:
+                    await mark_seasons_superseded(db, org_id, [year])
+                    await db.commit()
+                progress["replaced_done"] = (progress.get("replaced_done") or 0) + 1
+
+            async with session_maker() as db:
+                progress["players"] = (await db.execute(text("""
+                    SELECT COUNT(*) FROM players
+                     WHERE organisation_id = :org
+                       AND cricketstatz_player_id IS NOT NULL
+                """), {"org": str(org_id)})).scalar() or 0
+            for new_name, candidates in (caches.get("near_matches") or {}).items():
+                note(f"{new_name}: added as a new player — close to "
+                     f"{', '.join(candidates)}. Check Merge Duplicates.")
             await _set_progress(session_maker, import_id, progress=progress)
+
+        # Backstop. Each season is marked as its own matches land (above), so
+        # by here this normally writes nothing — it exists for a season whose
+        # own year could not be read off its label, which would otherwise be
+        # imported and then never marked.
+        if replaced_years:
+            async with session_maker() as db:
+                await mark_seasons_superseded(db, org_id, replaced_years)
+                await db.commit()
 
         # ── the record book ─────────────────────────────────────────────────
         progress["phase"] = "records"
-        await _set_progress(session_maker, import_id, progress=progress)
+        await _set_progress(session_maker, import_id, phase="records",
+                            progress=progress)
 
         def record_progress(done, total, saved):
             progress["records"] = saved
         async with session_maker() as db:
             progress["records"] = await import_records(
                 db, org_id, import_id, club_id, record_progress)
+
+        # ── the honour board out of the players' own notes ──────────────────
+        progress["phase"] = "notes"
+        await _set_progress(session_maker, import_id, phase="notes",
+                            progress=progress)
+
+        def notes_progress(done, total, made):
+            progress["notes_done"] = done
+            progress["notes_total"] = total
+            progress["awards"] = made
+        async with session_maker() as db:
+            try:
+                summary_notes = await import_notes(
+                    db, org_id, import_id, club_id, notes_progress, note)
+                progress["awards"] = summary_notes["awards_created"]
+                progress["notes_read"] = summary_notes["players_read"]
+            except CricketStatzError:
+                raise
+            except Exception as exc:
+                # An honour board is worth having and is not what the import is
+                # for: a failure here must not lose a history already written.
+                await db.rollback()
+                logger.exception("CricketStatz notes pass failed")
+                note(f"player notes could not be read: {exc}")
 
         progress["phase"] = "done"
         async with session_maker() as db:
@@ -800,6 +1404,54 @@ async def run_import(session_maker, org_id, import_id, club_id: str) -> None:
                             progress=progress, finished_at=datetime.utcnow())
 
 
+async def run_notes_pass(session_maker, org_id, import_id, club_id: str) -> None:
+    """Read the club's player notes and file the honour board. Never raises.
+
+    THE HONOUR BOARD IS THE LAST PHASE OF AN IMPORT, so it is the first thing
+    lost when a run is cut off — a redeploy, a stop, a network failure after
+    the matches are in. Re-importing to recover it would re-pull every
+    scorecard for a pass that needs none of them, so it runs on its own here.
+
+    Reuses the import's own batch id, so the honours it writes are removed by
+    undoing that import exactly as if they had been read during it, and the
+    Awards screen lists them under the same batch. A second run over a club
+    whose notes are already read re-stamps rather than duplicating.
+    """
+    progress = {"phase": "notes", "notes_done": 0, "notes_total": 0,
+                "awards": 0, "notes_read": 0, "notes": []}
+
+    def note(message: str) -> None:
+        if len(progress["notes"]) < 200:
+            progress["notes"].append(message)
+
+    def on_progress(done, total, made):
+        progress["notes_done"] = done
+        progress["notes_total"] = total
+        progress["awards"] = made
+
+    try:
+        await _set_progress(session_maker, import_id, status="running",
+                            phase="notes", progress=progress)
+        async with session_maker() as db:
+            summary = await import_notes(db, org_id, import_id, club_id,
+                                         on_progress, note)
+        progress["awards"] = summary["awards_created"]
+        progress["notes_read"] = summary["players_read"]
+        progress["phase"] = "done"
+        await _set_progress(session_maker, import_id, status="complete",
+                            phase="done", progress=progress,
+                            finished_at=datetime.utcnow())
+    except CricketStatzError as exc:
+        await _set_progress(session_maker, import_id, status="error",
+                            error=str(exc), progress=progress,
+                            finished_at=datetime.utcnow())
+    except Exception as exc:  # a failed pass must report, never vanish
+        logger.exception("CricketStatz notes pass failed")
+        await _set_progress(session_maker, import_id, status="error",
+                            error=f"{type(exc).__name__}: {exc}",
+                            progress=progress, finished_at=datetime.utcnow())
+
+
 async def undo_import(db: AsyncSession, org_id, import_id) -> dict:
     """Remove everything one import wrote.
 
@@ -818,8 +1470,46 @@ async def undo_import(db: AsyncSession, org_id, import_id) -> dict:
          WHERE organisation_id = :org AND import_id = :imp
         RETURNING id
     """), {"org": str(org_id), "imp": str(import_id)})).fetchall()
+    # The honour board this import read out of the players' notes. Achievements
+    # carry the import's own id as their batch, so they go with it.
+    awards = (await db.execute(text("""
+        DELETE FROM player_achievements
+         WHERE org_id = :org AND import_batch_id = :imp
+        RETURNING id
+    """), {"org": str(org_id), "imp": str(import_id)})).fetchall()
+    await db.execute(text("""
+        UPDATE achievement_import_batches
+           SET status = 'undone', undone_at = NOW()
+         WHERE id = :imp AND org_id = :org
+    """), {"imp": str(import_id), "org": str(org_id)})
+    # Award definitions are deliberately KEPT: a trophy the club now has in its
+    # catalogue may already have a second winner typed in by hand, and a
+    # catalogue entry holds no claim about anybody.
     await db.execute(text(
         "UPDATE cricketstatz_imports SET undone_at = NOW() WHERE id = :imp"),
         {"imp": str(import_id)})
+    # A SEASON LEFT WITH NEITHER SOURCE IS THE ONE STATE THIS MUST NOT LEAVE.
+    # Making CricketStatz the record for a season only ever HIDES the synced
+    # copy (migration 287) — so undoing the import that replaced it, without
+    # taking the marker off, removes the CricketStatz matches AND leaves the
+    # club's own Cricket Australia data still hidden. The season then reads
+    # empty on every screen with nothing to say why.
+    #
+    # Cleared per season rather than club-wide: a season still holding an
+    # imported match from ANOTHER import is still genuinely read from
+    # CricketStatz and keeps its marker. Only a season this undo has just
+    # emptied goes back to the sync.
+    handed_back = (await db.execute(text("""
+        UPDATE seasons s SET stats_source = NULL
+         WHERE s.organisation_id = :org
+           AND s.stats_source IN ('cricketstatz', 'playhq')
+           AND NOT EXISTS (
+                 SELECT 1 FROM manual_games mg
+                  WHERE mg.season_id = s.id
+                    AND mg.cricketstatz_import_id IS NOT NULL)
+        RETURNING s.year
+    """), {"org": str(org_id)})).scalars().all()
     await db.commit()
-    return {"matches_removed": len(removed), "records_removed": len(records)}
+    return {"matches_removed": len(removed), "records_removed": len(records),
+            "awards_removed": len(awards),
+            "seasons_handed_back": sorted(y for y in handed_back if y)}

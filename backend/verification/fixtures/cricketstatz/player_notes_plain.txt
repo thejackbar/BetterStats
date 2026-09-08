@@ -1,0 +1,24 @@
+<table class='ss_table'>
+                        <tr>
+                            <td align="right" bgcolor="dddddd" width="70"><b>Clubs:</b></td>
+                            <td class="ss_tablerow">Keon Park Cricket Club 1985-2011</td>
+                        </tr>
+                        <tr>
+                            <td align="right" bgcolor="dddddd"><b>Matches:</b></td>
+                            <td class="ss_tablerow">317</td>
+                        </tr>
+                        <tr>
+                            <td align="right" bgcolor="dddddd"><b>Batting:</b></td>
+                            <td class="ss_tablerow">unknown</td>
+                        </tr>
+                        <tr>
+                            <td align="right" bgcolor="dddddd"><b>Bowling:</b></td>
+                            <td class="ss_tablerow">unknown</td>
+                        </tr>
+                        
+                        <tr>
+                            <td align="right" valign="top" bgcolor="dddddd"><b>Notes:</b></td>
+                            <td class="ss_tablerow">LIFE MEMBER ~ 1998-99<br>A-GRADE CAP AND DEBUT 🧢 #122 (1985-86)</td>
+                        </tr>
+                        
+                    </table>
