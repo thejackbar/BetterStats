@@ -360,6 +360,46 @@ async def trigger_crawl(
             "rediscover": rediscover}
 
 
+# ── Background-job bookkeeping, shared by every long run on this page ──────────
+# Rediscover, Push to BetterCricket CRM and Refresh engagement scores all use the
+# same running/started_at/finished_at/result/error state dict and the same UI
+# poller, so the three helpers below are shared rather than copied per job.
+_BG_STALE_SECS = 30 * 60
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _settle_bg(state: dict, res):
+    """Store a background job's result, translating the services' documented
+    "never raises, returns {'error': ...} instead" convention into the state
+    dict's own error field — so the UI poller's ``if (s.error)`` branch catches
+    a soft failure the same way it catches a hard exception, instead of trying
+    to format an error dict as a success result."""
+    if isinstance(res, dict) and res.get("error"):
+        state["result"], state["error"] = None, str(res["error"])
+    else:
+        state["result"], state["error"] = res, None
+
+
+def _bg_stale(state: dict, window_secs: "int | None" = None) -> bool:
+    """True if a background job's ``state`` dict claims to still be running but
+    started long enough ago that it's more likely a worker restart lost track of
+    it. ``window_secs`` overrides the default for a job with a genuinely
+    different runtime: a rediscover re-pages the whole of PlayHQ at the crawl's
+    courtesy pace and legitimately runs for hours, so treating it as stale after
+    30 minutes would let a second run start on top of the first."""
+    if not state["running"] or not state["started_at"]:
+        return False
+    try:
+        started = datetime.fromisoformat(state["started_at"])
+        limit = _BG_STALE_SECS if window_secs is None else window_secs
+        return (datetime.now(timezone.utc) - started).total_seconds() > limit
+    except Exception:
+        return True
+
+
 # ── Rediscover: re-read the committee PlayHQ publishes today ────────────────────
 # A full rediscover re-pages the whole club search at the crawl's own courtesy
 # pace, so it runs for hours — background, one at a time, with a progress dict

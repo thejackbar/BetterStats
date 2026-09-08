@@ -79,12 +79,38 @@ integration."*
   every club with the busy one outscoring the club nobody has visited, a dry
   run writing nothing, a single club rescoring on its own signal without
   touching its neighbour, and the operator script running the shared sweep
-  rather than a second copy) **with a control run**: 35 of the 39 reachable
-  checks fail against the previous commit.
+  rather than a second copy, and thirteen CRM / Sales / Super Admin / Reporting
+  route bodies answering) **with two control runs**: 35 of the 40 reachable
+  checks fail against the pre-retirement commit, and against the commit that
+  had lost the three shared helpers, 5 fail naming them and the three buttons
+  they break.
+- **THE EXPORT BLOCK TOOK THREE SHARED HELPERS WITH IT, AND NOTHING NOTICED —
+  found by auditing rather than by the suite.** `_now_iso`, `_settle_bg` and
+  `_bg_stale` sat inside the Twenty-export region of `marketing.py` and are
+  called by **Rediscover, Push to BetterCricket CRM and the engagement rescore**.
+  The module still imported, `vite build` passed, the route strings were all
+  still there, and every one of those three buttons would have raised
+  `NameError` the first time it was pressed. **A structural check for a route's
+  presence is not a check that the route RUNS**: the suite presses all three
+  and their pollers now, and `undefined_names()` walks the whole backend for a
+  name a module uses and never defines — the one check that catches a helper
+  deleted along with the block it lived in.
+- **THE ROUTE TABLE IS THE HONEST DIFF, and it was taken both ways.** Dumping
+  `app.openapi()` on this commit and on the previous one and diffing names
+  exactly 10 removed routes, every one Twenty-only (3 export/refresh pairs, 4
+  gauge, 2 webhooks), against 2 added. No CRM, Sales, Super Admin, Reporting or
+  Directory route lost. Repeat that dump whenever a retirement removes code.
+- **THE SUITE NOW PRESSES THIRTEEN REAL SURFACES** — the CRM board, its stages,
+  deals, events and settings, Wizard Clubs, commissions and periods, the Sales
+  Workspace queue, the rep team, Sales Performance and the ad-signup report —
+  because "nothing was removed" and "everything still answers" are different
+  claims and only the second one is what a club notices.
 - **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN.** The first cut died on
   `from app.services import engagement` and said nothing about the twenty-odd
   behavioural checks below it. The behavioural half now REPORTS the engine or
-  the sweep as missing and returns.
+  the sweep as missing and returns; each button press is wrapped for the same
+  reason, so a `NameError` in a route body is a named failure rather than the
+  end of the run.
 - **A CHECK THAT MATCHES MORE THAN IT MEANS IS NOT A CHECK.** "the script keeps
   no loop of its own" scanned the whole file and caught the `--verify`
   equivalence checkers, which legitimately need one. It reads `recalc()`'s own

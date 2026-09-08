@@ -108,6 +108,51 @@ def lifespan_ddl(table: str) -> list:
     return out
 
 
+def undefined_names(pkg_dir: str) -> list:
+    """Every module-level name a file USES but never defines, imports or gets
+    from a builtin.
+
+    This is the class of break neither an import smoke test nor `vite build`
+    can see: a shared helper called INSIDE a function body, deleted along with
+    the block it used to sit in. The module still imports; the route 500s the
+    first time somebody presses the button. It caught exactly that here — the
+    Twenty export block was removed and took `_now_iso`, `_settle_bg` and
+    `_bg_stale` with it, which Rediscover, Push to BetterCricket CRM and the
+    engagement rescore all call."""
+    import ast, builtins
+    known = set(dir(builtins))
+    out = []
+    for root, dirs, files in os.walk(pkg_dir):
+        dirs[:] = [d for d in dirs if d != "__pycache__"]
+        for f in sorted(files):
+            if not f.endswith(".py"):
+                continue
+            path = os.path.join(root, f)
+            try:
+                tree = ast.parse(open(path).read())
+            except SyntaxError:
+                continue
+            bound = set(known)
+            for n in ast.walk(tree):
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    bound.add(n.name)
+                elif isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)):
+                    bound.add(n.id)
+                elif isinstance(n, ast.alias):
+                    bound.add((n.asname or n.name).split(".")[0])
+                elif isinstance(n, ast.arg):
+                    bound.add(n.arg)
+                elif isinstance(n, ast.ExceptHandler) and n.name:
+                    bound.add(n.name)
+                elif isinstance(n, (ast.Global, ast.Nonlocal)):
+                    bound.update(n.names)
+            used = {n.id for n in ast.walk(tree)
+                    if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)}
+            for m in sorted(used - bound):
+                out.append(f"{os.path.relpath(path, pkg_dir)}::{m}")
+    return out
+
+
 # ══ 1. Nothing reaches the retired CRM ════════════════════════════════════════
 
 RETIRED_MODULES = [
@@ -176,6 +221,17 @@ def structural_checks() -> None:
     check("the browser can no longer call a retired route",
           bool(api) and "export-twenty" not in api and "refresh-twenty" not in api)
     check("...and can call the rescore", "refresh-engagement" in api)
+
+    # Nothing anywhere calls a helper the retirement deleted. Three of these
+    # were removed with the export block and are shared by Rediscover, Push to
+    # BetterCricket CRM and the engagement rescore — all of which would have
+    # 500'd on the first press while importing perfectly.
+    dangling = undefined_names(os.path.join(ROOT, "backend", "app"))
+    # A tiny pre-existing residue is tolerated; a NEW one is not, so the check
+    # names whatever it finds rather than counting.
+    marketing_dangling = [d for d in dangling if d.startswith("routers/marketing.py")]
+    check("no module calls a helper that no longer exists (Club Directory)",
+          not marketing_dangling, ", ".join(marketing_dangling))
 
     ui = src("frontend/src/pages/admin/SuperMarketing.jsx")
     check("the Club Directory offers a rescore button",
@@ -341,6 +397,114 @@ async def behavioural_checks() -> None:
         check("the per-club rescore caches a score", busy.engagement_score is not None)
         await db.refresh(quiet)
         check("...and touches only that club", quiet.engagement_score is None)
+
+        head("The Club Directory's three long-running buttons actually run")
+        # A static check is not proof: these route bodies share the background
+        # bookkeeping helpers, and a missing one only raises when the button is
+        # pressed. So press all three, and their pollers, for real.
+        from app.routers import marketing as mkt
+
+        class _Bg:
+            """Stands in for FastAPI's BackgroundTasks — records what the route
+            queued instead of running it, so the check is about the route body
+            rather than a full PlayHQ crawl."""
+            def __init__(self):
+                self.queued = []
+
+            def add_task(self, fn, *a, **kw):
+                self.queued.append(fn)
+
+        for state in (mkt._rediscover, mkt._crm_push, mkt._engagement_refresh):
+            state.update(running=False, started_at=None, finished_at=None,
+                         result=None, error=None)
+
+        async def press(label, coro_fn, want=("started",)):
+            """Press a button and report what it did — never let a NameError in
+            a route body take the suite down with it, or the run says nothing
+            about everything below."""
+            try:
+                res = await coro_fn()
+            except Exception as e:  # noqa: BLE001 — that IS the finding
+                check(label, False, f"{type(e).__name__}: {e}")
+                return None
+            check(label, isinstance(res, dict) and res.get("status") in want, str(res))
+            return res
+
+        await press("Rediscover starts", lambda: mkt.rediscover(_Bg()))
+        await press("...and a second press joins the run in flight rather than doubling it",
+                    lambda: mkt.rediscover(_Bg()), want=("already_running",))
+        try:
+            check("...and its poller answers", "running" in await mkt.rediscover_status())
+        except Exception as e:  # noqa: BLE001
+            check("...and its poller answers", False, f"{type(e).__name__}: {e}")
+        mkt._rediscover.update(running=False, started_at=None)
+
+        await press("Push to BetterCricket CRM starts",
+                    lambda: mkt.push_to_crm(mkt.PushToCrmBody(), _Bg(), db),
+                    want=("started", "already_running"))
+        try:
+            check("...and its poller answers", "running" in await mkt.push_to_crm_status())
+        except Exception as e:  # noqa: BLE001
+            check("...and its poller answers", False, f"{type(e).__name__}: {e}")
+        mkt._crm_push.update(running=False, started_at=None)
+
+        await press("Refresh engagement scores starts",
+                    lambda: mkt.refresh_engagement_scores(_Bg()))
+        try:
+            check("...and its poller answers",
+                  "running" in await mkt.refresh_engagement_status())
+        except Exception as e:  # noqa: BLE001
+            check("...and its poller answers", False, f"{type(e).__name__}: {e}")
+        mkt._engagement_refresh.update(running=False, started_at=None)
+
+        head("Every surface the retirement could have touched still answers")
+        # Route bodies, called for real. The route-table diff proves nothing was
+        # REMOVED from CRM / Sales Management / Super Admin / Reporting / the
+        # Club Directory; this proves what is left still runs. Read-only.
+        from app.routers import crm as crm_r, sales_commissions as sc_r
+        from app.routers import sales_workspace as sw_r, meta_ads as ma_r
+        from app.routers.auth import SalesActor
+        from app.models.db import ClubMembership, Organisation, User
+
+        org = Organisation(id=uuid.uuid4(), name="Audit Org", slug="audit-org")
+        db.add(org)
+        await db.flush()
+        auditor = User(id=uuid.uuid4(), username="auditor",
+                       email="auditor@example.com", password_hash="x")
+        db.add(auditor)
+        await db.flush()
+        db.add(ClubMembership(id=uuid.uuid4(), user_id=auditor.id,
+                              club_id=org.id, role="super_admin"))
+        await db.commit()
+        actor = SalesActor(user=auditor, role="super_admin")
+
+        surfaces = [
+            ("CRM: the pipeline board", lambda: crm_r.super_pipeline(db)),
+            ("CRM: its stages", lambda: crm_r.super_stages(db)),
+            ("CRM: the deal list", lambda: crm_r.super_list_deals(db=db)),
+            ("CRM: the events feed", lambda: crm_r.super_list_events(db=db)),
+            ("CRM: its settings", lambda: crm_r.super_crm_settings(db)),
+            ("CRM: the manual recalc poller", lambda: crm_r.super_recalc_engagement_status()),
+            ("Super Admin: Wizard Clubs", lambda: crm_r.super_wizard_clubs(db=db)),
+            ("Sales Management: commissions", lambda: sc_r.overview(auditor, db)),
+            ("Sales Management: commission periods", lambda: sc_r.periods("quarter", auditor, db)),
+            ("Sales Management: the Workspace queue", lambda: sw_r.list_clubs(actor=actor, db=db)),
+            ("Sales Management: the rep team", lambda: sw_r.team(actor=actor, db=db)),
+            ("Sales Management: Sales Performance", lambda: sw_r.performance(actor=actor, db=db)),
+            ("Reporting: the ad-signup lead report", lambda: ma_r.ad_signups(db=db, _=auditor)),
+        ]
+        for label, fn in surfaces:
+            try:
+                res = fn()
+                if asyncio.iscoroutine(res):
+                    res = await res
+                check(label, True)
+            except Exception as e:  # noqa: BLE001 — that IS the finding
+                check(label, False, f"{type(e).__name__}: {e}")
+                try:
+                    await db.rollback()
+                except Exception:
+                    pass
 
         head("The operator script runs the SAME sweep, not a second one")
         from app.scripts import recalc_engagement as script
