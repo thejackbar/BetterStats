@@ -7691,6 +7691,55 @@ describes choosing a winner per season describes the design this replaces.
   follow-up is a "these look like the same match — are they?" review list, built
   from the near misses the matcher already scores and declines.
 
+### THE PAIRING WAS RIGHT AND NEVER RAN (v9.70.4, Sep 2026)
+
+Reported after v9.70.2 deployed: still 547 matches and 28 hundreds, and the
+club's 2002/03 still holding all 171 games. **The code was correct — replaying
+that club's four real seasons through the SHIPPED `reconcile_org` against a
+local Postgres takes 706 games to 404 and writes 302 pairs.** So the pass had
+simply not run, and nothing anywhere said so.
+
+- **A SILENT LOG CANNOT TELL "RAN AND FOUND NOTHING" FROM "NEVER RAN", and that
+  is what cost the round trip.** The boot sweep logged only when `changed` was
+  non-zero. It logs the club count on the way in and every club's result on the
+  way out now, and a failure logs its traceback rather than one line.
+- **A BARE `asyncio.create_task` IS NOT KEPT ALIVE.** The loop holds a weak
+  reference, so a task that suspends on its first await can be collected before
+  it runs — the trap `iq_opponent`'s own `_BUILD_TASKS` already documents.
+  `main._BACKGROUND_TASKS` holds it and discards it on completion.
+- **A CARD QUERY BOUND TO THE CLUB'S PLAYERS ALONE SCANNED THE WHOLE
+  PLATFORM'S `batting_innings`.** `_SYNCED_CARD_SQL` filtered on
+  `players.organisation_id` and nothing else, so one club's question read every
+  innings on the platform. Both card queries bind the ids of the games already
+  loaded (`= ANY(CAST(:ids AS UUID[]))`), which is the plain restriction the
+  planner pushes into the index — the same lesson the record boards' timing
+  work records, and the reason `load_sides` now reads its rows BEFORE their
+  cards.
+- **MATCHING A WHOLE HISTORY IS SECONDS OF SOLID CPU AND MUST NOT SIT ON THE
+  EVENT LOOP.** Measured with a realistic card distribution (a squad of 60,
+  scores skewed low, so the (player, runs) index buckets are big): 217
+  candidates per imported match at the median and **6.7s** for 3,500 each side.
+  Inline, that freezes every other request the API is serving, the health check
+  a deploy waits on included. `asyncio.to_thread` — verified by running a 50ms
+  heartbeat alongside it, which ticked 119 times during the pass.
+- **AND IT IS RETRIED NIGHTLY** (`jobs/scheduler.pair_all_imported_matches`,
+  02:50 Perth). A pass that only ever fires at boot leaves a club counting both
+  sources indefinitely if that one firing is lost, which is exactly what
+  happened. Costs nothing once it has run: it re-derives and writes only what
+  changed, and a club holding no import never appears in the list.
+- **`python -m app.scripts.pair_imported_matches [<org|all>] [--apply]`** is
+  the way to fix a club now and to see what happened, without waiting on any
+  trigger. Dry run by default, per the house rule; a club that fails is named
+  with its error rather than taking the run down.
+- **THE CAUSE OF THE ONE LOST FIRING IS STILL NOT ESTABLISHED** — the log
+  carried nothing to establish it with, which is the first thing fixed above.
+  Every one of the four changes stands on its own merits regardless.
+- **Verified** (the suite is 277 checks now: both card queries bound to an id
+  list, the matching off the event loop, the boot task held, the sweep
+  reporting whether or not anything changed, and the nightly retry registered)
+  and the four real seasons replayed end to end through the shipped
+  `reconcile_org` and the shipped script: 706 games -> 404, 302 pairs written.
+
 ### A COUNT THAT CANNOT FIT THE RUNS IS NOT A COUNT (v9.70.3, Sep 2026)
 
 Reported off StatLab's most-sixes board: Nathan Sammit **30 sixes in an innings

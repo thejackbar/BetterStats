@@ -1779,6 +1779,30 @@ def verify_matcher() -> None:
     # Matched on the WRITE, not on the column name — `superseded_years` still
     # READS it so the screen can say the marker no longer decides anything, and
     # a check that matched any mention would fail against correct code.
+    # THE PASS MUST SURVIVE A BOOT THAT NEVER REACHED IT. Reported live: the
+    # code was deployed, correct, and nothing was paired — a club counting both
+    # its sources with nothing on screen to say so. A silent log could not tell
+    # "ran and found nothing" from "never ran".
+    sched = (root / "jobs" / "scheduler.py").read_text()
+    check("a nightly pass retries the pairing",
+          "pair_all_imported_matches" in sched
+          and "nightly_match_pairing" in sched)
+    check("the boot sweep is held, not just started — a bare create_task can "
+          "be collected before it runs",
+          "_BACKGROUND_TASKS.add" in main_src)
+    check("and it says what it did whether or not anything changed",
+          'logger.info("Match pairing for %s: %s", _org, res)' in main_src)
+
+    # A CARD QUERY BOUND TO THE CLUB'S PLAYERS ALONE SCANS THE WHOLE PLATFORM'S
+    # `batting_innings`, which is slow enough to be killed by a statement
+    # timeout — and a pairing pass that dies there is a club counting twice.
+    pairing_src = (root / "services" / "match_pairing.py").read_text()
+    check("both card queries are bound to the games already loaded",
+          pairing_src.count("= ANY(CAST(:ids AS UUID[]))") == 2,
+          "a card query is not bound to an id list")
+    check("and the matching itself runs off the event loop",
+          "asyncio.to_thread(assign" in pairing_src)
+
     check("and nothing marks a season as read from one source any more",
           "SET stats_source = 'cricketstatz'" not in import_src
           and "season.stats_source =" not in import_src,

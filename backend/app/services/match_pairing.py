@@ -55,6 +55,7 @@ never be paired away — the standing rule at the top of CLAUDE.md.
 """
 from __future__ import annotations
 
+import asyncio
 import re
 from datetime import timedelta
 from dataclasses import dataclass, field
@@ -366,11 +367,20 @@ _SYNCED_SQL = """
 # OUR OWN BATTERS, NEVER THE OPPOSITION'S. A fixture between two synced clubs
 # is ONE `games` row carrying both clubs' innings, so a signature built without
 # this join would compare our card against theirs.
+#
+# BOUND TO THE GAMES WE HAVE ALREADY LOADED, and that is not a tidy-up.
+# Filtering on the PLAYER alone left Postgres scanning the whole platform's
+# `batting_innings` — millions of rows for one club's question — which is slow
+# enough to be killed by a statement timeout, and a pairing pass that dies
+# there leaves the club counting both sources with nothing on screen to say so.
+# An id array is a plain restriction the planner pushes into the index; the
+# same lesson the record boards' own timing work records.
 _SYNCED_CARD_SQL = """
     SELECT bi.game_id::text AS id, bi.player_id::text AS player_id, bi.runs
       FROM batting_innings bi
       JOIN players p ON p.id = bi.player_id AND p.organisation_id = :org
-     WHERE NOT bi.did_not_bat AND bi.runs IS NOT NULL
+     WHERE bi.game_id = ANY(CAST(:ids AS UUID[]))
+       AND NOT bi.did_not_bat AND bi.runs IS NOT NULL
 """
 
 _IMPORTED_SQL = """
@@ -387,9 +397,7 @@ _IMPORTED_CARD_SQL = """
     SELECT mbi.manual_game_id::text AS id, mbi.player_id::text AS player_id,
            mbi.runs
       FROM manual_batting_innings mbi
-      JOIN manual_games mg ON mg.id = mbi.manual_game_id
-     WHERE mg.organisation_id = :org
-       AND mg.cricketstatz_import_id IS NOT NULL
+     WHERE mbi.manual_game_id = ANY(CAST(:ids AS UUID[]))
        AND NOT mbi.did_not_bat AND mbi.runs IS NOT NULL
 """
 
@@ -412,20 +420,20 @@ async def load_sides(db: AsyncSession, org_id, season_ids=None
     two sources routinely file the same year under different season rows, so a
     date window is what actually reaches the twin.
     """
-    imp_sql, imp_card_sql = _IMPORTED_SQL, _IMPORTED_CARD_SQL
+    imp_sql = _IMPORTED_SQL
     params = {"org": str(org_id)}
     if season_ids:
-        clause = "\n       AND mg.season_id = ANY(CAST(:seasons AS UUID[]))"
-        imp_sql += clause
-        imp_card_sql += clause
+        imp_sql += "\n       AND mg.season_id = ANY(CAST(:seasons AS UUID[]))"
         params["seasons"] = [str(x) for x in season_ids]
 
     club_tokens = team_tokens((await db.execute(
         text(_CLUB_NAME_SQL), {"org": str(org_id)})).scalar() or "")
 
-    imp_cards = await _cards(db, imp_card_sql, params)
     imported: list[MatchRow] = []
-    for row in (await db.execute(text(imp_sql), params)).mappings():
+    imp_rows = (await db.execute(text(imp_sql), params)).mappings().all()
+    imp_cards = await _cards(db, _IMPORTED_CARD_SQL,
+                             {"ids": [r["id"] for r in imp_rows]})
+    for row in imp_rows:
         ours, opp = split_sides(row["home_team"], row["away_team"],
                                 row["opposition"], club_tokens)
         imported.append(MatchRow(row["id"], row["played_at"], opp,
@@ -441,9 +449,12 @@ async def load_sides(db: AsyncSession, org_id, season_ids=None
                        "    OR (w.played_at >= :from_day AND w.played_at <= :to_day)")
             syn_params |= {"from_day": min(dates) - span, "to_day": max(dates) + span}
 
-    syn_cards = await _cards(db, _SYNCED_CARD_SQL, {"org": str(org_id)})
+    syn_rows = (await db.execute(text(syn_sql), syn_params)).mappings().all()
+    syn_cards = await _cards(db, _SYNCED_CARD_SQL,
+                             {"org": str(org_id),
+                              "ids": [r["id"] for r in syn_rows]})
     synced: list[MatchRow] = []
-    for row in (await db.execute(text(syn_sql), syn_params)).mappings():
+    for row in syn_rows:
         ours, opp = split_sides(row["home_team"], row["away_team"],
                                 row["opposition"], club_tokens)
         synced.append(MatchRow(row["id"], row["played_at"], opp,
@@ -460,7 +471,11 @@ async def reconcile_org(db: AsyncSession, org_id, *, season_ids=None,
                 "prefer_import": 0, "only_cricketstatz": 0, "only_synced": 0,
                 "changed": 0}
 
-    pairs = assign(imported, synced)
+    # OFF THE EVENT LOOP. Matching a club's whole history is seconds of solid
+    # CPU (6.7s for 3,500 matches each side), and running that inline freezes
+    # every other request the API is serving — including the health check a
+    # deploy waits on.
+    pairs = await asyncio.to_thread(assign, imported, synced)
 
     current_sql = """
         SELECT id::text AS id, superseded_by_game_id::text AS pair,

@@ -3,7 +3,7 @@ import asyncio
 from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.models.db import async_session_maker
 from app.services.sync import sync_organisation
@@ -81,6 +81,47 @@ async def group_all_organisations():
                 result.get("grades_filled", 0),
                 result.get("seasons_unresolved", 0))
     logger.info("Competition grouping: grouped %d club(s) this run", done)
+
+
+async def pair_all_imported_matches():
+    """Re-derive which imported match is a synced match, club by club.
+
+    A club that syncs from Cricket Australia and has also imported its
+    CricketStatz history holds many of the same matches twice, and the pairing
+    is what counts each one once. It runs as an import goes, after a full sync
+    and once at boot — but a pass that fails, or a boot that never reached it,
+    leaves the club counting both sources with nothing on screen to say so, and
+    that is exactly what a club reported. This is the retry that gets them out
+    of it without anybody noticing first.
+
+    Costs nothing on a platform where it has already run: the pass re-derives
+    from the data as it stands and writes only what changed, and a club holding
+    no import never appears in the list at all.
+    """
+    from app.services import match_pairing
+
+    async with async_session_maker() as session:
+        orgs = (await session.execute(text("""
+            SELECT DISTINCT organisation_id FROM manual_games
+             WHERE cricketstatz_import_id IS NOT NULL
+        """))).scalars().all()
+
+    if not orgs:
+        return
+    changed = 0
+    for org_id in orgs:
+        try:
+            async with async_session_maker() as session:
+                result = await match_pairing.reconcile_org(session, org_id)
+        except Exception as e:  # one club is never the whole pass
+            logger.warning("Match pairing failed for %s: %s", org_id, e,
+                           exc_info=True)
+            continue
+        if result.get("changed"):
+            changed += 1
+            logger.info("Match pairing: %s — %s", org_id, result)
+    logger.info("Match pairing: %d of %d club(s) changed this run",
+                changed, len(orgs))
 
 
 async def sync_all_organisations():
@@ -665,6 +706,21 @@ def start_scheduler():
         minute=30,
         timezone=PERTH,
         id="nightly_competition_grouping",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    # Re-derive the CricketStatz match pairing for the clubs that hold an
+    # import. The pass runs as an import goes and after a full sync; this is
+    # the retry, so a boot that never reached it cannot leave a club counting
+    # both its sources indefinitely.
+    scheduler.add_job(
+        pair_all_imported_matches,
+        trigger="cron",
+        hour=2,
+        minute=50,
+        timezone=PERTH,
+        id="nightly_match_pairing",
         replace_existing=True,
         max_instances=1,
         coalesce=True,

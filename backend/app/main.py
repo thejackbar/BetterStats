@@ -43,6 +43,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Strong references to detached background tasks. `asyncio.create_task`
+# alone does not keep one alive: the loop holds only a weak reference, so
+# a task that suspends on its first await can be collected before it runs.
+_BACKGROUND_TASKS: set = set()
+
 
 async def _run_stripe_subscription_sweep():
     """Background counterpart to lifespan's boot sequence — see the comment
@@ -5819,18 +5824,27 @@ async def lifespan(app: FastAPI):
                     SELECT DISTINCT organisation_id FROM manual_games
                      WHERE cricketstatz_import_id IS NOT NULL
                 """))).scalars().all()
+            # ALWAYS LOGGED, not only when something changed. A pass that
+            # writes nothing and a pass that never ran look identical in a
+            # silent log, and telling those two apart is what cost a day.
+            logger.info("Match pairing sweep: %d club(s) hold an import", len(orgs))
             for _org in orgs:
                 try:
                     async with AsyncSessionLocal() as _db:
                         res = await _mp.reconcile_org(_db, _org)
-                    if res.get("changed"):
-                        logger.info("Match pairing for %s: %s", _org, res)
+                    logger.info("Match pairing for %s: %s", _org, res)
                 except Exception as exc:
-                    logger.warning("Match pairing failed for %s: %s", _org, exc)
+                    logger.warning("Match pairing failed for %s: %s", _org, exc,
+                                   exc_info=True)
         except Exception as exc:
-            logger.warning("Match pairing sweep failed: %s", exc)
+            logger.warning("Match pairing sweep failed: %s", exc, exc_info=True)
 
-    asyncio.create_task(_run_match_pairing_sweep())
+    # HELD, NOT JUST STARTED. A bare `create_task` result nobody keeps is
+    # eligible for garbage collection the moment it awaits — the trap the IQ
+    # dossier builder already documents (`_BUILD_TASKS`).
+    _pairing_task = asyncio.create_task(_run_match_pairing_sweep())
+    _BACKGROUND_TASKS.add(_pairing_task)
+    _pairing_task.add_done_callback(_BACKGROUND_TASKS.discard)
 
     # Seed every club's BetterComms library with the built-in starter templates
     # (idempotent — ON CONFLICT DO NOTHING per org+name, so this also backfills
