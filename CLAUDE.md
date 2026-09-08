@@ -7469,6 +7469,119 @@ back to 1953/54.
   appears exactly once failed against correct output. It asserts the phrase is
   present and that the old flat `Earliest` label is gone.
 
+### THE TWO SOURCES COMPLETE EACH OTHER. IT IS AN AND (migration 293, v9.70.0, Sep 2026)
+
+Said directly, after a per-season either/or was proposed and costed: **"You
+shouldn't lose any? They should compliment each other. It shouldn't be an or,
+it should be an and."** The user was right, and every note below this one that
+describes choosing a winner per season describes the design this replaces.
+
+- **CHOOSING A SOURCE PER SEASON REMOVED THE DOUBLE COUNT BY THROWING MATCHES
+  AWAY, and that was measured before it was believed.** Across five of Keon
+  Park's seasons, Cricket Australia holds **401** matches and CricketStatz
+  **473**, each with genuine gaps the other fills — 2002 85/86, 2005 91/104,
+  2011 91/117, 2019 65/82, 2024 69/84. `seasons.stats_source = 'cricketstatz'`
+  hid a season's whole synced side, so a season where CA held five matches
+  CricketStatz lacked lost all five.
+- **SO THE DUPLICATE IS REMOVED PER MATCH.**
+  `manual_games.superseded_by_game_id` pairs an imported match to the synced
+  game that IS that match, `pair_prefers_import` says which half of the pair
+  counts, and everything unpaired from BOTH sides counts. The club's record is
+  the union.
+- **THE SCORECARD IS THE IDENTIFIER, NOT THE DATE, and that is what makes the
+  pairing possible at all.** A two-day match is dated by one source under the
+  day it started and by the other under the day it finished — measured on the
+  real data at 1 March against 8 March for the same match — so a date key
+  paired only about two thirds of them. Three of our own batters with identical
+  scores in one season is not a coincidence. Four ways in, deliberately
+  different in kind: three shared scores at any distance; one shared score plus
+  the same club within ten days; the same day against the same club (what
+  carries a season CA holds no scorecards for); two shared scores close
+  together (the two sources name a grade and an opposition differently often
+  enough that this has to stand alone).
+- **A FIFTH WAY IN EXISTS ONLY WHERE NO CARD COMPARISON IS POSSIBLE** — the
+  same club within ten days when one side has no card at all. Guarded on that,
+  because two cards sharing NOTHING is a strong signal these are two different
+  matches against the same club. It recovers 398 of 2,800 duplicates in the
+  awkward case with no wrong pairs.
+- **A TIE IS REFUSED RATHER THAN GUESSED**, and the trade-off is stated rather
+  than assumed: leaving a true pair unpaired counts the match twice, which is
+  visible; pairing the wrong one hides a match that really happened, which is
+  not. A wrong pair still counts each match once — it only mis-attributes which
+  fixture it was — so the count, which is what a club checks, stays right
+  either way.
+- **CRICKET AUSTRALIA WINS A PAIR BY DEFAULT** because it is the live source
+  and keeps its copy current. `pair_prefers_import` is the one exception: where
+  the synced game carries no scorecard of ours and the imported one does, the
+  import is the better record of that match and the synced game steps aside
+  instead. That is "if PlayHQ is incomplete, use CricketStatz to complete",
+  decided per match rather than per season.
+- **CA'S OWN SEASON TOTALS ARE ALWAYS COUNTED NOW, and that is what makes the
+  union work at the aggregate level.** `player_season_stats` covers Cricket
+  Australia's matches and nothing else; the `manual_game` rollup beside it
+  counts only the imported matches that are NOT paired, i.e. the ones CA does
+  not have. Neither half can reach the other's matches, so no third branch and
+  no suppression is needed. The same reasoning retires `services/season_source.py`
+  — CA's per-grade aggregate (`player_season_grade_stats`) is counted in full
+  and the imported scorecards paired away before they reach the grid's `held`
+  side, so the by-grade cell is a union rather than a sum of two records of one
+  thing.
+- **THE PER-INNINGS VIEWS GOT SIMPLER, NOT MORE COMPLEX.** The pair test needs
+  neither `grades` nor `seasons`, so all six lost two joins; the synced side is
+  one indexed lookup against a partial unique index that is EMPTY for a club
+  that has imported nothing.
+- **IT RE-DERIVES; IT NEVER ACCUMULATES.** Either side can arrive after the
+  other — a club has imported while a Full Rebuild was still running, which is
+  how the previous design's one-shot snapshot went stale. So the pass starts
+  from the data as it stands, clears the pairs it can no longer justify, and is
+  idempotent. It runs per season as an import walks it (leaving a run that
+  stops halfway with the seasons it reached correct), once more over the whole
+  club at the end, after a full sync and a Full Rebuild, once at BOOT for every
+  club holding an import (which is what stops the deploy carrying 293 showing a
+  club its duplicates until something paired them), and on a button.
+- **`seasons.stats_source` IS LEFT IN PLACE AND READ BY NOTHING**, the call
+  migration 267 made for `vote_settings`. Rows already carrying a value are
+  left as they are — destroying a club's own earlier choice to tidy up would be
+  its own bug — and `superseded_years` still reads it only so the screen can
+  stop reporting a decision that no longer decides anything.
+- **Measured at club scale, both ways** (3,500 matches each side, 2,800 of them
+  genuinely the same match): where CA holds its scorecards, all 2,800 pair to
+  the right game with none wrong, in **377ms**. With a THIRD of the synced games
+  carrying no card and a QUARTER of the imported ones dated a week off, 2,566
+  pair correctly, 6 to a neighbouring fixture and 234 are missed, in **291ms**.
+  Quadratic comparison is avoided by two indexes — a date bucket and a
+  (player, runs) index — so it is near-linear rather than 12M comparisons.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_cricketstatz_import.py`, 262 checks: every
+  matching rule and both refusals, one-to-one assignment, the tie refused, the
+  reported failure replayed — an import running while `games` is empty and the
+  sync landing on top — the pass finding the pair afterwards and a second pass
+  changing nothing, a match only CricketStatz has and a match only Cricket
+  Australia has both still counted, the per-innings views keeping the synced
+  side and dropping the imported twin, a synced fixture with no card preferring
+  the imported copy, CA's per-grade figure counted in full with only the gap
+  match added beside it, an import pairing each season as its matches land with
+  a run cut off part way, undo bringing back a synced game its import had
+  replaced, and the wiring asserted structurally) **with two control runs**:
+  with the matcher neutered 23 of the 262 fail, reporting the reported
+  `{'api': 1, 'manual': 1}`; with the hooks unwired, 3.
+- **A CHECK NEEDS A REAL DUPLICATE IN THE FIXTURE.** "A season already walked is
+  paired before the run moves on" failed on the first cut because the captured
+  cards for that club share no date or opposition with the seeded synced games
+  — there was nothing to pair, so the check could never have passed. The
+  fixture seeds a synced game that IS one of the imported matches now.
+- **A CHECK THAT MATCHES THE COLUMN NAME RATHER THAN THE WRITE CANNOT PASS.**
+  "Nothing marks a season any more" first matched `stats_source = 'cricketstatz'`,
+  which is also the WHERE clause of the read `superseded_years` still makes. It
+  matches the write.
+- **The neighbouring suites were re-run rather than assumed**: club records 93,
+  season fold 65, shared fixtures 38, retired not out 71, rate coverage 105,
+  match coverage 66, records timing 47, competitions 136.
+- **NOTICED, NOT FIXED**: 234 missed pairs per 3,500 in the awkward case are
+  matches still counted twice, and nothing on screen names them. The obvious
+  follow-up is a "these look like the same match — are they?" review list, built
+  from the near misses the matcher already scores and declines.
+
 ### A SEASON CHANGES OVER AS ITS OWN MATCHES LAND (v9.69.2, Sep 2026)
 
 Reported off Keon Park's Records with the import still going: duplicate high
@@ -7526,6 +7639,10 @@ we're way over what I expect".
   moment the run completes.
 
 ### EVERY EFFECTIVE VIEW APPLIES THE SEASON'S SOURCE (migration 291, v9.69.8, Sep 2026)
+**SUPERSEDED BY v9.70.0 above — the source rule is now a per-MATCH pairing,
+not a season's marker. The eight views and the boot check still exist; what
+they test changed.**
+
 
 Reported off the record boards with a screenshot: Heath Shephard's 270 listed
 TWICE for 2002/03, Princely Emmanuel's 206\* twice, David Nelson's 171 twice,
@@ -7693,6 +7810,10 @@ the view was not, and every screen counted both sources.
   moment it happens rather than after a club reports doubled figures.
 
 ### ONE SOURCE PER SEASON, DECIDED BY THE DATA (migration 290, v9.69.4, Sep 2026)
+**SUPERSEDED BY v9.70.0 above. Choosing one source per season is exactly what
+lost the matches only the other source held; kept here because the reasoning
+about snapshots going stale is still why the pairing re-derives.**
+
 
 Reported off Keon Park's Records with the import running: duplicates again, and
 a career at **14,966 runs against CricketStatz's 10,444** — the exact figure
@@ -7792,6 +7913,8 @@ end.
   read as 0 with the imported ones gone too.
 
 ### AND WHICH SOURCE IS THE RECORD IS THE CLUB'S CALL (migration 287, v9.68.4)
+**SUPERSEDED BY v9.70.0 above. `seasons.stats_source` is read by nothing now.**
+
 
 Asked for straight after: "CricketStatz should overwrite PlayHQ in the same way
 a historical import does where we believe the CricketStatz data more than the

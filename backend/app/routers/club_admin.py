@@ -4858,6 +4858,22 @@ async def hard_refresh_org(
                 except Exception as ge:
                     _logger.warning(f"HardRefresh: competition grouping failed for {org_id_str}: {ge}")
 
+            # AND RE-DERIVE THE MATCH PAIRING, for a club that has also imported
+            # its CricketStatz history. A sync brings matches in on the Cricket
+            # Australia side, and an imported twin of one of them has to be paired
+            # to it or the club counts that match twice. A club that has imported
+            # nothing does one cheap count and stops. Never raises: a pairing
+            # failure must not read as a sync failure.
+            try:
+                from app.services import match_pairing
+                from app.models.db import async_session_maker as _maker
+                async with _maker() as _db:
+                    pairs = await match_pairing.reconcile_org(_db, club.id)
+                if pairs.get("changed"):
+                    _logger.info(f"HardRefresh: match pairing for {org_id_str}: {pairs}")
+            except Exception as pe:
+                _logger.warning(f"HardRefresh: match pairing failed for {org_id_str}: {pe}")
+
             # Refresh planner statistics. A hard refresh delete+reinserts the
             # org's whole game-level dataset and rewrites player_season_stats,
             # which leaves Postgres' statistics stale until autovacuum catches

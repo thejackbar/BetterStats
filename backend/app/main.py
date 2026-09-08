@@ -4301,10 +4301,11 @@ async def lifespan(app: FastAPI):
         for _stmt in _CRICKETSTATZ_DDL:
             await conn.execute(text(_stmt))
 
-        # Migration 287: a club can say CricketStatz is the record for a season
-        # it also syncs, so the same match is not counted from two sources.
-        # Applied on read in the effective views — nothing is deleted and
-        # clearing the marker puts the synced copy straight back.
+        # Migration 293: a CricketStatz import and a Cricket Australia sync
+        # complement each other, so their matches are UNIONED and the
+        # duplicates removed per match — `manual_games.superseded_by_game_id`.
+        # Applied on read in the effective views; nothing is deleted and
+        # unpairing brings the imported copy straight back.
         from app.services import superseded_ddl as _superseded
         for _stmt in _superseded.STATEMENTS:
             await conn.execute(text(_stmt))
@@ -5795,6 +5796,37 @@ async def lifespan(app: FastAPI):
     # created on demand), so running it just after boot is safe. Same reasoning
     # as the Stripe sweep below.
     asyncio.create_task(_run_yearbook_stub_sweep())
+
+    # RE-DERIVE THE CRICKETSTATZ MATCH PAIRING, for the clubs that hold one.
+    # Migration 293 replaced a season-level winner with a per-match pairing, so
+    # on the deploy that carries it every imported match starts unpaired — and
+    # an unpaired match counts, which is the whole point of the union. A club
+    # that already holds both sources would therefore see its duplicates until
+    # something paired them, so the boot does it rather than waiting for the
+    # club's next import or full sync. Bounded by construction: a club with no
+    # CricketStatz import does one cheap count and stops, and the pass is
+    # idempotent, so every later boot writes nothing. Background, never
+    # awaited, and it never raises — same reasoning as the sweep above.
+    async def _run_match_pairing_sweep() -> None:
+        try:
+            from app.services import match_pairing as _mp
+            async with AsyncSessionLocal() as _db:
+                orgs = (await _db.execute(text("""
+                    SELECT DISTINCT organisation_id FROM manual_games
+                     WHERE cricketstatz_import_id IS NOT NULL
+                """))).scalars().all()
+            for _org in orgs:
+                try:
+                    async with AsyncSessionLocal() as _db:
+                        res = await _mp.reconcile_org(_db, _org)
+                    if res.get("changed"):
+                        logger.info("Match pairing for %s: %s", _org, res)
+                except Exception as exc:
+                    logger.warning("Match pairing failed for %s: %s", _org, exc)
+        except Exception as exc:
+            logger.warning("Match pairing sweep failed: %s", exc)
+
+    asyncio.create_task(_run_match_pairing_sweep())
 
     # Seed every club's BetterComms library with the built-in starter templates
     # (idempotent — ON CONFLICT DO NOTHING per org+name, so this also backfills
