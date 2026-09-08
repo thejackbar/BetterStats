@@ -36,6 +36,7 @@ from app.auth.capabilities import MANAGE_MANUAL_ENTRIES, require_cap
 from app.models.db import Organisation, User, get_db
 from app.routers.auth import get_current_club, get_current_user
 from app.services import cricketstatz_import as importer
+from app.services import match_pairing
 from app.services.cricketstatz_client import CricketStatzUnavailable
 from app.services.cricketstatz_import import STALL_AFTER_SECONDS
 from app.services.cricketstatz_parse import CricketStatzError, parse_club_url
@@ -93,28 +94,25 @@ async def inspect(
     found["synced_years"] = sorted(covered)
     found["synced_games"] = sum(covered.values())
     found["superseded_years"] = await importer.superseded_years(db, club.id)
+    found["pairing"] = await match_pairing.summary(db, club.id)
     return found
 
 
-class SupersedeBody(BaseModel):
-    years: Optional[list[int]] = None
-
-
-@router.post("/superseded/clear")
-async def clear_superseded(
-    body: SupersedeBody,
+@router.post("/pairing/rebuild")
+async def rebuild_pairing(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
 ):
-    """Hand seasons back to the Cricket Australia sync.
+    """Work out again which imported matches the sync also holds.
 
-    Instant and complete: the marker is all that was hiding the synced copy,
-    so clearing it brings it back with nothing to re-pull.
+    Runs by itself after an import and after a full sync, so this is the
+    escape hatch for a club that has just had matches arrive and would rather
+    not wait — and the recovery for a run that stopped part way. Idempotent:
+    it re-derives from the data as it stands, so running it twice is running
+    it once.
     """
-    cleared = await importer.clear_seasons_superseded(db, club.id, body.years)
-    await db.commit()
-    return {"cleared": cleared,
-            "superseded_years": await importer.superseded_years(db, club.id)}
+    result = await match_pairing.reconcile_org(db, club.id)
+    return result
 
 
 @router.post("/import")

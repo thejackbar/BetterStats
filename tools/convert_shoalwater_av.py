@@ -83,24 +83,85 @@ NOT_OUT_CODES = frozenset({NOT_OUT, RETIRED_NOT_OUT})
 # batters against the innings' own wickets figure. With 11 alone that holds in
 # 908 of 916 innings; adding 12 (8 innings across fifteen seasons) makes it 916
 # of 916, and those 8 ARE the 8 failures. Every other unexplained code makes the
-# identity worse, so 7, 10, 13, 14, 15, 29 and 37 are all genuine dismissals
-# whatever they are called. A retired not out is not a dismissal and a retired
-# out is, which is the same rule BetterStats itself keeps.
-# The five below are supported by counting an
-# independent population in the same files and finding the same magnitude:
-# our batters were run out 443 times against 404 wickets we took that were not
-# credited to a bowler, and stumped 184 times against 204 stumpings by our own
-# keepers. Their shares (caught 47%, bowled 27%, lbw 9%) are ordinary club
-# rates. Everything else is left as a raw code rather than guessed at.
+# identity worse, so 7, 10, 15, 29 and 37 are all genuine dismissals whatever
+# they are called. A retired not out is not a dismissal and a retired out is,
+# which is the same rule BetterStats itself keeps.
+#
+# 0-4 are supported by counting an independent population in the same files and
+# finding the same magnitude: our batters were run out 443 times against 404
+# wickets we took that were not credited to a bowler, and stumped 196 times
+# against 234 stumpings by our own keepers. Their shares (caught 47%, bowled
+# 27%, lbw 9%) are ordinary club rates.
+#
+# SIX MORE WERE CONFIRMED BY THE CLUB from its own records (Sep 2026): 13 is
+# caught and bowled, 14 and 37 are caught by the wicket keeper, 7 is hit
+# wicket, 10 is retired out and 15 is caught in slips - which is a catch, so it
+# is stored as a plain catch rather than inventing a fielding position the app
+# has no field for. All six are consistent with the files: each of 13, 14, 15
+# and 37 is a kind of catch, and 454 keeper catches against 3,738 plain ones is
+# an unremarkable 10.8% - but see the note in NOTES: the keeper codes are
+# UNDER-recorded rather than wrong. Our own keepers took 958 catches over the
+# same fifteen seasons, so a scorer entering our batting card picked a specific
+# code about half the time and plain "caught" the rest. The meaning is right;
+# the count is a floor.
+#
+# CODE 10 IS A DISMISSAL AND MUST STAY ONE. Law 25.4.3's retired-out is a
+# genuine wicket credited to no bowler, which is exactly why it is NOT in
+# NOT_OUT_CODES beside 11 and 12 - and the files settle it rather than the Law
+# alone: with only 11 and 12 read as not outs the dismissed batters equal the
+# innings wickets in all 916 innings that record both, and adding 10 to that
+# set breaks 11 of them (905/916). Measured by running it that way, not
+# reasoned about. `services/dismissal.py` holds the same distinction on the
+# app's side, so "retired out" reads as a wicket there too.
+#
+# Code 29 (7 innings) is still with the club and is left as a raw code rather
+# than guessed at.
 DISMISSALS = {0: "Bowled", 1: "Caught", 2: "LBW", 3: "Stumped",
-              4: "Run out", NOT_OUT: "Not out",
-              RETIRED_NOT_OUT: "Not out (retired)"}
+              4: "Run out", 7: "Hit wicket", 10: "Retired out",
+              13: "Caught and bowled", 14: "Caught behind",
+              15: "Caught", 37: "Caught behind",
+              NOT_OUT: "Not out", RETIRED_NOT_OUT: "Not out (retired)"}
+
+# The SAME codes in BetterStats' own stored vocabulary, which is short and
+# lowercase (`sync._GR_DISMISSAL_SHORT`). This is not a style choice: the How I
+# Get Out donut classifies by `dismissal_type = 'c'` / `LIKE 'c %'` and friends,
+# case-sensitively, so a human-readable "Caught" falls through to the ELSE
+# branch and becomes its own slice sitting beside the real one. Verified in
+# Postgres against the shipped CASE rather than reasoned about.
+#
+# A KEEPER'S CATCH IS A PLAIN `c` PLUS THE FLAG, which is exactly how the sync
+# stores one - the scorecard appends its own "(wk)" from `caught_behind`, so
+# spelling it in the text as well renders "c wk (wk)". Migration 291 gave
+# `manual_batting_innings` that column, so the club's own code 14 now survives
+# all the way to the How I Get Out donut instead of being read out of a
+# thirty-year-old file and dropped at the last step.
+#
+# `c & b` keeps its text: there is no flag for caught and bowled, and it still
+# starts "c " so it reads as a catch.
+#
+# "hit wicket" and "retired out" are the app's own spellings, checked against
+# the shipped How I Get Out CASE and against `dismissal.is_not_out` in Postgres
+# rather than reasoned about: "hit wicket" is in `sync._GR_DISMISSAL_SHORT`
+# verbatim, and "retired out" matches the donut's `LIKE 'ret%'` while failing
+# `is_not_out` - a wicket that is filed under retired, which is what Law 25.4.3
+# says it is. Both also reach StatLab's unusual-dismissals board.
+IMPORT_DISMISSALS = {0: "b", 1: "c", 2: "lbw", 3: "st", 4: "run out",
+                     7: "hit wicket", 10: "retired out",
+                     13: "c & b", 14: "c", 15: "c", 37: "c"}
+
+# The codes that ARE a catch by the wicket keeper, carried as the flag rather
+# than as words. A set, so a further such code can be added without touching
+# anything that reads it - which is exactly what happened when the club came
+# back with 37 alongside 14.
+CAUGHT_BEHIND_CODES = frozenset({14, 37})
 
 
 def dismissal_label(code) -> str:
     if code is None:
         return ""
     return DISMISSALS.get(code, f"code {code}")
+
+
 DID_NOT_BAT = 255     # value of B_POSITION for a player who was not in the order
 EPOCH = datetime.date(1899, 12, 30)
 
@@ -671,7 +732,7 @@ GAME_CSV_COLUMNS = [
     "is_final", "match_format", "home_team", "away_team", "winning_team", "result",
     "player_name", "innings_number", "batting_position",
     "batting_runs", "batting_balls", "batting_fours", "batting_sixes",
-    "batting_not_out", "did_not_bat", "dismissal_type",
+    "batting_not_out", "did_not_bat", "dismissal_type", "batting_caught_behind",
     "bowling_overs", "bowling_maidens", "bowling_runs", "bowling_wickets",
     "bowling_wides", "bowling_no_balls",
     "fielding_catches", "fielding_catches_wk", "fielding_run_outs", "fielding_stumpings",
@@ -731,8 +792,14 @@ def build_game_rows(seasons: list, club: str) -> list:
                         "did_not_bat": "true" if not b["batted"] else "false",
                         # only the labels the data proves; an unmapped code is
                         # left blank rather than imported as a made-up method
-                        "dismissal_type": DISMISSALS.get(b["dismissal_code"], "")
+                        "dismissal_type": IMPORT_DISMISSALS.get(b["dismissal_code"], "")
                                           if b["batted"] and not b["not_out"] else "",
+                        # Blank, never "false": the card saying nothing is a
+                        # different answer from the card saying it was not the
+                        # keeper, and only blank reads as a plain catch.
+                        "batting_caught_behind":
+                            "true" if (b["batted"] and not b["not_out"]
+                                       and b["dismissal_code"] in CAUGHT_BEHIND_CODES) else "",
                         "bowling_overs": b["overs"] if b["bowled"] else "",
                         "bowling_maidens": b["maidens"] if b["bowled"] else "",
                         "bowling_runs": b["conceded"] if b["bowled"] else "",
@@ -771,11 +838,26 @@ NOTES = [
     ("Dismissals", "Codes 11 and 12 are not outs, proved rather than assumed: with both "
                    "read that way the count of dismissed batters equals the innings wickets "
                    "in all 916 innings that record both. That also proves every OTHER code "
-                   "is a dismissal. 0-4 read as bowled, caught, LBW, stumped and run out, "
-                   "which the shares back up (caught 47.6% of dismissals, bowled 27.0, LBW "
-                   "8.9, run out 6.1, stumped 2.5). The raw code is in its own column beside "
-                   "the label, and a code the mapping does not cover is left unlabelled "
-                   "rather than guessed at."),
+                   "is a dismissal, code 10 included. 0-4 read as bowled, caught, LBW, "
+                   "stumped and run out, which the shares back up (caught 47.6% of "
+                   "dismissals, bowled 27.0, LBW 8.9, run out 6.1, stumped 2.5). The club "
+                   "confirmed six more from its own records: 7 hit wicket, 10 retired out, "
+                   "13 caught and bowled, 14 and 37 caught by the keeper, and 15 caught in "
+                   "slips, which imports as a plain catch. That leaves 7 innings on code 29, "
+                   "which the club is still checking; they import as out with no method "
+                   "given rather than as a guess, and the runs still count. The raw code is "
+                   "in its own column beside the label."),
+    ("Caught behind", "Codes 14 and 37 are UNDER-recorded, not wrong. Together they appear "
+                      "454 times against our batters, while our own keepers took 958 catches "
+                      "over the same fifteen seasons - so a scorer filling in our batting "
+                      "card reached for a specific code about half the time and plain "
+                      "'caught' the rest. Read the caught-behind figure for these years as a "
+                      "floor."),
+    ("Retired out", "Code 10 is Law 25.4.3's retired-out: a genuine wicket, credited to no "
+                    "bowler, which counts against the batter's average. It is deliberately "
+                    "NOT read as a not out - that is the separate Law 25.4.2 retirement, and "
+                    "the club's own files settle it: read that way, 11 innings would no "
+                    "longer balance their own wickets figure, where all 916 balance now."),
     ("Not recorded", "Balls faced, batting strike rate, run outs and the bowler or fielder "
                      "who took a wicket are not in the format at all. They are left blank, "
                      "never zeroed - a zero would read as a recorded nought."),

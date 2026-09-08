@@ -2200,6 +2200,15 @@ class ManualGame(Base):
     # whole import be undone as a unit.
     cricketstatz_match_id = Column(Text, nullable=True)
     cricketstatz_import_id = Column(UUID(as_uuid=True), nullable=True)
+    # The synced game this imported match IS (migration 293), and which half of
+    # the pair counts. Written by services/match_pairing.py, applied on read by
+    # the effective views. Mapped here as well as in the DDL because a column
+    # the services only ever touch through text() is invisible to the ORM until
+    # somebody adds it — the trap fee_members.archived_at already documents.
+    superseded_by_game_id = Column(
+        UUID(as_uuid=True), ForeignKey("games.id", ondelete="SET NULL"),
+        nullable=True)
+    pair_prefers_import = Column(Boolean, nullable=False, server_default="false")
     created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
@@ -2230,6 +2239,10 @@ class ManualBattingInnings(Base):
     sixes = Column(Integer, server_default="0", nullable=True)
     strike_rate = Column(Numeric(6, 2), nullable=True)
     dismissal_type = Column(Text, nullable=True)
+    # NULL = the card does not say (migration 291), which every reader treats
+    # as a plain catch. Only a source that genuinely records the keeper's catch
+    # sets it — the synced table has carried the same flag since 075.
+    caught_behind = Column(Boolean, nullable=True)
     not_out = Column(Boolean, server_default="false", nullable=False)
     did_not_bat = Column(Boolean, server_default="false", nullable=False)
 

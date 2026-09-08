@@ -1,13 +1,13 @@
 export default {
   version: 'v9.70.0',
   date: '2026-09-15',
-  // Above v9.69.7, or SITE_VERSION never reaches this release.
+  // Above v9.69.8, or SITE_VERSION never reaches this release.
   sortKey: '2026-09-15T09:00:00Z',
-  title: 'Manage Grades points out the duplicates for you',
+  title: 'Your two sources now complete each other',
   items: [
-    'Grades & Competitions now suggests the grades that look like one grade written two ways — a sponsor added to the name, punctuation changed, or Cricket Australia spelling it differently in a later season.',
-    'Each suggestion says which way round it will merge, which seasons each name was played in and which association ran it, so you can check before pressing anything. You can swap the direction, or say the two are genuinely different grades and never be asked again.',
-    'It will not offer to merge grades that only differ by a number, a letter, a colour or a match type — 5th Grade and 6th Grade, One Day Grade 2 and Grade 4, or a two-day grade and its one-day counterpart are left well alone.',
-    'Nothing is merged until you press Merge, and every merge can still be undone.',
+    'If your club syncs from Cricket Australia and has also imported its CricketStatz history, the two are now added together rather than one being chosen over the other. Every match you have from either source counts, and a match both hold is counted once.',
+    'Until now, picking CricketStatz for a season hid your Cricket Australia data for that whole season — including matches CricketStatz never had. Those matches are back.',
+    'Where Cricket Australia has the fixture but no scorecard behind it, the CricketStatz scorecard is used for that match instead, so a gap in one source is filled by the other.',
+    'The check runs by itself as an import goes and again after a full sync, so a season is sorted out as its matches arrive rather than at the end. There is a button on the CricketStatz screen if you would rather not wait.',
   ],
 }

@@ -34,9 +34,12 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # no
 
 from app.models.db import Base  # noqa: E402
 from app.services import cricketstatz_import as importer  # noqa: E402
+try:  # A CONTROL RUN MUST REPORT, NOT CRASH — the feature may be absent.
+    from app.services import match_pairing  # noqa: E402
+except ImportError:  # pragma: no cover - control runs only
+    match_pairing = None
 from app.services.cricketstatz_ddl import DOWNGRADE, STATEMENTS  # noqa: E402
 from app.services import superseded_ddl as importer_ddl  # noqa: E402
-from app.services.superseded_ddl import BACKFILL  # noqa: E402
 from app.services.superseded_ddl import DOWNGRADE as SUPERSEDED_DOWNGRADE  # noqa: E402
 from app.services.superseded_ddl import STATEMENTS as SUPERSEDED_DDL  # noqa: E402
 from app.services.cricketstatz_parse import (  # noqa: E402
@@ -1185,8 +1188,10 @@ async def verify_synced_overlap(engine, session_maker) -> None:
           any("counted twice" in n for n in (row.get("notes") or [])),
           str(row.get("notes")))
 
-    # A club that would rather CricketStatz were the record for those years.
-    # The synced side steps aside instead of both being counted.
+    # A club that brings those years across as well. THE TWO SOURCES ARE
+    # UNIONED: a match both hold is counted once, and a match only one holds is
+    # still counted — the whole point of pairing per match rather than picking
+    # a winner per season.
     stub2 = StubSite()
     importer.client = stub2
     try:
@@ -1208,18 +1213,17 @@ async def verify_synced_overlap(engine, session_maker) -> None:
               JOIN seasons s ON s.id = mg.season_id
              WHERE mg.organisation_id = :o ORDER BY s.year
         """), {"o": str(org)})).scalars().all()
-        marked = await importer.superseded_years(db, org)
     check("asking for CricketStatz brings those seasons across",
           1995 in years2 and 2025 in years2, str(years2))
-    # EVERY season the import writes into is marked, not just the shared ones.
-    # A season the sync does not reach has no synced games to step aside, so
-    # marking it costs nothing — and it is what removes the dependence on the
-    # overlap having been worked out correctly at the start of the run.
-    check("and marks every season it wrote into as read from CricketStatz",
-          marked == [1985, 1995, 2025], str(marked))
 
+    # NOT ONE SEASON IS MARKED. The marker chose a winner for a whole season,
+    # which is how the club lost every match the losing source alone held.
+    async with session_maker() as db:
+        marked = await importer.superseded_years(db, org)
+    check("and marks no season as read from one source or the other",
+          marked == [], str(marked))
 
-    # THE POINT OF THE WHOLE THING: the synced side must stop being counted.
+    # THE POINT OF THE WHOLE THING: every match counted, exactly once.
     async with session_maker() as db:
         synced_left = (await db.execute(text("""
             SELECT COUNT(*) FROM v_effective_games
@@ -1230,40 +1234,40 @@ async def verify_synced_overlap(engine, session_maker) -> None:
              WHERE organisation_id = :o AND source = 'manual'
         """), {"o": str(org)})).scalar()
         raw_synced = (await db.execute(text(
-            "SELECT COUNT(*) FROM games")))
-        raw_synced = raw_synced.scalar()
-    check("the synced games for those seasons stop being counted",
-          synced_left == 0, str(synced_left))
-    check("while the imported ones are", imported_shown > 0, str(imported_shown))
-    check("and nothing was deleted — the club's synced data is still there",
+            "SELECT COUNT(*) FROM games"))).scalar()
+        raw_manual = (await db.execute(text("""
+            SELECT COUNT(*) FROM manual_games WHERE organisation_id = :o
+        """), {"o": str(org)})).scalar()
+        paired = (await db.execute(text("""
+            SELECT COUNT(*) FROM manual_games
+             WHERE organisation_id = :o AND superseded_by_game_id IS NOT NULL
+        """), {"o": str(org)})).scalar()
+    check("the club's own synced games are still counted",
+          synced_left == 2, str(synced_left))
+    check("the imported matches are counted alongside them",
+          imported_shown > 0, str(imported_shown))
+    check("and every match is counted exactly once",
+          synced_left + imported_shown == raw_synced + raw_manual - paired,
+          f"api={synced_left} manual={imported_shown} raw={raw_synced}+{raw_manual} "
+          f"paired={paired}")
+    check("nothing was deleted — the club's synced data is still there",
           raw_synced == 2, str(raw_synced))
 
-    # Cricket Australia's own season totals go with them, or a career would
-    # still be counted from both.
+    # CRICKET AUSTRALIA'S OWN SEASON TOTALS ARE ALWAYS COUNTED. They cover CA's
+    # matches and nothing else, and a CricketStatz match that is the same match
+    # is paired away before its scorecard is rolled up, so the two halves add
+    # to a union rather than to a double count.
     async with session_maker() as db:
         api_rows = (await db.execute(text("""
             SELECT COUNT(*) FROM v_effective_player_season_stats pss
               JOIN seasons s ON s.id = pss.season_id
              WHERE s.organisation_id = :o AND pss.source = 'api'
         """), {"o": str(org)})).scalar()
-    check("and so do Cricket Australia's own season totals for them",
-          api_rows == 0, str(api_rows))
-    async with session_maker() as db:
         raw_pss = (await db.execute(text(
             "SELECT COUNT(*) FROM player_season_stats"))).scalar()
-    check("those totals are kept too, just not counted", raw_pss == 2, str(raw_pss))
-
-    # Handing them back is instant — nothing has to be re-pulled.
-    async with session_maker() as db:
-        cleared = await importer.clear_seasons_superseded(db, org)
-        await db.commit()
-    async with session_maker() as db:
-        back = (await db.execute(text("""
-            SELECT COUNT(*) FROM v_effective_games
-             WHERE organisation_id = :o AND source = 'api'
-        """), {"o": str(org)})).scalar()
-    check("handing the seasons back counts the synced games again",
-          cleared == 2 and back == 2, f"cleared={cleared} shown={back}")
+    check("Cricket Australia's own season totals are never suppressed",
+          api_rows == 2, str(api_rows))
+    check("and they are all still stored", raw_pss == 2, str(raw_pss))
 
     # A club with no sync at all is untouched by any of this.
     fresh = uuid.uuid4()
@@ -1271,12 +1275,10 @@ async def verify_synced_overlap(engine, session_maker) -> None:
         covered_none = await importer.synced_coverage(db, fresh)
     check("a club that has never synced has nothing to skip", covered_none == {})
 
-    # MID-RUN, A SEASON ALREADY WALKED MUST NOT BE COUNTED TWICE. Marking every
-    # season only at the END leaves each finished season reading from BOTH
-    # sources for as long as the rest of the import takes — reported off a live
-    # record board as duplicate high scores. Marking them all UP FRONT is the
-    # other wrong answer: a season not yet walked would then read from NEITHER.
-    # The pair below fails against each of those, one check each.
+    # MID-RUN, A SEASON ALREADY WALKED MUST NOT BE COUNTED TWICE. Pairing
+    # every season only at the END leaves each finished season reading its
+    # duplicates from BOTH sources for as long as the rest of the import takes
+    # — reported off a live record board as duplicate high scores.
     #
     # The run is cut off part way by refusing a scorecard from the LAST season
     # in the plan (oldest first, so 1985 then 1995 then 2025) — a real network
@@ -1293,7 +1295,27 @@ async def verify_synced_overlap(engine, session_maker) -> None:
 
     third = uuid.uuid4()
     async with session_maker() as db:
-        await importer.clear_seasons_superseded(db, org)
+        await db.execute(text("""
+            UPDATE manual_games SET superseded_by_game_id = NULL,
+                                    pair_prefers_import = false
+             WHERE organisation_id = :o
+        """), {"o": str(org)})
+        # A synced game that IS one of the imported matches (the 1985 card,
+        # the first season the run walks). Without a real duplicate in the
+        # fixture there is nothing for a mid-run pass to find, and the check
+        # below would pass whenever it was run.
+        early_season = (await db.execute(text("""
+            SELECT id FROM seasons WHERE organisation_id = :o AND year = 1985
+        """), {"o": str(org)})).scalar()
+        early_grade = uuid.uuid4()
+        await db.execute(text("""
+            INSERT INTO grades (id, season_id, name) VALUES (:g, :s, 'A-GRADE')
+        """), {"g": str(early_grade), "s": str(early_season)})
+        await db.execute(text("""
+            INSERT INTO games (id, grade_id, played_at, home_team, away_team)
+            VALUES (:i, :g, CAST(:d AS date), 'Keon Park CC', 'A-Grade Oakhill')
+        """), {"i": str(uuid.uuid4()), "g": str(early_grade),
+               "d": date(1985, 11, 2)})
         await db.execute(text("""
             INSERT INTO cricketstatz_imports
                 (id, organisation_id, club_id, source_url, status, phase)
@@ -1306,44 +1328,56 @@ async def verify_synced_overlap(engine, session_maker) -> None:
     finally:
         importer.client = real_client
 
+    async def _paired_years(o):
+        async with session_maker() as db:
+            return set((await db.execute(text("""
+                SELECT DISTINCT s.year FROM manual_games mg
+                  JOIN seasons s ON s.id = mg.season_id
+                 WHERE mg.organisation_id = :o
+                   AND mg.superseded_by_game_id IS NOT NULL
+            """), {"o": str(o)})).scalars().all())
+
     async with session_maker() as db:
-        part_marked = await importer.superseded_years(db, org)
         status3 = (await db.execute(text(
             "SELECT status FROM cricketstatz_imports WHERE id = :i"),
             {"i": str(third)})).scalar()
+    part_paired = await _paired_years(org)
     check("the part-way run really did stop", status3 == "error", str(status3))
-    check("a season already walked is marked before the run moves on",
-          1995 in part_marked, str(part_marked))
-    check("and a season the run never reached is left to the sync",
-          2025 not in part_marked, str(part_marked))
+    check("a season already walked is paired before the run moves on",
+          1985 in part_paired, str(part_paired))
+    check("and a season the run never reached has nothing paired",
+          2025 not in part_paired, str(part_paired))
 
-    # UNDOING AN IMPORT THAT REPLACED A SEASON MUST HAND IT BACK. Making
-    # CricketStatz the record only HIDES the synced copy, so an undo that
-    # removes the imported matches and leaves the marker standing leaves the
-    # season reading from NEITHER source — the one state migration 287 exists
-    # to prevent, reached from the other end.
+    # UNDOING AN IMPORT TAKES ITS PAIRS WITH IT. Where the synced game had
+    # stepped aside for a better imported copy of the same match, removing that
+    # copy has to bring the synced one straight back — the "neither source"
+    # state reached from the other end.
     undo_org = uuid.uuid4()
     imp_a, imp_b = uuid.uuid4(), uuid.uuid4()
+    kept_player = uuid.uuid4()
     async with session_maker() as db:
         await db.execute(text("""
             INSERT INTO organisations (id, name, slug, is_active)
             VALUES (:o, 'Undo Test CC', 'undo-test-cc', true)
         """), {"o": str(undo_org)})
+        await db.execute(text("""
+            INSERT INTO players (id, organisation_id, name)
+            VALUES (:p, :o, 'Kept Player')
+        """), {"p": str(kept_player), "o": str(undo_org)})
         for imp in (imp_a, imp_b):
             await db.execute(text("""
                 INSERT INTO cricketstatz_imports
                     (id, organisation_id, club_id, source_url, status, phase)
                 VALUES (:id, :o, '93931', 'u', 'complete', 'done')
             """), {"id": str(imp), "o": str(undo_org)})
-        # 1995 is this import's alone; 2025 also holds a second import's match,
-        # so it is still genuinely read from CricketStatz and keeps its marker.
-        held = {}
-        for year, imps in ((1995, (imp_a,)), (2025, (imp_a, imp_b))):
-            sid, grid = uuid.uuid4(), uuid.uuid4()
-            held[year] = sid
+        # A synced fixture with NO scorecard of ours behind it, and an imported
+        # copy of the same match that HAS one. The import is the better record
+        # of that match, so the synced game steps aside for it.
+        for year, imps in ((1995, (imp_a,)), (2025, (imp_b,))):
+            sid, grid, gid = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
             await db.execute(text("""
-                INSERT INTO seasons (id, organisation_id, name, year, stats_source)
-                VALUES (:s, :o, :n, :y, 'cricketstatz')
+                INSERT INTO seasons (id, organisation_id, name, year)
+                VALUES (:s, :o, :n, :y)
             """), {"s": str(sid), "o": str(undo_org),
                    "n": f"Summer {year}/{str(year+1)[2:]}", "y": year})
             await db.execute(text("""
@@ -1352,50 +1386,69 @@ async def verify_synced_overlap(engine, session_maker) -> None:
             await db.execute(text("""
                 INSERT INTO games (id, grade_id, played_at, home_team, away_team)
                 VALUES (:i, :g, CAST(:d AS date), 'Undo Test CC', 'Panton Hill')
-            """), {"i": str(uuid.uuid4()), "g": str(grid), "d": date(year, 11, 5)})
+            """), {"i": str(gid), "g": str(grid), "d": date(year, 11, 5)})
             for imp in imps:
+                mgid = uuid.uuid4()
                 await db.execute(text("""
                     INSERT INTO manual_games
                         (id, organisation_id, season_id, played_at, opposition,
-                         cricketstatz_import_id)
-                    VALUES (:i, :o, :s, CAST(:d AS date), 'Panton Hill', :imp)
-                """), {"i": str(uuid.uuid4()), "o": str(undo_org), "s": str(sid),
-                       "d": date(year, 11, 5), "imp": str(imp)})
+                         cricketstatz_import_id, cricketstatz_match_id)
+                    VALUES (:i, :o, :s, CAST(:d AS date), 'Panton Hill', :imp, :mid)
+                """), {"i": str(mgid), "o": str(undo_org), "s": str(sid),
+                       "d": date(year, 11, 5), "imp": str(imp),
+                       "mid": f"undo-{year}"})
+                await db.execute(text("""
+                    INSERT INTO manual_batting_innings
+                        (manual_game_id, player_id, innings_number, runs,
+                         did_not_bat, not_out)
+                    VALUES (:g, :p, 1, 44, false, false)
+                """), {"g": str(mgid), "p": str(kept_player)})
         await db.commit()
 
     async with session_maker() as db:
-        hidden = (await db.execute(text("""
-            SELECT COUNT(*) FROM v_effective_games
-             WHERE organisation_id = :o AND source = 'api'
-        """), {"o": str(undo_org)})).scalar()
-    check("both replaced seasons start with their synced games hidden",
-          hidden == 0, str(hidden))
+        pair_stats = await match_pairing.reconcile_org(db, undo_org)
+    check("both matches are paired to the synced fixture they duplicate",
+          pair_stats["paired"] == 2, str(pair_stats))
+    check("and the imported half wins, since it holds the scorecard",
+          pair_stats["prefer_import"] == 2, str(pair_stats))
+
+    async def _counted(o, source):
+        async with session_maker() as db:
+            return (await db.execute(text("""
+                SELECT COUNT(*) FROM v_effective_games
+                 WHERE organisation_id = :o AND source = :s
+            """), {"o": str(o), "s": source})).scalar()
+
+    check("so the synced fixtures step aside rather than being counted twice",
+          await _counted(undo_org, "api") == 0
+          and await _counted(undo_org, "manual") == 2,
+          f"api={await _counted(undo_org, 'api')} "
+          f"manual={await _counted(undo_org, 'manual')}")
 
     async with session_maker() as db:
         undone = await importer.undo_import(db, undo_org, imp_a)
     async with session_maker() as db:
-        still_marked = await importer.superseded_years(db, undo_org)
         counted = (await db.execute(text("""
             SELECT s.year FROM v_effective_games g
               JOIN seasons s ON s.id = g.season_id
              WHERE g.organisation_id = :o AND g.source = 'api'
         """), {"o": str(undo_org)})).scalars().all()
-    check("undoing hands back a season it has emptied",
-          1995 not in still_marked, str(still_marked))
-    check("so the club's own synced games are counted again",
+    check("undoing brings back the synced game its import had replaced",
           list(counted) == [1995], str(counted))
-    check("and the undo says which seasons went back to the sync",
-          undone.get("seasons_handed_back") == [1995], str(undone))
-    check("a season another import still covers keeps CricketStatz as its record",
-          still_marked == [2025], str(still_marked))
+    check("and the other import's match still counts for itself",
+          await _counted(undo_org, "manual") == 1,
+          str(await _counted(undo_org, "manual")))
+    check("the undo says how much it removed",
+          undone.get("matches_removed") == 1, str(undone))
 
-    # THE REPORTED FAILURE, REPLAYED. The overlap was worked out ONCE at the
-    # start of the run: a club whose synced games were not in `games` at that
-    # moment (a Full Rebuild still running, a sync that had not landed) read as
-    # having no overlap at all, so nothing was skipped and nothing was marked —
-    # and once the synced side arrived the club counted BOTH. Live: every
-    # shared season holding exactly synced + imported, a career at 14,966
-    # against CricketStatz's 10,444.
+    # THE REPORTED FAILURE, REPLAYED. The overlap used to be worked out ONCE at
+    # the start of the run: a club whose synced games were not in `games` at
+    # that moment (a Full Rebuild still running, a sync that had not landed)
+    # read as having no overlap at all, and once the synced side arrived the
+    # club counted BOTH. Live: every shared season holding exactly synced +
+    # imported, a career at 14,966 against CricketStatz's 10,444. The pairing
+    # RE-DERIVES rather than accumulating, so the pass that runs after a full
+    # sync is what settles it.
     late = uuid.uuid4()
     late_imp = uuid.uuid4()
     late_season, late_grade = uuid.uuid4(), uuid.uuid4()
@@ -1427,10 +1480,6 @@ async def verify_synced_overlap(engine, session_maker) -> None:
                "d": date(2002, 11, 5), "imp": str(late_imp)})
         await db.commit()
 
-    # Repaired by the SHIPPED statement list — what alembic's 290 and the
-    # lifespan mirror both run — never by reaching for the backfill constant
-    # on its own. A check that applies it directly passes whether or not it is
-    # actually wired in, which is not a check.
     # THE SCHEMA MUST MATCH THE CODE, AND THE ONLY WAY TO KNOW IS TO READ IT
     # BACK. Found live: 73 seasons marked and the view carrying no clause to
     # act on them, with alembic reporting the migration applied.
@@ -1454,89 +1503,431 @@ async def verify_synced_overlap(engine, session_maker) -> None:
         for statement in SUPERSEDED_DDL:
             await conn.execute(text(statement))
         after = await importer_ddl.verify(conn)
-    check("a view carrying its source clause is reported as sound",
+    # MIGRATION 291 GAVE `manual_batting_innings` ITS OWN `caught_behind`, and
+    # this module re-issues that view LAST in the lifespan — so selecting NULL
+    # there would silently revert someone else's feature on every boot.
+    batting = next(st for st in SUPERSEDED_DDL
+                   if "VIEW v_effective_batting_innings" in st)
+    check("the batting view keeps 291's manual caught_behind",
+          "NULL::boolean AS caught_behind" not in batting
+          and batting.count("caught_behind") >= 2, batting[-400:])
+
+    check("a view carrying its pairing clause is reported as sound",
           all(before.values()), str(before))
     check("a view that has lost it is caught rather than assumed",
           stale.get("v_effective_games") is False, str(stale))
     check("and applying the shipped statements puts it back",
           all(after.values()), str(after))
 
-    check("the repair is part of the shipped statement list",
-          any("UPDATE seasons" in st and "cricketstatz_import_id" in st
-              for st in SUPERSEDED_DDL),
-          "BACKFILL is not in STATEMENTS")
     async with engine.begin() as conn:
         for statement in SUPERSEDED_DDL:
             await conn.execute(text(statement))
 
     # NOW the synced side arrives — a Full Rebuild finishing, or the next sync.
+    # Nothing was paired when the import ran, because there was nothing to pair
+    # to; the pass that runs after a full sync is what finds it.
+    late_game = uuid.uuid4()
     async with session_maker() as db:
         await db.execute(text("""
             INSERT INTO games (id, grade_id, played_at, home_team, away_team)
             VALUES (:i, :g, CAST(:d AS date), 'Late Sync CC', 'Panton Hill')
-        """), {"i": str(uuid.uuid4()), "g": str(late_grade),
+        """), {"i": str(late_game), "g": str(late_grade),
                "d": date(2002, 11, 5)})
         await db.commit()
 
-    async with session_maker() as db:
-        counted = (await db.execute(text("""
-            SELECT source, COUNT(*) FROM v_effective_games
-             WHERE organisation_id = :o GROUP BY source
-        """), {"o": str(late)})).all()
-    by_source = {r[0]: r[1] for r in counted}
-    check("a season that holds CricketStatz matches is never left unsourced",
-          await _source_of(session_maker, late_season) == 'cricketstatz',
-          await _source_of(session_maker, late_season))
-    check("so a sync landing afterwards is not counted on top of it",
-          by_source.get('api', 0) == 0 and by_source.get('manual', 0) == 1,
-          str(by_source))
+    async def _late_sources():
+        async with session_maker() as db:
+            rows = (await db.execute(text("""
+                SELECT source, COUNT(*) FROM v_effective_games
+                 WHERE organisation_id = :o GROUP BY source
+            """), {"o": str(late)})).all()
+        return {r[0]: r[1] for r in rows}
 
-    # And handing it back counts the synced game INSTEAD, never as well.
-    async with session_maker() as db:
-        handed = await importer.clear_seasons_superseded(db, late)
-        await db.commit()
-    async with session_maker() as db:
-        counted2 = (await db.execute(text("""
-            SELECT source, COUNT(*) FROM v_effective_games
-             WHERE organisation_id = :o GROUP BY source
-        """), {"o": str(late)})).all()
-    by_source2 = {r[0]: r[1] for r in counted2}
-    check("handing a season back counts the synced game",
-          by_source2.get('api', 0) == 1, str(by_source2))
-    check("and steps the imported side aside rather than showing both",
-          by_source2.get('manual', 0) == 0, str(by_source2))
-    check("the club's own choice is recorded, not just cleared",
-          handed == 1 and await _source_of(session_maker, late_season) == 'playhq',
-          f"handed={handed}")
+    before_pass = await _late_sources()
+    check("a sync landing after an import is counted twice until it is paired",
+          before_pass.get("api", 0) == 1 and before_pass.get("manual", 0) == 1,
+          str(before_pass))
 
-    # A season the sync does not reach has nothing to hand back to — marking it
-    # 'playhq' would hide its imported matches and leave it empty.
-    lonely = uuid.uuid4()
+    async with session_maker() as db:
+        late_pairs = await match_pairing.reconcile_org(db, late)
+    after_pass = await _late_sources()
+    check("the pass that follows a full sync finds the pair",
+          late_pairs["paired"] == 1, str(late_pairs))
+    check("so the match is counted once, from Cricket Australia",
+          after_pass.get("api", 0) == 1 and after_pass.get("manual", 0) == 0,
+          str(after_pass))
+    check("and nothing was deleted to do it",
+          (await _raw_count(session_maker,
+                            "SELECT COUNT(*) FROM manual_games "
+                            "WHERE organisation_id = :o", late)) == 1)
+
+    # RUNNING IT AGAIN IS RUNNING IT ONCE.
+    async with session_maker() as db:
+        again = await match_pairing.reconcile_org(db, late)
+    check("a second pass changes nothing",
+          again["changed"] == 0 and again["paired"] == 1, str(again))
+
+    # AND A MATCH ONLY CRICKETSTATZ HAS IS STILL COUNTED. This is the whole
+    # difference from choosing a winner per season: the season is shared, and
+    # the match Cricket Australia does not have still reaches the club's
+    # records.
     async with session_maker() as db:
         await db.execute(text("""
-            INSERT INTO seasons (id, organisation_id, name, year, stats_source)
-            VALUES (:s, :o, 'Summer 1969/70', 1969, 'cricketstatz')
-        """), {"s": str(lonely), "o": str(late)})
+            INSERT INTO manual_games
+                (id, organisation_id, season_id, played_at, opposition,
+                 cricketstatz_import_id)
+            VALUES (:i, :o, :s, CAST(:d AS date), 'Bundoora United', :imp)
+        """), {"i": str(uuid.uuid4()), "o": str(late), "s": str(late_season),
+               "d": date(2002, 12, 14), "imp": str(late_imp)})
         await db.commit()
     async with session_maker() as db:
-        again = await importer.clear_seasons_superseded(db, late)
+        with_gap = await match_pairing.reconcile_org(db, late)
+    gap_sources = await _late_sources()
+    check("a match only CricketStatz has is left unpaired",
+          with_gap["only_cricketstatz"] == 1, str(with_gap))
+    check("and it is counted alongside the synced one, not instead of it",
+          gap_sources.get("api", 0) == 1 and gap_sources.get("manual", 0) == 1,
+          str(gap_sources))
+
+    # AND A MATCH ONLY CRICKET AUSTRALIA HAS IS STILL COUNTED. The season-level
+    # rule lost exactly this — it hid the club's whole synced side.
+    async with session_maker() as db:
+        await db.execute(text("""
+            INSERT INTO games (id, grade_id, played_at, home_team, away_team)
+            VALUES (:i, :g, CAST(:d AS date), 'Late Sync CC', 'Epping')
+        """), {"i": str(uuid.uuid4()), "g": str(late_grade),
+               "d": date(2003, 1, 18)})
         await db.commit()
-    check("a season with no synced games is left alone rather than emptied",
-          again == 0 and await _source_of(session_maker, lonely) == 'cricketstatz',
-          f"handed={again}")
+    async with session_maker() as db:
+        both_ways = await match_pairing.reconcile_org(db, late)
+    both_sources = await _late_sources()
+    check("a match only Cricket Australia has is left unpaired too",
+          both_ways["only_synced"] == 1, str(both_ways))
+    check("so the club ends with the union of the two, each match once",
+          both_sources.get("api", 0) == 2 and both_sources.get("manual", 0) == 1,
+          str(both_sources))
+
+
+async def _raw_count(session_maker, sql, org) -> int:
+    async with session_maker() as db:
+        return (await db.execute(text(sql), {"o": str(org)})).scalar()
+
+
+def verify_matcher() -> None:
+    """The rules that decide two records are one match. No database needed.
+
+    The whole union rests on this: a pair we miss is a match counted twice, and
+    a pair we invent is a match that disappears. Both directions are checked.
+    """
+    print("\nWhich two records are one match")
+    if match_pairing is None:
+        check("services/match_pairing.py is present", False,
+              "the matcher is absent — every pairing check below "
+              "is reported rather than run")
+        return
+    MR = match_pairing.MatchRow
+
+    def card(*pairs):
+        return frozenset(pairs)
+
+    # THE SCORECARD CARRIES THE PAIRS A DATE CANNOT. A two-day match is dated
+    # by one source under the day it started and the other under the day it
+    # finished — measured on real data at a week apart, and the reason a date
+    # key alone paired only about two thirds of them.
+    a = MR("i1", date(2003, 3, 1), "Croxton", card(("p1", 87), ("p2", 12), ("p3", 40)))
+    b = MR("g1", date(2003, 3, 8), "Fairfield", card(("p1", 87), ("p2", 12), ("p3", 40)))
+    check("three batters with the same scores are one match, whatever the date",
+          match_pairing.score_pair(a, b) is not None)
+
+    # AND THE DATE CARRIES THE SEASONS THERE ARE NO SCORECARDS FOR.
+    c = MR("i2", date(2003, 3, 1), "Croxton Park CC")
+    d = MR("g2", date(2003, 3, 1), "Croxton Park Cricket Club")
+    check("the same day against the same club is one match with no cards at all",
+          match_pairing.score_pair(c, d) is not None)
+
+    e = MR("i3", date(2003, 3, 1), "Epping")
+    check("the same day against a different club is not",
+          match_pairing.score_pair(e, d) is None)
+
+    f = MR("i4", date(2003, 3, 4), "Croxton", card(("p1", 87)))
+    f2 = MR("g4", date(2003, 3, 1), "Croxton Park Cricket Club", card(("p1", 87)))
+    check("one shared score, the same club and a few days apart is one match",
+          match_pairing.score_pair(f, f2) is not None)
+
+    g = MR("i5", date(2003, 3, 4), "Croxton", card(("p9", 3)))
+    h = MR("g5", date(2003, 3, 6), "Northcote", card(("p9", 3), ("p8", 21)))
+    check("two shared scores close together stand on their own",
+          match_pairing.score_pair(
+              MR("i5", date(2003, 3, 4), "Croxton", card(("p9", 3), ("p8", 21))),
+              h) is not None)
+    check("but one shared score against a club named differently is not enough",
+          match_pairing.score_pair(g, h) is None)
+
+    far = MR("g6", date(2004, 3, 1), "Croxton")
+    check("the same club a year apart is two different matches",
+          match_pairing.score_pair(c, far) is None)
+
+    # ONE SYNCED GAME TAKES AT MOST ONE IMPORTED MATCH.
+    twin1 = MR("i7", date(2003, 3, 1), "Croxton", card(("p1", 87), ("p2", 12), ("p3", 40)))
+    twin2 = MR("i8", date(2003, 3, 1), "Croxton", card(("p1", 87), ("p2", 12), ("p3", 40)))
+    one = MR("g7", date(2003, 3, 1), "Croxton", card(("p1", 87), ("p2", 12), ("p3", 40)))
+    both = match_pairing.assign([twin1, twin2], [one])
+    check("two imported matches cannot both take the same synced game",
+          len(both) == 1, str(both))
+
+    # A TIE IS REFUSED RATHER THAN GUESSED. Pairing the wrong one hides a match
+    # that really happened.
+    tie = match_pairing.assign(
+        [MR("i9", date(2003, 3, 1), "Croxton")],
+        [MR("gA", date(2003, 3, 1), "Croxton"), MR("gB", date(2003, 3, 1), "Croxton")])
+    check("two candidates that look identical are refused, not guessed between",
+          tie == {}, str(tie))
+
+    # WHICH HALF OF THE PAIR COUNTS.
+    thin = match_pairing.assign(
+        [MR("iC", date(2003, 3, 1), "Croxton", card(("p1", 87)))],
+        [MR("gC", date(2003, 3, 1), "Croxton")])
+    check("the imported half wins where the synced game has no card of ours",
+          thin.get("iC", (None, False))[1] is True, str(thin))
+    fat = match_pairing.assign(
+        [MR("iD", date(2003, 3, 1), "Croxton", card(("p1", 87)))],
+        [MR("gD", date(2003, 3, 1), "Croxton", card(("p1", 87)))])
+    check("and Cricket Australia wins wherever it holds one too",
+          fat.get("iD", (None, True))[1] is False, str(fat))
+
+    # A team name is only ever a supporting signal, so it is forgiving — but
+    # never on the strength of a word that says nothing about which club.
+    check("a club spelled two ways reads as one club",
+          match_pairing.teams_agree("Panton Hill CC", "Panton Hill Cricket Club"))
+    check("two different clubs do not",
+          not match_pairing.teams_agree("Panton Hill", "Epping"))
+    check("and a shared grade word is not a club",
+          not match_pairing.teams_agree("1st XI", "2nd XI"))
+
+    # THE PAIRING HAS TO BE WIRED IN, not merely written. A pass nothing calls
+    # leaves a club counting both sources with nothing on screen to say so.
+    root = Path(__file__).resolve().parent.parent / "app"
+    main_src = (root / "main.py").read_text()
+    check("the boot re-derives the pairing for a club that holds an import",
+          "match_pairing" in main_src and "_run_match_pairing_sweep" in main_src)
+    orgs_src = (root / "routers" / "organisations.py").read_text()
+    admin_src = (root / "routers" / "club_admin.py").read_text()
+    check("a full sync re-derives it once its own matches have landed",
+          "match_pairing.reconcile_org" in orgs_src)
+    check("and so does a Full Rebuild", "match_pairing.reconcile_org" in admin_src)
+    import_src = (root / "services" / "cricketstatz_import.py").read_text()
+    check("an import pairs each season as its own matches land",
+          import_src.count("match_pairing.reconcile_org") >= 2, )
+    # Matched on the WRITE, not on the column name — `superseded_years` still
+    # READS it so the screen can say the marker no longer decides anything, and
+    # a check that matched any mention would fail against correct code.
+    check("and nothing marks a season as read from one source any more",
+          "SET stats_source = 'cricketstatz'" not in import_src
+          and "season.stats_source =" not in import_src,
+          "the retired season-level marker is still being written")
+
+
+async def verify_per_innings_source(session_maker) -> None:
+    """One innings, one source. Reported live off the record boards.
+
+    `v_effective_games` and `v_effective_player_season_stats` were filtered by
+    migration 287; the six PER-INNINGS views were not. So for a season read
+    from CricketStatz both the synced innings and the imported innings were
+    present, and every century, wicket and catch was counted twice — a record
+    board listing the same 270 for the same player in the same season, and a
+    career reading 14,806 runs.
+    """
+    print("\nOne innings, one source")
+    org, player = uuid.uuid4(), uuid.uuid4()
+    season, ca_grade = uuid.uuid4(), uuid.uuid4()
+    game, mgame = uuid.uuid4(), uuid.uuid4()
+    imp = uuid.uuid4()
+    async with session_maker() as db:
+        await db.execute(text("""
+            INSERT INTO organisations (id, name, slug, is_active)
+            VALUES (:o, 'Innings Test CC', 'innings-test-cc', true)
+        """), {"o": str(org)})
+        await db.execute(text("""
+            INSERT INTO cricketstatz_imports
+                (id, organisation_id, club_id, source_url, status, phase)
+            VALUES (:i, :o, '93931', 'u', 'complete', 'done')
+        """), {"i": str(imp), "o": str(org)})
+        await db.execute(text("""
+            INSERT INTO seasons (id, organisation_id, name, year)
+            VALUES (:s, :o, 'Summer 2002/03', 2002)
+        """), {"s": str(season), "o": str(org)})
+        await db.execute(text(
+            "INSERT INTO grades (id, season_id, name) VALUES (:g, :s, 'NMCA - Jika Shield')"),
+            {"g": str(ca_grade), "s": str(season)})
+        await db.execute(text("""
+            INSERT INTO players (id, organisation_id, name)
+            VALUES (:p, :o, 'Shephard, Heath')
+        """), {"p": str(player), "o": str(org)})
+        # The same innings from both sources: 270, one season, one player.
+        await db.execute(text("""
+            INSERT INTO games (id, grade_id, played_at, home_team, away_team)
+            VALUES (:i, :g, CAST(:d AS date), 'Innings Test CC', 'Panton Hill')
+        """), {"i": str(game), "g": str(ca_grade), "d": date(2002, 11, 5)})
+        await db.execute(text("""
+            INSERT INTO batting_innings
+                (game_id, player_id, innings_number, runs, not_out, did_not_bat)
+            VALUES (:g, :p, 1, 270, false, false)
+        """), {"g": str(game), "p": str(player)})
+        # A synced row in every other per-innings table too, or the checks
+        # below assert 0 against a table that was empty anyway and could never
+        # have failed.
+        await db.execute(text("""
+            INSERT INTO bowling_spells (game_id, player_id, innings_number,
+                                        overs, maidens, runs, wickets)
+            VALUES (:g, :p, 1, 10.0, 2, 30, 3)
+        """), {"g": str(game), "p": str(player)})
+        await db.execute(text("""
+            INSERT INTO fielding_stats (game_id, player_id, catches)
+            VALUES (:g, :p, 2)
+        """), {"g": str(game), "p": str(player)})
+        await db.execute(text("""
+            INSERT INTO fall_of_wickets (game_id, innings_number, wicket_number,
+                                         score_at_fall, player_id)
+            VALUES (:g, 1, 1, 40, :p)
+        """), {"g": str(game), "p": str(player)})
+        await db.execute(text("""
+            INSERT INTO partnerships (game_id, innings_number, wicket_number,
+                                      batter1_id, runs, is_club_innings)
+            VALUES (:g, 1, 1, :p, 40, true)
+        """), {"g": str(game), "p": str(player)})
+        await db.execute(text("""
+            INSERT INTO bowler_wickets (game_id, innings_number, bowler_id,
+                                        batter_name, dismissal_type)
+            VALUES (:g, 1, :p, 'A Batter', 'bowled')
+        """), {"g": str(game), "p": str(player)})
+        await db.execute(text("""
+            INSERT INTO manual_games
+                (id, organisation_id, season_id, grade_id, played_at, opposition,
+                 cricketstatz_import_id)
+            VALUES (:i, :o, :s, :gr, CAST(:d AS date), 'Panton Hill', :imp)
+        """), {"i": str(mgame), "o": str(org), "s": str(season),
+               "gr": str(ca_grade), "d": date(2002, 11, 5), "imp": str(imp)})
+        await db.execute(text("""
+            INSERT INTO manual_batting_innings
+                (manual_game_id, player_id, innings_number, runs, not_out, did_not_bat)
+            VALUES (:g, :p, 1, 270, false, false)
+        """), {"g": str(mgame), "p": str(player)})
+        await db.commit()
+
+    async def innings_rows():
+        async with session_maker() as db:
+            return (await db.execute(text("""
+                SELECT source, COUNT(*) FROM v_effective_batting_innings
+                 WHERE player_id = :p GROUP BY source
+            """), {"p": str(player)})).all()
+
+    both = {r[0]: r[1] for r in await innings_rows()}
+    check("before pairing, a club holding the same match twice sees both",
+          both.get("api", 0) == 1 and both.get("manual", 0) == 1, str(both))
+
+    async with session_maker() as db:
+        paired = await match_pairing.reconcile_org(db, org)
+    check("the two records of one match are recognised as one",
+          paired["paired"] == 1, str(paired))
+    once = {r[0]: r[1] for r in await innings_rows()}
+    check("so the innings is counted once, from Cricket Australia",
+          once.get("api", 0) == 1 and once.get("manual", 0) == 0, str(once))
+
+    # The same rule on every per-innings view, not just batting: the IMPORTED
+    # side steps aside, and the synced rows are all still there.
+    async with session_maker() as db:
+        for view in ("v_effective_bowling_spells", "v_effective_fielding_stats",
+                     "v_effective_fall_of_wickets", "v_effective_partnerships",
+                     "v_effective_bowler_wickets"):
+            n = (await db.execute(text(
+                f"SELECT COUNT(*) FROM {view} WHERE game_id = :g"),
+                {"g": str(game)})).scalar()
+            check(f"{view} keeps the synced side", n == 1, str(n))
+        gone = (await db.execute(text(
+            "SELECT COUNT(*) FROM v_effective_batting_innings WHERE game_id = :g"),
+            {"g": str(mgame)})).scalar()
+    check("and the imported copy of that innings is not counted again",
+          gone == 0, str(gone))
+
+    # WHERE THE SYNCED GAME HAS NO CARD, THE IMPORT IS THE BETTER RECORD.
+    # "If PlayHQ is incomplete, use CricketStatz to complete" — decided per
+    # match, not per season.
+    thin_game, thin_manual = uuid.uuid4(), uuid.uuid4()
+    async with session_maker() as db:
+        await db.execute(text("""
+            INSERT INTO games (id, grade_id, played_at, home_team, away_team)
+            VALUES (:i, :g, CAST(:d AS date), 'Innings Test CC', 'Epping')
+        """), {"i": str(thin_game), "g": str(ca_grade), "d": date(2003, 1, 11)})
+        await db.execute(text("""
+            INSERT INTO manual_games
+                (id, organisation_id, season_id, grade_id, played_at, opposition,
+                 cricketstatz_import_id)
+            VALUES (:i, :o, :s, :gr, CAST(:d AS date), 'Epping', :imp)
+        """), {"i": str(thin_manual), "o": str(org), "s": str(season),
+               "gr": str(ca_grade), "d": date(2003, 1, 11), "imp": str(imp)})
+        await db.execute(text("""
+            INSERT INTO manual_batting_innings
+                (manual_game_id, player_id, innings_number, runs, not_out, did_not_bat)
+            VALUES (:g, :p, 1, 88, false, false)
+        """), {"g": str(thin_manual), "p": str(player)})
+        await db.commit()
+    async with session_maker() as db:
+        thin = await match_pairing.reconcile_org(db, org)
+        kept_side = (await db.execute(text("""
+            SELECT source, COUNT(*) FROM v_effective_games
+             WHERE organisation_id = :o AND played_at = CAST(:d AS date)
+             GROUP BY source
+        """), {"o": str(org), "d": date(2003, 1, 11)})).all()
+        card = (await db.execute(text("""
+            SELECT COUNT(*) FROM v_effective_batting_innings WHERE game_id = :g
+        """), {"g": str(thin_manual)})).scalar()
+    sides = {r[0]: r[1] for r in kept_side}
+    check("a synced fixture with no card of ours prefers the imported copy",
+          thin["prefer_import"] == 1, str(thin))
+    check("so that match is counted once, from CricketStatz",
+          sides.get("manual", 0) == 1 and sides.get("api", 0) == 0, str(sides))
+    check("and its scorecard is the one that reaches the club's figures",
+          card == 1, str(card))
+
+    # An innings on a game with NO grade is kept — a manual upload need not
+    # have one, and an inner join would drop it silently.
+    loose_game = uuid.uuid4()
+    async with session_maker() as db:
+        await db.execute(text("""
+            INSERT INTO manual_games (id, organisation_id, season_id, played_at,
+                                      opposition)
+            VALUES (:i, :o, :s, CAST(:d AS date), 'Panton Hill')
+        """), {"i": str(loose_game), "o": str(org), "s": str(season),
+               "d": date(2002, 12, 1)})
+        await db.execute(text("""
+            INSERT INTO manual_batting_innings
+                (manual_game_id, player_id, innings_number, runs, not_out, did_not_bat)
+            VALUES (:g, :p, 1, 44, false, false)
+        """), {"g": str(loose_game), "p": str(player)})
+        await db.commit()
+        kept = (await db.execute(text(
+            "SELECT COUNT(*) FROM v_effective_batting_innings WHERE game_id = :g"),
+            {"g": str(loose_game)})).scalar()
+    check("an innings whose game has no grade is kept, not dropped",
+          kept == 1, str(kept))
 
 
 async def verify_per_grade_aggregate(session_maker) -> None:
-    """CA's per-grade rows must step aside too, or the grid doubles.
+    """The by-grade grid reads the union, never one match from two sources.
 
     Reported live: a career grid showing 28 matches for 2002/03 where
     CricketStatz has 14 — every shared season exactly doubled — while the
-    career header two inches above it was correct. `player_season_grade_stats`
-    is Cricket Australia's OWN per-grade aggregate and the effective views do
-    not cover it; worse, the two sources file the same cricket under different
-    grade names ("NMCA - Jika Shield" against "A-GRADE"), so the by-grade
-    grid's own max(held, claimed) never compares them — they land in separate
-    cells and ADD.
+    career header two inches above it was correct.
+    `player_season_grade_stats` is Cricket Australia's OWN per-grade aggregate
+    and the effective views do not cover it; the two sources also file the same
+    cricket under different grade names ("NMCA - Jika Shield" against
+    "A-GRADE"), so the grid's own max(held, claimed) never compares them.
+
+    The pairing is what settles it, and it settles it in the RIGHT direction:
+    CA's per-grade figure is counted in full, and only the imported matches CA
+    does not have are added beside it. Suppressing CA's rows for the season —
+    what the season-level marker did — read as 0 here and lost every match only
+    Cricket Australia had.
     """
     print("\nCricket Australia's per-grade rows")
     # Lifespan-created raw SQL, so `create_all` never makes it. Copied from
@@ -1597,32 +1988,56 @@ async def verify_per_grade_aggregate(session_maker) -> None:
     check("with only Cricket Australia's rows the grid reads its figure",
           total_before == 14, str(total_before))
 
-    # The club makes CricketStatz the record for that season.
+    # NOW THE CLUB IMPORTS THAT SEASON TOO. One imported match is the same
+    # match as a synced game; the other is one Cricket Australia does not have.
+    imp = uuid.uuid4()
+    synced_game, twin, only_cs = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     async with session_maker() as db:
-        await db.execute(text(
-            "UPDATE seasons SET stats_source = 'cricketstatz' WHERE id = :s"),
-            {"s": str(season)})
+        await db.execute(text("""
+            INSERT INTO cricketstatz_imports
+                (id, organisation_id, club_id, source_url, status, phase)
+            VALUES (:i, :o, '93931', 'u', 'complete', 'done')
+        """), {"i": str(imp), "o": str(org)})
+        await db.execute(text("""
+            INSERT INTO games (id, grade_id, played_at, home_team, away_team)
+            VALUES (:i, :g, CAST(:d AS date), 'Grid Test CC', 'Panton Hill')
+        """), {"i": str(synced_game), "g": str(ca_grade), "d": date(2002, 11, 5)})
+        await db.execute(text("""
+            INSERT INTO batting_innings
+                (game_id, player_id, innings_number, runs, not_out, did_not_bat)
+            VALUES (:g, :p, 1, 61, false, false)
+        """), {"g": str(synced_game), "p": str(player)})
+        for mid, day, opp, runs in ((twin, date(2002, 11, 5), 'Panton Hill', 61),
+                                    (only_cs, date(2002, 12, 14), 'Bundoora', 30)):
+            await db.execute(text("""
+                INSERT INTO manual_games
+                    (id, organisation_id, season_id, grade_id, played_at,
+                     opposition, cricketstatz_import_id)
+                VALUES (:i, :o, :s, :gr, CAST(:d AS date), :opp, :imp)
+            """), {"i": str(mid), "o": str(org), "s": str(season),
+                   "gr": str(cs_grade), "d": day, "opp": opp, "imp": str(imp)})
+            await db.execute(text("""
+                INSERT INTO manual_batting_innings
+                    (manual_game_id, player_id, innings_number, runs,
+                     not_out, did_not_bat)
+                VALUES (:g, :p, 1, :r, false, false)
+            """), {"g": str(mid), "p": str(player), "r": runs})
         await db.commit()
+
+    async with session_maker() as db:
+        pairs = await match_pairing.reconcile_org(db, org)
+    check("the imported twin is paired and the gap match is not",
+          pairs["paired"] == 1 and pairs["only_cricketstatz"] == 1, str(pairs))
+
     async with session_maker() as db:
         after = await agg.get_player_team_breakdown(db, str(player), str(org))
-    total_after = sum(r["matches"] for r in after["rows"])
-    names = {r["grade_name"] for r in after["rows"]}
-    check("a season read from CricketStatz drops CA's per-grade rows",
-          total_after == 0, str(total_after))
-    check("so the grade it filed them under is gone from the grid",
-          "NMCA - Jika Shield" not in names, str(names))
-
-    # And handing the season back brings them straight in again.
-    async with session_maker() as db:
-        await db.execute(text(
-            "UPDATE seasons SET stats_source = 'playhq' WHERE id = :s"),
-            {"s": str(season)})
-        await db.commit()
-    async with session_maker() as db:
-        back = await agg.get_player_team_breakdown(db, str(player), str(org))
-    check("handing it back counts them again",
-          sum(r["matches"] for r in back["rows"]) == 14,
-          str(sum(r["matches"] for r in back["rows"])))
+    cells = {r["grade_name"]: r["matches"] for r in after["rows"]}
+    check("Cricket Australia's own per-grade figure is still counted in full",
+          cells.get("NMCA - Jika Shield") == 14, str(cells))
+    check("and only the match it does not have is added beside it",
+          cells.get("A-GRADE") == 1, str(cells))
+    check("so the grid reads the union, never the two records of one match",
+          sum(r["matches"] for r in after["rows"]) == 15, str(cells))
 
 
 async def verify_notes_pass(engine, session_maker, org_id, import_id) -> None:
@@ -1787,6 +2202,8 @@ async def main() -> int:
     await verify_synced_overlap(engine, session_maker)
     await verify_repair(session_maker, org_id)
     await verify_heartbeat(session_maker, org_id)
+    verify_matcher()
+    await verify_per_innings_source(session_maker)
     await verify_per_grade_aggregate(session_maker)
     await verify_notes_pass(engine, session_maker, org_id, import_id)
     await verify_undo(session_maker, org_id, import_id, players)

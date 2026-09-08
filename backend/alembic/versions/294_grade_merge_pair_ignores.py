@@ -10,15 +10,15 @@ season and every merge on this screen is name-to-name. Names are stored in
 sorted order and written that way by the endpoint, so one pair is one row
 whichever way round it was dismissed.
 
-Revision ID: 291
-Revises: 290
+Revision ID: 294
+Revises: 293
 """
 from alembic import op
 
 from app.services.grade_ignore_ddl import STATEMENTS
 
-revision = "291"
-down_revision = "290"
+revision = "294"
+down_revision = "293"
 branch_labels = None
 depends_on = None
 

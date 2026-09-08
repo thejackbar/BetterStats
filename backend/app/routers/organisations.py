@@ -712,6 +712,24 @@ async def _sync_safe(org_id: str, run_id: uuid.UUID, kind: str = "org_full", aut
         except Exception as ge:
             logging.getLogger(__name__).warning(
                 f"Competition grouping after full sync failed for {org_id}: {ge}")
+
+        # AND RE-DERIVE THE MATCH PAIRING, for a club that has also imported
+        # its CricketStatz history. A sync brings matches in on the Cricket
+        # Australia side, and an imported twin of one of them has to be paired
+        # to it or the club counts that match twice. A club that has imported
+        # nothing does one cheap count and stops. Never raises: a pairing
+        # failure must not read as a sync failure.
+        try:
+            from app.services import match_pairing
+            from app.models.db import async_session_maker as _maker
+            async with _maker() as _db:
+                pairs = await match_pairing.reconcile_org(_db, org_id)
+            if pairs.get("changed"):
+                logging.getLogger(__name__).info(
+                    f"Match pairing after full sync for {org_id}: {pairs}")
+        except Exception as pe:
+            logging.getLogger(__name__).warning(
+                f"Match pairing after full sync failed for {org_id}: {pe}")
     except SyncControlSignal as sig:
         # Pause/Cancel from the Super Admin All Clubs page — not a crash.
         if sig.action == "pause":

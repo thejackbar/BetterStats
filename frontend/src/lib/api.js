@@ -1816,10 +1816,8 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ url, synced_years: syncedYears }),
     }),
-  csClearSuperseded: (years = null) =>
-    request('/club-admin/cricketstatz/superseded/clear', {
-      method: 'POST', body: JSON.stringify({ years }),
-    }),
+  csRebuildPairing: () =>
+    request('/club-admin/cricketstatz/pairing/rebuild', { method: 'POST' }),
   csReadNotes: () =>
     request('/club-admin/cricketstatz/notes', { method: 'POST' }),
   csStatus: () => request('/club-admin/cricketstatz/status'),
