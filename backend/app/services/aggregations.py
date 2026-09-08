@@ -9,6 +9,7 @@ from app.services.club_grades import club_game_sql
 from app.services.grade_scope import GradeScope
 from app.services.game_status import NOT_PLAYED_SQL_LIST, appearance_counts_as_match
 from app.services import rate_coverage as rc
+from app.services import season_source
 
 # "Does this roster appearance count as a match played" — one definition,
 # interpolated into every query below that counts matches off
@@ -2003,6 +2004,7 @@ async def get_player_team_breakdown(
                 mixed_seasons.add(sid)
 
     # Exact per-(season,grade) aggregate from CA (when synced). Source of truth.
+    ca_source_clause = season_source.ca_aggregate_clause("sc")
     per_grade_agg = await session.execute(
         text(f"""
             SELECT
@@ -2013,6 +2015,12 @@ async def get_player_team_breakdown(
             JOIN grades gr ON gr.id = psgs.grade_id
             JOIN seasons sc ON sc.id = gr.season_id
                            AND sc.organisation_id = CAST(:org_id AS UUID)
+                           -- CA's OWN per-grade rows for a season the club
+                           -- reads from CricketStatz. Their grade names differ
+                           -- ("NMCA - Jika Shield" against "A-GRADE"), so the
+                           -- two sources land in separate cells and ADD rather
+                           -- than one winning — every shared season doubled.
+                           {ca_source_clause}
             LEFT JOIN LATERAL (
                 SELECT canonical_name FROM grade_merge_logs gml
                 WHERE gml.org_id = CAST(:org_id AS UUID)

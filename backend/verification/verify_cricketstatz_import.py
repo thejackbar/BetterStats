@@ -1526,6 +1526,105 @@ async def verify_synced_overlap(engine, session_maker) -> None:
           f"handed={again}")
 
 
+async def verify_per_grade_aggregate(session_maker) -> None:
+    """CA's per-grade rows must step aside too, or the grid doubles.
+
+    Reported live: a career grid showing 28 matches for 2002/03 where
+    CricketStatz has 14 — every shared season exactly doubled — while the
+    career header two inches above it was correct. `player_season_grade_stats`
+    is Cricket Australia's OWN per-grade aggregate and the effective views do
+    not cover it; worse, the two sources file the same cricket under different
+    grade names ("NMCA - Jika Shield" against "A-GRADE"), so the by-grade
+    grid's own max(held, claimed) never compares them — they land in separate
+    cells and ADD.
+    """
+    print("\nCricket Australia's per-grade rows")
+    # Lifespan-created raw SQL, so `create_all` never makes it. Copied from
+    # main.py column for column, per the house rule about harness tables.
+    async with session_maker() as db:
+        await db.execute(text("""
+            CREATE TABLE IF NOT EXISTS grade_merge_logs (
+                id SERIAL PRIMARY KEY,
+                merged_at TIMESTAMPTZ DEFAULT NOW(),
+                org_id UUID NOT NULL,
+                canonical_name TEXT NOT NULL,
+                alias_name TEXT NOT NULL,
+                undone_at TIMESTAMPTZ
+            )
+        """))
+        await db.execute(text("""
+            CREATE TABLE IF NOT EXISTS season_aliases (
+                id SERIAL PRIMARY KEY,
+                merged_at TIMESTAMPTZ DEFAULT NOW(),
+                org_id UUID NOT NULL,
+                canonical_season_id UUID NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
+                alias_season_id    UUID NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
+                undone_at TIMESTAMPTZ
+            )
+        """))
+        await db.commit()
+    org, player = uuid.uuid4(), uuid.uuid4()
+    season, ca_grade, cs_grade = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    async with session_maker() as db:
+        await db.execute(text("""
+            INSERT INTO organisations (id, name, slug, is_active)
+            VALUES (:o, 'Grid Test CC', 'grid-test-cc', true)
+        """), {"o": str(org)})
+        await db.execute(text("""
+            INSERT INTO seasons (id, organisation_id, name, year)
+            VALUES (:s, :o, 'Summer 2002/03', 2002)
+        """), {"s": str(season), "o": str(org)})
+        for gid, name in ((ca_grade, "NMCA - Jika Shield"), (cs_grade, "A-GRADE")):
+            await db.execute(text(
+                "INSERT INTO grades (id, season_id, name) VALUES (:g, :s, :n)"),
+                {"g": str(gid), "s": str(season), "n": name})
+        await db.execute(text("""
+            INSERT INTO players (id, organisation_id, name)
+            VALUES (:p, :o, 'Quinsee, Brad')
+        """), {"p": str(player), "o": str(org)})
+        # Cricket Australia's own per-grade figure for the season.
+        await db.execute(text("""
+            INSERT INTO player_season_grade_stats
+                (player_id, season_id, grade_id, matches)
+            VALUES (:p, :s, :g, 14)
+        """), {"p": str(player), "s": str(season), "g": str(ca_grade)})
+        await db.commit()
+
+    from app.services import aggregations as agg
+    async with session_maker() as db:
+        before = await agg.get_player_team_breakdown(db, str(player), str(org))
+    total_before = sum(r["matches"] for r in before["rows"])
+    check("with only Cricket Australia's rows the grid reads its figure",
+          total_before == 14, str(total_before))
+
+    # The club makes CricketStatz the record for that season.
+    async with session_maker() as db:
+        await db.execute(text(
+            "UPDATE seasons SET stats_source = 'cricketstatz' WHERE id = :s"),
+            {"s": str(season)})
+        await db.commit()
+    async with session_maker() as db:
+        after = await agg.get_player_team_breakdown(db, str(player), str(org))
+    total_after = sum(r["matches"] for r in after["rows"])
+    names = {r["grade_name"] for r in after["rows"]}
+    check("a season read from CricketStatz drops CA's per-grade rows",
+          total_after == 0, str(total_after))
+    check("so the grade it filed them under is gone from the grid",
+          "NMCA - Jika Shield" not in names, str(names))
+
+    # And handing the season back brings them straight in again.
+    async with session_maker() as db:
+        await db.execute(text(
+            "UPDATE seasons SET stats_source = 'playhq' WHERE id = :s"),
+            {"s": str(season)})
+        await db.commit()
+    async with session_maker() as db:
+        back = await agg.get_player_team_breakdown(db, str(player), str(org))
+    check("handing it back counts them again",
+          sum(r["matches"] for r in back["rows"]) == 14,
+          str(sum(r["matches"] for r in back["rows"])))
+
+
 async def verify_notes_pass(engine, session_maker, org_id, import_id) -> None:
     """The honour board on its own, without re-pulling a single scorecard.
 
@@ -1688,6 +1787,7 @@ async def main() -> int:
     await verify_synced_overlap(engine, session_maker)
     await verify_repair(session_maker, org_id)
     await verify_heartbeat(session_maker, org_id)
+    await verify_per_grade_aggregate(session_maker)
     await verify_notes_pass(engine, session_maker, org_id, import_id)
     await verify_undo(session_maker, org_id, import_id, players)
     await verify_downgrade(engine)

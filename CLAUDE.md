@@ -7525,6 +7525,44 @@ we're way over what I expect".
   seasons are marked by the old end-of-run write. The board corrects itself the
   moment the run completes.
 
+### THE PER-GRADE AGGREGATE IS A SECOND TABLE, AND IT DOUBLED TOO (v9.69.7, Sep 2026)
+
+Reported after an undo and a fresh import: a career back to nearly 600 games.
+Not the career header this time — the **by-grade grid**, which was reading
+2002/03 as 28 where CricketStatz has 14, every shared season exactly doubled,
+with the header two inches above it correct.
+
+- **`player_season_grade_stats` IS CRICKET AUSTRALIA'S OWN PER-GRADE AGGREGATE
+  AND THE EFFECTIVE VIEWS DO NOT COVER IT.** Migration 287 filters
+  `v_effective_games` and `v_effective_player_season_stats`; this is a third
+  table, read directly by the grid and by two record boards. Marking a season
+  as read from CricketStatz did nothing to it.
+- **THE GRADE NAMES DO NOT MATCH, WHICH IS WHY IT ADDS RATHER THAN ONE
+  WINNING.** Cricket Australia files the season under "NMCA - Jika Shield";
+  CricketStatz files the same cricket under "A-GRADE". The grid's own
+  `max(held, claimed)` reconciles per (season, GRADE), so it never compares
+  them — they land in different cells and sum. A reconciliation that looks
+  safe is not safe across two sources that name their grades differently.
+- **`services/season_source.ca_aggregate_clause(alias)` is the one definition**,
+  the same shape `grade_scope` and `game_status` already use. Expressed against
+  a `seasons` alias the query already joins, **never as a correlated EXISTS** —
+  these run on the record boards, where a per-row subplan is the trap
+  `records.py`'s own timing notes document.
+- **One of the two record boards joined no `seasons` row at all** and had to be
+  given one; the other already had it.
+- **THE SECOND `JOIN seasons sc` IN THE GRID IS NOT THIS TABLE.** It belongs to
+  the manual per-grade adjustment read, which goes through
+  `v_effective_player_season_stats` and is therefore already filtered. Patching
+  by text match hit both; it is patched by position.
+- **Verified against a real Postgres** (the suite is 225 checks now: CA's
+  figure read on its own, the season switched to CricketStatz dropping those
+  rows AND the grade they were filed under, and handing the season back
+  counting them again) **with a control run**: with the clause emptied, both
+  fail and the grid reports the reported 14 alongside the imported cricket.
+- **NOTICED, NOT FIXED**: `iq_team` and `iq_trends` read the same table for
+  internal analytics, and `import_reconcile` for its own reconciliation. None
+  is a club-facing stats figure and each needs its own look.
+
 ### THE HONOUR BOARD RUNS ON ITS OWN (v9.69.6, Sep 2026)
 
 Asked while checking the awards: a club whose whole CricketStatz history had
