@@ -2,7 +2,7 @@
 
 WHY
     A self-serve registration links a club's directory row to its onboarded
-    Organisation at signup (twenty_sync._resolve_self_serve_club). A club a
+    Organisation at signup (engagement._resolve_self_serve_club). A club a
     super admin onboards/syncs and then trials does NOT get that link, so its
     marketing_clubs.existing_org_id stays NULL. Everything the CRM card reads
     about the org's subscription flows through that link

@@ -110,19 +110,19 @@ def _parse_billing_keys(metadata) -> list[str]:
     return [k for k in raw.split(",") if k in BILLABLE_MODULES]
 
 
-def _push_to_twenty(org_id, crm_trigger: Optional[str] = None,
-                    won_module_keys: Optional[list] = None) -> None:
+def _sync_crm(org_id, crm_trigger: Optional[str] = None,
+              won_module_keys: Optional[list] = None) -> None:
     # Best-effort, mirrors every other subscription-change call site (see
-    # club_admin.py::approve_module_request) — never let a Twenty hiccup fail
-    # a webhook Stripe expects a fast 2xx from. ``crm_trigger`` threads
-    # through to _push_club_to_twenty (one of crm_rules.TRIGGERS' subscription
-    # keys) so a real Stripe payment event keeps BetterCricket's own
-    # (super-admin-configurable) CRM pipeline in lockstep too, not just Twenty.
+    # club_admin.py::approve_module_request) — never let a CRM hiccup fail a
+    # webhook Stripe expects a fast 2xx from. ``crm_trigger`` threads through
+    # to _sync_club_to_crm (one of crm_rules.TRIGGERS' subscription keys) so a
+    # real Stripe payment event moves the deal on BetterCricket's own
+    # (super-admin-configurable) pipeline and rescores the club.
     try:
-        from app.routers.club_admin import _push_club_to_twenty
-        _push_club_to_twenty(org_id, crm_trigger=crm_trigger, won_module_keys=won_module_keys)
+        from app.routers.club_admin import _sync_club_to_crm
+        _sync_club_to_crm(org_id, crm_trigger=crm_trigger, won_module_keys=won_module_keys)
     except Exception:
-        logger.exception("Stripe billing: Twenty push failed")
+        logger.exception("Stripe billing: CRM sync failed")
 
 
 async def _record_action(db: AsyncSession, org: Organisation, module_key: str, kind: str, note: str, now: datetime) -> None:
@@ -180,7 +180,7 @@ async def handle_checkout_completed(db: AsyncSession, session: dict) -> None:
     # actually paid for ride along, so the deal is won at what was bought
     # rather than at whatever the pipeline had been forecasting — that figure
     # is what a rep's commission is calculated from.
-    _push_to_twenty(org.id, crm_trigger="subscription_won", won_module_keys=billing_keys)
+    _sync_crm(org.id, crm_trigger="subscription_won", won_module_keys=billing_keys)
 
 
 async def handle_invoice_paid(db: AsyncSession, invoice: dict) -> None:
@@ -260,7 +260,7 @@ async def handle_invoice_payment_failed(db: AsyncSession, invoice: dict) -> None
         module_subscriptions.set_status_billing(org, key, STATUS_PAST_DUE, now=now)
     await _upsert_invoice(db, org, invoice, now, sub=sub)
     await db.commit()
-    _push_to_twenty(org.id)
+    _sync_crm(org.id)
 
 
 async def handle_subscription_deleted(db: AsyncSession, subscription: dict) -> None:
@@ -283,7 +283,7 @@ async def handle_subscription_deleted(db: AsyncSession, subscription: dict) -> N
     # 'subscription_cancelled' only fires (per the configured automation rule)
     # if the org is left holding nothing billable at all (a still-trialing or
     # otherwise granted module elsewhere means the deal stays exactly where it is).
-    _push_to_twenty(org.id, crm_trigger="subscription_cancelled")
+    _sync_crm(org.id, crm_trigger="subscription_cancelled")
 
 
 async def sweep_dangling_stripe_subscriptions(db: AsyncSession) -> list[str]:

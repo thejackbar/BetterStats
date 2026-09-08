@@ -1445,20 +1445,25 @@ export const api = {
     request('/club-admin/marketing/crawl/control', { method: 'POST', body: JSON.stringify({ paused }) }),
   mktCrawl: (limit) =>
     request(`/club-admin/marketing/crawl${limit ? `?limit=${limit}` : ''}`, { method: 'POST' }),
+  // Re-read every club's committee from PlayHQ and reconcile the directory
+  // against it (prune the departed, re-tick the listed). Hours long, so it runs
+  // in the background and the page polls the status.
+  mktRediscover: () => request('/club-admin/marketing/rediscover', { method: 'POST' }),
+  mktRediscoverStatus: () => request('/club-admin/marketing/rediscover/status'),
+  // The same for ONE club — two short requests, answers immediately.
+  mktRediscoverClub: (clubId) =>
+    request(`/club-admin/marketing/clubs/${clubId}/rediscover`, { method: 'POST' }),
+  mktBulkTickOfficers: (filters = {}) =>
+    request('/club-admin/marketing/clubs/bulk-tick-officers',
+      { method: 'POST', body: JSON.stringify(filters) }),
   mktExportComms: (payload) =>
     request('/club-admin/marketing/export-comms', { method: 'POST', body: JSON.stringify(payload) }),
-  mktExportTwenty: (payload) =>
-    request('/club-admin/marketing/export-twenty', { method: 'POST', body: JSON.stringify(payload) }),
-  mktExportTwentyStatus: () => request('/club-admin/marketing/export-twenty/status'),
   mktPushToCrm: (payload) =>
     request('/club-admin/marketing/push-to-crm', { method: 'POST', body: JSON.stringify(payload) }),
   mktPushToCrmStatus: () => request('/club-admin/marketing/push-to-crm/status'),
-  mktRefreshTwentyEngagement: () =>
-    request('/club-admin/marketing/refresh-twenty-engagement', { method: 'POST' }),
-  mktRefreshTwentyEngagementStatus: () => request('/club-admin/marketing/refresh-twenty-engagement/status'),
-  mktRefreshTwentyLeadsTasks: () =>
-    request('/club-admin/marketing/refresh-twenty-leads-tasks', { method: 'POST' }),
-  mktRefreshTwentyLeadsTasksStatus: () => request('/club-admin/marketing/refresh-twenty-leads-tasks/status'),
+  mktRefreshEngagement: () =>
+    request('/club-admin/marketing/refresh-engagement', { method: 'POST' }),
+  mktRefreshEngagementStatus: () => request('/club-admin/marketing/refresh-engagement/status'),
   mktSetContactSelected: (contactId, selected) =>
     request(`/club-admin/marketing/contacts/${contactId}`, { method: 'PATCH', body: JSON.stringify({ selected }) }),
   mktUpdateContact: (contactId, patch) =>

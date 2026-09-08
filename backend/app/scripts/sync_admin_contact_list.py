@@ -29,7 +29,7 @@ would fight it on every run. They are reported as ``suppressed``.
 An admin with no email address on file cannot be a contact and is reported by
 username, not silently dropped — that count is what says the list is short of
 the roster. An ARCHIVED club's admins are left out, the same rule the sync
-scheduler and the Twenty pushes already use for a club that is no longer live.
+scheduler already uses for a club that is no longer live.
 
 USAGE
 -----

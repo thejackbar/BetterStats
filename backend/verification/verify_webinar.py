@@ -169,7 +169,7 @@ async def main() -> None:
         await engine.dispose()
         sys.exit(1)
 
-    print("\n-- migration 295 --")
+    print("\n-- migration 296 --")
     async with engine.begin() as conn:
         await conn.execute(text("DROP TABLE IF EXISTS webinar_registrations"))
         await conn.execute(text("DROP TABLE IF EXISTS platform_settings"))
@@ -208,12 +208,15 @@ async def main() -> None:
     main_src = (Path(__file__).resolve().parent.parent / "app" / "main.py").read_text()
     check("main.py's lifespan imports the shared DDL",
           "from app.services.webinar_ddl import STATEMENTS" in main_src)
+    # Renumbered 295 -> 296 on merging origin/main, which had reached 295
+    # (committee_rediscover) — two migrations sharing a revision id break
+    # Alembic outright, which is exactly what this pair of checks is for.
     migration = (Path(__file__).resolve().parent.parent / "alembic" / "versions"
-                 / "295_webinar_registrations.py").read_text()
-    check("migration 295 imports the same shared list",
+                 / "296_webinar_registrations.py").read_text()
+    check("migration 296 imports the same shared list",
           "from app.services.webinar_ddl import" in migration)
-    check("and revises 294 (a shared revision id breaks alembic outright)",
-          'down_revision = "294"' in migration)
+    check("and revises 295 (a shared revision id breaks alembic outright)",
+          'down_revision = "295"' in migration)
 
     print("\n-- the event is declared once, and both copies agree --")
     event = webinar.EVENT

@@ -60,7 +60,7 @@ ORIGIN_LABEL = "Club Admin Users"
 CONTACT_SOURCE = "admin"
 
 #: Held so a fire-and-forget task isn't garbage collected mid-flight — the same
-#: guard club_admin._push_club_to_twenty keeps.
+#: guard club_admin._sync_club_to_crm keeps.
 _tasks: set = set()
 
 
@@ -90,8 +90,8 @@ async def admin_rows(session: AsyncSession, *, club_id=None) -> list:
 
     An ARCHIVED club is left out. Its admin is no longer running a club on the
     platform, and archiving is the house rule for "stop treating this club as
-    live" everywhere else (the sync scheduler and the Twenty pushes both skip
-    them). They stay on the list if they are already on it — nothing here
+    live" everywhere else (auto_sync's own eligibility check skips them).
+    They stay on the list if they are already on it — nothing here
     removes anybody — they just stop being added by a later run.
     """
     q = (

@@ -448,6 +448,7 @@ function ClubDetail({ club, onToggleContact, onToggleEmailed, onToggleExcluded, 
   const [adding, setAdding] = useState(false)
   const [cbusy, setCbusy] = useState(false)
   const [cerr, setCerr] = useState('')
+  const [redisc, setRedisc] = useState('')
   const saveUtm = async () => {
     setUtmBusy(true)
     try { await onSaveUtm(club.id, utm) } finally { setUtmBusy(false) }
@@ -468,6 +469,28 @@ function ClubDetail({ club, onToggleContact, onToggleEmailed, onToggleExcluded, 
     try { await api.mktDeleteContact(id); onRefresh && onRefresh() }
     catch (e) { setCerr(e.message || 'Could not remove the contact.') } finally { setCbusy(false) }
   }
+  // Re-read THIS club's committee from PlayHQ. Two short requests, so it answers
+  // in a second or two rather than being backgrounded like the full run.
+  const rediscoverThisClub = async () => {
+    if (!window.confirm(
+      `Re-read ${club.name}'s committee from PlayHQ?\n\n`
+      + '· Officers PlayHQ still lists are updated to their current role and, if they '
+      + 'have an email, ticked for outreach.\n'
+      + '· Officers PlayHQ no longer lists are removed. One who unsubscribed, bounced, '
+      + 'was marked do-not-contact, carries a note or is linked to the CRM is kept '
+      + 'instead and marked "not on PlayHQ".\n'
+      + '· Contacts you added by hand are never touched.\n'
+      + '· Anyone already in BetterComms stays there.')) return
+    setCbusy(true); setCerr(''); setRedisc('')
+    try {
+      const r = await api.mktRediscoverClub(club.id)
+      if (!r.found) { setCerr(r.error || 'PlayHQ could not be read for this club.'); return }
+      setRedisc(`${r.contacts} officer(s) on PlayHQ · ${r.pruned} removed · `
+        + `${r.marked_former} kept and marked.`)
+      onRefresh && onRefresh()
+    } catch (e) { setCerr(e.message || 'Could not re-read this club.') }
+    finally { setCbusy(false) }
+  }
   return (
     <div className="space-y-4">
       {/* Contacts — full width so long names/emails never collide with the facts column */}
@@ -476,10 +499,17 @@ function ClubDetail({ club, onToggleContact, onToggleEmailed, onToggleExcluded, 
           <div className="text-[11px] uppercase tracking-wide text-pb-faint">
             Contacts ({contacts.length}) · tick who to email
           </div>
-          <button className="text-[11px] text-pb-accent hover:underline"
-                  onClick={() => { setAdding(a => !a); setEditId(null) }}>
-            {adding ? 'Cancel' : '+ Add contact'}
-          </button>
+          <div className="flex items-center gap-3">
+            <button className="text-[11px] text-pb-accent hover:underline disabled:opacity-50"
+                    disabled={cbusy} onClick={rediscoverThisClub}
+                    title="Re-read this club's committee from PlayHQ and reconcile it">
+              {cbusy ? 'Reading PlayHQ...' : '↻ Re-read from PlayHQ'}
+            </button>
+            <button className="text-[11px] text-pb-accent hover:underline"
+                    onClick={() => { setAdding(a => !a); setEditId(null) }}>
+              {adding ? 'Cancel' : '+ Add contact'}
+            </button>
+          </div>
         </div>
         {(contacts.length || adding) ? (
           <div className="overflow-x-auto">
@@ -516,6 +546,12 @@ function ClubDetail({ club, onToggleContact, onToggleEmailed, onToggleExcluded, 
                           ? <a href={`mailto:${ct.email}`} className="text-pb-accent break-all">{ct.email}</a>
                           : <span className="text-pb-faint">-</span>}
                         {!ct.subscribed && <span className="ml-1 text-[10px] text-amber-300 whitespace-nowrap">unsub</span>}
+                        {ct.former && (
+                          <span className="ml-1 text-[10px] text-amber-300 border border-amber-500/40 bg-amber-500/10 rounded px-1 whitespace-nowrap"
+                                title="PlayHQ no longer lists this person on the committee. Kept (not deleted) because removing them would lose an unsubscribe, a note, a do-not-contact or a CRM link.">
+                            not on PlayHQ
+                          </span>
+                        )}
                         {ct.exported && (
                           <span className="ml-1 text-[10px] text-sky-300 border border-sky-500/40 bg-sky-500/10 rounded px-1 whitespace-nowrap"
                                 title="Already in BetterComms — a re-export will skip it (no duplicate)">
@@ -541,6 +577,7 @@ function ClubDetail({ club, onToggleContact, onToggleEmailed, onToggleExcluded, 
           </div>
         ) : <div className="text-pb-faint text-xs">No contacts stored.</div>}
         {cerr && <div className="text-red-300 text-[11px] mt-1">{cerr}</div>}
+        {redisc && <div className="text-emerald-300 text-[11px] mt-1">{redisc}</div>}
       </div>
 
       {/* Club facts (left) + sales pipeline / site visits (right) */}
@@ -794,6 +831,8 @@ export default function SuperMarketing() {
 
   const [stats, setStats] = useState(null)
   const [status, setStatus] = useState(null)
+  // Live state of a full committee rediscover (running / progress / last result).
+  const [rediscover, setRediscover] = useState(null)
   const [clubs, setClubs] = useState([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -815,7 +854,7 @@ export default function SuperMarketing() {
     // Ranks (rather than paginates) the currently-filtered set by page views
     // or distinct visitors — see backend club_directory.top_clubs_by_visits.
     top_n: '', top_n_metric: 'views',
-    // Cached Twenty engagementScore (see marketing_clubs.engagement_score) — >=/<=.
+    // Cached engagement score (see marketing_clubs.engagement_score) — >=/<=.
     engagement_score_gte: '', engagement_score_lte: '',
     existing_org_id: initialOrgId,
   })
@@ -861,17 +900,18 @@ export default function SuperMarketing() {
   useEffect(() => { setPage(0) }, [filters, view])  // back to first page when filters or sort change
   useEffect(() => { api.mktAssociations().then(setAssocOptions).catch(() => {}) }, [])
   useEffect(() => { api.mktCountries().then(setCountryOptions).catch(() => {}) }, [])
-  // Re-attach to an in-flight Twenty export if the page was reloaded mid-run.
+  // Re-attach to an in-flight rediscover if the page was reloaded mid-run — it
+  // runs for hours, so landing on this page mid-run is the ordinary case.
   useEffect(() => {
-    api.mktExportTwentyStatus().then((s) => {
-      if (s && s.running) {
-        setBusy('twenty')
-        setMsg('Exporting to Twenty… this can take a few minutes for a large list. You can leave this page; the export keeps running.')
-        pollTwentyExport().finally(() => setBusy(''))
-      }
+    api.mktRediscoverStatus().then((st) => {
+      setRediscover(st)
+      if (st && st.running) pollRediscover()
     }).catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  const rediscoverRunning = !!rediscover?.running
+  const rediscoverProgress = rediscover?.progress || {}
 
   const runCrawl = async () => {
     setBusy('crawl'); setMsg('')
@@ -879,6 +919,70 @@ export default function SuperMarketing() {
       await api.mktCrawl()
       setMsg('Crawl batch started in the background. Watch the status above — it is rate-limited, so progress is slow.')
       setTimeout(loadStats, 2000)  // let the first fetch land, then refresh the status pill
+    } catch (e) { setError(e.message) } finally { setBusy('') }
+  }
+
+  // Re-read every club's committee from PlayHQ. Hours long (the whole club
+  // search, re-paged at the crawl's own courtesy delay), so it is backgrounded
+  // and polled — the same shape the engagement rescore uses.
+  const pollRediscover = async () => {
+    for (;;) {
+      await new Promise(r => setTimeout(r, 8000))
+      let st
+      try { st = await api.mktRediscoverStatus() } catch { continue }
+      setRediscover(st)
+      if (!st.running) {
+        if (st.error) setError(st.error)
+        else if (st.result) {
+          const r = st.result
+          setMsg(`Rediscover finished: ${r.au_seen || 0} club(s) re-read, `
+            + `${r.pruned || 0} departed officer(s) removed, `
+            + `${r.marked_former || 0} kept and marked, ${r.new || 0} club(s) new.`)
+        }
+        loadStats(); loadClubs()
+        return
+      }
+    }
+  }
+
+  const runRediscover = async () => {
+    if (!window.confirm(
+      'Re-read EVERY club\'s committee from PlayHQ?\n\n'
+      + 'This re-pages the whole PlayHQ club search at the crawler\'s own pace: '
+      + 'one request at a time, 15-40s apart, ~70 pages of 100 clubs, so roughly '
+      + '30-50 minutes. It runs in the background — you can leave this page.\n\n'
+      + '· Officers PlayHQ still lists get their current role, and are ticked for '
+      + 'outreach if they have an email.\n'
+      + '· Officers PlayHQ no longer lists are removed from the directory. One who '
+      + 'unsubscribed, bounced, is do-not-contact, carries a note or is linked to '
+      + 'the CRM is kept and marked "not on PlayHQ" instead.\n'
+      + '· Contacts added by hand are never touched.\n'
+      + '· Nobody is removed from BetterComms.')) return
+    setBusy('rediscover'); setMsg(''); setError('')
+    try {
+      const r = await api.mktRediscover()
+      if (r.status === 'already_running') {
+        setMsg('A rediscover is already running — watch the progress above.')
+      } else {
+        setMsg('Rediscover started. It re-pages the whole of PlayHQ at one request '
+          + 'every 15-40s, so give it around 30-50 minutes; you can leave this page.')
+      }
+      api.mktRediscoverStatus().then(setRediscover).catch(() => {})
+      pollRediscover()
+    } catch (e) { setError(e.message) } finally { setBusy('') }
+  }
+
+  const tickOfficers = async () => {
+    if (!window.confirm(
+      'Tick every listed officer with an email address, in the clubs currently '
+      + 'filtered?\n\nSkips anyone who unsubscribed, bounced, is marked '
+      + 'do-not-contact, or is no longer on PlayHQ. No PlayHQ traffic — this only '
+      + 'uses what the directory already holds.')) return
+    setBusy('tick'); setMsg(''); setError('')
+    try {
+      const r = await api.mktBulkTickOfficers(filters)
+      setMsg(`Ticked ${r.ticked} officer(s) across ${r.clubs} filtered club(s).`)
+      loadClubs()
     } catch (e) { setError(e.message) } finally { setBusy('') }
   }
 
@@ -911,35 +1015,16 @@ export default function SuperMarketing() {
     } catch (e) { setError(e.message) } finally { setBusy('') }
   }
 
-  const formatTwentyResult = (r) => {
-    const cl = (r.clubs_created || 0) + (r.clubs_updated || 0) + (r.clubs_adopted || 0)
-    const pp = (r.people_created || 0) + (r.people_updated || 0) + (r.people_adopted || 0)
-    let m = `Exported to Twenty: ${r.matched_clubs} club(s) matched, ${cl} club + ${pp} officer record(s) synced`
-    m += (r.clubs_unchanged || r.people_unchanged) ? `, ${(r.clubs_unchanged || 0) + (r.people_unchanged || 0)} unchanged` : ''
-    m += r.errors ? `. ${r.errors} club(s) errored (see logs).` : '.'
-    return m
-  }
-
   const formatEngagementResult = (r) =>
-    `Refreshed engagement on ${r.refreshed || 0} club(s) in Twenty` + (r.errored ? `, ${r.errored} errored (see logs).` : '.')
+    `Rescored ${r.processed || 0} of ${r.total || 0} club(s); ${r.promoted || 0} deal(s) moved`
+    + (r.errors ? `, ${r.errors} errored (see logs).` : '.')
 
-  const formatLeadsTasksResult = (r) => {
-    const leads = (r.leads_created || 0) + (r.leads_updated || 0) + (r.leads_adopted || 0)
-    const tasks = (r.tasks_request || 0) + (r.tasks_trial_expiry || 0) + (r.tasks_renewal || 0)
-    return `Twenty leads/tasks: scanned ${r.clubs_scanned || 0} exported club(s), `
-      + `${r.leads_qualified || 0} qualified → ${leads} lead(s). Pending: `
-      + `${r.requests_outstanding || 0} request(s), ${r.trials_in_window || 0} expiring trial(s), `
-      + `${r.renewals_in_window || 0} renewal(s) → ${tasks} new task(s).`
-      + ((r.leads_errored || r.tasks_errored) ? ' Some errored (see logs).' : '')
-  }
-
-  // Poll a background Twenty job's status endpoint until it finishes; surfaces
-  // the result/error. Shared by export, engagement refresh and leads/tasks
-  // refresh — all three run in the background (see marketing.py) since a full
-  // pass over an exported-club list against Twenty's rate limit routinely
-  // exceeds the nginx proxy timeout.
-  const pollTwentyJob = async (statusFn, formatResult, { onDone } = {}) => {
-    // ~20 min cap at 3s intervals — long jobs throttle through Twenty's rate limit.
+  // Poll a background job's status endpoint until it finishes; surfaces the
+  // result/error. Shared by the engagement rescore and the CRM push — both run
+  // in the background (see marketing.py) since a full pass over the directory
+  // comfortably exceeds the nginx proxy timeout.
+  const pollBackgroundJob = async (statusFn, formatResult, { onDone } = {}) => {
+    // ~20 min cap at 3s intervals.
     for (let i = 0; i < 400; i++) {
       await new Promise((res) => setTimeout(res, 3000))
       let s
@@ -952,16 +1037,6 @@ export default function SuperMarketing() {
       return // no result and not running — nothing to report
     }
     setMsg('Still running — check back shortly, then refresh the list.')
-  }
-
-  const exportTwenty = async () => {
-    setBusy('twenty'); setMsg(''); setError('')
-    try {
-      const r = await api.mktExportTwenty({ ...filters })
-      if (r.error) { setError(r.error); return }
-      setMsg('Exporting to Twenty… this can take a few minutes for a large list. You can leave this page; the export keeps running.')
-      await pollTwentyJob(api.mktExportTwentyStatus, formatTwentyResult, { onDone: loadClubs })
-    } catch (e) { setError(e.message) } finally { setBusy('') }
   }
 
   const formatPushToCrmResult = (r) =>
@@ -977,27 +1052,18 @@ export default function SuperMarketing() {
       const r = await api.mktPushToCrm({ ...filters })
       if (r.error) { setError(r.error); return }
       setMsg('Pushing to BetterCricket CRM… this can take a while for a large list. You can leave this page.')
-      await pollTwentyJob(api.mktPushToCrmStatus, formatPushToCrmResult)
+      await pollBackgroundJob(api.mktPushToCrmStatus, formatPushToCrmResult)
     } catch (e) { setError(e.message) } finally { setBusy('') }
   }
 
-  const refreshTwentyEngagement = async () => {
-    setBusy('twenty-refresh'); setMsg(''); setError('')
+  const refreshEngagement = async () => {
+    setBusy('engagement'); setMsg(''); setError('')
     try {
-      const r = await api.mktRefreshTwentyEngagement()
+      const r = await api.mktRefreshEngagement()
       if (r.error) { setError(r.error); return }
-      setMsg('Refreshing engagement scores in Twenty… this can take a while for a large list. You can leave this page.')
-      await pollTwentyJob(api.mktRefreshTwentyEngagementStatus, formatEngagementResult)
-    } catch (e) { setError(e.message) } finally { setBusy('') }
-  }
-
-  const refreshTwentyLeadsTasks = async () => {
-    setBusy('twenty-leads-tasks'); setMsg(''); setError('')
-    try {
-      const r = await api.mktRefreshTwentyLeadsTasks()
-      if (r.error) { setError(r.error); return }
-      setMsg('Refreshing Twenty leads/tasks… this can take a while for a large list. You can leave this page.')
-      await pollTwentyJob(api.mktRefreshTwentyLeadsTasksStatus, formatLeadsTasksResult)
+      setMsg('Rescoring every club… this takes a few minutes. You can leave this page; the rescore keeps running.')
+      await pollBackgroundJob(api.mktRefreshEngagementStatus, formatEngagementResult,
+                              { onDone: loadClubs })
     } catch (e) { setError(e.message) } finally { setBusy('') }
   }
 
@@ -1173,6 +1239,46 @@ export default function SuperMarketing() {
           <button className={BTN} onClick={() => { loadStats(); loadClubs() }}>Refresh</button>
         </div>
 
+        {/* Committee sync — separate from the crawl controls above, because these
+            two RECONCILE the directory against PlayHQ rather than extend it. */}
+        <div className="flex flex-wrap items-center gap-2 mb-2.5">
+          <button className={BTN_ACCENT}
+                  disabled={busy === 'rediscover' || rediscoverRunning || status?.paused}
+                  onClick={runRediscover}
+                  title="Re-page the whole PlayHQ club search and reconcile every club's committee">
+            {rediscoverRunning ? 'Rediscovering...'
+              : busy === 'rediscover' ? 'Starting...' : 'Rediscover committees'}
+          </button>
+          <button className={BTN} disabled={busy === 'tick'} onClick={tickOfficers}
+                  title="Tick every listed officer with an email, in the filtered clubs. No PlayHQ traffic.">
+            {busy === 'tick' ? 'Ticking...' : 'Tick officers with an email'}
+          </button>
+          {rediscoverRunning && (
+            <span className="text-[11px] text-pb-dim">
+              {rediscoverProgress.clubs_seen != null
+                ? `${rediscoverProgress.clubs_seen} club(s) re-read`
+                  + (rediscoverProgress.total_reported ? ` of ~${rediscoverProgress.total_reported}` : '')
+                  + ` · ${rediscoverProgress.pruned || 0} removed`
+                  + ` · ${rediscoverProgress.marked_former || 0} kept and marked`
+                : 'Reading the first page from PlayHQ...'}
+            </span>
+          )}
+          {!rediscoverRunning && rediscover?.finished_at && rediscover?.result && (
+            <span className="text-[11px] text-pb-faint">
+              Last rediscover: {rediscover.result.au_seen || 0} club(s),
+              {' '}{rediscover.result.pruned || 0} removed,
+              {' '}{rediscover.result.marked_former || 0} kept and marked.
+            </span>
+          )}
+        </div>
+        <div className="text-[11px] text-pb-faint mb-2.5">
+          Rediscover re-reads the committee PlayHQ publishes today: current officers get
+          their current role and, with an email, a tick for outreach; officers PlayHQ has
+          dropped are removed, except where that would lose an unsubscribe, a note, a
+          do-not-contact or a CRM link — those are kept and marked. Contacts you added by
+          hand are never touched, and nobody is removed from BetterComms.
+        </div>
+
         {/* ── Filter card ─────────────────────────────────────────────── */}
         <section className={CARD}>
           <div className="flex items-center justify-between mb-2">
@@ -1259,7 +1365,7 @@ export default function SuperMarketing() {
             <Field label="Engagement score">
               <div className="flex items-center gap-1">
                 <input className={SELECT_CLS + ' w-full'} placeholder="min" inputMode="numeric"
-                       title="Cached score — can lag the live Twenty value; see the club row's 'scored' timestamp"
+                       title="Cached score — can lag the live value; see the club row's 'scored' timestamp"
                        value={filters.engagement_score_gte}
                        onChange={(e) => setFilters(f => ({ ...f, engagement_score_gte: e.target.value }))} />
                 <span className="text-pb-faint">–</span>
@@ -1342,21 +1448,13 @@ export default function SuperMarketing() {
                      onChange={e => setOnlyTicked(e.target.checked)} />
               Only ticked contacts
             </label>
-            <button className={BTN} disabled={busy === 'twenty'} onClick={exportTwenty}
-                    title="Push the currently-filtered clubs and their officers into the Twenty CRM (idempotent — re-running skips unchanged records)">
-              {busy === 'twenty' ? 'Exporting...' : 'Export to Twenty'}
+            <button className={BTN} disabled={busy === 'engagement'} onClick={refreshEngagement}
+                    title="Recompute every club's engagement score from the latest usage, email and enquiry activity, and re-run the CRM stage promotion (runs nightly too)">
+              {busy === 'engagement' ? 'Rescoring...' : 'Refresh engagement scores'}
             </button>
             <button className={BTN} disabled={busy === 'push-crm'} onClick={pushToCrm}
                     title="Upsert the currently-filtered clubs directly into BetterCricket's own CRM pipeline at the 'Manually Added' stage (idempotent — re-running just advances the same deal)">
               {busy === 'push-crm' ? 'Pushing...' : 'Push to BetterCricket CRM'}
-            </button>
-            <button className={BTN} disabled={busy === 'twenty-refresh'} onClick={refreshTwentyEngagement}
-                    title="Recompute the engagement score for every club already in Twenty from the latest usage breadcrumbs (runs daily too)">
-              {busy === 'twenty-refresh' ? 'Refreshing...' : 'Refresh Twenty scores'}
-            </button>
-            <button className={BTN} disabled={busy === 'twenty-leads-tasks'} onClick={refreshTwentyLeadsTasks}
-                    title="Seed/refresh Leads from telemetry and raise follow-up Tasks (module requests, expiring trials, upcoming renewals) in Twenty (runs daily too)">
-              {busy === 'twenty-leads-tasks' ? 'Refreshing...' : 'Refresh Twenty leads/tasks'}
             </button>
             <button className={BTN} disabled={busy === 'supp'} onClick={syncSuppressions}>
               {busy === 'supp' ? 'Syncing...' : 'Sync suppressions'}

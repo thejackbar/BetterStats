@@ -10,15 +10,15 @@ that table is the queue of clubs asking to be onboarded, and somebody who has
 signed up to watch a demo has not asked for that. Mixing them would put a
 hundred curious registrants in front of the staff who work the onboarding list.
 
-Revision ID: 295
-Revises: 294
+Revision ID: 296
+Revises: 295
 """
 from alembic import op
 
 from app.services.webinar_ddl import DOWNGRADE, STATEMENTS
 
-revision = "295"
-down_revision = "294"
+revision = "296"
+down_revision = "295"
 branch_labels = None
 depends_on = None
 

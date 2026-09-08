@@ -11,7 +11,9 @@ const STATUS_STYLE = {
   dismissed:   'bg-pb-surface2 text-pb-faint border-pb-hairline',
 }
 const KIND_LABEL = { trial: 'Trial', subscribe: 'Subscribe', cancel: 'Cancel' }
-const SOURCE_LABEL = { app: 'In-app', super_admin: 'Super admin', twenty: 'CRM (Twenty)' }
+// 'twenty' is a legacy stored value from the retired external CRM — still
+// labelled so an old row reads, never written any more.
+const SOURCE_LABEL = { app: 'In-app', super_admin: 'Super admin', twenty: 'External CRM (retired)' }
 
 function fmtDate(iso) {
   if (!iso) return '—'

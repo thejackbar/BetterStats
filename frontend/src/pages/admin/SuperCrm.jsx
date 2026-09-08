@@ -231,7 +231,8 @@ const CHANNEL_LABELS = {
   manual: 'Manual',
   auto_enquiry: 'Auto (enquiry)',
   auto_trial: 'Auto (trial)',
-  twenty_import: 'Twenty import',
+  // Legacy stored value from the retired external CRM's one-off cutover.
+  twenty_import: 'Imported (legacy CRM)',
 }
 const channelLabel = (v) => CHANNEL_LABELS[v] || v
 

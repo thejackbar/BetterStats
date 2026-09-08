@@ -17,7 +17,7 @@ org status is live it returns the whole override list, else Core only. Everythin
 downstream reads through it (`require_module`, `/auth/me` `entitlements`,
 `hasModule` on the frontend).
 
-The gap is already flagged in code at `services/twenty_sync.py` ("subscription_status
+The gap is already flagged in code at `services/engagement.py` ("subscription_status
 is still org-wide here, a true per-module subscribed/trial split needs the org model
 change discussed in the brief"). A club paying for Core + BetterSelect while trialing
 BetterIQ cannot be represented: the whole club reads as either trial or active, so its
@@ -163,7 +163,7 @@ Backend:
 - new club-admin endpoints to raise a trial / subscription request (capability + primary
   gate), feeding the queue and bumping `marketing_clubs.requested_trial_modules` so interest
   shows in Twenty.
-- `twenty_sync.py`: compute `paidModules` / `trialModules` / `arr` per module from the new
+- `engagement.py`: compute `paidModules` / `trialModules` / `arr` per module from the new
   table instead of the org-wide flag (resolves the existing TODO).
 - a light daily job to push trial lapses to Twenty + notify (entitlement itself is read-time).
 

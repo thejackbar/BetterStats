@@ -1,5 +1,145 @@
 # BetterStats — Claude Session Notes
 
+## Twenty is retired; the engagement score, the CRM and Sales Management are not (v9.71.0, Sep 2026)
+
+Asked for directly: *"the calculation and continual re-calculation of engagement
+score and updating of CRM, and Sales Management functions is essential and both
+manual export and background updating functions for CRM, Sales Management and
+Club Directory must be preserved whilst retiring Twenty and its points of
+integration."*
+
+- **THE NIGHTLY RESCORE HAD SILENTLY STOPPED, AND FINDING THAT IS WHAT MADE
+  THIS URGENT RATHER THAN TIDY-UP.** `refresh_twenty_engagement` returned
+  immediately when Twenty was unconfigured and only ever touched clubs already
+  in `twenty_links` — so the moment Twenty went away, NOTHING rescored anything
+  platform-wide and every cached `marketing_clubs.engagement_score` froze
+  wherever it was last incidentally touched. The Club Directory, BetterComms
+  Lists/Segments, the CRM board and the Sales Workspace all read that cached
+  number, so four surfaces were quietly reading a stale one.
+- **`crm.recalc_all_engagement` IS THE ONE SWEEP, and three callers share it**:
+  the nightly job (`daily_engagement_rescore`), the Club Directory's
+  `POST /refresh-engagement`, and `python -m app.scripts.recalc_engagement`.
+  The script keeps its histograms and percentiles through an `on_club`
+  callback rather than a loop of its own — two copies of "rescore the whole
+  directory" is how the button and the cron start disagreeing about what a
+  score is.
+- **THE ENGINE WAS NEVER TWENTY'S; ONLY ITS FILENAME WAS.** `_engagement` is a
+  local read/compute over `usage_events` / `email_events` / our own
+  subscription rows that CACHES onto the club row — Twenty was one reader of
+  the result. So the move is `git mv services/twenty_sync.py
+  services/engagement.py` and strip, NOT an extraction: that file is 1,000
+  lines of dense reasoning about the scoring, and lifting 900 of them into a
+  new file is how the comments get lost.
+- **A `from x import y` INSIDE A FUNCTION BODY COMPILES, IMPORTS, AND STILL
+  BREAKS.** Three subscription hooks imported `_push_club_to_twenty` lazily
+  inside their own bodies — `billing.py` (a club adds modules to a live
+  subscription), `stripe_billing.py` (**a Stripe payment lands**) and
+  `organisations.py` (a club's first sync completes). `py_compile`, the import
+  smoke test and `vite build` all pass on every one of them; each would have
+  raised the first time a club actually paid for something. The suite checks
+  the call sites structurally for exactly this reason.
+- **`organisations.py` HAD BEEN CALLING A HELPER THAT NO LONGER EXISTED AT
+  ALL** — the local `_push_club_to_twenty` was deleted and its call site left
+  behind, a bare NameError on the club's first sync. It calls
+  `club_admin._sync_club_to_crm` now, which is the right answer anyway: that
+  helper links the directory row AND rescores, which is what "we synced the
+  club, show it in the CRM straight away" meant.
+- **A SEND STILL RESCORES THE CLUBS IT REACHED**, and that is the one place the
+  retirement changed a behaviour rather than a name: the rescore used to happen
+  as a SIDE EFFECT of pushing to Twenty. It is called directly now, per club,
+  on its own session, so a BetterComms outreach send moves the engagement score
+  immediately instead of waiting for the nightly sweep.
+- **`twenty_links` IS LEFT IN PLACE AND READ BY NOTHING**, the call migration
+  267 made for `vote_settings` — but the lifespan no longer CREATES it, so a
+  fresh database simply does not have it. Same for
+  `club_request_events.twenty_task_id`/`.twenty_task_status` and
+  `crm_deals.source = 'twenty_import'`: stored values and history, never
+  written again, and the ORM keeps mapping them so an existing row still reads.
+- **THE PIPELINE GAUGE WENT WITH IT.** `routers/pipeline_gauge.py` rendered
+  widgets for a Twenty dashboard iframe at `twenty.betterat.cricket`, reading
+  Twenty's own `/rest/opportunities` — both ends gone, and the internal Sales
+  Performance / Sales Commissions screens already answer the same question. Its
+  two `GAUGE_*` settings went with it.
+- **`OPPORTUNITY_AUTO_THRESHOLD` STILL EXISTS AND NOW MEANS SOMETHING WEAKER,
+  so the copy says so.** Nothing auto-creates anything at 90 any more; it is a
+  reporting line the parameters page and its preview count against ("Reads as
+  an opportunity at"). Leaving the old label would have promised an automation
+  that no longer runs.
+- **A COMMENT THAT JUSTIFIES ITSELF BY A RETIRED SYSTEM GOES STALE WITH IT.**
+  `trial_lifecycle`'s docstring explained its own design as "unlike the Twenty
+  scan, this runs whether or not Twenty is configured" — true, and meaningless
+  once there is no Twenty scan to be unlike. Corrected in place rather than
+  left to mislead the next reader; same for `engagement_params`' user-facing
+  group blurb and `models/db.py`'s column comments.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_twenty_retirement.py`, 57 checks — 11 retired
+  modules gone, 9 retired settings gone, no retired route on either side of the
+  wire, the three subscription hooks calling something that EXISTS, and then
+  the half that matters: the score computed AND cached, the sweep reaching
+  every club with the busy one outscoring the club nobody has visited, a dry
+  run writing nothing, a single club rescoring on its own signal without
+  touching its neighbour, and the operator script running the shared sweep
+  rather than a second copy, and thirteen CRM / Sales / Super Admin / Reporting
+  route bodies answering) **with two control runs**: 35 of the 40 reachable
+  checks fail against the pre-retirement commit, and against the commit that
+  had lost the three shared helpers, 5 fail naming them and the three buttons
+  they break.
+- **THE EXPORT BLOCK TOOK THREE SHARED HELPERS WITH IT, AND NOTHING NOTICED —
+  found by auditing rather than by the suite.** `_now_iso`, `_settle_bg` and
+  `_bg_stale` sat inside the Twenty-export region of `marketing.py` and are
+  called by **Rediscover, Push to BetterCricket CRM and the engagement rescore**.
+  The module still imported, `vite build` passed, the route strings were all
+  still there, and every one of those three buttons would have raised
+  `NameError` the first time it was pressed. **A structural check for a route's
+  presence is not a check that the route RUNS**: the suite presses all three
+  and their pollers now, and `undefined_names()` walks the whole backend for a
+  name a module uses and never defines — the one check that catches a helper
+  deleted along with the block it lived in.
+- **THE ROUTE TABLE IS THE HONEST DIFF, and it was taken both ways.** Dumping
+  `app.openapi()` on this commit and on the previous one and diffing names
+  exactly 10 removed routes, every one Twenty-only (3 export/refresh pairs, 4
+  gauge, 2 webhooks), against 2 added. No CRM, Sales, Super Admin, Reporting or
+  Directory route lost. Repeat that dump whenever a retirement removes code.
+- **THE SUITE NOW PRESSES THIRTEEN REAL SURFACES** — the CRM board, its stages,
+  deals, events and settings, Wizard Clubs, commissions and periods, the Sales
+  Workspace queue, the rep team, Sales Performance and the ad-signup report —
+  because "nothing was removed" and "everything still answers" are different
+  claims and only the second one is what a club notices.
+- **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN.** The first cut died on
+  `from app.services import engagement` and said nothing about the twenty-odd
+  behavioural checks below it. The behavioural half now REPORTS the engine or
+  the sweep as missing and returns; each button press is wrapped for the same
+  reason, so a `NameError` in a route body is a named failure rather than the
+  end of the run.
+- **A CHECK THAT MATCHES MORE THAN IT MEANS IS NOT A CHECK.** "the script keeps
+  no loop of its own" scanned the whole file and caught the `--verify`
+  equivalence checkers, which legitimately need one. It reads `recalc()`'s own
+  body through `inspect.getsource` now.
+- **TWO HARNESS ARTEFACTS, BOTH DOCUMENTED TRAPS HIT AGAIN**: a raw
+  `UPDATE ... SET engagement_score = NULL` left the ORM's in-memory copy stale,
+  so the sweep loaded a club that still LOOKED scored and wrote nothing; and
+  `expire_all()` then handing that instance to a service lazy-loads on its
+  first attribute read, which is the MissingGreenlet trap. `refresh`, don't
+  expire, when the object is about to be passed on.
+- **`usage_events`, `platform_settings` AND `marketing_utm_aliases` ARE
+  LIFESPAN-CREATED RAW SQL**, invisible to `create_all`, and every column added
+  since each was written lives in its own later ALTER — including the
+  loop-driven ones whose `(column, type)` pairs sit in a tuple an f-string
+  reads. The suite pulls the CREATE **and** every ALTER out of the shipped
+  `main.py` rather than retyping them, so a table that merely LOOKS right
+  cannot pass.
+- **RENUMBERED 293 -> 295.** `origin/main` reached 294 while the Rediscover work
+  was in flight, and its own 293 was a different migration entirely — two
+  sharing a revision id break Alembic outright. **This file has now recorded
+  that trap five times: check `origin/main` at the moment you merge, not only
+  when you first number one.** The v9.70.0 changelog entry collided the same
+  way and became v9.70.3.
+- **NOTICED, NOT DONE**: `twenty_links` still exists on the live database with
+  its history in it — dropping it is a decision for a person, not a deploy. The
+  five Twenty-era docs are kept as the record of what was built, with a
+  retirement banner on `docs/twenty-crm-integration.md`; the changelog entries
+  that describe the Twenty era are untouched for the same reason.
+
 ## NEVER DELETE OR OVERWRITE WHAT A CLUB TYPED IN BY HAND (v9.68.2, Sep 2026)
 
 **Set as a standing rule, after a merge deleted half a player's career.** A
@@ -56,7 +196,7 @@ import re-writes the same matches (deterministic `cricketstatz_match_id`, and
 that was kept. A club's hand-typed history has no such path, which is the whole
 reason for the rule.
 
-## THE CONVERSION CANNOT FIRE ON STREAMYARD'S DOMAIN (migration 295, v9.71.0, Sep 2026)
+## THE CONVERSION CANNOT FIRE ON STREAMYARD'S DOMAIN (migration 296, v9.71.1, Sep 2026)
 
 Asked for with a paused Meta campaign waiting on it: a page on `betterat.cricket`
 that fires `CompleteRegistration` on a successful webinar registration and only
@@ -192,7 +332,124 @@ then hands the visitor the StreamYard link. Webinar Mon 21 Sep 2026.
   event is one constant, so a second webinar means editing both copies rather
   than picking a row — `event_key` is on the table from the start for whenever
   that becomes worth a screen.
+## The Club Directory's committee only ever grew (migration 295, v9.70.0, Sep 2026)
 
+Asked for directly: a Rediscover that re-reads what PlayHQ publishes for every
+club (and for one named club), prunes the officers it no longer lists, ticks
+every officer with an email, leaves departed officers in BetterComms, and
+updates the role of a contact already there.
+
+- **DISCOVERY WAS ADDITIVE AND NOTHING SAID SO.** `_store_contact` upserts on
+  lower(email) and has never removed a row, so a club that elected a new
+  committee read as last season's officers PLUS this season's, with nothing on
+  screen separating them. `crawl_batch` could not have fixed it either — its
+  discovery phase only runs `if total == 0 or rediscover`, and the UI's Run
+  crawl batch button has never sent `rediscover`, so on a populated directory
+  that button does association enrichment ONLY.
+- **A REDISCOVER IS THE SAME DISCOVERY PASS WITH TWO FLAGS, not a second
+  reader.** `discover_clubs(prune=True, retick=True)`. Two copies of "read a
+  club's committee" is how the nightly pass and the operator's button start
+  disagreeing about what a committee is.
+- **THE ROLE IS RESOLVED WITHIN THE PAYLOAD BEFORE ANYTHING IS WRITTEN, which
+  is what makes replacing it safe.** The old rule was improve-only
+  (`if role_rank < existing.role_rank`) for a real reason: one person
+  legitimately appears twice in one payload (Secretary AND Junior Coordinator on
+  one address) and the club should read as the senior. That is now decided in
+  `_upsert_club` over the whole payload, so a Rediscover can then REPLACE the
+  stored role outright — a Secretary who is now Treasurer reads as Treasurer.
+  The ordinary crawl stays improve-only.
+- **DELETING AN UNSUBSCRIBED OFFICER IS THE ONE THING THIS MUST NOT DO, and it
+  is the whole reason `former_at` exists.** Delete the row and the next crawl
+  re-adds them from PlayHQ as a fresh contact — subscribed, and ticked under the
+  new rule — and we email somebody who opted out. So `_prune_committee` DELETES
+  only where nothing a person decided would go with the row, and KEEPS the rest
+  unticked with `former_at` stamped: an unsubscribe, a bounce, a
+  `do_not_contact`, a note, or a `crm_people` link (migration 255's bridge is
+  ON DELETE SET NULL, so a delete would not destroy the CRM person but would
+  silently cut the link).
+- **THREE ROWS ARE NEVER CANDIDATES AT ALL**: a contact a super admin added by
+  hand (`source='manual'` — PlayHQ never listed it, so its absence says
+  nothing), the org-level club mailbox, which comes from `discover_org_contact`
+  rather than the committee list and is the only row carrying
+  `_CLUB_CONTACT_RANK`, and anything at `_HAND_ADDED_RANK`. The suite asserts
+  both ranks are unreachable from `_role_for_position`, so neither
+  identification can go stale.
+- **`sales_workspace.add_directory_contact` WROTE `source='api'`, so the first
+  cut of the prune DELETED A PERSON A REP HAD TYPED IN.** Found by asking
+  whether the CRM needed a push, not by the suite — the drawer writes through
+  `_store_contact`, which hardcoded the source, so a Workspace-added contact was
+  indistinguishable from a crawled officer and only survived if it happened to
+  carry a note, an opt-out or a logged call. It stores `'manual'` now, and rank
+  99 covers every row written before the fix: `_role_for_position` returns only
+  1/2/3/4/5/10/50/60, so 99 cannot have come from a crawl. **The control run is
+  what showed the size of it** — with both halves reverted, both Workspace
+  contacts are gone.
+- **`contacts` ABSENT AND `contacts: []` ARE DIFFERENT ANSWERS.** Present-but-
+  empty is a club that publishes no committee and everything prunable goes;
+  absent or null is a payload that said nothing, and prunes nobody — an upstream
+  shape change must not be able to empty the whole directory in one pass.
+- **A LISTED OFFICER WITH AN EMAIL IS TICKED, and the insert default changed
+  from `rank <= 4` to "has an email"** — a Junior Coordinator with an address is
+  as emailable as a Treasurer. Never a contact who unsubscribed, bounced or
+  asked not to be contacted: ticking those shows a super admin a recipient who
+  can never be sent to. **An ordinary crawl still never re-ticks somebody a
+  super admin unticked** (`retick=False`), or the nightly pass would fight the
+  operator; only the explicit Rediscover and the explicit "Tick officers with an
+  email" button apply the rule to existing rows.
+- **THE EXPORT UPDATES RATHER THAN SKIPS.** `export_to_comms` used to stamp
+  `exported_at` on an address already in BetterComms and move on, so an officer
+  who changed role kept the role they held when they were first exported.
+  `comms_contacts.role` is refreshed now; a blank name and a missing club link
+  are filled; a name set by hand on the comms side is never overwritten and a
+  suppressed address is never resurrected.
+- **`comms_contacts.role` IS A STORED COPY ON PURPOSE, against this file's own
+  derive-don't-store instinct.** A departed officer is pruned from the Directory
+  and KEPT in BetterComms — that is what was asked for — so a join back to
+  `marketing_club_contacts` would blank exactly the people the feature exists to
+  preserve. It is the last role we knew them by, which is the honest reading.
+  It is also what makes Role a filter facet on Lists and Segments.
+- **ONE CONTACT SERIALISER.** `list_clubs` had its own copy of `_contact_out`'s
+  dict, so `former` would have reached the club card and not the list. It calls
+  the shared one now, and the suite asserts there is exactly one copy.
+- **`emptyFilters` IS THE ONE FACET SHAPE.** `CommsLists.jsx` kept its own
+  `noFilters` literal, which silently drops any facet added to the kit — Role
+  was added to the kit.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_committee_rediscover.py`, 91 checks through the
+  shipped service and route bodies with the PlayHQ client stubbed: migration 295
+  applied three times to a populated pre-293 table seeded in RAW SQL — the ORM
+  model already carries the columns, so a row inserted through it could not be a
+  pre-293 row — the ordinary crawl still additive and still not re-ticking, the
+  role replaced on a rediscover and improve-only otherwise, one person listed
+  twice, all five retained cases marked and unticked, the manual row and the org
+  mailbox untouched, a returning officer clearing `former_at` without being
+  re-ticked, both upstream-shape guards, one named club matched on its GUID
+  rather than a name two clubs share and found by routingCode after a rename, an
+  unreachable PlayHQ reading as a fetch failure rather than an empty committee, a
+  stopped crawler stopping the run, the ticking rule and its four exclusions, and
+  the export updating a role while never resurrecting a suppressed address)
+  **with two control runs**: with the whole feature absent the suite REPORTS it
+  and bails rather than dying on the ImportError; with the prune, the retick and
+  the role refresh neutered, 24 of the 91 fail — the departed officer still
+  listed and the comms role stuck on the old one, which is the reported symptom.
+- **THE POLITENESS DOC WAS STALE AND IS CORRECTED IN PLACE.**
+  `docs/marketing-club-directory.md` said "a jittered 2 to 4s delay"; the shipped
+  defaults are `marketing_crawl_min_delay=15.0` / `_max_delay=40.0`, applied
+  BEFORE each request behind a module-level `asyncio.Semaphore(1)` that every
+  directory call queues on. ~6,900 AU clubs at 100 per page is ~70 requests, so a
+  full Rediscover is roughly half an hour to an hour, not the "hours" the first
+  cut of the UI copy claimed. A single-club Rediscover uses the short
+  interactive delay (0.2-0.7s) `discover_org_contact` already uses for the
+  self-serve registration lookup.
+- **NUMBERED 293, NOT 291.** `origin/main` had reached 292 while this was in
+  flight. Check `origin/main` at the moment you merge, not only when you first
+  number one — this file has now recorded that trap four times.
+- **NOTICED, NOT BUILT**: there is no `role` SEGMENT field (Role is a Lists and
+  Segments facet, not a saved-rule condition — that needs its own entry in
+  `comms_segments`' registry); nothing prunes a `former_at` contact later, which
+  is deliberate, since the whole reason those rows survived is that somebody
+  decided something about them; and the nightly discovery pass still runs
+  additive, so the reconcile only happens when an operator asks for it.
 ## A club decides what it is told about (migration 288, v9.69.0, Sep 2026)
 
 Asked for as a configurable notification system a club admin manages — emails
@@ -7879,6 +8136,89 @@ simply not run, and nothing anywhere said so.
   reporting whether or not anything changed, and the nightly retry registered)
   and the four real seasons replayed end to end through the shipped
   `reconcile_org` and the shipped script: 706 games -> 404, 302 pairs written.
+
+### AN OLDER DEFINITION CAN NO LONGER REPLACE THE VIEW (v9.70.10, Sep 2026)
+
+Reported plainly, after four rounds of diagnosis: *we should just be fixing the
+duplicates.* Right. The duplicate logic was correct and verified; what kept
+bringing them back was a process on the server rewriting two view definitions,
+and an hourly repair only puts them back AFTER a club has seen the wrong
+figure.
+
+- **THE OVERWRITE SUCCEEDS ONLY BECAUSE THE COLUMN LISTS MATCH.** The pairing
+  clause is a join and a WHERE, so our `v_effective_games` has exactly the
+  columns a 266-era definition has, and `CREATE OR REPLACE VIEW` accepts it
+  without a word. A 169-era one, which lacks `status`, already fails with
+  `cannot drop columns from view` — the failure this whole hunt was read off.
+- **SO BOTH VIEWS NOW CARRY `pairing_applied`, a column no older definition
+  has.** `CREATE OR REPLACE VIEW` can append a column and cannot drop one, so
+  ours replaces what is there and nothing older can replace ours. The overwrite
+  fails loudly in the database log instead of silently doubling a career.
+  Nothing selects `*` from either view and nothing depends on them, both
+  checked before adding it.
+- **THE DOWNGRADE HAS TO DROP FIRST**, for the same reason — a `CREATE OR
+  REPLACE` back to the pre-pairing shape is exactly what is now refused. Same
+  call migration 266's downgrade already had to make.
+- **THE HOURLY REPAIR STAYS.** It is the net for a database that was already
+  overwritten before this shipped, and for anything that drops and recreates
+  rather than replacing. Belt and braces, not one or the other.
+- **AND THE SUITE PROVES THE GUARD RATHER THAN DESCRIBING IT**: it takes the
+  pre-pairing definition out of `DOWNGRADE`, turns it back into a `CREATE OR
+  REPLACE`, applies it, and asserts it is REFUSED and the clause survives.
+  Three harness sites that used to break a view by replacing it now have to
+  drop it first, which is itself the guard working.
+- **Verified against a real Postgres** (the suite is 304 checks) and every
+  neighbouring suite re-run against the changed views: club records 93, match
+  coverage 66, competitions 136, rate coverage 105, season fold 65, shared
+  fixtures 38, retired not out 71, boundary counts 27.
+- **STILL NOT ESTABLISHED, and now it does not matter as much**: which process
+  writes the old definitions. It will announce itself in the database log the
+  next time it tries, and a club's figures no longer depend on finding it.
+
+### IT WAS OUR OWN BOOT PATH, TWO THOUSAND LINES LATER (v9.70.11, Sep 2026)
+
+`app/main.py` applies the superseded views at **line 4319** and verifies them
+three lines on — which is why the boot honestly logged `8 of 8`. At **line
+5786** the migration 266 mirror loads that migration's module by file path and
+re-executes `EFFECTIVE_GAMES_WITH_STATUS` and `SEASON_STATS_NET_OF_UNPLAYED`:
+266's own, pre-pairing definitions of the same two views. Every boot, on every
+club holding both sources, that put the duplicates straight back.
+
+- **IT SUCCEEDS SILENTLY BECAUSE THE COLUMN LISTS MATCH.** The pairing clause
+  is a join and a WHERE, not a column, so 266's version has exactly the columns
+  ours has and `CREATE OR REPLACE VIEW` takes it without a word. The six
+  per-innings views were never touched because 266 does not define them — which
+  is the "six current, two stale" state that matches no version of this code
+  and sent four rounds of diagnosis looking for an external process.
+- **THE FIX IS ORDER OF OWNERSHIP, NOT A GUARD.** `superseded_ddl` owns both
+  views now, so the mirror applies 266's COLUMN and INDEX and nothing else. The
+  module that owns them guarantees `games.status` itself, since it runs first.
+- **THE GUARD COLUMN WAS THE WRONG ANSWER AND IT TOOK THE SITE DOWN.** Adding a
+  column no older definition has makes the overwrite fail loudly instead of
+  silently — sound reasoning, and it turned a silent revert into a crash-loop
+  at boot, because the process doing the overwriting was ours. Reverted within
+  minutes. **A guard that converts a silent failure into a hard one has to be
+  preceded by knowing who trips it.**
+- **AND THAT CRASH IS WHAT NAMED IT.** Four rounds of instrumenting the app,
+  reading the database log and chasing a second compose project found nothing;
+  one hard failure printed the offending statement and the traceback pointed at
+  the lifespan. Worth remembering both ways: the guard was premature AND it
+  answered the question.
+- **THE GREP THAT MISSED IT.** `grep "v_effective_games" app/main.py` returns
+  one comment — the SQL lives in the migration file and main.py only names the
+  CONSTANTS. **Searching a lifespan for a view's own name is not enough when a
+  mirror imports its statements.** Search for what executes, not only for what
+  is written.
+- **The hourly `repair_effective_views` (v9.70.8) stays.** It is the net for a
+  database already overwritten, and for anything that drops and recreates
+  rather than replacing.
+- **Verified against a real Postgres** (the suite is 305 checks: the mirror no
+  longer naming either view, still applying the column and index, and the
+  owning module guaranteeing that column itself) **with a control run**: with
+  the two view statements put back in the mirror, the check fails. Every
+  neighbouring suite re-run: club records 93, match coverage 66, competitions
+  136, rate coverage 105, season fold 65, shared fixtures 38, retired not out
+  71, boundary counts 27.
 
 ### AND POSTGRES'S OWN LOG NAMED THE SHAPE OF IT (v9.70.8, Sep 2026)
 

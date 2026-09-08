@@ -1554,7 +1554,7 @@ async def start_trial(
 ):
     """The salesperson's equivalent of Super Admin -> All Clubs -> New Club —
     reuses that exact flow (org creation, first sync, every-module trial,
-    Primary Admin invite email, Twenty push) rather than a second
+    Primary Admin invite email, CRM sync) rather than a second
     implementation, called directly with this rep as the acting user. Scoped
     to a club already in the rep's own queue (can't spin up an arbitrary new
     org) and refuses if it's already registered or has no real CA id on file.

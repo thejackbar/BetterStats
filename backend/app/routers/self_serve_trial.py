@@ -751,27 +751,14 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
         from app.services.admin_contact_list import queue_sync as queue_admin_contact_sync
         queue_admin_contact_sync(org.id)
 
-        # Best-effort, backgrounded: land the club + registering admin in
-        # Twenty as a Company/Contact/Lead/Opportunity immediately (per the
-        # user's explicit call — a self-serve registration is the strongest
-        # buying signal there is, stronger even than a direct "onboard my
-        # club" enquiry, so it doesn't wait on the nightly refresh or a human
-        # flipping Twenty's own createOpportunity field). Never raises;
-        # a CRM hiccup can't undo the registration that already committed.
-        from app.services import twenty_sync
-        background_tasks.add_task(
-            twenty_sync.push_self_serve_registration,
-            org_id=org.id, org_name=name, contact_name=user.display_name,
-            email=email, phone=user.mobile_number or None, modules=list(requested_modules),
-        )
-        # Same signal, BetterCricket's own pipeline: pin the local platform
-        # deal to Trial / Self-Serve Trial onboarding method / $399 base value
-        # (see crm.sync_self_serve_trial_deal's own docstring for why value
+        # Best-effort, backgrounded: pin the platform deal to Trial /
+        # Self-Serve Trial onboarding method / $399 base value (see
+        # crm.sync_self_serve_trial_deal's own docstring for why the value
         # stays at the Stats base rather than every trialled module's price).
-        # Deliberately a SEPARATE background task from the Twenty push above,
-        # not nested inside it — push_self_serve_registration no-ops entirely
-        # when Twenty isn't configured, and this local sync must not inherit
-        # that gate.
+        # A self-serve registration is the strongest buying signal there is, so
+        # the pipeline reflects it immediately rather than at the nightly
+        # sweep. Never raises; a CRM hiccup can't undo the registration that
+        # already committed.
         from app.services import crm as crm_service
         background_tasks.add_task(
             crm_service.sync_self_serve_trial_registration,

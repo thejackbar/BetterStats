@@ -57,9 +57,9 @@ _STR_KEYS = {"webinar_recording_url"}
 _STR_MAX_LENGTH = 500
 
 # How long a direct "onboard my club" website enquiry (Contact page or the quick
-# CTA modal) holds a prospect at a flat Hot 100 Twenty engagement score before it
+# CTA modal) holds a prospect at a flat Hot 100 engagement score before it
 # decays back to the ordinary recency/frequency formula — see
-# twenty_sync._engagement. A plain in-repo default (not an env var): this is a
+# engagement._engagement. A plain in-repo default (not an env var): this is a
 # commercial/marketing parameter a super admin tunes from General Settings, not
 # server configuration.
 DEFAULT_DIRECT_ENQUIRY_HOT_DAYS = 60
@@ -211,7 +211,8 @@ async def get_default_trial_days(db: AsyncSession) -> int:
 
 async def get_direct_enquiry_hot_days(db: AsyncSession) -> int:
     """How many days a direct onboarding enquiry holds a prospect at Hot 100 in
-    Twenty, or DEFAULT_DIRECT_ENQUIRY_HOT_DAYS when unset/invalid."""
+    the engagement engine, or DEFAULT_DIRECT_ENQUIRY_HOT_DAYS when
+    unset/invalid."""
     settings = await get_settings(db)
     try:
         days = int(settings.get("direct_enquiry_hot_days"))

@@ -1,4 +1,3 @@
-import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
@@ -23,24 +22,7 @@ from app.auth.capabilities import require_cap, RUN_SYNC
 router = APIRouter(prefix="/organisations", tags=["organisations"])
 
 _org_sync_running: set = set()
-_background_tasks: set = set()
 logger = logging.getLogger(__name__)
-
-
-def _push_club_to_twenty(org_id) -> None:
-    """Fire-and-forget: push one club's Company fields to Twenty. No-op when
-    Twenty isn't configured; never raises into the request (mirrors
-    club_admin.py's identical helper — kept local since routers don't share
-    request-scoped helpers)."""
-    async def _run():
-        try:
-            from app.services import twenty_sync
-            await twenty_sync.push_org_company(org_id)
-        except Exception:
-            logger.exception("twenty push failed")
-    task = asyncio.create_task(_run())
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
 
 
 class OnboardRequest(BaseModel):
@@ -132,7 +114,7 @@ async def _onboard_club_core(
     # revisits this club (club_directory._link_existing_org), which could be
     # days away. Same matching priority (PlayHQ id, then name), reversed to look
     # up FROM the org. Best-effort: a club that isn't in the directory at all is
-    # a normal no-op. Pushing to Twenty now (rather than waiting for the nightly
+    # a normal no-op. Rescoring now (rather than waiting for the nightly
     # refresh) is what makes "we synced the club" show up in the CRM lifecycle/
     # engagement score right away.
     mc = await db.scalar(
@@ -145,7 +127,10 @@ async def _onboard_club_core(
     if mc is not None:
         mc.existing_org_id = org.id
         await db.commit()
-        _push_club_to_twenty(org.id)
+        # club_admin's own helper: links the directory row and re-runs the
+        # score-based CRM promotion on its own session, after our commit.
+        from app.routers.club_admin import _sync_club_to_crm
+        _sync_club_to_crm(org.id)
 
     return org, run_id, name
 

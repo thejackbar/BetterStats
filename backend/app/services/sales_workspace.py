@@ -294,12 +294,20 @@ async def add_directory_contact(
 ) -> MarketingClubContact:
     """A new person added from the Workspace drawer — writes straight to the
     canonical Club Directory table via the same upsert helper the crawler
-    and the Directory screen itself use, so it's indistinguishable from a
-    directory-sourced contact afterwards."""
-    from app.services.club_directory import _store_contact
+    and the Directory screen itself use, so it reads as an ordinary directory
+    contact afterwards.
+
+    Stored ``source='manual'``, and that is not cosmetic: a Rediscover
+    (migration 295) reconciles the crawled committee against what PlayHQ
+    publishes and prunes ``'api'`` rows it no longer lists. This wrote 'api'
+    until then, which would have let a later Rediscover delete a person a rep
+    had typed in. Rows written before the fix are still spared, by their rank —
+    see club_directory._HAND_ADDED_RANK."""
+    from app.services.club_directory import _store_contact, _HAND_ADDED_RANK
     await _store_contact(
         session, marketing_club_id, full_name=full_name, role=role or "Contact",
-        role_rank=99, email=email, phone=mobile, selected=True,
+        role_rank=_HAND_ADDED_RANK, email=email, phone=mobile, selected=True,
+        source="manual",
     )
     await session.flush()
     email_norm = (email or "").strip().lower()
@@ -514,12 +522,13 @@ async def _move_to_stage_key(session: AsyncSession, deal: CrmDeal, stage_key: st
     await session.flush()
 
 
-# The one-off Twenty pipeline cutover backfill (app/scripts/
-# import_twenty_pipeline.py) writes a "system" entry per club it touched
-# ("Imported from Twenty (...): stage=...") and a "note" entry per Twenty
-# Opportunity note it pulled in — both stamped with one of these meta keys.
-# The Sales Workspace's own History/Notes never show either: a rep's
-# timeline is what THEY did, not what a retired CRM's board once said.
+# The one-off pipeline cutover backfill from the retired external CRM wrote a
+# "system" entry per club it touched ("Imported from Twenty (...): stage=...")
+# and a "note" entry per Opportunity note it pulled in — both stamped with one
+# of these meta keys. The script itself is gone; ITS ROWS ARE STILL IN THE LIVE
+# DATABASE, which is why these keys must stay. The Sales Workspace's own
+# History/Notes never show either: a rep's timeline is what THEY did, not what
+# a retired CRM's board once said.
 _TWENTY_IMPORT_META_KEYS = ("twenty_kind", "twenty_note_id")
 
 
@@ -673,7 +682,7 @@ async def meta_ad_summary(session: AsyncSession, club) -> Optional[dict]:
     last Tuesday" is what a rep opens a call with. Returns None when the club
     has no ad-attributed traffic at all, so the card simply doesn't draw.
 
-    A click is detected exactly as the score detects it — twenty_sync's
+    A click is detected exactly as the score detects it — engagement's
     ``_META_CLICK``, an fbclid/igshid on the stored URL — rather than a second
     rule that could disagree with the number beside it. Attribution mirrors
     ``_engagement``'s own two branches: the pre-stamped resolved club for a
@@ -682,7 +691,7 @@ async def meta_ad_summary(session: AsyncSession, club) -> Optional[dict]:
     """
     if club is None:
         return None
-    from app.services.twenty_sync import _META_CLICK
+    from app.services.engagement import _META_CLICK
 
     rows = (await session.execute(text(f"""
         SELECT ue.created_at, ue.path, ue.landing_path,

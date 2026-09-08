@@ -98,6 +98,11 @@ _OFFICE_BEARERS = {
 _COORDINATOR_RE = re.compile(r"COOR?DINATOR")
 _COORDINATOR_RANK = 10
 _CLUB_CONTACT_RANK = 5    # the org-level generic club mailbox (just below office bearers)
+# The rank sales_workspace.add_directory_contact stamps on a contact a rep types
+# into the Workspace drawer. Unreachable from _role_for_position (which returns
+# 1/2/3/4/5/10/50/60), so it identifies a hand-added row even where `source` was
+# written as 'api' — which it was, until migration 295's Rediscover shipped.
+_HAND_ADDED_RANK = 99
 _OTHER_RANK = 50          # any other named committee position
 _UNLABELLED_RANK = 60     # a contact with no position at all
 # Contacts at or above this rank are pre-selected for outreach by default; the
@@ -156,12 +161,38 @@ def _full_name(contact: dict) -> Optional[str]:
 
 async def _store_contact(session: AsyncSession, club_id, full_name: Optional[str],
                          role: str, role_rank: int, email: Optional[str],
-                         phone: Optional[str], selected: Optional[bool] = None) -> None:
-    """Upsert one committee contact, deduped on lower(email) per club. A re-crawl
-    refreshes name/phone and fills a better role but never overrides the manual
-    ``outreach_selected`` choice on an existing row. Contacts with no email are
-    kept (phone-only), deduped on (club, full_name) so a re-crawl doesn't pile up.
-    New rows are pre-selected for outreach when they're office bearers."""
+                         phone: Optional[str], selected: Optional[bool] = None,
+                         replace_role: bool = False, retick: bool = False,
+                         source: str = "api"):
+    """Upsert one committee contact, deduped on lower(email) per club. Contacts
+    with no email are kept (phone-only), deduped on (club, full_name) so a
+    re-crawl doesn't pile up. Returns the row's id (None when there was nothing
+    to key on), which is what lets a Rediscover reconcile against the set it
+    just saw.
+
+    ``replace_role`` is what a Rediscover passes: the role becomes what PlayHQ
+    publishes TODAY, so a Secretary who is now Treasurer reads as Treasurer. The
+    ordinary crawl leaves it improve-only, because one person legitimately
+    appears several times in one payload (Secretary AND Junior Coordinator on
+    the same address) and the club should read as the more senior of the two —
+    ``_upsert_club`` resolves that within the payload before calling here, so
+    replacing is safe.
+
+    ``retick`` ticks an existing contact who has an email for outreach — the
+    club-officers-with-an-email rule — but never one who unsubscribed, bounced
+    or asked not to be contacted, since ticking those misrepresents them as
+    reachable. An ordinary crawl passes retick=False and the manual
+    ``outreach_selected`` choice is left exactly as a super admin set it.
+
+    Being listed again clears ``former_at``: a returning officer is a current
+    officer.
+
+    ``source`` is who put the row there, and it is load-bearing rather than
+    bookkeeping: a Rediscover only ever prunes ``'api'`` rows, so a person added
+    by hand — from the Directory screen, or from the Sales Workspace drawer —
+    must be stored as ``'manual'`` or a later prune would delete somebody's own
+    typing. See ``_prune_committee``.
+    """
     email = (email or "").strip().lower() or None
     phone = (phone or "").strip() or None
     if email:
@@ -174,19 +205,34 @@ async def _store_contact(session: AsyncSession, club_id, full_name: Optional[str
             MarketingClubContact.email.is_(None),
             func.lower(MarketingClubContact.full_name) == full_name.lower()))
     else:
-        return
+        return None
     if existing:
         existing.mobile = phone or existing.mobile
         existing.full_name = full_name or existing.full_name
-        if role_rank < (existing.role_rank or 99):
+        if replace_role or role_rank < (existing.role_rank or 99):
             existing.role, existing.role_rank = role, role_rank
+        existing.former_at = None
+        if retick and email and _tickable(existing):
+            existing.outreach_selected = True
         existing.updated_at = func.now()
-        return
-    sel = selected if selected is not None else (role_rank <= _DEFAULT_SELECTED_MAX_RANK)
-    session.add(MarketingClubContact(
+        return existing.id
+    # A club officer with an email is ticked for outreach; a phone-only contact
+    # has nothing to send to, so it is stored unticked and a super admin decides.
+    sel = selected if selected is not None else bool(email)
+    row = MarketingClubContact(
         marketing_club_id=club_id, full_name=full_name, role=role,
-        role_rank=role_rank, email=email, mobile=phone, source="api",
-        outreach_selected=sel))
+        role_rank=role_rank, email=email, mobile=phone, source=source,
+        outreach_selected=sel)
+    session.add(row)
+    await session.flush()   # need the id so a Rediscover can count it as seen
+    return row.id
+
+
+def _tickable(contact: MarketingClubContact) -> bool:
+    """Whether it is honest to tick this contact for outreach. An opt-out, a
+    bounce or a do-not-contact means the address is not reachable, and ticking
+    it would show a super admin a recipient who will never be sent to."""
+    return bool(contact.subscribed) and not contact.bounced and not contact.do_not_contact
 
 
 async def _link_existing_org(session: AsyncSession, club: MarketingClub) -> None:
@@ -216,7 +262,7 @@ async def link_org_to_marketing_club(session: AsyncSession, org) -> "Optional[Ma
     different org). Returns the linked (or already-linked) club, else None.
 
     Why this exists: a self-serve registration links the club at signup
-    (``twenty_sync._resolve_self_serve_club``), but a club a super admin
+    (``engagement._resolve_self_serve_club``), but a club a super admin
     onboards/syncs and then trials has its directory row left UNLINKED — so
     ``trial_days_remaining_by_club`` / ``subscribed_modules_by_club`` (and
     every CRM card badge that reads them: expired-trial state, the trial
@@ -243,13 +289,21 @@ async def link_org_to_marketing_club(session: AsyncSession, org) -> "Optional[Ma
     return club
 
 
-async def _upsert_club(session: AsyncSession, org: dict) -> bool:
-    """Insert or refresh one club from a search result. Returns True if newly
-    inserted. Leaves ``associations`` untouched (NULL stays the enrichment
-    frontier); never clobbers ``status``/``existing_org_id`` on an existing row."""
+async def _upsert_club(session: AsyncSession, org: dict, *, prune: bool = False,
+                       retick: bool = False) -> dict:
+    """Insert or refresh one club from a search result. Returns a small
+    per-club tally (``new`` / ``contacts`` / ``pruned`` / ``marked_former``).
+
+    ``prune`` reconciles the stored committee against what PlayHQ publishes
+    now (see ``_prune_committee``) and makes the role authoritative rather
+    than improve-only; ``retick`` ticks every listed officer who has an
+    email. An ordinary crawl passes neither, so it stays purely additive.
+
+    Leaves ``associations`` untouched (NULL stays the enrichment frontier);
+    never clobbers ``status``/``existing_org_id`` on an existing row."""
     guid = org.get("id")
     if not guid:
-        return False
+        return {"new": False, "contacts": 0, "pruned": 0, "marked_former": 0}
     addr = org.get("address") or {}
     club = await session.scalar(
         select(MarketingClub).where(MarketingClub.grassroots_guid == guid))
@@ -280,34 +334,141 @@ async def _upsert_club(session: AsyncSession, org: dict) -> bool:
 
     # Store the whole committee (every contact the club publishes). visible=False
     # contacts are the club's deliberate non-publish, so we still skip those.
-    top_email = top_phone = None
-    top_rank = 999
+    #
+    # Resolve the payload FIRST, best role per person, before writing anything.
+    # One person legitimately appears twice in one payload (Secretary AND Junior
+    # Coordinator on the same address) and the club should read as the more
+    # senior of the two — doing that here is what lets a Rediscover then REPLACE
+    # the stored role outright rather than only ever improving it.
+    people: dict = {}
     for c in (org.get("contacts") or []):
         if c.get("visible") is False:
             continue
         label, rank = _role_for_position(c.get("position"))
         email = (c.get("email") or "").strip() or None
         phone = (c.get("phone") or "").strip() or None
-        await _store_contact(session, club.id, _full_name(c), label, rank, email, phone)
-        if rank < top_rank and (email or phone):
-            top_rank, top_email, top_phone = rank, email, phone
+        name = _full_name(c)
+        key = email.lower() if email else (f"name:{name.lower()}" if name else None)
+        if key is None:
+            continue   # nothing to key on — no email and no name
+        prev = people.get(key)
+        if prev is None or rank < prev["rank"]:
+            people[key] = {"name": name, "role": label, "rank": rank,
+                           "email": email, "phone": phone}
+        else:   # keep the senior role, but don't lose a name/phone it lacked
+            prev["name"] = prev["name"] or name
+            prev["phone"] = prev["phone"] or phone
+
+    seen_ids, top_email, top_phone, top_rank = [], None, None, 999
+    for p in people.values():
+        cid = await _store_contact(
+            session, club.id, p["name"], p["role"], p["rank"], p["email"], p["phone"],
+            replace_role=prune, retick=retick)
+        if cid is not None:
+            seen_ids.append(cid)
+        if p["rank"] < top_rank and (p["email"] or p["phone"]):
+            top_rank, top_email, top_phone = p["rank"], p["email"], p["phone"]
     # Mirror the top contact onto the club for the list filter + CSV fallback.
     club.contact_email = top_email or club.contact_email
     club.contact_phone = top_phone or club.contact_phone
 
+    # Reconcile against what PlayHQ publishes now. ``contacts`` present-but-empty
+    # is a club that publishes no committee, and pruning to nothing is the right
+    # answer. ``contacts`` ABSENT (None) is a payload that said nothing about the
+    # committee at all, so nothing is pruned — an upstream schema change must not
+    # be able to empty the whole directory in one pass.
+    pruned = marked = 0
+    if prune and org.get("contacts") is not None:
+        pruned, marked = await _prune_committee(session, club.id, seen_ids)
+
     await _link_existing_org(session, club)
-    return is_new
+    return {"new": is_new, "contacts": len(people),
+            "pruned": pruned, "marked_former": marked}
 
 
-async def discover_clubs(session: AsyncSession, max_pages: int = 200) -> dict:
+async def _prune_committee(session: AsyncSession, club_id, seen_ids: list) -> tuple[int, int]:
+    """Reconcile a club's crawled committee against the set just seen on PlayHQ.
+
+    A delisted officer is DELETED where nothing a person decided would go with
+    them, and KEPT with ``former_at`` stamped (and unticked) where something
+    would. The retained cases, and why each one matters:
+
+    * an unsubscribe or a bounce — deleting the row lets the next crawl re-add
+      them subscribed and TICKED, and we would email somebody who opted out.
+      This one is the reason the whole guard exists;
+    * ``do_not_contact`` — the person-level "don't call me" the Sales Workspace
+      writes, same argument;
+    * a note somebody typed about them;
+    * a ``crm_people`` row bridged to this contact (migration 255) — the FK is
+      ON DELETE SET NULL, so a delete would not destroy the CRM person or their
+      call history, but it would silently cut the link back to the Directory.
+
+    Three rows are never candidates at all. A contact somebody added BY HAND
+    (``source='manual'`` — PlayHQ never listed it, so its absence says nothing).
+    The org-level club mailbox, which comes from a different endpoint entirely
+    (``discover_org_contact``) and is the one row carrying
+    ``_CLUB_CONTACT_RANK``. And anything at ``_HAND_ADDED_RANK``, which is the
+    retroactive half of the same rule: ``sales_workspace.add_directory_contact``
+    wrote ``source='api'`` until this shipped, so a person a rep typed into the
+    Workspace drawer is indistinguishable from a crawled officer by source
+    alone — but it stamps rank 99, and ``_role_for_position`` can only ever
+    return 1/2/3/4/5/10/50/60, so rank 99 cannot have come from a crawl.
+    """
+    ids = list(seen_ids)
+    params = {"club": str(club_id), "seen": [str(i) for i in ids],
+              "mailbox_rank": _CLUB_CONTACT_RANK, "hand_rank": _HAND_ADDED_RANK}
+    # A club whose whole committee is gone passes an empty list; `<> ALL('{}')`
+    # is true for every row, which is exactly right, but asyncpg cannot infer an
+    # empty array's type — so it is cast, the same trap the record-book note
+    # documents for a bound uuid[].
+    unseen = ("marketing_club_id = CAST(:club AS uuid) "
+              "AND source = 'api' "
+              "AND role_rank <> :mailbox_rank "
+              "AND role_rank <> :hand_rank "
+              "AND id <> ALL(CAST(:seen AS uuid[]))")
+    keep = (
+        "(subscribed IS NOT TRUE OR bounced IS TRUE OR do_not_contact IS TRUE "
+        " OR (notes IS NOT NULL AND notes <> '') "
+        " OR EXISTS (SELECT 1 FROM crm_people cp "
+        "            WHERE cp.directory_contact_id = marketing_club_contacts.id))"
+    )
+    # crm_people is ORM-mapped, but a harness built from create_all alone can
+    # still be missing it; to_regclass keeps the reconcile from failing over a
+    # table that isn't there.
+    has_crm = await session.scalar(text("SELECT to_regclass('public.crm_people')"))
+    keep_clause = keep if has_crm else (
+        "(subscribed IS NOT TRUE OR bounced IS TRUE OR do_not_contact IS TRUE "
+        " OR (notes IS NOT NULL AND notes <> ''))")
+
+    marked = await session.execute(text(
+        f"UPDATE marketing_club_contacts SET former_at = NOW(), "
+        f"outreach_selected = false, updated_at = NOW() "
+        f"WHERE {unseen} AND {keep_clause} AND former_at IS NULL"), params)
+    deleted = await session.execute(text(
+        f"DELETE FROM marketing_club_contacts WHERE {unseen} AND NOT {keep_clause}"), params)
+    return deleted.rowcount or 0, marked.rowcount or 0
+
+
+async def discover_clubs(session: AsyncSession, max_pages: int = 200, *,
+                         prune: bool = False, retick: bool = False,
+                         progress: Optional[dict] = None) -> dict:
     """Page the PlayHQ search to completion, upserting every Australian cricket
     club (with its committee). Idempotent — safe to re-run to pick up new clubs.
 
     Resilient to transient fetch failures: a failed page is retried (not treated
     as the end of the list, which previously truncated discovery on a single
     network blip), and paging stops only on a genuinely empty page or once the
-    reported ``totalRecords`` has been covered."""
+    reported ``totalRecords`` has been covered.
+
+    ``prune``/``retick`` are what a Rediscover passes: reconcile each club's
+    stored committee against what PlayHQ publishes now, and tick every listed
+    officer who has an email. The unattended nightly pass passes neither, so it
+    stays additive and never re-ticks a contact a super admin unticked.
+
+    ``progress`` is an optional dict the caller owns, updated in place after
+    every page so a long run can be watched from another request."""
     page, seen, new, skipped = 1, 0, 0, 0
+    pruned = marked = 0
     total_reported = None
     while page <= max_pages:
         if await is_crawl_paused(session):
@@ -332,15 +493,23 @@ async def discover_clubs(session: AsyncSession, max_pages: int = 200) -> dict:
             if (org.get("tenant") or {}).get("name") != AU_TENANT:
                 skipped += 1
                 continue
-            if await _upsert_club(session, org):
+            tally = await _upsert_club(session, org, prune=prune, retick=retick)
+            if tally["new"]:
                 new += 1
+            pruned += tally["pruned"]
+            marked += tally["marked_former"]
             seen += 1
         await session.commit()
         page += 1
+        if progress is not None:
+            progress.update({"pages": page - 1, "clubs_seen": seen, "new": new,
+                             "pruned": pruned, "marked_former": marked,
+                             "total_reported": total_reported})
         if total_reported and (page - 1) * 100 >= total_reported:
             break  # paged through everything the search reports
     stats = {"pages": page - 1, "au_seen": seen, "new": new,
-             "non_au_skipped": skipped, "total_reported": total_reported}
+             "non_au_skipped": skipped, "total_reported": total_reported,
+             "pruned": pruned, "marked_former": marked}
     logger.info("discover_clubs: %s", stats)
     return stats
 
@@ -419,6 +588,89 @@ async def crawl_batch(session: AsyncSession, limit: Optional[int] = None,
     enrichment = await enrich_associations(session, limit)
     result = {"discovery": discovery, "enrichment": enrichment}
     logger.info("crawl_batch: %s", result)
+    return result
+
+
+# ── Rediscover: re-read the committee PlayHQ publishes today ────────────────────
+# The ordinary crawl has only ever ADDED committee members (``_store_contact``
+# upserts and never removes), so a club that elected a new committee read as last
+# season's officers plus this season's. A Rediscover re-reads what PlayHQ
+# publishes and reconciles the Directory against it: roles become what PlayHQ
+# says now, every listed officer with an email is ticked for outreach, and a
+# delisted officer is pruned (or kept and marked — see ``_prune_committee``).
+#
+# It is the SAME discovery pass the crawler already runs, with two flags set, so
+# there is one definition of "read a club's committee" rather than a second copy
+# that could drift.
+
+# One club's own lookup is a single interactive request an operator is waiting
+# on, not a background walk, so it uses the short delay ``discover_org_contact``
+# already uses for the self-serve registration lookup rather than the 15-40s
+# crawl pace.
+_SINGLE_CLUB_DELAY = (0.2, 0.7)
+
+
+async def rediscover_all(session: AsyncSession, progress: Optional[dict] = None) -> dict:
+    """Re-page the whole PlayHQ club search and reconcile every club's committee.
+
+    Long: ~6,900 AU clubs at 100 per page is ~70 requests, each waiting out the
+    crawl's own courtesy delay (``marketing_crawl_min_delay``/``_max_delay``,
+    15-40s by default, one request at a time), so around half an hour to an hour
+    at the shipped settings. Run it in the background and watch ``progress``. Honours the operator Stop the same way every other crawl path
+    does — ``discover_clubs`` checks the pause flag between pages."""
+    if await is_crawl_paused(session):
+        return {"skipped": "stopped"}
+    stats = await discover_clubs(session, prune=True, retick=True, progress=progress)
+    logger.info("rediscover_all: %s", stats)
+    return stats
+
+
+async def rediscover_club(session: AsyncSession, club_id: str) -> dict:
+    """Re-read ONE club's committee from PlayHQ and reconcile it.
+
+    PlayHQ's search has no fetch-by-id, so the club is found by searching its own
+    name and matching on the GUID we already hold — never on the name itself,
+    which two clubs can share. A club PlayHQ has since renamed is looked up a
+    second time by its routingCode. Reports ``found: False`` rather than raising
+    when neither finds it, so the screen can say so.
+
+    Also refreshes the org-level club mailbox, which lives on a different
+    endpoint from the committee list and is otherwise only filled in by the
+    association-enrichment pass."""
+    club = await session.get(MarketingClub, club_id)
+    if club is None:
+        return {"found": False, "error": "Club not found in the directory."}
+
+    org = None
+    for query in [q for q in (club.name, club.playhq_id) if q]:
+        results, _ = await phq.search_organisations(
+            "CLUB", query, page=1, limit=25, delay=_SINGLE_CLUB_DELAY)
+        if results is None:
+            return {"found": False, "club": club.name,
+                    "error": "Could not reach PlayHQ just now. Try again shortly."}
+        for r in results:
+            if (r.get("id") or "") == (club.grassroots_guid or ""):
+                org = r
+                break
+        if org is not None:
+            break
+    if org is None:
+        return {"found": False, "club": club.name,
+                "error": ("PlayHQ's directory no longer lists this club under its "
+                          "stored id, so its committee can't be re-read.")}
+
+    tally = await _upsert_club(session, org, prune=True, retick=True)
+
+    # The generic club mailbox (a different endpoint from the committee list).
+    # Best-effort: a club that publishes none is the ordinary case.
+    org_contact = await phq.discover_org_contact(club.playhq_id, delay=_SINGLE_CLUB_DELAY)
+    if org_contact and (org_contact.get("email") or org_contact.get("phone")):
+        await _store_contact(
+            session, club.id, None, "Club contact", _CLUB_CONTACT_RANK,
+            org_contact.get("email"), org_contact.get("phone"), selected=True)
+    await session.commit()
+    result = {"found": True, "club": club.name, **tally}
+    logger.info("rediscover_club(%s): %s", club.name, result)
     return result
 
 
@@ -677,7 +929,7 @@ async def _resolve_outreach_org(session: AsyncSession, organisation_id: Optional
 def _assoc_names(club: MarketingClub) -> list[str]:
     # Guard non-dict entries (a null / stray string in the associations JSONB would
     # otherwise AttributeError and 500 the whole CSV export) — same guard as
-    # twenty_sync._club_assocs.
+    # engagement._club_assocs.
     return [a["name"] for a in (club.associations or [])
             if isinstance(a, dict) and a.get("name")]
 
@@ -897,7 +1149,17 @@ async def export_to_comms(session: AsyncSession, organisation_id: Optional[str] 
     contacts a super admin ticked (``outreach_selected``) unless ``selected_only``
     is False. The only hard guard is the excluded flag; a suppressed address is
     left untouched. Customers and already-emailed clubs ARE exportable (use the
-    directory filters to hold them back when you want to)."""
+    directory filters to hold them back when you want to).
+
+    An address ALREADY in BetterComms is refreshed rather than skipped: its
+    ``role`` becomes the role the directory now holds, and a blank name or a
+    missing club link is filled in. Nothing set by hand on the comms side is
+    overwritten, and a suppressed address is never resurrected — the row is
+    updated in place, so an unsubscribe stays an unsubscribe.
+
+    An officer the directory has since pruned is NOT in this set (pruning
+    unticks them), so they stay in BetterComms carrying the last role we knew
+    them by, which is the point of leaving them there."""
     org = await _resolve_outreach_org(session, organisation_id)
 
     q = (
@@ -917,7 +1179,7 @@ async def export_to_comms(session: AsyncSession, organisation_id: Optional[str] 
         q = q.where(MarketingClubContact.email.isnot(None))
 
     rows = (await session.execute(q)).all()
-    added = skipped = suppressed = 0
+    added = skipped = suppressed = updated = 0
     now = func.now()
     for contact, club in rows:
         if not contact.email:
@@ -929,8 +1191,26 @@ async def export_to_comms(session: AsyncSession, organisation_id: Optional[str] 
                 func.lower(CommsContact.email) == email))
         if existing:
             # Already in BetterComms — stamp it exported (idempotent) so the
-            # directory shows the badge and won't offer it for re-export.
+            # directory shows the badge and won't offer it for re-export, and
+            # REFRESH what the directory now knows about them. Before this the
+            # row was skipped outright, so an officer who changed role kept the
+            # role they held when they were first exported.
             contact.exported_at = contact.exported_at or now
+            changed = False
+            if contact.role and existing.role != contact.role:
+                existing.role = contact.role
+                changed = True
+            # Fill blanks only — never overwrite a name or a club link a super
+            # admin set by hand on the comms side.
+            if not (existing.name or "").strip() and (contact.full_name or "").strip():
+                existing.name = contact.full_name.strip()
+                changed = True
+            if existing.marketing_club_id is None:
+                existing.marketing_club_id = club.id
+                changed = True
+            if changed:
+                existing.updated_at = now
+                updated += 1
             if not existing.subscribed:
                 suppressed += 1  # respect an opt-out already on the comms side
             else:
@@ -946,6 +1226,7 @@ async def export_to_comms(session: AsyncSession, organisation_id: Optional[str] 
             organisation_id=org.id, email=email,
             name=(contact.full_name or "").strip() or None, source="import",
             marketing_club_id=club.id,   # link back so a campaign send flags the club
+            role=contact.role,           # last known committee role (migration 295)
             tags=[club.name] + _assoc_names(club),
         ))
         contact.exported_at = now
@@ -970,6 +1251,7 @@ async def export_to_comms(session: AsyncSession, organisation_id: Optional[str] 
 
     result = {"org": org.name, "candidates": len(rows), "added": added,
               "already_present": skipped, "already_suppressed": suppressed,
+              "updated": updated,
               "clubs_matched": matched, "clubs_eligible": eligible,
               "customers": await _count(MarketingClub.existing_org_id.isnot(None)),
               "emailed": await _count(MarketingClub.emailed_at.isnot(None)),
@@ -1196,16 +1478,11 @@ async def set_sales_state(session: AsyncSession, club_id: str, *,
     automated source). Only the fields passed are changed. Returns the new state,
     or None if the club isn't found.
 
-    Adding a module to Trial Modules OR Requested Trial here queues the same
-    super-admin action-queue request the Twenty CRM webhook raises when a
-    salesperson does the equivalent edit on the Company (see
-    twenty_inbound.request_trial_modules): a real ModuleActionRequest if the club
-    is already synced, else a Twenty Task asking for it to be synced first.
-    Requested Trial is the "a club asked us for a trial" signal (e.g. by phone/
-    email, logged here by a super admin) — it needs the same follow-up action as
-    Trial Modules, just earlier in the pipeline, so it raises the identical
-    request/Task rather than sitting silently on the club's row. Best-effort —
-    never blocks saving the sales state."""
+    Adding a module to Trial Modules OR Requested Trial advances the club's
+    platform deal per the configured automation rule. Requested Trial is the "a
+    club asked us for a trial" signal (e.g. by phone/email, logged here by a
+    super admin) — the same follow-up as Trial Modules, just earlier in the
+    pipeline. Best-effort — never blocks saving the sales state."""
     club = await session.get(MarketingClub, club_id)
     if club is None:
         return None
@@ -1228,31 +1505,10 @@ async def set_sales_state(session: AsyncSession, club_id: str, *,
     await session.commit()
     await session.refresh(club)
     added_modules = sorted(added_trial | added_requested)
-    if added_modules:
-        try:
-            from app.services.twenty_inbound import request_trial_modules
-            org = (await session.get(Organisation, club.existing_org_id)
-                   if club.existing_org_id else None)
-            await request_trial_modules(session, club, org, added_modules,
-                                        source="app", ext_key=f"app:{club.grassroots_guid}")
-        except Exception:  # noqa: BLE001 - queueing the follow-up must never block the save
-            logger.exception("club_directory: failed to queue trial request for %s", club.id)
     if added_modules or became_in_trial:
-        # Requesting or starting a trial here is as strong a buying signal as a
-        # direct "onboard my club" enquiry — force the same immediate Hot (100)
-        # + Lead treatment rather than letting it filter through as partial
-        # credit in the gradual engagement formula (see push_onboarding_enquiry).
-        try:
-            from app.services.twenty_sync import push_club_and_contacts
-            await push_club_and_contacts(
-                club.id, engagement_override={
-                    "engagementScore": 100, "engagementTier": "HOT", "inSalesCycle": True})
-        except Exception:  # noqa: BLE001 - the CRM push must never block the save
-            logger.exception("club_directory: failed to push trial engagement for %s", club.id)
-        # Local CRM pipeline equivalent — advance (or create) this club's
-        # platform deal per the super-admin-configured 'trial_started' /
-        # 'trial_requested' automation rule (services/crm_rules.py), same
-        # trigger moment as the Twenty push above. Prefers 'trial_started'
+        # Advance (or create) this club's platform deal per the
+        # super-admin-configured 'trial_started' / 'trial_requested' automation
+        # rule (services/crm_rules.py). Prefers 'trial_started'
         # whenever a module is actually being trialed now (added_trial or
         # became_in_trial) — 'trial_requested' only fires when this save was
         # purely adding a REQUESTED (not yet granted) module.
@@ -1274,10 +1530,10 @@ async def set_sales_state(session: AsyncSession, club_id: str, *,
                 # Seed the deal's contact from the club's best-known contact if
                 # it doesn't already have one (no-op otherwise).
                 await ensure_deal_contact(session, deal)
-            # Also check the score-based promotion right now, independent of
-            # whether Twenty is configured — harmless no-op once the deal above
-            # is already past Engaged (trial always is), but keeps this call
-            # site consistent with every other discrete-event trigger.
+            # Also rescore and check the score-based promotion right now — a
+            # harmless no-op once the deal above is already past Engaged (a
+            # trial always is), but keeps this call site consistent with every
+            # other discrete-event trigger.
             org = (await session.get(Organisation, club.existing_org_id,
                                      options=[selectinload(Organisation.module_subscriptions)])
                    if club.existing_org_id else None)
@@ -1343,6 +1599,35 @@ async def bulk_set_excluded(session: AsyncSession, excluded: bool,
         .values(excluded=excluded, excluded_at=(now if excluded else None), updated_at=now))
     await session.commit()
     return {"updated": len(ids), "excluded": excluded}
+
+
+async def bulk_tick_officers(session: AsyncSession, filters: Optional[dict] = None) -> dict:
+    """Tick every currently-listed officer WITH AN EMAIL in the filtered clubs.
+
+    A Rediscover already applies this rule as it goes, but re-paging the whole
+    of PlayHQ takes hours; this applies the same rule to what the directory
+    already holds, in one statement, with no upstream traffic at all.
+
+    Three exclusions, each for the same reason the crawl's own tick rule has
+    them: a contact who unsubscribed, bounced or asked not to be contacted is
+    not reachable, and ticking them would show a recipient who will never be
+    sent to; a contact marked ``former_at`` is no longer on the committee; and a
+    contact with no email has nothing to send to."""
+    ids = await _filtered_club_ids(session, filters)
+    if not ids:
+        return {"ticked": 0, "clubs": 0}
+    res = await session.execute(
+        update(MarketingClubContact)
+        .where(MarketingClubContact.marketing_club_id.in_(ids),
+               MarketingClubContact.email.isnot(None),
+               MarketingClubContact.outreach_selected.is_(False),
+               MarketingClubContact.former_at.is_(None),
+               MarketingClubContact.subscribed.is_(True),
+               MarketingClubContact.bounced.is_(False),
+               MarketingClubContact.do_not_contact.is_(False))
+        .values(outreach_selected=True, updated_at=func.now()))
+    await session.commit()
+    return {"ticked": res.rowcount or 0, "clubs": len(ids)}
 
 
 async def push_clubs_to_crm(session: AsyncSession, filters: Optional[dict] = None,
@@ -1685,7 +1970,7 @@ _PATH_CODE = "split_part(split_part(ue.path, '?', 1), '/', 2)"
 # The per-event single-club resolution, as a correlated scalar (references the
 # outer ``ue``). COALESCE applies the priority order; each subquery is LIMIT 1 so
 # a colliding ``utm_code`` can't multiply the row. Exposed on its own so the
-# engagement score (twenty_sync._engagement) attributes a visit the SAME way this
+# engagement score (engagement._engagement) attributes a visit the SAME way this
 # panel does — resolving each visit to ONE club rather than the old any-overlap
 # match that credited every club whose code merely collided with the path/UTM.
 def _resolved_cid_sql(utm_id: str, utm_source: str, path_code: str) -> str:
@@ -1750,7 +2035,7 @@ _RESOLVED_VISITS = (
     # keeps riding along on every later page view from that tab, including a
     # staff member's own authenticated admin browsing — which would otherwise
     # get misattributed to a prospect club as "visits"/"pages viewed" and
-    # corrupt the engagement score built on this same CTE (twenty_sync.py
+    # corrupt the engagement score built on this same CTE (engagement.py
     # _engagement). Same guard usage.py's campaigns()/live() already use to
     # keep staff activity out of visitor numbers.
     "AND ue.user_id IS NULL "
@@ -1760,7 +2045,7 @@ _RESOLVED_VISITS = (
 # Same shape as _RESOLVED_VISITS (both feed club_visit_detail's `base` below,
 # same output columns) but reads the pre-stamped resolved_marketing_club_id
 # column directly (an indexed equality) instead of recomputing _RESOLVED_CID's
-# 7-branch COALESCE per row — the identical fast_web=True trade twenty_sync.
+# 7-branch COALESCE per row — the identical fast_web=True trade engagement.
 # _engagement already makes for the SAME resolution (resolve_prospect_club_id
 # stamps this column at write time using the exact same logic, see above), just
 # applied here to the Website Analytics panel's per-club query instead of the
@@ -1987,7 +2272,7 @@ async def club_visit_detail(session: AsyncSession, club_id, limit: int = 50, fas
 
     ``fast_web`` swaps the resolution for the pre-stamped, indexed
     resolved_marketing_club_id column (see _RESOLVED_VISITS_FAST above) — the
-    same trade twenty_sync._engagement's own fast_web makes, needed here
+    same trade engagement._engagement's own fast_web makes, needed here
     because the Sales Workspace drawer calls this on every club open and the
     live 7-branch resolution over the whole usage_events table was the
     dominant cost in a "detail pane is slow" report."""
