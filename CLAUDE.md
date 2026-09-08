@@ -8002,7 +8002,7 @@ simply not run, and nothing anywhere said so.
   and the four real seasons replayed end to end through the shipped
   `reconcile_org` and the shipped script: 706 games -> 404, 302 pairs written.
 
-### AN OLDER DEFINITION CAN NO LONGER REPLACE THE VIEW (v9.70.9, Sep 2026)
+### AN OLDER DEFINITION CAN NO LONGER REPLACE THE VIEW (v9.70.10, Sep 2026)
 
 Reported plainly, after four rounds of diagnosis: *we should just be fixing the
 duplicates.* Right. The duplicate logic was correct and verified; what kept
