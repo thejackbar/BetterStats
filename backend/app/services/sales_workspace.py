@@ -522,12 +522,13 @@ async def _move_to_stage_key(session: AsyncSession, deal: CrmDeal, stage_key: st
     await session.flush()
 
 
-# The one-off Twenty pipeline cutover backfill (app/scripts/
-# import_twenty_pipeline.py) writes a "system" entry per club it touched
-# ("Imported from Twenty (...): stage=...") and a "note" entry per Twenty
-# Opportunity note it pulled in — both stamped with one of these meta keys.
-# The Sales Workspace's own History/Notes never show either: a rep's
-# timeline is what THEY did, not what a retired CRM's board once said.
+# The one-off pipeline cutover backfill from the retired external CRM wrote a
+# "system" entry per club it touched ("Imported from Twenty (...): stage=...")
+# and a "note" entry per Opportunity note it pulled in — both stamped with one
+# of these meta keys. The script itself is gone; ITS ROWS ARE STILL IN THE LIVE
+# DATABASE, which is why these keys must stay. The Sales Workspace's own
+# History/Notes never show either: a rep's timeline is what THEY did, not what
+# a retired CRM's board once said.
 _TWENTY_IMPORT_META_KEYS = ("twenty_kind", "twenty_note_id")
 
 

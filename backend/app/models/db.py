@@ -926,7 +926,7 @@ class ModuleActionRequest(Base):
     completed_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     completed_at = Column(TIMESTAMP(timezone=True), nullable=True)
     result_subscription_id = Column(UUID(as_uuid=True), ForeignKey("org_module_subscriptions.id", ondelete="SET NULL"), nullable=True)
-    external_ref = Column(Text, nullable=True)          # dedupe key for a Twenty-origin request
+    external_ref = Column(Text, nullable=True)          # legacy: deduped a request from the retired external CRM
 
 
 class BillingInvoice(Base):

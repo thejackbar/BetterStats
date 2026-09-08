@@ -44,7 +44,7 @@ all — everything it reads is already in our database, so it is quick enough to
 run platform-wide.
 
 An ARCHIVED club's admins are left out, the house rule for "stop treating this
-club as live" that the sync scheduler and the Twenty pushes already follow.
+club as live" that the sync scheduler already follows.
 
 USAGE
 -----
