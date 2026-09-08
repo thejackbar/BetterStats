@@ -98,6 +98,11 @@ _OFFICE_BEARERS = {
 _COORDINATOR_RE = re.compile(r"COOR?DINATOR")
 _COORDINATOR_RANK = 10
 _CLUB_CONTACT_RANK = 5    # the org-level generic club mailbox (just below office bearers)
+# The rank sales_workspace.add_directory_contact stamps on a contact a rep types
+# into the Workspace drawer. Unreachable from _role_for_position (which returns
+# 1/2/3/4/5/10/50/60), so it identifies a hand-added row even where `source` was
+# written as 'api' — which it was, until migration 293's Rediscover shipped.
+_HAND_ADDED_RANK = 99
 _OTHER_RANK = 50          # any other named committee position
 _UNLABELLED_RANK = 60     # a contact with no position at all
 # Contacts at or above this rank are pre-selected for outreach by default; the
@@ -157,7 +162,8 @@ def _full_name(contact: dict) -> Optional[str]:
 async def _store_contact(session: AsyncSession, club_id, full_name: Optional[str],
                          role: str, role_rank: int, email: Optional[str],
                          phone: Optional[str], selected: Optional[bool] = None,
-                         replace_role: bool = False, retick: bool = False):
+                         replace_role: bool = False, retick: bool = False,
+                         source: str = "api"):
     """Upsert one committee contact, deduped on lower(email) per club. Contacts
     with no email are kept (phone-only), deduped on (club, full_name) so a
     re-crawl doesn't pile up. Returns the row's id (None when there was nothing
@@ -180,6 +186,12 @@ async def _store_contact(session: AsyncSession, club_id, full_name: Optional[str
 
     Being listed again clears ``former_at``: a returning officer is a current
     officer.
+
+    ``source`` is who put the row there, and it is load-bearing rather than
+    bookkeeping: a Rediscover only ever prunes ``'api'`` rows, so a person added
+    by hand — from the Directory screen, or from the Sales Workspace drawer —
+    must be stored as ``'manual'`` or a later prune would delete somebody's own
+    typing. See ``_prune_committee``.
     """
     email = (email or "").strip().lower() or None
     phone = (phone or "").strip() or None
@@ -209,7 +221,7 @@ async def _store_contact(session: AsyncSession, club_id, full_name: Optional[str
     sel = selected if selected is not None else bool(email)
     row = MarketingClubContact(
         marketing_club_id=club_id, full_name=full_name, role=role,
-        role_rank=role_rank, email=email, mobile=phone, source="api",
+        role_rank=role_rank, email=email, mobile=phone, source=source,
         outreach_selected=sel)
     session.add(row)
     await session.flush()   # need the id so a Rediscover can count it as seen
@@ -391,15 +403,20 @@ async def _prune_committee(session: AsyncSession, club_id, seen_ids: list) -> tu
       ON DELETE SET NULL, so a delete would not destroy the CRM person or their
       call history, but it would silently cut the link back to the Directory.
 
-    Two rows are never candidates at all: a contact a super admin added BY HAND
-    (``source='manual'`` — PlayHQ never listed it, so its absence says nothing),
-    and the org-level club mailbox, which comes from a different endpoint
-    entirely (``discover_org_contact``) and is the one row carrying
-    ``_CLUB_CONTACT_RANK``.
+    Three rows are never candidates at all. A contact somebody added BY HAND
+    (``source='manual'`` — PlayHQ never listed it, so its absence says nothing).
+    The org-level club mailbox, which comes from a different endpoint entirely
+    (``discover_org_contact``) and is the one row carrying
+    ``_CLUB_CONTACT_RANK``. And anything at ``_HAND_ADDED_RANK``, which is the
+    retroactive half of the same rule: ``sales_workspace.add_directory_contact``
+    wrote ``source='api'`` until this shipped, so a person a rep typed into the
+    Workspace drawer is indistinguishable from a crawled officer by source
+    alone — but it stamps rank 99, and ``_role_for_position`` can only ever
+    return 1/2/3/4/5/10/50/60, so rank 99 cannot have come from a crawl.
     """
     ids = list(seen_ids)
     params = {"club": str(club_id), "seen": [str(i) for i in ids],
-              "mailbox_rank": _CLUB_CONTACT_RANK}
+              "mailbox_rank": _CLUB_CONTACT_RANK, "hand_rank": _HAND_ADDED_RANK}
     # A club whose whole committee is gone passes an empty list; `<> ALL('{}')`
     # is true for every row, which is exactly right, but asyncpg cannot infer an
     # empty array's type — so it is cast, the same trap the record-book note
@@ -407,6 +424,7 @@ async def _prune_committee(session: AsyncSession, club_id, seen_ids: list) -> tu
     unseen = ("marketing_club_id = CAST(:club AS uuid) "
               "AND source = 'api' "
               "AND role_rank <> :mailbox_rank "
+              "AND role_rank <> :hand_rank "
               "AND id <> ALL(CAST(:seen AS uuid[]))")
     keep = (
         "(subscribed IS NOT TRUE OR bounced IS TRUE OR do_not_contact IS TRUE "

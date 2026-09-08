@@ -91,12 +91,23 @@ updates the role of a contact already there.
   `do_not_contact`, a note, or a `crm_people` link (migration 255's bridge is
   ON DELETE SET NULL, so a delete would not destroy the CRM person but would
   silently cut the link).
-- **TWO ROWS ARE NEVER CANDIDATES AT ALL**: a contact a super admin added by
+- **THREE ROWS ARE NEVER CANDIDATES AT ALL**: a contact a super admin added by
   hand (`source='manual'` — PlayHQ never listed it, so its absence says
-  nothing), and the org-level club mailbox, which comes from
-  `discover_org_contact` rather than the committee list and is the only row
-  carrying `_CLUB_CONTACT_RANK`. The suite asserts that rank is unreachable from
-  `_role_for_position`, so the identification cannot go stale.
+  nothing), the org-level club mailbox, which comes from `discover_org_contact`
+  rather than the committee list and is the only row carrying
+  `_CLUB_CONTACT_RANK`, and anything at `_HAND_ADDED_RANK`. The suite asserts
+  both ranks are unreachable from `_role_for_position`, so neither
+  identification can go stale.
+- **`sales_workspace.add_directory_contact` WROTE `source='api'`, so the first
+  cut of the prune DELETED A PERSON A REP HAD TYPED IN.** Found by asking
+  whether the CRM needed a push, not by the suite — the drawer writes through
+  `_store_contact`, which hardcoded the source, so a Workspace-added contact was
+  indistinguishable from a crawled officer and only survived if it happened to
+  carry a note, an opt-out or a logged call. It stores `'manual'` now, and rank
+  99 covers every row written before the fix: `_role_for_position` returns only
+  1/2/3/4/5/10/50/60, so 99 cannot have come from a crawl. **The control run is
+  what showed the size of it** — with both halves reverted, both Workspace
+  contacts are gone.
 - **`contacts` ABSENT AND `contacts: []` ARE DIFFERENT ANSWERS.** Present-but-
   empty is a club that publishes no committee and everything prunable goes;
   absent or null is a payload that said nothing, and prunes nobody — an upstream

@@ -294,12 +294,20 @@ async def add_directory_contact(
 ) -> MarketingClubContact:
     """A new person added from the Workspace drawer — writes straight to the
     canonical Club Directory table via the same upsert helper the crawler
-    and the Directory screen itself use, so it's indistinguishable from a
-    directory-sourced contact afterwards."""
-    from app.services.club_directory import _store_contact
+    and the Directory screen itself use, so it reads as an ordinary directory
+    contact afterwards.
+
+    Stored ``source='manual'``, and that is not cosmetic: a Rediscover
+    (migration 293) reconciles the crawled committee against what PlayHQ
+    publishes and prunes ``'api'`` rows it no longer lists. This wrote 'api'
+    until then, which would have let a later Rediscover delete a person a rep
+    had typed in. Rows written before the fix are still spared, by their rank —
+    see club_directory._HAND_ADDED_RANK."""
+    from app.services.club_directory import _store_contact, _HAND_ADDED_RANK
     await _store_contact(
         session, marketing_club_id, full_name=full_name, role=role or "Contact",
-        role_rank=99, email=email, phone=mobile, selected=True,
+        role_rank=_HAND_ADDED_RANK, email=email, phone=mobile, selected=True,
+        source="manual",
     )
     await session.flush()
     email_norm = (email or "").strip().lower()

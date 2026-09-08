@@ -297,6 +297,10 @@ async def main() -> int:
         noted = add("noted@apple.test", "Ned Note", notes="Rang, call back in March")
         crmed = add("crm@apple.test", "Cam Crm")
         manual = add("manual@apple.test", "Mia Manual", source="manual")
+        # A rep typed this into the Sales Workspace drawer BEFORE the source fix:
+        # stored source='api', so only its rank tells it apart from a crawled row.
+        ws_old = add("ws-old@apple.test", "Wes Old", source="api")
+        ws_old.role_rank = cd._HAND_ADDED_RANK
         mailbox = MarketingClubContact(
             id=uuid.uuid4(), marketing_club_id=club.id, full_name=None,
             role="Club contact", role_rank=cd._CLUB_CONTACT_RANK,
@@ -307,6 +311,25 @@ async def main() -> int:
         db.add(CrmPerson(id=uuid.uuid4(), organisation_id=outreach.id,
                          full_name="Cam Crm", directory_contact_id=crmed.id))
         await db.commit()
+
+        # And one added through the SHIPPED Workspace path, which must store it
+        # as manual so no prune can ever reach it.
+        from app.services import sales_workspace as sw   # noqa: PLC0415
+        ws_new = await sw.add_directory_contact(
+            db, marketing_club_id=club.id, full_name="Wanda New", role="Grants Officer",
+            email="ws-new@apple.test", mobile=None)
+        await db.commit()
+        check("a contact added from the Sales Workspace is stored as manual",
+              ws_new is not None and ws_new.source == "manual",
+              getattr(ws_new, "source", None))
+        check("...at the rank that identifies a hand-added row",
+              ws_new is not None and ws_new.role_rank == cd._HAND_ADDED_RANK,
+              getattr(ws_new, "role_rank", None))
+        check("rank 99 cannot come from a crawl, so it is a safe marker",
+              cd._HAND_ADDED_RANK not in
+              {cd._role_for_position(p)[1] for p in
+               ("PRESIDENT", "VICE_PRESIDENT", "SECRETARY", "TREASURER",
+                "JUNIOR_CRICKET_COODINATOR", "SCORER", "", "ANYTHING_ELSE")})
 
         check("the org mailbox is the only row carrying _CLUB_CONTACT_RANK",
               cd._CLUB_CONTACT_RANK not in
@@ -331,6 +354,10 @@ async def main() -> int:
                 check(f"...{label} one is marked former", got[email].former_at is not None)
                 check(f"...{label} one is unticked", not got[email].outreach_selected)
         check("a hand-added contact is never pruned", "manual@apple.test" in got)
+        check("...a Workspace-added one too, by its rank alone (it was written "
+              "source='api' before the fix)", "ws-old@apple.test" in got, sorted(got))
+        check("...and a Workspace-added one written since, by its source",
+              "ws-new@apple.test" in got, sorted(got))
         check("...and is never marked former either",
               "manual@apple.test" in got and got["manual@apple.test"].former_at is None)
         check("the org-level club mailbox is never pruned", "club@apple.test" in got)
