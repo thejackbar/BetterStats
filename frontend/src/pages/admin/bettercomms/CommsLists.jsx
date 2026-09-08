@@ -7,7 +7,7 @@ import { Button, Badge, Caption, SectionHeading, Note, Empty, Toast, INPUT_CLS, 
 import { CrudPanes, RecordListPane, DetailPane, RecordTitleRow, CountBar, SaveRow, reachability, clubCount } from '../clubhouse/crudShell'
 import ScreenIntro, { useScreenIntro, INTROS } from '../clubhouse/intro'
 import { ContactDetailModal } from './CommsContacts'
-import { FACETS, matchesQuery, matchesFilters, facetOptionsFrom, MultiSelect, matchesSuppressed, SuppressedToggle,
+import { FACETS, emptyFilters, matchesQuery, matchesFilters, facetOptionsFrom, MultiSelect, matchesSuppressed, SuppressedToggle,
   emptyModes, matchesModes, anyMode, DirectoryFilterChips, searchHint,
   emptyEngagementFilter, matchesEngagementScore, topClubIds, matchesTopClubs, EngagementFilterControls,
   matchesUnsubscribed, UnsubscribedToggle, unsubscribedTitle } from './audience'
@@ -28,7 +28,10 @@ import { FACETS, matchesQuery, matchesFilters, facetOptionsFrom, MultiSelect, ma
 // is simply what the right pane always shows, and Export CSV and "Email these N
 // now" moved to the record's own actions.
 
-const noFilters = () => ({ club: [], association: [], country: [], utm_code: [], state: [] })
+// One definition of the facet-filter shape, in the audience kit beside FACETS
+// itself — a second copy here silently drops any facet added there (Role was
+// added in migration 293).
+const noFilters = emptyFilters
 
 // Start an email already addressed to a list.
 //

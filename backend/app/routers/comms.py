@@ -184,6 +184,11 @@ def _contact_out(c: CommsContact, mc: "Optional[MarketingClub]" = None,
         # exclusion, or on the global suppression list (passed in by the caller).
         "suppressed": bool(c.bounced or complained or c.excluded or suppressed),
         "player_id": str(c.player_id) if c.player_id else None,
+        # The committee role the Clubs Directory last knew this person by
+        # (migration 293). Blank for an ordinary club's own members. Kept after
+        # the directory prunes a departed officer, so a list built on it still
+        # reads "Secretary" for the person who was one when we last heard.
+        "role": (c.role or "") if hasattr(c, "role") else "",
         # The stored {{first_name}} override (what Set First Name writes). Surfaced
         # so a nameless contact can still read as its set first name in the list.
         "first_name": str((c.merge_vars or {}).get("first_name") or "").strip(),

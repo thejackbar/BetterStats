@@ -4368,6 +4368,13 @@ class CommsContact(Base):
     # personalised. Absent key ⇒ use the derived default.
     merge_vars = Column(JSONB, nullable=False, server_default="{}", default=dict)
     tags = Column(JSONB, nullable=False, server_default="[]", default=list)
+    # Migration 293: the officer's role at the moment it was last exported or
+    # refreshed from the Clubs Directory ("President", "Secretary"). A stored
+    # copy rather than a join back to marketing_club_contacts on purpose — an
+    # officer who has since left the committee is pruned from the Directory but
+    # KEPT here, and keeps the last role we knew them by. Blank for an ordinary
+    # club's own members, who have no directory row at all.
+    role = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
@@ -4746,6 +4753,14 @@ class MarketingClubContact(Base):
     # equivalent is marketing_clubs.not_interested, not a column here.
     do_not_contact = Column(Boolean, nullable=False, server_default="false", default=False)
     do_not_contact_reason = Column(Text, nullable=True)
+    # Migration 293: when a Rediscover last found this contact ABSENT from what
+    # PlayHQ publishes for their club. NULL = listed today. A Rediscover deletes
+    # a delisted officer where nothing would be lost and stamps this instead
+    # where a person has decided something about them (an unsubscribe, a bounce,
+    # a do-not-contact, a note, a CRM link, or a hand-added row) — deleting an
+    # unsubscribed officer would let the next crawl re-add them subscribed and
+    # ticked. Cleared if PlayHQ lists them again.
+    former_at = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 

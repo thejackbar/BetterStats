@@ -56,6 +56,114 @@ import re-writes the same matches (deterministic `cricketstatz_match_id`, and
 that was kept. A club's hand-typed history has no such path, which is the whole
 reason for the rule.
 
+## The Club Directory's committee only ever grew (migration 293, v9.70.0, Sep 2026)
+
+Asked for directly: a Rediscover that re-reads what PlayHQ publishes for every
+club (and for one named club), prunes the officers it no longer lists, ticks
+every officer with an email, leaves departed officers in BetterComms, and
+updates the role of a contact already there.
+
+- **DISCOVERY WAS ADDITIVE AND NOTHING SAID SO.** `_store_contact` upserts on
+  lower(email) and has never removed a row, so a club that elected a new
+  committee read as last season's officers PLUS this season's, with nothing on
+  screen separating them. `crawl_batch` could not have fixed it either — its
+  discovery phase only runs `if total == 0 or rediscover`, and the UI's Run
+  crawl batch button has never sent `rediscover`, so on a populated directory
+  that button does association enrichment ONLY.
+- **A REDISCOVER IS THE SAME DISCOVERY PASS WITH TWO FLAGS, not a second
+  reader.** `discover_clubs(prune=True, retick=True)`. Two copies of "read a
+  club's committee" is how the nightly pass and the operator's button start
+  disagreeing about what a committee is.
+- **THE ROLE IS RESOLVED WITHIN THE PAYLOAD BEFORE ANYTHING IS WRITTEN, which
+  is what makes replacing it safe.** The old rule was improve-only
+  (`if role_rank < existing.role_rank`) for a real reason: one person
+  legitimately appears twice in one payload (Secretary AND Junior Coordinator on
+  one address) and the club should read as the senior. That is now decided in
+  `_upsert_club` over the whole payload, so a Rediscover can then REPLACE the
+  stored role outright — a Secretary who is now Treasurer reads as Treasurer.
+  The ordinary crawl stays improve-only.
+- **DELETING AN UNSUBSCRIBED OFFICER IS THE ONE THING THIS MUST NOT DO, and it
+  is the whole reason `former_at` exists.** Delete the row and the next crawl
+  re-adds them from PlayHQ as a fresh contact — subscribed, and ticked under the
+  new rule — and we email somebody who opted out. So `_prune_committee` DELETES
+  only where nothing a person decided would go with the row, and KEEPS the rest
+  unticked with `former_at` stamped: an unsubscribe, a bounce, a
+  `do_not_contact`, a note, or a `crm_people` link (migration 255's bridge is
+  ON DELETE SET NULL, so a delete would not destroy the CRM person but would
+  silently cut the link).
+- **TWO ROWS ARE NEVER CANDIDATES AT ALL**: a contact a super admin added by
+  hand (`source='manual'` — PlayHQ never listed it, so its absence says
+  nothing), and the org-level club mailbox, which comes from
+  `discover_org_contact` rather than the committee list and is the only row
+  carrying `_CLUB_CONTACT_RANK`. The suite asserts that rank is unreachable from
+  `_role_for_position`, so the identification cannot go stale.
+- **`contacts` ABSENT AND `contacts: []` ARE DIFFERENT ANSWERS.** Present-but-
+  empty is a club that publishes no committee and everything prunable goes;
+  absent or null is a payload that said nothing, and prunes nobody — an upstream
+  shape change must not be able to empty the whole directory in one pass.
+- **A LISTED OFFICER WITH AN EMAIL IS TICKED, and the insert default changed
+  from `rank <= 4` to "has an email"** — a Junior Coordinator with an address is
+  as emailable as a Treasurer. Never a contact who unsubscribed, bounced or
+  asked not to be contacted: ticking those shows a super admin a recipient who
+  can never be sent to. **An ordinary crawl still never re-ticks somebody a
+  super admin unticked** (`retick=False`), or the nightly pass would fight the
+  operator; only the explicit Rediscover and the explicit "Tick officers with an
+  email" button apply the rule to existing rows.
+- **THE EXPORT UPDATES RATHER THAN SKIPS.** `export_to_comms` used to stamp
+  `exported_at` on an address already in BetterComms and move on, so an officer
+  who changed role kept the role they held when they were first exported.
+  `comms_contacts.role` is refreshed now; a blank name and a missing club link
+  are filled; a name set by hand on the comms side is never overwritten and a
+  suppressed address is never resurrected.
+- **`comms_contacts.role` IS A STORED COPY ON PURPOSE, against this file's own
+  derive-don't-store instinct.** A departed officer is pruned from the Directory
+  and KEPT in BetterComms — that is what was asked for — so a join back to
+  `marketing_club_contacts` would blank exactly the people the feature exists to
+  preserve. It is the last role we knew them by, which is the honest reading.
+  It is also what makes Role a filter facet on Lists and Segments.
+- **ONE CONTACT SERIALISER.** `list_clubs` had its own copy of `_contact_out`'s
+  dict, so `former` would have reached the club card and not the list. It calls
+  the shared one now, and the suite asserts there is exactly one copy.
+- **`emptyFilters` IS THE ONE FACET SHAPE.** `CommsLists.jsx` kept its own
+  `noFilters` literal, which silently drops any facet added to the kit — Role
+  was added to the kit.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_committee_rediscover.py`, 91 checks through the
+  shipped service and route bodies with the PlayHQ client stubbed: migration 293
+  applied three times to a populated pre-293 table seeded in RAW SQL — the ORM
+  model already carries the columns, so a row inserted through it could not be a
+  pre-293 row — the ordinary crawl still additive and still not re-ticking, the
+  role replaced on a rediscover and improve-only otherwise, one person listed
+  twice, all five retained cases marked and unticked, the manual row and the org
+  mailbox untouched, a returning officer clearing `former_at` without being
+  re-ticked, both upstream-shape guards, one named club matched on its GUID
+  rather than a name two clubs share and found by routingCode after a rename, an
+  unreachable PlayHQ reading as a fetch failure rather than an empty committee, a
+  stopped crawler stopping the run, the ticking rule and its four exclusions, and
+  the export updating a role while never resurrecting a suppressed address)
+  **with two control runs**: with the whole feature absent the suite REPORTS it
+  and bails rather than dying on the ImportError; with the prune, the retick and
+  the role refresh neutered, 24 of the 91 fail — the departed officer still
+  listed and the comms role stuck on the old one, which is the reported symptom.
+- **THE POLITENESS DOC WAS STALE AND IS CORRECTED IN PLACE.**
+  `docs/marketing-club-directory.md` said "a jittered 2 to 4s delay"; the shipped
+  defaults are `marketing_crawl_min_delay=15.0` / `_max_delay=40.0`, applied
+  BEFORE each request behind a module-level `asyncio.Semaphore(1)` that every
+  directory call queues on. ~6,900 AU clubs at 100 per page is ~70 requests, so a
+  full Rediscover is roughly half an hour to an hour, not the "hours" the first
+  cut of the UI copy claimed. A single-club Rediscover uses the short
+  interactive delay (0.2-0.7s) `discover_org_contact` already uses for the
+  self-serve registration lookup.
+- **NUMBERED 293, NOT 291.** `origin/main` had reached 292 while this was in
+  flight. Check `origin/main` at the moment you merge, not only when you first
+  number one — this file has now recorded that trap four times.
+- **NOTICED, NOT BUILT**: there is no `role` SEGMENT field (Role is a Lists and
+  Segments facet, not a saved-rule condition — that needs its own entry in
+  `comms_segments`' registry); nothing prunes a `former_at` contact later, which
+  is deliberate, since the whole reason those rows survived is that somebody
+  decided something about them; and the nightly discovery pass still runs
+  additive, so the reconcile only happens when an operator asks for it.
+
 ## A club decides what it is told about (migration 288, v9.69.0, Sep 2026)
 
 Asked for as a configurable notification system a club admin manages — emails

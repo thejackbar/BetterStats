@@ -1439,6 +1439,17 @@ export const api = {
     request('/club-admin/marketing/crawl/control', { method: 'POST', body: JSON.stringify({ paused }) }),
   mktCrawl: (limit) =>
     request(`/club-admin/marketing/crawl${limit ? `?limit=${limit}` : ''}`, { method: 'POST' }),
+  // Re-read every club's committee from PlayHQ and reconcile the directory
+  // against it (prune the departed, re-tick the listed). Hours long, so it runs
+  // in the background and the page polls the status.
+  mktRediscover: () => request('/club-admin/marketing/rediscover', { method: 'POST' }),
+  mktRediscoverStatus: () => request('/club-admin/marketing/rediscover/status'),
+  // The same for ONE club — two short requests, answers immediately.
+  mktRediscoverClub: (clubId) =>
+    request(`/club-admin/marketing/clubs/${clubId}/rediscover`, { method: 'POST' }),
+  mktBulkTickOfficers: (filters = {}) =>
+    request('/club-admin/marketing/clubs/bulk-tick-officers',
+      { method: 'POST', body: JSON.stringify(filters) }),
   mktExportComms: (payload) =>
     request('/club-admin/marketing/export-comms', { method: 'POST', body: JSON.stringify(payload) }),
   mktExportTwenty: (payload) =>

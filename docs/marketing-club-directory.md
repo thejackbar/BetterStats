@@ -81,11 +81,22 @@ Two phases (`app/services/club_directory.py`), both resumable through the table:
 
 ### Politeness
 
-Deliberately a slow, quiet citizen (settings `marketing_crawl_*`): concurrency 1,
-a jittered 2 to 4s delay between requests, a single backoff-and-retry on 429/5xx, a
-nightly cap, run off-peak (the scheduler job is 02:00). Discovery is cheap (~70
-calls); enrichment is one call per club across ~6,900 clubs, so it is a handful of
-quiet nights at the nightly cap. `raw_json` + the frontier model mean re-runs
+Deliberately a slow, quiet citizen (settings `marketing_crawl_*`): concurrency 1
+(a module-level `asyncio.Semaphore(1)` in `playhq_directory_client`, so EVERY
+directory call queues behind it — discovery, enrichment, a Rediscover and an
+operator's single-club lookup alike), **a jittered 15 to 40s delay applied
+BEFORE each request** so two callers can never burst, a single
+backoff-and-retry after 8s on 429/500/502/503, a 30s timeout, a nightly cap, run
+off-peak (the scheduler job is 02:00). Discovery is cheap (~70 calls, one per
+page of 100 clubs); enrichment is one call per club across ~6,900 clubs, so it is
+a handful of quiet nights at the nightly cap.
+
+The one deliberate exception is a short interactive lookup an operator is waiting
+on — resolving one club at self-serve registration, or a single-club Rediscover —
+which passes its own `delay` of 0.2 to 0.7s. It is two requests, not a walk.
+
+(This section read "2 to 4s" until Sep 2026, which had been stale for some time:
+the shipped defaults are 15 and 40. Read `config/settings.py`, not this line.) `raw_json` + the frontier model mean re-runs
 never refetch an enriched club.
 
 ### Two run modes
@@ -126,6 +137,42 @@ python -m app.scripts.crawl_clubs --csv > clubs.csv   # export the directory
 Super-admin API (gated by `require_super_admin`, prefix `/club-admin/marketing`):
 `GET /stats`, `GET /clubs` (search/filter/paginate), `POST /crawl` (background
 batch), `POST /export-comms`, `POST /sync-suppressions`, `GET /export.csv`.
+
+### Rediscover: reconciling a committee against PlayHQ
+
+Discovery has always been ADDITIVE — `_store_contact` upserts on lower(email)
+and never removes — so a club that elects a new committee reads as last
+season's officers plus this season's. A **Rediscover** is the same discovery
+pass with two flags set (`prune`, `retick`), so there is one definition of
+"read a club's committee" rather than a second copy that could drift:
+
+* every officer PlayHQ lists gets the role it publishes **today** (not
+  improve-only: a Secretary who is now Treasurer reads as Treasurer). Where one
+  person appears twice in one payload the senior of the two wins, resolved
+  before anything is written;
+* every listed officer **with an email** is ticked for outreach;
+* an officer PlayHQ no longer lists is **deleted**, unless deleting would lose
+  something a person decided — an unsubscribe, a bounce, a do-not-contact, a
+  note, or a `crm_people` link. Those are kept, unticked, and stamped
+  `former_at`. **The unsubscribe case is why the guard exists**: delete the row
+  and the next crawl re-adds them subscribed and ticked, and we email somebody
+  who opted out;
+* a contact a super admin added by hand (`source='manual'`) and the org-level
+  club mailbox (the one row at `_CLUB_CONTACT_RANK`, which comes from a
+  different endpoint) are never candidates at all;
+* a payload whose `contacts` key is **absent or null** prunes nobody. Only a
+  present-but-empty list means "this club publishes no committee". An upstream
+  shape change must not be able to empty the directory in one pass.
+
+Nothing is ever removed from BetterComms. A departed officer stays there
+carrying the last role we knew them by (`comms_contacts.role`), which is what
+lets an audience still read "Secretary" for the person who was one.
+
+`POST /marketing/rediscover` re-pages the whole search (~70 requests at the
+crawl pace, so roughly half an hour to an hour) in the background;
+`POST /marketing/clubs/{id}/rediscover` does ONE club on the short interactive
+delay. `POST /marketing/clubs/bulk-tick-officers` applies the ticking rule
+alone to what the directory already holds, with no upstream traffic.
 
 ## Sending: the BetterComms bridge
 

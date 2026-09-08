@@ -330,12 +330,10 @@ async def list_clubs(
             "engagement_score": c.engagement_score,
             "engagement_tier": c.engagement_tier,
             "engagement_scored_at": c.engagement_scored_at.isoformat() if c.engagement_scored_at else None,
-            "contacts": [{
-                "id": str(ct.id), "full_name": ct.full_name, "role": ct.role,
-                "email": ct.email, "mobile": ct.mobile, "source": ct.source,
-                "subscribed": ct.subscribed, "selected": ct.outreach_selected,
-                "exported": ct.exported_at is not None,
-            } for ct in contacts_by_club.get(c.id, [])],
+            # One serialiser, shared with the per-contact routes below — two
+            # copies of this dict is how the list and the club card start
+            # disagreeing about a contact (``former`` was added to one of them).
+            "contacts": [_contact_out(ct) for ct in contacts_by_club.get(c.id, [])],
         })
     return {"total": total or 0, "limit": limit, "offset": offset, "clubs": out}
 
@@ -359,6 +357,68 @@ async def trigger_crawl(
     background.add_task(_crawl_bg, limit, rediscover)
     return {"started": True, "limit": limit or "configured nightly limit",
             "rediscover": rediscover}
+
+
+# ── Rediscover: re-read the committee PlayHQ publishes today ────────────────────
+# A full rediscover re-pages the whole club search at the crawl's own courtesy
+# pace, so it runs for hours — background, one at a time, with a progress dict
+# the UI polls. Same running/started_at/finished_at/result/error shape as the
+# Twenty export below, plus a live ``progress`` the service updates per page.
+# In-process state: a worker restart mid-run loses it, so a run older than
+# _REDISCOVER_STALE_SECS is treated as stale and a new one is allowed.
+_REDISCOVER_STALE_SECS = 12 * 60 * 60
+_rediscover: dict = {
+    "running": False, "started_at": None, "finished_at": None,
+    "result": None, "error": None, "progress": {},
+}
+
+
+async def _rediscover_bg():
+    try:
+        async with async_session_maker() as session:
+            res = await cd.rediscover_all(session, progress=_rediscover["progress"])
+        _settle_bg(_rediscover, res)
+    except Exception as e:  # noqa: BLE001 — never let one bad page wedge the runner
+        _rediscover["result"], _rediscover["error"] = None, str(e)
+    finally:
+        _rediscover["running"] = False
+        _rediscover["finished_at"] = _now_iso()
+
+
+@router.post("/rediscover")
+async def rediscover(background: BackgroundTasks, _=Depends(require_super_admin)):
+    """Re-read EVERY club's committee from PlayHQ and reconcile the directory
+    against it: roles become what PlayHQ publishes now, every listed officer with
+    an email is ticked for outreach, and an officer PlayHQ no longer lists is
+    pruned (or kept and marked, where deleting would lose an unsubscribe, a
+    bounce, a do-not-contact, a note or a CRM link).
+
+    Long — ~6,900 AU clubs at 100 per page is ~70 requests, and every one waits
+    out the crawl's courtesy delay (15-40s, one at a time), so call it half an
+    hour to an hour. Runs in the background; poll /rediscover/status. Stopping
+    the crawler stops it between pages."""
+    if _rediscover["running"] and not _bg_stale(_rediscover, _REDISCOVER_STALE_SECS):
+        return {"status": "already_running", "started_at": _rediscover["started_at"]}
+    _rediscover.update(running=True, started_at=_now_iso(), finished_at=None,
+                       result=None, error=None, progress={})
+    background.add_task(_rediscover_bg)
+    return {"status": "started"}
+
+
+@router.get("/rediscover/status")
+async def rediscover_status(_=Depends(require_super_admin)):
+    """Current/last rediscover state for the UI poller, including live per-page
+    progress while it runs."""
+    return dict(_rediscover)
+
+
+@router.post("/clubs/{club_id}/rediscover")
+async def rediscover_one_club(club_id: str, db: AsyncSession = Depends(get_db),
+                              _=Depends(require_super_admin)):
+    """Re-read ONE club's committee from PlayHQ, same rules as the full run.
+    Two requests on the short interactive delay, so it answers in a second or
+    two rather than being backgrounded."""
+    return await cd.rediscover_club(db, club_id)
 
 
 class DirFilterFields(BaseModel):
@@ -448,17 +508,21 @@ def _settle_bg(state: dict, res):
         state["result"], state["error"] = res, None
 
 
-def _bg_stale(state: dict) -> bool:
+def _bg_stale(state: dict, window_secs: int | None = None) -> bool:
     """True if a background job's ``state`` dict claims to still be running but
     started long enough ago that it's more likely a worker restart lost track of
     it — shared by the Twenty export, engagement refresh and leads/tasks refresh
     runners below, all of which use the same running/started_at/finished_at/
-    result/error shape."""
+    result/error shape. ``window_secs`` overrides the default for a job with a
+    genuinely different runtime: a rediscover re-pages the whole of PlayHQ at the
+    crawl's courtesy pace and legitimately runs for hours, so treating it as
+    stale after 30 minutes would let a second run start on top of the first."""
     if not state["running"] or not state["started_at"]:
         return False
     try:
         started = datetime.fromisoformat(state["started_at"])
-        return (datetime.now(timezone.utc) - started).total_seconds() > _EXPORT_STALE_SECS
+        limit = _EXPORT_STALE_SECS if window_secs is None else window_secs
+        return (datetime.now(timezone.utc) - started).total_seconds() > limit
     except Exception:
         return True
 
@@ -707,6 +771,18 @@ async def bulk_set_excluded(body: BulkActionBody, db: AsyncSession = Depends(get
 
 class UtmBody(BaseModel):
     utm: str
+
+
+@router.post("/clubs/bulk-tick-officers")
+async def bulk_tick_officers(body: BulkActionBody, db: AsyncSession = Depends(get_db),
+                             _=Depends(require_super_admin)):
+    """Tick every currently-listed officer WITH AN EMAIL in the filtered clubs.
+
+    The same rule a Rediscover applies as it goes, applied to what the directory
+    already holds — no PlayHQ traffic at all, so it answers immediately instead
+    of waiting hours for a full re-page. Skips anyone who unsubscribed, bounced,
+    asked not to be contacted, or is marked as no longer on the committee."""
+    return await cd.bulk_tick_officers(db, await _bulk_filters(db, body))
 
 
 @router.patch("/clubs/{club_id}/utm")
@@ -996,6 +1072,11 @@ def _contact_out(ct: MarketingClubContact) -> dict:
         "email": ct.email, "mobile": ct.mobile, "source": ct.source,
         "subscribed": ct.subscribed, "selected": ct.outreach_selected,
         "exported": ct.exported_at is not None,
+        # A Rediscover found this officer absent from PlayHQ but kept the row
+        # rather than deleting it, because deleting would have lost something a
+        # person decided (an unsubscribe, a bounce, a do-not-contact, a note, a
+        # CRM link). See services/club_directory._prune_committee.
+        "former": getattr(ct, "former_at", None) is not None,
     }
 
 

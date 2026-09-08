@@ -4331,6 +4331,17 @@ async def lifespan(app: FastAPI):
         for _stmt in _NOTIFICATION_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 293: a Club Directory Rediscover re-reads a club's committee
+        # from PlayHQ and reconciles against it. former_at marks a delisted
+        # officer we kept rather than deleted (an unsubscribe, a bounce, a
+        # do-not-contact, a note, a CRM link, a hand-added row); comms_contacts
+        # .role carries the officer's last known role into BetterComms. Same
+        # one-copy rule — this list and alembic's 293 both run
+        # services/committee_sync_ddl.STATEMENTS.
+        from app.services.committee_sync_ddl import STATEMENTS as _COMMITTEE_SYNC_DDL
+        for _stmt in _COMMITTEE_SYNC_DDL:
+            await conn.execute(text(_stmt))
+
     # Migration 178: Member self-service portal, Stripe Connect fee payments,
     # reminder automation. See services/member_portal_auth.py,
     # services/stripe_connect_client.py, services/member_reminders.py.
