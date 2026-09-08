@@ -1454,6 +1454,15 @@ async def verify_synced_overlap(engine, session_maker) -> None:
         for statement in SUPERSEDED_DDL:
             await conn.execute(text(statement))
         after = await importer_ddl.verify(conn)
+    # MIGRATION 291 GAVE `manual_batting_innings` ITS OWN `caught_behind`, and
+    # this module re-issues that view LAST in the lifespan — so selecting NULL
+    # there would silently revert someone else's feature on every boot.
+    batting = next(st for st in SUPERSEDED_DDL
+                   if "VIEW v_effective_batting_innings" in st)
+    check("the batting view keeps 291's manual caught_behind",
+          "NULL::boolean AS caught_behind" not in batting
+          and batting.count("caught_behind") >= 2, batting[-400:])
+
     check("a view carrying its source clause is reported as sound",
           all(before.values()), str(before))
     check("a view that has lost it is caught rather than assumed",
@@ -1524,6 +1533,160 @@ async def verify_synced_overlap(engine, session_maker) -> None:
     check("a season with no synced games is left alone rather than emptied",
           again == 0 and await _source_of(session_maker, lonely) == 'cricketstatz',
           f"handed={again}")
+
+
+async def verify_per_innings_source(session_maker) -> None:
+    """One innings, one source. Reported live off the record boards.
+
+    `v_effective_games` and `v_effective_player_season_stats` were filtered by
+    migration 287; the six PER-INNINGS views were not. So for a season read
+    from CricketStatz both the synced innings and the imported innings were
+    present, and every century, wicket and catch was counted twice — a record
+    board listing the same 270 for the same player in the same season, and a
+    career reading 14,806 runs.
+    """
+    print("\nOne innings, one source")
+    org, player = uuid.uuid4(), uuid.uuid4()
+    season, ca_grade = uuid.uuid4(), uuid.uuid4()
+    game, mgame = uuid.uuid4(), uuid.uuid4()
+    imp = uuid.uuid4()
+    async with session_maker() as db:
+        await db.execute(text("""
+            INSERT INTO organisations (id, name, slug, is_active)
+            VALUES (:o, 'Innings Test CC', 'innings-test-cc', true)
+        """), {"o": str(org)})
+        await db.execute(text("""
+            INSERT INTO cricketstatz_imports
+                (id, organisation_id, club_id, source_url, status, phase)
+            VALUES (:i, :o, '93931', 'u', 'complete', 'done')
+        """), {"i": str(imp), "o": str(org)})
+        await db.execute(text("""
+            INSERT INTO seasons (id, organisation_id, name, year)
+            VALUES (:s, :o, 'Summer 2002/03', 2002)
+        """), {"s": str(season), "o": str(org)})
+        await db.execute(text(
+            "INSERT INTO grades (id, season_id, name) VALUES (:g, :s, 'NMCA - Jika Shield')"),
+            {"g": str(ca_grade), "s": str(season)})
+        await db.execute(text("""
+            INSERT INTO players (id, organisation_id, name)
+            VALUES (:p, :o, 'Shephard, Heath')
+        """), {"p": str(player), "o": str(org)})
+        # The same innings from both sources: 270, one season, one player.
+        await db.execute(text("""
+            INSERT INTO games (id, grade_id, played_at, home_team, away_team)
+            VALUES (:i, :g, CAST(:d AS date), 'Innings Test CC', 'Panton Hill')
+        """), {"i": str(game), "g": str(ca_grade), "d": date(2002, 11, 5)})
+        await db.execute(text("""
+            INSERT INTO batting_innings
+                (game_id, player_id, innings_number, runs, not_out, did_not_bat)
+            VALUES (:g, :p, 1, 270, false, false)
+        """), {"g": str(game), "p": str(player)})
+        # A synced row in every other per-innings table too, or the checks
+        # below assert 0 against a table that was empty anyway and could never
+        # have failed.
+        await db.execute(text("""
+            INSERT INTO bowling_spells (game_id, player_id, innings_number,
+                                        overs, maidens, runs, wickets)
+            VALUES (:g, :p, 1, 10.0, 2, 30, 3)
+        """), {"g": str(game), "p": str(player)})
+        await db.execute(text("""
+            INSERT INTO fielding_stats (game_id, player_id, catches)
+            VALUES (:g, :p, 2)
+        """), {"g": str(game), "p": str(player)})
+        await db.execute(text("""
+            INSERT INTO fall_of_wickets (game_id, innings_number, wicket_number,
+                                         score_at_fall, player_id)
+            VALUES (:g, 1, 1, 40, :p)
+        """), {"g": str(game), "p": str(player)})
+        await db.execute(text("""
+            INSERT INTO partnerships (game_id, innings_number, wicket_number,
+                                      batter1_id, runs, is_club_innings)
+            VALUES (:g, 1, 1, :p, 40, true)
+        """), {"g": str(game), "p": str(player)})
+        await db.execute(text("""
+            INSERT INTO bowler_wickets (game_id, innings_number, bowler_id,
+                                        batter_name, dismissal_type)
+            VALUES (:g, 1, :p, 'A Batter', 'bowled')
+        """), {"g": str(game), "p": str(player)})
+        await db.execute(text("""
+            INSERT INTO manual_games
+                (id, organisation_id, season_id, grade_id, played_at, opposition,
+                 cricketstatz_import_id)
+            VALUES (:i, :o, :s, :gr, CAST(:d AS date), 'Panton Hill', :imp)
+        """), {"i": str(mgame), "o": str(org), "s": str(season),
+               "gr": str(ca_grade), "d": date(2002, 11, 5), "imp": str(imp)})
+        await db.execute(text("""
+            INSERT INTO manual_batting_innings
+                (manual_game_id, player_id, innings_number, runs, not_out, did_not_bat)
+            VALUES (:g, :p, 1, 270, false, false)
+        """), {"g": str(mgame), "p": str(player)})
+        await db.commit()
+
+    async def innings_rows():
+        async with session_maker() as db:
+            return (await db.execute(text("""
+                SELECT source, COUNT(*) FROM v_effective_batting_innings
+                 WHERE player_id = :p GROUP BY source
+            """), {"p": str(player)})).all()
+
+    both = {r[0]: r[1] for r in await innings_rows()}
+    check("with no source recorded a club holding both sees both",
+          both.get("api", 0) == 1 and both.get("manual", 0) == 1, str(both))
+
+    async with session_maker() as db:
+        await db.execute(text(
+            "UPDATE seasons SET stats_source = 'cricketstatz' WHERE id = :s"),
+            {"s": str(season)})
+        await db.commit()
+    cs = {r[0]: r[1] for r in await innings_rows()}
+    check("a season read from CricketStatz counts the innings once",
+          cs.get("api", 0) == 0 and cs.get("manual", 0) == 1, str(cs))
+
+    async with session_maker() as db:
+        await db.execute(text(
+            "UPDATE seasons SET stats_source = 'playhq' WHERE id = :s"),
+            {"s": str(season)})
+        await db.commit()
+    ph = {r[0]: r[1] for r in await innings_rows()}
+    check("and read from Cricket Australia it counts the other one, still once",
+          ph.get("api", 0) == 1 and ph.get("manual", 0) == 0, str(ph))
+
+    # The same rule on every per-innings view, not just batting.
+    async with session_maker() as db:
+        await db.execute(text(
+            "UPDATE seasons SET stats_source = 'cricketstatz' WHERE id = :s"),
+            {"s": str(season)})
+        await db.commit()
+    async with session_maker() as db:
+        for view in ("v_effective_bowling_spells", "v_effective_fielding_stats",
+                     "v_effective_fall_of_wickets", "v_effective_partnerships",
+                     "v_effective_bowler_wickets"):
+            n = (await db.execute(text(
+                f"SELECT COUNT(*) FROM {view} WHERE game_id = :g"),
+                {"g": str(game)})).scalar()
+            check(f"{view} drops the synced side too", n == 0, str(n))
+
+    # An innings on a game with NO grade is kept — a manual upload need not
+    # have one, and an inner join would drop it silently.
+    loose_game = uuid.uuid4()
+    async with session_maker() as db:
+        await db.execute(text("""
+            INSERT INTO manual_games (id, organisation_id, season_id, played_at,
+                                      opposition)
+            VALUES (:i, :o, :s, CAST(:d AS date), 'Panton Hill')
+        """), {"i": str(loose_game), "o": str(org), "s": str(season),
+               "d": date(2002, 12, 1)})
+        await db.execute(text("""
+            INSERT INTO manual_batting_innings
+                (manual_game_id, player_id, innings_number, runs, not_out, did_not_bat)
+            VALUES (:g, :p, 1, 44, false, false)
+        """), {"g": str(loose_game), "p": str(player)})
+        await db.commit()
+        kept = (await db.execute(text(
+            "SELECT COUNT(*) FROM v_effective_batting_innings WHERE game_id = :g"),
+            {"g": str(loose_game)})).scalar()
+    check("an innings whose game has no grade is kept, not dropped",
+          kept == 1, str(kept))
 
 
 async def verify_per_grade_aggregate(session_maker) -> None:
@@ -1787,6 +1950,7 @@ async def main() -> int:
     await verify_synced_overlap(engine, session_maker)
     await verify_repair(session_maker, org_id)
     await verify_heartbeat(session_maker, org_id)
+    await verify_per_innings_source(session_maker)
     await verify_per_grade_aggregate(session_maker)
     await verify_notes_pass(engine, session_maker, org_id, import_id)
     await verify_undo(session_maker, org_id, import_id, players)

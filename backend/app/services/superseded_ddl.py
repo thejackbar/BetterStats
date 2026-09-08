@@ -43,6 +43,11 @@ from __future__ import annotations
 
 STATEMENTS: tuple[str, ...] = (
     "ALTER TABLE seasons ADD COLUMN IF NOT EXISTS stats_source TEXT",
+    # Migration 291's column, guarded here too: this module re-issues
+    # v_effective_batting_innings, which reads it, and a view cannot be
+    # created against a column that is not there yet.
+    "ALTER TABLE manual_batting_innings ADD COLUMN IF NOT EXISTS "
+    "caught_behind BOOLEAN",
     # Tiny by construction — only the seasons a club has re-sourced — so the
     # views' own test is an index lookup rather than a scan.
     "CREATE INDEX IF NOT EXISTS ix_seasons_stats_source "
@@ -401,6 +406,126 @@ STATEMENTS: tuple[str, ...] = (
 # the downgrade puts migration 266's own definitions back rather than dropping
 # the views and leaving every reader broken.
 
+# ── the per-innings views ────────────────────────────────────────────────────
+# Reported live: a record board listing the same 270 twice and a career at
+# 14,806 runs. `v_effective_games` and `v_effective_player_season_stats` were
+# filtered; these six were not, so for a superseded season BOTH the synced
+# innings and the imported innings were present — every century, every wicket
+# and every catch counted from two sources.
+#
+# Each is taken from the migration that LAST defined it (075, 038, 147, 092,
+# 147, 093), with the column list untouched and every column qualified — a
+# `CREATE OR REPLACE VIEW` cannot change the output columns, and joining
+# `games` makes a bare `id` ambiguous. The joins are all on primary keys, so
+# they add no rows; LEFT JOIN throughout, so an innings whose game has no
+# grade (a manual upload with no grade is ordinary) is KEPT rather than
+# silently dropped, exactly as `v_effective_games` does it.
+_SYNCED_SOURCE_JOIN = """
+    LEFT JOIN games g ON g.id = {t}.game_id
+    LEFT JOIN grades gr ON gr.id = g.grade_id
+    LEFT JOIN seasons s ON s.id = gr.season_id
+    WHERE s.stats_source IS DISTINCT FROM 'cricketstatz'
+"""
+
+_MANUAL_SOURCE_JOIN = """
+    LEFT JOIN manual_games mg ON mg.id = {t}.manual_game_id
+    LEFT JOIN seasons ms ON ms.id = mg.season_id
+    WHERE mg.cricketstatz_import_id IS NULL
+       OR ms.stats_source IS DISTINCT FROM 'playhq'
+"""
+
+
+def _per_innings(view: str, synced_table: str, manual_table: str,
+                 synced_cols: str, manual_cols: str, *,
+                 filtered: bool = True) -> str:
+    """One per-innings view, with the source rule or without it.
+
+    `filtered=False` is what DOWNGRADE emits — the same column list with the
+    joins removed, so undoing 287 leaves nothing referencing `stats_source`
+    and the column can actually be dropped.
+    """
+    synced_tail = _SYNCED_SOURCE_JOIN.format(t="t") if filtered else "\n"
+    manual_tail = _MANUAL_SOURCE_JOIN.format(t="t") if filtered else "\n"
+    return (
+        f"CREATE OR REPLACE VIEW {view} AS\n"
+        f"    SELECT {synced_cols}\n"
+        f"    FROM {synced_table} t"
+        + synced_tail
+        + "    UNION ALL\n"
+        f"    SELECT {manual_cols}\n"
+        f"    FROM {manual_table} t"
+        + manual_tail
+    )
+
+
+
+
+_PER_INNINGS_SPECS = (
+    (
+        "v_effective_batting_innings", "batting_innings", "manual_batting_innings",
+        "t.id, t.game_id, t.player_id, t.innings_number, t.runs, t.balls, "
+        "t.fours, t.sixes, t.strike_rate, t.dismissal_type, t.not_out, "
+        "t.batting_position, t.did_not_bat, 'api'::text AS source, t.caught_behind",
+        "t.id, t.manual_game_id AS game_id, t.player_id, t.innings_number, "
+        "t.runs, t.balls, t.fours, t.sixes, t.strike_rate, t.dismissal_type, "
+        "t.not_out, t.batting_position, t.did_not_bat, 'manual'::text AS source, "
+        # Migration 291 gave manual_batting_innings its own caught_behind, and
+        # this module re-issues the view LAST in the lifespan — selecting NULL
+        # here would silently revert that feature on every boot.
+        "t.caught_behind",
+    ),
+    (
+        "v_effective_bowling_spells", "bowling_spells", "manual_bowling_spells",
+        "t.id, t.game_id, t.player_id, t.innings_number, t.overs, t.maidens, "
+        "t.runs, t.wickets, t.wides, t.no_balls, t.economy, 'api'::text AS source",
+        "t.id, t.manual_game_id AS game_id, t.player_id, t.innings_number, "
+        "t.overs, t.maidens, t.runs, t.wickets, t.wides, t.no_balls, t.economy, "
+        "'manual'::text AS source",
+    ),
+    (
+        "v_effective_fielding_stats", "fielding_stats", "manual_fielding_stats",
+        "t.id, t.game_id, t.player_id, t.catches, t.catches_wk, t.run_outs, "
+        "t.stumpings, 'api'::text AS source, t.player_name",
+        "t.id, t.manual_game_id AS game_id, t.player_id, t.catches, "
+        "t.catches_wk, t.run_outs, t.stumpings, 'manual'::text AS source, "
+        "t.player_name",
+    ),
+    (
+        "v_effective_fall_of_wickets", "fall_of_wickets", "manual_fall_of_wickets",
+        "t.id, t.game_id, t.innings_number, t.wicket_number, t.score_at_fall, "
+        "t.overs_at_fall, t.player_id, t.batter_name, 'api'::text AS source",
+        "t.id, t.manual_game_id AS game_id, t.innings_number, t.wicket_number, "
+        "t.score_at_fall, t.overs_at_fall, t.player_id, t.batter_name, "
+        "'manual'::text AS source",
+    ),
+    (
+        "v_effective_partnerships", "partnerships", "manual_partnerships",
+        "t.id, t.game_id, t.innings_number, t.wicket_number, t.batter1_id, "
+        "t.batter2_id, t.runs, t.balls, t.batter1_runs, t.batter2_runs, "
+        "t.is_club_innings, 'api'::text AS source, t.batter1_name, t.batter2_name",
+        "t.id, t.manual_game_id AS game_id, t.innings_number, t.wicket_number, "
+        "t.batter1_id, t.batter2_id, t.runs, t.balls, t.batter1_runs, "
+        "t.batter2_runs, t.is_club_innings, 'manual'::text AS source, "
+        "t.batter1_name, t.batter2_name",
+    ),
+    (
+        "v_effective_bowler_wickets", "bowler_wickets", "manual_bowler_wickets",
+        "t.id, t.game_id, t.innings_number, t.bowler_id, t.fielder_id, "
+        "t.batter_name, t.batter_position, t.batter_runs, t.batter_balls, "
+        "t.dismissal_type, t.caught_behind, 'api'::text AS source",
+        "t.id, t.manual_game_id AS game_id, t.innings_number, t.bowler_id, "
+        "t.fielder_id, t.batter_name, t.batter_position, t.batter_runs, "
+        "t.batter_balls, t.dismissal_type, t.caught_behind, 'manual'::text AS source",
+    ),
+)
+
+PER_INNINGS_VIEWS: tuple[str, ...] = tuple(
+    _per_innings(*spec) for spec in _PER_INNINGS_SPECS)
+PER_INNINGS_ORIGINALS: tuple[str, ...] = tuple(
+    _per_innings(*spec, filtered=False) for spec in _PER_INNINGS_SPECS)
+
+STATEMENTS = STATEMENTS + PER_INNINGS_VIEWS
+
 BACKFILL = """
     UPDATE seasons s SET stats_source = 'cricketstatz'
      WHERE s.stats_source IS NULL
@@ -417,7 +542,7 @@ BACKFILL = """
 # nothing.
 STATEMENTS = STATEMENTS + (BACKFILL,)
 
-DOWNGRADE: tuple[str, ...] = (
+DOWNGRADE: tuple[str, ...] = PER_INNINGS_ORIGINALS + (
     """CREATE OR REPLACE VIEW v_effective_games AS
     SELECT
         g.id, g.grade_id, g.played_at, g.home_team, g.away_team,
@@ -760,6 +885,12 @@ DOWNGRADE: tuple[str, ...] = (
 VERIFIED_VIEWS: tuple[tuple[str, str], ...] = (
     ("v_effective_games", "stats_source"),
     ("v_effective_player_season_stats", "stats_source"),
+    ("v_effective_batting_innings", "stats_source"),
+    ("v_effective_bowling_spells", "stats_source"),
+    ("v_effective_fielding_stats", "stats_source"),
+    ("v_effective_fall_of_wickets", "stats_source"),
+    ("v_effective_partnerships", "stats_source"),
+    ("v_effective_bowler_wickets", "stats_source"),
 )
 
 
