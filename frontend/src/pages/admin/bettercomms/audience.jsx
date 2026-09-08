@@ -9,7 +9,7 @@ export const SEARCH_FIELDS = ['name', 'email', 'role', 'club', 'association', 'c
 // The Clubs Directory facets offered as multi-select filters.
 export const FACETS = [
   // Role is the committee role the Clubs Directory last knew a contact by
-  // (migration 293) — what makes "email every Secretary" a list you can build.
+  // (migration 295) — what makes "email every Secretary" a list you can build.
   // Blank for a club's own members, and facetOptionsFrom only offers a facet
   // that actually has values, so it never appears for them.
   { key: 'role', label: 'Role' },
@@ -219,7 +219,7 @@ export function EngagementFilterControls({ value, onChange, hasDirectory }) {
     <div className="flex items-center gap-1 flex-wrap">
       <input value={value.gte} onChange={e => onChange({ ...value, gte: e.target.value })}
         placeholder="score min" inputMode="numeric"
-        title="Cached Twenty engagement score — can lag the live value"
+        title="Cached engagement score — can lag the live value"
         className="w-20 bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-pb-text text-xs focus:outline-none focus:border-pb-accent" />
       <input value={value.lte} onChange={e => onChange({ ...value, lte: e.target.value })}
         placeholder="score max" inputMode="numeric"

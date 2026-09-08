@@ -219,7 +219,7 @@ No frontend change needed — `CommsSettings.jsx`'s `requestLimit` already displ
 renders correctly as-is.
 
 **Phase 12 — MarketingClub + Twenty Lead/Opportunity creation (done).** New
-`twenty_sync._resolve_self_serve_club` finds-or-creates the `MarketingClub` +
+`engagement._resolve_self_serve_club` finds-or-creates the `MarketingClub` +
 registering-admin `MarketingClubContact` for a completed registration — checked in
 order: a row `_onboard_club_core` already linked to this exact org (it runs first,
 inside the same registration, and may already have matched-and-linked one by
@@ -236,7 +236,7 @@ webhook cascade (`create_opportunity_from_company`, which expects a human to fli
 Twenty's own field and round-trips through the Twenty API to re-derive the club),
 calling the same underlying upsert directly is simpler here since the club/company
 id are already in hand from the same request. New `push_self_serve_registration`
-(`twenty_sync.py`) ties it together: resolve club/contact, commit, then
+(`engagement.py`) ties it together: resolve club/contact, commit, then
 `push_club_and_contacts(..., engagement_override=<forced Hot 100>,
 create_opportunity=True, opportunity_modules=<the modules the admin selected>)` —
 same forced-Hot treatment `push_onboarding_enquiry` gives a plain enquiry, plus the

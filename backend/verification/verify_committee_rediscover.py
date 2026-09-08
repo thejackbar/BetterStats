@@ -97,7 +97,7 @@ async def main() -> int:
         await conn.execute(text(
             "INSERT INTO marketing_crawl_control (id, paused) VALUES (1, FALSE) "
             "ON CONFLICT (id) DO NOTHING"))
-        # Pre-293: the two columns must not exist yet, so the migration has
+        # Pre-295: the two columns must not exist yet, so the migration has
         # something to do and a populated table to do it to.
         await conn.execute(text(
             "ALTER TABLE marketing_club_contacts DROP COLUMN IF EXISTS former_at"))
@@ -105,8 +105,8 @@ async def main() -> int:
 
     Session = async_sessionmaker(engine, expire_on_commit=False)
 
-    # ── Migration 293 ───────────────────────────────────────────────────────
-    print("\n── Migration 293, on a populated pre-293 table ───────────────────")
+    # ── Migration 295 ───────────────────────────────────────────────────────
+    print("\n── Migration 295, on a populated pre-295 table ───────────────────")
     try:
         from app.services.committee_sync_ddl import STATEMENTS as DDL
     except Exception as exc:  # noqa: BLE001
@@ -119,7 +119,7 @@ async def main() -> int:
         return 1
 
     # Populate BEFORE the migration, in raw SQL — the ORM model already carries
-    # the new columns, so a row inserted through it could not be a pre-293 row.
+    # the new columns, so a row inserted through it could not be a pre-295 row.
     async with engine.begin() as conn:
         cid = uuid.uuid4()
         await conn.execute(text(
@@ -153,13 +153,14 @@ async def main() -> int:
     check("the partial index on former_at exists", idx is not None)
     check("the row that was already there survives", kept == 1, f"{kept}")
 
-    alembic = load("backend/alembic/versions/293_committee_rediscover.py")
+    alembic = load("backend/alembic/versions/295_committee_rediscover.py")
     mirror = load("backend/app/main.py")
-    check("alembic 293 runs the shared list, not its own copy",
+    check("alembic 295 runs the shared list, not its own copy",
           "from app.services.committee_sync_ddl import STATEMENTS" in alembic)
     check("the lifespan mirror runs the SAME shared list",
           "committee_sync_ddl import STATEMENTS" in mirror)
-    check("293 revises 292", 'down_revision = "292"' in alembic or "down_revision = '292'" in alembic)
+    check("295 revises 294",
+          'down_revision = "294"' in alembic or "down_revision = '294'" in alembic)
 
     # Imports come AFTER the migration, so the ORM's new columns line up.
     from app.services import club_directory as cd            # noqa: E402

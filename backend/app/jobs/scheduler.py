@@ -278,34 +278,29 @@ async def resolve_all_drafts():
                 logger.error(f"Draft auto-resolve failed for draft {d.id}: {e}")
 
 
-async def refresh_twenty_engagement():
-    """Recompute each exported club's engagement rollup (usage breadcrumbs move
-    daily, so the score/tier drifts even when nothing else about the club does)
-    and PATCH it onto its Twenty Company. Skipped unless Twenty is configured."""
-    if not settings.twenty_configured:
-        return
-    from app.services import twenty_sync
-    logger.info("Starting scheduled Twenty engagement refresh")
-    try:
-        stats = await twenty_sync.refresh_engagement()
-        logger.info(f"Twenty engagement refresh done: {stats}")
-    except Exception as e:
-        logger.error(f"Twenty engagement refresh failed: {e}")
+async def refresh_engagement_scores():
+    """Rescore EVERY club nightly and re-run the pipeline promotion.
 
+    Usage breadcrumbs move daily, so a club's score and tier drift even when
+    nothing else about it does — and the Club Directory, BetterComms
+    Lists/Segments and the CRM board all read the cached number rather than
+    recomputing it themselves. This is what keeps that number honest.
 
-async def refresh_twenty_leads_tasks():
-    """Seed/refresh Leads from telemetry, mirror outstanding module requests to Tasks,
-    and scan trials + renewals into follow-up Tasks. Idempotent; the first run also
-    backfills whatever already qualifies. Skipped unless Twenty is configured."""
-    if not settings.twenty_configured:
-        return
-    from app.services import twenty_leads_tasks
-    logger.info("Starting scheduled Twenty leads/tasks refresh")
+    No external CRM in it. This job used to push to the retired external CRM
+    and returned immediately when that was not configured, only ever touching
+    clubs already exported to it — so once it was retired the platform-wide
+    refresh silently stopped and every cached score froze wherever it was last
+    individually touched. ``crm.recalc_all_engagement`` is a local
+    read/compute over our own tables with no external call in it at all."""
+    from app.models.db import async_session_maker
+    from app.services import crm as crm_service
+    logger.info("Starting scheduled engagement rescore")
     try:
-        stats = await twenty_leads_tasks.refresh_leads_and_tasks()
-        logger.info(f"Twenty leads/tasks refresh done: {stats}")
+        async with async_session_maker() as session:
+            stats = await crm_service.recalc_all_engagement(session)
+        logger.info(f"Engagement rescore done: {stats}")
     except Exception as e:
-        logger.error(f"Twenty leads/tasks refresh failed: {e}")
+        logger.error(f"Engagement rescore failed: {e}")
 
 
 # ─── CRM Sales Pipeline auto-recompute (Tier 2 incremental + Tier 3 global) ────
@@ -688,31 +683,22 @@ def start_scheduler():
         id="daily_fantasy_settle",
         replace_existing=True,
     )
-    # BetterCricket CRM — refresh each exported club's engagement score daily
-    # (usage breadcrumbs move even when the club record doesn't). No-op when
-    # Twenty isn't configured.
+    # BetterCricket CRM — rescore EVERY club daily (usage breadcrumbs move even
+    # when the club record doesn't), and re-run the pipeline promotion. Runs
+    # whether or not any external CRM is configured: the score is computed from
+    # our own tables and cached on the club row, which is what the Club
+    # Directory, BetterComms Lists/Segments and the CRM board read.
     scheduler.add_job(
-        refresh_twenty_engagement,
+        refresh_engagement_scores,
         trigger="cron",
         hour=6,
         minute=0,
-        id="daily_twenty_engagement",
-        replace_existing=True,
-    )
-    # BetterCricket CRM — seed/refresh Leads from telemetry and raise follow-up Tasks
-    # (outstanding module requests, expiring trials, upcoming renewals) daily. No-op
-    # when Twenty isn't configured.
-    scheduler.add_job(
-        refresh_twenty_leads_tasks,
-        trigger="cron",
-        hour=7,
-        minute=0,
-        id="daily_twenty_leads_tasks",
+        id="daily_engagement_rescore",
         replace_existing=True,
     )
     # Self-serve trial onboarding, Phase 16 — daily scan for trial lifecycle
     # events and onboarding nudges, emailed straight to the club's own admin.
-    # Right after the Twenty scan since it's conceptually adjacent (both read
+    # Right after the engagement rescore since it's conceptually adjacent (both read
     # org_module_subscriptions). No-op unless a super admin has turned it on.
     scheduler.add_job(
         send_trial_lifecycle_nudges,
@@ -866,7 +852,7 @@ def start_scheduler():
     scheduler.start()
     logger.info("Scheduler started — marketing crawl %s, results sync Sun+Mon 01:00 Perth, "
                 "drift check first Sun 05:00 Perth, Square 04:00, fantasy settle 05:00, "
-                "Twenty engagement 06:00, trial lifecycle nudges 08:00, notifications 08:45, "
+                "engagement rescore 06:00, trial lifecycle nudges 08:00, notifications 08:45, "
                 "BetterScout refresh 09:00, Meta Ads snapshot hourly at :05, "
                 "draft tick /15min", marketing_mode)
 

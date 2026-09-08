@@ -1,5 +1,24 @@
 # Twenty CRM ↔ BetterCricket Integration — Scope
 
+> **RETIRED (v9.71.0, Sep 2026).** Twenty is decommissioned and every point of
+> integration has been removed: the client, the lead/task scan, the inbound
+> webhook, the opportunity push, the export button, the id-mapping ledger and
+> the credentials. This document is kept as the record of what was built and
+> why — BetterCricket's own pipeline stages still mirror the Opportunity board
+> described in section 3.4, and `crm_deals.source = 'twenty_import'` is still a
+> stored value from the one-off cutover.
+>
+> What replaced it: **the engagement engine moved to
+> `backend/app/services/engagement.py`** (it was `twenty_sync.py`, and had
+> always been a local read/compute over our own tables), and
+> `crm.recalc_all_engagement` is the one platform-wide rescore — run nightly by
+> `jobs/scheduler.py`, on demand from the Club Directory's "Refresh engagement
+> scores", and by `python -m app.scripts.recalc_engagement`. See the
+> CLAUDE.md note "Twenty is retired; the engagement score, the CRM and Sales
+> Management are not".
+>
+> Read every "we will" below as "we did, and it has since been removed".
+
 Status: design / scoping (June 2026). No code shipped yet. This document defines
 the target Twenty data model, the BetterCricket source entities that feed it, the
 API surface to build, the two-way sync workflow, and a phased build plan.

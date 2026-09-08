@@ -40,6 +40,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.capabilities import require_cap, MANAGE_COMMS
 from app.auth.modules import MODULE_COMMS, STATUS_TRIAL
 from app.config.settings import settings
+from sqlalchemy.orm import selectinload
+
 from app.models.db import (
     User, Organisation, Player, ClubMembership, Team,
     CommsContact, CommsCampaign, CommsRecipient, CommsSegment, CommsTemplate,
@@ -58,7 +60,7 @@ from app.services import directory
 from app.services import comms_limits
 from app.services import club_requests
 from app.services import ses_tenants
-from app.services import twenty_sync
+from app.services import crm as crm_service
 from app.services.club_directory import CA_EMAIL_DOMAINS, club_visit_stats
 from app.services import name_format
 from app.services.send_rate_limiter import send_limiter
@@ -185,7 +187,7 @@ def _contact_out(c: CommsContact, mc: "Optional[MarketingClub]" = None,
         "suppressed": bool(c.bounced or complained or c.excluded or suppressed),
         "player_id": str(c.player_id) if c.player_id else None,
         # The committee role the Clubs Directory last knew this person by
-        # (migration 293). Blank for an ordinary club's own members. Kept after
+        # (migration 295). Blank for an ordinary club's own members. Kept after
         # the directory prunes a departed officer, so a list built on it still
         # reads "Secretary" for the person who was one when we last heard.
         "role": (c.role or "") if hasattr(c, "role") else "",
@@ -1768,10 +1770,9 @@ async def _run_send(campaign_id: str, org_id: str) -> None:
                     WHERE r.campaign_id = :cid AND r.status = 'sent'
                       AND cc.marketing_club_id IS NOT NULL)
             """), {"now": now, "cid": uuid.UUID(campaign_id)})
-            # Every email sent should upsert a record in Twenty: for a
-            # marketing-outreach send, the club (Company) and the officer(s) just
-            # emailed (People) enter the CRM subset now if they weren't already —
-            # no manual "export to Twenty" click required first.
+            # Which officers a marketing-outreach send actually reached, per
+            # club — the input to the rescore below, so a send moves the club's
+            # engagement score straight away rather than at the nightly sweep.
             sent_officers = (await s.execute(text("""
                 SELECT DISTINCT cc.marketing_club_id, mcc.id
                 FROM comms_recipients r
@@ -1786,11 +1787,25 @@ async def _run_send(campaign_id: str, org_id: str) -> None:
         by_club: dict = {}
         for club_id, contact_id in sent_officers:
             by_club.setdefault(club_id, []).append(contact_id)
-        for club_id, contact_ids in by_club.items():
+        # A send is a real signal, so rescore each club it reached and re-check
+        # the pipeline promotion right now rather than waiting for the nightly
+        # sweep. (This used to route through the retired external-CRM exporter,
+        # which cached the score only as a side effect of pushing; the rescore is
+        # the whole point and is called directly.)
+        for club_id in by_club:
             try:
-                await twenty_sync.push_club_and_contacts(club_id, contact_ids)
+                async with async_session_maker() as s:
+                    mc = await s.get(MarketingClub, club_id)
+                    if mc is None:
+                        continue
+                    org_row = (await s.get(
+                        Organisation, mc.existing_org_id,
+                        options=[selectinload(Organisation.module_subscriptions)])
+                        if mc.existing_org_id else None)
+                    await crm_service.sync_engagement_promotion(s, mc, org_row)
+                    await s.commit()
             except Exception:  # noqa: BLE001 - a CRM hiccup must never affect the send
-                logger.exception("twenty push_club_and_contacts failed for club %s", club_id)
+                logger.exception("engagement rescore failed for club %s", club_id)
         logger.info("BetterComms: campaign %s sent=%d failed=%d", campaign_id, sent, failed)
     except Exception as e:  # never let the task die silently
         logger.error("BetterComms send failed for %s: %s", campaign_id, e, exc_info=True)
@@ -1885,8 +1900,7 @@ async def request_limit_increase(
     db: AsyncSession = Depends(get_db),
 ):
     """A club asks BetterCricket to lift it out of the sandbox. Queues a
-    super-admin decision, records telemetry, and raises an automated Twenty task.
-    One open request at a time.
+    super-admin decision and records telemetry. One open request at a time.
 
     Production sending is a paid-only feature: a club trialling BetterAdmin
     (self-serve trial registration, Phase 11 — see
@@ -1926,7 +1940,7 @@ async def request_limit_increase(
     )
     db.add(req)
     await db.flush()
-    # Telemetry + automated Twenty CRM task (uniform across every club→BC request).
+    # Telemetry (uniform across every club→BC request).
     metrics = await comms_limits.deliverability_metrics(db, club.id)
     ev = await club_requests.add_request_event(
         db, org_id=club.id, request_type="comms_tier_increase",
@@ -1936,7 +1950,6 @@ async def request_limit_increase(
         source="bettercomms", requested_by=user.id,
         ref_table="comms_limit_requests", ref_id=req.id)
     await db.commit()
-    club_requests.fire_twenty_task(ev.id)
     return {"status": "pending", "request": _limit_request_out(req)}
 
 

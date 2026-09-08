@@ -3,30 +3,30 @@ re-cache it onto marketing_clubs, then re-run the CRM auto-promotion so the
 Super Admin CRM board (/admin/super/crm) reflects the new scores.
 
 WHY THIS EXISTS
-    twenty_sync._engagement() caches its result onto the club row itself
+    engagement._engagement() caches its result onto the club row itself
     (marketing_clubs.engagement_score / .engagement_tier / .engagement_scored_at
     — see _apply_engagement_cache), and the CRM board reads that cached number
     (crm.py builds each deal's "engagement_score" straight from the club row).
-    Scores are normally refreshed lazily — the nightly job, a BetterComms send,
-    a manual "Refresh Twenty scores" — and the built-in refresh_engagement()
-    only touches clubs already exported to Twenty. After a change to the scoring
-    weights, every cached number is stale until its club is next touched. This
-    script forces a full, immediate recompute across ALL marketing_clubs so the
-    board is correct straight away.
+    Scores are normally refreshed lazily — a BetterComms send, a club's own
+    subscription change, an open/click. After a change to the scoring weights,
+    every cached number is stale until its club is next touched. This script
+    forces a full, immediate recompute across ALL marketing_clubs so the board
+    is correct straight away. It is the SAME sweep the nightly job and the Club
+    Directory's Refresh button run (crm.recalc_all_engagement); this wrapper
+    adds the distribution reporting.
 
 WHAT IT DOES PER CLUB
     crm.sync_engagement_promotion(session, club, org):
       1. _engagement() — recomputes and re-caches score + tier (a handful of
-         indexed reads over usage_events / email_events / etc; no Twenty calls,
-         so it works whether or not Twenty is configured).
+         indexed reads over usage_events / email_events / etc; entirely local,
+         no external CRM anywhere).
       2. maybe_promote_by_engagement_score() — re-applies the configured
          'engagement_score' CRM automation rules, promoting a club's deal to the
          right stage for its new score (forward-only; a no-op when no rule
          qualifies or the club has no deal yet).
 
-    It does NOT push to Twenty — that is the external CRM and is refreshed by its
-    own jobs / the "Refresh Twenty scores" button. This script is only about the
-    internal board's cached numbers.
+    Nothing leaves the platform: this is only about the cached numbers the
+    Club Directory, BetterComms Lists/Segments and the CRM board read.
 
 USAGE (inside the backend container — see the deploy notes in CLAUDE.md)
     # every club
@@ -53,7 +53,7 @@ from sqlalchemy.orm import selectinload
 from app.models.db import MarketingClub, Organisation, async_session_maker
 from app.services import crm as crm_service
 from app.services import engagement_params
-from app.services import twenty_sync
+from app.services import engagement
 
 logger = logging.getLogger("recalc_engagement")
 
@@ -63,7 +63,7 @@ COMMIT_EVERY = 100
 async def _load_org(session, org_id):
     """Load the linked org with its module subscriptions eagerly, so _engagement
     scores a paying club on account-health (it inspects module_subscriptions to
-    tell paid from trial). Mirrors refresh_engagement's own loader."""
+    tell paid from trial). Mirrors crm.recalc_all_engagement's own loader."""
     if not org_id:
         return None
     return await session.get(
@@ -109,111 +109,75 @@ def _print_histogram(scores: list) -> None:
 
 async def recalc(*, dry_run: bool = False, name: str | None = None,
                  params: dict | None = None, keep_prev: bool = False) -> dict:
-    """``params`` overrides the stored engagement parameters for this run only,
+    """Report wrapper around ``crm.recalc_all_engagement`` — that function IS
+    the sweep (the nightly job and the Club Directory's Refresh button call it
+    too, so there is one definition of "rescore the whole directory"); this adds
+    the tier split, histograms and percentiles an operator reads off a run.
+
+    ``params`` overrides the stored engagement parameters for this run only,
     which is what the parameters page's Preview uses: score every club under a
     proposed set of weights inside a transaction that is then rolled back.
     ``keep_prev`` suppresses the day-over-day baseline roll, for a sweep caused
     by a parameter change rather than by real club activity — see
-    twenty_sync._apply_engagement_cache."""
+    engagement._apply_engagement_cache."""
     tiers: Counter = Counter()
     tiers_linked: Counter = Counter()   # clubs with a linked org (onboarded/customer)
     tiers_prospect: Counter = Counter()  # directory-only prospects
     scores: list = []
     scores_prospect: list = []
-    promoted = 0
-    errors = 0
-    processed = 0
-    linked_count = 0
+    seen = [0]
 
     async with async_session_maker() as session:
-        # Resolve the scoring parameters ONCE for the whole sweep and inject
-        # them per club, so a save landing mid-run cannot score the first half
-        # of the table by one set of weights and the second half by another.
+        # Resolve the scoring parameters ONCE for the whole sweep and hand them
+        # in, so a save landing mid-run cannot score the first half of the table
+        # by one set of weights and the second half by another — and so the
+        # thresholds reported below are the ones actually scored against.
         if params is None:
             params = await engagement_params.get_params(session, use_cache=False)
-        # Pre-load a lightweight list of (id, name) as PLAIN values, not ORM
-        # instances. If a club's recompute errors, the failed transaction expires
-        # every attached ORM object, so touching one afterwards (even to read its
-        # id for a log line) fires a lazy reload — which, mid-failed-async-txn,
-        # raises MissingGreenlet and takes the whole sweep down. Plain tuples are
-        # immune, and re-fetching each club fresh inside the loop means a rollback
-        # fully resets the session before the next club.
-        idq = select(MarketingClub.id, MarketingClub.name).order_by(MarketingClub.id)
-        if name:
-            idq = idq.where(func.lower(MarketingClub.name).like(f"%{name.lower()}%"))
-        rows = (await session.execute(idq)).all()
-        total = len(rows)
-        print(f"Recomputing engagement for {total} club(s)"
-              + (f" matching {name!r}" if name else "")
+
+        def collect(club, deal) -> None:
+            """Called by the sweep for each club, while its row is still live in
+            the session. Reads only plain attributes — never triggers a lazy
+            load, which mid-failed-transaction would raise MissingGreenlet."""
+            tier = club.engagement_tier or "UNKNOWN"
+            tiers[tier] += 1
+            # "Linked" = has an Organisation row (an onboarded club: a trial or a
+            # paying customer). These are the ones the account-health / trial-depth
+            # floors push high, vs a directory-only prospect scored purely on lead
+            # heat. Matches the CRM deal's is_customer flag (bool(existing_org_id)),
+            # so the split lines up with the dashboard chart.
+            is_linked = bool(club.existing_org_id)
+            (tiers_linked if is_linked else tiers_prospect)[tier] += 1
+            if club.engagement_score is not None:
+                scores.append(club.engagement_score)
+                if not is_linked:
+                    scores_prospect.append(club.engagement_score)
+            seen[0] += 1
+            if seen[0] % COMMIT_EVERY == 0:
+                print(f"  ... {seen[0]}")
+
+        print("Recomputing engagement"
+              + (f" for club(s) matching {name!r}" if name else " for every club")
               + (" [DRY RUN — nothing will be saved]" if dry_run else "")
               + " ...")
-
-        # Single-pass precompute of the two per-club scans (web + email) for the
-        # WHOLE table at once. The per-club versions each re-resolve every event
-        # for every club (O(events x clubs)) — the reason a full sweep took ~14h.
-        # Resolving once here and injecting the results makes the loop's scoring
-        # a pure in-memory calc for the common (prospect) case, so 6k clubs run
-        # in minutes. The scoring is byte-for-byte identical (see --verify).
-        print("  building batch web/email stats (one pass over usage_events + email_events) ...")
-        web_map = await twenty_sync.batch_web_stats(session, params)
-        email_map = await twenty_sync.batch_email_stats(session, params)
-        print(f"  batch stats ready: {len(web_map)} clubs with web activity, "
-              f"{len(email_map)} with email activity")
-
-        batch = 0
-        for cid, cname in rows:
-            try:
-                club = await session.get(MarketingClub, cid)
-                if club is None:
-                    continue
-                org = await _load_org(session, club.existing_org_id)
-                deal = await crm_service.sync_engagement_promotion(
-                    session, club, org, web_stats=web_map, email_stats=email_map,
-                    params=params, keep_prev=keep_prev)
-                tier = club.engagement_tier or "UNKNOWN"
-                tiers[tier] += 1
-                # "Linked" = has an Organisation row (an onboarded club: a trial
-                # or a paying customer). These are the ones the account-health /
-                # trial-depth floors push high, vs a directory-only prospect
-                # scored purely on lead heat. Matches the CRM deal's is_customer
-                # flag (bool(existing_org_id)), so the split lines up with the
-                # dashboard chart.
-                is_linked = bool(club.existing_org_id)
-                if is_linked:
-                    linked_count += 1
-                    tiers_linked[tier] += 1
-                else:
-                    tiers_prospect[tier] += 1
-                if club.engagement_score is not None:
-                    scores.append(club.engagement_score)
-                    if not is_linked:
-                        scores_prospect.append(club.engagement_score)
-                if deal is not None:
-                    promoted += 1
-                processed += 1
-                batch += 1
-                if batch >= COMMIT_EVERY:
-                    # Roll a dry run back so nothing persists; commit a real run.
-                    await (session.rollback() if dry_run else session.commit())
-                    batch = 0
-                    print(f"  ... {processed}/{total}")
-            except Exception:  # noqa: BLE001 — one bad club must not abort the sweep
-                errors += 1
-                await session.rollback()   # reset the session BEFORE any logging
-                batch = 0
-                logger.exception("recalc failed for club id=%s name=%r", cid, cname)
-
-        # Flush the tail of the final partial batch.
-        await (session.rollback() if dry_run else session.commit())
+        print("  (one batch pass over usage_events + email_events first)")
+        out = await crm_service.recalc_all_engagement(
+            session, name=name, dry_run=dry_run, keep_prev=keep_prev,
+            params=params, on_club=collect, commit_every=COMMIT_EVERY)
         if dry_run:
             print("DRY RUN — rolled back, no changes saved.")
+
+    processed = out["processed"]
+    promoted = out["promoted"]
+    errors = out["errors"]
+    linked_count = sum(tiers_linked.values())
+    prospect_count = sum(tiers_prospect.values())
 
     print("\nDone.")
     print(f"  processed: {processed}")
     print(f"  deals promoted this run: {promoted}")
     if errors:
         print(f"  errors (skipped, see log): {errors}")
-    prospect_count = processed - linked_count
     print(f"  makeup: {prospect_count} directory-only prospects, "
           f"{linked_count} linked clubs (onboarded trials/customers)")
     print(f"  tier distribution (total | prospect | linked):")
@@ -234,7 +198,7 @@ async def recalc(*, dry_run: bool = False, name: str | None = None,
             # without re-deriving it: the whole score list (so a histogram and
             # percentiles are a client-side calculation), how many clubs would
             # be on the board under these thresholds, and how many would cross
-            # the Twenty Opportunity line.
+            # the auto-Opportunity line.
             "scores": scores, "scores_prospect": scores_prospect,
             "on_board": board,
             "at_opportunity": sum(1 for v in scores if v >= opp_min)}
@@ -257,7 +221,7 @@ async def verify(sample: int, name: str | None = None) -> None:
     web/email maps injected, once with the original per-club queries — and report
     any club whose score, tier, or any underlying web/email aggregate differs.
     Never persists (rolls back)."""
-    from app.services.twenty_sync import _engagement
+    from app.services.engagement import _engagement
     async with async_session_maker() as session:
         idq = select(MarketingClub.id, MarketingClub.name).order_by(MarketingClub.id)
         if name:
@@ -266,8 +230,8 @@ async def verify(sample: int, name: str | None = None) -> None:
         rows = (await session.execute(idq)).all()
         print(f"Verifying batch vs per-club for {len(rows)} club(s) ...")
         print("  building batch web/email stats ...")
-        web_map = await twenty_sync.batch_web_stats(session)
-        email_map = await twenty_sync.batch_email_stats(session)
+        web_map = await engagement.batch_web_stats(session)
+        email_map = await engagement.batch_email_stats(session)
 
         checked = 0
         mismatches = 0
@@ -303,7 +267,7 @@ async def verify_fast(sample: int, name: str | None = None) -> None:
     club whose score, tier, or underlying web aggregate differs. Never persists.
     A clean pass means crm.check_web_signal_promotion's live per-event recompute
     is trustworthy."""
-    from app.services.twenty_sync import _engagement
+    from app.services.engagement import _engagement
     async with async_session_maker() as session:
         idq = select(MarketingClub.id, MarketingClub.name).order_by(MarketingClub.id)
         if name:

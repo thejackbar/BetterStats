@@ -101,7 +101,7 @@ _CLUB_CONTACT_RANK = 5    # the org-level generic club mailbox (just below offic
 # The rank sales_workspace.add_directory_contact stamps on a contact a rep types
 # into the Workspace drawer. Unreachable from _role_for_position (which returns
 # 1/2/3/4/5/10/50/60), so it identifies a hand-added row even where `source` was
-# written as 'api' — which it was, until migration 293's Rediscover shipped.
+# written as 'api' — which it was, until migration 295's Rediscover shipped.
 _HAND_ADDED_RANK = 99
 _OTHER_RANK = 50          # any other named committee position
 _UNLABELLED_RANK = 60     # a contact with no position at all
@@ -262,7 +262,7 @@ async def link_org_to_marketing_club(session: AsyncSession, org) -> "Optional[Ma
     different org). Returns the linked (or already-linked) club, else None.
 
     Why this exists: a self-serve registration links the club at signup
-    (``twenty_sync._resolve_self_serve_club``), but a club a super admin
+    (``engagement._resolve_self_serve_club``), but a club a super admin
     onboards/syncs and then trials has its directory row left UNLINKED — so
     ``trial_days_remaining_by_club`` / ``subscribed_modules_by_club`` (and
     every CRM card badge that reads them: expired-trial state, the trial
@@ -929,7 +929,7 @@ async def _resolve_outreach_org(session: AsyncSession, organisation_id: Optional
 def _assoc_names(club: MarketingClub) -> list[str]:
     # Guard non-dict entries (a null / stray string in the associations JSONB would
     # otherwise AttributeError and 500 the whole CSV export) — same guard as
-    # twenty_sync._club_assocs.
+    # engagement._club_assocs.
     return [a["name"] for a in (club.associations or [])
             if isinstance(a, dict) and a.get("name")]
 
@@ -1226,7 +1226,7 @@ async def export_to_comms(session: AsyncSession, organisation_id: Optional[str] 
             organisation_id=org.id, email=email,
             name=(contact.full_name or "").strip() or None, source="import",
             marketing_club_id=club.id,   # link back so a campaign send flags the club
-            role=contact.role,           # last known committee role (migration 293)
+            role=contact.role,           # last known committee role (migration 295)
             tags=[club.name] + _assoc_names(club),
         ))
         contact.exported_at = now
@@ -1478,16 +1478,11 @@ async def set_sales_state(session: AsyncSession, club_id: str, *,
     automated source). Only the fields passed are changed. Returns the new state,
     or None if the club isn't found.
 
-    Adding a module to Trial Modules OR Requested Trial here queues the same
-    super-admin action-queue request the Twenty CRM webhook raises when a
-    salesperson does the equivalent edit on the Company (see
-    twenty_inbound.request_trial_modules): a real ModuleActionRequest if the club
-    is already synced, else a Twenty Task asking for it to be synced first.
-    Requested Trial is the "a club asked us for a trial" signal (e.g. by phone/
-    email, logged here by a super admin) — it needs the same follow-up action as
-    Trial Modules, just earlier in the pipeline, so it raises the identical
-    request/Task rather than sitting silently on the club's row. Best-effort —
-    never blocks saving the sales state."""
+    Adding a module to Trial Modules OR Requested Trial advances the club's
+    platform deal per the configured automation rule. Requested Trial is the "a
+    club asked us for a trial" signal (e.g. by phone/email, logged here by a
+    super admin) — the same follow-up as Trial Modules, just earlier in the
+    pipeline. Best-effort — never blocks saving the sales state."""
     club = await session.get(MarketingClub, club_id)
     if club is None:
         return None
@@ -1510,31 +1505,10 @@ async def set_sales_state(session: AsyncSession, club_id: str, *,
     await session.commit()
     await session.refresh(club)
     added_modules = sorted(added_trial | added_requested)
-    if added_modules:
-        try:
-            from app.services.twenty_inbound import request_trial_modules
-            org = (await session.get(Organisation, club.existing_org_id)
-                   if club.existing_org_id else None)
-            await request_trial_modules(session, club, org, added_modules,
-                                        source="app", ext_key=f"app:{club.grassroots_guid}")
-        except Exception:  # noqa: BLE001 - queueing the follow-up must never block the save
-            logger.exception("club_directory: failed to queue trial request for %s", club.id)
     if added_modules or became_in_trial:
-        # Requesting or starting a trial here is as strong a buying signal as a
-        # direct "onboard my club" enquiry — force the same immediate Hot (100)
-        # + Lead treatment rather than letting it filter through as partial
-        # credit in the gradual engagement formula (see push_onboarding_enquiry).
-        try:
-            from app.services.twenty_sync import push_club_and_contacts
-            await push_club_and_contacts(
-                club.id, engagement_override={
-                    "engagementScore": 100, "engagementTier": "HOT", "inSalesCycle": True})
-        except Exception:  # noqa: BLE001 - the CRM push must never block the save
-            logger.exception("club_directory: failed to push trial engagement for %s", club.id)
-        # Local CRM pipeline equivalent — advance (or create) this club's
-        # platform deal per the super-admin-configured 'trial_started' /
-        # 'trial_requested' automation rule (services/crm_rules.py), same
-        # trigger moment as the Twenty push above. Prefers 'trial_started'
+        # Advance (or create) this club's platform deal per the
+        # super-admin-configured 'trial_started' / 'trial_requested' automation
+        # rule (services/crm_rules.py). Prefers 'trial_started'
         # whenever a module is actually being trialed now (added_trial or
         # became_in_trial) — 'trial_requested' only fires when this save was
         # purely adding a REQUESTED (not yet granted) module.
@@ -1556,10 +1530,10 @@ async def set_sales_state(session: AsyncSession, club_id: str, *,
                 # Seed the deal's contact from the club's best-known contact if
                 # it doesn't already have one (no-op otherwise).
                 await ensure_deal_contact(session, deal)
-            # Also check the score-based promotion right now, independent of
-            # whether Twenty is configured — harmless no-op once the deal above
-            # is already past Engaged (trial always is), but keeps this call
-            # site consistent with every other discrete-event trigger.
+            # Also rescore and check the score-based promotion right now — a
+            # harmless no-op once the deal above is already past Engaged (a
+            # trial always is), but keeps this call site consistent with every
+            # other discrete-event trigger.
             org = (await session.get(Organisation, club.existing_org_id,
                                      options=[selectinload(Organisation.module_subscriptions)])
                    if club.existing_org_id else None)
@@ -1996,7 +1970,7 @@ _PATH_CODE = "split_part(split_part(ue.path, '?', 1), '/', 2)"
 # The per-event single-club resolution, as a correlated scalar (references the
 # outer ``ue``). COALESCE applies the priority order; each subquery is LIMIT 1 so
 # a colliding ``utm_code`` can't multiply the row. Exposed on its own so the
-# engagement score (twenty_sync._engagement) attributes a visit the SAME way this
+# engagement score (engagement._engagement) attributes a visit the SAME way this
 # panel does — resolving each visit to ONE club rather than the old any-overlap
 # match that credited every club whose code merely collided with the path/UTM.
 def _resolved_cid_sql(utm_id: str, utm_source: str, path_code: str) -> str:
@@ -2061,7 +2035,7 @@ _RESOLVED_VISITS = (
     # keeps riding along on every later page view from that tab, including a
     # staff member's own authenticated admin browsing — which would otherwise
     # get misattributed to a prospect club as "visits"/"pages viewed" and
-    # corrupt the engagement score built on this same CTE (twenty_sync.py
+    # corrupt the engagement score built on this same CTE (engagement.py
     # _engagement). Same guard usage.py's campaigns()/live() already use to
     # keep staff activity out of visitor numbers.
     "AND ue.user_id IS NULL "
@@ -2071,7 +2045,7 @@ _RESOLVED_VISITS = (
 # Same shape as _RESOLVED_VISITS (both feed club_visit_detail's `base` below,
 # same output columns) but reads the pre-stamped resolved_marketing_club_id
 # column directly (an indexed equality) instead of recomputing _RESOLVED_CID's
-# 7-branch COALESCE per row — the identical fast_web=True trade twenty_sync.
+# 7-branch COALESCE per row — the identical fast_web=True trade engagement.
 # _engagement already makes for the SAME resolution (resolve_prospect_club_id
 # stamps this column at write time using the exact same logic, see above), just
 # applied here to the Website Analytics panel's per-club query instead of the
@@ -2298,7 +2272,7 @@ async def club_visit_detail(session: AsyncSession, club_id, limit: int = 50, fas
 
     ``fast_web`` swaps the resolution for the pre-stamped, indexed
     resolved_marketing_club_id column (see _RESOLVED_VISITS_FAST above) — the
-    same trade twenty_sync._engagement's own fast_web makes, needed here
+    same trade engagement._engagement's own fast_web makes, needed here
     because the Sales Workspace drawer calls this on every club open and the
     live 7-branch resolution over the whole usage_events table was the
     dominant cost in a "detail pane is slow" report."""

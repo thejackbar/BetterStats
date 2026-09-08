@@ -687,7 +687,7 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
             <div className="flex items-center justify-between gap-2 mb-2">
               <h3 className="font-display font-bold text-[13px]">Notes &amp; activity</h3>
               {/* A rep's own notes are the needle in this haystack: the feed
-                  below is deliberately everything on the deal (the Twenty
+                  below is deliberately everything on the deal (the legacy CRM
                   pipeline backfill and the reassignment audit rows included,
                   both of which the Sales Workspace drawer hides from its own
                   History), so on a long-running club a note typed in the

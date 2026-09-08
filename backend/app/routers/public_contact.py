@@ -21,7 +21,6 @@ from app.routers import self_serve_trial as sst
 from app.services import meta_capi, rate_limit
 from app.services.crm import sync_deal_for_enquiry
 from app.services.login_audit import client_ip
-from app.services.twenty_sync import mark_contact_source, push_onboarding_enquiry
 from app.services.usage_tracker import record_event_bg
 
 logger = logging.getLogger(__name__)
@@ -182,23 +181,13 @@ async def submit_contact(
     )
     db.add(row)
     await db.commit()
-    # If this enquirer is already a Person in the CRM, record that they made
-    # contact via the website. Runs after the response so a CRM hiccup can't slow
-    # or fail the form (Formspree is the primary delivery either way).
-    background.add_task(mark_contact_source, email, "WEBSITE")
     # A direct "onboard my club" enquiry — from either this short CTA-modal form
     # or the full Contact page (both post here) — is the strongest buying signal
-    # a prospect can give, so the club is immediately upserted into Twenty as a
-    # Company + Lead at a forced Hot (100) engagement score, regardless of
-    # whether it was already exported. Backgrounded; never raises.
+    # a prospect can give: ensure a New Lead deal exists (or advance an existing
+    # one) so the pipeline reflects it immediately. Backgrounded; never raises.
     # ``org_id`` is what stops one club arriving as two: a picked club keys the
     # directory row on its real CA guid instead of a synthetic one derived from
     # however the name was spelled.
-    background.add_task(push_onboarding_enquiry, club_name=club, contact_name=name,
-                        email=email, phone=payload.phone, org_id=club_org_id)
-    # Same enquiry, the local CRM pipeline's equivalent of the Twenty push
-    # above — ensures a New Lead deal exists (or advances an existing one) so
-    # the pipeline stays in step with the same trigger. Best-effort.
     background.add_task(sync_deal_for_enquiry, club_name=club, contact_name=name,
                         email=email, phone=payload.phone, org_id=club_org_id)
     # Server-side Lead event (Meta Conversions API), sharing the browser pixel's

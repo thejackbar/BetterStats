@@ -60,7 +60,7 @@ ORIGIN_LABEL = "Club Admin Users"
 CONTACT_SOURCE = "admin"
 
 #: Held so a fire-and-forget task isn't garbage collected mid-flight — the same
-#: guard club_admin._push_club_to_twenty keeps.
+#: guard club_admin._sync_club_to_crm keeps.
 _tasks: set = set()
 
 

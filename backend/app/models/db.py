@@ -904,11 +904,13 @@ class ModuleActionRequest(Base):
     """A request to change a club's module entitlement, actioned by a super admin
     (migration 119). A request never changes entitlement on its own — it queues an
     action. ``kind`` is trial / subscribe / cancel; ``source`` records where it came
-    from (app / super_admin / twenty). The super admin actions it from the queue;
+    from (app / super_admin / twenty — the last a legacy value from the retired
+    external CRM). The super admin actions it from the queue;
     completing a trial request creates the trial (``result_subscription_id``).
 
     Mirrors the ClubOnboardingRequest pattern (super-admin actionable, lifecycle +
-    source + timestamps). ``external_ref`` dedupes a Twenty-origin request.
+    source + timestamps). ``external_ref`` deduped a request originating in the
+    retired external CRM; nothing writes it now.
     """
     __tablename__ = "module_action_requests"
 
@@ -1094,7 +1096,7 @@ class CommsLimitRequest(Base):
     Mirrors ModuleActionRequest: a request never changes the tier on its own, it
     queues a decision. The super admin approves (which sets the club's
     ``comms_tier`` / per-club cap) or denies. Creating one also emits a
-    ClubRequestEvent (telemetry + a Twenty task) via services/club_requests.py.
+    ClubRequestEvent (telemetry) via services/club_requests.py.
     """
     __tablename__ = "comms_limit_requests"
 
@@ -1115,15 +1117,15 @@ class CommsLimitRequest(Base):
 class ClubRequestEvent(Base):
     """Telemetry for EVERY club→BetterCricket request across the platform
     (migration 125): a BetterComms tier lift, a module trial/subscribe, and
-    future asks. One durable audit row per request, and the hook that fires an
-    automated Twenty CRM task so the back office actions it. Written by the
-    shared helper services/club_requests.py::record_club_request.
+    future asks. One durable audit row per request. Written by the shared helper
+    services/club_requests.py::add_request_event.
 
     ``request_type`` is a stable slug (comms_tier_increase | module_request | …);
     ``ref_table`` / ``ref_id`` point back at the domain row (e.g. the
-    comms_limit_requests row) so the CRM task and the workflow queue stay linked.
-    ``twenty_task_status`` tracks the best-effort CRM push (pending → created /
-    failed / skipped) without ever blocking the request itself.
+    comms_limit_requests row) so the event and the workflow queue stay linked.
+    ``twenty_task_id`` / ``twenty_task_status`` tracked a best-effort push into
+    the retired external CRM. Nothing writes either now; they are kept so a row
+    that already carries one still reads (see services/club_requests.py).
     """
     __tablename__ = "club_request_events"
 
@@ -4694,19 +4696,19 @@ class MarketingClub(Base):
     # Sales disposition: club contacted and explicitly not interested. Manual, and it
     # overrides the computed engagement tier in the CRM (never auto-recomputed away).
     not_interested = Column(Boolean, nullable=False, server_default="false", default=False)
-    # Cached copy of the last-computed Twenty engagementScore/-Tier — written by
-    # every _engagement() call (twenty_sync.py) regardless of what triggered it
-    # (manual export, bulk export, "Refresh Twenty scores", "Refresh Twenty
-    # leads/tasks", or a nightly job), so the Club Directory / BetterComms
-    # Contacts+Lists / Segments can filter on a real number without recomputing
-    # this per-club scan themselves. Can lag the live Twenty value by up to
-    # however long since this club's score was last (re)computed.
+    # Cached copy of the last-computed engagement score/tier — written by every
+    # _engagement() call (engagement.py) regardless of what triggered it (the
+    # nightly rescore, the Club Directory's Refresh, a BetterComms send, a
+    # subscription change, an open/click), so the Club Directory / BetterComms
+    # Contacts+Lists / Segments and the CRM board can all filter on a real
+    # number without each recomputing this per-club scan themselves. Can lag the
+    # live value by however long since this club's score was last (re)computed.
     engagement_score = Column(Integer, nullable=True)
     engagement_tier = Column(Text, nullable=True)
     engagement_scored_at = Column(TIMESTAMP(timezone=True), nullable=True)
     # Day-over-day baseline for the CRM pipeline's engagement up/down arrow
     # (migration 192). There is no score-history table — _apply_engagement_cache
-    # (twenty_sync.py) rolls the then-current engagement_score into _prev the
+    # (engagement.py) rolls the then-current engagement_score into _prev the
     # first time it writes on a NEW calendar day, so _prev holds the last score
     # recorded on an earlier day and (current vs _prev) is the day-over-day
     # direction. _prev_date is the calendar day that _prev value belongs to.
@@ -4952,6 +4954,8 @@ class CrmDeal(Base):
     # every open deal, and on one won before this shipped (which then falls
     # back to the rep's current rate — see services/sales_commissions.py).
     commission_rate_percent = Column(Numeric(6, 3), nullable=True)
+    # 'twenty_import' is a legacy value from the retired external CRM's one-off
+    # pipeline cutover — still stored, never written again.
     source = Column(Text, nullable=True)  # manual | auto_enquiry | auto_trial | self_serve_trial | twenty_import
     # Migration 184: how this club came to be onboarded (independent of `source`,
     # which is about how the DEAL/row was created) — self_serve_trial |

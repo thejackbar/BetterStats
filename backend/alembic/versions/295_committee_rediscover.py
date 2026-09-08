@@ -19,15 +19,15 @@ one who has since left the committee keeps the last role we knew them by.
 Both columns are nullable with no default, so every row already stored reads
 exactly as it did.
 
-Revision ID: 293
+Revision ID: 295
 Revises: 292
 """
 from alembic import op
 
 from app.services.committee_sync_ddl import STATEMENTS
 
-revision = "293"
-down_revision = "292"
+revision = "295"
+down_revision = "294"
 branch_labels = None
 depends_on = None
 

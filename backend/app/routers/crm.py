@@ -243,7 +243,7 @@ async def _activities_payload(db: AsyncSession, deal) -> dict:
     activity list holds.
 
     Deliberately still crm_service.list_activities, i.e. EVERYTHING on the
-    deal: the Sales Workspace drawer filters the Twenty backfill and the
+    deal: the Sales Workspace drawer filters the legacy CRM backfill and the
     reassignment audit rows out of its own feed
     (sales_workspace.list_activities_for_workspace), the card does not.
     `created_by_name` is the one addition — a note a rep wrote in the Sales
@@ -927,13 +927,13 @@ async def super_wizard_clubs_create_list(
 
 # ─── Manual full engagement recompute (the "Recalculate" board button) ────────
 # Runs the SAME logic as `python -m app.scripts.recalc_engagement`: recompute and
-# re-cache every club's engagement score (twenty_sync._engagement, a local
-# read/compute — no Twenty calls) and re-run the score-based CRM auto-promotion,
-# so the board reflects the current scoring rules immediately instead of waiting
-# on the nightly (Twenty-gated) refresh or lazy per-event recomputes. A full
+# re-cache every club's engagement score (engagement._engagement, a local
+# read/compute over our own tables) and re-run the score-based CRM
+# auto-promotion, so the board reflects the current scoring rules immediately
+# instead of waiting on the nightly refresh or lazy per-event recomputes. A full
 # sweep takes minutes, well past nginx's 60s proxy timeout, so it runs as a
 # detached background task with a status the button polls — same pattern as the
-# marketing page's "Refresh Twenty" buttons.
+# Club Directory's own Refresh button.
 _engagement_recalc: dict = {
     "running": False, "started_at": None, "finished_at": None, "result": None, "error": None,
 }

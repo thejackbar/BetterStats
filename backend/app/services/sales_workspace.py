@@ -298,7 +298,7 @@ async def add_directory_contact(
     contact afterwards.
 
     Stored ``source='manual'``, and that is not cosmetic: a Rediscover
-    (migration 293) reconciles the crawled committee against what PlayHQ
+    (migration 295) reconciles the crawled committee against what PlayHQ
     publishes and prunes ``'api'`` rows it no longer lists. This wrote 'api'
     until then, which would have let a later Rediscover delete a person a rep
     had typed in. Rows written before the fix are still spared, by their rank —
@@ -681,7 +681,7 @@ async def meta_ad_summary(session: AsyncSession, club) -> Optional[dict]:
     last Tuesday" is what a rep opens a call with. Returns None when the club
     has no ad-attributed traffic at all, so the card simply doesn't draw.
 
-    A click is detected exactly as the score detects it — twenty_sync's
+    A click is detected exactly as the score detects it — engagement's
     ``_META_CLICK``, an fbclid/igshid on the stored URL — rather than a second
     rule that could disagree with the number beside it. Attribution mirrors
     ``_engagement``'s own two branches: the pre-stamped resolved club for a
@@ -690,7 +690,7 @@ async def meta_ad_summary(session: AsyncSession, club) -> Optional[dict]:
     """
     if club is None:
         return None
-    from app.services.twenty_sync import _META_CLICK
+    from app.services.engagement import _META_CLICK
 
     rows = (await session.execute(text(f"""
         SELECT ue.created_at, ue.path, ue.landing_path,

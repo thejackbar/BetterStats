@@ -1213,7 +1213,7 @@ export default function SuperMetaAds() {
               </div>
             )}
 
-            {/* Ad-driven self-serve signups joined to their Twenty engagement
+            {/* Ad-driven self-serve signups joined to their engagement
                 score — which ads produced clubs that actually use the thing. */}
             {adSignups && (
               <div className="pb-card p-4 mb-4">
@@ -1231,7 +1231,7 @@ export default function SuperMetaAds() {
                 {adSignups.rows.length === 0 ? (
                   <p className="text-xs text-pb-faint">
                     No self-serve signups yet. Once the /trial page is live and the campaign is running,
-                    every club that registers itself lands here with its ad attribution and Twenty
+                    every club that registers itself lands here with its ad attribution and
                     engagement score.
                   </p>
                 ) : (
@@ -1303,9 +1303,9 @@ export default function SuperMetaAds() {
                       </table>
                     </div>
                     <p className="font-mono text-[9px] text-pb-faintest mt-3">
-                      Lead score is the cached Twenty engagement score (refreshed daily / via the Club
-                      Directory&rsquo;s refresh buttons). A club that registered before Twenty was configured
-                      shows &ldquo;not yet scored&rdquo; until it&rsquo;s exported.
+                      Lead score is the cached engagement score (rescored nightly, or on demand from
+                      the Club Directory). A club with no directory row yet shows
+                      &ldquo;not yet scored&rdquo;.
                     </p>
                   </>
                 )}

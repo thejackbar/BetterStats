@@ -74,22 +74,12 @@ async def _org_billable_module_keys(session, org_id) -> list:
     return sorted({billing_key_for(m) for m in held})
 
 
-def _push_club_to_twenty(org_id, force_hot: bool = False, crm_trigger: Optional[str] = None,
-                         won_module_keys: Optional[list] = None) -> None:
-    """Fire-and-forget: push one club's Company fields (paid/trial modules, ARR,
-    renewal) to Twenty after a subscription change. No-op when Twenty isn't
-    configured; never raises into the request.
+def _sync_club_to_crm(org_id, crm_trigger: Optional[str] = None,
+                      won_module_keys: Optional[list] = None) -> None:
+    """Fire-and-forget: bring one club's sales pipeline into line after a
+    subscription change, and rescore it. Never raises into the request.
 
-    ``force_hot=True`` (a trial actually starting — see start_module_trial and
-    approve_module_request's trial branch) also forces the engagement score to
-    Hot (100) and upserts a real Lead, same treatment as a direct "onboard my
-    club" enquiry — a club being put on a trial is too strong a signal to wait
-    on the gradual recency/frequency formula or the nightly refresh.
-
-    ``crm_trigger`` keeps BetterCricket's OWN sales pipeline in lockstep with
-    the Twenty push, in the SAME background task — per direct instruction, our
-    own CRM must reflect every action immediately, not lag behind Twenty's
-    periodic/manual-only refresh. It's one of ``crm_rules.TRIGGERS``'
+    ``crm_trigger`` is what moves the deal. It's one of ``crm_rules.TRIGGERS``'
     subscription/trial keys ('trial_requested' | 'trial_started' |
     'subscription_won' | 'subscription_cancelled') — the STAGE each one
     resolves to (and whether it's even enabled at all) is a super-admin
@@ -108,16 +98,6 @@ def _push_club_to_twenty(org_id, force_hot: bool = False, crm_trigger: Optional[
     calculated from, so it has to be what was actually bought."""
     async def _run():
         try:
-            from app.services import twenty_sync
-            override = ({"engagementScore": 100, "engagementTier": "HOT", "inSalesCycle": True}
-                       if force_hot else None)
-            await twenty_sync.push_org_company(org_id, engagement_override=override)
-        except Exception:
-            _logging.getLogger(__name__).exception("twenty push failed")
-
-        if not crm_trigger:
-            return
-        try:
             from app.models.db import async_session_maker
             from app.services import crm as crm_service, crm_rules
             from app.services.club_directory import link_org_to_marketing_club
@@ -125,7 +105,7 @@ def _push_club_to_twenty(org_id, force_hot: bool = False, crm_trigger: Optional[
                 if crm_trigger == "subscription_cancelled":
                     held = await _org_billable_module_keys(session, org_id)
                     if held:
-                        return
+                        return   # a partial cancel leaves the deal alone
                 org = await session.get(Organisation, org_id,
                                         options=[selectinload(Organisation.module_subscriptions)])
                 if org is None:
@@ -138,8 +118,10 @@ def _push_club_to_twenty(org_id, force_hot: bool = False, crm_trigger: Optional[
                 mc = await link_org_to_marketing_club(session, org)
                 if mc is None:
                     return
-                pipeline = await crm_service.ensure_platform_pipeline(session)
-                match = await crm_rules.resolve(session, pipeline, crm_trigger)
+                match = None
+                if crm_trigger:
+                    pipeline = await crm_service.ensure_platform_pipeline(session)
+                    match = await crm_rules.resolve(session, pipeline, crm_trigger)
                 if match is not None:
                     exact = bool(won_module_keys) and crm_trigger == "subscription_won"
                     modules = (sorted(set(won_module_keys)) if exact
@@ -148,12 +130,13 @@ def _push_club_to_twenty(org_id, force_hot: bool = False, crm_trigger: Optional[
                         session, mc, stage_key=match["stage_key"], source="auto_trial",
                         module_keys=modules, advance_only=not match["force"],
                         exact_value=exact)
-                # Also check the score-based Target/Contacted -> Engaged rule right
-                # now, independent of whether Twenty is configured (the Twenty push
-                # above already no-ops silently when it isn't) — a subscription
-                # change is exactly the kind of discrete event that shouldn't wait
-                # for the sweep. Harmless no-op once the deal above is already past
-                # Engaged (e.g. a trial_started rule's own move to Trial).
+                # Rescore the club and check the score-based
+                # Target/Contacted -> Engaged rule right now: a subscription
+                # change is exactly the kind of discrete event that shouldn't
+                # wait for the nightly sweep. Runs whether or not a trigger
+                # moved the deal, and is a harmless no-op once the deal above
+                # is already past Engaged (a trial_started rule's own move to
+                # Trial, say).
                 await crm_service.sync_engagement_promotion(session, mc, org)
                 await session.commit()
         except Exception:
@@ -2078,9 +2061,9 @@ def _club_payload(
         # Full Rebuild (its wipe already committed before the pause).
         "full_sync_paused": full_sync_paused,
         "full_sync_kind": full_sync_kind,
-        # Cached Twenty engagement score from the club's linked marketing_clubs
+        # Cached engagement score from the club's linked marketing_clubs
         # row (see MarketingClub.engagement_score — written by every
-        # twenty_sync._engagement() call). NULL = never scored, which the All
+        # engagement._engagement() call). NULL = never scored, which the All
         # Clubs page shows as "not yet scored" rather than 0.
         "engagement_score": engagement_score,
         "engagement_tier": engagement_tier,
@@ -2236,7 +2219,7 @@ async def list_all_clubs(
             web_count_by_org[row.org_id] = row.cnt
 
         # The three engagement-action counts below are cheap bulk versions of
-        # the per-club signals twenty_sync._engagement() attributes when it
+        # the per-club signals engagement._engagement() attributes when it
         # computes the (cached) score this page also returns — org-keyed web
         # activity above, email opens/clicks, and direct "onboard my club"
         # enquiries. They drive the All Clubs "actions recorded" sub-filter,
@@ -2628,7 +2611,7 @@ async def create_club(
         down;
       * stamps ``onboarding_method='super_admin_trial'`` on the club, which is
         what the setup wizard's auto-open and the trial-engagement score read;
-      * pushes the club to Twenty and creates the local CRM deal marked
+      * creates the local CRM deal marked
         'Super Admin Trial' immediately, so the engagement score is computed at
         creation rather than at the next nightly refresh.
 
@@ -2794,20 +2777,10 @@ async def create_club(
         club_name=name, link=f"{_settings.public_base_url}/login?invite={invite_token}",
     )
 
-    # Twenty + our own pipeline, immediately rather than at the next nightly
-    # refresh: creating a club and putting it on a trial is exactly the signal
-    # both are meant to reflect. Two separate background tasks on purpose —
-    # the Twenty push no-ops entirely when Twenty isn't configured, and the
-    # local deal must not inherit that gate.
-    from app.services import twenty_sync
+    # Put the club on the pipeline immediately rather than at the next nightly
+    # sweep: creating a club and putting it on a trial is exactly the signal the
+    # pipeline is meant to reflect.
     from app.services import crm as crm_service
-    background_tasks.add_task(
-        twenty_sync.push_self_serve_registration,
-        org_id=org.id, org_name=name, contact_name=admin_display_name,
-        email=admin_email, phone=admin.mobile_number,
-        modules=[k for k in trial_modules if k != MODULE_CORE],
-        source="super_admin_trial", lead_lifecycle=None, opportunity_stage=None,
-    )
     background_tasks.add_task(
         crm_service.sync_super_admin_trial_registration,
         org_id=org.id, org_name=name, contact_name=admin_display_name,
@@ -3185,12 +3158,10 @@ async def start_module_trial(
     mod_subs.start_trial_billing(org, module_key, start=body.start, end=body.end, days=days)
     await db.commit()
     await db.refresh(org, attribute_names=["module_subscriptions"])
-    # A new trial is a strong engagement signal (see twenty_sync._engagement's
-    # per-module upsell calc) — push it to Twenty now rather than waiting for the
-    # nightly refresh, same as the approve_module_request path below. force_hot
-    # forces the score to 100 and upserts a Lead rather than waiting for the
-    # gradual formula to notice.
-    _push_club_to_twenty(org.id, force_hot=True, crm_trigger="trial_started")
+    # A new trial is a strong engagement signal (see engagement._engagement's
+    # per-module upsell calc) — move the deal and rescore the club now rather
+    # than waiting for the nightly sweep, same as approve_module_request below.
+    _sync_club_to_crm(org.id, crm_trigger="trial_started")
     return _club_payload(org)
 
 
@@ -3518,7 +3489,7 @@ async def start_own_module_trial(
     await db.refresh(club, attribute_names=["module_subscriptions"])
     # Same signal-strength reasoning as start_module_trial / create_module_request's
     # trial branch — a trial actually starting always forces Hot(100)+Lead.
-    _push_club_to_twenty(club.id, force_hot=True, crm_trigger="trial_started")
+    _sync_club_to_crm(club.id, crm_trigger="trial_started")
     return {"ok": True}
 
 
@@ -3611,7 +3582,7 @@ async def cancel_own_module(
     # if this cancel left NOTHING billable held — cancelling one of several
     # modules shouldn't demote a deal that's still live for everything else
     # the club holds.
-    _push_club_to_twenty(club.id, crm_trigger="subscription_cancelled")
+    _sync_club_to_crm(club.id, crm_trigger="subscription_cancelled")
     return {"ok": True, "cancelled": targets}
 
 
@@ -3695,8 +3666,8 @@ async def create_module_request(
         requested_by=current_user.id,
     )
     db.add(req)
-    # Best-effort: surface the interest on the linked CRM club too (interestedModules
-    # in Twenty). Never blocks the request.
+    # Best-effort: surface the interest on the linked CRM club too. Never
+    # blocks the request.
     if body.kind in ("trial", "subscribe"):
         try:
             from app.models.db import MarketingClub
@@ -3708,9 +3679,8 @@ async def create_module_request(
                 mc.requested_trial_modules = sorted(wanted)
         except Exception:
             pass
-    # Uniform club→BetterCricket request telemetry + automated Twenty task (same
-    # helper the BetterComms tier request uses), so every ask is tracked and
-    # surfaces in the CRM action queue.
+    # Uniform club→BetterCricket request telemetry (the same helper the
+    # BetterComms tier request uses), so every ask is tracked.
     ev = await club_requests.add_request_event(
         db, org_id=club.id, request_type="module_request",
         summary=f"{club.name} requests {body.kind} of {body.module_key}",
@@ -3718,12 +3688,11 @@ async def create_module_request(
         source="app", requested_by=current_user.id,
         ref_table="module_action_requests", ref_id=req.id)
     await db.commit()
-    club_requests.fire_twenty_task(ev.id)
     if body.kind == "trial":
         # A club asking for a trial itself is as strong a signal as being put on
         # one — force the same Hot(100)+Lead treatment (start_module_trial /
         # approve_module_request give it at the grant end; this is the ask end).
-        _push_club_to_twenty(club.id, force_hot=True, crm_trigger="trial_requested")
+        _sync_club_to_crm(club.id, crm_trigger="trial_requested")
     await db.refresh(req)
     return _request_payload(req, org_name=club.name, requester=current_user.username)
 
@@ -3858,14 +3827,13 @@ async def approve_module_request(
     if result_sub is not None:
         req.result_subscription_id = result_sub.id
     await db.commit()
-    # Keep Twenty in step with the new paid/trial split (best-effort, configured-only).
-    # A trial approval is put-on-a-trial in every sense a direct grant is
-    # (start_module_trial above) — force the same Hot(100)+Lead treatment;
-    # a subscribe approval is a genuine conversion (CRM deal -> Won); cancel
-    # stays the ordinary billing-fields-only Twenty push, with the CRM deal
-    # only demoted if the org is left holding nothing billable at all.
-    _push_club_to_twenty(
-        org.id, force_hot=(req.kind == "trial"),
+    # Move the deal to match the new paid/trial split. A trial approval is
+    # put-on-a-trial in every sense a direct grant is (start_module_trial
+    # above); a subscribe approval is a genuine conversion (CRM deal -> Won);
+    # a cancel only demotes the deal if the org is left holding nothing
+    # billable at all.
+    _sync_club_to_crm(
+        org.id,
         crm_trigger=("subscription_won" if req.kind == "subscribe"
                     else "subscription_cancelled" if req.kind == "cancel"
                     else "trial_started" if req.kind == "trial" else None))

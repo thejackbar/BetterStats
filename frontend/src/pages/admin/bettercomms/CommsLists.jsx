@@ -30,7 +30,7 @@ import { FACETS, emptyFilters, matchesQuery, matchesFilters, facetOptionsFrom, M
 
 // One definition of the facet-filter shape, in the audience kit beside FACETS
 // itself — a second copy here silently drops any facet added there (Role was
-// added in migration 293).
+// added in migration 295).
 const noFilters = emptyFilters
 
 // Start an email already addressed to a list.

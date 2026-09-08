@@ -854,7 +854,7 @@ export default function SuperMarketing() {
     // Ranks (rather than paginates) the currently-filtered set by page views
     // or distinct visitors — see backend club_directory.top_clubs_by_visits.
     top_n: '', top_n_metric: 'views',
-    // Cached Twenty engagementScore (see marketing_clubs.engagement_score) — >=/<=.
+    // Cached engagement score (see marketing_clubs.engagement_score) — >=/<=.
     engagement_score_gte: '', engagement_score_lte: '',
     existing_org_id: initialOrgId,
   })
@@ -910,18 +910,6 @@ export default function SuperMarketing() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Re-attach to an in-flight Twenty export if the page was reloaded mid-run.
-  useEffect(() => {
-    api.mktExportTwentyStatus().then((s) => {
-      if (s && s.running) {
-        setBusy('twenty')
-        setMsg('Exporting to Twenty… this can take a few minutes for a large list. You can leave this page; the export keeps running.')
-        pollTwentyExport().finally(() => setBusy(''))
-      }
-    }).catch(() => {})
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
   const rediscoverRunning = !!rediscover?.running
   const rediscoverProgress = rediscover?.progress || {}
 
@@ -936,7 +924,7 @@ export default function SuperMarketing() {
 
   // Re-read every club's committee from PlayHQ. Hours long (the whole club
   // search, re-paged at the crawl's own courtesy delay), so it is backgrounded
-  // and polled — the same shape the Twenty export uses.
+  // and polled — the same shape the engagement rescore uses.
   const pollRediscover = async () => {
     for (;;) {
       await new Promise(r => setTimeout(r, 8000))
@@ -1027,35 +1015,16 @@ export default function SuperMarketing() {
     } catch (e) { setError(e.message) } finally { setBusy('') }
   }
 
-  const formatTwentyResult = (r) => {
-    const cl = (r.clubs_created || 0) + (r.clubs_updated || 0) + (r.clubs_adopted || 0)
-    const pp = (r.people_created || 0) + (r.people_updated || 0) + (r.people_adopted || 0)
-    let m = `Exported to Twenty: ${r.matched_clubs} club(s) matched, ${cl} club + ${pp} officer record(s) synced`
-    m += (r.clubs_unchanged || r.people_unchanged) ? `, ${(r.clubs_unchanged || 0) + (r.people_unchanged || 0)} unchanged` : ''
-    m += r.errors ? `. ${r.errors} club(s) errored (see logs).` : '.'
-    return m
-  }
-
   const formatEngagementResult = (r) =>
-    `Refreshed engagement on ${r.refreshed || 0} club(s) in Twenty` + (r.errored ? `, ${r.errored} errored (see logs).` : '.')
+    `Rescored ${r.processed || 0} of ${r.total || 0} club(s); ${r.promoted || 0} deal(s) moved`
+    + (r.errors ? `, ${r.errors} errored (see logs).` : '.')
 
-  const formatLeadsTasksResult = (r) => {
-    const leads = (r.leads_created || 0) + (r.leads_updated || 0) + (r.leads_adopted || 0)
-    const tasks = (r.tasks_request || 0) + (r.tasks_trial_expiry || 0) + (r.tasks_renewal || 0)
-    return `Twenty leads/tasks: scanned ${r.clubs_scanned || 0} exported club(s), `
-      + `${r.leads_qualified || 0} qualified → ${leads} lead(s). Pending: `
-      + `${r.requests_outstanding || 0} request(s), ${r.trials_in_window || 0} expiring trial(s), `
-      + `${r.renewals_in_window || 0} renewal(s) → ${tasks} new task(s).`
-      + ((r.leads_errored || r.tasks_errored) ? ' Some errored (see logs).' : '')
-  }
-
-  // Poll a background Twenty job's status endpoint until it finishes; surfaces
-  // the result/error. Shared by export, engagement refresh and leads/tasks
-  // refresh — all three run in the background (see marketing.py) since a full
-  // pass over an exported-club list against Twenty's rate limit routinely
-  // exceeds the nginx proxy timeout.
-  const pollTwentyJob = async (statusFn, formatResult, { onDone } = {}) => {
-    // ~20 min cap at 3s intervals — long jobs throttle through Twenty's rate limit.
+  // Poll a background job's status endpoint until it finishes; surfaces the
+  // result/error. Shared by the engagement rescore and the CRM push — both run
+  // in the background (see marketing.py) since a full pass over the directory
+  // comfortably exceeds the nginx proxy timeout.
+  const pollBackgroundJob = async (statusFn, formatResult, { onDone } = {}) => {
+    // ~20 min cap at 3s intervals.
     for (let i = 0; i < 400; i++) {
       await new Promise((res) => setTimeout(res, 3000))
       let s
@@ -1068,16 +1037,6 @@ export default function SuperMarketing() {
       return // no result and not running — nothing to report
     }
     setMsg('Still running — check back shortly, then refresh the list.')
-  }
-
-  const exportTwenty = async () => {
-    setBusy('twenty'); setMsg(''); setError('')
-    try {
-      const r = await api.mktExportTwenty({ ...filters })
-      if (r.error) { setError(r.error); return }
-      setMsg('Exporting to Twenty… this can take a few minutes for a large list. You can leave this page; the export keeps running.')
-      await pollTwentyJob(api.mktExportTwentyStatus, formatTwentyResult, { onDone: loadClubs })
-    } catch (e) { setError(e.message) } finally { setBusy('') }
   }
 
   const formatPushToCrmResult = (r) =>
@@ -1093,27 +1052,18 @@ export default function SuperMarketing() {
       const r = await api.mktPushToCrm({ ...filters })
       if (r.error) { setError(r.error); return }
       setMsg('Pushing to BetterCricket CRM… this can take a while for a large list. You can leave this page.')
-      await pollTwentyJob(api.mktPushToCrmStatus, formatPushToCrmResult)
+      await pollBackgroundJob(api.mktPushToCrmStatus, formatPushToCrmResult)
     } catch (e) { setError(e.message) } finally { setBusy('') }
   }
 
-  const refreshTwentyEngagement = async () => {
-    setBusy('twenty-refresh'); setMsg(''); setError('')
+  const refreshEngagement = async () => {
+    setBusy('engagement'); setMsg(''); setError('')
     try {
-      const r = await api.mktRefreshTwentyEngagement()
+      const r = await api.mktRefreshEngagement()
       if (r.error) { setError(r.error); return }
-      setMsg('Refreshing engagement scores in Twenty… this can take a while for a large list. You can leave this page.')
-      await pollTwentyJob(api.mktRefreshTwentyEngagementStatus, formatEngagementResult)
-    } catch (e) { setError(e.message) } finally { setBusy('') }
-  }
-
-  const refreshTwentyLeadsTasks = async () => {
-    setBusy('twenty-leads-tasks'); setMsg(''); setError('')
-    try {
-      const r = await api.mktRefreshTwentyLeadsTasks()
-      if (r.error) { setError(r.error); return }
-      setMsg('Refreshing Twenty leads/tasks… this can take a while for a large list. You can leave this page.')
-      await pollTwentyJob(api.mktRefreshTwentyLeadsTasksStatus, formatLeadsTasksResult)
+      setMsg('Rescoring every club… this takes a few minutes. You can leave this page; the rescore keeps running.')
+      await pollBackgroundJob(api.mktRefreshEngagementStatus, formatEngagementResult,
+                              { onDone: loadClubs })
     } catch (e) { setError(e.message) } finally { setBusy('') }
   }
 
@@ -1415,7 +1365,7 @@ export default function SuperMarketing() {
             <Field label="Engagement score">
               <div className="flex items-center gap-1">
                 <input className={SELECT_CLS + ' w-full'} placeholder="min" inputMode="numeric"
-                       title="Cached score — can lag the live Twenty value; see the club row's 'scored' timestamp"
+                       title="Cached score — can lag the live value; see the club row's 'scored' timestamp"
                        value={filters.engagement_score_gte}
                        onChange={(e) => setFilters(f => ({ ...f, engagement_score_gte: e.target.value }))} />
                 <span className="text-pb-faint">–</span>
@@ -1498,21 +1448,13 @@ export default function SuperMarketing() {
                      onChange={e => setOnlyTicked(e.target.checked)} />
               Only ticked contacts
             </label>
-            <button className={BTN} disabled={busy === 'twenty'} onClick={exportTwenty}
-                    title="Push the currently-filtered clubs and their officers into the Twenty CRM (idempotent — re-running skips unchanged records)">
-              {busy === 'twenty' ? 'Exporting...' : 'Export to Twenty'}
+            <button className={BTN} disabled={busy === 'engagement'} onClick={refreshEngagement}
+                    title="Recompute every club's engagement score from the latest usage, email and enquiry activity, and re-run the CRM stage promotion (runs nightly too)">
+              {busy === 'engagement' ? 'Rescoring...' : 'Refresh engagement scores'}
             </button>
             <button className={BTN} disabled={busy === 'push-crm'} onClick={pushToCrm}
                     title="Upsert the currently-filtered clubs directly into BetterCricket's own CRM pipeline at the 'Manually Added' stage (idempotent — re-running just advances the same deal)">
               {busy === 'push-crm' ? 'Pushing...' : 'Push to BetterCricket CRM'}
-            </button>
-            <button className={BTN} disabled={busy === 'twenty-refresh'} onClick={refreshTwentyEngagement}
-                    title="Recompute the engagement score for every club already in Twenty from the latest usage breadcrumbs (runs daily too)">
-              {busy === 'twenty-refresh' ? 'Refreshing...' : 'Refresh Twenty scores'}
-            </button>
-            <button className={BTN} disabled={busy === 'twenty-leads-tasks'} onClick={refreshTwentyLeadsTasks}
-                    title="Seed/refresh Leads from telemetry and raise follow-up Tasks (module requests, expiring trials, upcoming renewals) in Twenty (runs daily too)">
-              {busy === 'twenty-leads-tasks' ? 'Refreshing...' : 'Refresh Twenty leads/tasks'}
             </button>
             <button className={BTN} disabled={busy === 'supp'} onClick={syncSuppressions}>
               {busy === 'supp' ? 'Syncing...' : 'Sync suppressions'}

@@ -2,7 +2,7 @@
 
 A design note for making every number in the engagement-score calculation
 editable by a Super Admin, from a page linked off the CRM hub, instead of
-living as constants in `backend/app/services/twenty_sync.py`.
+living as constants in `backend/app/services/engagement.py`.
 
 **Status: BUILT (v9.38.0).** Sections 1 to 7 describe the design; what shipped
 follows it, with the deviations noted below. Sections 8 and 9 are findings about
@@ -56,7 +56,7 @@ should default to.
 
 Two files hold every weight:
 
-- **`services/twenty_sync.py`**, lines 43 to 117, one block titled "Engagement
+- **`services/engagement.py`**, lines 43 to 117, one block titled "Engagement
   scoring weights", plus a few values inlined in the customer branch.
 - **`services/trial_engagement.py`**, lines 52 to 60, the self-serve setup-depth
   rollup that acts as a floor on a prospect's score.
@@ -76,7 +76,7 @@ because it changes the scope:
 - The trial wizard's `club_prepared` beacon (a visitor picking their club) feeds
   the Meta Ads funnel (`routers/meta_ads.py::get_club_selected_count`) and the
   Wizard Clubs CRM page (`services/wizard_club_lists.py`). Neither of those
-  touches the engagement score. `grep club_prepared` across `twenty_sync.py`,
+  touches the engagement score. `grep club_prepared` across `engagement.py`,
   `trial_engagement.py` and `crm.py` returns nothing.
 - The nearest thing that IS scored is `BONUS_VISIT_TRIAL = 20`, awarded when an
   attributed visit hits the `/trial` page at all, whether or not a club was then
@@ -143,7 +143,7 @@ from Apple Mail Privacy Protection with nobody reading it
 - Three values currently inlined rather than named, which should be pulled out
   and named as part of this work: the `0.5` multiplier on recency, the `0.5`
   multiplier on frequency, and the `20` cap on the frequency contribution
-  (`twenty_sync.py` line 770)
+  (`engagement.py` line 770)
 
 **Trial depth** (`services/trial_engagement.py`, the self-serve setup-effort
 floor)
@@ -160,9 +160,9 @@ floor)
   prospect to. Its companion window, `direct_enquiry_hot_days`, is already
   super-admin editable from General Settings, so this is the one parameter with
   half the job already done.
-- `OPPORTUNITY_AUTO_THRESHOLD` 90, at or above which
-  `twenty_leads_tasks._seed_and_refresh_leads` creates a real Twenty
-  Opportunity
+- `OPPORTUNITY_AUTO_THRESHOLD` 90, at or above which a club reads as a real
+  opportunity rather than one to keep watching. Since the external CRM was
+  retired this is a reporting line only — nothing is created or moved by it
 
 Deliberately **not** parameterised, at least in a first pass: the day boundaries
 themselves (7 / 14 / 21 / 28 / 90) and the 30-day session window. They are
@@ -392,10 +392,9 @@ own snapshot:
 - **BetterComms segments** filter on it (`comms_segments.py` line 282).
 - **Sales Workspace** call-queue priority derives from it
   (`sales_workspace.py` line 626).
-- **Twenty** is the exception. It holds its own pushed copy, refreshed by
-  `refresh_engagement` on its own schedule and by the "Refresh Twenty scores"
-  button. A parameter change does not reach Twenty until one of those runs. Say
-  so on the page, or trigger it alongside.
+There is no longer an exception: the external CRM that held its own pushed
+copy has been retired, so the cached number on the club row is the only copy
+there is and every surface above reads it.
 
 ### It self-heals within an hour with no action at all
 
@@ -457,12 +456,10 @@ The precedent for cleaning up afterwards already exists in
 specifically. State the policy on the page: lowering a weight will not demote
 anything, here is what to run if you want it to.
 
-**Opportunities can be mass-created.** At or above
-`OPPORTUNITY_AUTO_THRESHOLD` (90), `twenty_leads_tasks._seed_and_refresh_leads`
-creates a real Twenty Opportunity. A broad increase in weights can therefore
-manufacture Opportunities in the external CRM on the next Twenty refresh. This
-is the strongest argument for the preview: show the count of clubs that would
-cross 90 before anything is saved.
+**How many clubs read as opportunities moves.** `OPPORTUNITY_AUTO_THRESHOLD`
+(90) is a reporting line since the external CRM was retired — nothing is created
+by crossing it — but a broad increase in weights still changes how many clubs sit
+above it, which is what the preview's "would cross 90" count is for.
 
 **Tier and floor changes ripple into audiences.** A BetterComms segment built on
 `engagement_score >= 60` changes membership the moment scores move. Nothing
@@ -494,9 +491,8 @@ floor change being a leap, and most of it is `recalc --dry-run` plus the two
 counts. Save persists, then triggers the existing background recalculation with
 the `_prev` suppression above.
 
-**Phase 3, the rest of the judgement tools.** Revision history with rollback,
-the "would cross 90" Opportunity warning, and an option to push to Twenty in the
-same action rather than waiting on its own refresh. Then, separately, add "Club
+**Phase 3, the rest of the judgement tools.** Revision history with rollback
+and the "would cross 90" opportunity warning. Then, separately, add "Club
 Selected" as a genuinely new scored signal off the `club_prepared` beacon, which
 by then is a catalogue entry and a query rather than a code change in four
 places.
@@ -508,7 +504,7 @@ biggest problem. There is a defect in the direct-enquiry override that no amount
 of re-weighting fixes.
 
 The numbers below come from modelling the formula's own arithmetic offline
-(constants copied from `twenty_sync.py`, archetype clubs pushed through it).
+(constants copied from `engagement.py`, archetype clubs pushed through it).
 They describe the shape of the curve, not the observed distribution. The real
 check is `python -m app.scripts.recalc_engagement --dry-run`, which already
 prints a histogram in bins of 5 plus percentiles, split between linked clubs and
@@ -516,7 +512,7 @@ directory-only prospects. Run that before acting on any of this.
 
 ### 8a. The defect: the enquiry override can LOWER a score
 
-`twenty_sync.py` line 833:
+`engagement.py` line 833:
 
     if direct_enquiry_hot:
         score, tier = DIRECT_ENQUIRY_SCORE, "HOT"

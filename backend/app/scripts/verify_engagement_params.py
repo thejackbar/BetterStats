@@ -17,7 +17,7 @@ _auth = types.ModuleType("app.routers.auth")
 _auth.get_current_club = lambda *a, **k: None
 sys.modules["app.routers.auth"] = _auth
 
-from app.services import twenty_sync as ts
+from app.services import engagement as ts
 from app.services import trial_engagement as te
 from app.services import engagement_params as ep
 

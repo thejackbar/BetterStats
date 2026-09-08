@@ -2,7 +2,7 @@
 
 Every number that decides a club's engagement score, and whether that club
 appears on the CRM sales pipeline at all, used to be a constant in
-``services/twenty_sync.py`` and ``services/trial_engagement.py``. This module is
+``services/engagement.py`` and ``services/trial_engagement.py``. This module is
 the one place they are defined, validated, resolved and cached, so a Super Admin
 can tune them from Better HQ > CRM > Engagement Score Parameters without a
 deploy.
@@ -60,8 +60,8 @@ GROUPS: list[tuple[str, str, str]] = [
      "Whether a club appears on the sales pipeline at all. The highest-leverage "
      "settings on this page."),
     ("tiers", "Tier bands and thresholds",
-     "Where Cold becomes Warm becomes Hot, and the score that raises a Twenty "
-     "Opportunity."),
+     "Where Cold becomes Warm becomes Hot, and the score at which a club reads "
+     "as a real opportunity."),
     ("overrides", "Overrides",
      "Rules that replace the ordinary calculation for a club, rather than "
      "contributing to it."),
@@ -132,10 +132,11 @@ _p("TIER_WARM_MIN", "tiers", "Warm starts at",
    "Below this a club reads Cold.", 30, kind="threshold", min=0, max=100)
 _p("TIER_HOT_MIN", "tiers", "Hot starts at",
    "At or above this a club reads Hot.", 60, kind="threshold", min=0, max=100)
-_p("OPPORTUNITY_AUTO_THRESHOLD", "tiers", "Raise a Twenty Opportunity at",
-   "A Lead scoring at least this has a real Opportunity created for it in "
-   "Twenty automatically. Lowering it can mass-create Opportunities on the next "
-   "Twenty refresh, so check the preview first.",
+_p("OPPORTUNITY_AUTO_THRESHOLD", "tiers", "Reads as an opportunity at",
+   "A club scoring at least this is a real opportunity rather than one to keep "
+   "watching. It is a reporting line, not an automation: nothing is created or "
+   "moved by it, so lowering it changes what the preview and the parameters "
+   "page count, never a club's own stage.",
    90, kind="threshold", min=0, max=100)
 
 # ─── Overrides ───────────────────────────────────────────────────────────────

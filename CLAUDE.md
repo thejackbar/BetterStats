@@ -1,5 +1,119 @@
 # BetterStats — Claude Session Notes
 
+## Twenty is retired; the engagement score, the CRM and Sales Management are not (v9.71.0, Sep 2026)
+
+Asked for directly: *"the calculation and continual re-calculation of engagement
+score and updating of CRM, and Sales Management functions is essential and both
+manual export and background updating functions for CRM, Sales Management and
+Club Directory must be preserved whilst retiring Twenty and its points of
+integration."*
+
+- **THE NIGHTLY RESCORE HAD SILENTLY STOPPED, AND FINDING THAT IS WHAT MADE
+  THIS URGENT RATHER THAN TIDY-UP.** `refresh_twenty_engagement` returned
+  immediately when Twenty was unconfigured and only ever touched clubs already
+  in `twenty_links` — so the moment Twenty went away, NOTHING rescored anything
+  platform-wide and every cached `marketing_clubs.engagement_score` froze
+  wherever it was last incidentally touched. The Club Directory, BetterComms
+  Lists/Segments, the CRM board and the Sales Workspace all read that cached
+  number, so four surfaces were quietly reading a stale one.
+- **`crm.recalc_all_engagement` IS THE ONE SWEEP, and three callers share it**:
+  the nightly job (`daily_engagement_rescore`), the Club Directory's
+  `POST /refresh-engagement`, and `python -m app.scripts.recalc_engagement`.
+  The script keeps its histograms and percentiles through an `on_club`
+  callback rather than a loop of its own — two copies of "rescore the whole
+  directory" is how the button and the cron start disagreeing about what a
+  score is.
+- **THE ENGINE WAS NEVER TWENTY'S; ONLY ITS FILENAME WAS.** `_engagement` is a
+  local read/compute over `usage_events` / `email_events` / our own
+  subscription rows that CACHES onto the club row — Twenty was one reader of
+  the result. So the move is `git mv services/twenty_sync.py
+  services/engagement.py` and strip, NOT an extraction: that file is 1,000
+  lines of dense reasoning about the scoring, and lifting 900 of them into a
+  new file is how the comments get lost.
+- **A `from x import y` INSIDE A FUNCTION BODY COMPILES, IMPORTS, AND STILL
+  BREAKS.** Three subscription hooks imported `_push_club_to_twenty` lazily
+  inside their own bodies — `billing.py` (a club adds modules to a live
+  subscription), `stripe_billing.py` (**a Stripe payment lands**) and
+  `organisations.py` (a club's first sync completes). `py_compile`, the import
+  smoke test and `vite build` all pass on every one of them; each would have
+  raised the first time a club actually paid for something. The suite checks
+  the call sites structurally for exactly this reason.
+- **`organisations.py` HAD BEEN CALLING A HELPER THAT NO LONGER EXISTED AT
+  ALL** — the local `_push_club_to_twenty` was deleted and its call site left
+  behind, a bare NameError on the club's first sync. It calls
+  `club_admin._sync_club_to_crm` now, which is the right answer anyway: that
+  helper links the directory row AND rescores, which is what "we synced the
+  club, show it in the CRM straight away" meant.
+- **A SEND STILL RESCORES THE CLUBS IT REACHED**, and that is the one place the
+  retirement changed a behaviour rather than a name: the rescore used to happen
+  as a SIDE EFFECT of pushing to Twenty. It is called directly now, per club,
+  on its own session, so a BetterComms outreach send moves the engagement score
+  immediately instead of waiting for the nightly sweep.
+- **`twenty_links` IS LEFT IN PLACE AND READ BY NOTHING**, the call migration
+  267 made for `vote_settings` — but the lifespan no longer CREATES it, so a
+  fresh database simply does not have it. Same for
+  `club_request_events.twenty_task_id`/`.twenty_task_status` and
+  `crm_deals.source = 'twenty_import'`: stored values and history, never
+  written again, and the ORM keeps mapping them so an existing row still reads.
+- **THE PIPELINE GAUGE WENT WITH IT.** `routers/pipeline_gauge.py` rendered
+  widgets for a Twenty dashboard iframe at `twenty.betterat.cricket`, reading
+  Twenty's own `/rest/opportunities` — both ends gone, and the internal Sales
+  Performance / Sales Commissions screens already answer the same question. Its
+  two `GAUGE_*` settings went with it.
+- **`OPPORTUNITY_AUTO_THRESHOLD` STILL EXISTS AND NOW MEANS SOMETHING WEAKER,
+  so the copy says so.** Nothing auto-creates anything at 90 any more; it is a
+  reporting line the parameters page and its preview count against ("Reads as
+  an opportunity at"). Leaving the old label would have promised an automation
+  that no longer runs.
+- **A COMMENT THAT JUSTIFIES ITSELF BY A RETIRED SYSTEM GOES STALE WITH IT.**
+  `trial_lifecycle`'s docstring explained its own design as "unlike the Twenty
+  scan, this runs whether or not Twenty is configured" — true, and meaningless
+  once there is no Twenty scan to be unlike. Corrected in place rather than
+  left to mislead the next reader; same for `engagement_params`' user-facing
+  group blurb and `models/db.py`'s column comments.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_twenty_retirement.py`, 57 checks — 11 retired
+  modules gone, 9 retired settings gone, no retired route on either side of the
+  wire, the three subscription hooks calling something that EXISTS, and then
+  the half that matters: the score computed AND cached, the sweep reaching
+  every club with the busy one outscoring the club nobody has visited, a dry
+  run writing nothing, a single club rescoring on its own signal without
+  touching its neighbour, and the operator script running the shared sweep
+  rather than a second copy) **with a control run**: 35 of the 39 reachable
+  checks fail against the previous commit.
+- **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN.** The first cut died on
+  `from app.services import engagement` and said nothing about the twenty-odd
+  behavioural checks below it. The behavioural half now REPORTS the engine or
+  the sweep as missing and returns.
+- **A CHECK THAT MATCHES MORE THAN IT MEANS IS NOT A CHECK.** "the script keeps
+  no loop of its own" scanned the whole file and caught the `--verify`
+  equivalence checkers, which legitimately need one. It reads `recalc()`'s own
+  body through `inspect.getsource` now.
+- **TWO HARNESS ARTEFACTS, BOTH DOCUMENTED TRAPS HIT AGAIN**: a raw
+  `UPDATE ... SET engagement_score = NULL` left the ORM's in-memory copy stale,
+  so the sweep loaded a club that still LOOKED scored and wrote nothing; and
+  `expire_all()` then handing that instance to a service lazy-loads on its
+  first attribute read, which is the MissingGreenlet trap. `refresh`, don't
+  expire, when the object is about to be passed on.
+- **`usage_events`, `platform_settings` AND `marketing_utm_aliases` ARE
+  LIFESPAN-CREATED RAW SQL**, invisible to `create_all`, and every column added
+  since each was written lives in its own later ALTER — including the
+  loop-driven ones whose `(column, type)` pairs sit in a tuple an f-string
+  reads. The suite pulls the CREATE **and** every ALTER out of the shipped
+  `main.py` rather than retyping them, so a table that merely LOOKS right
+  cannot pass.
+- **RENUMBERED 293 -> 295.** `origin/main` reached 294 while the Rediscover work
+  was in flight, and its own 293 was a different migration entirely — two
+  sharing a revision id break Alembic outright. **This file has now recorded
+  that trap five times: check `origin/main` at the moment you merge, not only
+  when you first number one.** The v9.70.0 changelog entry collided the same
+  way and became v9.70.3.
+- **NOTICED, NOT DONE**: `twenty_links` still exists on the live database with
+  its history in it — dropping it is a decision for a person, not a deploy. The
+  five Twenty-era docs are kept as the record of what was built, with a
+  retirement banner on `docs/twenty-crm-integration.md`; the changelog entries
+  that describe the Twenty era are untouched for the same reason.
+
 ## NEVER DELETE OR OVERWRITE WHAT A CLUB TYPED IN BY HAND (v9.68.2, Sep 2026)
 
 **Set as a standing rule, after a merge deleted half a player's career.** A
@@ -56,7 +170,7 @@ import re-writes the same matches (deterministic `cricketstatz_match_id`, and
 that was kept. A club's hand-typed history has no such path, which is the whole
 reason for the rule.
 
-## The Club Directory's committee only ever grew (migration 293, v9.70.0, Sep 2026)
+## The Club Directory's committee only ever grew (migration 295, v9.70.0, Sep 2026)
 
 Asked for directly: a Rediscover that re-reads what PlayHQ publishes for every
 club (and for one named club), prunes the officers it no longer lists, ticks
@@ -140,7 +254,7 @@ updates the role of a contact already there.
   was added to the kit.
 - **Verified against a real Postgres**
   (`backend/verification/verify_committee_rediscover.py`, 91 checks through the
-  shipped service and route bodies with the PlayHQ client stubbed: migration 293
+  shipped service and route bodies with the PlayHQ client stubbed: migration 295
   applied three times to a populated pre-293 table seeded in RAW SQL — the ORM
   model already carries the columns, so a row inserted through it could not be a
   pre-293 row — the ordinary crawl still additive and still not re-ticking, the
