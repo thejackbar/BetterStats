@@ -329,7 +329,11 @@ def assign(imported: list[MatchRow], synced: list[MatchRow]) -> dict[str, tuple[
             if key is not None:
                 scored.append((key, imp.id, syn.id))
 
-    scored.sort(key=lambda row: row[0], reverse=True)
+    # THE IDS ARE THE FINAL TIEBREAK, so the same data always gives the same
+    # assignment. Without them the order of equally-scored candidates follows
+    # frozenset iteration, which is not stable between processes — and a pass
+    # that keeps re-pairing tied clusters writes rows every night for nothing.
+    scored.sort(key=lambda row: (row[0], row[1], row[2]), reverse=True)
     synced_by_id = {m.id: m for m in synced}
     imported_by_id = {m.id: m for m in imported}
     taken: set[str] = set()
@@ -493,20 +497,57 @@ async def reconcile_org(db: AsyncSession, org_id, *, season_ids=None,
         for row in (await db.execute(text(current_sql), cur_params)).mappings()
     }
 
-    changed = 0
+    # CLEAR EVERY CHANGING ROW BEFORE SETTING ANY OF THEM, AND THAT ORDERING IS
+    # THE WHOLE POINT. `uq_manual_games_superseded_by_game` allows one imported
+    # match per synced game, and a re-derivation routinely MOVES a game from
+    # one imported match to another. Writing row by row, the new holder's
+    # UPDATE can land while the old one still carries it — two rows on one game
+    # for an instant, the unique index refuses it, and the whole transaction
+    # rolls back having written nothing.
+    #
+    # Reported live, and it is what stopped the pairing dead: every run after
+    # the first — the boot sweep, the button and the script alike — died here
+    # and left the club counting both its sources.
+    #
+    # A row keeping its pair cannot be the conflict: the assignment is
+    # one-to-one, so a game moving to a new holder means the old holder's own
+    # value changes too, which puts it in this same list.
+    clear_ids: list[str] = []
+    set_ids: list[str] = []
+    set_games: list[str] = []
+    set_prefers: list[bool] = []
     for imp in imported:
         want = pairs.get(imp.id)
         have = current.get(imp.id, (None, False))
         now = (want[0], want[1]) if want else (None, False)
         if (have[0] or None, bool(have[1])) == now:
             continue
-        changed += 1
+        clear_ids.append(imp.id)
+        if now[0] is not None:
+            set_ids.append(imp.id)
+            set_games.append(now[0])
+            set_prefers.append(bool(now[1]))
+    changed = len(clear_ids)
+
+    if clear_ids:
         await db.execute(text("""
             UPDATE manual_games
-               SET superseded_by_game_id = CAST(:pair AS UUID),
-                   pair_prefers_import = :prefer
-             WHERE id = CAST(:id AS UUID)
-        """), {"id": imp.id, "pair": now[0], "prefer": now[1]})
+               SET superseded_by_game_id = NULL, pair_prefers_import = false
+             WHERE id = ANY(CAST(:ids AS UUID[]))
+        """), {"ids": clear_ids})
+    if set_ids:
+        # One statement rather than a loop: it takes every lock it needs in one
+        # scan, so it cannot race itself — the shape `apply_associations` was
+        # rewritten into after a live deadlock.
+        await db.execute(text("""
+            UPDATE manual_games m
+               SET superseded_by_game_id = v.game_id,
+                   pair_prefers_import = v.prefer
+              FROM (SELECT unnest(CAST(:ids AS UUID[])) AS id,
+                           unnest(CAST(:games AS UUID[])) AS game_id,
+                           unnest(CAST(:prefers AS BOOLEAN[])) AS prefer) v
+             WHERE m.id = v.id
+        """), {"ids": set_ids, "games": set_games, "prefers": set_prefers})
 
     if commit and changed:
         await db.commit()

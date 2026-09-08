@@ -1441,6 +1441,159 @@ async def verify_synced_overlap(engine, session_maker) -> None:
     check("the undo says how much it removed",
           undone.get("matches_removed") == 1, str(undone))
 
+    # RE-DERIVING MOVES A GAME FROM ONE IMPORTED MATCH TO ANOTHER, and the
+    # unique index allows one imported match per synced game. Reported live:
+    # every run after the first died on that index and wrote NOTHING, leaving
+    # the club counting both its sources —
+    #   duplicate key value violates unique constraint
+    #   "uq_manual_games_superseded_by_game"
+    # — because the new holder's write landed while the old one still carried
+    # it. The fix is to clear every changing row before setting any of them.
+    swap_org, swap_imp = uuid.uuid4(), uuid.uuid4()
+    swap_season, swap_grade = uuid.uuid4(), uuid.uuid4()
+    g_one, g_two = uuid.uuid4(), uuid.uuid4()
+    m_one, m_two = uuid.uuid4(), uuid.uuid4()
+    async with session_maker() as db:
+        await db.execute(text("""
+            INSERT INTO organisations (id, name, slug, is_active)
+            VALUES (:o, 'Swap Test CC', 'swap-test-cc', true)
+        """), {"o": str(swap_org)})
+        await db.execute(text("""
+            INSERT INTO cricketstatz_imports
+                (id, organisation_id, club_id, source_url, status, phase)
+            VALUES (:i, :o, '93931', 'u', 'complete', 'done')
+        """), {"i": str(swap_imp), "o": str(swap_org)})
+        await db.execute(text("""
+            INSERT INTO seasons (id, organisation_id, name, year)
+            VALUES (:s, :o, 'Summer 2002/03', 2002)
+        """), {"s": str(swap_season), "o": str(swap_org)})
+        await db.execute(text(
+            "INSERT INTO grades (id, season_id, name) VALUES (:g, :s, 'A')"),
+            {"g": str(swap_grade), "s": str(swap_season)})
+        for gid, day, opp in ((g_one, date(2002, 11, 2), 'Panton Hill'),
+                              (g_two, date(2002, 11, 9), 'Epping')):
+            await db.execute(text("""
+                INSERT INTO games (id, grade_id, played_at, home_team, away_team,
+                                   opp_club_name)
+                VALUES (:i, :g, CAST(:d AS date), 'Swap Test CC', :o, :o)
+            """), {"i": str(gid), "g": str(swap_grade), "d": day, "o": opp})
+        # Written the WRONG way round, as a run with an older matcher would
+        # leave them: each imported match holds the other's game.
+        for mid, day, opp, held in ((m_one, date(2002, 11, 2), 'Panton Hill', g_two),
+                                    (m_two, date(2002, 11, 9), 'Epping', g_one)):
+            await db.execute(text("""
+                INSERT INTO manual_games
+                    (id, organisation_id, season_id, grade_id, played_at,
+                     home_team, away_team, opposition, cricketstatz_import_id,
+                     cricketstatz_match_id, superseded_by_game_id)
+                VALUES (:i, :o, :s, :g, CAST(:d AS date), 'Swap Test CC', :opp,
+                        :opp, :imp, :mid, :held)
+            """), {"i": str(mid), "o": str(swap_org), "s": str(swap_season),
+                   "g": str(swap_grade), "d": day, "opp": opp,
+                   "imp": str(swap_imp), "mid": f"swap-{opp}", "held": str(held)})
+        await db.commit()
+
+    swap_error = None
+    try:
+        async with session_maker() as db:
+            swapped = await match_pairing.reconcile_org(db, swap_org)
+    except Exception as exc:
+        swap_error = f"{type(exc).__name__}: {exc}"
+        swapped = {}
+    check("re-deriving a pairing that moves a game does not die on the index",
+          swap_error is None, str(swap_error))
+    async with session_maker() as db:
+        held_now = {
+            str(r["id"]): str(r["pair"]) if r["pair"] else None
+            for r in (await db.execute(text("""
+                SELECT id, superseded_by_game_id AS pair FROM manual_games
+                 WHERE organisation_id = :o
+            """), {"o": str(swap_org)})).mappings()
+        }
+    check("and each imported match ends on its own synced game",
+          held_now.get(str(m_one)) == str(g_one)
+          and held_now.get(str(m_two)) == str(g_two), str(held_now))
+    check("with both still counted once",
+          swapped.get("paired") == 2, str(swapped))
+
+    # A CLUSTER NOTHING CAN TELL APART IS PAIRED OFF, AND IT HAS TO LAND THE
+    # SAME WAY EVERY TIME. Four of our sides out on one Saturday against one
+    # club, no scorecards on either side, no side marker in any name: every
+    # combination scores identically, so which imported match takes which
+    # synced game is decided purely by the order equally-scored candidates are
+    # walked in. That order followed frozenset iteration, which is not stable
+    # between processes — so the nightly pass re-paired the cluster and wrote
+    # rows for nothing, night after night. The ids are the final tiebreak now.
+    tie_org, tie_imp = uuid.uuid4(), uuid.uuid4()
+    tie_season, tie_grade = uuid.uuid4(), uuid.uuid4()
+    tie_games = [uuid.uuid4() for _ in range(4)]
+    tie_manual = [uuid.uuid4() for _ in range(4)]
+    async with session_maker() as db:
+        await db.execute(text("""
+            INSERT INTO organisations (id, name, slug, is_active)
+            VALUES (:o, 'Tie Test CC', 'tie-test-cc', true)
+        """), {"o": str(tie_org)})
+        await db.execute(text("""
+            INSERT INTO cricketstatz_imports
+                (id, organisation_id, club_id, source_url, status, phase)
+            VALUES (:i, :o, '93931', 'u', 'complete', 'done')
+        """), {"i": str(tie_imp), "o": str(tie_org)})
+        await db.execute(text("""
+            INSERT INTO seasons (id, organisation_id, name, year)
+            VALUES (:s, :o, 'Summer 2004/05', 2004)
+        """), {"s": str(tie_season), "o": str(tie_org)})
+        await db.execute(text(
+            "INSERT INTO grades (id, season_id, name) VALUES (:g, :s, 'A')"),
+            {"g": str(tie_grade), "s": str(tie_season)})
+        for gid in tie_games:
+            await db.execute(text("""
+                INSERT INTO games (id, grade_id, played_at, home_team, away_team,
+                                   opp_club_name)
+                VALUES (:i, :g, CAST(:d AS date), 'Tie Test CC', 'Reservoir',
+                        'Reservoir')
+            """), {"i": str(gid), "g": str(tie_grade), "d": date(2004, 12, 4)})
+        for n, mid in enumerate(tie_manual):
+            await db.execute(text("""
+                INSERT INTO manual_games
+                    (id, organisation_id, season_id, grade_id, played_at,
+                     home_team, away_team, opposition, cricketstatz_import_id,
+                     cricketstatz_match_id)
+                VALUES (:i, :o, :s, :g, CAST(:d AS date), 'Tie Test CC',
+                        'Reservoir', 'Reservoir', :imp, :mid)
+            """), {"i": str(mid), "o": str(tie_org), "s": str(tie_season),
+                   "g": str(tie_grade), "d": date(2004, 12, 4),
+                   "imp": str(tie_imp), "mid": f"tie-{n}"})
+        await db.commit()
+
+    async def _tie_pairs():
+        async with session_maker() as db:
+            res = await match_pairing.reconcile_org(db, tie_org)
+        async with session_maker() as db:
+            rows = (await db.execute(text("""
+                SELECT id, superseded_by_game_id AS pair FROM manual_games
+                 WHERE organisation_id = :o
+            """), {"o": str(tie_org)})).mappings()
+            held = {str(r["id"]): str(r["pair"]) if r["pair"] else None
+                    for r in rows}
+        return res, held
+
+    first_res, first_held = await _tie_pairs()
+    second_res, second_held = await _tie_pairs()
+    third_res, third_held = await _tie_pairs()
+    check("every match of an indistinguishable cluster is still counted once",
+          first_res.get("paired") == 4
+          and len({v for v in first_held.values() if v}) == 4,
+          f"{first_res} {first_held}")
+    check("the first pass writes the cluster",
+          first_res.get("changed") == 4, str(first_res))
+    check("and a second pass writes nothing at all",
+          second_res.get("changed") == 0, str(second_res))
+    check("nor a third",
+          third_res.get("changed") == 0, str(third_res))
+    check("the assignment is the same every time",
+          first_held == second_held == third_held,
+          f"{first_held} {second_held} {third_held}")
+
     # THE REPORTED FAILURE, REPLAYED. The overlap used to be worked out ONCE at
     # the start of the run: a club whose synced games were not in `games` at
     # that moment (a Full Rebuild still running, a sync that had not landed)
@@ -1762,6 +1915,29 @@ def verify_matcher() -> None:
     check("and a shared grade word is not a club",
           not match_pairing.teams_agree("1st XI", "2nd XI"))
 
+    # THE ASSIGNMENT MUST NOT DEPEND ON THE ORDER THE ROWS ARRIVE IN. Four of
+    # our sides out on one Saturday against one club, no cards either side:
+    # every combination scores identically, so which imported match takes which
+    # synced game came down to the order equally-scored candidates were walked
+    # in — which followed frozenset iteration and is not stable between
+    # processes. Reported as a nightly pass that wrote rows every run: 302 the
+    # first time, 2 more the next, for ever. The ids are the final tiebreak now.
+    #
+    # Shuffling the inputs is what makes this fail against the old code: the
+    # sort was stable, so a tie kept whatever order it was given.
+    day = date(2004, 12, 4)
+    tie_i = [MR(f"ti{n}", day, "Reservoir") for n in range(4)]
+    tie_g = [MR(f"tg{n}", day, "Reservoir") for n in range(4)]
+    forward = match_pairing.assign(tie_i, tie_g)
+    backward = match_pairing.assign(list(reversed(tie_i)), list(reversed(tie_g)))
+    rotated = match_pairing.assign(tie_i[1:] + tie_i[:1], tie_g[2:] + tie_g[:2])
+    check("a cluster nothing can tell apart is still paired off, one for one",
+          len(forward) == 4 and len({g for g, _ in forward.values()}) == 4,
+          str(forward))
+    check("and the same rows in any order give the same assignment",
+          forward == backward == rotated,
+          f"{forward} {backward} {rotated}")
+
     # THE PAIRING HAS TO BE WIRED IN, not merely written. A pass nothing calls
     # leaves a club counting both sources with nothing on screen to say so.
     root = Path(__file__).resolve().parent.parent / "app"
@@ -1798,7 +1974,8 @@ def verify_matcher() -> None:
     # timeout — and a pairing pass that dies there is a club counting twice.
     pairing_src = (root / "services" / "match_pairing.py").read_text()
     check("both card queries are bound to the games already loaded",
-          pairing_src.count("= ANY(CAST(:ids AS UUID[]))") == 2,
+          all("= ANY(CAST(:ids AS UUID[]))" in pairing_src.split(const, 1)[1][:600]
+              for const in ("_SYNCED_CARD_SQL = ", "_IMPORTED_CARD_SQL = ")),
           "a card query is not bound to an id list")
     check("and the matching itself runs off the event loop",
           "asyncio.to_thread(assign" in pairing_src)

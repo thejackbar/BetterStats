@@ -7740,6 +7740,52 @@ simply not run, and nothing anywhere said so.
   and the four real seasons replayed end to end through the shipped
   `reconcile_org` and the shipped script: 706 games -> 404, 302 pairs written.
 
+### AND THEN IT REFUSED ITS OWN WORK (v9.70.5, Sep 2026)
+
+Reported by running the script: **Cockburn Cricket Club AND Keon Park** both
+failed with `duplicate key value violates unique constraint
+"uq_manual_games_superseded_by_game"`, and the pairing had written nothing on
+either. So the pass shipped in v9.70.4 ran the first time and then gave up
+silently on every run after it — the boot sweep, the nightly job, the button
+and the script alike.
+
+- **A RE-DERIVATION MOVES A GAME FROM ONE IMPORTED MATCH TO ANOTHER, AND THE
+  INDEX ONLY ALLOWS ONE HOLDER.** The write was row by row, so the new holder's
+  UPDATE could land while the old one still carried the game — two rows on one
+  game for an instant, the unique index refuses it, and the WHOLE transaction
+  rolls back having written nothing. Nothing partial, nothing logged beyond the
+  error: a club counting both its sources with the pass reporting a failure
+  nobody was reading.
+- **CLEAR EVERY CHANGING ROW FIRST, THEN SET THEM IN ONE STATEMENT.** A row
+  keeping its pair cannot be the conflict — the assignment is one-to-one, so a
+  game moving to a new holder means the old holder's own value changes too,
+  which puts it in the same list. The set is one `unnest` UPDATE rather than a
+  loop, which takes every lock it needs in one scan, the shape
+  `apply_associations` was rewritten into after the v9.62.6 deadlock.
+- **AND THE ASSIGNMENT WAS NOT STABLE BETWEEN RUNS**, which is the quieter half
+  of the same report: `--apply` wrote 302 rows and a second `--apply` wrote 2
+  more, for ever. Where several of our sides play one club on one day with no
+  scorecards, every combination scores identically, so which imported match
+  takes which synced game came down to the order equally-scored candidates were
+  walked in — and that followed frozenset iteration, which is not stable
+  between processes. **The ids are the final tiebreak now**, so the same data
+  always gives the same assignment and a settled club is never rewritten.
+- **A THREE-PASS CHECK IN ONE PROCESS CANNOT CATCH IT, and finding that out is
+  what made the check honest.** Within one process the hash seed is fixed, so
+  the DB idempotency checks pass against the broken code. What fails is
+  `assign` run over the SAME rows in three different ORDERS — the property
+  actually at stake — since the sort was stable and a tie therefore kept
+  whatever order it was handed. The DB pass-writes-nothing checks are kept
+  beside it: they are a real property of the write path, just not this bug's.
+- **Verified against a real Postgres** (the suite is 287 checks now: two
+  imported matches each holding the other's game re-derived without dying on
+  the index and each landing on its own, a four-way cluster paired off one for
+  one, a second and third pass writing nothing, and the same rows in three
+  orders giving one assignment) **with two control runs**: with the row-by-row
+  write restored, 3 fail reporting the club's own error verbatim; with the id
+  tiebreak removed, the order check fails and every DB check still passes,
+  which is exactly why it is there.
+
 ### A COUNT THAT CANNOT FIT THE RUNS IS NOT A COUNT (v9.70.3, Sep 2026)
 
 Reported off StatLab's most-sixes board: Nathan Sammit **30 sixes in an innings
