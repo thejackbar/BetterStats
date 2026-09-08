@@ -45,6 +45,7 @@ from app.models.db import (
     Season,
 )
 from app.services import cricketstatz_client as client
+from app.services import match_pairing
 from app.services.cricketstatz_awards import classify_note
 from app.services.import_ingest import match_players
 from app.services.grade_labels import suggest_categories, suggest_category
@@ -411,54 +412,22 @@ async def synced_coverage(db: AsyncSession, org_id) -> dict:
 
 
 
-async def mark_seasons_superseded(db: AsyncSession, org_id, years) -> int:
-    """Say CricketStatz is the record for these seasons of this club.
-
-    A marker on the season, read by `v_effective_games` and
-    `v_effective_player_season_stats` (migration 287): the synced side of those
-    two views steps aside while the imported matches are rolled up as normal,
-    so the season is counted once. Nothing is deleted — the club's Cricket
-    Australia data stays, the sync keeps it current underneath, and clearing
-    the marker brings it straight back.
-    """
-    if not years:
-        return 0
-    result = await db.execute(text("""
-        UPDATE seasons SET stats_source = 'cricketstatz'
-         WHERE organisation_id = :org AND year = ANY(CAST(:years AS int[]))
-           AND stats_source IS DISTINCT FROM 'cricketstatz'
-    """), {"org": str(org_id), "years": [int(y) for y in years]})
-    return result.rowcount or 0
-
-
-async def clear_seasons_superseded(db: AsyncSession, org_id, years=None) -> int:
-    """Hand the seasons back to the sync. Instant — nothing has to be re-pulled.
-
-    Sets `'playhq'`, NOT NULL, and that is the whole difference. NULL means
-    "count what is here", which for a season holding both an imported and a
-    synced copy is the double count this exists to prevent — handing a season
-    back used to show BOTH, and said so in the confirm. `'playhq'` steps the
-    imported side aside instead, so exactly one source is counted either way.
-
-    Only ever applied to a season the sync actually reaches. A season with no
-    synced games has nothing to hand back to, and marking it `'playhq'` would
-    hide its imported matches and leave the season empty — the "neither source"
-    failure reached from the far end.
-    """
-    sql = ("""UPDATE seasons s SET stats_source = 'playhq'
-                WHERE s.organisation_id = :org
-                  AND s.stats_source = 'cricketstatz'
-                  AND EXISTS (SELECT 1 FROM games g
-                                JOIN grades gr ON gr.id = g.grade_id
-                               WHERE gr.season_id = s.id)""")
-    params = {"org": str(org_id)}
-    if years:
-        sql += " AND s.year = ANY(CAST(:years AS int[]))"
-        params["years"] = [int(y) for y in years]
-    return (await db.execute(text(sql), params)).rowcount or 0
+# ── the season-level marker, retired ─────────────────────────────────────────
+# `seasons.stats_source` chose ONE source for a whole season, which removed the
+# double count by throwing away every match the losing source alone held.
+# `services/match_pairing.py` pairs the two sources match by match instead, so
+# nothing marks a season any more and nothing reads the column. The three
+# helpers that wrote and read it are gone rather than left to be called by
+# mistake; the column stays, holding whatever a club chose before this, because
+# destroying that to tidy up would be its own bug.
 
 
 async def superseded_years(db: AsyncSession, org_id) -> list:
+    """Seasons a club marked before the pairing replaced the marker.
+
+    Read by the preview so the screen can say the marker no longer decides
+    anything. Nothing acts on it.
+    """
     rows = (await db.execute(text("""
         SELECT year FROM seasons
          WHERE organisation_id = :org AND stats_source = 'cricketstatz'
@@ -503,25 +472,12 @@ async def import_match(db: AsyncSession, org_id, import_id, card: dict,
         db, org_id, caches["season_label"], caches["season_value"], caches["seasons"])
     if season is None:
         return f"{source_id}: no season"
-    # ONE SOURCE PER SEASON, DECIDED BY THE DATA RATHER THAN BY A STEP.
-    # A season that holds a CricketStatz match is read from CricketStatz — set
-    # here, in the SAME transaction as the match itself, so the two can never
-    # be out of step. The earlier design worked the overlap out once at the
-    # start of the run and marked the seasons afterwards; anything that changed
-    # `games` in between (a Full Rebuild finishing, a sync landing) left that
-    # snapshot wrong and the club counting both sources with nothing to say so.
-    #
-    # Unconditional: a season the sync does not reach has no synced games to
-    # step aside, so marking it costs nothing and removes the dependence on the
-    # overlap being right. An explicit 'playhq' is the club's own decision and
-    # is never overwritten.
-    # Written on the ORM row rather than as a raw UPDATE: `resolve_season`
-    # hands back a Season, the session is already holding it, and a raw
-    # statement would leave that instance's own copy stale. A rollback expires
-    # it and clears the cache, so the next match resolves and sets it again.
-    if season.stats_source is None:
-        season.stats_source = "cricketstatz"
-        await db.flush()
+    # NOTHING IS MARKED HERE. A match that is also in the Cricket Australia
+    # sync is paired to it afterwards (`services/match_pairing.py`) and counted
+    # once; a match only CricketStatz has is counted from here. Marking the
+    # SEASON, which is what this used to do, hid the club's whole synced side
+    # for that season — including every match Cricket Australia had and
+    # CricketStatz did not.
     grade = await resolve_grade(db, org_id, season, label, caches["grades"])
 
     home = card.get("home_team") or row.get("home_team") or ""
@@ -1139,6 +1095,7 @@ async def run_import(session_maker, org_id, import_id, club_id: str,
         "notes_done": 0, "notes_total": 0, "awards": 0, "notes_read": 0,
         "skipped_synced_years": [], "replaced_synced_years": [],
         "replaced_done": 0, "synced_years": [],
+        "paired": 0, "only_cricketstatz": 0, "prefer_import": 0,
         "candidates_done": 0, "candidates_total": 0, "current_season": None,
     }
 
@@ -1306,20 +1263,32 @@ async def run_import(session_maker, org_id, import_id, club_id: str,
                     if (m_idx + 1) % 5 == 0:
                         await _set_progress(session_maker, import_id,
                                             progress=progress)
-            # THIS SEASON IS MARKED THE MOMENT ITS OWN MATCHES ARE IN, not at
-            # the end of the run. Marking every season up front would leave the
-            # ones not yet walked showing neither source; leaving it all to the
-            # end leaves every season already walked counted TWICE for the
-            # forty minutes the import takes, which is what a club sees and
-            # reports as duplicates on its record board. Per season, after its
-            # matches commit, there is no window for either: a season is either
-            # still on Cricket Australia or fully across, never both and never
-            # neither — and a run that stops halfway leaves exactly that.
+            # THIS SEASON IS PAIRED THE MOMENT ITS OWN MATCHES ARE IN, not at
+            # the end of the run. Leaving it all to the end leaves every season
+            # already walked counted TWICE for the forty minutes the import
+            # takes, which is what a club sees and reports as duplicates on its
+            # record board. Per season, after its matches commit, there is no
+            # such window — and a run that stops halfway leaves the seasons it
+            # reached correct rather than a club to repair.
+            # Looked up by YEAR in a fresh session rather than read off the
+            # cached Season: a commit expires that instance and a rollback
+            # clears the cache outright, so its `.id` is not safe to touch here.
             year = season_year(season["label"], season["value"])
-            if year is not None and year in set(replaced_years):
+            season_ids: list[str] = []
+            if year is not None:
                 async with session_maker() as db:
-                    await mark_seasons_superseded(db, org_id, [year])
-                    await db.commit()
+                    season_ids = [str(x) for x in (await db.execute(text("""
+                        SELECT id FROM seasons
+                         WHERE organisation_id = :org AND year = :year
+                    """), {"org": str(org_id), "year": int(year)})).scalars().all()]
+            if season_ids:
+                async with session_maker() as db:
+                    paired = await match_pairing.reconcile_org(
+                        db, org_id, season_ids=season_ids)
+                progress["paired"] = (progress.get("paired") or 0) + paired["paired"]
+                progress["only_cricketstatz"] = (
+                    (progress.get("only_cricketstatz") or 0)
+                    + paired["only_cricketstatz"])
                 progress["replaced_done"] = (progress.get("replaced_done") or 0) + 1
 
             async with session_maker() as db:
@@ -1333,14 +1302,17 @@ async def run_import(session_maker, org_id, import_id, club_id: str,
                      f"{', '.join(candidates)}. Check Merge Duplicates.")
             await _set_progress(session_maker, import_id, progress=progress)
 
-        # Backstop. Each season is marked as its own matches land (above), so
-        # by here this normally writes nothing — it exists for a season whose
-        # own year could not be read off its label, which would otherwise be
-        # imported and then never marked.
-        if replaced_years:
-            async with session_maker() as db:
-                await mark_seasons_superseded(db, org_id, replaced_years)
-                await db.commit()
+        # THE WHOLE-CLUB PASS, AND IT IS NOT A BACKSTOP FOR THE ONES ABOVE.
+        # Each season pairs against the synced games around its own dates, and
+        # a match either source files under a wildly different date is only
+        # reachable once every season is in. Re-derives from scratch, so it can
+        # only ever correct what the per-season passes decided.
+        async with session_maker() as db:
+            final_pairs = await match_pairing.reconcile_org(db, org_id)
+        progress["paired"] = final_pairs["paired"]
+        progress["only_cricketstatz"] = final_pairs["only_cricketstatz"]
+        progress["prefer_import"] = final_pairs["prefer_import"]
+        await _set_progress(session_maker, import_id, progress=progress)
 
         # ── the record book ─────────────────────────────────────────────────
         progress["phase"] = "records"
@@ -1488,17 +1460,14 @@ async def undo_import(db: AsyncSession, org_id, import_id) -> dict:
     await db.execute(text(
         "UPDATE cricketstatz_imports SET undone_at = NOW() WHERE id = :imp"),
         {"imp": str(import_id)})
-    # A SEASON LEFT WITH NEITHER SOURCE IS THE ONE STATE THIS MUST NOT LEAVE.
-    # Making CricketStatz the record for a season only ever HIDES the synced
-    # copy (migration 287) — so undoing the import that replaced it, without
-    # taking the marker off, removes the CricketStatz matches AND leaves the
-    # club's own Cricket Australia data still hidden. The season then reads
-    # empty on every screen with nothing to say why.
+    # THE PAIRS GO WITH THE MATCHES. Deleting an imported row takes its pair
+    # with it, so a synced game that had stepped aside for a better imported
+    # copy comes straight back — there is nothing to re-derive here.
     #
-    # Cleared per season rather than club-wide: a season still holding an
-    # imported match from ANOTHER import is still genuinely read from
-    # CricketStatz and keeps its marker. Only a season this undo has just
-    # emptied goes back to the sync.
+    # What is left is the season marker the earlier design wrote, which nothing
+    # reads any more. Cleared for a season this undo has emptied, purely so the
+    # screen stops reporting a decision that no longer decides anything; a
+    # season still holding an imported match from ANOTHER import keeps it.
     handed_back = (await db.execute(text("""
         UPDATE seasons s SET stats_source = NULL
          WHERE s.organisation_id = :org

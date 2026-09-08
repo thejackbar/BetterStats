@@ -24,6 +24,146 @@ function GradePicker({ grades, value, onChange, placeholder, exclude }) {
   )
 }
 
+// What each tier is called on screen. A tier the server adds later that this
+// map has never heard of still renders — under its own key — rather than
+// silently reading as blank.
+const SUGGESTION_LABEL = {
+  same_name: 'THE SAME NAME, WRITTEN TWO WAYS',
+  extra_words: 'ONE NAME HAS EXTRA WORDS',
+  word_typo: 'LIKELY A MISSPELLING',
+}
+
+function SuggestionCard({ orgId, pair, onMerged, onDismissed }) {
+  const [busy, setBusy] = useState(null)
+  const [error, setError] = useState(null)
+  // Which way round to merge. The server suggests a direction from the fuller
+  // record; which spelling a club wants on its own leaderboard is its call.
+  const [flipped, setFlipped] = useState(false)
+
+  const keep = flipped ? pair.grade_b : pair.grade_a
+  const drop = flipped ? pair.grade_a : pair.grade_b
+
+  async function run(fn, tag) {
+    setBusy(tag)
+    setError(null)
+    try { await fn() } catch (e) { setError(e.message); setBusy(null) }
+  }
+
+  const span = g => (g.seasons.length ? `${g.seasons[0]}${g.seasons.length > 1 ? ` – ${g.seasons[g.seasons.length - 1]}` : ''}` : 'no seasons recorded')
+
+  return (
+    <div className="border pb-hairline rounded p-4 mb-3 bg-pb-surface2">
+      <div className="flex items-center gap-2 flex-wrap mb-3">
+        <span className="font-mono text-[10px] tracking-wide2 px-1.5 py-0.5 rounded bg-pb-accent/15 text-pb-accent-ink">
+          {SUGGESTION_LABEL[pair.kind] || pair.kind.replace(/_/g, ' ').toUpperCase()}
+        </span>
+        {!pair.bulk_safe && (
+          <span className="font-mono text-[10px] tracking-wide2 px-1.5 py-0.5 rounded bg-pb-amber/15 text-pb-amber">
+            CHECK IT'S THE SAME GRADE
+          </span>
+        )}
+      </div>
+
+      <p className="text-sm text-pb-text mb-1">
+        <span className="font-semibold">{drop.display_name}</span>
+        <span className="text-pb-dim"> merges into </span>
+        <span className="font-semibold">{keep.display_name}</span>
+      </p>
+      <p className="text-pb-dim text-[13px] mb-3">{pair.reason}</p>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+        {[keep, drop].map((g, i) => (
+          <div key={g.grade_name} className="text-[12px] leading-relaxed">
+            <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-0.5">{i === 0 ? 'KEEPING' : 'MERGING AWAY'}</p>
+            <p className="text-pb-text">{g.display_name}</p>
+            <p className="text-pb-dim">{g.games} games · {g.runs} runs</p>
+            <p className="text-pb-dim">{span(g)}</p>
+            {g.association_names.length > 0 && (
+              <p className="text-pb-dim">{g.association_names.join(', ')}</p>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {pair.cautions.length > 0 && (
+        <ul className="mb-3 space-y-1">
+          {pair.cautions.map((c, i) => (
+            <li key={i} className="text-pb-dim text-[12px]">· {c}</li>
+          ))}
+        </ul>
+      )}
+
+      {error && (
+        <div className="mb-3 font-mono text-[11px] text-pb-red bg-pb-red/10 border border-pb-red/30 rounded px-3 py-2">{error}</div>
+      )}
+
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={() => run(() => api.mergeGrades(orgId, drop.grade_name, keep.grade_name).then(onMerged), 'merge')}
+          disabled={!!busy}
+          className="px-3 py-1.5 rounded font-mono text-[11px] tracking-wide2 font-semibold transition disabled:opacity-40 text-pb-bg"
+          style={{ background: 'var(--pb-accent)' }}
+        >
+          {busy === 'merge' ? 'Merging…' : 'Merge'}
+        </button>
+        <button
+          onClick={() => setFlipped(f => !f)}
+          disabled={!!busy}
+          className="px-3 py-1.5 rounded font-mono text-[11px] tracking-wide2 border pb-hairline text-pb-dim disabled:opacity-40"
+        >
+          Keep {drop.display_name} instead
+        </button>
+        <button
+          onClick={() => run(() => api.ignoreGradePair(orgId, pair.grade_a.grade_name, pair.grade_b.grade_name).then(onDismissed), 'ignore')}
+          disabled={!!busy}
+          className="px-3 py-1.5 rounded font-mono text-[11px] tracking-wide2 border pb-hairline text-pb-dim disabled:opacity-40"
+        >
+          {busy === 'ignore' ? 'Dismissing…' : 'Not a duplicate'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function MergeSuggestions({ orgId, refreshKey, onChanged }) {
+  const [pairs, setPairs] = useState(null)
+
+  useEffect(() => {
+    if (!orgId) return
+    let live = true
+    api.gradeMergeCandidates(orgId)
+      .then(d => { if (live) setPairs(Array.isArray(d) ? d : []) })
+      .catch(() => { if (live) setPairs([]) })
+    return () => { live = false }
+  }, [orgId, refreshKey])
+
+  // Nothing to sort out reads as nothing at all — a panel that can only ever
+  // say "everything is fine" is worse than no panel.
+  if (!pairs || pairs.length === 0) return null
+
+  return (
+    <div className="pb-card p-5 mb-8">
+      <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-3 uppercase">
+        Possible duplicate grades <span className="text-pb-faintest">({pairs.length})</span>
+      </p>
+      <p className="text-pb-dim text-sm mb-4 leading-relaxed">
+        Grades whose names look like one grade written two ways — a sponsor added, punctuation
+        changed, or Cricket Australia spelling it differently in a later season. Nothing is merged
+        until you press Merge, and every merge can be undone below.
+      </p>
+      {pairs.map(p => (
+        <SuggestionCard
+          key={`${p.grade_a.grade_name}::${p.grade_b.grade_name}`}
+          orgId={orgId}
+          pair={p}
+          onMerged={onChanged}
+          onDismissed={onChanged}
+        />
+      ))}
+    </div>
+  )
+}
+
 function MergeBuilder({ orgId, grades, onMerged }) {
   const [alias, setAlias] = useState(null)
   const [canonical, setCanonical] = useState(null)
@@ -1143,6 +1283,8 @@ export default function AdminGrades() {
         </p>
 
         <CompetitionManager clubId={orgId} />
+
+        <MergeSuggestions orgId={orgId} refreshKey={historyKey} onChanged={refresh} />
 
         <MergeBuilder orgId={orgId} grades={grades || []} onMerged={refresh} />
 

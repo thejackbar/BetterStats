@@ -3,14 +3,11 @@ export default {
   date: '2026-09-15',
   // Above v9.69.8, or SITE_VERSION never reaches this release.
   sortKey: '2026-09-15T09:00:00Z',
-  title: 'Club Directory reads the committee PlayHQ publishes today',
+  title: 'Your two sources now complete each other',
   items: [
-    'New Rediscover button on the Club Directory: re-reads every club\'s committee from PlayHQ and brings the directory into line with it. There is a per-club version on each club card too, which answers in a second or two.',
-    'Officers PlayHQ still lists get their current role, and are ticked for outreach if they have an email address.',
-    'Officers PlayHQ has dropped are removed. One who unsubscribed, bounced, was marked do-not-contact, carries a note or is linked to the CRM is kept and badged "not on PlayHQ" instead — removing them would let the next crawl add them back as a fresh, ticked contact.',
-    'Contacts you added by hand are never touched, and nobody is ever removed from BetterComms.',
-    'Exporting to BetterComms now updates a contact who is already there rather than skipping them, so a change of role reaches your audience. Somebody who has since left the committee keeps the last role we knew them by.',
-    'Role is a new filter on Lists and Segments, so "email every Secretary" is an audience you can build.',
-    'A "Tick officers with an email" button applies the same ticking rule to the clubs you have filtered, with no PlayHQ traffic, when you do not want to wait for a full re-read.',
+    'If your club syncs from Cricket Australia and has also imported its CricketStatz history, the two are now added together rather than one being chosen over the other. Every match you have from either source counts, and a match both hold is counted once.',
+    'Until now, picking CricketStatz for a season hid your Cricket Australia data for that whole season — including matches CricketStatz never had. Those matches are back.',
+    'Where Cricket Australia has the fixture but no scorecard behind it, the CricketStatz scorecard is used for that match instead, so a gap in one source is filled by the other.',
+    'The check runs by itself as an import goes and again after a full sync, so a season is sorted out as its matches arrive rather than at the end. There is a button on the CricketStatz screen if you would rather not wait.',
   ],
 }

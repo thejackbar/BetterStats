@@ -16,7 +16,6 @@ from sqlalchemy import select as sa_select
 from app.services import playhq_client
 from app.services import grade_scope
 from app.services import club_records
-from app.services import season_source
 from app.services.club_grades import club_game_sql
 from app.services.game_status import appearance_counts_as_match
 from app.services.grade_labels import suggest_category
@@ -1090,11 +1089,6 @@ async def get_records(
         """)
     elif use_psgs_path:
         psgs_season_clause = "AND psgs.season_id = ANY(:season_ids)" if season_ids else ""
-        # CA's per-grade aggregate for a season the club reads from
-        # CricketStatz — the effective views do not cover this table,
-        # and the two sources' grade names differ, so without this they
-        # add rather than one winning.
-        ca_source_clause = season_source.ca_aggregate_clause("s")
         msa_season_clause = "AND msa.season_id = ANY(:season_ids)" if season_ids else ""
         gg_season_clause = "AND gr.season_id = ANY(:season_ids)" if season_ids else ""
         # Same two rules the player profile's own by-grade grid follows
@@ -1158,7 +1152,6 @@ async def get_records(
             JOIN grades gr ON gr.id = psgs.grade_id
             JOIN seasons s ON s.id = gr.season_id
                           AND s.organisation_id = CAST(:org_id AS UUID)
-                          {ca_source_clause}
             LEFT JOIN grade_adj ga ON ga.player_id = p.id
             LEFT JOIN grade_games gg ON gg.player_id = p.id
             WHERE p.organisation_id = :org_id
@@ -1265,11 +1258,6 @@ async def get_records(
         """)
     elif use_psgs_path:
         psgs_season_clause = "AND psgs.season_id = ANY(:season_ids)" if season_ids else ""
-        # CA's per-grade aggregate for a season the club reads from
-        # CricketStatz — the effective views do not cover this table,
-        # and the two sources' grade names differ, so without this they
-        # add rather than one winning.
-        ca_source_clause = season_source.ca_aggregate_clause("s")
         most_seasons = await q(f"""
             SELECT p.id::text AS player_id,
                    COALESCE(p.display_name_override, p.name) AS name,
@@ -1279,7 +1267,6 @@ async def get_records(
             JOIN player_season_grade_stats psgs ON psgs.player_id = p.id
             JOIN grades gr ON gr.id = psgs.grade_id
             JOIN seasons s ON s.id = gr.season_id
-                          {ca_source_clause}
             WHERE p.organisation_id = :org_id
               AND {_grade_match}
               {psgs_season_clause}{gender_clause}

@@ -32,6 +32,7 @@ from app.services.grade_labels import (
 from app.services.import_ingest import _name_parts, _middles_compatible
 from app.services.player_aliases import seed_alias_on_rename
 from app.services import merge_carry
+from app.services import grade_duplicates
 from app.services.import_reconcile import reconcile_imported_totals
 from app.auth.modules import require_module
 
@@ -891,6 +892,73 @@ async def list_grades_with_stats(org_id: str, db: AsyncSession = Depends(get_db)
     # shown-order rule as the AFL Merge Grades screen.
     out.sort(key=lambda r: (r["display_order"] is None, r["display_order"] or 0, r["display_name"].lower()))
     return out
+
+
+@router.get("/grade-merge-candidates")
+async def get_grade_merge_candidates(
+    org_id: str, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)
+):
+    """Grade names that look like one grade written two ways.
+
+    Reads exactly what the Manage Grades table draws — so a pair can never name
+    a grade the screen does not list, and a group already merged is one row and
+    therefore never suggested against itself.
+
+    The rules live in `services/grade_duplicates`; see its docstring for why
+    this is token-aware rather than the similarity score the player suggestions
+    use, and for the measurement that settled it.
+    """
+    grades = await list_grades_with_stats(org_id, db, _)
+
+    context = await grade_duplicates.grade_context(db, org_id)
+    ignored_res = await db.execute(
+        text("SELECT name_a, name_b FROM grade_merge_pair_ignores WHERE org_id = CAST(:org_id AS UUID)"),
+        {"org_id": org_id},
+    )
+    ignored = {(r["name_a"], r["name_b"]) for r in ignored_res.mappings().all()}
+
+    enriched = []
+    for row in grades:
+        # A merged group answers for every name in it: the canonical's own row
+        # plus each alias, so a group that already absorbed a spelling carries
+        # that spelling's seasons and association too.
+        names = [row["grade_name"], *row.get("aliases", [])]
+        ctx = {"association_ids": set(), "association_names": set(), "seasons": set(), "categories": set()}
+        for name in names:
+            got = context.get(name) or {}
+            for key in ctx:
+                ctx[key].update(v for v in (got.get(key) or []) if v)
+        enriched.append({**row, **{k: sorted(v) for k, v in ctx.items()}})
+
+    return grade_duplicates.build_pairs(enriched, ignored)
+
+
+class IgnoreGradePairRequest(BaseModel):
+    org_id: str
+    name_a: str
+    name_b: str
+
+
+@router.post("/ignore-grade-pair")
+async def ignore_grade_pair(
+    req: IgnoreGradePairRequest,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_cap(MANAGE_MERGES)),
+):
+    """Stop suggesting a grade pair the club has said is two real grades."""
+    a, b = sorted([req.name_a, req.name_b])
+    if not a or not b or a == b:
+        raise HTTPException(status_code=400, detail="Two different grade names are required")
+    await db.execute(
+        text("""
+            INSERT INTO grade_merge_pair_ignores (org_id, name_a, name_b)
+            VALUES (CAST(:org_id AS UUID), :a, :b)
+            ON CONFLICT (org_id, name_a, name_b) DO NOTHING
+        """),
+        {"org_id": req.org_id, "a": a, "b": b},
+    )
+    await db.commit()
+    return {"status": "ignored", "name_a": a, "name_b": b}
 
 
 class MergeGradesRequest(BaseModel):
