@@ -2116,6 +2116,19 @@ def verify_matcher() -> None:
     check("and it still names each view that is missing its clause",
           "SCHEMA MISMATCH" in main_src)
 
+    # AND A VIEW THAT LOSES ITS CLAUSE AFTER BOOT IS PUT BACK. The boot
+    # verified 8 of 8 and two were the pre-pairing definition again minutes
+    # later — something outside this codebase issuing an older definition,
+    # which for `v_effective_games` has the SAME column list as ours and so
+    # replaces it silently, taking the pairing clause with it. A club's career
+    # doubles until the next restart, so the check runs hourly too.
+    check("a lost source clause is repaired hourly, not only at boot",
+          "repair_effective_views" in sched
+          and "hourly_effective_view_repair" in sched)
+    check("and the repair re-applies the shipped statements rather than its "
+          "own copy",
+          "superseded_ddl.STATEMENTS" in sched)
+
     # A CARD QUERY BOUND TO THE CLUB'S PLAYERS ALONE SCANS THE WHOLE PLATFORM'S
     # `batting_innings`, which is slow enough to be killed by a statement
     # timeout — and a pairing pass that dies there is a club counting twice.
@@ -2131,6 +2144,47 @@ def verify_matcher() -> None:
           "SET stats_source = 'cricketstatz'" not in import_src
           and "season.stats_source =" not in import_src,
           "the retired season-level marker is still being written")
+
+
+async def verify_view_repair(engine, session_maker) -> None:
+    """Break a view the way production was broken, and let the job fix it."""
+    print("\nA view that loses its source clause is put back")
+    try:
+        from app.jobs.scheduler import repair_effective_views
+    except Exception as exc:  # pragma: no cover - control runs only
+        check("the hourly repair is importable", False, f"{type(exc).__name__}: {exc}")
+        return
+
+    # The pre-pairing definitions, exactly as the DOWNGRADE holds them — which
+    # is what an older image writes over the top on this box.
+    broken = [st for st in SUPERSEDED_DOWNGRADE
+              if "CREATE OR REPLACE VIEW v_effective_games" in st
+              or "CREATE OR REPLACE VIEW v_effective_player_season_stats" in st]
+    check("the pre-pairing definitions are available to break it with",
+          len(broken) == 2, str(len(broken)))
+    async with session_maker() as db:
+        for st in broken:
+            await db.execute(text(st))
+        await db.commit()
+        bad = [v for v, ok in (await importer_ddl.verify(db)).items() if not ok]
+    check("breaking those two is seen by the check the boot uses",
+          sorted(bad) == ["v_effective_games",
+                          "v_effective_player_season_stats"], str(bad))
+
+    await repair_effective_views()
+
+    async with session_maker() as db:
+        after = await importer_ddl.verify(db)
+    check("and the hourly job puts every one of them back",
+          all(after.values()), str([v for v, ok in after.items() if not ok]))
+
+    # It must write nothing when nothing is wrong — it runs every hour on
+    # every deployment, most of which have no import at all.
+    await repair_effective_views()
+    async with session_maker() as db:
+        again = await importer_ddl.verify(db)
+    check("and a second run leaves them alone", all(again.values()),
+          str([v for v, ok in again.items() if not ok]))
 
 
 async def verify_per_innings_source(session_maker) -> None:
@@ -2609,6 +2663,7 @@ async def main() -> int:
     await verify_repair(session_maker, org_id)
     await verify_heartbeat(session_maker, org_id)
     verify_matcher()
+    await verify_view_repair(engine, session_maker)
     await verify_per_innings_source(session_maker)
     await verify_per_grade_aggregate(session_maker)
     await verify_notes_pass(engine, session_maker, org_id, import_id)

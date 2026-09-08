@@ -7743,6 +7743,60 @@ simply not run, and nothing anywhere said so.
   and the four real seasons replayed end to end through the shipped
   `reconcile_org` and the shipped script: 706 games -> 404, 302 pairs written.
 
+### AND POSTGRES'S OWN LOG NAMED THE SHAPE OF IT (v9.70.8, Sep 2026)
+
+The boot check logged **8 of 8** and two of the views were the pre-pairing
+definition again minutes later, on a running system. `log_statement` is off, so
+Postgres only records a statement that ERRORS — and the database log already
+held the answer, once per minute, on a fresh backend pid each time:
+
+    ERROR:  cannot drop columns from view
+    STATEMENT:  CREATE OR REPLACE VIEW v_effective_games AS ...
+                mg.season_id AS season_id, mg.organisation_id AS organisation_id
+                FROM manual_games mg
+
+- **THAT DEFINITION IS MIGRATION 169's**, ending at `organisation_id` with no
+  `status` column — the one 266 added. So a process outside this codebase was
+  applying a PRE-266 definition, failing, and retrying every 60 seconds.
+- **AND IT EXPLAINS WHY ONLY TWO OF THE EIGHT MOVED.** Our
+  `v_effective_games` adds no COLUMNS — the pairing clause is a join and a
+  WHERE — so a **266-era** definition has the identical column list and
+  `CREATE OR REPLACE` accepts it silently, taking the pairing clause with it. A
+  **169-era** one fails loudly. Same for the season-stats view. The six
+  per-innings views are newer than anything that process knows about, so it
+  never touches them. Six current and two stale, which no version of this code
+  can produce, is exactly what an older one overwriting two of them looks like.
+- **A SILENT SUCCESS IS INVISIBLE UNTIL YOU ASK FOR IT.** `log_statement =
+  'ddl'` (a reload, no restart) is what makes the writer name itself —
+  `log_line_prefix` carrying `%h` and `%a` gives the client host and
+  application. **The failing statements were free evidence that had been in the
+  log the whole time**; reach for the DATABASE log before instrumenting the
+  application.
+- **WHAT IS STILL OPEN**: which process. The pre-266 loop had stopped by the
+  time this was found (zero occurrences the following day), and the successful
+  writes were never logged. `log_statement='ddl'` is on now, so the next one is
+  named.
+- **SO THE APP STOPS DEPENDING ON THE BOOT GETTING IT RIGHT.**
+  `jobs/scheduler.repair_effective_views` runs hourly: `superseded_ddl.verify`,
+  and where a view has lost its clause it re-applies the SHIPPED `STATEMENTS`
+  and logs what it repaired. It writes nothing when nothing is wrong, which is
+  every deployment that holds no import. **This is not a substitute for finding
+  the process** — it is what stops a club's career doubling in the meantime,
+  because the cost of waiting is paid by whoever reads their own total.
+- **THE JOB IS EXERCISED, NOT GREPPED FOR.** The suite applies the pre-pairing
+  definitions out of `superseded_ddl.DOWNGRADE` — the same shape the older
+  image writes — asserts the boot's own check sees them, runs the SHIPPED
+  `repair_effective_views`, and asserts all eight come back and a second run
+  writes nothing.
+- **Verified against a real Postgres** (the suite is 302 checks) **with a
+  control run**: with the job removed, 3 fail and the rest are REPORTED rather
+  than crashing on the import.
+- **A FUNCTION INSERTED MID-BODY SPLITS THE ONE IT LANDS IN.** The first cut
+  put `verify_view_repair` after a check inside `verify_matcher`, so the rest of
+  that function became part of the new one and died on a `NameError` for a local
+  defined above the split. Caught by running it; a structural check would not
+  have seen it.
+
 ### THE VIEW IN THE DATABASE WAS NOT THE VIEW IN THE CODE (v9.70.7, Sep 2026)
 
 The end of the same report, and the most expensive part of it. Brad Quinsee's

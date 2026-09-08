@@ -124,6 +124,53 @@ async def pair_all_imported_matches():
                 changed, len(orgs))
 
 
+async def repair_effective_views():
+    """Put back any effective view that has lost its source clause.
+
+    THE PAIRING IS ONLY WORTH ANYTHING IF THE VIEWS CAN ACT ON IT. Reported
+    live: `v_effective_games` and `v_effective_player_season_stats` were the
+    pre-pairing definitions while the other six were current, so every
+    imported match was correctly paired, correctly dropped from the innings
+    list, and STILL counted in the season aggregate — a career reading 15,333
+    runs and 28 hundreds against the club's own 10,444 and 16.
+
+    The boot applies all eight in one transaction and verifies them; that boot
+    logged 8 of 8 and two were stale again minutes later. Postgres's own log
+    named the shape of it: something outside this codebase issuing an OLDER
+    definition of `v_effective_games` — a pre-266 one fails loudly with
+    "cannot drop columns from view", a 266-era one has the same column list as
+    ours and so REPLACES it silently, taking the pairing clause with it.
+
+    So this is not a substitute for finding that process. It is what stops a
+    club's figures doubling in the meantime, because the cost of waiting is
+    paid by whoever reads their own career total. Idempotent — the same
+    statements the boot runs — and it writes nothing when nothing is wrong.
+    """
+    from app.services import superseded_ddl
+
+    async with async_session_maker() as session:
+        missing = [v for v, ok in
+                   (await superseded_ddl.verify(session)).items() if not ok]
+        if not missing:
+            logger.info("Effective views: 8 of 8 carry their source clause")
+            return
+        logger.error(
+            "Effective views: %s had lost their source clause — a club "
+            "holding both a CricketStatz import and a Cricket Australia sync "
+            "was counting the same match twice. Re-applying.",
+            ", ".join(missing))
+        for stmt in superseded_ddl.STATEMENTS:
+            await session.execute(text(stmt))
+        await session.commit()
+        still = [v for v, ok in
+                 (await superseded_ddl.verify(session)).items() if not ok]
+    if still:
+        logger.error("Effective views STILL missing after re-applying: %s",
+                     ", ".join(still))
+    else:
+        logger.info("Effective views: repaired %s", ", ".join(missing))
+
+
 async def sync_all_organisations():
     """Pull each eligible club's recent results.
 
@@ -721,6 +768,19 @@ def start_scheduler():
         minute=50,
         timezone=PERTH,
         id="nightly_match_pairing",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    # A view that has lost its source clause counts a club's matches twice, so
+    # the check that already runs at boot runs hourly as well. It writes
+    # nothing when nothing is wrong; see repair_effective_views for why this
+    # exists rather than trusting one pass through a long startup block.
+    scheduler.add_job(
+        repair_effective_views,
+        trigger="cron",
+        minute=20,
+        id="hourly_effective_view_repair",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
