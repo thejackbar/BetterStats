@@ -80,6 +80,11 @@ function parseAcquisition() {
     utm_medium: get('utm_medium'),
     utm_campaign: get('utm_campaign'),
     utm_content: get('utm_content'),
+    // The fifth standard tag. Missing from this list until the webinar page
+    // needed it, so a campaign that tagged utm_term had it silently dropped
+    // everywhere — every form on the site reads this one function, so adding
+    // it here is what makes the capture complete rather than per-page.
+    utm_term: get('utm_term'),
     click_id: clickId,
     click_source: clickSource,
     has_signal: !!(utmSource || clickId),

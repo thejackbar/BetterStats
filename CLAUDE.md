@@ -56,6 +56,128 @@ import re-writes the same matches (deterministic `cricketstatz_match_id`, and
 that was kept. A club's hand-typed history has no such path, which is the whole
 reason for the rule.
 
+## THE CONVERSION CANNOT FIRE ON STREAMYARD'S DOMAIN (migration 295, v9.71.0, Sep 2026)
+
+Asked for with a paused Meta campaign waiting on it: a page on `betterat.cricket`
+that fires `CompleteRegistration` on a successful webinar registration and only
+then hands the visitor the StreamYard link. Webinar Mon 21 Sep 2026.
+
+- **THAT ONE CONSTRAINT DECIDED THE WHOLE SHAPE, and it is worth stating because
+  every other choice follows from it.** A pixel cannot fire on a third-party
+  domain, so an ad pointing straight at StreamYard hands Meta zero conversion
+  signal and delivery degrades within days. So the registration happens on our
+  own page, and **the success state is rendered rather than redirected** — a
+  redirect races the beacon it is supposed to follow, and skips the calendar
+  file and the inbox note besides.
+- **THE ORDER IS PERSIST, THEN FIRE, AND NOTHING ELSE.** Never on page load,
+  never on the click, never on a validation failure. The browser suite asserts
+  each of those by recording what `fbq` was actually called with, in order —
+  none of it is observable from the backend, which is why it is checked there.
+- **A RESUBMISSION IS THE SAME LEAD, SO IT CLAIMS NO SECOND CONVERSION.**
+  `webinar.register` folds on `(event_key, lower(email))` and reports `created`;
+  the page fires the pixel only when it is true. Counting a resubmission would
+  teach the ad set to optimise toward people who fill the form in twice. The
+  cost is stated rather than hidden: somebody arriving on a fresh ad click and
+  re-registering is a click Meta attributed with no conversion behind it, and
+  under-reporting one duplicate is the safer direction than inventing one.
+- **A BROKEN BACKEND STILL HANDS OVER THE LINK, AND STILL CLAIMS NOTHING.** The
+  registrant is not trapped behind a failed write — but no pixel fires, because
+  nothing was registered and a conversion we invented is worse for the ad set
+  than one we missed.
+- **CAMPAIGN CREDIT IS FILLED, NEVER OVERWRITTEN.** The upsert COALESCEs every
+  UTM column, so a registration already credited to a campaign keeps that credit
+  and one that arrived with no signal can be upgraded by a later tagged visit.
+  Overwriting would credit the registration to whichever visit happened to be
+  last rather than the click that earned it.
+- **`utm_term` WAS NEVER CAPTURED BY THE SITE AT ALL, and the browser suite is
+  what found it.** `lib/visitor.js::parseAcquisition` returned four UTM tags and
+  not the fifth, so any campaign tagging it had it silently dropped — on every
+  form, not just this one. Fixed at the source, and `public_self_serve`'s own
+  `_ATTRIBUTION_KEYS` allowlist had to learn it too or the newly-captured field
+  would have been dropped one level down.
+- **ONE DATE CONSTANT, TWO PAGES, AND THE PAGE TURNS ITSELF OVER.**
+  `services/webinar.EVENT` and its hand-kept mirror `frontend/src/data/webinar.js`
+  drive the headline, the button label, the promo block and what the success
+  state hands over. **The switch is the event's END, not its start** — somebody
+  arriving halfway through should still be sent to the live stream. The mirror
+  exists so the H1 paints without a request (this traffic is paid and mobile, and
+  a fetch in front of the H1 is a fetch in front of LCP); the suite asserts the
+  two copies agree rather than trusting them, the arrangement `billing_pricing.py`
+  and `pricing.js` already have.
+- **THE RECORDING LINK IS A SETTING, NOT A CONSTANT.** It does not exist until
+  after the event, and the hour afterwards is when interest peaks — waiting on a
+  deploy would spend it. `platform_settings.webinar_recording_url` (a new
+  `_STR_KEYS` group, url-validated, `''` CLEARS rather than storing an empty
+  string that would read as a link which exists and is blank).
+- **THE `.ics` IS AN ENDPOINT, NOT A BROWSER-BUILT BLOB**, because the same URL
+  is what the confirmation email links to. `email_service.EmailMessage` carries
+  no attachment field and the five providers behind it each take attachments
+  differently (SES would need raw MIME rather than the simple content path it
+  uses), so a link is both what the brief allowed and the only thing that works
+  in every mail client. Written as a UTC `DTSTART` with **CRLF line endings** —
+  RFC 5545 requires them, and a file joined with bare LF is accepted by some
+  calendar apps and silently rejected by others.
+- **DELIBERATELY NOT `club_onboarding_requests`.** That table is the queue of
+  clubs asking to be onboarded; somebody who signed up to watch a demo has not
+  asked for that, and folding a hundred registrants in would bury the clubs who
+  did. Per direct instruction it also does NOT push a Hot lead into Twenty or
+  the CRM the way a Contact-form enquiry does — a demo registration is a weaker
+  signal than "onboard my club".
+- **`/trial` KEEPS ITS OWN `content_category`.** The brief asked for `'trial'`;
+  it already fires `'self_serve_trial'`, and renaming it would split the event's
+  history so a custom conversion filtered on either value misses half of it.
+  Left as it is, per direct decision — the two are already distinguishable.
+- **THE PROMO BLOCK SITS BELOW `/trial`'s SEARCH BOX**, measured off the real
+  boxes rather than source order: that page converts paid traffic at ~3.4% and
+  anything above the fold competing with its search costs it that. It fires no
+  pixel event of its own — clicking through and registering is what fires one.
+- **A NEW TOP-LEVEL ROUTE IS A CLUB SLUG UNTIL FOUR LISTS SAY OTHERWISE**, the
+  trap this file already records for `/videos`. Added `demo` — **and `trial`,
+  which had never been added**, so `/trial` was resolving "trial" as a club slug
+  on every visit: a wasted `/api/clubs/trial` 404 and the club `Navbar` drawn on
+  top of its own `MarketingNav`, on the exact page paid traffic lands on.
+- **Verified against a real Postgres** (`backend/verification/verify_webinar.py`,
+  143 checks through the shipped route bodies and service: the DDL applied three
+  times and again over a populated table, both copies of the date agreeing, 17:30
+  Perth and 19:30 AEST proved the same instant, the switch at the event's end,
+  the calendar file's CRLF and UTC stamps, every UTM tag and the fbclid stored,
+  an un-allowlisted key never reaching the blob, the conversion queued once with
+  the browser's own event_id, a resubmission storing no duplicate and claiming
+  nothing while keeping its campaign credit, an untagged registration upgraded
+  later, all five refusals, the honeypot and fill-time guards including a device
+  with a fast clock NOT refused, the post-event states with and without a
+  recording, the setting cleared and refused, the email's outcome recorded on the
+  row through a refusal and a throw, and the downgrade) **with three control
+  runs**: the resubmission guard neutered fails 2, the bot guards neutered fail 4,
+  and with the service absent it REPORTS the feature rather than dying on the
+  first ImportError.
+- **Driven in Chromium** (`frontend/verification/verify_webinar_browser.mjs`: no
+  conversion on page load or on either validation failure, the exact payload on
+  the wire, the conversion fired once with `content_category: 'webinar'` sharing
+  the server's event_id, the button refusing a second press while in flight, the
+  resubmission and server-error paths both claiming nothing, both date-driven
+  states, the promo measured as below the search box, and no overflow at 390px).
+- **A CHECK THAT MEASURES THE HARNESS IS NOT A CHECK, twice here.**
+  `addInitScript` cannot stub `gtag` — `index.html` unconditionally redefines it
+  (`function gtag(){dataLayer.push(arguments)}`) after the init script runs, so
+  the recorder is replaced and every GA4 check reads empty; the calls are read
+  back out of `window.dataLayer` instead. `fbq` IS stubbable there, because its
+  own loader bails out when `window.fbq` already exists. And a `click({force:
+  true})` on a disabled button hung the suite rather than failing it — the
+  in-flight guard is asserted by holding the response and reading `isDisabled()`,
+  then dispatching the event directly.
+- **STILL ACCOUNT-SIDE, NOT SOMETHING CODE CAN DO**: `betterat.cricket` verified
+  in Business Manager, `CompleteRegistration` in the Aggregated Event Measurement
+  priority list (or iOS conversions are not attributed), and the ad's
+  `conversion_domain`. Also worth fixing on the creative itself: it reads "WAST",
+  which is West Africa Summer Time — Perth is **AWST**.
+- **NOTICED, NOT BUILT**: no reminder email before the event and no
+  attended/no-show record afterwards, so "send the recording to everyone who
+  registered" is a CSV export and a BetterComms list rather than one button. The
+  event is one constant, so a second webinar means editing both copies rather
+  than picking a row — `event_key` is on the table from the start for whenever
+  that becomes worth a screen.
+
 ## A club decides what it is told about (migration 288, v9.69.0, Sep 2026)
 
 Asked for as a configurable notification system a club admin manages — emails

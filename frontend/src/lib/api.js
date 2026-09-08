@@ -1966,6 +1966,14 @@ export const api = {
   // Public marketing Contact form — store a club onboarding enquiry.
   submitOnboarding: (payload) =>
     request('/public/contact', { method: 'POST', body: JSON.stringify(payload) }),
+  // Webinar registration (/demo). `webinarDetails` carries the one thing the
+  // page can't know for itself — whether a recording has been published yet;
+  // the date and labels render from src/data/webinar.js so the headline paints
+  // without waiting on this.
+  webinarDetails: () => request('/public/webinar'),
+  registerForWebinar: (payload) =>
+    request('/public/webinar/register', { method: 'POST', body: JSON.stringify(payload) }),
+  superWebinarRegistrations: () => request('/club-admin/super/webinar-registrations'),
   // Club lookup behind the Contact form's Club name field. Same Cricket
   // Australia club list the self-serve registration wizard searches, on the
   // Contact form's own endpoint so it works whether or not self-serve

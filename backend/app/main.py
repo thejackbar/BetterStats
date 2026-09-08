@@ -15,7 +15,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.config.settings import settings
 from app.auth.modules import require_module
 from app.routers import instructional_videos
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, cricketstatz, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, public_net_checkin, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, cricketstatz, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, public_net_checkin, net_manager, website, comms, public_comms, public_ses, public_contact, public_webinar, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
     stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
     club_diary, social_media, votes, public_votes, roles_activities, club_room, roster, facility_requests, directory, \
     public_club_room, sales_workspace, sales_commissions, honours
@@ -1315,6 +1315,10 @@ async def lifespan(app: FastAPI):
         # Mirrors migration 291 — the ONE copy lives in the service.
         from app.services.grade_ignore_ddl import STATEMENTS as _GRADE_IGNORE_DDL
         for _stmt in _GRADE_IGNORE_DDL:
+            await conn.execute(text(_stmt))
+        # Mirrors migration 295 — the ONE copy lives in the service.
+        from app.services.webinar_ddl import STATEMENTS as _WEBINAR_DDL
+        for _stmt in _WEBINAR_DDL:
             await conn.execute(text(_stmt))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS grade_merge_logs (
@@ -6152,6 +6156,7 @@ app.include_router(public_club_room.router)                                     
 app.include_router(public_comms.router)                                                   # BetterComms (public unsubscribe)
 app.include_router(public_ses.router)                                                     # BetterComms (SES event webhook, SNS-signed)
 app.include_router(public_contact.router)                                                 # Marketing Contact form (public intake)
+app.include_router(public_webinar.router)                                                 # Webinar registration (public intake)
 app.include_router(public_square.router)                                                  # BetterMerch (Square OAuth callback)
 app.include_router(public_xero.router)                                                    # BetterFees (Xero OAuth callback)
 app.include_router(public_stripe.router)                                                  # Billing (Stripe webhook, signature-verified)

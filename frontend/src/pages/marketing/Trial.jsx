@@ -13,6 +13,7 @@ import { ModuleWordmark } from '../../components/ModuleLockup'
 import { getVisitorId } from '../../lib/visitor'
 import { getMetaEventContext } from '../../lib/metaPixel'
 import TextType from '../../components/marketing/TextType'
+import { webinarState } from '../../data/webinar'
 
 // The ad-campaign landing page. Most visitors arrive on a phone, so the page is
 // mobile-first and forced LIGHT (a `data-theme="light"` wrapper — every pb-*
@@ -280,6 +281,9 @@ export default function Trial() {
   }, [])
 
   const available = !!status?.enabled
+  // The webinar promo's copy and link, from the one date constant. Computed
+  // here rather than inline so both of its states read from one place.
+  const webinar = webinarState()
 
   // Debounced club search (min 2 chars), hitting the same public search the
   // wizard uses — results carry `already_registered` + the existing club's
@@ -475,6 +479,29 @@ export default function Trial() {
                 </p>
               </div>
             ) : null}
+          </div>
+        </section>
+
+        {/* Webinar promo — BELOW the hero on purpose. This page's job is trial
+            signups and it converts paid traffic at ~3.4%; anything above the
+            fold competing with the search box costs it that. Both its states
+            come from the one date constant (src/data/webinar.js), so it flips
+            to the recording after the event and can never sit here advertising
+            a webinar that has already happened. No pixel event fires from
+            here — clicking through to /demo and registering there is what
+            fires it. */}
+        <section className="px-4 sm:px-6 lg:px-10 pb-8">
+          <div className="max-w-xl mx-auto">
+            <div className="pb-card p-5 bg-pb-surface" data-testid="trial-webinar-promo">
+              <p className="font-display font-semibold text-base mb-1">{webinar.promoHeading}</p>
+              <p className="text-sm text-pb-dim leading-relaxed mb-3">{webinar.promoBody}</p>
+              <Link
+                to="/demo"
+                className="inline-flex items-center gap-1 px-4 py-2.5 rounded-lg font-display font-semibold text-sm border pb-hairline text-pb-text hover:bg-pb-surface2 transition"
+              >
+                {webinar.promoCta} <span aria-hidden="true">→</span>
+              </Link>
+            </div>
           </div>
         </section>
 

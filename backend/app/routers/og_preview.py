@@ -69,6 +69,12 @@ MARKETING_PAGES: dict[str, tuple[str, str]] = {
         "$399 a year, add modules from $149, and bundle for a discount. One "
         "price per club.",
     ),
+    "/demo": (
+        "Watch the BetterCricket demo | Live demo + Q&A",
+        "See the whole of BetterCricket in one sitting — historical stats, "
+        "selection, socials, club admin and opposition analysis — then ask us "
+        "anything. Register free.",
+    ),
     "/trial": (
         "Start your club's free trial | BetterCricket",
         "Register your cricket club yourself and start a free trial of every "
@@ -184,6 +190,7 @@ RESERVED_ROOT_SEGMENTS = {
     "games", "match", "scorecards", "players",
     "features", "pricing", "compare", "about", "contact", "faq",
     "terms", "privacy", "blog", "videos", "overview", "modules",
+    "trial", "demo",
 }
 
 

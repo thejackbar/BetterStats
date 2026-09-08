@@ -2525,6 +2525,7 @@ async def get_general_settings(
         "bundle_discount_schedule": await ps.get_bundle_discount_schedule(db),
         "demo_booking_links": await ps.get_demo_booking_links(db),
         "backup_schedule": await ps.get_backup_schedule(db),
+        "webinar_recording_url": await ps.get_webinar_recording_url(db),
     }
 
 
@@ -2544,6 +2545,13 @@ class GeneralSettingsUpdate(BaseModel):
     # Merch storefront (migration 179) — same off-by-default, super-admin-only
     # posture as member_portal_enabled above.
     merch_storefront_enabled: Optional[bool] = None
+    # Where the /demo page sends people once the webinar has been and gone.
+    # The link does not exist until after the event, so it is a setting rather
+    # than a constant — see platform_settings._STR_KEYS. An empty string clears
+    # it (back to "recording coming shortly"), which is why the field is a
+    # plain Optional[str] read through exclude_unset rather than an is-not-None
+    # check: "" and absent have to mean different things.
+    webinar_recording_url: Optional[str] = None
     # module-count (str or int, JSON-friendly either way) -> whole-dollar
     # discount. See platform_settings.update_bundle_discount_schedule — this
     # REPLACES the whole table, it's not a merge.
@@ -2596,6 +2604,7 @@ async def patch_general_settings(
         "bundle_discount_schedule": await ps.get_bundle_discount_schedule(db),
         "demo_booking_links": await ps.get_demo_booking_links(db),
         "backup_schedule": await ps.get_backup_schedule(db),
+        "webinar_recording_url": await ps.get_webinar_recording_url(db),
     }
 
 
@@ -4180,6 +4189,41 @@ async def list_onboarding_requests(
             "visitor_id": r.visitor_id,
         }
         for r in result.scalars().all()
+    ]
+
+
+@router.get("/super/webinar-registrations")
+async def list_webinar_registrations(
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Everyone registered for the webinar, newest first, with the campaign
+    each registration came from.
+
+    Deliberately a separate list from the onboarding enquiries above: somebody
+    who signed up to watch a demo has not asked to be onboarded, and putting a
+    hundred of them in front of the staff who work that queue would bury the
+    clubs who did ask. The UTM columns are what make this reconcilable against
+    Meta's own attributed numbers — the two will not match, since Meta counts
+    on a 7-day click window.
+    """
+    from sqlalchemy import text as _text
+    rows = (await db.execute(_text("""
+        SELECT id, event_key, name, email, club, role,
+               utm_source, utm_medium, utm_campaign, utm_content, utm_term,
+               click_id, click_source, referrer, landing_path,
+               visitor_id, email_sent, email_error, created_at
+          FROM webinar_registrations
+         ORDER BY created_at DESC
+         LIMIT 5000
+    """))).mappings().all()
+    return [
+        {
+            **{k: v for k, v in row.items() if k not in ("id", "created_at")},
+            "id": str(row["id"]),
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        }
+        for row in rows
     ]
 
 
