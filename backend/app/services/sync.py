@@ -18,6 +18,7 @@ from app.models.db import (
     SyncRun, async_session_maker
 )
 from app.services import auto_sync, dismissal, playhq_client
+from app.services.boundary_counts import clean as _bounds
 from app.services.game_status import NOT_PLAYED_SQL_LIST, NOT_PLAYED_STATUSES
 from app.services.grade_labels import suggest_categories, suggest_category
 
@@ -1032,8 +1033,14 @@ async def _sync_organisation_impl(
                     is_hs_not_out=bat.get("isBattingHSNotOut") or False,
                     batting_average=bat.get("battingAverage"),
                     batting_strike_rate=bat.get("battingStrikeRate"),
-                    fours=bat.get("battingFours") or 0,
-                    sixes=bat.get("battingSixes") or 0,
+                    # The same arithmetic holds across a season, and this is
+                    # where a career's boundary totals come from.
+                    fours=_bounds(bat.get("battingAggregate") or 0,
+                                  bat.get("battingFours"),
+                                  bat.get("battingSixes"))[0],
+                    sixes=_bounds(bat.get("battingAggregate") or 0,
+                                  bat.get("battingFours"),
+                                  bat.get("battingSixes"))[1],
                     batting_minutes=bat.get("battingMinutes") or 0,
                     bowling_innings=bowl.get("bowlingInnings") or 0,
                     wickets=bowl.get("bowlingWickets") or 0,
@@ -2459,8 +2466,19 @@ async def sync_grassroots_game_level_data(
                             # 50-off-nothing once the count has been flattened.
                             # See services/rate_coverage.py.
                             balls=row.get("ballsFaced"),
-                            fours=row.get("foursScored") or 0,
-                            sixes=row.get("sixesScored") or 0,
+                            # A COUNT THAT CANNOT FIT THE RUNS IS NOT A
+                            # COUNT. Cricket Australia carries impossible
+                            # boundary figures on some old junior cards —
+                            # verified live: 8 runs with 30 sixes — which
+                            # topped the most-sixes record board. Reads as NOT
+                            # RECORDED rather than as zero, the same call
+                            # `balls` makes above.
+                            fours=_bounds(row.get("runsScored") or 0,
+                                          row.get("foursScored"),
+                                          row.get("sixesScored"))[0],
+                            sixes=_bounds(row.get("runsScored") or 0,
+                                          row.get("foursScored"),
+                                          row.get("sixesScored"))[1],
                             not_out=not_out,
                             dismissal_type=dt_short or None,
                             caught_behind=caught_behind,

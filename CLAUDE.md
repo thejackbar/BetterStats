@@ -7691,6 +7691,50 @@ describes choosing a winner per season describes the design this replaces.
   follow-up is a "these look like the same match — are they?" review list, built
   from the near misses the matcher already scores and declines.
 
+### A COUNT THAT CANNOT FIT THE RUNS IS NOT A COUNT (v9.70.3, Sep 2026)
+
+Reported off StatLab's most-sixes board: Nathan Sammit **30 sixes in an innings
+of 8 runs**, and Rasika Thanippullige 11 sixes off 7.
+
+- **IT IS CRICKET AUSTRALIA'S OWN DATA, AND THAT WAS ESTABLISHED BEFORE
+  ANYTHING WAS CHANGED.** The reported innings was traced to one match (Cameron
+  U12 v Keon Park U12, 17 Nov 2006), which BOTH sources hold. CricketStatz's own
+  card reads `R 8, M 0, 4s 1, 6s 0` and our import stored exactly that; the
+  synced row for the same match reads `runs 8, balls 0, fours 1, sixes 30`,
+  confirmed by fetching it live rather than inferred from the code. A scorer
+  twenty years ago typed something else into the sixes box and CA has carried it
+  since. **No re-sync repairs it and no parser fix reaches it.**
+- **SIX RUNS PER SIX IS ARITHMETIC, NOT A JUDGEMENT.** `fours * 4 + sixes * 6 <=
+  runs` holds for every innings ever played, so a count that breaks it is not a
+  boundary count. `services/boundary_counts.clean` is the one rule, applied by
+  the sync's per-innings write, by the season aggregate a career's totals are
+  summed from, and by the CricketStatz import.
+- **IT READS AS NOT RECORDED, NEVER AS ZERO** — the same call `sync.py` already
+  makes for a missing ball count. A 0 says the batter hit no boundaries, which
+  is a different claim from "this column cannot be read", and a NULL keeps it
+  out of a total without asserting anything.
+- **EACH COLUMN IS JUDGED ON ITS OWN FIRST.** In the reported innings the single
+  four fits the 8 runs perfectly well and only the sixes do not, so nulling both
+  would throw away a good figure. Only where the pair still cannot fit together
+  (6 fours and a six in 24 runs) does the other go too.
+- **THE RUNS ARE NEVER TOUCHED.** They are what every other figure on the row is
+  reconciled against, and a bad boundary count is no reason to doubt them.
+- **`python -m app.scripts.backfill_boundary_counts <org|all> --apply`** repairs
+  what is stored — no network at all, since the runs are on the row beside the
+  counts. Dry run by default, per the house rule.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_boundary_counts.py`, 27 checks through the
+  shipped rule and the shipped backfill: the reported innings losing only the
+  count that cannot fit, an ordinary innings untouched, a genuine none kept as a
+  none, six-off-one-ball standing and a six in a five-run innings not, the pair
+  that is possible apart and not together, the runs unchanged on the stored row,
+  another club's rows not this club's to repair, a second run repairing nothing,
+  and **the SQL mirror and the Python rule agreeing on all 300 randomised rows**)
+  **with a control run**: with the rule neutered 6 of the 27 fail.
+- **NOTICED, NOT FIXED**: nothing flags these rows to a club. The counts simply
+  stop being published. A "these figures could not be read" list would be its
+  own change, and the same arithmetic would build it.
+
 ### OUR OWN CLUB'S NAME IS ON BOTH SIDES OF EVERY MATCH (v9.70.2, Sep 2026)
 
 Reported off the live site after v9.70.0: no duplicate high scores, but a
