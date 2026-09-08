@@ -7582,6 +7582,76 @@ describes choosing a winner per season describes the design this replaces.
   follow-up is a "these look like the same match — are they?" review list, built
   from the near misses the matcher already scores and declines.
 
+### OUR OWN CLUB'S NAME IS ON BOTH SIDES OF EVERY MATCH (v9.70.1, Sep 2026)
+
+Reported off the live site after v9.70.0: no duplicate high scores, but a
+career of 547 matches and 28 hundreds where the club counts about 370 and 16.
+Measured, not inferred: the club's 2002/03 read **171 games — exactly Cricket
+Australia's 85 plus CricketStatz's 86**. Nothing had been paired at all.
+
+- **THE MATCHER COMPARED OUR OWN CLUB'S NAME AND SO AGREED WITH EVERYTHING.**
+  `load_sides` handed `teams_agree` the concatenated `home_team + away_team` of
+  both sides, and every match a club plays has that club's name on it — so
+  "Keon Park 4th-XI v Croxton Utd" and "Rosebank v Keon Park" read as the same
+  fixture. Every one of a Saturday's ten fixtures then looked identical, the
+  tie guard refused the lot, and **6 of 86 paired**. `split_sides` takes our own
+  club off first — a stored opposition wins, the club-name test is the
+  fallback — which alone took it to 62.
+- **ONE SHARED WORD IS NOT A CLUB.** On one real Saturday the club played
+  Preston Trinity, Preston Druids, Preston YCW and West Preston. `teams_agree`
+  agreed on any overlap, so all four read as one another. It now needs one name
+  CONTAINED in the other ("Preston YCW" in "Preston YCW District 2nd XI") or
+  two identifying words in common. An age group is stripped first, so "Preston
+  U17 Trinity" and "Preston Trinity" still agree. 62 → 65.
+- **WHICH OF OUR SIDES PLAYED IS WHAT TELLS ONE SATURDAY'S FIXTURES APART**, and
+  it is the ONE hard no in the matcher: our 2nd XI's match is never our 1st
+  XI's, however well the date and the opposition agree. `side_marker` reads it
+  from either spelling ("2nd-XI", "2nd XI", "1's", "U17") and says nothing for a
+  bare "Keon Park". 65 → 77.
+- **A GRADE LETTER IS NEVER READ AS A TEAM NUMBER.** A Grade is not always the
+  1st XI — this club's 3rd XI plays D Grade and its 4th plays E — so mapping the
+  letters onto team numbers would confidently pair the wrong fixtures. Only a
+  number the name itself carries counts.
+- **A CLUSTER THAT CANNOT BE TOLD APART IS PAIRED OFF, NOT REFUSED, and that
+  reverses v9.70.0.** Refusing a tie sounds safer and is not: Cricket Australia
+  writes both of a Saturday's fixtures as a bare "Keon Park", and refusing every
+  such tie left 2011/12 reading 149 games against a true ~117. Pairing them off
+  gets the COUNT right whichever way round they go, because both fixtures are in
+  both sources, and the strongest-first order means the scorecards decide it
+  wherever there are any. **The cost is stated rather than hidden**: where one
+  source alone holds one of two indistinguishable fixtures and the other source
+  alone holds the other, pairing them loses a match — which needs a club to have
+  played one opposition twice in a day with each source missing a different one,
+  and is worth less than the double count refusing guarantees.
+- **Measured on the club's own seasons, with no scorecards read at all**:
+  2002/03 171 → 89 (CA 85, CS 86), 2006/07 180 → 108, 2011/12 208 → 122,
+  2019/20 147 → 85; four seasons, **706 → 404**. In production the scorecards
+  are loaded too and are the stronger signal.
+- **Measured at scale in the worst realistic shape** — four of our sides out
+  against ONE opposition club every Saturday, Cricket Australia writing every
+  one as a bare "Keon Park", a third carrying no card of ours and a quarter
+  dated a week off: **all 2,800 matches pair, none missed, and the club counts
+  2,800 rather than 5,600**, in under a second. 468 pair to a sibling fixture
+  from the same day — a mis-attribution, not a miscount.
+- **Verified** (the suite is 272 checks now: our own side and the opposition
+  told apart whichever way round the fixture is written, a stored opposition
+  taken at its word, two clubs sharing one word not the same club, a name
+  contained in another still agreeing, an age group not telling two clubs apart,
+  the side marker read from every spelling, a grade letter never read as a team
+  number, our firsts' match never paired to our seconds', and a cluster nothing
+  can tell apart still counted once each) **with two control runs**: with the
+  matcher neutered 25 of the 272 fail; with our own name compared and one shared
+  word agreeing — the reported bug — 3 fail on exactly that.
+- **A MEASUREMENT NEEDS A REALISTIC FIXTURE.** The scale test's opposition clubs
+  were named "Club 12", whose only token an age-group strip removes, so the
+  harder run read 1,866 of 2,800 for a reason that exists nowhere outside the
+  harness. Real names are what it measures now.
+- **NOTICED, NOT OURS**: Cricket Australia's own feed carries impossible
+  boundary counts on some old junior cards — verified live, `runs: 8, balls: 0,
+  fours: 1, sixes: 30` on a 2006 Under 12 innings — which tops the most-sixes
+  record board. The CricketStatz import reads that same card correctly (8, 1
+  four, 0 sixes). See the note below.
+
 ### A SEASON CHANGES OVER AS ITS OWN MATCHES LAND (v9.69.2, Sep 2026)
 
 Reported off Keon Park's Records with the import still going: duplicate high

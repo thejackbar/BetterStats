@@ -1675,13 +1675,71 @@ def verify_matcher() -> None:
     check("two imported matches cannot both take the same synced game",
           len(both) == 1, str(both))
 
-    # A TIE IS REFUSED RATHER THAN GUESSED. Pairing the wrong one hides a match
-    # that really happened.
-    tie = match_pairing.assign(
-        [MR("i9", date(2003, 3, 1), "Croxton")],
-        [MR("gA", date(2003, 3, 1), "Croxton"), MR("gB", date(2003, 3, 1), "Croxton")])
-    check("two candidates that look identical are refused, not guessed between",
-          tie == {}, str(tie))
+    # OUR OWN CLUB'S NAME MUST NEVER BE WHAT MAKES TWO RECORDS AGREE. The
+    # reported bug: both sides of every candidate carry it, so comparing the
+    # raw team names made every pair look identical, the whole Saturday read as
+    # one fixture, and 6 of a real season's 86 matches paired. Measured on that
+    # same live season, this takes it to 77 before a single card is read.
+    club = match_pairing.team_tokens("Keon Park Cricket Club")
+    ours, opp = match_pairing.split_sides(
+        "Keon Park 3rd-XI", "Sumner Colts 'D'", "", club)
+    check("our own side and the opposition are told apart",
+          ours == "Keon Park 3rd-XI" and opp == "Sumner Colts 'D'", f"{ours}|{opp}")
+    ours2, opp2 = match_pairing.split_sides(
+        "Rosebank", "Keon Park", "", club)
+    check("whichever way round the fixture is written",
+          ours2 == "Keon Park" and opp2 == "Rosebank", f"{ours2}|{opp2}")
+    check("and a stored opposition is taken at its word",
+          match_pairing.split_sides("A v B", "Keon Park U12", "Cameron U12",
+                                    club)[1] == "Cameron U12")
+
+    # ONE SHARED WORD IS NOT A CLUB. A real Saturday: Preston Trinity, Preston
+    # Druids, Preston YCW and West Preston are four different clubs.
+    check("two clubs sharing one word are not the same club",
+          not match_pairing.teams_agree("Preston Trinity", "Preston Druids"))
+    check("but a name contained in the other is",
+          match_pairing.teams_agree("Preston YCW 'B'",
+                                    "Preston YCW District 2nd XI"))
+    check("and an age group is not what tells two clubs apart",
+          match_pairing.teams_agree("Preston U17 Trinity", "Preston Trinity"))
+
+    # OUR 2nd XI's MATCH IS NEVER OUR 1st XI's, however well everything else
+    # agrees — which is what separates the two fixtures a club plays against
+    # one opposition on one day.
+    check("our own side's number is read from either spelling",
+          match_pairing.side_marker("Keon Park 2nd-XI") == "xi2"
+          and match_pairing.side_marker("Keon Park 2nd XI") == "xi2"
+          and match_pairing.side_marker("Keon Park 1's 'A-Grade'") == "xi1"
+          and match_pairing.side_marker("Keon Park U17") == "u17"
+          and match_pairing.side_marker("Keon Park") is None)
+    # A GRADE LETTER IS NEVER READ AS A TEAM NUMBER: this club's 3rd XI plays
+    # D Grade and its 4th plays E, so mapping the letters would pair the wrong
+    # fixtures.
+    check("a grade letter is not read as a team number",
+          match_pairing.side_marker("Keon Park 'D-Grade'") is None)
+    firsts = MR("iF", date(2003, 1, 25), "Kingsbury", ours="Keon Park 1's 'A-Grade'")
+    seconds_syn = MR("gS", date(2003, 1, 25), "Kingsbury 2nd XI", ours="Keon Park 2nd XI")
+    check("our firsts' match is never paired to our seconds'",
+          match_pairing.score_pair(firsts, seconds_syn) is None)
+    both = match_pairing.assign(
+        [firsts, MR("iS", date(2003, 1, 25), "Kingsbury 'B'", ours="Keon Park 2nd-XI")],
+        [seconds_syn, MR("gF", date(2003, 1, 25), "Kingsbury", ours="Keon Park")])
+    check("so each of our sides takes its own fixture",
+          both.get("iF", ("",))[0] == "gF" and both.get("iS", ("",))[0] == "gS",
+          str(both))
+
+    # A CLUSTER THAT CANNOT BE TOLD APART IS PAIRED OFF, NOT REFUSED. Cricket
+    # Australia writes both of a Saturday's fixtures as a bare "Keon Park", so
+    # refusing every such tie left a real season reading 149 games against a
+    # true ~117. Pairing them off gets the count right whichever way round.
+    cluster = match_pairing.assign(
+        [MR("iX", date(2011, 11, 11), "Brunswick"),
+         MR("iY", date(2011, 11, 11), "Brunswick")],
+        [MR("gX", date(2011, 11, 11), "Brunswick"),
+         MR("gY", date(2011, 11, 11), "Brunswick")])
+    check("two fixtures nothing can tell apart are still counted once each",
+          len(cluster) == 2 and len(set(g for g, _ in cluster.values())) == 2,
+          str(cluster))
 
     # WHICH HALF OF THE PAIR COUNTS.
     thin = match_pairing.assign(

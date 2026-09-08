@@ -37,14 +37,17 @@ the imported one does, the import is the better record of that match and the
 synced game steps aside instead. That is the "if PlayHQ is incomplete, use
 CricketStatz to complete" case, decided per match rather than per season.
 
-**MEASURED AT CLUB SCALE, BOTH WAYS.** 3,500 matches each side with 2,800 of
-them genuinely the same match: where Cricket Australia holds its scorecards,
-all 2,800 pair to the right game with none wrong, in 377ms. In a deliberately
-awkward run — a THIRD of the synced games carrying no card of ours and a
-QUARTER of the imported ones dated a week off — 2,566 pair correctly, 6 pair to
-a neighbouring fixture and 234 are missed, in 291ms. A miss counts a match
-twice, which is visible; a wrong pair still counts each match once and only
-mis-attributes which fixture it was. Both are the right way round.
+**MEASURED ON A REAL CLUB'S SEASONS, AND AT SCALE.** Four of Keon Park's
+seasons held 706 games between the two sources where the club really played
+about 400; with no scorecards read at all, the pairing takes them to 404
+(2002/03: 171 -> 89 against Cricket Australia's 85 and CricketStatz's 86).
+At club scale, in the worst realistic shape — four of our sides out against
+ONE opposition club every Saturday, Cricket Australia writing every one of
+them as a bare "Keon Park", a third carrying no card of ours and a quarter
+dated a week off — all 2,800 matches pair, none are missed, and the club
+counts 2,800 rather than 5,600, in under a second. 468 of those pair to a
+sibling fixture from the same day: a mis-attribution, not a miscount, which
+is the trade this is built to make.
 
 **A GAME A CLUB TYPED IN BY HAND IS NEVER TOUCHED.** Only rows carrying a
 `cricketstatz_import_id` are considered at all, so a hand-entered scorecard can
@@ -82,30 +85,102 @@ _NOISE = {
     "a", "b", "c", "d", "e", "f", "g", "h",
     "grade", "div", "division", "seniors", "senior", "juniors", "junior",
     "men", "mens", "women", "womens", "colts", "under", "u",
+    # A team's own age group or number, which both sources spell their own way
+    # ("Preston U17 Trinity" against "Preston Trinity").
+    "utd", "fc", "cc's", "district",
 }
+
+# "u17", "u/12", "under14" — the age group, not the club.
+_AGE_GROUP = re.compile(r"^u\d{1,2}$|^\d{1,2}s?$")
 
 
 def team_tokens(name: str) -> frozenset[str]:
     """The words in a team name that actually identify a club."""
     words = re.sub(r"[^a-z0-9]+", " ", (name or "").lower()).split()
-    return frozenset(w for w in words if w not in _NOISE and len(w) > 1)
+    return frozenset(w for w in words
+                     if w not in _NOISE and len(w) > 1
+                     and not _AGE_GROUP.match(w))
+
+
+_AGE_MARK = re.compile(r"\bu\s*/?\s*(\d{1,2})\b")
+_XI_MARK = re.compile(r"\b(\d{1,2})\s*(?:st|nd|rd|th|s)\b")
+_ANY_NUM = re.compile(r"\b(\d{1,2})\b")
+
+
+def side_marker(name: str) -> Optional[str]:
+    """Which of the club's sides a team name is — "u17", "xi2", or nothing.
+
+    **THIS IS WHAT TELLS ONE SATURDAY'S FIXTURES APART.** A club routinely
+    plays the same opposition twice on one day, firsts and seconds, so the
+    opposition and the date agree for both and only our own side's number
+    separates them. The two sources write it differently ("Keon Park 2nd-XI"
+    against "Keon Park 2nd XI", "Keon Park 1's 'A-Grade'" against a bare "Keon
+    Park") but when both say it, they say the same thing.
+
+    **NO LETTER GRADE IS READ AS A NUMBER.** A Grade is not always the 1st XI:
+    this club's 3rd XI plays D Grade and its 4th plays E, so mapping the letters
+    onto team numbers would pair the wrong fixtures. Only a number the name
+    itself carries counts.
+    """
+    low = (name or "").lower()
+    m = _AGE_MARK.search(low)
+    if m:
+        return f"u{int(m.group(1))}"
+    m = _XI_MARK.search(low) or _ANY_NUM.search(low)
+    return f"xi{int(m.group(1))}" if m else None
+
+
+def split_sides(home: str, away: str, opposition: str,
+                club_tokens: frozenset[str]) -> tuple[str, str]:
+    """(our own side, the opposition) from a match's two team names.
+
+    **THE ONE THING THAT MUST NOT BE COMPARED IS OUR OWN NAME**, and getting
+    this wrong is what stopped the first cut pairing anything: both sides of
+    every candidate carried "Keon Park", so every pair read as agreeing, every
+    Saturday's ten fixtures looked identical, and the tie guard refused nearly
+    all of them. Measured on one real season: 6 of 86 paired before, 62 after.
+
+    A stored opposition wins where there is one — the import already worked it
+    out from the club's own team list, and Cricket Australia sends it — and the
+    club-name test is the fallback for a row that carries neither.
+    """
+    if opposition:
+        other = home if _norm(away) == _norm(opposition) else away
+        return (other if _norm(other) != _norm(opposition) else ""), opposition
+    ours_home = bool(team_tokens(home) & club_tokens)
+    ours_away = bool(team_tokens(away) & club_tokens)
+    if ours_home and not ours_away:
+        return home, away
+    if ours_away and not ours_home:
+        return away, home
+    # Neither reads as us, or both do (we played ourselves, or the club name is
+    # in the opposition's too). Offer both rather than guessing which is which.
+    return "", " ".join(x for x in (home, away) if x)
+
+
+def _norm(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (name or "").lower()).strip()
 
 
 def teams_agree(a: str, b: str) -> bool:
     """Do two spellings of an opposition name mean the same club?
 
-    Deliberately forgiving in one direction only: a shared identifying word, or
-    one name being the start of the other. It is never the sole reason to pair
-    two matches — it always rides alongside a date or a scorecard — so a loose
-    match here cannot pair two fixtures on its own.
+    **ONE SHARED WORD IS NOT A CLUB.** The first cut agreed on any overlap at
+    all, which on a real Saturday made "Preston Trinity", "Preston Druids",
+    "Preston YCW" and "West Preston" all read as one another — so five
+    fixtures looked identical, the tie guard refused the lot, and 24 of one
+    season's 86 matches went unpaired. Either one name is contained in the
+    other ("Preston YCW" in "Preston YCW District 2nd XI") or they share two
+    identifying words; a single word in common is not enough.
+
+    Names the two sources abbreviate differently ("Croxton Utd" against
+    "Croxton United") are deliberately left to the scorecard, which identifies
+    a match far better than a name ever will.
     """
     ta, tb = team_tokens(a), team_tokens(b)
     if not ta or not tb:
         return False
-    if ta & tb:
-        return True
-    ja, jb = " ".join(sorted(ta)), " ".join(sorted(tb))
-    return ja.startswith(jb) or jb.startswith(ja)
+    return ta <= tb or tb <= ta or len(ta & tb) >= 2
 
 
 @dataclass
@@ -116,6 +191,11 @@ class MatchRow:
     played_at: object = None
     opposition: str = ""
     signature: frozenset = field(default_factory=frozenset)
+    # Which of our own sides played it ("Keon Park 3rd XI"). NEVER part of
+    # deciding whether two records are the same match — every match has our
+    # club's name on it, so comparing it would agree with everything — but a
+    # real tiebreaker when a Saturday has five of our teams out at once.
+    ours: str = ""
 
     @property
     def has_card(self) -> bool:
@@ -141,6 +221,17 @@ def score_pair(imported: MatchRow, synced: MatchRow) -> Optional[tuple]:
     near = gap is not None and gap <= NEAR_DAYS
     same_day = gap == 0
     opp = teams_agree(imported.opposition, synced.opposition)
+
+    # A TIEBREAKER, NOT A REASON. Several of our teams play on one Saturday,
+    # so which of our sides it was is what tells those fixtures apart when the
+    # date and the opposition cannot — but it agrees with every candidate on
+    # its own, so it never appears in the test below.
+    mine, theirs = side_marker(imported.ours), side_marker(synced.ours)
+    if mine and theirs and mine != theirs:
+        # Our 2nd XI's match is not our 1st XI's, however well the date and the
+        # opposition agree. The one hard NO in here.
+        return None
+    same_side = bool(mine and theirs and mine == theirs)
 
     ok = (
         # Three batters with the same scores. Not a coincidence.
@@ -168,8 +259,8 @@ def score_pair(imported: MatchRow, synced: MatchRow) -> Optional[tuple]:
     )
     if not ok:
         return None
-    return (shared, 1 if opp else 0, 1 if same_day else 0,
-            -(gap if gap is not None else 999))
+    return (shared, 1 if opp else 0, 1 if same_side else 0,
+            1 if same_day else 0, -(gap if gap is not None else 999))
 
 
 def _candidates(imported: list[MatchRow], synced: list[MatchRow]
@@ -212,26 +303,30 @@ def assign(imported: list[MatchRow], synced: list[MatchRow]) -> dict[str, tuple[
     a many-to-one pairing would fan the views' join out and multiply every
     figure it touches.
 
-    **A TIE IS REFUSED RATHER THAN GUESSED.** Two candidates that look equally
-    like the same match are two fixtures we cannot tell apart, and pairing the
-    wrong one hides a match that really happened.
+    **A CLUSTER THAT CANNOT BE TOLD APART IS PAIRED OFF, NOT REFUSED**, and
+    that is a deliberate reversal. Refusing a tie sounds safer and is not: a
+    club plays the same opposition twice on one Saturday, Cricket Australia
+    records both sides as a bare "Keon Park", and refusing every such tie left
+    a real season reading 149 games against a true ~117. Pairing them off in
+    whatever order gets the COUNT right whichever way round they go, because
+    both fixtures are in both sources; the strongest-first order means the
+    scorecards decide it wherever there are any.
+
+    The cost is stated rather than hidden: where one source alone holds one of
+    two indistinguishable fixtures and the other source alone holds the other,
+    pairing them loses a match. That needs a club to have played one
+    opposition twice in a day with each source missing a different one of the
+    two, and it is worth less than the double count refusing guarantees.
+    The one hard NO is in `score_pair` — our 2nd XI's match is never our 1st
+    XI's, however well everything else agrees.
     """
     candidates = _candidates(imported, synced)
     scored: list[tuple[tuple, str, str]] = []
-    best: dict[str, list[tuple]] = {}
     for imp in imported:
         for syn in candidates.get(imp.id, ()):
             key = score_pair(imp, syn)
-            if key is None:
-                continue
-            scored.append((key, imp.id, syn.id))
-            best.setdefault(imp.id, []).append(key)
-
-    ambiguous = set()
-    for imp_id, keys in best.items():
-        keys.sort(reverse=True)
-        if len(keys) > 1 and keys[0] == keys[1]:
-            ambiguous.add(imp_id)
+            if key is not None:
+                scored.append((key, imp.id, syn.id))
 
     scored.sort(key=lambda row: row[0], reverse=True)
     synced_by_id = {m.id: m for m in synced}
@@ -239,7 +334,7 @@ def assign(imported: list[MatchRow], synced: list[MatchRow]) -> dict[str, tuple[
     taken: set[str] = set()
     out: dict[str, tuple[str, bool]] = {}
     for _key, imp_id, syn_id in scored:
-        if imp_id in ambiguous or imp_id in out or syn_id in taken:
+        if imp_id in out or syn_id in taken:
             continue
         taken.add(syn_id)
         # THE HALF THAT HOLDS THE SCORECARD IS THE HALF THAT COUNTS. Cricket
@@ -252,6 +347,8 @@ def assign(imported: list[MatchRow], synced: list[MatchRow]) -> dict[str, tuple[
 
 
 # ── reading each side ────────────────────────────────────────────────────────
+
+_CLUB_NAME_SQL = "SELECT name FROM organisations WHERE id = :org"
 
 _SYNCED_SQL = """
     SELECT g.id::text AS id, g.played_at,
@@ -278,7 +375,9 @@ _SYNCED_CARD_SQL = """
 
 _IMPORTED_SQL = """
     SELECT mg.id::text AS id, mg.played_at,
-           COALESCE(mg.opposition, '') AS opposition
+           COALESCE(mg.opposition, '') AS opposition,
+           COALESCE(mg.home_team, '') AS home_team,
+           COALESCE(mg.away_team, '') AS away_team
       FROM manual_games mg
      WHERE mg.organisation_id = :org
        AND mg.cricketstatz_import_id IS NOT NULL
@@ -321,11 +420,16 @@ async def load_sides(db: AsyncSession, org_id, season_ids=None
         imp_card_sql += clause
         params["seasons"] = [str(x) for x in season_ids]
 
+    club_tokens = team_tokens((await db.execute(
+        text(_CLUB_NAME_SQL), {"org": str(org_id)})).scalar() or "")
+
     imp_cards = await _cards(db, imp_card_sql, params)
     imported: list[MatchRow] = []
     for row in (await db.execute(text(imp_sql), params)).mappings():
-        imported.append(MatchRow(row["id"], row["played_at"], row["opposition"],
-                                 frozenset(imp_cards.get(row["id"], ()))))
+        ours, opp = split_sides(row["home_team"], row["away_team"],
+                                row["opposition"], club_tokens)
+        imported.append(MatchRow(row["id"], row["played_at"], opp,
+                                 frozenset(imp_cards.get(row["id"], ())), ours))
 
     syn_sql, syn_params = _SYNCED_SQL, {"org": str(org_id)}
     if season_ids:
@@ -340,13 +444,10 @@ async def load_sides(db: AsyncSession, org_id, season_ids=None
     syn_cards = await _cards(db, _SYNCED_CARD_SQL, {"org": str(org_id)})
     synced: list[MatchRow] = []
     for row in (await db.execute(text(syn_sql), syn_params)).mappings():
-        # `opp_club_name` is not always filled in; the two team names are, and
-        # whichever is not ours is the opposition. Both are offered to the
-        # comparison rather than guessed between.
-        opp = " ".join(x for x in (row["opposition"], row["home_team"],
-                                   row["away_team"]) if x)
+        ours, opp = split_sides(row["home_team"], row["away_team"],
+                                row["opposition"], club_tokens)
         synced.append(MatchRow(row["id"], row["played_at"], opp,
-                               frozenset(syn_cards.get(row["id"], ()))))
+                               frozenset(syn_cards.get(row["id"], ())), ours))
     return imported, synced
 
 
