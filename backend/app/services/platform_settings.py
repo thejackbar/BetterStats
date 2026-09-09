@@ -47,10 +47,19 @@ _BOOL_KEYS = {
     "crm_show_past_events",
 }
 
+# Free-text settings. `webinar_recording_url` is where a super admin pastes the
+# recording once the webinar has been and gone: the /demo page flips to its
+# recording state on the event's own end time (services/webinar.EVENT), and
+# this is what it then serves. A setting rather than a constant because the
+# link does not exist until after the event, and the hour right after it is
+# exactly when interest peaks — waiting on a deploy would spend that.
+_STR_KEYS = {"webinar_recording_url"}
+_STR_MAX_LENGTH = 500
+
 # How long a direct "onboard my club" website enquiry (Contact page or the quick
-# CTA modal) holds a prospect at a flat Hot 100 Twenty engagement score before it
+# CTA modal) holds a prospect at a flat Hot 100 engagement score before it
 # decays back to the ordinary recency/frequency formula — see
-# twenty_sync._engagement. A plain in-repo default (not an env var): this is a
+# engagement._engagement. A plain in-repo default (not an env var): this is a
 # commercial/marketing parameter a super admin tunes from General Settings, not
 # server configuration.
 DEFAULT_DIRECT_ENQUIRY_HOT_DAYS = 60
@@ -202,7 +211,8 @@ async def get_default_trial_days(db: AsyncSession) -> int:
 
 async def get_direct_enquiry_hot_days(db: AsyncSession) -> int:
     """How many days a direct onboarding enquiry holds a prospect at Hot 100 in
-    Twenty, or DEFAULT_DIRECT_ENQUIRY_HOT_DAYS when unset/invalid."""
+    the engagement engine, or DEFAULT_DIRECT_ENQUIRY_HOT_DAYS when
+    unset/invalid."""
     settings = await get_settings(db)
     try:
         days = int(settings.get("direct_enquiry_hot_days"))
@@ -431,6 +441,18 @@ async def update_settings(db: AsyncSession, patch: dict) -> dict:
             if not isinstance(value, bool):
                 raise ValueError(f"{key} must be true or false")
             out[key] = value
+        elif key in _STR_KEYS:
+            cleaned = (str(value) if value is not None else "").strip()
+            if not cleaned:
+                # A cleared field means "unset", never an empty string — a
+                # stored "" would read as a link that exists and is blank.
+                out.pop(key, None)
+                continue
+            if len(cleaned) > _STR_MAX_LENGTH:
+                raise ValueError(f"{key} is too long")
+            if key.endswith("_url") and not cleaned.startswith(("http://", "https://")):
+                raise ValueError(f"{key} must start with http:// or https://")
+            out[key] = cleaned
         # Unknown keys are ignored (forward-compatible).
     await db.execute(
         text("UPDATE platform_settings SET settings = CAST(:s AS jsonb), updated_at = NOW() WHERE id = 1"),
@@ -445,6 +467,15 @@ async def get_feature_flag(db: AsyncSession, key: str) -> bool:
     keys in ``_BOOL_KEYS`` are meaningful here."""
     settings = await get_settings(db)
     return bool(settings.get(key) is True)
+
+
+async def get_webinar_recording_url(db: AsyncSession) -> str | None:
+    """The recording link for the webinar, once a super admin has pasted one in
+    from General Settings. None until then — the /demo page says the recording
+    is coming rather than offering a link that goes nowhere."""
+    settings_blob = await get_settings(db)
+    value = (settings_blob.get("webinar_recording_url") or "").strip()
+    return value or None
 
 
 async def get_self_serve_registration_enabled(db: AsyncSession) -> bool:

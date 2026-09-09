@@ -12,6 +12,7 @@
 //   palette                            active post palette (resolveBlankColor tokens)
 //   players                            roster for the player-block picker
 //   onPickImage(itemId)                opens the media library / file picker
+//   onEditImage(itemId)                opens the crop / background-removal editor
 import { useState } from 'react'
 import { Icon } from '../../../pages/admin/betterselect/ui'
 import { BLANK_FONTS } from '../../../social/blank-template'
@@ -73,7 +74,7 @@ function Swatches({ value, onChange, palette }) {
 
 export default function SelectionInspector({
   items, selIds, onUpdate, onReorder, onDuplicate, onRemove, onAlign,
-  palette, players = [], onPickImage,
+  palette, players = [], onPickImage, onEditImage,
 }) {
   const [more, setMore] = useState(false)
   const single = selIds.length === 1 ? items.find(it => it.id === selIds[0]) : null
@@ -140,6 +141,11 @@ export default function SelectionInspector({
         {single?.type === 'image' && (
           <>
             <Btn onClick={() => onPickImage(single.id)}>Replace</Btn>
+            {/* Crop and background removal for the image already in the block —
+                the same editor the hero photo and sponsor logos open, so a
+                white-backgrounded PNG can be cut out wherever it landed. */}
+            <Btn title={single.src ? 'Crop, or remove the background' : 'Add an image first'}
+              onClick={() => single.src && onEditImage?.(single.id)}>Edit</Btn>
             <Btn onClick={() => patch({ fit: single.fit === 'cover' ? 'contain' : 'cover' })}>
               {single.fit === 'cover' ? 'Fill' : 'Fit'}
             </Btn>

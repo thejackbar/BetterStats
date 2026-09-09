@@ -53,6 +53,7 @@ export default function CricketStatzImport() {
   // them. There is no third option that keeps both — that is the double count.
   const [syncedYears, setSyncedYears] = useState('skip')
   const [undoing, setUndoing] = useState(null)
+  const [pairing, setPairing] = useState(false)
   const [readingNotes, setReadingNotes] = useState(false)
   const pollRef = useRef(null)
 
@@ -119,20 +120,21 @@ export default function CricketStatzImport() {
     } finally { setReadingNotes(false) }
   }
 
-  async function handOverBack() {
-    if (!window.confirm(
-      'Hand these seasons back to Cricket Australia?\n\nYour synced matches '
-      + 'start counting again straight away — nothing has to be re-pulled. The '
-      + 'CricketStatz matches for those seasons stay imported but stop being '
-      + 'counted, so each season is still counted once.'
-    )) return
+  // Runs by itself after an import and after a full sync; this is the escape
+  // hatch for a club that has just had matches arrive on one side and would
+  // rather not wait. Re-derives from scratch, so pressing it twice is
+  // pressing it once.
+  async function rebuildPairing() {
+    setPairing(true)
     try {
-      await api.csClearSuperseded()
-      toast?.success?.('Those seasons read from Cricket Australia again.')
+      const r = await api.csRebuildPairing()
+      toast?.success?.(
+        `${r.paired} imported match(es) matched to a synced one, `
+        + `${r.only_cricketstatz} only CricketStatz has.`)
       setPreview(await api.csInspect(url))
     } catch (e) {
-      setError(e?.detail || e?.message || 'Could not hand those seasons back.')
-    }
+      setError(e?.detail || e?.message || 'Could not check for duplicates.')
+    } finally { setPairing(false) }
   }
 
   async function stop(id) {
@@ -153,20 +155,13 @@ export default function CricketStatzImport() {
     if (!window.confirm(
       'Remove every match and record this import brought across?\n\n'
       + 'Players and seasons are kept — only the imported matches and record '
-      + 'boards go. Any season this import was the record for goes back to '
-      + 'your Cricket Australia sync.')) return
+      + 'boards go. Your Cricket Australia matches are untouched.')) return
     setUndoing(id)
     try {
       const r = await api.csUndo(id)
-      const back = r.seasons_handed_back || []
       toast?.success?.(
         `Removed ${r.matches_removed} matches, ${r.records_removed} record `
-        + `boards and ${r.awards_removed || 0} honours.`
-        // A season this import was the record for is now back on the sync —
-        // say so, or the club is left wondering where those matches went.
-        + (back.length
-          ? ` ${back.length} season(s) went back to your Cricket Australia sync.`
-          : ''))
+        + `boards and ${r.awards_removed || 0} honours.`)
       await loadStatus(); await loadRest()
     } catch (e) {
       toast?.error?.(e?.detail || 'Could not undo that import.')
@@ -298,24 +293,28 @@ export default function CricketStatzImport() {
                                checked={syncedYears === 'cricketstatz'}
                                onChange={() => setSyncedYears('cricketstatz')} />
                         <span>
-                          <b>Use CricketStatz for those seasons too.</b>{' '}
-                          Your Cricket Australia data is kept and steps aside,
-                          so nothing is deleted and you can hand those seasons
-                          back at any time.
+                          <b>Bring those seasons across as well.</b>{' '}
+                          Any match your sync already holds is matched up and
+                          counted once; the rest fill the gaps your sync has.
+                          Nothing is deleted either way.
                         </span>
                       </label>
                     </div>
                   </Note>
                 )}
-                {!!preview.superseded_years?.length && (
+                {!!preview.pairing?.imported && (
                   <Note>
-                    {`CricketStatz is currently the record for `}
-                    {preview.superseded_years.length} season(s)
-                    {` (${preview.superseded_years[0]}\u2013${preview.superseded_years[preview.superseded_years.length - 1]}). `}
-                    Your Cricket Australia data for them is kept, just not counted.
+                    {`You have already imported ${preview.pairing.imported} match(es). `}
+                    {preview.pairing.paired > 0
+                      ? `${preview.pairing.paired} of them are the same match as `
+                        + `one your Cricket Australia sync holds, so each is `
+                        + `counted once, and ${preview.pairing.only_cricketstatz} `
+                        + `are matches only CricketStatz has.`
+                      : `None of them has been matched to a synced game yet.`}
                     <div className="mt-2">
-                      <Button variant="quiet" size="sm" onClick={handOverBack}>
-                        Hand them back to Cricket Australia
+                      <Button variant="quiet" size="sm" onClick={rebuildPairing}
+                              disabled={pairing}>
+                        {pairing ? 'Checking…' : 'Check again for duplicates'}
                       </Button>
                     </div>
                   </Note>
@@ -380,16 +379,17 @@ export default function CricketStatzImport() {
 
                 {!!p.replaced_synced_years?.length && (
                   <Caption>
-                    {/* A season changes over as its own matches land, not at
+                    {/* A season is matched up as its own matches land, not at
                         the end of the run, so while it is going this says how
-                        far through that changeover it is — a club watching a
-                        record board can see which years have moved. */}
+                        far through that it is — a club watching a record board
+                        can see which years have been checked. */}
                     {`${p.replaced_synced_years.length} season(s) you also sync `}
                     {running
-                      ? `read from CricketStatz as they come across (${p.replaced_done || 0} of ${p.replaced_synced_years.length} so far) `
-                      : `read from CricketStatz `}
+                      ? `checked for duplicates as they come across (${p.replaced_done || 0} of ${p.replaced_synced_years.length} so far) `
+                      : `checked for duplicates `}
                     {`(${p.replaced_synced_years[0]}\u2013${p.replaced_synced_years[p.replaced_synced_years.length - 1]}). `}
-                    {`Your Cricket Australia data is kept and steps aside.`}
+                    {`${p.paired || 0} matched a synced game and are counted once; `}
+                    {`${p.only_cricketstatz || 0} are matches only CricketStatz has.`}
                   </Caption>
                 )}
                 {!!p.skipped_synced_years?.length && (

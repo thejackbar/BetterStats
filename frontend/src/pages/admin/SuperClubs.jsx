@@ -136,6 +136,7 @@ export default function SuperClubs() {
     merch_storefront_enabled: false,
     bundle_discount_schedule: { 1: 0, 2: 48, 3: 97, 4: 146, 5: 0, 6: 0 },
     demo_booking_links: [],
+    webinar_recording_url: '',
     backup_hour: 3, backup_minute: 0, backup_retention_days: 30,
   })
   const [settingsSaving, setSettingsSaving] = useState(false)
@@ -184,7 +185,7 @@ export default function SuperClubs() {
   const [syncMode, setSyncMode] = useState('any')
   const [syncFrom, setSyncFrom] = useState('')
   const [syncTo, setSyncTo] = useState('')
-  // Engagement score range (cached Twenty score, mirrors the Club Directory's
+  // Engagement score range (cached score, mirrors the Club Directory's
   // own >=/<= filter) + a sub-filter on which recorded action types feed it.
   const [engFrom, setEngFrom] = useState('')
   const [engTo, setEngTo] = useState('')
@@ -232,6 +233,7 @@ export default function SuperClubs() {
         merch_storefront_enabled: !!s?.merch_storefront_enabled,
         bundle_discount_schedule: normalizeBundleSchedule(s?.bundle_discount_schedule),
         demo_booking_links: Object.entries(s?.demo_booking_links || {}).map(([name, url]) => ({ name, url })),
+        webinar_recording_url: s?.webinar_recording_url || '',
         // Stored/returned by the API in UTC — shown to the admin in Perth time.
         backup_hour: utcHourToPerth(s?.backup_schedule?.hour ?? 19), // 19:00 UTC = 03:00 Perth
         backup_minute: s?.backup_schedule?.minute ?? 0,
@@ -255,6 +257,9 @@ export default function SuperClubs() {
         billing_checkout_enabled: !!settingsForm.billing_checkout_enabled,
         member_portal_enabled: !!settingsForm.member_portal_enabled,
         merch_storefront_enabled: !!settingsForm.merch_storefront_enabled,
+        // Sent as a trimmed string; '' means "clear it" (back to "recording
+        // coming shortly"), which is why this isn't guarded on truthiness.
+        webinar_recording_url: (settingsForm.webinar_recording_url || '').trim(),
         bundle_discount_schedule: Object.fromEntries(
           BUNDLE_DISCOUNT_ROWS.map((n) => [n, Math.max(0, Number(settingsForm.bundle_discount_schedule[n]) || 0)])
         ),
@@ -783,9 +788,19 @@ export default function SuperClubs() {
                   className={INPUT_CLS} />
                 <p className="font-mono text-[10px] text-pb-faintest mt-1">
                   How many days a direct "onboard my club" website enquiry holds a prospect at a
-                  flat 100/Hot engagement score in Twenty, before it decays back to the ordinary
+                  flat 100/Hot engagement score, before it decays back to the ordinary
                   recency/frequency score. Ends early if the club becomes a paying customer or is
                   marked Not Interested.
+                </p>
+                <label className="font-mono text-[10px] text-pb-faint block mb-1 mt-3">Webinar recording URL</label>
+                <input type="url" placeholder="https://…" value={settingsForm.webinar_recording_url}
+                  onChange={e => setSettingsForm(f => ({ ...f, webinar_recording_url: e.target.value }))}
+                  className={INPUT_CLS} />
+                <p className="font-mono text-[10px] text-pb-faintest mt-1">
+                  What /demo serves once the webinar has been and gone. The page flips to its
+                  recording state on the event's own end time by itself — paste the link here and
+                  it starts handing that out instead, with no deploy. Leave it empty and a visitor
+                  who registers after the event is told the recording is on its way.
                 </p>
               </div>
 

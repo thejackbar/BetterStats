@@ -2,9 +2,10 @@
 
 One engine, two scopes:
   - **platform**: BetterCricket's own sales pipeline (organisation_id NULL,
-    deals usually linked to a ``marketing_clubs`` prospect row) — the
-    replacement for Twenty's Opportunity board. Exactly one pipeline always
-    exists (``ensure_platform_pipeline``), auto-seeded on first touch.
+    deals usually linked to a ``marketing_clubs`` prospect row), and since the
+    external CRM was retired the only sales board there is. Exactly one
+    pipeline always exists (``ensure_platform_pipeline``), auto-seeded on
+    first touch.
   - **club**: the BetterAdmin CRM module (organisation_id set) — a club adds
     zero or more opt-in "trackers" (pipelines) from a small preset catalogue
     (Sponsors / Grants / Alumni & Fundraising) or builds a fully custom one.
@@ -63,10 +64,10 @@ PERSON_ROLES = (
 ACTIVITY_TYPES = ("call", "email", "meeting", "note", "system")
 DEAL_STATUSES = ("open", "won", "lost")
 
-# (key, name, default_probability, is_won, is_lost) — mirrors Twenty's own
-# Opportunity pipeline exactly (bootstrap_twenty.PIPELINE), so a deal's stage
+# (key, name, default_probability, is_won, is_lost) — mirrored the retired
+# external CRM's own Opportunity pipeline exactly, so a deal's stage
 # means the same thing whichever system is looked at during/after cutover.
-# "manually_added" is BetterCricket's own addition (not in Twenty) — the
+# "manually_added" is BetterCricket's own addition — the
 # landing stage for a club pushed straight from the Club Directory rather
 # than arriving via an enquiry/trial/webhook signal.
 PLATFORM_DEFAULT_STAGES = [
@@ -81,7 +82,7 @@ PLATFORM_DEFAULT_STAGES = [
     ("lost_dormant", "Lost / Dormant", 0, False, True),
 ]
 
-# Renames from the ORIGINAL platform stage set (pre-Twenty-parity) onto the
+# Renames from the ORIGINAL platform stage set onto the
 # one above — applied in place by _reconcile_platform_stages so a pipeline
 # created before this list changed doesn't fork from it forever.
 _PLATFORM_STAGE_RENAMES = {
@@ -89,7 +90,7 @@ _PLATFORM_STAGE_RENAMES = {
     "qualified": "engaged",
     "lost": "lost_dormant",
 }
-# Twenty has no equivalent of the old "negotiation" stage — any deal sitting
+# There is no equivalent of the old "negotiation" stage — any deal sitting
 # there folds into "proposal" (the stage immediately before Won).
 _PLATFORM_STAGE_MERGES = {
     "negotiation": "proposal",
@@ -479,7 +480,7 @@ effective_probability = _effective_probability
 def _engagement_delta_dir(club: Optional[MarketingClub]) -> Optional[str]:
     """'up' / 'down' / None for a club's engagement score vs the last value it
     held on an earlier calendar day (marketing_clubs.engagement_score_prev, set
-    by twenty_sync._apply_engagement_cache). None when either side is missing
+    by engagement._apply_engagement_cache). None when either side is missing
     (never scored, or no prior day recorded yet) or the score is unchanged."""
     if club is None:
         return None
@@ -502,10 +503,9 @@ def _deal_dict(deal: CrmDeal, stage: Optional[CrmStage] = None,
         "scope": deal.scope,
         "organisation_id": str(deal.organisation_id) if deal.organisation_id else None,
         "marketing_club_id": str(deal.marketing_club_id) if deal.marketing_club_id else None,
-        # Engagement score/tier are never computed here — they're Twenty's own
-        # mirrored number, sourced straight from marketing_clubs.engagement_score
-        # (twenty_sync._engagement()), the same one Twenty's Lead/Opportunity
-        # both mirror from the Company. `club` is only ever set for a platform
+        # Engagement score/tier are never computed here — they're the cached
+        # number, sourced straight from marketing_clubs.engagement_score
+        # (engagement._engagement()). `club` is only ever set for a platform
         # deal linked to a prospect; a club-scope deal has no marketing_club_id
         # so this is always None there.
         "engagement_score": club.engagement_score if club else None,
@@ -948,7 +948,7 @@ async def hard_delete_registered_club(session: AsyncSession, org_id) -> None:
 
 async def reset_marketing_club_engagement(session: AsyncSession, club: MarketingClub) -> None:
     """Wipe every sales-pipeline/engagement signal a super admin can have set
-    on a prospect club (see twenty_sync._engagement — this clears every
+    on a prospect club (see engagement._engagement — this clears every
     input that function reads besides real web/email activity and
     club_onboarding_requests, which aren't safely scoped to one club without
     a direct FK) — for purging TEST activity on a real club's directory row,
@@ -963,7 +963,7 @@ async def reset_marketing_club_engagement(session: AsyncSession, club: Marketing
     which runs its OWN session.commit() mid-flow; that committed (and expired)
     the caller's already-loaded deal object before it was deleted, which broke
     the delete and surfaced as a 500 with nothing removed. set_sales_state's
-    trial-request / Twenty-push side effects only fire when a module is ADDED,
+    trial-request / CRM side effects only fire when a module is ADDED,
     so a reset (which only clears) never triggered them anyway — nothing is
     lost by setting the same fields here directly."""
     club.trial_modules = []
@@ -1066,7 +1066,7 @@ async def link_deal_contact(session: AsyncSession, deal_id, person_id,
 
 # Convention, not a column: at most one CrmDealContact per deal carries this
 # role at a time (enforced by set_point_of_contact clearing any other holder)
-# — mirrors Twenty's single "Point of Contact" field on an Opportunity, on
+# — mirrors the single "Point of Contact" field an Opportunity carries, on
 # top of our own model's richer many-contacts-per-deal shape.
 POINT_OF_CONTACT_ROLE = "point_of_contact"
 
@@ -2138,9 +2138,9 @@ async def next_events_by_deal(session: AsyncSession, deal_ids, *, now=None) -> d
 
 
 # ─── Auto-creation: platform deals from existing engagement/trial signals ───
-# Mirrors twenty_sync.py's own trigger points (a direct enquiry, a trial
+# Mirrors engagement.py's own trigger points (a direct enquiry, a trial
 # request/start) so the local pipeline stays in step with the same signals
-# that used to ONLY push into Twenty — see the call sites in
+# that used to ONLY push into the retired external CRM — see the call sites in
 # routers/public_contact.py and services/club_directory.py::set_sales_state.
 
 async def _last_attributed_deal_for_club(session: AsyncSession, pipeline_id, club_id) -> Optional[CrmDeal]:
@@ -2432,15 +2432,14 @@ async def sync_engagement_promotion(session: AsyncSession, club: MarketingClub,
     """Recompute one club's engagement score, ensure it's on the pipeline once
     the score is above zero, and immediately check the score-based
     Target/Contacted -> Engaged promotion, right now, in the caller's own
-    session. ``twenty_sync._engagement`` is a pure local read/compute over our
-    own tables (usage_events/email_events/etc) — it never calls out to Twenty —
-    so this works whether or not Twenty is configured, unlike routing through
-    ``push_club_and_contacts``. A single-club recompute is a handful of indexed
+    session. ``engagement._engagement`` is a pure local read/compute over our own
+    tables (usage_events/email_events/etc), with no external call in it at all.
+    A single-club recompute is a handful of indexed
     queries, cheap enough to run inline wherever a real signal event already has
     a session+club in hand (an enquiry, a trial request/grant, a subscription
     change) rather than waiting for a scheduled sweep. Caller commits."""
     from app.services import engagement_params
-    from app.services.twenty_sync import _engagement
+    from app.services.engagement import _engagement
     if params is None:
         params = await engagement_params.get_params(session)
     await _engagement(session, club, org, web_stats=web_stats,
@@ -2449,6 +2448,91 @@ async def sync_engagement_promotion(session: AsyncSession, club: MarketingClub,
     membership = await sync_pipeline_membership(session, club, params)
     promoted = await maybe_promote_by_engagement_score(session, club)
     return promoted or membership
+
+
+async def recalc_all_engagement(session: AsyncSession, *, name: Optional[str] = None,
+                                dry_run: bool = False, keep_prev: bool = False,
+                                params: Optional[dict] = None,
+                                on_club=None, progress: Optional[dict] = None,
+                                commit_every: int = 100) -> dict:
+    """Rescore EVERY club and re-run the pipeline promotion, in one pass.
+
+    The platform-wide sweep behind both the nightly job and the Club Directory's
+    own Refresh button, and the operator script
+    (``app.scripts.recalc_engagement``) runs the same loop with an ``on_club``
+    callback for its histograms — so there is one definition of "rescore the
+    whole directory" rather than a copy per caller.
+
+    **No external CRM anywhere.** ``_engagement`` is a local read/compute over
+    our own tables and caches its result onto the club row, which is what the
+    Club Directory, BetterComms Lists/Segments and the CRM board all read. The
+    old nightly job pushed to Twenty and returned immediately when Twenty was
+    not configured, only ever touching clubs already exported to it — so once
+    Twenty was retired the platform-wide refresh had stopped entirely and every
+    cached score was frozen wherever it last happened to be touched.
+
+    The two batch stat passes are what make this affordable: resolving web and
+    email activity per club re-reads every event for every club (O(events x
+    clubs), which took ~14 hours), so both are precomputed for the whole table
+    in one pass and injected. 6k clubs then run in minutes.
+
+    One bad club never aborts the sweep — it rolls back, is counted, and the
+    loop carries on. Opens no session and commits its own batches (or rolls
+    them back under ``dry_run``); the caller owns the session."""
+    from app.services import engagement_params
+    from app.services.engagement import batch_email_stats, batch_web_stats
+    if params is None:
+        params = await engagement_params.get_params(session)
+
+    idq = select(MarketingClub.id, MarketingClub.name).order_by(MarketingClub.id)
+    if name:
+        idq = idq.where(func.lower(MarketingClub.name).like(f"%{name.lower()}%"))
+    rows = (await session.execute(idq)).all()
+    total = len(rows)
+    if progress is not None:
+        progress.update({"total": total, "processed": 0, "promoted": 0, "errors": 0})
+
+    web_map = await batch_web_stats(session, params)
+    email_map = await batch_email_stats(session, params)
+
+    processed = promoted = errors = batch = 0
+    for cid, cname in rows:
+        try:
+            club = await session.get(MarketingClub, cid)
+            if club is None:
+                continue
+            org = (await session.get(
+                Organisation, club.existing_org_id,
+                options=[selectinload(Organisation.module_subscriptions)])
+                if club.existing_org_id else None)
+            deal = await sync_engagement_promotion(
+                session, club, org, web_stats=web_map, email_stats=email_map,
+                params=params, keep_prev=keep_prev)
+            if deal is not None:
+                promoted += 1
+            if on_club is not None:
+                on_club(club, deal)
+            processed += 1
+            batch += 1
+            if batch >= commit_every:
+                await (session.rollback() if dry_run else session.commit())
+                batch = 0
+                if progress is not None:
+                    progress.update({"processed": processed, "promoted": promoted,
+                                     "errors": errors})
+        except Exception:  # noqa: BLE001 — one bad club must not abort the sweep
+            errors += 1
+            await session.rollback()   # reset the session BEFORE any logging
+            batch = 0
+            logger.exception("recalc_all_engagement failed for club id=%s name=%r",
+                             cid, cname)
+    await (session.rollback() if dry_run else session.commit())
+    out = {"total": total, "processed": processed, "promoted": promoted,
+           "errors": errors, "dry_run": dry_run}
+    if progress is not None:
+        progress.update(out)
+    logger.info("recalc_all_engagement: %s", out)
+    return out
 
 
 async def reset_auto_promoted_engaged(session: AsyncSession) -> int:
@@ -2585,7 +2669,7 @@ async def check_web_signal_promotion(*, org_id=None, utm_id=None, utm_source=Non
 async def sync_deal_for_enquiry(*, club_name: str, contact_name: str = "",
                                 email: str = "", phone: Optional[str] = None,
                                 org_id: Optional[str] = None) -> dict:
-    """Backgrounded counterpart to ``twenty_sync.push_onboarding_enquiry`` — a
+    """A
     direct 'onboard my club' enquiry (either the short CTA modal or the full
     Contact page) is the strongest buying signal a prospect can give, so it
     also ensures a platform deal exists (or advances an existing one).
@@ -2594,7 +2678,7 @@ async def sync_deal_for_enquiry(*, club_name: str, contact_name: str = "",
     first-ever Contact-Us submission from this club moves the deal straight
     to Contacted (a fresh deal is created there, never left sitting at
     Target); a second (or later) submission moves it on to Engaged. Reuses
-    ``twenty_sync._onboarding_signal`` — the same email/visitor/club-name
+    ``engagement._onboarding_signal`` — the same email/visitor/club-name
     matching the engagement-score formula already counts this signal by — so
     "how many times has this club contacted us" can never drift from what the
     score itself already believes. The row this call is counting was already
@@ -2604,9 +2688,9 @@ async def sync_deal_for_enquiry(*, club_name: str, contact_name: str = "",
 
     ``org_id`` is the CA organisation guid of the club the enquirer picked from
     the Contact form's club search, passed straight through so this and the
-    Twenty push resolve the same directory row."""
+    onboarding signal resolve the same directory row."""
     from app.models.db import async_session_maker
-    from app.services.twenty_sync import _resolve_onboarding_club, _onboarding_signal
+    from app.services.engagement import _resolve_onboarding_club, _onboarding_signal
     try:
         async with async_session_maker() as session:
             club, contact = await _resolve_onboarding_club(
@@ -2641,7 +2725,7 @@ async def sync_deal_for_enquiry(*, club_name: str, contact_name: str = "",
             await sync_engagement_promotion(session, club, org)
             await session.commit()
             return {"deal_id": str(deal.id) if deal else None, "onboarding_request_count": count}
-    except Exception:  # noqa: BLE001 - best-effort, mirrors push_onboarding_enquiry
+    except Exception:  # noqa: BLE001 - best-effort, never raises into the caller
         logger.exception("crm: failed to sync deal for enquiry (%s)", club_name)
         return {"error": "failed"}
 
@@ -2663,7 +2747,7 @@ async def sync_deal_for_wizard_lead(*, club_name: str, email: str = "",
     best-effort; never raises. Fires from routers/self_serve_trial.py::acknowledge
     (both the internal and public self-serve routers register that handler)."""
     from app.models.db import async_session_maker
-    from app.services.twenty_sync import _resolve_onboarding_club
+    from app.services.engagement import _resolve_onboarding_club
     if not (club_name or "").strip():
         return {"skipped": "no club name"}
     try:
@@ -2700,9 +2784,9 @@ async def sync_deal_for_wizard_lead(*, club_name: str, email: str = "",
 # A self-serve registration (routers/self_serve_trial.py's shared submit(), hit
 # by both the super-admin-testing internal flow and the public /trial flow)
 # starts a 14-day trial of every module the registrant picked, with no human
-# in the loop — the same real signal push_self_serve_registration already
-# gives Twenty. The local pipeline deserves the same treatment, independent of
-# whether Twenty itself is configured.
+# in the loop — the same real signal the registration itself already
+# gave the retired external CRM. The local pipeline deserves the same
+# treatment, and gets it unconditionally.
 
 # Domains from frontend/src/lib/visitor.js's CLICK_IDS ad-network table (only
 # the ones this classifier distinguishes) plus common AI assistant/search
@@ -2831,13 +2915,13 @@ async def sync_self_serve_trial_registration(*, org_id, org_name: str, contact_n
                                              email: str = "", phone: Optional[str] = None,
                                              attribution: Optional[dict] = None) -> dict:
     """Backgrounded counterpart to (and fired alongside)
-    twenty_sync.push_self_serve_registration — creates/advances the ONE local
+    Creates/advances the ONE local
     BetterCRM platform deal for a brand-new self-serve trial registration.
-    Deliberately independent of whether Twenty is configured (unlike the
-    Twenty push, which no-ops entirely when it isn't): BetterCricket's own
+    Runs unconditionally, unlike the retired external push it replaces
+    (which no-opped entirely when that CRM was unconfigured): BetterCricket's own
     pipeline must reflect a real registration regardless of that external
     integration's state, so this resolves the MarketingClub itself rather than
-    relying on the Twenty push having already done so. Opens its own session;
+    relying on an external push having already done so. Opens its own session;
     never raises."""
     return await _sync_trial_registration(
         org_id=org_id, org_name=org_name, contact_name=contact_name, email=email,
@@ -2854,7 +2938,7 @@ async def sync_super_admin_trial_registration(*, org_id, org_name: str, contact_
     Sales Pipeline the moment it's created, with the deal card marked
     'Super Admin Trial' — before this, a super-admin-created club had no deal
     at all until someone made one by hand, or a later trial/subscription
-    change happened to fire ``_push_club_to_twenty``'s own crm_trigger."""
+    change happened to fire ``_sync_club_to_crm``'s own crm_trigger."""
     return await _sync_trial_registration(
         org_id=org_id, org_name=org_name, contact_name=contact_name, email=email,
         phone=phone, source="super_admin_trial", deal_factory=sync_super_admin_trial_deal,
@@ -2868,7 +2952,7 @@ async def _sync_trial_registration(*, org_id, org_name: str, contact_name: str, 
     never raises — a CRM hiccup can't undo the registration that already
     committed."""
     from app.models.db import async_session_maker
-    from app.services.twenty_sync import _resolve_self_serve_club
+    from app.services.engagement import _resolve_self_serve_club
     try:
         async with async_session_maker() as session:
             club, contact = await _resolve_self_serve_club(

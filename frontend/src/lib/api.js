@@ -474,6 +474,12 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ org_id: orgId, alias_name: aliasName, canonical_name: canonicalName }),
     }),
+  gradeMergeCandidates: (orgId) => request(`/admin/grade-merge-candidates?org_id=${orgId}`),
+  ignoreGradePair: (orgId, nameA, nameB) =>
+    request('/admin/ignore-grade-pair', {
+      method: 'POST',
+      body: JSON.stringify({ org_id: orgId, name_a: nameA, name_b: nameB }),
+    }),
   getGradeMergeHistory: (orgId) => request(`/admin/grade-merge-history?org_id=${orgId}`),
   undoGradeMerge: (mergeLogId, orgId) =>
     request('/admin/undo-grade-merge', {
@@ -1439,20 +1445,28 @@ export const api = {
     request('/club-admin/marketing/crawl/control', { method: 'POST', body: JSON.stringify({ paused }) }),
   mktCrawl: (limit) =>
     request(`/club-admin/marketing/crawl${limit ? `?limit=${limit}` : ''}`, { method: 'POST' }),
+  // Re-read every club's committee from PlayHQ and reconcile the directory
+  // against it (prune the departed, re-tick the listed). Hours long, so it runs
+  // in the background and the page polls the status.
+  mktRediscover: () => request('/club-admin/marketing/rediscover', { method: 'POST' }),
+  mktRediscoverStatus: () => request('/club-admin/marketing/rediscover/status'),
+  // A rediscover runs whether or not the crawler is stopped, so it needs a stop
+  // of its own — this is what keeps "halt all PlayHQ traffic" reachable.
+  mktRediscoverStop: () => request('/club-admin/marketing/rediscover/stop', { method: 'POST' }),
+  // The same for ONE club — two short requests, answers immediately.
+  mktRediscoverClub: (clubId) =>
+    request(`/club-admin/marketing/clubs/${clubId}/rediscover`, { method: 'POST' }),
+  mktBulkTickOfficers: (filters = {}) =>
+    request('/club-admin/marketing/clubs/bulk-tick-officers',
+      { method: 'POST', body: JSON.stringify(filters) }),
   mktExportComms: (payload) =>
     request('/club-admin/marketing/export-comms', { method: 'POST', body: JSON.stringify(payload) }),
-  mktExportTwenty: (payload) =>
-    request('/club-admin/marketing/export-twenty', { method: 'POST', body: JSON.stringify(payload) }),
-  mktExportTwentyStatus: () => request('/club-admin/marketing/export-twenty/status'),
   mktPushToCrm: (payload) =>
     request('/club-admin/marketing/push-to-crm', { method: 'POST', body: JSON.stringify(payload) }),
   mktPushToCrmStatus: () => request('/club-admin/marketing/push-to-crm/status'),
-  mktRefreshTwentyEngagement: () =>
-    request('/club-admin/marketing/refresh-twenty-engagement', { method: 'POST' }),
-  mktRefreshTwentyEngagementStatus: () => request('/club-admin/marketing/refresh-twenty-engagement/status'),
-  mktRefreshTwentyLeadsTasks: () =>
-    request('/club-admin/marketing/refresh-twenty-leads-tasks', { method: 'POST' }),
-  mktRefreshTwentyLeadsTasksStatus: () => request('/club-admin/marketing/refresh-twenty-leads-tasks/status'),
+  mktRefreshEngagement: () =>
+    request('/club-admin/marketing/refresh-engagement', { method: 'POST' }),
+  mktRefreshEngagementStatus: () => request('/club-admin/marketing/refresh-engagement/status'),
   mktSetContactSelected: (contactId, selected) =>
     request(`/club-admin/marketing/contacts/${contactId}`, { method: 'PATCH', body: JSON.stringify({ selected }) }),
   mktUpdateContact: (contactId, patch) =>
@@ -1810,10 +1824,8 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ url, synced_years: syncedYears }),
     }),
-  csClearSuperseded: (years = null) =>
-    request('/club-admin/cricketstatz/superseded/clear', {
-      method: 'POST', body: JSON.stringify({ years }),
-    }),
+  csRebuildPairing: () =>
+    request('/club-admin/cricketstatz/pairing/rebuild', { method: 'POST' }),
   csReadNotes: () =>
     request('/club-admin/cricketstatz/notes', { method: 'POST' }),
   csStatus: () => request('/club-admin/cricketstatz/status'),
@@ -1962,6 +1974,23 @@ export const api = {
   // Public marketing Contact form — store a club onboarding enquiry.
   submitOnboarding: (payload) =>
     request('/public/contact', { method: 'POST', body: JSON.stringify(payload) }),
+  // Webinar registration (/demo). `webinarDetails` carries the one thing the
+  // page can't know for itself — whether a recording has been published yet;
+  // the date and labels render from src/data/webinar.js so the headline paints
+  // without waiting on this.
+  webinarDetails: () => request('/public/webinar'),
+  registerForWebinar: (payload) =>
+    request('/public/webinar/register', { method: 'POST', body: JSON.stringify(payload) }),
+  superWebinarRegistrations: () => request('/club-admin/super/webinar-registrations'),
+  // The escape hatch on the day — the hourly sweep is what normally sends
+  // these, and nobody is emailed twice either way (the claim is on the row).
+  superSendWebinarReminders: () =>
+    request('/club-admin/super/webinar-reminders', { method: 'POST' }),
+  // Push anyone StreamYard does not have yet. The register route pushes each
+  // one as it arrives and the hourly pass retries; this is the catch-up for
+  // registrations taken before that existed.
+  superSyncWebinarStreamyard: () =>
+    request('/club-admin/super/webinar-streamyard-sync', { method: 'POST' }),
   // Club lookup behind the Contact form's Club name field. Same Cricket
   // Australia club list the self-serve registration wizard searches, on the
   // Contact form's own endpoint so it works whether or not self-serve

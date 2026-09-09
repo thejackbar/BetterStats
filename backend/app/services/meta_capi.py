@@ -209,19 +209,33 @@ async def send_complete_registration_event(
     user_agent: Optional[str] = None,
     fbp: Optional[str] = None,
     fbc: Optional[str] = None,
+    value: float = 399,
+    content_name: str = "Self-serve trial registration",
+    content_category: str = "self_serve_trial",
 ) -> None:
     """Send a server-side `CompleteRegistration` event — a finished public
     self-serve trial registration (routers/public_self_serve.py). This is the
     conversion the ad campaign optimises toward, one step deeper in the funnel
     than the Contact-form Lead. Value mirrors the Core annual price the trial
     leads to, same basis as the Lead event's 399. Best-effort — logs, never
-    raises."""
+    raises.
+
+    THE CALLER MUST NAME ITS OWN EVENT, and the defaults are the trial's only
+    because it was the first caller. TWO different registrations now fire this
+    same event name on the same dataset and are told apart ONLY by
+    `content_category` — the /demo webinar page sends 'webinar', /trial sends
+    'self_serve_trial'. The webinar router used to take these defaults, so
+    every webinar registration reached Meta server-side labelled as a trial
+    signup carrying A$399 of value it does not have — a phantom figure in any
+    ROAS reading, and a deduped conversion whose parameters contradicted the
+    browser pixel's own. A caller for a result that is not worth money passes
+    `value=0`."""
     await _send_event(
         "CompleteRegistration",
         event_id=event_id, event_source_url=event_source_url,
         email=email, phone=phone, name=name,
         client_ip=client_ip, user_agent=user_agent, fbp=fbp, fbc=fbc,
-        value=399, currency="AUD",
-        content_name="Self-serve trial registration",
-        content_category="self_serve_trial",
+        value=value, currency="AUD",
+        content_name=content_name,
+        content_category=content_category,
     )

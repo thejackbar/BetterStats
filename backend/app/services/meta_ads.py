@@ -90,16 +90,76 @@ def _date_range_params() -> dict:
     })}
 
 
+# ── Conversion streams ───────────────────────────────────────────────────────
+# ONE Meta campaign now sells TWO DIFFERENT THINGS, and that is the single fact
+# this whole module has to be read through since the 8-9 Sep 2026 restructure.
+#
+# Both landing pages fire the SAME pixel event, CompleteRegistration, on the
+# same dataset, told apart only by `content_category`: /trial sends
+# 'self_serve_trial' (and carries a value of 399 AUD), /demo sends 'webinar'
+# (and carries none). A trial signup is a prospective paying club; a webinar
+# registration is somebody who watched a form. They are not the same result and
+# their costs differ by a lot, so NOTHING here reports a conversion count or a
+# cost per result without saying which stream it belongs to — a combined
+# "registrations" number would be arithmetic performed on two different units.
+STREAM_TRIAL = "trial"
+STREAM_WEBINAR = "webinar"
+STREAMS = (STREAM_TRIAL, STREAM_WEBINAR)
+
+STREAM_LABELS = {
+    STREAM_TRIAL: "Free trial signups",
+    STREAM_WEBINAR: "Webinar registrations",
+}
+# The pixel `content_category` each stream fires — the parameter that is the
+# ONLY thing separating the two events on Meta's side. Mirrored from
+# frontend/src/pages/marketing/{Trial,Demo}.jsx and services/meta_capi.py.
+STREAM_CONTENT_CATEGORIES = {
+    STREAM_TRIAL: "self_serve_trial",
+    STREAM_WEBINAR: "webinar",
+}
+# Only the trial event carries a monetary value. Any revenue/ROAS arithmetic
+# must read this rather than assuming every conversion is worth something —
+# valuing a webinar registration at the trial's 399 would inflate return by the
+# whole webinar volume.
+STREAM_VALUE_AUD = {
+    STREAM_TRIAL: 399.0,
+    STREAM_WEBINAR: 0.0,
+}
+
+
 # Ad -> destination map (§1 of the spec). Stable IDs; the live API response's
 # ad_name/ad_id are preferred where available, this is the fallback label.
 # `campaign_id` lets get_registration_count() work out which utm_content tags
 # belong to the CURRENT campaign (settings.meta_campaign_id) without a second
 # round-trip — see that function.
+#
+# `stream` is the entry's own answer to "which product is this ad selling".
+# It is NOT the only source — `stream_for_ad()` falls back to the ad NAME, so
+# an ad built in Ads Manager tomorrow is classified correctly without anyone
+# editing this file. The map exists to be exact where we can be, not to be the
+# gate.
+#
+# `ends_on` marks an ad that stops being relevant on a known date (the webinar
+# is a dated event). Used to report a stream as finished rather than leaving it
+# reading as a live campaign with a collapsing result rate.
 AD_DESTINATIONS = {
-    # BC_AU_Trials_CBO_Aug2026 (current) — club-history hero → /trial. The
-    # utm_content here must match the tag on the ad's own destination URL for
-    # get_registration_count() to tie a real signup back to this campaign.
-    "120250150859240121": {"campaign_id": "120250149119070121", "name": "Ad_ClubHistory_Trial_Hero_v3", "destination": "betterat.cricket/trial", "utm_content": "club_history_hero"},
+    # ── BC_AU_Trials_CBO_Aug2026 (current), restructured 8-9 Sep 2026 ────────
+    # The webinar ad — the whole reason conversions had to be split. Its
+    # primary text also carries a PLAIN-TEXT link with no UTMs (it had to match
+    # a line on the artwork), so a minority of its registrations arrive
+    # untagged and read as direct traffic. That shortfall is reported, never
+    # papered over — see get_webinar_registration_counts().
+    "120251267760560121": {"campaign_id": "120250149119070121", "name": "Ad_Webinar_LiveDemo_21Sep2026_v2", "destination": "betterat.cricket/demo", "utm_content": "live_demo_hero", "utm_campaign": "webinar_21sep2026", "stream": STREAM_WEBINAR, "ends_on": "2026-09-21"},
+    "120251267750770121": {"campaign_id": "120250149119070121", "name": "ZZ_SUPERSEDED_Ad_Webinar_LiveDemo_21Sep2026_v1", "destination": "betterat.cricket/demo", "utm_content": "live_demo_hero", "utm_campaign": "webinar_21sep2026", "stream": STREAM_WEBINAR, "ends_on": "2026-09-21"},
+    # The evergreen trial ad — paused, live from 22 Sep (the day after the
+    # webinar), so it legitimately reads as zero-spend until then.
+    "120251268385660121": {"campaign_id": "120250149119070121", "name": "Ad_Trial_Spreadsheet_Sep2026", "destination": "betterat.cricket/trial", "utm_content": "spreadsheet_hero", "utm_campaign": "trial_evergreen_sep2026", "stream": STREAM_TRIAL},
+    "120250237123350121": {"campaign_id": "120250149119070121", "name": "Ad_CheckOutYourClub_v2", "destination": "betterat.cricket/trial", "stream": STREAM_TRIAL},
+    "120250237122840121": {"campaign_id": "120250149119070121", "name": "Ad_CheckOutYourClub_v1", "destination": "betterat.cricket/trial", "stream": STREAM_TRIAL},
+    # club-history hero → /trial. The utm_content here must match the tag on
+    # the ad's own destination URL for get_registration_count() to tie a real
+    # signup back to this campaign.
+    "120250150859240121": {"campaign_id": "120250149119070121", "name": "Ad_ClubHistory_Trial_Hero_v3", "destination": "betterat.cricket/trial", "utm_content": "club_history_hero", "stream": STREAM_TRIAL},
     # BC_AU_SelfServe_Aug2026 — every ad lands on /trial; utm_content is the
     # same tag the ad-signups report groups by (see routers/meta_ads.py).
     "120249908493850121": {"campaign_id": "120249890918010121", "name": "Ad1_SelfServe_StaticShowcase", "destination": "betterat.cricket/trial", "utm_content": "static_showcase_full"},
@@ -113,21 +173,77 @@ AD_DESTINATIONS = {
     "120249238467160121": {"campaign_id": "120249237210710121", "name": "Ad4_Legacy", "destination": "betterat.cricket/ (homepage)", "utm_content": "club_legacy"},
 }
 
-# Canonical `utm_campaign` value per Meta campaign this dashboard has ever
-# tracked — per docs/meta-ad-campaign-self-serve.md §4, every ad's
-# destination URL sets utm_campaign to the exact Ads Manager campaign name,
-# identical across every ad in it. That makes it a second, more resilient
-# way (alongside AD_DESTINATIONS' per-ad utm_content) to tie a real signup
-# back to a campaign: a new ad/creative added in Ads Manager needs its
-# utm_content added to AD_DESTINATIONS by hand before a signup through it
-# counts, but its utm_campaign was already right from the moment it was
-# built off this campaign's own destination-URL template — no code change
-# needed. See _attribution_matches_campaign().
-CAMPAIGN_UTM_NAMES = {
-    "120250149119070121": "BC_AU_Trials_CBO_Aug2026",
-    "120249890918010121": "BC_AU_SelfServe_Aug2026",
-    "120249237210710121": "BC_AU_Traffic_ClubHistory_Jul2026",
+# Every `utm_campaign` value a Meta campaign's ads tag their destination URLs
+# with — a SET per campaign, not one value, and that plurality is the point.
+#
+# The convention used to be one tag per campaign, the exact Ads Manager name
+# (docs/meta-ad-campaign-self-serve.md §4). The 8-9 Sep restructure broke that:
+# BC_AU_Trials_CBO_Aug2026 now runs two products under two taxonomies
+# (`webinar_21sep2026`, `trial_evergreen_sep2026`) and neither is the campaign's
+# own name. A single-valued map would have quietly stopped recognising every
+# registration through the new ads — failing CLOSED, which reads as "the ads
+# produced nothing" rather than as a bug.
+#
+# This is still the resilient half of attribution (alongside AD_DESTINATIONS'
+# per-ad utm_content): a new creative built off one of these destination-URL
+# templates is recognised the moment it goes live, with no code change.
+CAMPAIGN_UTM_CAMPAIGNS: dict[str, set[str]] = {
+    "120250149119070121": {
+        "BC_AU_Trials_CBO_Aug2026",   # pre-restructure ads
+        "webinar_21sep2026",
+        "trial_evergreen_sep2026",
+    },
+    "120249890918010121": {"BC_AU_SelfServe_Aug2026"},
+    "120249237210710121": {"BC_AU_Traffic_ClubHistory_Jul2026"},
 }
+
+# Which stream a `utm_campaign` tag belongs to. Derived from the taxonomy
+# rather than the ad id, so a registration is attributed to the right product
+# even when the ad that produced it has since been deleted.
+STREAM_BY_UTM_CAMPAIGN = {
+    "webinar_21sep2026": STREAM_WEBINAR,
+    "trial_evergreen_sep2026": STREAM_TRIAL,
+}
+
+
+def stream_for_ad(ad_id: str | None, ad_name: str | None = None) -> str:
+    """Which product an ad is selling — the map first, then the ad's own NAME.
+
+    Deliberately name-derived as the fallback rather than requiring every ad
+    to be listed above: the ad set is where creatives get added and renamed in
+    Ads Manager, and a classification that needs a code change to keep up would
+    silently mis-file the next webinar ad as a trial one. Naming convention is
+    `Ad_Webinar_*` / `ZZ_SUPERSEDED_Ad_Webinar_*`; anything that does not
+    announce itself as a webinar ad sells the trial, which is what every ad in
+    this account did before the restructure.
+
+    NOT derived from the ad SET name — `AS_Cold_Broad_AU_LPV` says "cold
+    broad" and "LPV" and is now wrong about both, so nothing here reads it.
+    """
+    entry = AD_DESTINATIONS.get(ad_id or "") or {}
+    if entry.get("stream"):
+        return entry["stream"]
+    name = (ad_name or entry.get("name") or "").lower()
+    return STREAM_WEBINAR if "webinar" in name else STREAM_TRIAL
+
+
+def stream_for_attribution(attribution: dict | None) -> str | None:
+    """Which stream a stored registration's own UTM tags point at, or None
+    when they say nothing. The utm_campaign taxonomy is checked first (it is
+    set per destination and survives an ad being deleted), then the creative
+    tag. Used to attribute a CREATIVE's results — never to decide what KIND of
+    result a row is, which is settled by the table it lives in."""
+    if not attribution:
+        return None
+    campaign_tag = (attribution.get("utm_campaign") or "").strip().lower()
+    for tag, stream in STREAM_BY_UTM_CAMPAIGN.items():
+        if campaign_tag == tag.lower():
+            return stream
+    content_tag = (attribution.get("utm_content") or "").strip()
+    for entry in AD_DESTINATIONS.values():
+        if entry.get("utm_content") == content_tag and entry.get("stream"):
+            return entry["stream"]
+    return None
 
 # campaign["leads"] (shown as "Started registering (Meta-reported)", the
 # funnel stage right after "Club selected") counts ONLY the genuine Meta Lead
@@ -165,10 +281,42 @@ CAMPAIGN_LENGTH_DAYS = 30
 # resolves the active campaign's own plan via _campaign_plan() so those
 # notes only ever describe the campaign actually on screen.
 CAMPAIGN_PLANS: dict[str, tuple[float, int]] = {
-    "120250149119070121": (750.0, 30),  # BC_AU_Trials_CBO_Aug2026 — A$25/day CBO
+    # BC_AU_Trials_CBO_Aug2026 — A$30/day CBO since the 8 Sep restructure (was
+    # A$50/day). 30 x 30 = 900 over the pacing window. Pacing is measured from
+    # the most recent change (see build_insights), not across it, so this is
+    # the plan the campaign is actually running to rather than a blend of two.
+    "120250149119070121": (900.0, 30),
     "120249890918010121": (500.0, 30),  # BC_AU_SelfServe_Aug2026
     "120249237210710121": (500.0, 30),  # BC_AU_Traffic_ClubHistory_Jul2026 (finished)
 }
+
+# Dated, deliberate changes to a campaign — rendered as a marker on every
+# time-series chart and used to decide what is comparable with what.
+#
+# A campaign that changed materially is two campaigns wearing one name, and a
+# chart that plots straight through the change invites a reading it cannot
+# support: "down 40% week on week" printed over a deliberate 40% budget cut is
+# worse than saying nothing. There WILL be more of these — add a row rather
+# than reasoning about the discontinuity somewhere else.
+CAMPAIGN_ANNOTATIONS: dict[str, list[dict]] = {
+    "120250149119070121": [
+        {
+            "date": "2026-09-08",
+            "label": "Campaign restructured",
+            "detail": (
+                "Budget A$50 → A$30/day; placements narrowed to Facebook Feed only "
+                "(Instagram off); targeting went from broad with Advantage+ Audience to "
+                "AU men 30-64 with a cricket interest; /demo added alongside /trial. "
+                "Figures either side of this line describe two different campaigns."
+            ),
+        },
+    ],
+}
+
+# Meta attributes a conversion to the date of the CLICK, on a 7-day window, so
+# the most recent 7 days always under-report and fill in retrospectively. Every
+# figure covering that stretch is provisional; nothing alerts off it.
+ATTRIBUTION_WINDOW_DAYS = 7
 
 
 def _campaign_plan() -> tuple[float, int]:
@@ -176,6 +324,25 @@ def _campaign_plan() -> tuple[float, int]:
     CAMPAIGN_BUDGET_AUD/CAMPAIGN_LENGTH_DAYS for a campaign not yet added to
     CAMPAIGN_PLANS (e.g. a brand new one just switched to)."""
     return CAMPAIGN_PLANS.get(_campaign_id(), (CAMPAIGN_BUDGET_AUD, CAMPAIGN_LENGTH_DAYS))
+
+
+def campaign_annotations() -> list[dict]:
+    """The CURRENT campaign's change markers, oldest first."""
+    return sorted(CAMPAIGN_ANNOTATIONS.get(_campaign_id(), []), key=lambda a: a["date"])
+
+
+def _provisional_from() -> date:
+    """The first date whose figures are still settling — anything on or after
+    it is inside Meta's 7-day click-attribution window."""
+    return date.today() - timedelta(days=ATTRIBUTION_WINDOW_DAYS - 1)
+
+
+def _last_change_date() -> date | None:
+    """The most recent deliberate campaign change, or None. Anything before it
+    is not comparable with anything after it."""
+    dates = [_parse_insights_date(a["date"]) for a in campaign_annotations()]
+    settled = [d for d in dates if d]
+    return max(settled) if settled else None
 
 
 class MetaAdsError(Exception):
@@ -328,6 +495,9 @@ async def fetch_per_ad() -> list[dict]:
         r["name"] = r.get("ad_name") or meta.get("name") or r["ad_id"]
         r["destination"] = meta.get("destination")
         r["utm_content"] = meta.get("utm_content")
+        r["utm_campaign"] = meta.get("utm_campaign")
+        r["stream"] = stream_for_ad(r["ad_id"], r.get("ad_name"))
+        r["ends_on"] = meta.get("ends_on")
         r["delivery_status"] = delivery_statuses.get(r["ad_id"])
     return rows
 
@@ -511,40 +681,14 @@ def ad_note(ad: dict, all_ads: list[dict]) -> str:
     return "Performing in line with the rest of the campaign. No action needed."
 
 
-def compute_funnel(campaign: dict, club_selected: float = 0) -> list[dict]:
-    """Ordered funnel stages, impressions through to a completed trial
-    registration, each carrying what % of the top and of the PREVIOUS stage
-    it represents — the numbers the KPI cards show individually, laid out so
-    the drop-off at each step is visible without anyone computing a ratio.
-
-    Every stage except "Club selected" is Meta's own ad-account number
-    (impressions/clicks/LPV/leads from Insights). "Club selected" is ours —
-    a real count of distinct Meta-driven visitors who picked a club in the
-    wizard (get_club_selected_count), regardless of whether they went on to
-    finish. It sits between landing_page_views and leads because that's
-    exactly where it happens in the wizard, and it's a genuine buying signal
-    worth tracking on its own — Meta's own "leads" reports the same moment
-    but is self-reported and can drift (see the leads_effective note)."""
-    stages_raw = [
-        ("impressions", "Impressions", campaign.get("impressions") or 0),
-        ("link_clicks", "Link clicks", campaign.get("link_clicks") or 0),
-        ("landing_page_views", "Landing page views", campaign.get("landing_page_views") or 0),
-        ("club_selected", "Club selected", club_selected or 0),
-        ("leads", "Started registering (Meta-reported)", campaign.get("leads") or 0),
-        ("registrations", "Completed registrations", campaign.get("registrations") or 0),
-    ]
-    top = stages_raw[0][2] or 0
-    stages: list[dict] = []
-    prev: float | None = None
-    for key, label, value in stages_raw:
-        pct_of_top = round(100 * value / top, 1) if top else 0.0
-        pct_of_prev = 100.0 if prev is None else (round(100 * value / prev, 1) if prev else 0.0)
-        stages.append({
-            "key": key, "label": label, "value": value,
-            "pct_of_top": pct_of_top, "pct_of_prev": pct_of_prev,
-        })
-        prev = value
-    return stages
+# A single campaign-wide funnel USED TO LIVE HERE (compute_funnel) and was
+# removed in the 8-9 Sep restructure rather than relabelled. It put
+# campaign-wide impressions, clicks and landing page views above a "Completed
+# registrations" figure that only ever counted TRIAL signups — fine while the
+# campaign sold one thing, and a mixed-unit chart the moment the webinar ad
+# started spending: the drop at the bottom read as a conversion collapse when
+# it was really two products sharing one column. compute_stream_funnel() builds
+# one funnel per stream instead, each ending in its own result.
 
 
 # Ordered checkpoints the public registration wizard beacons through (see
@@ -607,8 +751,8 @@ async def get_club_selected_count(db: AsyncSession, days: int = CAMPAIGN_LENGTH_
     """Real count of distinct Meta-driven visitors who picked a club in the
     wizard (the `club_prepared` beacon), whether or not they ever went on to
     finish registering — a genuine buying signal in its own right, tracked
-    as its own stage in compute_funnel() between landing_page_views and
-    leads. Scoped to Meta traffic only (the same signal get_selected_clubs
+    as its own stage in the trial funnel (compute_stream_funnel) between
+    landing_page_views and leads. Scoped to Meta traffic only (the same signal get_selected_clubs
     and get_searched_clubs use), so it lines up with the Meta-account
     numbers on either side of it in that funnel rather than including
     selections from organic/EDM/other traffic."""
@@ -630,7 +774,7 @@ async def get_registration_step_funnel(db: AsyncSession, days: int = CAMPAIGN_LE
     (fired only on a fully successful last step). Counts distinct visitors
     reaching each step (see public_self_serve.py's /track-step beacon and
     SelfServeTrialModal.jsx's trackFunnelStep calls), same
-    key/label/value/pct_of_top/pct_of_prev shape as compute_funnel() so the
+    key/label/value/pct_of_top/pct_of_prev shape as compute_stream_funnel() so the
     frontend can reuse the same FunnelChart component."""
     await _use_active_campaign(db)  # resolves the counting-since cutoff, see _since()
     rows = (await db.execute(text(f"""
@@ -932,7 +1076,8 @@ async def get_searched_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
 
 
 def build_insights(campaign: dict, ads: list[dict], daily_history: list[dict],
-                    campaign_budget: float, campaign_length_days: int) -> list[dict]:
+                    campaign_budget: float, campaign_length_days: int,
+                    streams: list[dict] | None = None) -> list[dict]:
     """Short, severity-ordered headlines on how the campaign is actually
     going, so a reader never has to interpret the raw KPI numbers themselves.
     Deliberately terse (one line of detail, not a paragraph) and only fires
@@ -952,22 +1097,45 @@ def build_insights(campaign: dict, ads: list[dict], daily_history: list[dict],
     # level='campaign_daily' series), not the lifetime-to-date campaign
     # total, so a short burst of higher spend can't be misread as the
     # steady-state rate.
-    spend_days = {d["date"] for d in daily_history if (d.get("spend") or 0) > 0}
-    if campaign_budget and spend_days:
-        daily_rate = spend / len(spend_days)
+    #
+    # MEASURED FROM THE LAST DELIBERATE CHANGE, NEVER ACROSS IT. The 8 Sep
+    # restructure cut the daily budget from A$50 to A$30, so a rate averaged
+    # over both halves describes a campaign that no longer exists and would
+    # read as "overspending" for weeks after a deliberate cut.
+    #
+    # SPEND IS NOT SUBJECT TO THE 7-DAY ATTRIBUTION WINDOW and this block does
+    # not pretend it is. Meta attributes a CONVERSION to the date of the click
+    # and back-fills it for 7 days; money spent on a given day is settled that
+    # day. So pacing excludes only today, which is a part-day, and the
+    # provisional-window guard below applies to the conversion insights it
+    # genuinely bites on. (An earlier cut gated pacing on the attribution
+    # window too, which made it unanswerable for a week after every change —
+    # the two conditions are contradictory the day a change lands.)
+    change_date = _last_change_date()
+    today = date.today()
+    pacing_days = [
+        d for d in daily_history
+        if (d.get("spend") or 0) > 0
+        and (not change_date or (_parse_insights_date(d.get("date")) or date.min) >= change_date)
+        and (_parse_insights_date(d.get("date")) or date.min) < today
+    ]
+    if campaign_budget and len(pacing_days) >= 2:
+        window_spend = sum(d.get("spend") or 0.0 for d in pacing_days)
+        daily_rate = window_spend / len(pacing_days)
         projected = daily_rate * campaign_length_days
+        since = f" (measured since the {change_date.strftime('%-d %b')} change)" if change_date else ""
         if projected > campaign_budget * 1.15:
             over_pct = round((projected / campaign_budget - 1) * 100)
             insights.append({
                 "severity": "warning",
                 "title": "Overspending the budget pace",
-                "detail": f"On track for ~${projected:.0f} of ${campaign_budget:.0f} by day {campaign_length_days} ({over_pct}% over). Trim spend or pause the weaker ads.",
+                "detail": f"On track for ~${projected:.0f} of ${campaign_budget:.0f} by day {campaign_length_days} ({over_pct}% over){since}. Trim spend or pause the weaker ads.",
             })
-        elif projected < campaign_budget * 0.7 and len(spend_days) >= 2:
+        elif projected < campaign_budget * 0.7:
             insights.append({
                 "severity": "info",
                 "title": "Under-pacing the budget",
-                "detail": f"On track for only ~${projected:.0f} of ${campaign_budget:.0f} by day {campaign_length_days}. Room to spend more if the ads below are working.",
+                "detail": f"On track for only ~${projected:.0f} of ${campaign_budget:.0f} by day {campaign_length_days}{since}. Room to spend more if the ads below are working.",
             })
 
     # Funnel bottlenecks — where the drop-off actually hurts.
@@ -1008,6 +1176,64 @@ def build_insights(campaign: dict, ads: list[dict], daily_history: list[dict],
                 "elsewhere, so try a real test signup from a Meta ad click to see where it drops off."
             ),
         })
+
+    # Per-stream cost, stated separately and never averaged. Two ads selling
+    # two different things at very different prices is the ordinary state of
+    # this campaign now, so this reports the pair rather than flagging the gap
+    # between them as a fault.
+    priced = [s for s in (streams or []) if s.get("cost_per_result") and s.get("spend", 0) >= 5]
+    if len(priced) >= 2:
+        cheapest = min(priced, key=lambda s: s["cost_per_result"])
+        dearest = max(priced, key=lambda s: s["cost_per_result"])
+        if cheapest["stream"] != dearest["stream"]:
+            insights.append({
+                "severity": "info",
+                "title": "Two results at two prices",
+                "detail": (
+                    f"{cheapest['label']} cost ${cheapest['cost_per_result']:.2f} each, "
+                    f"{dearest['label']} ${dearest['cost_per_result']:.2f}. Different things at "
+                    "different prices — worth comparing each against what it's worth, not against each other."
+                ),
+            })
+    # A change younger than the attribution window means every conversion
+    # figure describing the period after it is still filling in. Say so once,
+    # and hold back the conversion-shortfall warnings below rather than
+    # reporting a stream as failing when its results simply haven't landed yet.
+    settling = bool(change_date and (today - change_date).days < ATTRIBUTION_WINDOW_DAYS)
+    if settling:
+        insights.append({
+            "severity": "info",
+            "title": "Results since the change are still settling",
+            "detail": (
+                f"The campaign changed on {change_date.strftime('%-d %b')} and Meta attributes "
+                f"conversions to the click date over {ATTRIBUTION_WINDOW_DAYS} days, so anything "
+                "after it will keep filling in. Spend is settled; results are not."
+            ),
+        })
+
+    for stream in (streams or []):
+        # An ad that has ended stops being a live performance question. Say so
+        # once rather than letting it read as a stream that stopped converting.
+        if stream.get("ended"):
+            insights.append({
+                "severity": "info",
+                "title": f"{stream['label']} has finished",
+                "detail": (
+                    f"The ads behind it ended on {stream['ends_on']}. "
+                    f"${stream['spend']:.0f} spent, {stream['results']} registered"
+                    + (f" (${stream['cost_per_result']:.2f} each)." if stream.get("cost_per_result") else ".")
+                ),
+            })
+        elif (not settling and stream.get("spend", 0) >= 20 and stream.get("results") == 0
+              and stream.get("landing_page_views", 0) >= 10):
+            insights.append({
+                "severity": "warning",
+                "title": f"No {stream['label'].lower()} yet",
+                "detail": (
+                    f"${stream['spend']:.0f} spent and {stream['landing_page_views']:.0f} landing page views, "
+                    "with nothing registered. Check the form on that page works from a real ad click."
+                ),
+            })
 
     # Best vs worst spending ad.
     spending_ads = [a for a in ads if (a.get("spend") or 0) >= 3 and a.get("cost_per_lpv")]
@@ -1189,9 +1415,10 @@ def _attribution_matches_campaign(attribution: dict | None) -> bool:
     CURRENT campaign (_campaign_id()), checked three independent ways — any
     one is enough:
     1. its utm_content is one AD_DESTINATIONS maps to this campaign;
-    2. its utm_campaign matches this campaign's own canonical name in
-       CAMPAIGN_UTM_NAMES (more resilient than (1) — doesn't need
-       AD_DESTINATIONS kept in sync with every new ad);
+    2. its utm_campaign is one of the tags this campaign's ads use
+       (CAMPAIGN_UTM_CAMPAIGNS — a SET since the 8-9 Sep restructure, when one
+       campaign started running two destination taxonomies). More resilient
+       than (1): doesn't need AD_DESTINATIONS kept in sync with every new ad;
     3. it otherwise carries a plain Meta click signal (a fb/ig/meta
        utm_source, or a facebook/instagram click_source) — the loosest
        check, but a genuine Meta-driven registration shouldn't silently
@@ -1207,8 +1434,9 @@ def _attribution_matches_campaign(attribution: dict | None) -> bool:
     utm_content = (attribution.get("utm_content") or "").strip()
     if utm_content and utm_content in _current_campaign_utm_contents():
         return True
-    utm_campaign_name = CAMPAIGN_UTM_NAMES.get(_campaign_id())
-    if utm_campaign_name and (attribution.get("utm_campaign") or "").strip().lower() == utm_campaign_name.lower():
+    utm_campaign = (attribution.get("utm_campaign") or "").strip().lower()
+    known = CAMPAIGN_UTM_CAMPAIGNS.get(_campaign_id()) or set()
+    if utm_campaign and utm_campaign in {name.lower() for name in known}:
         return True
     utm_source = (attribution.get("utm_source") or "").strip().lower()
     if utm_source in _META_ATTRIBUTION_SOURCES:
@@ -1245,6 +1473,454 @@ async def get_registration_count(db: AsyncSession) -> int:
     return sum(1 for attribution in rows if _attribution_matches_campaign(attribution))
 
 
+async def get_registration_count_since(db: AsyncSession, since: date) -> dict:
+    """Completed trial registrations attributed to the current campaign that
+    happened on or after `since`.
+
+    Shares `_attribution_matches_campaign` with get_registration_count above,
+    so the windowed and lifetime figures can never disagree about what counts
+    as a registration — only about when it happened.
+
+    Orgs carry no created_at; the signup timestamp is the earliest
+    `self_serve_idempotency_keys` row, the same source the ad-signups report
+    uses. An attributed org with NO key row has no knowable signup date, so it
+    cannot be placed in the window at all — it is counted as `undated` rather
+    than dropped quietly or swept in, either of which would move a
+    cost-per-result figure without saying so.
+
+    The comparison is made in Postgres against a date, so the boundary is
+    midnight in the database's own timezone. Meta's daily figures are in the ad
+    account's timezone, so a few hours either side of a change date cannot be
+    reconciled exactly by anything here — immaterial for "before or after the
+    restructure", and not worth implying a precision we do not have.
+    """
+    await _use_active_campaign(db)
+    rows = (await db.execute(text("""
+        SELECT o.signup_attribution AS attribution,
+               MIN(k.created_at) AS signed_up_at
+          FROM organisations o
+          LEFT JOIN self_serve_idempotency_keys k ON k.org_id = o.id
+         WHERE o.signup_source IS NOT NULL
+           AND o.archived_at IS NULL
+           AND o.signup_attribution IS NOT NULL
+         GROUP BY o.id, o.signup_attribution
+    """))).mappings().all()
+
+    count = 0
+    undated = 0
+    for row in rows:
+        if not _attribution_matches_campaign(row["attribution"]):
+            continue
+        at = row["signed_up_at"]
+        if at is None:
+            undated += 1
+        elif at.date() >= since:
+            count += 1
+    return {"count": count, "undated": undated}
+
+
+async def get_webinar_registration_counts(db: AsyncSession) -> dict:
+    """Webinar registrations (`webinar_registrations`, migration 296) split by
+    whether they can be attributed to the CURRENT Meta campaign.
+
+    THE UNATTRIBUTED COUNT IS REPORTED, NOT ABSORBED, and that is deliberate.
+    The webinar ad's primary text carries a plain-text link (betterat.cricket/demo)
+    with no UTMs on it — it had to match a line printed on the artwork — so a
+    minority of genuinely ad-driven registrations arrive carrying no campaign
+    signal at all and are indistinguishable from an organic one. Counting them
+    as ours would inflate the ad's result; hiding them would make the shortfall
+    look like a tracking fault. So the cost-per-result figure is computed on
+    the attributed count alone (which reads HIGH, the safe direction) and the
+    unattributed count rides alongside so a reader knows the true figure sits
+    somewhere between.
+
+    Scoped to the event, not to a date window: a registration for the 21 Sep
+    webinar is a result of this campaign whenever it happened."""
+    await _use_active_campaign(db)
+    from app.services import webinar
+
+    rows = (await db.execute(text("""
+        SELECT utm_source, utm_campaign, utm_content, click_source
+          FROM webinar_registrations
+         WHERE event_key = :event_key
+    """), {"event_key": webinar.EVENT.key})).mappings().all()
+
+    attributed = 0
+    unattributed = 0
+    for row in rows:
+        if _attribution_matches_campaign(dict(row)):
+            attributed += 1
+        elif not any((row["utm_source"], row["utm_campaign"],
+                      row["utm_content"], row["click_source"])):
+            # No campaign signal of ANY kind — the untagged in-ad link, or a
+            # genuinely organic registration. The two cannot be told apart.
+            unattributed += 1
+    return {
+        "attributed": attributed,
+        "unattributed": unattributed,
+        "total": len(rows),
+        "event_key": webinar.EVENT.key,
+        "event_date": webinar.EVENT.starts_at.date().isoformat(),
+        "is_past": webinar.EVENT.is_past(),
+    }
+
+
+async def get_webinar_registration_count_since(db: AsyncSession, since: date) -> int:
+    """Attributed webinar registrations received on or after `since`.
+
+    The lifetime count above is deliberately scoped to the EVENT rather than to
+    a date — a registration for the 21 Sep webinar is a result of this campaign
+    whenever it arrived. This one exists only for the since-the-change block,
+    where both streams have to be measured over the same stretch of calendar or
+    their cost-per-result figures are not comparable. The webinar ad started at
+    the restructure, so today the two counts are the same; they stop being the
+    same at the next change.
+
+    Attributed only, per the lifetime rule: the untagged in-ad link means a
+    minority of genuine registrations carry no campaign signal, and counting
+    those would inflate the ad's result."""
+    await _use_active_campaign(db)
+    from app.services import webinar
+
+    rows = (await db.execute(text("""
+        SELECT utm_source, utm_campaign, utm_content, click_source
+          FROM webinar_registrations
+         WHERE event_key = :event_key AND created_at >= :since
+    """), {"event_key": webinar.EVENT.key, "since": since})).mappings().all()
+    return sum(1 for row in rows if _attribution_matches_campaign(dict(row)))
+
+
+def stream_totals(ads: list[dict]) -> dict[str, dict]:
+    """Meta's own delivery figures summed PER STREAM from the per-ad rows.
+
+    Spend has to be split this way or every cost-per-result on the page is
+    wrong: the campaign-level spend now covers both products, so dividing it by
+    trial signups charges the trial with the webinar's spend, and vice versa.
+    Ad-level is the finest split Meta gives us and the streams are cleanly
+    separable there (see stream_for_ad), so this is exact rather than
+    apportioned."""
+    totals = {
+        stream: {
+            "stream": stream,
+            "label": STREAM_LABELS[stream],
+            "spend": 0.0, "impressions": 0.0, "link_clicks": 0.0,
+            "landing_page_views": 0.0, "leads": 0.0,
+            "ad_count": 0, "active_ad_count": 0,
+        }
+        for stream in STREAMS
+    }
+    for ad in ads:
+        stream = ad.get("stream") or stream_for_ad(ad.get("ad_id"), ad.get("ad_name"))
+        bucket = totals.get(stream)
+        if bucket is None:
+            continue
+        for key in ("spend", "impressions", "link_clicks", "landing_page_views", "leads"):
+            bucket[key] += ad.get(key) or 0.0
+        bucket["ad_count"] += 1
+        if (ad.get("delivery_status") or "ACTIVE") == "ACTIVE":
+            bucket["active_ad_count"] += 1
+    for bucket in totals.values():
+        bucket["spend"] = round(bucket["spend"], 2)
+        bucket["cost_per_lpv"] = (
+            round(bucket["spend"] / bucket["landing_page_views"], 2)
+            if bucket["landing_page_views"] > 0 else None
+        )
+    return totals
+
+
+async def stream_totals_since(db: AsyncSession, since: date) -> dict:
+    """Per-stream delivery figures summed from the TRUE daily per-ad rows
+    (level='ad_daily') on or after `since`.
+
+    stream_totals() above reads the level='ad' rows, which are LIFETIME totals.
+    Right for "what has this campaign cost in all", wrong for "what are we
+    paying now": the trial's lifetime spend is mostly the regime that ran
+    BEFORE the 8 Sep restructure (A$50/day, broad targeting, all placements,
+    Instagram on), while the webinar stream has no pre-change history at all.
+    So the two lifetime cost-per-result figures describe two different
+    campaigns and must never be read against each other.
+
+    `covers_from` is the earliest daily row actually held. A window that starts
+    after `since` is missing spend, which reads LOW and would UNDERSTATE cost
+    per result — the direction that flatters the campaign — so it is reported
+    and the caller withholds the division rather than printing a wrong number.
+    """
+    await _use_active_campaign(db)
+    rows = (await db.execute(text("""
+        SELECT ad_id, ad_name, spend, impressions, link_clicks,
+               landing_page_views, leads
+          FROM meta_ad_snapshots
+         WHERE level = 'ad_daily' AND campaign_id = :campaign_id
+           AND snapshot_date >= :since
+    """), {"campaign_id": _campaign_id(), "since": since})).mappings().all()
+
+    earliest = (await db.execute(text("""
+        SELECT MIN(snapshot_date) FROM meta_ad_snapshots
+         WHERE level = 'ad_daily' AND campaign_id = :campaign_id
+    """), {"campaign_id": _campaign_id()})).scalar()
+
+    totals = {
+        stream: {"spend": 0.0, "impressions": 0.0, "link_clicks": 0.0,
+                 "landing_page_views": 0.0, "leads": 0.0}
+        for stream in STREAMS
+    }
+    for r in rows:
+        stream = stream_for_ad(r["ad_id"], r["ad_name"])
+        bucket = totals.get(stream)
+        if bucket is None:
+            continue
+        bucket["spend"] += float(r["spend"] or 0)
+        bucket["impressions"] += float(r["impressions"] or 0)
+        bucket["link_clicks"] += float(r["link_clicks"] or 0)
+        bucket["landing_page_views"] += float(r["landing_page_views"] or 0)
+        bucket["leads"] += float(r["leads"] or 0)
+    for bucket in totals.values():
+        bucket["spend"] = round(bucket["spend"], 2)
+
+    return {
+        "totals": totals,
+        "covers_from": earliest,
+        # Held data starts after the date asked for, so the sum is short of the
+        # real spend since the change.
+        "partial": bool(earliest and earliest > since),
+    }
+
+
+def _since_change_block(stream: str, since_change: dict | None) -> dict | None:
+    """One stream's figures since the last deliberate campaign change, or None
+    when there has been no change to measure from.
+
+    THE WHOLE POINT IS COMPARABILITY. Lifetime, the trial carries months of
+    pre-restructure spend and the webinar carries none, so the two cost-per-
+    result figures are not answering the same question. Measured from the
+    change, both describe the campaign as it runs today.
+
+    Three things are deliberately withheld rather than guessed at:
+
+    * A PARTIAL WINDOW yields no cost per result. If the daily rows we hold
+      start after the change, the spend is short of what was really spent, so
+      the division would UNDERSTATE the cost — the direction that makes the
+      campaign look better than it is.
+    * NO RESULTS YET yields no cost per result, the same rule the lifetime
+      figure keeps. An ad set that has not converted is not an infinitely
+      expensive one.
+    * SPEND IS SETTLED, RESULTS ARE NOT. Meta credits a conversion to the date
+      of the click and back-fills for 7 days, so a cost per result computed
+      inside that window is a ceiling that will come down. It is marked
+      provisional and nothing alerts off it.
+    """
+    if not since_change:
+        return None
+    since = since_change["since"]
+    totals = (since_change.get("totals") or {}).get(stream) or {}
+    results = int((since_change.get("results") or {}).get(stream) or 0)
+    spend = round(float(totals.get("spend") or 0.0), 2)
+    partial = bool(since_change.get("partial"))
+    today = date.today()
+    days = max(0, (today - since).days)
+    # Inside the attribution window the results behind this figure are still
+    # arriving, so the cost reads HIGH and will fall.
+    provisional = days < ATTRIBUTION_WINDOW_DAYS
+
+    block = {
+        "since": since.isoformat(),
+        "days": days,
+        "spend": spend,
+        "results": results,
+        "impressions": round(float(totals.get("impressions") or 0.0)),
+        "link_clicks": round(float(totals.get("link_clicks") or 0.0)),
+        "landing_page_views": round(float(totals.get("landing_page_views") or 0.0)),
+        "leads": round(float(totals.get("leads") or 0.0)),
+        "partial": partial,
+        "provisional": provisional,
+        "cost_per_result": None,
+        "withheld_reason": None,
+    }
+    if partial:
+        block["withheld_reason"] = "partial_window"
+    elif results <= 0:
+        block["withheld_reason"] = "no_results_yet"
+    elif spend <= 0:
+        block["withheld_reason"] = "no_spend_yet"
+    else:
+        block["cost_per_result"] = round(spend / results, 2)
+    return block
+
+
+def build_streams(ads: list[dict], campaign: dict, *, trial_results: int,
+                  webinar_counts: dict, club_selected: float = 0,
+                  since_change: dict | None = None) -> list[dict]:
+    """The two streams as the page reads them: delivery figures, the result
+    that stream actually produced, its own cost per result, and its own funnel.
+
+    `trial_results` and the webinar counts come from OUR OWN database — a real
+    completed registration — never from Meta's self-reported action counts,
+    which cannot tell the two CompleteRegistration events apart at all without
+    a breakdown we don't fetch. Meta's `leads` is kept alongside as the
+    self-reported comparison, clearly labelled as that."""
+    totals = stream_totals(ads)
+    webinar_results = webinar_counts.get("attributed", 0)
+    results_by_stream = {STREAM_TRIAL: trial_results, STREAM_WEBINAR: webinar_results}
+
+    out: list[dict] = []
+    for stream in STREAMS:
+        bucket = dict(totals[stream])
+        results = results_by_stream.get(stream, 0)
+        bucket["results"] = results
+        bucket["result_label"] = STREAM_LABELS[stream]
+        bucket["content_category"] = STREAM_CONTENT_CATEGORIES[stream]
+        # Divide only when there is something to divide by — an ad set that has
+        # not converted yet, and one whose ads have ended, both land here.
+        bucket["cost_per_result"] = (
+            round(bucket["spend"] / results, 2) if results > 0 and bucket["spend"] > 0 else None
+        )
+        # ONLY the trial carries a value. A webinar registration is worth
+        # nothing on the books, so it contributes nothing here — folding it in
+        # at the trial's 399 would invent revenue out of form fills.
+        unit_value = STREAM_VALUE_AUD[stream]
+        bucket["unit_value_aud"] = unit_value
+        bucket["attributed_value_aud"] = round(results * unit_value, 2) if unit_value else 0.0
+        bucket["carries_value"] = unit_value > 0
+        bucket["roas"] = (
+            round(bucket["attributed_value_aud"] / bucket["spend"], 2)
+            if unit_value and bucket["spend"] > 0 else None
+        )
+        # An ad that has ended stops the stream reading as a live campaign
+        # whose result rate is collapsing.
+        ends = [
+            _parse_insights_date((AD_DESTINATIONS.get(a.get("ad_id") or "") or {}).get("ends_on"))
+            for a in ads
+            if (a.get("stream") or stream_for_ad(a.get("ad_id"), a.get("ad_name"))) == stream
+        ]
+        ends = [d for d in ends if d]
+        bucket["ends_on"] = max(ends).isoformat() if ends else None
+        bucket["ended"] = bool(ends) and max(ends) < date.today()
+        bucket["funnel"] = compute_stream_funnel(
+            bucket, results,
+            club_selected=club_selected if stream == STREAM_TRIAL else None,
+        )
+        if stream == STREAM_WEBINAR:
+            bucket["unattributed_results"] = webinar_counts.get("unattributed", 0)
+            bucket["total_registrations"] = webinar_counts.get("total", 0)
+        bucket["since_change"] = _since_change_block(stream, since_change)
+        out.append(bucket)
+
+    # Whatever the campaign spent that no ad row accounts for (a deleted ad, a
+    # rounding gap). Surfaced rather than silently folded into one stream —
+    # a cost-per-result quietly carrying someone else's spend is the bug this
+    # whole split exists to remove.
+    attributed_spend = round(sum(s["spend"] for s in out), 2)
+    campaign_spend = round(campaign.get("spend") or 0.0, 2)
+    return out, round(campaign_spend - attributed_spend, 2)
+
+
+def compute_stream_funnel(bucket: dict, results: int, club_selected: float | None = None) -> list[dict]:
+    """One stream's own funnel, impressions through to its own result.
+
+    Built per stream rather than campaign-wide because the campaign-wide
+    version mixed units the moment the webinar ad started spending: its
+    impressions and clicks sat above a "completed registrations" figure that
+    only ever counted trial signups, so the drop-off at the bottom read as a
+    conversion collapse when it was two products in one column.
+
+    "Club selected" only exists on the trial path (it is a step in the
+    registration wizard), so the webinar funnel goes straight from a landing
+    page view to a registration — which is what that page actually asks for."""
+    stages_raw = [
+        ("impressions", "Impressions", bucket.get("impressions") or 0),
+        ("link_clicks", "Link clicks", bucket.get("link_clicks") or 0),
+        ("landing_page_views", "Landing page views", bucket.get("landing_page_views") or 0),
+    ]
+    if club_selected is not None:
+        stages_raw.append(("club_selected", "Club selected", club_selected or 0))
+        stages_raw.append(("leads", "Started registering (Meta-reported)", bucket.get("leads") or 0))
+    stages_raw.append(("results", bucket.get("result_label") or "Results", results or 0))
+
+    top = stages_raw[0][2] or 0
+    stages: list[dict] = []
+    prev: float | None = None
+    for key, label, value in stages_raw:
+        pct_of_top = round(100 * value / top, 1) if top else 0.0
+        pct_of_prev = 100.0 if prev is None else (round(100 * value / prev, 1) if prev else 0.0)
+        stages.append({
+            "key": key, "label": label, "value": value,
+            "pct_of_top": pct_of_top, "pct_of_prev": pct_of_prev,
+        })
+        prev = value
+    return stages
+
+
+async def get_creative_performance(db: AsyncSession, ads: list[dict]) -> list[dict]:
+    """Per-creative results, keyed on `utm_content` — the identifier that
+    outlives the ad it was built on, so a creative's performance can be
+    compared across campaigns and across a rebuild in Ads Manager.
+
+    Spend comes from Meta (per ad, mapped to its creative tag); the results
+    come from our own tables. A creative's results are counted by the tag on
+    the registration, so a webinar-ad click that went on to start a trial is
+    credited to the webinar creative as a TRIAL result — which is what
+    happened, and worth seeing."""
+    await _use_active_campaign(db)
+    from app.services import webinar
+
+    trial_tags = (await db.execute(text("""
+        SELECT signup_attribution FROM organisations
+         WHERE signup_source IS NOT NULL
+           AND archived_at IS NULL
+           AND signup_attribution IS NOT NULL
+    """))).scalars().all()
+    webinar_tags = (await db.execute(text("""
+        SELECT utm_source, utm_campaign, utm_content, click_source
+          FROM webinar_registrations
+         WHERE event_key = :event_key
+    """), {"event_key": webinar.EVENT.key})).mappings().all()
+
+    rows: dict[str, dict] = {}
+
+    def _bucket(tag: str | None, stream: str) -> dict:
+        key = (tag or "").strip() or "(untagged)"
+        return rows.setdefault(key, {
+            "utm_content": key, "stream": stream, "ad_name": None,
+            "spend": 0.0, "trial_signups": 0, "webinar_registrations": 0,
+            "impressions": 0.0, "link_clicks": 0.0, "landing_page_views": 0.0,
+        })
+
+    for ad in ads:
+        stream = ad.get("stream") or stream_for_ad(ad.get("ad_id"), ad.get("ad_name"))
+        bucket = _bucket(ad.get("utm_content"), stream)
+        bucket["ad_name"] = bucket["ad_name"] or ad.get("name")
+        bucket["stream"] = stream
+        for key in ("spend", "impressions", "link_clicks", "landing_page_views"):
+            bucket[key] += ad.get(key) or 0.0
+
+    for attribution in trial_tags:
+        if _attribution_matches_campaign(attribution):
+            tag = (attribution or {}).get("utm_content")
+            _bucket(tag, stream_for_attribution(attribution) or STREAM_TRIAL)["trial_signups"] += 1
+    for row in webinar_tags:
+        if _attribution_matches_campaign(dict(row)):
+            _bucket(row["utm_content"], STREAM_WEBINAR)["webinar_registrations"] += 1
+
+    out = []
+    for bucket in rows.values():
+        bucket["spend"] = round(bucket["spend"], 2)
+        results = bucket["trial_signups"] + bucket["webinar_registrations"]
+        bucket["results"] = results
+        bucket["cost_per_result"] = (
+            round(bucket["spend"] / results, 2) if results > 0 and bucket["spend"] > 0 else None
+        )
+        bucket["cost_per_lpv"] = (
+            round(bucket["spend"] / bucket["landing_page_views"], 2)
+            if bucket["landing_page_views"] > 0 else None
+        )
+        # A creative's results are one stream's or the other's, never a sum of
+        # both presented as one figure — the row carries each separately and
+        # the total is only ever used to rank.
+        out.append(bucket)
+    out.sort(key=lambda b: (-b["results"], -b["spend"]))
+    return out
+
+
 async def get_latest_summary(db: AsyncSession) -> dict:
     """Read back the most recent snapshot set for the CURRENT campaign (used
     for the fast page-load path, as opposed to /refresh which does a live
@@ -1268,6 +1944,9 @@ async def get_latest_summary(db: AsyncSession) -> dict:
                 "recommendation_status": None, "last_updated": None,
                 "leads_adjustment": adjustment, "campaign_budget": campaign_budget,
                 "campaign_length_days": campaign_length_days, "insights": [],
+                "streams": [], "creatives": [], "unattributed_spend": 0.0,
+                "annotations": campaign_annotations(),
+                "attribution_window_days": ATTRIBUTION_WINDOW_DAYS,
                 "counting_since": _since().isoformat() if _since() else None}
 
     latest_date = campaign_row["snapshot_date"]
@@ -1292,14 +1971,17 @@ async def get_latest_summary(db: AsyncSession) -> dict:
         }
 
     registrations = await get_registration_count(db)
+    webinar_counts = await get_webinar_registration_counts(db)
 
     campaign = _row_to_dict(campaign_row)
     campaign["leads_adjustment"] = adjustment
+    # THE TRIAL'S OWN RESULT COUNT, and it is named that way on purpose. This
+    # reads `organisations`, so it has only ever counted trial signups — the
+    # danger was never that it double-counted, it was that the SPEND it used
+    # to be divided by covers both products (see cost_per_result below).
     campaign["registrations"] = registrations
     campaign["leads_effective"] = max(0.0, registrations + adjustment)
-    campaign["cost_per_lead"] = (
-        round(campaign["spend"] / campaign["leads_effective"], 2) if campaign["leads_effective"] > 0 else None
-    )
+    campaign["webinar_registrations"] = webinar_counts
 
     ads = [_row_to_dict(r) for r in ad_rows]
     for ad in ads:
@@ -1307,6 +1989,9 @@ async def get_latest_summary(db: AsyncSession) -> dict:
         ad["name"] = ad.get("ad_name") or meta.get("name") or ad["ad_id"]
         ad["destination"] = meta.get("destination")
         ad["utm_content"] = meta.get("utm_content")
+        ad["utm_campaign"] = meta.get("utm_campaign")
+        ad["stream"] = stream_for_ad(ad["ad_id"], ad.get("ad_name"))
+        ad["ends_on"] = meta.get("ends_on")
         ad["status"] = ad_status(ad, ads)
         ad["cost_per_lead"] = round(ad["spend"] / ad["leads"], 2) if ad["leads"] > 0 else None
         ad["note"] = ad_note(ad, ads)
@@ -1318,12 +2003,63 @@ async def get_latest_summary(db: AsyncSession) -> dict:
     daily_history = await get_history(db, days=campaign_length_days + 5)
     club_selected = await get_club_selected_count(db)
 
-    campaign["funnel"] = compute_funnel(campaign, club_selected)
-    insights = build_insights(campaign, ads, daily_history, campaign_budget, campaign_length_days)
+    # SINCE THE LAST DELIBERATE CHANGE, alongside the lifetime figures.
+    # Lifetime, the trial carries months of pre-restructure spend and the
+    # webinar carries none, so reading one cost per result against the other
+    # compares two different campaigns. Measured from the change, both describe
+    # the campaign as it runs now — which is the question the page is actually
+    # asked. The manual leads adjustment is NOT applied here: it is a lifetime
+    # correction and may well relate to a signup from before the change.
+    change_date = _last_change_date()
+    since_change = None
+    if change_date:
+        spend_since = await stream_totals_since(db, change_date)
+        trial_since = await get_registration_count_since(db, change_date)
+        since_change = {
+            "since": change_date,
+            "totals": spend_since["totals"],
+            "partial": spend_since["partial"],
+            "results": {
+                STREAM_TRIAL: trial_since["count"],
+                STREAM_WEBINAR: await get_webinar_registration_count_since(db, change_date),
+            },
+            "undated_trial_results": trial_since["undated"],
+        }
+
+    streams, unattributed_spend = build_streams(
+        ads, campaign,
+        trial_results=int(campaign["leads_effective"]),
+        webinar_counts=webinar_counts,
+        club_selected=club_selected,
+        since_change=since_change,
+    )
+    by_stream = {s["stream"]: s for s in streams}
+
+    # `cost_per_lead` is kept under its old name for anything still reading it,
+    # but is now the TRIAL's own cost per signup — trial spend over trial
+    # signups. It used to be whole-campaign spend over trial signups, which
+    # charged the trial with the webinar's spend from the moment both ran in
+    # one campaign, and would have gone on quietly overstating it.
+    campaign["cost_per_lead"] = by_stream[STREAM_TRIAL]["cost_per_result"]
+    campaign["cost_per_trial_signup"] = by_stream[STREAM_TRIAL]["cost_per_result"]
+    campaign["cost_per_webinar_registration"] = by_stream[STREAM_WEBINAR]["cost_per_result"]
+
+    insights = build_insights(campaign, ads, daily_history, campaign_budget,
+                              campaign_length_days, streams=streams)
 
     return {
         "campaign": campaign,
         "ads": ads,
+        "streams": streams,
+        "creatives": await get_creative_performance(db, ads),
+        "unattributed_spend": unattributed_spend,
+        "annotations": campaign_annotations(),
+        "attribution_window_days": ATTRIBUTION_WINDOW_DAYS,
+        # An attributed trial signup we hold no timestamp for can't be placed
+        # either side of the change, so it counts lifetime and not since.
+        # Reported so a short since-the-change count reads as a known gap
+        # rather than as the ads having stopped working.
+        "undated_trial_results": (since_change or {}).get("undated_trial_results", 0),
         "recommendation": campaign_row["recommendation"],
         "recommendation_status": campaign_row["recommendation_status"],
         "last_updated": (campaign_row["updated_at"] or campaign_row["created_at"]).isoformat()
@@ -1350,6 +2086,11 @@ async def get_history(db: AsyncSession, days: int = 14) -> list[dict]:
         WHERE level = 'campaign_daily' AND campaign_id = :campaign_id AND snapshot_date >= :since
         ORDER BY snapshot_date ASC
     """), {"campaign_id": _campaign_id(), "since": since})).mappings().all()
+    # Meta attributes a conversion to the date of the CLICK on a 7-day window,
+    # so the most recent 7 days always under-report and fill in retrospectively.
+    # Flagged rather than hidden: the days are real, they are just not finished.
+    # The charts draw them differently and nothing alerts off them.
+    provisional_from = _provisional_from()
     return [
         {
             "date": r["snapshot_date"].isoformat(),
@@ -1360,6 +2101,7 @@ async def get_history(db: AsyncSession, days: int = 14) -> list[dict]:
             "landing_page_views": float(r["landing_page_views"]),
             "cost_per_lpv": float(r["cost_per_lpv"]) if r["cost_per_lpv"] is not None else None,
             "leads": float(r["leads"]),
+            "provisional": r["snapshot_date"] >= provisional_from,
         }
         for r in rows
     ]
@@ -1375,6 +2117,11 @@ async def get_ad_history(db: AsyncSession, ad_id: str, days: int = 30) -> list[d
         WHERE level = 'ad_daily' AND campaign_id = :campaign_id AND ad_id = :ad_id AND snapshot_date >= :since
         ORDER BY snapshot_date ASC
     """), {"campaign_id": _campaign_id(), "ad_id": ad_id, "since": since})).mappings().all()
+    # Meta attributes a conversion to the date of the CLICK on a 7-day window,
+    # so the most recent 7 days always under-report and fill in retrospectively.
+    # Flagged rather than hidden: the days are real, they are just not finished.
+    # The charts draw them differently and nothing alerts off them.
+    provisional_from = _provisional_from()
     return [
         {
             "date": r["snapshot_date"].isoformat(),
@@ -1385,6 +2132,7 @@ async def get_ad_history(db: AsyncSession, ad_id: str, days: int = 30) -> list[d
             "landing_page_views": float(r["landing_page_views"]),
             "cost_per_lpv": float(r["cost_per_lpv"]) if r["cost_per_lpv"] is not None else None,
             "leads": float(r["leads"]),
+            "provisional": r["snapshot_date"] >= provisional_from,
         }
         for r in rows
     ]

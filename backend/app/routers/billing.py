@@ -347,9 +347,9 @@ async def create_checkout_session(
         # rather than at everything the club now holds; the rep who earned the
         # club is carried onto the new deal (see
         # crm.sync_platform_deal_for_club) so an upsell pays commission.
-        from app.routers.club_admin import _push_club_to_twenty
-        _push_club_to_twenty(club.id, crm_trigger="subscription_won",
-                             won_module_keys=list(addon_keys))
+        from app.routers.club_admin import _sync_club_to_crm
+        _sync_club_to_crm(club.id, crm_trigger="subscription_won",
+                          won_module_keys=list(addon_keys))
         return {"added": True, "modules": addon_keys}
 
     schedule = await platform_settings.get_bundle_discount_schedule(db)

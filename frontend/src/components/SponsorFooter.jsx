@@ -8,7 +8,7 @@ const RESERVED_ROOT_SEGMENTS = new Set([
   'login', 'admin', 'onboard', 'club-inactive',
   'games', 'match', 'scorecards', 'players',
   'features', 'pricing', 'compare', 'about', 'contact', 'faq',
-  'terms', 'privacy', 'blog', 'videos',
+  'terms', 'privacy', 'blog', 'videos', 'trial', 'demo',
 ])
 
 function useSlug() {

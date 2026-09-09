@@ -5,6 +5,7 @@
 // Props:
 //   moduleLogo, clubName
 //   W, H, content            full-size (W×H) preview node, scaled to fit
+//   fill                     colour behind a letterboxed layout
 //   fontStyle                the display-font CSS vars for the preview
 //   types [{key,label}], activeType, onPickType
 //   fields [{label,value,onChange,placeholder}]   up to 3
@@ -24,7 +25,7 @@ function StepLabel({ n, children }) {
 }
 
 export default function MobileQuickPost({
-  moduleLogo, clubName, W, H, content, fontStyle,
+  moduleLogo, clubName, W, H, content, fontStyle, fill,
   types = [], activeType, onPickType,
   fields = [], palettes = [], paletteKey, onPickPalette,
   onExport, exporting, onFullEditor, onSaveDraft,
@@ -53,7 +54,7 @@ export default function MobileQuickPost({
 
       {/* Live preview */}
       <div ref={wrapRef} className="shrink-0 px-4 py-3 grid place-items-center" style={{ background: '#07090f' }}>
-        <div style={{ width: pw, height: Math.round(H * scale), overflow: 'hidden', borderRadius: 8, boxShadow: '0 12px 30px rgba(0,0,0,.5)' }}>
+        <div style={{ width: pw, height: Math.round(H * scale), overflow: 'hidden', borderRadius: 8, background: fill, boxShadow: '0 12px 30px rgba(0,0,0,.5)' }}>
           <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, position: 'relative', pointerEvents: 'none' }}>
             {content}
           </div>

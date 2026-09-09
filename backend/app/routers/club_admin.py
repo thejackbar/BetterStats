@@ -74,22 +74,12 @@ async def _org_billable_module_keys(session, org_id) -> list:
     return sorted({billing_key_for(m) for m in held})
 
 
-def _push_club_to_twenty(org_id, force_hot: bool = False, crm_trigger: Optional[str] = None,
-                         won_module_keys: Optional[list] = None) -> None:
-    """Fire-and-forget: push one club's Company fields (paid/trial modules, ARR,
-    renewal) to Twenty after a subscription change. No-op when Twenty isn't
-    configured; never raises into the request.
+def _sync_club_to_crm(org_id, crm_trigger: Optional[str] = None,
+                      won_module_keys: Optional[list] = None) -> None:
+    """Fire-and-forget: bring one club's sales pipeline into line after a
+    subscription change, and rescore it. Never raises into the request.
 
-    ``force_hot=True`` (a trial actually starting — see start_module_trial and
-    approve_module_request's trial branch) also forces the engagement score to
-    Hot (100) and upserts a real Lead, same treatment as a direct "onboard my
-    club" enquiry — a club being put on a trial is too strong a signal to wait
-    on the gradual recency/frequency formula or the nightly refresh.
-
-    ``crm_trigger`` keeps BetterCricket's OWN sales pipeline in lockstep with
-    the Twenty push, in the SAME background task — per direct instruction, our
-    own CRM must reflect every action immediately, not lag behind Twenty's
-    periodic/manual-only refresh. It's one of ``crm_rules.TRIGGERS``'
+    ``crm_trigger`` is what moves the deal. It's one of ``crm_rules.TRIGGERS``'
     subscription/trial keys ('trial_requested' | 'trial_started' |
     'subscription_won' | 'subscription_cancelled') — the STAGE each one
     resolves to (and whether it's even enabled at all) is a super-admin
@@ -108,16 +98,6 @@ def _push_club_to_twenty(org_id, force_hot: bool = False, crm_trigger: Optional[
     calculated from, so it has to be what was actually bought."""
     async def _run():
         try:
-            from app.services import twenty_sync
-            override = ({"engagementScore": 100, "engagementTier": "HOT", "inSalesCycle": True}
-                       if force_hot else None)
-            await twenty_sync.push_org_company(org_id, engagement_override=override)
-        except Exception:
-            _logging.getLogger(__name__).exception("twenty push failed")
-
-        if not crm_trigger:
-            return
-        try:
             from app.models.db import async_session_maker
             from app.services import crm as crm_service, crm_rules
             from app.services.club_directory import link_org_to_marketing_club
@@ -125,7 +105,7 @@ def _push_club_to_twenty(org_id, force_hot: bool = False, crm_trigger: Optional[
                 if crm_trigger == "subscription_cancelled":
                     held = await _org_billable_module_keys(session, org_id)
                     if held:
-                        return
+                        return   # a partial cancel leaves the deal alone
                 org = await session.get(Organisation, org_id,
                                         options=[selectinload(Organisation.module_subscriptions)])
                 if org is None:
@@ -138,8 +118,10 @@ def _push_club_to_twenty(org_id, force_hot: bool = False, crm_trigger: Optional[
                 mc = await link_org_to_marketing_club(session, org)
                 if mc is None:
                     return
-                pipeline = await crm_service.ensure_platform_pipeline(session)
-                match = await crm_rules.resolve(session, pipeline, crm_trigger)
+                match = None
+                if crm_trigger:
+                    pipeline = await crm_service.ensure_platform_pipeline(session)
+                    match = await crm_rules.resolve(session, pipeline, crm_trigger)
                 if match is not None:
                     exact = bool(won_module_keys) and crm_trigger == "subscription_won"
                     modules = (sorted(set(won_module_keys)) if exact
@@ -148,12 +130,13 @@ def _push_club_to_twenty(org_id, force_hot: bool = False, crm_trigger: Optional[
                         session, mc, stage_key=match["stage_key"], source="auto_trial",
                         module_keys=modules, advance_only=not match["force"],
                         exact_value=exact)
-                # Also check the score-based Target/Contacted -> Engaged rule right
-                # now, independent of whether Twenty is configured (the Twenty push
-                # above already no-ops silently when it isn't) — a subscription
-                # change is exactly the kind of discrete event that shouldn't wait
-                # for the sweep. Harmless no-op once the deal above is already past
-                # Engaged (e.g. a trial_started rule's own move to Trial).
+                # Rescore the club and check the score-based
+                # Target/Contacted -> Engaged rule right now: a subscription
+                # change is exactly the kind of discrete event that shouldn't
+                # wait for the nightly sweep. Runs whether or not a trigger
+                # moved the deal, and is a harmless no-op once the deal above
+                # is already past Engaged (a trial_started rule's own move to
+                # Trial, say).
                 await crm_service.sync_engagement_promotion(session, mc, org)
                 await session.commit()
         except Exception:
@@ -2078,9 +2061,9 @@ def _club_payload(
         # Full Rebuild (its wipe already committed before the pause).
         "full_sync_paused": full_sync_paused,
         "full_sync_kind": full_sync_kind,
-        # Cached Twenty engagement score from the club's linked marketing_clubs
+        # Cached engagement score from the club's linked marketing_clubs
         # row (see MarketingClub.engagement_score — written by every
-        # twenty_sync._engagement() call). NULL = never scored, which the All
+        # engagement._engagement() call). NULL = never scored, which the All
         # Clubs page shows as "not yet scored" rather than 0.
         "engagement_score": engagement_score,
         "engagement_tier": engagement_tier,
@@ -2236,7 +2219,7 @@ async def list_all_clubs(
             web_count_by_org[row.org_id] = row.cnt
 
         # The three engagement-action counts below are cheap bulk versions of
-        # the per-club signals twenty_sync._engagement() attributes when it
+        # the per-club signals engagement._engagement() attributes when it
         # computes the (cached) score this page also returns — org-keyed web
         # activity above, email opens/clicks, and direct "onboard my club"
         # enquiries. They drive the All Clubs "actions recorded" sub-filter,
@@ -2525,6 +2508,7 @@ async def get_general_settings(
         "bundle_discount_schedule": await ps.get_bundle_discount_schedule(db),
         "demo_booking_links": await ps.get_demo_booking_links(db),
         "backup_schedule": await ps.get_backup_schedule(db),
+        "webinar_recording_url": await ps.get_webinar_recording_url(db),
     }
 
 
@@ -2544,6 +2528,13 @@ class GeneralSettingsUpdate(BaseModel):
     # Merch storefront (migration 179) — same off-by-default, super-admin-only
     # posture as member_portal_enabled above.
     merch_storefront_enabled: Optional[bool] = None
+    # Where the /demo page sends people once the webinar has been and gone.
+    # The link does not exist until after the event, so it is a setting rather
+    # than a constant — see platform_settings._STR_KEYS. An empty string clears
+    # it (back to "recording coming shortly"), which is why the field is a
+    # plain Optional[str] read through exclude_unset rather than an is-not-None
+    # check: "" and absent have to mean different things.
+    webinar_recording_url: Optional[str] = None
     # module-count (str or int, JSON-friendly either way) -> whole-dollar
     # discount. See platform_settings.update_bundle_discount_schedule — this
     # REPLACES the whole table, it's not a merge.
@@ -2596,6 +2587,7 @@ async def patch_general_settings(
         "bundle_discount_schedule": await ps.get_bundle_discount_schedule(db),
         "demo_booking_links": await ps.get_demo_booking_links(db),
         "backup_schedule": await ps.get_backup_schedule(db),
+        "webinar_recording_url": await ps.get_webinar_recording_url(db),
     }
 
 
@@ -2628,7 +2620,7 @@ async def create_club(
         down;
       * stamps ``onboarding_method='super_admin_trial'`` on the club, which is
         what the setup wizard's auto-open and the trial-engagement score read;
-      * pushes the club to Twenty and creates the local CRM deal marked
+      * creates the local CRM deal marked
         'Super Admin Trial' immediately, so the engagement score is computed at
         creation rather than at the next nightly refresh.
 
@@ -2794,20 +2786,10 @@ async def create_club(
         club_name=name, link=f"{_settings.public_base_url}/login?invite={invite_token}",
     )
 
-    # Twenty + our own pipeline, immediately rather than at the next nightly
-    # refresh: creating a club and putting it on a trial is exactly the signal
-    # both are meant to reflect. Two separate background tasks on purpose —
-    # the Twenty push no-ops entirely when Twenty isn't configured, and the
-    # local deal must not inherit that gate.
-    from app.services import twenty_sync
+    # Put the club on the pipeline immediately rather than at the next nightly
+    # sweep: creating a club and putting it on a trial is exactly the signal the
+    # pipeline is meant to reflect.
     from app.services import crm as crm_service
-    background_tasks.add_task(
-        twenty_sync.push_self_serve_registration,
-        org_id=org.id, org_name=name, contact_name=admin_display_name,
-        email=admin_email, phone=admin.mobile_number,
-        modules=[k for k in trial_modules if k != MODULE_CORE],
-        source="super_admin_trial", lead_lifecycle=None, opportunity_stage=None,
-    )
     background_tasks.add_task(
         crm_service.sync_super_admin_trial_registration,
         org_id=org.id, org_name=name, contact_name=admin_display_name,
@@ -3185,12 +3167,10 @@ async def start_module_trial(
     mod_subs.start_trial_billing(org, module_key, start=body.start, end=body.end, days=days)
     await db.commit()
     await db.refresh(org, attribute_names=["module_subscriptions"])
-    # A new trial is a strong engagement signal (see twenty_sync._engagement's
-    # per-module upsell calc) — push it to Twenty now rather than waiting for the
-    # nightly refresh, same as the approve_module_request path below. force_hot
-    # forces the score to 100 and upserts a Lead rather than waiting for the
-    # gradual formula to notice.
-    _push_club_to_twenty(org.id, force_hot=True, crm_trigger="trial_started")
+    # A new trial is a strong engagement signal (see engagement._engagement's
+    # per-module upsell calc) — move the deal and rescore the club now rather
+    # than waiting for the nightly sweep, same as approve_module_request below.
+    _sync_club_to_crm(org.id, crm_trigger="trial_started")
     return _club_payload(org)
 
 
@@ -3518,7 +3498,7 @@ async def start_own_module_trial(
     await db.refresh(club, attribute_names=["module_subscriptions"])
     # Same signal-strength reasoning as start_module_trial / create_module_request's
     # trial branch — a trial actually starting always forces Hot(100)+Lead.
-    _push_club_to_twenty(club.id, force_hot=True, crm_trigger="trial_started")
+    _sync_club_to_crm(club.id, crm_trigger="trial_started")
     return {"ok": True}
 
 
@@ -3611,7 +3591,7 @@ async def cancel_own_module(
     # if this cancel left NOTHING billable held — cancelling one of several
     # modules shouldn't demote a deal that's still live for everything else
     # the club holds.
-    _push_club_to_twenty(club.id, crm_trigger="subscription_cancelled")
+    _sync_club_to_crm(club.id, crm_trigger="subscription_cancelled")
     return {"ok": True, "cancelled": targets}
 
 
@@ -3695,8 +3675,8 @@ async def create_module_request(
         requested_by=current_user.id,
     )
     db.add(req)
-    # Best-effort: surface the interest on the linked CRM club too (interestedModules
-    # in Twenty). Never blocks the request.
+    # Best-effort: surface the interest on the linked CRM club too. Never
+    # blocks the request.
     if body.kind in ("trial", "subscribe"):
         try:
             from app.models.db import MarketingClub
@@ -3708,9 +3688,8 @@ async def create_module_request(
                 mc.requested_trial_modules = sorted(wanted)
         except Exception:
             pass
-    # Uniform club→BetterCricket request telemetry + automated Twenty task (same
-    # helper the BetterComms tier request uses), so every ask is tracked and
-    # surfaces in the CRM action queue.
+    # Uniform club→BetterCricket request telemetry (the same helper the
+    # BetterComms tier request uses), so every ask is tracked.
     ev = await club_requests.add_request_event(
         db, org_id=club.id, request_type="module_request",
         summary=f"{club.name} requests {body.kind} of {body.module_key}",
@@ -3718,12 +3697,11 @@ async def create_module_request(
         source="app", requested_by=current_user.id,
         ref_table="module_action_requests", ref_id=req.id)
     await db.commit()
-    club_requests.fire_twenty_task(ev.id)
     if body.kind == "trial":
         # A club asking for a trial itself is as strong a signal as being put on
         # one — force the same Hot(100)+Lead treatment (start_module_trial /
         # approve_module_request give it at the grant end; this is the ask end).
-        _push_club_to_twenty(club.id, force_hot=True, crm_trigger="trial_requested")
+        _sync_club_to_crm(club.id, crm_trigger="trial_requested")
     await db.refresh(req)
     return _request_payload(req, org_name=club.name, requester=current_user.username)
 
@@ -3858,14 +3836,13 @@ async def approve_module_request(
     if result_sub is not None:
         req.result_subscription_id = result_sub.id
     await db.commit()
-    # Keep Twenty in step with the new paid/trial split (best-effort, configured-only).
-    # A trial approval is put-on-a-trial in every sense a direct grant is
-    # (start_module_trial above) — force the same Hot(100)+Lead treatment;
-    # a subscribe approval is a genuine conversion (CRM deal -> Won); cancel
-    # stays the ordinary billing-fields-only Twenty push, with the CRM deal
-    # only demoted if the org is left holding nothing billable at all.
-    _push_club_to_twenty(
-        org.id, force_hot=(req.kind == "trial"),
+    # Move the deal to match the new paid/trial split. A trial approval is
+    # put-on-a-trial in every sense a direct grant is (start_module_trial
+    # above); a subscribe approval is a genuine conversion (CRM deal -> Won);
+    # a cancel only demotes the deal if the org is left holding nothing
+    # billable at all.
+    _sync_club_to_crm(
+        org.id,
         crm_trigger=("subscription_won" if req.kind == "subscribe"
                     else "subscription_cancelled" if req.kind == "cancel"
                     else "trial_started" if req.kind == "trial" else None))
@@ -4181,6 +4158,88 @@ async def list_onboarding_requests(
         }
         for r in result.scalars().all()
     ]
+
+
+@router.get("/super/webinar-registrations")
+async def list_webinar_registrations(
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Everyone registered for the webinar, newest first, with the campaign
+    each registration came from.
+
+    Deliberately a separate list from the onboarding enquiries above: somebody
+    who signed up to watch a demo has not asked to be onboarded, and putting a
+    hundred of them in front of the staff who work that queue would bury the
+    clubs who did ask. The UTM columns are what make this reconcilable against
+    Meta's own attributed numbers — the two will not match, since Meta counts
+    on a 7-day click window.
+    """
+    from sqlalchemy import text as _text
+    rows = (await db.execute(_text("""
+        SELECT id, event_key, name, email, club, phone, role,
+               utm_source, utm_medium, utm_campaign, utm_content, utm_term,
+               click_id, click_source, referrer, landing_path,
+               visitor_id, email_sent, email_error,
+               reminder_sent_at, reminder_error,
+               streamyard_id, streamyard_error, created_at
+          FROM webinar_registrations
+         ORDER BY created_at DESC
+         LIMIT 5000
+    """))).mappings().all()
+    return [
+        {
+            **{k: v for k, v in row.items()
+               if k not in ("id", "created_at", "reminder_sent_at")},
+            "id": str(row["id"]),
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            "reminder_sent_at": (
+                row["reminder_sent_at"].isoformat() if row["reminder_sent_at"] else None
+            ),
+        }
+        for row in rows
+    ]
+
+
+@router.post("/super/webinar-reminders")
+async def send_webinar_reminders_now(
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Send the day-of reminder now, rather than waiting for the hourly sweep.
+
+    The escape hatch, not the mechanism — `jobs/scheduler.send_webinar_reminders`
+    is what normally does this. It exists because the reminder has exactly one
+    chance to be useful: if the sweep is missed on the night (a restart landing
+    on the wrong minute, the window arithmetic being wrong about a timezone),
+    there is no second run that matters.
+
+    Runs the SAME `webinar.send_reminders`, so the two cannot disagree about
+    who has already had one — and because the claim is on the row, pressing
+    this after the sweep has run emails nobody twice.
+    """
+    from app.services import webinar as _webinar
+    return await _webinar.send_reminders(db)
+
+
+@router.post("/super/webinar-streamyard-sync")
+async def sync_webinar_streamyard_now(
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Push every registrant StreamYard does not have yet, now.
+
+    The register route pushes each one as it arrives and the hourly upkeep pass
+    catches up anything it missed, so this exists for the two cases where an
+    hour is too long to wait: the registrations taken BEFORE the push was
+    built, and a run of failures somebody has just fixed at the StreamYard end.
+
+    Runs the SAME `webinar.sync_streamyard`, and a row already pushed is
+    skipped before any request is made — so pressing it twice registers nobody
+    twice and costs nothing.
+    """
+    from app.services import webinar as _webinar
+    return await _webinar.sync_streamyard(db)
 
 
 _ONBOARDING_STATUSES = {"new", "contacted", "onboarded", "closed"}
@@ -4857,6 +4916,22 @@ async def hard_refresh_org(
                         _logger.info(f"HardRefresh: competition grouping for {org_id_str}: {grp}")
                 except Exception as ge:
                     _logger.warning(f"HardRefresh: competition grouping failed for {org_id_str}: {ge}")
+
+            # AND RE-DERIVE THE MATCH PAIRING, for a club that has also imported
+            # its CricketStatz history. A sync brings matches in on the Cricket
+            # Australia side, and an imported twin of one of them has to be paired
+            # to it or the club counts that match twice. A club that has imported
+            # nothing does one cheap count and stops. Never raises: a pairing
+            # failure must not read as a sync failure.
+            try:
+                from app.services import match_pairing
+                from app.models.db import async_session_maker as _maker
+                async with _maker() as _db:
+                    pairs = await match_pairing.reconcile_org(_db, club.id)
+                if pairs.get("changed"):
+                    _logger.info(f"HardRefresh: match pairing for {org_id_str}: {pairs}")
+            except Exception as pe:
+                _logger.warning(f"HardRefresh: match pairing failed for {org_id_str}: {pe}")
 
             # Refresh planner statistics. A hard refresh delete+reinserts the
             # org's whole game-level dataset and rewrites player_season_stats,

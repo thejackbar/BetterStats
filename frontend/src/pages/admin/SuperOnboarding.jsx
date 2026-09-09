@@ -20,6 +20,240 @@ function fmtDate(iso) {
   return d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
+// Webinar registrations — a SEPARATE list from the onboarding enquiries above,
+// on purpose. Somebody who signed up to watch a demo has not asked to be
+// onboarded, and folding a hundred of them into that queue would bury the
+// clubs who did ask. The campaign columns are what make this reconcilable
+// against Meta's own attributed numbers; the two will not match, because Meta
+// counts on a 7-day click window.
+function WebinarRegistrations() {
+  const [rows, setRows] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  // Open by default. This list is the answer to "did that registration land?",
+  // and a panel that opens closed makes a real registration look like a missing
+  // one until somebody finds the toggle.
+  const [open, setOpen] = useState(true)
+  const [reminding, setReminding] = useState(false)
+  const [reminderNote, setReminderNote] = useState('')
+  const [pushing, setPushing] = useState(false)
+
+  const load = () => api.superWebinarRegistrations()
+    .then((data) => { setRows(Array.isArray(data) ? data : []); setError('') })
+    .catch((e) => setError(e.message || 'Could not load registrations.'))
+    .finally(() => setLoading(false))
+
+  useEffect(() => { load() }, [])
+
+  // The escape hatch, not the mechanism: the hourly sweep is what normally
+  // sends these. It is here because the reminder has one chance to be useful,
+  // and pressing it twice emails nobody twice — the claim is on the row.
+  const remind = async () => {
+    if (reminding) return
+    if (!window.confirm(
+      'Email every registrant who has not had the day-of reminder yet?\n\n'
+      + 'Nobody is emailed twice, and nothing is sent outside the few hours '
+      + 'before the session starts.'
+    )) return
+    setReminding(true)
+    setReminderNote('')
+    try {
+      const r = await api.superSendWebinarReminders()
+      setReminderNote(
+        r?.skipped
+          ? 'Not sent: outside the reminder window (it opens a few hours before the session).'
+          : `Sent ${r?.sent ?? 0}${r?.failed ? `, ${r.failed} failed` : ''}.`
+      )
+      await load()
+    } catch (e) {
+      setReminderNote(e.message || 'Could not send reminders.')
+    } finally {
+      setReminding(false)
+    }
+  }
+
+  // The catch-up, not the mechanism: each registration is pushed as it arrives
+  // and the hourly pass retries anything that failed. This is for the two cases
+  // where an hour is too long — the registrations taken before the push
+  // existed, and a run of failures just fixed at the StreamYard end. A row
+  // already pushed is skipped before any request, so pressing it twice
+  // registers nobody twice.
+  const pushStreamyard = async () => {
+    if (pushing) return
+    setPushing(true)
+    setReminderNote('')
+    try {
+      const r = await api.superSyncWebinarStreamyard()
+      setReminderNote(
+        r?.considered
+          ? `StreamYard: ${r.pushed} pushed`
+            + (r.skipped ? `, ${r.skipped} skipped` : '')
+            + (r.failed ? `, ${r.failed} failed` : '')
+          : 'StreamYard already has every registrant.'
+      )
+      await load()
+    } catch (e) {
+      setReminderNote(e.message || 'Could not push to StreamYard.')
+    } finally {
+      setPushing(false)
+    }
+  }
+
+  const csv = () => {
+    const cols = ['created_at', 'name', 'email', 'phone', 'club', 'role', 'utm_campaign',
+                  'utm_source', 'utm_medium', 'utm_content', 'email_sent', 'reminder_sent_at',
+                  'streamyard_id']
+    const escape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`
+    const body = [cols.join(','), ...rows.map((r) => cols.map((c) => escape(r[c])).join(','))].join('\n')
+    const url = URL.createObjectURL(new Blob([body], { type: 'text/csv;charset=utf-8' }))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'webinar-registrations.csv'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  if (loading) return null
+  if (error) {
+    return <p className="text-sm text-red-400 mt-8">{error}</p>
+  }
+
+  return (
+    <div className="mt-10">
+      <div className="flex flex-wrap items-end gap-3 mb-3">
+        <div>
+          <h2 className="text-lg font-semibold text-pb-text">Webinar registrations</h2>
+          <p className="text-xs text-pb-faint mt-1 max-w-2xl">
+            Everyone who registered at /demo, newest first. Registering for the demo is not the
+            same as asking to be onboarded, so these are kept out of the list above.
+          </p>
+        </div>
+        <div className="ml-auto flex gap-2">
+          {rows.length > 0 && (
+            <button
+              onClick={pushStreamyard}
+              disabled={pushing}
+              title="Register anyone StreamYard does not have yet"
+              className="font-mono text-[10px] tracking-wide2 uppercase text-pb-faint hover:text-pb-text border pb-hairline rounded px-3 py-1.5 transition disabled:opacity-50"
+            >
+              {pushing ? 'Pushing…' : 'Push to StreamYard'}
+            </button>
+          )}
+          {rows.length > 0 && (
+            <button
+              onClick={remind}
+              disabled={reminding}
+              title="Email everyone who has not had the day-of reminder"
+              className="font-mono text-[10px] tracking-wide2 uppercase text-pb-faint hover:text-pb-text border pb-hairline rounded px-3 py-1.5 transition disabled:opacity-50"
+            >
+              {reminding ? 'Sending…' : 'Send reminder'}
+            </button>
+          )}
+          {rows.length > 0 && (
+            <button
+              onClick={csv}
+              className="font-mono text-[10px] tracking-wide2 uppercase text-pb-faint hover:text-pb-text border pb-hairline rounded px-3 py-1.5 transition"
+            >
+              Export CSV
+            </button>
+          )}
+          <button
+            onClick={() => setOpen((o) => !o)}
+            className="font-mono text-[10px] tracking-wide2 uppercase text-pb-faint hover:text-pb-text border pb-hairline rounded px-3 py-1.5 transition"
+          >
+            {open ? 'Hide' : `Show (${rows.length})`}
+          </button>
+        </div>
+      </div>
+
+      {reminderNote && <p className="text-xs text-pb-dim mb-3">{reminderNote}</p>}
+
+      {open && (rows.length === 0 ? (
+        <div className="pb-card p-8 text-center">
+          <p className="text-sm text-pb-dim">
+            Nobody has registered yet. Registrations from /demo show up here.
+          </p>
+        </div>
+      ) : (
+        <div className="pb-card overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left font-mono text-[10px] tracking-wide2 uppercase text-pb-faint border-b pb-hairline">
+                <th className="px-3 py-2.5">Date</th>
+                <th className="px-3 py-2.5">Name</th>
+                <th className="px-3 py-2.5">Phone</th>
+                <th className="px-3 py-2.5">Club</th>
+                <th className="px-3 py-2.5">Role</th>
+                <th className="px-3 py-2.5">Campaign</th>
+                <th className="px-3 py-2.5">Email</th>
+                <th className="px-3 py-2.5">Reminder</th>
+                <th className="px-3 py-2.5">StreamYard</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id} className="border-b pb-hairline last:border-0 align-top">
+                  <td className="px-3 py-2.5 whitespace-nowrap text-pb-dim">{fmtDate(r.created_at)}</td>
+                  <td className="px-3 py-2.5">
+                    <div className="text-pb-text">{r.name}</div>
+                    <a href={`mailto:${r.email}`} className="text-xs text-pb-faint hover:text-pb-text underline">{r.email}</a>
+                  </td>
+                  {/* A real tel: link — this list is worked from a desk. Often
+                      blank, and that is expected: the field is optional, and a
+                      registration taken before it existed carries none either. */}
+                  <td className="px-3 py-2.5 whitespace-nowrap">
+                    {r.phone
+                      ? <a href={`tel:${String(r.phone).replace(/\s/g, '')}`} className="text-pb-text hover:underline">{r.phone}</a>
+                      : <span className="text-pb-faintest">-</span>}
+                  </td>
+                  <td className="px-3 py-2.5 text-pb-text">{r.club}</td>
+                  <td className="px-3 py-2.5 text-pb-dim">{r.role || '-'}</td>
+                  <td className="px-3 py-2.5">
+                    <div className="text-pb-dim">{r.utm_campaign || (r.click_source ? `${r.click_source} (no campaign tag)` : 'Direct')}</div>
+                    {r.utm_content && <div className="font-mono text-[10px] text-pb-faintest">{r.utm_content}</div>}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    {/* Whether the provider accepted the confirmation email, and
+                        why not if it didn't - what makes "they say they never
+                        got it" answerable months later. */}
+                    {r.email_sent
+                      ? <span className="font-mono text-[10px] text-emerald-400">SENT</span>
+                      : <span className="font-mono text-[10px] text-amber-400" title={r.email_error || 'Not sent yet'}>
+                          {r.email_error ? 'FAILED' : 'PENDING'}
+                        </span>}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    {/* The day-of reminder is its own send with its own
+                        outcome. A dash before the event is the ordinary state,
+                        not a problem — it goes out a few hours beforehand. */}
+                    {r.reminder_sent_at
+                      ? <span className="font-mono text-[10px] text-emerald-400" title={fmtDate(r.reminder_sent_at)}>SENT</span>
+                      : r.reminder_error
+                        ? <span className="font-mono text-[10px] text-amber-400" title={r.reminder_error}>FAILED</span>
+                        : <span className="text-pb-faintest">-</span>}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    {/* Whether StreamYard has them too, so nobody is asked to
+                        register a second time. A reason without an id is not
+                        always a failure — "no surname to send" is a row there
+                        was nothing to do for, which is why the amber carries
+                        the reason rather than just reading FAILED. */}
+                    {r.streamyard_id
+                      ? <span className="font-mono text-[10px] text-emerald-400" title={r.streamyard_id}>REGISTERED</span>
+                      : r.streamyard_error
+                        ? <span className="font-mono text-[10px] text-amber-400" title={r.streamyard_error}>NOT SENT</span>
+                        : <span className="text-pb-faintest">-</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export default function SuperOnboarding() {
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
@@ -209,6 +443,8 @@ export default function SuperOnboarding() {
             </table>
           </div>
         )}
+
+        <WebinarRegistrations />
       </div>
     </AdminLayout>
   )

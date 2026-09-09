@@ -3,7 +3,7 @@ import asyncio
 from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.models.db import async_session_maker
 from app.services.sync import sync_organisation
@@ -81,6 +81,94 @@ async def group_all_organisations():
                 result.get("grades_filled", 0),
                 result.get("seasons_unresolved", 0))
     logger.info("Competition grouping: grouped %d club(s) this run", done)
+
+
+async def pair_all_imported_matches():
+    """Re-derive which imported match is a synced match, club by club.
+
+    A club that syncs from Cricket Australia and has also imported its
+    CricketStatz history holds many of the same matches twice, and the pairing
+    is what counts each one once. It runs as an import goes, after a full sync
+    and once at boot — but a pass that fails, or a boot that never reached it,
+    leaves the club counting both sources with nothing on screen to say so, and
+    that is exactly what a club reported. This is the retry that gets them out
+    of it without anybody noticing first.
+
+    Costs nothing on a platform where it has already run: the pass re-derives
+    from the data as it stands and writes only what changed, and a club holding
+    no import never appears in the list at all.
+    """
+    from app.services import match_pairing
+
+    async with async_session_maker() as session:
+        orgs = (await session.execute(text("""
+            SELECT DISTINCT organisation_id FROM manual_games
+             WHERE cricketstatz_import_id IS NOT NULL
+        """))).scalars().all()
+
+    if not orgs:
+        return
+    changed = 0
+    for org_id in orgs:
+        try:
+            async with async_session_maker() as session:
+                result = await match_pairing.reconcile_org(session, org_id)
+        except Exception as e:  # one club is never the whole pass
+            logger.warning("Match pairing failed for %s: %s", org_id, e,
+                           exc_info=True)
+            continue
+        if result.get("changed"):
+            changed += 1
+            logger.info("Match pairing: %s — %s", org_id, result)
+    logger.info("Match pairing: %d of %d club(s) changed this run",
+                changed, len(orgs))
+
+
+async def repair_effective_views():
+    """Put back any effective view that has lost its source clause.
+
+    THE PAIRING IS ONLY WORTH ANYTHING IF THE VIEWS CAN ACT ON IT. Reported
+    live: `v_effective_games` and `v_effective_player_season_stats` were the
+    pre-pairing definitions while the other six were current, so every
+    imported match was correctly paired, correctly dropped from the innings
+    list, and STILL counted in the season aggregate — a career reading 15,333
+    runs and 28 hundreds against the club's own 10,444 and 16.
+
+    The boot applies all eight in one transaction and verifies them; that boot
+    logged 8 of 8 and two were stale again minutes later. Postgres's own log
+    named the shape of it: something outside this codebase issuing an OLDER
+    definition of `v_effective_games` — a pre-266 one fails loudly with
+    "cannot drop columns from view", a 266-era one has the same column list as
+    ours and so REPLACES it silently, taking the pairing clause with it.
+
+    So this is not a substitute for finding that process. It is what stops a
+    club's figures doubling in the meantime, because the cost of waiting is
+    paid by whoever reads their own career total. Idempotent — the same
+    statements the boot runs — and it writes nothing when nothing is wrong.
+    """
+    from app.services import superseded_ddl
+
+    async with async_session_maker() as session:
+        missing = [v for v, ok in
+                   (await superseded_ddl.verify(session)).items() if not ok]
+        if not missing:
+            logger.info("Effective views: 8 of 8 carry their source clause")
+            return
+        logger.error(
+            "Effective views: %s had lost their source clause — a club "
+            "holding both a CricketStatz import and a Cricket Australia sync "
+            "was counting the same match twice. Re-applying.",
+            ", ".join(missing))
+        for stmt in superseded_ddl.STATEMENTS:
+            await session.execute(text(stmt))
+        await session.commit()
+        still = [v for v, ok in
+                 (await superseded_ddl.verify(session)).items() if not ok]
+    if still:
+        logger.error("Effective views STILL missing after re-applying: %s",
+                     ", ".join(still))
+    else:
+        logger.info("Effective views: repaired %s", ", ".join(missing))
 
 
 async def sync_all_organisations():
@@ -278,34 +366,29 @@ async def resolve_all_drafts():
                 logger.error(f"Draft auto-resolve failed for draft {d.id}: {e}")
 
 
-async def refresh_twenty_engagement():
-    """Recompute each exported club's engagement rollup (usage breadcrumbs move
-    daily, so the score/tier drifts even when nothing else about the club does)
-    and PATCH it onto its Twenty Company. Skipped unless Twenty is configured."""
-    if not settings.twenty_configured:
-        return
-    from app.services import twenty_sync
-    logger.info("Starting scheduled Twenty engagement refresh")
-    try:
-        stats = await twenty_sync.refresh_engagement()
-        logger.info(f"Twenty engagement refresh done: {stats}")
-    except Exception as e:
-        logger.error(f"Twenty engagement refresh failed: {e}")
+async def refresh_engagement_scores():
+    """Rescore EVERY club nightly and re-run the pipeline promotion.
 
+    Usage breadcrumbs move daily, so a club's score and tier drift even when
+    nothing else about it does — and the Club Directory, BetterComms
+    Lists/Segments and the CRM board all read the cached number rather than
+    recomputing it themselves. This is what keeps that number honest.
 
-async def refresh_twenty_leads_tasks():
-    """Seed/refresh Leads from telemetry, mirror outstanding module requests to Tasks,
-    and scan trials + renewals into follow-up Tasks. Idempotent; the first run also
-    backfills whatever already qualifies. Skipped unless Twenty is configured."""
-    if not settings.twenty_configured:
-        return
-    from app.services import twenty_leads_tasks
-    logger.info("Starting scheduled Twenty leads/tasks refresh")
+    No external CRM in it. This job used to push to the retired external CRM
+    and returned immediately when that was not configured, only ever touching
+    clubs already exported to it — so once it was retired the platform-wide
+    refresh silently stopped and every cached score froze wherever it was last
+    individually touched. ``crm.recalc_all_engagement`` is a local
+    read/compute over our own tables with no external call in it at all."""
+    from app.models.db import async_session_maker
+    from app.services import crm as crm_service
+    logger.info("Starting scheduled engagement rescore")
     try:
-        stats = await twenty_leads_tasks.refresh_leads_and_tasks()
-        logger.info(f"Twenty leads/tasks refresh done: {stats}")
+        async with async_session_maker() as session:
+            stats = await crm_service.recalc_all_engagement(session)
+        logger.info(f"Engagement rescore done: {stats}")
     except Exception as e:
-        logger.error(f"Twenty leads/tasks refresh failed: {e}")
+        logger.error(f"Engagement rescore failed: {e}")
 
 
 # ─── CRM Sales Pipeline auto-recompute (Tier 2 incremental + Tier 3 global) ────
@@ -574,6 +657,48 @@ async def refresh_scout_players():
             logger.error(f"BetterScout refresh failed for club {org_guid}: {e}")
 
 
+async def webinar_upkeep():
+    """Keep the webinar's two lists in step, then remind on the day.
+
+    Two jobs in one hourly pass because they answer one question — is every
+    registrant where they should be, and have they been told:
+
+      1. Push anyone StreamYard does not have yet. The register route pushes
+         each one as it arrives, so this only ever catches up registrations
+         taken before that existed and pushes that failed on a wobble at their
+         end. Bounded, and it writes nothing once everybody is across.
+      2. Send the reminder, if the event's own send window is open.
+
+    HOURLY RATHER THAN A CRON PINNED TO THE RIGHT MOMENT, and the window is
+    what decides — `webinar.send_reminders` returns immediately outside it. A
+    one-shot cron has to be moved by hand for the next event and misses
+    entirely if the app happens to be restarting; a cheap hourly check that
+    reads the event's own constant does not.
+    """
+    from app.models.db import async_session_maker
+    from app.services import webinar
+
+    # Nothing to keep in step once the event has been and gone.
+    if not webinar.EVENT.is_past():
+        try:
+            async with async_session_maker() as session:
+                synced = await webinar.sync_streamyard(session)
+            if synced.get("considered"):
+                logger.info("Webinar StreamYard sync: %s", synced)
+        except Exception as e:
+            logger.error(f"Webinar StreamYard sync failed: {e}")
+
+    if not webinar.reminder_window_open():
+        return
+    try:
+        async with async_session_maker() as session:
+            result = await webinar.send_reminders(session)
+        if result.get("claimed"):
+            logger.info("Webinar reminders: %s", result)
+    except Exception as e:
+        logger.error(f"Webinar reminder sweep failed: {e}")
+
+
 async def comms_daily_maintenance():
     """BetterComms daily housekeeping, run just after the AWS quota window rolls
     over (midnight UTC): (1) trip the bounce/complaint circuit breaker on any
@@ -669,6 +794,34 @@ def start_scheduler():
         max_instances=1,
         coalesce=True,
     )
+    # Re-derive the CricketStatz match pairing for the clubs that hold an
+    # import. The pass runs as an import goes and after a full sync; this is
+    # the retry, so a boot that never reached it cannot leave a club counting
+    # both its sources indefinitely.
+    scheduler.add_job(
+        pair_all_imported_matches,
+        trigger="cron",
+        hour=2,
+        minute=50,
+        timezone=PERTH,
+        id="nightly_match_pairing",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    # A view that has lost its source clause counts a club's matches twice, so
+    # the check that already runs at boot runs hourly as well. It writes
+    # nothing when nothing is wrong; see repair_effective_views for why this
+    # exists rather than trusting one pass through a long startup block.
+    scheduler.add_job(
+        repair_effective_views,
+        trigger="cron",
+        minute=20,
+        id="hourly_effective_view_repair",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
     # BetterMerch — pull Square canteen/bar stock + sales daily for connected clubs.
     scheduler.add_job(
         sync_all_square,
@@ -688,31 +841,22 @@ def start_scheduler():
         id="daily_fantasy_settle",
         replace_existing=True,
     )
-    # BetterCricket CRM — refresh each exported club's engagement score daily
-    # (usage breadcrumbs move even when the club record doesn't). No-op when
-    # Twenty isn't configured.
+    # BetterCricket CRM — rescore EVERY club daily (usage breadcrumbs move even
+    # when the club record doesn't), and re-run the pipeline promotion. Runs
+    # whether or not any external CRM is configured: the score is computed from
+    # our own tables and cached on the club row, which is what the Club
+    # Directory, BetterComms Lists/Segments and the CRM board read.
     scheduler.add_job(
-        refresh_twenty_engagement,
+        refresh_engagement_scores,
         trigger="cron",
         hour=6,
         minute=0,
-        id="daily_twenty_engagement",
-        replace_existing=True,
-    )
-    # BetterCricket CRM — seed/refresh Leads from telemetry and raise follow-up Tasks
-    # (outstanding module requests, expiring trials, upcoming renewals) daily. No-op
-    # when Twenty isn't configured.
-    scheduler.add_job(
-        refresh_twenty_leads_tasks,
-        trigger="cron",
-        hour=7,
-        minute=0,
-        id="daily_twenty_leads_tasks",
+        id="daily_engagement_rescore",
         replace_existing=True,
     )
     # Self-serve trial onboarding, Phase 16 — daily scan for trial lifecycle
     # events and onboarding nudges, emailed straight to the club's own admin.
-    # Right after the Twenty scan since it's conceptually adjacent (both read
+    # Right after the engagement rescore since it's conceptually adjacent (both read
     # org_module_subscriptions). No-op unless a super admin has turned it on.
     scheduler.add_job(
         send_trial_lifecycle_nudges,
@@ -831,6 +975,17 @@ def start_scheduler():
         id="daily_scout_refresh",
         replace_existing=True,
     )
+    # Webinar upkeep — hourly at :20. Pushes any registrant StreamYard does not
+    # have, then sends the reminder if the event's own window is open (see
+    # webinar_upkeep for why hourly rather than one pinned cron). Off the hour
+    # so it never lands in the same minute as the Meta Ads snapshot at :05.
+    scheduler.add_job(
+        webinar_upkeep,
+        trigger="cron",
+        minute=20,
+        id="webinar_reminders",
+        replace_existing=True,
+    )
     # BetterComms daily maintenance — 00:15 UTC, just after AWS's daily send
     # quota resets at midnight UTC: trip the bounce/complaint breaker, then resume
     # any campaigns whose overflow was deferred to today's fresh allowance.
@@ -866,7 +1021,7 @@ def start_scheduler():
     scheduler.start()
     logger.info("Scheduler started — marketing crawl %s, results sync Sun+Mon 01:00 Perth, "
                 "drift check first Sun 05:00 Perth, Square 04:00, fantasy settle 05:00, "
-                "Twenty engagement 06:00, trial lifecycle nudges 08:00, notifications 08:45, "
+                "engagement rescore 06:00, trial lifecycle nudges 08:00, notifications 08:45, "
                 "BetterScout refresh 09:00, Meta Ads snapshot hourly at :05, "
                 "draft tick /15min", marketing_mode)
 

@@ -39,7 +39,9 @@ import { useBlankLayer } from '../../social/useBlankLayer'
 import { useEditHistory } from '../../social/useEditHistory'
 import { usePages } from '../../social/usePages'
 import PageStrip from '../../components/admin/socialpost/PageStrip'
+import PostPreviewModal from '../../components/admin/socialpost/PostPreviewModal'
 import { templateToBlocks, CUSTOM_EDITABLE } from '../../social/templateToBlocks'
+import { POST_SIZES, DEFAULT_POST_SIZE, postSizeOf, PostFrame, frameTransform } from '../../social/postSizes'
 import { resolveClubFonts, fontWeightFor, buildFontFaceCss } from '../../lib/theme'
 
 // Stable initial value for the (empty) Custom Edit overlay layer.
@@ -101,6 +103,9 @@ const TEMPLATES = [
 // crop window to reposition and they are deliberately absent.
 const HERO_CROP_ASPECT = { T1: 480 / 845, T3: 380 / 1080, T10: 720 / 1080 }
 const HERO_FOCUS_TEMPLATES = Object.keys(HERO_CROP_ASPECT)
+// The layouts drawn around a hero photo. Derived from the same id list the Hero
+// Image panel is gated on, so the two can't drift apart.
+const HERO_SLOT_TEMPLATES = ['T1', 'T3', 'T6', 'T7', 'T10', 'C1', 'C3']
 
 const TAB_MAP = {
   T1: 'lineup', T2: 'lineup', T3: 'lineup', T4: 'lineup', T5: 'lineup',
@@ -850,6 +855,10 @@ export default function AdminSocialPost() {
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState(null)
+  const [previewOpen, setPreviewOpen] = useState(false)
+  // "That worked, and here is where it went" — shown under the header after a
+  // save, because the two save buttons put things in two very different places.
+  const [savedNote, setSavedNote] = useState(null)
   const [savingToClubRoom, setSavingToClubRoom] = useState(false)
   const [clubRoomSaved, setClubRoomSaved] = useState(false)
 
@@ -900,6 +909,20 @@ export default function AdminSocialPost() {
     document.head.appendChild(style)
     return () => style.remove()
   }, [clubFont])
+  // The shape of the canvas the post is designed on — square, 4:5 portrait or
+  // 9:16 story. Persisted like the other Style controls, since a club that
+  // posts to one place mostly keeps posting to it.
+  const [postSize, setPostSize] = useState(() =>
+    localStorage.getItem('bs_social_post_size') || DEFAULT_POST_SIZE
+  )
+  // How a fixed 1080×1080 layout is placed into a canvas that isn't square:
+  // 'fit' shows the whole layout with the background running past it, 'fill'
+  // scales it up and crops. Fit is the default because it never loses artwork.
+  const [postFit, setPostFit] = useState(() =>
+    localStorage.getItem('bs_social_post_fit') || 'fit'
+  )
+  useEffect(() => { localStorage.setItem('bs_social_post_size', postSize) }, [postSize])
+  useEffect(() => { localStorage.setItem('bs_social_post_fit', postFit) }, [postFit])
   // Background texture, layered over any template — persisted like the other
   // Style controls so a club's preferred "finish" carries between posts.
   const [bgStyle, setBgStyle] = useState(() =>
@@ -1115,6 +1138,11 @@ export default function AdminSocialPost() {
     setSavedTemplates(next)
     localStorage.setItem('bs_social_templates', JSON.stringify(next))
     setSaveTemplateName('')
+    // Templates land under Design → Your templates, and — being localStorage —
+    // on THIS browser only. Both worth saying, since neither is visible from
+    // the button that just saved it.
+    setSavedNote({ text: `Saved as “${name}” — Design → Your templates, on this browser`, tool: 'design' })
+    setTimeout(() => setSavedNote(null), 8000)
   }
   const applyTemplate = (tpl) => {
     if (!tpl) return
@@ -1785,9 +1813,9 @@ export default function AdminSocialPost() {
     setExporting(true)
     setExportError(null)
     try {
-      const splitOn = isScorecard && scSplit
-      const W = splitOn ? 1080 : (tmpl.w || (tmpl.isScorecard ? 1920 : 1080))
-      const H = splitOn ? 1080 : (tmpl.h || 1080)
+      // W/H come from the one place the canvas size is decided (see "Preview
+      // renderer" below) — a second copy of that formula here is how the
+      // downloaded PNG starts coming out a different shape from the preview.
       const stamp = Date.now()
       // A Blank-tab carousel exports every page as its own PNG (slideN).
       const roundCount = (tmpl.kind === 'fixtures' || tmpl.kind === 'results') ? roundPages[tmpl.kind].count : 1
@@ -1805,7 +1833,7 @@ export default function AdminSocialPost() {
           if (!node) continue
           await exportNodeToPng(node, { width: W, height: H, fileName: `betterstats-${templateId.toLowerCase()}-${stamp}-slide${i + 1}.png` })
         }
-      } else if (splitOn) {
+      } else if (scSplitOn) {
         // Scorecard split into 2 square posts — one team per slide.
         for (let i = 0; i < 2; i++) {
           const node = scSplitPageRefs.current[i]
@@ -1833,12 +1861,15 @@ export default function AdminSocialPost() {
     setExportError(null)
     setClubRoomSaved(false)
     try {
-      const W = tmpl.w || (tmpl.isScorecard ? 1920 : 1080)
-      const H = tmpl.h || 1080
+      // Same shared W/H as the export and the preview.
       const blob = await exportNodeToPng(renderRef.current, { width: W, height: H, download: false })
       await api.clubRoomSaveSocialExport(blob, tmpl.label || templateId)
       setClubRoomSaved(true)
-      setTimeout(() => setClubRoomSaved(false), 3000)
+      // Say where it went. This button saves a finished PICTURE into the TV
+      // slideshow — it is not "save this design", which is SAVE AS TEMPLATE —
+      // and a bare "✓ SAVED" is what makes the two read as the same thing.
+      setSavedNote({ text: 'Picture added to Club Room Mode', to: '/admin/club-room', linkText: 'Open Club Room' })
+      setTimeout(() => { setClubRoomSaved(false); setSavedNote(null) }, 8000)
     } catch (e) {
       setExportError(e.message || 'Could not save to Club Room')
     } finally {
@@ -2203,6 +2234,12 @@ export default function AdminSocialPost() {
   if (tmpl.kind === 'blank') {
     extraProps.items = canvas.items
     extraProps.data = blankData
+    // The blank canvas IS the post's shape (its blocks carry their own
+    // coordinates), so it has to be told the size rather than falling back to
+    // BlankCanvas's 1080×1080 default. Read straight off postSize — the shared
+    // W/H below is declared after this point in the render body.
+    extraProps.width = postSizeOf(postSize).w
+    extraProps.height = postSizeOf(postSize).h
   }
   if (tmpl.kind === 'event') {
     extraProps.event = event
@@ -2275,14 +2312,90 @@ export default function AdminSocialPost() {
   )
 
   // ─── Preview renderer ────────────────────────────────────────────────────────
-  const W = scSplitOn ? 1080 : (tmpl.w || (isScorecard ? 1920 : 1080))
-  const H = scSplitOn ? 1080 : (tmpl.h || 1080)
+  // The size a layout is DRAWN at (fixed, baked into each template component)
+  // and the size of the CANVAS it is being posted on. They're the same thing
+  // for a square post, which is why the common case is unchanged.
+  const nativeW = tmpl.w || (isScorecard ? 1920 : 1080)
+  const nativeH = tmpl.h || 1080
+  // Scorecards are 1920×1080 and already have their own reframing control (the
+  // Instagram-squares split), so the post-size picker is for everything else.
+  const sizeApplies = !isScorecard
+  const activeSize = postSizeOf(postSize)
+  const W = scSplitOn ? 1080 : sizeApplies ? activeSize.w : nativeW
+  const H = scSplitOn ? 1080 : sizeApplies ? activeSize.h : nativeH
+  // The Blank Canvas is genuinely whatever shape the post is — its blocks carry
+  // their own coordinates. A fixed template can't re-lay itself out, so it is
+  // placed into the canvas instead (see social/postSizes.jsx).
+  const framed = !isBlankTab && (W !== nativeW || H !== nativeH)
+  const frameGeom = frameTransform(W, H, nativeW, nativeH, postFit)
+  // Wraps a fixed template for the canvas it's being posted on. Used by the
+  // live preview AND the off-screen export node, so the two cannot disagree.
+  const frameTemplate = (node) => (framed
+    ? <PostFrame canvasW={W} canvasH={H} nativeW={nativeW} nativeH={nativeH} mode={postFit}>{node}</PostFrame>
+    : node)
+
+  // Every page this post exports as, in order — ONE definition, read by the
+  // off-screen export nodes AND by the Preview overlay. Two copies of "what is
+  // in this post" is how a preview starts showing something the download
+  // doesn't have.
+  // What shows in the letterbox bands when a square layout is fitted onto a
+  // taller canvas. Without this they're the canvas well's own near-black, which
+  // reads as an unfinished export rather than a deliberate portrait post — a
+  // texture from Brand covers them, and the club's own primary is the sane
+  // default when there isn't one.
+  const canvasFill = framed && postFit === 'fit' ? renderPalette.primary : undefined
+  const pageBackground = bgActive
+    ? <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} {...bgExtraProps} />
+    : null
+  const templateNode = (props = {}) => frameTemplate(
+    <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers}
+      palette={templatePalette} headline={headline} {...extraProps} {...props} />
+  )
+  const postPages = (() => {
+    if (isBlankTab && pages.count > 1) {
+      return pages.all().map((items, i) => ({
+        key: `carousel-${i}`, label: `Page ${i + 1}`,
+        setRef: (el) => { pageRefs.current[i] = el },
+        content: <>{pageBackground}<BlankCanvas team={team} palette={templatePalette} items={items} data={blankData} width={W} height={H} /></>,
+      }))
+    }
+    if (roundPagesOn) {
+      return chunkEven(tmpl.kind === 'fixtures' ? fixtures : results, roundPage.count).map((chunk, i) => ({
+        key: `round-${i}`, label: `Page ${i + 1}`,
+        setRef: (el) => { roundPageRefs.current[i] = el },
+        content: <>{pageBackground}{templateNode(tmpl.kind === 'fixtures' ? { fixtures: chunk } : { results: chunk })}</>,
+      }))
+    }
+    if (scSplitOn) {
+      return ['home', 'away'].map((side, i) => ({
+        key: `sc-${side}`, label: i === 0 ? 'Batted first' : 'Chasing',
+        setRef: (el) => { scSplitPageRefs.current[i] = el },
+        content: <>{pageBackground}{templateNode({ only: side })}</>,
+      }))
+    }
+    return [{
+      key: 'single', label: tmpl.name || 'Post',
+      setRef: (el) => { renderRef.current = el },
+      content: (
+        <>
+          {pageBackground}
+          {templateNode()}
+          {customEdit && !isBlankTab && (
+            <BlankCanvas team={team} palette={templatePalette} items={overlay.items} data={blankData} transparent width={W} height={H} style={{ position: 'absolute', inset: 0 }} />
+          )}
+        </>
+      ),
+    }]
+  })()
 
   // ─── Controls ────────────────────────────────────────────────────────────────
   const showMatchInfo = !['scorecard', 'events', 'blank'].includes(activeTab)
   const showOpponent  = !['scorecard', 'fixtures', 'results', 'events', 'blank'].includes(activeTab)
   const showPlayers   = activeTab !== 'scorecard' && activeTab !== 'blank' && tmpl.maxPlayers > 0
-  const showHeroImage = ['T1','T3','T6','T7','T10','C1','C3'].includes(templateId)
+  const showHeroImage = HERO_SLOT_TEMPLATES.includes(templateId)
+  const HERO_SLOT_LAYOUT_NAMES = HERO_SLOT_TEMPLATES
+    .map((id) => TEMPLATES.find((t) => t.id === id)?.name)
+    .filter(Boolean)
 
   // ─── Mobile quick post ────────────────────────────────────────────────────
   if (isMobile && !forceFullEditor) {
@@ -2291,7 +2404,9 @@ export default function AdminSocialPost() {
         {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} {...bgExtraProps} />}
         {isBlankTab
           ? <BlankCanvas team={team} palette={templatePalette} items={canvas.items} data={blankData} width={W} height={H} />
-          : <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />}
+          : frameTemplate(
+            <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />
+          )}
         {customEdit && !isBlankTab && (
           <BlankCanvas team={team} palette={templatePalette} items={overlay.items} data={blankData} transparent width={W} height={H} style={{ position: 'absolute', inset: 0 }} />
         )}
@@ -2332,7 +2447,7 @@ export default function AdminSocialPost() {
         <SocialBackgroundDefs />
         <MobileQuickPost
           moduleLogo={moduleBrand('socials').logo} clubName={settings?.name}
-          W={W} H={H} content={previewContent} fontStyle={fontStyle}
+          W={W} H={H} content={previewContent} fontStyle={fontStyle} fill={canvasFill}
           types={TABS.map((t) => ({ key: t.key, label: t.label }))} activeType={activeTab} onPickType={switchTab}
           fields={mFields} palettes={mPalettes} paletteKey={paletteKey} onPickPalette={setPaletteKey}
           onExport={handleExport} exporting={exporting} onSaveDraft={saveCurrentTemplate}
@@ -2443,7 +2558,10 @@ export default function AdminSocialPost() {
   }
 
   // Media library handlers (optimistic upload, then swap in the stored URL).
-  const uploadMedia = async (files) => {
+  // `use` puts the stored asset straight onto the post — what an edited image
+  // coming back from the background remover wants, where a bulk drop of ten
+  // photos does not.
+  const uploadMedia = async (files, { use = false } = {}) => {
     for (const f of files) {
       if (!f) continue
       const tmpId = `tmp_${Date.now()}_${Math.round(Math.random() * 1e6)}`
@@ -2452,7 +2570,13 @@ export default function AdminSocialPost() {
       try {
         const saved = await api.uploadSocialMedia(f)
         setMediaAssets((a) => a.map((x) => (x.id === tmpId ? saved : x)))
-      } catch { setMediaAssets((a) => a.filter((x) => x.id !== tmpId)) }
+        if (use) useMediaAsset(saved)
+      } catch {
+        setMediaAssets((a) => a.filter((x) => x.id !== tmpId))
+        // The upload failed but the edit is real work — keep it on the post
+        // from the local blob rather than throwing it away.
+        if (use) useMediaAsset({ id: tmpId, name: f.name, url: tmpUrl })
+      }
     }
   }
   const useMediaAsset = (asset) => {
@@ -2486,6 +2610,19 @@ export default function AdminSocialPost() {
     try { await api.deleteSocialMedia(asset.id) } catch { /* asset stays removed locally */ }
   }
   const pickImageForItem = (itemId) => { pendingImgItem.current = itemId; blankImgInputRef.current?.click() }
+  // Crop / remove the background on the image ALREADY in a block. The hero
+  // photo and sponsor logos have had this since they were built; an image block
+  // only ever got the editor on the way in (replace), so an uploaded PNG that
+  // turned out to have a white background could not be cleaned up in place.
+  const editImageForItem = (itemId) => {
+    const it = layer.items.find((x) => x.id === itemId)
+    if (it?.src) setEditor({ key: 'blankimg', itemId, source: it.src })
+  }
+  // The same editor for a club-library asset. The cleaned-up version is stored
+  // as a NEW asset rather than overwriting: the original may already be on a
+  // post somebody has not re-exported, and a cut-out is rarely a replacement
+  // for every use of the picture.
+  const editLibraryAsset = (asset) => { if (asset?.url) setEditor({ key: 'libraryimg', source: asset.url, assetName: asset.name }) }
 
   const clubName = settings?.name || 'Club'
   const headerLeft = (
@@ -2533,6 +2670,13 @@ export default function AdminSocialPost() {
       {exportError && <span className="text-pb-red text-[10px] font-mono truncate max-w-[140px]">{exportError}</span>}
       <button onClick={handleReset} title="Reset the fields for this post type"
         className="px-2.5 h-8 rounded-md border pb-hairline2 font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">↺ RESET</button>
+      {/* See the finished post with none of the editing chrome on it — and
+          every page of a carousel at once, which the canvas can't show. */}
+      <button onClick={() => setPreviewOpen(true)} data-testid="open-preview"
+        title={postPages.length > 1 ? `Preview all ${postPages.length} pages` : 'Preview this post full size'}
+        className="px-3 h-8 rounded-md border pb-hairline2 font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text hover:border-pb-accent transition-colors">
+        ◉ PREVIEW{postPages.length > 1 ? ` (${postPages.length})` : ''}
+      </button>
       <button onClick={saveCurrentTemplate} title="Save this post as a reusable template"
         className="px-3 h-8 rounded-md border pb-hairline2 font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text hover:border-pb-accent transition-colors">SAVE AS TEMPLATE</button>
       {!((isBlankTab && pages.count > 1) || roundPagesOn || scSplitOn) && (
@@ -2551,6 +2695,8 @@ export default function AdminSocialPost() {
     source: DATA_TABS.includes(activeTab) ? 'pull it first' : 'nothing to pull',
     design: `${tabTemplates.length} layout${tabTemplates.length === 1 ? '' : 's'}`,
     content: 'this post', data: 'live', brand: 'colour · type',
+    photos: `club library · ${mediaAssets.length}`,
+    text: 'add words', elements: 'add shapes',
     layers: `${layer.items.length} block${layer.items.length === 1 ? '' : 's'}`,
   }[tool] || ''
 
@@ -2577,14 +2723,14 @@ export default function AdminSocialPost() {
           <PageStrip count={2} index={scSplitIdx} onGoTo={setScSplitIdx} fixed />
         )}
         <div style={{ width: pw, height: ph, overflow: 'hidden', borderRadius: 6, background: '#080808', boxShadow: '0 24px 60px rgba(0,0,0,.55)' }}>
-          <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: showBlankTools ? 'auto' : 'none', position: 'relative' }}>
+          <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: showBlankTools ? 'auto' : 'none', position: 'relative', background: canvasFill }}>
             {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} {...bgExtraProps} />}
             {isBlankTab ? (
               <BlankCanvas team={team} palette={templatePalette} items={canvas.items} data={blankData}
                 interactive scale={scale} selectedIds={canvas.selIds}
                 onSelect={canvas.select} onDeselect={canvas.deselect} onPatchMany={canvas.patchMany}
                 onGestureStart={() => record('Move block')} onDuplicate={hDuplicate} onRemove={hRemove} />
-            ) : (
+            ) : frameTemplate(
               <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />
             )}
             {customEdit && !isBlankTab && (
@@ -2597,7 +2743,7 @@ export default function AdminSocialPost() {
           </div>
         </div>
         <div className="mt-2 flex items-center justify-between gap-3" style={{ width: pw }}>
-          <span className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faintest">{W} × {H} · {Math.round(scale * 100)}% · {isBlankTab && pages.count > 1 ? `PAGE ${pages.index + 1} OF ${pages.count} · CAROUSEL` : roundPagesOn ? `PAGE ${roundPage.idx + 1} OF ${roundPage.count} · CAROUSEL` : scSplitOn ? `PAGE ${scSplitIdx + 1} OF 2 · INSTAGRAM SQUARES` : 'SINGLE POST'}</span>
+          <span className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faintest">{W} × {H} · {Math.round(scale * 100)}% · {isBlankTab && pages.count > 1 ? `PAGE ${pages.index + 1} OF ${pages.count} · CAROUSEL` : roundPagesOn ? `PAGE ${roundPage.idx + 1} OF ${roundPage.count} · CAROUSEL` : scSplitOn ? `PAGE ${scSplitIdx + 1} OF 2 · INSTAGRAM SQUARES` : sizeApplies ? `${activeSize.label.toUpperCase()} · ${activeSize.sub}` : 'SINGLE POST'}</span>
           <span className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faintest">{showBlankTools ? 'DRAG TO MOVE · SHIFT-CLICK FOR SEVERAL' : ''}</span>
         </div>
       </div>
@@ -2609,13 +2755,13 @@ export default function AdminSocialPost() {
       items={layer.items} selIds={layer.selIds}
       onUpdate={hUpdate} onReorder={hReorder}
       onDuplicate={hDuplicate} onRemove={hRemove} onAlign={hAlign}
-      palette={themedPalette} players={allPlayers} onPickImage={pickImageForItem}
+      palette={themedPalette} players={allPlayers} onPickImage={pickImageForItem} onEditImage={editImageForItem}
     />
   )
 
   const photosPanel = (
     <MediaLibraryPanel
-      assets={mediaAssets} onUpload={uploadMedia} onUseAsset={useMediaAsset} onAddEmptyFrame={() => addBlock('image')}
+      assets={mediaAssets} onUpload={uploadMedia} onUseAsset={useMediaAsset} onEditAsset={editLibraryAsset} onAddEmptyFrame={() => addBlock('image')}
       players={allPlayers} onAddPlayerPhoto={(pid) => addBlock('data', { kind: 'playerphoto', playerId: pid })}
       onAddBrandLockup={() => addBlock('brand')}
       sponsors={adminSponsors.map((s) => ({ name: s.name, url: `${BASE_URL}/images/sponsors/${s.id}/logo` }))}
@@ -2686,6 +2832,23 @@ export default function AdminSocialPost() {
         panelMeta={panelMeta}
         renderCanvas={renderCanvas}
         inspector={inspectorNode}
+        notice={savedNote ? (
+          <div data-testid="saved-note" className="shrink-0 flex items-center gap-3 px-3.5 py-2 border-b pb-hairline"
+            style={{ background: 'color-mix(in srgb, var(--pb-accent) 10%, var(--pb-surface))' }}>
+            <span className="font-mono text-[10px] tracking-wide2 uppercase" style={{ color: 'var(--pb-accent)' }}>Saved</span>
+            <span className="text-[12px] text-pb-text">{savedNote.text}</span>
+            {savedNote.to && (
+              <button onClick={() => navigate(savedNote.to)} data-testid="saved-note-link"
+                className="font-mono text-[10px] tracking-wide2 uppercase underline underline-offset-2 text-pb-dim hover:text-pb-text">{savedNote.linkText || 'Open'}</button>
+            )}
+            {savedNote.tool && (
+              <button onClick={() => { setTool(savedNote.tool); setSavedNote(null) }} data-testid="saved-note-link"
+                className="font-mono text-[10px] tracking-wide2 uppercase underline underline-offset-2 text-pb-dim hover:text-pb-text">Show me</button>
+            )}
+            <span className="flex-1" />
+            <button onClick={() => setSavedNote(null)} className="font-mono text-[11px] text-pb-faint hover:text-pb-text px-1">✕</button>
+          </div>
+        ) : null}
         panel={(
           <div className="flex flex-col gap-4">
             {tool === 'source' && (
@@ -2831,6 +2994,32 @@ export default function AdminSocialPost() {
                 onSelect={layer.select} onReorder={hReorder}
                 onDuplicate={hDuplicate} onRemove={hRemove}
                 onMoveLayerBefore={hMoveBefore} historyLog={history.log}
+                note={!isBlankTab ? (
+                  // The stack below is the blocks YOU have added. A built-in
+                  // layout is one drawn component, not a set of layers, so
+                  // "send this image behind that heading" genuinely isn't a
+                  // thing on most of them — and its own background is opaque,
+                  // so a block behind it would be invisible anyway. Say which
+                  // way out applies rather than letting Forward/Backward look
+                  // broken.
+                  <div className="rounded-md border pb-hairline bg-pb-surface2 p-2.5 flex flex-col gap-1.5" data-testid="layers-template-note">
+                    <span className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faint">On a built-in layout</span>
+                    <p className="text-[11px] leading-relaxed text-pb-dim">
+                      {tmpl.name} is one fixed design, so blocks you add always sit on top of it — Forward and Backward order them against each other, not against the layout's own text.
+                    </p>
+                    {CUSTOM_EDITABLE.includes(templateId) ? (
+                      <button onClick={beginCustomEdit} data-testid="layers-custom-edit"
+                        className="self-start px-2.5 py-1.5 rounded border text-[11px] font-mono text-pb-dim hover:text-pb-text transition-colors"
+                        style={{ borderColor: 'var(--pb-accent)', color: 'var(--pb-accent)' }}>
+                        ✎ Open as movable blocks
+                      </button>
+                    ) : (
+                      <p className="text-[11px] leading-relaxed text-pb-faintest">
+                        To reorder everything freely, build it on the <button onClick={() => switchTab('blank')} className="underline underline-offset-2 text-pb-dim hover:text-pb-text">Blank canvas</button>, where every element is its own layer.
+                      </p>
+                    )}
+                  </div>
+                ) : null}
               />
             )}
             {tool === 'brand' && (<>
@@ -3144,6 +3333,59 @@ export default function AdminSocialPost() {
             </>)}
 
             {tool === 'design' && (<>
+            {/* Post size — the shape of the canvas. Hidden on the scorecards,
+                which are 1920×1080 and have their own reframing control (the
+                Instagram-squares split further down). */}
+            {sizeApplies && (
+              <section className="pb-card p-4">
+                <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Post size</h2>
+                <p className="text-pb-faintest text-[10px] mb-2.5">The canvas this post is made on. Instagram gives a 4:5 portrait more room in the feed than a square.</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {POST_SIZES.map((s) => {
+                    const on = postSize === s.key
+                    // A miniature of the real proportions, so the choice reads
+                    // as a shape rather than as three numbers.
+                    const th = 34, tw = Math.round(th * (s.w / s.h))
+                    return (
+                      <button key={s.key} onClick={() => setPostSize(s.key)} title={`${s.w} × ${s.h} — ${s.where}`}
+                        className={`flex flex-col items-center gap-1.5 py-2.5 rounded border transition-colors ${on ? '' : 'border-pb-hairline hover:border-pb-hairline2'}`}
+                        style={on ? { borderColor: 'var(--pb-accent)', background: 'color-mix(in srgb, var(--pb-accent) 10%, transparent)' } : undefined}>
+                        <span className="rounded-[2px] border" style={{ width: tw, height: th, borderColor: on ? 'var(--pb-accent)' : 'var(--pb-hairline2)', background: 'var(--pb-surface2)' }} />
+                        <span className={`font-mono text-[10px] ${on ? 'text-pb-accent' : 'text-pb-dim'}`}>{s.label}</span>
+                        <span className="font-mono text-[8px] text-pb-faintest">{s.sub}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+                {/* A fixed layout can't re-lay itself out at another shape, so
+                    say what is happening to it rather than leaving the bands to
+                    read as a bug. The Blank Canvas is genuinely this size and
+                    needs no choice at all. */}
+                {framed && (
+                  <div className="mt-3 flex flex-col gap-1.5">
+                    <span className="font-mono text-[9px] tracking-wide2 text-pb-faint uppercase">Fitting this layout</span>
+                    <div className="flex gap-1.5">
+                      {[
+                        { key: 'fit',  label: 'Fit whole', hint: 'Shows all of the layout; the background fills the rest.' },
+                        { key: 'fill', label: 'Fill & crop', hint: 'Scales the layout up to cover the canvas, trimming the edges.' },
+                      ].map((o) => (
+                        <button key={o.key} onClick={() => setPostFit(o.key)} title={o.hint}
+                          className={`flex-1 py-1.5 rounded border text-[11px] font-mono transition-colors ${postFit === o.key ? '' : 'text-pb-faint border-pb-hairline hover:border-pb-hairline2'}`}
+                          style={postFit === o.key ? { borderColor: 'var(--pb-accent)', color: 'var(--pb-accent)' } : undefined}>{o.label}</button>
+                      ))}
+                    </div>
+                    <span className="text-pb-faintest text-[10px]">
+                      {postFit === 'fit'
+                        ? `${tmpl.name} is drawn at ${nativeW}×${nativeH}, so it sits whole on the ${activeSize.label.toLowerCase()} canvas with the background running past it. Add a background under Brand, or use the Blank canvas to design at ${W}×${H} from scratch.`
+                        : `${tmpl.name} is scaled up to cover the canvas — the edges of the layout are cropped off.`}
+                    </span>
+                  </div>
+                )}
+                {isBlankTab && postSize !== DEFAULT_POST_SIZE && (
+                  <p className="mt-2.5 text-pb-faintest text-[10px]">The blank canvas is genuinely {W}×{H} — put your blocks anywhere on it.</p>
+                )}
+              </section>
+            )}
             {/* Templates — collapsible. Built-in variants for this tab stacked
                 so they're all visible at once, plus a "Custom" group of saved
                 templates. Saving works on every tab (captures base template +
@@ -3347,11 +3589,29 @@ export default function AdminSocialPost() {
               </section>
             )}
 
+            {/* A hero photo is a SLOT the layout draws around — a cut-out figure
+                behind the type, cropped to that layout's own window — so it only
+                exists on the layouts built with one. Say which those are rather
+                than leaving the section silently absent, which reads as a
+                control that has gone missing. */}
+            {!showHeroImage && !isBlankTab && activeTab !== 'scorecard' && activeTab !== 'events' && (
+              <section className="pb-card p-4" data-testid="hero-unavailable">
+                <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Hero image</h2>
+                <p className="text-[11px] text-pb-faint leading-relaxed">
+                  {tmpl.name} has no hero slot — its layout is fixed. The layouts that do are{' '}
+                  <span className="text-pb-dim">{HERO_SLOT_LAYOUT_NAMES.join(', ')}</span>.
+                </p>
+                <p className="text-[11px] text-pb-faint leading-relaxed mt-1.5">
+                  To put a photo on this one, add it from <button onClick={() => setTool('photos')} className="underline underline-offset-2 text-pb-dim hover:text-pb-text">Photos</button> — it lands as a block you can move, and sits on top of the layout.
+                </p>
+              </section>
+            )}
+
             {/* Hero Image */}
             {showHeroImage && (
               <section className="pb-card p-4">
                 <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Hero Image</h2>
-                <p className="text-[11px] text-pb-faint mb-3">Transparent PNG recommended for best results.</p>
+                <p className="text-[11px] text-pb-faint mb-3">Transparent PNG recommended for best results. Any image with a solid background can be cut out with Edit.</p>
                 {['T1', 'T3', 'T6', 'T10'].includes(templateId) && selectedPlayers.length > 0 && (
                   <div className="mb-3">
                     <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Hero Player</label>
@@ -4106,54 +4366,30 @@ export default function AdminSocialPost() {
         )}
       />
 
-      {/* Hidden full-size render for export */}
+      {/* Hidden full-size render for export — one node per page, from the
+          shared postPages list so the download, the Club Room save and the
+          Preview overlay are all the same artwork. */}
       <div style={{ position: 'absolute', left: '-9999px', top: 0, pointerEvents: 'none', zIndex: -1 }}>
-        {isBlankTab && pages.count > 1 ? (
-          // One full-size node per carousel page, captured in turn on export.
-          pages.all().map((pageItems, i) => (
-            <div key={i} ref={(el) => { pageRefs.current[i] = el }} style={{ ...fontStyle, width: W, height: H, position: 'relative' }}>
-              {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} {...bgExtraProps} />}
-              <BlankCanvas team={team} palette={templatePalette} items={pageItems} data={blankData} width={W} height={H} />
-            </div>
-          ))
-        ) : roundPagesOn ? (
-          // One full-size node per derived fixtures/results page — same template,
-          // each with its even slice of the rows.
-          chunkEven(tmpl.kind === 'fixtures' ? fixtures : results, roundPage.count).map((chunk, i) => (
-            <div key={i} ref={(el) => { roundPageRefs.current[i] = el }} style={{ ...fontStyle, width: W, height: H, position: 'relative' }}>
-              {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} {...bgExtraProps} />}
-              <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline}
-                {...extraProps} {...(tmpl.kind === 'fixtures' ? { fixtures: chunk } : { results: chunk })} />
-            </div>
-          ))
-        ) : scSplitOn ? (
-          // One 1080×1080 node per team — the batted-first side, then the
-          // chasing side — regardless of which page is currently previewed.
-          ['home', 'away'].map((side, i) => (
-            <div key={side} ref={(el) => { scSplitPageRefs.current[i] = el }} style={{ ...fontStyle, width: W, height: H, position: 'relative' }}>
-              {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} {...bgExtraProps} />}
-              <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline}
-                {...extraProps} only={side} />
-            </div>
-          ))
-        ) : (
-          <div ref={renderRef} style={{ ...fontStyle, width: W, height: H, position: 'relative' }}>
-            {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} {...bgExtraProps} />}
-            <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />
-            {customEdit && !isBlankTab && (
-              <BlankCanvas team={team} palette={templatePalette} items={overlay.items} data={blankData} transparent width={W} height={H} style={{ position: 'absolute', inset: 0 }} />
-            )}
+        {postPages.map((p) => (
+          <div key={p.key} ref={p.setRef} style={{ ...fontStyle, width: W, height: H, position: 'relative', overflow: 'hidden', background: canvasFill }}>
+            {p.content}
           </div>
-        )}
+        ))}
       </div>
+
+      <PostPreviewModal
+        open={previewOpen} onClose={() => setPreviewOpen(false)}
+        pages={postPages} width={W} height={H} fontStyle={fontStyle} fill={canvasFill}
+        title={tmpl.name} sizeLabel={sizeApplies ? `${activeSize.label} · ${activeSize.sub}` : `${W} × ${H}`}
+      />
 
       <ImageEditorModal
         open={!!editor}
         source={editor?.source}
-        title={editor?.key === 'hero' ? 'Edit Hero Image' : editor?.key === 'blankimg' ? 'Edit Image' : 'Edit Sponsor Logo'}
+        title={editor?.key === 'hero' ? 'Edit Hero Image' : editor?.key === 'blankimg' ? 'Edit Image' : editor?.key === 'libraryimg' ? 'Edit Library Image' : 'Edit Sponsor Logo'}
         aspect={null}
         outputType="image/png"
-        outputName={editor?.key === 'hero' ? 'hero.png' : editor?.key === 'blankimg' ? 'image.png' : 'sponsor.png'}
+        outputName={editor?.key === 'hero' ? 'hero.png' : editor?.key === 'blankimg' ? 'image.png' : editor?.key === 'libraryimg' ? (editor?.assetName || 'image.png') : 'sponsor.png'}
         onCancel={() => setEditor(null)}
         onApply={async (file) => {
           const e = editor
@@ -4165,6 +4401,10 @@ export default function AdminSocialPost() {
           } else if (e.key === 'blankimg' && e.itemId) {
             record('Replace image')
             layer.update(e.itemId, { src: URL.createObjectURL(file) })
+          } else if (e.key === 'libraryimg') {
+            // Stored as its own asset (see editLibraryAsset) and applied
+            // straight away, so the cut-out is both reusable and on the post.
+            await uploadMedia([file], { use: true })
           } else if (typeof e.sponsorIdx === 'number') {
             applySponsorBlob(e.sponsorIdx, file, e.sponsorName)
           }

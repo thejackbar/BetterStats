@@ -179,6 +179,14 @@ class Settings(BaseSettings):
     marketing_crawl_break_min: float = 120.0         # long break length, min seconds (2 min)
     marketing_crawl_break_max: float = 180.0         # long break length, max seconds (3 min)
     marketing_crawl_refresh_daemon: bool = True      # after backfill, re-discover daily for new clubs
+    # How long a club's stored associations stay current before the enrichment
+    # pass re-reads them (migration 298). A club changes association between
+    # seasons at most, so this is deliberately slow: a shorter window would spend
+    # the crawl's whole daily budget re-asking questions whose answer has not
+    # changed, and starve the clubs that have never been enriched at all. 0
+    # switches refreshing off entirely and restores the pre-298 behaviour, where
+    # a club's associations were fetched once and then never again.
+    marketing_association_refresh_days: int = 90
     # PlayHQ public discovery endpoints (no API key — read the same as playhq.com).
     # Search enumerates every cricket club + its committee; the main graph maps a
     # club to the association(s) it plays in (needs the tenant header below).
@@ -276,35 +284,6 @@ class Settings(BaseSettings):
     comms_metrics_window_days: int = 30
     comms_metrics_min_sample: int = 50
 
-    # ─── Twenty CRM integration (super-admin GTM workspace) ───────────────────
-    # Self-hosted Twenty instance that holds the BetterCricket sales/CRM model.
-    # The export pushes the *targeted subset* of the Clubs Directory (filtered
-    # clubs + their officers) into Twenty as Companies/People/Associations.
-    # Blank url/key = the export endpoint reports "not configured" and does
-    # nothing. The model itself is built by app/scripts/bootstrap_twenty.py;
-    # these drive the ongoing record sync (twenty_client / twenty_sync).
-    twenty_api_url: str = ""   # e.g. https://twenty.betterat.cricket (the SERVER_URL)
-    twenty_api_key: str = ""   # a workspace API key with record write
-
-    # ─── Pipeline target gauge (routers/pipeline_gauge.py) ─────────────────────
-    # HTTP Basic Auth for the superadmin-only dashboard-gauge widget. Blank =
-    # every request 500s (fails closed) rather than serving the page open.
-    gauge_username: str = ""
-    gauge_password: str = ""
-    # Shared secret for the INBOUND Twenty webhook (POST /webhooks/twenty). When set,
-    # a Twenty record-update webhook can raise a module trial request back in
-    # BetterCricket (source=twenty). Blank = the endpoint is a no-op (returns 200 and
-    # ignores the payload), so it's safe to leave unconfigured.
-    twenty_webhook_secret: str = ""
-    # Client-side request ceiling (requests/min) the export paces under, to stay below
-    # Twenty's server rate limit (default 100/60s). Raise this in lockstep if you raise
-    # Twenty's own API_RATE_LIMITING_* limit, else it becomes the bottleneck.
-    twenty_rate_per_min: int = 90
-    # Optional Twenty workspaceMember id to assign auto-created Tasks to (the
-    # back-office follow-up owner). Blank = Tasks are created unassigned. Find the id
-    # in Twenty under Settings > Members, or via GET /rest/workspaceMembers.
-    twenty_task_assignee_id: str = ""
-
     # ─── Meta Ads dashboard (super-admin HQ — BetterCricket's own ad spend) ────
     # System-user token (ads_read + read_insights) for the Meta Marketing API,
     # read-only against one campaign in the platform's own ad account. Blank
@@ -338,14 +317,6 @@ class Settings(BaseSettings):
     @property
     def meta_capi_configured(self) -> bool:
         return bool(self.meta_dataset_id and self.meta_capi_access_token)
-
-    @property
-    def twenty_configured(self) -> bool:
-        return bool(self.twenty_api_url and self.twenty_api_key)
-
-    @property
-    def twenty_webhook_configured(self) -> bool:
-        return bool(self.twenty_webhook_secret)
 
     @property
     def square_api_base(self) -> str:

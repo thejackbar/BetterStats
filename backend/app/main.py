@@ -15,7 +15,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.config.settings import settings
 from app.auth.modules import require_module
 from app.routers import instructional_videos
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, cricketstatz, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, public_net_checkin, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, cricketstatz, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, public_net_checkin, net_manager, website, comms, public_comms, public_ses, public_contact, public_webinar, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
     stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
     club_diary, social_media, votes, public_votes, roles_activities, club_room, roster, facility_requests, directory, \
     public_club_room, sales_workspace, sales_commissions, honours
@@ -42,6 +42,11 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s — %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+# Strong references to detached background tasks. `asyncio.create_task`
+# alone does not keep one alive: the loop holds only a weak reference, so
+# a task that suspends on its first await can be collected before it runs.
+_BACKGROUND_TASKS: set = set()
 
 
 async def _run_stripe_subscription_sweep():
@@ -598,7 +603,7 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE marketing_clubs ADD COLUMN IF NOT EXISTS not_interested "
             "BOOLEAN NOT NULL DEFAULT FALSE"))
-        # Cached Twenty engagementScore/-Tier, written by every _engagement() call —
+        # Cached engagement score/tier, written by every _engagement() call —
         # see the column comment in models/db.py for why.
         await conn.execute(text(
             "ALTER TABLE marketing_clubs ADD COLUMN IF NOT EXISTS engagement_score INTEGER"))
@@ -999,22 +1004,12 @@ async def lifespan(app: FastAPI):
         # branch); the only lookup key on that path that wasn't indexed (migration 121).
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_organisations_slug ON organisations(slug)"))
-        # Twenty CRM integration: membership ledger mapping a BetterCricket entity
-        # (club / person / association) to its Twenty record id. A row exists only
-        # for the targeted subset exported to Twenty, so it doubles as "what's in
-        # the CRM" and makes upserts idempotent (content_hash skips no-op updates).
-        await conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS twenty_links (
-                entity_type TEXT NOT NULL,
-                bc_id TEXT NOT NULL,
-                twenty_id TEXT NOT NULL,
-                content_hash TEXT,
-                last_synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                PRIMARY KEY (entity_type, bc_id)
-            )
-        """))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS idx_twenty_links_twenty ON twenty_links(twenty_id)"))
+        # NOTE: ``twenty_links`` (the id-mapping ledger for the retired external
+        # CRM) used to be created here. Nothing reads it any more, so a fresh
+        # database no longer gets it — but it is deliberately NOT dropped where
+        # it already exists: it is the record of what was once pushed, and
+        # dropping a table to save nothing is how history goes missing. Same
+        # call migration 267 made for ``vote_settings``.
         # Upload Historical Scorecard (migration 091): a manual game built from a
         # photographed card carries the opposition club's Grassroots org GUID and the
         # full both-team scorecard the AI extracted (renders the opposition half of
@@ -1307,6 +1302,14 @@ async def lifespan(app: FastAPI):
                 UNIQUE (org_id, player_a_id, player_b_id)
             )
         """))
+        # Mirrors migration 291 — the ONE copy lives in the service.
+        from app.services.grade_ignore_ddl import STATEMENTS as _GRADE_IGNORE_DDL
+        for _stmt in _GRADE_IGNORE_DDL:
+            await conn.execute(text(_stmt))
+        # Mirrors migrations 296, 297, 299 and 300 — the ONE copy is the service.
+        from app.services.webinar_ddl import STATEMENTS as _WEBINAR_DDL
+        for _stmt in _WEBINAR_DDL:
+            await conn.execute(text(_stmt))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS grade_merge_logs (
                 id SERIAL PRIMARY KEY,
@@ -1524,7 +1527,7 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS idx_usage_events_source "
             "ON usage_events(traffic_source) WHERE traffic_source IS NOT NULL"
         ))
-        # Migration 133: index the org_id branch of twenty_sync._engagement's
+        # Migration 133: index the org_id branch of engagement._engagement's
         # usage_events scan (a customer/trial club's authenticated in-app
         # activity) — previously unindexed.
         await conn.execute(text(
@@ -1543,7 +1546,7 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS idx_usage_events_visitor_type_created "
             "ON usage_events(visitor_id, event_type, created_at) WHERE visitor_id IS NOT NULL"
         ))
-        # Materialised prospect-club attribution. twenty_sync._engagement's web
+        # Materialised prospect-club attribution. engagement._engagement's web
         # query resolves each event to a club via the 7-subquery _RESOLVED_CID
         # expression; filtering on that computed value forces a full re-resolution
         # of the table per club (~6s each) — fine for a batch sweep, far too slow
@@ -2139,8 +2142,8 @@ async def lifespan(app: FastAPI):
         ))
         # BetterComms sending tiers (migration 125): per-club sandbox→production
         # send tier + optional daily-cap override, the tier-increase request
-        # queue, and the generic club→BetterCricket request telemetry (feeds a
-        # Twenty CRM task). Every club starts in 'sandbox' and EARNS production by
+        # queue, and the generic club→BetterCricket request telemetry. Every
+        # club starts in 'sandbox' and EARNS production by
         # request + super-admin approval — so there is deliberately NO boot-time
         # promotion here (an earlier version blanket-set every club to production
         # on each boot, which is why every club showed 'production'; migration 129
@@ -2211,6 +2214,9 @@ async def lifespan(app: FastAPI):
                 requested_by UUID REFERENCES users(id) ON DELETE SET NULL,
                 ref_table TEXT,
                 ref_id UUID,
+                -- Written by nothing since the external CRM was retired; kept
+                -- so a row already carrying one still reads (see
+                -- services/club_requests.py).
                 twenty_task_id TEXT,
                 twenty_task_status TEXT NOT NULL DEFAULT 'pending',
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -3328,7 +3334,7 @@ async def lifespan(app: FastAPI):
         await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS country TEXT"))
         # First-touch signup attribution (migration 161) — set only by the
         # public self-serve registration (routers/public_self_serve.py) so ad
-        # performance can be joined against trial usage / Twenty engagement
+        # performance can be joined against trial usage / the engagement score
         # in the meta_ads ad-signups report.
         await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS signup_source TEXT"))
         await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS signup_attribution JSONB"))
@@ -4301,10 +4307,11 @@ async def lifespan(app: FastAPI):
         for _stmt in _CRICKETSTATZ_DDL:
             await conn.execute(text(_stmt))
 
-        # Migration 287: a club can say CricketStatz is the record for a season
-        # it also syncs, so the same match is not counted from two sources.
-        # Applied on read in the effective views — nothing is deleted and
-        # clearing the marker puts the synced copy straight back.
+        # Migration 293: a CricketStatz import and a Cricket Australia sync
+        # complement each other, so their matches are UNIONED and the
+        # duplicates removed per match — `manual_games.superseded_by_game_id`.
+        # Applied on read in the effective views; nothing is deleted and
+        # unpairing brings the imported copy straight back.
         from app.services import superseded_ddl as _superseded
         for _stmt in _superseded.STATEMENTS:
             await conn.execute(text(_stmt))
@@ -4314,14 +4321,27 @@ async def lifespan(app: FastAPI):
         # the migration as applied. The statements were right; something in the
         # boot path had not run them. Nothing anywhere noticed, which is what
         # made it expensive — so this says so, loudly, rather than assuming.
-        for _view, _ok in (await _superseded.verify(conn)).items():
-            if not _ok:
-                logger.error(
-                    "SCHEMA MISMATCH: %s does not carry its source clause. A "
-                    "club holding both a CricketStatz import and a Cricket "
-                    "Australia sync will count the same match twice until "
-                    "services/superseded_ddl.STATEMENTS is applied to this "
-                    "database.", _view)
+        #
+        # AND IT SAYS SO WHETHER OR NOT ANYTHING IS WRONG. Reported live a
+        # second time: six of the eight views were current and two were the
+        # pre-pairing definition, which no version of this code can produce —
+        # all eight are applied in this one transaction. The check had been
+        # running and finding it every boot; a log that only speaks up on
+        # failure is one nobody has a reason to read, so "ran and found
+        # nothing" and "never ran" looked identical from outside. Same lesson
+        # the match-pairing sweep already records.
+        _views_ok = await _superseded.verify(conn)
+        _views_bad = [v for v, ok in _views_ok.items() if not ok]
+        logger.info("Effective views carrying their source clause: %d of %d%s",
+                    len(_views_ok) - len(_views_bad), len(_views_ok),
+                    "" if not _views_bad else " — MISSING: " + ", ".join(_views_bad))
+        for _view in _views_bad:
+            logger.error(
+                "SCHEMA MISMATCH: %s does not carry its source clause. A "
+                "club holding both a CricketStatz import and a Cricket "
+                "Australia sync will count the same match twice until "
+                "services/superseded_ddl.STATEMENTS is applied to this "
+                "database.", _view)
 
         # Migration 288: configurable club notifications — the switches a club
         # sets, each admin's own opt-out, and the record of what was raised and
@@ -4329,6 +4349,29 @@ async def lifespan(app: FastAPI):
         # run services/notification_ddl.STATEMENTS.
         from app.services.notification_ddl import STATEMENTS as _NOTIFICATION_DDL
         for _stmt in _NOTIFICATION_DDL:
+            await conn.execute(text(_stmt))
+
+        # Migration 293: a Club Directory Rediscover re-reads a club's committee
+        # from PlayHQ and reconciles against it. former_at marks a delisted
+        # officer we kept rather than deleted (an unsubscribe, a bounce, a
+        # do-not-contact, a note, a CRM link, a hand-added row); comms_contacts
+        # .role carries the officer's last known role into BetterComms. Same
+        # one-copy rule — this list and alembic's 293 both run
+        # services/committee_sync_ddl.STATEMENTS.
+        from app.services.committee_sync_ddl import STATEMENTS as _COMMITTEE_SYNC_DDL
+        for _stmt in _COMMITTEE_SYNC_DDL:
+            await conn.execute(text(_stmt))
+
+        # Migration 298: the crawl re-reads an existing club's associations.
+        # The enrichment frontier was "associations IS NULL", so a club's
+        # associations were fetched once and then frozen — a club that moved
+        # association kept the old one for ever. associations_fetched_at is what
+        # makes "fetched, but a while ago" expressible; last_crawled_at cannot,
+        # because the discovery pass bumps it for every club it sees. Same
+        # one-copy rule — this list and alembic's 298 both run
+        # services/assoc_refresh_ddl.STATEMENTS.
+        from app.services.assoc_refresh_ddl import STATEMENTS as _ASSOC_REFRESH_DDL
+        for _stmt in _ASSOC_REFRESH_DDL:
             await conn.execute(text(_stmt))
 
     # Migration 178: Member self-service portal, Stripe Connect fee payments,
@@ -5776,12 +5819,19 @@ async def lifespan(app: FastAPI):
         _spec = _ilu.spec_from_file_location("_bs_migration_266", _mig_path)
         _mig266 = _ilu.module_from_spec(_spec)
         _spec.loader.exec_module(_mig266)
-        for _stmt in (
-            _mig266.ADD_STATUS,
-            _mig266.ADD_INDEX,
-            _mig266.EFFECTIVE_GAMES_WITH_STATUS,
-            _mig266.SEASON_STATS_NET_OF_UNPLAYED,
-        ):
+        # THE COLUMN AND ITS INDEX ONLY. The two views 266 defines are owned by
+        # services/superseded_ddl now, which re-issues them further UP this
+        # function with the match-pairing clause on top of everything 266 had.
+        #
+        # Re-issuing 266's versions here put them straight back, every boot,
+        # silently — the pairing clause is a join and a WHERE, so the column
+        # lists match and CREATE OR REPLACE accepts it without a word. A club
+        # holding both a CricketStatz import and a Cricket Australia sync then
+        # counted every shared match twice: one reported career read 547
+        # matches and 28 hundreds against the club's own 372 and 17. The boot
+        # check three lines after the superseded block logged "8 of 8" and was
+        # telling the truth; this ran two thousand lines later and undid it.
+        for _stmt in (_mig266.ADD_STATUS, _mig266.ADD_INDEX):
             await conn.execute(text(_stmt))
 
     # Ensure uploads directory exists
@@ -5795,6 +5845,46 @@ async def lifespan(app: FastAPI):
     # created on demand), so running it just after boot is safe. Same reasoning
     # as the Stripe sweep below.
     asyncio.create_task(_run_yearbook_stub_sweep())
+
+    # RE-DERIVE THE CRICKETSTATZ MATCH PAIRING, for the clubs that hold one.
+    # Migration 293 replaced a season-level winner with a per-match pairing, so
+    # on the deploy that carries it every imported match starts unpaired — and
+    # an unpaired match counts, which is the whole point of the union. A club
+    # that already holds both sources would therefore see its duplicates until
+    # something paired them, so the boot does it rather than waiting for the
+    # club's next import or full sync. Bounded by construction: a club with no
+    # CricketStatz import does one cheap count and stops, and the pass is
+    # idempotent, so every later boot writes nothing. Background, never
+    # awaited, and it never raises — same reasoning as the sweep above.
+    async def _run_match_pairing_sweep() -> None:
+        try:
+            from app.services import match_pairing as _mp
+            async with AsyncSessionLocal() as _db:
+                orgs = (await _db.execute(text("""
+                    SELECT DISTINCT organisation_id FROM manual_games
+                     WHERE cricketstatz_import_id IS NOT NULL
+                """))).scalars().all()
+            # ALWAYS LOGGED, not only when something changed. A pass that
+            # writes nothing and a pass that never ran look identical in a
+            # silent log, and telling those two apart is what cost a day.
+            logger.info("Match pairing sweep: %d club(s) hold an import", len(orgs))
+            for _org in orgs:
+                try:
+                    async with AsyncSessionLocal() as _db:
+                        res = await _mp.reconcile_org(_db, _org)
+                    logger.info("Match pairing for %s: %s", _org, res)
+                except Exception as exc:
+                    logger.warning("Match pairing failed for %s: %s", _org, exc,
+                                   exc_info=True)
+        except Exception as exc:
+            logger.warning("Match pairing sweep failed: %s", exc, exc_info=True)
+
+    # HELD, NOT JUST STARTED. A bare `create_task` result nobody keeps is
+    # eligible for garbage collection the moment it awaits — the trap the IQ
+    # dossier builder already documents (`_BUILD_TASKS`).
+    _pairing_task = asyncio.create_task(_run_match_pairing_sweep())
+    _BACKGROUND_TASKS.add(_pairing_task)
+    _pairing_task.add_done_callback(_BACKGROUND_TASKS.discard)
 
     # Seed every club's BetterComms library with the built-in starter templates
     # (idempotent — ON CONFLICT DO NOTHING per org+name, so this also backfills
@@ -6089,11 +6179,11 @@ app.include_router(public_club_room.router)                                     
 app.include_router(public_comms.router)                                                   # BetterComms (public unsubscribe)
 app.include_router(public_ses.router)                                                     # BetterComms (SES event webhook, SNS-signed)
 app.include_router(public_contact.router)                                                 # Marketing Contact form (public intake)
+app.include_router(public_webinar.router)                                                 # Webinar registration (public intake)
 app.include_router(public_square.router)                                                  # BetterMerch (Square OAuth callback)
 app.include_router(public_xero.router)                                                    # BetterFees (Xero OAuth callback)
 app.include_router(public_stripe.router)                                                  # Billing (Stripe webhook, signature-verified)
 app.include_router(public_fantasy.router)                                                 # BetterFantasyCricket (public manager play)
-app.include_router(pipeline_gauge.router)                                                 # Twenty CRM dashboard gauge (own HTTP Basic Auth, not require_module)
 app.include_router(ladders.router)  # standings power public club pages — not gated
 app.include_router(iq.router, dependencies=[Depends(require_module("iq"))])               # BetterIQ
 app.include_router(fantasy.router, dependencies=[Depends(require_module("fantasy"))])      # BetterFantasyCricket

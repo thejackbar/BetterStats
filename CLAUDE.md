@@ -1,5 +1,442 @@
 # BetterStats — Claude Session Notes
 
+## ONE CAMPAIGN, TWO PRODUCTS, ONE PIXEL EVENT (v9.72.0, Sep 2026)
+
+The Meta ad account was restructured 8-9 Sep 2026 and `BC_AU_Trials_CBO_Aug2026`
+now runs a webinar ad beside the trial ads. Asked for as "update the page for
+the two new ads"; the brief's own framing is the important half: *"registrations
+is no longer a single number, and any reporting that treats it as one is now
+silently wrong."*
+
+- **BOTH LANDING PAGES FIRE THE SAME PIXEL EVENT ON THE SAME DATASET, AND ONLY
+  A PARAMETER SEPARATES THEM.** `/trial` and `/demo` each send
+  `CompleteRegistration` to 1317878090534903, told apart by `content_category`
+  alone — `self_serve_trial` (value 399 AUD) and `webinar` (no value). A trial
+  signup is a prospective paying club; a webinar registration is somebody who
+  watched a form. Every cost-per-result figure that adds them describes neither.
+- **THE PAGE WAS NEVER DOUBLE-COUNTING, AND ESTABLISHING THAT FIRST IS WHAT
+  STOPPED THIS BEING FIXED THE WRONG WAY.** `get_registration_count` reads
+  `organisations`, so it has only ever counted trial signups. The bug was the
+  DIVISOR: `cost_per_lead` was whole-campaign spend over trial signups, so the
+  trial was charged with the webinar's spend from the moment both ran together.
+  On the brief's own lifetime figures that is **A$46.84 against a true
+  A$43.90** — and it widens with every dollar the webinar spends.
+- **SO SPEND IS SPLIT PER STREAM FROM THE PER-AD ROWS.** Ad level is the finest
+  split Meta gives us and the two streams are cleanly separable there, so this
+  is exact rather than apportioned. `stream_totals` / `build_streams` are the
+  one definition; `campaign.cost_per_lead` is kept under its old name and now
+  means the trial's own.
+- **`stream_for_ad` FALLS BACK TO THE AD'S NAME, and that is the half that
+  keeps working.** `AD_DESTINATIONS` is exact where we can be, never the gate —
+  a creative added in Ads Manager tomorrow is classified by its name
+  (`Ad_Webinar_*`) with no code change. **Never from the AD SET name**:
+  `AS_Cold_Broad_AU_LPV` is now wrong about both "broad" and "LPV".
+- **`CAMPAIGN_UTM_NAMES` HAD TO BECOME A SET PER CAMPAIGN, AND A SINGLE VALUE
+  WOULD HAVE FAILED CLOSED.** One campaign now carries two destination
+  taxonomies (`webinar_21sep2026`, `trial_evergreen_sep2026`), neither of them
+  the Ads Manager name the old convention assumed. Unrecognised tags are
+  DROPPED, so every registration through the new ads would have read as
+  belonging to no campaign — which shows up as "the new ads produced nothing"
+  rather than as a bug.
+- **A LAZY IMPORT OF THE RENAMED CONSTANT SURVIVED `py_compile` AND
+  `vite build`.** `sales_workspace._ad_click_history` does
+  `from app.services.meta_ads import ... CAMPAIGN_UTM_NAMES` INSIDE a function
+  body — the exact trap the Twenty-retirement note above records. Found by a
+  sweep that walks every `ImportFrom` and `meta_ads.<attr>` in `app/` and asks
+  whether the name still exists; worth re-running on any rename here. Worse
+  than an ImportError, it would then have read `.values()` of a set-valued map
+  and marked genuine ad traffic "unrecognised campaign".
+- **THE PHANTOM VALUE WAS BEING CREATED AT SOURCE, NOT JUST IN THE REPORT.**
+  `meta_capi.send_complete_registration_event` hardcoded the trial's
+  `content_category` and `value=399`, and `public_webinar.py` took those
+  defaults — so every webinar registration reached Meta server-side labelled a
+  trial signup carrying A$399, and the deduped conversion's two halves
+  contradicted each other. The caller names its own event now; the defaults
+  stay the trial's only because it was the first caller.
+- **THE SINGLE CAMPAIGN-WIDE FUNNEL WAS REMOVED, NOT RELABELLED.** It put
+  campaign-wide impressions above a bottom row counting trial signups only, so
+  the drop at the end read as a conversion collapse when it was two products in
+  one column. `compute_stream_funnel` builds one per stream; the webinar's has
+  no "Club selected" step because there is no wizard on `/demo`.
+- **THE UNTAGGED WEBINAR REGISTRATIONS ARE REPORTED, NEVER ABSORBED.** The ad's
+  primary text carries a plain link with no UTMs (it had to match a line on the
+  artwork), so some genuinely ad-driven registrations are indistinguishable
+  from organic. Cost per result is computed on the attributed count alone —
+  which reads HIGH, the safe direction — with the shortfall named beside it.
+- **SPEND IS NOT SUBJECT TO THE 7-DAY ATTRIBUTION WINDOW, and the first cut had
+  that wrong.** Meta credits a CONVERSION to the click date and back-fills for
+  seven days; money spent on a day is settled that day. Gating budget pacing on
+  the attribution window made it unanswerable for a week after every change —
+  the two conditions are contradictory the day a change lands. Pacing excludes
+  only today (a part-day); the provisional guard applies to the conversion
+  insights it genuinely bites on.
+- **PACING IS MEASURED FROM THE LAST DELIBERATE CHANGE, NEVER ACROSS IT.**
+  `CAMPAIGN_ANNOTATIONS` is a per-campaign list of `{date, label, detail}` —
+  add a row rather than reasoning about a discontinuity somewhere else. One day
+  after a change there are not two settled days to pace off and the insight
+  correctly says nothing; that is not a bug, and a test expecting otherwise was
+  the wrong expectation.
+- **A REFERENCE LINE WRAPPED IN A FRAGMENT IS SILENTLY DROPPED BY RECHARTS.**
+  It finds `ReferenceLine`/`ReferenceArea` by walking `React.Children` and
+  reading each child's `type`; React.Children flattens an ARRAY but treats a
+  Fragment as one opaque child. The chart renders perfectly, with no error, and
+  simply has no marker on it. `chartMarkers()` returns an array. **Found by the
+  browser suite reporting zero markers against code that reads as though it
+  draws them.**
+- **AND RECHARTS DRAWS A `ReferenceArea` AS A `<path>`, NOT A `<rect>`** — the
+  first cut of that check selected `svg rect` and reported zero against code
+  that was drawing the band correctly. It measures the real element AND its
+  width now: a band collapsed to nothing would pass a bare presence check.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_meta_ads_streams.py`, 43 checks through the
+  shipped service: an unmapped ad classified by name, both new taxonomies
+  recognised and an EDM's still refused, each stream's cost per result from its
+  own spend, the pre-split figure shown to be higher, only the trial carrying
+  value, the untagged registrations counted apart, a creative keeping its two
+  result counts separate, nothing dividing by zero on an ad that never spent,
+  pacing reading the post-change rate rather than the pre-change one or a
+  blend, and a zero-result stream NOT reported as failing while it settles)
+  **with a control run** that names all ten missing parts rather than dying on
+  the first ImportError.
+- **Driven in Chromium** (`verify_meta_ads_streams_browser.mjs`, 41: two stream
+  cards with two different costs per result, no combined total anywhere, the
+  webinar card saying it carries no value, two funnels, the change marker on
+  every chart, the shaded band measured as covering the trailing half of the
+  window, the creative table, and an ad that has not gone live yet breaking
+  nothing) **with a control run**: 32 of the 41 fail against the previous
+  commit, and the nine that pass in both are don't-regress guards (no NaN, no
+  page errors, no overflow) rather than checks that should have caught it.
+- **FIVE CHECKS COULD NOT HAVE FAILED AS FIRST WRITTEN, and the control run is
+  what found them.** Three compared against labels the page renders CSS-
+  `uppercase`, which `innerText` returns transformed — the trap this file
+  already records, hit three times in one suite. One matched an insight's prose
+  rather than the funnel it claimed to read. Two used `.every()` on an array
+  that is empty in the control, which is vacuously true.
+- **VERIFIED AGAINST THE LIVE AD ACCOUNT for structure, not for figures.** The
+  Meta MCP tools confirm the account id, all six ads and their names; they
+  return entity ids and names only, no spend or conversion metrics, so the
+  numeric totals were NOT independently tied to Ads Manager here. The app's own
+  backend holds the token and queries the Graph API directly.
+### The trial's cost was still a lifetime average, so the two were never comparable (v9.72.1)
+
+Asked for straight after: "can we split the spend and the costs off from the
+old ones and get new numbers for webinar and trial ones?"
+
+- **SPLITTING THE SPEND PER STREAM WAS ONLY HALF OF IT, and the half that was
+  left is why the two figures still could not be read against each other.**
+  `stream_totals` sums the `level='ad'` snapshot rows, which are LIFETIME
+  (`fetch_per_ad` sends `date_preset: maximum`). So the trial's cost per signup
+  is an average over the campaign that ran BEFORE the 8 Sep restructure —
+  A$50/day, broad targeting, all placements, Instagram on — while the webinar
+  has no pre-change history at all. **Comparing them compares two different
+  campaigns**, and the brief's own question ("what are we spending per trial
+  signup NOW") was unanswerable from the page.
+- **SO EACH STREAM CARRIES A SECOND FIGURE, MEASURED FROM THE LAST DELIBERATE
+  CHANGE.** `stream_totals_since` sums the TRUE daily per-ad rows
+  (`level='ad_daily'`) on or after `_last_change_date()`, and the results behind
+  it are windowed too — both streams over the same stretch of calendar or the
+  pair means nothing. Lifetime is kept: it is the real money spent.
+- **THE COUNTING-SINCE CUTOFF IS NOT THIS, and reaching for it would have been
+  the wrong fix.** That is a super-admin setting which resets EVERY figure on
+  the page, and it deliberately never windows `get_registration_count` — a
+  genuine registration always counts, however long ago. This is per stream, per
+  card, automatic, and derived from the annotation that already exists.
+- **THE ALL-TIME FIGURES NOW SAY THEY ARE ALL TIME.** Left unlabelled beside a
+  since-the-change one, the bigger number reads as the current cost — which is
+  the same misreading in a new place.
+- **A PARTIAL WINDOW WITHHOLDS THE NUMBER, and the direction of the error is
+  why.** `ad_daily` is retained for `CAMPAIGN_LENGTH_DAYS + 5`, so a change
+  older than that leaves the sum short of what was really spent — which
+  UNDERSTATES cost per result, the direction that flatters the campaign and
+  gets quoted back at us. `covers_from` reports it and the block withholds the
+  division, naming the reason so silence does not read as a bug.
+- **SPEND IS SETTLED, RESULTS ARE NOT, and this block is where that bites
+  hardest.** Inside the 7-day click window the results behind a since figure
+  are still arriving, so the cost is a CEILING that comes down. Marked
+  provisional; nothing alerts off it — the rule the pacing insight already
+  keeps, applied to a figure that is mostly window at the moment (the change
+  was yesterday).
+- **A SIGNUP WITH NO TIMESTAMP IS REPORTED, NEVER GUESSED EITHER WAY.** Orgs
+  carry no `created_at`; the date is the earliest `self_serve_idempotency_keys`
+  row (the source `ad_signups` already uses). An attributed org with no key row
+  cannot be placed either side of the change, so it counts lifetime and in
+  neither since figure — surfaced as `undated_trial_results` so a short since
+  count reads as a known gap rather than as the ads having stopped working.
+- **THE MANUAL LEADS ADJUSTMENT IS NOT APPLIED TO THE SINCE COUNT.** It is a
+  lifetime correction and may well relate to a signup from before the change;
+  folding it into a windowed figure would move a number nobody can trace.
+- **`get_registration_count` IS UNTOUCHED.** `get_registration_count_since` is
+  its own function sharing `_attribution_matches_campaign`, so the windowed and
+  lifetime figures can never disagree about what COUNTS — only about when it
+  happened — and the existing function's documented "never windowed" promise
+  still holds exactly.
+- **Verified against a real Postgres** (`verify_meta_ads_streams.py` is 67
+  checks now: the trial's since-spend being its post-change spend alone and a
+  fraction of its lifetime, the webinar's since-spend EQUALLING its lifetime
+  because it has no history before the change, a signup from before the change
+  excluded, an undated one reported rather than counted or dropped, a webinar
+  registration predating the ad falling outside the window, the since cost per
+  result differing from the lifetime one, and every guard — partial, no
+  results, no spend, settled-vs-provisional, no change at all) **with two
+  control runs**: with the feature absent it REPORTS all four missing parts by
+  name and the other 43 still pass; with the window and the guards neutered, 8
+  fail — the trial's since-spend reading its lifetime 1800.0, and a partial
+  window printing A$25.00 instead of withholding.
+- **Driven in Chromium** (`verify_meta_ads_streams_browser.mjs` is 57: both
+  blocks on screen, the since figure read from its own element and differing
+  from the lifetime one beside it, the all-time label, the provisional note on
+  one stream and NOT the settled one, a withheld figure printing no digits
+  while still reporting its spend, the undated note, and no overflow at 390px)
+  **with a control run**: 13 fail against the previous commit, reporting the
+  unlabelled `A$43.90 each` that reads as current.
+- **FOUR CHECKS PASSED IN THE CONTROL FOR THE WRONG REASON and were
+  tightened.** "The since figure is not the lifetime figure", "a settled stream
+  is not marked provisional" and "a withheld figure prints no number" are all
+  trivially true of a block that never rendered — absence masquerading as
+  correct behaviour. Each is now gated on the block existing first.
+- **A FIXTURE THAT GROWS MOVES ITS NEIGHBOURS' EXPECTATIONS.** Adding the
+  undated org took the lifetime trial count 3 → 4 and failed two pre-existing
+  checks. The intent of both was intact — only the fixture's size changed — so
+  the count was updated and the cost check re-expressed against
+  `trial_results` rather than a hardcoded 3, so the two can no longer drift.
+
+- **NOTICED, NOT BUILT**: nothing reads Meta's own `content_category` breakdown
+  off the insights API, so Meta's self-reported conversion counts are still
+  un-splittable and are shown only as the labelled "Meta-reported" comparison.
+  The campaign plan (`CAMPAIGN_PLANS`) is still one budget per campaign rather
+  than per stream, so pacing is campaign-wide.
+
+## A FIXED LAYOUT CANNOT RE-LAY ITSELF OUT AT 4:5 (v9.73.0, Sep 2026)
+
+Seven questions off the live BetterPosts editor, three of them real gaps and
+four of them things that exist and could not be found.
+
+- **EVERY BUILT-IN TEMPLATE IS A HARDCODED `width: 1080, height: 1080` DIV OF
+  ABSOLUTELY-POSITIONED CHILDREN**, so "make this 1080×1350" is not a layout
+  question — there is no layout to re-run. What a template CAN do is sit inside
+  the taller canvas: `social/postSizes.jsx` owns that one piece of maths, used
+  by the live canvas, the mobile preview AND the off-screen export node.
+  `fit` (whole, letterboxed) is the default because it never loses artwork;
+  `fill` scales up and crops, and the panel says the edges go.
+- **THE BLANK CANVAS IS THE EXCEPTION AND IT IS GENUINELY PORTRAIT.** Its blocks
+  carry their own x/y, so there is nothing to place — `framed` is
+  `!isBlankTab && (W !== nativeW || H !== nativeH)`, and `BlankCanvas` is handed
+  the real width/height rather than falling back to its 1080 default.
+- **THE SAME FORMULA WAS WRITTEN OUT THREE TIMES** — `handleExport`,
+  `handleSaveToClubRoom` and the preview each recomputed `tmpl.w || 1080`. Both
+  copies are gone; the two handlers close over the ONE `W`/`H`. A second copy of
+  the canvas size is how a downloaded PNG comes out a different shape from the
+  preview.
+- **`postPages` IS THE ONE LIST OF WHAT THIS POST IS**, and the off-screen
+  export nodes and the Preview overlay both map it. The four page shapes
+  (blank carousel / derived roundup pages / the scorecard's two squares /
+  a single post) used to be a four-branch ternary written out once for export
+  and would have needed a second copy for the preview.
+- **THE LETTERBOX BANDS ARE FILLED WITH THE CLUB'S OWN PRIMARY.** Left at the
+  canvas well's `#080808` a fitted post reads as a broken export rather than a
+  deliberate portrait one. Found by SCREENSHOTTING the real render, not by the
+  geometry checks — which all passed on the black version.
+- **A SCORECARD IS NOT OFFERED THE PICKER.** It is 1920×1080 and already has its
+  own reframing control (the Instagram-squares split); two answers to one
+  question is worse than one.
+- **BACKGROUND REMOVAL EXISTED AND ONLY THREE UPLOAD PATHS REACHED IT.**
+  `ImageEditorModal` has had an AI cut-out and a colour key since it was
+  written, wired to the hero photo, sponsor logos and an image block's REPLACE.
+  An image already on the post, and anything in the club library, had no way in
+  — which is exactly where somebody who has just uploaded a white-backgrounded
+  PNG is standing. Both now open the same editor; a library edit is stored as a
+  NEW asset rather than overwriting, since the original may be on a post nobody
+  has re-exported.
+- **"SAVE TO CLUB ROOM" IS NOT "SAVE THIS DESIGN", AND `✓ SAVED` IS WHAT MADE
+  THE TWO READ AS ONE THING.** It renders a PNG into the Club Room TV
+  slideshow's media pool; SAVE AS TEMPLATE writes a `bs_social_templates`
+  localStorage row that appears under Design → Your templates on that browser
+  only. Both now say where the thing went, and the Club Room one links there.
+- **A CONTROL THAT IS CORRECTLY ABSENT STILL HAS TO EXPLAIN ITSELF**, the call
+  this file already records for a figure that is correctly zero. The Hero Image
+  panel is gated on a seven-id list; on every other layout it simply was not
+  there. It now names the layouts that have a hero slot, off the same list, so
+  the two cannot drift.
+- **"SEND THIS IMAGE BEHIND THAT HEADING" IS GENUINELY NOT POSSIBLE ON MOST
+  LAYOUTS, and saying so beats a control that looks broken.** Only C1–C4
+  decompose into blocks (`templateToBlocks`); everything else takes added blocks
+  as an overlay ON TOP, and each template root paints its own opaque gradient,
+  so a block behind one would be invisible anyway. The Layers panel says it and
+  points at the two ways out (Custom Edit where it exists, else the blank
+  canvas). **Extending `templateToBlocks` past four templates is the real fix
+  and is a large piece of work — 40+ bespoke layouts, each hand-recreated.**
+- **Driven in Chromium** (`frontend/verification/verify_post_designer_browser.mjs`,
+  49 checks: the canvas AND the export node moving together, the frame measured
+  off the real element at scale 1 / top 135 for fit and 1.25 / left −135 for
+  fill, the blank canvas NOT framed, the bands' computed colour, a scorecard
+  offered no picker, Preview opening with one page and with two, Escape closing
+  it, the editor reachable from a library tile and from an image on the canvas,
+  all four explanations, and no overflow at 390px) **with a control run**: 33 of
+  the 49 fail against the previous commit, and the 16 that pass in both are
+  don't-regress guards.
+- **THE FRAME IS ADDRESSED BY `data-post-frame`, NOT BY "an element with a scale
+  transform".** The loose selector matched a transform INSIDE a template, so on
+  a build with no frame at all the check read the wrong element and reported
+  `scale: 1.4` — a measurement of nothing. **And "the blank canvas is not
+  letterboxed" is trivially true of a build that never frames anything**, so it
+  is gated on the canvas really being 1080×1350 first.
+- **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN.** The suite anchors on the
+  export button (which every build has) rather than on anything this change
+  adds, and every new element is read through `textOf`/`seen`/`press`, which
+  report absence instead of throwing.
+- **THE CSS-`uppercase` TRAP, HIT AGAIN.** The preview header renders
+  `2 pages` as `2 PAGES`, so a check written in the source's casing could never
+  pass. And `getByText('Club library')` matched three elements — the panel meta,
+  the drop-zone copy and the heading.
+- **NOTICED, NOT BUILT**: there are no portrait-native template variants — the
+  honest fix for a club that wants the full 4:5 filled edge to edge, and a
+  design job per layout rather than a code one. Saved templates are still
+  `localStorage`, so they do not follow a volunteer to another device (the
+  design handoff proposes `social_post_template`; the media library and brand
+  kit already went server-side). A multi-file drop into the club library still
+  uploads as-is rather than opening the editor per file — deliberate, since ten
+  modals for ten photos is worse than the Edit affordance on each tile.
+
+## Twenty is retired; the engagement score, the CRM and Sales Management are not (v9.71.0, Sep 2026)
+
+Asked for directly: *"the calculation and continual re-calculation of engagement
+score and updating of CRM, and Sales Management functions is essential and both
+manual export and background updating functions for CRM, Sales Management and
+Club Directory must be preserved whilst retiring Twenty and its points of
+integration."*
+
+- **THE NIGHTLY RESCORE HAD SILENTLY STOPPED, AND FINDING THAT IS WHAT MADE
+  THIS URGENT RATHER THAN TIDY-UP.** `refresh_twenty_engagement` returned
+  immediately when Twenty was unconfigured and only ever touched clubs already
+  in `twenty_links` — so the moment Twenty went away, NOTHING rescored anything
+  platform-wide and every cached `marketing_clubs.engagement_score` froze
+  wherever it was last incidentally touched. The Club Directory, BetterComms
+  Lists/Segments, the CRM board and the Sales Workspace all read that cached
+  number, so four surfaces were quietly reading a stale one.
+- **`crm.recalc_all_engagement` IS THE ONE SWEEP, and three callers share it**:
+  the nightly job (`daily_engagement_rescore`), the Club Directory's
+  `POST /refresh-engagement`, and `python -m app.scripts.recalc_engagement`.
+  The script keeps its histograms and percentiles through an `on_club`
+  callback rather than a loop of its own — two copies of "rescore the whole
+  directory" is how the button and the cron start disagreeing about what a
+  score is.
+- **THE ENGINE WAS NEVER TWENTY'S; ONLY ITS FILENAME WAS.** `_engagement` is a
+  local read/compute over `usage_events` / `email_events` / our own
+  subscription rows that CACHES onto the club row — Twenty was one reader of
+  the result. So the move is `git mv services/twenty_sync.py
+  services/engagement.py` and strip, NOT an extraction: that file is 1,000
+  lines of dense reasoning about the scoring, and lifting 900 of them into a
+  new file is how the comments get lost.
+- **A `from x import y` INSIDE A FUNCTION BODY COMPILES, IMPORTS, AND STILL
+  BREAKS.** Three subscription hooks imported `_push_club_to_twenty` lazily
+  inside their own bodies — `billing.py` (a club adds modules to a live
+  subscription), `stripe_billing.py` (**a Stripe payment lands**) and
+  `organisations.py` (a club's first sync completes). `py_compile`, the import
+  smoke test and `vite build` all pass on every one of them; each would have
+  raised the first time a club actually paid for something. The suite checks
+  the call sites structurally for exactly this reason.
+- **`organisations.py` HAD BEEN CALLING A HELPER THAT NO LONGER EXISTED AT
+  ALL** — the local `_push_club_to_twenty` was deleted and its call site left
+  behind, a bare NameError on the club's first sync. It calls
+  `club_admin._sync_club_to_crm` now, which is the right answer anyway: that
+  helper links the directory row AND rescores, which is what "we synced the
+  club, show it in the CRM straight away" meant.
+- **A SEND STILL RESCORES THE CLUBS IT REACHED**, and that is the one place the
+  retirement changed a behaviour rather than a name: the rescore used to happen
+  as a SIDE EFFECT of pushing to Twenty. It is called directly now, per club,
+  on its own session, so a BetterComms outreach send moves the engagement score
+  immediately instead of waiting for the nightly sweep.
+- **`twenty_links` IS LEFT IN PLACE AND READ BY NOTHING**, the call migration
+  267 made for `vote_settings` — but the lifespan no longer CREATES it, so a
+  fresh database simply does not have it. Same for
+  `club_request_events.twenty_task_id`/`.twenty_task_status` and
+  `crm_deals.source = 'twenty_import'`: stored values and history, never
+  written again, and the ORM keeps mapping them so an existing row still reads.
+- **THE PIPELINE GAUGE WENT WITH IT.** `routers/pipeline_gauge.py` rendered
+  widgets for a Twenty dashboard iframe at `twenty.betterat.cricket`, reading
+  Twenty's own `/rest/opportunities` — both ends gone, and the internal Sales
+  Performance / Sales Commissions screens already answer the same question. Its
+  two `GAUGE_*` settings went with it.
+- **`OPPORTUNITY_AUTO_THRESHOLD` STILL EXISTS AND NOW MEANS SOMETHING WEAKER,
+  so the copy says so.** Nothing auto-creates anything at 90 any more; it is a
+  reporting line the parameters page and its preview count against ("Reads as
+  an opportunity at"). Leaving the old label would have promised an automation
+  that no longer runs.
+- **A COMMENT THAT JUSTIFIES ITSELF BY A RETIRED SYSTEM GOES STALE WITH IT.**
+  `trial_lifecycle`'s docstring explained its own design as "unlike the Twenty
+  scan, this runs whether or not Twenty is configured" — true, and meaningless
+  once there is no Twenty scan to be unlike. Corrected in place rather than
+  left to mislead the next reader; same for `engagement_params`' user-facing
+  group blurb and `models/db.py`'s column comments.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_twenty_retirement.py`, 57 checks — 11 retired
+  modules gone, 9 retired settings gone, no retired route on either side of the
+  wire, the three subscription hooks calling something that EXISTS, and then
+  the half that matters: the score computed AND cached, the sweep reaching
+  every club with the busy one outscoring the club nobody has visited, a dry
+  run writing nothing, a single club rescoring on its own signal without
+  touching its neighbour, and the operator script running the shared sweep
+  rather than a second copy, and thirteen CRM / Sales / Super Admin / Reporting
+  route bodies answering) **with two control runs**: 35 of the 40 reachable
+  checks fail against the pre-retirement commit, and against the commit that
+  had lost the three shared helpers, 5 fail naming them and the three buttons
+  they break.
+- **THE EXPORT BLOCK TOOK THREE SHARED HELPERS WITH IT, AND NOTHING NOTICED —
+  found by auditing rather than by the suite.** `_now_iso`, `_settle_bg` and
+  `_bg_stale` sat inside the Twenty-export region of `marketing.py` and are
+  called by **Rediscover, Push to BetterCricket CRM and the engagement rescore**.
+  The module still imported, `vite build` passed, the route strings were all
+  still there, and every one of those three buttons would have raised
+  `NameError` the first time it was pressed. **A structural check for a route's
+  presence is not a check that the route RUNS**: the suite presses all three
+  and their pollers now, and `undefined_names()` walks the whole backend for a
+  name a module uses and never defines — the one check that catches a helper
+  deleted along with the block it lived in.
+- **THE ROUTE TABLE IS THE HONEST DIFF, and it was taken both ways.** Dumping
+  `app.openapi()` on this commit and on the previous one and diffing names
+  exactly 10 removed routes, every one Twenty-only (3 export/refresh pairs, 4
+  gauge, 2 webhooks), against 2 added. No CRM, Sales, Super Admin, Reporting or
+  Directory route lost. Repeat that dump whenever a retirement removes code.
+- **THE SUITE NOW PRESSES THIRTEEN REAL SURFACES** — the CRM board, its stages,
+  deals, events and settings, Wizard Clubs, commissions and periods, the Sales
+  Workspace queue, the rep team, Sales Performance and the ad-signup report —
+  because "nothing was removed" and "everything still answers" are different
+  claims and only the second one is what a club notices.
+- **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN.** The first cut died on
+  `from app.services import engagement` and said nothing about the twenty-odd
+  behavioural checks below it. The behavioural half now REPORTS the engine or
+  the sweep as missing and returns; each button press is wrapped for the same
+  reason, so a `NameError` in a route body is a named failure rather than the
+  end of the run.
+- **A CHECK THAT MATCHES MORE THAN IT MEANS IS NOT A CHECK.** "the script keeps
+  no loop of its own" scanned the whole file and caught the `--verify`
+  equivalence checkers, which legitimately need one. It reads `recalc()`'s own
+  body through `inspect.getsource` now.
+- **TWO HARNESS ARTEFACTS, BOTH DOCUMENTED TRAPS HIT AGAIN**: a raw
+  `UPDATE ... SET engagement_score = NULL` left the ORM's in-memory copy stale,
+  so the sweep loaded a club that still LOOKED scored and wrote nothing; and
+  `expire_all()` then handing that instance to a service lazy-loads on its
+  first attribute read, which is the MissingGreenlet trap. `refresh`, don't
+  expire, when the object is about to be passed on.
+- **`usage_events`, `platform_settings` AND `marketing_utm_aliases` ARE
+  LIFESPAN-CREATED RAW SQL**, invisible to `create_all`, and every column added
+  since each was written lives in its own later ALTER — including the
+  loop-driven ones whose `(column, type)` pairs sit in a tuple an f-string
+  reads. The suite pulls the CREATE **and** every ALTER out of the shipped
+  `main.py` rather than retyping them, so a table that merely LOOKS right
+  cannot pass.
+- **RENUMBERED 293 -> 295.** `origin/main` reached 294 while the Rediscover work
+  was in flight, and its own 293 was a different migration entirely — two
+  sharing a revision id break Alembic outright. **This file has now recorded
+  that trap five times: check `origin/main` at the moment you merge, not only
+  when you first number one.** The v9.70.0 changelog entry collided the same
+  way and became v9.70.3.
+- **NOTICED, NOT DONE**: `twenty_links` still exists on the live database with
+  its history in it — dropping it is a decision for a person, not a deploy. The
+  five Twenty-era docs are kept as the record of what was built, with a
+  retirement banner on `docs/twenty-crm-integration.md`; the changelog entries
+  that describe the Twenty era are untouched for the same reason.
+
 ## NEVER DELETE OR OVERWRITE WHAT A CLUB TYPED IN BY HAND (v9.68.2, Sep 2026)
 
 **Set as a standing rule, after a merge deleted half a player's career.** A
@@ -56,6 +493,753 @@ import re-writes the same matches (deterministic `cricketstatz_match_id`, and
 that was kept. A club's hand-typed history has no such path, which is the whole
 reason for the rule.
 
+## THE CONVERSION CANNOT FIRE ON STREAMYARD'S DOMAIN (migration 296, v9.71.1, Sep 2026)
+
+Asked for with a paused Meta campaign waiting on it: a page on `betterat.cricket`
+that fires `CompleteRegistration` on a successful webinar registration and only
+then hands the visitor the StreamYard link. Webinar Mon 21 Sep 2026.
+
+- **THAT ONE CONSTRAINT DECIDED THE WHOLE SHAPE, and it is worth stating because
+  every other choice follows from it.** A pixel cannot fire on a third-party
+  domain, so an ad pointing straight at StreamYard hands Meta zero conversion
+  signal and delivery degrades within days. So the registration happens on our
+  own page, and **the success state is rendered rather than redirected** — a
+  redirect races the beacon it is supposed to follow, and skips the calendar
+  file and the inbox note besides.
+- **THE ORDER IS PERSIST, THEN FIRE, AND NOTHING ELSE.** Never on page load,
+  never on the click, never on a validation failure. The browser suite asserts
+  each of those by recording what `fbq` was actually called with, in order —
+  none of it is observable from the backend, which is why it is checked there.
+- **A RESUBMISSION IS THE SAME LEAD, SO IT CLAIMS NO SECOND CONVERSION.**
+  `webinar.register` folds on `(event_key, lower(email))` and reports `created`;
+  the page fires the pixel only when it is true. Counting a resubmission would
+  teach the ad set to optimise toward people who fill the form in twice. The
+  cost is stated rather than hidden: somebody arriving on a fresh ad click and
+  re-registering is a click Meta attributed with no conversion behind it, and
+  under-reporting one duplicate is the safer direction than inventing one.
+- **A BROKEN BACKEND STILL HANDS OVER THE LINK, AND STILL CLAIMS NOTHING.** The
+  registrant is not trapped behind a failed write — but no pixel fires, because
+  nothing was registered and a conversion we invented is worse for the ad set
+  than one we missed.
+- **CAMPAIGN CREDIT IS FILLED, NEVER OVERWRITTEN.** The upsert COALESCEs every
+  UTM column, so a registration already credited to a campaign keeps that credit
+  and one that arrived with no signal can be upgraded by a later tagged visit.
+  Overwriting would credit the registration to whichever visit happened to be
+  last rather than the click that earned it.
+- **`utm_term` WAS NEVER CAPTURED BY THE SITE AT ALL, and the browser suite is
+  what found it.** `lib/visitor.js::parseAcquisition` returned four UTM tags and
+  not the fifth, so any campaign tagging it had it silently dropped — on every
+  form, not just this one. Fixed at the source, and `public_self_serve`'s own
+  `_ATTRIBUTION_KEYS` allowlist had to learn it too or the newly-captured field
+  would have been dropped one level down.
+- **ONE DATE CONSTANT, TWO PAGES, AND THE PAGE TURNS ITSELF OVER.**
+  `services/webinar.EVENT` and its hand-kept mirror `frontend/src/data/webinar.js`
+  drive the headline, the button label, the promo block and what the success
+  state hands over. **The switch is the event's END, not its start** — somebody
+  arriving halfway through should still be sent to the live stream. The mirror
+  exists so the H1 paints without a request (this traffic is paid and mobile, and
+  a fetch in front of the H1 is a fetch in front of LCP); the suite asserts the
+  two copies agree rather than trusting them, the arrangement `billing_pricing.py`
+  and `pricing.js` already have.
+- **THE SERVER DECIDES WHETHER THE EVENT HAS PASSED; THE LOCAL CLOCK ONLY
+  COVERS THE FIRST PAINT.** Found by the browser suite: the first cut derived
+  `past` from the mirrored date alone and ignored the server's own `is_past`, so
+  a visitor whose device clock is days out would be shown the wrong state
+  entirely — offered a recording that does not exist yet, or sent to a stream
+  that has already finished. `webinarState({ isPast })` takes the server's
+  answer whenever it has one and falls back to the clock until the request
+  lands. Seven checks failed on exactly this.
+- **THE RECORDING LINK IS A SETTING, NOT A CONSTANT.** It does not exist until
+  after the event, and the hour afterwards is when interest peaks — waiting on a
+  deploy would spend it. `platform_settings.webinar_recording_url` (a new
+  `_STR_KEYS` group, url-validated, `''` CLEARS rather than storing an empty
+  string that would read as a link which exists and is blank).
+- **THE `.ics` IS AN ENDPOINT, NOT A BROWSER-BUILT BLOB**, because the same URL
+  is what the confirmation email links to. `email_service.EmailMessage` carries
+  no attachment field and the five providers behind it each take attachments
+  differently (SES would need raw MIME rather than the simple content path it
+  uses), so a link is both what the brief allowed and the only thing that works
+  in every mail client. Written as a UTC `DTSTART` with **CRLF line endings** —
+  RFC 5545 requires them, and a file joined with bare LF is accepted by some
+  calendar apps and silently rejected by others.
+- **DELIBERATELY NOT `club_onboarding_requests`.** That table is the queue of
+  clubs asking to be onboarded; somebody who signed up to watch a demo has not
+  asked for that, and folding a hundred registrants in would bury the clubs who
+  did. Per direct instruction it also does NOT push a Hot lead into Twenty or
+  the CRM the way a Contact-form enquiry does — a demo registration is a weaker
+  signal than "onboard my club".
+- **`/trial` KEEPS ITS OWN `content_category`.** The brief asked for `'trial'`;
+  it already fires `'self_serve_trial'`, and renaming it would split the event's
+  history so a custom conversion filtered on either value misses half of it.
+  Left as it is, per direct decision — the two are already distinguishable.
+- **THE PROMO BLOCK SITS BELOW `/trial`'s SEARCH BOX**, measured off the real
+  boxes rather than source order: that page converts paid traffic at ~3.4% and
+  anything above the fold competing with its search costs it that. It fires no
+  pixel event of its own — clicking through and registering is what fires one.
+- **A NEW TOP-LEVEL ROUTE IS A CLUB SLUG UNTIL FOUR LISTS SAY OTHERWISE**, the
+  trap this file already records for `/videos`. Added `demo` — **and `trial`,
+  which had never been added**, so `/trial` was resolving "trial" as a club slug
+  on every visit: a wasted `/api/clubs/trial` 404 and the club `Navbar` drawn on
+  top of its own `MarketingNav`, on the exact page paid traffic lands on.
+  **CORRECTED in v9.71.3 below: only THREE of the four were updated.** The
+  fourth, `lib/marketingPaths.MARKETING_PATHS`, is the one that suppresses the
+  club Navbar, so the overlap this note claims to have fixed was still live on
+  both pages until then — and could be measured on the deployed site.
+- **Verified against a real Postgres** (`backend/verification/verify_webinar.py`,
+  143 checks through the shipped route bodies and service: the DDL applied three
+  times and again over a populated table, both copies of the date agreeing, 17:30
+  Perth and 19:30 AEST proved the same instant, the switch at the event's end,
+  the calendar file's CRLF and UTC stamps, every UTM tag and the fbclid stored,
+  an un-allowlisted key never reaching the blob, the conversion queued once with
+  the browser's own event_id, a resubmission storing no duplicate and claiming
+  nothing while keeping its campaign credit, an untagged registration upgraded
+  later, all five refusals, the honeypot and fill-time guards including a device
+  with a fast clock NOT refused, the post-event states with and without a
+  recording, the setting cleared and refused, the email's outcome recorded on the
+  row through a refusal and a throw, and the downgrade) **with three control
+  runs**: the resubmission guard neutered fails 2, the bot guards neutered fail 4,
+  and with the service absent it REPORTS the feature rather than dying on the
+  first ImportError.
+- **Driven in Chromium** (`frontend/verification/verify_webinar_browser.mjs`, 87:
+  no conversion on page load or on either validation failure, the exact payload
+  on the wire, the conversion fired once with `content_category: 'webinar'`
+  sharing the server's event_id, the button refusing a second press while in
+  flight, the resubmission and server-error paths both claiming nothing, both
+  date-driven states, the promo measured as below the search box, and no
+  overflow at 390px) **with a control run**: firing the conversion regardless of
+  `created` fails the resubmission checks.
+- **`waitUntil: 'networkidle'` NEVER SETTLES ON THIS APP**, and it hangs the
+  suite rather than failing it: `HeartbeatBeacon` pings every ~25s for as long
+  as the tab is open, so the network is never idle. Wait for the element the
+  checks are about. Killing a hung run also leaves its Chromium behind, and
+  those pile up until the next launch hangs too.
+- **A CHECK THAT MEASURES THE HARNESS IS NOT A CHECK, twice here.**
+  `addInitScript` cannot stub `gtag` — `index.html` unconditionally redefines it
+  (`function gtag(){dataLayer.push(arguments)}`) after the init script runs, so
+  the recorder is replaced and every GA4 check reads empty; the calls are read
+  back out of `window.dataLayer` instead. `fbq` IS stubbable there, because its
+  own loader bails out when `window.fbq` already exists. And a `click({force:
+  true})` on a disabled button hung the suite rather than failing it — the
+  in-flight guard is asserted by holding the response and reading `isDisabled()`,
+  then dispatching the event directly.
+- **STILL ACCOUNT-SIDE, NOT SOMETHING CODE CAN DO**: `betterat.cricket` verified
+  in Business Manager, `CompleteRegistration` in the Aggregated Event Measurement
+  priority list (or iOS conversions are not attributed), and the ad's
+  `conversion_domain`. Also worth fixing on the creative itself: it reads "WAST",
+  which is West Africa Summer Time — Perth is **AWST**.
+- **THE FORM PRE-FILLS NOTHING ON STREAMYARD, AND THAT WAS ASKED AND ANSWERED
+  RATHER THAN ASSUMED (migration 297, v9.71.2).** `EVENT.watch_url` is handed
+  over as a plain link and no registration data crosses to it — there is no
+  StreamYard API call anywhere in this codebase. Read off the watch page's own
+  server-rendered props: the broadcast is configured as a **webinar**
+  (`webinarId`) and the page carries a `sessionRegistrationId`, which is
+  StreamYard's OWN registration mechanism and is empty for an anonymous
+  visitor. Whether that gate is switched on for this broadcast is a setting in
+  StreamYard, not something this code can see or change. **If it is on, a
+  registrant fills a form twice** — the fix is a StreamYard setting, not a
+  code change.
+- **A PHONE NUMBER IS GATHERED, AND IT IS OPTIONAL.** It shipped REQUIRED and
+  that was reversed the same week — see v9.71.3 below. The original reasoning
+  ("make sure we gather" is not satisfied by a field most people skip) is a
+  real argument and it loses to two better ones: on cold paid traffic a
+  mandatory phone number is the highest-friction field on the form, and it
+  reads as a promise to ring, which contradicts the "no sales call" line
+  `/trial` makes one click away.
+- **STORED EXACTLY AS TYPED, and validated on "could this be a phone number"
+  and nothing more.** `PHONE_MIN_DIGITS, PHONE_MAX_DIGITS = 8, 15` — an
+  Australian landline with no area code is 8 digits and E.164's own ceiling is
+  15. **DELIBERATELY NOT `admin_identity.mobile_valid`**, which is right for a
+  club admin's account and wrong here: it refuses anything that is not an
+  Australian mobile, and the clubroom landline a secretary writes down is a
+  perfectly good number to ring them on. Normalising the stored value would
+  only make it harder to read back to whoever rings it; the digits-only form
+  is derived once, at the Meta boundary, by `meta_capi._hash_phone`.
+- **IT RIDES ON THE CONVERSION BECAUSE IT IS A SECOND HASHED IDENTIFIER.**
+  `send_complete_registration_event` has always taken a `phone` and never had
+  one to hash — a conversion carrying an email AND a phone matches back to
+  whoever saw the ad more often, so this is an attribution improvement rather
+  than only a stored field.
+- **THE UPSERT COALESCES THE PHONE WHERE IT OVERWRITES THE NAME AND CLUB.**
+  Those two are always present, so a resubmission correcting them is
+  unambiguous; a phone can legitimately be absent (a browser served an older
+  bundle mid-deploy, a caller that is not the form), and losing a stored number
+  to one of those is worse than keeping a stale one. A new number still wins.
+- **MIGRATION 297 RE-RUNS THE WHOLE SHARED LIST rather than issuing a lone
+  ALTER**, so the CREATE covers a fresh database and an idempotent
+  `ADD COLUMN IF NOT EXISTS` covers one already at 296 — one list, no second
+  copy of the column to drift. **Its downgrade drops the COLUMN, never the
+  table**: 296 owns the table, and copying 296's downgrade would destroy every
+  registration over one column. The suite pins that.
+- **Verified** (the backend suite is 173 now: the pre-297 table rebuilt in raw
+  SQL and carried across with its rows, an earlier registration reading as no
+  phone rather than a blank, the number stored as typed, the corrected number
+  landing, a phone-less write not blanking one already stored, five shapes of
+  real number accepted incl. a landline and an international one, four
+  refusals, and the staff list carrying it) **with a control run**: 22 fail
+  against the previous commit and the run REPORTS rather than crashing.
+  **Driven in Chromium** (93: the field with its `tel` type, inputmode and
+  autocomplete, its label, the exact number on the wire, and both refusals
+  posting nothing and claiming no conversion) **with a control run**: 8 fail.
+- **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN, hit twice in one change.**
+  The backend's `SELECT phone` died on an `UndefinedColumnError` and said
+  nothing about the other 150 checks; the browser's bare `fill('#demo-phone')`
+  hung 30s on the locator and killed the run after six. Every phone read is
+  presence-checked now — `row.get("phone")` over `row["phone"]`, `attrOf()`
+  over a bare `getAttribute`. **The browser's refusal checks needed the WHOLE
+  BLOCK gated on the field existing, not each read guarded**: without the
+  field those submissions SUCCEED, the form is replaced by the success state,
+  and every later check in that section then hangs on a form that is gone.
+  Guarding one read at a time just moved the crash further down.
+- **NOTICED, NOT BUILT**: no reminder email before the event and no
+  attended/no-show record afterwards, so "send the recording to everyone who
+  registered" is a CSV export and a BetterComms list rather than one button. The
+  event is one constant, so a second webinar means editing both copies rather
+  than picking a row — `event_key` is on the table from the start for whenever
+  that becomes worth a screen.
+
+### What a review of the live page found, and one note it proved wrong (v9.71.3)
+
+Four findings off `betterat.cricket/demo` as deployed. The pixel behaviour —
+the part the page exists for — was confirmed correct; these are everything
+around it.
+
+- **THE PAGE ADVERTISED A RECORDING OF A DEMO THAT HAD NOT HAPPENED YET, on
+  every share of the link.** `<title>` and the server card's `og:title` were
+  both hardcoded to the post-event wording while the H1 correctly read "See
+  BetterCricket in action". The tab is the small half; the card is the real
+  one, because `usePageMeta` never reaches a crawler.
+- **SO THE COPY MOVED TO WHERE THE DATE ALREADY LIVES.**
+  `services/webinar.page_meta(is_past)` and `webinarState`'s `pageTitle` /
+  `pageDescription`, mirrored the way every other string on this page already
+  is, and asserted rather than trusted. **`_marketing_html` resolves `/demo`
+  per request** and the entry is GONE from `MARKETING_PAGES` — a frozen dict
+  cannot answer a question whose answer changes with the calendar, and leaving
+  a stale one there is how the two disagree.
+- **THE PHONE IS OPTIONAL, one week after shipping as required.** See the
+  corrected note above for why the original argument loses. The 8-15 digit
+  check still governs a number that IS typed; a blank one is a complete
+  registration. The label says "(OPTIONAL)" — asking silently and accepting
+  nothing is its own kind of dishonest.
+- **THE STREAMYARD LINK WAS IN THE JS BUNDLE, so the form was bypassable by
+  anyone who read the source.** It is off `WEBINAR` entirely now and comes from
+  `GET /public/webinar`, a request the page already makes. Grep the BUILT
+  bundle to confirm, not the source: `grep -rl <url> frontend/dist`.
+- **THE FULL GATE IS NOT BUILT, AND THE REASON IS A DIRECT CONFLICT WITH THE
+  BRIEF.** Genuinely gating registration means withholding `watch_url` from the
+  page-load read and returning it only from the register POST — which is
+  exactly the case the brief's own "a broken backend still hands over the link"
+  rule exists for. The two are mutually exclusive. **What ships is the middle
+  and it covers the failure that actually happens**: the register WRITE
+  erroring still hands the link over, because the page-load READ has already
+  succeeded. Only both failing leaves nothing, and there the page says what to
+  do instead of drawing a button that goes nowhere.
+- **THE OVERLAPPING LOCKUP WAS THE FOUR-LISTS TRAP, NOT A LOGO PROBLEM.**
+  Reported as "the header logo renders clipped at narrow widths — it reads as
+  'iiB Be… Cricket' with the wordmark overlapping the mark", which reads as a
+  CSS bug. Measured instead of guessed: `/demo` renders **a `HEADER` at y=0
+  AND a `NAV` at y=0**, the club `Navbar` and the page's own `MarketingNav`
+  stacked. The mark is three bars and a B ("iiB"), so two lockups a few pixels
+  apart is exactly the reported string.
+- **THE FOURTH LIST IS `lib/marketingPaths`, AND IT IS THE ONE THAT MATTERS
+  HERE.** `og_preview.RESERVED_ROOT_SEGMENTS`, `FaviconManager.RESERVED_ROOTS`
+  and `SponsorFooter.RESERVED_ROOT_SEGMENTS` all had `demo` and `trial`; the
+  list that suppresses the club Navbar did not.
+- **BUT NOT `MARKETING_PATHS` ITSELF, and that distinction is the whole fix.**
+  That list carries THREE behaviours: suppress the club Navbar, force the dark
+  marketing theme, and show `ClubCTABar`'s "get your club on BetterCricket"
+  bar. `/demo` and `/trial` want only the first — each forces LIGHT with its
+  own `data-theme` wrapper, and each IS a conversion page with its own call to
+  action, so a second competing CTA across the bottom is the friction they
+  exist to avoid. `OWN_NAV_PATHS` / `rendersOwnMarketingNav` is that one
+  behaviour on its own.
+- **Verified against a real Postgres** (`verify_webinar.py`, 198 checks: both
+  page-meta states and the two differing, the mirror carrying both titles, the
+  share card built from the state and the retired literal gone from it, `/demo`
+  no longer frozen in `MARKETING_PAGES` while another page still is, the watch
+  url absent from the mirror, and a blank phone registering, storing nothing
+  rather than a blank string, still being handed the link and still sending the
+  conversion with no phone to hash) **with a control run**: 8 fail against the
+  previous commit, named, with the other 171 still reported.
+- **A CHECK THAT COMPARES AGAINST AN EMPTY STRING CANNOT FAIL, and the control
+  run is what caught it.** The two share-card checks did `want_title in card`
+  with `want_title` defaulting to `""` when `page_meta` was absent — trivially
+  true. They assert the value is non-empty first now.
+- **Driven in Chromium** (111: the title in both states and `og:title` agreeing
+  with it, EXACTLY ONE header at the top of the page, the phone field not
+  marked required and its label saying optional, a blank phone posting and
+  reaching the success state, a malformed one still refused, the link handed
+  over being the one the server sent rather than a constant, and both calls
+  failing drawing no dead link) **with a control run**: 12 fail against the
+  previous commit, reporting the title as `Watch the BetterCricket demo | Live
+  demo + Q&A` and **THREE** headers at the top of `/demo` and of `/trial`.
+- **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN, hit again in this same
+  file.** The new blank-phone block opened with a bare
+  `getByTestId('demo-success').waitFor()`, which is exactly what a
+  required-phone build never reaches — so the control died there and said
+  nothing about the seventy checks below it. `reachedSuccess()` reports rather
+  than throws, and every read that depends on the success state is gated on
+  it: guarding one read at a time is not enough when a whole block assumes a
+  form has been replaced.
+
+
+### A disabled button that does not say why reads as broken (v9.71.4, Sep 2026)
+
+Reported: "rediscover committee is disabled on club directory".
+
+- **NOTHING WAS BROKEN, AND THE GATE IS RIGHT.** `disabled={busy === 'rediscover'
+  || rediscoverRunning || status?.paused}` — the third one was true, because an
+  operator had the crawler stopped. That is correct rather than merely cautious:
+  `rediscover_all` returns `{"skipped": "stopped"}` while the flag is set, so a
+  button that let you press it would report a finished run that never read a
+  page. **The silence was the bug**, and it is the same call this file already
+  records for a figure that is correctly zero — it still has to explain itself.
+- **THE STOP IS SET TWO ROWS AWAY, which is what made it unreadable.** The crawl
+  button beside it is at least next to its own Start crawling button and under
+  the red "Stopped" pill; the committee row has neither, so a greyed-out
+  Rediscover had nothing anywhere near it to connect the two. One reason string
+  now drives the disable, the tooltip and a line beside the button, so the three
+  can never disagree.
+- **"PAUSED" MEANS TWO DIFFERENT THINGS IN ONE PAYLOAD, and gating on the wrong
+  one would have been a real bug.** `crawl_status` emits `state == 'paused'` for
+  a runner merely on a break and `state == 'stopped'` for the operator's flag —
+  and it is the separate `paused` BOOLEAN that the button reads. Gating on the
+  word would kill the button every time the crawler breathed. The suite asserts
+  a break leaves it live.
+- **A RUN THIS PROCESS HAS LOST TRACK OF USED TO KILL THE BUTTON FOR GOOD.**
+  `_rediscover` is in-process and `POST /rediscover` has a 12-hour `_bg_stale`
+  escape hatch — so the server would happily start a new run while the screen,
+  reading `running` alone, kept it disabled with no way to reach that hatch.
+  **The server reports `stale` on its own status now** rather than the browser
+  keeping a second copy of the window, which is the one-definition rule this
+  file keeps everywhere: the disable and the server's own decision have to be
+  the same decision, and the suite asserts they agree both ways.
+- **A SKIPPED RUN IS NOT A FINISHED ONE.** `{"skipped": "stopped"}` was
+  formatted through the ordinary success path and printed "0 club(s) re-read" —
+  which reads as "it ran and there was nothing to do". The same mistake
+  `_settle_bg` exists to stop for a soft error, reached from the other end.
+  **Found by the browser suite, not by reading it**: the poll's message was
+  fixed and the "Last rediscover:" line beside the button was not, and it reads
+  the same result dict.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_rediscover_gating.py`, 19 checks through the
+  shipped route body and services: the two meanings of paused kept apart, the
+  Stop flag genuinely refusing a rediscover, a 45-minute run NOT stale, a
+  day-old one stale, the status and the POST agreeing both ways, a malformed
+  start time freeing the button rather than wedging it, and the payload
+  otherwise untouched) **with a control run**: 7 fail against the previous
+  commit, one of them reporting `stale=None allowed=True` — the server willing
+  and the screen refusing.
+- **Driven in Chromium** (`verify_rediscover_gating_browser.mjs`, 24: the
+  reported case reproduced, the reason on screen and in both tooltips, nothing
+  drawn when nothing is blocked, a break not disabling anything, a stale run no
+  longer holding it, and the skipped run reported honestly) **with a control
+  run**: 9 fail, while "the button is disabled" PASSES in both — the disable was
+  never the bug.
+- **A LOCATOR KEYED ON A NEW TESTID ALONE MEASURES THE HARNESS.** The first
+  control run reported "button not found" everywhere, which says nothing about
+  behaviour; it falls back to the label so the old build's button is found and
+  fails on what it does. The label itself is checked, so it cannot be the
+  primary locator — it reads "Rediscovering..." in exactly the state the suite
+  is about.
+- **`const URL = ...` SHADOWS THE GLOBAL `URL`** and every `new URL(...)` in the
+  route handler dies with "URL is not a constructor".
+
+### And then the gate itself was wrong (migration 298, v9.71.5, Sep 2026)
+
+Asked straight after the fix above: if they are two different jobs, why must the
+crawler be restarted to run one of them? Then, once the trade-off was put:
+"I do want the ability to stop all crawling traffic with PlayHQ. But I also want
+the ability to re-start the crawl, which should re-discover both new and existing
+clubs and pick up changes in address, associations, officers etc. The Re-discover
+committee members should just run through the existing clubs... (and I should be
+able to launch this function even if the typical Crawl is stopped)."
+
+- **THE GATE WAS PROTECTING NOTHING, AND THE OBVIOUS FEAR IS THE WRONG ONE.**
+  "A partial rediscover could empty the directory" is false: `_prune_committee`
+  is scoped `marketing_club_id = :club` and compares against the ids seen in
+  THAT CLUB'S OWN payload, and `_upsert_club(prune=True)` is called per club as
+  each page lands. So a run stopped at page N leaves every club on pages N+1..end
+  untouched rather than emptied. What the gate actually saved you from was a
+  no-op: `discover_clubs` polls the flag at the TOP of the loop, so a rediscover
+  started while stopped broke before page one and returned zeroes.
+- **THE PLATFORM ALREADY DISAGREED WITH ITSELF, which is the tell that a rule is
+  inherited rather than decided.** `rediscover_club` (one club, from its own row)
+  bypasses `discover_clubs` entirely and calls `_upsert_club(prune=True,
+  retick=True)` direct — **no pause check at all**, and it has always run while
+  stopped. If reconciling-while-stopped were unsafe, that one would be gated too.
+- **SO STOP MEANS "STOP THE UNATTENDED CRAWLER", AND THE REDISCOVER CARRIES ITS
+  OWN CANCEL.** `discover_clubs` takes a `should_stop` callable that DEFAULTS to
+  `is_crawl_paused`, so every background path (the continuous runner,
+  `crawl_batch`, `enrich_associations`) is byte-for-byte unchanged and the switch
+  still stops all unattended traffic. Only `rediscover_all` passes something
+  else. The suite presses each background path with the flag set for exactly
+  this reason — letting the rediscover through is only defensible while that half
+  holds.
+- **A RUN THAT IGNORES THE GLOBAL STOP MUST HAVE A STOP OF ITS OWN, or the
+  ability to halt all PlayHQ traffic quietly disappears the moment one is
+  running.** `POST /rediscover/stop` raises an in-process cancel (in-process is
+  right — the run itself is), and starting a run CLEARS it, or a stale cancel
+  would kill the next rediscover before its first page. The suite asserts the
+  cancel is the check the run actually asks, not a flag nothing reads.
+- **A HALTED RUN IS NOT A FINISHED ONE**, the rule this file already records for
+  a skipped one, reached from the other end. `discover_clubs` reports
+  `stopped: True` when it broke off with pages to go, so the screen says
+  "stopped part way" rather than printing the finished line over a partial pass.
+- **THE ASSOCIATION WAS THE ONLY REAL GAP IN "PICK UP CHANGES", and two thirds of
+  that ask were already true.** `_upsert_club` rewrites name, website, suburb,
+  state, postcode and coordinates on EVERY pass, and newly listed officers are
+  already added — both are now asserted rather than claimed, which is what makes
+  "nothing to build there" an answer. But `enrich_associations`'s frontier was
+  `associations IS NULL` and nothing else, so a club's associations were fetched
+  once and frozen for the life of the row: a club that moved association kept the
+  old one for ever and no crawl would ever correct it.
+- **`last_crawled_at` CANNOT ANSWER "WHEN WERE THE ASSOCIATIONS READ".** Discovery
+  bumps it for every club it sees, so it records when the club was last SEEN.
+  Hence `marketing_clubs.associations_fetched_at` (298), stamped only on a
+  SUCCESSFUL fetch — a PlayHQ wobble must not buy a club another 90 days of
+  staleness.
+- **THE BACKFILL IS SERVED BEFORE ANY REFRESH** (`case((never_fetched, 0),
+  else_=1)`), or refreshes starve the clubs nobody has ever enriched.
+- **`frontier_remaining` STILL MEANS NEVER-FETCHED ONLY, and that is
+  load-bearing.** `run_continuous` reads it as "is the backfill finished" and
+  sleeps to the next window at 0; folding refreshes in would mean the runner
+  never considered itself done and hot-looped. Refreshes ride alongside as
+  `refresh_due`, and get PROCESSED because they are in the frontier QUERY.
+- **THE MIGRATION BACKFILLS THE STAMP RATHER THAN LEAVING IT NULL**, or the whole
+  directory becomes refresh-due in one burst on the day it ships. Stamped from
+  `COALESCE(last_crawled_at, first_seen_at)`, so the longest-unseen clubs come
+  due first and the rest drain at the crawler's own pace. Only where
+  `associations IS NOT NULL`, so a never-fetched club stays on the ordinary
+  backfill frontier.
+- **A REFRESH CAN COME BACK EMPTY WHERE A FIRST FETCH COULD NOT** — the club has
+  left every association it played in — so `association_name`/`association_guid`
+  (a denormalised copy of `assocs[0]`) are CLEARED. Leaving them would show an
+  association the club no longer plays in. Unreachable before this change, which
+  is why it was never handled.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_rediscover_gating.py` is 34 checks now, and
+  `verify_assoc_refresh.py` is 21: 298 applied three times to a populated pre-298
+  table, the backfill stamping only the right rows, a stale club back on the
+  frontier and a fresh one not, the backfill served first, a failed fetch not
+  restamping, an empty refresh clearing the name, 0 days restoring the pre-298
+  behaviour, every background path still honouring the Stop, a rediscover running
+  while stopped and storing what it read, the cancel halting it, and a club the
+  halted run never reached left exactly as it was) **with two control runs**:
+  with both behaviours reverted 8 of the gating checks and 4 of the refresh
+  checks fail, reporting the club's own `{'skipped': 'stopped'}` and its stale
+  "Old Assoc"; with the feature absent both suites REPORT it by name rather than
+  dying on the first import or the missing parameter.
+- **A FAKE THAT REPORTS ITS OWN ROW COUNT AS `totalRecords` IS 'FINISHED' AFTER
+  PAGE ONE.** `discover_clubs` stops once `(pages_done * 100) >= totalRecords`,
+  so the first cut's cancel could never be reached — and "it never asked for
+  page 2" PASSED for the wrong reason. The fake reports a high total by default
+  now, and the caller lowers it only when running out of pages IS the check.
+- **Driven in Chromium** (`verify_rediscover_gating_browser.mjs`, 32: the button
+  live while the crawler is stopped, the crawl button beside it still held back,
+  the Stop control appearing only while a run is going, its exact endpoint on the
+  wire and never the crawler's own, a dismissed confirm sending nothing, and a
+  halted run reported as halted) **with a control run**: 11 fail, naming
+  `disabled=true` and the old build printing `Last rediscover: 412 club(s)` over
+  a partial pass.
+- **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN, hit again here.** A bare
+  `.first().innerText()` on the new note killed the control after three checks
+  and said nothing about the other twenty-nine. Every read of an element this
+  change ADDS goes through `textOf()`, which returns '' for an absent locator.
+
+### One form, two lists: pushing the registrant into StreamYard (migration 300, v9.71.6)
+
+Asked for directly, after the reminder below shipped: **"I want just one single
+form and the registrants to be put into StreamYard as well as in BetterCricket
+rather than making someone register twice."**
+
+- **THE PUSH IS BUILT AND IT WORKS AGAINST THE LIVE API, verified through the
+  SHIPPED function rather than a curl.** `POST oa-api.streamyard.com/api/public/
+  webinars/{id}/registrations` returns **201** with the registration's id;
+  `services/streamyard.push_registration` is what calls it, and every registrant
+  is pushed as they arrive. So StreamYard's registrant list, its attendee report
+  and its own reminders all know who is coming, off our one form.
+- **REMOVING THE SECOND FORM IS STILL THE STREAMYARD TOGGLE, and that is not a
+  shortcut — it is the only thing that works.** Three things were measured
+  before settling on it, and each one closes a route that looks open from
+  reading their bundle: the browser cannot register from our page (a CORS
+  preflight from `betterat.cricket` answers **`{"message":"CORS error: Origin
+  not allowed"}`**); a registration is bound to the SESSION that created it
+  (`GET /webinars/{id}` reads `isUserRegistered: true` for the session that
+  POSTed and **401s on the registration id alone**), so one our backend creates
+  cannot be handed to the visitor's browser; and the `?token=` a StreamYard
+  reminder links to is **not** the registration id — `/watch/{id}?token={id}`
+  leaves `sessionRegistrationId` empty in the page's own server-rendered props,
+  and so do `registrationId=`, `rid=` and both `embed=true` variants. **With the
+  gate on there is no way to skip the form; with it off there is no form to
+  skip.** The push is what makes turning it off cost nothing.
+- **THE FIELD IDS ARE FETCHED, NEVER HARDCODED.** The payload keys on
+  per-definition uuids (`fields.definitionId` + `fields.values[{field id}]`),
+  which change the moment somebody edits the registration form in StreamYard —
+  so `_field_map` reads `registrationFieldDefinitions` and maps by `type`,
+  cached ten minutes so an edit is picked up within the hour rather than at the
+  next deploy. Hardcoding them would work today and break silently the first
+  time a field is added.
+- **THE BROADCAST IS NEVER A SECOND CONSTANT.** `webinar_id_from` parses it out
+  of `EVENT.watch_url`, which is already the one place the event is named. A
+  watch link that is not StreamYard's yields None and every function no-ops,
+  which is also what makes the next event's setup one line rather than two.
+- **THEIR API IS IDEMPOTENT ON THE EMAIL BUT DOES NOT OVERWRITE**, verified:
+  posting twice returns the SAME id and leaves the stored values alone. So a
+  retry is free — and a row already pushed is skipped before any request is
+  made, because re-pushing a corrected name would cost a request and change
+  nothing at their end.
+- **A REQUIRED FIELD CANNOT BE BLANK, AND A MONONYM IS THEREFORE SKIPPED RATHER
+  THAN GIVEN AN INVENTED SURNAME.** Measured: `lastName: ""` is a **400** while
+  an empty optional phone is accepted. A name we made up would sit beside that
+  person's chat messages in front of everyone watching; they are still
+  registered with us, still emailed, and — with the gate off — the link still
+  lets them in. The reason is recorded on the row rather than being silent.
+- **A SKIP IS NOT A FAILURE, and the staff list says so differently.** `no
+  surname to send` and `the broadcast has no registration form` are rows there
+  was nothing to do for; an HTTP error is one that went wrong. Both land in
+  `streamyard_error`, and both read as `NOT SENT` with the reason on hover
+  rather than as `FAILED`.
+- **BEST-EFFORT AT EVERY STEP, because it is an undocumented API.** The
+  registration is complete once our own row is written and the page has already
+  handed the link over, so the push is backgrounded on its own session, never
+  raises, and records its outcome on the row. Everything else — the
+  registration, the confirmation email, the reminder, the link — works with
+  this erroring, switched off, or removed by StreamYard tomorrow.
+- **THE HOURLY PASS IS THE CATCH-UP, NOT THE MECHANISM.** `webinar_upkeep`
+  (the reminder job, widened) pushes anyone with no id, so a registration taken
+  before this existed and a push that failed on a wobble both self-heal. It
+  settles — a second pass over a list everybody is on considers nobody and
+  makes no request. `POST /club-admin/super/webinar-streamyard-sync` is the
+  button for when an hour is too long to wait.
+- **Verified against a real Postgres** (`verify_webinar.py`, 259 checks: the
+  DDL adding the pair, the id derived from the watch link and a non-StreamYard
+  link no-oping, all three name splits, a push stamping the id, a row already
+  pushed skipped before any request, a mononym recorded as a skip with no id, a
+  refusal recorded rather than raised, the catch-up making one request per row
+  and settling to none, and the register route asserted structurally to fire
+  it) **with a control run**: 7 fail against the previous commit and the other
+  234 are still reported. **No live call is made by the suite** —
+  `push_registration` is stubbed, because a verification run must not create
+  real registrations in somebody's StreamYard account.
+- **THE LIVE API WAS EXERCISED SEPARATELY, THROUGH THE SHIPPED FUNCTION**, which
+  is the only way to know an undocumented endpoint's real shape: 201 with an id,
+  a second push returning the same id, the mononym skipped and a non-StreamYard
+  link no-oping. **It left four test registrations in the account**
+  (`bettercricket-integration-test@`, `bc-it-a@`, `bc-it-b@`,
+  `bc-shipped-fn-test@`, all `betterat.cricket`) and **there is no public DELETE
+  — every id 404s** — so they have to be removed from the StreamYard dashboard
+  by hand. Use an obviously-marked address if this is ever done again.
+- **STILL ACCOUNT-SIDE**: turn registration OFF on the StreamYard broadcast.
+  That is the half that removes the second form, and no code in this repo
+  changes it. **Not established, because it needs that toggle flipped**: whether
+  their API still accepts a push once registration is disabled. The push handles
+  a refusal as an ordinary recorded error, so if it stops working the worst case
+  is one form and our own list — check the StreamYard column after the first
+  registration to see which way it fell.
+
+### The second form is StreamYard's, and the reminder that replaces it (migration 299, v9.71.5)
+
+Reported with the campaign live: "when you enter your details it takes you to a
+page where you click a link and then have to put details in again... it should
+automatically go through to StreamYard and save the registration details so
+that can be tracked. Where do the registrants go currently?"
+
+- **REGISTRANTS HAVE ALWAYS BEEN TRACKED, and answering that first is what
+  stopped this being built as a data-capture feature.** Every registration is a
+  `webinar_registrations` row — name, email, club, phone, role, all five UTM
+  tags and the fbclid — folded on `(event_key, lower(email))`, listed at
+  **`/admin/super/onboarding`** under "Webinar registrations" with a CSV
+  export. Nothing was going missing; the panel simply **opened collapsed**
+  behind a `Show (N)` toggle, which is how a registration that landed reads as
+  one that did not. It opens expanded now.
+- **THE SECOND FORM IS STREAMYARD'S OWN, AND v9.71.2 PREDICTED IT EXACTLY.**
+  That note read: "Whether that gate is switched on for this broadcast is a
+  setting in StreamYard... **If it is on, a registrant fills a form twice** —
+  the fix is a StreamYard setting, not a code change." Confirmed against the
+  live broadcast: `isRegistrationEnabled: true`, and its fields are email,
+  first name, last name (required) and phone (optional) — **every one of which
+  our own form already collects**. So the fix is to switch that gate off in
+  StreamYard, and nothing in this repo can reach it.
+- **CARRYING THE DETAILS ACROSS IS CLOSED OFF, AND IT WAS MEASURED RATHER THAN
+  ASSUMED.** StreamYard has an undocumented registration API
+  (`POST oa-api.streamyard.com/api/public/webinars/{id}/registrations`) and the
+  watch URL takes a per-registrant `?token=`, so an auto-handoff looks possible
+  from the bundle. It is not: the API answers
+  **`{"message":"CORS error: Origin not allowed"}`** to a preflight from
+  `betterat.cricket`, so the visitor's browser cannot register there from our
+  page. Server-to-server would bind the registration to OUR session rather than
+  theirs, on an unversioned internal API, twelve days before the event — a
+  worse trade than one setting.
+- **SWITCHING THE GATE OFF COSTS EXACTLY ONE THING, so that one thing is now
+  built.** StreamYard's registration is what sends its reminder; ours did not
+  have one (`NOTICED, NOT BUILT` in the v9.71.2 note). `webinar.send_reminders`
+  is the replacement.
+- **THE WINDOW DECIDES, NOT A PINNED CRON.** The sweep runs hourly and returns
+  immediately outside `REMINDER_LEAD_HOURS` (3) before the start — a one-shot
+  cron at the right minute has to be moved by hand for the next event and
+  misses entirely if the app happens to be restarting. It costs one indexed
+  UPDATE matching nothing on all but a handful of runs in the event's life.
+- **NOBODY WHO REGISTERED INSIDE THE WINDOW IS REMINDED.** Their confirmation
+  went out minutes ago carrying the same link; a second one an hour later reads
+  as a mistake rather than a courtesy.
+- **`reminder_sent_at` IS THE CLAIM, NOT JUST THE RECORD.** The same UPDATE
+  that selects the rows stamps it, so two overlapping runs cannot both email
+  one person; a refusal HANDS THE CLAIM BACK and keeps its reason, so the next
+  hour retries rather than one provider hiccup silently costing somebody their
+  only reminder. A hard crash between the stamp and the send leaves it claimed
+  and the reminder is missed — the conservative direction, since a duplicate is
+  the one a registrant would notice.
+- **NOTHING GOES OUT ONCE THE SESSION HAS ENDED.** A reminder landing after the
+  event sends somebody to a stream that is over, which is worse than none.
+- **A SEPARATE PAIR OF COLUMNS, NOT THE CONFIRMATION'S.** `reminder_sent_at` /
+  `reminder_error` sit beside `email_sent` / `email_error` rather than
+  overwriting them — two sends, two outcomes, so "did they get reminded" stays
+  answerable independently of "did they get the confirmation".
+- **`POST /club-admin/super/webinar-reminders` IS THE ESCAPE HATCH, NOT THE
+  MECHANISM.** The reminder has one chance to be useful, so a "Send reminder"
+  button exists for a sweep missed on the night. It runs the SAME function, so
+  pressing it after the sweep emails nobody twice, and it refuses outside the
+  window so it cannot fire a week early.
+- **NUMBERED 299, NOT 298 — AND v9.71.5, NOT v9.71.4.** `origin/main` reached
+  298 (`assoc_refresh`) and shipped its own `v9.71.4` changelog entry while
+  this was in flight. **Six times now, and this is the first time the CHANGELOG
+  collided in the same merge as the migration** — two files with one name is a
+  merge conflict rather than a silent break, but check both. Migration 299
+  re-runs the whole shared `webinar_ddl.STATEMENTS` list rather than issuing
+  two lone ALTERs, and its downgrade drops the two COLUMNS, never the table —
+  296 owns that.
+- **Verified against a real Postgres** (`verify_webinar.py`, 232 checks: the
+  DDL applied three times over a pre-297 table adding the reminder pair, an
+  older registration reading as not reminded, the window at all four edges,
+  nobody emailed before it opens, the late registrant and another event's
+  registrant both left out, a second sweep emailing nobody twice, a refusal
+  handing the claim back with its reason and the next run sending it, nothing
+  after the session ends, the email's link and both timezones, the endpoint
+  refusing outside the window, and the sweep asserted structurally to be
+  registered on the scheduler) **with a control run**: 6 fail against the
+  previous commit and the other 202 are still reported.
+- **STILL ACCOUNT-SIDE, and it is the actual fix for what was reported**: turn
+  registration OFF on the StreamYard broadcast. Until that is done a registrant
+  fills two forms, and no code in this repo changes that.
+
+## The Club Directory's committee only ever grew (migration 295, v9.70.0, Sep 2026)
+
+Asked for directly: a Rediscover that re-reads what PlayHQ publishes for every
+club (and for one named club), prunes the officers it no longer lists, ticks
+every officer with an email, leaves departed officers in BetterComms, and
+updates the role of a contact already there.
+
+- **DISCOVERY WAS ADDITIVE AND NOTHING SAID SO.** `_store_contact` upserts on
+  lower(email) and has never removed a row, so a club that elected a new
+  committee read as last season's officers PLUS this season's, with nothing on
+  screen separating them. `crawl_batch` could not have fixed it either — its
+  discovery phase only runs `if total == 0 or rediscover`, and the UI's Run
+  crawl batch button has never sent `rediscover`, so on a populated directory
+  that button does association enrichment ONLY.
+- **A REDISCOVER IS THE SAME DISCOVERY PASS WITH TWO FLAGS, not a second
+  reader.** `discover_clubs(prune=True, retick=True)`. Two copies of "read a
+  club's committee" is how the nightly pass and the operator's button start
+  disagreeing about what a committee is.
+- **THE ROLE IS RESOLVED WITHIN THE PAYLOAD BEFORE ANYTHING IS WRITTEN, which
+  is what makes replacing it safe.** The old rule was improve-only
+  (`if role_rank < existing.role_rank`) for a real reason: one person
+  legitimately appears twice in one payload (Secretary AND Junior Coordinator on
+  one address) and the club should read as the senior. That is now decided in
+  `_upsert_club` over the whole payload, so a Rediscover can then REPLACE the
+  stored role outright — a Secretary who is now Treasurer reads as Treasurer.
+  The ordinary crawl stays improve-only.
+- **DELETING AN UNSUBSCRIBED OFFICER IS THE ONE THING THIS MUST NOT DO, and it
+  is the whole reason `former_at` exists.** Delete the row and the next crawl
+  re-adds them from PlayHQ as a fresh contact — subscribed, and ticked under the
+  new rule — and we email somebody who opted out. So `_prune_committee` DELETES
+  only where nothing a person decided would go with the row, and KEEPS the rest
+  unticked with `former_at` stamped: an unsubscribe, a bounce, a
+  `do_not_contact`, a note, or a `crm_people` link (migration 255's bridge is
+  ON DELETE SET NULL, so a delete would not destroy the CRM person but would
+  silently cut the link).
+- **THREE ROWS ARE NEVER CANDIDATES AT ALL**: a contact a super admin added by
+  hand (`source='manual'` — PlayHQ never listed it, so its absence says
+  nothing), the org-level club mailbox, which comes from `discover_org_contact`
+  rather than the committee list and is the only row carrying
+  `_CLUB_CONTACT_RANK`, and anything at `_HAND_ADDED_RANK`. The suite asserts
+  both ranks are unreachable from `_role_for_position`, so neither
+  identification can go stale.
+- **`sales_workspace.add_directory_contact` WROTE `source='api'`, so the first
+  cut of the prune DELETED A PERSON A REP HAD TYPED IN.** Found by asking
+  whether the CRM needed a push, not by the suite — the drawer writes through
+  `_store_contact`, which hardcoded the source, so a Workspace-added contact was
+  indistinguishable from a crawled officer and only survived if it happened to
+  carry a note, an opt-out or a logged call. It stores `'manual'` now, and rank
+  99 covers every row written before the fix: `_role_for_position` returns only
+  1/2/3/4/5/10/50/60, so 99 cannot have come from a crawl. **The control run is
+  what showed the size of it** — with both halves reverted, both Workspace
+  contacts are gone.
+- **`contacts` ABSENT AND `contacts: []` ARE DIFFERENT ANSWERS.** Present-but-
+  empty is a club that publishes no committee and everything prunable goes;
+  absent or null is a payload that said nothing, and prunes nobody — an upstream
+  shape change must not be able to empty the whole directory in one pass.
+- **A LISTED OFFICER WITH AN EMAIL IS TICKED, and the insert default changed
+  from `rank <= 4` to "has an email"** — a Junior Coordinator with an address is
+  as emailable as a Treasurer. Never a contact who unsubscribed, bounced or
+  asked not to be contacted: ticking those shows a super admin a recipient who
+  can never be sent to. **An ordinary crawl still never re-ticks somebody a
+  super admin unticked** (`retick=False`), or the nightly pass would fight the
+  operator; only the explicit Rediscover and the explicit "Tick officers with an
+  email" button apply the rule to existing rows.
+- **THE EXPORT UPDATES RATHER THAN SKIPS.** `export_to_comms` used to stamp
+  `exported_at` on an address already in BetterComms and move on, so an officer
+  who changed role kept the role they held when they were first exported.
+  `comms_contacts.role` is refreshed now; a blank name and a missing club link
+  are filled; a name set by hand on the comms side is never overwritten and a
+  suppressed address is never resurrected.
+- **`comms_contacts.role` IS A STORED COPY ON PURPOSE, against this file's own
+  derive-don't-store instinct.** A departed officer is pruned from the Directory
+  and KEPT in BetterComms — that is what was asked for — so a join back to
+  `marketing_club_contacts` would blank exactly the people the feature exists to
+  preserve. It is the last role we knew them by, which is the honest reading.
+  It is also what makes Role a filter facet on Lists and Segments.
+- **ONE CONTACT SERIALISER.** `list_clubs` had its own copy of `_contact_out`'s
+  dict, so `former` would have reached the club card and not the list. It calls
+  the shared one now, and the suite asserts there is exactly one copy.
+- **`emptyFilters` IS THE ONE FACET SHAPE.** `CommsLists.jsx` kept its own
+  `noFilters` literal, which silently drops any facet added to the kit — Role
+  was added to the kit.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_committee_rediscover.py`, 91 checks through the
+  shipped service and route bodies with the PlayHQ client stubbed: migration 295
+  applied three times to a populated pre-293 table seeded in RAW SQL — the ORM
+  model already carries the columns, so a row inserted through it could not be a
+  pre-293 row — the ordinary crawl still additive and still not re-ticking, the
+  role replaced on a rediscover and improve-only otherwise, one person listed
+  twice, all five retained cases marked and unticked, the manual row and the org
+  mailbox untouched, a returning officer clearing `former_at` without being
+  re-ticked, both upstream-shape guards, one named club matched on its GUID
+  rather than a name two clubs share and found by routingCode after a rename, an
+  unreachable PlayHQ reading as a fetch failure rather than an empty committee, a
+  stopped crawler stopping the run, the ticking rule and its four exclusions, and
+  the export updating a role while never resurrecting a suppressed address)
+  **with two control runs**: with the whole feature absent the suite REPORTS it
+  and bails rather than dying on the ImportError; with the prune, the retick and
+  the role refresh neutered, 24 of the 91 fail — the departed officer still
+  listed and the comms role stuck on the old one, which is the reported symptom.
+- **THE POLITENESS DOC WAS STALE AND IS CORRECTED IN PLACE.**
+  `docs/marketing-club-directory.md` said "a jittered 2 to 4s delay"; the shipped
+  defaults are `marketing_crawl_min_delay=15.0` / `_max_delay=40.0`, applied
+  BEFORE each request behind a module-level `asyncio.Semaphore(1)` that every
+  directory call queues on. ~6,900 AU clubs at 100 per page is ~70 requests, so a
+  full Rediscover is roughly half an hour to an hour, not the "hours" the first
+  cut of the UI copy claimed. A single-club Rediscover uses the short
+  interactive delay (0.2-0.7s) `discover_org_contact` already uses for the
+  self-serve registration lookup.
+- **NUMBERED 293, NOT 291.** `origin/main` had reached 292 while this was in
+  flight. Check `origin/main` at the moment you merge, not only when you first
+  number one — this file has now recorded that trap four times.
+- **NOTICED, NOT BUILT**: there is no `role` SEGMENT field (Role is a Lists and
+  Segments facet, not a saved-rule condition — that needs its own entry in
+  `comms_segments`' registry); nothing prunes a `former_at` contact later, which
+  is deliberate, since the whole reason those rows survived is that somebody
+  decided something about them; and the nightly discovery pass still runs
+  additive, so the reconcile only happens when an operator asks for it.
 ## A club decides what it is told about (migration 288, v9.69.0, Sep 2026)
 
 Asked for as a configurable notification system a club admin manages — emails
@@ -212,6 +1396,115 @@ period before expiry left for the club to define**.
   away), and the AFL silo is untouched. `member_reminders` still emails the
   MEMBER about their own lapsing qualification through the member portal — a
   different audience from this, and deliberately left alone.
+
+## Suggested duplicate grades: the discriminator rule (migration 294, v9.70.1, Sep 2026)
+
+Asked for on Manage Grades: a smarter way of merging potential duplicates by
+suggesting them, and whether Cricket Australia's grade ID could help. Merging
+was two manual dropdowns and nothing computed a candidate pair.
+
+- **THE CA GRADE GUID CANNOT DO THIS, AND THAT WAS MEASURED BEFORE ANYTHING WAS
+  BUILT.** It is minted FRESH EVERY SEASON: across three seasons of a real club's
+  live `fixturesladders/organisations/{org}/teams` payload, **0 of 43 grade guids
+  repeated**, while the same grade NAME carried three different guids. The unique
+  index on `(season_id, grassroots_id)` already forbids a repeat inside a season,
+  so there is no pair of rows a shared guid could ever link. **The
+  `owningOrganisation.id` on the very same payload IS stable across all three
+  seasons** — that is the CA id this uses, and it was already stored as
+  `grades.association_id` (migration 283).
+- **EDIT DISTANCE IS NOT MERELY WEAKER ON GRADE NAMES, IT IS BACKWARDS.** Scored
+  against a real club's own grade list, the genuinely DIFFERENT grades outscore
+  the real duplicates: `One Day Grade 2`/`One Day Grade 4` **0.933**,
+  `Twenty20 Div 2`/`Div 3` 0.929, `PSWL South A`/`South B` 0.917 — against
+  `A Grade`/`A Grade (Gatorade)` **0.560** and `F Grade`/`F Grade Colts Cup`
+  0.583. **No threshold separates the two columns.** At the player matcher's 0.90
+  the screen would offer to merge a club's One Day Grade 2 into its Grade 4 while
+  missing the sponsor suffix entirely. **So `admin._fuzzy_name_pairs` must never
+  be pointed at grade names.** The reason is structural: a player's names differ
+  by SPELLING VARIANCE, where an edit distance means something; a grade's differ
+  by a DISCRIMINATOR — a number, a letter, a colour — that IS the whole meaning of
+  the name, and edit distance reads it as noise.
+- **THE RULE IS THEREFORE TOKEN-AWARE: the discriminating tokens must be
+  IDENTICAL, and only decoration may differ.** Every tier in
+  `services/grade_duplicates.py` is gated on that one test, which is what makes
+  even the loosest of them safe. Three tiers: `same_name` (identical once
+  decoration is stripped), `extra_words` (one name says everything the other does
+  and more) and `word_typo` (one word differs and is ≥0.80 alike — consulted
+  ONLY after the discriminators have matched, so it cannot repeat the mistake
+  this module exists to avoid).
+- **A NUMBER, A BARE LETTER AND A COLOUR ARE DISCRIMINATORS.** "One Day Grade 5
+  Black" and "... 5 Gold" are two real grades whose names are otherwise
+  identical, so a colour has to count.
+- **SO IS THE MATCH FORMAT THE NAME ANNOUNCES, and leaving it out was a real
+  bug the first run caught.** "1st Grade" and "One Day Grade 1" share a number
+  and differ only by the words "one day", so a word-subset rule alone read the
+  second as the first with decoration and offered to merge a club's whole one-day
+  competition into its two-day one. Format is an axis this platform filters on, so
+  naming one is identity. Read off the RAW name via `suggest_formats`, which is
+  what catches `A Grade (One Day)` — a parenthetical the sponsor strip removes.
+- **EVERY SYNONYM EXPANDS AN ABBREVIATION; none contracts one.** Folding
+  `division` to `div` left the misspelt `Divsion` compared against a three-letter
+  stub (0.60, reads as a different word); expanding compares like with like
+  (0.93). `_PREFIX_SYNONYMS` is separate and only fires on letters stuck to a
+  number (U14, Yr9), so a BARE "u" is still read as a grade tier the way "A
+  Grade" is. **Both found by running it, not by reading it.**
+- **THE ASSOCIATION IS A VETO; THE CATEGORY IS ONLY A CAUTION.** Two names run by
+  associations we KNOW to be different are not one grade, whatever they are
+  called. A classification clash is NOT a veto — a club really does merge a
+  junior-sounding cup name into the senior grade it belongs to (this file's own
+  shared-fixture note records "F Grade Colts Cup" merged into senior "F Grade"),
+  and refusing it would block a merge the platform has already seen happen.
+  Coexisting in a season is a caution too, never a veto: CA's older spelling
+  turning up mid-season is real.
+- **ONLY `same_name` IS EVER BULK-SAFE**, and not even then if the two coexisted
+  in a season — `BULK_SAFE_KINDS` is an allowlist, mirroring `MergeTools`'
+  `isExactPair`, so a tier added later is manual-confirm until somebody decides
+  otherwise.
+- **THE DIRECTION IS A SUGGESTION, NOT A DECISION.** The fuller record is kept
+  (games, then the newer season, then the shorter name) and the card offers to
+  flip it, because which spelling a club wants on its own leaderboard is the
+  club's call.
+- **THE PAIRS ARE BUILT FROM WHAT THE SCREEN ALREADY DRAWS** (`list_grades_with_stats`),
+  so a pair can never name a grade the table does not list and an already-merged
+  group is one row and therefore never suggested against itself. A merged group
+  answers for every name in it, so it carries its aliases' seasons and
+  associations too.
+- **`grade_merge_pair_ignores` (294) keys on NAMES, not grade ids**, because a
+  grade name spans one row per season and every merge here is name-to-name.
+  Stored sorted, so dismissing a pair either way round is one row.
+  `services/grade_ignore_ddl.py` is the ONE copy alembic and the lifespan mirror
+  both run, per the `vote_medal_ddl` rule.
+- **NUMBERED 294 after checking `origin/main`**, which had reached 293 — two
+  migrations sharing a revision id break Alembic outright.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_grade_duplicates.py`, 67 checks through the
+  shipped service and route bodies: the whole calibration table re-run as checks
+  both ways, every discriminator rule, the DDL applied three times and again over
+  a POPULATED table, the sponsored spelling and the punctuation-only rename
+  offered, the junior cup offered with its clash as a caution, the three
+  destructive pairs refused, the association veto, cross-club both ways,
+  dismissal in both directions landing one row, two refusals, and an
+  already-merged group not suggested against itself) **with two control runs**:
+  with the token rule swapped for the player matcher's 0.90 SequenceMatcher, **18
+  of the 67 fail — four of them offering to merge genuinely different grades**;
+  with the service absent the suite REPORTS it by name rather than dying on the
+  first ImportError.
+- **Driven in Chromium** (`frontend/verification/verify_grade_duplicates_browser.mjs`,
+  29: the exact merge on the wire, flipping the direction sending the other way
+  round, a dismissal going to the ignore endpoint and never a merge, the weaker
+  tier's warning drawn once and not twice, a club with nothing to sort out shown
+  no panel at all, and no overflow at 390px) **with a control run**: with the
+  panel removed it reports 23 missing checks rather than crashing — which it DID
+  on the first cut, dying on the first absent locator after two checks, so every
+  interaction goes through `press()` now.
+- **NOTICED, NOT BUILT**: opponent overlap. Two grades that are really one tier
+  play largely the same set of clubs, which is the strongest confirmation
+  available from our own data — but it needs club-name matching against
+  `home_team`/`away_team` (`club_match_keys` territory) and a wrong-looking stat
+  on a merge card is worse than none. The season span shown on each card is the
+  cheap half of the same idea. The AFL silo's own Merge Grades screen
+  (`routers/afl/merge.py`) is untouched and would need its own pass — its
+  categories are single-valued and it has no association column.
 
 ## A FIXTURE BELONGS TO BOTH CLUBS. Read it that way, every time (v9.62.0, Sep 2026)
 
@@ -7469,6 +8762,580 @@ back to 1953/54.
   appears exactly once failed against correct output. It asserts the phrase is
   present and that the old flat `Earliest` label is gone.
 
+### THE TWO SOURCES COMPLETE EACH OTHER. IT IS AN AND (migration 293, v9.70.0, Sep 2026)
+
+Said directly, after a per-season either/or was proposed and costed: **"You
+shouldn't lose any? They should compliment each other. It shouldn't be an or,
+it should be an and."** The user was right, and every note below this one that
+describes choosing a winner per season describes the design this replaces.
+
+- **CHOOSING A SOURCE PER SEASON REMOVED THE DOUBLE COUNT BY THROWING MATCHES
+  AWAY, and that was measured before it was believed.** Across five of Keon
+  Park's seasons, Cricket Australia holds **401** matches and CricketStatz
+  **473**, each with genuine gaps the other fills — 2002 85/86, 2005 91/104,
+  2011 91/117, 2019 65/82, 2024 69/84. `seasons.stats_source = 'cricketstatz'`
+  hid a season's whole synced side, so a season where CA held five matches
+  CricketStatz lacked lost all five.
+- **SO THE DUPLICATE IS REMOVED PER MATCH.**
+  `manual_games.superseded_by_game_id` pairs an imported match to the synced
+  game that IS that match, `pair_prefers_import` says which half of the pair
+  counts, and everything unpaired from BOTH sides counts. The club's record is
+  the union.
+- **THE SCORECARD IS THE IDENTIFIER, NOT THE DATE, and that is what makes the
+  pairing possible at all.** A two-day match is dated by one source under the
+  day it started and by the other under the day it finished — measured on the
+  real data at 1 March against 8 March for the same match — so a date key
+  paired only about two thirds of them. Three of our own batters with identical
+  scores in one season is not a coincidence. Four ways in, deliberately
+  different in kind: three shared scores at any distance; one shared score plus
+  the same club within ten days; the same day against the same club (what
+  carries a season CA holds no scorecards for); two shared scores close
+  together (the two sources name a grade and an opposition differently often
+  enough that this has to stand alone).
+- **A FIFTH WAY IN EXISTS ONLY WHERE NO CARD COMPARISON IS POSSIBLE** — the
+  same club within ten days when one side has no card at all. Guarded on that,
+  because two cards sharing NOTHING is a strong signal these are two different
+  matches against the same club. It recovers 398 of 2,800 duplicates in the
+  awkward case with no wrong pairs.
+- **A TIE IS REFUSED RATHER THAN GUESSED**, and the trade-off is stated rather
+  than assumed: leaving a true pair unpaired counts the match twice, which is
+  visible; pairing the wrong one hides a match that really happened, which is
+  not. A wrong pair still counts each match once — it only mis-attributes which
+  fixture it was — so the count, which is what a club checks, stays right
+  either way.
+- **CRICKET AUSTRALIA WINS A PAIR BY DEFAULT** because it is the live source
+  and keeps its copy current. `pair_prefers_import` is the one exception: where
+  the synced game carries no scorecard of ours and the imported one does, the
+  import is the better record of that match and the synced game steps aside
+  instead. That is "if PlayHQ is incomplete, use CricketStatz to complete",
+  decided per match rather than per season.
+- **CA'S OWN SEASON TOTALS ARE ALWAYS COUNTED NOW, and that is what makes the
+  union work at the aggregate level.** `player_season_stats` covers Cricket
+  Australia's matches and nothing else; the `manual_game` rollup beside it
+  counts only the imported matches that are NOT paired, i.e. the ones CA does
+  not have. Neither half can reach the other's matches, so no third branch and
+  no suppression is needed. **CORRECTED in v9.70.6 below: the first cut of that
+  filter also kept a paired match whose pair `pair_prefers_import`, which counts
+  it twice — a season total has no row for CA's copy to step aside with. At this
+  level a paired match is never counted from the import at all.** The same reasoning retires `services/season_source.py`
+  — CA's per-grade aggregate (`player_season_grade_stats`) is counted in full
+  and the imported scorecards paired away before they reach the grid's `held`
+  side, so the by-grade cell is a union rather than a sum of two records of one
+  thing.
+- **THE PER-INNINGS VIEWS GOT SIMPLER, NOT MORE COMPLEX.** The pair test needs
+  neither `grades` nor `seasons`, so all six lost two joins; the synced side is
+  one indexed lookup against a partial unique index that is EMPTY for a club
+  that has imported nothing.
+- **IT RE-DERIVES; IT NEVER ACCUMULATES.** Either side can arrive after the
+  other — a club has imported while a Full Rebuild was still running, which is
+  how the previous design's one-shot snapshot went stale. So the pass starts
+  from the data as it stands, clears the pairs it can no longer justify, and is
+  idempotent. It runs per season as an import walks it (leaving a run that
+  stops halfway with the seasons it reached correct), once more over the whole
+  club at the end, after a full sync and a Full Rebuild, once at BOOT for every
+  club holding an import (which is what stops the deploy carrying 293 showing a
+  club its duplicates until something paired them), and on a button.
+- **`seasons.stats_source` IS LEFT IN PLACE AND READ BY NOTHING**, the call
+  migration 267 made for `vote_settings`. Rows already carrying a value are
+  left as they are — destroying a club's own earlier choice to tidy up would be
+  its own bug — and `superseded_years` still reads it only so the screen can
+  stop reporting a decision that no longer decides anything.
+- **Measured at club scale, both ways** (3,500 matches each side, 2,800 of them
+  genuinely the same match): where CA holds its scorecards, all 2,800 pair to
+  the right game with none wrong, in **377ms**. With a THIRD of the synced games
+  carrying no card and a QUARTER of the imported ones dated a week off, 2,566
+  pair correctly, 6 to a neighbouring fixture and 234 are missed, in **291ms**.
+  Quadratic comparison is avoided by two indexes — a date bucket and a
+  (player, runs) index — so it is near-linear rather than 12M comparisons.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_cricketstatz_import.py`, 262 checks: every
+  matching rule and both refusals, one-to-one assignment, the tie refused, the
+  reported failure replayed — an import running while `games` is empty and the
+  sync landing on top — the pass finding the pair afterwards and a second pass
+  changing nothing, a match only CricketStatz has and a match only Cricket
+  Australia has both still counted, the per-innings views keeping the synced
+  side and dropping the imported twin, a synced fixture with no card preferring
+  the imported copy, CA's per-grade figure counted in full with only the gap
+  match added beside it, an import pairing each season as its matches land with
+  a run cut off part way, undo bringing back a synced game its import had
+  replaced, and the wiring asserted structurally) **with two control runs**:
+  with the matcher neutered 23 of the 262 fail, reporting the reported
+  `{'api': 1, 'manual': 1}`; with the hooks unwired, 3.
+- **A CHECK NEEDS A REAL DUPLICATE IN THE FIXTURE.** "A season already walked is
+  paired before the run moves on" failed on the first cut because the captured
+  cards for that club share no date or opposition with the seeded synced games
+  — there was nothing to pair, so the check could never have passed. The
+  fixture seeds a synced game that IS one of the imported matches now.
+- **A CHECK THAT MATCHES THE COLUMN NAME RATHER THAN THE WRITE CANNOT PASS.**
+  "Nothing marks a season any more" first matched `stats_source = 'cricketstatz'`,
+  which is also the WHERE clause of the read `superseded_years` still makes. It
+  matches the write.
+- **The neighbouring suites were re-run rather than assumed**: club records 93,
+  season fold 65, shared fixtures 38, retired not out 71, rate coverage 105,
+  match coverage 66, records timing 47, competitions 136.
+- **NOTICED, NOT FIXED**: 234 missed pairs per 3,500 in the awkward case are
+  matches still counted twice, and nothing on screen names them. The obvious
+  follow-up is a "these look like the same match — are they?" review list, built
+  from the near misses the matcher already scores and declines.
+
+### THE PAIRING WAS RIGHT AND NEVER RAN (v9.70.4, Sep 2026)
+
+Reported after v9.70.2 deployed: still 547 matches and 28 hundreds, and the
+club's 2002/03 still holding all 171 games. **The code was correct — replaying
+that club's four real seasons through the SHIPPED `reconcile_org` against a
+local Postgres takes 706 games to 404 and writes 302 pairs.** So the pass had
+simply not run, and nothing anywhere said so.
+
+- **A SILENT LOG CANNOT TELL "RAN AND FOUND NOTHING" FROM "NEVER RAN", and that
+  is what cost the round trip.** The boot sweep logged only when `changed` was
+  non-zero. It logs the club count on the way in and every club's result on the
+  way out now, and a failure logs its traceback rather than one line.
+- **A BARE `asyncio.create_task` IS NOT KEPT ALIVE.** The loop holds a weak
+  reference, so a task that suspends on its first await can be collected before
+  it runs — the trap `iq_opponent`'s own `_BUILD_TASKS` already documents.
+  `main._BACKGROUND_TASKS` holds it and discards it on completion.
+- **A CARD QUERY BOUND TO THE CLUB'S PLAYERS ALONE SCANNED THE WHOLE
+  PLATFORM'S `batting_innings`.** `_SYNCED_CARD_SQL` filtered on
+  `players.organisation_id` and nothing else, so one club's question read every
+  innings on the platform. Both card queries bind the ids of the games already
+  loaded (`= ANY(CAST(:ids AS UUID[]))`), which is the plain restriction the
+  planner pushes into the index — the same lesson the record boards' timing
+  work records, and the reason `load_sides` now reads its rows BEFORE their
+  cards.
+- **MATCHING A WHOLE HISTORY IS SECONDS OF SOLID CPU AND MUST NOT SIT ON THE
+  EVENT LOOP.** Measured with a realistic card distribution (a squad of 60,
+  scores skewed low, so the (player, runs) index buckets are big): 217
+  candidates per imported match at the median and **6.7s** for 3,500 each side.
+  Inline, that freezes every other request the API is serving, the health check
+  a deploy waits on included. `asyncio.to_thread` — verified by running a 50ms
+  heartbeat alongside it, which ticked 119 times during the pass.
+- **AND IT IS RETRIED NIGHTLY** (`jobs/scheduler.pair_all_imported_matches`,
+  02:50 Perth). A pass that only ever fires at boot leaves a club counting both
+  sources indefinitely if that one firing is lost, which is exactly what
+  happened. Costs nothing once it has run: it re-derives and writes only what
+  changed, and a club holding no import never appears in the list.
+- **`python -m app.scripts.pair_imported_matches [<org|all>] [--apply]`** is
+  the way to fix a club now and to see what happened, without waiting on any
+  trigger. Dry run by default, per the house rule; a club that fails is named
+  with its error rather than taking the run down.
+- **THE CAUSE OF THE ONE LOST FIRING IS STILL NOT ESTABLISHED** — the log
+  carried nothing to establish it with, which is the first thing fixed above.
+  Every one of the four changes stands on its own merits regardless.
+- **Verified** (the suite is 277 checks now: both card queries bound to an id
+  list, the matching off the event loop, the boot task held, the sweep
+  reporting whether or not anything changed, and the nightly retry registered)
+  and the four real seasons replayed end to end through the shipped
+  `reconcile_org` and the shipped script: 706 games -> 404, 302 pairs written.
+
+### AN OLDER DEFINITION CAN NO LONGER REPLACE THE VIEW (v9.70.10, Sep 2026)
+
+Reported plainly, after four rounds of diagnosis: *we should just be fixing the
+duplicates.* Right. The duplicate logic was correct and verified; what kept
+bringing them back was a process on the server rewriting two view definitions,
+and an hourly repair only puts them back AFTER a club has seen the wrong
+figure.
+
+- **THE OVERWRITE SUCCEEDS ONLY BECAUSE THE COLUMN LISTS MATCH.** The pairing
+  clause is a join and a WHERE, so our `v_effective_games` has exactly the
+  columns a 266-era definition has, and `CREATE OR REPLACE VIEW` accepts it
+  without a word. A 169-era one, which lacks `status`, already fails with
+  `cannot drop columns from view` — the failure this whole hunt was read off.
+- **SO BOTH VIEWS NOW CARRY `pairing_applied`, a column no older definition
+  has.** `CREATE OR REPLACE VIEW` can append a column and cannot drop one, so
+  ours replaces what is there and nothing older can replace ours. The overwrite
+  fails loudly in the database log instead of silently doubling a career.
+  Nothing selects `*` from either view and nothing depends on them, both
+  checked before adding it.
+- **THE DOWNGRADE HAS TO DROP FIRST**, for the same reason — a `CREATE OR
+  REPLACE` back to the pre-pairing shape is exactly what is now refused. Same
+  call migration 266's downgrade already had to make.
+- **THE HOURLY REPAIR STAYS.** It is the net for a database that was already
+  overwritten before this shipped, and for anything that drops and recreates
+  rather than replacing. Belt and braces, not one or the other.
+- **AND THE SUITE PROVES THE GUARD RATHER THAN DESCRIBING IT**: it takes the
+  pre-pairing definition out of `DOWNGRADE`, turns it back into a `CREATE OR
+  REPLACE`, applies it, and asserts it is REFUSED and the clause survives.
+  Three harness sites that used to break a view by replacing it now have to
+  drop it first, which is itself the guard working.
+- **Verified against a real Postgres** (the suite is 304 checks) and every
+  neighbouring suite re-run against the changed views: club records 93, match
+  coverage 66, competitions 136, rate coverage 105, season fold 65, shared
+  fixtures 38, retired not out 71, boundary counts 27.
+- **STILL NOT ESTABLISHED, and now it does not matter as much**: which process
+  writes the old definitions. It will announce itself in the database log the
+  next time it tries, and a club's figures no longer depend on finding it.
+
+### IT WAS OUR OWN BOOT PATH, TWO THOUSAND LINES LATER (v9.70.11, Sep 2026)
+
+`app/main.py` applies the superseded views at **line 4319** and verifies them
+three lines on — which is why the boot honestly logged `8 of 8`. At **line
+5786** the migration 266 mirror loads that migration's module by file path and
+re-executes `EFFECTIVE_GAMES_WITH_STATUS` and `SEASON_STATS_NET_OF_UNPLAYED`:
+266's own, pre-pairing definitions of the same two views. Every boot, on every
+club holding both sources, that put the duplicates straight back.
+
+- **IT SUCCEEDS SILENTLY BECAUSE THE COLUMN LISTS MATCH.** The pairing clause
+  is a join and a WHERE, not a column, so 266's version has exactly the columns
+  ours has and `CREATE OR REPLACE VIEW` takes it without a word. The six
+  per-innings views were never touched because 266 does not define them — which
+  is the "six current, two stale" state that matches no version of this code
+  and sent four rounds of diagnosis looking for an external process.
+- **THE FIX IS ORDER OF OWNERSHIP, NOT A GUARD.** `superseded_ddl` owns both
+  views now, so the mirror applies 266's COLUMN and INDEX and nothing else. The
+  module that owns them guarantees `games.status` itself, since it runs first.
+- **THE GUARD COLUMN WAS THE WRONG ANSWER AND IT TOOK THE SITE DOWN.** Adding a
+  column no older definition has makes the overwrite fail loudly instead of
+  silently — sound reasoning, and it turned a silent revert into a crash-loop
+  at boot, because the process doing the overwriting was ours. Reverted within
+  minutes. **A guard that converts a silent failure into a hard one has to be
+  preceded by knowing who trips it.**
+- **AND THAT CRASH IS WHAT NAMED IT.** Four rounds of instrumenting the app,
+  reading the database log and chasing a second compose project found nothing;
+  one hard failure printed the offending statement and the traceback pointed at
+  the lifespan. Worth remembering both ways: the guard was premature AND it
+  answered the question.
+- **THE GREP THAT MISSED IT.** `grep "v_effective_games" app/main.py` returns
+  one comment — the SQL lives in the migration file and main.py only names the
+  CONSTANTS. **Searching a lifespan for a view's own name is not enough when a
+  mirror imports its statements.** Search for what executes, not only for what
+  is written.
+- **The hourly `repair_effective_views` (v9.70.8) stays.** It is the net for a
+  database already overwritten, and for anything that drops and recreates
+  rather than replacing.
+- **Verified against a real Postgres** (the suite is 305 checks: the mirror no
+  longer naming either view, still applying the column and index, and the
+  owning module guaranteeing that column itself) **with a control run**: with
+  the two view statements put back in the mirror, the check fails. Every
+  neighbouring suite re-run: club records 93, match coverage 66, competitions
+  136, rate coverage 105, season fold 65, shared fixtures 38, retired not out
+  71, boundary counts 27.
+
+### AND POSTGRES'S OWN LOG NAMED THE SHAPE OF IT (v9.70.8, Sep 2026)
+
+The boot check logged **8 of 8** and two of the views were the pre-pairing
+definition again minutes later, on a running system. `log_statement` is off, so
+Postgres only records a statement that ERRORS — and the database log already
+held the answer, once per minute, on a fresh backend pid each time:
+
+    ERROR:  cannot drop columns from view
+    STATEMENT:  CREATE OR REPLACE VIEW v_effective_games AS ...
+                mg.season_id AS season_id, mg.organisation_id AS organisation_id
+                FROM manual_games mg
+
+- **THAT DEFINITION IS MIGRATION 169's**, ending at `organisation_id` with no
+  `status` column — the one 266 added. So a process outside this codebase was
+  applying a PRE-266 definition, failing, and retrying every 60 seconds.
+- **AND IT EXPLAINS WHY ONLY TWO OF THE EIGHT MOVED.** Our
+  `v_effective_games` adds no COLUMNS — the pairing clause is a join and a
+  WHERE — so a **266-era** definition has the identical column list and
+  `CREATE OR REPLACE` accepts it silently, taking the pairing clause with it. A
+  **169-era** one fails loudly. Same for the season-stats view. The six
+  per-innings views are newer than anything that process knows about, so it
+  never touches them. Six current and two stale, which no version of this code
+  can produce, is exactly what an older one overwriting two of them looks like.
+- **A SILENT SUCCESS IS INVISIBLE UNTIL YOU ASK FOR IT.** `log_statement =
+  'ddl'` (a reload, no restart) is what makes the writer name itself —
+  `log_line_prefix` carrying `%h` and `%a` gives the client host and
+  application. **The failing statements were free evidence that had been in the
+  log the whole time**; reach for the DATABASE log before instrumenting the
+  application.
+- **WHAT IS STILL OPEN**: which process. The pre-266 loop had stopped by the
+  time this was found (zero occurrences the following day), and the successful
+  writes were never logged. `log_statement='ddl'` is on now, so the next one is
+  named.
+- **SO THE APP STOPS DEPENDING ON THE BOOT GETTING IT RIGHT.**
+  `jobs/scheduler.repair_effective_views` runs hourly: `superseded_ddl.verify`,
+  and where a view has lost its clause it re-applies the SHIPPED `STATEMENTS`
+  and logs what it repaired. It writes nothing when nothing is wrong, which is
+  every deployment that holds no import. **This is not a substitute for finding
+  the process** — it is what stops a club's career doubling in the meantime,
+  because the cost of waiting is paid by whoever reads their own total.
+- **THE JOB IS EXERCISED, NOT GREPPED FOR.** The suite applies the pre-pairing
+  definitions out of `superseded_ddl.DOWNGRADE` — the same shape the older
+  image writes — asserts the boot's own check sees them, runs the SHIPPED
+  `repair_effective_views`, and asserts all eight come back and a second run
+  writes nothing.
+- **Verified against a real Postgres** (the suite is 302 checks) **with a
+  control run**: with the job removed, 3 fail and the rest are REPORTED rather
+  than crashing on the import.
+- **A FUNCTION INSERTED MID-BODY SPLITS THE ONE IT LANDS IN.** The first cut
+  put `verify_view_repair` after a check inside `verify_matcher`, so the rest of
+  that function became part of the new one and died on a `NameError` for a local
+  defined above the split. Caught by running it; a structural check would not
+  have seen it.
+
+### THE VIEW IN THE DATABASE WAS NOT THE VIEW IN THE CODE (v9.70.7, Sep 2026)
+
+The end of the same report, and the most expensive part of it. Brad Quinsee's
+career read **547 matches, 15,333 runs, 28 hundreds** against an innings list
+of 336, 9,914 and 16 — his club's own hand count — with **nine shared seasons
+at exactly 2.000x on BOTH runs and innings at once**. Two fixes were shipped
+against it (v9.70.5, v9.70.6), both real bugs, neither this one.
+
+- **THE PAIRING WAS RIGHT AND THE VIEW COULD NOT ACT ON IT.** Read off
+  production: `v_effective_batting_innings` and its five per-innings siblings
+  carried the pairing clause (`superseded_by_game_id` twice each);
+  `v_effective_games` and `v_effective_player_season_stats` carried it **zero
+  times** — they were the pre-pairing definitions. So every imported match was
+  correctly paired, correctly dropped from the innings list, and still counted
+  in the season aggregate beside Cricket Australia's own figure for the same
+  match.
+- **A STATE NO VERSION OF THIS CODE CAN PRODUCE, WHICH IS WHY IT TOOK SO
+  LONG.** All eight views are applied by one loop over
+  `superseded_ddl.STATEMENTS` inside a single `engine.begin()` transaction,
+  with no try/except anywhere around it — verified by parsing the AST, not by
+  reading. Six current and two stale is not a partial application; it is the
+  two having been replaced afterwards by something. **What that something is
+  is NOT established** — the deployed module's own statements were confirmed
+  correct (`x2` and `x3`) and applying them by hand succeeded immediately.
+- **THE REPAIR IS THOSE TWO STATEMENTS, AND NOTHING ELSE.** No migration, no
+  re-pairing, no re-import: `CREATE OR REPLACE VIEW` with the column list
+  untouched. Brad went to **372 / 344 / 10,152 / 17** the moment they ran,
+  against CricketStatz's own 10,444, with `without_scorecard` falling from 173
+  to 0.
+- **THE BOOT CHECK HAD BEEN FINDING IT EVERY BOOT AND SAYING SO TO NOBODY.**
+  `superseded_ddl.verify` has reported both views since v9.69.5 — and only ever
+  logged on FAILURE, so "ran and found nothing" and "never ran" were
+  indistinguishable from outside, and a `grep SCHEMA MISMATCH` over the last
+  day found nothing at all. It logs the count on every boot now, missing views
+  named. **Exactly the lesson v9.70.4 records for the pairing sweep, in the
+  check written to catch that same class of problem.**
+- **THREE CHECKS COULD NOT HAVE FAILED, AND EACH ONE COST A ROUND TRIP.** The
+  diagnostic asked whether the deployed view still carried `pair_prefers_import`
+  — absent from the fixed view AND from the pre-pairing one, so it answered
+  False for both and read as "the fix is live". The needle that separates the
+  three states is how many times the view mentions `superseded_by_game_id`:
+  **3 for the current aggregate view, 2 for a current per-innings view, 0 for a
+  pre-pairing one.** `VERIFIED_VIEWS` already needles that column, which is why
+  `verify()` was right all along and the hand-rolled probe was not.
+- **`python -m app.scripts.inspect_player_aggregate <player> [year]`** is the
+  read-only diagnostic that ended it: the career header split per branch of the
+  view, every row emitted for one season, the raw `player_season_stats` rows
+  behind them, and what `pg_get_viewdef` actually holds. **`ops/` is not in the
+  backend image** — only `backend/` is copied — so a diagnostic has to live in
+  `app/scripts/` to be runnable in the container at all.
+- **THE ORDER THAT WORKED, after three that did not**: measure the ratio per
+  season (nine at exactly 2.000 is arithmetic, not coverage); split the figure
+  by the view's own `source` column; then read the view definition back out of
+  Postgres. The first two say WHICH branch, the third says WHY — and only the
+  third can catch a database that disagrees with the code.
+- **STILL OPEN**: what replaces those two view definitions after the lifespan
+  has applied them. Until that is found, a deploy can silently put a club back
+  to counting both its sources — which is what the every-boot log line now
+  makes visible within seconds rather than after a club reports a doubled
+  career.
+
+### PREFERRING THE IMPORTED COPY IS A PER-INNINGS DECISION, NEVER AN AGGREGATE ONE (v9.70.6, Sep 2026)
+
+Reported off Brad Quinsee's profile once the pairing was finally running: the
+innings list read **336 innings, 9,914 runs and 16 hundreds** — the club's own
+hand count — while the career header two inches above it read **508, 15,333 and
+28**, and the Players list said 547 matches.
+
+- **MEASURED PER SEASON, AND THE SHAPE NAMED THE CAUSE BEFORE ANY CODE WAS
+  READ.** Every season up to 2001/02 — the years only CricketStatz covers —
+  matched the innings list almost exactly. Every season from 2002/03, exactly
+  the era BOTH sources hold, was **double the innings beneath it, to the run**:
+  914 against 457, 1,136 against 568, 1,064 against 532, 4 hundreds against 2.
+  So the per-innings views were pairing correctly and
+  `v_effective_player_season_stats` was not.
+- **`pair_prefers_import` IS WHY, AND THE HOLE IS IN THE DESIGN RATHER THAN THE
+  WIRING.** The per-innings views are per-MATCH, so a paired synced game steps
+  aside (`_SYNCED_SOURCE_JOIN`) and the imported copy answers — which is the
+  whole point of preferring it where Cricket Australia holds no scorecard of
+  ours. `player_season_stats` is a SEASON TOTAL with no per-match granularity:
+  **there is no row to drop**, so CA's own figure carries that match whatever
+  we do. Keeping the imported copy beside it in the `manual_game` rollup is the
+  same match counted twice.
+- **SO AT THE AGGREGATE LEVEL A PAIRED MATCH IS NEVER COUNTED FROM THE IMPORT,
+  `pair_prefers_import` OR NOT.** The rule there is CA's totals PLUS the
+  imported matches CA does not have at all. **Preferring the imported copy is a
+  decision about which scorecard to SHOW**, and it stays where there is a row
+  to drop. The v9.70.0 note claimed "neither half can reach the other's
+  matches, so no suppression is needed" — true only while the flag is false,
+  and it is corrected in place rather than left to mislead the next reader.
+- **THE HEADER AND THE LIST ARE THEN DRAWN FROM DIFFERENT ROWS FOR THE SAME
+  MATCH, AND THAT IS FINE.** For a prefer-import pair the header counts CA's
+  figure and the list shows the imported card. They describe one match and
+  agree on the total, which the suite asserts directly rather than checking
+  each in isolation. Where they legitimately differ — CA counting a match we
+  hold no scorecard for at all — `match_coverage` already explains it.
+- **NOTHING IS RE-PAIRED, RE-IMPORTED OR MIGRATED.** It is a view definition,
+  `CREATE OR REPLACE`d by the lifespan on every boot with the column list
+  untouched, so a deploy is the whole fix and every club's figures correct
+  themselves on the next page load.
+- **THE GAP EXISTED BECAUSE THE SUITE ONLY EVER CHECKED `v_effective_games`
+  THERE.** The prefer-import fixture asserted the synced fixture stepped aside
+  and counted the manual rows, and never once summed the season aggregate — so
+  six views were verified and the seventh was not. It is asserted now, on runs,
+  innings, hundreds and matches.
+- **Verified against a real Postgres** (the suite is 294 checks: a prefer-import
+  pair counted once on all four figures, the innings list beneath it reading the
+  same runs, and a match only CricketStatz holds still added on top) **with a
+  control run**: with the flag put back into the aggregate branch, 6 fail —
+  reporting 240 runs and 2 hundreds where 120 and 1 are right, the reported
+  doubling in miniature.
+
+### AND THEN IT REFUSED ITS OWN WORK (v9.70.5, Sep 2026)
+
+Reported by running the script: **Cockburn Cricket Club AND Keon Park** both
+failed with `duplicate key value violates unique constraint
+"uq_manual_games_superseded_by_game"`, and the pairing had written nothing on
+either. So the pass shipped in v9.70.4 ran the first time and then gave up
+silently on every run after it — the boot sweep, the nightly job, the button
+and the script alike.
+
+- **A RE-DERIVATION MOVES A GAME FROM ONE IMPORTED MATCH TO ANOTHER, AND THE
+  INDEX ONLY ALLOWS ONE HOLDER.** The write was row by row, so the new holder's
+  UPDATE could land while the old one still carried the game — two rows on one
+  game for an instant, the unique index refuses it, and the WHOLE transaction
+  rolls back having written nothing. Nothing partial, nothing logged beyond the
+  error: a club counting both its sources with the pass reporting a failure
+  nobody was reading.
+- **CLEAR EVERY CHANGING ROW FIRST, THEN SET THEM IN ONE STATEMENT.** A row
+  keeping its pair cannot be the conflict — the assignment is one-to-one, so a
+  game moving to a new holder means the old holder's own value changes too,
+  which puts it in the same list. The set is one `unnest` UPDATE rather than a
+  loop, which takes every lock it needs in one scan, the shape
+  `apply_associations` was rewritten into after the v9.62.6 deadlock.
+- **AND THE ASSIGNMENT WAS NOT STABLE BETWEEN RUNS**, which is the quieter half
+  of the same report: `--apply` wrote 302 rows and a second `--apply` wrote 2
+  more, for ever. Where several of our sides play one club on one day with no
+  scorecards, every combination scores identically, so which imported match
+  takes which synced game came down to the order equally-scored candidates were
+  walked in — and that followed frozenset iteration, which is not stable
+  between processes. **The ids are the final tiebreak now**, so the same data
+  always gives the same assignment and a settled club is never rewritten.
+- **A THREE-PASS CHECK IN ONE PROCESS CANNOT CATCH IT, and finding that out is
+  what made the check honest.** Within one process the hash seed is fixed, so
+  the DB idempotency checks pass against the broken code. What fails is
+  `assign` run over the SAME rows in three different ORDERS — the property
+  actually at stake — since the sort was stable and a tie therefore kept
+  whatever order it was handed. The DB pass-writes-nothing checks are kept
+  beside it: they are a real property of the write path, just not this bug's.
+- **Verified against a real Postgres** (the suite is 287 checks now: two
+  imported matches each holding the other's game re-derived without dying on
+  the index and each landing on its own, a four-way cluster paired off one for
+  one, a second and third pass writing nothing, and the same rows in three
+  orders giving one assignment) **with two control runs**: with the row-by-row
+  write restored, 3 fail reporting the club's own error verbatim; with the id
+  tiebreak removed, the order check fails and every DB check still passes,
+  which is exactly why it is there.
+
+### A COUNT THAT CANNOT FIT THE RUNS IS NOT A COUNT (v9.70.3, Sep 2026)
+
+Reported off StatLab's most-sixes board: Nathan Sammit **30 sixes in an innings
+of 8 runs**, and Rasika Thanippullige 11 sixes off 7.
+
+- **IT IS CRICKET AUSTRALIA'S OWN DATA, AND THAT WAS ESTABLISHED BEFORE
+  ANYTHING WAS CHANGED.** The reported innings was traced to one match (Cameron
+  U12 v Keon Park U12, 17 Nov 2006), which BOTH sources hold. CricketStatz's own
+  card reads `R 8, M 0, 4s 1, 6s 0` and our import stored exactly that; the
+  synced row for the same match reads `runs 8, balls 0, fours 1, sixes 30`,
+  confirmed by fetching it live rather than inferred from the code. A scorer
+  twenty years ago typed something else into the sixes box and CA has carried it
+  since. **No re-sync repairs it and no parser fix reaches it.**
+- **SIX RUNS PER SIX IS ARITHMETIC, NOT A JUDGEMENT.** `fours * 4 + sixes * 6 <=
+  runs` holds for every innings ever played, so a count that breaks it is not a
+  boundary count. `services/boundary_counts.clean` is the one rule, applied by
+  the sync's per-innings write, by the season aggregate a career's totals are
+  summed from, and by the CricketStatz import.
+- **IT READS AS NOT RECORDED, NEVER AS ZERO** — the same call `sync.py` already
+  makes for a missing ball count. A 0 says the batter hit no boundaries, which
+  is a different claim from "this column cannot be read", and a NULL keeps it
+  out of a total without asserting anything.
+- **EACH COLUMN IS JUDGED ON ITS OWN FIRST.** In the reported innings the single
+  four fits the 8 runs perfectly well and only the sixes do not, so nulling both
+  would throw away a good figure. Only where the pair still cannot fit together
+  (6 fours and a six in 24 runs) does the other go too.
+- **THE RUNS ARE NEVER TOUCHED.** They are what every other figure on the row is
+  reconciled against, and a bad boundary count is no reason to doubt them.
+- **`python -m app.scripts.backfill_boundary_counts <org|all> --apply`** repairs
+  what is stored — no network at all, since the runs are on the row beside the
+  counts. Dry run by default, per the house rule.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_boundary_counts.py`, 27 checks through the
+  shipped rule and the shipped backfill: the reported innings losing only the
+  count that cannot fit, an ordinary innings untouched, a genuine none kept as a
+  none, six-off-one-ball standing and a six in a five-run innings not, the pair
+  that is possible apart and not together, the runs unchanged on the stored row,
+  another club's rows not this club's to repair, a second run repairing nothing,
+  and **the SQL mirror and the Python rule agreeing on all 300 randomised rows**)
+  **with a control run**: with the rule neutered 6 of the 27 fail.
+- **NOTICED, NOT FIXED**: nothing flags these rows to a club. The counts simply
+  stop being published. A "these figures could not be read" list would be its
+  own change, and the same arithmetic would build it.
+
+### OUR OWN CLUB'S NAME IS ON BOTH SIDES OF EVERY MATCH (v9.70.2, Sep 2026)
+
+Reported off the live site after v9.70.0: no duplicate high scores, but a
+career of 547 matches and 28 hundreds where the club counts about 370 and 16.
+Measured, not inferred: the club's 2002/03 read **171 games — exactly Cricket
+Australia's 85 plus CricketStatz's 86**. Nothing had been paired at all.
+
+- **THE MATCHER COMPARED OUR OWN CLUB'S NAME AND SO AGREED WITH EVERYTHING.**
+  `load_sides` handed `teams_agree` the concatenated `home_team + away_team` of
+  both sides, and every match a club plays has that club's name on it — so
+  "Keon Park 4th-XI v Croxton Utd" and "Rosebank v Keon Park" read as the same
+  fixture. Every one of a Saturday's ten fixtures then looked identical, the
+  tie guard refused the lot, and **6 of 86 paired**. `split_sides` takes our own
+  club off first — a stored opposition wins, the club-name test is the
+  fallback — which alone took it to 62.
+- **ONE SHARED WORD IS NOT A CLUB.** On one real Saturday the club played
+  Preston Trinity, Preston Druids, Preston YCW and West Preston. `teams_agree`
+  agreed on any overlap, so all four read as one another. It now needs one name
+  CONTAINED in the other ("Preston YCW" in "Preston YCW District 2nd XI") or
+  two identifying words in common. An age group is stripped first, so "Preston
+  U17 Trinity" and "Preston Trinity" still agree. 62 → 65.
+- **WHICH OF OUR SIDES PLAYED IS WHAT TELLS ONE SATURDAY'S FIXTURES APART**, and
+  it is the ONE hard no in the matcher: our 2nd XI's match is never our 1st
+  XI's, however well the date and the opposition agree. `side_marker` reads it
+  from either spelling ("2nd-XI", "2nd XI", "1's", "U17") and says nothing for a
+  bare "Keon Park". 65 → 77.
+- **A GRADE LETTER IS NEVER READ AS A TEAM NUMBER.** A Grade is not always the
+  1st XI — this club's 3rd XI plays D Grade and its 4th plays E — so mapping the
+  letters onto team numbers would confidently pair the wrong fixtures. Only a
+  number the name itself carries counts.
+- **A CLUSTER THAT CANNOT BE TOLD APART IS PAIRED OFF, NOT REFUSED, and that
+  reverses v9.70.0.** Refusing a tie sounds safer and is not: Cricket Australia
+  writes both of a Saturday's fixtures as a bare "Keon Park", and refusing every
+  such tie left 2011/12 reading 149 games against a true ~117. Pairing them off
+  gets the COUNT right whichever way round they go, because both fixtures are in
+  both sources, and the strongest-first order means the scorecards decide it
+  wherever there are any. **The cost is stated rather than hidden**: where one
+  source alone holds one of two indistinguishable fixtures and the other source
+  alone holds the other, pairing them loses a match — which needs a club to have
+  played one opposition twice in a day with each source missing a different one,
+  and is worth less than the double count refusing guarantees.
+- **Measured on the club's own seasons, with no scorecards read at all**:
+  2002/03 171 → 89 (CA 85, CS 86), 2006/07 180 → 108, 2011/12 208 → 122,
+  2019/20 147 → 85; four seasons, **706 → 404**. In production the scorecards
+  are loaded too and are the stronger signal.
+- **Measured at scale in the worst realistic shape** — four of our sides out
+  against ONE opposition club every Saturday, Cricket Australia writing every
+  one as a bare "Keon Park", a third carrying no card of ours and a quarter
+  dated a week off: **all 2,800 matches pair, none missed, and the club counts
+  2,800 rather than 5,600**, in under a second. 468 pair to a sibling fixture
+  from the same day — a mis-attribution, not a miscount.
+- **Verified** (the suite is 272 checks now: our own side and the opposition
+  told apart whichever way round the fixture is written, a stored opposition
+  taken at its word, two clubs sharing one word not the same club, a name
+  contained in another still agreeing, an age group not telling two clubs apart,
+  the side marker read from every spelling, a grade letter never read as a team
+  number, our firsts' match never paired to our seconds', and a cluster nothing
+  can tell apart still counted once each) **with two control runs**: with the
+  matcher neutered 25 of the 272 fail; with our own name compared and one shared
+  word agreeing — the reported bug — 3 fail on exactly that.
+- **A MEASUREMENT NEEDS A REALISTIC FIXTURE.** The scale test's opposition clubs
+  were named "Club 12", whose only token an age-group strip removes, so the
+  harder run read 1,866 of 2,800 for a reason that exists nowhere outside the
+  harness. Real names are what it measures now.
+- **NOTICED, NOT OURS**: Cricket Australia's own feed carries impossible
+  boundary counts on some old junior cards — verified live, `runs: 8, balls: 0,
+  fours: 1, sixes: 30` on a 2006 Under 12 innings — which tops the most-sixes
+  record board. The CricketStatz import reads that same card correctly (8, 1
+  four, 0 sixes). See the note below.
+
 ### A SEASON CHANGES OVER AS ITS OWN MATCHES LAND (v9.69.2, Sep 2026)
 
 Reported off Keon Park's Records with the import still going: duplicate high
@@ -7526,6 +9393,10 @@ we're way over what I expect".
   moment the run completes.
 
 ### EVERY EFFECTIVE VIEW APPLIES THE SEASON'S SOURCE (migration 291, v9.69.8, Sep 2026)
+**SUPERSEDED BY v9.70.0 above — the source rule is now a per-MATCH pairing,
+not a season's marker. The eight views and the boot check still exist; what
+they test changed.**
+
 
 Reported off the record boards with a screenshot: Heath Shephard's 270 listed
 TWICE for 2002/03, Princely Emmanuel's 206\* twice, David Nelson's 171 twice,
@@ -7693,6 +9564,10 @@ the view was not, and every screen counted both sources.
   moment it happens rather than after a club reports doubled figures.
 
 ### ONE SOURCE PER SEASON, DECIDED BY THE DATA (migration 290, v9.69.4, Sep 2026)
+**SUPERSEDED BY v9.70.0 above. Choosing one source per season is exactly what
+lost the matches only the other source held; kept here because the reasoning
+about snapshots going stale is still why the pairing re-derives.**
+
 
 Reported off Keon Park's Records with the import running: duplicates again, and
 a career at **14,966 runs against CricketStatz's 10,444** — the exact figure
@@ -7792,6 +9667,8 @@ end.
   read as 0 with the imported ones gone too.
 
 ### AND WHICH SOURCE IS THE RECORD IS THE CLUB'S CALL (migration 287, v9.68.4)
+**SUPERSEDED BY v9.70.0 above. `seasons.stats_source` is read by nothing now.**
+
 
 Asked for straight after: "CricketStatz should overwrite PlayHQ in the same way
 a historical import does where we believe the CricketStatz data more than the

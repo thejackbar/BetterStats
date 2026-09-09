@@ -270,8 +270,8 @@ async def searched_clubs(
 async def ad_signups(db: AsyncSession = Depends(get_db), _: User = Depends(require_super_admin)):
     """Every club that registered itself through the public self-serve flow
     AND is attributed to one of THIS Meta campaign's own ads, joined with
-    what it's since done (trial/paid modules) and its cached Twenty
-    engagement score — "which ads produced our hottest leads" in one table.
+    what it's since done (trial/paid modules) and its cached engagement
+    score — "which ads produced our hottest leads" in one table.
 
     `signup_source == 'self_serve_ad'` on its own is NOT specific to Meta —
     it's set whenever getAttribution() saw ANY click signal, which an EDM
@@ -285,14 +285,14 @@ async def ad_signups(db: AsyncSession = Depends(get_db), _: User = Depends(requi
     The engagement score is the cached marketing_clubs value from the daily
     refresh (via the existing_org_id link), NOT a live _engagement() scan per
     row — and an ad signup can legitimately have no MarketingClub row at all
-    (Twenty wasn't configured at registration time), so both club and score
-    are nullable here and the UI shows "not yet scored".
+    (nothing had linked it to the directory at registration time), so both club
+    and score are nullable here and the UI shows "not yet scored".
 
     Archived clubs are excluded — same default as the main Club Directory
     (GET /club-admin/super/clubs). A super admin's own test signups get
     archived after verifying the flow works (the documented cleanup step),
     and this report exists to show real prospects, not test data."""
-    from app.services.twenty_sync import _module_split
+    from app.services.engagement import _module_split
 
     await meta_ads._use_active_campaign(db)
 

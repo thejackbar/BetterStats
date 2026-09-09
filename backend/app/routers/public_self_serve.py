@@ -307,7 +307,10 @@ class PublicSubmitRequest(sst.SubmitRequest):
 
 
 _ATTRIBUTION_KEYS = (
-    "utm_source", "utm_medium", "utm_campaign", "utm_content",
+    # utm_term joined the browser's own capture (lib/visitor.js) alongside the
+    # webinar page; without it here, a campaign that tags utm_term has it
+    # captured and then silently dropped on the way in.
+    "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term",
     "click_id", "click_source", "landing_path", "landing_referrer", "has_signal",
 )
 
