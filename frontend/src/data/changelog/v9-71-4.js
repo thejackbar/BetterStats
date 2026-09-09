@@ -1,11 +1,14 @@
 export default {
   version: 'v9.71.4',
   date: '2026-09-09',
-  sortKey: '2026-09-09T03:20:00Z',
-  title: 'A reminder on the day of the demo',
+  // Above v9.71.1, whose sortKey is the highest of the releases so far, or
+  // SITE_VERSION never reaches this one.
+  sortKey: '2026-09-18T04:00:00Z',
+  title: 'The Club Directory says why a button is greyed out',
   items: [
-    'Everyone registered for the demo now gets a reminder email a few hours before it starts, with the link and both timezones. Nobody is reminded twice, and anyone who registers on the day is left alone — their confirmation has just gone out.',
-    'Webinar registrations open expanded on the onboarding screen instead of hiding behind a Show toggle, and each row says whether the reminder got out.',
-    'A Send reminder button, for a sweep missed on the night. It emails nobody twice and refuses to fire before the day.',
+    'Rediscover committees is held back while the crawler is stopped — it re-reads the whole of PlayHQ, so it genuinely cannot run then. It now says so beside the button and points at Start crawling, instead of just sitting there greyed out.',
+    'Run crawl batch explains itself the same way.',
+    'A rediscover this server has lost track of no longer keeps the button switched off for good. It could already be started again from the server\'s point of view; now the screen agrees.',
+    'A rediscover that never got going because the crawler was stopped says that, rather than reporting itself as a finished run that read nothing.',
   ],
 }

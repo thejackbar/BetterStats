@@ -42,14 +42,14 @@ import logging
 import random
 import re
 import uuid
-from typing import Optional
+from typing import Awaitable, Callable, Optional
 
 try:
     from zoneinfo import ZoneInfo
 except ImportError:  # pragma: no cover — Python < 3.9
     ZoneInfo = None  # type: ignore
 
-from sqlalchemy import select, func, cast, update, Text, and_, or_, exists, text
+from sqlalchemy import select, func, case, cast, update, Text, and_, or_, exists, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.settings import settings
@@ -82,6 +82,27 @@ async def set_crawl_paused(session: AsyncSession, paused: bool) -> dict:
         {"p": paused})
     await session.commit()
     return {"paused": paused}
+
+
+# "Should this run stop now?" — asked between units of work by the long passes.
+# It is a parameter rather than a hardcoded read of the Stop flag because the
+# flag governs the UNATTENDED crawler, and an operator-pressed Rediscover is not
+# that: it is the operator, so it runs while the crawler is stopped and carries
+# its own cancel instead. Every background caller passes nothing and keeps the
+# flag, so "Stop crawling" still stops all unattended PlayHQ traffic.
+StopCheck = Callable[[], Awaitable[bool]]
+
+
+async def _stop_requested(session: AsyncSession,
+                          should_stop: Optional[StopCheck]) -> bool:
+    if should_stop is not None:
+        return bool(await should_stop())
+    return await is_crawl_paused(session)
+
+
+async def never_stop() -> bool:
+    """A ``StopCheck`` that never stops — for a caller with no cancel of its own."""
+    return False
 
 # We store the WHOLE committee, with a tidy label + a priority rank so the key
 # people sort to the top of each club's contact list. Office bearers rank highest,
@@ -451,7 +472,8 @@ async def _prune_committee(session: AsyncSession, club_id, seen_ids: list) -> tu
 
 async def discover_clubs(session: AsyncSession, max_pages: int = 200, *,
                          prune: bool = False, retick: bool = False,
-                         progress: Optional[dict] = None) -> dict:
+                         progress: Optional[dict] = None,
+                         should_stop: Optional[StopCheck] = None) -> dict:
     """Page the PlayHQ search to completion, upserting every Australian cricket
     club (with its committee). Idempotent — safe to re-run to pick up new clubs.
 
@@ -466,13 +488,27 @@ async def discover_clubs(session: AsyncSession, max_pages: int = 200, *,
     stays additive and never re-ticks a contact a super admin unticked.
 
     ``progress`` is an optional dict the caller owns, updated in place after
-    every page so a long run can be watched from another request."""
+    every page so a long run can be watched from another request.
+
+    ``should_stop`` is asked between pages, and DEFAULTS to the operator Stop
+    flag — so every background path (the nightly batch, the continuous runner)
+    is unchanged. A Rediscover passes its own check instead, because Stop means
+    "stop the unattended crawler" and a super admin pressing Rediscover is
+    explicit intent; it carries its own cancel so that run can still be halted.
+    Stopping mid-run is safe rather than destructive: the prune is per club,
+    scoped to the ids seen in that club's own payload, so the clubs a stopped
+    run never reached are left untouched rather than emptied.
+
+    ``stats["stopped"]`` says the run was halted with pages still to go, so a
+    caller never reports a partial pass as a finished one."""
     page, seen, new, skipped = 1, 0, 0, 0
     pruned = marked = 0
     total_reported = None
+    stopped = False
     while page <= max_pages:
-        if await is_crawl_paused(session):
-            logger.info("discover_clubs: stopped by operator at %d AU clubs", seen)
+        if await _stop_requested(session, should_stop):
+            logger.info("discover_clubs: stopped at %d AU clubs", seen)
+            stopped = True
             break
         results, tot = None, 0
         for attempt in range(5):
@@ -509,25 +545,52 @@ async def discover_clubs(session: AsyncSession, max_pages: int = 200, *,
             break  # paged through everything the search reports
     stats = {"pages": page - 1, "au_seen": seen, "new": new,
              "non_au_skipped": skipped, "total_reported": total_reported,
-             "pruned": pruned, "marked_former": marked}
+             "pruned": pruned, "marked_former": marked, "stopped": stopped}
     logger.info("discover_clubs: %s", stats)
     return stats
 
 
 # ── association enrichment ──────────────────────────────────────────────────────
 
+def _assoc_stale_before() -> Optional[dt.datetime]:
+    """The cutoff a club's ``associations_fetched_at`` must be older than to be
+    re-read, or None when refreshing is switched off (0 days)."""
+    days = settings.marketing_association_refresh_days
+    if not days or days <= 0:
+        return None
+    return dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
+
+
 async def enrich_associations(session: AsyncSession, limit: Optional[int] = None) -> dict:
-    """For up to ``limit`` clubs whose associations haven't been fetched, call the
-    main graph and store the association(s) they play in. Resumable: a fetch
-    failure leaves ``associations`` NULL so the club is retried next batch."""
+    """For up to ``limit`` clubs, call the main graph and store the
+    association(s) they play in. Resumable: a fetch failure leaves
+    ``associations`` NULL so the club is retried next batch.
+
+    The frontier is never-fetched clubs PLUS clubs whose associations were last
+    read longer ago than ``marketing_association_refresh_days``. It used to be
+    never-fetched only, which meant a club's associations were read once and
+    then frozen for the life of the row — a club that changed association kept
+    the old one for ever, and no crawl would ever correct it.
+
+    Never-fetched clubs are served FIRST, so adding refreshes cannot starve the
+    original backfill: a club nobody has ever enriched is worth more than
+    re-asking a question whose answer probably has not changed."""
     limit = limit or settings.marketing_crawl_nightly_limit
+    stale_before = _assoc_stale_before()
+    never_fetched = MarketingClub.associations.is_(None)
+    due = [never_fetched]
+    if stale_before is not None:
+        due.append(and_(MarketingClub.associations.isnot(None),
+                        MarketingClub.associations_fetched_at < stale_before))
     frontier = (await session.execute(
         select(MarketingClub)
-        .where(MarketingClub.associations.is_(None), MarketingClub.kind == "club")
-        # last_crawled_at ASC (nulls first) so a club whose fetch just failed —
-        # which bumps last_crawled_at to now — drops to the back of the queue
-        # instead of head-of-line blocking the same failing row every iteration.
-        .order_by(MarketingClub.last_crawled_at.asc().nullsfirst(),
+        .where(or_(*due), MarketingClub.kind == "club")
+        # Backfill before refresh, then last_crawled_at ASC (nulls first) so a
+        # club whose fetch just failed — which bumps last_crawled_at to now —
+        # drops to the back of the queue instead of head-of-line blocking the
+        # same failing row every iteration.
+        .order_by(case((never_fetched, 0), else_=1),
+                  MarketingClub.last_crawled_at.asc().nullsfirst(),
                   MarketingClub.first_seen_at.asc())
         .limit(limit)
     )).scalars().all()
@@ -546,10 +609,18 @@ async def enrich_associations(session: AsyncSession, limit: Optional[int] = None
             await session.commit()
             continue
         club.associations = assocs
+        club.associations_fetched_at = func.now()   # only on a real answer
         if assocs:
             club.association_name = assocs[0]["name"]
             club.association_guid = assocs[0]["id"]
             stats["with_association"] += 1
+        else:
+            # A REFRESH can legitimately come back empty where the first fetch
+            # did not: the club has left every association it used to play in.
+            # These two are a denormalised copy of assocs[0], so leaving them
+            # standing would show an association the club no longer plays in.
+            club.association_name = None
+            club.association_guid = None
         # Also capture the org-level club mailbox (shown on the PlayHQ org page but
         # absent from the search committee list — common for schools / small clubs
         # that publish one generic address and no named office bearers).
@@ -566,9 +637,22 @@ async def enrich_associations(session: AsyncSession, limit: Optional[int] = None
         stats["processed"].append({"id": str(club.id), "ok": True})
         await session.commit()
 
+    # frontier_remaining stays NEVER-FETCHED ONLY, deliberately. run_continuous
+    # reads it as "is the backfill finished" (and sleeps to the next window when
+    # it hits 0); folding refresh candidates in would mean the runner never
+    # considered itself done and hot-looped for ever. Refreshes are reported
+    # alongside it instead, and get picked up because they are in the frontier
+    # QUERY above — the runner keeps going while `enriched` is non-zero.
     remaining = await session.scalar(select(func.count(MarketingClub.id)).where(
         MarketingClub.associations.is_(None), MarketingClub.kind == "club"))
     stats["frontier_remaining"] = remaining or 0
+    stats["refresh_due"] = 0
+    if stale_before is not None:
+        stats["refresh_due"] = await session.scalar(
+            select(func.count(MarketingClub.id)).where(
+                MarketingClub.kind == "club",
+                MarketingClub.associations.isnot(None),
+                MarketingClub.associations_fetched_at < stale_before)) or 0
     logger.info("enrich_associations: %s", stats)
     return stats
 
@@ -610,17 +694,27 @@ async def crawl_batch(session: AsyncSession, limit: Optional[int] = None,
 _SINGLE_CLUB_DELAY = (0.2, 0.7)
 
 
-async def rediscover_all(session: AsyncSession, progress: Optional[dict] = None) -> dict:
+async def rediscover_all(session: AsyncSession, progress: Optional[dict] = None,
+                         should_stop: Optional[StopCheck] = None) -> dict:
     """Re-page the whole PlayHQ club search and reconcile every club's committee.
 
     Long: ~6,900 AU clubs at 100 per page is ~70 requests, each waiting out the
     crawl's own courtesy delay (``marketing_crawl_min_delay``/``_max_delay``,
     15-40s by default, one request at a time), so around half an hour to an hour
-    at the shipped settings. Run it in the background and watch ``progress``. Honours the operator Stop the same way every other crawl path
-    does — ``discover_clubs`` checks the pause flag between pages."""
-    if await is_crawl_paused(session):
-        return {"skipped": "stopped"}
-    stats = await discover_clubs(session, prune=True, retick=True, progress=progress)
+    at the shipped settings. Run it in the background and watch ``progress``.
+
+    DELIBERATELY IGNORES THE OPERATOR STOP FLAG. That flag stops the unattended
+    crawler; this is a super admin pressing a button, which is the opposite of
+    unattended, and refusing it meant the only way to reconcile committees was
+    to restart the background crawl as well. The single-club ``rediscover_club``
+    has always worked while stopped — same prune, same retick — so refusing here
+    was the platform disagreeing with itself rather than a safety rule.
+
+    It carries its own cancel instead (``should_stop``), so "stop every bit of
+    PlayHQ traffic" is still reachable: Stop crawling halts the unattended
+    crawler, and stopping this run halts this one."""
+    stats = await discover_clubs(session, prune=True, retick=True, progress=progress,
+                                 should_stop=should_stop or never_stop)
     logger.info("rediscover_all: %s", stats)
     return stats
 

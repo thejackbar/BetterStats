@@ -4659,6 +4659,13 @@ class MarketingClub(Base):
     # All association(s) the club plays in: [{"id","name","competition"}, …].
     # NULL = not yet fetched (enrichment frontier); [] = fetched, none.
     associations = Column(JSONB, nullable=True)
+    # When the association fetch last SUCCEEDED (migration 298). Distinct from
+    # last_crawled_at, which the discovery pass bumps for every club it sees and
+    # so records when the club was last SEEN, not when its associations were
+    # last READ. It is what lets a club already carrying associations come back
+    # onto the enrichment frontier, so a club that changes association is picked
+    # up instead of keeping the first answer for ever.
+    associations_fetched_at = Column(TIMESTAMP(timezone=True), nullable=True)
     website_url = Column(Text, nullable=True)
     contact_email = Column(Text, nullable=True)
     contact_phone = Column(Text, nullable=True)

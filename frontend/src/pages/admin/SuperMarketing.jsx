@@ -910,8 +910,30 @@ export default function SuperMarketing() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const rediscoverRunning = !!rediscover?.running
+  // A run this backend has lost track of leaves `running` true for ever. The
+  // server already decides when that is stale enough to replace (it lets the
+  // POST through), and says so on the status — so read its answer rather than
+  // keeping a second copy of the window here, or the button stays dead on a run
+  // the server itself would happily start over.
+  const rediscoverRunning = !!rediscover?.running && !rediscover?.stale
   const rediscoverProgress = rediscover?.progress || {}
+
+  // A DISABLED BUTTON THAT DOES NOT SAY WHY READS AS BROKEN SOFTWARE. Run crawl
+  // batch is part of the unattended crawler, so the Stop genuinely holds it
+  // back — and the Stop is set two rows away, so nothing on the button connected
+  // the two. One reason string drives the disable, the tooltip and the line
+  // underneath, so the three can never disagree.
+  //
+  // Rediscover is NOT held back by it. That flag stops the unattended crawler,
+  // and pressing this button is the opposite of unattended; the per-club
+  // Rediscover in the drawer has always run while stopped. It carries its own
+  // Stop instead, so halting every bit of PlayHQ traffic is still reachable.
+  const crawlStopped = !!status?.paused
+  const STOPPED_WHY = 'The crawler is stopped. Press Start crawling above to run this.'
+  const crawlWhy = crawlStopped ? STOPPED_WHY : ''
+  const rediscoverWhy = rediscoverRunning
+    ? 'A rediscover is already running — watch the progress beside the button.'
+    : ''
 
   const runCrawl = async () => {
     setBusy('crawl'); setMsg('')
@@ -933,11 +955,19 @@ export default function SuperMarketing() {
       setRediscover(st)
       if (!st.running) {
         if (st.error) setError(st.error)
+        // A HALTED RUN IS NOT A FINISHED ONE. `discover_clubs` reports
+        // `stopped` when it broke off with pages still to go, so say what it
+        // got through rather than printing the same "finished" line over a
+        // partial pass — the mistake `_settle_bg` exists to stop for a soft
+        // error, reached from the other end.
         else if (st.result) {
           const r = st.result
-          setMsg(`Rediscover finished: ${r.au_seen || 0} club(s) re-read, `
+          const got = `${r.au_seen || 0} club(s) re-read, `
             + `${r.pruned || 0} departed officer(s) removed, `
-            + `${r.marked_former || 0} kept and marked, ${r.new || 0} club(s) new.`)
+            + `${r.marked_former || 0} kept and marked, ${r.new || 0} club(s) new.`
+          if (r.stopped) setMsg(`Rediscover stopped part way: ${got} `
+            + 'Every club it did not reach is exactly as it was.')
+          else setMsg(`Rediscover finished: ${got}`)
         }
         loadStats(); loadClubs()
         return
@@ -969,6 +999,24 @@ export default function SuperMarketing() {
       }
       api.mktRediscoverStatus().then(setRediscover).catch(() => {})
       pollRediscover()
+    } catch (e) { setError(e.message) } finally { setBusy('') }
+  }
+
+  // A rediscover ignores the crawler's Stop, so it needs its own — without one,
+  // "halt every bit of PlayHQ traffic" would stop being reachable the moment a
+  // rediscover was running. It finishes the page it is on rather than dropping
+  // it, so the count in the result is honest.
+  const stopRediscover = async () => {
+    if (!window.confirm(
+      'Stop the running rediscover?\n\n'
+      + 'It finishes the page it is on and then stops, so it may take up to a '
+      + 'minute. Clubs it has already re-read keep their refreshed committee; '
+      + 'clubs it never reached are left exactly as they were.')) return
+    setBusy('rediscover-stop'); setMsg(''); setError('')
+    try {
+      await api.mktRediscoverStop()
+      setMsg('Stopping the rediscover — it finishes the page it is on first.')
+      api.mktRediscoverStatus().then(setRediscover).catch(() => {})
     } catch (e) { setError(e.message) } finally { setBusy('') }
   }
 
@@ -1222,7 +1270,9 @@ export default function SuperMarketing() {
 
         {/* Crawler controls — sit directly under the status pill */}
         <div className="flex flex-wrap items-center gap-2 mb-2.5">
-          <button className={BTN_ACCENT} disabled={busy === 'crawl' || status?.paused} onClick={runCrawl}>
+          <button className={BTN_ACCENT} disabled={busy === 'crawl' || crawlStopped}
+                  title={crawlWhy || 'Discover new clubs and enrich the next slice of the frontier'}
+                  onClick={runCrawl}>
             {busy === 'crawl' ? 'Starting...' : 'Run crawl batch'}
           </button>
           {status?.paused ? (
@@ -1243,12 +1293,25 @@ export default function SuperMarketing() {
             two RECONCILE the directory against PlayHQ rather than extend it. */}
         <div className="flex flex-wrap items-center gap-2 mb-2.5">
           <button className={BTN_ACCENT}
-                  disabled={busy === 'rediscover' || rediscoverRunning || status?.paused}
+                  data-testid="rediscover-btn"
+                  disabled={busy === 'rediscover' || rediscoverRunning}
                   onClick={runRediscover}
-                  title="Re-page the whole PlayHQ club search and reconcile every club's committee">
+                  title={rediscoverWhy
+                    || "Re-page the whole PlayHQ club search and reconcile every club's committee. "
+                       + 'Runs whether or not the crawler is stopped.'}>
             {rediscoverRunning ? 'Rediscovering...'
               : busy === 'rediscover' ? 'Starting...' : 'Rediscover committees'}
           </button>
+          {rediscoverRunning && (
+            <button className="px-3 py-1.5 rounded text-xs font-semibold border border-red-500/40 bg-red-500/15 text-red-300 hover:bg-red-500/25 disabled:opacity-50"
+                    data-testid="rediscover-stop-btn"
+                    disabled={busy === 'rediscover-stop' || rediscover?.cancel}
+                    onClick={stopRediscover}
+                    title="Stop this rediscover at the end of the page it is on.">
+              {rediscover?.cancel ? 'Stopping...'
+                : busy === 'rediscover-stop' ? '...' : 'Stop rediscover'}
+            </button>
+          )}
           <button className={BTN} disabled={busy === 'tick'} onClick={tickOfficers}
                   title="Tick every listed officer with an email, in the filtered clubs. No PlayHQ traffic.">
             {busy === 'tick' ? 'Ticking...' : 'Tick officers with an email'}
@@ -1263,9 +1326,23 @@ export default function SuperMarketing() {
                 : 'Reading the first page from PlayHQ...'}
             </span>
           )}
+          {/* The Stop holds back the crawl row above, not this one — say so
+              here, or a stopped crawler reads as though this button must be
+              blocked too, which is exactly what it used to be. */}
+          {crawlStopped && !rediscoverRunning && (
+            <span className="text-[11px] text-pb-faint" data-testid="rediscover-runs-stopped">
+              The crawler is stopped. This still runs.
+            </span>
+          )}
+          {/* A HALTED RUN IS NOT A FINISHED ONE — this line reads the same
+              result dict as the poller above, so the two have to agree about
+              which it was. */}
           {!rediscoverRunning && rediscover?.finished_at && rediscover?.result && (
-            <span className="text-[11px] text-pb-faint">
-              Last rediscover: {rediscover.result.au_seen || 0} club(s),
+            <span className={'text-[11px] '
+              + (rediscover.result.stopped ? 'text-amber-300' : 'text-pb-faint')}>
+              {rediscover.result.stopped ? 'Last rediscover stopped part way: '
+                : 'Last rediscover: '}
+              {rediscover.result.au_seen || 0} club(s),
               {' '}{rediscover.result.pruned || 0} removed,
               {' '}{rediscover.result.marked_former || 0} kept and marked.
             </span>
@@ -1276,7 +1353,8 @@ export default function SuperMarketing() {
           their current role and, with an email, a tick for outreach; officers PlayHQ has
           dropped are removed, except where that would lose an unsubscribe, a note, a
           do-not-contact or a CRM link — those are kept and marked. Contacts you added by
-          hand are never touched, and nobody is removed from BetterComms.
+          hand are never touched, and nobody is removed from BetterComms. It runs whether
+          or not the crawler is stopped, and has its own Stop.
         </div>
 
         {/* ── Filter card ─────────────────────────────────────────────── */}

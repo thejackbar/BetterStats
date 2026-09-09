@@ -410,19 +410,33 @@ def _bg_stale(state: dict, window_secs: "int | None" = None) -> bool:
 _REDISCOVER_STALE_SECS = 12 * 60 * 60
 _rediscover: dict = {
     "running": False, "started_at": None, "finished_at": None,
-    "result": None, "error": None, "progress": {},
+    "result": None, "error": None, "progress": {}, "cancel": False,
 }
+
+
+async def _rediscover_cancelled() -> bool:
+    """This run's OWN stop, asked between pages.
+
+    A rediscover deliberately ignores the crawler's Stop flag — that flag stops
+    the UNATTENDED crawler, and this is a super admin pressing a button. So it
+    needs a stop of its own, or "halt every bit of PlayHQ traffic" would stop
+    being reachable once one is running. In-process like the rest of this state
+    dict, which is fine because the run itself is in-process.
+    """
+    return bool(_rediscover.get("cancel"))
 
 
 async def _rediscover_bg():
     try:
         async with async_session_maker() as session:
-            res = await cd.rediscover_all(session, progress=_rediscover["progress"])
+            res = await cd.rediscover_all(session, progress=_rediscover["progress"],
+                                          should_stop=_rediscover_cancelled)
         _settle_bg(_rediscover, res)
     except Exception as e:  # noqa: BLE001 — never let one bad page wedge the runner
         _rediscover["result"], _rediscover["error"] = None, str(e)
     finally:
         _rediscover["running"] = False
+        _rediscover["cancel"] = False
         _rediscover["finished_at"] = _now_iso()
 
 
@@ -436,21 +450,48 @@ async def rediscover(background: BackgroundTasks, _=Depends(require_super_admin)
 
     Long — ~6,900 AU clubs at 100 per page is ~70 requests, and every one waits
     out the crawl's courtesy delay (15-40s, one at a time), so call it half an
-    hour to an hour. Runs in the background; poll /rediscover/status. Stopping
-    the crawler stops it between pages."""
+    hour to an hour. Runs in the background; poll /rediscover/status.
+
+    RUNS WHETHER OR NOT THE CRAWLER IS STOPPED. That flag stops the unattended
+    crawler, and this is a super admin asking for it explicitly — the per-club
+    Rediscover has always worked while stopped, so refusing here was the
+    platform disagreeing with itself. Stop it with POST /rediscover/stop."""
     if _rediscover["running"] and not _bg_stale(_rediscover, _REDISCOVER_STALE_SECS):
         return {"status": "already_running", "started_at": _rediscover["started_at"]}
     _rediscover.update(running=True, started_at=_now_iso(), finished_at=None,
-                       result=None, error=None, progress={})
+                       result=None, error=None, progress={}, cancel=False)
     background.add_task(_rediscover_bg)
     return {"status": "started"}
+
+
+@router.post("/rediscover/stop")
+async def rediscover_stop(_=Depends(require_super_admin)):
+    """Stop a running rediscover at the end of the page it is on.
+
+    This is what keeps "stop all PlayHQ traffic" reachable now that a rediscover
+    ignores the crawler's own Stop flag. Halting part way is safe rather than
+    destructive: the prune is per club and scoped to the ids seen in that club's
+    own payload, so the clubs the run never reached are left exactly as they
+    were, not emptied."""
+    if not _rediscover["running"]:
+        return {"status": "not_running"}
+    _rediscover["cancel"] = True
+    return {"status": "stopping"}
 
 
 @router.get("/rediscover/status")
 async def rediscover_status(_=Depends(require_super_admin)):
     """Current/last rediscover state for the UI poller, including live per-page
-    progress while it runs."""
-    return dict(_rediscover)
+    progress while it runs.
+
+    ``stale`` is the SERVER's own answer to "would a new run be allowed right
+    now" — the same ``_bg_stale`` test POST /rediscover makes. It rides on the
+    status so the screen never keeps a second copy of the window: a run this
+    process has lost track of leaves ``running`` true for ever, and without this
+    the button would stay disabled on a run the server itself would happily
+    replace."""
+    return {**_rediscover,
+            "stale": _bg_stale(_rediscover, _REDISCOVER_STALE_SECS)}
 
 
 @router.post("/clubs/{club_id}/rediscover")
