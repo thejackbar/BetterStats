@@ -48,6 +48,13 @@ STATEMENTS: list[str] = [
         -- never got it" is answerable months later.
         email_sent      BOOLEAN NOT NULL DEFAULT FALSE,
         email_error     TEXT,
+        -- The reminder on the day is a SEPARATE send with its own outcome, so
+        -- it gets its own pair rather than overwriting the confirmation's.
+        -- `reminder_sent_at` is also the claim: the sweep stamps it before it
+        -- sends, so two runs overlapping cannot both email the same person,
+        -- and a refusal clears it back to NULL so the next hour retries.
+        reminder_sent_at TIMESTAMPTZ,
+        reminder_error   TEXT,
         created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
@@ -58,6 +65,15 @@ STATEMENTS: list[str] = [
     # which of the two a given database needed — see migration 297.
     """
     ALTER TABLE webinar_registrations ADD COLUMN IF NOT EXISTS phone TEXT
+    """,
+    # Same arrangement for the reminder pair — see migration 298.
+    """
+    ALTER TABLE webinar_registrations
+        ADD COLUMN IF NOT EXISTS reminder_sent_at TIMESTAMPTZ
+    """,
+    """
+    ALTER TABLE webinar_registrations
+        ADD COLUMN IF NOT EXISTS reminder_error TEXT
     """,
     # One row per person per event. Folded, because an address typed with a
     # capital is the same person — a second registration corrects the row it

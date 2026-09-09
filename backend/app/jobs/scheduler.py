@@ -657,6 +657,31 @@ async def refresh_scout_players():
             logger.error(f"BetterScout refresh failed for club {org_guid}: {e}")
 
 
+async def send_webinar_reminders():
+    """Remind everyone registered for the webinar, a few hours before it starts.
+
+    Hourly rather than a single cron at the right moment, and the WINDOW is
+    what decides — `webinar.send_reminders` returns immediately on every run
+    outside it. A one-shot cron pinned to the hour has to be moved by hand for
+    the next event and misses entirely if the app happens to be restarting; a
+    cheap hourly check that reads the event's own constant does not.
+
+    Costs one indexed UPDATE that matches nothing on all but a handful of runs
+    in the event's whole life.
+    """
+    from app.models.db import async_session_maker
+    from app.services import webinar
+    if not webinar.reminder_window_open():
+        return
+    try:
+        async with async_session_maker() as session:
+            result = await webinar.send_reminders(session)
+        if result.get("claimed"):
+            logger.info("Webinar reminders: %s", result)
+    except Exception as e:
+        logger.error(f"Webinar reminder sweep failed: {e}")
+
+
 async def comms_daily_maintenance():
     """BetterComms daily housekeeping, run just after the AWS quota window rolls
     over (midnight UTC): (1) trip the bounce/complaint circuit breaker on any
@@ -931,6 +956,17 @@ def start_scheduler():
         hour=9,
         minute=0,
         id="daily_scout_refresh",
+        replace_existing=True,
+    )
+    # Webinar reminder — hourly at :20, gated on the event's own send window
+    # (see send_webinar_reminders for why hourly rather than one pinned cron).
+    # Off the hour so it never lands in the same minute as the Meta Ads
+    # snapshot at :05.
+    scheduler.add_job(
+        send_webinar_reminders,
+        trigger="cron",
+        minute=20,
+        id="webinar_reminders",
         replace_existing=True,
     )
     # BetterComms daily maintenance — 00:15 UTC, just after AWS's daily send

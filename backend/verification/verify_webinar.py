@@ -237,6 +237,20 @@ async def main() -> None:
             "WHERE table_name = 'webinar_registrations'"
         ))).all()}
         check("applying it over a pre-297 table adds the phone", "phone" in pre297)
+        # And the same again for 299's pair — one list, so a database at any of
+        # 296, 297 or 299 lands on the same schema.
+        check("and the reminder pair", "reminder_sent_at" in pre297
+              and "reminder_error" in pre297, str(sorted(pre297)))
+        if "reminder_sent_at" in pre297:
+            earlier_rem = (await conn.execute(text(
+                "SELECT reminder_sent_at FROM webinar_registrations "
+                "WHERE email = 'at296@example.com'"
+            ))).scalar_one()
+            check("a registration taken before it existed reads as not reminded",
+                  earlier_rem is None, repr(earlier_rem))
+        else:
+            check("a registration taken before it existed reads as not reminded",
+                  False, "no reminder_sent_at column to read")
         kept = (await conn.execute(text(
             "SELECT count(*) FROM webinar_registrations WHERE email = 'at296@example.com'"
         ))).scalar_one()
@@ -284,6 +298,29 @@ async def main() -> None:
     check("its downgrade drops the column, never the table",
           "DROP COLUMN IF EXISTS phone" in phone_migration
           and "DROP TABLE" not in phone_migration)
+    # NUMBERED 299, NOT 298 — origin/main reached 298 (assoc_refresh) while the
+    # reminder was in flight. This file has now recorded that trap six times.
+    rem_path = (Path(__file__).resolve().parent.parent / "alembic" / "versions"
+                / "299_webinar_reminder.py")
+    rem_migration = rem_path.read_text() if rem_path.exists() else ""
+    check("migration 299 runs the same shared list rather than its own ALTERs",
+          "from app.services.webinar_ddl import STATEMENTS" in rem_migration)
+    check("and revises 298, not 297 (origin/main had already taken 298)",
+          'down_revision = "298"' in rem_migration)
+    check("its downgrade drops the two columns, never the table",
+          "DROP COLUMN IF EXISTS reminder_sent_at" in rem_migration
+          and "DROP COLUMN IF EXISTS reminder_error" in rem_migration
+          and "DROP TABLE" not in rem_migration)
+    # The sweep is only useful if something calls it. Asserted structurally so
+    # a reminder that can never fire is a named failure rather than a quiet one
+    # on the night.
+    sched_src = (Path(__file__).resolve().parent.parent / "app" / "jobs"
+                 / "scheduler.py").read_text()
+    check("the scheduler registers the reminder sweep",
+          "send_webinar_reminders" in sched_src
+          and 'id="webinar_reminders"' in sched_src)
+    check("and it is gated on the event's own window rather than one pinned cron",
+          "reminder_window_open" in sched_src)
 
     print("\n-- the event is declared once, and both copies agree --")
     event = webinar.EVENT
@@ -861,6 +898,167 @@ async def main() -> None:
         finally:
             webinar.email_service.get_email_provider = original
 
+    # ------------------------------------------------------------------
+    # The day-of reminder.
+    #
+    # WHY IT EXISTS: StreamYard's own webinar registration sends one, and
+    # switching that gate off — which is what stops a registrant filling a form
+    # twice — takes it with it. Everything the second form asks for is already
+    # on our own row, so this is the one thing worth replacing.
+    #
+    # The checks that matter are about WHO gets one and HOW MANY TIMES: never
+    # outside the window, never twice, and never to somebody whose confirmation
+    # went out minutes ago.
+    # ------------------------------------------------------------------
+    print("\n-- the reminder window --")
+    if not hasattr(webinar, "send_reminders"):
+        check("the reminder is present", False, "webinar.send_reminders missing")
+    else:
+        opens = event.starts_at - timedelta(hours=webinar.REMINDER_LEAD_HOURS)
+        check("it opens a few hours before the session, not on the day it is created",
+              webinar.reminder_window_open(event, opens + timedelta(minutes=1)) is True)
+        check("and is shut before that",
+              webinar.reminder_window_open(event, opens - timedelta(minutes=1)) is False)
+        # A reminder landing after the session has finished is worse than none:
+        # it sends somebody to a stream that is over.
+        check("and shut again once the session has ended",
+              webinar.reminder_window_open(event, event.ends_at) is False)
+        check("still open while the session is running",
+              webinar.reminder_window_open(event, event.starts_at + timedelta(minutes=5)) is True)
+
+        async with Session() as session:
+            # Registered LONG before the window — the ordinary registrant.
+            await session.execute(text("""
+                UPDATE webinar_registrations
+                   SET reminder_sent_at = NULL, reminder_error = NULL,
+                       created_at = :when
+                 WHERE event_key = :k
+            """), {"k": event.key, "when": opens - timedelta(days=5)})
+            # And one who registered INSIDE it, minutes after the reminder
+            # would have gone out.
+            await session.execute(text("""
+                INSERT INTO webinar_registrations (event_key, name, email, club, created_at)
+                VALUES (:k, 'Late Arrival', 'late@example.com', 'Late CC', :when)
+                ON CONFLICT (event_key, lower(email)) DO UPDATE
+                   SET created_at = EXCLUDED.created_at, reminder_sent_at = NULL
+            """), {"k": event.key, "when": opens + timedelta(minutes=30)})
+            # A DIFFERENT event's registrant, who must not be swept up.
+            await session.execute(text("""
+                INSERT INTO webinar_registrations (event_key, name, email, club)
+                VALUES ('webinar-some-other', 'Other Event', 'other@example.com', 'Other CC')
+                ON CONFLICT (event_key, lower(email)) DO UPDATE SET reminder_sent_at = NULL
+            """))
+            await session.commit()
+
+            sent: list = []
+
+            class Accepting:
+                async def send(self, msg):
+                    sent.append(msg)
+                    return type("R", (), {"ok": True, "message_id": "m", "error": None})()
+
+            original = webinar.email_service.get_email_provider
+            try:
+                webinar.email_service.get_email_provider = lambda: Accepting()
+
+                # Before the window opens: nothing at all, not even a claim.
+                result = await webinar.send_reminders(
+                    session, event=event, now=opens - timedelta(hours=1))
+                check("before the window, nobody is emailed", len(sent) == 0, str(len(sent)))
+                check("and nobody is claimed", result["claimed"] == 0, str(result))
+
+                # Inside it: everyone who registered beforehand, once.
+                result = await webinar.send_reminders(
+                    session, event=event, now=opens + timedelta(minutes=5))
+                addressed = {m.to_email for m in sent}
+                check("inside the window, the registrants are emailed",
+                      len(sent) >= 1, str(len(sent)))
+                check("the one who registered since is NOT — their confirmation "
+                      "went out minutes ago",
+                      "late@example.com" not in addressed, str(sorted(addressed)))
+                # A registration for a different event is a different list. The
+                # two must never merge — that is what event_key is for.
+                check("and another event's registrant is not swept up",
+                      "other@example.com" not in addressed, str(sorted(addressed)))
+                row = await row_for(session, "sam@example.com")
+                check("the send is recorded on the row",
+                      row and row["reminder_sent_at"] is not None)
+                check("with no error", row and row["reminder_error"] is None)
+
+                msg = next((m for m in sent if m.to_email == "sam@example.com"), None)
+                check("the reminder carries the watch link",
+                      msg and event.watch_url in msg.html)
+                check("and both timezones",
+                      msg and "5:30pm AWST" in msg.html and "7:30pm AEST" in msg.html)
+                check("the plain-text part carries the link too",
+                      msg and event.watch_url in msg.text)
+                check("and the subject says it is today",
+                      msg and msg.subject.lower().startswith("today"), str(msg and msg.subject))
+
+                # THE ONE THING A REMINDER MUST NOT DO. The claim is on the row,
+                # so a second sweep an hour later emails nobody again.
+                before = len(sent)
+                again = await webinar.send_reminders(
+                    session, event=event, now=opens + timedelta(hours=1))
+                check("a second sweep emails nobody twice",
+                      len(sent) == before, f"{len(sent) - before} extra")
+                check("and claims nothing", again["claimed"] == 0, str(again))
+
+                # A refusal HANDS THE CLAIM BACK, so the next hour retries —
+                # otherwise one provider hiccup silently costs somebody their
+                # only reminder.
+                await session.execute(text("""
+                    UPDATE webinar_registrations SET reminder_sent_at = NULL
+                     WHERE lower(email) = 'sam@example.com'
+                """))
+                await session.commit()
+
+                class Refusing:
+                    async def send(self, _msg):
+                        return type("R", (), {"ok": False, "message_id": None,
+                                              "error": "smtp down"})()
+
+                webinar.email_service.get_email_provider = lambda: Refusing()
+                failed = await webinar.send_reminders(
+                    session, event=event, now=opens + timedelta(hours=2))
+                check("a refusal does not raise", True)
+                check("and is counted", failed["failed"] >= 1, str(failed))
+                row = await row_for(session, "sam@example.com")
+                check("the claim is handed back so the next run retries",
+                      row and row["reminder_sent_at"] is None)
+                check("and the reason is kept on the row",
+                      row and "smtp down" in (row["reminder_error"] or ""),
+                      str(row and row["reminder_error"]))
+
+                webinar.email_service.get_email_provider = lambda: Accepting()
+                retried = await webinar.send_reminders(
+                    session, event=event, now=opens + timedelta(hours=3))
+                check("and the next run does send it", retried["sent"] >= 1, str(retried))
+                row = await row_for(session, "sam@example.com")
+                check("clearing the error it left behind", row and row["reminder_error"] is None)
+
+                # After the session has finished, nothing goes out however many
+                # rows are still unsent.
+                await session.execute(text("""
+                    UPDATE webinar_registrations SET reminder_sent_at = NULL
+                     WHERE event_key = :k
+                """), {"k": event.key})
+                await session.commit()
+                after = await webinar.send_reminders(
+                    session, event=event, now=event.ends_at + timedelta(minutes=1))
+                check("after the session, nobody is emailed", after["claimed"] == 0, str(after))
+            finally:
+                webinar.email_service.get_email_provider = original
+
+        print("\n-- sending the reminder by hand --")
+        async with Session() as session:
+            from app.routers.club_admin import send_webinar_reminders_now
+            # Outside the window on purpose: the escape hatch must not be able
+            # to email a week early because somebody pressed it.
+            out = await send_webinar_reminders_now(None, session)
+            check("the endpoint runs the same sweep and refuses outside the window",
+                  out.get("claimed") == 0, str(out))
+
     print("\n-- the staff list --")
     async with Session() as session:
         from app.routers.club_admin import list_webinar_registrations
@@ -879,6 +1077,14 @@ async def main() -> None:
         # Without it on the staff list it may as well not be stored.
         check("and the phone, which is what the list is worked from",
               sam and sam.get("phone") == "(08) 9364 1234", str(sam and sam.get("phone")))
+        # The reminder is a separate send with its own outcome, so the list has
+        # to report it separately — otherwise "did they get reminded" is only
+        # answerable from the database.
+        check("and whether the reminder went out", sam and "reminder_sent_at" in sam)
+        check("as a string rather than a raw timestamp",
+              sam and (sam.get("reminder_sent_at") is None
+                       or isinstance(sam["reminder_sent_at"], str)),
+              str(type(sam and sam.get("reminder_sent_at"))))
 
     print("\n-- the downgrade --")
     async with engine.begin() as conn:

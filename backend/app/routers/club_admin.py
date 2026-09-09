@@ -4180,19 +4180,45 @@ async def list_webinar_registrations(
         SELECT id, event_key, name, email, club, phone, role,
                utm_source, utm_medium, utm_campaign, utm_content, utm_term,
                click_id, click_source, referrer, landing_path,
-               visitor_id, email_sent, email_error, created_at
+               visitor_id, email_sent, email_error,
+               reminder_sent_at, reminder_error, created_at
           FROM webinar_registrations
          ORDER BY created_at DESC
          LIMIT 5000
     """))).mappings().all()
     return [
         {
-            **{k: v for k, v in row.items() if k not in ("id", "created_at")},
+            **{k: v for k, v in row.items()
+               if k not in ("id", "created_at", "reminder_sent_at")},
             "id": str(row["id"]),
             "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            "reminder_sent_at": (
+                row["reminder_sent_at"].isoformat() if row["reminder_sent_at"] else None
+            ),
         }
         for row in rows
     ]
+
+
+@router.post("/super/webinar-reminders")
+async def send_webinar_reminders_now(
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Send the day-of reminder now, rather than waiting for the hourly sweep.
+
+    The escape hatch, not the mechanism — `jobs/scheduler.send_webinar_reminders`
+    is what normally does this. It exists because the reminder has exactly one
+    chance to be useful: if the sweep is missed on the night (a restart landing
+    on the wrong minute, the window arithmetic being wrong about a timezone),
+    there is no second run that matters.
+
+    Runs the SAME `webinar.send_reminders`, so the two cannot disagree about
+    who has already had one — and because the claim is on the row, pressing
+    this after the sweep has run emails nobody twice.
+    """
+    from app.services import webinar as _webinar
+    return await _webinar.send_reminders(db)
 
 
 _ONBOARDING_STATUSES = {"new", "contacted", "onboarded", "closed"}

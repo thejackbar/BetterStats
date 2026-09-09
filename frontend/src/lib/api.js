@@ -1979,6 +1979,10 @@ export const api = {
   registerForWebinar: (payload) =>
     request('/public/webinar/register', { method: 'POST', body: JSON.stringify(payload) }),
   superWebinarRegistrations: () => request('/club-admin/super/webinar-registrations'),
+  // The escape hatch on the day — the hourly sweep is what normally sends
+  // these, and nobody is emailed twice either way (the claim is on the row).
+  superSendWebinarReminders: () =>
+    request('/club-admin/super/webinar-reminders', { method: 'POST' }),
   // Club lookup behind the Contact form's Club name field. Same Cricket
   // Australia club list the self-serve registration wizard searches, on the
   // Contact form's own endpoint so it works whether or not self-serve

@@ -1306,7 +1306,7 @@ async def lifespan(app: FastAPI):
         from app.services.grade_ignore_ddl import STATEMENTS as _GRADE_IGNORE_DDL
         for _stmt in _GRADE_IGNORE_DDL:
             await conn.execute(text(_stmt))
-        # Mirrors migrations 296 and 297 — the ONE copy lives in the service.
+        # Mirrors migrations 296, 297 and 299 — the ONE copy lives in the service.
         from app.services.webinar_ddl import STATEMENTS as _WEBINAR_DDL
         for _stmt in _WEBINAR_DDL:
             await conn.execute(text(_stmt))
