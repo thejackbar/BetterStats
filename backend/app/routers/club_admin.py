@@ -4177,7 +4177,7 @@ async def list_webinar_registrations(
     """
     from sqlalchemy import text as _text
     rows = (await db.execute(_text("""
-        SELECT id, event_key, name, email, club, phone, role,
+        SELECT id, event_key, name, first_name, last_name, email, club, phone, role,
                utm_source, utm_medium, utm_campaign, utm_content, utm_term,
                click_id, click_source, referrer, landing_path,
                visitor_id, email_sent, email_error,
@@ -4240,6 +4240,74 @@ async def sync_webinar_streamyard_now(
     """
     from app.services import webinar as _webinar
     return await _webinar.sync_streamyard(db)
+
+
+class WebinarRegistrationPatch(BaseModel):
+    name: Optional[str] = None
+
+
+@router.patch("/super/webinar-registrations/{registration_id}")
+async def patch_webinar_registration(
+    registration_id: str,
+    body: WebinarRegistrationPatch,
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Correct a registrant's name.
+
+    THIS EXISTS BECAUSE A SKIP HAS TO BE FIXABLE. StreamYard's own form has
+    first name and last name as two separate REQUIRED fields and refuses a
+    blank surname outright (a 400, verified against the live endpoint), while
+    ours asks for one Name — so somebody who typed a single word cannot be
+    pushed, and `streamyard.push_registration` records that rather than
+    inventing a surname to sit beside their chat messages in front of everyone
+    watching. Without a way to correct the name, the reason could never stop
+    being true and the row was stuck for good.
+
+    `sync_streamyard` deliberately retries a previously-skipped row, so
+    correcting the name here and pressing Push is the whole loop.
+
+    ONLY THE NAME. The email is the identity these rows fold on
+    (`(event_key, lower(email))`) and is what StreamYard's own idempotency
+    keys on, so letting it be edited would separate our row from the
+    registration it already made at their end. The campaign fields are the
+    record of where the registration came from and are not ours to rewrite.
+    """
+    from sqlalchemy import text as _text
+    from app.services import streamyard as _streamyard, webinar as _webinar
+
+    if body.name is None:
+        raise HTTPException(status_code=422, detail="Nothing to change.")
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="A name is required.")
+
+    try:
+        _uuid = uuid.UUID(registration_id)
+    except (ValueError, AttributeError, TypeError):
+        raise HTTPException(status_code=404, detail="Registration not found.")
+
+    # The halves move with it, or the row would still push the OLD name —
+    # `push_to_streamyard` prefers them over splitting `name`, which is the
+    # whole point of them. Split here because a staff correction is one typed
+    # string, and a pair derived that way is better than a stale one: it is
+    # what somebody just looked at the row and wrote.
+    first, last = _streamyard.split_name(name)
+    updated = (await db.execute(_text("""
+        UPDATE webinar_registrations
+           SET name = :name, first_name = :first, last_name = :last,
+               updated_at = NOW()
+         WHERE id = CAST(:id AS uuid)
+        RETURNING id
+    """), {"id": str(_uuid),
+           "name": _webinar._clip(name, _webinar.MAX_LENGTHS["name"]),
+           "first": _webinar._clip(first, _webinar.MAX_LENGTHS["name"]),
+           "last": _webinar._clip(last, _webinar.MAX_LENGTHS["name"])})).first()
+    if not updated:
+        await db.rollback()
+        raise HTTPException(status_code=404, detail="Registration not found.")
+    await db.commit()
+    return {"ok": True, "name": name}
 
 
 _ONBOARDING_STATUSES = {"new", "contacted", "onboarded", "closed"}

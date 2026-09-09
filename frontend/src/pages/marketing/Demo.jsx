@@ -178,7 +178,14 @@ function SuccessState({ state, recordingPending, watchUrl }) {
 }
 
 function RegistrationForm({ state, onSuccess }) {
-  const [name, setName] = useState('')
+  // TWO FIELDS, not one. StreamYard's own registration form has First name
+  // and Last name as separate required fields and refuses a blank surname
+  // outright, so a registrant who typed one word could not be pushed into
+  // their list and a person had to patch the row by hand. Both boxes carry
+  // the right `autocomplete` token, so a phone fills them in one tap —
+  // which is what keeps this from being real friction on paid traffic.
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
   const [email, setEmail] = useState('')
   const [club, setClub] = useState('')
   const [phone, setPhone] = useState('')
@@ -195,7 +202,8 @@ function RegistrationForm({ state, onSuccess }) {
 
   const validate = () => {
     const next = {}
-    if (!name.trim()) next.name = 'Add your name.'
+    if (!firstName.trim()) next.firstName = 'Add your first name.'
+    if (!lastName.trim()) next.lastName = 'Add your last name.'
     if (!email.trim()) next.email = 'Add your email.'
     else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) next.email = 'That doesn’t look like an email address.'
     if (!club.trim()) next.club = 'Add your club.'
@@ -227,7 +235,8 @@ function RegistrationForm({ state, onSuccess }) {
     const meta = getMetaEventContext()
     try {
       const result = await api.registerForWebinar({
-        name: name.trim(),
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
         email: email.trim(),
         club: club.trim(),
         phone: phone.trim(),
@@ -332,21 +341,42 @@ function RegistrationForm({ state, onSuccess }) {
   return (
     <form onSubmit={submit} className="text-left" noValidate data-testid="demo-form">
       <div className="space-y-3">
-        <div>
-          <label htmlFor="demo-name" className="block font-mono text-[11px] tracking-wide text-pb-faint mb-1.5">
-            YOUR NAME
-          </label>
-          <input
-            id="demo-name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            autoComplete="name"
-            required
-            aria-invalid={!!errors.name}
-            aria-describedby={errors.name ? 'demo-name-error' : undefined}
-            className={FIELD_CLS}
-          />
-          {err('name')}
+        {/* Side by side, so two boxes cost one line rather than two — the form
+            is no longer than it was. They stack under 400px, where a
+            half-width text input is too narrow to read what you typed. */}
+        <div className="grid grid-cols-1 min-[400px]:grid-cols-2 gap-3">
+          <div>
+            <label htmlFor="demo-first-name" className="block font-mono text-[11px] tracking-wide text-pb-faint mb-1.5">
+              FIRST NAME
+            </label>
+            <input
+              id="demo-first-name"
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+              autoComplete="given-name"
+              required
+              aria-invalid={!!errors.firstName}
+              aria-describedby={errors.firstName ? 'demo-firstName-error' : undefined}
+              className={FIELD_CLS}
+            />
+            {err('firstName')}
+          </div>
+          <div>
+            <label htmlFor="demo-last-name" className="block font-mono text-[11px] tracking-wide text-pb-faint mb-1.5">
+              LAST NAME
+            </label>
+            <input
+              id="demo-last-name"
+              value={lastName}
+              onChange={(e) => setLastName(e.target.value)}
+              autoComplete="family-name"
+              required
+              aria-invalid={!!errors.lastName}
+              aria-describedby={errors.lastName ? 'demo-lastName-error' : undefined}
+              className={FIELD_CLS}
+            />
+            {err('lastName')}
+          </div>
         </div>
         <div>
           <label htmlFor="demo-email" className="block font-mono text-[11px] tracking-wide text-pb-faint mb-1.5">

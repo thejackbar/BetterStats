@@ -627,6 +627,89 @@ async def main() -> None:
             check("a sheet with no game_key column is refused",
                   "missing required column" in str(e).lower(), str(e)[:120])
 
+    print("\n-- A MATCH NOBODY WAS NAMED FOR IS STILL A MATCH --")
+    # Shoalwater Bay's own records carry 17 of these: a forfeit, a washout or a
+    # no-play draw where the club recorded the result and never a single name.
+    # Twelve name nobody at all, so the sheet's only way to say it is a row
+    # with the match filled in and the player column empty. Nothing else in
+    # this suite covers a player-less row, and a tidy-up of the blank-name skip
+    # in `_write_games` would silently drop those twelve matches.
+    async with Session() as session:
+        await reset(session)
+        await seed(session)
+    async with Session() as session:
+        c, u = await club(session), await user(session)
+        rows = [
+            game_row(game_key="FF1", played_at="2007-01-20", opposition="Waroona",
+                     venue="Singleton", season_name="1996/97", grade_name="1st Grade",
+                     result="WIN", winning_team="Shoalwater Bay", player_name=""),
+            game_row(game_key="AB1", played_at="2007-02-11", opposition="Halls Head",
+                     season_name="1996/97", grade_name="1st Grade", player_name=""),
+        ]
+        # Guarded: with the blank-name skip gone the commit refuses outright,
+        # and a control run has to REPORT that rather than die on it.
+        try:
+            out = await commit_manual_games(req=GameResolveRequest(rows=rows),
+                                            current_user=u, club=c, db=session)
+        except Exception as e:
+            out = {"games_created": 0, "errors": 1, "players_created": 0, "raised": str(e)[:160]}
+        check("both matches import with nobody on the card",
+              out["games_created"] == 2 and out["errors"] == 0, str(out))
+        check("and no player was invented to carry them",
+              out["players_created"] == 0, str(out))
+    async with Session() as session:
+        games = (await session.execute(select(ManualGame))).scalars().all()
+        ff = [g for g in games if g.opposition == "Waroona"]
+        check("the match itself is there, with its own date and opponent",
+              len(ff) == 1 and str(ff[0].played_at) == "2007-01-20", str(games))
+        ff = ff or [None]
+        check("carrying the result the club recorded",
+              bool(ff[0]) and ff[0].result == "WIN"
+              and ff[0].winning_team == "Shoalwater Bay",
+              str(ff[0].result if ff[0] else None))
+        check("and the venue too", bool(ff[0]) and ff[0].venue == "Singleton")
+        ab = [g for g in games if g.opposition == "Halls Head"]
+        check("an abandoned match carries NO result rather than a made-up one",
+              len(ab) == 1 and ab[0].result is None,
+              str(ab[0].result if ab else "no game at all"))
+        check("neither game has a scorecard under it",
+              len((await session.execute(
+                  select(ManualBattingInnings))).scalars().all()) == 0)
+        check("nor a bowling spell",
+              len((await session.execute(
+                  select(ManualBowlingSpell))).scalars().all()) == 0)
+
+    print("\n-- A NAMED SIDE WITH NO FIGURES COUNTS A GAME, NOT AN INNINGS --")
+    # The other five name an eleven and record nothing else. They should read
+    # as a match each of those players turned up to, and must not add a batting
+    # innings — an average is runs over dismissals, and a did-not-bat row that
+    # slipped into the denominator would quietly deflate eleven careers.
+    async with Session() as session:
+        await reset(session)
+        await seed(session)
+    async with Session() as session:
+        c, u = await club(session), await user(session)
+        rows = [game_row(game_key="TS1", played_at="2000-03-11", opposition="Pinjarra",
+                         season_name="1996/97", grade_name="1st Grade", result="WIN",
+                         player_name="Held, Harry", innings_number="1",
+                         did_not_bat="true")]
+        try:
+            out = await commit_manual_games(req=GameResolveRequest(rows=rows),
+                                            current_user=u, club=c, db=session)
+        except Exception as e:
+            out = {"games_created": 0, "errors": 1, "raised": str(e)[:160]}
+        check("the match imports", out["games_created"] == 1 and out["errors"] == 0, str(out))
+    async with Session() as session:
+        rows = (await session.execute(select(ManualBattingInnings))).scalars().all()
+        check("the named player is on the card", len(rows) == 1, str(len(rows)))
+        check("marked as not having batted", bool(rows) and rows[0].did_not_bat is True,
+              str(rows[0].did_not_bat if rows else "no row at all"))
+        real = (await session.execute(text(
+            "SELECT COUNT(*) FROM v_effective_batting_innings "
+            "WHERE did_not_bat IS NOT TRUE"))).scalar()
+        check("and it is NOT counted as an innings anywhere downstream",
+              real == 0, f"{real} innings")
+
     print("\n-- THE STRICT ENDPOINT IS UNCHANGED --")
     async with Session() as session:
         await reset(session)

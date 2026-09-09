@@ -566,6 +566,60 @@ want a design per template done please."*
   post. `templateToBlocks` still reaches four templates. Saved templates are
   still `localStorage`. EV2's square panel still clips at its own size.
 
+## A FACET LISTED IN THE KIT AND MISSING FROM ONE FUNCTION (v9.73.1, Sep 2026)
+
+Reported off `/admin/comms/lists` as `a[r.key] is not iterable`, straight after
+an Export to BetterComms added 800+ contacts — so it read as a problem in the
+inserted rows.
+
+- **IT IS NOT THE ROWS, AND ESTABLISHING THAT FIRST IS WHAT STOPPED THIS BEING
+  CHASED THROUGH THE DATABASE.** `facetOptionsFrom` ends
+  `[...opts[f.key]]` for EVERY entry in `FACETS`, and that line runs whatever
+  the contacts are. Reproduced with an empty list and with `null`: it throws
+  either way. The export was a coincidence of timing — the screen had been
+  down since the deploy before it.
+- **V8 PRINTS THE SOURCE TEXT OF THE OFFENDING EXPRESSION, which is what makes
+  a minified message locatable.** `a[r.key] is not iterable` is
+  `opts[f.key]` after minification, and a grep for a spread of a `.key`-indexed
+  member (`\.\.\.[a-z]+\[[a-z]+\.key\]`) returns **exactly one match in the
+  whole frontend**. Reach for the expression's shape, not for the variable
+  names.
+- **THE CAUSE IS A SECOND HAND-WRITTEN COPY OF THE FACET LIST.** `FACETS`
+  gained `role` in migration 295's commit; `facetOptionsFrom` built its `opts`
+  from a hardcoded five-key literal written before `role` existed, so
+  `opts.role` was undefined. **This is the trap this file already records one
+  function over** — `CommsLists.jsx`'s own `noFilters` literal, fixed in
+  v9.70.0 by aliasing it to `emptyFilters`. The same commit that fixed it there
+  introduced it here.
+- **TWO CRASH PATHS, AND ONLY ONE OF THEM NEEDS DATA.** The spread throws
+  unconditionally; `opts[f.key].add(...)` throws `Cannot read properties of
+  undefined (reading 'add')` only once a contact actually carries a role, which
+  is what the exported directory rows brought. The control run reports both.
+- **A COMMENT CAN DESCRIBE BEHAVIOUR THE FUNCTION CANNOT DELIVER.** The note
+  added beside `role` said "facetOptionsFrom only offers a facet that actually
+  has values, so it never appears for them" — true of the intent, and the
+  function threw before it could offer anything. It is true now.
+- **BOTH SHAPES ARE DERIVED FROM `FACETS` NOW, mirroring `emptyModes`**, which
+  had this right all along (`Object.fromEntries(MODE_FILTERS.map(...))`). A
+  facet added later reaches the filter shape, the options builder and the
+  matcher with no second list to keep in step.
+- **Verified** (`frontend/verification/verify_comms_facets.mjs`, 11 checks
+  against the SHIPPED functions lifted out of the file rather than retyped: an
+  empty and a null contact list, a club contact carrying no directory fields,
+  every `FACETS` key present in both shapes, role options collected and
+  de-duplicated, a facet nobody carries staying empty so it is never offered,
+  and the filter it then drives) **with a control run**: 7 of the 11 fail
+  against the previous commit, reporting the customer's own
+  `opts[f.key] is not iterable`.
+- **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN, hit again here.** The
+  first cut read `facetOptionsFrom(exported)` into a `const` at module level,
+  so the control died on it and said nothing about the four checks below.
+  Every read goes through the guarded `check()` now.
+- **NOTICED, NOT FIXED**: nothing asserts that a key added to `FACETS`,
+  `MODE_FILTERS` or the engagement filter reaches every consumer — the check
+  here covers `FACETS` only, and a structural sweep over the kit would be its
+  own change.
+
 ## Twenty is retired; the engagement score, the CRM and Sales Management are not (v9.71.0, Sep 2026)
 
 Asked for directly: *"the calculation and continual re-calculation of engagement
@@ -1305,6 +1359,133 @@ rather than making someone register twice."**
   a refusal as an ordinary recorded error, so if it stops working the worst case
   is one form and our own list — check the StreamYard column after the first
   registration to see which way it fell.
+- **AND THAT TOGGLE HAS A COST THIS NOTE ORIGINALLY FAILED TO NAME.** Reported
+  straight back: "turning off registrations means i can't see the registrants
+  list." Correct — StreamYard's registrant list AND its attendee report both
+  hang off registration being on, so switching it off trades the second form
+  for the attended-vs-registered split. It is a decision with two real sides,
+  not a step: **our own list is complete either way** (name, email, club, phone,
+  role, every campaign tag, CSV export), so the ONLY thing genuinely lost is
+  who turned up. **Untested third path**: their form carries an "Already
+  registered? Join here" link, and everyone the push registers genuinely IS
+  registered at their end — so that link may admit a registrant on their email
+  alone, keeping both. Not verified, so not asserted.
+
+### A skip that does not say why reads as a broken button (v9.73.2, Sep 2026)
+
+Reported: "It's not letting me push to streamyard - says 0 pushed, 2 skipped".
+
+- **NOTHING WAS BROKEN, AND THE SILENCE WAS THE BUG** — the same call this file
+  already records for the disabled Rediscover button and for a figure that is
+  correctly zero. Both rows had a single-word name, and StreamYard's own form
+  has firstName and lastName as separate REQUIRED fields: a blank surname is a
+  **400, re-verified against the live endpoint** while diagnosing this (a
+  refusal creates nothing, so it is a safe probe). The skip was right; the
+  reporting was not.
+- **THE OTHER TWO SKIP REASONS WERE RULED OUT BY MEASUREMENT, NOT BY READING.**
+  The live broadcast still answers `isRegistrationEnabled: true` with one
+  definition and all four fields, so "the broadcast has no registration form"
+  was not it; and `webinar_id_from` parses the shipped watch link, so neither
+  was "not a StreamYard broadcast". **A session failure is an ERROR, never a
+  skip** — `_field_map` calls `raise_for_status()` and an unauthenticated
+  `GET /webinars/{id}` answers **401**, which the outer handler records as a
+  failure. So "skipped" could only ever have been the surname.
+- **`sync_streamyard` REPORTS `reasons`, and the button names them.** A bare
+  count is the whole reported problem; the counts and the distinct outcomes now
+  come back together and the message reads them out.
+- **THE REASON IS WRITTEN OUT ON THE ROW, NOT LEFT ON HOVER.** It was on a
+  `title` tooltip, which is a state nobody can see — two rows reading NOT SENT
+  with the explanation hidden is how a working feature reads as a fault.
+- **A SKIP HAS TO BE FIXABLE OR THE REASON CAN NEVER STOP BEING TRUE.**
+  `sync_streamyard` already retries a previously-skipped row on purpose ("the
+  reason can stop being true if somebody corrects their name") — and nothing
+  could correct the name, so the row was stuck for good and the retry was
+  pointless. `PATCH /super/webinar-registrations/{id}` takes a name;
+  an **Add surname** button is offered on exactly the rows where a
+  single-word name is what is standing in the way, never on a row that pushed
+  fine.
+- **ONLY THE NAME IS EDITABLE, and that is deliberate.** The email is the
+  identity these rows fold on (`(event_key, lower(email))`) AND what
+  StreamYard's own idempotency keys on, so editing it would separate our row
+  from the registration already made at their end. The campaign fields are the
+  record of where a registration came from and are not ours to rewrite.
+- **A SURNAME IS STILL NEVER INVENTED.** It would sit beside that person's chat
+  messages in front of everyone watching. A person types the correction, or the
+  row stays skipped and says so.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_streamyard_skip_reporting.py`, 62 checks through
+  the shipped service and route bodies: the reported run replayed — one pushed,
+  two skipped — the reason counted and named, the reason landing on the row, a
+  second press not re-registering the one already done while retrying the two,
+  a corrected name then pushing, four refusals leaving the row exactly as it
+  was, the email absent from the patch model, and the shipped name split)
+  **with a control run**: 16 pass and **9 are REPORTED by name** rather than
+  dying on the first missing attribute. **No live call is made** —
+  `push_registration` is stubbed, because their API has no public DELETE and a
+  verification run must not create real registrations in somebody's account.
+
+### The form asked for one name where theirs needs two (migration 301, v9.73.3)
+
+Reported straight after: "Can you double check the form then because it does
+say first and last name so it should be pulling across - also, we want to
+ensure we pull through a phone number."
+
+- **THE PHONE ALREADY WORKED, AND SAYING SO BEAT BUILDING SOMETHING.** Verified
+  by pushing a marked test registration through the SHIPPED payload shape and
+  reading it back: `stored phone = '+61 400 111 222'`. It rides in
+  `fields.values` under the fetched phone field id, is accepted while optional,
+  and the same second POST returned the SAME id — their documented idempotency,
+  re-confirmed. Nothing to fix.
+- **THE FORM WAS THE MISMATCH, and the expectation was right.** StreamYard's
+  registration form has First name and Last name as separate REQUIRED fields;
+  ours had ONE field labelled `YOUR NAME`. So a registrant who typed one word
+  left nothing to send. The two boxes are `given-name` / `family-name` and sit
+  side by side, so two fields cost one line and one autofill tap — which is
+  what keeps this from being real friction on the paid traffic this page exists
+  for.
+- **SPLITTING A STRING IS A GUESS, NOT A FIX.** At the first space it reads
+  "Mary Jane Smith" as a surname of "Jane Smith", and it has no answer at all
+  for a mononym. Asking for the halves is the only version that cannot be
+  wrong, which is why the fix is the form rather than a cleverer splitter.
+- **`name` STAYS AND STAYS AUTHORITATIVE.** The confirmation greeting, the
+  reminder, the staff list and the CSV all read it, so it is stored as the
+  joined whole and the halves sit beside it — no backfill, and nothing
+  downstream changed.
+- **A SPLIT-DERIVED PAIR IS STORED AS NULL, never as a pair.** `resolve_name`
+  returns halves ONLY when both were given; a bare `name` (a browser served an
+  older bundle mid-deploy — the rule `plan_report.unassigned` already keeps)
+  stores NULL and the push falls back to splitting for itself. So NULL means
+  "we only ever had one string", which is exactly what a pre-301 row is.
+- **ONE HALF IS NOT A PAIR.** A surname box left empty IS the mononym case and
+  has to read as one — storing a lone first name as a pair would push a blank
+  surname, which is a 400 at their end.
+- **THE HALVES ARE COALESCED WHERE `name` IS OVERWRITTEN OUTRIGHT**, the same
+  call the phone already makes: `name` is always present so a correction is
+  unambiguous, whereas a one-field resubmission carries no halves and losing a
+  real pair to it is worse than keeping it.
+- **`streamyard.resolve_push_name` IS THE ONE RULE, AND ITS OWN FUNCTION SO IT
+  CAN BE CHECKED OFFLINE.** Everything else in `push_registration` talks to
+  StreamYard, so four lines inline meant the fallback could only be tested by
+  making a live call. **The stub CALLS it rather than retyping it** — a stub
+  that reimplements the rule is measuring the harness.
+- **THE STAFF CORRECTION SETS THE HALVES TOO**, or the row would keep pushing
+  the old name, since the push prefers them. And the **Add surname** button is
+  withdrawn once a row has both, so it only ever appears on the registrations
+  taken before the form asked.
+- **Verified** (the suite is 62 checks now: migration 301 applied three times
+  over a populated pre-301 table with the existing row's name untouched and no
+  invented halves, the downgrade dropping the two COLUMNS and never the table,
+  every `resolve_name` branch, the halves reaching the row and being sent
+  whole, the phone riding with them, a one-field resubmission not blanking a
+  stored pair while still correcting the club, and a pre-301 row still pushing
+  via the split) **with a control run**: 2 fail on the migration, **11 are
+  REPORTED** and nothing crashes. **Getting that control run clean took two
+  passes** — the suite's own `SELECT first_name` died on an
+  `UndefinedColumnError`, and the shared stub called `resolve_push_name`
+  unguarded; both are presence-checked now. **Driven in Chromium**
+  (`verify_webinar_browser.mjs`: both fields with their autocomplete tokens and
+  labels, both named in the validation message and marked invalid, and
+  `firstName`/`lastName` on the wire rather than one string).
 
 ### The second form is StreamYard's, and the reminder that replaces it (migration 299, v9.71.5)
 
