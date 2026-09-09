@@ -7,6 +7,7 @@
 //   assets            [{ id, name, url }]  from GET /social/media
 //   onUpload(files)   File[] => void       POST /social/media, optimistic add
 //   onUseAsset(asset) picks it for the selected image block, or adds a new one
+//   onEditAsset(asset) opens the crop / background-removal editor on it
 //   onAddEmptyFrame() adds an image block with no source
 //   players           roster (for headshot blocks)
 //   onAddPlayerPhoto(playerId)
@@ -25,7 +26,7 @@ const TABS = [
 const stripe = 'repeating-linear-gradient(135deg, var(--pb-surface2) 0 6px, var(--pb-hairline) 6px 12px)'
 
 export default function MediaLibraryPanel({
-  assets = [], onUpload, onUseAsset, onAddEmptyFrame,
+  assets = [], onUpload, onUseAsset, onEditAsset, onAddEmptyFrame,
   players = [], onAddPlayerPhoto,
   onAddBrandLockup, sponsors = [], onAddSponsor, club,
 }) {
@@ -67,14 +68,28 @@ export default function MediaLibraryPanel({
 
           <div className="grid grid-cols-3 gap-2">
             {assets.map(a => (
-              <button key={a.id} title={a.name} onClick={() => onUseAsset(a)}
-                className="relative aspect-square rounded-lg border pb-hairline overflow-hidden hover:border-pb-accent transition-colors"
-                style={a.url ? { background: `center/cover no-repeat url(${a.url})` } : { background: stripe }}>
-                <span className="absolute inset-x-0 bottom-0 px-1.5 py-1 text-left font-mono text-[7.5px] leading-tight text-pb-dim"
-                  style={{ background: 'linear-gradient(transparent, rgba(7,9,15,.9))' }}>{a.name}</span>
-              </button>
+              <div key={a.id} className="relative group">
+                <button title={`${a.name} — click to put on the post`} onClick={() => onUseAsset(a)}
+                  className="w-full relative aspect-square rounded-lg border pb-hairline overflow-hidden hover:border-pb-accent transition-colors"
+                  style={a.url ? { background: `center/cover no-repeat url(${a.url})` } : { background: stripe }}>
+                  <span className="absolute inset-x-0 bottom-0 px-1.5 py-1 text-left font-mono text-[7.5px] leading-tight text-pb-dim"
+                    style={{ background: 'linear-gradient(transparent, rgba(7,9,15,.9))' }}>{a.name}</span>
+                </button>
+                {/* Crop, or cut the background out of a picture that arrived
+                    with one. The result is saved as its own library image. */}
+                {onEditAsset && a.url && (
+                  <button onClick={() => onEditAsset(a)} title="Crop or remove the background"
+                    className="absolute top-1 right-1 px-1.5 py-0.5 rounded font-mono text-[8px] uppercase tracking-wide2 text-pb-dim opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                    style={{ background: 'rgba(7,9,15,.85)' }}>Edit</button>
+                )}
+              </div>
             ))}
           </div>
+          {assets.length > 0 && (
+            <p className="font-mono text-[9px] leading-relaxed text-pb-faintest">
+              Hover an image for Edit — crop it, or remove a solid background.
+            </p>
+          )}
 
           <button onClick={onAddEmptyFrame}
             className="py-2 rounded-md border pb-hairline font-mono text-[10px] text-pb-dim hover:text-pb-text transition-colors">

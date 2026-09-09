@@ -206,6 +206,97 @@ old ones and get new numbers for webinar and trial ones?"
   The campaign plan (`CAMPAIGN_PLANS`) is still one budget per campaign rather
   than per stream, so pacing is campaign-wide.
 
+## A FIXED LAYOUT CANNOT RE-LAY ITSELF OUT AT 4:5 (v9.73.0, Sep 2026)
+
+Seven questions off the live BetterPosts editor, three of them real gaps and
+four of them things that exist and could not be found.
+
+- **EVERY BUILT-IN TEMPLATE IS A HARDCODED `width: 1080, height: 1080` DIV OF
+  ABSOLUTELY-POSITIONED CHILDREN**, so "make this 1080×1350" is not a layout
+  question — there is no layout to re-run. What a template CAN do is sit inside
+  the taller canvas: `social/postSizes.jsx` owns that one piece of maths, used
+  by the live canvas, the mobile preview AND the off-screen export node.
+  `fit` (whole, letterboxed) is the default because it never loses artwork;
+  `fill` scales up and crops, and the panel says the edges go.
+- **THE BLANK CANVAS IS THE EXCEPTION AND IT IS GENUINELY PORTRAIT.** Its blocks
+  carry their own x/y, so there is nothing to place — `framed` is
+  `!isBlankTab && (W !== nativeW || H !== nativeH)`, and `BlankCanvas` is handed
+  the real width/height rather than falling back to its 1080 default.
+- **THE SAME FORMULA WAS WRITTEN OUT THREE TIMES** — `handleExport`,
+  `handleSaveToClubRoom` and the preview each recomputed `tmpl.w || 1080`. Both
+  copies are gone; the two handlers close over the ONE `W`/`H`. A second copy of
+  the canvas size is how a downloaded PNG comes out a different shape from the
+  preview.
+- **`postPages` IS THE ONE LIST OF WHAT THIS POST IS**, and the off-screen
+  export nodes and the Preview overlay both map it. The four page shapes
+  (blank carousel / derived roundup pages / the scorecard's two squares /
+  a single post) used to be a four-branch ternary written out once for export
+  and would have needed a second copy for the preview.
+- **THE LETTERBOX BANDS ARE FILLED WITH THE CLUB'S OWN PRIMARY.** Left at the
+  canvas well's `#080808` a fitted post reads as a broken export rather than a
+  deliberate portrait one. Found by SCREENSHOTTING the real render, not by the
+  geometry checks — which all passed on the black version.
+- **A SCORECARD IS NOT OFFERED THE PICKER.** It is 1920×1080 and already has its
+  own reframing control (the Instagram-squares split); two answers to one
+  question is worse than one.
+- **BACKGROUND REMOVAL EXISTED AND ONLY THREE UPLOAD PATHS REACHED IT.**
+  `ImageEditorModal` has had an AI cut-out and a colour key since it was
+  written, wired to the hero photo, sponsor logos and an image block's REPLACE.
+  An image already on the post, and anything in the club library, had no way in
+  — which is exactly where somebody who has just uploaded a white-backgrounded
+  PNG is standing. Both now open the same editor; a library edit is stored as a
+  NEW asset rather than overwriting, since the original may be on a post nobody
+  has re-exported.
+- **"SAVE TO CLUB ROOM" IS NOT "SAVE THIS DESIGN", AND `✓ SAVED` IS WHAT MADE
+  THE TWO READ AS ONE THING.** It renders a PNG into the Club Room TV
+  slideshow's media pool; SAVE AS TEMPLATE writes a `bs_social_templates`
+  localStorage row that appears under Design → Your templates on that browser
+  only. Both now say where the thing went, and the Club Room one links there.
+- **A CONTROL THAT IS CORRECTLY ABSENT STILL HAS TO EXPLAIN ITSELF**, the call
+  this file already records for a figure that is correctly zero. The Hero Image
+  panel is gated on a seven-id list; on every other layout it simply was not
+  there. It now names the layouts that have a hero slot, off the same list, so
+  the two cannot drift.
+- **"SEND THIS IMAGE BEHIND THAT HEADING" IS GENUINELY NOT POSSIBLE ON MOST
+  LAYOUTS, and saying so beats a control that looks broken.** Only C1–C4
+  decompose into blocks (`templateToBlocks`); everything else takes added blocks
+  as an overlay ON TOP, and each template root paints its own opaque gradient,
+  so a block behind one would be invisible anyway. The Layers panel says it and
+  points at the two ways out (Custom Edit where it exists, else the blank
+  canvas). **Extending `templateToBlocks` past four templates is the real fix
+  and is a large piece of work — 40+ bespoke layouts, each hand-recreated.**
+- **Driven in Chromium** (`frontend/verification/verify_post_designer_browser.mjs`,
+  49 checks: the canvas AND the export node moving together, the frame measured
+  off the real element at scale 1 / top 135 for fit and 1.25 / left −135 for
+  fill, the blank canvas NOT framed, the bands' computed colour, a scorecard
+  offered no picker, Preview opening with one page and with two, Escape closing
+  it, the editor reachable from a library tile and from an image on the canvas,
+  all four explanations, and no overflow at 390px) **with a control run**: 33 of
+  the 49 fail against the previous commit, and the 16 that pass in both are
+  don't-regress guards.
+- **THE FRAME IS ADDRESSED BY `data-post-frame`, NOT BY "an element with a scale
+  transform".** The loose selector matched a transform INSIDE a template, so on
+  a build with no frame at all the check read the wrong element and reported
+  `scale: 1.4` — a measurement of nothing. **And "the blank canvas is not
+  letterboxed" is trivially true of a build that never frames anything**, so it
+  is gated on the canvas really being 1080×1350 first.
+- **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN.** The suite anchors on the
+  export button (which every build has) rather than on anything this change
+  adds, and every new element is read through `textOf`/`seen`/`press`, which
+  report absence instead of throwing.
+- **THE CSS-`uppercase` TRAP, HIT AGAIN.** The preview header renders
+  `2 pages` as `2 PAGES`, so a check written in the source's casing could never
+  pass. And `getByText('Club library')` matched three elements — the panel meta,
+  the drop-zone copy and the heading.
+- **NOTICED, NOT BUILT**: there are no portrait-native template variants — the
+  honest fix for a club that wants the full 4:5 filled edge to edge, and a
+  design job per layout rather than a code one. Saved templates are still
+  `localStorage`, so they do not follow a volunteer to another device (the
+  design handoff proposes `social_post_template`; the media library and brand
+  kit already went server-side). A multi-file drop into the club library still
+  uploads as-is rather than opening the editor per file — deliberate, since ten
+  modals for ten photos is worse than the Edit affordance on each tile.
+
 ## Twenty is retired; the engagement score, the CRM and Sales Management are not (v9.71.0, Sep 2026)
 
 Asked for directly: *"the calculation and continual re-calculation of engagement
