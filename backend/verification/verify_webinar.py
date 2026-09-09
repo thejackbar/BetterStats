@@ -237,6 +237,22 @@ async def main() -> None:
             "WHERE table_name = 'webinar_registrations'"
         ))).all()}
         check("applying it over a pre-297 table adds the phone", "phone" in pre297)
+        # And the same again for 299's pair — one list, so a database at any of
+        # 296, 297 or 299 lands on the same schema.
+        check("and the reminder pair", "reminder_sent_at" in pre297
+              and "reminder_error" in pre297, str(sorted(pre297)))
+        check("and the StreamYard pair", "streamyard_id" in pre297
+              and "streamyard_error" in pre297, str(sorted(pre297)))
+        if "reminder_sent_at" in pre297:
+            earlier_rem = (await conn.execute(text(
+                "SELECT reminder_sent_at FROM webinar_registrations "
+                "WHERE email = 'at296@example.com'"
+            ))).scalar_one()
+            check("a registration taken before it existed reads as not reminded",
+                  earlier_rem is None, repr(earlier_rem))
+        else:
+            check("a registration taken before it existed reads as not reminded",
+                  False, "no reminder_sent_at column to read")
         kept = (await conn.execute(text(
             "SELECT count(*) FROM webinar_registrations WHERE email = 'at296@example.com'"
         ))).scalar_one()
@@ -284,6 +300,50 @@ async def main() -> None:
     check("its downgrade drops the column, never the table",
           "DROP COLUMN IF EXISTS phone" in phone_migration
           and "DROP TABLE" not in phone_migration)
+    # NUMBERED 299, NOT 298 — origin/main reached 298 (assoc_refresh) while the
+    # reminder was in flight. This file has now recorded that trap six times.
+    rem_path = (Path(__file__).resolve().parent.parent / "alembic" / "versions"
+                / "299_webinar_reminder.py")
+    rem_migration = rem_path.read_text() if rem_path.exists() else ""
+    check("migration 299 runs the same shared list rather than its own ALTERs",
+          "from app.services.webinar_ddl import STATEMENTS" in rem_migration)
+    check("and revises 298, not 297 (origin/main had already taken 298)",
+          'down_revision = "298"' in rem_migration)
+    check("its downgrade drops the two columns, never the table",
+          "DROP COLUMN IF EXISTS reminder_sent_at" in rem_migration
+          and "DROP COLUMN IF EXISTS reminder_error" in rem_migration
+          and "DROP TABLE" not in rem_migration)
+    # The sweep is only useful if something calls it. Asserted structurally so
+    # a reminder that can never fire is a named failure rather than a quiet one
+    # on the night.
+    sched_src = (Path(__file__).resolve().parent.parent / "app" / "jobs"
+                 / "scheduler.py").read_text()
+    check("the scheduler registers the hourly upkeep pass",
+          "webinar_upkeep" in sched_src and 'id="webinar_reminders"' in sched_src)
+    check("and the reminder half is gated on the event's own window "
+          "rather than one pinned cron",
+          "reminder_window_open" in sched_src)
+    check("and it catches up anyone StreamYard does not have",
+          "sync_streamyard" in sched_src)
+    # NUMBERED 300 after re-checking origin/main. Same shared list again, so a
+    # database at any of 296, 297, 299 or 300 lands on the same schema.
+    sy_path = (Path(__file__).resolve().parent.parent / "alembic" / "versions"
+               / "300_webinar_streamyard.py")
+    sy_migration = sy_path.read_text() if sy_path.exists() else ""
+    check("migration 300 runs the same shared list rather than its own ALTERs",
+          "from app.services.webinar_ddl import STATEMENTS" in sy_migration)
+    check("and revises 299", 'down_revision = "299"' in sy_migration)
+    check("its downgrade drops the two columns, never the table",
+          "DROP COLUMN IF EXISTS streamyard_id" in sy_migration
+          and "DROP COLUMN IF EXISTS streamyard_error" in sy_migration
+          and "DROP TABLE" not in sy_migration)
+    # The push is only worth anything if the register route actually fires it.
+    reg_src = (Path(__file__).resolve().parent.parent / "app" / "routers"
+               / "public_webinar.py").read_text()
+    check("the register route backgrounds the StreamYard push",
+          "_push_streamyard_bg" in reg_src)
+    check("and never for a past event, which has nothing left to register for",
+          "if not webinar.EVENT.is_past():" in reg_src)
 
     print("\n-- the event is declared once, and both copies agree --")
     event = webinar.EVENT
@@ -861,6 +921,321 @@ async def main() -> None:
         finally:
             webinar.email_service.get_email_provider = original
 
+    # ------------------------------------------------------------------
+    # The day-of reminder.
+    #
+    # WHY IT EXISTS: StreamYard's own webinar registration sends one, and
+    # switching that gate off — which is what stops a registrant filling a form
+    # twice — takes it with it. Everything the second form asks for is already
+    # on our own row, so this is the one thing worth replacing.
+    #
+    # The checks that matter are about WHO gets one and HOW MANY TIMES: never
+    # outside the window, never twice, and never to somebody whose confirmation
+    # went out minutes ago.
+    # ------------------------------------------------------------------
+    print("\n-- the reminder window --")
+    if not hasattr(webinar, "send_reminders"):
+        check("the reminder is present", False, "webinar.send_reminders missing")
+    else:
+        opens = event.starts_at - timedelta(hours=webinar.REMINDER_LEAD_HOURS)
+        check("it opens a few hours before the session, not on the day it is created",
+              webinar.reminder_window_open(event, opens + timedelta(minutes=1)) is True)
+        check("and is shut before that",
+              webinar.reminder_window_open(event, opens - timedelta(minutes=1)) is False)
+        # A reminder landing after the session has finished is worse than none:
+        # it sends somebody to a stream that is over.
+        check("and shut again once the session has ended",
+              webinar.reminder_window_open(event, event.ends_at) is False)
+        check("still open while the session is running",
+              webinar.reminder_window_open(event, event.starts_at + timedelta(minutes=5)) is True)
+
+        async with Session() as session:
+            # Registered LONG before the window — the ordinary registrant.
+            await session.execute(text("""
+                UPDATE webinar_registrations
+                   SET reminder_sent_at = NULL, reminder_error = NULL,
+                       created_at = :when
+                 WHERE event_key = :k
+            """), {"k": event.key, "when": opens - timedelta(days=5)})
+            # And one who registered INSIDE it, minutes after the reminder
+            # would have gone out.
+            await session.execute(text("""
+                INSERT INTO webinar_registrations (event_key, name, email, club, created_at)
+                VALUES (:k, 'Late Arrival', 'late@example.com', 'Late CC', :when)
+                ON CONFLICT (event_key, lower(email)) DO UPDATE
+                   SET created_at = EXCLUDED.created_at, reminder_sent_at = NULL
+            """), {"k": event.key, "when": opens + timedelta(minutes=30)})
+            # A DIFFERENT event's registrant, who must not be swept up.
+            await session.execute(text("""
+                INSERT INTO webinar_registrations (event_key, name, email, club)
+                VALUES ('webinar-some-other', 'Other Event', 'other@example.com', 'Other CC')
+                ON CONFLICT (event_key, lower(email)) DO UPDATE SET reminder_sent_at = NULL
+            """))
+            await session.commit()
+
+            sent: list = []
+
+            class Accepting:
+                async def send(self, msg):
+                    sent.append(msg)
+                    return type("R", (), {"ok": True, "message_id": "m", "error": None})()
+
+            original = webinar.email_service.get_email_provider
+            try:
+                webinar.email_service.get_email_provider = lambda: Accepting()
+
+                # Before the window opens: nothing at all, not even a claim.
+                result = await webinar.send_reminders(
+                    session, event=event, now=opens - timedelta(hours=1))
+                check("before the window, nobody is emailed", len(sent) == 0, str(len(sent)))
+                check("and nobody is claimed", result["claimed"] == 0, str(result))
+
+                # Inside it: everyone who registered beforehand, once.
+                result = await webinar.send_reminders(
+                    session, event=event, now=opens + timedelta(minutes=5))
+                addressed = {m.to_email for m in sent}
+                check("inside the window, the registrants are emailed",
+                      len(sent) >= 1, str(len(sent)))
+                check("the one who registered since is NOT — their confirmation "
+                      "went out minutes ago",
+                      "late@example.com" not in addressed, str(sorted(addressed)))
+                # A registration for a different event is a different list. The
+                # two must never merge — that is what event_key is for.
+                check("and another event's registrant is not swept up",
+                      "other@example.com" not in addressed, str(sorted(addressed)))
+                row = await row_for(session, "sam@example.com")
+                check("the send is recorded on the row",
+                      row and row["reminder_sent_at"] is not None)
+                check("with no error", row and row["reminder_error"] is None)
+
+                msg = next((m for m in sent if m.to_email == "sam@example.com"), None)
+                check("the reminder carries the watch link",
+                      msg and event.watch_url in msg.html)
+                check("and both timezones",
+                      msg and "5:30pm AWST" in msg.html and "7:30pm AEST" in msg.html)
+                check("the plain-text part carries the link too",
+                      msg and event.watch_url in msg.text)
+                check("and the subject says it is today",
+                      msg and msg.subject.lower().startswith("today"), str(msg and msg.subject))
+
+                # THE ONE THING A REMINDER MUST NOT DO. The claim is on the row,
+                # so a second sweep an hour later emails nobody again.
+                before = len(sent)
+                again = await webinar.send_reminders(
+                    session, event=event, now=opens + timedelta(hours=1))
+                check("a second sweep emails nobody twice",
+                      len(sent) == before, f"{len(sent) - before} extra")
+                check("and claims nothing", again["claimed"] == 0, str(again))
+
+                # A refusal HANDS THE CLAIM BACK, so the next hour retries —
+                # otherwise one provider hiccup silently costs somebody their
+                # only reminder.
+                await session.execute(text("""
+                    UPDATE webinar_registrations SET reminder_sent_at = NULL
+                     WHERE lower(email) = 'sam@example.com'
+                """))
+                await session.commit()
+
+                class Refusing:
+                    async def send(self, _msg):
+                        return type("R", (), {"ok": False, "message_id": None,
+                                              "error": "smtp down"})()
+
+                webinar.email_service.get_email_provider = lambda: Refusing()
+                failed = await webinar.send_reminders(
+                    session, event=event, now=opens + timedelta(hours=2))
+                check("a refusal does not raise", True)
+                check("and is counted", failed["failed"] >= 1, str(failed))
+                row = await row_for(session, "sam@example.com")
+                check("the claim is handed back so the next run retries",
+                      row and row["reminder_sent_at"] is None)
+                check("and the reason is kept on the row",
+                      row and "smtp down" in (row["reminder_error"] or ""),
+                      str(row and row["reminder_error"]))
+
+                webinar.email_service.get_email_provider = lambda: Accepting()
+                retried = await webinar.send_reminders(
+                    session, event=event, now=opens + timedelta(hours=3))
+                check("and the next run does send it", retried["sent"] >= 1, str(retried))
+                row = await row_for(session, "sam@example.com")
+                check("clearing the error it left behind", row and row["reminder_error"] is None)
+
+                # After the session has finished, nothing goes out however many
+                # rows are still unsent.
+                await session.execute(text("""
+                    UPDATE webinar_registrations SET reminder_sent_at = NULL
+                     WHERE event_key = :k
+                """), {"k": event.key})
+                await session.commit()
+                after = await webinar.send_reminders(
+                    session, event=event, now=event.ends_at + timedelta(minutes=1))
+                check("after the session, nobody is emailed", after["claimed"] == 0, str(after))
+            finally:
+                webinar.email_service.get_email_provider = original
+
+        print("\n-- sending the reminder by hand --")
+        async with Session() as session:
+            from app.routers.club_admin import send_webinar_reminders_now
+            # Outside the window on purpose: the escape hatch must not be able
+            # to email a week early because somebody pressed it.
+            out = await send_webinar_reminders_now(None, session)
+            check("the endpoint runs the same sweep and refuses outside the window",
+                  out.get("claimed") == 0, str(out))
+
+    # ------------------------------------------------------------------
+    # One form, two lists.
+    #
+    # StreamYard's own registration gate is what made somebody fill in a second
+    # form, and it asks for exactly what our form already collected. Removing it
+    # is a setting in StreamYard; pushing each registrant into their list anyway
+    # is what makes removing it cost nothing.
+    #
+    # NO LIVE CALL IS MADE HERE. `streamyard.push_registration` is stubbed — a
+    # verification run must not create real registrations in somebody's
+    # StreamYard account, and what these checks are about is what we do with the
+    # answer, not their API.
+    # ------------------------------------------------------------------
+    print("\n-- pushing the registrant into StreamYard --")
+    if not hasattr(webinar, "push_to_streamyard"):
+        check("the StreamYard push is present", False, "webinar.push_to_streamyard missing")
+    else:
+        from app.services import streamyard
+
+        check("the broadcast id is derived from the watch link we already hold",
+              streamyard.webinar_id_from(event.watch_url) == "ibBKm5Ek4sQu",
+              str(streamyard.webinar_id_from(event.watch_url)))
+        # A watch link that is not StreamYard's must make every part of this
+        # no-op rather than guess at an id.
+        check("a link that is not StreamYard's yields no id",
+              streamyard.webinar_id_from("https://zoom.us/j/123") is None)
+        check("and neither does an empty one",
+              streamyard.webinar_id_from("") is None)
+        # Split at the LAST space, so the two join back to exactly what was
+        # typed — that is what StreamYard shows beside a chat message.
+        check("a name splits at the last space",
+              streamyard.split_name("Mary Jane Watson") == ("Mary", "Jane Watson"),
+              str(streamyard.split_name("Mary Jane Watson")))
+        check("an ordinary name splits in two",
+              streamyard.split_name("Elton John") == ("Elton", "John"))
+        check("and a single-word name leaves no surname",
+              streamyard.split_name("Prince") == ("Prince", ""))
+
+        calls: list[dict] = []
+
+        def stub(result):
+            async def _push(**kwargs):
+                calls.append(kwargs)
+                return result
+            return _push
+
+        original_push = streamyard.push_registration
+        try:
+            async with Session() as session:
+                await session.execute(text("""
+                    INSERT INTO webinar_registrations (event_key, name, email, club, phone)
+                    VALUES (:k, 'Push Me', 'push@example.com', 'Push CC', '0412 345 678')
+                    ON CONFLICT (event_key, lower(email)) DO UPDATE
+                       SET streamyard_id = NULL, streamyard_error = NULL
+                """), {"k": event.key})
+                await session.commit()
+                row = await row_for(session, "push@example.com")
+
+                streamyard.push_registration = stub(
+                    {"ok": True, "id": "sy-1", "error": None, "skipped": None})
+                await webinar.push_to_streamyard(
+                    session, registration_id=row["id"], name="Push Me",
+                    email="push@example.com", phone="0412 345 678", event=event)
+                row = await row_for(session, "push@example.com")
+                check("a successful push stamps their StreamYard id on the row",
+                      row and row["streamyard_id"] == "sy-1", str(row and row["streamyard_id"]))
+                check("with no reason recorded beside it",
+                      row and row["streamyard_error"] is None)
+                # What the push is handed has to be what the person typed, or
+                # StreamYard's list and ours disagree about who came.
+                sent = calls[-1] if calls else {}
+                check("the push carries the name, email and phone as stored",
+                      sent.get("name") == "Push Me" and sent.get("email") == "push@example.com"
+                      and sent.get("phone") == "0412 345 678", str(sent))
+                check("and the watch link, so the broadcast is never a second constant",
+                      sent.get("watch_url") == event.watch_url)
+
+                # THE ONE THING THIS MUST NOT DO. Their API is idempotent on the
+                # email but does NOT overwrite, so a second push costs a request
+                # and changes nothing at their end.
+                before = len(calls)
+                again = await webinar.push_to_streamyard(
+                    session, registration_id=row["id"], name="Push Me Corrected",
+                    email="push@example.com", event=event)
+                check("a row already pushed is skipped before any request is made",
+                      len(calls) == before, f"{len(calls) - before} extra")
+                check("and reports the id it already has", again.get("id") == "sy-1", str(again))
+
+                # A SKIP IS NOT A FAILURE. A mononym is a row there was nothing
+                # to do for, not one that went wrong — recorded as the plain
+                # reason, with no id.
+                await session.execute(text("""
+                    INSERT INTO webinar_registrations (event_key, name, email, club)
+                    VALUES (:k, 'Prince', 'mononym@example.com', 'Mononym CC')
+                    ON CONFLICT (event_key, lower(email)) DO UPDATE
+                       SET streamyard_id = NULL, streamyard_error = NULL
+                """), {"k": event.key})
+                await session.commit()
+                mono = await row_for(session, "mononym@example.com")
+                streamyard.push_registration = stub(
+                    {"ok": False, "id": None, "error": None,
+                     "skipped": "no surname to send (their form requires one)"})
+                await webinar.push_to_streamyard(
+                    session, registration_id=mono["id"], name="Prince",
+                    email="mononym@example.com", event=event)
+                mono = await row_for(session, "mononym@example.com")
+                check("a skip records the reason and no id",
+                      mono and mono["streamyard_id"] is None
+                      and "surname" in (mono["streamyard_error"] or ""),
+                      str(mono and mono["streamyard_error"]))
+
+                # A refusal at their end is recorded rather than raised — the
+                # registration is already complete without it.
+                await session.execute(text("""
+                    INSERT INTO webinar_registrations (event_key, name, email, club)
+                    VALUES (:k, 'Broken Push', 'broken@example.com', 'Broken CC')
+                    ON CONFLICT (event_key, lower(email)) DO UPDATE
+                       SET streamyard_id = NULL, streamyard_error = NULL
+                """), {"k": event.key})
+                await session.commit()
+                broken = await row_for(session, "broken@example.com")
+                streamyard.push_registration = stub(
+                    {"ok": False, "id": None, "error": "HTTP 503: upstream", "skipped": None})
+                await webinar.push_to_streamyard(
+                    session, registration_id=broken["id"], name="Broken Push",
+                    email="broken@example.com", event=event)
+                broken = await row_for(session, "broken@example.com")
+                check("a refusal is recorded with its reason and does not raise",
+                      broken and broken["streamyard_id"] is None
+                      and "503" in (broken["streamyard_error"] or ""),
+                      str(broken and broken["streamyard_error"]))
+
+                # The catch-up pass: everyone StreamYard does not have, and
+                # nobody it does.
+                streamyard.push_registration = stub(
+                    {"ok": True, "id": "sy-bulk", "error": None, "skipped": None})
+                before = len(calls)
+                summary = await webinar.sync_streamyard(session, event=event)
+                check("the catch-up pass pushes the rows with no id",
+                      summary["pushed"] >= 3, str(summary))
+                check("and leaves the one already pushed alone",
+                      (await row_for(session, "push@example.com"))["streamyard_id"] == "sy-1")
+                check("making one request per row it pushed",
+                      len(calls) - before == summary["pushed"],
+                      f"{len(calls) - before} calls for {summary['pushed']} pushed")
+                # It must settle: a second pass over a list everybody is on
+                # writes nothing and calls nothing.
+                before = len(calls)
+                settled = await webinar.sync_streamyard(session, event=event)
+                check("a second pass considers nobody", settled["considered"] == 0, str(settled))
+                check("and makes no request at all", len(calls) == before)
+        finally:
+            streamyard.push_registration = original_push
+
     print("\n-- the staff list --")
     async with Session() as session:
         from app.routers.club_admin import list_webinar_registrations
@@ -879,6 +1254,18 @@ async def main() -> None:
         # Without it on the staff list it may as well not be stored.
         check("and the phone, which is what the list is worked from",
               sam and sam.get("phone") == "(08) 9364 1234", str(sam and sam.get("phone")))
+        # The reminder is a separate send with its own outcome, so the list has
+        # to report it separately — otherwise "did they get reminded" is only
+        # answerable from the database.
+        check("and whether the reminder went out", sam and "reminder_sent_at" in sam)
+        # The whole point of the push is that somebody can see it happened. A
+        # StreamYard list our own screen cannot report on is one nobody checks.
+        check("and whether StreamYard has them too",
+              sam and "streamyard_id" in sam and "streamyard_error" in sam)
+        check("as a string rather than a raw timestamp",
+              sam and (sam.get("reminder_sent_at") is None
+                       or isinstance(sam["reminder_sent_at"], str)),
+              str(type(sam and sam.get("reminder_sent_at"))))
 
     print("\n-- the downgrade --")
     async with engine.begin() as conn:

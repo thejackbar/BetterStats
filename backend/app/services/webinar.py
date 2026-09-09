@@ -452,3 +452,258 @@ async def send_confirmation(
         db, registration_id,
         error=None if result.ok else (result.error or "unknown provider error"),
     )
+
+
+# How long before the session starts the reminder goes out. Chosen for the
+# 5:30pm AWST / 7:30pm AEST slot this event runs in: three hours puts it in
+# somebody's afternoon on the west coast and their early evening on the east,
+# which is when a person can still change their plans. Earlier and it is read
+# at work and forgotten; later and the east coast is already sitting down to
+# dinner.
+REMINDER_LEAD_HOURS = 3
+
+
+def reminder_window_open(event: WebinarEvent = EVENT, now: Optional[datetime] = None) -> bool:
+    """Whether we are inside the send window: close enough to the start to be
+    a reminder, and not past the end. A reminder that lands after the session
+    has finished is worse than none — it tells somebody to go to a stream that
+    is over."""
+    now = now or datetime.now(timezone.utc)
+    return (event.starts_at - timedelta(hours=REMINDER_LEAD_HOURS)) <= now < event.ends_at
+
+
+async def send_reminders(
+    db: AsyncSession,
+    *,
+    event: WebinarEvent = EVENT,
+    now: Optional[datetime] = None,
+) -> dict:
+    """Email everyone registered for `event` who has not had their reminder.
+
+    WHY THIS EXISTS: StreamYard's own webinar registration sends a reminder,
+    and switching that gate off — which is what stops a registrant filling a
+    form twice — takes the reminder with it. Everything the second form asks
+    for is already on our own row, so this is the one thing worth replacing.
+
+    NOBODY WHO REGISTERED INSIDE THE WINDOW IS REMINDED. Their confirmation
+    email went out minutes ago and carries the same link; a second one an hour
+    later reads as a mistake rather than a courtesy.
+
+    The row is CLAIMED before the send (`reminder_sent_at` stamped by the same
+    UPDATE that selects it), so two overlapping runs cannot both email one
+    person. A refusal clears the claim, so the next run retries. Never raises —
+    the job that calls this must not fall over on one bad address.
+    """
+    now = now or datetime.now(timezone.utc)
+    if not reminder_window_open(event, now):
+        return {"claimed": 0, "sent": 0, "failed": 0, "skipped": "outside window"}
+
+    # Claimed in one statement: SELECT and stamp cannot be separated, or two
+    # runs a second apart both read the same unsent rows.
+    rows = (await db.execute(text("""
+        UPDATE webinar_registrations
+           SET reminder_sent_at = NOW(), reminder_error = NULL, updated_at = NOW()
+         WHERE event_key = :event_key
+           AND reminder_sent_at IS NULL
+           -- Registered before the window opened. Anyone who signed up since
+           -- has just had the confirmation, which says the same thing.
+           AND created_at < :window_opens
+     RETURNING id, name, email
+    """), {
+        "event_key": event.key,
+        "window_opens": event.starts_at - timedelta(hours=REMINDER_LEAD_HOURS),
+    })).mappings().all()
+    await db.commit()
+
+    sent = failed = 0
+    for row in rows:
+        ok, error = await _send_reminder_email(
+            name=row["name"] or "", email=row["email"] or "", event=event,
+        )
+        if ok:
+            sent += 1
+            continue
+        failed += 1
+        # Hand the claim back so the next run tries again, and keep the reason.
+        try:
+            await db.execute(text("""
+                UPDATE webinar_registrations
+                   SET reminder_sent_at = NULL, reminder_error = :error, updated_at = NOW()
+                 WHERE id = :id
+            """), {"id": row["id"], "error": _clip(error, 500)})
+            await db.commit()
+        except Exception:
+            logger.exception("webinar: could not release reminder claim for %s", row["email"])
+            await db.rollback()
+
+    if rows:
+        logger.info("webinar reminders: %s sent, %s failed", sent, failed)
+    return {"claimed": len(rows), "sent": sent, "failed": failed}
+
+
+async def _send_reminder_email(
+    *, name: str, email: str, event: WebinarEvent,
+) -> tuple[bool, Optional[str]]:
+    """One reminder. Returns (ok, error) rather than raising, so one refused
+    address cannot stop the rest of the sweep."""
+    try:
+        message = email_service.EmailMessage(
+            to_email=email,
+            subject=f"Today: {event.title}",
+            html=_reminder_html(name=name, event=event, watch_url=event.watch_url),
+            text=_reminder_text(name=name, event=event, watch_url=event.watch_url),
+            from_email=settings.email_from_address,
+            from_name=settings.email_from_name,
+            reply_to=settings.email_reply_to,
+            configuration_set=(settings.ses_configuration_set_transactional or "").strip() or None,
+        )
+        result = await email_service.get_email_provider().send(message)
+    except Exception as exc:  # noqa: BLE001 - one bad address must not stop the sweep
+        logger.exception("webinar: reminder email failed for %s", email)
+        return False, str(exc)[:500]
+    if result.ok:
+        return True, None
+    return False, (result.error or "unknown provider error")
+
+
+def _reminder_html(*, name: str, event: WebinarEvent, watch_url: str) -> str:
+    greeting = f"Hi {name.split()[0]}," if name.strip() else "Hi,"
+    return f"""
+    <div style="font-family:Arial,Helvetica,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#1a1a1a">
+      <p style="font-size:14px;color:#555;margin:0 0 8px">BetterCricket</p>
+      <h1 style="font-size:22px;margin:0 0 16px">The demo is today</h1>
+      <p style="font-size:15px;line-height:1.6;margin:0 0 16px">{greeting}</p>
+      <p style="font-size:15px;line-height:1.6;margin:0 0 20px">
+        A quick reminder that the BetterCricket live demo and Q&amp;A starts in a
+        few hours. Nothing to install &mdash; the link below opens it in your browser.
+      </p>
+      <table role="presentation" style="font-size:15px;line-height:1.6;margin:0 0 24px">
+        <tr><td style="padding:2px 12px 2px 0;color:#555">Starts</td><td><strong>5:30pm AWST</strong> (Perth)</td></tr>
+        <tr><td style="padding:2px 12px 2px 0;color:#555"></td><td><strong>7:30pm AEST</strong> (Sydney, Melbourne, Brisbane)</td></tr>
+      </table>
+      <p style="margin:0 0 24px">
+        <a href="{watch_url}" style="display:inline-block;background:#0f172a;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:bold;font-size:15px">Watch the demo</a>
+      </p>
+      <p style="font-size:14px;line-height:1.6;color:#555;margin:0 0 24px">
+        Can't make it? You don't need to do anything &mdash; we'll email you the
+        full recording afterwards.
+      </p>
+      <p style="font-size:12px;color:#888;line-height:1.5;margin:0">
+        You're getting this because you registered at {settings.public_base_url}/demo.
+        Reply to this email if you have any questions.
+      </p>
+    </div>
+    """
+
+
+def _reminder_text(*, name: str, event: WebinarEvent, watch_url: str) -> str:
+    greeting = f"Hi {name.split()[0]}," if name.strip() else "Hi,"
+    return (
+        f"{greeting}\n\n"
+        "A quick reminder that the BetterCricket live demo and Q&A starts in a "
+        "few hours.\n\n"
+        "Starts: 5:30pm AWST (Perth) / 7:30pm AEST (Sydney, Melbourne, Brisbane)\n"
+        f"Watch here: {watch_url}\n\n"
+        "Can't make it? You don't need to do anything - we'll email you the full "
+        "recording afterwards.\n"
+    )
+
+
+# ----------------------------------------------------------------------
+# StreamYard: one form, two lists.
+#
+# A registrant fills OUR form and nothing else. Their details are pushed into
+# StreamYard's own registrant list afterwards, so the broadcast's attendee
+# report and its own reminders still know who is coming — and so StreamYard's
+# registration gate can be switched off, which is the half that actually
+# removes the second form (see services/streamyard.py for what was tried and
+# why nothing else works).
+#
+# BEST-EFFORT AT EVERY STEP. A registration is complete once our own row is
+# written; the page has already handed the viewing link over by then. So this
+# never raises, never blocks, and records its outcome on the row rather than
+# only in a log.
+# ----------------------------------------------------------------------
+
+async def push_to_streamyard(
+    db: AsyncSession,
+    *,
+    registration_id: str,
+    name: str,
+    email: str,
+    phone: Optional[str] = None,
+    event: WebinarEvent = EVENT,
+) -> dict:
+    """Push one registration into StreamYard and stamp what happened.
+
+    Skipped outright for a row already pushed — their API is idempotent on the
+    email, but it also does NOT overwrite, so re-pushing a corrected name would
+    cost a request and change nothing.
+    """
+    from app.services import streamyard
+
+    already = (await db.execute(text(
+        "SELECT streamyard_id FROM webinar_registrations WHERE id = CAST(:id AS uuid)"
+    ), {"id": registration_id})).scalar_one_or_none()
+    if already:
+        return {"ok": True, "id": already, "skipped": "already pushed"}
+
+    result = await streamyard.push_registration(
+        watch_url=event.watch_url, name=name, email=email, phone=phone)
+    # A skip is not a failure and must not read as one on the staff list — it
+    # is recorded as the plain reason there was nothing to do.
+    note = result.get("error") or result.get("skipped")
+    try:
+        await db.execute(text("""
+            UPDATE webinar_registrations
+               SET streamyard_id = :sid, streamyard_error = :note, updated_at = NOW()
+             WHERE id = CAST(:id AS uuid)
+        """), {"id": registration_id, "sid": result.get("id"),
+               "note": _clip(note, 500)})
+        await db.commit()
+    except Exception:
+        logger.exception("webinar: could not record the StreamYard outcome for %s", email)
+        await db.rollback()
+    return result
+
+
+async def sync_streamyard(
+    db: AsyncSession,
+    *,
+    event: WebinarEvent = EVENT,
+    limit: int = 200,
+) -> dict:
+    """Push every registrant StreamYard does not have yet.
+
+    THE CATCH-UP, not the mechanism — `public_webinar.register` pushes each one
+    as it arrives. This is what covers the registrations taken before the push
+    existed, and a push that failed on a wobble at their end.
+
+    A row that has already been SKIPPED for a reason that will not change (no
+    surname to send) is retried anyway: it costs one request, and the reason
+    can stop being true if somebody corrects their name.
+    """
+    rows = (await db.execute(text("""
+        SELECT id, name, email, phone
+          FROM webinar_registrations
+         WHERE event_key = :k AND streamyard_id IS NULL
+         ORDER BY created_at
+         LIMIT :limit
+    """), {"k": event.key, "limit": limit})).mappings().all()
+
+    pushed = failed = skipped = 0
+    for row in rows:
+        result = await push_to_streamyard(
+            db, registration_id=str(row["id"]), name=row["name"] or "",
+            email=row["email"] or "", phone=row["phone"], event=event)
+        if result.get("ok"):
+            pushed += 1
+        elif result.get("skipped"):
+            skipped += 1
+        else:
+            failed += 1
+    if rows:
+        logger.info("webinar: StreamYard sync — %s pushed, %s skipped, %s failed",
+                    pushed, skipped, failed)
+    return {"considered": len(rows), "pushed": pushed,
+            "skipped": skipped, "failed": failed}

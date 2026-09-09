@@ -607,6 +607,7 @@ around it.
   it: guarding one read at a time is not enough when a whole block assumes a
   form has been replaced.
 
+
 ### A disabled button that does not say why reads as broken (v9.71.4, Sep 2026)
 
 Reported: "rediscover committee is disabled on club directory".
@@ -770,6 +771,182 @@ able to launch this function even if the typical Crawl is stopped)."
   `.first().innerText()` on the new note killed the control after three checks
   and said nothing about the other twenty-nine. Every read of an element this
   change ADDS goes through `textOf()`, which returns '' for an absent locator.
+
+### One form, two lists: pushing the registrant into StreamYard (migration 300, v9.71.6)
+
+Asked for directly, after the reminder below shipped: **"I want just one single
+form and the registrants to be put into StreamYard as well as in BetterCricket
+rather than making someone register twice."**
+
+- **THE PUSH IS BUILT AND IT WORKS AGAINST THE LIVE API, verified through the
+  SHIPPED function rather than a curl.** `POST oa-api.streamyard.com/api/public/
+  webinars/{id}/registrations` returns **201** with the registration's id;
+  `services/streamyard.push_registration` is what calls it, and every registrant
+  is pushed as they arrive. So StreamYard's registrant list, its attendee report
+  and its own reminders all know who is coming, off our one form.
+- **REMOVING THE SECOND FORM IS STILL THE STREAMYARD TOGGLE, and that is not a
+  shortcut — it is the only thing that works.** Three things were measured
+  before settling on it, and each one closes a route that looks open from
+  reading their bundle: the browser cannot register from our page (a CORS
+  preflight from `betterat.cricket` answers **`{"message":"CORS error: Origin
+  not allowed"}`**); a registration is bound to the SESSION that created it
+  (`GET /webinars/{id}` reads `isUserRegistered: true` for the session that
+  POSTed and **401s on the registration id alone**), so one our backend creates
+  cannot be handed to the visitor's browser; and the `?token=` a StreamYard
+  reminder links to is **not** the registration id — `/watch/{id}?token={id}`
+  leaves `sessionRegistrationId` empty in the page's own server-rendered props,
+  and so do `registrationId=`, `rid=` and both `embed=true` variants. **With the
+  gate on there is no way to skip the form; with it off there is no form to
+  skip.** The push is what makes turning it off cost nothing.
+- **THE FIELD IDS ARE FETCHED, NEVER HARDCODED.** The payload keys on
+  per-definition uuids (`fields.definitionId` + `fields.values[{field id}]`),
+  which change the moment somebody edits the registration form in StreamYard —
+  so `_field_map` reads `registrationFieldDefinitions` and maps by `type`,
+  cached ten minutes so an edit is picked up within the hour rather than at the
+  next deploy. Hardcoding them would work today and break silently the first
+  time a field is added.
+- **THE BROADCAST IS NEVER A SECOND CONSTANT.** `webinar_id_from` parses it out
+  of `EVENT.watch_url`, which is already the one place the event is named. A
+  watch link that is not StreamYard's yields None and every function no-ops,
+  which is also what makes the next event's setup one line rather than two.
+- **THEIR API IS IDEMPOTENT ON THE EMAIL BUT DOES NOT OVERWRITE**, verified:
+  posting twice returns the SAME id and leaves the stored values alone. So a
+  retry is free — and a row already pushed is skipped before any request is
+  made, because re-pushing a corrected name would cost a request and change
+  nothing at their end.
+- **A REQUIRED FIELD CANNOT BE BLANK, AND A MONONYM IS THEREFORE SKIPPED RATHER
+  THAN GIVEN AN INVENTED SURNAME.** Measured: `lastName: ""` is a **400** while
+  an empty optional phone is accepted. A name we made up would sit beside that
+  person's chat messages in front of everyone watching; they are still
+  registered with us, still emailed, and — with the gate off — the link still
+  lets them in. The reason is recorded on the row rather than being silent.
+- **A SKIP IS NOT A FAILURE, and the staff list says so differently.** `no
+  surname to send` and `the broadcast has no registration form` are rows there
+  was nothing to do for; an HTTP error is one that went wrong. Both land in
+  `streamyard_error`, and both read as `NOT SENT` with the reason on hover
+  rather than as `FAILED`.
+- **BEST-EFFORT AT EVERY STEP, because it is an undocumented API.** The
+  registration is complete once our own row is written and the page has already
+  handed the link over, so the push is backgrounded on its own session, never
+  raises, and records its outcome on the row. Everything else — the
+  registration, the confirmation email, the reminder, the link — works with
+  this erroring, switched off, or removed by StreamYard tomorrow.
+- **THE HOURLY PASS IS THE CATCH-UP, NOT THE MECHANISM.** `webinar_upkeep`
+  (the reminder job, widened) pushes anyone with no id, so a registration taken
+  before this existed and a push that failed on a wobble both self-heal. It
+  settles — a second pass over a list everybody is on considers nobody and
+  makes no request. `POST /club-admin/super/webinar-streamyard-sync` is the
+  button for when an hour is too long to wait.
+- **Verified against a real Postgres** (`verify_webinar.py`, 259 checks: the
+  DDL adding the pair, the id derived from the watch link and a non-StreamYard
+  link no-oping, all three name splits, a push stamping the id, a row already
+  pushed skipped before any request, a mononym recorded as a skip with no id, a
+  refusal recorded rather than raised, the catch-up making one request per row
+  and settling to none, and the register route asserted structurally to fire
+  it) **with a control run**: 7 fail against the previous commit and the other
+  234 are still reported. **No live call is made by the suite** —
+  `push_registration` is stubbed, because a verification run must not create
+  real registrations in somebody's StreamYard account.
+- **THE LIVE API WAS EXERCISED SEPARATELY, THROUGH THE SHIPPED FUNCTION**, which
+  is the only way to know an undocumented endpoint's real shape: 201 with an id,
+  a second push returning the same id, the mononym skipped and a non-StreamYard
+  link no-oping. **It left four test registrations in the account**
+  (`bettercricket-integration-test@`, `bc-it-a@`, `bc-it-b@`,
+  `bc-shipped-fn-test@`, all `betterat.cricket`) and **there is no public DELETE
+  — every id 404s** — so they have to be removed from the StreamYard dashboard
+  by hand. Use an obviously-marked address if this is ever done again.
+- **STILL ACCOUNT-SIDE**: turn registration OFF on the StreamYard broadcast.
+  That is the half that removes the second form, and no code in this repo
+  changes it. **Not established, because it needs that toggle flipped**: whether
+  their API still accepts a push once registration is disabled. The push handles
+  a refusal as an ordinary recorded error, so if it stops working the worst case
+  is one form and our own list — check the StreamYard column after the first
+  registration to see which way it fell.
+
+### The second form is StreamYard's, and the reminder that replaces it (migration 299, v9.71.5)
+
+Reported with the campaign live: "when you enter your details it takes you to a
+page where you click a link and then have to put details in again... it should
+automatically go through to StreamYard and save the registration details so
+that can be tracked. Where do the registrants go currently?"
+
+- **REGISTRANTS HAVE ALWAYS BEEN TRACKED, and answering that first is what
+  stopped this being built as a data-capture feature.** Every registration is a
+  `webinar_registrations` row — name, email, club, phone, role, all five UTM
+  tags and the fbclid — folded on `(event_key, lower(email))`, listed at
+  **`/admin/super/onboarding`** under "Webinar registrations" with a CSV
+  export. Nothing was going missing; the panel simply **opened collapsed**
+  behind a `Show (N)` toggle, which is how a registration that landed reads as
+  one that did not. It opens expanded now.
+- **THE SECOND FORM IS STREAMYARD'S OWN, AND v9.71.2 PREDICTED IT EXACTLY.**
+  That note read: "Whether that gate is switched on for this broadcast is a
+  setting in StreamYard... **If it is on, a registrant fills a form twice** —
+  the fix is a StreamYard setting, not a code change." Confirmed against the
+  live broadcast: `isRegistrationEnabled: true`, and its fields are email,
+  first name, last name (required) and phone (optional) — **every one of which
+  our own form already collects**. So the fix is to switch that gate off in
+  StreamYard, and nothing in this repo can reach it.
+- **CARRYING THE DETAILS ACROSS IS CLOSED OFF, AND IT WAS MEASURED RATHER THAN
+  ASSUMED.** StreamYard has an undocumented registration API
+  (`POST oa-api.streamyard.com/api/public/webinars/{id}/registrations`) and the
+  watch URL takes a per-registrant `?token=`, so an auto-handoff looks possible
+  from the bundle. It is not: the API answers
+  **`{"message":"CORS error: Origin not allowed"}`** to a preflight from
+  `betterat.cricket`, so the visitor's browser cannot register there from our
+  page. Server-to-server would bind the registration to OUR session rather than
+  theirs, on an unversioned internal API, twelve days before the event — a
+  worse trade than one setting.
+- **SWITCHING THE GATE OFF COSTS EXACTLY ONE THING, so that one thing is now
+  built.** StreamYard's registration is what sends its reminder; ours did not
+  have one (`NOTICED, NOT BUILT` in the v9.71.2 note). `webinar.send_reminders`
+  is the replacement.
+- **THE WINDOW DECIDES, NOT A PINNED CRON.** The sweep runs hourly and returns
+  immediately outside `REMINDER_LEAD_HOURS` (3) before the start — a one-shot
+  cron at the right minute has to be moved by hand for the next event and
+  misses entirely if the app happens to be restarting. It costs one indexed
+  UPDATE matching nothing on all but a handful of runs in the event's life.
+- **NOBODY WHO REGISTERED INSIDE THE WINDOW IS REMINDED.** Their confirmation
+  went out minutes ago carrying the same link; a second one an hour later reads
+  as a mistake rather than a courtesy.
+- **`reminder_sent_at` IS THE CLAIM, NOT JUST THE RECORD.** The same UPDATE
+  that selects the rows stamps it, so two overlapping runs cannot both email
+  one person; a refusal HANDS THE CLAIM BACK and keeps its reason, so the next
+  hour retries rather than one provider hiccup silently costing somebody their
+  only reminder. A hard crash between the stamp and the send leaves it claimed
+  and the reminder is missed — the conservative direction, since a duplicate is
+  the one a registrant would notice.
+- **NOTHING GOES OUT ONCE THE SESSION HAS ENDED.** A reminder landing after the
+  event sends somebody to a stream that is over, which is worse than none.
+- **A SEPARATE PAIR OF COLUMNS, NOT THE CONFIRMATION'S.** `reminder_sent_at` /
+  `reminder_error` sit beside `email_sent` / `email_error` rather than
+  overwriting them — two sends, two outcomes, so "did they get reminded" stays
+  answerable independently of "did they get the confirmation".
+- **`POST /club-admin/super/webinar-reminders` IS THE ESCAPE HATCH, NOT THE
+  MECHANISM.** The reminder has one chance to be useful, so a "Send reminder"
+  button exists for a sweep missed on the night. It runs the SAME function, so
+  pressing it after the sweep emails nobody twice, and it refuses outside the
+  window so it cannot fire a week early.
+- **NUMBERED 299, NOT 298 — AND v9.71.5, NOT v9.71.4.** `origin/main` reached
+  298 (`assoc_refresh`) and shipped its own `v9.71.4` changelog entry while
+  this was in flight. **Six times now, and this is the first time the CHANGELOG
+  collided in the same merge as the migration** — two files with one name is a
+  merge conflict rather than a silent break, but check both. Migration 299
+  re-runs the whole shared `webinar_ddl.STATEMENTS` list rather than issuing
+  two lone ALTERs, and its downgrade drops the two COLUMNS, never the table —
+  296 owns that.
+- **Verified against a real Postgres** (`verify_webinar.py`, 232 checks: the
+  DDL applied three times over a pre-297 table adding the reminder pair, an
+  older registration reading as not reminded, the window at all four edges,
+  nobody emailed before it opens, the late registrant and another event's
+  registrant both left out, a second sweep emailing nobody twice, a refusal
+  handing the claim back with its reason and the next run sending it, nothing
+  after the session ends, the email's link and both timezones, the endpoint
+  refusing outside the window, and the sweep asserted structurally to be
+  registered on the scheduler) **with a control run**: 6 fail against the
+  previous commit and the other 202 are still reported.
+- **STILL ACCOUNT-SIDE, and it is the actual fix for what was reported**: turn
+  registration OFF on the StreamYard broadcast. Until that is done a registrant
+  fills two forms, and no code in this repo changes that.
 
 ## The Club Directory's committee only ever grew (migration 295, v9.70.0, Sep 2026)
 

@@ -48,6 +48,20 @@ STATEMENTS: list[str] = [
         -- never got it" is answerable months later.
         email_sent      BOOLEAN NOT NULL DEFAULT FALSE,
         email_error     TEXT,
+        -- The reminder on the day is a SEPARATE send with its own outcome, so
+        -- it gets its own pair rather than overwriting the confirmation's.
+        -- `reminder_sent_at` is also the claim: the sweep stamps it before it
+        -- sends, so two runs overlapping cannot both email the same person,
+        -- and a refusal clears it back to NULL so the next hour retries.
+        reminder_sent_at TIMESTAMPTZ,
+        reminder_error   TEXT,
+        -- Whether this registrant was also pushed into StreamYard's own
+        -- registrant list, so they never fill in a second form. Best-effort
+        -- against an undocumented API, so a failure has to be VISIBLE rather
+        -- than silent: the id when it worked, the reason when it did not, and
+        -- both NULL for a row nothing has tried yet.
+        streamyard_id    TEXT,
+        streamyard_error TEXT,
         created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
@@ -58,6 +72,24 @@ STATEMENTS: list[str] = [
     # which of the two a given database needed — see migration 297.
     """
     ALTER TABLE webinar_registrations ADD COLUMN IF NOT EXISTS phone TEXT
+    """,
+    # Same arrangement for the reminder pair — see migration 298.
+    """
+    ALTER TABLE webinar_registrations
+        ADD COLUMN IF NOT EXISTS reminder_sent_at TIMESTAMPTZ
+    """,
+    """
+    ALTER TABLE webinar_registrations
+        ADD COLUMN IF NOT EXISTS reminder_error TEXT
+    """,
+    # And again for the StreamYard pair — see migration 300.
+    """
+    ALTER TABLE webinar_registrations
+        ADD COLUMN IF NOT EXISTS streamyard_id TEXT
+    """,
+    """
+    ALTER TABLE webinar_registrations
+        ADD COLUMN IF NOT EXISTS streamyard_error TEXT
     """,
     # One row per person per event. Folded, because an address typed with a
     # capital is the same person — a second registration corrects the row it

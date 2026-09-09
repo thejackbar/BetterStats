@@ -657,6 +657,48 @@ async def refresh_scout_players():
             logger.error(f"BetterScout refresh failed for club {org_guid}: {e}")
 
 
+async def webinar_upkeep():
+    """Keep the webinar's two lists in step, then remind on the day.
+
+    Two jobs in one hourly pass because they answer one question — is every
+    registrant where they should be, and have they been told:
+
+      1. Push anyone StreamYard does not have yet. The register route pushes
+         each one as it arrives, so this only ever catches up registrations
+         taken before that existed and pushes that failed on a wobble at their
+         end. Bounded, and it writes nothing once everybody is across.
+      2. Send the reminder, if the event's own send window is open.
+
+    HOURLY RATHER THAN A CRON PINNED TO THE RIGHT MOMENT, and the window is
+    what decides — `webinar.send_reminders` returns immediately outside it. A
+    one-shot cron has to be moved by hand for the next event and misses
+    entirely if the app happens to be restarting; a cheap hourly check that
+    reads the event's own constant does not.
+    """
+    from app.models.db import async_session_maker
+    from app.services import webinar
+
+    # Nothing to keep in step once the event has been and gone.
+    if not webinar.EVENT.is_past():
+        try:
+            async with async_session_maker() as session:
+                synced = await webinar.sync_streamyard(session)
+            if synced.get("considered"):
+                logger.info("Webinar StreamYard sync: %s", synced)
+        except Exception as e:
+            logger.error(f"Webinar StreamYard sync failed: {e}")
+
+    if not webinar.reminder_window_open():
+        return
+    try:
+        async with async_session_maker() as session:
+            result = await webinar.send_reminders(session)
+        if result.get("claimed"):
+            logger.info("Webinar reminders: %s", result)
+    except Exception as e:
+        logger.error(f"Webinar reminder sweep failed: {e}")
+
+
 async def comms_daily_maintenance():
     """BetterComms daily housekeeping, run just after the AWS quota window rolls
     over (midnight UTC): (1) trip the bounce/complaint circuit breaker on any
@@ -931,6 +973,17 @@ def start_scheduler():
         hour=9,
         minute=0,
         id="daily_scout_refresh",
+        replace_existing=True,
+    )
+    # Webinar upkeep — hourly at :20. Pushes any registrant StreamYard does not
+    # have, then sends the reminder if the event's own window is open (see
+    # webinar_upkeep for why hourly rather than one pinned cron). Off the hour
+    # so it never lands in the same minute as the Meta Ads snapshot at :05.
+    scheduler.add_job(
+        webinar_upkeep,
+        trigger="cron",
+        minute=20,
+        id="webinar_reminders",
         replace_existing=True,
     )
     # BetterComms daily maintenance — 00:15 UTC, just after AWS's daily send
