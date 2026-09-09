@@ -78,24 +78,61 @@ function WebinarRegistrations() {
   // existed, and a run of failures just fixed at the StreamYard end. A row
   // already pushed is skipped before any request, so pressing it twice
   // registers nobody twice.
+  // A COUNT THAT IS CORRECTLY ZERO STILL HAS TO EXPLAIN ITSELF. "0 pushed,
+  // 2 skipped" was reported as the feature being broken, and it wasn't — the
+  // two rows had no surname to send, which is on each row and was only ever
+  // visible on hover. The reasons come back with the counts now and are named
+  // here, so the message says what to do about it.
   const pushStreamyard = async () => {
     if (pushing) return
     setPushing(true)
     setReminderNote('')
     try {
       const r = await api.superSyncWebinarStreamyard()
-      setReminderNote(
-        r?.considered
-          ? `StreamYard: ${r.pushed} pushed`
-            + (r.skipped ? `, ${r.skipped} skipped` : '')
-            + (r.failed ? `, ${r.failed} failed` : '')
-          : 'StreamYard already has every registrant.'
-      )
+      if (!r?.considered) {
+        setReminderNote('StreamYard already has every registrant.')
+      } else {
+        const reasons = Object.entries(r.reasons || {})
+          .map(([reason, n]) => `${n > 1 ? `${n}x ` : ''}${reason}`)
+          .join('; ')
+        setReminderNote(
+          `StreamYard: ${r.pushed} pushed`
+          + (r.skipped ? `, ${r.skipped} skipped` : '')
+          + (r.failed ? `, ${r.failed} failed` : '')
+          + (reasons ? ` — ${reasons}.` : '.')
+        )
+      }
       await load()
     } catch (e) {
       setReminderNote(e.message || 'Could not push to StreamYard.')
     } finally {
       setPushing(false)
+    }
+  }
+
+  // Correcting the name is what makes a skip fixable. StreamYard's own form
+  // has first and last name as two required fields and refuses a blank surname
+  // outright, so a single-word name cannot be pushed and we will not invent a
+  // surname to sit beside somebody's chat messages during the demo. The push
+  // deliberately retries a skipped row, so fixing the name here and pressing
+  // Push is the whole loop.
+  const renameRow = async (row) => {
+    const next = window.prompt(
+      'Full name, first and last.\n\n'
+      + 'StreamYard requires a surname and refuses a blank one, so a '
+      + 'single-word name cannot be registered there. This is also the name '
+      + 'the reminder email greets them by.',
+      row.name || ''
+    )
+    if (next === null) return
+    const name = next.trim()
+    if (!name || name === (row.name || '')) return
+    try {
+      await api.superPatchWebinarRegistration(row.id, { name })
+      setReminderNote(`Renamed to ${name}. Press Push to StreamYard to register them.`)
+      await load()
+    } catch (e) {
+      setReminderNote(e.message || 'Could not change the name.')
     }
   }
 
@@ -195,7 +232,20 @@ function WebinarRegistrations() {
                 <tr key={r.id} className="border-b pb-hairline last:border-0 align-top">
                   <td className="px-3 py-2.5 whitespace-nowrap text-pb-dim">{fmtDate(r.created_at)}</td>
                   <td className="px-3 py-2.5">
-                    <div className="text-pb-text">{r.name}</div>
+                    <div className="text-pb-text">
+                      {r.name}
+                      {/* Only offered where it is the thing standing in the
+                          way. A name that pushed fine is not ours to tidy. */}
+                      {!r.streamyard_id && !String(r.name || '').trim().includes(' ') && (
+                        <button
+                          onClick={() => renameRow(r)}
+                          title="StreamYard needs a first and last name"
+                          className="ml-2 font-mono text-[10px] tracking-wide2 uppercase text-amber-400 hover:text-pb-text underline"
+                        >
+                          Add surname
+                        </button>
+                      )}
+                    </div>
                     <a href={`mailto:${r.email}`} className="text-xs text-pb-faint hover:text-pb-text underline">{r.email}</a>
                   </td>
                   {/* A real tel: link — this list is worked from a desk. Often
@@ -236,12 +286,23 @@ function WebinarRegistrations() {
                     {/* Whether StreamYard has them too, so nobody is asked to
                         register a second time. A reason without an id is not
                         always a failure — "no surname to send" is a row there
-                        was nothing to do for, which is why the amber carries
-                        the reason rather than just reading FAILED. */}
+                        was nothing to do for.
+
+                        THE REASON IS WRITTEN OUT, NOT LEFT ON HOVER. It was on
+                        a tooltip and the button said "0 pushed, 2 skipped",
+                        which reads as the feature being broken when in fact
+                        both rows just needed a surname. A state nobody can see
+                        without hovering is the same mistake as a disabled
+                        button that does not say why. */}
                     {r.streamyard_id
                       ? <span className="font-mono text-[10px] text-emerald-400" title={r.streamyard_id}>REGISTERED</span>
                       : r.streamyard_error
-                        ? <span className="font-mono text-[10px] text-amber-400" title={r.streamyard_error}>NOT SENT</span>
+                        ? (
+                          <div>
+                            <span className="font-mono text-[10px] text-amber-400">NOT SENT</span>
+                            <div className="text-[10px] text-pb-dim mt-0.5 max-w-[15rem]">{r.streamyard_error}</div>
+                          </div>
+                        )
                         : <span className="text-pb-faintest">-</span>}
                   </td>
                 </tr>

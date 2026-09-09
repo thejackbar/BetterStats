@@ -739,6 +739,70 @@ rather than making someone register twice."**
   a refusal as an ordinary recorded error, so if it stops working the worst case
   is one form and our own list — check the StreamYard column after the first
   registration to see which way it fell.
+- **AND THAT TOGGLE HAS A COST THIS NOTE ORIGINALLY FAILED TO NAME.** Reported
+  straight back: "turning off registrations means i can't see the registrants
+  list." Correct — StreamYard's registrant list AND its attendee report both
+  hang off registration being on, so switching it off trades the second form
+  for the attended-vs-registered split. It is a decision with two real sides,
+  not a step: **our own list is complete either way** (name, email, club, phone,
+  role, every campaign tag, CSV export), so the ONLY thing genuinely lost is
+  who turned up. **Untested third path**: their form carries an "Already
+  registered? Join here" link, and everyone the push registers genuinely IS
+  registered at their end — so that link may admit a registrant on their email
+  alone, keeping both. Not verified, so not asserted.
+
+### A skip that does not say why reads as a broken button (v9.73.2, Sep 2026)
+
+Reported: "It's not letting me push to streamyard - says 0 pushed, 2 skipped".
+
+- **NOTHING WAS BROKEN, AND THE SILENCE WAS THE BUG** — the same call this file
+  already records for the disabled Rediscover button and for a figure that is
+  correctly zero. Both rows had a single-word name, and StreamYard's own form
+  has firstName and lastName as separate REQUIRED fields: a blank surname is a
+  **400, re-verified against the live endpoint** while diagnosing this (a
+  refusal creates nothing, so it is a safe probe). The skip was right; the
+  reporting was not.
+- **THE OTHER TWO SKIP REASONS WERE RULED OUT BY MEASUREMENT, NOT BY READING.**
+  The live broadcast still answers `isRegistrationEnabled: true` with one
+  definition and all four fields, so "the broadcast has no registration form"
+  was not it; and `webinar_id_from` parses the shipped watch link, so neither
+  was "not a StreamYard broadcast". **A session failure is an ERROR, never a
+  skip** — `_field_map` calls `raise_for_status()` and an unauthenticated
+  `GET /webinars/{id}` answers **401**, which the outer handler records as a
+  failure. So "skipped" could only ever have been the surname.
+- **`sync_streamyard` REPORTS `reasons`, and the button names them.** A bare
+  count is the whole reported problem; the counts and the distinct outcomes now
+  come back together and the message reads them out.
+- **THE REASON IS WRITTEN OUT ON THE ROW, NOT LEFT ON HOVER.** It was on a
+  `title` tooltip, which is a state nobody can see — two rows reading NOT SENT
+  with the explanation hidden is how a working feature reads as a fault.
+- **A SKIP HAS TO BE FIXABLE OR THE REASON CAN NEVER STOP BEING TRUE.**
+  `sync_streamyard` already retries a previously-skipped row on purpose ("the
+  reason can stop being true if somebody corrects their name") — and nothing
+  could correct the name, so the row was stuck for good and the retry was
+  pointless. `PATCH /super/webinar-registrations/{id}` takes a name;
+  an **Add surname** button is offered on exactly the rows where a
+  single-word name is what is standing in the way, never on a row that pushed
+  fine.
+- **ONLY THE NAME IS EDITABLE, and that is deliberate.** The email is the
+  identity these rows fold on (`(event_key, lower(email))`) AND what
+  StreamYard's own idempotency keys on, so editing it would separate our row
+  from the registration already made at their end. The campaign fields are the
+  record of where a registration came from and are not ours to rewrite.
+- **A SURNAME IS STILL NEVER INVENTED.** It would sit beside that person's chat
+  messages in front of everyone watching. A person types the correction, or the
+  row stays skipped and says so.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_streamyard_skip_reporting.py`, 32 checks through
+  the shipped service and route bodies: the reported run replayed — one pushed,
+  two skipped — the reason counted and named, the reason landing on the row, a
+  second press not re-registering the one already done while retrying the two,
+  a corrected name then pushing, four refusals leaving the row exactly as it
+  was, the email absent from the patch model, and the shipped name split)
+  **with a control run**: 16 pass and **9 are REPORTED by name** rather than
+  dying on the first missing attribute. **No live call is made** —
+  `push_registration` is stubbed, because their API has no public DELETE and a
+  verification run must not create real registrations in somebody's account.
 
 ### The second form is StreamYard's, and the reminder that replaces it (migration 299, v9.71.5)
 

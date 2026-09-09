@@ -682,6 +682,14 @@ async def sync_streamyard(
     A row that has already been SKIPPED for a reason that will not change (no
     surname to send) is retried anyway: it costs one request, and the reason
     can stop being true if somebody corrects their name.
+
+    IT REPORTS WHY, NOT JUST HOW MANY. "0 pushed, 2 skipped" is a figure that
+    is correctly zero and explains nothing — the same call this codebase already
+    makes for a disabled Rediscover button. `reasons` counts the distinct
+    outcomes so the screen can name them, and every one of them is separately
+    actionable: a missing surname is fixed by correcting the name (which is why
+    the name is editable on the staff list), a refusal at their end is fixed at
+    their end.
     """
     rows = (await db.execute(text("""
         SELECT id, name, email, phone
@@ -692,18 +700,23 @@ async def sync_streamyard(
     """), {"k": event.key, "limit": limit})).mappings().all()
 
     pushed = failed = skipped = 0
+    reasons: dict[str, int] = {}
     for row in rows:
         result = await push_to_streamyard(
             db, registration_id=str(row["id"]), name=row["name"] or "",
             email=row["email"] or "", phone=row["phone"], event=event)
         if result.get("ok"):
             pushed += 1
-        elif result.get("skipped"):
+            continue
+        if result.get("skipped"):
             skipped += 1
         else:
             failed += 1
+        note = result.get("skipped") or result.get("error") or "unknown"
+        reasons[_clip(note, 200) or "unknown"] = reasons.get(_clip(note, 200) or "unknown", 0) + 1
     if rows:
-        logger.info("webinar: StreamYard sync — %s pushed, %s skipped, %s failed",
-                    pushed, skipped, failed)
+        logger.info("webinar: StreamYard sync — %s pushed, %s skipped, %s failed%s",
+                    pushed, skipped, failed,
+                    f" ({'; '.join(f'{n}x {r}' for r, n in reasons.items())})" if reasons else "")
     return {"considered": len(rows), "pushed": pushed,
-            "skipped": skipped, "failed": failed}
+            "skipped": skipped, "failed": failed, "reasons": reasons}

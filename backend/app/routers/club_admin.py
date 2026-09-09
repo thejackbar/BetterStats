@@ -4242,6 +4242,65 @@ async def sync_webinar_streamyard_now(
     return await _webinar.sync_streamyard(db)
 
 
+class WebinarRegistrationPatch(BaseModel):
+    name: Optional[str] = None
+
+
+@router.patch("/super/webinar-registrations/{registration_id}")
+async def patch_webinar_registration(
+    registration_id: str,
+    body: WebinarRegistrationPatch,
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Correct a registrant's name.
+
+    THIS EXISTS BECAUSE A SKIP HAS TO BE FIXABLE. StreamYard's own form has
+    first name and last name as two separate REQUIRED fields and refuses a
+    blank surname outright (a 400, verified against the live endpoint), while
+    ours asks for one Name — so somebody who typed a single word cannot be
+    pushed, and `streamyard.push_registration` records that rather than
+    inventing a surname to sit beside their chat messages in front of everyone
+    watching. Without a way to correct the name, the reason could never stop
+    being true and the row was stuck for good.
+
+    `sync_streamyard` deliberately retries a previously-skipped row, so
+    correcting the name here and pressing Push is the whole loop.
+
+    ONLY THE NAME. The email is the identity these rows fold on
+    (`(event_key, lower(email))`) and is what StreamYard's own idempotency
+    keys on, so letting it be edited would separate our row from the
+    registration it already made at their end. The campaign fields are the
+    record of where the registration came from and are not ours to rewrite.
+    """
+    from sqlalchemy import text as _text
+    from app.services import webinar as _webinar
+
+    if body.name is None:
+        raise HTTPException(status_code=422, detail="Nothing to change.")
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="A name is required.")
+
+    try:
+        _uuid = uuid.UUID(registration_id)
+    except (ValueError, AttributeError, TypeError):
+        raise HTTPException(status_code=404, detail="Registration not found.")
+
+    updated = (await db.execute(_text("""
+        UPDATE webinar_registrations
+           SET name = :name, updated_at = NOW()
+         WHERE id = CAST(:id AS uuid)
+        RETURNING id
+    """), {"id": str(_uuid),
+           "name": _webinar._clip(name, _webinar.MAX_LENGTHS["name"])})).first()
+    if not updated:
+        await db.rollback()
+        raise HTTPException(status_code=404, detail="Registration not found.")
+    await db.commit()
+    return {"ok": True, "name": name}
+
+
 _ONBOARDING_STATUSES = {"new", "contacted", "onboarded", "closed"}
 
 
