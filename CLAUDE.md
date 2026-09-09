@@ -412,6 +412,160 @@ them, and let an added image go behind a template's own text.
   layout's own text as blocks" is unchanged. Saved templates are still
   `localStorage`.
 
+## A portrait design per template, not a square one stretched (v9.75.0, Sep 2026)
+
+The thing the note above lists as NOT BUILT, asked for in those words: *"yeh i
+want a design per template done please."*
+
+- **REFLOWING AND DESIGNING ARE DIFFERENT JOBS, and the first is what shipped
+  last release.** v9.74.0 made all 48 layouts DRAW at 1080×1350 and 1080×1920 —
+  boxes grow, nothing overlaps, nothing is letterboxed. It did not make one of
+  them a portrait design: a fixture row is 45px of content sitting in a 200px
+  slot, a 196px masthead becomes a tenth of a story, and a 150px sponsor strip
+  becomes a hairline. That reads as a square with air pushed through it, which
+  is the complaint reflow does not answer.
+- **ALL THREE SIZES ARE 1080 WIDE, so a design per template is entirely a
+  decision about where the extra HEIGHT goes** — which band grows, which type
+  steps up, and what has to re-compose rather than stretch. There is no
+  re-columning problem to solve.
+- **`social/postAspect.js` IS THE VOCABULARY, and a template inventing its own
+  breakpoint is what it exists to stop.** `aspectOf` names the shape;
+  `pick(A, {square, portrait, story})` falls back square → portrait → story, so
+  a template names only the shapes it redesigns for; `share(h, at1080)` keeps a
+  band's SHARE; `grow(h, at1080, rate)` keeps its pixels and adds a fraction of
+  the extra; `type(h, at1080)` steps type up without tracking the canvas.
+- **EVERY PRIMITIVE IS EXACT AT 1080 BY CONSTRUCTION**: `share` is `h*n/1080`,
+  `grow` adds `max(0, h − 1080) × rate`, and every `pick` multiplier at square is
+  1. **That is necessary and it is nowhere near sufficient** — see the anchoring
+  note below, which is what shooting all 48 squares on both builds and comparing
+  byte for byte actually found.
+- **A PRIMITIVE BEING EXACT SAYS NOTHING ABOUT THE LAYOUT AROUND IT, and 15 of
+  the 48 squares moved before this was measured.** Every offending change was
+  the same shape: a block the square top-anchored at its NATURAL height turned
+  into a stretched box with its content centred or spread. Giving a 300px
+  medallion a 420px box and centring it moves it down 60px; re-pinning a block
+  from `top: 700` to `bottom: 240` only lands in the same place if its height
+  happens to be exactly 140; `space-between` on a panel that now fills the
+  column pushes its two halves apart; and `minHeight: 0` on a grid cell lets it
+  shrink past its own content, which on EV2's already-overflowing square
+  collapsed each cell to its label with the value gone. **`anchor(A, sq, tall)`
+  in round-templates and a plain `A === 'square' ? … : …` elsewhere is the fix:
+  the square keeps its original anchoring and only a taller canvas stretches.**
+- **THE FINAL COUNT IS 44 OF 48 BYTE-IDENTICAL, and the four are named rather
+  than rounded away.** T4 (40% of the post) and T9 (10%) changed because their
+  squares were ALREADY broken — T4's thirteenth row landed on top of the footer
+  and T9's billing ran 76px off the edge — so both are fixes and both are in the
+  changelog as such. T5 (3.5% of pixels, no pixel differing by more than 55 of a
+  possible 765) and C2 (0.8%, one glyph rasterising 1px taller) are sub-pixel:
+  measured, nothing moved.
+- **MEASURE THE CLAIM BEFORE YOU WRITE IT.** "Square posts are unchanged" went
+  into the changelog on the strength of the arithmetic being exact, and was
+  false for 15 templates at the time. The pixel comparison is cheap — one
+  `SIZES=square` shoot per build and `cmp` — and it is the only thing that
+  turns that sentence from a hope into a fact.
+- **A MASTHEAD KEEPS ITS PIXELS AND A PHOTO BAND KEEPS ITS SHARE.** That is the
+  whole reason `grow` and `share` are separate: `share` on a 150px footer
+  balloons it to 267 on a story, and `grow` on a 680px photo band leaves it a
+  third of the post. Use `grow` for chrome and `share` for structure.
+- **`roundScale()` IS THE SAME DECISION MADE ONCE FOR NINETEEN TEMPLATES.** The
+  roundup family is one shape — masthead, body of rows, sponsor strip — so it
+  gets one design scale (`head()`, `foot`, `row`, `big`) and each template
+  spends it. `sz(mult)` wraps it so a template still reads as the square sizes
+  it was drawn at rather than a column of arithmetic.
+- **ROW TYPE STEPS UP WITH THE SLOT IT SITS IN.** The single most visible half
+  of this release: a body that absorbs the whole of the extra height gives its
+  rows 200px each and then sets them at the size they were in a 60px row.
+- **THE PANELS THAT STOPPED WHERE THE SQUARE ENDED NOW RUN TO THE FOOTER.** T4's
+  batting order was document flow, so its rows kept their square height and left
+  a dead strip; the root is a flex column and the rows share what is left. Same
+  shape for T5, and for C4's two top-performer panels, which distribute batting
+  and bowling with `space-between` instead of clumping at the top.
+- **WHAT RE-COMPOSES RATHER THAN STRETCHING, and each is a real design decision
+  rather than a multiplier**: T2 and C1's card grids go 4×3 → 3×4 on a story so
+  the cards stay card-shaped instead of becoming letterboxes; T9's support act
+  re-sets two names to a line instead of three, so the billing is five lines and
+  each name is half as wide again; T1's squad list is set as ONE centred block
+  rather than 13 names spread 130px apart.
+- **CENTRED, NOT BOTTOM-ANCHORED, ON A STORY.** T1 first anchored its name block
+  to the foot of the rail on the reasoning that a phone shows the bottom. That
+  is backwards: a story's bottom couple of hundred pixels carry the app's own
+  reply bar and its top the profile row, so anything anchored to either edge is
+  the half that gets covered.
+- **`space-evenly` WAS TRIED ON T9 AND IS WORSE.** Spreading three tiers down a
+  story puts 350px between them and the billing reads as three unrelated lines.
+  A gig poster's billing is a block; the extra height buys more LINES, not more
+  air between the ones you have.
+- **AutoFitText MEASURED AGAINST THE PARENT'S `clientWidth`, WHICH INCLUDES ITS
+  PADDING.** So a node inside a padded parent was allowed to overflow by exactly
+  that padding with nothing detecting it — T9's tiers sat in a `padding: 0 40px`
+  box, measured 1076 against a parent `clientWidth` of 1080, and ran 76px off
+  the poster at full size. It measures the tighter of the node's own box and the
+  parent's now, so a node positioned wider than its parent is still caught. **A
+  general bug in a shared primitive, not a T9 one** — the same line is in
+  `round-templates`' own `AutoFit`.
+- **THE BLAST RADIUS WAS MEASURED BEFORE THE FIX WENT IN.** Probing 12
+  templates at square for `scrollWidth > clientWidth` found **zero** overflowing
+  nodes, so the change can only ever shrink text that was already clipped and
+  the square claim stays honest. A shared primitive is exactly where that
+  measurement is worth taking.
+- **Three real bugs found on the way, all shipped in v9.74.0's reflow**: EVT_Block
+  put its colour band on `share()` and its panel on a hardcoded `top: 606`, so
+  they overlapped by 152px at portrait and ~340 at story; T3's background was a
+  hardcoded `<svg width="1080" height="1080">`, so the gradient stopped two
+  thirds of the way down a story; and EV2's details grid needed its own
+  `1fr` rows to reach the panel foot.
+- **EV2's SQUARE HAS ALWAYS CLIPPED ITS OWN PANEL, and that is left alone.**
+  The first cut gave the grid `flex: 1` at every size, which on the
+  already-overflowing square hid the values entirely. Confirmed pre-existing,
+  so the share behaviour is gated on `aspectOf(...) !== 'square'` and the square
+  keeps its exact original fixed rows. Shrinking the square's own type to fix it
+  is a different change from the one that was asked for.
+- **Driven in Chromium** (`verify_post_designer_browser.mjs`, 78 checks — the 64
+  from v9.74.0 plus a new section that measures the DESIGN rather than the
+  geometry: a masthead keeping its share of the extra height, a sponsor strip
+  still a strip, row type stepping up with its slot, a body still reaching the
+  sponsor strip, EV2's band and panel meeting exactly at both sizes, T4's order
+  reaching the footer, and every one of them asserted UNCHANGED at 1080)
+  **with a control run**: all 6 of the new checks fail against the previous
+  commit, reporting a masthead going 18.15% → 14.52% of the post, a sponsor
+  strip 4.63% → 3.7%, row type frozen at `31px -> 31px`, and EV2's band bottom
+  at 56.15% against a panel top of 44.89% — the overlap, in the control's own
+  numbers.
+- **Judged from 144 SCREENSHOTS of the real editor**, not from the checks. The
+  geometry all passed on versions that read wrong: T1's story names clumped,
+  T2's portrait grid with a 140px dead band, T3's XI stopping short of the
+  credit rule, T9's billing running off the edge. A layout is a picture and
+  only a picture settles it.
+- **UNITS HAVE TO BE THE SAME ACROSS ONE RETURN OBJECT.** The measuring helper
+  returned positions as percentages of the post and `font` already multiplied by
+  1080, so the step-up check converted twice and read a genuine 31 → 35 as
+  31 → 28: a design that had worked, reported as a failure. Every field is a
+  plain percentage now and every check converts the same way.
+- **A CHECK THAT ASSUMES THE FIXTURE IS NOT A CHECK.** T4's row selector wanted
+  a container with more than two children; the suite seeds TWO players, so it
+  found nothing and reported the design as unmeasurable. Keyed on the one
+  flex-1 column in the layout instead.
+- **`SIZES=square` on `shoot_templates.mjs`** shoots one size, which is what
+  makes an all-48 square comparison against a control build practical.
+- **`npx vite build | tail -2` REPORTS A FAILED BUILD AS A SUCCESS.** A build
+  that fails ends in an esbuild stack trace, so the last two lines are
+  `at Pipe.onStreamRead` rather than the error — and `vite preview` then serves
+  the PREVIOUS `dist` quite happily, so the shoot runs, the screenshots come
+  back, and every measurement is of code that never compiled. Cost a full round
+  of "my fix had no effect". Grep for `built in|Build failed|ERROR` instead.
+- **A `{/* comment */}` CANNOT GO INSIDE A `.map()` ARROW'S RETURN.** The arrow
+  returns one expression, so a comment before the element is a second one. Put
+  it above the `.map(` call. This is what failed the build above.
+- **A `file://` PAGE CANNOT `getImageData` A `file://` IMAGE** — the canvas is
+  tainted cross-origin, and from `about:blank` the image will not load at all
+  (the trap this file already records for the contact sheet). Read the PNG in
+  node and pass it in as a `data:` URL; that is same-origin and decodes fine.
+- **NOTICED, NOT BUILT**: the scorecards (SC1-SC3) keep their own fixed
+  1920×1080 and are still offered no size picker, so they are the three of the
+  48 with no portrait design — they are a landscape document rather than a feed
+  post. `templateToBlocks` still reaches four templates. Saved templates are
+  still `localStorage`. EV2's square panel still clips at its own size.
+
 ## Twenty is retired; the engagement score, the CRM and Sales Management are not (v9.71.0, Sep 2026)
 
 Asked for directly: *"the calculation and continual re-calculation of engagement

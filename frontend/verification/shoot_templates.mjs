@@ -28,7 +28,7 @@ const ALL = [
   'BL1',
 ]
 const IDS = ONLY.length ? ONLY : ALL
-const SIZES = ['square', 'portrait', 'story']
+const SIZES = (process.env.SIZES || 'square,portrait,story').split(',')
 
 mkdirSync(OUT, { recursive: true })
 

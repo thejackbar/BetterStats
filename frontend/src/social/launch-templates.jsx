@@ -6,6 +6,7 @@
 // a featured player, top performers) rather than screenshot, so the poster is
 // fully whitelabelled per club. Copy reads from the club's point of view.
 import { AutoFitText, ClubLogo, GrainSVG, Halftone, Stripes } from './cricket-templates'
+import { share } from './postAspect'
 import brandWordmark from '../assets/bettercricket-white.svg'
 
 import statsLogo from '../assets/modules/betterstats.svg'
@@ -173,9 +174,11 @@ export function ClubLaunchPoster({
       <div style={{ position: 'relative', display: 'flex', gap: 28, flex: 1, minHeight: 0 }}>
         {/* Left */}
         <div style={{ width: 452, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 60, lineHeight: 0.9, color: ink, letterSpacing: 0.5, transform: 'rotate(-2deg)', transformOrigin: 'left' }}>{headline}</div>
-          {/* Fixed-height box so AutoFitText fits the name to *this* 190px, not the whole column. */}
-          <div style={{ height: 188, marginTop: 8, transform: 'rotate(-2deg)', transformOrigin: 'left' }}>
+          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: share(height, 60), lineHeight: 0.9, color: ink, letterSpacing: 0.5, transform: 'rotate(-2deg)', transformOrigin: 'left' }}>{headline}</div>
+          {/* A fixed-height box so AutoFitText fits the name to THIS box rather
+              than the whole column — sized off the canvas, so the club's name
+              is the loudest thing on a portrait poster too. 188 at 1080. */}
+          <div style={{ height: share(height, 188), marginTop: 8, transform: 'rotate(-2deg)', transformOrigin: 'left' }}>
             <AutoFitText
               text={(club.name || 'Cricket Club').toUpperCase()}
               max={78} min={28} lines={3} measureDeps={[club.name]}

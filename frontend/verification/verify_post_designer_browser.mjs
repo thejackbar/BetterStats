@@ -245,6 +245,140 @@ async function pickSize(page, label) {
   await ctx.close()
 }
 
+// ── 1d. The taller canvas is DESIGNED for, not just filled ─────────────────
+// Reflow made every layout draw at the full canvas; it did not make any of them
+// a portrait design. These measure the difference: a masthead that keeps a
+// share of the extra height rather than becoming a tenth of the post, a sponsor
+// strip that is still a strip, row type that steps up with the slot it sits in,
+// and a body that runs to the footer instead of stopping where the square did.
+// Every one is read off the real element at both sizes, and every one is
+// asserted UNCHANGED at 1080 — the square output is the same post it was.
+{
+  // One element inside the export node, by a predicate run in the page.
+  const box = (page, findSrc) => page.evaluate((src) => {
+    const holder = [...document.querySelectorAll('div')].find(
+      (d) => d.style.left === '-9999px' && d.style.position === 'absolute',
+    )
+    const root = holder?.firstElementChild
+    if (!root) return null
+    // eslint-disable-next-line no-new-func
+    const find = new Function('root', src)
+    const el = find(root)
+    if (!el) return null
+    const rr = root.getBoundingClientRect()
+    const r = el.getBoundingClientRect()
+    const cs = getComputedStyle(el)
+    return {
+      // Relative to the layout, and unscaled — the live canvas is drawn at a
+      // preview scale, so raw client pixels would move with the zoom.
+      // EVERY field is a percentage of the post's own height, font included —
+      // one unit, so every check converts to real post pixels the same way
+      // (× 10.8 at square, × 13.5 at portrait). The first cut returned the font
+      // already multiplied by 1080 while the positions were plain percentages,
+      // so the step-up check converted twice and read a genuine 31 → 35 as
+      // 31 → 28, i.e. a design that had worked reported as a failure.
+      top: Math.round(((r.top - rr.top) / rr.height) * 10000) / 100,
+      bottom: Math.round(((r.bottom - rr.top) / rr.height) * 10000) / 100,
+      h: Math.round((r.height / rr.height) * 10000) / 100,
+      font: Math.round((parseFloat(cs.fontSize) / rr.height) * 10000) / 100,
+    }
+  }, findSrc)
+
+  // ── A fixture roundup: masthead, rows and sponsor strip ─────────────────
+  {
+    const { ctx, page, errors } = await openEditor('?template=FX1')
+    // The body box is the one absolutely-positioned block inset 56px a side.
+    const BODY = "return [...root.querySelectorAll('div')].find((d) => d.style.left === '56px' && d.style.right === '56px' && d.style.top) || null"
+    // The sponsor slots are the only dashed boxes on the post.
+    const SLOT = "return [...root.querySelectorAll('div')].find((d) => getComputedStyle(d).borderStyle === 'dashed') || null"
+    // A row's opponent name — the biggest thing in a row, and what a reader is
+    // scanning for.
+    const OPP = "return [...root.querySelectorAll('div')].find((d) => d.children.length === 0 && /SUBIACO/i.test(d.textContent || '')) || null"
+
+    const sqBody = await box(page, BODY)
+    const sqSlot = await box(page, SLOT)
+    const sqOpp = await box(page, OPP)
+    ck('the roundup body, sponsor strip and rows are all measurable', sqBody && sqSlot && sqOpp,
+      JSON.stringify({ sqBody, sqSlot, sqOpp }))
+    // Pinned so a later change cannot quietly move the square's own design.
+    ck('the square masthead is unchanged', sqBody && Math.abs(sqBody.top - (196 / 1080) * 100) < 0.6, String(sqBody?.top))
+    ck('the square sponsor slot is unchanged', sqSlot && Math.abs(sqSlot.h - (50 / 1080) * 100) < 0.6, String(sqSlot?.h))
+    ck('the square row type is unchanged', sqOpp && Math.abs(sqOpp.font * 10.8 - 31) < 1.2, String(sqOpp && sqOpp.font * 10.8))
+
+    await pickSize(page, 'Portrait')
+    await page.waitForTimeout(250)
+    const poBody = await box(page, BODY)
+    const poSlot = await box(page, SLOT)
+    const poOpp = await box(page, OPP)
+    // In post pixels: 196 → 239, 50 → 62, 31 → 35.
+    ck('the masthead keeps a share of the extra height',
+      poBody && poBody.top * 13.5 > sqBody.top * 10.8 + 20, `${sqBody?.top}% -> ${poBody?.top}%`)
+    ck('the sponsor strip grows with the post',
+      poSlot && poSlot.h * 13.5 > sqSlot.h * 10.8 + 5, `${sqSlot?.h}% -> ${poSlot?.h}%`)
+    ck('the row type steps up with the slot it sits in',
+      poOpp && poOpp.font * 13.5 > sqOpp.font * 10.8 + 1.5,
+      `${sqOpp && Math.round(sqOpp.font * 10.8)}px -> ${poOpp && Math.round(poOpp.font * 13.5)}px`)
+    // The body still runs to the sponsor strip rather than stopping short.
+    ck('and the body still reaches the sponsor strip',
+      poBody && poSlot && poSlot.top - poBody.bottom < 6, `${poBody?.bottom}% .. ${poSlot?.top}%`)
+
+    ck('no page errors measuring the roundup', errors.length === 0, errors.slice(0, 2).join(' | '))
+    await ctx.close()
+  }
+
+  // ── An event poster: the colour band and the panel under it ─────────────
+  // EV2 draws a band whose height follows the canvas and a panel that used to
+  // start at a hardcoded 606 — so on a portrait post the two overlapped by
+  // 150px and on a story by 340. They have to MEET.
+  {
+    const { ctx, page } = await openEditor('?template=EV2')
+    const BAND = "return [...root.querySelectorAll('div')].find((d) => d.style.top === '0px' && d.style.left === '0px' && d.style.height) || null"
+    const PANEL = "return [...root.querySelectorAll('div')].find((d) => d.style.left === '0px' && d.style.bottom === '0px' && d.style.top && d.style.top !== '0px') || null"
+    const sqBand = await box(page, BAND)
+    const sqPanel = await box(page, PANEL)
+    ck('the event band and its panel are measurable', sqBand && sqPanel, JSON.stringify({ sqBand, sqPanel }))
+    ck('they meet exactly on the square', sqBand && sqPanel && Math.abs(sqBand.bottom - sqPanel.top) < 0.3,
+      `${sqBand?.bottom}% vs ${sqPanel?.top}%`)
+
+    await pickSize(page, 'Portrait')
+    await page.waitForTimeout(250)
+    const poBand = await box(page, BAND)
+    const poPanel = await box(page, PANEL)
+    ck('and still meet on a portrait post', poBand && poPanel && Math.abs(poBand.bottom - poPanel.top) < 0.3,
+      `${poBand?.bottom}% vs ${poPanel?.top}%`)
+    await ctx.close()
+  }
+
+  // ── A batting order: the rows fill down to the footer ───────────────────
+  // T4 was document flow, so its rows kept the height they had on the square
+  // and left a dead strip above the footer on anything taller.
+  {
+    const { ctx, page } = await openEditor('?template=T4')
+    await press(page.getByRole('button', { name: 'Content', exact: true }))
+    await page.waitForTimeout(200)
+    for (const p of PLAYERS) await press(page.getByRole('button', { name: new RegExp(`^${p.name}\\b`) }))
+    await page.waitForTimeout(300)
+
+    // The last row of the order — the row grid is the only block of striped
+    // rows, and its last child is what has to reach the bottom.
+    // The one flex-1 column in T4 is the rows container. Keyed on that rather
+    // than on a child count: the suite seeds TWO players, so a "more than two
+    // rows" predicate found nothing and reported the design as unmeasurable.
+    const LAST = "const g = [...root.querySelectorAll('div')].find((d) => d.style.flex === '1 1 0%' && d.style.flexDirection === 'column' && d.children.length > 0); return g ? g.lastElementChild : null"
+    const sqLast = await box(page, LAST)
+    ck('the batting order rows are measurable', sqLast !== null, JSON.stringify(sqLast))
+
+    await pickSize(page, 'Portrait')
+    await page.waitForTimeout(250)
+    const poLast = await box(page, LAST)
+    // Within the footer's own band of the post, not stopping at the square's
+    // own last row (which would land around 78%).
+    ck('the order runs down to the footer on a portrait post',
+      poLast && poLast.bottom > 88, `${poLast?.bottom}%`)
+    await ctx.close()
+  }
+}
+
 // ── 2. The blank canvas is genuinely the new size ──────────────────────────
 {
   const { ctx, page, errors } = await openEditor('?type=blank')

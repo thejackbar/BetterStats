@@ -9,6 +9,7 @@
 // SponsorFooter, AutoFit, Monogram) are defined locally.
 import { useRef, useState, useLayoutEffect } from 'react'
 import { GrainSVG as Grain, Halftone, Stripes, ClubLogo, BrandLockup, CreditMark } from './cricket-templates'
+import { aspectOf, pick, share, grow } from './postAspect'
 
 const DISPLAY = "var(--social-display-font, 'Anton', sans-serif)"
 const MONO = "'JetBrains Mono', monospace"
@@ -56,9 +57,13 @@ function Bug({ ink }) {
 
 // Presented-by footer — renders real sponsor logos when present, the sponsor
 // name when only a name is set, else an empty dashed slot (placeholder).
-function SponsorFooter({ palette, sponsors = [], showBug = true }) {
+// `h` is the canvas height, so the strip keeps a share of a taller post rather
+// than staying the 50px slot it was drawn at — a sponsor's logo shrinking to a
+// hairline is the one part of these posts a club would notice.
+function SponsorFooter({ palette, sponsors = [], showBug = true, h = 1080 }) {
   const { ink } = palette
   const slots = (sponsors && sponsors.length) ? sponsors : [{}, {}]
+  const slotH = grow(h, 50, 0.09)
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 22, width: '100%' }}>
       <div style={{ fontFamily: BODY, fontSize: 11, letterSpacing: 2.5, color: ink, opacity: 0.55, fontWeight: 600, flexShrink: 0 }}>PRESENTED BY</div>
@@ -68,12 +73,12 @@ function SponsorFooter({ palette, sponsors = [], showBug = true }) {
           const name = (s && (s.name || (typeof s === 'string' ? s : ''))) || ''
           return (
             <div key={i} style={{
-              flex: 1, height: 50, display: 'grid', placeItems: 'center',
+              flex: 1, height: slotH, display: 'grid', placeItems: 'center',
               border: `1px dashed ${ink}33`, borderRadius: 6, background: `${ink}08`,
               overflow: 'hidden', whiteSpace: 'nowrap', padding: '0 10px',
             }}>
               {url
-                ? <img src={url} alt={name || `Sponsor ${i + 1}`} style={{ maxHeight: 40, maxWidth: '100%', objectFit: 'contain' }} />
+                ? <img src={url} alt={name || `Sponsor ${i + 1}`} style={{ maxHeight: slotH - 10, maxWidth: '100%', objectFit: 'contain' }} />
                 : <span style={{ fontFamily: DISPLAY, fontSize: 18, letterSpacing: 1.5, color: ink, opacity: 0.78 }}>{name}</span>}
             </div>
           )
@@ -93,7 +98,11 @@ function AutoFit({ children, max, min = 24, style = {}, deps = [] }) {
     if (!node || !parent) return
     const fit = () => {
       let next = max; node.style.fontSize = next + 'px'; let guard = 0
-      while (guard++ < 400 && next > min && node.scrollWidth > parent.clientWidth + 0.5) {
+      // The node's own box, not the parent's — `clientWidth` includes padding,
+      // so text inside a padded parent could overflow by that much undetected.
+      // See the same note on AutoFitText in cricket-templates.jsx.
+      const boxW = () => Math.min(node.clientWidth > 0 ? node.clientWidth : parent.clientWidth, parent.clientWidth)
+      while (guard++ < 400 && next > min && node.scrollWidth > boxW() + 0.5) {
         next -= 1; node.style.fontSize = next + 'px'
       }
       setSize(next)
@@ -105,6 +114,44 @@ function AutoFit({ children, max, min = 24, style = {}, deps = [] }) {
   }, [max, min, ...deps]) // eslint-disable-line react-hooks/exhaustive-deps
   return <div ref={ref} style={{ fontSize: size, whiteSpace: 'nowrap', ...style }}>{children}</div>
 }
+
+// ── Designing this family for 4:5 and 9:16 ───────────────────────────────────
+// All nineteen are the same three parts: a masthead, a body of rows or cards,
+// and the sponsor strip. Reflowed, the body absorbs the WHOLE of the extra
+// height — which is right for the rows and wrong for everything else: the
+// masthead ends up a tenth of a story post and the sponsor strip a hairline
+// along the bottom, so the design reads as a square with a stretched middle.
+//
+// `roundScale` is the vocabulary each template designs against. The masthead
+// and the footer take a fraction of the extra height rather than all or none of
+// it, and the row type steps up so a fixture in a 200px slot is not set at the
+// size it was in a 60px one. Every multiplier is 1 and every `grow` is exact at
+// 1080, so the square output is byte-for-byte what it was.
+function roundScale(width, height) {
+  const A = aspectOf(width, height)
+  return {
+    A,
+    // Where the body starts, from the header height the square was drawn with.
+    head: (at1080) => grow(height, at1080, 0.16),
+    // What the body leaves clear for the sponsor strip.
+    foot: grow(height, 150, 0.18),
+    // Row and figure type.
+    row: pick(A, { square: 1, portrait: 1.12, story: 1.3 }),
+    big: pick(A, { square: 1, portrait: 1.16, story: 1.4 }),
+  }
+}
+// Round a scaled type size — every call site is `sz(N)`, so a template reads as
+// the square sizes it was designed at rather than a column of arithmetic.
+const sz = (mult) => (n) => Math.round(n * mult)
+
+// A block the square top-anchors at its NATURAL height, which a taller canvas
+// stretches and centres instead. Gated, and that gate is load-bearing: giving a
+// 300px medallion a 420px box and centring it moves it down 60px, and pinning a
+// block that sat at `top: 700` to `bottom: 240` only lands in the same place if
+// its height happens to be exactly 140. Both are a changed square, however well
+// they read on a story — measured by shooting all 48 squares on both builds and
+// comparing byte for byte, which is what found this.
+const anchor = (A, sq, tall) => (A === 'square' ? sq : tall)
 
 // The one shell every roundup template is drawn in, and so the one place the
 // post's real size lands. Each of these layouts is a top-anchored header, a
@@ -149,6 +196,8 @@ function headLine(r, withVenue = false) {
 // ═══════════════════════════════ FIXTURES ROUNDUP ═══════════════════════════
 
 export function FixtureList({ palette: pal, width = 1080, height = 1080, meta = {}, fixtures = [], club = {}, sponsors }) {
+  const S = roundScale(width, height)
+  const t = sz(S.row)
   const rows = fixtures
   return (
     <Post palette={pal} w={width} h={height}>
@@ -168,33 +217,33 @@ export function FixtureList({ palette: pal, width = 1080, height = 1080, meta = 
           <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={112} />
         </div>
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: 196, bottom: 150, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(196), bottom: S.foot, display: 'flex', flexDirection: 'column' }}>
         {rows.map((r, i) => {
           const home = r.ha === 'H'
           return (
             <div key={i} style={{ flex: 1, display: 'grid', gridTemplateColumns: '162px minmax(0,1fr) 206px', alignItems: 'center', gap: 18, borderBottom: i < rows.length - 1 ? `1px solid ${pal.ink}1a` : 'none' }}>
               <div>
                 <div style={{ width: 30, height: 4, background: pal.accent, marginBottom: 8 }} />
-                <div style={{ fontFamily: DISPLAY, fontSize: 30, letterSpacing: 0.5, lineHeight: 0.95 }}>{r.grade}</div>
+                <div style={{ fontFamily: DISPLAY, fontSize: t(30), letterSpacing: 0.5, lineHeight: 0.95 }}>{r.grade}</div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0 }}>
                 <span style={{ fontFamily: DISPLAY, fontSize: 20, letterSpacing: 2, color: home ? pal.accent : pal.ink, opacity: home ? 1 : 0.55, width: 40, flexShrink: 0 }}>{home ? 'VS' : '@'}</span>
                 <Monogram text={r.oppMono} logo={r.oppLogo} size={50} fg={pal.ink} bg={`${pal.ink}12`} ring={`${pal.ink}33`} />
                 <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontFamily: DISPLAY, fontSize: 31, letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.opp}</div>
+                  <div style={{ fontFamily: DISPLAY, fontSize: t(31), letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.opp}</div>
                   <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1.5, color: pal.ink, opacity: 0.55, marginTop: 4 }}>{home ? 'HOME' : 'AWAY'}</div>
                 </div>
               </div>
               <div style={{ textAlign: 'right' }}>
-                <div style={{ fontFamily: DISPLAY, fontSize: 27, letterSpacing: 1, lineHeight: 1, color: pal.accent, whiteSpace: 'nowrap' }}>{r.time}</div>
+                <div style={{ fontFamily: DISPLAY, fontSize: t(27), letterSpacing: 1, lineHeight: 1, color: pal.accent, whiteSpace: 'nowrap' }}>{r.time}</div>
                 <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 1.5, color: pal.ink, opacity: 0.7, marginTop: 5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.venue}</div>
               </div>
             </div>
           )
         })}
       </div>
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '22px 56px', background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
-        <SponsorFooter palette={pal} sponsors={sponsors} />
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: `${grow(height, 22, 0.09)}px 56px`, background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
+        <SponsorFooter palette={pal} sponsors={sponsors} h={height} />
       </div>
       <Grain opacity={0.3} id="fl-g" />
     </Post>
@@ -202,16 +251,19 @@ export function FixtureList({ palette: pal, width = 1080, height = 1080, meta = 
 }
 
 export function FixtureHype({ palette: pal, width = 1080, height = 1080, meta = {}, fixtures = [], club = {}, sponsors }) {
+  const S = roundScale(width, height)
+  const t = sz(S.row)
+  const b = sz(S.big)
   const rows = fixtures
   const roundNum = (meta.round || '').replace(/[^0-9]/g, '') || '9'
   return (
     <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.07} size={10} />
-      <div style={{ position: 'absolute', right: -90, top: 150, fontFamily: DISPLAY, fontSize: 900, lineHeight: 0.7, color: pal.accent, opacity: 0.1, letterSpacing: -20, userSelect: 'none' }}>{roundNum}</div>
+      <div style={{ position: 'absolute', right: -90, top: share(height, 150), fontFamily: DISPLAY, fontSize: share(height, 900), lineHeight: 0.7, color: pal.accent, opacity: 0.1, letterSpacing: -20, userSelect: 'none' }}>{roundNum}</div>
       <div style={{ position: 'absolute', left: -200, width: 1600, top: 30, height: 268, background: pal.accent, transform: 'rotate(-5deg)', transformOrigin: 'top left' }} />
       <div style={{ position: 'absolute', left: 56, top: 82, zIndex: 3 }}>
         <div style={{ fontFamily: MONO, fontSize: 15, letterSpacing: 3, color: pal.primary, fontWeight: 700 }}>{`// ${meta.round} · ${meta.comp}`}</div>
-        <div style={{ fontFamily: DISPLAY, fontSize: 96, lineHeight: 0.86, letterSpacing: -1, color: pal.primary, marginTop: 6 }}>THIS<br />SATURDAY</div>
+        <div style={{ fontFamily: DISPLAY, fontSize: b(96), lineHeight: 0.86, letterSpacing: -1, color: pal.primary, marginTop: 6 }}>THIS<br />SATURDAY</div>
       </div>
       <div style={{ position: 'absolute', right: 56, top: 64, zIndex: 3, display: 'flex', alignItems: 'center', gap: 16 }}>
         <div style={{ textAlign: 'right' }}>
@@ -220,16 +272,16 @@ export function FixtureHype({ palette: pal, width = 1080, height = 1080, meta = 
         </div>
         <Shield logo={club.logo} monogram={club.mono} color={pal.primary} size={130} />
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: 360, bottom: 150, display: 'flex', flexDirection: 'column', gap: 0 }}>
+      <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(360), bottom: S.foot, display: 'flex', flexDirection: 'column', gap: 0 }}>
         {rows.map((r, i) => {
           const home = r.ha === 'H'
           return (
             <div key={i} style={{ flex: 1, display: 'grid', gridTemplateColumns: '52px 150px minmax(0,1fr) 184px', alignItems: 'center', gap: 20, padding: '0 6px', borderTop: `2px solid ${pal.ink}22` }}>
               <div style={{ fontFamily: MONO, fontSize: 22, letterSpacing: 1, color: pal.accent }}>{String(i + 1).padStart(2, '0')}</div>
-              <div style={{ fontFamily: DISPLAY, fontSize: 30, letterSpacing: 0.5, lineHeight: 0.95 }}>{r.grade}</div>
+              <div style={{ fontFamily: DISPLAY, fontSize: t(30), letterSpacing: 0.5, lineHeight: 0.95 }}>{r.grade}</div>
               <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 14 }}>
                 <span style={{ fontFamily: DISPLAY, fontSize: 22, letterSpacing: 1, color: home ? pal.accent : pal.ink, opacity: home ? 1 : 0.5, flexShrink: 0 }}>{home ? 'V' : '@'}</span>
-                <div style={{ flex: 1, minWidth: 0, fontFamily: DISPLAY, fontSize: 38, letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.opp}</div>
+                <div style={{ flex: 1, minWidth: 0, fontFamily: DISPLAY, fontSize: t(38), letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.opp}</div>
               </div>
               <div style={{ textAlign: 'right' }}>
                 <div style={{ fontFamily: DISPLAY, fontSize: 26, color: pal.ink, lineHeight: 1, whiteSpace: 'nowrap' }}>{r.time}</div>
@@ -241,7 +293,7 @@ export function FixtureHype({ palette: pal, width = 1080, height = 1080, meta = 
       </div>
       <div style={{ position: 'absolute', left: -200, bottom: -28, width: 1600, height: 150, background: pal.secondary, transform: 'rotate(-2deg)', transformOrigin: 'bottom left' }} />
       <div style={{ position: 'absolute', left: 56, right: 56, bottom: 30, zIndex: 3 }}>
-        <SponsorFooter palette={pal} sponsors={sponsors} />
+        <SponsorFooter palette={pal} sponsors={sponsors} h={height} />
       </div>
       <Grain opacity={0.32} id="fh-g" />
     </Post>
@@ -249,6 +301,9 @@ export function FixtureHype({ palette: pal, width = 1080, height = 1080, meta = 
 }
 
 export function FixtureGrid({ palette: pal, width = 1080, height = 1080, meta = {}, fixtures = [], club = {}, sponsors }) {
+  const S = roundScale(width, height)
+  const t = sz(S.row)
+  const b = sz(S.big)
   const rows = fixtures
   return (
     <Post palette={pal} w={width} h={height}>
@@ -256,7 +311,7 @@ export function FixtureGrid({ palette: pal, width = 1080, height = 1080, meta = 
       <Stripes color={pal.accent} opacity={0.03} gap={30} angle={-18} />
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '44px 56px 26px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <div style={{ fontFamily: DISPLAY, fontSize: 76, letterSpacing: -1, lineHeight: 0.9 }}>FIXTURES</div>
+          <div style={{ fontFamily: DISPLAY, fontSize: b(76), letterSpacing: -1, lineHeight: 0.9 }}>FIXTURES</div>
           <Kicker color={pal.accent} size={15} style={{ marginTop: 8 }}>{`// ${meta.round} · ${meta.comp}`}</Kicker>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
@@ -267,20 +322,20 @@ export function FixtureGrid({ palette: pal, width = 1080, height = 1080, meta = 
           <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={100} />
         </div>
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: 188, bottom: 142, display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr 1fr', gap: 18 }}>
+      <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(188), bottom: grow(height, 142, 0.18), display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr 1fr', gap: 18 }}>
         {rows.slice(0, 6).map((r, i) => {
           const home = r.ha === 'H'
           return (
             <div key={i} style={{ position: 'relative', background: pal.secondary, borderTop: `3px solid ${pal.accent}`, padding: '20px 24px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', overflow: 'hidden' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ fontFamily: DISPLAY, fontSize: 30, letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap' }}>{r.grade}</div>
+                <div style={{ fontFamily: DISPLAY, fontSize: t(30), letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap' }}>{r.grade}</div>
                 <span style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1.5, padding: '4px 9px', borderRadius: 3, background: home ? pal.accent : `${pal.ink}1a`, color: home ? pal.primary : pal.ink, fontWeight: 700, flexShrink: 0 }}>{home ? 'HOME' : 'AWAY'}</span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
                 <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={46} />
                 <span style={{ fontFamily: DISPLAY, fontSize: 22, color: pal.accent, opacity: 0.9 }}>v</span>
                 <Monogram text={r.oppMono} logo={r.oppLogo} size={46} fg={pal.ink} bg={`${pal.ink}14`} ring={`${pal.ink}33`} />
-                <div style={{ fontFamily: DISPLAY, fontSize: 28, letterSpacing: 0.5, lineHeight: 0.95, minWidth: 0, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.opp}</div>
+                <div style={{ fontFamily: DISPLAY, fontSize: t(28), letterSpacing: 0.5, lineHeight: 0.95, minWidth: 0, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.opp}</div>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', borderTop: `1px solid ${pal.ink}1a`, paddingTop: 12 }}>
                 <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 1.2, color: pal.ink, opacity: 0.7 }}>{r.venue}</div>
@@ -290,8 +345,8 @@ export function FixtureGrid({ palette: pal, width = 1080, height = 1080, meta = 
           )
         })}
       </div>
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '20px 56px', background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
-        <SponsorFooter palette={pal} sponsors={sponsors} />
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: `${grow(height, 20, 0.09)}px 56px`, background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
+        <SponsorFooter palette={pal} sponsors={sponsors} h={height} />
       </div>
       <Grain opacity={0.3} id="fg-g" />
     </Post>
@@ -299,6 +354,8 @@ export function FixtureGrid({ palette: pal, width = 1080, height = 1080, meta = 
 }
 
 export function FixtureBoard({ palette: pal, width = 1080, height = 1080, meta = {}, fixtures = [], club = {}, sponsors }) {
+  const S = roundScale(width, height)
+  const t = sz(S.row)
   const rows = fixtures
   const cols = '150px minmax(0,1fr) 122px 184px'
   return (
@@ -311,20 +368,20 @@ export function FixtureBoard({ palette: pal, width = 1080, height = 1080, meta =
         </div>
         <BrandLockup team={{ name: club.full || club.name, fullName: club.full, monogram: club.mono, logo: club.logo }} palette={pal} size={110} layout="row" align="right" nameSize={34} />
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: 196, display: 'grid', gridTemplateColumns: cols, gap: 18, padding: '0 14px 10px', borderBottom: `1px solid ${pal.ink}22` }}>
+      <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(196), display: 'grid', gridTemplateColumns: cols, gap: 18, padding: '0 14px 10px', borderBottom: `1px solid ${pal.ink}22` }}>
         {['GRADE', 'MATCH', 'TIME', 'GROUND'].map((h, i) => (
           <div key={i} style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1.8, color: pal.ink, opacity: 0.5, textAlign: i >= 2 ? 'right' : 'left' }}>{h}</div>
         ))}
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: 242, bottom: 150, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(242), bottom: S.foot, display: 'flex', flexDirection: 'column' }}>
         {rows.map((r, i) => {
           const home = r.ha === 'H'
           return (
             <div key={i} style={{ flex: 1, display: 'grid', gridTemplateColumns: cols, gap: 18, alignItems: 'center', padding: '0 14px', background: i % 2 ? `${pal.ink}08` : 'transparent' }}>
-              <div style={{ fontFamily: DISPLAY, fontSize: 26, letterSpacing: 0.5, lineHeight: 0.92 }}>{r.grade}</div>
+              <div style={{ fontFamily: DISPLAY, fontSize: t(26), letterSpacing: 0.5, lineHeight: 0.92 }}>{r.grade}</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
                 <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1, color: home ? pal.accent : pal.ink, opacity: home ? 1 : 0.5, flexShrink: 0, width: 22 }}>{home ? 'VS' : '@'}</span>
-                <span style={{ fontFamily: DISPLAY, fontSize: 28, letterSpacing: 0.5, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.opp}</span>
+                <span style={{ fontFamily: DISPLAY, fontSize: t(28), letterSpacing: 0.5, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.opp}</span>
                 <span style={{ fontFamily: MONO, fontSize: 10, letterSpacing: 1.2, padding: '2px 7px', borderRadius: 3, border: `1px solid ${pal.ink}30`, color: pal.ink, opacity: 0.6, flexShrink: 0 }}>{home ? 'HOME' : 'AWAY'}</span>
               </div>
               <div style={{ fontFamily: MONO, fontSize: 20, fontWeight: 700, letterSpacing: 0.5, color: pal.accent, textAlign: 'right', whiteSpace: 'nowrap' }}>{r.time}</div>
@@ -333,8 +390,8 @@ export function FixtureBoard({ palette: pal, width = 1080, height = 1080, meta =
           )
         })}
       </div>
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '22px 56px', background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
-        <SponsorFooter palette={pal} sponsors={sponsors} />
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: `${grow(height, 22, 0.09)}px 56px`, background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
+        <SponsorFooter palette={pal} sponsors={sponsors} h={height} />
       </div>
       <Grain opacity={0.3} id="fb-g" />
     </Post>
@@ -342,6 +399,9 @@ export function FixtureBoard({ palette: pal, width = 1080, height = 1080, meta =
 }
 
 export function FixtureHeadline({ palette: pal, width = 1080, height = 1080, meta = {}, fixtures = [], club = {}, sponsors }) {
+  const S = roundScale(width, height)
+  const t = sz(S.row)
+  const b = sz(S.big)
   const rows = fixtures
   const feat = rows[0] || { grade: '', opp: '', oppMono: '', ha: 'H', time: '', venue: '' }
   const rest = rows.slice(1)
@@ -357,14 +417,14 @@ export function FixtureHeadline({ palette: pal, width = 1080, height = 1080, met
         </div>
         <BrandLockup team={{ name: club.full || club.name, fullName: club.full, monogram: club.mono, logo: club.logo }} palette={pal} size={104} layout="row" align="right" nameSize={32} />
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: 198, height: 426, background: pal.secondary, borderTop: `3px solid ${pal.accent}`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(198), height: S.head(652) - S.head(198) - 28, background: pal.secondary, borderTop: `3px solid ${pal.accent}`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
         <Kicker color={pal.accent} size={13} style={{ marginBottom: 22 }}>{`// FEATURE MATCH · ${feat.grade}`}</Kicker>
         <div style={{ display: 'flex', alignItems: 'center', gap: 44 }}>
           <div style={{ textAlign: 'center', width: 280 }}>
             <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={150} />
             <div style={{ fontFamily: DISPLAY, fontSize: 30, letterSpacing: 0.5, marginTop: 12 }}>{club.name}</div>
           </div>
-          <div style={{ fontFamily: DISPLAY, fontSize: 60, color: pal.accent, letterSpacing: 1 }}>VS</div>
+          <div style={{ fontFamily: DISPLAY, fontSize: b(60), color: pal.accent, letterSpacing: 1 }}>VS</div>
           <div style={{ textAlign: 'center', width: 280 }}>
             <Shield logo={feat.oppLogo} monogram={feat.oppMono} color={pal.ink} size={150} />
             <AutoFit max={30} min={16} style={{ fontFamily: DISPLAY, letterSpacing: 0.5, marginTop: 12, textAlign: 'center' }} deps={[feat.opp]}>{feat.opp}</AutoFit>
@@ -374,24 +434,24 @@ export function FixtureHeadline({ palette: pal, width = 1080, height = 1080, met
           <span style={{ color: pal.accent, fontWeight: 700 }}>{feat.time}</span><span style={{ opacity: 0.4 }}>·</span><span>{feat.venue}</span><span style={{ opacity: 0.4 }}>·</span><span>{fHome ? 'HOME' : 'AWAY'}</span>
         </div>
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: 652, bottom: 150 }}>
+      <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(652), bottom: S.foot }}>
         <Kicker color={pal.ink} size={12} style={{ opacity: 0.55, marginBottom: 12 }}>{`// ALSO ON ${meta.date}`}</Kicker>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 34px' }}>
           {rest.map((r, i) => {
             const home = r.ha === 'H'
             return (
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '7px 0', borderBottom: `1px solid ${pal.ink}14` }}>
-                <span style={{ fontFamily: DISPLAY, fontSize: 19, width: 104, flexShrink: 0, lineHeight: 1 }}>{r.grade}</span>
+                <span style={{ fontFamily: DISPLAY, fontSize: t(19), width: 104, flexShrink: 0, lineHeight: 1 }}>{r.grade}</span>
                 <span style={{ fontFamily: MONO, fontSize: 11, color: home ? pal.accent : pal.ink, opacity: home ? 1 : 0.5, flexShrink: 0 }}>{home ? 'v' : '@'}</span>
-                <span style={{ fontFamily: DISPLAY, fontSize: 20, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.opp}</span>
+                <span style={{ fontFamily: DISPLAY, fontSize: t(20), flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.opp}</span>
                 <span style={{ fontFamily: MONO, fontSize: 12, color: pal.accent, flexShrink: 0 }}>{r.time}</span>
               </div>
             )
           })}
         </div>
       </div>
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '20px 56px', background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
-        <SponsorFooter palette={pal} sponsors={sponsors} />
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: `${grow(height, 20, 0.09)}px 56px`, background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
+        <SponsorFooter palette={pal} sponsors={sponsors} h={height} />
       </div>
       <Grain opacity={0.3} id="fhd-g" />
     </Post>
@@ -399,6 +459,8 @@ export function FixtureHeadline({ palette: pal, width = 1080, height = 1080, met
 }
 
 export function FixtureSchedule({ palette: pal, width = 1080, height = 1080, meta = {}, fixtures = [], club = {}, sponsors }) {
+  const S = roundScale(width, height)
+  const t = sz(S.row)
   const toMin = (t) => {
     const m = String(t || '').trim().match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i)
     if (!m) return 9999
@@ -417,19 +479,19 @@ export function FixtureSchedule({ palette: pal, width = 1080, height = 1080, met
         </div>
         <BrandLockup team={{ name: club.full || club.name, fullName: club.full, monogram: club.mono, logo: club.logo }} palette={pal} size={110} layout="row" align="right" nameSize={34} />
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: 206, bottom: 150 }}>
+      <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(206), bottom: S.foot }}>
         <div style={{ position: 'absolute', left: 158, top: 12, bottom: 12, width: 2, background: `${pal.ink}22` }} />
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           {rows.map((r, i) => {
             const home = r.ha === 'H'
             return (
               <div key={i} style={{ flex: 1, display: 'flex', alignItems: 'center', position: 'relative' }}>
-                <div style={{ width: 150, textAlign: 'right', paddingRight: 26, fontFamily: DISPLAY, fontSize: 32, color: pal.accent, lineHeight: 1, flexShrink: 0 }}>{String(r.time || '').replace(' ', '')}</div>
+                <div style={{ width: 150, textAlign: 'right', paddingRight: 26, fontFamily: DISPLAY, fontSize: t(32), color: pal.accent, lineHeight: 1, flexShrink: 0 }}>{String(r.time || '').replace(' ', '')}</div>
                 <div style={{ width: 16, height: 16, borderRadius: '50%', background: pal.accent, border: `3px solid ${pal.primary}`, zIndex: 2, flexShrink: 0 }} />
                 <div style={{ flex: 1, minWidth: 0, paddingLeft: 26, display: 'flex', alignItems: 'center', gap: 14 }}>
                   <span style={{ fontFamily: DISPLAY, fontSize: 26, width: 116, flexShrink: 0, lineHeight: 0.95 }}>{r.grade}</span>
                   <span style={{ fontFamily: MONO, fontSize: 13, color: home ? pal.accent : pal.ink, opacity: home ? 1 : 0.5, flexShrink: 0, width: 24 }}>{home ? 'VS' : '@'}</span>
-                  <span style={{ fontFamily: DISPLAY, fontSize: 30, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.opp}</span>
+                  <span style={{ fontFamily: DISPLAY, fontSize: t(30), flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.opp}</span>
                   <span style={{ fontFamily: MONO, fontSize: 12, color: pal.ink, opacity: 0.6, flexShrink: 0, whiteSpace: 'nowrap' }}>{r.venue} · {home ? 'H' : 'A'}</span>
                 </div>
               </div>
@@ -437,8 +499,8 @@ export function FixtureSchedule({ palette: pal, width = 1080, height = 1080, met
           })}
         </div>
       </div>
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '22px 56px', background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
-        <SponsorFooter palette={pal} sponsors={sponsors} />
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: `${grow(height, 22, 0.09)}px 56px`, background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
+        <SponsorFooter palette={pal} sponsors={sponsors} h={height} />
       </div>
       <Grain opacity={0.3} id="fsch-g" />
     </Post>
@@ -448,13 +510,15 @@ export function FixtureSchedule({ palette: pal, width = 1080, height = 1080, met
 // ════════════════════════════════ SINGLE RESULT ═════════════════════════════
 
 export function ResultMarginHero({ palette: pal, width = 1080, height = 1080, result: r, sponsors }) {
+  const S = roundScale(width, height)
+  const b = sz(S.big)
   const { won, winnerName, tied } = outcomeBits(r)
   const bigWord = tied ? 'TIE' : 'WIN'
   return (
     <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.06} size={11} />
       <Stripes color={pal.accent} opacity={0.04} gap={28} angle={-20} />
-      <div style={{ position: 'absolute', left: -60, bottom: -40, fontFamily: DISPLAY, fontSize: 760, lineHeight: 0.72, color: pal.accent, opacity: 0.08, letterSpacing: -20, userSelect: 'none' }}>{won ? 'W' : tied ? 'T' : 'L'}</div>
+      <div style={{ position: 'absolute', left: -60, bottom: -40, fontFamily: DISPLAY, fontSize: share(height, 760), lineHeight: 0.72, color: pal.accent, opacity: 0.08, letterSpacing: -20, userSelect: 'none' }}>{won ? 'W' : tied ? 'T' : 'L'}</div>
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '46px 56px 28px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: `3px solid ${pal.accent}` }}>
         <div>
           <Slab bg={pal.accent} fg={pal.primary} size={26} style={{ padding: '8px 16px' }}>FULL TIME</Slab>
@@ -462,12 +526,12 @@ export function ResultMarginHero({ palette: pal, width = 1080, height = 1080, re
         </div>
         <BrandLockup team={{ name: r.us.name, fullName: r.us.name, monogram: r.us.mono, logo: r.us.logo }} palette={pal} size={124} layout="row" align="right" nameSize={32} />
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: 280 }}>
-        <div style={{ fontFamily: DISPLAY, fontSize: 60, letterSpacing: 2, color: pal.ink, opacity: 0.55, lineHeight: 1 }}>{winnerName}</div>
-        <AutoFit max={260} min={120} style={{ fontFamily: DISPLAY, color: pal.ink, letterSpacing: -4, lineHeight: 0.82, marginTop: 2 }} deps={[bigWord]}>{bigWord}</AutoFit>
-        <div style={{ fontFamily: DISPLAY, fontSize: 92, letterSpacing: 1, color: pal.accent, lineHeight: 1, marginTop: 4 }}>{r.margin}</div>
+      <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(280), ...anchor(S.A, null, { bottom: grow(height, 240, 0.18) + 180, justifyContent: 'center' }), display: 'flex', flexDirection: 'column' }}>
+        <div style={{ fontFamily: DISPLAY, fontSize: b(60), letterSpacing: 2, color: pal.ink, opacity: 0.55, lineHeight: 1 }}>{winnerName}</div>
+        <AutoFit max={b(260)} min={120} style={{ fontFamily: DISPLAY, color: pal.ink, letterSpacing: -4, lineHeight: 0.82, marginTop: 2 }} deps={[bigWord]}>{bigWord}</AutoFit>
+        <div style={{ fontFamily: DISPLAY, fontSize: b(92), letterSpacing: 1, color: pal.accent, lineHeight: 1, marginTop: 4 }}>{r.margin}</div>
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: 700, display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', gap: 22 }}>
+      <div style={{ position: 'absolute', left: 56, right: 56, ...anchor(S.A, { top: 700 }, { bottom: grow(height, 240, 0.18) }), display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', gap: 22 }}>
         <div style={{ padding: '18px 22px', background: won ? `${pal.accent}1f` : `${pal.ink}0c`, border: `2px solid ${won ? pal.accent : pal.ink + '22'}`, display: 'flex', alignItems: 'center', gap: 16 }}>
           <Monogram text={r.us.mono} logo={r.us.logo} size={56} fg={pal.ink} bg={`${pal.ink}14`} ring={`${pal.ink}33`} />
           <div>
@@ -485,7 +549,7 @@ export function ResultMarginHero({ palette: pal, width = 1080, height = 1080, re
         </div>
       </div>
       {(r.potm.first || r.potm.last) && (
-        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 92, padding: '0 56px' }}>
+        <div style={{ position: 'absolute', left: 0, right: 0, bottom: grow(height, 92, 0.18), padding: '0 56px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '14px 20px', background: pal.secondary, borderLeft: `4px solid ${pal.accent}` }}>
             <span style={{ fontFamily: DISPLAY, fontSize: 16, letterSpacing: 2, color: pal.accent, whiteSpace: 'nowrap', flexShrink: 0 }}>★ POTM</span>
             <span style={{ fontFamily: DISPLAY, fontSize: 28, letterSpacing: 0.5, whiteSpace: 'nowrap', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.potm.first} {r.potm.last}</span>
@@ -493,8 +557,8 @@ export function ResultMarginHero({ palette: pal, width = 1080, height = 1080, re
           </div>
         </div>
       )}
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '18px 56px', background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
-        <SponsorFooter palette={pal} sponsors={sponsors} />
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: `${grow(height, 18, 0.09)}px 56px`, background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
+        <SponsorFooter palette={pal} sponsors={sponsors} h={height} />
       </div>
       <Grain opacity={0.3} id="rmh-g" />
     </Post>
@@ -502,20 +566,25 @@ export function ResultMarginHero({ palette: pal, width = 1080, height = 1080, re
 }
 
 export function ResultBroadcast({ palette: pal, width = 1080, height = 1080, result: r, sponsors }) {
+  const S = roundScale(width, height)
+  const b = sz(S.big)
   const { won, tied, line } = outcomeBits(r)
   // RS2 feedback: the top performers were clipping at the bottom. The whole body
   // is now a single flex column (header→footer) so the team rows shrink and the
   // performers grow to fill — they can never run off the bottom regardless of how
   // many rows come back, and the performers are enlarged to be the focus.
+  // `t` is the team in TeamRow, so the two scaled sizes are resolved first.
+  const rowName = b(38)
+  const rowScore = b(58)
   const TeamRow = ({ t, isWinner }) => (
     <div style={{ display: 'flex', alignItems: 'center', gap: 20, padding: '15px 24px', background: isWinner ? `${pal.accent}1a` : `${pal.ink}08`, borderLeft: `6px solid ${isWinner ? pal.accent : pal.ink + '22'}` }}>
       <Monogram text={t.mono} logo={t.logo} size={60} fg={pal.ink} bg={`${pal.ink}14`} ring={`${pal.ink}40`} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontFamily: DISPLAY, fontSize: 38, letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</div>
+        <div style={{ fontFamily: DISPLAY, fontSize: rowName, letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</div>
         <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 1.5, color: pal.ink, opacity: 0.6, marginTop: 5 }}>{t.overs} OVERS</div>
       </div>
       {isWinner && <span style={{ fontFamily: DISPLAY, fontSize: 15, letterSpacing: 2, color: pal.primary, background: pal.accent, padding: '4px 11px' }}>WON</span>}
-      <div style={{ fontFamily: DISPLAY, fontSize: 58, letterSpacing: -1, lineHeight: 1 }}>{t.score}</div>
+      <div style={{ fontFamily: DISPLAY, fontSize: rowScore, letterSpacing: -1, lineHeight: 1 }}>{t.score}</div>
     </div>
   )
   const Col = ({ title, items, accent }) => (
@@ -529,12 +598,18 @@ export function ResultBroadcast({ palette: pal, width = 1080, height = 1080, res
       ))}
     </div>
   )
+  const tall = S.A !== 'square'
   const Performers = ({ mono, color, lineColor, bat, bowl }) => (
-    <div style={{ flex: 1, minWidth: 0 }}>
-      <div style={{ fontFamily: DISPLAY, fontSize: 25, letterSpacing: 2, color, marginBottom: 12 }}>{mono} · TOP PERFORMERS</div>
-      <Col title="BATTING" items={bat} accent={lineColor} />
-      <div style={{ height: 14 }} />
-      <Col title="BOWLING" items={bowl} accent={lineColor} />
+    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ fontFamily: DISPLAY, fontSize: b(25), letterSpacing: 2, color, marginBottom: 12, flexShrink: 0 }}>{mono} · TOP PERFORMERS</div>
+      {/* Pushed apart to fill the panel on a taller post. At square the two
+          columns keep their original fixed 14px gap — stretching them there
+          lets the box shrink past its own content and the BOWLING heading
+          disappears altogether. */}
+      <div style={{ ...(tall ? { flex: 1, minHeight: 0, justifyContent: 'space-between' } : null), display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <Col title="BATTING" items={bat} accent={lineColor} />
+        <Col title="BOWLING" items={bowl} accent={lineColor} />
+      </div>
     </div>
   )
   return (
@@ -554,7 +629,7 @@ export function ResultBroadcast({ palette: pal, width = 1080, height = 1080, res
           <Shield logo={r.us.logo} monogram={r.us.mono} color={pal.ink} size={96} />
         </div>
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: 172, bottom: 96, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(172), bottom: grow(height, 96, 0.18), display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 9, flexShrink: 0 }}>
           <TeamRow t={r.us} isWinner={won} />
           <div style={{ textAlign: 'center', fontFamily: DISPLAY, fontSize: 24, letterSpacing: 3, color: pal.accent }}>{line}</div>
@@ -572,8 +647,8 @@ export function ResultBroadcast({ palette: pal, width = 1080, height = 1080, res
           </div>
         )}
       </div>
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '18px 56px', background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
-        <SponsorFooter palette={pal} sponsors={sponsors} />
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: `${grow(height, 18, 0.09)}px 56px`, background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
+        <SponsorFooter palette={pal} sponsors={sponsors} h={height} />
       </div>
       <Grain opacity={0.3} id="rb-g" />
     </Post>
@@ -581,13 +656,18 @@ export function ResultBroadcast({ palette: pal, width = 1080, height = 1080, res
 }
 
 export function ResultVersusColumns({ palette: pal, width = 1080, height = 1080, result: r, sponsors }) {
+  const S = roundScale(width, height)
+  const b = sz(S.big)
   const { won, tied, line } = outcomeBits(r)
+  // `t` is the team inside Column, so the scaled size is resolved out here
+  // rather than shadowed by the parameter.
+  const bigF = b(96)
   const Column = ({ t, isWinner }) => (
     <div style={{ flex: 1, position: 'relative', background: isWinner ? `${pal.accent}16` : 'transparent', border: `2px solid ${isWinner ? pal.accent : pal.ink + '1f'}`, padding: '28px 26px', display: 'flex', flexDirection: 'column' }}>
       {isWinner && <div style={{ position: 'absolute', top: -15, left: 26, padding: '4px 12px', background: pal.accent, color: pal.primary, fontFamily: DISPLAY, fontSize: 15, letterSpacing: 2 }}>WINNER</div>}
       <Shield logo={t.logo} monogram={t.mono} color={pal.ink} size={76} />
       <div style={{ fontFamily: DISPLAY, fontSize: 30, letterSpacing: 0.5, lineHeight: 1, marginTop: 16, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</div>
-      <div style={{ fontFamily: DISPLAY, fontSize: 96, letterSpacing: -2, lineHeight: 0.95, marginTop: 6 }}>{t.score}</div>
+      <div style={{ fontFamily: DISPLAY, fontSize: bigF, letterSpacing: -2, lineHeight: 0.95, marginTop: 6 }}>{t.score}</div>
       <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1.5, color: pal.ink, opacity: 0.6 }}>{t.overs} OVERS</div>
       <div style={{ marginTop: 22, paddingTop: 16, borderTop: `1px solid ${pal.ink}22` }}>
         <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1.8, color: pal.accent, marginBottom: 8 }}>TOP BAT · TOP BOWL</div>
@@ -611,16 +691,16 @@ export function ResultVersusColumns({ palette: pal, width = 1080, height = 1080,
         </div>
         <BrandLockup team={{ name: r.us.name, fullName: r.us.name, monogram: r.us.mono, logo: r.us.logo }} palette={pal} size={116} layout="row" align="right" nameSize={30} />
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: 224, bottom: 268, display: 'flex', alignItems: 'stretch', gap: 0 }}>
+      <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(224), bottom: grow(height, 268, 0.18), display: 'flex', alignItems: 'stretch', gap: 0 }}>
         <Column t={{ ...r.us, bat: r.topBat.us, bowl: r.topBowl.us }} isWinner={won} />
         <div style={{ width: 90, display: 'grid', placeItems: 'center' }}>
           <div style={{ fontFamily: DISPLAY, fontSize: 56, letterSpacing: 1, color: pal.accent }}>VS</div>
         </div>
         <Column t={{ ...r.them, bat: r.topBat.them, bowl: r.topBowl.them }} isWinner={!won && !tied} />
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, bottom: 168, padding: '18px 26px 22px', background: pal.secondary, borderLeft: `4px solid ${pal.accent}`, textAlign: 'center' }}>
+      <div style={{ position: 'absolute', left: 56, right: 56, bottom: grow(height, 168, 0.18), padding: '18px 26px 22px', background: pal.secondary, borderLeft: `4px solid ${pal.accent}`, textAlign: 'center' }}>
         <Kicker color={pal.accent} size={12} style={{ marginBottom: 8 }}>{`// MATCH RESULT`}</Kicker>
-        <div style={{ fontFamily: DISPLAY, fontSize: 44, letterSpacing: 0, lineHeight: 1.02 }}>{line}</div>
+        <div style={{ fontFamily: DISPLAY, fontSize: b(44), letterSpacing: 0, lineHeight: 1.02 }}>{line}</div>
         {(r.potm.first || r.potm.last) && (
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 14, marginTop: 14, padding: '10px 20px', background: `${pal.ink}10`, border: `1.5px solid ${pal.accent}` }}>
             <span style={{ fontFamily: DISPLAY, fontSize: 20, letterSpacing: 2, color: pal.accent, whiteSpace: 'nowrap' }}>★ POTM</span>
@@ -629,8 +709,8 @@ export function ResultVersusColumns({ palette: pal, width = 1080, height = 1080,
           </div>
         )}
       </div>
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '18px 56px', background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
-        <SponsorFooter palette={pal} sponsors={sponsors} />
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: `${grow(height, 18, 0.09)}px 56px`, background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
+        <SponsorFooter palette={pal} sponsors={sponsors} h={height} />
       </div>
       <Grain opacity={0.3} id="rvc-g" />
     </Post>
@@ -638,6 +718,8 @@ export function ResultVersusColumns({ palette: pal, width = 1080, height = 1080,
 }
 
 export function ResultStar({ palette: pal, width = 1080, height = 1080, result: r, sponsors }) {
+  const S = roundScale(width, height)
+  const b = sz(S.big)
   const p = r.potm
   const { winnerName, tied, line } = outcomeBits(r)
   const initials = (p.first[0] || '') + (p.last[0] || '')
@@ -645,7 +727,7 @@ export function ResultStar({ palette: pal, width = 1080, height = 1080, result: 
     <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.06} size={11} />
       <Stripes color={pal.accent} opacity={0.04} gap={28} angle={-22} />
-      <div style={{ position: 'absolute', left: -30, bottom: 110, fontFamily: DISPLAY, fontSize: 360, lineHeight: 0.8, color: pal.ink, opacity: 0.05, letterSpacing: -8, userSelect: 'none', whiteSpace: 'nowrap' }}>{p.last}</div>
+      <div style={{ position: 'absolute', left: -30, bottom: share(height, 110), fontFamily: DISPLAY, fontSize: share(height, 360), lineHeight: 0.8, color: pal.ink, opacity: 0.05, letterSpacing: -8, userSelect: 'none', whiteSpace: 'nowrap' }}>{p.last}</div>
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '46px 56px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
           <Slab bg={pal.accent} fg={pal.primary} size={26} style={{ padding: '8px 16px' }}>FULL TIME</Slab>
@@ -653,8 +735,8 @@ export function ResultStar({ palette: pal, width = 1080, height = 1080, result: 
         </div>
         <BrandLockup team={{ name: r.us.name, fullName: r.us.name, monogram: r.us.mono, logo: r.us.logo }} palette={pal} size={116} layout="row" align="right" nameSize={30} />
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: 230, display: 'flex', alignItems: 'center', gap: 44 }}>
-        <div style={{ width: 300, height: 300, borderRadius: '50%', border: `4px solid ${pal.accent}`, background: `${pal.accent}14`, display: 'grid', placeItems: 'center', fontFamily: DISPLAY, fontSize: 150, color: pal.ink, letterSpacing: 2, flexShrink: 0, overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(230), ...anchor(S.A, null, { bottom: grow(height, 430, 0.18) }), display: 'flex', alignItems: 'center', gap: 44 }}>
+        <div style={{ width: b(300), height: b(300), borderRadius: '50%', border: `4px solid ${pal.accent}`, background: `${pal.accent}14`, display: 'grid', placeItems: 'center', fontFamily: DISPLAY, fontSize: 150, color: pal.ink, letterSpacing: 2, flexShrink: 0, overflow: 'hidden' }}>
           {p.photo
             ? <img src={p.photo} alt={`${p.first} ${p.last}`} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top' }} />
             : (initials || '★')}
@@ -662,26 +744,26 @@ export function ResultStar({ palette: pal, width = 1080, height = 1080, result: 
         <div style={{ flex: 1, minWidth: 0 }}>
           <Slab bg={pal.accent} fg={pal.primary} size={17} style={{ padding: '6px 12px' }}>★ STAR OF THE DAY</Slab>
           <div style={{ fontFamily: DISPLAY, fontSize: 44, letterSpacing: 1, opacity: 0.7, lineHeight: 1, marginTop: 18 }}>{(p.first || '').toUpperCase()}</div>
-          <div style={{ fontFamily: DISPLAY, fontSize: 116, letterSpacing: -1, lineHeight: 0.86, whiteSpace: 'nowrap' }}>{p.last}</div>
+          <div style={{ fontFamily: DISPLAY, fontSize: b(116), letterSpacing: -1, lineHeight: 0.86, whiteSpace: 'nowrap' }}>{p.last}</div>
           <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, color: pal.accent, marginTop: 8 }}>{p.role}</div>
         </div>
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: 576, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <div style={{ position: 'absolute', left: 56, right: 56, ...anchor(S.A, { top: 576 }, { bottom: grow(height, 240, 0.18) }), display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         {[['BATTING', p.bat], ['BOWLING', p.bowl]].map(([lab, val], i) => (
           <div key={i} style={{ padding: '16px 22px', background: i === 0 ? pal.accent : `${pal.ink}0c`, border: `1.5px solid ${pal.accent}`, color: i === 0 ? pal.primary : pal.ink }}>
             <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, opacity: 0.75 }}>{lab}</div>
-            <div style={{ fontFamily: DISPLAY, fontSize: 54, lineHeight: 0.95, letterSpacing: -0.5, marginTop: 4 }}>{val || '—'}</div>
+            <div style={{ fontFamily: DISPLAY, fontSize: b(54), lineHeight: 0.95, letterSpacing: -0.5, marginTop: 4 }}>{val || '—'}</div>
           </div>
         ))}
       </div>
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 92, padding: '0 56px' }}>
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: grow(height, 92, 0.18), padding: '0 56px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 20px', background: pal.secondary, borderLeft: `4px solid ${pal.accent}` }}>
           <span style={{ fontFamily: DISPLAY, fontSize: 24, letterSpacing: 0.5, whiteSpace: 'nowrap', flexShrink: 0 }}>{tied ? 'MATCH TIED' : line}</span>
           <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1, color: pal.ink, opacity: 0.7, marginLeft: 'auto', whiteSpace: 'nowrap', flexShrink: 0 }}>{r.us.mono} {r.us.score} · {r.them.mono} {r.them.score}</span>
         </div>
       </div>
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '18px 56px', background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
-        <SponsorFooter palette={pal} sponsors={sponsors} />
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: `${grow(height, 18, 0.09)}px 56px`, background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
+        <SponsorFooter palette={pal} sponsors={sponsors} h={height} />
       </div>
       <Grain opacity={0.3} id="rst-g" />
     </Post>
@@ -689,6 +771,8 @@ export function ResultStar({ palette: pal, width = 1080, height = 1080, result: 
 }
 
 export function ResultInningsBars({ palette: pal, width = 1080, height = 1080, result: r, sponsors }) {
+  const S = roundScale(width, height)
+  const b = sz(S.big)
   const { won, tied, line } = outcomeBits(r)
   const runs = (s) => parseInt(String(s).includes('/') ? String(s).split('/')[1] : s, 10) || 0
   const oversNum = (o) => { const [a, b] = String(o).split('.').map(Number); return (a || 0) + (b || 0) / 6 }
@@ -698,19 +782,22 @@ export function ResultInningsBars({ palette: pal, width = 1080, height = 1080, r
   const themRR = oversNum(r.them.overs) ? (themR / oversNum(r.them.overs)).toFixed(2) : '0.00'
   // RS5 feedback: make the innings bars a far bigger part of the image — taller
   // track, larger score, and the run total set inside the filled portion.
+  const nameF = b(40)
+  const scoreF = b(64)
+  const valF = b(56)
   const Bar = ({ t, val, rr, win, fill, fillInk }) => (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0, flex: 1 }}>
           <Monogram text={t.mono} logo={t.logo} size={58} fg={pal.ink} bg={`${pal.ink}14`} ring={win ? pal.accent : `${pal.ink}40`} />
-          <span style={{ fontFamily: DISPLAY, fontSize: 40, letterSpacing: 0.5, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</span>
+          <span style={{ fontFamily: DISPLAY, fontSize: nameF, letterSpacing: 0.5, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</span>
           {win && <span style={{ fontFamily: DISPLAY, fontSize: 16, letterSpacing: 2, color: pal.primary, background: pal.accent, padding: '4px 11px', flexShrink: 0 }}>WON</span>}
         </div>
-        <span style={{ fontFamily: DISPLAY, fontSize: 64, letterSpacing: -1, lineHeight: 1, flexShrink: 0, marginLeft: 16 }}>{t.score}</span>
+        <span style={{ fontFamily: DISPLAY, fontSize: scoreF, letterSpacing: -1, lineHeight: 1, flexShrink: 0, marginLeft: 16 }}>{t.score}</span>
       </div>
-      <div style={{ height: 104, background: `${pal.ink}10`, position: 'relative', overflow: 'hidden' }}>
+      <div style={{ height: grow(height, 104, 0.14), background: `${pal.ink}10`, position: 'relative', overflow: 'hidden' }}>
         <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${Math.max((val / maxR) * 100, 14)}%`, background: fill, display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
-          <span style={{ fontFamily: DISPLAY, fontSize: 56, lineHeight: 1, letterSpacing: -1, color: fillInk, padding: '0 22px', whiteSpace: 'nowrap' }}>{val}</span>
+          <span style={{ fontFamily: DISPLAY, fontSize: valF, lineHeight: 1, letterSpacing: -1, color: fillInk, padding: '0 22px', whiteSpace: 'nowrap' }}>{val}</span>
         </div>
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: MONO, fontSize: 14, letterSpacing: 1, color: pal.ink, opacity: 0.7, marginTop: 10 }}>
@@ -729,16 +816,16 @@ export function ResultInningsBars({ palette: pal, width = 1080, height = 1080, r
         </div>
         <BrandLockup team={{ name: r.us.name, fullName: r.us.name, monogram: r.us.mono, logo: r.us.logo }} palette={pal} size={116} layout="row" align="right" nameSize={30} />
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: 240, display: 'flex', flexDirection: 'column', gap: 56 }}>
+      <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(240), ...anchor(S.A, null, { bottom: grow(height, 340, 0.18), justifyContent: 'center' }), display: 'flex', flexDirection: 'column', gap: 56 }}>
         <Bar t={r.us} val={usR} rr={usRR} win={won} fill={pal.accent} fillInk={pal.primary} />
         <Bar t={r.them} val={themR} rr={themRR} win={!won && !tied} fill={`${pal.ink}55`} fillInk={pal.ink} />
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: 720, padding: '16px 26px', background: pal.secondary, borderLeft: `4px solid ${pal.accent}`, textAlign: 'center' }}>
+      <div style={{ position: 'absolute', left: 56, right: 56, ...anchor(S.A, { top: 720 }, { bottom: grow(height, 240, 0.18) }), padding: '16px 26px', background: pal.secondary, borderLeft: `4px solid ${pal.accent}`, textAlign: 'center' }}>
         <Kicker color={pal.accent} size={12} style={{ marginBottom: 6 }}>{`// MATCH RESULT`}</Kicker>
-        <div style={{ fontFamily: DISPLAY, fontSize: 42, letterSpacing: 0, lineHeight: 1.02 }}>{line}</div>
+        <div style={{ fontFamily: DISPLAY, fontSize: b(42), letterSpacing: 0, lineHeight: 1.02 }}>{line}</div>
       </div>
       {(r.potm.first || r.potm.last) && (
-        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 92, padding: '0 56px' }}>
+        <div style={{ position: 'absolute', left: 0, right: 0, bottom: grow(height, 92, 0.18), padding: '0 56px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '14px 20px', background: pal.secondary, borderLeft: `4px solid ${pal.accent}` }}>
             <span style={{ fontFamily: DISPLAY, fontSize: 16, letterSpacing: 2, color: pal.accent, whiteSpace: 'nowrap', flexShrink: 0 }}>★ POTM</span>
             <span style={{ fontFamily: DISPLAY, fontSize: 28, letterSpacing: 0.5, whiteSpace: 'nowrap', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.potm.first} {r.potm.last}</span>
@@ -746,8 +833,8 @@ export function ResultInningsBars({ palette: pal, width = 1080, height = 1080, r
           </div>
         </div>
       )}
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '18px 56px', background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
-        <SponsorFooter palette={pal} sponsors={sponsors} />
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: `${grow(height, 18, 0.09)}px 56px`, background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
+        <SponsorFooter palette={pal} sponsors={sponsors} h={height} />
       </div>
       <Grain opacity={0.3} id="rib-g" />
     </Post>
@@ -755,13 +842,19 @@ export function ResultInningsBars({ palette: pal, width = 1080, height = 1080, r
 }
 
 export function ResultTicket({ palette: pal, width = 1080, height = 1080, result: r, sponsors }) {
+  const S = roundScale(width, height)
+  const b = sz(S.big)
   const { won, tied, line } = outcomeBits(r)
+  // `t` is the team in the row map below, so the two scaled sizes are resolved
+  // before it shadows the helper.
+  const tName = b(38)
+  const tScore = b(62)
   const notch = (side) => ({ position: 'absolute', [side]: -17, top: '50%', transform: 'translateY(-50%)', width: 32, height: 32, borderRadius: '50%', background: pal.primary })
   return (
     <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.06} size={11} />
       <Stripes color={pal.accent} opacity={0.04} gap={26} angle={-20} />
-      <div style={{ position: 'absolute', left: 80, right: 80, top: 108, bottom: 150, background: pal.secondary, border: `2px solid ${pal.accent}`, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ position: 'absolute', left: 80, right: 80, top: S.head(108), bottom: S.foot, background: pal.secondary, border: `2px solid ${pal.accent}`, display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: '24px 36px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: `2px dashed ${pal.accent}66`, position: 'relative' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0 }}>
             <Shield logo={r.us.logo} monogram={r.us.mono} color={pal.ink} size={88} />
@@ -778,13 +871,13 @@ export function ResultTicket({ palette: pal, width = 1080, height = 1080, result
           {[[r.us, won], [r.them, !won && !tied]].map(([t, win], i) => (
             <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
               <Monogram text={t.mono} logo={t.logo} size={62} fg={pal.ink} bg={`${pal.ink}14`} ring={win ? pal.accent : `${pal.ink}40`} />
-              <span style={{ fontFamily: DISPLAY, fontSize: 38, letterSpacing: 0.5, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', opacity: win ? 1 : 0.85 }}>{t.name}</span>
+              <span style={{ fontFamily: DISPLAY, fontSize: tName, letterSpacing: 0.5, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', opacity: win ? 1 : 0.85 }}>{t.name}</span>
               {win && <span style={{ fontFamily: DISPLAY, fontSize: 14, letterSpacing: 2, color: pal.primary, background: pal.accent, padding: '4px 10px', flexShrink: 0 }}>WON</span>}
-              <span style={{ fontFamily: DISPLAY, fontSize: 62, letterSpacing: -1, lineHeight: 1, flexShrink: 0 }}>{t.score}</span>
+              <span style={{ fontFamily: DISPLAY, fontSize: tScore, letterSpacing: -1, lineHeight: 1, flexShrink: 0 }}>{t.score}</span>
             </div>
           ))}
           <div style={{ marginTop: 8, paddingTop: 18, borderTop: `1px solid ${pal.ink}1a`, textAlign: 'center' }}>
-            <div style={{ fontFamily: DISPLAY, fontSize: 46, letterSpacing: 0 }}>{line}</div>
+            <div style={{ fontFamily: DISPLAY, fontSize: b(46), letterSpacing: 0 }}>{line}</div>
             {(r.potm.first || r.potm.last) && <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1.5, color: pal.ink, opacity: 0.75, marginTop: 8 }}>★ POTM · {r.potm.first} {r.potm.last} · {r.potm.line}</div>}
           </div>
         </div>
@@ -797,7 +890,7 @@ export function ResultTicket({ palette: pal, width = 1080, height = 1080, result
         </div>
       </div>
       <div style={{ position: 'absolute', left: 80, right: 80, bottom: 44 }}>
-        <SponsorFooter palette={pal} sponsors={sponsors} showBug={false} />
+        <SponsorFooter palette={pal} sponsors={sponsors} showBug={false} h={height} />
       </div>
       <Grain opacity={0.3} id="rtk-g" />
     </Post>
@@ -807,6 +900,8 @@ export function ResultTicket({ palette: pal, width = 1080, height = 1080, result
 // ═══════════════════════════════ RESULTS ROUNDUP ════════════════════════════
 
 export function ResultsList({ palette: pal, width = 1080, height = 1080, meta = {}, results = [], club = {}, sponsors }) {
+  const S = roundScale(width, height)
+  const t = sz(S.row)
   const rows = results
   const rec = record(rows)
   return (
@@ -827,16 +922,16 @@ export function ResultsList({ palette: pal, width = 1080, height = 1080, meta = 
           <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={110} />
         </div>
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: 200, bottom: 138, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(200), bottom: grow(height, 138, 0.18), display: 'flex', flexDirection: 'column' }}>
         {(() => {
           // Scale type down as the grade count climbs so a full Saturday (9–10
           // grades, some with long two-line names) never clips off the bottom.
           const n = rows.length || 1
-          const gradeF = n >= 9 ? 19 : n >= 7 ? 22 : n >= 5 ? 25 : 28
-          const scoreF = n >= 9 ? 23 : n >= 7 ? 26 : 30
-          const oppF = n >= 9 ? 17 : n >= 7 ? 19 : 22
-          const badgeF = n >= 9 ? 16 : 20
-          const bar = n >= 9 ? 38 : 52
+          const gradeF = t(n >= 9 ? 19 : n >= 7 ? 22 : n >= 5 ? 25 : 28)
+          const scoreF = t(n >= 9 ? 23 : n >= 7 ? 26 : 30)
+          const oppF = t(n >= 9 ? 17 : n >= 7 ? 19 : 22)
+          const badgeF = t(n >= 9 ? 16 : 20)
+          const bar = t(n >= 9 ? 38 : 52)
           return rows.map((r, i) => {
             const w = r.outcome === 'W'
             const c = w ? WIN : LOSS
@@ -858,8 +953,8 @@ export function ResultsList({ palette: pal, width = 1080, height = 1080, meta = 
           })
         })()}
       </div>
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '22px 56px', background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
-        <SponsorFooter palette={pal} sponsors={sponsors} />
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: `${grow(height, 22, 0.09)}px 56px`, background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
+        <SponsorFooter palette={pal} sponsors={sponsors} h={height} />
       </div>
       <Grain opacity={0.3} id="rl-g" />
     </Post>
@@ -871,16 +966,18 @@ export function ResultsList({ palette: pal, width = 1080, height = 1080, meta = 
 // from the match scorecard's "our team" innings). A grade with no performer
 // data yet (manually-added row) just renders its header line.
 export function ResultsListLeaders({ palette: pal, width = 1080, height = 1080, meta = {}, results = [], club = {}, sponsors }) {
+  const S = roundScale(width, height)
+  const t = sz(S.row)
   const rows = results
   const rec = record(rows)
   const n = rows.length || 1
-  const gradeF = n >= 8 ? 20 : n >= 6 ? 24 : n >= 4 ? 28 : 32
-  const scoreF = n >= 8 ? 23 : n >= 6 ? 27 : n >= 4 ? 32 : 36
-  const oppF = n >= 8 ? 15 : n >= 6 ? 18 : n >= 4 ? 21 : 23
-  const badgeF = n >= 8 ? 13 : n >= 6 ? 15 : 18
-  const nameF = n >= 8 ? 16 : n >= 6 ? 18 : 20
-  const lineF = n >= 8 ? 15 : n >= 6 ? 17 : 19
-  const bar = n >= 8 ? 36 : n >= 6 ? 46 : 60
+  const gradeF = t(n >= 8 ? 20 : n >= 6 ? 24 : n >= 4 ? 28 : 32)
+  const scoreF = t(n >= 8 ? 23 : n >= 6 ? 27 : n >= 4 ? 32 : 36)
+  const oppF = t(n >= 8 ? 15 : n >= 6 ? 18 : n >= 4 ? 21 : 23)
+  const badgeF = t(n >= 8 ? 13 : n >= 6 ? 15 : 18)
+  const nameF = t(n >= 8 ? 16 : n >= 6 ? 18 : 20)
+  const lineF = t(n >= 8 ? 15 : n >= 6 ? 17 : 19)
+  const bar = t(n >= 8 ? 36 : n >= 6 ? 46 : 60)
   return (
     <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.06} size={11} />
@@ -899,7 +996,7 @@ export function ResultsListLeaders({ palette: pal, width = 1080, height = 1080, 
           <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={96} />
         </div>
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: 158, bottom: 138, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(158), bottom: grow(height, 138, 0.18), display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr 1fr', gap: 12, marginBottom: 8 }}>
           <div />
           <Kicker color={pal.ink} size={12} style={{ opacity: 0.55 }}>TOP RUN SCORERS</Kicker>
@@ -952,8 +1049,8 @@ export function ResultsListLeaders({ palette: pal, width = 1080, height = 1080, 
           )
         })}
       </div>
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '22px 56px', background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
-        <SponsorFooter palette={pal} sponsors={sponsors} />
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: `${grow(height, 22, 0.09)}px 56px`, background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
+        <SponsorFooter palette={pal} sponsors={sponsors} h={height} />
       </div>
       <Grain opacity={0.3} id="rll-g" />
     </Post>
@@ -961,6 +1058,9 @@ export function ResultsListLeaders({ palette: pal, width = 1080, height = 1080, 
 }
 
 export function ResultsScoreboard({ palette: pal, width = 1080, height = 1080, meta = {}, results = [], club = {}, sponsors }) {
+  const S = roundScale(width, height)
+  const t = sz(S.row)
+  const b = sz(S.big)
   const rows = results
   const rec = record(rows)
   return (
@@ -969,7 +1069,7 @@ export function ResultsScoreboard({ palette: pal, width = 1080, height = 1080, m
       <Stripes color={pal.accent} opacity={0.03} gap={30} angle={-18} />
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '44px 56px 26px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <div style={{ fontFamily: DISPLAY, fontSize: 76, letterSpacing: -1, lineHeight: 0.9 }}>RESULTS</div>
+          <div style={{ fontFamily: DISPLAY, fontSize: b(76), letterSpacing: -1, lineHeight: 0.9 }}>RESULTS</div>
           <Kicker color={pal.accent} size={15} style={{ marginTop: 8 }}>{`// ${meta.round} · ${meta.date}`}</Kicker>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
@@ -980,7 +1080,7 @@ export function ResultsScoreboard({ palette: pal, width = 1080, height = 1080, m
           <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={100} />
         </div>
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: 188, bottom: 142, display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr 1fr', gap: 24 }}>
+      <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(188), bottom: grow(height, 142, 0.18), display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr 1fr', gap: 24 }}>
         {rows.slice(0, 6).map((r, i) => {
           const w = r.outcome === 'W'
           const c = w ? WIN : LOSS
@@ -988,15 +1088,15 @@ export function ResultsScoreboard({ palette: pal, width = 1080, height = 1080, m
             <div key={i} style={{ position: 'relative', background: pal.secondary, border: `1px solid ${pal.ink}22`, borderTop: `3px solid ${c}`, borderRadius: 4, padding: '18px 24px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', overflow: 'hidden' }}>
               <div style={{ position: 'absolute', right: 14, bottom: 8, fontFamily: DISPLAY, fontSize: 120, lineHeight: 1, color: c, opacity: 0.09, letterSpacing: -6, userSelect: 'none' }}>{w ? 'W' : 'L'}</div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, position: 'relative' }}>
-                <div style={{ fontFamily: DISPLAY, fontSize: 26, letterSpacing: 0.5, lineHeight: 0.95, minWidth: 0, overflow: 'hidden', paddingRight: 2 }}>{r.grade}</div>
+                <div style={{ fontFamily: DISPLAY, fontSize: t(26), letterSpacing: 0.5, lineHeight: 0.95, minWidth: 0, overflow: 'hidden', paddingRight: 2 }}>{r.grade}</div>
                 <span style={{ fontFamily: DISPLAY, fontSize: 16, letterSpacing: 1.5, padding: '4px 11px', background: c, color: pal.primary, flexShrink: 0 }}>{w ? 'WON' : 'LOST'}</span>
               </div>
               <div style={{ position: 'relative' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   <Monogram text={club.mono} logo={club.logo} size={40} fg={pal.ink} bg={`${pal.ink}14`} ring={`${pal.ink}33`} />
-                  <span style={{ fontFamily: DISPLAY, fontSize: 32, letterSpacing: -0.5 }}>{r.us}</span>
-                  <span style={{ fontFamily: DISPLAY, fontSize: 18, color: pal.accent, opacity: 0.8 }}>v</span>
-                  <span style={{ fontFamily: DISPLAY, fontSize: 32, letterSpacing: -0.5, opacity: 0.85 }}>{r.them}</span>
+                  <span style={{ fontFamily: DISPLAY, fontSize: t(32), letterSpacing: -0.5 }}>{r.us}</span>
+                  <span style={{ fontFamily: DISPLAY, fontSize: t(18), color: pal.accent, opacity: 0.8 }}>v</span>
+                  <span style={{ fontFamily: DISPLAY, fontSize: t(32), letterSpacing: -0.5, opacity: 0.85 }}>{r.them}</span>
                   <Monogram text={r.oppMono} logo={r.oppLogo} size={40} fg={pal.ink} bg={`${pal.ink}14`} ring={`${pal.ink}33`} />
                 </div>
                 <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 1.2, color: pal.ink, opacity: 0.65, marginTop: 10 }}>{r.opp} · {r.margin}</div>
@@ -1005,8 +1105,8 @@ export function ResultsScoreboard({ palette: pal, width = 1080, height = 1080, m
           )
         })}
       </div>
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '20px 56px', background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
-        <SponsorFooter palette={pal} sponsors={sponsors} />
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: `${grow(height, 20, 0.09)}px 56px`, background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
+        <SponsorFooter palette={pal} sponsors={sponsors} h={height} />
       </div>
       <Grain opacity={0.3} id="rsb-g" />
     </Post>
@@ -1014,35 +1114,38 @@ export function ResultsScoreboard({ palette: pal, width = 1080, height = 1080, m
 }
 
 export function ResultsRecord({ palette: pal, width = 1080, height = 1080, meta = {}, results = [], club = {}, sponsors }) {
+  const S = roundScale(width, height)
+  const t = sz(S.row)
+  const b = sz(S.big)
   const rows = results
   const rec = record(rows)
   return (
     <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.07} size={10} />
       <Stripes color={pal.accent} opacity={0.04} gap={26} angle={-20} />
-      <div style={{ position: 'absolute', right: -50, top: 120, fontFamily: DISPLAY, fontSize: 620, lineHeight: 0.74, color: pal.ink, opacity: 0.05, letterSpacing: -18, userSelect: 'none' }}>{rec.w}–{rec.l}</div>
+      <div style={{ position: 'absolute', right: -50, top: share(height, 120), fontFamily: DISPLAY, fontSize: share(height, 620), lineHeight: 0.74, color: pal.ink, opacity: 0.05, letterSpacing: -18, userSelect: 'none' }}>{rec.w}–{rec.l}</div>
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '48px 56px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
           <Kicker color={pal.accent} size={15}>{`// ${meta.round} · ${meta.date}`}</Kicker>
-          <div style={{ fontFamily: DISPLAY, fontSize: 110, letterSpacing: -2, lineHeight: 0.85, marginTop: 6 }}>WEEKEND<br />WRAP</div>
+          <div style={{ fontFamily: DISPLAY, fontSize: b(110), letterSpacing: -2, lineHeight: 0.85, marginTop: 6 }}>WEEKEND<br />WRAP</div>
         </div>
         <BrandLockup team={{ name: club.full || club.name, fullName: club.full, monogram: club.mono, logo: club.logo }} palette={pal} size={124} layout="stack" align="right" nameSize={26} />
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: 360, display: 'flex', alignItems: 'center', gap: 26, padding: '20px 28px', background: pal.accent }}>
-        <div style={{ fontFamily: DISPLAY, fontSize: 58, letterSpacing: -1, lineHeight: 1, color: pal.primary, whiteSpace: 'nowrap', flexShrink: 0 }}>{rec.w} WINS</div>
+      <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(360), display: 'flex', alignItems: 'center', gap: 26, padding: '20px 28px', background: pal.accent }}>
+        <div style={{ fontFamily: DISPLAY, fontSize: b(58), letterSpacing: -1, lineHeight: 1, color: pal.primary, whiteSpace: 'nowrap', flexShrink: 0 }}>{rec.w} WINS</div>
         <div style={{ width: 3, height: 52, background: pal.primary, opacity: 0.4, flexShrink: 0 }} />
-        <div style={{ fontFamily: DISPLAY, fontSize: 58, letterSpacing: -1, lineHeight: 1, color: pal.primary, opacity: 0.6, whiteSpace: 'nowrap', flexShrink: 0 }}>{rec.l} LOSSES</div>
+        <div style={{ fontFamily: DISPLAY, fontSize: b(58), letterSpacing: -1, lineHeight: 1, color: pal.primary, opacity: 0.6, whiteSpace: 'nowrap', flexShrink: 0 }}>{rec.l} LOSSES</div>
         <div style={{ marginLeft: 'auto', fontFamily: MONO, fontSize: 12, letterSpacing: 2, color: pal.primary, textAlign: 'right', lineHeight: 1.5, flexShrink: 0 }}>{club.full}<br />{meta.season}</div>
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: 510, bottom: 150, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(510), bottom: S.foot, display: 'flex', flexDirection: 'column' }}>
         {rows.map((r, i) => {
           const w = r.outcome === 'W'
           const c = w ? WIN : LOSS
           return (
             <div key={i} style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 18, borderBottom: i < rows.length - 1 ? `1px solid ${pal.ink}1a` : 'none' }}>
               <span style={{ fontFamily: DISPLAY, fontSize: 18, letterSpacing: 1, color: pal.primary, background: c, width: 44, height: 32, display: 'grid', placeItems: 'center', flexShrink: 0 }}>{w ? 'W' : 'L'}</span>
-              <div style={{ width: 150, fontFamily: DISPLAY, fontSize: 26, letterSpacing: 0.5, flexShrink: 0 }}>{r.grade}</div>
-              <div style={{ flex: 1, minWidth: 0, fontFamily: DISPLAY, fontSize: 24, letterSpacing: 0.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              <div style={{ width: 150, fontFamily: DISPLAY, fontSize: t(26), letterSpacing: 0.5, flexShrink: 0 }}>{r.grade}</div>
+              <div style={{ flex: 1, minWidth: 0, fontFamily: DISPLAY, fontSize: t(24), letterSpacing: 0.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 <span style={{ color: w ? pal.ink : c }}>{w ? 'DEF' : 'LOST TO'}</span> {r.opp}
               </div>
               <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1, color: pal.ink, opacity: 0.7, flexShrink: 0 }}>{r.us} v {r.them}</div>
@@ -1051,8 +1154,8 @@ export function ResultsRecord({ palette: pal, width = 1080, height = 1080, meta 
           )
         })}
       </div>
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '22px 56px', background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
-        <SponsorFooter palette={pal} sponsors={sponsors} />
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: `${grow(height, 22, 0.09)}px 56px`, background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
+        <SponsorFooter palette={pal} sponsors={sponsors} h={height} />
       </div>
       <Grain opacity={0.32} id="rr-g" />
     </Post>
@@ -1060,6 +1163,8 @@ export function ResultsRecord({ palette: pal, width = 1080, height = 1080, meta 
 }
 
 export function ResultsHeadline({ palette: pal, width = 1080, height = 1080, meta = {}, results = [], club = {}, sponsors }) {
+  const S = roundScale(width, height)
+  const b = sz(S.big)
   const rows = results
   const rec = record(rows)
   const f = rows[0] || { grade: '', opp: '', oppMono: '', us: '', them: '', outcome: 'W', margin: '' }
@@ -1083,7 +1188,7 @@ export function ResultsHeadline({ palette: pal, width = 1080, height = 1080, met
           <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={104} />
         </div>
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: 196, height: 340, background: pal.secondary, borderTop: `3px solid ${fc}`, padding: '26px 32px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+      <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(196), height: S.head(560) - S.head(196) - 24, background: pal.secondary, borderTop: `3px solid ${fc}`, padding: '26px 32px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, color: pal.accent }}>{`// FEATURE · ${f.grade}`}</span>
           <span style={{ fontFamily: DISPLAY, fontSize: 18, letterSpacing: 2, color: pal.primary, background: fc, padding: '5px 12px' }}>{fw ? 'WON' : 'LOST'}</span>
@@ -1091,17 +1196,17 @@ export function ResultsHeadline({ palette: pal, width = 1080, height = 1080, met
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 26, marginTop: 22 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             <Monogram text={club.mono} logo={club.logo} size={66} fg={pal.ink} bg={`${pal.ink}14`} ring={fw ? pal.accent : `${pal.ink}40`} />
-            <span style={{ fontFamily: DISPLAY, fontSize: 64, letterSpacing: -1, lineHeight: 1 }}>{f.us}</span>
+            <span style={{ fontFamily: DISPLAY, fontSize: b(64), letterSpacing: -1, lineHeight: 1 }}>{f.us}</span>
           </div>
           <span style={{ fontFamily: DISPLAY, fontSize: 34, color: pal.accent }}>v</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <span style={{ fontFamily: DISPLAY, fontSize: 64, letterSpacing: -1, lineHeight: 1, opacity: 0.85 }}>{f.them}</span>
+            <span style={{ fontFamily: DISPLAY, fontSize: b(64), letterSpacing: -1, lineHeight: 1, opacity: 0.85 }}>{f.them}</span>
             <Monogram text={f.oppMono} logo={f.oppLogo} size={66} fg={pal.ink} bg={`${pal.ink}14`} ring={!fw ? pal.accent : `${pal.ink}40`} />
           </div>
         </div>
-        <div style={{ textAlign: 'center', fontFamily: DISPLAY, fontSize: 40, letterSpacing: 0, marginTop: 20, lineHeight: 1 }}>{club.name} {fw ? 'DEF' : 'LOST TO'} {f.opp} {f.margin}</div>
+        <div style={{ textAlign: 'center', fontFamily: DISPLAY, fontSize: b(40), letterSpacing: 0, marginTop: 20, lineHeight: 1 }}>{club.name} {fw ? 'DEF' : 'LOST TO'} {f.opp} {f.margin}</div>
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: 560, bottom: 150 }}>
+      <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(560), bottom: S.foot }}>
         <Kicker color={pal.ink} size={12} style={{ opacity: 0.55, marginBottom: 8 }}>{`// OTHER RESULTS`}</Kicker>
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           {rest.map((r, i) => {
@@ -1119,8 +1224,8 @@ export function ResultsHeadline({ palette: pal, width = 1080, height = 1080, met
           })}
         </div>
       </div>
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '20px 56px', background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
-        <SponsorFooter palette={pal} sponsors={sponsors} />
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: `${grow(height, 20, 0.09)}px 56px`, background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
+        <SponsorFooter palette={pal} sponsors={sponsors} h={height} />
       </div>
       <Grain opacity={0.3} id="rhd-g" />
     </Post>
@@ -1128,6 +1233,8 @@ export function ResultsHeadline({ palette: pal, width = 1080, height = 1080, met
 }
 
 export function ResultsBoard({ palette: pal, width = 1080, height = 1080, meta = {}, results = [], club = {}, sponsors }) {
+  const S = roundScale(width, height)
+  const t = sz(S.row)
   const rows = results
   const rec = record(rows)
   const cols = '140px minmax(0,1fr) 184px 86px'
@@ -1147,20 +1254,20 @@ export function ResultsBoard({ palette: pal, width = 1080, height = 1080, meta =
           <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={104} />
         </div>
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: 196, display: 'grid', gridTemplateColumns: cols, gap: 18, padding: '0 14px 10px', borderBottom: `1px solid ${pal.ink}22` }}>
+      <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(196), display: 'grid', gridTemplateColumns: cols, gap: 18, padding: '0 14px 10px', borderBottom: `1px solid ${pal.ink}22` }}>
         {['GRADE', 'RESULT', 'SCORE', ''].map((h, i) => (
           <div key={i} style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1.8, color: pal.ink, opacity: 0.5, textAlign: i === 2 ? 'right' : i === 3 ? 'center' : 'left' }}>{h}</div>
         ))}
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: 242, bottom: 150, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(242), bottom: S.foot, display: 'flex', flexDirection: 'column' }}>
         {rows.map((r, i) => {
           const w = r.outcome === 'W'
           const c = w ? WIN : LOSS
           return (
             <div key={i} style={{ flex: 1, display: 'grid', gridTemplateColumns: cols, gap: 18, alignItems: 'center', padding: '0 14px', background: i % 2 ? `${pal.ink}08` : 'transparent' }}>
-              <div style={{ fontFamily: DISPLAY, fontSize: 26, letterSpacing: 0.5, lineHeight: 0.92 }}>{r.grade}</div>
+              <div style={{ fontFamily: DISPLAY, fontSize: t(26), letterSpacing: 0.5, lineHeight: 0.92 }}>{r.grade}</div>
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontFamily: DISPLAY, fontSize: 24, letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}><span style={{ color: w ? pal.ink : c }}>{w ? 'DEF' : 'LOST TO'}</span> {r.opp}</div>
+                <div style={{ fontFamily: DISPLAY, fontSize: t(24), letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}><span style={{ color: w ? pal.ink : c }}>{w ? 'DEF' : 'LOST TO'}</span> {r.opp}</div>
                 <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1, color: c, marginTop: 4 }}>{r.margin}</div>
               </div>
               <div style={{ fontFamily: MONO, fontSize: 17, letterSpacing: 0.5, color: pal.ink, opacity: 0.85, textAlign: 'right', whiteSpace: 'nowrap' }}>{r.us} v {r.them}</div>
@@ -1171,8 +1278,8 @@ export function ResultsBoard({ palette: pal, width = 1080, height = 1080, meta =
           )
         })}
       </div>
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '22px 56px', background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
-        <SponsorFooter palette={pal} sponsors={sponsors} />
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: `${grow(height, 22, 0.09)}px 56px`, background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
+        <SponsorFooter palette={pal} sponsors={sponsors} h={height} />
       </div>
       <Grain opacity={0.3} id="rbd-g" />
     </Post>
@@ -1180,24 +1287,27 @@ export function ResultsBoard({ palette: pal, width = 1080, height = 1080, meta =
 }
 
 export function ResultsSplit({ palette: pal, width = 1080, height = 1080, meta = {}, results = [], club = {}, sponsors }) {
+  const S = roundScale(width, height)
+  const t = sz(S.row)
+  const b = sz(S.big)
   const rows = results
   const wins = rows.filter(r => r.outcome === 'W')
   const losses = rows.filter(r => r.outcome === 'L')
   const Side = ({ title, items, color, count }) => (
     <div style={{ flex: 1, background: `${color}12`, border: `2px solid ${color}`, display: 'flex', flexDirection: 'column' }}>
       <div style={{ padding: '16px 22px', background: color, color: pal.primary, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontFamily: DISPLAY, fontSize: 30, letterSpacing: 1 }}>{title}</span>
-        <span style={{ fontFamily: DISPLAY, fontSize: 42, letterSpacing: -1, lineHeight: 1 }}>{count}</span>
+        <span style={{ fontFamily: DISPLAY, fontSize: b(30), letterSpacing: 1 }}>{title}</span>
+        <span style={{ fontFamily: DISPLAY, fontSize: b(42), letterSpacing: -1, lineHeight: 1 }}>{count}</span>
       </div>
       <div style={{ flex: 1, padding: '8px 22px' }}>
         {items.map((r, i) => (
           <div key={i} style={{ padding: '14px 0', borderBottom: i < items.length - 1 ? `1px solid ${pal.ink}1a` : 'none' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ fontFamily: DISPLAY, fontSize: 22, letterSpacing: 0.5, flexShrink: 0, whiteSpace: 'nowrap' }}>{r.grade}</span>
+              <span style={{ fontFamily: DISPLAY, fontSize: t(22), letterSpacing: 0.5, flexShrink: 0, whiteSpace: 'nowrap' }}>{r.grade}</span>
               <span style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1, color: pal.ink, opacity: 0.5, marginLeft: 'auto', flexShrink: 0, whiteSpace: 'nowrap' }}>{r.margin}</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginTop: 4 }}>
-              <span style={{ fontFamily: DISPLAY, fontSize: 26, letterSpacing: 0.5, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.opp}</span>
+              <span style={{ fontFamily: DISPLAY, fontSize: t(26), letterSpacing: 0.5, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.opp}</span>
               <span style={{ fontFamily: MONO, fontSize: 12, color: pal.ink, opacity: 0.7, flexShrink: 0 }}>{r.us} v {r.them}</span>
             </div>
           </div>
@@ -1216,12 +1326,12 @@ export function ResultsSplit({ palette: pal, width = 1080, height = 1080, meta =
         </div>
         <BrandLockup team={{ name: club.full || club.name, fullName: club.full, monogram: club.mono, logo: club.logo }} palette={pal} size={110} layout="row" align="right" nameSize={34} />
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: 200, bottom: 150, display: 'flex', gap: 22, alignItems: 'stretch' }}>
+      <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(200), bottom: S.foot, display: 'flex', gap: 22, alignItems: 'stretch' }}>
         <Side title="WON" items={wins} color={WIN} count={wins.length} />
         <Side title="LOST" items={losses} color={LOSS} count={losses.length} />
       </div>
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '22px 56px', background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
-        <SponsorFooter palette={pal} sponsors={sponsors} />
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: `${grow(height, 22, 0.09)}px 56px`, background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
+        <SponsorFooter palette={pal} sponsors={sponsors} h={height} />
       </div>
       <Grain opacity={0.3} id="rsp-g" />
     </Post>

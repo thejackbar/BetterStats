@@ -1,14 +1,14 @@
-// The canvas a post is designed on, and how a fixed-size layout is placed into
-// one that isn't its own shape.
+// The canvas a post is designed on.
 //
-// Every built-in template is drawn at a hardcoded 1080×1080 (or 1920×1080 for
-// the scorecards) — they are absolutely positioned, not responsive, so a
-// template CANNOT simply re-lay itself out at 4:5. What it can do is sit inside
-// the taller canvas, over the same background, either whole (`fit`) or scaled up
-// and cropped (`fill`). That's the choice this module owns.
+// Every built-in template now takes the real width and height and carries its
+// own design for each of the three shapes — see postAspect.js, which owns the
+// vocabulary a template designs against. So a portrait post is a portrait
+// design, not a square one placed inside a taller box.
 //
-// The Blank Canvas is different: its blocks carry their own x/y, so a portrait
-// canvas there is genuinely portrait and needs no frame at all.
+// The scorecards are the exception and keep their own fixed 1920×1080: they are
+// a landscape document rather than a feed post, and they are offered no size
+// picker. `PostFrame` below is what places one of those into a canvas that is
+// not its own shape — the only remaining caller of it.
 //
 // ONE definition of the maths, used by the live canvas AND the off-screen export
 // node — two copies is how the preview and the downloaded PNG start disagreeing
