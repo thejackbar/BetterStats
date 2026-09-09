@@ -449,8 +449,16 @@ async def rediscover(background: BackgroundTasks, _=Depends(require_super_admin)
 @router.get("/rediscover/status")
 async def rediscover_status(_=Depends(require_super_admin)):
     """Current/last rediscover state for the UI poller, including live per-page
-    progress while it runs."""
-    return dict(_rediscover)
+    progress while it runs.
+
+    ``stale`` is the SERVER's own answer to "would a new run be allowed right
+    now" — the same ``_bg_stale`` test POST /rediscover makes. It rides on the
+    status so the screen never keeps a second copy of the window: a run this
+    process has lost track of leaves ``running`` true for ever, and without this
+    the button would stay disabled on a run the server itself would happily
+    replace."""
+    return {**_rediscover,
+            "stale": _bg_stale(_rediscover, _REDISCOVER_STALE_SECS)}
 
 
 @router.post("/clubs/{club_id}/rediscover")

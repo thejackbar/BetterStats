@@ -332,6 +332,68 @@ then hands the visitor the StreamYard link. Webinar Mon 21 Sep 2026.
   event is one constant, so a second webinar means editing both copies rather
   than picking a row — `event_key` is on the table from the start for whenever
   that becomes worth a screen.
+### A disabled button that does not say why reads as broken (v9.71.2, Sep 2026)
+
+Reported: "rediscover committee is disabled on club directory".
+
+- **NOTHING WAS BROKEN, AND THE GATE IS RIGHT.** `disabled={busy === 'rediscover'
+  || rediscoverRunning || status?.paused}` — the third one was true, because an
+  operator had the crawler stopped. That is correct rather than merely cautious:
+  `rediscover_all` returns `{"skipped": "stopped"}` while the flag is set, so a
+  button that let you press it would report a finished run that never read a
+  page. **The silence was the bug**, and it is the same call this file already
+  records for a figure that is correctly zero — it still has to explain itself.
+- **THE STOP IS SET TWO ROWS AWAY, which is what made it unreadable.** The crawl
+  button beside it is at least next to its own Start crawling button and under
+  the red "Stopped" pill; the committee row has neither, so a greyed-out
+  Rediscover had nothing anywhere near it to connect the two. One reason string
+  now drives the disable, the tooltip and a line beside the button, so the three
+  can never disagree.
+- **"PAUSED" MEANS TWO DIFFERENT THINGS IN ONE PAYLOAD, and gating on the wrong
+  one would have been a real bug.** `crawl_status` emits `state == 'paused'` for
+  a runner merely on a break and `state == 'stopped'` for the operator's flag —
+  and it is the separate `paused` BOOLEAN that the button reads. Gating on the
+  word would kill the button every time the crawler breathed. The suite asserts
+  a break leaves it live.
+- **A RUN THIS PROCESS HAS LOST TRACK OF USED TO KILL THE BUTTON FOR GOOD.**
+  `_rediscover` is in-process and `POST /rediscover` has a 12-hour `_bg_stale`
+  escape hatch — so the server would happily start a new run while the screen,
+  reading `running` alone, kept it disabled with no way to reach that hatch.
+  **The server reports `stale` on its own status now** rather than the browser
+  keeping a second copy of the window, which is the one-definition rule this
+  file keeps everywhere: the disable and the server's own decision have to be
+  the same decision, and the suite asserts they agree both ways.
+- **A SKIPPED RUN IS NOT A FINISHED ONE.** `{"skipped": "stopped"}` was
+  formatted through the ordinary success path and printed "0 club(s) re-read" —
+  which reads as "it ran and there was nothing to do". The same mistake
+  `_settle_bg` exists to stop for a soft error, reached from the other end.
+  **Found by the browser suite, not by reading it**: the poll's message was
+  fixed and the "Last rediscover:" line beside the button was not, and it reads
+  the same result dict.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_rediscover_gating.py`, 19 checks through the
+  shipped route body and services: the two meanings of paused kept apart, the
+  Stop flag genuinely refusing a rediscover, a 45-minute run NOT stale, a
+  day-old one stale, the status and the POST agreeing both ways, a malformed
+  start time freeing the button rather than wedging it, and the payload
+  otherwise untouched) **with a control run**: 7 fail against the previous
+  commit, one of them reporting `stale=None allowed=True` — the server willing
+  and the screen refusing.
+- **Driven in Chromium** (`verify_rediscover_gating_browser.mjs`, 24: the
+  reported case reproduced, the reason on screen and in both tooltips, nothing
+  drawn when nothing is blocked, a break not disabling anything, a stale run no
+  longer holding it, and the skipped run reported honestly) **with a control
+  run**: 9 fail, while "the button is disabled" PASSES in both — the disable was
+  never the bug.
+- **A LOCATOR KEYED ON A NEW TESTID ALONE MEASURES THE HARNESS.** The first
+  control run reported "button not found" everywhere, which says nothing about
+  behaviour; it falls back to the label so the old build's button is found and
+  fails on what it does. The label itself is checked, so it cannot be the
+  primary locator — it reads "Rediscovering..." in exactly the state the suite
+  is about.
+- **`const URL = ...` SHADOWS THE GLOBAL `URL`** and every `new URL(...)` in the
+  route handler dies with "URL is not a constructor".
+
 ## The Club Directory's committee only ever grew (migration 295, v9.70.0, Sep 2026)
 
 Asked for directly: a Rediscover that re-reads what PlayHQ publishes for every

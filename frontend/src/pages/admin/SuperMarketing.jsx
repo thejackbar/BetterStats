@@ -910,8 +910,26 @@ export default function SuperMarketing() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const rediscoverRunning = !!rediscover?.running
+  // A run this backend has lost track of leaves `running` true for ever. The
+  // server already decides when that is stale enough to replace (it lets the
+  // POST through), and says so on the status — so read its answer rather than
+  // keeping a second copy of the window here, or the button stays dead on a run
+  // the server itself would happily start over.
+  const rediscoverRunning = !!rediscover?.running && !rediscover?.stale
   const rediscoverProgress = rediscover?.progress || {}
+
+  // A DISABLED BUTTON THAT DOES NOT SAY WHY READS AS BROKEN SOFTWARE. Both of
+  // these hit PlayHQ, so both are correctly held back while an operator has the
+  // crawler stopped (`rediscover_all` returns {"skipped": "stopped"} and would
+  // do nothing) — but the Stop is set two rows away, so nothing on the button
+  // connected the two. One reason string, used for the disable, the tooltip and
+  // the line underneath, so they can never disagree.
+  const crawlStopped = !!status?.paused
+  const STOPPED_WHY = 'The crawler is stopped. Press Start crawling above to run this.'
+  const crawlWhy = crawlStopped ? STOPPED_WHY : ''
+  const rediscoverWhy = rediscoverRunning
+    ? 'A rediscover is already running — watch the progress beside the button.'
+    : crawlWhy
 
   const runCrawl = async () => {
     setBusy('crawl'); setMsg('')
@@ -933,6 +951,14 @@ export default function SuperMarketing() {
       setRediscover(st)
       if (!st.running) {
         if (st.error) setError(st.error)
+        // `rediscover_all` returns {"skipped": "stopped"} when the crawler was
+        // already stopped — it never read a page. Formatting that as a finished
+        // run reports "0 clubs re-read" and reads as "nothing to do", which is
+        // the same mistake `_settle_bg` exists to stop for a soft error.
+        else if (st.result?.skipped === 'stopped') {
+          setError('Rediscover did not run — the crawler is stopped. '
+            + 'Press Start crawling, then try again.')
+        }
         else if (st.result) {
           const r = st.result
           setMsg(`Rediscover finished: ${r.au_seen || 0} club(s) re-read, `
@@ -1222,7 +1248,9 @@ export default function SuperMarketing() {
 
         {/* Crawler controls — sit directly under the status pill */}
         <div className="flex flex-wrap items-center gap-2 mb-2.5">
-          <button className={BTN_ACCENT} disabled={busy === 'crawl' || status?.paused} onClick={runCrawl}>
+          <button className={BTN_ACCENT} disabled={busy === 'crawl' || crawlStopped}
+                  title={crawlWhy || 'Discover new clubs and enrich the next slice of the frontier'}
+                  onClick={runCrawl}>
             {busy === 'crawl' ? 'Starting...' : 'Run crawl batch'}
           </button>
           {status?.paused ? (
@@ -1243,9 +1271,11 @@ export default function SuperMarketing() {
             two RECONCILE the directory against PlayHQ rather than extend it. */}
         <div className="flex flex-wrap items-center gap-2 mb-2.5">
           <button className={BTN_ACCENT}
-                  disabled={busy === 'rediscover' || rediscoverRunning || status?.paused}
+                  data-testid="rediscover-btn"
+                  disabled={busy === 'rediscover' || rediscoverRunning || crawlStopped}
                   onClick={runRediscover}
-                  title="Re-page the whole PlayHQ club search and reconcile every club's committee">
+                  title={rediscoverWhy
+                    || "Re-page the whole PlayHQ club search and reconcile every club's committee"}>
             {rediscoverRunning ? 'Rediscovering...'
               : busy === 'rediscover' ? 'Starting...' : 'Rediscover committees'}
           </button>
@@ -1263,7 +1293,25 @@ export default function SuperMarketing() {
                 : 'Reading the first page from PlayHQ...'}
             </span>
           )}
-          {!rediscoverRunning && rediscover?.finished_at && rediscover?.result && (
+          {/* The reason lives beside the button it disables. The crawl row above
+              needs no copy of this — its own Stop/Start button and the red
+              "Stopped" pill directly above it already say it there. */}
+          {crawlStopped && !rediscoverRunning && (
+            <span className="text-[11px] text-amber-300" data-testid="rediscover-blocked">
+              {STOPPED_WHY}
+            </span>
+          )}
+          {/* A run that refused at the first page has no figures to report, and
+              formatting it as one prints "0 club(s)" — which reads as "it ran
+              and there was nothing to do" rather than "it never started". */}
+          {!rediscoverRunning && rediscover?.finished_at
+            && rediscover?.result?.skipped === 'stopped' && (
+            <span className="text-[11px] text-amber-300">
+              Last rediscover did not run — the crawler was stopped.
+            </span>
+          )}
+          {!rediscoverRunning && rediscover?.finished_at && rediscover?.result
+            && !rediscover.result.skipped && (
             <span className="text-[11px] text-pb-faint">
               Last rediscover: {rediscover.result.au_seen || 0} club(s),
               {' '}{rediscover.result.pruned || 0} removed,
