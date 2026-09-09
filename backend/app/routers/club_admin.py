@@ -4177,7 +4177,7 @@ async def list_webinar_registrations(
     """
     from sqlalchemy import text as _text
     rows = (await db.execute(_text("""
-        SELECT id, event_key, name, email, club, phone, role,
+        SELECT id, event_key, name, first_name, last_name, email, club, phone, role,
                utm_source, utm_medium, utm_campaign, utm_content, utm_term,
                click_id, click_source, referrer, landing_path,
                visitor_id, email_sent, email_error,
@@ -4274,7 +4274,7 @@ async def patch_webinar_registration(
     record of where the registration came from and are not ours to rewrite.
     """
     from sqlalchemy import text as _text
-    from app.services import webinar as _webinar
+    from app.services import streamyard as _streamyard, webinar as _webinar
 
     if body.name is None:
         raise HTTPException(status_code=422, detail="Nothing to change.")
@@ -4287,13 +4287,22 @@ async def patch_webinar_registration(
     except (ValueError, AttributeError, TypeError):
         raise HTTPException(status_code=404, detail="Registration not found.")
 
+    # The halves move with it, or the row would still push the OLD name —
+    # `push_to_streamyard` prefers them over splitting `name`, which is the
+    # whole point of them. Split here because a staff correction is one typed
+    # string, and a pair derived that way is better than a stale one: it is
+    # what somebody just looked at the row and wrote.
+    first, last = _streamyard.split_name(name)
     updated = (await db.execute(_text("""
         UPDATE webinar_registrations
-           SET name = :name, updated_at = NOW()
+           SET name = :name, first_name = :first, last_name = :last,
+               updated_at = NOW()
          WHERE id = CAST(:id AS uuid)
         RETURNING id
     """), {"id": str(_uuid),
-           "name": _webinar._clip(name, _webinar.MAX_LENGTHS["name"])})).first()
+           "name": _webinar._clip(name, _webinar.MAX_LENGTHS["name"]),
+           "first": _webinar._clip(first, _webinar.MAX_LENGTHS["name"]),
+           "last": _webinar._clip(last, _webinar.MAX_LENGTHS["name"])})).first()
     if not updated:
         await db.rollback()
         raise HTTPException(status_code=404, detail="Registration not found.")

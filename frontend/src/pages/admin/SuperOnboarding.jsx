@@ -235,8 +235,12 @@ function WebinarRegistrations() {
                     <div className="text-pb-text">
                       {r.name}
                       {/* Only offered where it is the thing standing in the
-                          way. A name that pushed fine is not ours to tidy. */}
-                      {!r.streamyard_id && !String(r.name || '').trim().includes(' ') && (
+                          way. A row with both halves stored has nothing to
+                          fix, and a name that pushed fine is not ours to
+                          tidy — the form asks for the two halves now, so this
+                          is for the registrations taken before it did. */}
+                      {!r.streamyard_id && !(r.first_name && r.last_name)
+                        && !String(r.name || '').trim().includes(' ') && (
                         <button
                           onClick={() => renameRow(r)}
                           title="StreamYard needs a first and last name"

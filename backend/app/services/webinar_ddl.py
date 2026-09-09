@@ -16,7 +16,19 @@ STATEMENTS: list[str] = [
     CREATE TABLE IF NOT EXISTS webinar_registrations (
         id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         event_key       TEXT NOT NULL,
+        -- `name` is the whole name as one string and stays the field every
+        -- reader uses: the email greeting, the reminder, the staff list, the
+        -- CSV. The two halves are stored ALONGSIDE it rather than replacing it
+        -- because StreamYard's own registration form has first and last name
+        -- as separate REQUIRED fields, and splitting one string at a space
+        -- guesses wrong for a two-word first name ("Mary Jane Smith") and has
+        -- no answer at all for a single word. Asking for the two halves and
+        -- keeping them is the only version that cannot be wrong. Nullable, so
+        -- every row written before this reads as "we only ever had one string"
+        -- and falls back to the split — see migration 301.
         name            TEXT NOT NULL,
+        first_name      TEXT,
+        last_name       TEXT,
         email           TEXT NOT NULL,
         club            TEXT NOT NULL,
         -- Stored as typed, not normalised to a canonical form. A club officer
@@ -90,6 +102,13 @@ STATEMENTS: list[str] = [
     """
     ALTER TABLE webinar_registrations
         ADD COLUMN IF NOT EXISTS streamyard_error TEXT
+    """,
+    # And again for the two name halves — see migration 301.
+    """
+    ALTER TABLE webinar_registrations ADD COLUMN IF NOT EXISTS first_name TEXT
+    """,
+    """
+    ALTER TABLE webinar_registrations ADD COLUMN IF NOT EXISTS last_name TEXT
     """,
     # One row per person per event. Folded, because an address typed with a
     # capital is the same person — a second registration corrects the row it

@@ -1144,7 +1144,7 @@ Reported: "It's not letting me push to streamyard - says 0 pushed, 2 skipped".
   messages in front of everyone watching. A person types the correction, or the
   row stays skipped and says so.
 - **Verified against a real Postgres**
-  (`backend/verification/verify_streamyard_skip_reporting.py`, 32 checks through
+  (`backend/verification/verify_streamyard_skip_reporting.py`, 62 checks through
   the shipped service and route bodies: the reported run replayed — one pushed,
   two skipped — the reason counted and named, the reason landing on the row, a
   second press not re-registering the one already done while retrying the two,
@@ -1154,6 +1154,69 @@ Reported: "It's not letting me push to streamyard - says 0 pushed, 2 skipped".
   dying on the first missing attribute. **No live call is made** —
   `push_registration` is stubbed, because their API has no public DELETE and a
   verification run must not create real registrations in somebody's account.
+
+### The form asked for one name where theirs needs two (migration 301, v9.73.3)
+
+Reported straight after: "Can you double check the form then because it does
+say first and last name so it should be pulling across - also, we want to
+ensure we pull through a phone number."
+
+- **THE PHONE ALREADY WORKED, AND SAYING SO BEAT BUILDING SOMETHING.** Verified
+  by pushing a marked test registration through the SHIPPED payload shape and
+  reading it back: `stored phone = '+61 400 111 222'`. It rides in
+  `fields.values` under the fetched phone field id, is accepted while optional,
+  and the same second POST returned the SAME id — their documented idempotency,
+  re-confirmed. Nothing to fix.
+- **THE FORM WAS THE MISMATCH, and the expectation was right.** StreamYard's
+  registration form has First name and Last name as separate REQUIRED fields;
+  ours had ONE field labelled `YOUR NAME`. So a registrant who typed one word
+  left nothing to send. The two boxes are `given-name` / `family-name` and sit
+  side by side, so two fields cost one line and one autofill tap — which is
+  what keeps this from being real friction on the paid traffic this page exists
+  for.
+- **SPLITTING A STRING IS A GUESS, NOT A FIX.** At the first space it reads
+  "Mary Jane Smith" as a surname of "Jane Smith", and it has no answer at all
+  for a mononym. Asking for the halves is the only version that cannot be
+  wrong, which is why the fix is the form rather than a cleverer splitter.
+- **`name` STAYS AND STAYS AUTHORITATIVE.** The confirmation greeting, the
+  reminder, the staff list and the CSV all read it, so it is stored as the
+  joined whole and the halves sit beside it — no backfill, and nothing
+  downstream changed.
+- **A SPLIT-DERIVED PAIR IS STORED AS NULL, never as a pair.** `resolve_name`
+  returns halves ONLY when both were given; a bare `name` (a browser served an
+  older bundle mid-deploy — the rule `plan_report.unassigned` already keeps)
+  stores NULL and the push falls back to splitting for itself. So NULL means
+  "we only ever had one string", which is exactly what a pre-301 row is.
+- **ONE HALF IS NOT A PAIR.** A surname box left empty IS the mononym case and
+  has to read as one — storing a lone first name as a pair would push a blank
+  surname, which is a 400 at their end.
+- **THE HALVES ARE COALESCED WHERE `name` IS OVERWRITTEN OUTRIGHT**, the same
+  call the phone already makes: `name` is always present so a correction is
+  unambiguous, whereas a one-field resubmission carries no halves and losing a
+  real pair to it is worse than keeping it.
+- **`streamyard.resolve_push_name` IS THE ONE RULE, AND ITS OWN FUNCTION SO IT
+  CAN BE CHECKED OFFLINE.** Everything else in `push_registration` talks to
+  StreamYard, so four lines inline meant the fallback could only be tested by
+  making a live call. **The stub CALLS it rather than retyping it** — a stub
+  that reimplements the rule is measuring the harness.
+- **THE STAFF CORRECTION SETS THE HALVES TOO**, or the row would keep pushing
+  the old name, since the push prefers them. And the **Add surname** button is
+  withdrawn once a row has both, so it only ever appears on the registrations
+  taken before the form asked.
+- **Verified** (the suite is 62 checks now: migration 301 applied three times
+  over a populated pre-301 table with the existing row's name untouched and no
+  invented halves, the downgrade dropping the two COLUMNS and never the table,
+  every `resolve_name` branch, the halves reaching the row and being sent
+  whole, the phone riding with them, a one-field resubmission not blanking a
+  stored pair while still correcting the club, and a pre-301 row still pushing
+  via the split) **with a control run**: 2 fail on the migration, **11 are
+  REPORTED** and nothing crashes. **Getting that control run clean took two
+  passes** — the suite's own `SELECT first_name` died on an
+  `UndefinedColumnError`, and the shared stub called `resolve_push_name`
+  unguarded; both are presence-checked now. **Driven in Chromium**
+  (`verify_webinar_browser.mjs`: both fields with their autocomplete tokens and
+  labels, both named in the validation message and marked invalid, and
+  `firstName`/`lastName` on the wire rather than one string).
 
 ### The second form is StreamYard's, and the reminder that replaces it (migration 299, v9.71.5)
 

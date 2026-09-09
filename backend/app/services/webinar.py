@@ -198,12 +198,46 @@ def google_calendar_url(event: WebinarEvent = EVENT, *, recording_url: Optional[
     return "https://calendar.google.com/calendar/render?" + urlencode(params)
 
 
+def resolve_name(
+    *, name: Optional[str], first_name: Optional[str], last_name: Optional[str],
+) -> tuple[str, Optional[str], Optional[str]]:
+    """`(name, first_name, last_name)` from whatever the caller sent.
+
+    THE HALVES WIN WHEN THEY ARE THERE, and `name` is derived by joining them —
+    so the one string every reader uses (the email greeting, the reminder, the
+    staff list, the CSV) is exactly what the person typed, and StreamYard gets
+    the two halves it requires without anything guessing where the split goes.
+
+    A BARE `name` IS STILL ACCEPTED, and that is not politeness. A browser
+    served an older bundle mid-deploy posts one field, and a registration must
+    not fail on that — the same call `plan_report.unassigned` and the phone
+    upsert already make. Splitting it is the fallback, never the mechanism:
+    at a space it reads "Mary Jane Smith" as a surname of "Jane Smith", and
+    there is no split at all that can invent a surname for a single word. So a
+    split-derived pair is stored as NULL rather than as a guess dressed up as
+    an answer, and the push falls back to splitting for those rows itself.
+    """
+    first = (first_name or "").strip()
+    last = (last_name or "").strip()
+    if first and last:
+        return f"{first} {last}", first, last
+    whole = (name or "").strip()
+    # One half on its own is not a pair, so it only contributes to the whole
+    # name. A form that sends `first_name` with the surname box left empty is
+    # exactly the mononym case, and it must read as one.
+    if not whole:
+        whole = " ".join(part for part in (first, last) if part)
+    return whole, None, None
+
+
 async def register(
     db: AsyncSession,
     *,
     name: str,
     email: str,
     club: str,
+    first_name: Optional[str] = None,
+    last_name: Optional[str] = None,
     phone: Optional[str] = None,
     role: Optional[str] = None,
     attribution: Optional[dict] = None,
@@ -227,7 +261,8 @@ async def register(
     whichever visit happened to be last rather than the click that earned it.
     """
     attribution = attribution or {}
-    name = (name or "").strip()
+    name, first_name, last_name = resolve_name(
+        name=name, first_name=first_name, last_name=last_name)
     email = (email or "").strip()
     club = (club or "").strip()
     phone = (phone or "").strip() or None
@@ -246,6 +281,8 @@ async def register(
         "id": str(uuid.uuid4()),
         "event_key": event.key,
         "name": _clip(name, MAX_LENGTHS["name"]) or "",
+        "first_name": _clip(first_name, MAX_LENGTHS["name"]),
+        "last_name": _clip(last_name, MAX_LENGTHS["name"]),
         "email": _clip(email, MAX_LENGTHS["email"]) or "",
         "club": _clip(club, MAX_LENGTHS["club"]) or "",
         "phone": _clip(phone, MAX_LENGTHS["phone"]),
@@ -266,18 +303,28 @@ async def register(
 
     row = (await db.execute(text("""
         INSERT INTO webinar_registrations (
-            id, event_key, name, email, club, phone, role,
+            id, event_key, name, first_name, last_name, email, club, phone, role,
             utm_source, utm_medium, utm_campaign, utm_content, utm_term,
             click_id, click_source, attribution, referrer, landing_path,
             visitor_id, user_agent
         ) VALUES (
-            CAST(:id AS uuid), :event_key, :name, :email, :club, :phone, :role,
+            CAST(:id AS uuid), :event_key, :name, :first_name, :last_name,
+            :email, :club, :phone, :role,
             :utm_source, :utm_medium, :utm_campaign, :utm_content, :utm_term,
             :click_id, :click_source, CAST(:attribution AS jsonb), :referrer,
             :landing_path, :visitor_id, :user_agent
         )
         ON CONFLICT (event_key, lower(email)) DO UPDATE SET
             name = EXCLUDED.name,
+            -- COALESCEd where `name` above is overwritten outright, and for the
+            -- same reason the phone is: `name` is always present, so a
+            -- resubmission correcting it is unambiguous, whereas the halves can
+            -- legitimately be absent (a browser served an older bundle
+            -- mid-deploy posts one Name field) and losing a real pair to one of
+            -- those is worse than keeping it. A submission that DOES carry both
+            -- halves wins.
+            first_name = COALESCE(EXCLUDED.first_name, webinar_registrations.first_name),
+            last_name = COALESCE(EXCLUDED.last_name, webinar_registrations.last_name),
             club = EXCLUDED.club,
             -- A correction, so a new number wins — but never blanked back to
             -- nothing by a submission that carried none. Name and club are
@@ -632,6 +679,8 @@ async def push_to_streamyard(
     name: str,
     email: str,
     phone: Optional[str] = None,
+    first_name: Optional[str] = None,
+    last_name: Optional[str] = None,
     event: WebinarEvent = EVENT,
 ) -> dict:
     """Push one registration into StreamYard and stamp what happened.
@@ -639,17 +688,27 @@ async def push_to_streamyard(
     Skipped outright for a row already pushed — their API is idempotent on the
     email, but it also does NOT overwrite, so re-pushing a corrected name would
     cost a request and change nothing.
+
+    THE ROW IS READ FOR THE NAME HALVES rather than trusting the caller for
+    them. `register` already has them in hand and passes them through, but the
+    catch-up sweep and the staff button both work off the row, and the one place
+    that decides what StreamYard is sent should be the same either way.
     """
     from app.services import streamyard
 
-    already = (await db.execute(text(
-        "SELECT streamyard_id FROM webinar_registrations WHERE id = CAST(:id AS uuid)"
-    ), {"id": registration_id})).scalar_one_or_none()
-    if already:
-        return {"ok": True, "id": already, "skipped": "already pushed"}
+    row = (await db.execute(text(
+        "SELECT streamyard_id, first_name, last_name"
+        "  FROM webinar_registrations WHERE id = CAST(:id AS uuid)"
+    ), {"id": registration_id})).mappings().first()
+    if row and row["streamyard_id"]:
+        return {"ok": True, "id": row["streamyard_id"], "skipped": "already pushed"}
+    if row:
+        first_name = first_name or row["first_name"]
+        last_name = last_name or row["last_name"]
 
     result = await streamyard.push_registration(
-        watch_url=event.watch_url, name=name, email=email, phone=phone)
+        watch_url=event.watch_url, name=name, email=email, phone=phone,
+        first_name=first_name, last_name=last_name)
     # A skip is not a failure and must not read as one on the staff list — it
     # is recorded as the plain reason there was nothing to do.
     note = result.get("error") or result.get("skipped")
@@ -692,7 +751,7 @@ async def sync_streamyard(
     their end.
     """
     rows = (await db.execute(text("""
-        SELECT id, name, email, phone
+        SELECT id, name, first_name, last_name, email, phone
           FROM webinar_registrations
          WHERE event_key = :k AND streamyard_id IS NULL
          ORDER BY created_at
@@ -704,7 +763,9 @@ async def sync_streamyard(
     for row in rows:
         result = await push_to_streamyard(
             db, registration_id=str(row["id"]), name=row["name"] or "",
-            email=row["email"] or "", phone=row["phone"], event=event)
+            email=row["email"] or "", phone=row["phone"],
+            first_name=row["first_name"], last_name=row["last_name"],
+            event=event)
         if result.get("ok"):
             pushed += 1
             continue
