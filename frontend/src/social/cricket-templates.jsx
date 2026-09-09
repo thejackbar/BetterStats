@@ -1,61 +1,15 @@
 // Cricket social media templates — ES module port of the Cricket Scorecards 2 design system.
-// Every template COMPOSES at exactly 1080×1080px using inline styles, and renders
-// into a canvas of whichever post size was picked (see PostCanvas below and
-// postSizes.jsx). Font stack: Anton, Bebas Neue, Archivo Black, Inter,
-// JetBrains Mono (loaded in index.html)
+// Every template is designed at 1080×1080 and carries its own design for the
+// two taller posts (1080×1350 and 1080×1920) — see postAspect.js. The shapes
+// are all 1080 WIDE, so a portrait design is entirely a decision about where
+// the extra height goes: which band grows, what type steps up, and what
+// restructures rather than stretching.
+// Font stack: Anton, Bebas Neue, Archivo Black, Inter, JetBrains Mono (loaded in index.html)
 
-import { useRef, useState, useLayoutEffect, createContext, useContext } from 'react'
+import { useRef, useState, useLayoutEffect } from 'react'
+import { aspectOf, pick, share, grow } from './postAspect'
 import brandBlack from '../assets/bettercricket-black.svg'
 import brandWhite from '../assets/bettercricket-white.svg'
-import { ART_W, ART_H, matteFor } from './postSizes'
-
-// The post height every template on screen is rendering into. Carried by
-// CONTEXT rather than a prop so a format reaches all ~60 templates without
-// sixty signatures having to learn about it — and so a template mounted
-// anywhere else (a thumbnail, the mobile quick post) still gets the square by
-// default rather than needing every caller to remember to pass one.
-const PostHeightContext = createContext(ART_H)
-export function PostFormat({ h = ART_H, children }) {
-  return <PostHeightContext.Provider value={h}>{children}</PostHeightContext.Provider>
-}
-export function usePostHeight() { return useContext(PostHeightContext) }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// POST CANVAS — the one place a template becomes a 1:1 / 4:5 / 9:16 post
-//
-// A template's artwork is composed at 1080×1080 and is not re-laid-out per
-// format: three separately-tuned copies of one layout is how they start
-// disagreeing with each other. So a taller format is a taller CANVAS with the
-// same artwork centred in it, and the band above and below is painted by the
-// template's OWN background — which is what makes it seamless rather than a
-// letterbox somebody has to colour-match by hand.
-//
-// ONLY THE CANVAS CLIPS, NEVER THE ARTWORK BOX, and that is the decision that
-// makes a taller post read as the design extended rather than a square matted
-// into a band. The artwork box positions; the canvas is what content is cut
-// against. So a glow or a shape a template bleeds off its own top or bottom
-// edge carries on into the extra height instead of stopping at a line partway
-// down, which is exactly the seam a clipped artwork box produces — and the
-// shared texture layers (Halftone / Stripes / GrainSVG, see useBleed) reach the
-// real edges for the same reason.
-//
-// At h === ART_H the artwork box is the full canvas, so the square renders
-// byte-for-byte what it always did.
-// ─────────────────────────────────────────────────────────────────────────────
-export function PostCanvas({ h, style = {}, artStyle = {}, children, ...rest }) {
-  const ctxH = usePostHeight()
-  const raw = h == null ? ctxH : h
-  const height = Number(raw) > 0 ? Number(raw) : ART_H
-  const matte = matteFor(height)
-  return (
-    <div data-post-canvas={height} style={{ width: ART_W, height, position: 'relative', overflow: 'hidden', ...style }} {...rest}>
-      <div data-post-art="" style={{
-        position: 'absolute', left: 0, top: matte, width: ART_W, height: ART_H,
-        ...artStyle,
-      }}>{children}</div>
-    </div>
-  )
-}
 
 // The BetterCricket credit mark used in every template's footer — the real
 // brand logo (black on a light footer, white on a dark one), no wordmark text.
@@ -109,7 +63,15 @@ export function AutoFitText({ text, children, max, min = 8, lines = 1, pad = 0, 
       node.style.fontSize = next + 'px'
       let guard = 0
       while (guard++ < 400 && next > min) {
-        const overflowW = node.scrollWidth > parent.clientWidth + 0.5
+        // MEASURE AGAINST THE NODE'S OWN BOX, NOT THE PARENT'S. `clientWidth`
+        // INCLUDES padding, so a node inside a padded parent was allowed to
+        // overflow by exactly that padding with nothing detecting it — T9's
+        // tiers sat in a `padding: 0 40px` box and ran 76px off the poster at
+        // full size. Kept as the tighter of the two, so a node positioned
+        // wider than its parent is still caught the way it always was.
+        const nodeW = node.clientWidth > 0 ? node.clientWidth : parent.clientWidth
+        const boxW = Math.min(nodeW, parent.clientWidth)
+        const overflowW = node.scrollWidth > boxW + 0.5
         const overflowH = lines > 1 && node.scrollHeight > parent.clientHeight + 0.5
         if (!overflowW && !overflowH) break
         next -= 1
@@ -156,48 +118,9 @@ export function AutoFitText({ text, children, max, min = 8, lines = 1, pad = 0, 
 // SHARED VISUAL PRIMITIVES
 // ─────────────────────────────────────────────────────────────────────────────
 
-// A full-bleed layer's `inset: 0` resolves against the ARTWORK box, which on a
-// 4:5 or 9:16 post is only the middle 1080 of the canvas — so a texture that is
-// meant to run edge to edge instead stops with a visible line partway down.
-// This is what lets the shared texture layers reach the real canvas edges, and
-// it is why every template picked up correct 4:5 / 9:16 texture without any of
-// them being edited: they all draw their grain, dots and stripes through these
-// three primitives.
-//
-// Nothing else should escape the artwork box. A decoration deliberately bled
-// off the top or bottom at a negative offset is clipped at the ART edge on
-// purpose — that is what keeps it looking as it does on the square.
-// ONLY FOR A DIRECT CHILD OF THE CANVAS. The offsets are in canvas pixels, so
-// an element nested inside some other positioned box would be stretched past
-// its own parent rather than to the post's edges. A nested texture layer is
-// the one exception this file relies on and it works because both of them sit
-// inside a box that clips (T2's player card, T3's side panel); anywhere else,
-// pass `style={{ top: 0, bottom: 0 }}` to opt out — a caller's own style wins.
-export function useBleed() {
-  const h = usePostHeight()
-  const m = matteFor(h)
-  return m ? { top: -m, bottom: -m } : null
-}
-
-// A full-height element that belongs to the POST rather than to the artwork —
-// a side rail, a full-bleed photo scrim, a background wash. Anchored to the
-// artwork box it stops with a visible line partway down a 4:5 or 9:16 post;
-// this carries it to the real edges. Same direct-child rule as useBleed: a bar
-// inside a row is full-height of THAT row and must be left alone.
-export function Bleed({ style = {}, children, ...rest }) {
-  const bleed = useBleed()
-  return (
-    <div style={{ position: 'absolute', top: 0, bottom: 0, ...style, ...(bleed || {}) }} {...rest}>
-      {children}
-    </div>
-  )
-}
-
 export function GrainSVG({ opacity = 0.35, id = 'grain' }) {
-  const postH = usePostHeight()
-  const bleed = useBleed()
   return (
-    <svg style={{ position: 'absolute', inset: 0, width: '100%', height: postH, pointerEvents: 'none', mixBlendMode: 'overlay', opacity, ...bleed }}>
+    <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', mixBlendMode: 'overlay', opacity }}>
       <filter id={id}>
         <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch" />
         <feColorMatrix values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.55 0" />
@@ -208,7 +131,6 @@ export function GrainSVG({ opacity = 0.35, id = 'grain' }) {
 }
 
 export function Halftone({ color = '#fff', size = 14, opacity = 0.12, angle = 0, style = {} }) {
-  const bleed = useBleed()
   return (
     <div style={{
       position: 'absolute', inset: 0, pointerEvents: 'none', opacity,
@@ -216,18 +138,17 @@ export function Halftone({ color = '#fff', size = 14, opacity = 0.12, angle = 0,
       backgroundSize: `${size}px ${size}px`,
       transform: `rotate(${angle}deg) scale(1.4)`,
       transformOrigin: 'center',
-      ...bleed, ...style,
+      ...style,
     }} />
   )
 }
 
 export function Stripes({ color = '#fff', angle = -45, gap = 14, opacity = 0.06, style = {} }) {
-  const bleed = useBleed()
   return (
     <div style={{
       position: 'absolute', inset: 0, pointerEvents: 'none', opacity,
       backgroundImage: `repeating-linear-gradient(${angle}deg, ${color} 0 1px, transparent 1px ${gap}px)`,
-      ...bleed, ...style,
+      ...style,
     }} />
   )
 }
@@ -488,19 +409,35 @@ export function orgToPalette(org) {
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 1 — Hero cutout + bold name list
 // ─────────────────────────────────────────────────────────────────────────────
-export function T1_HeroList({ team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus }) {
+export function T1_HeroList({ width = 1080, height = 1080, team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus }) {
   const P = players.slice(0, 13)
-  // Size the name rows down as the squad grows so a full 13 always fits the
-  // available space (sized for the worst case: a tall headline + a wrapped vs
-  // row). Rows are then distributed to fill the column for larger squads.
-  const rowMax = P.length >= 13 ? 28 : P.length >= 11 ? 32 : P.length >= 9 ? 36 : 42
+  const A = aspectOf(width, height)
+  // ── T1 at 4:5 and 9:16 ────────────────────────────────────────────────────
+  // The square is a spine, a hero column and a name rail. The rail is what the
+  // extra height lands in, so the design decision is how the names spend it.
+  //
+  // PORTRAIT keeps the composition and lets the names grow into the room — the
+  // rail is a third taller, so a 28px cap on a 13-man squad reads as a square
+  // design with air pushed through it.
+  //
+  // STORY stops spreading them. Thirteen names distributed down 1,700px are
+  // 130px apart and read as a list somebody abandoned, so the squad is set as
+  // ONE block and centred in the rail. Centred rather than sat on the foot,
+  // because a story's bottom couple of hundred pixels carry the app's own reply
+  // bar and its top the profile row — a name block anchored to either edge is
+  // the half that gets covered up.
+  const packed = A === 'story'
+  const base = P.length >= 13 ? 28 : P.length >= 11 ? 32 : P.length >= 9 ? 36 : 42
+  const rowMax = Math.round(base * pick(A, { square: 1, portrait: 1.22, story: 1.6 }))
+  const heroTop = pick(A, { square: 210, portrait: 240, story: 300 })
   return (
-    <PostCanvas style={{
+    <div style={{
+      width, height, position: 'relative', overflow: 'hidden',
       background: `linear-gradient(135deg, ${palette.primary} 0%, ${palette.secondary} 100%)`,
       color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
-      <Bleed style={{
-        left: 0, width: 56,
+      <div style={{
+        position: 'absolute', left: 0, top: 0, bottom: 0, width: 56,
         background: palette.secondary,
         borderRight: `1px solid ${palette.ink}1a`,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -511,7 +448,7 @@ export function T1_HeroList({ team, opponent, match, players, palette, heroImage
           fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 27, letterSpacing: 8,
           color: palette.ink, opacity: 0.92,
         }}>{(team.fullName || team.name).toUpperCase()}</div>
-      </Bleed>
+      </div>
       <div style={{
         position: 'absolute', left: 70, top: 80,
         fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 160, lineHeight: 0.88,
@@ -520,8 +457,11 @@ export function T1_HeroList({ team, opponent, match, players, palette, heroImage
       }}>{(team.fullName || team.name + ' CRICKET CLUB').toUpperCase()}</div>
       <Halftone color={palette.ink} opacity={0.08} size={12} />
       <Stripes color={palette.ink} opacity={0.04} gap={20} angle={-30} />
+      {/* Bottom-anchored rather than a fixed 845 high: at 1080 that is the same
+          box to the pixel, and on a taller canvas the photo gets the extra room
+          instead of leaving a dead band under it. */}
       <div style={{
-        position: 'absolute', left: 64, top: 210, width: 480, height: 845,
+        position: 'absolute', left: 64, top: heroTop, width: 480, bottom: 25,
         display: 'grid', placeItems: 'end center', overflow: 'hidden',
       }}>
         <div style={{
@@ -569,9 +509,9 @@ export function T1_HeroList({ team, opponent, match, players, palette, heroImage
             }}>{match.season}</div>
           </div>
         </div>
-        <div style={{ maxHeight: 300, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', marginTop: 20, overflow: 'hidden' }}>
+        <div style={{ maxHeight: pick(A, { square: 300, portrait: 360, story: 440 }), display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', marginTop: 20, overflow: 'hidden' }}>
           <AutoFitText
-            text={(headline || 'SQUAD').toUpperCase()} max={180} min={48} lines={2} pad={14}
+            text={(headline || 'SQUAD').toUpperCase()} max={pick(A, { square: 180, portrait: 210, story: 250 })} min={48} lines={2} pad={14}
             style={{
               fontFamily: "var(--social-display-font, 'Anton', sans-serif)", lineHeight: 0.85,
               letterSpacing: -2, color: palette.ink, textAlign: 'right', width: '100%',
@@ -604,7 +544,11 @@ export function T1_HeroList({ team, opponent, match, players, palette, heroImage
               style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 1.5, lineHeight: 1, textAlign: 'left', width: '100%' }} />
           </div>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 1, textAlign: 'right', flex: 1, minHeight: 0, overflow: 'hidden', justifyContent: P.length >= 9 ? 'space-between' : 'flex-start' }}>
+        <div style={{
+          display: 'flex', flexDirection: 'column', gap: packed ? 8 : 1,
+          textAlign: 'right', flex: 1, minHeight: 0, overflow: 'hidden',
+          justifyContent: packed ? 'center' : (P.length >= 9 ? 'space-between' : 'flex-start'),
+        }}>
           {P.map((p, i) => {
             const chip = p.captain ? 'C' : p.viceCaptain ? 'VC' : p.keeper ? 'WK' : null
             return (
@@ -634,17 +578,34 @@ export function T1_HeroList({ team, opponent, match, players, palette, heroImage
         <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.35} id="g1" />
-    </PostCanvas>
+    </div>
   )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 2 — Trading card grid (4×3)
 // ─────────────────────────────────────────────────────────────────────────────
-export function T2_CardGrid({ team, opponent, match, players, palette }) {
+export function T2_CardGrid({ width = 1080, height = 1080, team, opponent, match, players, palette }) {
   const P = players.slice(0, 12)
+  const A = aspectOf(width, height)
+  // ── T2 at 4:5 and 9:16 ────────────────────────────────────────────────────
+  // These are trading cards, so the design question is the card's own shape.
+  // PORTRAIT keeps 4×3 and spends the extra height on the cards themselves —
+  // 240×200 becomes 240×270, which is a better trading card than the square
+  // was. STORY cannot: 4×3 there is 240×480, a face stretched down a slot, so
+  // it goes 3×4 and the cards come back to 330×360.
+  const cols = pick(A, { square: 4, story: 3 })
+  const rows = pick(A, { square: 3, story: 4 })
+  // The header ends about 300px down whatever the canvas, so the grid keeps
+  // roughly the square's own 80px gap under it rather than opening a band the
+  // taller canvas has no use for.
+  // The header block finishes around 300 whatever the canvas, so the grid opens
+  // just under it rather than sliding down with the post — a story that starts
+  // its cards at 440 leaves a dead band nobody put anything in.
+  const gridTop = pick(A, { square: 380, portrait: 400, story: 372 })
   return (
-    <PostCanvas style={{
+    <div style={{
+      width, height, position: 'relative', overflow: 'hidden',
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
       <Halftone color={palette.ink} opacity={0.05} size={10} />
@@ -702,8 +663,8 @@ export function T2_CardGrid({ team, opponent, match, players, palette }) {
         <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 26, letterSpacing: 1, color: palette.ink, lineHeight: 0.95, textAlign: 'center', marginTop: 8 }}>{(team.fullName || team.name).toUpperCase()}</div>
       </div>
       <div style={{
-        position: 'absolute', left: 56, right: 56, top: 380, bottom: 100,
-        display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gridTemplateRows: 'repeat(3, 1fr)',
+        position: 'absolute', left: 56, right: 56, top: gridTop, bottom: 100,
+        display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)`,
         gap: 14,
       }}>
         {P.map((p, i) => {
@@ -744,40 +705,52 @@ export function T2_CardGrid({ team, opponent, match, players, palette }) {
         <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.4} id="g2" />
-    </PostCanvas>
+    </div>
   )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 3 — Side image + numbered XI
 // ─────────────────────────────────────────────────────────────────────────────
-export function T3_SideNumbered({ team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus }) {
-  // The wave background and the side panel are the POST's, not the artwork's —
-  // both run to the real canvas edges on a 4:5 or 9:16.
-  const postH = usePostHeight()
-  const bleed = useBleed() || {}
+export function T3_SideNumbered({ width = 1080, height = 1080, team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus }) {
   const P = players.slice(0, 11)
   // The vertical spine label echoes the post headline (defaults to STARTING XI).
   // Scale it down for longer headlines so it never runs off the top edge.
   const spine = (headline || 'STARTING XI').toUpperCase()
-  const spineSize = Math.max(34, Math.min(80, Math.floor(1000 / Math.max(spine.length, 1))))
+  const A = aspectOf(width, height)
+  // ── T3 at 4:5 and 9:16 ────────────────────────────────────────────────────
+  // A full-height photo strip beside a numbered XI. The strip gets better the
+  // taller the canvas — it is the one element here that WANTS a portrait shape
+  // — so the design widens it and lets the numbers and names step up with it.
+  const strip = pick(A, { square: 380, portrait: 408, story: 440 })
+  // The outline spine is measured against the height it runs down, not a fixed
+  // 1000, or it stays a square-sized word on a canvas twice as long.
+  const spineSize = Math.max(34, Math.min(pick(A, { square: 80, portrait: 96, story: 120 }), Math.floor((height * 0.93) / Math.max(spine.length, 1))))
+  const numSize = pick(A, { square: 42, portrait: 48, story: 56 })
+  const nameMax = pick(A, { square: 38, portrait: 42, story: 50 })
   return (
-    <PostCanvas style={{
+    <div style={{
+      width, height, position: 'relative', overflow: 'hidden',
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
-      <svg width="1080" height={postH} style={{ position: 'absolute', inset: 0, ...bleed, height: postH }}>
+      {/* The gradient and both wave shapes are the background, so they take the
+          real canvas — hardcoded at 1080 the gradient stopped two thirds of the
+          way down a story and the rest fell through to the flat primary. The
+          waves keep their own 1080 viewBox and are stretched to fit, which is
+          what a decorative curve should do on a taller post. */}
+      <svg width={width} height={height} viewBox="0 0 1080 1080" preserveAspectRatio="none" style={{ position: 'absolute', inset: 0 }}>
         <defs>
           <linearGradient id="bgwv" x1="0" y1="0" x2="1" y2="1">
             <stop offset="0" stopColor={palette.primary} />
             <stop offset="1" stopColor={palette.secondary} />
           </linearGradient>
         </defs>
-        <rect width="1080" height={postH} fill="url(#bgwv)" />
+        <rect width="1080" height="1080" fill="url(#bgwv)" />
         <path d="M 900 0 C 1050 200 950 400 1080 600 L 1080 0 Z" fill={palette.ink} opacity="0.04" />
         <path d="M 1000 1080 C 850 900 1100 700 980 500 L 1080 500 L 1080 1080 Z" fill={palette.accent} opacity="0.06" />
       </svg>
-      <Bleed style={{
-        left: 0, width: 380,
+      <div style={{
+        position: 'absolute', left: 0, top: 0, width: strip, bottom: 0,
         background: `linear-gradient(180deg, ${palette.secondary} 0%, ${palette.primary} 100%)`,
         overflow: 'hidden',
       }}>
@@ -820,15 +793,17 @@ export function T3_SideNumbered({ team, opponent, match, players, palette, heroI
             </div>
           )
         })()}
-      </Bleed>
+      </div>
+      {/* Anchored to the middle of the canvas rather than a fixed 540, so the
+          word still runs up the centre of the seam on a taller post. */}
       <div style={{
-        position: 'absolute', left: 360, top: 540,
+        position: 'absolute', left: strip - 20, top: Math.round(height / 2),
         transform: 'rotate(-90deg)', transformOrigin: 'left top',
         fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: spineSize, letterSpacing: 4,
         color: 'transparent', WebkitTextStroke: `2px ${palette.accent}`,
         whiteSpace: 'nowrap', lineHeight: 0.8,
       }}>{spine}</div>
-      <div style={{ position: 'absolute', left: 460, top: 50, right: 40, bottom: 40, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ position: 'absolute', left: strip + 80, top: 50, right: 40, bottom: 40, display: 'flex', flexDirection: 'column' }}>
         <div style={{ textAlign: 'center', fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, letterSpacing: 2, color: palette.ink, lineHeight: 1, marginBottom: 14 }}>{(team.fullName || team.name).toUpperCase()}</div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 26, marginBottom: 24 }}>
           <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={132} shape="circle" />
@@ -841,14 +816,20 @@ export function T3_SideNumbered({ team, opponent, match, players, palette, heroI
         <div style={{ textAlign: 'center', fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 16, letterSpacing: 2, color: palette.accent, marginBottom: 22, lineHeight: 1 }}>
           {match.venue.toUpperCase()}
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1 }}>
+        {/* `minHeight: 0` is TALL-ONLY: at square it lets this column shrink
+            below its own rows, which moves the credit rule under it. */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, ...(A === 'square' ? null : { minHeight: 0 }) }}>
           {P.map((p, i) => {
             const chip = p.captain ? 'C' : p.viceCaptain ? 'VC' : p.keeper ? 'WK' : null
             return (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '7px 0', borderBottom: `1px solid ${palette.ink}1c` }}>
-                <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 42, color: palette.accent, lineHeight: 1, width: 50, textAlign: 'right', flexShrink: 0 }}>{i + 1}</div>
+              // On a taller canvas the eleven rows SHARE the column, so the XI
+              // runs down to the credit rule instead of stopping where it did on
+              // the square and leaving 270px of nothing under it. The square
+              // keeps its own naturally-sized rows.
+              <div key={i} style={{ ...(A === 'square' ? null : { flex: 1, minHeight: 0 }), display: 'flex', alignItems: 'center', gap: 12, padding: '7px 0', borderBottom: `1px solid ${palette.ink}1c` }}>
+                <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: numSize, color: palette.accent, lineHeight: 1, width: Math.round(numSize * 1.2), textAlign: 'right', flexShrink: 0 }}>{i + 1}</div>
                 <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-start' }}>
-                  <AutoFitText max={38} min={16} lines={1} pad={8}
+                  <AutoFitText max={nameMax} min={16} lines={1} pad={8}
                     style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 0.5, color: palette.ink, lineHeight: 1 }}>
                     <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: '0.26em', whiteSpace: 'nowrap' }}>
                       <span style={{ opacity: 0.65, fontWeight: 300, fontSize: '0.74em' }}>{p.first.toUpperCase()}</span>
@@ -866,29 +847,40 @@ export function T3_SideNumbered({ team, opponent, match, players, palette, heroI
         </div>
       </div>
       <GrainSVG opacity={0.3} id="g3" />
-    </PostCanvas>
+    </div>
   )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 4 — Batting order with role-coded rows
 // ─────────────────────────────────────────────────────────────────────────────
-export function T4_BattingOrder({ team, opponent, match, players, palette }) {
+export function T4_BattingOrder({ width = 1080, height = 1080, team, opponent, match, players, palette }) {
   const P = players.slice(0, 13)
+  const A = aspectOf(width, height)
+  // ── T4 at 4:5 and 9:16 ────────────────────────────────────────────────────
+  // The order is the whole post, so on a taller canvas the ORDER gets the room.
+  // The root is a flex column and the rows share what is left below the meta
+  // band, rather than the square's fixed-height rows leaving a dead strip above
+  // the footer. Numbers and names step up with the rows they sit in.
+  const numSize = pick(A, { square: 40, portrait: 46, story: 56 })
+  const nameMax = pick(A, { square: 30, portrait: 34, story: 42 })
+  const headSize = pick(A, { square: 68, portrait: 78, story: 92 })
   return (
-    <PostCanvas style={{
+    <div style={{
+      width, height, position: 'relative', overflow: 'hidden',
+      display: 'flex', flexDirection: 'column',
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
       <Stripes color={palette.ink} opacity={0.04} gap={40} angle={0} />
       <Halftone color={palette.ink} opacity={0.04} size={11} />
-      <div style={{ position: 'relative', padding: '32px 56px 18px', borderBottom: `3px solid ${palette.accent}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ position: 'relative', flexShrink: 0, padding: '32px 56px 18px', borderBottom: `3px solid ${palette.accent}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 2, color: palette.accent, marginBottom: 4 }}>// PROBABLE XI</div>
-          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 68, lineHeight: 0.85, color: palette.ink, letterSpacing: -1 }}>BATTING ORDER</div>
+          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: headSize, lineHeight: 0.85, color: palette.ink, letterSpacing: -1 }}>BATTING ORDER</div>
         </div>
         <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={116} shape="shield" />
       </div>
-      <div style={{ padding: '16px 56px', background: palette.secondary, borderBottom: `1px solid ${palette.ink}22`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ flexShrink: 0, padding: '16px 56px', background: palette.secondary, borderBottom: `1px solid ${palette.ink}22`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={58} shape="shield" />
@@ -905,21 +897,24 @@ export function T4_BattingOrder({ team, opponent, match, players, palette }) {
           <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.5, color: palette.ink, opacity: 0.7, marginTop: 4 }}>{match.time}</div>
         </div>
       </div>
-      <div style={{ padding: '16px 56px 0', display: 'flex', flexDirection: 'column', gap: 4 }}>
+      {/* The rows share whatever is left, so the order fills the post instead of
+          stopping short of the footer with a dead strip under it. */}
+      <div style={{ flex: 1, minHeight: 0, padding: '16px 56px 92px', display: 'flex', flexDirection: 'column', gap: 4 }}>
         {P.map((p, i) => {
           const chip = p.captain ? 'C' : p.viceCaptain ? 'VC' : p.keeper ? 'WK' : null
           const isRole = p.role || 'BAT'
           return (
             <div key={i} style={{
-              display: 'grid', gridTemplateColumns: '60px 1fr 76px', alignItems: 'center', gap: 14,
+              flex: 1, minHeight: 0,
+              display: 'grid', gridTemplateColumns: `${Math.round(numSize * 1.5)}px 1fr 76px`, alignItems: 'center', gap: 14,
               padding: '8px 16px',
               background: i % 2 === 0 ? `${palette.ink}08` : 'transparent',
               borderLeft: `3px solid ${i === 10 ? palette.accent : 'transparent'}`,
             }}>
-              <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 40, color: palette.accent, lineHeight: 1, textAlign: 'center' }}>{i + 1}</div>
+              <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: numSize, color: palette.accent, lineHeight: 1, textAlign: 'center' }}>{i + 1}</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
                 <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-start' }}>
-                  <AutoFitText max={30} min={14} lines={1} measureDeps={[chip ? 1 : 0]}
+                  <AutoFitText max={nameMax} min={14} lines={1} measureDeps={[chip ? 1 : 0]}
                     style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 0.5, color: palette.ink, lineHeight: 1 }}>
                     <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: '0.28em', whiteSpace: 'nowrap' }}>
                       <span style={{ opacity: 0.62, fontWeight: 300, fontSize: '0.73em' }}>{p.first.toUpperCase()}</span>
@@ -941,29 +936,39 @@ export function T4_BattingOrder({ team, opponent, match, players, palette }) {
         <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.25} id="g4" />
-    </PostCanvas>
+    </div>
   )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 5 — Brutalist typographic
 // ─────────────────────────────────────────────────────────────────────────────
-export function T5_Brutalist({ team, opponent, match, players, palette }) {
+export function T5_Brutalist({ width = 1080, height = 1080, team, opponent, match, players, palette }) {
   const P = players.slice(0, 11)
+  const A = aspectOf(width, height)
+  // ── T5 at 4:5 and 9:16 ────────────────────────────────────────────────────
+  // Brutalist means the names ARE the artwork, so the taller canvas goes into
+  // the type rather than into the space around it. The rows share the room the
+  // header and footer leave and each name is allowed to run bigger; the
+  // background marks are placed against the real canvas so the watermark still
+  // sits behind the middle of the list rather than a third of the way down.
+  const nameMax = pick(A, { square: 64, portrait: 76, story: 92 })
   return (
-    <PostCanvas style={{
+    <div style={{
+      width, height, position: 'relative', overflow: 'hidden',
+      display: 'flex', flexDirection: 'column',
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
       <Stripes color={palette.ink} opacity={0.06} gap={6} angle={0} />
-      <div style={{ position: 'absolute', left: 0, right: 0, top: 320, textAlign: 'center', fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 520, lineHeight: 0.8, color: palette.ink, opacity: 0.05, letterSpacing: -10, userSelect: 'none' }}>XI</div>
+      <div style={{ position: 'absolute', left: 0, right: 0, top: share(height, 320), textAlign: 'center', fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: share(height, 520), lineHeight: 0.8, color: palette.ink, opacity: 0.05, letterSpacing: -10, userSelect: 'none' }}>XI</div>
       <Halftone color={palette.ink} opacity={0.08} size={14} angle={-20} />
-      <div style={{ position: 'absolute', left: -100, top: 360, width: 1300, height: 100, background: palette.accent, opacity: 0.08, transform: 'rotate(-3deg)' }} />
-      <div style={{ position: 'absolute', left: -120, top: 700, width: 1300, height: 60, background: palette.accent, opacity: 0.1, transform: 'rotate(2deg)' }} />
-      <svg style={{ position: 'absolute', right: -180, top: 220, width: 520, height: 520, opacity: 0.08 }}>
+      <div style={{ position: 'absolute', left: -100, top: share(height, 360), width: 1300, height: 100, background: palette.accent, opacity: 0.08, transform: 'rotate(-3deg)' }} />
+      <div style={{ position: 'absolute', left: -120, top: share(height, 700), width: 1300, height: 60, background: palette.accent, opacity: 0.1, transform: 'rotate(2deg)' }} />
+      <svg style={{ position: 'absolute', right: -180, top: share(height, 220), width: 520, height: 520, opacity: 0.08 }}>
         <circle cx="260" cy="260" r="240" fill="none" stroke={palette.accent} strokeWidth="3" />
         <circle cx="260" cy="260" r="180" fill="none" stroke={palette.accent} strokeWidth="3" />
       </svg>
-      <div style={{ background: palette.accent, color: palette.primary, padding: '24px 44px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', zIndex: 2 }}>
+      <div style={{ flexShrink: 0, background: palette.accent, color: palette.primary, padding: '24px 44px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', zIndex: 2 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 20, minWidth: 0 }}>
           <ClubLogo src={team.logo} monogram={team.monogram} color={palette.primary} size={96} shape="shield" />
           <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 52, letterSpacing: 2, lineHeight: 1 }}>{team.name} XI</div>
@@ -973,14 +978,20 @@ export function T5_Brutalist({ team, opponent, match, players, palette }) {
           <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 2, marginTop: 6 }}>{match.round} · {match.date}</div>
         </div>
       </div>
-      <div style={{ padding: '32px 44px 0', display: 'flex', flexDirection: 'column', gap: 0 }}>
+      {/* Shares the room the header and footer leave on a taller post. At
+          square it keeps its original natural height and bottom padding, so the
+          list sits exactly where it did. */}
+      <div style={{
+        ...(A === 'square' ? { padding: '32px 44px 0' } : { flex: 1, minHeight: 0, padding: '32px 44px 132px' }),
+        position: 'relative', zIndex: 2, display: 'flex', flexDirection: 'column', gap: 0,
+      }}>
         {P.map((p, i) => {
           const chip = p.captain ? 'C' : p.viceCaptain ? 'VC' : p.keeper ? 'WK' : null
           return (
-            <div key={i} style={{ display: 'grid', gridTemplateColumns: '56px 1fr 70px 60px', alignItems: 'center', gap: 14, borderBottom: `1px solid ${palette.ink}1a`, padding: '4px 0' }}>
+            <div key={i} style={{ ...(A === 'square' ? null : { flex: 1, minHeight: 0 }), display: 'grid', gridTemplateColumns: '56px 1fr 70px 60px', alignItems: 'center', gap: 14, borderBottom: `1px solid ${palette.ink}1a`, padding: '4px 0' }}>
               <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 1.5, color: palette.accent, opacity: 0.9 }}>{String(i + 1).padStart(2, '0')}</div>
               <div style={{ minWidth: 0, display: 'flex', justifyContent: 'flex-start' }}>
-                <AutoFitText max={64} min={22} lines={1}
+                <AutoFitText max={nameMax} min={22} lines={1}
                   style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", color: palette.ink, letterSpacing: -1, lineHeight: 0.95 }}>
                   <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: '0.2em', whiteSpace: 'nowrap' }}>
                     <span style={{ opacity: 0.5, letterSpacing: 0.5, fontSize: '0.47em' }}>{p.first.toUpperCase()}</span>
@@ -1007,17 +1018,28 @@ export function T5_Brutalist({ team, opponent, match, players, palette }) {
         </div>
       </div>
       <GrainSVG opacity={0.32} id="g5" />
-    </PostCanvas>
+    </div>
   )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 6 — Diagonal poster
 // ─────────────────────────────────────────────────────────────────────────────
-export function T6_Diagonal({ team, opponent, match, players, palette, heroImage, featuredId }) {
+export function T6_Diagonal({ width = 1080, height = 1080, team, opponent, match, players, palette, heroImage, featuredId }) {
   const P = players.slice(0, 11)
+  const A = aspectOf(width, height)
+  // ── T6 at 4:5 and 9:16 ────────────────────────────────────────────────────
+  // Three bands between two rotated slabs: crest, hero and the XI in two
+  // columns. All three keep their share of the canvas, and the name grid is
+  // anchored to the bottom slab rather than starting at a fixed 620 — the
+  // square's names ended well short of the footer on a taller post and left a
+  // gap that read as the design running out.
+  const heroTop = share(height, 230)
+  const heroH = share(height, 370)
+  const nameMax = pick(A, { square: 26, portrait: 30, story: 38 })
   return (
-    <PostCanvas style={{
+    <div style={{
+      width, height, position: 'relative', overflow: 'hidden',
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
       <Halftone color={palette.ink} opacity={0.07} size={10} />
@@ -1035,13 +1057,13 @@ export function T6_Diagonal({ team, opponent, match, players, palette, heroImage
           </span>
         </div>
       </div>
-      <div style={{ position: 'absolute', left: 56, top: 230, right: 56, height: 370, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 24 }}>
+      <div style={{ position: 'absolute', left: 56, top: heroTop, right: 56, height: heroH, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 24 }}>
         <div style={{ flexShrink: 0, maxWidth: 320, paddingBottom: 24 }}>
           <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 2, color: palette.accent, marginBottom: 14 }}>// 1ST XI</div>
           <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={272} shape="shield" />
           <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 34, letterSpacing: 1, color: palette.ink, opacity: 1, marginTop: 14 }}>{(team.fullName || team.name).toUpperCase()}</div>
         </div>
-        <div style={{ flex: 1, height: 370, display: 'grid', placeItems: 'end center', position: 'relative', overflow: 'hidden' }}>
+        <div style={{ flex: 1, height: heroH, display: 'grid', placeItems: 'end center', position: 'relative', overflow: 'hidden' }}>
           {(() => {
             const featured = featuredOf(players, featuredId)
             const hasHead = !!(heroImage || heroSrcOf(featured))
@@ -1062,14 +1084,21 @@ export function T6_Diagonal({ team, opponent, match, players, palette, heroImage
           })()}
         </div>
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: 620, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+      {/* Stretched to the footer on a taller post so the pairs share the room;
+          the square keeps its natural-height grid exactly, since equal rows in
+          a box taller than the content spreads that content out. */}
+      <div style={{
+        position: 'absolute', left: 56, right: 56, top: heroTop + heroH + 20,
+        ...(A === 'square' ? null : { bottom: 150, gridTemplateRows: `repeat(${Math.ceil(P.length / 2)}, 1fr)` }),
+        display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8,
+      }}>
         {P.map((p, i) => {
           const chip = p.captain ? 'C' : p.viceCaptain ? 'VC' : p.keeper ? 'WK' : null
           return (
             <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 0', borderBottom: `1px solid ${palette.ink}1a` }}>
               <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 1.5, color: palette.accent, width: 26 }}>{String(i + 1).padStart(2, '0')}</div>
               <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-start' }}>
-                <AutoFitText max={26} min={13} lines={1}
+                <AutoFitText max={nameMax} min={13} lines={1}
                   style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 0.5, color: palette.ink, lineHeight: 1.1 }}>
                   <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: '0.28em', whiteSpace: 'nowrap' }}>
                     <span style={{ opacity: 0.55, fontWeight: 300 }}>{p.first.toUpperCase()}</span>
@@ -1094,14 +1123,14 @@ export function T6_Diagonal({ team, opponent, match, players, palette, heroImage
         <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.35} id="g6" />
-    </PostCanvas>
+    </div>
   )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 7 — Milestone spotlight
 // ─────────────────────────────────────────────────────────────────────────────
-export function T7_CaptainSpotlight({ team, opponent, match, players, palette, milestone, heroImage }) {
+export function T7_CaptainSpotlight({ width = 1080, height = 1080, team, opponent, match, players, palette, milestone, heroImage }) {
   const player = milestone?.player || featuredOf(players)
   const value = milestone?.value || '1ST'
   const unit = milestone?.unit || 'XI'
@@ -1109,14 +1138,26 @@ export function T7_CaptainSpotlight({ team, opponent, match, players, palette, m
   const detail = milestone?.detail || `${player?.roleLong || ''}`
   const rest = players.slice(0, 13).filter(p => p !== player)
   const hasHead = !!(player && player.headshot)
+  const A = aspectOf(width, height)
+  // ── T7 at 4:5 and 9:16 ────────────────────────────────────────────────────
+  // The square is a number, a cut-out and a roster band. Reflowed, the left
+  // column stayed pinned to the top and left 400px of dead air above the band —
+  // so it is a distributed column now: the milestone number holds the top, the
+  // player's name sits just above the band, and the gap between them is the
+  // design rather than a leftover. The band takes a share of the height, the
+  // number steps up, and the cut-out keeps standing on the band's own edge.
+  const bandH = grow(height, 270, 0.25)
+  const valueSize = pick(A, { square: 320, portrait: 360, story: 420 })
+  const lastSize = pick(A, { square: 76, portrait: 88, story: 104 })
   return (
-    <PostCanvas style={{
+    <div style={{
+      width, height, position: 'relative', overflow: 'hidden',
       background: `linear-gradient(135deg, ${palette.primary} 0%, ${palette.secondary} 100%)`,
       color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
       <Halftone color={palette.ink} opacity={0.06} size={11} />
       <Stripes color={palette.accent} opacity={0.04} gap={26} angle={-22} />
-      <div style={{ position: 'absolute', right: -40, top: -50, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 720, lineHeight: 0.8, color: palette.accent, opacity: 0.08, letterSpacing: -16, userSelect: 'none' }}>{value}</div>
+      <div style={{ position: 'absolute', right: -40, top: share(height, -50), fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: share(height, 720), lineHeight: 0.8, color: palette.accent, opacity: 0.08, letterSpacing: -16, userSelect: 'none' }}>{value}</div>
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '28px 40px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 4 }}>
         <div><div style={{ display: 'inline-block', padding: '5px 12px', background: palette.accent, color: palette.primary, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 16, letterSpacing: 3 }}>★ MILESTONE</div></div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -1125,29 +1166,48 @@ export function T7_CaptainSpotlight({ team, opponent, match, players, palette, m
           <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={palette.ink} size={60} shape="shield" />
         </div>
       </div>
-      <div style={{ position: 'absolute', right: 0, top: 60, width: 540, height: 660, display: 'grid', placeItems: 'end center', overflow: 'hidden' }}>
+      {/* Bottom-anchored: identical at 1080, and the cutout keeps standing on
+          the same line rather than floating with a gap beneath it. */}
+      <div style={{ position: 'absolute', right: 0, top: 60, width: 540, bottom: bandH + 90, display: 'grid', placeItems: 'end center', overflow: 'hidden' }}>
         {(heroImage || hasHead) ? (
-          <img src={heroImage || heroSrcOf(player)} alt={player.last} style={{ height: 720, width: 'auto', objectFit: 'contain', objectPosition: 'bottom', filter: `drop-shadow(0 40px 80px ${palette.primary}ee)` }} />
+          // A cut-out that deliberately overflows its box by 60 and is clipped
+          // at the top — the player bursting out of the panel. Derived from the
+          // canvas rather than fixed at 720, or a taller post just grows the box
+          // and leaves dead air above a photo that never followed it. Exactly
+          // 720 at 1080, so the square is untouched.
+          <img src={heroImage || heroSrcOf(player)} alt={player.last} style={{ height: height - bandH - 90, width: 'auto', objectFit: 'contain', objectPosition: 'bottom', filter: `drop-shadow(0 40px 80px ${palette.primary}ee)` }} />
         ) : (
           <img src={team.logo} alt={team.short} style={{ width: 380, height: 380, objectFit: 'contain', marginBottom: 40 }} />
         )}
       </div>
-      <div style={{ position: 'absolute', left: 40, top: 96, width: 540, zIndex: 3 }}>
-        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 3, color: palette.accent, marginBottom: 10 }}>// {reason}</div>
-        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 320, lineHeight: 0.82, color: palette.ink, letterSpacing: -8 }}>{value}</div>
-        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 80, letterSpacing: 2, color: palette.accent, lineHeight: 1, marginTop: -8 }}>{unit}</div>
+      {/* The figure and the name take the column between the header and the
+          band on a taller post. The square keeps its natural-height stack —
+          `space-between` in a box taller than the content pushes the two apart,
+          which is a changed square however well it reads at 4:5. */}
+      <div style={{
+        position: 'absolute', left: 40, top: 96, width: 540, zIndex: 3,
+        ...(A === 'square' ? null : { bottom: bandH + 40, justifyContent: 'space-between' }),
+        display: 'flex', flexDirection: 'column',
+      }}>
+        <div>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 3, color: palette.accent, marginBottom: 10 }}>// {reason}</div>
+          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: valueSize, lineHeight: 0.82, color: palette.ink, letterSpacing: -8 }}>{value}</div>
+          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: Math.round(valueSize / 4), letterSpacing: 2, color: palette.accent, lineHeight: 1, marginTop: -8 }}>{unit}</div>
+        </div>
         <div style={{ marginTop: 22, paddingTop: 16, borderTop: `2px solid ${palette.accent}` }}>
           <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 32, letterSpacing: 1, color: palette.ink, opacity: 0.78, lineHeight: 1 }}>{(player?.first || '').toUpperCase()}</div>
-          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 76, letterSpacing: -1, color: palette.ink, lineHeight: 0.9, marginTop: 2 }}>{player?.last || ''}</div>
+          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: lastSize, letterSpacing: -1, color: palette.ink, lineHeight: 0.9, marginTop: 2 }}>{player?.last || ''}</div>
           {detail && <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 1.2, color: palette.ink, opacity: 0.7, marginTop: 10, lineHeight: 1.4 }}>{detail}</div>}
         </div>
       </div>
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 270, background: palette.primary, borderTop: `3px solid ${palette.accent}`, padding: '18px 40px', zIndex: 3 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: bandH, background: palette.primary, borderTop: `3px solid ${palette.accent}`, padding: A === 'square' ? '18px 40px' : '18px 40px 26px', zIndex: 3, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
           <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 2, color: palette.accent }}>// JOINED BY THE XI</div>
           <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 1.5, color: palette.ink, opacity: 0.6 }}>{match.venue.toUpperCase()} · {match.date} · {match.time}</div>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4, columnGap: 24 }}>
+        {/* Equal rows filling the band on a taller post; the square keeps its
+            natural-height grid, since stretching it spreads the names apart. */}
+        <div style={{ ...(A === 'square' ? null : { flex: 1, minHeight: 0, gridTemplateRows: `repeat(${Math.ceil(Math.min(rest.length, 12) / 3) || 1}, 1fr)` }), display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4, columnGap: 24 }}>
           {rest.slice(0, 12).map((p, i) => {
             const chip = p.captain ? 'C' : p.viceCaptain ? 'VC' : p.keeper ? 'WK' : null
             return (
@@ -1162,14 +1222,14 @@ export function T7_CaptainSpotlight({ team, opponent, match, players, palette, m
         </div>
       </div>
       <GrainSVG opacity={0.32} id="g7" />
-    </PostCanvas>
+    </div>
   )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 8 — Asymmetric mosaic
 // ─────────────────────────────────────────────────────────────────────────────
-export function T8_Mosaic({ team, opponent, match, players, palette, featuredIdx = 0 }) {
+export function T8_Mosaic({ width = 1080, height = 1080, team, opponent, match, players, palette, featuredIdx = 0 }) {
   const playersXI = players.slice(0, 11)
   const featuredP = playersXI[featuredIdx] || playersXI.find(p => p.captain) || playersXI[0]
   const rest = playersXI.filter(p => p !== featuredP)
@@ -1179,8 +1239,18 @@ export function T8_Mosaic({ team, opponent, match, players, palette, featuredIdx
   const P = [featuredP, ...rest].filter(Boolean)
   const ROLE_BG = { BAT: palette.accent, BOWL: palette.ink, AR: palette.secondary, WK: palette.primary }
   const ROLE_INK = { BAT: palette.primary, BOWL: palette.primary, AR: palette.ink, WK: palette.ink }
+  const A = aspectOf(width, height)
+  // ── T8 at 4:5 and 9:16 ────────────────────────────────────────────────────
+  // A tile is only a tile while it is roughly square. PORTRAIT keeps 5×4 and
+  // the extra height makes each one 200×247, which is a better mosaic cell than
+  // the square's own 200×180. STORY would take that to 200×390 — a face down a
+  // letterbox — so the grid turns on its side to 4×6 and the cells land at
+  // 250×250 with the featured player a clean 500 square.
+  const cols = pick(A, { square: 5, story: 4 })
+  const rows = pick(A, { square: 4, story: 6 })
   return (
-    <PostCanvas style={{
+    <div style={{
+      width, height, position: 'relative', overflow: 'hidden',
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
       <Halftone color={palette.ink} opacity={0.05} size={9} />
@@ -1202,7 +1272,7 @@ export function T8_Mosaic({ team, opponent, match, players, palette, featuredIdx
         <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 1.5, color: palette.ink, opacity: 0.85 }}>{match.time}</div>
         <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 1.5, color: palette.ink, opacity: 0.85 }}>{match.venue.toUpperCase()}</div>
       </div>
-      <div style={{ position: 'absolute', left: 28, right: 28, top: 280, bottom: 80, display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gridTemplateRows: 'repeat(4, 1fr)', gap: 10 }}>
+      <div style={{ position: 'absolute', left: 28, right: 28, top: pick(A, { square: 280, portrait: 300, story: 330 }), bottom: 80, display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)`, gap: 10 }}>
         {P.map((p, i) => {
           const isFeatured = i === 0
           const role = p.role || 'BAT'
@@ -1243,25 +1313,43 @@ export function T8_Mosaic({ team, opponent, match, players, palette, featuredIdx
         <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.28} id="g8" />
-    </PostCanvas>
+    </div>
   )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 9 — Festival flyer
 // ─────────────────────────────────────────────────────────────────────────────
-export function T9_Flyer({ team, opponent, match, players, palette }) {
+export function T9_Flyer({ width = 1080, height = 1080, team, opponent, match, players, palette }) {
   const P = players.slice(0, 11)
   const tier1 = P.slice(0, 2)
   const tier2 = P.slice(2, 5)
   const tier3 = P.slice(5, 11)
+  const A = aspectOf(width, height)
+  // ── T9 at 4:5 and 9:16 ────────────────────────────────────────────────────
+  // A gig poster: the billing IS the design, so a taller canvas is more room
+  // for the names, not more white space around them. Each tier's type steps up
+  // — and on a story the SUPPORT ACT RE-SETS, two names to a line instead of
+  // three, so the billing is five lines rather than four and each name is half
+  // as wide again. Spreading the same four lines down the panel was tried and
+  // is worse: `space-evenly` puts 350px between tiers and the billing reads as
+  // three unrelated lines rather than one block.
+  const t1 = pick(A, { square: 108, portrait: 126, story: 150 })
+  const t2 = pick(A, { square: 68, portrait: 80, story: 100 })
+  const t3 = pick(A, { square: 40, portrait: 47, story: 72 })
+  const tierGap = pick(A, { square: 1, portrait: 1.3, story: 1.8 })
+  const perLine = pick(A, { square: 3, portrait: 3, story: 2 })
+  const t3Lines = []
+  for (let i = 0; i < tier3.length; i += perLine) t3Lines.push(tier3.slice(i, i + perLine))
   return (
-    <PostCanvas style={{
+    <div style={{
+      width, height, position: 'relative', overflow: 'hidden',
+      display: 'flex', flexDirection: 'column',
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
       <Halftone color={palette.ink} opacity={0.08} size={10} />
       <Stripes color={palette.accent} opacity={0.06} gap={20} angle={0} />
-      <div style={{ position: 'absolute', left: 0, right: 0, top: 130, textAlign: 'center', fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 520, lineHeight: 0.8, color: palette.accent, opacity: 0.07, letterSpacing: -10, userSelect: 'none' }}>XI</div>
+      <div style={{ position: 'absolute', left: 0, right: 0, top: share(height, 130), textAlign: 'center', fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: share(height, 520), lineHeight: 0.8, color: palette.accent, opacity: 0.07, letterSpacing: -10, userSelect: 'none' }}>XI</div>
       {[['left', 'top'], ['right', 'top'], ['left', 'bottom'], ['right', 'bottom']].map(([h, v], i) => (
         <div key={i} style={{
           position: 'absolute',
@@ -1273,7 +1361,7 @@ export function T9_Flyer({ team, opponent, match, players, palette }) {
           borderRight: h === 'right' ? `3px solid ${palette.accent}` : undefined,
         }} />
       ))}
-      <div style={{ textAlign: 'center', padding: '44px 40px 12px', position: 'relative', zIndex: 2 }}>
+      <div style={{ flexShrink: 0, textAlign: 'center', padding: '44px 40px 12px', position: 'relative', zIndex: 2 }}>
         <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 4, color: palette.accent, marginBottom: 14 }}>★ {match.competition} · {match.season} · PRESENTS ★</div>
         <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 20 }}>
           <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={90} shape="shield" />
@@ -1283,45 +1371,44 @@ export function T9_Flyer({ team, opponent, match, players, palette }) {
           <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={palette.ink} size={48} shape="shield" />
         </div>
       </div>
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, margin: '8px 0 16px', fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 18, letterSpacing: 6, color: palette.accent }}>
+      <div style={{ flexShrink: 0, position: 'relative', zIndex: 2, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, margin: '8px 0 16px', fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 18, letterSpacing: 6, color: palette.accent }}>
         <span style={{ flex: '0 1 180px', height: 2, background: palette.accent, opacity: 0.5 }} />
         <span>★ ★ ★ THE LINEUP ★ ★ ★</span>
         <span style={{ flex: '0 1 180px', height: 2, background: palette.accent, opacity: 0.5 }} />
       </div>
-      <div style={{ textAlign: 'center', padding: '0 40px', lineHeight: 0.88, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", color: palette.ink, letterSpacing: -1 }}>
-        <div style={{ fontSize: 108, marginBottom: 6 }}>
-          {tier1.map((p, i) => (
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', position: 'relative', zIndex: 2, textAlign: 'center', padding: '0 40px 132px', lineHeight: 0.88, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", color: palette.ink, letterSpacing: -1 }}>
+        {/* Fitted rather than set at a fixed size: two long surnames side by
+            side already ran off the square, and giving the billing more room on
+            a portrait poster would have made that worse rather than better. */}
+        <AutoFitText max={t1} min={40} lines={1} pad={12} measureDeps={[tier1.length]}
+          style={{ marginBottom: 6, lineHeight: 0.88, letterSpacing: -1 }}>
+          <span style={{ whiteSpace: 'nowrap' }}>{tier1.map((p, i) => (
             <span key={i}>
               <span>{p.last}</span>
               {i < tier1.length - 1 && <span style={{ color: palette.accent, margin: '0 18px' }}>·</span>}
             </span>
-          ))}
-        </div>
-        <div style={{ fontSize: 68, marginTop: 16, opacity: 0.95 }}>
-          {tier2.map((p, i) => (
+          ))}</span>
+        </AutoFitText>
+        <AutoFitText max={t2} min={28} lines={1} pad={12} measureDeps={[tier2.length]}
+          style={{ marginTop: Math.round(16 * tierGap), opacity: 0.95, lineHeight: 0.88, letterSpacing: -1 }}>
+          <span style={{ whiteSpace: 'nowrap' }}>{tier2.map((p, i) => (
             <span key={i}>
               <span>{p.last}</span>
               {i < tier2.length - 1 && <span style={{ color: palette.accent, margin: '0 16px' }}>·</span>}
             </span>
+          ))}</span>
+        </AutoFitText>
+        <div style={{ fontSize: t3, marginTop: Math.round(18 * tierGap), opacity: 0.88, letterSpacing: 0 }}>
+          {t3Lines.map((line, li) => (
+            <div key={li} style={{ marginTop: li === 0 ? 0 : Math.round(6 * tierGap) }}>
+              {line.map((p, i, arr) => (
+                <span key={i}>
+                  <span>{p.last}</span>
+                  {i < arr.length - 1 && <span style={{ color: palette.accent, margin: '0 14px', opacity: 0.7 }}>·</span>}
+                </span>
+              ))}
+            </div>
           ))}
-        </div>
-        <div style={{ fontSize: 40, marginTop: 18, opacity: 0.88, letterSpacing: 0 }}>
-          <div>
-            {tier3.slice(0, 3).map((p, i) => (
-              <span key={i}>
-                <span>{p.last}</span>
-                {i < 2 && <span style={{ color: palette.accent, margin: '0 14px', opacity: 0.7 }}>·</span>}
-              </span>
-            ))}
-          </div>
-          <div style={{ marginTop: 6 }}>
-            {tier3.slice(3).map((p, i, arr) => (
-              <span key={i}>
-                <span>{p.last}</span>
-                {i < arr.length - 1 && <span style={{ color: palette.accent, margin: '0 14px', opacity: 0.7 }}>·</span>}
-              </span>
-            ))}
-          </div>
         </div>
       </div>
       <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, background: palette.accent, color: palette.primary, padding: '22px 40px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1336,7 +1423,7 @@ export function T9_Flyer({ team, opponent, match, players, palette }) {
         <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.4} id="g9" />
-    </PostCanvas>
+    </div>
   )
 }
 
@@ -1363,10 +1450,18 @@ function TornEdge({ color = '#fff', height = 26, width = 1080, style = {} }) {
   )
 }
 
-export function T10_TeamSheet({ team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus }) {
+export function T10_TeamSheet({ width = 1080, height = 1080, team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus }) {
   const P = players.slice(0, 13)
+  const A = aspectOf(width, height)
+  // ── T10 at 4:5 and 9:16 ───────────────────────────────────────────────────
+  // A team sheet over a photo. The photo is the element that WANTS the extra
+  // height — it is already a portrait crop on the square — so it takes its
+  // share, the wordmark box above the names grows with it, and the names grow
+  // too. Left alone the names spread themselves 60px apart down a story and
+  // read as a list somebody forgot to finish.
   // Shrink the rows as the squad grows so a full 13 still fits the column.
-  const rowMax = P.length >= 13 ? 32 : P.length >= 12 ? 36 : P.length >= 11 ? 40 : P.length >= 9 ? 46 : 52
+  const base = P.length >= 13 ? 32 : P.length >= 12 ? 36 : P.length >= 11 ? 40 : P.length >= 9 ? 46 : 52
+  const rowMax = Math.round(base * pick(A, { square: 1, portrait: 1.2, story: 1.55 }))
   const featured = featuredOf(players, featuredId)
   const photo = heroImage || heroSrcOf(featured)
   // The strip is the club's ink colour (off-white on every built-in palette),
@@ -1383,12 +1478,15 @@ export function T10_TeamSheet({ team, opponent, match, players, palette, heroIma
   // reduces the picture. It sits on the strip, so its bottom edge is hidden
   // under the paper and only the top needs feathering.
   const PHOTO_W = 600
-  const PHOTO_H = 780
+  const PHOTO_H = share(height, 780)
+  const HEAD_TOP = share(height, 96)
+  const HEAD_H = share(height, 232)
   const meta = [match.date, match.time].filter(Boolean).join('  ·  ')
   const fixture = [team.short || team.name, opponent.short || opponent.name].filter(Boolean).join(' V ').toUpperCase()
   const comp = [match.competition, match.round].filter(Boolean).join('  ·  ').toUpperCase()
   return (
-    <PostCanvas style={{
+    <div style={{
+      width, height, position: 'relative', overflow: 'hidden',
       background: `linear-gradient(160deg, ${palette.secondary} 0%, ${palette.primary} 70%)`,
       color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
@@ -1428,8 +1526,8 @@ export function T10_TeamSheet({ team, opponent, match, players, palette, heroIma
           this colour. It has to clear the subject too — a face sits around the
           middle of the photo, and carrying the wash that far across leaves it
           muddy — so it is heavy only where the names actually are. */}
-      <Bleed style={{
-        left: 0, right: 0,
+      <div style={{
+        position: 'absolute', inset: 0,
         // Solid until past the photo's own left edge (600px in from the right,
         // so 44.4% across) — anything less and that edge shows through as a
         // faint vertical line down the post. It clears the subject by 77%.
@@ -1470,7 +1568,7 @@ export function T10_TeamSheet({ team, opponent, match, players, palette, heroIma
           AutoFitText sizes to fit the BOX and the clamp then cuts whatever is
           left over — at 2 a three-line headline lost its last word to an
           ellipsis even though it had already been shrunk to fit. */}
-      <div style={{ position: 'absolute', left: 42, top: 96, width: 500, height: 232, zIndex: 4 }}>
+      <div style={{ position: 'absolute', left: 42, top: HEAD_TOP, width: 500, height: HEAD_H, zIndex: 4 }}>
         <AutoFitText
           text={(headline || 'XI').toUpperCase()} max={230} min={52} lines={3} pad={10}
           style={{
@@ -1482,7 +1580,7 @@ export function T10_TeamSheet({ team, opponent, match, players, palette, heroIma
 
       {/* The XI itself. */}
       <div style={{
-        position: 'absolute', left: 44, top: 348, width: 560, bottom: STRIP_H + TEAR_H + 34,
+        position: 'absolute', left: 44, top: HEAD_TOP + HEAD_H + 20, width: 560, bottom: STRIP_H + TEAR_H + 34,
         zIndex: 4, display: 'flex', flexDirection: 'column',
         gap: 2, justifyContent: P.length >= 10 ? 'space-between' : 'flex-start',
       }}>
@@ -1534,28 +1632,37 @@ export function T10_TeamSheet({ team, opponent, match, players, palette, heroIma
         </div>
       </div>
       <GrainSVG opacity={0.4} id="g10" />
-    </PostCanvas>
+    </div>
   )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // COMPANION 1 — Generic announcement
 // ─────────────────────────────────────────────────────────────────────────────
-export function C1_CaptainAnnounce({ announcement, team, opponent, match, palette, player: legacyPlayer }) {
+export function C1_CaptainAnnounce({ width = 1080, height = 1080, announcement, team, opponent, match, palette, player: legacyPlayer }) {
   const a = announcement || { kind: 'ANNOUNCEMENT', headline: 'NAMED', subheadline: '', player: legacyPlayer }
   const player = a.player || legacyPlayer
   const hasHead = !!(player && player.headshot)
+  const A = aspectOf(width, height)
+  // ── C1 at 4:5 and 9:16 ────────────────────────────────────────────────────
+  // One cut-out and one name. The cut-out already follows the canvas, so the
+  // design here is the type keeping up with it — a 200px surname under a
+  // 1,900px-tall player reads as a caption rather than the announcement.
+  const lastSize = pick(A, { square: 200, portrait: 232, story: 280 })
   return (
-    <PostCanvas style={{
+    <div style={{
+      width, height, position: 'relative', overflow: 'hidden',
       background: `linear-gradient(160deg, ${palette.primary} 0%, ${palette.secondary} 100%)`,
       color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
       <Halftone color={palette.ink} opacity={0.07} size={11} />
       <Stripes color={palette.accent} opacity={0.04} gap={28} angle={-22} />
-      <div style={{ position: 'absolute', left: -40, top: -30, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 360, lineHeight: 0.82, color: palette.accent, opacity: 0.09, letterSpacing: -8, userSelect: 'none', whiteSpace: 'nowrap' }}>{(a.kind || 'ANNOUNCEMENT')}</div>
+      <div style={{ position: 'absolute', left: -40, top: -30, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: share(height, 360), lineHeight: 0.82, color: palette.accent, opacity: 0.09, letterSpacing: -8, userSelect: 'none', whiteSpace: 'nowrap' }}>{(a.kind || 'ANNOUNCEMENT')}</div>
       <div style={{ position: 'absolute', left: 60, top: 90, right: 60, bottom: 200, display: 'grid', placeItems: 'end center', overflow: 'hidden' }}>
         {hasHead ? (
-          <img src={player.headshot} alt={player.last} style={{ height: 820, width: 'auto', objectFit: 'contain', objectPosition: 'bottom', filter: `drop-shadow(0 40px 80px ${palette.primary}ee)` }} />
+          // Same cut-out rule as T7 and C3 — height follows the canvas so the
+          // box and the player grow together. Exactly 820 at 1080.
+          <img src={player.headshot} alt={player.last} style={{ height: height - 260, width: 'auto', objectFit: 'contain', objectPosition: 'bottom', filter: `drop-shadow(0 40px 80px ${palette.primary}ee)` }} />
         ) : (
           <img src={team.logo} alt={team.short} style={{ width: 460, height: 460, objectFit: 'contain', marginBottom: 60 }} />
         )}
@@ -1567,7 +1674,7 @@ export function C1_CaptainAnnounce({ announcement, team, opponent, match, palett
       <div style={{ position: 'absolute', left: 40, bottom: 130, right: 40, zIndex: 3 }}>
         <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 56, letterSpacing: 3, color: palette.accent, marginBottom: 8, lineHeight: 1 }}>{(a.headline || '').toUpperCase()}</div>
         <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 64, letterSpacing: 1, color: palette.ink, opacity: 0.78, lineHeight: 1 }}>{(player?.first || '').toUpperCase()}</div>
-        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 200, letterSpacing: -3, color: palette.ink, lineHeight: 0.84, marginTop: -6 }}>{player?.last || '—'}</div>
+        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: lastSize, letterSpacing: -3, color: palette.ink, lineHeight: 0.84, marginTop: -6 }}>{player?.last || '—'}</div>
         {a.subheadline && <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 28, letterSpacing: 2, color: palette.accent, marginTop: 10 }}>{a.subheadline.toUpperCase()}</div>}
       </div>
       <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '16px 40px', background: palette.primary, borderTop: `2px solid ${palette.accent}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 3 }}>
@@ -1576,25 +1683,33 @@ export function C1_CaptainAnnounce({ announcement, team, opponent, match, palett
         <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.32} id="ca1" />
-    </PostCanvas>
+    </div>
   )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // COMPANION 2 — Toss
 // ─────────────────────────────────────────────────────────────────────────────
-export function C2_TossWon({ toss, team, opponent, match, palette }) {
+export function C2_TossWon({ width = 1080, height = 1080, toss, team, opponent, match, palette }) {
   const winnerIsOpponent = toss?.winner === 'OPPONENT'
   const decision = (toss?.decision || 'BAT').toUpperCase()
+  const A = aspectOf(width, height)
+  // ── C2 at 4:5 and 9:16 ────────────────────────────────────────────────────
+  // The decision is the entire message, so it is CENTRED in the space the
+  // header and the fixture band leave rather than pinned 320px down — that
+  // pinning is what left a taller post with the call at the top and a hole
+  // under it. The word itself steps up with the canvas.
+  const decSize = pick(A, { square: 280, portrait: 330, story: 400 })
   return (
-    <PostCanvas style={{
+    <div style={{
+      width, height, position: 'relative', overflow: 'hidden',
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
       <Halftone color={palette.ink} opacity={0.07} size={10} />
       <Stripes color={palette.accent} opacity={0.04} gap={24} angle={-20} />
       <div style={{ position: 'absolute', right: -100, top: -100, width: 660, height: 660, borderRadius: '50%', background: `radial-gradient(circle at 35% 30%, ${palette.accent} 0%, ${palette.accent}dd 50%, ${palette.accent}88 100%)`, boxShadow: `inset 0 0 0 14px ${palette.primary}, inset 0 0 0 20px ${palette.accent}` }} />
       <div style={{ position: 'absolute', right: 90, top: 130, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 280, letterSpacing: -4, color: palette.primary, lineHeight: 0.85, transform: 'rotate(-6deg)' }}>TOSS</div>
-      <div style={{ position: 'absolute', left: -50, bottom: 180, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 460, lineHeight: 0.8, color: palette.ink, opacity: 0.05, letterSpacing: -10, userSelect: 'none' }}>{decision}</div>
+      <div style={{ position: 'absolute', left: -50, bottom: share(height, 180), fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: share(height, 460), lineHeight: 0.8, color: palette.ink, opacity: 0.05, letterSpacing: -10, userSelect: 'none' }}>{decision}</div>
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '32px 40px', display: 'flex', justifyContent: 'flex-start', alignItems: 'center', gap: 14, zIndex: 3 }}>
         <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={96} shape="shield" />
         <div>
@@ -1602,15 +1717,21 @@ export function C2_TossWon({ toss, team, opponent, match, palette }) {
           <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 28, letterSpacing: 1.5, marginTop: 2, color: palette.ink }}>{team.name} <span style={{ color: palette.accent }}>v</span> {opponent.name}</div>
         </div>
       </div>
-      <div style={{ position: 'absolute', left: 40, top: 320, right: 40 }}>
-        <div style={{ display: 'inline-block', padding: '6px 14px', background: palette.accent, color: palette.primary, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 20, letterSpacing: 3, marginBottom: 12 }}>
+      {/* Centred between the header and the fixture band on a taller post. The
+          square keeps its original plain block at top: 320 — a flex column
+          stops the chip's own bottom margin collapsing into the line under it,
+          so even centring aside, the switch alone moves the square by 12px. */}
+      <div style={A === 'square'
+        ? { position: 'absolute', left: 40, top: 320, right: 40 }
+        : { position: 'absolute', left: 40, top: 300, right: 40, bottom: 300, zIndex: 2, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+        <div style={{ ...(A === 'square' ? { display: 'inline-block' } : { alignSelf: 'flex-start' }), padding: '6px 14px', background: palette.accent, color: palette.primary, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 20, letterSpacing: 3, marginBottom: 12 }}>
           {winnerIsOpponent ? `${opponent.name} WON THE TOSS` : `${team.name} WON THE TOSS`}
         </div>
-        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 88, letterSpacing: 2, color: palette.ink, opacity: 0.55, lineHeight: 1, marginTop: 16 }}>{winnerIsOpponent ? "THEY'RE" : "WE'RE"}</div>
-        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 280, letterSpacing: -6, color: palette.ink, lineHeight: 0.85, marginTop: -4 }}>{decision}</div>
-        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 72, letterSpacing: 3, color: palette.accent, lineHeight: 1, marginTop: -8 }}>FIRST</div>
+        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: Math.round(decSize * 0.31), letterSpacing: 2, color: palette.ink, opacity: 0.55, lineHeight: 1, marginTop: 16 }}>{winnerIsOpponent ? "THEY'RE" : "WE'RE"}</div>
+        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: decSize, letterSpacing: -6, color: palette.ink, lineHeight: 0.85, marginTop: -4 }}>{decision}</div>
+        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: Math.round(decSize * 0.26), letterSpacing: 3, color: palette.accent, lineHeight: 1, marginTop: -8 }}>FIRST</div>
       </div>
-      <div style={{ position: 'absolute', left: 40, right: 40, bottom: 100, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 28px', background: palette.secondary, borderLeft: `4px solid ${palette.accent}` }}>
+      <div style={{ position: 'absolute', left: 40, right: 40, bottom: 100, zIndex: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 28px', background: palette.secondary, borderLeft: `4px solid ${palette.accent}` }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={84} shape="shield" />
           <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, color: palette.accent }}>VS</div>
@@ -1626,22 +1747,31 @@ export function C2_TossWon({ toss, team, opponent, match, palette }) {
         <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.3} id="ca2" />
-    </PostCanvas>
+    </div>
   )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // COMPANION 3 — Man of the Match
 // ─────────────────────────────────────────────────────────────────────────────
-export function C3_ManOfMatch({ motm, team, opponent, match, palette }) {
+export function C3_ManOfMatch({ width = 1080, height = 1080, motm, team, opponent, match, palette }) {
   const player = motm?.player
   const stats = motm?.stats || []
   const hasHead = !!(player && player.headshot)
+  const A = aspectOf(width, height)
+  // ── C3 at 4:5 and 9:16 ────────────────────────────────────────────────────
+  // A cut-out on the left and the performance on the right. The right column is
+  // CENTRED against the player now rather than starting at a fixed 230 — the
+  // cut-out grows with the canvas and the figures were being left up in the
+  // corner beside his head. The surname and the stat tiles step up with it.
+  const lastSize = pick(A, { square: 124, portrait: 144, story: 172 })
+  const statSize = pick(A, { square: 76, portrait: 86, story: 100 })
   return (
-    <PostCanvas style={{
+    <div style={{
+      width, height, position: 'relative', overflow: 'hidden',
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
-      <div style={{ position: 'absolute', left: -100, top: -100, width: 700, height: 1400, background: palette.secondary, transform: 'rotate(8deg)', transformOrigin: 'top left' }} />
+      <div style={{ position: 'absolute', left: -100, top: -100, width: 700, height: Math.round(height * 1.3), background: palette.secondary, transform: 'rotate(8deg)', transformOrigin: 'top left' }} />
       <Halftone color={palette.ink} opacity={0.06} size={11} />
       <Stripes color={palette.accent} opacity={0.04} gap={28} angle={-22} />
       <div style={{ position: 'absolute', right: 60, top: 90, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 320, lineHeight: 0.8, color: palette.accent, opacity: 0.18, letterSpacing: -8, userSelect: 'none' }}>★</div>
@@ -1653,22 +1783,27 @@ export function C3_ManOfMatch({ motm, team, opponent, match, palette }) {
         </div>
         <BrandLockup team={team} palette={palette} size={150} layout="stack" nameSize={22} style={{ maxWidth: 320 }} />
       </div>
-      <div style={{ position: 'absolute', left: 0, top: 220, width: 520, height: 700, display: 'grid', placeItems: 'end center', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', left: 0, top: 220, width: 520, bottom: 160, display: 'grid', placeItems: 'end center', overflow: 'hidden' }}>
         {hasHead ? (
-          <img src={player.headshot} alt={player?.last} style={{ height: 760, width: 'auto', objectFit: 'contain', objectPosition: 'bottom', filter: `drop-shadow(0 40px 80px ${palette.primary}ee)` }} />
+          // Same cut-out rule as T7: the photo overflows its box by 60 and is
+          // clipped at the top, so its height has to follow the canvas or a
+          // taller post is all box and no player. Exactly 760 at 1080.
+          <img src={player.headshot} alt={player?.last} style={{ height: height - 320, width: 'auto', objectFit: 'contain', objectPosition: 'bottom', filter: `drop-shadow(0 40px 80px ${palette.primary}ee)` }} />
         ) : (
           <img src={team.logo} alt={team.short} style={{ width: 400, height: 400, objectFit: 'contain', marginBottom: 80 }} />
         )}
       </div>
-      <div style={{ position: 'absolute', right: 36, top: 230, width: 520, zIndex: 3 }}>
+      <div style={A === 'square'
+        ? { position: 'absolute', right: 36, top: 230, width: 520, zIndex: 3 }
+        : { position: 'absolute', right: 36, top: 230, bottom: 110, width: 520, zIndex: 3, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
         <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 44, letterSpacing: 1, color: palette.ink, opacity: 0.78, lineHeight: 1 }}>{(player?.first || '').toUpperCase()}</div>
-        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 124, letterSpacing: -1, color: palette.ink, lineHeight: 0.88, marginTop: -2 }}>{player?.last || ''}</div>
+        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: lastSize, letterSpacing: -1, color: palette.ink, lineHeight: 0.88, marginTop: -2 }}>{player?.last || ''}</div>
         <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 2, color: palette.accent, marginTop: 8 }}>{(player?.roleLong || player?.role || '').toUpperCase()}</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 22 }}>
           {stats.map((s, i) => (
             <div key={i} style={{ padding: '14px 18px', background: i === 0 ? palette.accent : `${palette.ink}0c`, border: `1.5px solid ${palette.accent}`, color: i === 0 ? palette.primary : palette.ink }}>
               <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 2, opacity: 0.75 }}>{s.label.toUpperCase()}</div>
-              <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 76, lineHeight: 0.9, letterSpacing: -1, marginTop: 4 }}>{s.value}</div>
+              <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: statSize, lineHeight: 0.9, letterSpacing: -1, marginTop: 4 }}>{s.value}</div>
             </div>
           ))}
         </div>
@@ -1683,14 +1818,35 @@ export function C3_ManOfMatch({ motm, team, opponent, match, palette }) {
         <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.3} id="ca3" />
-    </PostCanvas>
+    </div>
   )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // COMPANION 4 — Final score with top performers
 // ─────────────────────────────────────────────────────────────────────────────
-export function C4_FinalScore({ result, team, opponent, match, palette }) {
+
+// One performers panel. Its two groups are pushed APART rather than stacked at
+// the top — the panel is a flex child that grows with the canvas, so on a
+// portrait post the square's top-anchored rows left the bottom half of the box
+// empty. Batting holds the top of the panel and bowling the bottom, which is
+// also the reading order a scorecard already has.
+function PerfPanel({ title, titleColor, titleOpacity = 1, edge, batters = [], bowlers = [], palette, Perf, tall = false }) {
+  const Label = ({ children }) => (
+    <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 1.5, color: palette.ink, opacity: 0.6, marginBottom: 6 }}>{children}</div>
+  )
+  return (
+    <div style={{ padding: '24px 26px', background: `${palette.ink}08`, borderLeft: `4px solid ${edge}`, display: 'flex', flexDirection: 'column', gap: 16, minHeight: 0 }}>
+      <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 27, letterSpacing: 2, lineHeight: 1, color: titleColor, opacity: titleOpacity, flexShrink: 0 }}>{title}</div>
+      <div style={{ ...(tall ? { flex: 1, minHeight: 0, justifyContent: 'space-between' } : null), display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div><Label>BATTING</Label>{batters.slice(0, 3).map((p, i) => <Perf key={i} p={p} />)}</div>
+        <div><Label>BOWLING</Label>{bowlers.slice(0, 3).map((p, i) => <Perf key={i} p={p} />)}</div>
+      </div>
+    </div>
+  )
+}
+
+export function C4_FinalScore({ width = 1080, height = 1080, result, team, opponent, match, palette }) {
   const winnerSide = result?.winner === 'OPPONENT' ? 'opponent' : (result?.winner === 'TIE' ? 'tie' : 'team')
   const tb = result?.topBatters || {}
   const tw = result?.topBowlers || {}
@@ -1708,8 +1864,10 @@ export function C4_FinalScore({ result, team, opponent, match, palette }) {
   )
   const metaLine = [result?.grade || match.competition, match.round, match.date]
     .filter((v, i, a) => v && a.indexOf(v) === i).join(' · ')
+  const A = aspectOf(width, height)
   return (
-    <PostCanvas style={{
+    <div style={{
+      width, height, position: 'relative', overflow: 'hidden',
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
       <Halftone color={palette.ink} opacity={0.06} size={10} />
@@ -1746,20 +1904,10 @@ export function C4_FinalScore({ result, team, opponent, match, palette }) {
           </div>
         </div>
         <div style={{ margin: '6px 48px 18px', flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, minHeight: 0 }}>
-          <div style={{ padding: '24px 26px', background: `${palette.ink}08`, borderLeft: `4px solid ${palette.accent}`, display: 'flex', flexDirection: 'column' }}>
-            <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 27, letterSpacing: 2, lineHeight: 1, color: palette.accent, marginBottom: 16 }}>{team.short} · TOP PERFORMERS</div>
-            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 1.5, color: palette.ink, opacity: 0.6, marginBottom: 6 }}>BATTING</div>
-            {teamBatters.slice(0, 3).map((p, i) => <Perf key={i} p={p} />)}
-            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 1.5, color: palette.ink, opacity: 0.6, marginTop: 16, marginBottom: 6 }}>BOWLING</div>
-            {teamBowlers.slice(0, 3).map((p, i) => <Perf key={i} p={p} />)}
-          </div>
-          <div style={{ padding: '24px 26px', background: `${palette.ink}08`, borderLeft: `4px solid ${palette.ink}55`, display: 'flex', flexDirection: 'column' }}>
-            <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 27, letterSpacing: 2, lineHeight: 1, color: palette.ink, opacity: 0.85, marginBottom: 16 }}>{opponent.short} · TOP PERFORMERS</div>
-            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 1.5, color: palette.ink, opacity: 0.6, marginBottom: 6 }}>BATTING</div>
-            {oppBatters.slice(0, 3).map((p, i) => <Perf key={i} p={p} />)}
-            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 1.5, color: palette.ink, opacity: 0.6, marginTop: 16, marginBottom: 6 }}>BOWLING</div>
-            {oppBowlers.slice(0, 3).map((p, i) => <Perf key={i} p={p} />)}
-          </div>
+          <PerfPanel title={`${team.short} · TOP PERFORMERS`} titleColor={palette.accent} edge={palette.accent}
+            batters={teamBatters} bowlers={teamBowlers} palette={palette} Perf={Perf} tall={A !== 'square'} />
+          <PerfPanel title={`${opponent.short} · TOP PERFORMERS`} titleColor={palette.ink} titleOpacity={0.85} edge={`${palette.ink}55`}
+            batters={oppBatters} bowlers={oppBowlers} palette={palette} Perf={Perf} tall={A !== 'square'} />
         </div>
         <div style={{ margin: '0 48px 18px', padding: '15px 24px', background: palette.secondary, borderLeft: `4px solid ${palette.accent}`, textAlign: 'center' }}>
           <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 2, color: palette.accent, marginBottom: 5 }}>// MATCH RESULT</div>
@@ -1777,7 +1925,7 @@ export function C4_FinalScore({ result, team, opponent, match, palette }) {
         <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.3} id="ca4" />
-    </PostCanvas>
+    </div>
   )
 }
 
@@ -1924,7 +2072,7 @@ export function SC1_Broadcast({ match, palette = {}, square = false, only = 'hom
     const side = only === 'away' ? 'away' : 'home'
     const team = m[side] || {}
     return (
-      <PostCanvas style={{ background: bg, color: ink, fontFamily: SC_BODY }}>
+      <div style={{ width: 1080, height: 1080, position: 'relative', overflow: 'hidden', background: bg, color: ink, fontFamily: SC_BODY }}>
         <Halftone color={ink} opacity={dark ? 0.04 : 0.05} size={12} />
         <div style={{ padding: '18px 20px 10px' }}>
           <div style={{ padding: '14px 20px', background: panel, border: `1px solid ${rule}`, display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 20 }}>
@@ -1950,7 +2098,7 @@ export function SC1_Broadcast({ match, palette = {}, square = false, only = 'hom
         </div>
         <ScSponsorFooter bg={panel} ink={ink} dim={dim} dimmer={dimmer} rule={rule} sponsors={m.meta?.sponsors} />
         <GrainSVG opacity={dark ? 0.22 : 0.16} id={`sc1g-${side}`} />
-      </PostCanvas>
+      </div>
     )
   }
 
@@ -2078,7 +2226,7 @@ export function SC2_Brutalist({ match, palette = {}, square = false, only = 'hom
   if (square) {
     const side = only === 'away' ? 'away' : 'home'
     return (
-      <PostCanvas style={{ background: bg, color: ink, fontFamily: SC_BODY }}>
+      <div style={{ width: 1080, height: 1080, position: 'relative', overflow: 'hidden', background: bg, color: ink, fontFamily: SC_BODY }}>
         <Stripes color={ink} opacity={0.04} gap={6} angle={0} />
         <Halftone color={ink} opacity={dark ? 0.05 : 0.06} size={12} />
         <div style={{ position: 'absolute', right: -30, top: 200, fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 200, lineHeight: 0.8, color: ink, opacity: 0.04, letterSpacing: -10, userSelect: 'none' }}>FINAL</div>
@@ -2101,7 +2249,7 @@ export function SC2_Brutalist({ match, palette = {}, square = false, only = 'hom
         </div>
         <ScSponsorFooter bg={ink} ink={bg} dim={_toRgba(bg, 0.55)} dimmer={_toRgba(bg, 0.35)} rule={ruleStrong} sponsors={m.meta?.sponsors} style={{ borderRadius: 0, borderTop: `3px solid ${accent}` }} />
         <GrainSVG opacity={dark ? 0.28 : 0.18} id={`sc2g-${side}`} />
-      </PostCanvas>
+      </div>
     )
   }
 
@@ -2233,7 +2381,7 @@ export function SC3_Dashboard({ match, palette = {}, square = false, only = 'hom
     const side = only === 'away' ? 'away' : 'home'
     const team = m[side] || {}
     return (
-      <PostCanvas style={{ background: bg, color: ink, fontFamily: SC_BODY }}>
+      <div style={{ width: 1080, height: 1080, position: 'relative', overflow: 'hidden', background: bg, color: ink, fontFamily: SC_BODY }}>
         <div style={{ padding: '20px 24px 10px' }}>
           <Card style={{ padding: '14px 20px', display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 20 }}>
             <div>
@@ -2257,7 +2405,7 @@ export function SC3_Dashboard({ match, palette = {}, square = false, only = 'hom
           <TeamCard team={team} accentC={team.color || (side === 'home' ? '#2563eb' : '#10b981')} side={side} />
         </div>
         <ScSponsorFooter bg={card} ink={ink} dim={dim} dimmer={dimmer} rule={rule} sponsors={m.meta?.sponsors} />
-      </PostCanvas>
+      </div>
     )
   }
 

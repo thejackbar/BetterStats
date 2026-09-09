@@ -5,7 +5,8 @@
 // Every panel is recreated from the club's own data (branding, headline stats,
 // a featured player, top performers) rather than screenshot, so the poster is
 // fully whitelabelled per club. Copy reads from the club's point of view.
-import { AutoFitText, ClubLogo, GrainSVG, Halftone, Stripes, PostCanvas } from './cricket-templates'
+import { AutoFitText, ClubLogo, GrainSVG, Halftone, Stripes } from './cricket-templates'
+import { share } from './postAspect'
 import brandWordmark from '../assets/bettercricket-white.svg'
 
 import statsLogo from '../assets/modules/betterstats.svg'
@@ -128,6 +129,8 @@ export function ClubLaunchPoster({
   subhead = 'A smarter way to run our club. A better experience for our players, coaches, members and supporters.',
   footerUrl = 'betterat.cricket',
   showCallout = true,
+  width = 1080,
+  height = 1080,
 }) {
   const P = palette || {}
   const bg = P.bg || '#0b0c10'
@@ -145,16 +148,12 @@ export function ClubLaunchPoster({
   ]
 
   return (
-    // The flex column and its padding lay the poster's own children out, so
-    // they belong on the ARTWORK box; only the paint carries out to the canvas
-    // edges on a 4:5 or 9:16 post.
-    <PostCanvas
-      style={{
-        background: `linear-gradient(120deg, ${bg} 38%, ${bg2} 100%)`,
-        color: ink, fontFamily: "'Inter', sans-serif",
-      }}
-      artStyle={{ display: 'flex', flexDirection: 'column', padding: 40, boxSizing: 'border-box' }}
-    >
+    <div style={{
+      width, height, position: 'relative', overflow: 'hidden',
+      background: `linear-gradient(120deg, ${bg} 38%, ${bg2} 100%)`,
+      color: ink, fontFamily: "'Inter', sans-serif",
+      display: 'flex', flexDirection: 'column', padding: 40, boxSizing: 'border-box',
+    }}>
       {/* texture + accent energy */}
       <div style={{ position: 'absolute', top: -180, right: -160, width: 520, height: 520, borderRadius: '50%', background: `radial-gradient(circle, ${accent}40 0%, transparent 70%)`, pointerEvents: 'none' }} />
       <Halftone color={ink} opacity={0.05} size={16} angle={0} />
@@ -175,9 +174,11 @@ export function ClubLaunchPoster({
       <div style={{ position: 'relative', display: 'flex', gap: 28, flex: 1, minHeight: 0 }}>
         {/* Left */}
         <div style={{ width: 452, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 60, lineHeight: 0.9, color: ink, letterSpacing: 0.5, transform: 'rotate(-2deg)', transformOrigin: 'left' }}>{headline}</div>
-          {/* Fixed-height box so AutoFitText fits the name to *this* 190px, not the whole column. */}
-          <div style={{ height: 188, marginTop: 8, transform: 'rotate(-2deg)', transformOrigin: 'left' }}>
+          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: share(height, 60), lineHeight: 0.9, color: ink, letterSpacing: 0.5, transform: 'rotate(-2deg)', transformOrigin: 'left' }}>{headline}</div>
+          {/* A fixed-height box so AutoFitText fits the name to THIS box rather
+              than the whole column — sized off the canvas, so the club's name
+              is the loudest thing on a portrait poster too. 188 at 1080. */}
+          <div style={{ height: share(height, 188), marginTop: 8, transform: 'rotate(-2deg)', transformOrigin: 'left' }}>
             <AutoFitText
               text={(club.name || 'Cricket Club').toUpperCase()}
               max={78} min={28} lines={3} measureDeps={[club.name]}
@@ -308,6 +309,6 @@ export function ClubLaunchPoster({
           {footerUrl}
         </div>
       </div>
-    </PostCanvas>
+    </div>
   )
 }

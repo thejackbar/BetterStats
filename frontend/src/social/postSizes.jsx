@@ -1,24 +1,18 @@
 // The canvas a post is designed on.
 //
-// Every built-in template COMPOSES its artwork at 1080×1080 (ART_W × ART_H) and
-// renders it into whichever of these canvases is picked — see PostCanvas in
-// social/cricket-templates, which every template's root goes through. A
-// template is therefore NOT re-laid-out per size (three separately-tuned copies
-// of one layout is how they start disagreeing with each other): the artwork
-// keeps its own proportions, sits centred, and the template's own background,
-// texture and full-height chrome carry out to the real canvas edges.
+// Every built-in template now takes the real width and height and carries its
+// own design for each of the three shapes — see postAspect.js, which owns the
+// vocabulary a template designs against. So a portrait post is a portrait
+// design, not a square one placed inside a taller box.
 //
-// WIDTH IS 1080 IN ALL THREE, which is what makes that work. Adding a size that
-// is NOT 1080 wide means deciding how the artwork scales, and that is a
-// different change from this one.
+// The scorecards are the exception and keep their own fixed 1920×1080: they are
+// a landscape document rather than a feed post, and they are offered no size
+// picker. `PostFrame` below is what places one of those into a canvas that is
+// not its own shape — the only remaining caller of it.
 //
-// The Blank Canvas is different again: its blocks carry their own x/y, so a
-// portrait canvas there is genuinely portrait with nothing to place.
-//
-// PostFrame/frameTransform below are the FALLBACK for a layout that cannot fill
-// a canvas of another shape — today only the 1920×1080 scorecards, which are
-// excluded from the size picker entirely. Kept because a future template with
-// its own fixed w/h would need it; nothing else should reach for it.
+// ONE definition of the maths, used by the live canvas AND the off-screen export
+// node — two copies is how the preview and the downloaded PNG start disagreeing
+// about where the artwork sits.
 
 export const POST_SIZES = [
   { key: 'square',   w: 1080, h: 1080, label: 'Square',   sub: '1:1',  where: 'Feed post' },
@@ -27,14 +21,6 @@ export const POST_SIZES = [
 ]
 
 export const DEFAULT_POST_SIZE = 'square'
-
-// The size a template's artwork is composed at, and the band a taller canvas
-// leaves above and below it. One definition, read by the templates themselves.
-export const ART_W = 1080
-export const ART_H = 1080
-export function matteFor(h) {
-  return Math.max(0, Math.round(((h || ART_H) - ART_H) / 2))
-}
 
 export const postSizeOf = (key) => POST_SIZES.find((s) => s.key === key) || POST_SIZES[0]
 

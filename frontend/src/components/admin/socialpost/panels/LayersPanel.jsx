@@ -9,23 +9,26 @@
 //   onMoveLayerBefore(dragId, overId)   drag reorder
 //   historyLog  [{ label, t }]          from useEditHistory
 //   note                                explains what the stack can and can't reach
+//   layoutName                          the built-in layout's own row in the stack
+//   onSetBehind(id, behind)             move a block across the layout
 import { useState } from 'react'
 import { Icon } from '../../../../pages/admin/betterselect/ui'
 import { itemLabel } from '../../../../social/blank-template'
 
 export default function LayersPanel({
   items = [], selIds = [], onSelect, onReorder, onDuplicate, onRemove, onMoveLayerBefore, historyLog = [], note = null,
+  layoutName = null, onSetBehind = null,
 }) {
   const [dragId, setDragId] = useState(null)
   const [overId, setOverId] = useState(null)
 
-  return (
-    <div className="flex flex-col gap-4">
-      {note}
-      <div className="flex flex-col gap-1">
-        <div className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faint">Layers · front on top</div>
-        {items.length === 0 && <div className="text-pb-faintest text-[10px] font-mono py-2">No blocks yet.</div>}
-        {items.slice().reverse().map((it) => (
+  // Front of the stack reads top-down, and the built-in layout is a row in it
+  // rather than an invisible floor under everything: blocks above the row are
+  // drawn over the layout, blocks below it are drawn behind.
+  const front = items.filter((it) => !it.behind).slice().reverse()
+  const behind = items.filter((it) => it.behind).slice().reverse()
+
+  const row = (it) => (
           <div key={it.id}
             draggable
             onDragStart={() => setDragId(it.id)}
@@ -46,7 +49,31 @@ export default function LayersPanel({
               <button onClick={(e) => { e.stopPropagation(); onRemove(it.id) }} title="Delete" className="hover:text-pb-red p-0.5"><Icon name="trash" size={12} /></button>
             </span>
           </div>
-        ))}
+  )
+
+  return (
+    <div className="flex flex-col gap-4">
+      {note}
+      <div className="flex flex-col gap-1">
+        <div className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faint">Layers · front on top</div>
+        {items.length === 0 && !layoutName && <div className="text-pb-faintest text-[10px] font-mono py-2">No blocks yet.</div>}
+        {front.map(row)}
+        {layoutName && (
+          // Not selectable and not draggable: a built-in layout is one drawn
+          // design, so the only thing that can move around it is your own
+          // blocks. It is in the list so the two sides of it are obvious.
+          <div data-testid="layers-layout-row"
+            className="flex items-center gap-2 px-2 py-1.5 rounded-md border border-dashed pb-hairline2 bg-pb-surface2/60">
+            <Icon name="image" size={12} className="text-pb-faintest" />
+            <span className="font-mono text-[11px] text-pb-dim truncate">{layoutName} layout</span>
+          </div>
+        )}
+        {behind.map(row)}
+        {layoutName && behind.length === 0 && (
+          <div className="px-2 py-1 font-mono text-[9px] text-pb-faintest">
+            Nothing behind the layout yet — use Backward on a block to send it under.
+          </div>
+        )}
       </div>
 
       <div>

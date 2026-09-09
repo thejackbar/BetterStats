@@ -1,17 +1,15 @@
 export default {
   version: 'v9.74.0',
   date: '2026-09-09',
-  // Above v9.73.2's sortKey, which is the highest on origin/main at merge time,
-  // or SITE_VERSION never reaches this one. Two entries sharing a sortKey is
-  // how the notification bell starts reporting the wrong release.
-  sortKey: '2026-09-20T08:00:00Z',
-  title: 'Every BetterPosts template fills the 4:5 and 9:16 canvas',
+  // Above v9.73.0's sortKey, which origin/main still has as the highest, or
+  // SITE_VERSION never reaches this one. Check origin/main at merge time.
+  sortKey: '2026-09-21T06:00:00Z',
+  title: 'BetterPosts: every layout is drawn at the post size, and a block can go behind it',
   items: [
-    'Picking Portrait or Story used to place the square layout onto the taller canvas, either whole with the background showing past it or scaled up with the edges cropped off. Every built-in template now renders into the canvas itself, so nothing is scaled and nothing is trimmed.',
-    'A template\'s own background, texture and edge bars run right to the top and bottom of the post rather than stopping where the square used to end, which is what made a taller post read as a letterboxed square rather than a portrait one.',
-    'The artwork keeps its proportions and sits centred, so a 9:16 story leaves room top and bottom — which is where Instagram draws its own profile bar and reply box anyway.',
-    'The "fit whole or fill and crop" choice is gone for these templates, because there is no longer anything to fit or crop. The panel says what the size does instead.',
-    'Exports name their size, so saving the same post at all three sizes gives three files rather than one overwritten twice.',
-    'The full scorecards are unchanged: they are drawn 1920×1080 wide and are still offered the Instagram-squares split rather than a post size.',
+    'Every built-in layout now draws itself at 1080×1350 portrait and 1080×1920 story, instead of sitting whole in the middle with bands above and below. A fixture list spreads its rows down the taller post, a poster gives its photo the extra room, and headers and footers stay on the edges where they belong.',
+    'Because the layouts fill the canvas themselves, the Fit whole / Fill & crop choice is gone — it only ever described a band that no longer exists.',
+    'A block you add can now be sent BEHIND the layout, not just moved among the other blocks you have added. Select it and press "Send behind", or press Backward past the bottom of the stack; the layout\'s own background stops painting so the block shows through.',
+    'The Layers panel lists the layout itself as a row, so what is over it and what is behind it is visible at a glance, and a block behind the layout can still be dragged around on the canvas.',
+    'A link that names a layout (?template=) now opens on that layout. It skipped the "What are you posting?" screen already but then showed whichever layout was last used.',
   ],
 }
