@@ -1991,6 +1991,13 @@ export const api = {
   // registrations taken before that existed.
   superSyncWebinarStreamyard: () =>
     request('/club-admin/super/webinar-streamyard-sync', { method: 'POST' }),
+  // Correct a registrant's name. StreamYard requires a surname and refuses a
+  // blank one, so a single-word name cannot be pushed — this is what lets that
+  // reason stop being true, since the push deliberately retries a skipped row.
+  superPatchWebinarRegistration: (id, payload) =>
+    request(`/club-admin/super/webinar-registrations/${id}`, {
+      method: 'PATCH', body: JSON.stringify(payload),
+    }),
   // Club lookup behind the Contact form's Club name field. Same Cricket
   // Australia club list the self-serve registration wizard searches, on the
   // Contact form's own endpoint so it works whether or not self-serve

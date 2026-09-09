@@ -155,7 +155,20 @@ async function fill(page, {
   name = 'Sam Committee', email = 'sam@example.com', club = 'Applecross CC',
   phone = '0412 345 678',
 } = {}) {
-  if (name !== null) await page.fill('#demo-name', name)
+  // TWO NAME FIELDS since migration 301 — StreamYard's own form has first and
+  // last name as separate required fields, so ours asks for both rather than
+  // guessing where to split one string. Presence-checked so a control run
+  // against the one-field build reports rather than hanging on the locator.
+  if (name !== null) {
+    const parts = String(name).trim().split(/\s+/)
+    const last = parts.length > 1 ? parts.slice(1).join(' ') : ''
+    if (await page.locator('#demo-first-name').count() === 1) {
+      await page.fill('#demo-first-name', parts[0] || '')
+      await page.fill('#demo-last-name', last)
+    } else if (await page.locator('#demo-name').count() === 1) {
+      await page.fill('#demo-name', name)
+    }
+  }
   if (email !== null) await page.fill('#demo-email', email)
   if (club !== null) await page.fill('#demo-club', club)
   // Presence-checked, not filled blind: against a build without the field a
@@ -220,8 +233,9 @@ async function attrOf(page, selector, name) {
   // Four fields now, and the role picker still collapsed. The phone was
   // asked for directly after the page shipped; the brief's own three-field
   // rule is what keeps the role optional and out of the way.
-  ck('name, email, club and phone are all present',
-    await page.locator('#demo-name').count() === 1
+  ck('first name, last name, email, club and phone are all present',
+    await page.locator('#demo-first-name').count() === 1
+    && await page.locator('#demo-last-name').count() === 1
     && await page.locator('#demo-email').count() === 1
     && await page.locator('#demo-club').count() === 1
     && await page.locator('#demo-phone').count() === 1)
@@ -233,8 +247,11 @@ async function attrOf(page, selector, name) {
     await page.locator('#demo-role option').count() === 8)   // 7 + "prefer not to say"
 
   // Autocomplete: a phone keyboard filling these in is most of this traffic.
-  ck('the name field autocompletes',
-    await page.locator('#demo-name').getAttribute('autocomplete') === 'name')
+  // A phone keyboard filling these in is most of this traffic, and the right
+  // tokens are what make two boxes cost one tap rather than two.
+  ck('the two name fields autocomplete as given and family name',
+    await attrOf(page, '#demo-first-name', 'autocomplete') === 'given-name'
+    && await attrOf(page, '#demo-last-name', 'autocomplete') === 'family-name')
   ck('the email field autocompletes',
     await page.locator('#demo-email').getAttribute('autocomplete') === 'email')
   ck('the club field autocompletes as an organisation',
@@ -247,7 +264,8 @@ async function attrOf(page, selector, name) {
     await attrOf(page, '#demo-phone', 'inputmode') === 'tel'
     && await attrOf(page, '#demo-phone', 'type') === 'tel')
   ck('every field has a real label',
-    await page.locator('label[for="demo-name"]').count() === 1
+    await page.locator('label[for="demo-first-name"]').count() === 1
+    && await page.locator('label[for="demo-last-name"]').count() === 1
     && await page.locator('label[for="demo-email"]').count() === 1
     && await page.locator('label[for="demo-club"]').count() === 1
     && await page.locator('label[for="demo-phone"]').count() === 1)
@@ -266,9 +284,11 @@ async function attrOf(page, selector, name) {
   ck('an empty form fires no CompleteRegistration', completeReg(px).length === 0)
   ck('and posts nothing at all', registrations(calls).length === 0)
   ck('it reports which fields are missing',
-    /Add your name\./.test(await page.getByTestId('demo-form').innerText()))
+    /Add your first name\./.test(await page.getByTestId('demo-form').innerText())
+    && /Add your last name\./.test(await page.getByTestId('demo-form').innerText()))
   ck('and marks them invalid for a screen reader',
-    await page.locator('#demo-name[aria-invalid="true"]').count() === 1)
+    await page.locator('#demo-first-name[aria-invalid="true"]').count() === 1
+    && await page.locator('#demo-last-name[aria-invalid="true"]').count() === 1)
 
   await fill(page, { email: 'not-an-email' })
   await page.getByTestId('demo-submit').click()
@@ -318,7 +338,12 @@ async function attrOf(page, selector, name) {
   const posts = registrations(calls)
   ck('exactly one registration is posted', posts.length === 1, String(posts.length))
   const sent = posts[0]?.body || {}
-  ck('carrying the name', sent.name === 'Sam Committee', JSON.stringify(sent.name))
+  // THE TWO HALVES ON THE WIRE, not one string for the server to split. This
+  // is the whole point of migration 301 — StreamYard requires both, and a
+  // split guesses wrong for a two-word first name.
+  ck('carrying the name as two fields',
+    sent.firstName === 'Sam' && sent.lastName === 'Committee',
+    JSON.stringify([sent.firstName, sent.lastName, sent.name]))
   ck('the email', sent.email === 'sam@example.com')
   ck('the club', sent.club === 'Applecross CC')
   // Exactly as typed, spaces and brackets and all — the server stores what a

@@ -43,10 +43,21 @@ const boxOf = async (loc) => (await loc.count()) ? await loc.first().boundingBox
 const press = async (loc) => { if (await loc.count()) { await loc.first().click(); return true } return false }
 
 const FORMATS = [
-  { key: 'square', w: 1080, h: 1080 },
-  { key: 'portrait', w: 1080, h: 1350 },
-  { key: 'story', w: 1080, h: 1920 },
+  { key: 'square', label: 'Square', w: 1080, h: 1080 },
+  { key: 'portrait', label: 'Portrait', w: 1080, h: 1350 },
+  { key: 'story', label: 'Story', w: 1080, h: 1920 },
 ]
+
+// The size picker lives in the Design panel and is keyed by its own label, not
+// by a testid this change invented — so a control run against the build BEFORE
+// the templates learned to fill the canvas still finds the buttons and fails on
+// what they DO, rather than reporting "button not found", which says nothing.
+const sizeBtn = (page, f) => page.locator('button', { hasText: new RegExp(`^${f.label}${f.key === 'square' ? '1:1' : f.key === 'portrait' ? '4:5' : '9:16'}$`) })
+const openDesign = async (page) => {
+  const tool = page.locator('button', { hasText: /^DESIGN$/i })
+  if (await tool.count()) await tool.first().click()
+  await page.waitForTimeout(400)
+}
 
 // One per template file, so a break in any of the four is caught rather than
 // cricket-templates standing in for all of them: a lineup poster (its own
@@ -91,6 +102,7 @@ async function open({ id = 'T1', type = 'lineup', width = 1600 } = {}) {
   await page.locator('[data-testid="post-export-node"]')
     .waitFor({ state: 'attached', timeout: 20000 }).catch(() => {})
   await page.waitForTimeout(1200)
+  await openDesign(page)
   return { page, ctx, errors }
 }
 
@@ -107,13 +119,12 @@ async function canvasGeometry(page) {
     const nb = r(node), cb = r(canvas), ab = r(art)
     return {
       node: nb, canvas: cb, art: ab,
-      // Everything painted inside the export node, so "nothing escapes the
-      // canvas" is measured rather than assumed from `overflow: hidden`.
-      widest: Array.from(node.querySelectorAll('*')).reduce((m, el) => {
-        const b = el.getBoundingClientRect()
-        if (!b.width || !b.height) return m
-        return Math.max(m, b.right - nb.left)
-      }, 0),
+      // A texture layer is deliberately drawn wider than the canvas (Halftone
+      // scales 1.4 about its centre) and CLIPPED by it, so measuring raw
+      // bounding boxes would report a seam that is never painted. What has to
+      // hold is that the canvas clips and the post does not scroll.
+      clips: canvas ? getComputedStyle(canvas).overflow : null,
+      scrollOverflow: canvas ? Math.max(canvas.scrollWidth - canvas.clientWidth, canvas.scrollHeight - canvas.clientHeight) : null,
     }
   })
 }
@@ -122,10 +133,8 @@ async function canvasGeometry(page) {
 // 1. THE CONTROL ITSELF.
 const { page, ctx, errors } = await open()
 
-const row = page.locator('[data-testid="post-format-row"]')
-ck('a post size control is offered', await has(row))
 for (const f of FORMATS) {
-  ck(`the ${f.key} size is offered`, await has(page.locator(`[data-testid="post-format-${f.key}"]`)))
+  ck(`the ${f.key} size is offered`, await has(sizeBtn(page, f)))
 }
 
 // The square is the default: a club that has never touched this gets exactly
@@ -139,8 +148,8 @@ ck('on the square the artwork box IS the canvas — no band at all',
 // ─────────────────────────────────────────────────────────────────────────────
 // 2. THE CANVAS IS THE SIZE IT SAYS, AND THE ARTWORK IS CENTRED IN IT.
 for (const f of FORMATS) {
-  await press(page.locator(`[data-testid="post-format-${f.key}"]`))
-  await page.waitForTimeout(500)
+  await press(sizeBtn(page, f))
+  await page.waitForTimeout(600)
   geo = await canvasGeometry(page)
   ck(`${f.key}: the export canvas is ${f.w}×${f.h}`,
     !!geo && Math.round(geo.node.w) === f.w && Math.round(geo.node.h) === f.h,
@@ -156,8 +165,9 @@ for (const f of FORMATS) {
   ck(`${f.key}: the artwork is still composed at 1080×1080`,
     !!geo?.art && Math.round(geo.art.h) === 1080 && Math.round(geo.art.w) === 1080,
     geo?.art ? `got ${Math.round(geo.art.w)}×${Math.round(geo.art.h)}` : 'no artwork box')
-  ck(`${f.key}: nothing is painted past the canvas's own width`,
-    !!geo && geo.widest <= f.w + 1, `widest ${geo && Math.round(geo.widest)}`)
+  ck(`${f.key}: nothing is painted past the canvas — it clips its own edges`,
+    geo?.clips === 'hidden' && geo?.scrollOverflow <= 0,
+    `overflow ${geo?.clips} scroll ${geo?.scrollOverflow}`)
 
   // ONE definition of the canvas: the preview and the node the export captures
   // read the same W×H, so a downloaded PNG cannot be a different size from the
@@ -175,8 +185,8 @@ for (const f of FORMATS) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 3. THE SEAM. Texture and full-height chrome have to reach the REAL edges.
-await press(page.locator('[data-testid="post-format-story"]'))
-await page.waitForTimeout(500)
+await press(sizeBtn(page, FORMATS[2]))
+await page.waitForTimeout(600)
 const edges = await page.evaluate(() => {
   const node = document.querySelector('[data-testid="post-export-node"]')
   if (!node) return null
@@ -197,6 +207,9 @@ const edges = await page.evaluate(() => {
     const b = el.getBoundingClientRect()
     out.push({
       cls: el.tagName + (el.style.width ? `[w=${el.style.width}]` : ''),
+      // A background layer: it paints across the post rather than holding
+      // content, so it is one of the ones that must reach the real edges.
+      backdrop: textured || (!el.textContent.trim() && b.width >= cb.width - 1),
       reachesTop: b.top <= cb.top + 1,
       reachesBottom: b.bottom >= cb.bottom - 1,
       stopsAtArt: Math.abs(b.top - ab.top) < 1 && Math.abs(b.bottom - ab.bottom) < 1,
@@ -208,10 +221,16 @@ ck('the story canvas has full-bleed layers to judge', (edges?.count || 0) > 0, `
 ck('no full-bleed layer stops at the artwork edge and leaves a line down the post',
   !!edges && edges.out.every((o) => !o.stopsAtArt),
   edges ? JSON.stringify(edges.out.filter((o) => o.stopsAtArt)) : 'nothing measured')
-ck('the full-bleed layers reach the real top and bottom of the post',
-  !!edges && edges.out.length > 0 && edges.out.every((o) => o.reachesTop && o.reachesBottom),
-  edges ? JSON.stringify(edges.out.filter((o) => !(o.reachesTop && o.reachesBottom))) : 'nothing measured')
+const backdrops = (edges?.out || []).filter((o) => o.backdrop)
+ck('the story canvas has background layers to judge', backdrops.length > 0, `found ${backdrops.length}`)
+ck('every background layer reaches the real top and bottom of the post',
+  backdrops.length > 0 && backdrops.every((o) => o.reachesTop && o.reachesBottom),
+  JSON.stringify(backdrops.filter((o) => !(o.reachesTop && o.reachesBottom))))
 
+ck('a template that fills the canvas is offered no fit-or-crop control',
+  !(await has(page.locator('text=Fitting this layout'))))
+ck('and is told it fills the canvas instead',
+  await has(page.locator('[data-testid="post-size-fills-note"]')))
 ck('no page errors while switching size', errors.length === 0, errors.slice(0, 2).join(' | '))
 await ctx.close()
 
@@ -222,8 +241,8 @@ await ctx.close()
 for (const s of SAMPLES) {
   const { page: p2, ctx: c2, errors: e2 } = await open({ id: s.id, type: s.type })
   for (const f of FORMATS) {
-    await press(p2.locator(`[data-testid="post-format-${f.key}"]`))
-    await p2.waitForTimeout(350)
+    await press(sizeBtn(p2, f))
+    await p2.waitForTimeout(450)
     const g = await canvasGeometry(p2)
     ck(`${s.label} (${s.id}) renders at ${f.w}×${f.h}`,
       !!g && Math.round(g.node.h) === f.h && Math.round(g.node.w) === f.w,
@@ -241,7 +260,7 @@ for (const s of SAMPLES) {
 {
   const { page: p3, ctx: c3 } = await open({ id: 'SC1', type: 'scorecard' })
   ck('the wide scorecard is offered no size control',
-    !(await has(p3.locator('[data-testid="post-format-row"]'))))
+    !(await has(sizeBtn(p3, FORMATS[1]))))
   const g = await canvasGeometry(p3)
   ck('the wide scorecard still composes at 1920×1080',
     !!g && Math.round(g.node.w) === 1920 && Math.round(g.node.h) === 1080,
@@ -257,10 +276,10 @@ for (const s of SAMPLES) {
   const names = []
   p4.on('download', (d) => names.push(d.suggestedFilename()))
   for (const f of FORMATS) {
-    await press(p4.locator(`[data-testid="post-format-${f.key}"]`))
-    await p4.waitForTimeout(400)
-    await press(p4.locator('button', { hasText: 'DOWNLOAD PNG' }))
-    await p4.waitForTimeout(2500)
+    await press(sizeBtn(p4, f))
+    await p4.waitForTimeout(500)
+    await press(p4.locator('button', { hasText: /DOWNLOAD PNG/ }))
+    await p4.waitForTimeout(6000)
   }
   ck('every size downloads a file', names.length === 3, `got ${names.length}: ${names.join(', ')}`)
   ck('each download names its own size',

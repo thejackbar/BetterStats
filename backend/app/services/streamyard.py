@@ -87,13 +87,20 @@ def webinar_id_from(watch_url: str) -> Optional[str]:
 
 
 def split_name(name: str) -> tuple[str, str]:
-    """Our form asks for one Name; theirs asks for two.
+    """One string into two names — the FALLBACK, not the mechanism.
 
-    Split at the LAST space, so the two join back to exactly what the person
-    typed — that is what StreamYard shows beside their chat messages.
-    A single-word name yields an empty surname, which their API refuses (a
-    required field cannot be blank, verified against the live endpoint) — the
-    caller skips the push rather than inventing one. See `push_registration`.
+    The form asks for the two halves outright since migration 301, precisely
+    because this is a guess: it splits at the FIRST space, so a two-word first
+    name comes back with the wrong surname ("Mary Jane Smith" reads as a
+    surname of "Jane Smith"). Used for a registration written before the form
+    did that, and for a caller that is not the form. See `resolve_push_name`,
+    which is what decides between the two.
+
+    Everything after the first word is the surname, so the two join back to
+    exactly what was typed — that is what StreamYard shows beside their chat
+    messages. A single-word name yields an empty surname, which their API
+    refuses (a required field cannot be blank, verified against the live
+    endpoint) — the caller skips the push rather than inventing one.
     """
     parts = (name or "").strip().split()
     if not parts:
@@ -101,6 +108,31 @@ def split_name(name: str) -> tuple[str, str]:
     if len(parts) == 1:
         return parts[0], ""
     return parts[0], " ".join(parts[1:])
+
+
+def resolve_push_name(
+    name: str, first_name: Optional[str] = None, last_name: Optional[str] = None,
+) -> tuple[str, str]:
+    """The two names to send, `("", "")` when there is no usable pair.
+
+    THE HALVES THE PERSON TYPED WIN. Splitting one string is a guess that reads
+    "Mary Jane Smith" as a surname of "Jane Smith", so the form asks for the two
+    fields StreamYard requires and the ordinary case needs no guessing at all.
+
+    The split is the fallback for a registration written before the form did
+    that, and for a caller that is not the form. A single half is not a pair —
+    a surname box left empty IS the mononym case, and sending a blank surname
+    is a 400 at their end.
+
+    Its own function rather than four lines inside `push_registration` so the
+    rule can be checked without a network call: everything else in that
+    function talks to StreamYard.
+    """
+    first = (first_name or "").strip()
+    last = (last_name or "").strip()
+    if first and last:
+        return first, last
+    return split_name(name)
 
 
 async def _session(client: httpx.AsyncClient, webinar_id: str) -> None:
@@ -154,6 +186,7 @@ async def _field_map(client: httpx.AsyncClient, webinar_id: str) -> Optional[dic
 
 async def push_registration(
     *, watch_url: str, name: str, email: str, phone: Optional[str] = None,
+    first_name: Optional[str] = None, last_name: Optional[str] = None,
     time_zone: str = "Australia/Perth",
 ) -> dict[str, Any]:
     """Register one person with StreamYard. Never raises.
@@ -174,7 +207,7 @@ async def push_registration(
         return {"ok": False, "id": None, "error": None,
                 "skipped": "the watch link is not a StreamYard broadcast"}
 
-    first, last = split_name(name)
+    first, last = resolve_push_name(name, first_name, last_name)
     if not first or not last:
         # Their form requires a surname and refuses a blank one (400). Inventing
         # one would put a name we made up beside this person's chat messages in

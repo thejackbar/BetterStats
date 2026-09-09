@@ -12,12 +12,13 @@
 //   panel                     scrolling panel body
 //   renderCanvas({availW,availH}) => node   centred canvas region (page strip + post + caption)
 //   inspector                 floating inspector node (positions itself)
+//   notice                    optional strip under the header ("saved — here's where")
 import { useEffect, useRef, useState } from 'react'
 import ToolRail from './ToolRail'
 
 export default function PostEditorShell({
   headerLeft, headerRight, tool, onTool,
-  panelTitle, panelMeta, panel, renderCanvas, inspector, tabBar,
+  panelTitle, panelMeta, panel, renderCanvas, inspector, tabBar, notice,
 }) {
   const wellRef = useRef(null)
   const [box, setBox] = useState({ w: 0, h: 0 })
@@ -47,6 +48,10 @@ export default function PostEditorShell({
         <div className="flex-1" />
         <div className="flex items-center gap-2.5 shrink-0">{headerRight}</div>
       </header>
+
+      {/* Saved-somewhere confirmation. Its own strip rather than a chip in the
+          header, because it has to have room to name the destination. */}
+      {notice}
 
       {/* Post-type bar — every type across the top */}
       {tabBar && (

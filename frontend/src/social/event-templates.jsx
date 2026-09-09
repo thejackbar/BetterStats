@@ -20,7 +20,7 @@
 //     · icon — a bundled 3D "thiings" glyph used as a faded watermark when no
 //       photo is supplied (auto-picked per preset, override in the editor).
 import { AutoFitText, Bleed, BrandLockup, ClubLogo, GrainSVG, Halftone, Stripes, PostCanvas, usePostHeight } from './cricket-templates'
-import { matteFor } from './postFormats'
+import { matteFor } from './postSizes'
 
 // Bundled motif glyphs (already in the repo at src/assets/thiings/).
 import icoTrophy from '../assets/thiings/trophy.png'

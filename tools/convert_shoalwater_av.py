@@ -59,6 +59,7 @@ FILE_LEN = HEADER_LEN + PLAYER_N * PLAYER_REC + PSTATS_N * PSTATS_REC \
 # within a match record
 M_ROUND, M_ROUND_LEN = 10, 20
 M_GROUND_IDX, M_GROUND, M_GROUND_LEN = 30, 32, 30
+M_RESULT = 496                         # the club's OWN recorded result - see RESULT_LABELS
 M_INN_US, M_INN_THEM = 502, 574        # slot A is always our club's innings
 M_FOW = 646                            # pairs of (score, batter position, 1-indexed)
 M_FOW_PAIRS = 10
@@ -154,6 +155,45 @@ IMPORT_DISMISSALS = {0: "b", 1: "c", 2: "lbw", 3: "st", 4: "run out",
 # anything that reads it - which is exactly what happened when the club came
 # back with 37 alongside 14.
 CAUGHT_BEHIND_CODES = frozenset({14, 37})
+
+
+# THE CLUB'S OWN RESULT, which is a better answer than comparing the scores.
+#
+# Found by scanning every byte of the match record against the outcome the
+# scores imply, and then confirmed outright: across all 914 matches this byte
+# takes exactly five values, and their counts are exactly the five lines of the
+# club's own CSFW summary - 467 won, 433 lost, 3 drawn, 3 tied, 8 abandoned.
+# Five values, five categories, all five counts exact.
+#
+# 3 IS TIED AND 2 IS DRAWN, which the counts alone cannot settle (both are 3).
+# The scores do: every match carrying a 3 has our total equal to theirs, and no
+# scored match carries a 2 at all. 4 is corroborated the same way - half the
+# 4s are scored matches where we were 15 or 9 all out against 195, which is
+# what an abandoned innings looks like.
+#
+# THIS IS AUTHORITATIVE OVER THE SCORES. A club wins on first innings, loses a
+# two-day match it out-scored, or has a game abandoned mid-innings, and the
+# scoreline alone says none of that. The 11 matches where the two disagree are
+# reported by `verify` rather than quietly resolved either way.
+RESULT_LABELS = {0: "Won", 1: "Lost", 2: "Drawn", 3: "Tied", 4: "Abandoned"}
+
+# The SAME results in BetterStats' own stored vocabulary, which is uppercase
+# (`WIN`/`LOSS`/`DRAW`/`TIE` - every reader in the app compares against those
+# literals, e.g. `aggregations._club_results`). A human-readable "Won" matches
+# none of them, so it counts as neither a win nor a loss on the club's own
+# dashboard - which is what the first cut of this converter emitted.
+#
+# AN ABANDONED MATCH IS DELIBERATELY BLANK. It was played and it counts as a
+# match, but it is not a win, a loss or a draw, and `_club_results` only counts
+# a row whose result is set - so blank files it exactly where the club's own
+# summary files it: on the fixture list, off the W/L/D line.
+IMPORT_RESULTS = {0: "WIN", 1: "LOSS", 2: "DRAW", 3: "TIE", 4: ""}
+
+
+def result_label(code) -> str:
+    if code is None:
+        return ""
+    return RESULT_LABELS.get(code, f"code {code}")
 
 
 def dismissal_label(code) -> str:
@@ -364,13 +404,18 @@ def parse_file(path: Path) -> dict:
         rec = buf[MATCH_BASE + idx * MATCH_REC:MATCH_BASE + (idx + 1) * MATCH_REC]
         us, them = parse_innings(rec, M_INN_US), parse_innings(rec, M_INN_THEM)
         blocks = parse_blocks(rec)
-        if not (us["played"] or them["played"] or any(b["batted"] or b["bowled"] for b in blocks)):
-            continue          # a side was named but no scorecard was ever entered
+        # EVERY FIXTURE-BACKED RECORD IS A MATCH THE CLUB COUNTS, scorecard or
+        # not. An earlier cut skipped a record with no innings and no batting or
+        # bowling, reading it as a fixture nobody ever filled in - and that
+        # dropped 17 real matches the club plays and counts: 10 won by forfeit,
+        # 3 drawn and 4 abandoned, none of which produces a figure to record.
+        # Keeping them is what makes the total 914, which is the club's own.
         matches.append({
             **fixtures[idx],
             "round": text(rec, M_ROUND, M_ROUND_LEN),
             "ground": text(rec, M_GROUND, M_GROUND_LEN),
             "ground_index": opt(i16(rec, M_GROUND_IDX)),
+            "result_code": rec[M_RESULT],
             "us": us, "them": them, "blocks": blocks, "fow": parse_fow(rec),
             "has_play": us["played"] or them["played"],
         })
@@ -407,6 +452,30 @@ def group_legs(season: dict) -> list:
     return out
 
 
+def leg_has_card(leg) -> bool:
+    """Did anything at all get written down for this leg?"""
+    return leg["has_play"] or any(b["batted"] or b["bowled"] for b in leg["blocks"])
+
+
+def match_legs(legs: list) -> list:
+    """The legs of one match that are worth emitting.
+
+    A 1992-97 two-day match routinely has its SECOND day left blank: the side
+    is named again, the game was settled on day one, and no figures were ever
+    entered. 231 of the club's matches look like that. A blank day is not an
+    innings and must not become one - emitting it would give all eleven a
+    second, invented "did not bat" innings on top of the runs they really made.
+
+    But a match whose EVERY leg is blank is a different thing: it is a match
+    the club played and counts (a forfeit, a washout, a draw with no play), and
+    it must not disappear just because there is no scorecard. Those keep ONE
+    leg - the two records name the same eleven, so taking both would count that
+    side twice.
+    """
+    scored = [l for l in legs if leg_has_card(l)]
+    return scored or legs[:1]
+
+
 def build_rows(seasons: list) -> dict:
     """Flatten every season into the sheets, collapsing two-day legs into one match."""
     matches, batting, bowling, fielding, fow_rows, votes, players = [], [], [], [], [], [], []
@@ -416,14 +485,22 @@ def build_rows(seasons: list) -> dict:
             players.append({"Season": s["season"], "Player ID": p["player_id"],
                             "Player": p["name"], "Surname": p["surname"],
                             "Initial": p["initial"], "First name": p["first_name"]})
-        for mid, date, team, opponent, legs in group_legs(s):
+        for mid, date, team, opponent, all_legs in group_legs(s):
             match_no += 1
-            our_runs = sum(l["us"]["total"] for l in legs if l["us"]["played"])
-            their_runs = sum(l["them"]["total"] for l in legs if l["them"]["played"])
-            both = any(l["us"]["played"] for l in legs) and any(l["them"]["played"] for l in legs)
-            result = ""
-            if both:
-                result = "Won" if our_runs > their_runs else "Lost" if our_runs < their_runs else "Tie"
+            legs = match_legs(all_legs)
+            # The club's own recorded result, not one worked out from the
+            # scores - it knows about a first-innings win, a forfeit and a
+            # match abandoned mid-innings, none of which a scoreline shows.
+            result = result_label(legs[0]["result_code"])
+            # A named side is the ONLY thing some of these matches record, so
+            # say who it was where there is no scorecard to say it for us.
+            squad = ""
+            if not leg_has_card(legs[0]):
+                # Semicolons: a name is stored "Surname, First", so joining
+                # eleven of them with commas reads as twenty-two people.
+                squad = "; ".join(
+                    s["players"].get(b["player_id"], {}).get("name", f"#{b['player_id']}")
+                    for b in legs[0]["blocks"])
             for l in legs:
                 names = s["players"]
                 common = {"Season": s["season"], "Match ID": mid, "Date": date,
@@ -442,6 +519,7 @@ def build_rows(seasons: list) -> dict:
                     "Their wides": l["them"]["wides"], "Their no balls": l["them"]["no_balls"],
                     "Their penalty": l["them"]["penalty"], "Their extras": l["them"]["extras"],
                     "Match result": result if l is legs[0] else "",
+                    "Named side (no scorecard)": squad if l is legs[0] else "",
                     "Source file": s["source"], "Record index": l["index"],
                 })
                 for b in l["blocks"]:
@@ -498,9 +576,7 @@ def build_season_stats(seasons: list, by_grade: bool = True) -> list:
             groups[(m["date"], m["team"], m["opponent"])].append(m)
         for key, legs in groups.items():
             team = key[1]
-            for l in legs:
-                if not l["has_play"]:
-                    continue
+            for l in match_legs(legs):
                 for b in l["blocks"]:
                     name = s["players"].get(b["player_id"], {}).get("name")
                     if not name:
@@ -714,6 +790,21 @@ def verify(seasons: list) -> list:
                 c["votes_checked"] += 1
                 if sum(v) == 6:
                     c["votes_ok"] += 1
+        # THE CARD'S OWN RESULT AGAINST THE SCORELINE. Not an error when they
+        # differ - a first-innings win, a forfeit and a match abandoned partway
+        # all read as something else on runs alone - but a disagreement is
+        # worth a reader knowing about, so it is counted rather than resolved.
+        for _mid, _d, _t, _o, all_legs in group_legs(s):
+            legs = match_legs(all_legs)
+            ours = sum(l["us"]["total"] for l in legs if l["us"]["played"])
+            theirs = sum(l["them"]["total"] for l in legs if l["them"]["played"])
+            if not (any(l["us"]["played"] for l in legs)
+                    and any(l["them"]["played"] for l in legs)):
+                continue
+            c["result_checked"] += 1
+            derived = "Won" if ours > theirs else "Lost" if ours < theirs else "Tied"
+            if derived == result_label(legs[0]["result_code"]):
+                c["result_ok"] += 1
     return [
         ("Batting runs + extras equal the innings total", c["runs_ok"], c["runs_checked"]),
         ("Batters dismissed equal the innings wickets", c["wickets_ok"], c["wickets_checked"]),
@@ -724,6 +815,8 @@ def verify(seasons: list) -> list:
         ("4s and 6s never account for more than the runs scored",
          c["boundary_ok"], c["boundary_checked"]),
         ("Award votes add up to 3-2-1", c["votes_ok"], c["votes_checked"]),
+        ("The card's own result agrees with the scoreline",
+         c["result_ok"], c["result_checked"]),
     ]
 
 
@@ -751,21 +844,19 @@ def build_game_rows(seasons: list, club: str) -> list:
     """
     rows = []
     for s in seasons:
-        for mid, date, team, opponent, legs in group_legs(s):
-            played = [l for l in legs if l["has_play"]]
-            if not played:
-                continue
-            ours = sum(l["us"]["total"] for l in legs if l["us"]["played"])
-            theirs = sum(l["them"]["total"] for l in legs if l["them"]["played"])
-            result = winner = ""
-            if any(l["us"]["played"] for l in legs) and any(l["them"]["played"] for l in legs):
-                result = "Won" if ours > theirs else "Lost" if ours < theirs else "Tie"
-                winner = club if result == "Won" else opponent if result == "Lost" else ""
+        for mid, date, team, opponent, all_legs in group_legs(s):
+            played = match_legs(all_legs)
+            # The club's own result, in the app's own vocabulary. An abandoned
+            # match comes back blank: it was played and it counts as a match,
+            # but it is not a win, a loss or a draw.
+            result = IMPORT_RESULTS.get(played[0]["result_code"], "")
+            winner = club if result == "WIN" else opponent if result == "LOSS" else ""
             # A two-day match's two legs are our first and second innings, but
             # both records routinely store innings number 1 - so the stored
             # number is only usable when the legs actually disagree about it.
             stored = [l["us"]["innings_no"] for l in played]
             distinct = len(set(stored)) == len(stored) and all(stored)
+            before = len(rows)
             for n, l in enumerate(played, 1):
                 innings = l["us"]["innings_no"] if distinct else n
                 for b in l["blocks"]:
@@ -811,6 +902,22 @@ def build_game_rows(seasons: list, club: str) -> list:
                         "fielding_run_outs": "",                   # not in the format
                         "fielding_stumpings": b["stumpings"] or "",
                     })
+            # A MATCH WITH NOBODY NAMED IS STILL A MATCH. Twelve of these are
+            # forfeits, washouts and no-play draws where the club recorded the
+            # result and never a single name. One row carrying the match and no
+            # player is how the importer takes that: it reads a blank
+            # player_name as "no player on this row" and writes the game with
+            # no scorecard under it, which is exactly what the club holds.
+            if len(rows) == before:
+                blank = dict.fromkeys(GAME_CSV_COLUMNS, "")
+                blank.update({
+                    "game_key": mid,
+                    "played_at": date.isoformat() if date else "",
+                    "opposition": opponent, "venue": played[0]["ground"],
+                    "season_name": s["season"], "grade_name": grade_label(team),
+                    "winning_team": winner, "result": result,
+                })
+                rows.append(blank)
     return rows
 
 
@@ -832,7 +939,25 @@ NOTES = [
     ("Two-day matches", "Seasons up to 1997 store a match as two records, 'Opponent 1' and "
                         "'Opponent 2'. They share a date and a team, so they are one match "
                         "here, with the Leg column saying which record a row came from. "
-                        "Games played counts the match once."),
+                        "Games played counts the match once. In 231 of them the second day "
+                        "names the side again and records no figures - the game was settled "
+                        "on day one - so that day is left out rather than imported as a "
+                        "second innings nobody batted in."),
+    ("Matches with no scorecard", "17 matches carry a result and no figures: 10 won by "
+                                  "forfeit, 3 drawn and 4 abandoned. They are matches the "
+                                  "club played and counts, so they are here, and they are "
+                                  "what takes the total to 914. Five of them name the side "
+                                  "and record nothing else - those eleven are listed on the "
+                                  "Matches sheet under 'Named side' and count a game played "
+                                  "each. The other twelve name nobody at all and import as "
+                                  "the match alone."),
+    ("Match result", "Read from the club's own result field, not worked out from the scores. "
+                     "It knows what a scoreline cannot: a first-innings win, a forfeit, a "
+                     "game abandoned partway. Confirmed outright - across all 914 matches "
+                     "the field takes five values whose counts are exactly the five lines of "
+                     "the club's own summary (467 won, 433 lost, 3 drawn, 3 tied, 8 "
+                     "abandoned). The 11 matches where it disagrees with the scoreline are "
+                     "counted on the checks above and left as the club recorded them."),
     ("Opposition", "The program only ever stored this club's own players, so there are no "
                    "opposition batting or bowling cards - only their innings totals."),
     ("Dismissals", "Codes 11 and 12 are not outs, proved rather than assumed: with both "
@@ -868,10 +993,13 @@ NOTES = [
                                "slips. Squads for different grades on one day do not overlap "
                                "at all, and a player spends a median 93% of a season in one "
                                "grade, so the grade split can be trusted."),
-    ("Which file to import", "manual_games_scorecards.csv - the same matches as this "
+    ("Which file to import", "manual_games_scorecards.csv - the same 914 matches as this "
                              "workbook, one row per player per match, in the columns "
                              "BetterCricket's scorecard import reads. It lands real match "
-                             "records, so match pages and partnerships work."),
+                             "records, so match pages and partnerships work. A match nobody "
+                             "was named for is one row with the match filled in and the "
+                             "player column empty, which is how the importer takes a game "
+                             "with no scorecard under it."),
     ("", "betterimport_season_stats.csv is the simpler alternative: season totals per "
          "player, no match detail. Import ONE of the two, never both - the same runs "
          "would be counted twice."),

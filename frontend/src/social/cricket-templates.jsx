@@ -1,13 +1,13 @@
 // Cricket social media templates — ES module port of the Cricket Scorecards 2 design system.
 // Every template COMPOSES at exactly 1080×1080px using inline styles, and renders
 // into a canvas of whichever post size was picked (see PostCanvas below and
-// postFormats.js). Font stack: Anton, Bebas Neue, Archivo Black, Inter,
+// postSizes.jsx). Font stack: Anton, Bebas Neue, Archivo Black, Inter,
 // JetBrains Mono (loaded in index.html)
 
 import { useRef, useState, useLayoutEffect, createContext, useContext } from 'react'
 import brandBlack from '../assets/bettercricket-black.svg'
 import brandWhite from '../assets/bettercricket-white.svg'
-import { ART_W, ART_H, matteFor } from './postFormats'
+import { ART_W, ART_H, matteFor } from './postSizes'
 
 // The post height every template on screen is rendering into. Carried by
 // CONTEXT rather than a prop so a format reaches all ~60 templates without
@@ -753,6 +753,7 @@ export function T2_CardGrid({ team, opponent, match, players, palette }) {
 export function T3_SideNumbered({ team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus }) {
   // The wave background and the side panel are the POST's, not the artwork's —
   // both run to the real canvas edges on a 4:5 or 9:16.
+  const postH = usePostHeight()
   const bleed = useBleed() || {}
   const P = players.slice(0, 11)
   // The vertical spine label echoes the post headline (defaults to STARTING XI).
@@ -763,14 +764,14 @@ export function T3_SideNumbered({ team, opponent, match, players, palette, heroI
     <PostCanvas style={{
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
-      <svg width="1080" height="100%" preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, ...bleed }}>
+      <svg width="1080" height={postH} preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, ...bleed, height: postH }}>
         <defs>
           <linearGradient id="bgwv" x1="0" y1="0" x2="1" y2="1">
             <stop offset="0" stopColor={palette.primary} />
             <stop offset="1" stopColor={palette.secondary} />
           </linearGradient>
         </defs>
-        <rect width="1080" height="100%" fill="url(#bgwv)" />
+        <rect width="1080" height={postH} fill="url(#bgwv)" />
         <path d="M 900 0 C 1050 200 950 400 1080 600 L 1080 0 Z" fill={palette.ink} opacity="0.04" />
         <path d="M 1000 1080 C 850 900 1100 700 980 500 L 1080 500 L 1080 1080 Z" fill={palette.accent} opacity="0.06" />
       </svg>
