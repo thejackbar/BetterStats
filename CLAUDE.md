@@ -546,6 +546,108 @@ Reported: "rediscover committee is disabled on club directory".
 - **`const URL = ...` SHADOWS THE GLOBAL `URL`** and every `new URL(...)` in the
   route handler dies with "URL is not a constructor".
 
+### And then the gate itself was wrong (migration 298, v9.71.5, Sep 2026)
+
+Asked straight after the fix above: if they are two different jobs, why must the
+crawler be restarted to run one of them? Then, once the trade-off was put:
+"I do want the ability to stop all crawling traffic with PlayHQ. But I also want
+the ability to re-start the crawl, which should re-discover both new and existing
+clubs and pick up changes in address, associations, officers etc. The Re-discover
+committee members should just run through the existing clubs... (and I should be
+able to launch this function even if the typical Crawl is stopped)."
+
+- **THE GATE WAS PROTECTING NOTHING, AND THE OBVIOUS FEAR IS THE WRONG ONE.**
+  "A partial rediscover could empty the directory" is false: `_prune_committee`
+  is scoped `marketing_club_id = :club` and compares against the ids seen in
+  THAT CLUB'S OWN payload, and `_upsert_club(prune=True)` is called per club as
+  each page lands. So a run stopped at page N leaves every club on pages N+1..end
+  untouched rather than emptied. What the gate actually saved you from was a
+  no-op: `discover_clubs` polls the flag at the TOP of the loop, so a rediscover
+  started while stopped broke before page one and returned zeroes.
+- **THE PLATFORM ALREADY DISAGREED WITH ITSELF, which is the tell that a rule is
+  inherited rather than decided.** `rediscover_club` (one club, from its own row)
+  bypasses `discover_clubs` entirely and calls `_upsert_club(prune=True,
+  retick=True)` direct — **no pause check at all**, and it has always run while
+  stopped. If reconciling-while-stopped were unsafe, that one would be gated too.
+- **SO STOP MEANS "STOP THE UNATTENDED CRAWLER", AND THE REDISCOVER CARRIES ITS
+  OWN CANCEL.** `discover_clubs` takes a `should_stop` callable that DEFAULTS to
+  `is_crawl_paused`, so every background path (the continuous runner,
+  `crawl_batch`, `enrich_associations`) is byte-for-byte unchanged and the switch
+  still stops all unattended traffic. Only `rediscover_all` passes something
+  else. The suite presses each background path with the flag set for exactly
+  this reason — letting the rediscover through is only defensible while that half
+  holds.
+- **A RUN THAT IGNORES THE GLOBAL STOP MUST HAVE A STOP OF ITS OWN, or the
+  ability to halt all PlayHQ traffic quietly disappears the moment one is
+  running.** `POST /rediscover/stop` raises an in-process cancel (in-process is
+  right — the run itself is), and starting a run CLEARS it, or a stale cancel
+  would kill the next rediscover before its first page. The suite asserts the
+  cancel is the check the run actually asks, not a flag nothing reads.
+- **A HALTED RUN IS NOT A FINISHED ONE**, the rule this file already records for
+  a skipped one, reached from the other end. `discover_clubs` reports
+  `stopped: True` when it broke off with pages to go, so the screen says
+  "stopped part way" rather than printing the finished line over a partial pass.
+- **THE ASSOCIATION WAS THE ONLY REAL GAP IN "PICK UP CHANGES", and two thirds of
+  that ask were already true.** `_upsert_club` rewrites name, website, suburb,
+  state, postcode and coordinates on EVERY pass, and newly listed officers are
+  already added — both are now asserted rather than claimed, which is what makes
+  "nothing to build there" an answer. But `enrich_associations`'s frontier was
+  `associations IS NULL` and nothing else, so a club's associations were fetched
+  once and frozen for the life of the row: a club that moved association kept the
+  old one for ever and no crawl would ever correct it.
+- **`last_crawled_at` CANNOT ANSWER "WHEN WERE THE ASSOCIATIONS READ".** Discovery
+  bumps it for every club it sees, so it records when the club was last SEEN.
+  Hence `marketing_clubs.associations_fetched_at` (298), stamped only on a
+  SUCCESSFUL fetch — a PlayHQ wobble must not buy a club another 90 days of
+  staleness.
+- **THE BACKFILL IS SERVED BEFORE ANY REFRESH** (`case((never_fetched, 0),
+  else_=1)`), or refreshes starve the clubs nobody has ever enriched.
+- **`frontier_remaining` STILL MEANS NEVER-FETCHED ONLY, and that is
+  load-bearing.** `run_continuous` reads it as "is the backfill finished" and
+  sleeps to the next window at 0; folding refreshes in would mean the runner
+  never considered itself done and hot-looped. Refreshes ride alongside as
+  `refresh_due`, and get PROCESSED because they are in the frontier QUERY.
+- **THE MIGRATION BACKFILLS THE STAMP RATHER THAN LEAVING IT NULL**, or the whole
+  directory becomes refresh-due in one burst on the day it ships. Stamped from
+  `COALESCE(last_crawled_at, first_seen_at)`, so the longest-unseen clubs come
+  due first and the rest drain at the crawler's own pace. Only where
+  `associations IS NOT NULL`, so a never-fetched club stays on the ordinary
+  backfill frontier.
+- **A REFRESH CAN COME BACK EMPTY WHERE A FIRST FETCH COULD NOT** — the club has
+  left every association it played in — so `association_name`/`association_guid`
+  (a denormalised copy of `assocs[0]`) are CLEARED. Leaving them would show an
+  association the club no longer plays in. Unreachable before this change, which
+  is why it was never handled.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_rediscover_gating.py` is 34 checks now, and
+  `verify_assoc_refresh.py` is 21: 298 applied three times to a populated pre-298
+  table, the backfill stamping only the right rows, a stale club back on the
+  frontier and a fresh one not, the backfill served first, a failed fetch not
+  restamping, an empty refresh clearing the name, 0 days restoring the pre-298
+  behaviour, every background path still honouring the Stop, a rediscover running
+  while stopped and storing what it read, the cancel halting it, and a club the
+  halted run never reached left exactly as it was) **with two control runs**:
+  with both behaviours reverted 8 of the gating checks and 4 of the refresh
+  checks fail, reporting the club's own `{'skipped': 'stopped'}` and its stale
+  "Old Assoc"; with the feature absent both suites REPORT it by name rather than
+  dying on the first import or the missing parameter.
+- **A FAKE THAT REPORTS ITS OWN ROW COUNT AS `totalRecords` IS 'FINISHED' AFTER
+  PAGE ONE.** `discover_clubs` stops once `(pages_done * 100) >= totalRecords`,
+  so the first cut's cancel could never be reached — and "it never asked for
+  page 2" PASSED for the wrong reason. The fake reports a high total by default
+  now, and the caller lowers it only when running out of pages IS the check.
+- **Driven in Chromium** (`verify_rediscover_gating_browser.mjs`, 32: the button
+  live while the crawler is stopped, the crawl button beside it still held back,
+  the Stop control appearing only while a run is going, its exact endpoint on the
+  wire and never the crawler's own, a dismissed confirm sending nothing, and a
+  halted run reported as halted) **with a control run**: 11 fail, naming
+  `disabled=true` and the old build printing `Last rediscover: 412 club(s)` over
+  a partial pass.
+- **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN, hit again here.** A bare
+  `.first().innerText()` on the new note killed the control after three checks
+  and said nothing about the other twenty-nine. Every read of an element this
+  change ADDS goes through `textOf()`, which returns '' for an absent locator.
+
 ## The Club Directory's committee only ever grew (migration 295, v9.70.0, Sep 2026)
 
 Asked for directly: a Rediscover that re-reads what PlayHQ publishes for every

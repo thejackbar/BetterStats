@@ -1,14 +1,19 @@
-// The reported surface: "rediscover committee is disabled on club directory".
+// The reported surface: "rediscover committee is disabled on club directory",
+// then — once the button explained itself — if they are two different jobs, why
+// must the crawler be restarted to run one of them?
 //
 //   npx vite --port 5203 &
 //   node frontend/verification/verify_rediscover_gating_browser.mjs [baseUrl]
 //
-// The button was correctly held back — a full rediscover re-pages the whole of
-// PlayHQ and the service refuses outright while an operator has the crawler
-// stopped — but it never said so, and the Stop that causes it is set two rows
-// away. What is measured here is that the screen now names the reason, that it
-// is no longer held back by a run this backend has lost track of, and that a
-// run which never read a page is not reported as a finished one.
+// The gate turned out to be protecting nothing: the prune is per club, so a
+// half-finished run leaves the clubs it never reached untouched, and the
+// single-club Rediscover has always run while stopped. So Stop now governs the
+// UNATTENDED crawler and a rediscover carries its own cancel.
+//
+// What is measured here: the button is live while the crawler is stopped, the
+// crawl button beside it is still held back (the half that must not regress),
+// the Stop rediscover control appears and writes to its own endpoint, and a run
+// halted part way is not reported as a finished one.
 import { existsSync } from 'node:fs'
 import { chromium } from 'playwright'
 
@@ -67,10 +72,14 @@ async function open({ status = RUNNING, run = IDLE_RUN, width = 1500 } = {}) {
                     entitlements: { modules: [], status: 'active' } })
     }
     if (/marketing\/rediscover\/status/.test(p)) return json(liveRun)
+    if (/marketing\/rediscover\/stop/.test(p)) {
+      liveRun = { ...liveRun, cancel: true }
+      return json({ status: 'stopping' })
+    }
     if (/marketing\/rediscover$/.test(p)) {
       // The stub MUTATES — one that answers the same thing every time cannot
       // tell a working press from a no-op.
-      liveRun = { ...liveRun, running: true, stale: false,
+      liveRun = { ...liveRun, running: true, stale: false, cancel: false,
                   started_at: new Date().toISOString(), progress: {} }
       return json({ status: 'started' })
     }
@@ -103,6 +112,14 @@ const btn = (page) => page.locator(
 // A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN — a build without the button
 // reports each missing check by name rather than dying on the first locator
 // timeout and saying nothing about the rest.
+// EVERY read of an element this change ADDS goes through here. A bare
+// `.first().innerText()` on a locator that found nothing throws, and in a
+// control run — where the element is absent by definition — that kills the run
+// after a couple of checks and says nothing about the rest. Found by running it.
+async function textOf(locator) {
+  return await locator.count() ? await locator.first().innerText() : ''
+}
+
 async function state(page, label) {
   const b = btn(page)
   if (await b.count() === 0) {
@@ -117,21 +134,29 @@ async function state(page, label) {
 {
   const { page, ctx, errors } = await open({ status: STOPPED })
   const s = await state(page, 'rediscover')
-  ck('THE REPORTED CASE REPRODUCES — with the crawler stopped, the button is disabled',
-    !!s && s.disabled)
+  ck('THE REPORTED CASE IS FIXED — with the crawler stopped, Rediscover is LIVE. '
+     + 'Stop governs the unattended crawler, and pressing this is the opposite '
+     + 'of unattended',
+    !!s && !s.disabled, s && `disabled=${s.disabled}`)
 
-  const note = page.getByTestId('rediscover-blocked')
-  ck('AND IT NOW SAYS WHY, ON SCREEN — a disabled control with no stated reason '
-     + 'reads as broken software',
-    await note.count() > 0 && /crawler is stopped/i.test(await note.first().innerText()),
-    await note.count() ? await note.first().innerText() : 'no note')
-  ck('naming the way out, which is set two rows away',
-    await note.count() > 0 && /Start crawling/i.test(await note.first().innerText()))
-  ck('and the tooltip says the same thing',
-    !!s && /crawler is stopped/i.test(s.title), s && s.title)
+  const noteText = await textOf(page.getByTestId('rediscover-runs-stopped'))
+  ck('AND IT SAYS SO — a stopped crawler two rows up otherwise reads as though '
+     + 'this button must be blocked too, which is what it used to be',
+    /still runs/i.test(noteText), noteText || 'no note')
+  ck('the tooltip says the same thing rather than a reason it is held back',
+    !!s && /whether or not the crawler is stopped/i.test(s.title), s && s.title)
+  ck('and nothing on the row tells you to press Start crawling first',
+    !/Press Start crawling above to run this/i.test(noteText)
+      && !/Press Start crawling above to run this/i.test((s && s.title) || ''),
+    noteText || (s && s.title) || '')
+
+  // THE HALF THAT MUST NOT REGRESS. Letting a rediscover through is only
+  // defensible while the switch still stops the unattended crawler.
   const crawlBtn = page.getByRole('button', { name: /Run crawl batch/ }).first()
-  ck('the crawl button beside it is held back for the same reason, and says so too',
-    await crawlBtn.count() > 0
+  ck('THE CRAWL BUTTON BESIDE IT IS STILL HELD BACK — the switch still stops '
+     + 'every unattended path',
+    await crawlBtn.count() > 0 && await crawlBtn.isDisabled())
+  ck('and still says why', await crawlBtn.count() > 0
       && /crawler is stopped/i.test(await crawlBtn.getAttribute('title') || ''))
   ck('no page errors', errors.length === 0, errors.join(' | '))
   await ctx.close()
@@ -144,9 +169,11 @@ async function state(page, label) {
   ck('with the crawler running the button is live', !!s && !s.disabled)
   ck('AND NOTHING IS DRAWN — a note on every visit is noise that teaches people '
      + 'to stop reading notes',
-    await page.getByTestId('rediscover-blocked').count() === 0)
-  ck('the tooltip goes back to describing what it does',
+    await page.getByTestId('rediscover-runs-stopped').count() === 0)
+  ck('the tooltip describes what it does',
     !!s && /Re-page the whole PlayHQ/i.test(s.title), s && s.title)
+  ck('and no Stop rediscover control is drawn when nothing is running',
+    await page.getByTestId('rediscover-stop-btn').count() === 0)
   ck('no page errors', errors.length === 0, errors.join(' | '))
   await ctx.close()
 }
@@ -158,8 +185,10 @@ async function state(page, label) {
   ck('A RUNNER ON A BREAK DOES NOT DISABLE ANYTHING — "paused" the derived state '
      + 'and "paused" the operator flag are two different things',
     !!s && !s.disabled)
-  ck('and nothing claims the crawler is stopped',
-    await page.getByTestId('rediscover-blocked').count() === 0)
+  const crawlBtn = page.getByRole('button', { name: /Run crawl batch/ }).first()
+  ck('and the crawl button is live too — gating on the WORD would kill it every '
+     + 'time the crawler took a breather',
+    await crawlBtn.count() > 0 && !(await crawlBtn.isDisabled()))
   await ctx.close()
 }
 
@@ -177,6 +206,59 @@ async function state(page, label) {
     !!s && /already running/i.test(s.title), s && s.title)
   const body = await page.locator('body').innerText()
   ck('and the progress is shown beside it', /300 club\(s\) re-read/.test(body))
+  ck('AND A STOP CONTROL APPEARS — without one, letting it ignore the crawler\'s '
+     + 'Stop would take away the ability to halt all PlayHQ traffic',
+    await page.getByTestId('rediscover-stop-btn').count() > 0)
+  await ctx.close()
+}
+
+// ── stopping a running rediscover ─────────────────────────────────────────
+{
+  const { page, ctx, calls, errors } = await open({
+    run: { ...IDLE_RUN, running: true, stale: false, cancel: false,
+           started_at: new Date().toISOString(),
+           progress: { clubs_seen: 120, total_reported: 6900 } },
+  })
+  page.on('dialog', d => d.accept())
+  const stop = page.getByTestId('rediscover-stop-btn')
+  if (await stop.count() === 0) {
+    ck('the Stop rediscover control is on the page', false, 'not found')
+    ck('pressing it writes to its own endpoint', false, 'no button')
+    ck('and never to the crawler\'s own Stop', false, 'no button')
+  } else {
+    const before = calls.length
+    await stop.click()
+    await page.waitForTimeout(900)
+    const sent = calls.slice(before).filter(c => c.method === 'POST')
+    ck('PRESSING STOP WRITES TO THE REDISCOVER\'S OWN ENDPOINT',
+      sent.length === 1 && /marketing\/rediscover\/stop$/.test(sent[0].path),
+      JSON.stringify(sent))
+    // Stopping this run must NOT stop the crawler — they are separate switches
+    // now, and conflating them is the whole bug this change undoes.
+    ck('AND NEVER TO THE CRAWLER\'S OWN STOP — they are separate switches',
+      !sent.some(c => /crawl\/control/.test(c.path)), JSON.stringify(sent))
+  }
+  ck('no page errors', errors.length === 0, errors.join(' | '))
+  await ctx.close()
+}
+
+// ── a dismissed confirm writes nothing ────────────────────────────────────
+{
+  const { page, ctx, calls } = await open({
+    run: { ...IDLE_RUN, running: true, stale: false, cancel: false,
+           started_at: new Date().toISOString(), progress: { clubs_seen: 5 } },
+  })
+  page.on('dialog', d => d.dismiss())
+  const stop = page.getByTestId('rediscover-stop-btn')
+  const before = calls.length
+  if (await stop.count() === 0) ck('a dismissed confirm sends nothing', false, 'no button')
+  else {
+    await stop.click()
+    await page.waitForTimeout(700)
+    ck('a dismissed confirm sends nothing at all',
+      calls.slice(before).filter(c => c.method === 'POST').length === 0,
+      JSON.stringify(calls.slice(before).filter(c => c.method === 'POST')))
+  }
   await ctx.close()
 }
 
@@ -211,20 +293,32 @@ async function state(page, label) {
   await ctx.close()
 }
 
-// ── a run that never read a page is not a finished one ────────────────────
+// ── a run halted part way is not a finished one ───────────────────────────
 {
   const { page, ctx } = await open({
     run: { ...IDLE_RUN, finished_at: new Date().toISOString(),
-           result: { skipped: 'stopped' } },
+           result: { au_seen: 412, pruned: 9, marked_former: 2, new: 0, stopped: true } },
   })
   const body = await page.locator('body').innerText()
-  ck('A SKIPPED RUN IS NOT REPORTED AS A FINISHED ONE — "0 club(s)" reads as '
-     + '"it ran and there was nothing to do" when in fact it never started',
-    !/Last rediscover: 0 club/.test(body),
-    body.match(/Last rediscover[^\n]{0,70}/)?.[0] || '')
-  ck('it says what actually happened instead',
-    /did not run/i.test(body) && /crawler was stopped/i.test(body),
-    body.match(/Last rediscover[^\n]{0,70}/)?.[0] || 'nothing said')
+  ck('A HALTED RUN IS NOT REPORTED AS A FINISHED ONE — the same line over a '
+     + 'partial pass claims a whole-directory reconcile that never happened',
+    /stopped part way/i.test(body),
+    body.match(/Last rediscover[^\n]{0,80}/)?.[0] || 'nothing said')
+  ck('while still reporting what it did get through',
+    /412 club/.test(body), body.match(/Last rediscover[^\n]{0,80}/)?.[0] || '')
+  await ctx.close()
+}
+
+// ── a run that finished ───────────────────────────────────────────────────
+{
+  const { page, ctx } = await open({
+    run: { ...IDLE_RUN, finished_at: new Date().toISOString(),
+           result: { au_seen: 6900, pruned: 140, marked_former: 31, new: 4, stopped: false } },
+  })
+  const body = await page.locator('body').innerText()
+  ck('a run that finished says so plainly, with no halted wording',
+    /Last rediscover: 6900 club/.test(body) && !/stopped part way/i.test(body),
+    body.match(/Last rediscover[^\n]{0,80}/)?.[0] || 'nothing said')
   await ctx.close()
 }
 
@@ -234,8 +328,8 @@ async function state(page, label) {
   const over = await page.evaluate(() =>
     document.documentElement.scrollWidth - document.documentElement.clientWidth)
   ck('no horizontal overflow at 390px', over <= 0, `${over}px`)
-  ck('and the reason is still drawn there',
-    await page.getByTestId('rediscover-blocked').count() > 0)
+  ck('and the note is still drawn there',
+    await page.getByTestId('rediscover-runs-stopped').count() > 0)
   ck('no page errors', errors.length === 0, errors.join(' | '))
   await ctx.close()
 }

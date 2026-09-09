@@ -179,6 +179,14 @@ class Settings(BaseSettings):
     marketing_crawl_break_min: float = 120.0         # long break length, min seconds (2 min)
     marketing_crawl_break_max: float = 180.0         # long break length, max seconds (3 min)
     marketing_crawl_refresh_daemon: bool = True      # after backfill, re-discover daily for new clubs
+    # How long a club's stored associations stay current before the enrichment
+    # pass re-reads them (migration 298). A club changes association between
+    # seasons at most, so this is deliberately slow: a shorter window would spend
+    # the crawl's whole daily budget re-asking questions whose answer has not
+    # changed, and starve the clubs that have never been enriched at all. 0
+    # switches refreshing off entirely and restores the pre-298 behaviour, where
+    # a club's associations were fetched once and then never again.
+    marketing_association_refresh_days: int = 90
     # PlayHQ public discovery endpoints (no API key — read the same as playhq.com).
     # Search enumerates every cricket club + its committee; the main graph maps a
     # club to the association(s) it plays in (needs the tenant header below).

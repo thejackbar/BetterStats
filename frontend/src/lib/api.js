@@ -1450,6 +1450,9 @@ export const api = {
   // in the background and the page polls the status.
   mktRediscover: () => request('/club-admin/marketing/rediscover', { method: 'POST' }),
   mktRediscoverStatus: () => request('/club-admin/marketing/rediscover/status'),
+  // A rediscover runs whether or not the crawler is stopped, so it needs a stop
+  // of its own — this is what keeps "halt all PlayHQ traffic" reachable.
+  mktRediscoverStop: () => request('/club-admin/marketing/rediscover/stop', { method: 'POST' }),
   // The same for ONE club — two short requests, answers immediately.
   mktRediscoverClub: (clubId) =>
     request(`/club-admin/marketing/clubs/${clubId}/rediscover`, { method: 'POST' }),

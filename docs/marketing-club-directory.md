@@ -71,13 +71,33 @@ Two phases (`app/services/club_directory.py`), both resumable through the table:
 1. **Discovery** (`discover_clubs`) — page the PlayHQ search to completion,
    upserting every AU club with its committee + address. ~70 calls, idempotent.
    Runs on the first batch (empty directory) or when asked to `rediscover`.
-2. **Association enrichment** (`enrich_associations`) — for up to `limit` clubs
-   whose `associations` is still NULL (the frontier), call `discoverCompetitions`
-   and store the association list. A fetch failure leaves the row NULL so it
-   retries next batch.
+2. **Association enrichment** (`enrich_associations`) — for up to `limit` clubs,
+   call `discoverCompetitions` and store the association list. A fetch failure
+   leaves the row NULL so it retries next batch.
 
 `crawl_batch` runs discovery (when needed) then one enrichment slice. Run it until
 `associations_pending` reaches 0; later runs with `rediscover` pick up new clubs.
+
+**An existing club's associations are re-read, not frozen (migration 298).** The
+enrichment frontier used to be `associations IS NULL` and nothing else, so a
+club's associations were fetched exactly once and never looked at again — a club
+that moved association kept the old one for ever. The frontier is now
+never-fetched clubs PLUS clubs whose `associations_fetched_at` is older than
+`marketing_association_refresh_days` (default 90; 0 switches refreshing off).
+Never-fetched clubs are served first, so refreshes cannot starve the backfill.
+
+`associations_fetched_at` exists because `last_crawled_at` cannot answer the
+question: discovery bumps that for every club it sees, so it records when the
+club was last SEEN, not when its associations were last READ. Only a successful
+fetch stamps it, so a PlayHQ wobble cannot buy a club another 90 days of
+staleness. `frontier_remaining` deliberately still counts never-fetched clubs
+ONLY — `run_continuous` reads it as "is the backfill finished" and would never
+sleep if refreshes were folded in; they are reported as `refresh_due` instead.
+
+**Discovery already refreshes the rest.** `_upsert_club` rewrites the club's
+name, website and whole address on every pass, and adds newly listed officers.
+What it does NOT do is prune departed officers, replace a demoted role or
+re-tick — those are a Rediscover, below.
 
 ### Politeness
 
@@ -173,6 +193,18 @@ crawl pace, so roughly half an hour to an hour) in the background;
 `POST /marketing/clubs/{id}/rediscover` does ONE club on the short interactive
 delay. `POST /marketing/clubs/bulk-tick-officers` applies the ticking rule
 alone to what the directory already holds, with no upstream traffic.
+
+**A Rediscover ignores the operator Stop flag, and carries its own.** That flag
+stops the UNATTENDED crawler — the continuous runner, `crawl_batch` and the
+ordinary discovery pass all still honour it — and a super admin pressing
+Rediscover is the opposite of unattended. The single-club Rediscover has always
+run while stopped (it bypasses `discover_clubs` entirely), so refusing the
+all-clubs one was the platform disagreeing with itself rather than a safety
+rule: the prune is per club, scoped to the ids seen in that club's own payload,
+so a run halted part way leaves the clubs it never reached untouched rather than
+emptied. `POST /marketing/rediscover/stop` is what stops one, which is what keeps
+"halt every bit of PlayHQ traffic" reachable. A halted run reports
+`stopped: true` so nothing formats a partial pass as a finished one.
 
 ## Sending: the BetterComms bridge
 

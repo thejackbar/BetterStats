@@ -4362,6 +4362,18 @@ async def lifespan(app: FastAPI):
         for _stmt in _COMMITTEE_SYNC_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 298: the crawl re-reads an existing club's associations.
+        # The enrichment frontier was "associations IS NULL", so a club's
+        # associations were fetched once and then frozen — a club that moved
+        # association kept the old one for ever. associations_fetched_at is what
+        # makes "fetched, but a while ago" expressible; last_crawled_at cannot,
+        # because the discovery pass bumps it for every club it sees. Same
+        # one-copy rule — this list and alembic's 298 both run
+        # services/assoc_refresh_ddl.STATEMENTS.
+        from app.services.assoc_refresh_ddl import STATEMENTS as _ASSOC_REFRESH_DDL
+        for _stmt in _ASSOC_REFRESH_DDL:
+            await conn.execute(text(_stmt))
+
     # Migration 178: Member self-service portal, Stripe Connect fee payments,
     # reminder automation. See services/member_portal_auth.py,
     # services/stripe_connect_client.py, services/member_reminders.py.
