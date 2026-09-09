@@ -297,6 +297,60 @@ four of them things that exist and could not be found.
   uploads as-is rather than opening the editor per file — deliberate, since ten
   modals for ten photos is worse than the Edit affordance on each tile.
 
+## A FACET LISTED IN THE KIT AND MISSING FROM ONE FUNCTION (v9.73.1, Sep 2026)
+
+Reported off `/admin/comms/lists` as `a[r.key] is not iterable`, straight after
+an Export to BetterComms added 800+ contacts — so it read as a problem in the
+inserted rows.
+
+- **IT IS NOT THE ROWS, AND ESTABLISHING THAT FIRST IS WHAT STOPPED THIS BEING
+  CHASED THROUGH THE DATABASE.** `facetOptionsFrom` ends
+  `[...opts[f.key]]` for EVERY entry in `FACETS`, and that line runs whatever
+  the contacts are. Reproduced with an empty list and with `null`: it throws
+  either way. The export was a coincidence of timing — the screen had been
+  down since the deploy before it.
+- **V8 PRINTS THE SOURCE TEXT OF THE OFFENDING EXPRESSION, which is what makes
+  a minified message locatable.** `a[r.key] is not iterable` is
+  `opts[f.key]` after minification, and a grep for a spread of a `.key`-indexed
+  member (`\.\.\.[a-z]+\[[a-z]+\.key\]`) returns **exactly one match in the
+  whole frontend**. Reach for the expression's shape, not for the variable
+  names.
+- **THE CAUSE IS A SECOND HAND-WRITTEN COPY OF THE FACET LIST.** `FACETS`
+  gained `role` in migration 295's commit; `facetOptionsFrom` built its `opts`
+  from a hardcoded five-key literal written before `role` existed, so
+  `opts.role` was undefined. **This is the trap this file already records one
+  function over** — `CommsLists.jsx`'s own `noFilters` literal, fixed in
+  v9.70.0 by aliasing it to `emptyFilters`. The same commit that fixed it there
+  introduced it here.
+- **TWO CRASH PATHS, AND ONLY ONE OF THEM NEEDS DATA.** The spread throws
+  unconditionally; `opts[f.key].add(...)` throws `Cannot read properties of
+  undefined (reading 'add')` only once a contact actually carries a role, which
+  is what the exported directory rows brought. The control run reports both.
+- **A COMMENT CAN DESCRIBE BEHAVIOUR THE FUNCTION CANNOT DELIVER.** The note
+  added beside `role` said "facetOptionsFrom only offers a facet that actually
+  has values, so it never appears for them" — true of the intent, and the
+  function threw before it could offer anything. It is true now.
+- **BOTH SHAPES ARE DERIVED FROM `FACETS` NOW, mirroring `emptyModes`**, which
+  had this right all along (`Object.fromEntries(MODE_FILTERS.map(...))`). A
+  facet added later reaches the filter shape, the options builder and the
+  matcher with no second list to keep in step.
+- **Verified** (`frontend/verification/verify_comms_facets.mjs`, 11 checks
+  against the SHIPPED functions lifted out of the file rather than retyped: an
+  empty and a null contact list, a club contact carrying no directory fields,
+  every `FACETS` key present in both shapes, role options collected and
+  de-duplicated, a facet nobody carries staying empty so it is never offered,
+  and the filter it then drives) **with a control run**: 7 of the 11 fail
+  against the previous commit, reporting the customer's own
+  `opts[f.key] is not iterable`.
+- **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN, hit again here.** The
+  first cut read `facetOptionsFrom(exported)` into a `const` at module level,
+  so the control died on it and said nothing about the four checks below.
+  Every read goes through the guarded `check()` now.
+- **NOTICED, NOT FIXED**: nothing asserts that a key added to `FACETS`,
+  `MODE_FILTERS` or the engagement filter reaches every consumer — the check
+  here covers `FACETS` only, and a structural sweep over the kit would be its
+  own change.
+
 ## Twenty is retired; the engagement score, the CRM and Sales Management are not (v9.71.0, Sep 2026)
 
 Asked for directly: *"the calculation and continual re-calculation of engagement
