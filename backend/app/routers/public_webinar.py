@@ -39,6 +39,12 @@ _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 # Australian landline with no area code is 8 digits and a mobile is 10; an
 # international number with a country code runs to 15 (E.164's own ceiling).
 #
+# THE FIELD ITSELF IS OPTIONAL. It shipped required for one release and that
+# was the wrong call on cold paid traffic — a mandatory phone number is the
+# highest-friction field on the form, and it reads as a promise to ring, which
+# contradicts the "no sales call" line on /trial. A blank one is accepted; this
+# range only governs a number somebody actually typed.
+#
 # DELIBERATELY NOT `admin_identity.mobile_valid`, which is the right rule for a
 # club admin's account and the wrong one here: it refuses anything that is not
 # an Australian mobile, and the clubroom landline a secretary writes down is a
@@ -173,11 +179,13 @@ async def register(
         raise HTTPException(status_code=422, detail="Enter a valid email address.")
     if not club:
         raise HTTPException(status_code=422, detail="Enter your club.")
-    if not phone:
-        raise HTTPException(status_code=422, detail="Enter your phone number.")
-    digits = re.sub(r"\D", "", phone)
-    if not (PHONE_MIN_DIGITS <= len(digits) <= PHONE_MAX_DIGITS):
-        raise HTTPException(status_code=422, detail="Enter a valid phone number.")
+    # OPTIONAL — a blank phone is a complete registration, not a refusal. See
+    # PHONE_MIN_DIGITS above for why, and why the check on a number that IS
+    # given is this loose.
+    if phone:
+        digits = re.sub(r"\D", "", phone)
+        if not (PHONE_MIN_DIGITS <= len(digits) <= PHONE_MAX_DIGITS):
+            raise HTTPException(status_code=422, detail="Enter a valid phone number.")
 
     rate_limit.enforce(
         f"webinar:register:{client_ip(request)}", REGISTER_LIMIT, REGISTER_WINDOW,

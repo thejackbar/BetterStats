@@ -30,15 +30,17 @@ import FaviconManager from './components/FaviconManager'
 import ClubCTABar from './components/ClubCTABar'
 import { usePageView } from './hooks/usePageView'
 import { useHeartbeat } from './hooks/useHeartbeat'
-import { MARKETING_PATHS, isMarketingPath } from './lib/marketingPaths'
+import { MARKETING_PATHS, isMarketingPath, rendersOwnMarketingNav } from './lib/marketingPaths'
 
 // Marketing pages have their own MarketingNav — suppress the global Navbar on those routes.
 // Also the reference list for ClubCTABar (which BetterCricket pages vs. club public
 // pages get the "get your club on BetterCricket" bar shown to every visitor).
-export { MARKETING_PATHS, isMarketingPath }
+export { MARKETING_PATHS, isMarketingPath, rendersOwnMarketingNav }
 function ConditionalNavbar() {
   const { pathname } = useLocation()
-  const isMarketing = isMarketingPath(pathname)
+  // Two lists, because /trial and /demo draw their own MarketingNav without
+  // wanting the rest of what MARKETING_PATHS carries — see the note there.
+  const isMarketing = isMarketingPath(pathname) || rendersOwnMarketingNav(pathname)
   // The public self-service availability page is a standalone, white-labelled
   // mobile page — it renders its own minimal header, no club nav. The BetterPosts
   // editor is a full-viewport takeover with its own header, so suppress the club

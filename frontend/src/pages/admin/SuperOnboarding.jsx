@@ -113,8 +113,9 @@ function WebinarRegistrations() {
                     <div className="text-pb-text">{r.name}</div>
                     <a href={`mailto:${r.email}`} className="text-xs text-pb-faint hover:text-pb-text underline">{r.email}</a>
                   </td>
-                  {/* A real tel: link — this list is worked from a desk, and a
-                      registration that predates the phone field carries none. */}
+                  {/* A real tel: link — this list is worked from a desk. Often
+                      blank, and that is expected: the field is optional, and a
+                      registration taken before it existed carries none either. */}
                   <td className="px-3 py-2.5 whitespace-nowrap">
                     {r.phone
                       ? <a href={`tel:${String(r.phone).replace(/\s/g, '')}`} className="text-pb-text hover:underline">{r.phone}</a>

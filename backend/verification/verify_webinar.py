@@ -313,12 +313,76 @@ async def main() -> None:
           / "data" / "webinar.js").read_text()
     check("the frontend mirror carries the same start instant",
           "'2026-09-21T09:30:00Z'" in fe)
-    check("the frontend mirror carries the same watch url", event.watch_url in fe)
     check("the frontend mirror carries the same date label", event.date_label in fe)
     check("the frontend mirror carries the same time label", event.time_label in fe)
     check("the frontend mirror carries the same event key", event.key in fe)
     check("and the same duration",
           f"durationMinutes: {event.duration_minutes}" in fe)
+    # The StreamYard link is the one field deliberately NOT mirrored: shipping
+    # it in the bundle put it in front of every visitor and made the form
+    # bypassable. It comes off the server now.
+    check("the watch url is NOT in the frontend bundle's constant",
+          event.watch_url not in fe, "still there")
+
+    print("\n-- the page title follows the event, not a literal --")
+    # Both copies were frozen in the post-event wording for one release, so
+    # every share of the page advertised a recording of a demo that had not
+    # happened yet. The server-rendered card is what a crawler actually reads.
+    pm = getattr(webinar, "page_meta", None)
+    if pm is None:
+        check("services.webinar exposes page_meta", False, "missing")
+    else:
+        pre_title, pre_desc = pm(False)
+        post_title, post_desc = pm(True)
+        check("before the event the title does not say 'watch'",
+              "watch" not in pre_title.lower(), pre_title)
+        check("and reads as a live session", "live demo" in pre_title.lower(), pre_title)
+        check("after the event it does", "watch" in post_title.lower(), post_title)
+        check("the two titles differ", pre_title != post_title)
+        check("the two descriptions differ", pre_desc != post_desc)
+        check("the post-event description offers the recording",
+              "recording" in post_desc.lower(), post_desc)
+        check("the pre-event description does not",
+              "recording" not in pre_desc.lower(), pre_desc)
+        # Kept inside the meta-description window the rest of MARKETING_PAGES
+        # observes, so neither state's card is truncated in a share preview.
+        for label, desc in (("pre-event", pre_desc), ("post-event", post_desc)):
+            check(f"the {label} description is a sane meta length",
+                  50 <= len(desc) <= 200, str(len(desc)))
+        # The mirror has to agree, or the tab and the share card disagree.
+        check("the frontend mirror carries the same pre-event title", pre_title in fe)
+        check("the frontend mirror carries the same post-event title", post_title in fe)
+        check("called with no argument it reads the event's own clock",
+              pm() == (pm(True) if event.is_past() else pm(False)))
+
+    print("\n-- and the share card is built from it --")
+    try:
+        from app.routers import og_preview as ogp
+        card = ogp._marketing_html("/demo", "https://betterat.cricket")
+    except Exception as exc:  # pragma: no cover - reported, not raised
+        card = ""
+        check("the /demo share card renders", False, str(exc))
+    if card:
+        # An empty `want_*` would make the two `in card` checks below pass
+        # against anything, so with page_meta absent they are REPORTED as
+        # missing rather than silently going green — the control run is what
+        # caught that.
+        want_title, want_desc = pm(event.is_past()) if pm else ("", "")
+        check("the /demo card's og:title is the state's own title",
+              bool(want_title)
+              and f'og:title" content="{want_title.replace("&", "&amp;")}"' in card,
+              "no page_meta to compare against" if not want_title else "not found")
+        check("the /demo card's description matches too",
+              bool(want_desc) and want_desc.replace("&", "&amp;") in card,
+              "no page_meta to compare against" if not want_desc else "not found")
+        check("the retired literal is gone from the card",
+              "Watch the BetterCricket demo | Live demo + Q&amp;A" not in card)
+        check("the /demo entry is no longer frozen in MARKETING_PAGES",
+              "/demo" not in ogp.MARKETING_PAGES)
+        # Every other page still reads its own frozen copy.
+        trial = ogp._marketing_html("/trial", "https://betterat.cricket")
+        check("another marketing page is untouched",
+              ogp.MARKETING_PAGES["/trial"][0].replace("&", "&amp;") in trial)
 
     print("\n-- the before/after switch is the event's END, not its start --")
     check("an hour before, it is not past", not event.is_past(event.starts_at - timedelta(hours=1)))
@@ -514,6 +578,37 @@ async def main() -> None:
         await session.execute(text("DELETE FROM webinar_registrations WHERE club = 'Phone CC'"))
         await session.commit()
 
+    print("\n-- the phone is OPTIONAL: skipping it registers you anyway --")
+    # It shipped required for one release. On cold paid traffic a mandatory
+    # phone number is the highest-friction field on the form, and it reads as a
+    # promise to ring — which contradicts the "no sales call" line on /trial.
+    async with Session() as session:
+        for label, value in (("left blank", ""), ("typed as spaces", "   ")):
+            email = f"nophone{len(label)}@example.com"
+            bg = Background()
+            try:
+                res = await register(RegisterIn(name="No Phone Nora", email=email,
+                                                club="Skip CC", phone=value),
+                                     FakeRequest(), bg, session)
+            except Exception as exc:  # noqa: BLE001
+                check(f"a phone {label} still registers", False, str(exc))
+                continue
+            check(f"a phone {label} still registers", res.get("created") is True, str(res))
+            row = await row_for(session, email)
+            check(f"and {label} it is stored as nothing, not a blank string",
+                  row is not None and not (row.get("phone") or ""),
+                  repr(row and row.get("phone")))
+            check(f"and {label} they are still handed the watch link",
+                  bool(res.get("watch_url")), str(res.get("watch_url")))
+            # The conversion still goes — just without the second identifier.
+            capi = bg.named("send_complete_registration_event")
+            check(f"and {label} the conversion is still queued", len(capi) == 1, str(len(capi)))
+            check(f"and {label} it carries no phone to hash",
+                  capi and not (capi[0].get("phone") or ""),
+                  str(capi and capi[0].get("phone")))
+        await session.execute(text("DELETE FROM webinar_registrations WHERE club = 'Skip CC'"))
+        await session.commit()
+
     print("\n-- an untagged registration can be upgraded once a signal arrives --")
     async with Session() as session:
         bg = Background()
@@ -539,8 +634,9 @@ async def main() -> None:
             ("a blank email", RegisterIn(name="A", email="", club="X CC", phone=PHONE)),
             ("an email with no @", RegisterIn(name="A", email="notanemail", club="X CC", phone=PHONE)),
             ("an email with no domain dot", RegisterIn(name="A", email="a@b", club="X CC", phone=PHONE)),
-            # The number is REQUIRED, per the direct instruction to gather it.
-            ("a blank phone", RegisterIn(name="A", email="a@b.com", club="X CC", phone="  ")),
+            # A BLANK phone is deliberately absent from this list — it is
+            # accepted, and is checked below. A number that IS typed still has
+            # to look like one.
             ("a phone with too few digits", RegisterIn(name="A", email="a@b.com", club="X CC", phone="1234")),
             ("a phone that is not a number at all", RegisterIn(name="A", email="a@b.com", club="X CC", phone="ring me")),
             ("a phone with more digits than E.164 allows", RegisterIn(name="A", email="a@b.com", club="X CC", phone="0412345678901234")),

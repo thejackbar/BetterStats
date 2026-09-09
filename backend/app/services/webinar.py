@@ -75,6 +75,36 @@ EVENT = WebinarEvent(
     time_label="5:30pm AWST / 7:30pm AEST",
 )
 
+
+def page_meta(is_past: Optional[bool] = None) -> tuple[str, str]:
+    """The /demo page title and description, for the state the event is in.
+
+    THE SHARE CARD IS SERVER-RENDERED, so this is what a crawler actually reads
+    — `usePageMeta` never reaches Facebook, LinkedIn or WhatsApp, none of which
+    run the page's JS. Both copies were hardcoded to the post-event wording for
+    one release, so every share of the page advertised a recording of a demo
+    that had not happened yet.
+
+    Mirrored in `frontend/src/data/webinar.js::webinarState` (pageTitle /
+    pageDescription) for the browser tab; the verification asserts the two
+    agree rather than taking it on trust.
+    """
+    past = EVENT.is_past() if is_past is None else is_past
+    if past:
+        return (
+            "Watch the BetterCricket demo | Recording + Q&A",
+            "Watch the BetterCricket demo recording: historical stats, "
+            "selection, socials, club admin and opposition analysis, plus the "
+            "questions clubs asked on the night.",
+        )
+    return (
+        "See BetterCricket in action | Live demo + Q&A",
+        "See the whole of BetterCricket in one sitting: historical stats, "
+        "selection, socials, club admin and opposition analysis, then ask us "
+        "anything. Register free.",
+    )
+
+
 ROLES = ["President", "Secretary", "Committee", "Coach", "Captain", "Player", "Other"]
 
 MAX_LENGTHS = {

@@ -47,6 +47,12 @@ async function open(path, {
   isPast = false, recordingUrl = null, width = 1440,
   registerStatus = 200, registerBody = null, selfServeEnabled = true,
   registerDelayMs = 0,
+  // The live StreamYard link the SERVER hands over. Overridable so a check can
+  // prove the page reads it off the wire rather than a bundled constant.
+  watchUrl = WATCH,
+  // The page-load read failing, which is the one thing that can leave the page
+  // with no link to hand over at all.
+  detailsStatus = 200,
 } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: 1800 } })
   const page = await ctx.newPage()
@@ -76,7 +82,7 @@ async function open(path, {
     date_label: 'Monday 21 September',
     time_label: '5:30pm AWST / 7:30pm AEST',
     is_past: isPast,
-    watch_url: isPast ? recordingUrl : WATCH,
+    watch_url: isPast ? recordingUrl : watchUrl,
     recording_available: !!(isPast && recordingUrl),
     google_calendar_url: 'https://calendar.google.com/calendar/render?action=TEMPLATE',
     roles: ['President', 'Secretary', 'Committee', 'Coach', 'Captain', 'Player', 'Other'],
@@ -93,7 +99,10 @@ async function open(path, {
       status, contentType: 'application/json', body: JSON.stringify(payload),
     })
 
-    if (p === '/public/webinar' && req.method() === 'GET') return json(details)
+    if (p === '/public/webinar' && req.method() === 'GET') {
+      if (detailsStatus !== 200) return json({ detail: 'unavailable' }, detailsStatus)
+      return json(details)
+    }
     if (p === '/public/webinar/register') {
       if (registerDelayMs) await new Promise((r) => setTimeout(r, registerDelayMs))
       if (registerStatus !== 200) return json({ detail: 'Something went wrong on our end.' }, registerStatus)
@@ -156,6 +165,26 @@ async function attrOf(page, selector, name) {
   // scent mismatch between the ad and the page is the biggest single cause of
   // bounce on paid traffic.
   ck('the H1 echoes the ad creative', /see bettercricket in action/i.test(h1), h1)
+
+  // AND SO DOES THE TAB. Both the title and og:title were literals for one
+  // release and both read "Watch the demo" for a demo that had not happened
+  // yet — on the tab and on every share preview. They come off the same state
+  // as the H1 now.
+  const titleBefore = await page.title()
+  ck('the page title does not advertise a recording yet',
+    !/watch/i.test(titleBefore), titleBefore)
+  ck('and reads as a live session', /live demo/i.test(titleBefore), titleBefore)
+  const ogTitle = await page.locator('meta[property="og:title"]').getAttribute('content')
+  ck('og:title agrees with it', ogTitle === titleBefore, `${ogTitle} / ${titleBefore}`)
+
+  // ONE HEADER, NOT TWO. /demo used to resolve as a club slug, so the club
+  // Navbar drew ON TOP of the page's own MarketingNav — two BetterCricket
+  // lockups overlapping at y=0, which reads as "iiB Be…Cricket".
+  const topBars = await page.evaluate(() => [...document.querySelectorAll('nav, header')]
+    .filter((el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.top < 80 })
+    .length)
+  ck('exactly one header renders at the top of the page', topBars === 1, String(topBars))
+
   const sub = await page.locator('#main-content').innerText()
   ck('the sub-headline is there', /The entire platform\. Your questions answered\./.test(sub))
   const when = (await page.getByTestId('demo-when').innerText()).trim()
@@ -230,33 +259,37 @@ async function attrOf(page, selector, name) {
   ck('a malformed email is caught before posting', registrations(calls).length === 0)
   ck('and fires no CompleteRegistration', completeReg(await readPixel()).length === 0)
 
-  // The phone is required, so the same has to hold for it — caught in the
-  // browser, nothing posted, and no conversion claimed.
+  // THE PHONE IS OPTIONAL. It shipped required for one release and that was
+  // the wrong call on cold paid traffic — a mandatory phone number is the
+  // highest-friction field on the form, and it reads as a promise to ring,
+  // which contradicts the "no sales call" line on /trial. A blank one must not
+  // block the form; a number that IS typed still has to look like one.
   //
-  // The WHOLE block is gated on the field existing. Against a build without
-  // it these submissions SUCCEED, the form is replaced by the success state,
-  // and every later check in this section hangs on a form that is gone — a
-  // control run that crashes is not a control run. Absent, the three checks
-  // report and the page is left exactly as it was.
+  // The WHOLE block is gated on the field existing. Against a build without it
+  // the checks below measure a form that has no such field, and the malformed
+  // submission would go straight through to the success state, taking every
+  // later check in this section with it — a control run that crashes is not a
+  // control run. Absent, the four checks report and the page is untouched.
   if (await page.locator('#demo-phone').count() === 1) {
-    await fill(page, { phone: '' })
-    await page.getByTestId('demo-submit').click()
-    await page.waitForTimeout(300)
-    ck('a missing phone is caught before posting', registrations(calls).length === 0)
-    ck('and it says which field is missing',
-      /Add your phone number\./.test(await page.getByTestId('demo-form').innerText()))
+    ck('the phone field is not marked required',
+      await attrOf(page, '#demo-phone', 'required') === null)
+    ck('and its label says so',
+      /OPTIONAL/i.test(await page.locator('label[for="demo-phone"]').innerText()))
     // A landline is a perfectly good number to ring a club secretary on, so
     // the rule is 'could be a phone number', never 'is an Australian mobile'.
     await fill(page, { phone: '1234' })
     await page.getByTestId('demo-submit').click()
     await page.waitForTimeout(300)
-    ck('and so is one with too few digits to be a phone number',
+    ck('a phone with too few digits is still caught before posting',
       registrations(calls).length === 0 && completeReg(await readPixel()).length === 0)
+    ck('and it says which field is wrong',
+      /doesn’t look like a phone number/.test(await page.getByTestId('demo-form').innerText()))
     await fill(page, { phone: '(08) 9364 1234' })
   } else {
-    ck('a missing phone is caught before posting', false, 'no phone field')
-    ck('and it says which field is missing', false, 'no phone field')
-    ck('and so is one with too few digits to be a phone number', false, 'no phone field')
+    ck('the phone field is not marked required', false, 'no phone field')
+    ck('and its label says so', false, 'no phone field')
+    ck('a phone with too few digits is still caught before posting', false, 'no phone field')
+    ck('and it says which field is wrong', false, 'no phone field')
   }
 
   // Now a real submission.
@@ -336,6 +369,46 @@ async function attrOf(page, selector, name) {
   await ctx.close()
 }
 
+// ------------------------------------------------ the phone can be skipped ----
+{
+  console.log('\n-- skipping the phone still registers --')
+  const { page, ctx, calls, readPixel } = await open('/demo')
+  await fill(page, { phone: '' })
+  await page.getByTestId('demo-submit').click()
+  await page.getByTestId('demo-success').waitFor({ timeout: 5000 })
+  const posts = registrations(calls)
+  ck('a blank phone still posts the registration', posts.length === 1, String(posts.length))
+  ck('with an empty phone on the wire, not a fabricated one',
+    !(posts[0]?.body?.phone || ''), JSON.stringify(posts[0]?.body?.phone))
+  ck('and the conversion still fires', completeReg(await readPixel()).length === 1)
+  ck('and they still reach the success state',
+    /YOU’RE REGISTERED/i.test(await page.getByTestId('demo-success').innerText()))
+  await ctx.close()
+}
+
+// ------------------------------------- the watch link comes off the server ----
+{
+  console.log('\n-- the StreamYard link is the server\'s, not a bundled constant --')
+  // Shipping it in the bundle put it in front of every visitor and made the
+  // form bypassable. Stubbing a DIFFERENT link is what proves the page reads
+  // the wire rather than a constant: against a build that still holds one, the
+  // page shows the constant and this fails.
+  const OTHER = 'https://streamyard.com/watch/serverSaysThis'
+  const { page, ctx } = await open('/demo', { watchUrl: OTHER })
+  await fill(page)
+  await page.getByTestId('demo-submit').click()
+  await page.getByTestId('demo-success').waitFor({ timeout: 5000 })
+  ck('the link handed over is the one the server sent',
+    await page.getByTestId('demo-watch-link').getAttribute('href') === OTHER,
+    await page.getByTestId('demo-watch-link').getAttribute('href'))
+  ck('the calendar link carries the server\'s link too',
+    decodeURIComponent(await page.getByTestId('demo-gcal').getAttribute('href') || '')
+      .includes(OTHER))
+  const html = await page.content()
+  ck('and the retired constant is nowhere on the page', !html.includes(WATCH))
+  await ctx.close()
+}
+
 // -------------------------------------------------- the trial CTA position ----
 {
   console.log('\n-- the trial CTA must not compete above the fold --')
@@ -373,6 +446,10 @@ async function attrOf(page, selector, name) {
 // ------------------------------------------------------- graceful failure ----
 {
   console.log('\n-- a broken backend must not trap a registered user --')
+  // THE FAILURE THAT ACTUALLY HAPPENS is the register WRITE erroring, and the
+  // link still survives it: it came off the page-load READ, which by then has
+  // already succeeded. That is what keeps the brief's graceful-failure rule
+  // standing now the link is no longer a bundled constant.
   const { page, ctx, errors, readPixel } = await open('/demo', { registerStatus: 500 })
   await fill(page)
   await page.getByTestId('demo-submit').click()
@@ -385,6 +462,25 @@ async function attrOf(page, selector, name) {
   ck('and the page did not crash', errors.length === 0, errors.join(' | '))
   ck('with a way back to try again',
     await page.getByText('Try registering again').count() === 1)
+  await ctx.close()
+}
+
+// ------------------------------------------ both calls down: say so plainly ----
+{
+  console.log('\n-- with nothing to hand over, the message stands on its own --')
+  // The ACCEPTED COST of the link not being in the bundle. Both the read and
+  // the write failing is the one case that can no longer produce a link, and a
+  // button pointing at nothing is worse than a sentence saying what to do.
+  const { page, ctx, errors } = await open('/demo', {
+    registerStatus: 500, detailsStatus: 503,
+  })
+  await fill(page)
+  await page.getByTestId('demo-submit').click()
+  await page.waitForTimeout(600)
+  ck('no dead link is drawn', await page.getByTestId('demo-fallback-link').count() === 0)
+  ck('and the message says what to do instead',
+    /email .*@/.test(await page.locator('#main-content').innerText()))
+  ck('and the page still did not crash', errors.length === 0, errors.join(' | '))
   await ctx.close()
 }
 
@@ -428,6 +524,10 @@ async function attrOf(page, selector, name) {
   })
   const h1 = (await page.locator('h1').first().innerText()).trim()
   ck('the H1 becomes "Watch the BetterCricket demo"', /watch the bettercricket demo/i.test(h1), h1)
+  // The tab follows it, because both come off the same state object.
+  const titleAfter = await page.title()
+  ck('and so does the page title', /watch the bettercricket demo/i.test(titleAfter), titleAfter)
+  ck('which no longer calls it a live session', !/live demo/i.test(titleAfter), titleAfter)
   const when = (await page.getByTestId('demo-when').innerText()).trim()
   ck('the date block reads "Recorded 21 September 2026"',
     /Recorded 21 September 2026/.test(when), when)
@@ -469,6 +569,13 @@ async function attrOf(page, selector, name) {
   const { page, ctx, errors, calls, readPixel } = await open('/trial')
   const promo = page.getByTestId('trial-webinar-promo')
   await promo.waitFor({ timeout: 5000 })
+  // /trial had the same two-headers-at-y=0 overlap as /demo, and for the same
+  // reason — it was resolving as a club slug. Asserted here rather than
+  // inferred from /demo passing.
+  const trialBars = await page.evaluate(() => [...document.querySelectorAll('nav, header')]
+    .filter((el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.top < 80 })
+    .length)
+  ck('/trial renders exactly one header too', trialBars === 1, String(trialBars))
   const text = await promo.innerText()
   ck('it offers the guided tour', /Want a guided tour first\?/.test(text), text)
   ck('naming the date and both timezones',
