@@ -30,6 +30,8 @@ import {
   ResultsList, ResultsListLeaders, ResultsScoreboard, ResultsRecord, ResultsHeadline, ResultsBoard, ResultsSplit,
   DEFAULT_FIXTURES, DEFAULT_RESULTS,
 } from '../../social/round-templates'
+import { PostFormat } from '../../social/cricket-templates'
+import { POST_FORMATS, DEFAULT_POST_FORMAT, postFormat } from '../../social/postFormats'
 import { exportNodeToPng } from '../../social/exportImage'
 import { SocialBackground, SocialBackgroundDefs, SOCIAL_BACKGROUNDS, GRADIENT_ANGLES, DEFAULT_COLORS as BG_DEFAULT_COLORS } from '../../social/SocialBackgrounds'
 import { EVENT_TEMPLATES, EVENT_PRESETS, DEFAULT_EVENT, resolveMotif, eventPaletteFor } from '../../social/event-templates'
@@ -1055,6 +1057,11 @@ export default function AdminSocialPost() {
   const [scSplit, setScSplit] = useState(false)
   const [scSplitIdx, setScSplitIdx] = useState(0)
 
+  // Post size — 1:1, 4:5 or 9:16. Every template composes its artwork at
+  // 1080×1080 and PostCanvas re-canvases it, so this is one piece of state
+  // rather than a layout choice each template has to know about.
+  const [formatKey, setFormatKey] = useState(DEFAULT_POST_FORMAT)
+
   // Club-event / announcement posters (Events tab). One editable facts object +
   // a chosen layout, motif glyph and optional background photo.
   const [event, setEvent] = useState(DEFAULT_EVENT)
@@ -1785,17 +1792,17 @@ export default function AdminSocialPost() {
     setExporting(true)
     setExportError(null)
     try {
-      const splitOn = isScorecard && scSplit
-      const W = splitOn ? 1080 : (tmpl.w || (tmpl.isScorecard ? 1920 : 1080))
-      const H = splitOn ? 1080 : (tmpl.h || 1080)
       const stamp = Date.now()
+      // The size is in the filename so a club exporting the same post at all
+      // three sizes ends up with three files rather than one overwritten twice.
+      const size = formatAvailable ? `-${fmt.w}x${fmt.h}` : ''
       // A Blank-tab carousel exports every page as its own PNG (slideN).
       const roundCount = (tmpl.kind === 'fixtures' || tmpl.kind === 'results') ? roundPages[tmpl.kind].count : 1
       if (tmpl.kind === 'blank' && pages.count > 1) {
         for (let i = 0; i < pages.count; i++) {
           const node = pageRefs.current[i]
           if (!node) continue
-          await exportNodeToPng(node, { width: W, height: H, fileName: `betterstats-carousel-${stamp}-slide${i + 1}.png` })
+          await exportNodeToPng(node, { width: W, height: H, fileName: `betterstats-carousel-${stamp}${size}-slide${i + 1}.png` })
         }
       } else if (roundCount > 1) {
         // A fixtures/results roundup spread across pages exports each derived
@@ -1803,18 +1810,18 @@ export default function AdminSocialPost() {
         for (let i = 0; i < roundCount; i++) {
           const node = roundPageRefs.current[i]
           if (!node) continue
-          await exportNodeToPng(node, { width: W, height: H, fileName: `betterstats-${templateId.toLowerCase()}-${stamp}-slide${i + 1}.png` })
+          await exportNodeToPng(node, { width: W, height: H, fileName: `betterstats-${templateId.toLowerCase()}-${stamp}${size}-slide${i + 1}.png` })
         }
-      } else if (splitOn) {
+      } else if (scSplitOn) {
         // Scorecard split into 2 square posts — one team per slide.
         for (let i = 0; i < 2; i++) {
           const node = scSplitPageRefs.current[i]
           if (!node) continue
-          await exportNodeToPng(node, { width: W, height: H, fileName: `betterstats-${templateId.toLowerCase()}-${stamp}-slide${i + 1}.png` })
+          await exportNodeToPng(node, { width: W, height: H, fileName: `betterstats-${templateId.toLowerCase()}-${stamp}${size}-slide${i + 1}.png` })
         }
       } else {
         if (!renderRef.current) return
-        await exportNodeToPng(renderRef.current, { width: W, height: H, fileName: `betterstats-${templateId.toLowerCase()}-${stamp}.png` })
+        await exportNodeToPng(renderRef.current, { width: W, height: H, fileName: `betterstats-${templateId.toLowerCase()}-${stamp}${size}.png` })
       }
     } catch (e) {
       setExportError(e.message || 'Export failed')
@@ -1833,8 +1840,6 @@ export default function AdminSocialPost() {
     setExportError(null)
     setClubRoomSaved(false)
     try {
-      const W = tmpl.w || (tmpl.isScorecard ? 1920 : 1080)
-      const H = tmpl.h || 1080
       const blob = await exportNodeToPng(renderRef.current, { width: W, height: H, download: false })
       await api.clubRoomSaveSocialExport(blob, tmpl.label || templateId)
       setClubRoomSaved(true)
@@ -2275,8 +2280,19 @@ export default function AdminSocialPost() {
   )
 
   // ─── Preview renderer ────────────────────────────────────────────────────────
-  const W = scSplitOn ? 1080 : (tmpl.w || (isScorecard ? 1920 : 1080))
-  const H = scSplitOn ? 1080 : (tmpl.h || 1080)
+  // ONE definition of the canvas, read by the preview, the off-screen render
+  // nodes and both export handlers — three copies of this expression is how a
+  // downloaded PNG ends up a different size from the thing on screen.
+  //
+  // The wide scorecard is the one layout a post format cannot re-canvas: it
+  // composes at 1920×1080, so a 1080-wide canvas would crop it rather than
+  // matte it. Split into two squares (scSplitOn) it composes 1080 wide like
+  // everything else and takes a format as normal.
+  const fmt = postFormat(formatKey)
+  const wideScorecard = isScorecard && !scSplitOn
+  const formatAvailable = !wideScorecard
+  const W = wideScorecard ? (tmpl.w || 1920) : 1080
+  const H = wideScorecard ? (tmpl.h || 1080) : fmt.h
 
   // ─── Controls ────────────────────────────────────────────────────────────────
   const showMatchInfo = !['scorecard', 'events', 'blank'].includes(activeTab)
@@ -2287,7 +2303,7 @@ export default function AdminSocialPost() {
   // ─── Mobile quick post ────────────────────────────────────────────────────
   if (isMobile && !forceFullEditor) {
     const previewContent = (
-      <>
+      <PostFormat h={H}>
         {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} {...bgExtraProps} />}
         {isBlankTab
           ? <BlankCanvas team={team} palette={templatePalette} items={canvas.items} data={blankData} width={W} height={H} />
@@ -2295,7 +2311,7 @@ export default function AdminSocialPost() {
         {customEdit && !isBlankTab && (
           <BlankCanvas team={team} palette={templatePalette} items={overlay.items} data={blankData} transparent width={W} height={H} style={{ position: 'absolute', inset: 0 }} />
         )}
-      </>
+      </PostFormat>
     )
     // The three details that matter most for the active post type.
     let mFields = []
@@ -2559,6 +2575,29 @@ export default function AdminSocialPost() {
     const pw = Math.round(W * scale), ph = Math.round(H * scale)
     return (
       <div className="relative">
+        {/* Post size. Sits with the canvas rather than in the action bar because
+            it is what the canvas IS, not something you do to it. Withheld for
+            the wide scorecard, which composes 1920×1080 and has nothing a
+            1080-wide format could do but crop it — a control that can only
+            answer wrongly is worse than none. */}
+        {formatAvailable && (
+          <div className="mb-2 flex items-center gap-1.5" style={{ width: pw }} data-testid="post-format-row">
+            <span className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faintest mr-0.5">SIZE</span>
+            {POST_FORMATS.map((f) => (
+              <button key={f.key} onClick={() => setFormatKey(f.key)} title={f.note}
+                data-testid={`post-format-${f.key}`}
+                aria-pressed={formatKey === f.key}
+                className={`px-2.5 h-7 rounded-md border font-mono text-[10px] tracking-wide2 transition-colors ${
+                  formatKey === f.key
+                    ? 'border-pb-accent text-pb-accent-ink'
+                    : 'pb-hairline2 text-pb-dim hover:text-pb-text hover:border-pb-accent'
+                }`}
+                style={formatKey === f.key ? { background: 'color-mix(in srgb, var(--pb-accent) 14%, transparent)' } : undefined}>
+                {f.ratio} <span className="text-pb-faintest">{f.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
         {isBlankTab && (
           <PageStrip count={pages.count} index={pages.index}
             onGoTo={pages.goTo} onAdd={pages.add} onDuplicate={pages.duplicate} onRemove={pages.remove} />
@@ -2577,10 +2616,11 @@ export default function AdminSocialPost() {
           <PageStrip count={2} index={scSplitIdx} onGoTo={setScSplitIdx} fixed />
         )}
         <div style={{ width: pw, height: ph, overflow: 'hidden', borderRadius: 6, background: '#080808', boxShadow: '0 24px 60px rgba(0,0,0,.55)' }}>
-          <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: showBlankTools ? 'auto' : 'none', position: 'relative' }}>
+          <div data-testid="post-preview-node" style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: showBlankTools ? 'auto' : 'none', position: 'relative' }}>
+            <PostFormat h={H}>
             {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} {...bgExtraProps} />}
             {isBlankTab ? (
-              <BlankCanvas team={team} palette={templatePalette} items={canvas.items} data={blankData}
+              <BlankCanvas team={team} palette={templatePalette} items={canvas.items} data={blankData} width={W} height={H}
                 interactive scale={scale} selectedIds={canvas.selIds}
                 onSelect={canvas.select} onDeselect={canvas.deselect} onPatchMany={canvas.patchMany}
                 onGestureStart={() => record('Move block')} onDuplicate={hDuplicate} onRemove={hRemove} />
@@ -2594,6 +2634,7 @@ export default function AdminSocialPost() {
                 onGestureStart={() => record('Move block')} onDuplicate={hDuplicate} onRemove={hRemove}
                 style={{ position: 'absolute', inset: 0 }} />
             )}
+            </PostFormat>
           </div>
         </div>
         <div className="mt-2 flex items-center justify-between gap-3" style={{ width: pw }}>
@@ -4108,6 +4149,7 @@ export default function AdminSocialPost() {
 
       {/* Hidden full-size render for export */}
       <div style={{ position: 'absolute', left: '-9999px', top: 0, pointerEvents: 'none', zIndex: -1 }}>
+        <PostFormat h={H}>
         {isBlankTab && pages.count > 1 ? (
           // One full-size node per carousel page, captured in turn on export.
           pages.all().map((pageItems, i) => (
@@ -4137,7 +4179,7 @@ export default function AdminSocialPost() {
             </div>
           ))
         ) : (
-          <div ref={renderRef} style={{ ...fontStyle, width: W, height: H, position: 'relative' }}>
+          <div ref={renderRef} data-testid="post-export-node" style={{ ...fontStyle, width: W, height: H, position: 'relative' }}>
             {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} {...bgExtraProps} />}
             <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />
             {customEdit && !isBlankTab && (
@@ -4145,6 +4187,7 @@ export default function AdminSocialPost() {
             )}
           </div>
         )}
+        </PostFormat>
       </div>
 
       <ImageEditorModal

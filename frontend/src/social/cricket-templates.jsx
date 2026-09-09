@@ -1,10 +1,61 @@
 // Cricket social media templates — ES module port of the Cricket Scorecards 2 design system.
-// All templates render at exactly 1080×1080px using inline styles.
-// Font stack: Anton, Bebas Neue, Archivo Black, Inter, JetBrains Mono (loaded in index.html)
+// Every template COMPOSES at exactly 1080×1080px using inline styles, and renders
+// into a canvas of whichever post size was picked (see PostCanvas below and
+// postFormats.js). Font stack: Anton, Bebas Neue, Archivo Black, Inter,
+// JetBrains Mono (loaded in index.html)
 
-import { useRef, useState, useLayoutEffect } from 'react'
+import { useRef, useState, useLayoutEffect, createContext, useContext } from 'react'
 import brandBlack from '../assets/bettercricket-black.svg'
 import brandWhite from '../assets/bettercricket-white.svg'
+import { ART_W, ART_H, matteFor } from './postFormats'
+
+// The post height every template on screen is rendering into. Carried by
+// CONTEXT rather than a prop so a format reaches all ~60 templates without
+// sixty signatures having to learn about it — and so a template mounted
+// anywhere else (a thumbnail, the mobile quick post) still gets the square by
+// default rather than needing every caller to remember to pass one.
+const PostHeightContext = createContext(ART_H)
+export function PostFormat({ h = ART_H, children }) {
+  return <PostHeightContext.Provider value={h}>{children}</PostHeightContext.Provider>
+}
+export function usePostHeight() { return useContext(PostHeightContext) }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST CANVAS — the one place a template becomes a 1:1 / 4:5 / 9:16 post
+//
+// A template's artwork is composed at 1080×1080 and is not re-laid-out per
+// format: three separately-tuned copies of one layout is how they start
+// disagreeing with each other. So a taller format is a taller CANVAS with the
+// same artwork centred in it, and the band above and below is painted by the
+// template's OWN background — which is what makes it seamless rather than a
+// letterbox somebody has to colour-match by hand.
+//
+// ONLY THE CANVAS CLIPS, NEVER THE ARTWORK BOX, and that is the decision that
+// makes a taller post read as the design extended rather than a square matted
+// into a band. The artwork box positions; the canvas is what content is cut
+// against. So a glow or a shape a template bleeds off its own top or bottom
+// edge carries on into the extra height instead of stopping at a line partway
+// down, which is exactly the seam a clipped artwork box produces — and the
+// shared texture layers (Halftone / Stripes / GrainSVG, see useBleed) reach the
+// real edges for the same reason.
+//
+// At h === ART_H the artwork box is the full canvas, so the square renders
+// byte-for-byte what it always did.
+// ─────────────────────────────────────────────────────────────────────────────
+export function PostCanvas({ h, style = {}, artStyle = {}, children, ...rest }) {
+  const ctxH = usePostHeight()
+  const raw = h == null ? ctxH : h
+  const height = Number(raw) > 0 ? Number(raw) : ART_H
+  const matte = matteFor(height)
+  return (
+    <div data-post-canvas={height} style={{ width: ART_W, height, position: 'relative', overflow: 'hidden', ...style }} {...rest}>
+      <div data-post-art="" style={{
+        position: 'absolute', left: 0, top: matte, width: ART_W, height: ART_H,
+        ...artStyle,
+      }}>{children}</div>
+    </div>
+  )
+}
 
 // The BetterCricket credit mark used in every template's footer — the real
 // brand logo (black on a light footer, white on a dark one), no wordmark text.
@@ -105,9 +156,47 @@ export function AutoFitText({ text, children, max, min = 8, lines = 1, pad = 0, 
 // SHARED VISUAL PRIMITIVES
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function GrainSVG({ opacity = 0.35, id = 'grain' }) {
+// A full-bleed layer's `inset: 0` resolves against the ARTWORK box, which on a
+// 4:5 or 9:16 post is only the middle 1080 of the canvas — so a texture that is
+// meant to run edge to edge instead stops with a visible line partway down.
+// This is what lets the shared texture layers reach the real canvas edges, and
+// it is why every template picked up correct 4:5 / 9:16 texture without any of
+// them being edited: they all draw their grain, dots and stripes through these
+// three primitives.
+//
+// Nothing else should escape the artwork box. A decoration deliberately bled
+// off the top or bottom at a negative offset is clipped at the ART edge on
+// purpose — that is what keeps it looking as it does on the square.
+// ONLY FOR A DIRECT CHILD OF THE CANVAS. The offsets are in canvas pixels, so
+// an element nested inside some other positioned box would be stretched past
+// its own parent rather than to the post's edges. A nested texture layer is
+// the one exception this file relies on and it works because both of them sit
+// inside a box that clips (T2's player card, T3's side panel); anywhere else,
+// pass `style={{ top: 0, bottom: 0 }}` to opt out — a caller's own style wins.
+export function useBleed() {
+  const h = usePostHeight()
+  const m = matteFor(h)
+  return m ? { top: -m, bottom: -m } : null
+}
+
+// A full-height element that belongs to the POST rather than to the artwork —
+// a side rail, a full-bleed photo scrim, a background wash. Anchored to the
+// artwork box it stops with a visible line partway down a 4:5 or 9:16 post;
+// this carries it to the real edges. Same direct-child rule as useBleed: a bar
+// inside a row is full-height of THAT row and must be left alone.
+export function Bleed({ style = {}, children, ...rest }) {
+  const bleed = useBleed()
   return (
-    <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', mixBlendMode: 'overlay', opacity }}>
+    <div style={{ position: 'absolute', top: 0, bottom: 0, ...style, ...(bleed || {}) }} {...rest}>
+      {children}
+    </div>
+  )
+}
+
+export function GrainSVG({ opacity = 0.35, id = 'grain' }) {
+  const bleed = useBleed()
+  return (
+    <svg style={{ position: 'absolute', inset: 0, width: '100%', height: 'auto', pointerEvents: 'none', mixBlendMode: 'overlay', opacity, ...bleed }}>
       <filter id={id}>
         <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch" />
         <feColorMatrix values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.55 0" />
@@ -118,6 +207,7 @@ export function GrainSVG({ opacity = 0.35, id = 'grain' }) {
 }
 
 export function Halftone({ color = '#fff', size = 14, opacity = 0.12, angle = 0, style = {} }) {
+  const bleed = useBleed()
   return (
     <div style={{
       position: 'absolute', inset: 0, pointerEvents: 'none', opacity,
@@ -125,17 +215,18 @@ export function Halftone({ color = '#fff', size = 14, opacity = 0.12, angle = 0,
       backgroundSize: `${size}px ${size}px`,
       transform: `rotate(${angle}deg) scale(1.4)`,
       transformOrigin: 'center',
-      ...style,
+      ...bleed, ...style,
     }} />
   )
 }
 
 export function Stripes({ color = '#fff', angle = -45, gap = 14, opacity = 0.06, style = {} }) {
+  const bleed = useBleed()
   return (
     <div style={{
       position: 'absolute', inset: 0, pointerEvents: 'none', opacity,
       backgroundImage: `repeating-linear-gradient(${angle}deg, ${color} 0 1px, transparent 1px ${gap}px)`,
-      ...style,
+      ...bleed, ...style,
     }} />
   )
 }
@@ -403,13 +494,12 @@ export function T1_HeroList({ team, opponent, match, players, palette, heroImage
   // row). Rows are then distributed to fill the column for larger squads.
   const rowMax = P.length >= 13 ? 28 : P.length >= 11 ? 32 : P.length >= 9 ? 36 : 42
   return (
-    <div style={{
-      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+    <PostCanvas style={{
       background: `linear-gradient(135deg, ${palette.primary} 0%, ${palette.secondary} 100%)`,
       color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
-      <div style={{
-        position: 'absolute', left: 0, top: 0, bottom: 0, width: 56,
+      <Bleed style={{
+        left: 0, width: 56,
         background: palette.secondary,
         borderRight: `1px solid ${palette.ink}1a`,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -420,7 +510,7 @@ export function T1_HeroList({ team, opponent, match, players, palette, heroImage
           fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 27, letterSpacing: 8,
           color: palette.ink, opacity: 0.92,
         }}>{(team.fullName || team.name).toUpperCase()}</div>
-      </div>
+      </Bleed>
       <div style={{
         position: 'absolute', left: 70, top: 80,
         fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 160, lineHeight: 0.88,
@@ -543,7 +633,7 @@ export function T1_HeroList({ team, opponent, match, players, palette, heroImage
         <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.35} id="g1" />
-    </div>
+    </PostCanvas>
   )
 }
 
@@ -553,8 +643,7 @@ export function T1_HeroList({ team, opponent, match, players, palette, heroImage
 export function T2_CardGrid({ team, opponent, match, players, palette }) {
   const P = players.slice(0, 12)
   return (
-    <div style={{
-      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+    <PostCanvas style={{
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
       <Halftone color={palette.ink} opacity={0.05} size={10} />
@@ -654,7 +743,7 @@ export function T2_CardGrid({ team, opponent, match, players, palette }) {
         <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.4} id="g2" />
-    </div>
+    </PostCanvas>
   )
 }
 
@@ -662,29 +751,31 @@ export function T2_CardGrid({ team, opponent, match, players, palette }) {
 // TEMPLATE 3 — Side image + numbered XI
 // ─────────────────────────────────────────────────────────────────────────────
 export function T3_SideNumbered({ team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus }) {
+  // The wave background and the side panel are the POST's, not the artwork's —
+  // both run to the real canvas edges on a 4:5 or 9:16.
+  const bleed = useBleed() || {}
   const P = players.slice(0, 11)
   // The vertical spine label echoes the post headline (defaults to STARTING XI).
   // Scale it down for longer headlines so it never runs off the top edge.
   const spine = (headline || 'STARTING XI').toUpperCase()
   const spineSize = Math.max(34, Math.min(80, Math.floor(1000 / Math.max(spine.length, 1))))
   return (
-    <div style={{
-      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+    <PostCanvas style={{
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
-      <svg width="1080" height="1080" style={{ position: 'absolute', inset: 0 }}>
+      <svg width="1080" height="100%" preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, ...bleed }}>
         <defs>
           <linearGradient id="bgwv" x1="0" y1="0" x2="1" y2="1">
             <stop offset="0" stopColor={palette.primary} />
             <stop offset="1" stopColor={palette.secondary} />
           </linearGradient>
         </defs>
-        <rect width="1080" height="1080" fill="url(#bgwv)" />
+        <rect width="1080" height="100%" fill="url(#bgwv)" />
         <path d="M 900 0 C 1050 200 950 400 1080 600 L 1080 0 Z" fill={palette.ink} opacity="0.04" />
         <path d="M 1000 1080 C 850 900 1100 700 980 500 L 1080 500 L 1080 1080 Z" fill={palette.accent} opacity="0.06" />
       </svg>
-      <div style={{
-        position: 'absolute', left: 0, top: 0, width: 380, height: 1080,
+      <Bleed style={{
+        left: 0, width: 380,
         background: `linear-gradient(180deg, ${palette.secondary} 0%, ${palette.primary} 100%)`,
         overflow: 'hidden',
       }}>
@@ -727,7 +818,7 @@ export function T3_SideNumbered({ team, opponent, match, players, palette, heroI
             </div>
           )
         })()}
-      </div>
+      </Bleed>
       <div style={{
         position: 'absolute', left: 360, top: 540,
         transform: 'rotate(-90deg)', transformOrigin: 'left top',
@@ -773,7 +864,7 @@ export function T3_SideNumbered({ team, opponent, match, players, palette, heroI
         </div>
       </div>
       <GrainSVG opacity={0.3} id="g3" />
-    </div>
+    </PostCanvas>
   )
 }
 
@@ -783,8 +874,7 @@ export function T3_SideNumbered({ team, opponent, match, players, palette, heroI
 export function T4_BattingOrder({ team, opponent, match, players, palette }) {
   const P = players.slice(0, 13)
   return (
-    <div style={{
-      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+    <PostCanvas style={{
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
       <Stripes color={palette.ink} opacity={0.04} gap={40} angle={0} />
@@ -849,7 +939,7 @@ export function T4_BattingOrder({ team, opponent, match, players, palette }) {
         <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.25} id="g4" />
-    </div>
+    </PostCanvas>
   )
 }
 
@@ -859,8 +949,7 @@ export function T4_BattingOrder({ team, opponent, match, players, palette }) {
 export function T5_Brutalist({ team, opponent, match, players, palette }) {
   const P = players.slice(0, 11)
   return (
-    <div style={{
-      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+    <PostCanvas style={{
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
       <Stripes color={palette.ink} opacity={0.06} gap={6} angle={0} />
@@ -916,7 +1005,7 @@ export function T5_Brutalist({ team, opponent, match, players, palette }) {
         </div>
       </div>
       <GrainSVG opacity={0.32} id="g5" />
-    </div>
+    </PostCanvas>
   )
 }
 
@@ -926,8 +1015,7 @@ export function T5_Brutalist({ team, opponent, match, players, palette }) {
 export function T6_Diagonal({ team, opponent, match, players, palette, heroImage, featuredId }) {
   const P = players.slice(0, 11)
   return (
-    <div style={{
-      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+    <PostCanvas style={{
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
       <Halftone color={palette.ink} opacity={0.07} size={10} />
@@ -1004,7 +1092,7 @@ export function T6_Diagonal({ team, opponent, match, players, palette, heroImage
         <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.35} id="g6" />
-    </div>
+    </PostCanvas>
   )
 }
 
@@ -1020,8 +1108,7 @@ export function T7_CaptainSpotlight({ team, opponent, match, players, palette, m
   const rest = players.slice(0, 13).filter(p => p !== player)
   const hasHead = !!(player && player.headshot)
   return (
-    <div style={{
-      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+    <PostCanvas style={{
       background: `linear-gradient(135deg, ${palette.primary} 0%, ${palette.secondary} 100%)`,
       color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
@@ -1073,7 +1160,7 @@ export function T7_CaptainSpotlight({ team, opponent, match, players, palette, m
         </div>
       </div>
       <GrainSVG opacity={0.32} id="g7" />
-    </div>
+    </PostCanvas>
   )
 }
 
@@ -1091,8 +1178,7 @@ export function T8_Mosaic({ team, opponent, match, players, palette, featuredIdx
   const ROLE_BG = { BAT: palette.accent, BOWL: palette.ink, AR: palette.secondary, WK: palette.primary }
   const ROLE_INK = { BAT: palette.primary, BOWL: palette.primary, AR: palette.ink, WK: palette.ink }
   return (
-    <div style={{
-      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+    <PostCanvas style={{
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
       <Halftone color={palette.ink} opacity={0.05} size={9} />
@@ -1155,7 +1241,7 @@ export function T8_Mosaic({ team, opponent, match, players, palette, featuredIdx
         <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.28} id="g8" />
-    </div>
+    </PostCanvas>
   )
 }
 
@@ -1168,8 +1254,7 @@ export function T9_Flyer({ team, opponent, match, players, palette }) {
   const tier2 = P.slice(2, 5)
   const tier3 = P.slice(5, 11)
   return (
-    <div style={{
-      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+    <PostCanvas style={{
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
       <Halftone color={palette.ink} opacity={0.08} size={10} />
@@ -1249,7 +1334,7 @@ export function T9_Flyer({ team, opponent, match, players, palette }) {
         <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.4} id="g9" />
-    </div>
+    </PostCanvas>
   )
 }
 
@@ -1301,8 +1386,7 @@ export function T10_TeamSheet({ team, opponent, match, players, palette, heroIma
   const fixture = [team.short || team.name, opponent.short || opponent.name].filter(Boolean).join(' V ').toUpperCase()
   const comp = [match.competition, match.round].filter(Boolean).join('  ·  ').toUpperCase()
   return (
-    <div style={{
-      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+    <PostCanvas style={{
       background: `linear-gradient(160deg, ${palette.secondary} 0%, ${palette.primary} 70%)`,
       color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
@@ -1342,8 +1426,8 @@ export function T10_TeamSheet({ team, opponent, match, players, palette, heroIma
           this colour. It has to clear the subject too — a face sits around the
           middle of the photo, and carrying the wash that far across leaves it
           muddy — so it is heavy only where the names actually are. */}
-      <div style={{
-        position: 'absolute', inset: 0,
+      <Bleed style={{
+        left: 0, right: 0,
         // Solid until past the photo's own left edge (600px in from the right,
         // so 44.4% across) — anything less and that edge shows through as a
         // faint vertical line down the post. It clears the subject by 77%.
@@ -1448,7 +1532,7 @@ export function T10_TeamSheet({ team, opponent, match, players, palette, heroIma
         </div>
       </div>
       <GrainSVG opacity={0.4} id="g10" />
-    </div>
+    </PostCanvas>
   )
 }
 
@@ -1460,8 +1544,7 @@ export function C1_CaptainAnnounce({ announcement, team, opponent, match, palett
   const player = a.player || legacyPlayer
   const hasHead = !!(player && player.headshot)
   return (
-    <div style={{
-      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+    <PostCanvas style={{
       background: `linear-gradient(160deg, ${palette.primary} 0%, ${palette.secondary} 100%)`,
       color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
@@ -1491,7 +1574,7 @@ export function C1_CaptainAnnounce({ announcement, team, opponent, match, palett
         <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.32} id="ca1" />
-    </div>
+    </PostCanvas>
   )
 }
 
@@ -1502,8 +1585,7 @@ export function C2_TossWon({ toss, team, opponent, match, palette }) {
   const winnerIsOpponent = toss?.winner === 'OPPONENT'
   const decision = (toss?.decision || 'BAT').toUpperCase()
   return (
-    <div style={{
-      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+    <PostCanvas style={{
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
       <Halftone color={palette.ink} opacity={0.07} size={10} />
@@ -1542,7 +1624,7 @@ export function C2_TossWon({ toss, team, opponent, match, palette }) {
         <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.3} id="ca2" />
-    </div>
+    </PostCanvas>
   )
 }
 
@@ -1554,8 +1636,7 @@ export function C3_ManOfMatch({ motm, team, opponent, match, palette }) {
   const stats = motm?.stats || []
   const hasHead = !!(player && player.headshot)
   return (
-    <div style={{
-      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+    <PostCanvas style={{
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
       <div style={{ position: 'absolute', left: -100, top: -100, width: 700, height: 1400, background: palette.secondary, transform: 'rotate(8deg)', transformOrigin: 'top left' }} />
@@ -1600,7 +1681,7 @@ export function C3_ManOfMatch({ motm, team, opponent, match, palette }) {
         <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.3} id="ca3" />
-    </div>
+    </PostCanvas>
   )
 }
 
@@ -1626,8 +1707,7 @@ export function C4_FinalScore({ result, team, opponent, match, palette }) {
   const metaLine = [result?.grade || match.competition, match.round, match.date]
     .filter((v, i, a) => v && a.indexOf(v) === i).join(' · ')
   return (
-    <div style={{
-      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+    <PostCanvas style={{
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
       <Halftone color={palette.ink} opacity={0.06} size={10} />
@@ -1695,7 +1775,7 @@ export function C4_FinalScore({ result, team, opponent, match, palette }) {
         <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.3} id="ca4" />
-    </div>
+    </PostCanvas>
   )
 }
 
@@ -1842,7 +1922,7 @@ export function SC1_Broadcast({ match, palette = {}, square = false, only = 'hom
     const side = only === 'away' ? 'away' : 'home'
     const team = m[side] || {}
     return (
-      <div style={{ width: 1080, height: 1080, position: 'relative', overflow: 'hidden', background: bg, color: ink, fontFamily: SC_BODY }}>
+      <PostCanvas style={{ background: bg, color: ink, fontFamily: SC_BODY }}>
         <Halftone color={ink} opacity={dark ? 0.04 : 0.05} size={12} />
         <div style={{ padding: '18px 20px 10px' }}>
           <div style={{ padding: '14px 20px', background: panel, border: `1px solid ${rule}`, display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 20 }}>
@@ -1868,7 +1948,7 @@ export function SC1_Broadcast({ match, palette = {}, square = false, only = 'hom
         </div>
         <ScSponsorFooter bg={panel} ink={ink} dim={dim} dimmer={dimmer} rule={rule} sponsors={m.meta?.sponsors} />
         <GrainSVG opacity={dark ? 0.22 : 0.16} id={`sc1g-${side}`} />
-      </div>
+      </PostCanvas>
     )
   }
 
@@ -1996,7 +2076,7 @@ export function SC2_Brutalist({ match, palette = {}, square = false, only = 'hom
   if (square) {
     const side = only === 'away' ? 'away' : 'home'
     return (
-      <div style={{ width: 1080, height: 1080, position: 'relative', overflow: 'hidden', background: bg, color: ink, fontFamily: SC_BODY }}>
+      <PostCanvas style={{ background: bg, color: ink, fontFamily: SC_BODY }}>
         <Stripes color={ink} opacity={0.04} gap={6} angle={0} />
         <Halftone color={ink} opacity={dark ? 0.05 : 0.06} size={12} />
         <div style={{ position: 'absolute', right: -30, top: 200, fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 200, lineHeight: 0.8, color: ink, opacity: 0.04, letterSpacing: -10, userSelect: 'none' }}>FINAL</div>
@@ -2019,7 +2099,7 @@ export function SC2_Brutalist({ match, palette = {}, square = false, only = 'hom
         </div>
         <ScSponsorFooter bg={ink} ink={bg} dim={_toRgba(bg, 0.55)} dimmer={_toRgba(bg, 0.35)} rule={ruleStrong} sponsors={m.meta?.sponsors} style={{ borderRadius: 0, borderTop: `3px solid ${accent}` }} />
         <GrainSVG opacity={dark ? 0.28 : 0.18} id={`sc2g-${side}`} />
-      </div>
+      </PostCanvas>
     )
   }
 
@@ -2151,7 +2231,7 @@ export function SC3_Dashboard({ match, palette = {}, square = false, only = 'hom
     const side = only === 'away' ? 'away' : 'home'
     const team = m[side] || {}
     return (
-      <div style={{ width: 1080, height: 1080, position: 'relative', overflow: 'hidden', background: bg, color: ink, fontFamily: SC_BODY }}>
+      <PostCanvas style={{ background: bg, color: ink, fontFamily: SC_BODY }}>
         <div style={{ padding: '20px 24px 10px' }}>
           <Card style={{ padding: '14px 20px', display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 20 }}>
             <div>
@@ -2175,7 +2255,7 @@ export function SC3_Dashboard({ match, palette = {}, square = false, only = 'hom
           <TeamCard team={team} accentC={team.color || (side === 'home' ? '#2563eb' : '#10b981')} side={side} />
         </div>
         <ScSponsorFooter bg={card} ink={ink} dim={dim} dimmer={dimmer} rule={rule} sponsors={m.meta?.sponsors} />
-      </div>
+      </PostCanvas>
     )
   }
 

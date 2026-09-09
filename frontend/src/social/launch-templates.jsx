@@ -5,7 +5,7 @@
 // Every panel is recreated from the club's own data (branding, headline stats,
 // a featured player, top performers) rather than screenshot, so the poster is
 // fully whitelabelled per club. Copy reads from the club's point of view.
-import { AutoFitText, ClubLogo, GrainSVG, Halftone, Stripes } from './cricket-templates'
+import { AutoFitText, ClubLogo, GrainSVG, Halftone, Stripes, PostCanvas } from './cricket-templates'
 import brandWordmark from '../assets/bettercricket-white.svg'
 
 import statsLogo from '../assets/modules/betterstats.svg'
@@ -145,12 +145,16 @@ export function ClubLaunchPoster({
   ]
 
   return (
-    <div style={{
-      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
-      background: `linear-gradient(120deg, ${bg} 38%, ${bg2} 100%)`,
-      color: ink, fontFamily: "'Inter', sans-serif",
-      display: 'flex', flexDirection: 'column', padding: 40, boxSizing: 'border-box',
-    }}>
+    // The flex column and its padding lay the poster's own children out, so
+    // they belong on the ARTWORK box; only the paint carries out to the canvas
+    // edges on a 4:5 or 9:16 post.
+    <PostCanvas
+      style={{
+        background: `linear-gradient(120deg, ${bg} 38%, ${bg2} 100%)`,
+        color: ink, fontFamily: "'Inter', sans-serif",
+      }}
+      artStyle={{ display: 'flex', flexDirection: 'column', padding: 40, boxSizing: 'border-box' }}
+    >
       {/* texture + accent energy */}
       <div style={{ position: 'absolute', top: -180, right: -160, width: 520, height: 520, borderRadius: '50%', background: `radial-gradient(circle, ${accent}40 0%, transparent 70%)`, pointerEvents: 'none' }} />
       <Halftone color={ink} opacity={0.05} size={16} angle={0} />
@@ -304,6 +308,6 @@ export function ClubLaunchPoster({
           {footerUrl}
         </div>
       </div>
-    </div>
+    </PostCanvas>
   )
 }

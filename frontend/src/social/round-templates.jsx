@@ -1,6 +1,7 @@
 // Fixtures roundups, single-match results & results roundups — ES-module port of
-// the BetterSocials "Fixtures & Results" design set. All render at 1080×1080 and
-// share the cricket-templates palette shape ({ primary, secondary, accent, ink })
+// the BetterSocials "Fixtures & Results" design set. All compose at 1080×1080
+// inside the shared Post shell (so they render at whichever post size is picked)
+// and share the cricket-templates palette shape ({ primary, secondary, accent, ink })
 // + the --social-display-font var (set by the Post Designer wrapper), so they
 // drop straight into the existing Style controls and PNG export.
 //
@@ -8,7 +9,7 @@
 // cricket-templates; the few extra atoms this set needs (Slab, Kicker, Bug,
 // SponsorFooter, AutoFit, Monogram) are defined locally.
 import { useRef, useState, useLayoutEffect } from 'react'
-import { GrainSVG as Grain, Halftone, Stripes, ClubLogo, BrandLockup, CreditMark } from './cricket-templates'
+import { GrainSVG as Grain, Halftone, Stripes, ClubLogo, BrandLockup, CreditMark, PostCanvas } from './cricket-templates'
 
 const DISPLAY = "var(--social-display-font, 'Anton', sans-serif)"
 const MONO = "'JetBrains Mono', monospace"
@@ -106,12 +107,14 @@ function AutoFit({ children, max, min = 24, style = {}, deps = [] }) {
   return <div ref={ref} style={{ fontSize: size, whiteSpace: 'nowrap', ...style }}>{children}</div>
 }
 
+// Every template in this file composes inside Post, so this one line is what
+// gives all nineteen of them the 4:5 and 9:16 canvases. PostCanvas reads the
+// height off the format context, so nothing here needs a prop.
 function Post({ palette, children, style = {} }) {
   return (
-    <div style={{
-      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+    <PostCanvas style={{
       background: palette.primary, color: palette.ink, fontFamily: BODY, ...style,
-    }}>{children}</div>
+    }}>{children}</PostCanvas>
   )
 }
 

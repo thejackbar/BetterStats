@@ -19,7 +19,8 @@
 //       scrim at `opacity` so text stays legible (the headline feature).
 //     · icon — a bundled 3D "thiings" glyph used as a faded watermark when no
 //       photo is supplied (auto-picked per preset, override in the editor).
-import { AutoFitText, BrandLockup, ClubLogo, GrainSVG, Halftone, Stripes } from './cricket-templates'
+import { AutoFitText, Bleed, BrandLockup, ClubLogo, GrainSVG, Halftone, Stripes, PostCanvas, usePostHeight } from './cricket-templates'
+import { matteFor } from './postFormats'
 
 // Bundled motif glyphs (already in the repo at src/assets/thiings/).
 import icoTrophy from '../assets/thiings/trophy.png'
@@ -60,8 +61,18 @@ function BSMark({ size = 22, color = '#f25aa6' }) {
 // Falls back to a diagonal accent weave (so the slot reads even with no photo).
 function PhotoLayer({ motif, palette, height = '100%', scrimFrom = 0.04, label }) {
   const P = palette
+  // The photo banner is the POST's own top edge, not the artwork's — left at
+  // the artwork's it stops with a hard line partway down a 4:5 or 9:16 and the
+  // band above it reads as a letterbox. A banner with a fixed height grows by
+  // the matte so it still ends where the composition expects; a full-height one
+  // runs to both real edges.
+  const m = matteFor(usePostHeight())
+  const full = height === '100%'
+  const box = full
+    ? { top: -m, bottom: -m }
+    : { top: -m, height: (Number(height) || 0) + m }
   return (
-    <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height, overflow: 'hidden' }}>
+    <div style={{ position: 'absolute', left: 0, right: 0, overflow: 'hidden', ...box }}>
       {motif?.imageUrl ? (
         <img src={motif.imageUrl} alt="" crossOrigin="anonymous"
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: motif.opacity ?? 0.85 }} />
@@ -105,7 +116,9 @@ function Watermark({ sponsor, color = 'rgba(255,255,255,0.42)' }) {
   )
 }
 
-const FRAME = { width: 1080, height: 1080, position: 'relative', overflow: 'hidden', fontFamily: "'Inter', sans-serif", boxSizing: 'border-box' }
+// The canvas itself (size, positioning, clipping) is PostCanvas's job now —
+// what is left here is what every event poster inherits INSIDE it.
+const FRAME = { fontFamily: "'Inter', sans-serif", boxSizing: 'border-box' }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // EV1 — FLOODLIT · full-bleed photo + opacity filter (sporty, BetterStats-native)
@@ -113,7 +126,7 @@ const FRAME = { width: 1080, height: 1080, position: 'relative', overflow: 'hidd
 export function EVT_Floodlit({ team, event = {}, palette, motif }) {
   const P = palette
   return (
-    <div style={{ ...FRAME, background: P.primary, color: '#fff' }}>
+    <PostCanvas style={{ ...FRAME, background: P.primary, color: '#fff' }}>
       <PhotoLayer motif={motif} palette={P} height={680} scrimFrom={0.04} label={motif?.label} />
       <div style={{ position: 'absolute', left: -180, top: -180, width: 520, height: 520, borderRadius: '50%', background: `radial-gradient(circle, ${a(P.accent, 0.3)}, transparent 68%)`, pointerEvents: 'none' }} />
 
@@ -146,7 +159,7 @@ export function EVT_Floodlit({ team, event = {}, palette, motif }) {
 
         <div style={{ marginTop: 38 }}><Watermark sponsor={event.sponsor} /></div>
       </div>
-    </div>
+    </PostCanvas>
   )
 }
 
@@ -156,7 +169,7 @@ export function EVT_Floodlit({ team, event = {}, palette, motif }) {
 export function EVT_Block({ team, event = {}, palette, motif }) {
   const P = palette
   return (
-    <div style={{ ...FRAME, background: P.primary, color: '#fff' }}>
+    <PostCanvas style={{ ...FRAME, background: P.primary, color: '#fff' }}>
       <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: 606, background: `linear-gradient(150deg, ${P.accent} 0%, ${a(P.accent, 0.78)} 100%)`, overflow: 'hidden' }}>
         {motif?.imageUrl
           ? <img src={motif.imageUrl} alt="" crossOrigin="anonymous" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.3, mixBlendMode: 'overlay' }} />
@@ -195,7 +208,7 @@ export function EVT_Block({ team, event = {}, palette, motif }) {
         ) : null}
         <div style={{ marginTop: 'auto', paddingTop: 28 }}><Watermark sponsor={event.sponsor} /></div>
       </div>
-    </div>
+    </PostCanvas>
   )
 }
 
@@ -210,7 +223,7 @@ export function EVT_Ticket({ team, event = {}, palette, motif }) {
   const line = a(ink, 0.2)
   const SERIF = "'Cormorant Garamond', serif"
   return (
-    <div style={{ ...FRAME, background: paper, color: ink, fontFamily: SERIF }}>
+    <PostCanvas style={{ ...FRAME, background: paper, color: ink, fontFamily: SERIF }}>
       <img src={motif?.icon || icoTrophy} alt="" style={{ position: 'absolute', left: '50%', top: 300, transform: 'translateX(-50%)', width: 600, height: 600, objectFit: 'contain', opacity: 0.12 }} />
       <div style={{ position: 'absolute', inset: 42, border: `1.5px solid ${line}`, pointerEvents: 'none' }} />
       <div style={{ position: 'absolute', inset: 50, border: `1px solid ${a(ink, 0.12)}`, pointerEvents: 'none' }} />
@@ -260,7 +273,7 @@ export function EVT_Ticket({ team, event = {}, palette, motif }) {
           </div>
         </div>
       </div>
-    </div>
+    </PostCanvas>
   )
 }
 
@@ -270,8 +283,8 @@ export function EVT_Ticket({ team, event = {}, palette, motif }) {
 export function EVT_Scoreboard({ team, event = {}, palette, motif }) {
   const P = palette
   return (
-    <div style={{ ...FRAME, background: P.primary, color: '#fff' }}>
-      <div style={{ position: 'absolute', inset: 0, backgroundImage: `radial-gradient(${a(P.accent, 0.1)} 1.4px, transparent 1.6px)`, backgroundSize: '24px 24px' }} />
+    <PostCanvas style={{ ...FRAME, background: P.primary, color: '#fff' }}>
+      <Bleed style={{ left: 0, right: 0, backgroundImage: `radial-gradient(${a(P.accent, 0.1)} 1.4px, transparent 1.6px)`, backgroundSize: '24px 24px' }} />
       <div style={{ position: 'absolute', left: -160, bottom: -160, width: 560, height: 560, borderRadius: '50%', background: `radial-gradient(circle, ${a(P.accent, 0.16)}, transparent 68%)` }} />
       <img src={motif?.icon || icoBat} alt="" style={{ position: 'absolute', right: 54, top: 64, width: 150, height: 150, objectFit: 'contain', opacity: 0.5 }} />
 
@@ -313,7 +326,7 @@ export function EVT_Scoreboard({ team, event = {}, palette, motif }) {
           <BSMark size={20} />
         </div>
       </div>
-    </div>
+    </PostCanvas>
   )
 }
 
@@ -329,7 +342,7 @@ export function EVT_Gazette({ team, event = {}, palette, motif }) {
   const SERIF = "'Playfair Display', serif"
   const BODY = "'Spectral', serif"
   return (
-    <div style={{ ...FRAME, background: paper, color: ink, fontFamily: BODY }}>
+    <PostCanvas style={{ ...FRAME, background: paper, color: ink, fontFamily: BODY }}>
       <div style={{ position: 'absolute', inset: 56, display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: faint, paddingBottom: 10 }}>
           <span>Vol. XCIV — No. 12</span><span>Est. 1921</span>
@@ -381,7 +394,7 @@ export function EVT_Gazette({ team, event = {}, palette, motif }) {
           </div>
         </div>
       </div>
-    </div>
+    </PostCanvas>
   )
 }
 
@@ -394,7 +407,7 @@ export function EVT_Sticker({ team, event = {}, palette, motif }) {
   const ink = P.deepInk || '#23202c'
   const FUN = "'Fredoka', sans-serif"
   return (
-    <div style={{ ...FRAME, background: paper, color: ink }}>
+    <PostCanvas style={{ ...FRAME, background: paper, color: ink }}>
       <div style={{ position: 'absolute', right: -130, top: -130, width: 480, height: 480, borderRadius: '50%', background: a(P.accent, 0.18) }} />
       <div style={{ position: 'absolute', left: -90, bottom: 110, width: 300, height: 300, borderRadius: '50%', border: `4px dashed ${a(P.accent, 0.4)}` }} />
 
@@ -443,7 +456,7 @@ export function EVT_Sticker({ team, event = {}, palette, motif }) {
         <BSMark size={18} />
         <span style={{ fontWeight: 500, fontSize: 13, letterSpacing: 1, color: a(ink, 0.5) }}>Made with BetterCricket{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
       </div>
-    </div>
+    </PostCanvas>
   )
 }
 
@@ -455,7 +468,7 @@ export function EVT_Kinetic({ team, event = {}, palette, motif }) {
   const skew = { transform: 'skewX(-8deg)' }
   const unskew = { display: 'inline-block', transform: 'skewX(8deg)' }
   return (
-    <div style={{ ...FRAME, background: P.primary, color: '#fff' }}>
+    <PostCanvas style={{ ...FRAME, background: P.primary, color: '#fff' }}>
       <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: 616, clipPath: 'polygon(0 0, 100% 0, 100% 100%, 0 76%)', overflow: 'hidden' }}>
         {motif?.imageUrl
           ? <img src={motif.imageUrl} alt="" crossOrigin="anonymous" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -506,7 +519,7 @@ export function EVT_Kinetic({ team, event = {}, palette, motif }) {
           </div>
         </div>
       </div>
-    </div>
+    </PostCanvas>
   )
 }
 
@@ -521,7 +534,7 @@ export function EVT_Swiss({ team, event = {}, palette }) {
   const line = a(ink, 0.2)
   const HELV = "'Helvetica Neue', Helvetica, Arial, sans-serif"
   return (
-    <div style={{ ...FRAME, background: paper, color: ink, fontFamily: HELV }}>
+    <PostCanvas style={{ ...FRAME, background: paper, color: ink, fontFamily: HELV }}>
       <div style={{ position: 'absolute', inset: 80, display: 'flex', flexDirection: 'column' }}>
         <div style={{ borderTop: `2px solid ${ink}`, paddingTop: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
@@ -560,7 +573,7 @@ export function EVT_Swiss({ team, event = {}, palette }) {
           </div>
         </div>
       </div>
-    </div>
+    </PostCanvas>
   )
 }
 
@@ -574,7 +587,7 @@ export function EVT_Crest({ team, event = {}, palette, motif }) {
   const SERIF = "'Cormorant Garamond', serif"
   const line = a(P.accent, 0.55)
   return (
-    <div style={{ ...FRAME, background: P.primary, color: cream, fontFamily: SERIF }}>
+    <PostCanvas style={{ ...FRAME, background: P.primary, color: cream, fontFamily: SERIF }}>
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 560, background: `radial-gradient(ellipse 600px 420px at 50% 0%, ${a(P.accent, 0.18)}, transparent 70%)` }} />
       <div style={{ position: 'absolute', inset: 44, border: `2px solid ${line}`, pointerEvents: 'none' }} />
       <div style={{ position: 'absolute', inset: 52, border: `1px solid ${a(P.accent, 0.3)}`, pointerEvents: 'none' }} />
@@ -620,7 +633,7 @@ export function EVT_Crest({ team, event = {}, palette, motif }) {
           </div>
         </div>
       </div>
-    </div>
+    </PostCanvas>
   )
 }
 
@@ -635,7 +648,7 @@ export function EVT_Chalkboard({ team, event = {}, palette }) {
   const faint = 'rgba(241,239,228,0.4)'
   const HAND = "'Caveat', cursive"
   return (
-    <div style={{ ...FRAME, background: board, color: chalk }}>
+    <PostCanvas style={{ ...FRAME, background: board, color: chalk }}>
       <div style={{ position: 'absolute', left: '8%', top: '14%', width: 420, height: 300, background: 'radial-gradient(ellipse, rgba(255,255,255,0.05), transparent 70%)', transform: 'rotate(-18deg)' }} />
       <div style={{ position: 'absolute', right: '6%', bottom: '18%', width: 380, height: 260, background: 'radial-gradient(ellipse, rgba(255,255,255,0.045), transparent 70%)', transform: 'rotate(12deg)' }} />
       <div style={{ position: 'absolute', inset: 44, border: `2px dashed ${faint}`, borderRadius: 8, pointerEvents: 'none' }} />
@@ -677,7 +690,7 @@ export function EVT_Chalkboard({ team, event = {}, palette }) {
           </div>
         </div>
       </div>
-    </div>
+    </PostCanvas>
   )
 }
 
@@ -691,8 +704,8 @@ export function EVT_Polaroid({ team, event = {}, palette, motif }) {
   const MARKER = "'Permanent Marker', cursive"
   const HAND = "'Caveat', cursive"
   return (
-    <div style={{ ...FRAME, background: paper, color: ink }}>
-      <div style={{ position: 'absolute', inset: 0, backgroundImage: 'radial-gradient(rgba(120,100,70,0.06) 1px, transparent 1.4px)', backgroundSize: '5px 5px', opacity: 0.6 }} />
+    <PostCanvas style={{ ...FRAME, background: paper, color: ink }}>
+      <Bleed style={{ left: 0, right: 0, backgroundImage: 'radial-gradient(rgba(120,100,70,0.06) 1px, transparent 1.4px)', backgroundSize: '5px 5px', opacity: 0.6 }} />
       <div style={{ position: 'absolute', inset: 76, display: 'flex', flexDirection: 'column' }}>
         <div style={{ marginBottom: 18 }}>
           <BrandLockup team={team} palette={P} size={84} nameColor={ink} nameSize={30} />
@@ -735,7 +748,7 @@ export function EVT_Polaroid({ team, event = {}, palette, motif }) {
           <span style={{ fontWeight: 500, fontSize: 13, letterSpacing: 1, color: a(ink, 0.5) }}>{team.name} · Made with BetterCricket{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
         </div>
       </div>
-    </div>
+    </PostCanvas>
   )
 }
 
