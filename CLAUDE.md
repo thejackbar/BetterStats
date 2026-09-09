@@ -117,6 +117,89 @@ silently wrong."*
   return entity ids and names only, no spend or conversion metrics, so the
   numeric totals were NOT independently tied to Ads Manager here. The app's own
   backend holds the token and queries the Graph API directly.
+### The trial's cost was still a lifetime average, so the two were never comparable (v9.72.1)
+
+Asked for straight after: "can we split the spend and the costs off from the
+old ones and get new numbers for webinar and trial ones?"
+
+- **SPLITTING THE SPEND PER STREAM WAS ONLY HALF OF IT, and the half that was
+  left is why the two figures still could not be read against each other.**
+  `stream_totals` sums the `level='ad'` snapshot rows, which are LIFETIME
+  (`fetch_per_ad` sends `date_preset: maximum`). So the trial's cost per signup
+  is an average over the campaign that ran BEFORE the 8 Sep restructure —
+  A$50/day, broad targeting, all placements, Instagram on — while the webinar
+  has no pre-change history at all. **Comparing them compares two different
+  campaigns**, and the brief's own question ("what are we spending per trial
+  signup NOW") was unanswerable from the page.
+- **SO EACH STREAM CARRIES A SECOND FIGURE, MEASURED FROM THE LAST DELIBERATE
+  CHANGE.** `stream_totals_since` sums the TRUE daily per-ad rows
+  (`level='ad_daily'`) on or after `_last_change_date()`, and the results behind
+  it are windowed too — both streams over the same stretch of calendar or the
+  pair means nothing. Lifetime is kept: it is the real money spent.
+- **THE COUNTING-SINCE CUTOFF IS NOT THIS, and reaching for it would have been
+  the wrong fix.** That is a super-admin setting which resets EVERY figure on
+  the page, and it deliberately never windows `get_registration_count` — a
+  genuine registration always counts, however long ago. This is per stream, per
+  card, automatic, and derived from the annotation that already exists.
+- **THE ALL-TIME FIGURES NOW SAY THEY ARE ALL TIME.** Left unlabelled beside a
+  since-the-change one, the bigger number reads as the current cost — which is
+  the same misreading in a new place.
+- **A PARTIAL WINDOW WITHHOLDS THE NUMBER, and the direction of the error is
+  why.** `ad_daily` is retained for `CAMPAIGN_LENGTH_DAYS + 5`, so a change
+  older than that leaves the sum short of what was really spent — which
+  UNDERSTATES cost per result, the direction that flatters the campaign and
+  gets quoted back at us. `covers_from` reports it and the block withholds the
+  division, naming the reason so silence does not read as a bug.
+- **SPEND IS SETTLED, RESULTS ARE NOT, and this block is where that bites
+  hardest.** Inside the 7-day click window the results behind a since figure
+  are still arriving, so the cost is a CEILING that comes down. Marked
+  provisional; nothing alerts off it — the rule the pacing insight already
+  keeps, applied to a figure that is mostly window at the moment (the change
+  was yesterday).
+- **A SIGNUP WITH NO TIMESTAMP IS REPORTED, NEVER GUESSED EITHER WAY.** Orgs
+  carry no `created_at`; the date is the earliest `self_serve_idempotency_keys`
+  row (the source `ad_signups` already uses). An attributed org with no key row
+  cannot be placed either side of the change, so it counts lifetime and in
+  neither since figure — surfaced as `undated_trial_results` so a short since
+  count reads as a known gap rather than as the ads having stopped working.
+- **THE MANUAL LEADS ADJUSTMENT IS NOT APPLIED TO THE SINCE COUNT.** It is a
+  lifetime correction and may well relate to a signup from before the change;
+  folding it into a windowed figure would move a number nobody can trace.
+- **`get_registration_count` IS UNTOUCHED.** `get_registration_count_since` is
+  its own function sharing `_attribution_matches_campaign`, so the windowed and
+  lifetime figures can never disagree about what COUNTS — only about when it
+  happened — and the existing function's documented "never windowed" promise
+  still holds exactly.
+- **Verified against a real Postgres** (`verify_meta_ads_streams.py` is 67
+  checks now: the trial's since-spend being its post-change spend alone and a
+  fraction of its lifetime, the webinar's since-spend EQUALLING its lifetime
+  because it has no history before the change, a signup from before the change
+  excluded, an undated one reported rather than counted or dropped, a webinar
+  registration predating the ad falling outside the window, the since cost per
+  result differing from the lifetime one, and every guard — partial, no
+  results, no spend, settled-vs-provisional, no change at all) **with two
+  control runs**: with the feature absent it REPORTS all four missing parts by
+  name and the other 43 still pass; with the window and the guards neutered, 8
+  fail — the trial's since-spend reading its lifetime 1800.0, and a partial
+  window printing A$25.00 instead of withholding.
+- **Driven in Chromium** (`verify_meta_ads_streams_browser.mjs` is 57: both
+  blocks on screen, the since figure read from its own element and differing
+  from the lifetime one beside it, the all-time label, the provisional note on
+  one stream and NOT the settled one, a withheld figure printing no digits
+  while still reporting its spend, the undated note, and no overflow at 390px)
+  **with a control run**: 13 fail against the previous commit, reporting the
+  unlabelled `A$43.90 each` that reads as current.
+- **FOUR CHECKS PASSED IN THE CONTROL FOR THE WRONG REASON and were
+  tightened.** "The since figure is not the lifetime figure", "a settled stream
+  is not marked provisional" and "a withheld figure prints no number" are all
+  trivially true of a block that never rendered — absence masquerading as
+  correct behaviour. Each is now gated on the block existing first.
+- **A FIXTURE THAT GROWS MOVES ITS NEIGHBOURS' EXPECTATIONS.** Adding the
+  undated org took the lifetime trial count 3 → 4 and failed two pre-existing
+  checks. The intent of both was intact — only the fixture's size changed — so
+  the count was updated and the cost check re-expressed against
+  `trial_results` rather than a hardcoded 3, so the two can no longer drift.
+
 - **NOTICED, NOT BUILT**: nothing reads Meta's own `content_category` breakdown
   off the insights API, so Meta's self-reported conversion counts are still
   un-splittable and are shown only as the labelled "Meta-reported" comparison.

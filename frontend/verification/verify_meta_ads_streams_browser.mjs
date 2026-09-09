@@ -52,6 +52,15 @@ const WEBINAR_SPEND = 120.0
 const TRIAL_RESULTS = 41
 const WEBINAR_RESULTS = 12
 
+// Since the change, the trial has spent a small fraction of its lifetime total
+// — its lifetime figure is mostly the campaign that ran BEFORE the restructure.
+// The webinar has no pre-change history at all, so its two figures agree. That
+// asymmetry is exactly what makes the lifetime pair incomparable and the
+// since-the-change pair comparable.
+const TRIAL_SINCE_SPEND = 96.0
+const TRIAL_SINCE_RESULTS = 4
+const TRIAL_SINCE_CPR = Number((TRIAL_SINCE_SPEND / TRIAL_SINCE_RESULTS).toFixed(2))
+
 const STREAMS = [
   {
     stream: 'trial', label: 'Free trial signups', content_category: 'self_serve_trial',
@@ -62,6 +71,12 @@ const STREAMS = [
     unit_value_aud: 399, attributed_value_aud: TRIAL_RESULTS * 399, carries_value: true,
     roas: Number(((TRIAL_RESULTS * 399) / TRIAL_SPEND).toFixed(2)),
     ends_on: null, ended: false,
+    since_change: {
+      since: CHANGE_DATE, days: 10, spend: TRIAL_SINCE_SPEND, results: TRIAL_SINCE_RESULTS,
+      impressions: 12000, link_clicks: 90, landing_page_views: 80, leads: 3,
+      partial: false, provisional: false,
+      cost_per_result: TRIAL_SINCE_CPR, withheld_reason: null,
+    },
     funnel: [
       { key: 'impressions', label: 'Impressions', value: 220000, pct_of_top: 100, pct_of_prev: 100 },
       { key: 'link_clicks', label: 'Link clicks', value: 1760, pct_of_top: 0.8, pct_of_prev: 0.8 },
@@ -80,6 +95,16 @@ const STREAMS = [
     unit_value_aud: 0, attributed_value_aud: 0, carries_value: false, roas: null,
     ends_on: '2026-09-21', ended: false,
     unattributed_results: 3, total_registrations: 15,
+    // Provisional: its results are still arriving inside Meta's 7-day window,
+    // so the figure is a ceiling. Marked here rather than on the trial so both
+    // states are on screen at once.
+    since_change: {
+      since: CHANGE_DATE, days: 10, spend: WEBINAR_SPEND, results: WEBINAR_RESULTS,
+      impressions: 9000, link_clicks: 200, landing_page_views: 150, leads: 0,
+      partial: false, provisional: true,
+      cost_per_result: Number((WEBINAR_SPEND / WEBINAR_RESULTS).toFixed(2)),
+      withheld_reason: null,
+    },
     funnel: [
       { key: 'impressions', label: 'Impressions', value: 9000, pct_of_top: 100, pct_of_prev: 100 },
       { key: 'link_clicks', label: 'Link clicks', value: 200, pct_of_top: 2.2, pct_of_prev: 2.2 },
@@ -228,6 +253,43 @@ ck('the webinar cost per result is its own spend over its own registrations (A$1
 ck('the two costs per result are different figures, never averaged into one',
    trialCpr.trim() !== webinarCpr.trim())
 
+// 1b. SINCE THE CHANGE, ALONGSIDE LIFETIME. The trial's lifetime figure is
+//     mostly the campaign that ran before the restructure and the webinar has
+//     no pre-change history, so the lifetime pair answers a different question
+//     from the one the page is asked. Both must be on the card, each saying
+//     which it is — a since figure that reads as the lifetime one, or the
+//     reverse, is the whole bug.
+const trialSince = trialCard.locator('[data-testid="stream-since-change"]')
+const webinarSince = webinarCard.locator('[data-testid="stream-since-change"]')
+ck('each stream card carries a since-the-change block',
+   (await has(trialSince)) && (await has(webinarSince)))
+
+const trialSinceCpr = await textOf(trialCard.locator('[data-testid="stream-since-cpr"]'))
+ck(`the trial's since-the-change cost per result is its own (A$${TRIAL_SINCE_CPR.toFixed(2)})`,
+   trialSinceCpr.includes(TRIAL_SINCE_CPR.toFixed(2)), `got "${trialSinceCpr}"`)
+// BOTH must be present and differ. Written as "the since figure does not
+// contain 43.90" alone, an ABSENT since block passes it trivially — which is
+// exactly the state this whole block exists to move away from.
+ck('it is NOT the lifetime figure — the two are read separately on the card',
+   trialSinceCpr.includes(TRIAL_SINCE_CPR.toFixed(2))
+   && !trialSinceCpr.includes('43.90') && trialCpr.includes('43.90'),
+   `since "${trialSinceCpr}" / lifetime "${trialCpr}"`)
+ck('the lifetime figure says it is all time, so it cannot be read as current',
+   /all time/i.test(trialCpr), `got "${trialCpr}"`)
+ck('the since block names the date it measures from',
+   /since the/i.test(await textOf(trialSince)), await textOf(trialSince))
+
+// Spend is settled the day it happens; results back-fill for 7 days. So a
+// since-the-change cost per result inside that window is a ceiling and must
+// say so — and one outside it must NOT, or the caveat means nothing.
+ck('a stream still inside the attribution window is marked provisional',
+   await has(webinarCard.locator('[data-testid="stream-since-provisional"]')))
+// Gated on the trial's own block existing, or a build with no block at all
+// passes this by having nothing to mark.
+ck('a settled stream is not',
+   (await has(trialSince))
+   && !(await has(trialCard.locator('[data-testid="stream-since-provisional"]'))))
+
 // The number the page used to show: whole-campaign spend over trial signups.
 // A$1920.29 / 41 = A$46.84 — the brief's own lifetime figure, and now wrong.
 // innerText returns CSS-`uppercase` text ALREADY TRANSFORMED, so anything
@@ -344,6 +406,9 @@ const empty = await open({
       ...s, spend: 0, impressions: 0, link_clicks: 0, landing_page_views: 0,
       results: 0, cost_per_result: null, roas: null, attributed_value_aud: 0,
       ad_count: 0, active_ad_count: 0,
+      // A campaign with no deliberate change behind it has nothing to measure
+      // a "since" from, so it carries no block rather than an empty one.
+      since_change: null,
       funnel: s.funnel.map((f) => ({ ...f, value: 0, pct_of_top: 0, pct_of_prev: 0 })),
     })),
     creatives: [], unattributed_spend: 0,
@@ -356,8 +421,51 @@ ck('a stream with no spend says so rather than showing a cost per result',
 ck('nothing divides by zero on an empty campaign', !/NaN|Infinity/.test(emptyBody))
 ck('no creative table is drawn when there is nothing to compare',
    !(await has(empty.page.locator('[data-testid="creative-table"]'))))
+ck('a campaign with no change behind it draws no since-the-change block at all',
+   !(await has(empty.page.locator('[data-testid="stream-since-change"]'))))
 ck('no page errors on an empty campaign', empty.errors.length === 0, empty.errors[0] || '')
 await empty.ctx.close()
+
+// A since-the-change figure we cannot stand behind. A partial window is short
+// of real spend, so dividing would UNDERSTATE the cost — the direction that
+// flatters the campaign — and a silent blank reads as a bug. It has to withhold
+// the number AND say why.
+const withheld = await open({
+  summary: {
+    ...SUMMARY,
+    undated_trial_results: 2,
+    streams: STREAMS.map((s) => ({
+      ...s,
+      since_change: {
+        ...s.since_change,
+        cost_per_result: null,
+        withheld_reason: s.stream === 'trial' ? 'partial_window' : 'no_results_yet',
+        results: s.stream === 'trial' ? s.since_change.results : 0,
+      },
+    })),
+  },
+})
+const withheldBody = await withheld.page.locator('body').innerText()
+const withheldCpr = await textOf(
+  withheld.page.locator('[data-testid="stream-card-trial"] [data-testid="stream-since-cpr"]'))
+// The block has to BE there and print no figure — "no digits" alone is
+// trivially true of a block that never rendered.
+ck('a withheld since-the-change figure prints no number at all',
+   (await has(withheld.page.locator('[data-testid="stream-card-trial"] [data-testid="stream-since-change"]')))
+   && !/\d/.test(withheldCpr), `got "${withheldCpr}"`)
+ck('a partial window says that is why, rather than going quietly blank',
+   /not enough daily history/i.test(withheldBody))
+ck('a stream with no results since the change says that instead',
+   /no results since the change/i.test(withheldBody))
+ck('the spend it did measure is still reported, so the block is not simply empty',
+   new RegExp(`\\$${TRIAL_SINCE_SPEND.toFixed(2)}`).test(withheldBody), 'spend missing')
+ck('trial signups with no recorded date are reported as a known gap',
+   /no recorded signup date/i.test(withheldBody))
+ck('and the since figure is called a floor, not a fall in performance',
+   /floor/i.test(withheldBody))
+ck('nothing divides by zero when a figure is withheld', !/NaN|Infinity/.test(withheldBody))
+ck('no page errors with a withheld figure', withheld.errors.length === 0, withheld.errors[0] || '')
+await withheld.ctx.close()
 
 // Mobile.
 const narrow = await open({ width: 390 })

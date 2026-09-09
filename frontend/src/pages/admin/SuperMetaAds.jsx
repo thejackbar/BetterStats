@@ -606,9 +606,64 @@ function AdCard({ ad, maxCostPerLpv, selected, onSelect, trendDays, annotations 
 // what it spent to do it. NEVER a shared total with the other stream — the two
 // results are different things at different prices and adding them together
 // produces a number that describes neither.
+// Why a since-the-change cost per result is being withheld, in the words a
+// reader can act on. Silence with no reason reads as a bug; a number we can't
+// stand behind is worse than either.
+const WITHHELD_COPY = {
+  partial_window: 'not enough daily history held yet to measure this',
+  no_results_yet: 'no results since the change yet',
+  no_spend_yet: 'no spend since the change yet',
+}
+
+// The stretch since the last deliberate change, measured on its own.
+//
+// LIFETIME AND SINCE-THE-CHANGE ARE DIFFERENT QUESTIONS, and for the trial they
+// give very different answers: its lifetime spend is mostly the campaign that
+// ran before the restructure, while the webinar has no pre-change history at
+// all. Reading one stream's lifetime cost against the other's is comparing two
+// campaigns, so both are shown and each says which it is.
+function SinceChange({ since }) {
+  if (!since) return null
+  const cpr = since.cost_per_result
+  const reason = WITHHELD_COPY[since.withheld_reason]
+  return (
+    <div
+      data-testid="stream-since-change"
+      className="mt-2 pt-2 border-t pb-hairline-t"
+    >
+      <div className="font-mono text-[9px] uppercase tracking-wide text-pb-faint">
+        Since the {fmtDay(since.since)} change
+      </div>
+      <div className="flex items-baseline gap-2 mt-0.5">
+        <div data-testid="stream-since-cpr" className="font-display text-lg text-pb-text">
+          {cpr != null ? fmtMoney(cpr) : <span className="text-pb-faintest text-sm">&mdash;</span>}
+        </div>
+        <div className="font-mono text-[10px] text-pb-dim">
+          {cpr != null
+            ? <>each &middot; {fmtNum(since.results)} from {fmtMoney(since.spend)}</>
+            : <span className="text-pb-faintest">{reason || 'not measurable yet'}</span>}
+        </div>
+      </div>
+      {cpr == null && since.spend > 0 && (
+        <div className="font-mono text-[9px] text-pb-faintest mt-0.5">
+          {fmtMoney(since.spend)} spent, {fmtNum(since.results)} result{since.results === 1 ? '' : 's'} so far.
+        </div>
+      )}
+      {since.provisional && (
+        <div data-testid="stream-since-provisional" className="font-mono text-[9px] text-amber-300/80 mt-1 leading-relaxed">
+          Provisional. Meta credits a conversion to the day of the click and back-fills for
+          7 days, so results here are still arriving — the spend is settled, the cost per
+          result is a ceiling that will come down.
+        </div>
+      )}
+    </div>
+  )
+}
+
 function StreamCard({ stream, children }) {
   const style = streamStyle(stream.stream)
   const ended = stream.ended
+  const since = stream.since_change
   return (
     <div
       data-testid={`stream-card-${stream.stream}`}
@@ -628,12 +683,12 @@ function StreamCard({ stream, children }) {
         <div data-testid="stream-results" className="font-display text-2xl text-pb-text">{fmtNum(stream.results)}</div>
         <div data-testid="stream-cpr" className="font-mono text-[11px] text-pb-dim">
           {stream.cost_per_result != null
-            ? <>{fmtMoney(stream.cost_per_result)} each</>
+            ? <>{fmtMoney(stream.cost_per_result)} each{since ? ' all time' : ''}</>
             : <span className="text-pb-faintest">no cost per result yet</span>}
         </div>
       </div>
       <div className="font-mono text-[9px] text-pb-faintest mt-1">
-        {fmtMoney(stream.spend)} spent on {stream.ad_count} ad{stream.ad_count === 1 ? '' : 's'}
+        {fmtMoney(stream.spend)} spent {since ? 'all time ' : ''}on {stream.ad_count} ad{stream.ad_count === 1 ? '' : 's'}
         {ended
           ? <> &middot; <span className="text-pb-faint">finished {fmtDay(stream.ends_on)}</span></>
           : stream.active_ad_count === 0
@@ -652,6 +707,7 @@ function StreamCard({ stream, children }) {
           Carries no value — excluded from revenue and ROAS.
         </div>
       )}
+      <SinceChange since={since} />
       {children}
     </div>
   )
@@ -1030,6 +1086,7 @@ export default function SuperMetaAds() {
   const ads = summary?.ads || []
   const streams = summary?.streams || []
   const unattributedSpend = summary?.unattributed_spend || 0
+  const undatedTrialResults = summary?.undated_trial_results || 0
   const annotations = summary?.annotations || []
   const provisionalDays = summary?.attribution_window_days || 0
   // The first date inside Meta's click-attribution window, computed from the
@@ -1159,6 +1216,14 @@ export default function SuperMetaAds() {
                   </StreamCard>
                 ))}
               </div>
+            )}
+
+            {undatedTrialResults > 0 && (
+              <p data-testid="undated-trial-results" className="font-mono text-[9px] text-amber-300/80 mb-1">
+                {fmtNum(undatedTrialResults)} attributed trial signup{undatedTrialResults === 1 ? '' : 's'} carry
+                no recorded signup date, so {undatedTrialResults === 1 ? 'it counts' : 'they count'} in the
+                all-time figure and in neither since-the-change one. The since figure is a floor.
+              </p>
             )}
 
             {unattributedSpend > 0.5 && (

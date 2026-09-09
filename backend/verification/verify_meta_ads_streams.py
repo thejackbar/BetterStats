@@ -91,6 +91,8 @@ async def setup(session_maker) -> None:
         await db.execute(text("DROP TABLE IF EXISTS webinar_registrations"))
         await db.execute(text("DROP TABLE IF EXISTS organisations"))
         await db.execute(text("DROP TABLE IF EXISTS platform_settings"))
+        await db.execute(text("DROP TABLE IF EXISTS self_serve_idempotency_keys"))
+        await db.execute(text("DROP TABLE IF EXISTS meta_ad_snapshots"))
         await db.execute(text('CREATE EXTENSION IF NOT EXISTS "pgcrypto"'))
         for stmt in webinar_ddl.STATEMENTS:
             await db.execute(text(stmt))
@@ -104,6 +106,47 @@ async def setup(session_maker) -> None:
                 archived_at TIMESTAMPTZ
             )
         """))
+        # The signup timestamp lives here, not on the org (orgs carry no
+        # created_at) — it is what places a registration either side of the
+        # change. Columns as main.py's lifespan creates them.
+        await db.execute(text("""
+            CREATE TABLE self_serve_idempotency_keys (
+                idempotency_key TEXT PRIMARY KEY,
+                email TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'validated',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                org_id UUID,
+                user_id UUID
+            )
+        """))
+        # meta_ad_snapshots as the lifespan builds it: the CREATE plus every
+        # column added since in its own later ALTER (campaign_id, delivery_status,
+        # updated_at). A table that merely LOOKS right is worse than none.
+        await db.execute(text("""
+            CREATE TABLE meta_ad_snapshots (
+                id BIGSERIAL PRIMARY KEY,
+                snapshot_date DATE NOT NULL,
+                level TEXT NOT NULL,
+                ad_id TEXT,
+                ad_name TEXT,
+                spend NUMERIC NOT NULL DEFAULT 0,
+                impressions NUMERIC NOT NULL DEFAULT 0,
+                link_clicks NUMERIC NOT NULL DEFAULT 0,
+                link_ctr NUMERIC NOT NULL DEFAULT 0,
+                landing_page_views NUMERIC NOT NULL DEFAULT 0,
+                cost_per_lpv NUMERIC,
+                leads NUMERIC NOT NULL DEFAULT 0,
+                recommendation TEXT,
+                recommendation_status TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        for stmt in (
+            "ALTER TABLE meta_ad_snapshots ADD COLUMN IF NOT EXISTS campaign_id TEXT",
+            "ALTER TABLE meta_ad_snapshots ADD COLUMN IF NOT EXISTS delivery_status TEXT",
+            "ALTER TABLE meta_ad_snapshots ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ",
+        ):
+            await db.execute(text(stmt))
         await db.execute(text("""
             CREATE TABLE platform_settings (
                 id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
@@ -161,6 +204,60 @@ async def seed(session_maker) -> None:
         await db.commit()
 
 
+async def seed_since(session_maker, change: date) -> None:
+    """Dates either side of the last deliberate change.
+
+    The trial ran for weeks BEFORE the restructure and the webinar has no
+    pre-change history at all, so the two lifetime cost-per-result figures
+    describe different campaigns. This fixture is what makes that measurable:
+    the trial's daily rows straddle the change, the webinar's start at it.
+    """
+    async with session_maker() as db:
+        # Trial signups placed either side. One matching org gets NO key row at
+        # all — a real possibility, and it must be reported as undated rather
+        # than silently counted or silently dropped.
+        await db.execute(text(
+            "INSERT INTO organisations (name, signup_source, signup_attribution) "
+            "VALUES ('Echo CC', 'self_serve_ad', CAST(:a AS jsonb))"
+        ), {"a": json.dumps({"utm_campaign": "trial_evergreen_sep2026",
+                             "utm_content": "spreadsheet_hero", "utm_source": "fb"})})
+        for name, at in [
+            ("Alpha CC", change - timedelta(days=5)),   # before the change
+            ("Bravo CC", change),                        # the day of it
+            ("Charlie CC", change + timedelta(days=1)),  # after
+            ("Delta CC", change + timedelta(days=1)),    # after, but an EDM
+        ]:
+            await db.execute(text("""
+                INSERT INTO self_serve_idempotency_keys (idempotency_key, email, org_id, created_at)
+                SELECT :k, :e, o.id, :at FROM organisations o WHERE o.name = :n
+            """), {"k": f"key-{name}", "e": f"{name}@x.com", "n": name, "at": at})
+
+        # A webinar registration from before the ad launched — /demo has been
+        # live since v9.71.1, so an organic one is ordinary. It must fall
+        # outside the since-the-change window.
+        await db.execute(text(
+            "UPDATE webinar_registrations SET created_at = :at WHERE email = 'a@x.com'"
+        ), {"at": change - timedelta(days=2)})
+
+        # TRUE daily per-ad rows (level='ad_daily'). The trial's straddle the
+        # change; the webinar's begin at it.
+        rows: list[tuple] = []
+        for i in range(1, 11):
+            rows.append((change - timedelta(days=i), TRIAL_AD,
+                         "Ad_ClubHistory_Trial_Hero_v3", 176.40))
+        for d in (change, change + timedelta(days=1)):
+            rows.append((d, TRIAL_AD, "Ad_ClubHistory_Trial_Hero_v3", 18.0))
+            rows.append((d, WEBINAR_AD, "Ad_Webinar_LiveDemo_21Sep2026_v2", 60.0))
+        for snapshot_date, ad_id, ad_name, spend in rows:
+            await db.execute(text("""
+                INSERT INTO meta_ad_snapshots
+                    (snapshot_date, level, campaign_id, ad_id, ad_name, spend,
+                     impressions, link_clicks, landing_page_views, leads)
+                VALUES (:d, 'ad_daily', :c, :a, :n, :s, 1000, 20, 15, 0)
+            """), {"d": snapshot_date, "c": CAMPAIGN_ID, "a": ad_id, "n": ad_name, "s": spend})
+        await db.commit()
+
+
 ADS = [
     {"ad_id": WEBINAR_AD, "ad_name": "Ad_Webinar_LiveDemo_21Sep2026_v2", "name": "Ad_Webinar_LiveDemo_21Sep2026_v2",
      "spend": 120.0, "impressions": 9000, "link_clicks": 200, "landing_page_views": 150,
@@ -193,6 +290,9 @@ async def main() -> int:
     await seed(session_maker)
 
     m._active_campaign.set(CAMPAIGN_ID)
+    change_date = m._last_change_date()
+    if change_date:
+        await seed_since(session_maker, change_date)
     for ad in ADS:
         ad["stream"] = m.stream_for_ad(ad["ad_id"], ad["ad_name"])
 
@@ -229,8 +329,11 @@ async def main() -> int:
 
     async with session_maker() as db:
         trial_results = await m.get_registration_count(db)
+    # Four attributed: three dated either side of the change plus Echo CC,
+    # which carries no signup timestamp at all. The EDM signup and the archived
+    # test one are excluded.
     ck("trial signups count this campaign's own, and not an EDM's",
-       trial_results == 3, f"got {trial_results}")
+       trial_results == 4, f"got {trial_results}")
 
     # ── The split itself ────────────────────────────────────────────────────
     campaign = {"spend": 1920.29}
@@ -243,7 +346,7 @@ async def main() -> int:
     ck("each stream carries its OWN spend, summed from its own ads",
        t["spend"] == 1800.0 and w["spend"] == 120.0, f"{t['spend']} / {w['spend']}")
     ck("cost per trial signup is trial spend over trial signups",
-       t["cost_per_result"] == round(1800.0 / 3, 2), str(t["cost_per_result"]))
+       t["cost_per_result"] == round(1800.0 / trial_results, 2), str(t["cost_per_result"]))
     ck("cost per webinar registration is webinar spend over webinar registrations",
        w["cost_per_result"] == round(120.0 / 3, 2), str(w["cost_per_result"]))
     # The figure the page used to show: whole-campaign spend over trial signups.
@@ -356,6 +459,113 @@ async def main() -> int:
 
     ck("the attribution window is Meta's 7-day click window",
        m.ATTRIBUTION_WINDOW_DAYS == 7, str(m.ATTRIBUTION_WINDOW_DAYS))
+
+    # ── Since the change, measured on its own ───────────────────────────────
+    # A lifetime cost per result answers "what has this cost in all". It cannot
+    # answer "what are we paying NOW", and for the trial the two are far apart:
+    # its lifetime spend is mostly the campaign that ran before the restructure,
+    # while the webinar has no pre-change history to dilute it.
+    if missing(["stream_totals_since", "get_registration_count_since",
+                "get_webinar_registration_count_since", "_since_change_block"]):
+        print("\nThe since-the-change split is not present — reporting it rather "
+              "than reading past it.")
+    elif not change_date:
+        ck("there is a change to measure from", False, "no annotation")
+    else:
+        async with session_maker() as db:
+            since_spend = await m.stream_totals_since(db, change_date)
+            trial_since = await m.get_registration_count_since(db, change_date)
+            webinar_since = await m.get_webinar_registration_count_since(db, change_date)
+
+        st = since_spend["totals"]
+        ck("the trial's spend since the change is its own post-change spend only",
+           st["trial"]["spend"] == 36.0, str(st["trial"]["spend"]))
+        ck("and that is a fraction of its lifetime spend, which is the point",
+           st["trial"]["spend"] < t["spend"] / 10,
+           f"{st['trial']['spend']} vs {t['spend']}")
+        ck("the webinar's since-the-change spend IS its lifetime spend — it has no history before it",
+           st["webinar"]["spend"] == w["spend"] == 120.0, str(st["webinar"]["spend"]))
+        ck("a complete window is not reported as partial",
+           since_spend["partial"] is False, str(since_spend))
+
+        ck("a trial signup from before the change is not counted since it",
+           trial_since["count"] == 2, str(trial_since))
+        ck("a signup we hold no date for is reported, neither counted nor dropped",
+           trial_since["undated"] == 1, str(trial_since))
+        ck("an EDM signup is excluded from the windowed count too",
+           trial_since["count"] + trial_since["undated"] == 3, str(trial_since))
+        ck("a webinar registration from before the ad launched falls outside the window",
+           webinar_since == 2, str(webinar_since))
+
+        since_ctx = {
+            "since": change_date, "totals": st, "partial": since_spend["partial"],
+            "results": {"trial": trial_since["count"], "webinar": webinar_since},
+        }
+        streams2, _ = m.build_streams(
+            ADS, campaign, trial_results=trial_results,
+            webinar_counts=counts, club_selected=25, since_change=since_ctx)
+        by2 = {s["stream"]: s for s in streams2}
+        t2, w2 = by2["trial"]["since_change"], by2["webinar"]["since_change"]
+
+        ck("each stream carries a since-the-change block",
+           t2 is not None and w2 is not None)
+        ck("cost per trial signup since the change is its own spend over its own results",
+           t2["cost_per_result"] == round(36.0 / 2, 2), str(t2["cost_per_result"]))
+        ck("cost per webinar registration since the change likewise",
+           w2["cost_per_result"] == round(120.0 / 2, 2), str(w2["cost_per_result"]))
+        ck("the trial's since figure is NOT its lifetime figure",
+           t2["cost_per_result"] != by2["trial"]["cost_per_result"],
+           f"{t2['cost_per_result']} vs {by2['trial']['cost_per_result']}")
+        ck("and it is far lower, because the lifetime one carries the old campaign",
+           t2["cost_per_result"] < by2["trial"]["cost_per_result"] / 10,
+           f"{t2['cost_per_result']} vs {by2['trial']['cost_per_result']}")
+        ck("the block says which date it measures from",
+           t2["since"] == change_date.isoformat(), str(t2["since"]))
+        ck("results still arriving inside the 7-day window are marked provisional",
+           t2["provisional"] is True, str(t2))
+
+        # ── The guards, driven directly ─────────────────────────────────────
+        base = {"since": change_date, "partial": False,
+                "totals": {"trial": {"spend": 100.0}}, "results": {"trial": 4}}
+        ck("a complete window with results divides",
+           m._since_change_block("trial", base)["cost_per_result"] == 25.0)
+
+        part = dict(base, partial=True)
+        blk = m._since_change_block("trial", part)
+        ck("a PARTIAL window withholds the figure rather than understating it",
+           blk["cost_per_result"] is None, str(blk))
+        ck("and says why, so silence doesn't read as a bug",
+           blk["withheld_reason"] == "partial_window", str(blk))
+        ck("its spend is still reported, so the window isn't simply blank",
+           blk["spend"] == 100.0, str(blk))
+
+        none_yet = dict(base, results={"trial": 0})
+        blk = m._since_change_block("trial", none_yet)
+        ck("no results yet divides by nothing rather than by zero",
+           blk["cost_per_result"] is None and blk["withheld_reason"] == "no_results_yet",
+           str(blk))
+
+        no_spend = dict(base, totals={"trial": {"spend": 0.0}})
+        blk = m._since_change_block("trial", no_spend)
+        ck("no spend yet is reported as that, not as a free result",
+           blk["cost_per_result"] is None and blk["withheld_reason"] == "no_spend_yet",
+           str(blk))
+
+        settled = dict(base, since=date.today() - timedelta(days=m.ATTRIBUTION_WINDOW_DAYS + 1))
+        blk = m._since_change_block("trial", settled)
+        ck("a change older than the attribution window is no longer provisional",
+           blk["provisional"] is False, str(blk))
+
+        ck("a campaign with no change to measure from carries no block at all",
+           m._since_change_block("trial", None) is None)
+
+        # A stream nothing spent on must not invent a figure here either.
+        empty2, _ = m.build_streams([], {"spend": 0.0}, trial_results=0,
+                                    webinar_counts={"attributed": 0, "unattributed": 0, "total": 0},
+                                    since_change=since_ctx)
+        ck("a campaign with no ads still reports a block without dividing by zero",
+           all(s["since_change"] is not None and s["since_change"]["cost_per_result"] is not None
+               or s["since_change"]["withheld_reason"] for s in empty2))
 
     await engine.dispose()
     print(f"\n{PASS} passed, {FAIL} failed")
