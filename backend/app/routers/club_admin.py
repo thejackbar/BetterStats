@@ -4181,7 +4181,8 @@ async def list_webinar_registrations(
                utm_source, utm_medium, utm_campaign, utm_content, utm_term,
                click_id, click_source, referrer, landing_path,
                visitor_id, email_sent, email_error,
-               reminder_sent_at, reminder_error, created_at
+               reminder_sent_at, reminder_error,
+               streamyard_id, streamyard_error, created_at
           FROM webinar_registrations
          ORDER BY created_at DESC
          LIMIT 5000
@@ -4219,6 +4220,26 @@ async def send_webinar_reminders_now(
     """
     from app.services import webinar as _webinar
     return await _webinar.send_reminders(db)
+
+
+@router.post("/super/webinar-streamyard-sync")
+async def sync_webinar_streamyard_now(
+    _: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Push every registrant StreamYard does not have yet, now.
+
+    The register route pushes each one as it arrives and the hourly upkeep pass
+    catches up anything it missed, so this exists for the two cases where an
+    hour is too long to wait: the registrations taken BEFORE the push was
+    built, and a run of failures somebody has just fixed at the StreamYard end.
+
+    Runs the SAME `webinar.sync_streamyard`, and a row already pushed is
+    skipped before any request is made — so pressing it twice registers nobody
+    twice and costs nothing.
+    """
+    from app.services import webinar as _webinar
+    return await _webinar.sync_streamyard(db)
 
 
 _ONBOARDING_STATUSES = {"new", "contacted", "onboarded", "closed"}

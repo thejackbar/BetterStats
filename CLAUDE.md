@@ -649,6 +649,97 @@ able to launch this function even if the typical Crawl is stopped)."
   and said nothing about the other twenty-nine. Every read of an element this
   change ADDS goes through `textOf()`, which returns '' for an absent locator.
 
+### One form, two lists: pushing the registrant into StreamYard (migration 300, v9.71.6)
+
+Asked for directly, after the reminder below shipped: **"I want just one single
+form and the registrants to be put into StreamYard as well as in BetterCricket
+rather than making someone register twice."**
+
+- **THE PUSH IS BUILT AND IT WORKS AGAINST THE LIVE API, verified through the
+  SHIPPED function rather than a curl.** `POST oa-api.streamyard.com/api/public/
+  webinars/{id}/registrations` returns **201** with the registration's id;
+  `services/streamyard.push_registration` is what calls it, and every registrant
+  is pushed as they arrive. So StreamYard's registrant list, its attendee report
+  and its own reminders all know who is coming, off our one form.
+- **REMOVING THE SECOND FORM IS STILL THE STREAMYARD TOGGLE, and that is not a
+  shortcut — it is the only thing that works.** Three things were measured
+  before settling on it, and each one closes a route that looks open from
+  reading their bundle: the browser cannot register from our page (a CORS
+  preflight from `betterat.cricket` answers **`{"message":"CORS error: Origin
+  not allowed"}`**); a registration is bound to the SESSION that created it
+  (`GET /webinars/{id}` reads `isUserRegistered: true` for the session that
+  POSTed and **401s on the registration id alone**), so one our backend creates
+  cannot be handed to the visitor's browser; and the `?token=` a StreamYard
+  reminder links to is **not** the registration id — `/watch/{id}?token={id}`
+  leaves `sessionRegistrationId` empty in the page's own server-rendered props,
+  and so do `registrationId=`, `rid=` and both `embed=true` variants. **With the
+  gate on there is no way to skip the form; with it off there is no form to
+  skip.** The push is what makes turning it off cost nothing.
+- **THE FIELD IDS ARE FETCHED, NEVER HARDCODED.** The payload keys on
+  per-definition uuids (`fields.definitionId` + `fields.values[{field id}]`),
+  which change the moment somebody edits the registration form in StreamYard —
+  so `_field_map` reads `registrationFieldDefinitions` and maps by `type`,
+  cached ten minutes so an edit is picked up within the hour rather than at the
+  next deploy. Hardcoding them would work today and break silently the first
+  time a field is added.
+- **THE BROADCAST IS NEVER A SECOND CONSTANT.** `webinar_id_from` parses it out
+  of `EVENT.watch_url`, which is already the one place the event is named. A
+  watch link that is not StreamYard's yields None and every function no-ops,
+  which is also what makes the next event's setup one line rather than two.
+- **THEIR API IS IDEMPOTENT ON THE EMAIL BUT DOES NOT OVERWRITE**, verified:
+  posting twice returns the SAME id and leaves the stored values alone. So a
+  retry is free — and a row already pushed is skipped before any request is
+  made, because re-pushing a corrected name would cost a request and change
+  nothing at their end.
+- **A REQUIRED FIELD CANNOT BE BLANK, AND A MONONYM IS THEREFORE SKIPPED RATHER
+  THAN GIVEN AN INVENTED SURNAME.** Measured: `lastName: ""` is a **400** while
+  an empty optional phone is accepted. A name we made up would sit beside that
+  person's chat messages in front of everyone watching; they are still
+  registered with us, still emailed, and — with the gate off — the link still
+  lets them in. The reason is recorded on the row rather than being silent.
+- **A SKIP IS NOT A FAILURE, and the staff list says so differently.** `no
+  surname to send` and `the broadcast has no registration form` are rows there
+  was nothing to do for; an HTTP error is one that went wrong. Both land in
+  `streamyard_error`, and both read as `NOT SENT` with the reason on hover
+  rather than as `FAILED`.
+- **BEST-EFFORT AT EVERY STEP, because it is an undocumented API.** The
+  registration is complete once our own row is written and the page has already
+  handed the link over, so the push is backgrounded on its own session, never
+  raises, and records its outcome on the row. Everything else — the
+  registration, the confirmation email, the reminder, the link — works with
+  this erroring, switched off, or removed by StreamYard tomorrow.
+- **THE HOURLY PASS IS THE CATCH-UP, NOT THE MECHANISM.** `webinar_upkeep`
+  (the reminder job, widened) pushes anyone with no id, so a registration taken
+  before this existed and a push that failed on a wobble both self-heal. It
+  settles — a second pass over a list everybody is on considers nobody and
+  makes no request. `POST /club-admin/super/webinar-streamyard-sync` is the
+  button for when an hour is too long to wait.
+- **Verified against a real Postgres** (`verify_webinar.py`, 259 checks: the
+  DDL adding the pair, the id derived from the watch link and a non-StreamYard
+  link no-oping, all three name splits, a push stamping the id, a row already
+  pushed skipped before any request, a mononym recorded as a skip with no id, a
+  refusal recorded rather than raised, the catch-up making one request per row
+  and settling to none, and the register route asserted structurally to fire
+  it) **with a control run**: 7 fail against the previous commit and the other
+  234 are still reported. **No live call is made by the suite** —
+  `push_registration` is stubbed, because a verification run must not create
+  real registrations in somebody's StreamYard account.
+- **THE LIVE API WAS EXERCISED SEPARATELY, THROUGH THE SHIPPED FUNCTION**, which
+  is the only way to know an undocumented endpoint's real shape: 201 with an id,
+  a second push returning the same id, the mononym skipped and a non-StreamYard
+  link no-oping. **It left four test registrations in the account**
+  (`bettercricket-integration-test@`, `bc-it-a@`, `bc-it-b@`,
+  `bc-shipped-fn-test@`, all `betterat.cricket`) and **there is no public DELETE
+  — every id 404s** — so they have to be removed from the StreamYard dashboard
+  by hand. Use an obviously-marked address if this is ever done again.
+- **STILL ACCOUNT-SIDE**: turn registration OFF on the StreamYard broadcast.
+  That is the half that removes the second form, and no code in this repo
+  changes it. **Not established, because it needs that toggle flipped**: whether
+  their API still accepts a push once registration is disabled. The push handles
+  a refusal as an ordinary recorded error, so if it stops working the worst case
+  is one form and our own list — check the StreamYard column after the first
+  registration to see which way it fell.
+
 ### The second form is StreamYard's, and the reminder that replaces it (migration 299, v9.71.5)
 
 Reported with the campaign live: "when you enter your details it takes you to a

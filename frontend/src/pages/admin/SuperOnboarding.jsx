@@ -36,6 +36,7 @@ function WebinarRegistrations() {
   const [open, setOpen] = useState(true)
   const [reminding, setReminding] = useState(false)
   const [reminderNote, setReminderNote] = useState('')
+  const [pushing, setPushing] = useState(false)
 
   const load = () => api.superWebinarRegistrations()
     .then((data) => { setRows(Array.isArray(data) ? data : []); setError('') })
@@ -71,9 +72,37 @@ function WebinarRegistrations() {
     }
   }
 
+  // The catch-up, not the mechanism: each registration is pushed as it arrives
+  // and the hourly pass retries anything that failed. This is for the two cases
+  // where an hour is too long — the registrations taken before the push
+  // existed, and a run of failures just fixed at the StreamYard end. A row
+  // already pushed is skipped before any request, so pressing it twice
+  // registers nobody twice.
+  const pushStreamyard = async () => {
+    if (pushing) return
+    setPushing(true)
+    setReminderNote('')
+    try {
+      const r = await api.superSyncWebinarStreamyard()
+      setReminderNote(
+        r?.considered
+          ? `StreamYard: ${r.pushed} pushed`
+            + (r.skipped ? `, ${r.skipped} skipped` : '')
+            + (r.failed ? `, ${r.failed} failed` : '')
+          : 'StreamYard already has every registrant.'
+      )
+      await load()
+    } catch (e) {
+      setReminderNote(e.message || 'Could not push to StreamYard.')
+    } finally {
+      setPushing(false)
+    }
+  }
+
   const csv = () => {
     const cols = ['created_at', 'name', 'email', 'phone', 'club', 'role', 'utm_campaign',
-                  'utm_source', 'utm_medium', 'utm_content', 'email_sent', 'reminder_sent_at']
+                  'utm_source', 'utm_medium', 'utm_content', 'email_sent', 'reminder_sent_at',
+                  'streamyard_id']
     const escape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`
     const body = [cols.join(','), ...rows.map((r) => cols.map((c) => escape(r[c])).join(','))].join('\n')
     const url = URL.createObjectURL(new Blob([body], { type: 'text/csv;charset=utf-8' }))
@@ -100,6 +129,16 @@ function WebinarRegistrations() {
           </p>
         </div>
         <div className="ml-auto flex gap-2">
+          {rows.length > 0 && (
+            <button
+              onClick={pushStreamyard}
+              disabled={pushing}
+              title="Register anyone StreamYard does not have yet"
+              className="font-mono text-[10px] tracking-wide2 uppercase text-pb-faint hover:text-pb-text border pb-hairline rounded px-3 py-1.5 transition disabled:opacity-50"
+            >
+              {pushing ? 'Pushing…' : 'Push to StreamYard'}
+            </button>
+          )}
           {rows.length > 0 && (
             <button
               onClick={remind}
@@ -148,6 +187,7 @@ function WebinarRegistrations() {
                 <th className="px-3 py-2.5">Campaign</th>
                 <th className="px-3 py-2.5">Email</th>
                 <th className="px-3 py-2.5">Reminder</th>
+                <th className="px-3 py-2.5">StreamYard</th>
               </tr>
             </thead>
             <tbody>
@@ -190,6 +230,18 @@ function WebinarRegistrations() {
                       ? <span className="font-mono text-[10px] text-emerald-400" title={fmtDate(r.reminder_sent_at)}>SENT</span>
                       : r.reminder_error
                         ? <span className="font-mono text-[10px] text-amber-400" title={r.reminder_error}>FAILED</span>
+                        : <span className="text-pb-faintest">-</span>}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    {/* Whether StreamYard has them too, so nobody is asked to
+                        register a second time. A reason without an id is not
+                        always a failure — "no surname to send" is a row there
+                        was nothing to do for, which is why the amber carries
+                        the reason rather than just reading FAILED. */}
+                    {r.streamyard_id
+                      ? <span className="font-mono text-[10px] text-emerald-400" title={r.streamyard_id}>REGISTERED</span>
+                      : r.streamyard_error
+                        ? <span className="font-mono text-[10px] text-amber-400" title={r.streamyard_error}>NOT SENT</span>
                         : <span className="text-pb-faintest">-</span>}
                   </td>
                 </tr>

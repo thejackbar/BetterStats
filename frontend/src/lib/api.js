@@ -1986,6 +1986,11 @@ export const api = {
   // these, and nobody is emailed twice either way (the claim is on the row).
   superSendWebinarReminders: () =>
     request('/club-admin/super/webinar-reminders', { method: 'POST' }),
+  // Push anyone StreamYard does not have yet. The register route pushes each
+  // one as it arrives and the hourly pass retries; this is the catch-up for
+  // registrations taken before that existed.
+  superSyncWebinarStreamyard: () =>
+    request('/club-admin/super/webinar-streamyard-sync', { method: 'POST' }),
   // Club lookup behind the Contact form's Club name field. Same Cricket
   // Australia club list the self-serve registration wizard searches, on the
   // Contact form's own endpoint so it works whether or not self-serve

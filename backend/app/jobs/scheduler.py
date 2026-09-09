@@ -657,20 +657,37 @@ async def refresh_scout_players():
             logger.error(f"BetterScout refresh failed for club {org_guid}: {e}")
 
 
-async def send_webinar_reminders():
-    """Remind everyone registered for the webinar, a few hours before it starts.
+async def webinar_upkeep():
+    """Keep the webinar's two lists in step, then remind on the day.
 
-    Hourly rather than a single cron at the right moment, and the WINDOW is
-    what decides — `webinar.send_reminders` returns immediately on every run
-    outside it. A one-shot cron pinned to the hour has to be moved by hand for
-    the next event and misses entirely if the app happens to be restarting; a
-    cheap hourly check that reads the event's own constant does not.
+    Two jobs in one hourly pass because they answer one question — is every
+    registrant where they should be, and have they been told:
 
-    Costs one indexed UPDATE that matches nothing on all but a handful of runs
-    in the event's whole life.
+      1. Push anyone StreamYard does not have yet. The register route pushes
+         each one as it arrives, so this only ever catches up registrations
+         taken before that existed and pushes that failed on a wobble at their
+         end. Bounded, and it writes nothing once everybody is across.
+      2. Send the reminder, if the event's own send window is open.
+
+    HOURLY RATHER THAN A CRON PINNED TO THE RIGHT MOMENT, and the window is
+    what decides — `webinar.send_reminders` returns immediately outside it. A
+    one-shot cron has to be moved by hand for the next event and misses
+    entirely if the app happens to be restarting; a cheap hourly check that
+    reads the event's own constant does not.
     """
     from app.models.db import async_session_maker
     from app.services import webinar
+
+    # Nothing to keep in step once the event has been and gone.
+    if not webinar.EVENT.is_past():
+        try:
+            async with async_session_maker() as session:
+                synced = await webinar.sync_streamyard(session)
+            if synced.get("considered"):
+                logger.info("Webinar StreamYard sync: %s", synced)
+        except Exception as e:
+            logger.error(f"Webinar StreamYard sync failed: {e}")
+
     if not webinar.reminder_window_open():
         return
     try:
@@ -958,12 +975,12 @@ def start_scheduler():
         id="daily_scout_refresh",
         replace_existing=True,
     )
-    # Webinar reminder — hourly at :20, gated on the event's own send window
-    # (see send_webinar_reminders for why hourly rather than one pinned cron).
-    # Off the hour so it never lands in the same minute as the Meta Ads
-    # snapshot at :05.
+    # Webinar upkeep — hourly at :20. Pushes any registrant StreamYard does not
+    # have, then sends the reminder if the event's own window is open (see
+    # webinar_upkeep for why hourly rather than one pinned cron). Off the hour
+    # so it never lands in the same minute as the Meta Ads snapshot at :05.
     scheduler.add_job(
-        send_webinar_reminders,
+        webinar_upkeep,
         trigger="cron",
         minute=20,
         id="webinar_reminders",

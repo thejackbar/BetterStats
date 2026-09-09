@@ -55,6 +55,13 @@ STATEMENTS: list[str] = [
         -- and a refusal clears it back to NULL so the next hour retries.
         reminder_sent_at TIMESTAMPTZ,
         reminder_error   TEXT,
+        -- Whether this registrant was also pushed into StreamYard's own
+        -- registrant list, so they never fill in a second form. Best-effort
+        -- against an undocumented API, so a failure has to be VISIBLE rather
+        -- than silent: the id when it worked, the reason when it did not, and
+        -- both NULL for a row nothing has tried yet.
+        streamyard_id    TEXT,
+        streamyard_error TEXT,
         created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
@@ -74,6 +81,15 @@ STATEMENTS: list[str] = [
     """
     ALTER TABLE webinar_registrations
         ADD COLUMN IF NOT EXISTS reminder_error TEXT
+    """,
+    # And again for the StreamYard pair — see migration 300.
+    """
+    ALTER TABLE webinar_registrations
+        ADD COLUMN IF NOT EXISTS streamyard_id TEXT
+    """,
+    """
+    ALTER TABLE webinar_registrations
+        ADD COLUMN IF NOT EXISTS streamyard_error TEXT
     """,
     # One row per person per event. Folded, because an address typed with a
     # capital is the same person — a second registration corrects the row it

@@ -607,3 +607,103 @@ def _reminder_text(*, name: str, event: WebinarEvent, watch_url: str) -> str:
         "Can't make it? You don't need to do anything - we'll email you the full "
         "recording afterwards.\n"
     )
+
+
+# ----------------------------------------------------------------------
+# StreamYard: one form, two lists.
+#
+# A registrant fills OUR form and nothing else. Their details are pushed into
+# StreamYard's own registrant list afterwards, so the broadcast's attendee
+# report and its own reminders still know who is coming — and so StreamYard's
+# registration gate can be switched off, which is the half that actually
+# removes the second form (see services/streamyard.py for what was tried and
+# why nothing else works).
+#
+# BEST-EFFORT AT EVERY STEP. A registration is complete once our own row is
+# written; the page has already handed the viewing link over by then. So this
+# never raises, never blocks, and records its outcome on the row rather than
+# only in a log.
+# ----------------------------------------------------------------------
+
+async def push_to_streamyard(
+    db: AsyncSession,
+    *,
+    registration_id: str,
+    name: str,
+    email: str,
+    phone: Optional[str] = None,
+    event: WebinarEvent = EVENT,
+) -> dict:
+    """Push one registration into StreamYard and stamp what happened.
+
+    Skipped outright for a row already pushed — their API is idempotent on the
+    email, but it also does NOT overwrite, so re-pushing a corrected name would
+    cost a request and change nothing.
+    """
+    from app.services import streamyard
+
+    already = (await db.execute(text(
+        "SELECT streamyard_id FROM webinar_registrations WHERE id = CAST(:id AS uuid)"
+    ), {"id": registration_id})).scalar_one_or_none()
+    if already:
+        return {"ok": True, "id": already, "skipped": "already pushed"}
+
+    result = await streamyard.push_registration(
+        watch_url=event.watch_url, name=name, email=email, phone=phone)
+    # A skip is not a failure and must not read as one on the staff list — it
+    # is recorded as the plain reason there was nothing to do.
+    note = result.get("error") or result.get("skipped")
+    try:
+        await db.execute(text("""
+            UPDATE webinar_registrations
+               SET streamyard_id = :sid, streamyard_error = :note, updated_at = NOW()
+             WHERE id = CAST(:id AS uuid)
+        """), {"id": registration_id, "sid": result.get("id"),
+               "note": _clip(note, 500)})
+        await db.commit()
+    except Exception:
+        logger.exception("webinar: could not record the StreamYard outcome for %s", email)
+        await db.rollback()
+    return result
+
+
+async def sync_streamyard(
+    db: AsyncSession,
+    *,
+    event: WebinarEvent = EVENT,
+    limit: int = 200,
+) -> dict:
+    """Push every registrant StreamYard does not have yet.
+
+    THE CATCH-UP, not the mechanism — `public_webinar.register` pushes each one
+    as it arrives. This is what covers the registrations taken before the push
+    existed, and a push that failed on a wobble at their end.
+
+    A row that has already been SKIPPED for a reason that will not change (no
+    surname to send) is retried anyway: it costs one request, and the reason
+    can stop being true if somebody corrects their name.
+    """
+    rows = (await db.execute(text("""
+        SELECT id, name, email, phone
+          FROM webinar_registrations
+         WHERE event_key = :k AND streamyard_id IS NULL
+         ORDER BY created_at
+         LIMIT :limit
+    """), {"k": event.key, "limit": limit})).mappings().all()
+
+    pushed = failed = skipped = 0
+    for row in rows:
+        result = await push_to_streamyard(
+            db, registration_id=str(row["id"]), name=row["name"] or "",
+            email=row["email"] or "", phone=row["phone"], event=event)
+        if result.get("ok"):
+            pushed += 1
+        elif result.get("skipped"):
+            skipped += 1
+        else:
+            failed += 1
+    if rows:
+        logger.info("webinar: StreamYard sync — %s pushed, %s skipped, %s failed",
+                    pushed, skipped, failed)
+    return {"considered": len(rows), "pushed": pushed,
+            "skipped": skipped, "failed": failed}

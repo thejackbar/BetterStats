@@ -211,6 +211,19 @@ async def register(
         recording_url=recording_url if webinar.EVENT.is_past() else None,
     )
 
+    # ONE FORM, TWO LISTS. StreamYard's own registration asks for exactly what
+    # this form already collected, so the registrant is pushed into their list
+    # from here instead of being asked again on their domain. Backgrounded and
+    # best-effort for the same reason the email is: the registration is already
+    # written and the link already handed over, so an undocumented third-party
+    # API must not be able to slow or fail either. Never for a past event —
+    # there is nothing left to register for.
+    if not webinar.EVENT.is_past():
+        background.add_task(
+            _push_streamyard_bg,
+            registration_id=result["id"], name=name, email=email, phone=phone,
+        )
+
     if result["created"]:
         # Server-side CompleteRegistration, sharing the browser pixel's own
         # event_id so Meta dedupes the pair into one conversion rather than
@@ -274,3 +287,19 @@ async def _send_confirmation_bg(*, registration_id: str, name: str, email: str,
             )
     except Exception:
         logger.exception("webinar: confirmation task failed for %s", email)
+
+
+async def _push_streamyard_bg(*, registration_id: str, name: str, email: str,
+                              phone: Optional[str]) -> None:
+    """Own session — a background task must never borrow the request's, which is
+    closed by the time this runs. Never raises."""
+    from app.models.db import async_session_maker
+
+    try:
+        async with async_session_maker() as session:
+            await webinar.push_to_streamyard(
+                session, registration_id=registration_id, name=name,
+                email=email, phone=phone,
+            )
+    except Exception:
+        logger.exception("webinar: StreamYard push task failed for %s", email)
