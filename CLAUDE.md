@@ -1,5 +1,128 @@
 # BetterStats — Claude Session Notes
 
+## ONE CAMPAIGN, TWO PRODUCTS, ONE PIXEL EVENT (v9.72.0, Sep 2026)
+
+The Meta ad account was restructured 8-9 Sep 2026 and `BC_AU_Trials_CBO_Aug2026`
+now runs a webinar ad beside the trial ads. Asked for as "update the page for
+the two new ads"; the brief's own framing is the important half: *"registrations
+is no longer a single number, and any reporting that treats it as one is now
+silently wrong."*
+
+- **BOTH LANDING PAGES FIRE THE SAME PIXEL EVENT ON THE SAME DATASET, AND ONLY
+  A PARAMETER SEPARATES THEM.** `/trial` and `/demo` each send
+  `CompleteRegistration` to 1317878090534903, told apart by `content_category`
+  alone — `self_serve_trial` (value 399 AUD) and `webinar` (no value). A trial
+  signup is a prospective paying club; a webinar registration is somebody who
+  watched a form. Every cost-per-result figure that adds them describes neither.
+- **THE PAGE WAS NEVER DOUBLE-COUNTING, AND ESTABLISHING THAT FIRST IS WHAT
+  STOPPED THIS BEING FIXED THE WRONG WAY.** `get_registration_count` reads
+  `organisations`, so it has only ever counted trial signups. The bug was the
+  DIVISOR: `cost_per_lead` was whole-campaign spend over trial signups, so the
+  trial was charged with the webinar's spend from the moment both ran together.
+  On the brief's own lifetime figures that is **A$46.84 against a true
+  A$43.90** — and it widens with every dollar the webinar spends.
+- **SO SPEND IS SPLIT PER STREAM FROM THE PER-AD ROWS.** Ad level is the finest
+  split Meta gives us and the two streams are cleanly separable there, so this
+  is exact rather than apportioned. `stream_totals` / `build_streams` are the
+  one definition; `campaign.cost_per_lead` is kept under its old name and now
+  means the trial's own.
+- **`stream_for_ad` FALLS BACK TO THE AD'S NAME, and that is the half that
+  keeps working.** `AD_DESTINATIONS` is exact where we can be, never the gate —
+  a creative added in Ads Manager tomorrow is classified by its name
+  (`Ad_Webinar_*`) with no code change. **Never from the AD SET name**:
+  `AS_Cold_Broad_AU_LPV` is now wrong about both "broad" and "LPV".
+- **`CAMPAIGN_UTM_NAMES` HAD TO BECOME A SET PER CAMPAIGN, AND A SINGLE VALUE
+  WOULD HAVE FAILED CLOSED.** One campaign now carries two destination
+  taxonomies (`webinar_21sep2026`, `trial_evergreen_sep2026`), neither of them
+  the Ads Manager name the old convention assumed. Unrecognised tags are
+  DROPPED, so every registration through the new ads would have read as
+  belonging to no campaign — which shows up as "the new ads produced nothing"
+  rather than as a bug.
+- **A LAZY IMPORT OF THE RENAMED CONSTANT SURVIVED `py_compile` AND
+  `vite build`.** `sales_workspace._ad_click_history` does
+  `from app.services.meta_ads import ... CAMPAIGN_UTM_NAMES` INSIDE a function
+  body — the exact trap the Twenty-retirement note above records. Found by a
+  sweep that walks every `ImportFrom` and `meta_ads.<attr>` in `app/` and asks
+  whether the name still exists; worth re-running on any rename here. Worse
+  than an ImportError, it would then have read `.values()` of a set-valued map
+  and marked genuine ad traffic "unrecognised campaign".
+- **THE PHANTOM VALUE WAS BEING CREATED AT SOURCE, NOT JUST IN THE REPORT.**
+  `meta_capi.send_complete_registration_event` hardcoded the trial's
+  `content_category` and `value=399`, and `public_webinar.py` took those
+  defaults — so every webinar registration reached Meta server-side labelled a
+  trial signup carrying A$399, and the deduped conversion's two halves
+  contradicted each other. The caller names its own event now; the defaults
+  stay the trial's only because it was the first caller.
+- **THE SINGLE CAMPAIGN-WIDE FUNNEL WAS REMOVED, NOT RELABELLED.** It put
+  campaign-wide impressions above a bottom row counting trial signups only, so
+  the drop at the end read as a conversion collapse when it was two products in
+  one column. `compute_stream_funnel` builds one per stream; the webinar's has
+  no "Club selected" step because there is no wizard on `/demo`.
+- **THE UNTAGGED WEBINAR REGISTRATIONS ARE REPORTED, NEVER ABSORBED.** The ad's
+  primary text carries a plain link with no UTMs (it had to match a line on the
+  artwork), so some genuinely ad-driven registrations are indistinguishable
+  from organic. Cost per result is computed on the attributed count alone —
+  which reads HIGH, the safe direction — with the shortfall named beside it.
+- **SPEND IS NOT SUBJECT TO THE 7-DAY ATTRIBUTION WINDOW, and the first cut had
+  that wrong.** Meta credits a CONVERSION to the click date and back-fills for
+  seven days; money spent on a day is settled that day. Gating budget pacing on
+  the attribution window made it unanswerable for a week after every change —
+  the two conditions are contradictory the day a change lands. Pacing excludes
+  only today (a part-day); the provisional guard applies to the conversion
+  insights it genuinely bites on.
+- **PACING IS MEASURED FROM THE LAST DELIBERATE CHANGE, NEVER ACROSS IT.**
+  `CAMPAIGN_ANNOTATIONS` is a per-campaign list of `{date, label, detail}` —
+  add a row rather than reasoning about a discontinuity somewhere else. One day
+  after a change there are not two settled days to pace off and the insight
+  correctly says nothing; that is not a bug, and a test expecting otherwise was
+  the wrong expectation.
+- **A REFERENCE LINE WRAPPED IN A FRAGMENT IS SILENTLY DROPPED BY RECHARTS.**
+  It finds `ReferenceLine`/`ReferenceArea` by walking `React.Children` and
+  reading each child's `type`; React.Children flattens an ARRAY but treats a
+  Fragment as one opaque child. The chart renders perfectly, with no error, and
+  simply has no marker on it. `chartMarkers()` returns an array. **Found by the
+  browser suite reporting zero markers against code that reads as though it
+  draws them.**
+- **AND RECHARTS DRAWS A `ReferenceArea` AS A `<path>`, NOT A `<rect>`** — the
+  first cut of that check selected `svg rect` and reported zero against code
+  that was drawing the band correctly. It measures the real element AND its
+  width now: a band collapsed to nothing would pass a bare presence check.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_meta_ads_streams.py`, 43 checks through the
+  shipped service: an unmapped ad classified by name, both new taxonomies
+  recognised and an EDM's still refused, each stream's cost per result from its
+  own spend, the pre-split figure shown to be higher, only the trial carrying
+  value, the untagged registrations counted apart, a creative keeping its two
+  result counts separate, nothing dividing by zero on an ad that never spent,
+  pacing reading the post-change rate rather than the pre-change one or a
+  blend, and a zero-result stream NOT reported as failing while it settles)
+  **with a control run** that names all ten missing parts rather than dying on
+  the first ImportError.
+- **Driven in Chromium** (`verify_meta_ads_streams_browser.mjs`, 41: two stream
+  cards with two different costs per result, no combined total anywhere, the
+  webinar card saying it carries no value, two funnels, the change marker on
+  every chart, the shaded band measured as covering the trailing half of the
+  window, the creative table, and an ad that has not gone live yet breaking
+  nothing) **with a control run**: 32 of the 41 fail against the previous
+  commit, and the nine that pass in both are don't-regress guards (no NaN, no
+  page errors, no overflow) rather than checks that should have caught it.
+- **FIVE CHECKS COULD NOT HAVE FAILED AS FIRST WRITTEN, and the control run is
+  what found them.** Three compared against labels the page renders CSS-
+  `uppercase`, which `innerText` returns transformed — the trap this file
+  already records, hit three times in one suite. One matched an insight's prose
+  rather than the funnel it claimed to read. Two used `.every()` on an array
+  that is empty in the control, which is vacuously true.
+- **VERIFIED AGAINST THE LIVE AD ACCOUNT for structure, not for figures.** The
+  Meta MCP tools confirm the account id, all six ads and their names; they
+  return entity ids and names only, no spend or conversion metrics, so the
+  numeric totals were NOT independently tied to Ads Manager here. The app's own
+  backend holds the token and queries the Graph API directly.
+- **NOTICED, NOT BUILT**: nothing reads Meta's own `content_category` breakdown
+  off the insights API, so Meta's self-reported conversion counts are still
+  un-splittable and are shown only as the labelled "Meta-reported" comparison.
+  The campaign plan (`CAMPAIGN_PLANS`) is still one budget per campaign rather
+  than per stream, so pacing is campaign-wide.
+
 ## Twenty is retired; the engagement score, the CRM and Sales Management are not (v9.71.0, Sep 2026)
 
 Asked for directly: *"the calculation and continual re-calculation of engagement

@@ -94,6 +94,51 @@ https://betterat.cricket/trial?utm_source=facebook&utm_medium=paid_social&utm_ca
 - Instagram placements ride the same URL; `utm_source` stays `facebook`
   (the click id source detection still distinguishes actual IG shares).
 
+### 4a. The 8–9 September 2026 restructure — one campaign, two destinations
+
+`BC_AU_Trials_CBO_Aug2026` now runs a webinar ad alongside the trial ads, and
+the "`utm_campaign` identical across the whole campaign" rule above **no longer
+holds for it**. The two destinations tag themselves by PRODUCT rather than by
+Ads Manager campaign:
+
+|               | webinar (`/demo`)      | trial (`/trial`)          |
+|---------------|------------------------|---------------------------|
+| `utm_source`  | `meta`                 | `meta`                    |
+| `utm_medium`  | `paid_social`          | `paid_social`             |
+| `utm_campaign`| `webinar_21sep2026`    | `trial_evergreen_sep2026` |
+| `utm_content` | `live_demo_hero`       | `spreadsheet_hero`        |
+
+So `meta_ads.CAMPAIGN_UTM_CAMPAIGNS` maps a campaign id to a **set** of tags,
+not one. It was a single value, and a single value would have failed CLOSED
+the day these ads went live — every registration through them reading as
+belonging to no campaign, which shows up as "the new ads produced nothing"
+rather than as a bug. Add the tag there when a new destination taxonomy is
+introduced.
+
+**Both landing pages fire the SAME pixel event.** `/trial` and `/demo` each
+send `CompleteRegistration` on the same dataset (1317878090534903), separated
+only by `content_category` — `self_serve_trial` (carrying a value of 399 AUD)
+and `webinar` (carrying none). A trial signup is a prospective paying club; a
+webinar registration is somebody who watched a form. Anything that adds the two
+together produces a cost per result that describes neither, which is why the
+dashboard splits every conversion figure by stream and why only the trial ever
+contributes to value or ROAS.
+
+**Known gap, and not a tracking fault:** the webinar ad's primary text carries
+a plain-text link (`betterat.cricket/demo`) with no UTMs on it, because it had
+to match a line printed on the artwork. A minority of genuinely ad-driven
+registrations therefore arrive untagged and are indistinguishable from organic
+ones. The dashboard reports that count beside the attributed one rather than
+claiming or hiding it, so the true cost per webinar registration sits somewhere
+below the figure shown.
+
+**The ad set name is now misleading.** `AS_Cold_Broad_AU_LPV` says "cold broad"
+and "LPV"; it is neither broad (AU men 30–64 with a cricket interest, Advantage+
+Audience off) nor optimising for landing page views (it optimises for
+`OFFSITE_CONVERSIONS` / CompleteRegistration on a 7-day click window). Nothing
+in the reporting code derives anything from ad set names — classify by ad name
+or by `content_category` instead.
+
 ## 5. Creative brief (three concepts per ad set)
 
 All creative can be produced from real product screens; nothing mocked up.

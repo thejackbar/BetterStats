@@ -233,6 +233,15 @@ async def register(
             user_agent=request.headers.get("user-agent"),
             fbp=meta.fbp if meta else None,
             fbc=meta.fbc if meta else None,
+            # THE SAME THREE VALUES THE BROWSER PIXEL SENDS (Demo.jsx), and
+            # they have to be passed rather than defaulted: the two halves of
+            # one deduped conversion must not describe two different products.
+            # A webinar registration carries NO value — it is a form fill, not
+            # a club buying anything, and inheriting the trial's A$399 default
+            # invented revenue on every one of them.
+            value=0,
+            content_name=f"Webinar Registration - {webinar.EVENT.date_label} 2026",
+            content_category="webinar",
         )
         # A breadcrumb on this visitor's own journey, so a registration shows
         # up inline on the Usage page rather than only as a row in its table.
