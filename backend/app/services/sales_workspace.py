@@ -715,7 +715,7 @@ async def meta_ad_summary(session: AsyncSession, club) -> Optional[dict]:
     if not rows:
         return None
 
-    from app.services.meta_ads import AD_DESTINATIONS, CAMPAIGN_UTM_NAMES
+    from app.services.meta_ads import AD_DESTINATIONS, CAMPAIGN_UTM_CAMPAIGNS
 
     # utm_content is the tag on an ad's own destination URL, so it names the
     # creative; utm_campaign names the campaign. Both are read back through the
@@ -723,7 +723,14 @@ async def meta_ad_summary(session: AsyncSession, club) -> Optional[dict]:
     # reads as "Ad_ClubHistory_Trial_Hero_v3" in both places and an untagged or
     # retired one falls back to whatever tag it actually carried.
     ad_names = {a["utm_content"]: a["name"] for a in AD_DESTINATIONS.values() if a.get("utm_content")}
-    campaign_names = set(CAMPAIGN_UTM_NAMES.values())
+    # A SET PER CAMPAIGN since the 8-9 Sep 2026 restructure, when one campaign
+    # started running two destination taxonomies (`webinar_21sep2026` and
+    # `trial_evergreen_sep2026` alongside its own Ads Manager name). This used
+    # to read `.values()` of a single-valued map; against the set-valued one
+    # that yields sets rather than strings, so every real tag would have read
+    # as unknown — a rep's click history would have marked genuine ad traffic
+    # "unrecognised campaign".
+    campaign_names = {name for names in CAMPAIGN_UTM_CAMPAIGNS.values() for name in names}
 
     def _tally(key):
         counts: dict[str, int] = {}

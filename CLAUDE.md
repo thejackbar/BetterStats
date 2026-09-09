@@ -1,5 +1,356 @@
 # BetterStats — Claude Session Notes
 
+## ONE CAMPAIGN, TWO PRODUCTS, ONE PIXEL EVENT (v9.72.0, Sep 2026)
+
+The Meta ad account was restructured 8-9 Sep 2026 and `BC_AU_Trials_CBO_Aug2026`
+now runs a webinar ad beside the trial ads. Asked for as "update the page for
+the two new ads"; the brief's own framing is the important half: *"registrations
+is no longer a single number, and any reporting that treats it as one is now
+silently wrong."*
+
+- **BOTH LANDING PAGES FIRE THE SAME PIXEL EVENT ON THE SAME DATASET, AND ONLY
+  A PARAMETER SEPARATES THEM.** `/trial` and `/demo` each send
+  `CompleteRegistration` to 1317878090534903, told apart by `content_category`
+  alone — `self_serve_trial` (value 399 AUD) and `webinar` (no value). A trial
+  signup is a prospective paying club; a webinar registration is somebody who
+  watched a form. Every cost-per-result figure that adds them describes neither.
+- **THE PAGE WAS NEVER DOUBLE-COUNTING, AND ESTABLISHING THAT FIRST IS WHAT
+  STOPPED THIS BEING FIXED THE WRONG WAY.** `get_registration_count` reads
+  `organisations`, so it has only ever counted trial signups. The bug was the
+  DIVISOR: `cost_per_lead` was whole-campaign spend over trial signups, so the
+  trial was charged with the webinar's spend from the moment both ran together.
+  On the brief's own lifetime figures that is **A$46.84 against a true
+  A$43.90** — and it widens with every dollar the webinar spends.
+- **SO SPEND IS SPLIT PER STREAM FROM THE PER-AD ROWS.** Ad level is the finest
+  split Meta gives us and the two streams are cleanly separable there, so this
+  is exact rather than apportioned. `stream_totals` / `build_streams` are the
+  one definition; `campaign.cost_per_lead` is kept under its old name and now
+  means the trial's own.
+- **`stream_for_ad` FALLS BACK TO THE AD'S NAME, and that is the half that
+  keeps working.** `AD_DESTINATIONS` is exact where we can be, never the gate —
+  a creative added in Ads Manager tomorrow is classified by its name
+  (`Ad_Webinar_*`) with no code change. **Never from the AD SET name**:
+  `AS_Cold_Broad_AU_LPV` is now wrong about both "broad" and "LPV".
+- **`CAMPAIGN_UTM_NAMES` HAD TO BECOME A SET PER CAMPAIGN, AND A SINGLE VALUE
+  WOULD HAVE FAILED CLOSED.** One campaign now carries two destination
+  taxonomies (`webinar_21sep2026`, `trial_evergreen_sep2026`), neither of them
+  the Ads Manager name the old convention assumed. Unrecognised tags are
+  DROPPED, so every registration through the new ads would have read as
+  belonging to no campaign — which shows up as "the new ads produced nothing"
+  rather than as a bug.
+- **A LAZY IMPORT OF THE RENAMED CONSTANT SURVIVED `py_compile` AND
+  `vite build`.** `sales_workspace._ad_click_history` does
+  `from app.services.meta_ads import ... CAMPAIGN_UTM_NAMES` INSIDE a function
+  body — the exact trap the Twenty-retirement note above records. Found by a
+  sweep that walks every `ImportFrom` and `meta_ads.<attr>` in `app/` and asks
+  whether the name still exists; worth re-running on any rename here. Worse
+  than an ImportError, it would then have read `.values()` of a set-valued map
+  and marked genuine ad traffic "unrecognised campaign".
+- **THE PHANTOM VALUE WAS BEING CREATED AT SOURCE, NOT JUST IN THE REPORT.**
+  `meta_capi.send_complete_registration_event` hardcoded the trial's
+  `content_category` and `value=399`, and `public_webinar.py` took those
+  defaults — so every webinar registration reached Meta server-side labelled a
+  trial signup carrying A$399, and the deduped conversion's two halves
+  contradicted each other. The caller names its own event now; the defaults
+  stay the trial's only because it was the first caller.
+- **THE SINGLE CAMPAIGN-WIDE FUNNEL WAS REMOVED, NOT RELABELLED.** It put
+  campaign-wide impressions above a bottom row counting trial signups only, so
+  the drop at the end read as a conversion collapse when it was two products in
+  one column. `compute_stream_funnel` builds one per stream; the webinar's has
+  no "Club selected" step because there is no wizard on `/demo`.
+- **THE UNTAGGED WEBINAR REGISTRATIONS ARE REPORTED, NEVER ABSORBED.** The ad's
+  primary text carries a plain link with no UTMs (it had to match a line on the
+  artwork), so some genuinely ad-driven registrations are indistinguishable
+  from organic. Cost per result is computed on the attributed count alone —
+  which reads HIGH, the safe direction — with the shortfall named beside it.
+- **SPEND IS NOT SUBJECT TO THE 7-DAY ATTRIBUTION WINDOW, and the first cut had
+  that wrong.** Meta credits a CONVERSION to the click date and back-fills for
+  seven days; money spent on a day is settled that day. Gating budget pacing on
+  the attribution window made it unanswerable for a week after every change —
+  the two conditions are contradictory the day a change lands. Pacing excludes
+  only today (a part-day); the provisional guard applies to the conversion
+  insights it genuinely bites on.
+- **PACING IS MEASURED FROM THE LAST DELIBERATE CHANGE, NEVER ACROSS IT.**
+  `CAMPAIGN_ANNOTATIONS` is a per-campaign list of `{date, label, detail}` —
+  add a row rather than reasoning about a discontinuity somewhere else. One day
+  after a change there are not two settled days to pace off and the insight
+  correctly says nothing; that is not a bug, and a test expecting otherwise was
+  the wrong expectation.
+- **A REFERENCE LINE WRAPPED IN A FRAGMENT IS SILENTLY DROPPED BY RECHARTS.**
+  It finds `ReferenceLine`/`ReferenceArea` by walking `React.Children` and
+  reading each child's `type`; React.Children flattens an ARRAY but treats a
+  Fragment as one opaque child. The chart renders perfectly, with no error, and
+  simply has no marker on it. `chartMarkers()` returns an array. **Found by the
+  browser suite reporting zero markers against code that reads as though it
+  draws them.**
+- **AND RECHARTS DRAWS A `ReferenceArea` AS A `<path>`, NOT A `<rect>`** — the
+  first cut of that check selected `svg rect` and reported zero against code
+  that was drawing the band correctly. It measures the real element AND its
+  width now: a band collapsed to nothing would pass a bare presence check.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_meta_ads_streams.py`, 43 checks through the
+  shipped service: an unmapped ad classified by name, both new taxonomies
+  recognised and an EDM's still refused, each stream's cost per result from its
+  own spend, the pre-split figure shown to be higher, only the trial carrying
+  value, the untagged registrations counted apart, a creative keeping its two
+  result counts separate, nothing dividing by zero on an ad that never spent,
+  pacing reading the post-change rate rather than the pre-change one or a
+  blend, and a zero-result stream NOT reported as failing while it settles)
+  **with a control run** that names all ten missing parts rather than dying on
+  the first ImportError.
+- **Driven in Chromium** (`verify_meta_ads_streams_browser.mjs`, 41: two stream
+  cards with two different costs per result, no combined total anywhere, the
+  webinar card saying it carries no value, two funnels, the change marker on
+  every chart, the shaded band measured as covering the trailing half of the
+  window, the creative table, and an ad that has not gone live yet breaking
+  nothing) **with a control run**: 32 of the 41 fail against the previous
+  commit, and the nine that pass in both are don't-regress guards (no NaN, no
+  page errors, no overflow) rather than checks that should have caught it.
+- **FIVE CHECKS COULD NOT HAVE FAILED AS FIRST WRITTEN, and the control run is
+  what found them.** Three compared against labels the page renders CSS-
+  `uppercase`, which `innerText` returns transformed — the trap this file
+  already records, hit three times in one suite. One matched an insight's prose
+  rather than the funnel it claimed to read. Two used `.every()` on an array
+  that is empty in the control, which is vacuously true.
+- **VERIFIED AGAINST THE LIVE AD ACCOUNT for structure, not for figures.** The
+  Meta MCP tools confirm the account id, all six ads and their names; they
+  return entity ids and names only, no spend or conversion metrics, so the
+  numeric totals were NOT independently tied to Ads Manager here. The app's own
+  backend holds the token and queries the Graph API directly.
+### The trial's cost was still a lifetime average, so the two were never comparable (v9.72.1)
+
+Asked for straight after: "can we split the spend and the costs off from the
+old ones and get new numbers for webinar and trial ones?"
+
+- **SPLITTING THE SPEND PER STREAM WAS ONLY HALF OF IT, and the half that was
+  left is why the two figures still could not be read against each other.**
+  `stream_totals` sums the `level='ad'` snapshot rows, which are LIFETIME
+  (`fetch_per_ad` sends `date_preset: maximum`). So the trial's cost per signup
+  is an average over the campaign that ran BEFORE the 8 Sep restructure —
+  A$50/day, broad targeting, all placements, Instagram on — while the webinar
+  has no pre-change history at all. **Comparing them compares two different
+  campaigns**, and the brief's own question ("what are we spending per trial
+  signup NOW") was unanswerable from the page.
+- **SO EACH STREAM CARRIES A SECOND FIGURE, MEASURED FROM THE LAST DELIBERATE
+  CHANGE.** `stream_totals_since` sums the TRUE daily per-ad rows
+  (`level='ad_daily'`) on or after `_last_change_date()`, and the results behind
+  it are windowed too — both streams over the same stretch of calendar or the
+  pair means nothing. Lifetime is kept: it is the real money spent.
+- **THE COUNTING-SINCE CUTOFF IS NOT THIS, and reaching for it would have been
+  the wrong fix.** That is a super-admin setting which resets EVERY figure on
+  the page, and it deliberately never windows `get_registration_count` — a
+  genuine registration always counts, however long ago. This is per stream, per
+  card, automatic, and derived from the annotation that already exists.
+- **THE ALL-TIME FIGURES NOW SAY THEY ARE ALL TIME.** Left unlabelled beside a
+  since-the-change one, the bigger number reads as the current cost — which is
+  the same misreading in a new place.
+- **A PARTIAL WINDOW WITHHOLDS THE NUMBER, and the direction of the error is
+  why.** `ad_daily` is retained for `CAMPAIGN_LENGTH_DAYS + 5`, so a change
+  older than that leaves the sum short of what was really spent — which
+  UNDERSTATES cost per result, the direction that flatters the campaign and
+  gets quoted back at us. `covers_from` reports it and the block withholds the
+  division, naming the reason so silence does not read as a bug.
+- **SPEND IS SETTLED, RESULTS ARE NOT, and this block is where that bites
+  hardest.** Inside the 7-day click window the results behind a since figure
+  are still arriving, so the cost is a CEILING that comes down. Marked
+  provisional; nothing alerts off it — the rule the pacing insight already
+  keeps, applied to a figure that is mostly window at the moment (the change
+  was yesterday).
+- **A SIGNUP WITH NO TIMESTAMP IS REPORTED, NEVER GUESSED EITHER WAY.** Orgs
+  carry no `created_at`; the date is the earliest `self_serve_idempotency_keys`
+  row (the source `ad_signups` already uses). An attributed org with no key row
+  cannot be placed either side of the change, so it counts lifetime and in
+  neither since figure — surfaced as `undated_trial_results` so a short since
+  count reads as a known gap rather than as the ads having stopped working.
+- **THE MANUAL LEADS ADJUSTMENT IS NOT APPLIED TO THE SINCE COUNT.** It is a
+  lifetime correction and may well relate to a signup from before the change;
+  folding it into a windowed figure would move a number nobody can trace.
+- **`get_registration_count` IS UNTOUCHED.** `get_registration_count_since` is
+  its own function sharing `_attribution_matches_campaign`, so the windowed and
+  lifetime figures can never disagree about what COUNTS — only about when it
+  happened — and the existing function's documented "never windowed" promise
+  still holds exactly.
+- **Verified against a real Postgres** (`verify_meta_ads_streams.py` is 67
+  checks now: the trial's since-spend being its post-change spend alone and a
+  fraction of its lifetime, the webinar's since-spend EQUALLING its lifetime
+  because it has no history before the change, a signup from before the change
+  excluded, an undated one reported rather than counted or dropped, a webinar
+  registration predating the ad falling outside the window, the since cost per
+  result differing from the lifetime one, and every guard — partial, no
+  results, no spend, settled-vs-provisional, no change at all) **with two
+  control runs**: with the feature absent it REPORTS all four missing parts by
+  name and the other 43 still pass; with the window and the guards neutered, 8
+  fail — the trial's since-spend reading its lifetime 1800.0, and a partial
+  window printing A$25.00 instead of withholding.
+- **Driven in Chromium** (`verify_meta_ads_streams_browser.mjs` is 57: both
+  blocks on screen, the since figure read from its own element and differing
+  from the lifetime one beside it, the all-time label, the provisional note on
+  one stream and NOT the settled one, a withheld figure printing no digits
+  while still reporting its spend, the undated note, and no overflow at 390px)
+  **with a control run**: 13 fail against the previous commit, reporting the
+  unlabelled `A$43.90 each` that reads as current.
+- **FOUR CHECKS PASSED IN THE CONTROL FOR THE WRONG REASON and were
+  tightened.** "The since figure is not the lifetime figure", "a settled stream
+  is not marked provisional" and "a withheld figure prints no number" are all
+  trivially true of a block that never rendered — absence masquerading as
+  correct behaviour. Each is now gated on the block existing first.
+- **A FIXTURE THAT GROWS MOVES ITS NEIGHBOURS' EXPECTATIONS.** Adding the
+  undated org took the lifetime trial count 3 → 4 and failed two pre-existing
+  checks. The intent of both was intact — only the fixture's size changed — so
+  the count was updated and the cost check re-expressed against
+  `trial_results` rather than a hardcoded 3, so the two can no longer drift.
+
+- **NOTICED, NOT BUILT**: nothing reads Meta's own `content_category` breakdown
+  off the insights API, so Meta's self-reported conversion counts are still
+  un-splittable and are shown only as the labelled "Meta-reported" comparison.
+  The campaign plan (`CAMPAIGN_PLANS`) is still one budget per campaign rather
+  than per stream, so pacing is campaign-wide.
+
+## A FIXED LAYOUT CANNOT RE-LAY ITSELF OUT AT 4:5 (v9.73.0, Sep 2026)
+
+Seven questions off the live BetterPosts editor, three of them real gaps and
+four of them things that exist and could not be found.
+
+- **EVERY BUILT-IN TEMPLATE IS A HARDCODED `width: 1080, height: 1080` DIV OF
+  ABSOLUTELY-POSITIONED CHILDREN**, so "make this 1080×1350" is not a layout
+  question — there is no layout to re-run. What a template CAN do is sit inside
+  the taller canvas: `social/postSizes.jsx` owns that one piece of maths, used
+  by the live canvas, the mobile preview AND the off-screen export node.
+  `fit` (whole, letterboxed) is the default because it never loses artwork;
+  `fill` scales up and crops, and the panel says the edges go.
+- **THE BLANK CANVAS IS THE EXCEPTION AND IT IS GENUINELY PORTRAIT.** Its blocks
+  carry their own x/y, so there is nothing to place — `framed` is
+  `!isBlankTab && (W !== nativeW || H !== nativeH)`, and `BlankCanvas` is handed
+  the real width/height rather than falling back to its 1080 default.
+- **THE SAME FORMULA WAS WRITTEN OUT THREE TIMES** — `handleExport`,
+  `handleSaveToClubRoom` and the preview each recomputed `tmpl.w || 1080`. Both
+  copies are gone; the two handlers close over the ONE `W`/`H`. A second copy of
+  the canvas size is how a downloaded PNG comes out a different shape from the
+  preview.
+- **`postPages` IS THE ONE LIST OF WHAT THIS POST IS**, and the off-screen
+  export nodes and the Preview overlay both map it. The four page shapes
+  (blank carousel / derived roundup pages / the scorecard's two squares /
+  a single post) used to be a four-branch ternary written out once for export
+  and would have needed a second copy for the preview.
+- **THE LETTERBOX BANDS ARE FILLED WITH THE CLUB'S OWN PRIMARY.** Left at the
+  canvas well's `#080808` a fitted post reads as a broken export rather than a
+  deliberate portrait one. Found by SCREENSHOTTING the real render, not by the
+  geometry checks — which all passed on the black version.
+- **A SCORECARD IS NOT OFFERED THE PICKER.** It is 1920×1080 and already has its
+  own reframing control (the Instagram-squares split); two answers to one
+  question is worse than one.
+- **BACKGROUND REMOVAL EXISTED AND ONLY THREE UPLOAD PATHS REACHED IT.**
+  `ImageEditorModal` has had an AI cut-out and a colour key since it was
+  written, wired to the hero photo, sponsor logos and an image block's REPLACE.
+  An image already on the post, and anything in the club library, had no way in
+  — which is exactly where somebody who has just uploaded a white-backgrounded
+  PNG is standing. Both now open the same editor; a library edit is stored as a
+  NEW asset rather than overwriting, since the original may be on a post nobody
+  has re-exported.
+- **"SAVE TO CLUB ROOM" IS NOT "SAVE THIS DESIGN", AND `✓ SAVED` IS WHAT MADE
+  THE TWO READ AS ONE THING.** It renders a PNG into the Club Room TV
+  slideshow's media pool; SAVE AS TEMPLATE writes a `bs_social_templates`
+  localStorage row that appears under Design → Your templates on that browser
+  only. Both now say where the thing went, and the Club Room one links there.
+- **A CONTROL THAT IS CORRECTLY ABSENT STILL HAS TO EXPLAIN ITSELF**, the call
+  this file already records for a figure that is correctly zero. The Hero Image
+  panel is gated on a seven-id list; on every other layout it simply was not
+  there. It now names the layouts that have a hero slot, off the same list, so
+  the two cannot drift.
+- **"SEND THIS IMAGE BEHIND THAT HEADING" IS GENUINELY NOT POSSIBLE ON MOST
+  LAYOUTS, and saying so beats a control that looks broken.** Only C1–C4
+  decompose into blocks (`templateToBlocks`); everything else takes added blocks
+  as an overlay ON TOP, and each template root paints its own opaque gradient,
+  so a block behind one would be invisible anyway. The Layers panel says it and
+  points at the two ways out (Custom Edit where it exists, else the blank
+  canvas). **Extending `templateToBlocks` past four templates is the real fix
+  and is a large piece of work — 40+ bespoke layouts, each hand-recreated.**
+- **Driven in Chromium** (`frontend/verification/verify_post_designer_browser.mjs`,
+  49 checks: the canvas AND the export node moving together, the frame measured
+  off the real element at scale 1 / top 135 for fit and 1.25 / left −135 for
+  fill, the blank canvas NOT framed, the bands' computed colour, a scorecard
+  offered no picker, Preview opening with one page and with two, Escape closing
+  it, the editor reachable from a library tile and from an image on the canvas,
+  all four explanations, and no overflow at 390px) **with a control run**: 33 of
+  the 49 fail against the previous commit, and the 16 that pass in both are
+  don't-regress guards.
+- **THE FRAME IS ADDRESSED BY `data-post-frame`, NOT BY "an element with a scale
+  transform".** The loose selector matched a transform INSIDE a template, so on
+  a build with no frame at all the check read the wrong element and reported
+  `scale: 1.4` — a measurement of nothing. **And "the blank canvas is not
+  letterboxed" is trivially true of a build that never frames anything**, so it
+  is gated on the canvas really being 1080×1350 first.
+- **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN.** The suite anchors on the
+  export button (which every build has) rather than on anything this change
+  adds, and every new element is read through `textOf`/`seen`/`press`, which
+  report absence instead of throwing.
+- **THE CSS-`uppercase` TRAP, HIT AGAIN.** The preview header renders
+  `2 pages` as `2 PAGES`, so a check written in the source's casing could never
+  pass. And `getByText('Club library')` matched three elements — the panel meta,
+  the drop-zone copy and the heading.
+- **NOTICED, NOT BUILT**: there are no portrait-native template variants — the
+  honest fix for a club that wants the full 4:5 filled edge to edge, and a
+  design job per layout rather than a code one. Saved templates are still
+  `localStorage`, so they do not follow a volunteer to another device (the
+  design handoff proposes `social_post_template`; the media library and brand
+  kit already went server-side). A multi-file drop into the club library still
+  uploads as-is rather than opening the editor per file — deliberate, since ten
+  modals for ten photos is worse than the Edit affordance on each tile.
+
+## A FACET LISTED IN THE KIT AND MISSING FROM ONE FUNCTION (v9.73.1, Sep 2026)
+
+Reported off `/admin/comms/lists` as `a[r.key] is not iterable`, straight after
+an Export to BetterComms added 800+ contacts — so it read as a problem in the
+inserted rows.
+
+- **IT IS NOT THE ROWS, AND ESTABLISHING THAT FIRST IS WHAT STOPPED THIS BEING
+  CHASED THROUGH THE DATABASE.** `facetOptionsFrom` ends
+  `[...opts[f.key]]` for EVERY entry in `FACETS`, and that line runs whatever
+  the contacts are. Reproduced with an empty list and with `null`: it throws
+  either way. The export was a coincidence of timing — the screen had been
+  down since the deploy before it.
+- **V8 PRINTS THE SOURCE TEXT OF THE OFFENDING EXPRESSION, which is what makes
+  a minified message locatable.** `a[r.key] is not iterable` is
+  `opts[f.key]` after minification, and a grep for a spread of a `.key`-indexed
+  member (`\.\.\.[a-z]+\[[a-z]+\.key\]`) returns **exactly one match in the
+  whole frontend**. Reach for the expression's shape, not for the variable
+  names.
+- **THE CAUSE IS A SECOND HAND-WRITTEN COPY OF THE FACET LIST.** `FACETS`
+  gained `role` in migration 295's commit; `facetOptionsFrom` built its `opts`
+  from a hardcoded five-key literal written before `role` existed, so
+  `opts.role` was undefined. **This is the trap this file already records one
+  function over** — `CommsLists.jsx`'s own `noFilters` literal, fixed in
+  v9.70.0 by aliasing it to `emptyFilters`. The same commit that fixed it there
+  introduced it here.
+- **TWO CRASH PATHS, AND ONLY ONE OF THEM NEEDS DATA.** The spread throws
+  unconditionally; `opts[f.key].add(...)` throws `Cannot read properties of
+  undefined (reading 'add')` only once a contact actually carries a role, which
+  is what the exported directory rows brought. The control run reports both.
+- **A COMMENT CAN DESCRIBE BEHAVIOUR THE FUNCTION CANNOT DELIVER.** The note
+  added beside `role` said "facetOptionsFrom only offers a facet that actually
+  has values, so it never appears for them" — true of the intent, and the
+  function threw before it could offer anything. It is true now.
+- **BOTH SHAPES ARE DERIVED FROM `FACETS` NOW, mirroring `emptyModes`**, which
+  had this right all along (`Object.fromEntries(MODE_FILTERS.map(...))`). A
+  facet added later reaches the filter shape, the options builder and the
+  matcher with no second list to keep in step.
+- **Verified** (`frontend/verification/verify_comms_facets.mjs`, 11 checks
+  against the SHIPPED functions lifted out of the file rather than retyped: an
+  empty and a null contact list, a club contact carrying no directory fields,
+  every `FACETS` key present in both shapes, role options collected and
+  de-duplicated, a facet nobody carries staying empty so it is never offered,
+  and the filter it then drives) **with a control run**: 7 of the 11 fail
+  against the previous commit, reporting the customer's own
+  `opts[f.key] is not iterable`.
+- **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN, hit again here.** The
+  first cut read `facetOptionsFrom(exported)` into a `const` at module level,
+  so the control died on it and said nothing about the four checks below.
+  Every read goes through the guarded `check()` now.
+- **NOTICED, NOT FIXED**: nothing asserts that a key added to `FACETS`,
+  `MODE_FILTERS` or the engagement filter reaches every consumer — the check
+  here covers `FACETS` only, and a structural sweep over the kit would be its
+  own change.
+
 ## Twenty is retired; the engagement score, the CRM and Sales Management are not (v9.71.0, Sep 2026)
 
 Asked for directly: *"the calculation and continual re-calculation of engagement

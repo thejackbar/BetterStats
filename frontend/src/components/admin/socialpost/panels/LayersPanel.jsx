@@ -8,18 +8,20 @@
 //   onDuplicate(id), onRemove(id)       block ops
 //   onMoveLayerBefore(dragId, overId)   drag reorder
 //   historyLog  [{ label, t }]          from useEditHistory
+//   note                                explains what the stack can and can't reach
 import { useState } from 'react'
 import { Icon } from '../../../../pages/admin/betterselect/ui'
 import { itemLabel } from '../../../../social/blank-template'
 
 export default function LayersPanel({
-  items = [], selIds = [], onSelect, onReorder, onDuplicate, onRemove, onMoveLayerBefore, historyLog = [],
+  items = [], selIds = [], onSelect, onReorder, onDuplicate, onRemove, onMoveLayerBefore, historyLog = [], note = null,
 }) {
   const [dragId, setDragId] = useState(null)
   const [overId, setOverId] = useState(null)
 
   return (
     <div className="flex flex-col gap-4">
+      {note}
       <div className="flex flex-col gap-1">
         <div className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faint">Layers · front on top</div>
         {items.length === 0 && <div className="text-pb-faintest text-[10px] font-mono py-2">No blocks yet.</div>}

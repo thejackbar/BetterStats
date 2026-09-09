@@ -1,13 +1,33 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   ResponsiveContainer, BarChart, Bar, LineChart, Line, XAxis, YAxis,
-  CartesianGrid, Tooltip,
+  CartesianGrid, Tooltip, ReferenceLine, ReferenceArea,
 } from 'recharts'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
 
-const DEFAULT_BUDGET = 750
+const DEFAULT_BUDGET = 900
 const DEFAULT_LENGTH_DAYS = 30
+
+// ONE campaign, TWO products since the 8-9 Sep 2026 restructure. Both landing
+// pages fire the same CompleteRegistration pixel event and are told apart only
+// by `content_category`, so nothing on this page shows a conversion count or a
+// cost per result without saying which of the two it belongs to — a trial
+// signup is a prospective paying club, a webinar registration is somebody who
+// watched a form, and averaging them describes neither.
+const STREAM_STYLE = {
+  trial: {
+    accent: 'var(--pb-accent)',
+    chip: 'border-violet-500/40 text-violet-300 bg-violet-500/10',
+    swatch: 'bg-violet-400',
+  },
+  webinar: {
+    accent: '#38bdf8',
+    chip: 'border-sky-500/40 text-sky-300 bg-sky-500/10',
+    swatch: 'bg-sky-400',
+  },
+}
+const streamStyle = (s) => STREAM_STYLE[s] || STREAM_STYLE.trial
 
 const TREND_RANGES = [
   { label: '7d', days: 7 },
@@ -378,7 +398,62 @@ function RangePicker({ value, onChange }) {
   )
 }
 
-function TrendChart({ title, data, dataKey, kind = 'line', color = '#3b82f6', money }) {
+// The markers every time-series chart carries, shared by both chart kinds so
+// the two can't disagree about what a reader is looking at:
+//
+//   • a dashed line on each deliberate campaign change. A chart that plots
+//     straight through the 8 Sep restructure invites a reading it can't
+//     support — a 40% drop printed over a deliberate 40% budget cut.
+//   • a shaded band over the trailing 7 days. Meta attributes a conversion to
+//     the date of the CLICK across a 7-day window, so those days always
+//     under-report and fill in afterwards. They are drawn, not hidden — they
+//     are real, just not finished.
+// RETURNS AN ARRAY, NEVER A FRAGMENT, and that is not a style preference.
+// Recharts finds its reference lines and areas by walking `React.Children` of
+// the chart and reading each child's `type`. React.Children flattens an ARRAY
+// but treats a Fragment as ONE opaque child, so a fragment-wrapped marker is
+// silently dropped: the chart renders perfectly, with no error, and simply has
+// no marker on it. Found by running the browser suite, which reported zero
+// marker lines against code that reads as though it draws them.
+function chartMarkers({ data, annotations, provisionalFrom }) {
+  const dates = (data || []).map((d) => d.date)
+  const marks = (annotations || []).filter((a) => dates.includes(a.date))
+  const firstProvisional = provisionalFrom ? dates.find((d) => d >= provisionalFrom) : null
+  const lastDate = dates[dates.length - 1]
+  const out = []
+  // Pushed first so the band paints underneath the series rather than over it.
+  if (firstProvisional && lastDate && firstProvisional !== lastDate) {
+    out.push(
+      <ReferenceArea
+        key="provisional"
+        x1={firstProvisional}
+        x2={lastDate}
+        fill="var(--pb-faint, #64748b)"
+        fillOpacity={0.14}
+        strokeOpacity={0}
+        ifOverflow="extendDomain"
+      />
+    )
+  }
+  for (const a of marks) {
+    out.push(
+      <ReferenceLine
+        key={a.date}
+        x={a.date}
+        stroke="#f59e0b"
+        strokeDasharray="4 3"
+        strokeWidth={1.5}
+        ifOverflow="extendDomain"
+        label={{ value: '▼', position: 'top', fill: '#f59e0b', fontSize: 9 }}
+      />
+    )
+  }
+  return out
+}
+
+function TrendChart({ title, data, dataKey, kind = 'line', color = '#3b82f6', money,
+                      annotations, provisionalFrom }) {
+  const markers = chartMarkers({ data, annotations, provisionalFrom })
   return (
     <div className="pb-card p-4">
       <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint mb-2">{title}</div>
@@ -392,6 +467,7 @@ function TrendChart({ title, data, dataKey, kind = 'line', color = '#3b82f6', mo
               <XAxis dataKey="date" tickFormatter={fmtDay} tick={{ fill: 'var(--pb-faint, #64748b)', fontSize: 10 }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fill: 'var(--pb-faint, #64748b)', fontSize: 10 }} axisLine={false} tickLine={false} allowDecimals={false} />
               <Tooltip content={<ChartTooltip money={money} />} />
+              {markers}
               <Bar dataKey={dataKey} name={title} fill={color} radius={[3, 3, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
@@ -402,6 +478,7 @@ function TrendChart({ title, data, dataKey, kind = 'line', color = '#3b82f6', mo
               <XAxis dataKey="date" tickFormatter={fmtDay} tick={{ fill: 'var(--pb-faint, #64748b)', fontSize: 10 }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fill: 'var(--pb-faint, #64748b)', fontSize: 10 }} axisLine={false} tickLine={false} />
               <Tooltip content={<ChartTooltip money={money} />} />
+              {markers}
               <Line type="monotone" dataKey={dataKey} name={title} stroke={color} strokeWidth={2} dot={{ r: 2 }} />
             </LineChart>
           </ResponsiveContainer>
@@ -411,7 +488,32 @@ function TrendChart({ title, data, dataKey, kind = 'line', color = '#3b82f6', mo
   )
 }
 
-function AdTrendMini({ adId, days }) {
+// The key under the trend charts. Only drawn for the markers actually on
+// screen, so a campaign with no recorded changes gets no legend it can't use.
+function ChartLegend({ annotations, days, provisionalDays }) {
+  if (!days.length) return null
+  const shown = (annotations || []).filter((a) => a.date >= days[0] && a.date <= days[days.length - 1])
+  return (
+    <div className="font-mono text-[9px] text-pb-faintest mt-2 space-y-1">
+      {shown.map((a) => (
+        <p key={a.date}>
+          <span className="text-amber-400">▼ {fmtDay(a.date)} — {a.label}.</span>{' '}
+          {a.detail}
+        </p>
+      ))}
+      {provisionalDays > 0 && (
+        <p>
+          <span className="inline-block w-2.5 h-2 align-middle mr-1" style={{ background: 'var(--pb-faint, #64748b)', opacity: 0.25 }} />
+          The shaded last {provisionalDays} days are still settling — Meta attributes a conversion to the
+          date of the click over a {provisionalDays}-day window, so recent figures only ever go up.
+          Nothing on this page raises an alert off them.
+        </p>
+      )}
+    </div>
+  )
+}
+
+function AdTrendMini({ adId, days, annotations }) {
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
@@ -429,18 +531,22 @@ function AdTrendMini({ adId, days }) {
 
   if (loading) return <p className="text-xs text-pb-faint px-1 py-2">Loading trend&hellip;</p>
   if (err) return <p className="text-xs text-red-400 px-1 py-2">{err}</p>
-  if (rows.length === 0) return <p className="text-xs text-pb-faint px-1 py-2">No daily history recorded yet for this ad.</p>
+  // An ad that has ended, or one paused before it ever spent, legitimately has
+  // no daily rows in this window. Say so rather than drawing an empty chart.
+  if (rows.length === 0) return <p className="text-xs text-pb-faint px-1 py-2">No daily history recorded for this ad in the last {days} days.</p>
 
+  const provisionalFrom = rows.find((d) => d.provisional)?.date || null
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-      <TrendChart title="Daily spend" data={rows} dataKey="spend" kind="bar" color="var(--pb-accent)" money={new Set(['spend'])} />
-      <TrendChart title="Daily link CTR" data={rows} dataKey="link_ctr" kind="line" color="#3b82f6" />
+      <TrendChart title="Daily spend" data={rows} dataKey="spend" kind="bar" color="var(--pb-accent)" money={new Set(['spend'])} annotations={annotations} provisionalFrom={provisionalFrom} />
+      <TrendChart title="Daily link CTR" data={rows} dataKey="link_ctr" kind="line" color="#3b82f6" annotations={annotations} provisionalFrom={provisionalFrom} />
     </div>
   )
 }
 
-function AdCard({ ad, maxCostPerLpv, selected, onSelect, trendDays }) {
+function AdCard({ ad, maxCostPerLpv, selected, onSelect, trendDays, annotations }) {
   const style = AD_STATUS_STYLE[ad.status] || AD_STATUS_STYLE.on_track
+  const stream = streamStyle(ad.stream)
   const paused = ad.status === 'paused'
   const barPct = ad.cost_per_lpv && maxCostPerLpv ? Math.min(100, (ad.cost_per_lpv / maxCostPerLpv) * 100) : 0
   const barColor = paused ? 'bg-slate-500' : ad.status === 'winner' ? 'bg-emerald-500' : ad.status === 'laggard' ? 'bg-red-500' : 'bg-pb-accent'
@@ -450,10 +556,25 @@ function AdCard({ ad, maxCostPerLpv, selected, onSelect, trendDays }) {
       <button onClick={onSelect} className="w-full text-left p-3.5 hover:bg-pb-surface2/40">
         <div className="flex items-start justify-between gap-2 mb-1">
           <div className="text-sm font-medium text-pb-text">{ad.name}</div>
-          <span className={`shrink-0 px-1.5 py-0.5 rounded-full border text-[9px] font-mono uppercase ${style.cls}`}>
-            {style.label}
-          </span>
+          <div className="shrink-0 flex items-center gap-1">
+            {/* Which of the two products this ad sells — the split every
+                result figure on this page turns on. */}
+            <span
+              className={`px-1.5 py-0.5 rounded-full border text-[9px] font-mono uppercase ${stream.chip}`}
+              title={ad.destination ? `Lands on ${ad.destination}` : undefined}
+            >
+              {ad.stream}
+            </span>
+            <span className={`px-1.5 py-0.5 rounded-full border text-[9px] font-mono uppercase ${style.cls}`}>
+              {style.label}
+            </span>
+          </div>
         </div>
+        {ad.ends_on && (
+          <p className="font-mono text-[9px] text-pb-faintest mb-1.5">
+            Runs to {fmtDay(ad.ends_on)} &mdash; a dated event, so it stops being relevant after that.
+          </p>
+        )}
         <p className="text-xs text-pb-dim mb-2.5 leading-relaxed">{ad.note}</p>
         <div className="grid grid-cols-3 gap-x-3 gap-y-1 font-mono text-[10px] text-pb-faint mb-2">
           <div>Spend <span className="text-pb-text">{fmtMoney(ad.spend)}</span></div>
@@ -474,9 +595,182 @@ function AdCard({ ad, maxCostPerLpv, selected, onSelect, trendDays }) {
       </button>
       {selected && (
         <div className="border-t pb-hairline px-3.5 pb-3.5">
-          <AdTrendMini adId={ad.ad_id} days={trendDays} />
+          <AdTrendMini adId={ad.ad_id} days={trendDays} annotations={annotations} />
         </div>
       )}
+    </div>
+  )
+}
+
+// One conversion stream's headline: what it produced, what each one cost, and
+// what it spent to do it. NEVER a shared total with the other stream — the two
+// results are different things at different prices and adding them together
+// produces a number that describes neither.
+// Why a since-the-change cost per result is being withheld, in the words a
+// reader can act on. Silence with no reason reads as a bug; a number we can't
+// stand behind is worse than either.
+const WITHHELD_COPY = {
+  partial_window: 'not enough daily history held yet to measure this',
+  no_results_yet: 'no results since the change yet',
+  no_spend_yet: 'no spend since the change yet',
+}
+
+// The stretch since the last deliberate change, measured on its own.
+//
+// LIFETIME AND SINCE-THE-CHANGE ARE DIFFERENT QUESTIONS, and for the trial they
+// give very different answers: its lifetime spend is mostly the campaign that
+// ran before the restructure, while the webinar has no pre-change history at
+// all. Reading one stream's lifetime cost against the other's is comparing two
+// campaigns, so both are shown and each says which it is.
+function SinceChange({ since }) {
+  if (!since) return null
+  const cpr = since.cost_per_result
+  const reason = WITHHELD_COPY[since.withheld_reason]
+  return (
+    <div
+      data-testid="stream-since-change"
+      className="mt-2 pt-2 border-t pb-hairline-t"
+    >
+      <div className="font-mono text-[9px] uppercase tracking-wide text-pb-faint">
+        Since the {fmtDay(since.since)} change
+      </div>
+      <div className="flex items-baseline gap-2 mt-0.5">
+        <div data-testid="stream-since-cpr" className="font-display text-lg text-pb-text">
+          {cpr != null ? fmtMoney(cpr) : <span className="text-pb-faintest text-sm">&mdash;</span>}
+        </div>
+        <div className="font-mono text-[10px] text-pb-dim">
+          {cpr != null
+            ? <>each &middot; {fmtNum(since.results)} from {fmtMoney(since.spend)}</>
+            : <span className="text-pb-faintest">{reason || 'not measurable yet'}</span>}
+        </div>
+      </div>
+      {cpr == null && since.spend > 0 && (
+        <div className="font-mono text-[9px] text-pb-faintest mt-0.5">
+          {fmtMoney(since.spend)} spent, {fmtNum(since.results)} result{since.results === 1 ? '' : 's'} so far.
+        </div>
+      )}
+      {since.provisional && (
+        <div data-testid="stream-since-provisional" className="font-mono text-[9px] text-amber-300/80 mt-1 leading-relaxed">
+          Provisional. Meta credits a conversion to the day of the click and back-fills for
+          7 days, so results here are still arriving — the spend is settled, the cost per
+          result is a ceiling that will come down.
+        </div>
+      )}
+    </div>
+  )
+}
+
+function StreamCard({ stream, children }) {
+  const style = streamStyle(stream.stream)
+  const ended = stream.ended
+  const since = stream.since_change
+  return (
+    <div
+      data-testid={`stream-card-${stream.stream}`}
+      className="pb-card px-3.5 py-3 border-l-2"
+      style={{ borderLeftColor: style.accent }}
+    >
+      <div className="flex items-baseline justify-between gap-2">
+        <div className="font-mono text-[9px] uppercase tracking-wide text-pb-faint">{stream.label}</div>
+        <span
+          className={`shrink-0 px-1.5 py-0.5 rounded-full border font-mono text-[9px] uppercase ${style.chip}`}
+          title={`Pixel content_category: ${stream.content_category}`}
+        >
+          {stream.content_category}
+        </span>
+      </div>
+      <div className="flex items-baseline gap-2 mt-0.5">
+        <div data-testid="stream-results" className="font-display text-2xl text-pb-text">{fmtNum(stream.results)}</div>
+        <div data-testid="stream-cpr" className="font-mono text-[11px] text-pb-dim">
+          {stream.cost_per_result != null
+            ? <>{fmtMoney(stream.cost_per_result)} each{since ? ' all time' : ''}</>
+            : <span className="text-pb-faintest">no cost per result yet</span>}
+        </div>
+      </div>
+      <div className="font-mono text-[9px] text-pb-faintest mt-1">
+        {fmtMoney(stream.spend)} spent {since ? 'all time ' : ''}on {stream.ad_count} ad{stream.ad_count === 1 ? '' : 's'}
+        {ended
+          ? <> &middot; <span className="text-pb-faint">finished {fmtDay(stream.ends_on)}</span></>
+          : stream.active_ad_count === 0
+            ? <> &middot; <span className="text-pb-faint">none live</span></>
+            : ''}
+      </div>
+      {stream.stream === 'webinar' && stream.unattributed_results > 0 && (
+        <div className="font-mono text-[9px] text-amber-300/80 mt-1 leading-relaxed">
+          +{stream.unattributed_results} more registered carrying no campaign tag. The ad&rsquo;s own body
+          text has a plain link with no UTMs on it, so some genuinely ad-driven registrations arrive
+          untagged. The real cost per result sits somewhere below {fmtMoney(stream.cost_per_result)}.
+        </div>
+      )}
+      {!stream.carries_value && (
+        <div className="font-mono text-[9px] text-pb-faintest mt-1">
+          Carries no value — excluded from revenue and ROAS.
+        </div>
+      )}
+      <SinceChange since={since} />
+      {children}
+    </div>
+  )
+}
+
+// Per-creative results keyed on utm_content — the identifier that outlives the
+// ad it was built on, so a creative can be compared across a rebuild in Ads
+// Manager and across campaigns. Each row keeps its two result counts apart.
+function CreativeTable({ creatives }) {
+  const rows = (creatives || []).filter((c) => c.spend > 0 || c.results > 0)
+  if (!rows.length) return null
+  return (
+    <div data-testid="creative-table" className="pb-card p-4 mb-4">
+      <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint mb-3">
+        Creative performance (by utm_content)
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-left font-mono text-[10px] tracking-wide2 uppercase text-pb-faint border-b pb-hairline">
+              <th className="px-2 py-2">Creative</th>
+              <th className="px-2 py-2">Sells</th>
+              <th className="px-2 py-2 text-right">Spend</th>
+              <th className="px-2 py-2 text-right">LPVs</th>
+              <th className="px-2 py-2 text-right">Trial signups</th>
+              <th className="px-2 py-2 text-right">Webinar regs</th>
+              <th className="px-2 py-2 text-right">Cost / result</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((c) => {
+              const style = streamStyle(c.stream)
+              return (
+                <tr data-testid="creative-row" key={c.utm_content} className="border-b pb-hairline last:border-0 hover:bg-pb-surface2/40">
+                  <td className="px-2 py-2 text-pb-text font-medium whitespace-nowrap">
+                    {c.utm_content}
+                    {c.ad_name && <div className="font-mono text-[9px] text-pb-faintest">{c.ad_name}</div>}
+                  </td>
+                  <td className="px-2 py-2">
+                    <span className={`inline-block px-1.5 py-0.5 rounded-full border font-mono text-[9px] uppercase ${style.chip}`}>
+                      {c.stream}
+                    </span>
+                  </td>
+                  <td className="px-2 py-2 text-right text-pb-dim font-mono whitespace-nowrap">{fmtMoney(c.spend)}</td>
+                  <td className="px-2 py-2 text-right text-pb-dim font-mono">{fmtNum(c.landing_page_views)}</td>
+                  <td className="px-2 py-2 text-right font-mono text-pb-text">{c.trial_signups || '–'}</td>
+                  <td className="px-2 py-2 text-right font-mono text-pb-text">{c.webinar_registrations || '–'}</td>
+                  <td className="px-2 py-2 text-right font-mono text-pb-text whitespace-nowrap">
+                    {c.cost_per_result != null ? fmtMoney(c.cost_per_result) : '–'}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="font-mono text-[9px] text-pb-faintest mt-3">
+        Spend is Meta&rsquo;s, per ad, mapped to the creative tag on its destination URL. The two result
+        columns are ours, counted from the tag on the registration itself &mdash; kept apart because a
+        trial signup and a webinar registration are not the same result. &ldquo;Cost / result&rdquo; divides
+        a creative&rsquo;s own spend by its own results; a creative selling both is rare and reads as the
+        blend of the two, so compare within a stream rather than across.
+      </p>
     </div>
   )
 }
@@ -675,7 +969,11 @@ export default function SuperMetaAds() {
   const header = (
     <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
       <div>
-        <h1 className="text-xl font-semibold text-pb-text">Meta Ads &mdash; Trials Campaign</h1>
+        {/* Not "Trials Campaign" any more: since 8-9 Sep this one campaign runs
+            a free-trial ad and a webinar ad side by side, and naming it after
+            one of them is how a reader starts assuming every number below is
+            about that one. */}
+        <h1 className="text-xl font-semibold text-pb-text">Meta Ads HQ</h1>
         <div className="flex flex-wrap items-center gap-2 mt-1">
           {campaigns.length > 0 ? (
             <select
@@ -786,6 +1084,16 @@ export default function SuperMetaAds() {
   const campaign = summary?.campaign
   const insights = summary?.insights || []
   const ads = summary?.ads || []
+  const streams = summary?.streams || []
+  const unattributedSpend = summary?.unattributed_spend || 0
+  const undatedTrialResults = summary?.undated_trial_results || 0
+  const annotations = summary?.annotations || []
+  const provisionalDays = summary?.attribution_window_days || 0
+  // The first date inside Meta's click-attribution window, computed from the
+  // series itself so the shaded band lines up with real rows rather than with
+  // a date the chart may not hold.
+  const provisionalFrom = history.find((d) => d.provisional)?.date || null
+  const trialStream = streams.find((s) => s.stream === 'trial')
   const maxCostPerLpv = ads.reduce((m, a) => (a.cost_per_lpv != null && a.cost_per_lpv > m ? a.cost_per_lpv : m), 0)
 
   return (
@@ -840,57 +1148,91 @@ export default function SuperMetaAds() {
               </div>
             )}
 
-            {/* KPI strip */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-1">
+            {/* Campaign-wide delivery. These three are genuinely whole-campaign
+                figures — money out, and how far it reached — so they carry no
+                stream split. Every RESULT figure does, in the row below. */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-2">
               <Stat
-                label="Spend"
+                label="Spend (both products)"
                 value={fmtMoney(campaign.spend)}
                 hint={`of ${fmtMoney(budget)} · ${Math.min(100, Math.round((campaign.spend / budget) * 100))}%`}
               />
-              <Stat label="Cost per LPV" value={campaign.cost_per_lpv != null ? fmtMoney(campaign.cost_per_lpv) : '–'} />
               <Stat
-                label="Cost per registration"
-                value={campaign.cost_per_lead != null ? fmtMoney(campaign.cost_per_lead) : '–'}
-                hint="spend / actual registrations"
+                label="Cost per LPV (both)"
+                value={campaign.cost_per_lpv != null ? fmtMoney(campaign.cost_per_lpv) : '–'}
               />
-
-              <div className="pb-card px-3 py-2.5">
-                <div className="font-mono text-[9px] uppercase tracking-wide text-pb-faint">Free trial registrations</div>
-                <div className="font-display text-xl text-pb-text mt-0.5">{fmtNum(campaign.leads_effective)}</div>
-                <div className="font-mono text-[9px] text-pb-faintest mt-0.5">
-                  {fmtNum(campaign.registrations)} actual
-                  {campaign.leads_adjustment ? `, ${campaign.leads_adjustment > 0 ? '+' : ''}${campaign.leads_adjustment} manual` : ''}
-                  {' '}&middot;{' '}
-                  <span title="Meta counts this the moment someone picks a club, not when they finish registering, and it can shift on its own. The actual figure above is the real number.">
-                    {fmtNum(campaign.leads)} Meta-reported
-                  </span>
-                </div>
-                <div className="flex items-center gap-1 mt-1.5">
-                  <button
-                    onClick={() => adjustLeads(-1)}
-                    disabled={adjusting}
-                    title="Remove one registration (e.g. spam or duplicate)"
-                    className="w-5 h-5 flex items-center justify-center rounded border border-pb-hairline text-pb-dim hover:bg-pb-surface2 disabled:opacity-50 font-mono text-xs leading-none"
-                  >
-                    &minus;
-                  </button>
-                  <button
-                    onClick={() => adjustLeads(1)}
-                    disabled={adjusting}
-                    title="Add one registration our own tracking didn't capture (e.g. a manually onboarded club)"
-                    className="w-5 h-5 flex items-center justify-center rounded border border-pb-hairline text-pb-dim hover:bg-pb-surface2 disabled:opacity-50 font-mono text-xs leading-none"
-                  >
-                    +
-                  </button>
-                  <button
-                    onClick={() => setShowAdjLog((s) => !s)}
-                    className="font-mono text-[9px] text-pb-faint hover:underline ml-1"
-                  >
-                    {showAdjLog ? 'hide log' : `log (${adjustments.length})`}
-                  </button>
-                </div>
-              </div>
+              <Stat
+                label="Landing page views"
+                value={fmtNum(campaign.landing_page_views)}
+                hint={`${fmtNum(campaign.link_clicks)} link clicks`}
+              />
             </div>
+
+            {/* THE SPLIT. One campaign now sells two things — a free trial and
+                a webinar seat — and both landing pages fire the SAME pixel
+                event, told apart only by content_category. There is deliberately
+                no combined "registrations" total anywhere on this page: the two
+                cost very different amounts and only one of them is worth money. */}
+            {streams.length > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-1">
+                {streams.map((s) => (
+                  <StreamCard key={s.stream} stream={s}>
+                    {s.stream === 'trial' && (
+                      <>
+                        <div className="font-mono text-[9px] text-pb-faintest mt-1">
+                          {fmtNum(campaign.registrations)} tracked
+                          {campaign.leads_adjustment ? `, ${campaign.leads_adjustment > 0 ? '+' : ''}${campaign.leads_adjustment} manual` : ''}
+                          {' '}&middot;{' '}
+                          <span title="Meta counts a Lead the moment someone picks a club, not when they finish registering, and it can shift on its own. The figure above is our own database's count of real completed registrations.">
+                            {fmtNum(campaign.leads)} Meta-reported leads
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1 mt-1.5">
+                          <button
+                            onClick={() => adjustLeads(-1)}
+                            disabled={adjusting}
+                            title="Remove one trial registration (e.g. spam or duplicate)"
+                            className="w-5 h-5 flex items-center justify-center rounded border border-pb-hairline text-pb-dim hover:bg-pb-surface2 disabled:opacity-50 font-mono text-xs leading-none"
+                          >
+                            &minus;
+                          </button>
+                          <button
+                            onClick={() => adjustLeads(1)}
+                            disabled={adjusting}
+                            title="Add one trial registration our own tracking didn't capture (e.g. a manually onboarded club)"
+                            className="w-5 h-5 flex items-center justify-center rounded border border-pb-hairline text-pb-dim hover:bg-pb-surface2 disabled:opacity-50 font-mono text-xs leading-none"
+                          >
+                            +
+                          </button>
+                          <button
+                            onClick={() => setShowAdjLog((s2) => !s2)}
+                            className="font-mono text-[9px] text-pb-faint hover:underline ml-1"
+                          >
+                            {showAdjLog ? 'hide log' : `log (${adjustments.length})`}
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </StreamCard>
+                ))}
+              </div>
+            )}
+
+            {undatedTrialResults > 0 && (
+              <p data-testid="undated-trial-results" className="font-mono text-[9px] text-amber-300/80 mb-1">
+                {fmtNum(undatedTrialResults)} attributed trial signup{undatedTrialResults === 1 ? '' : 's'} carry
+                no recorded signup date, so {undatedTrialResults === 1 ? 'it counts' : 'they count'} in the
+                all-time figure and in neither since-the-change one. The since figure is a floor.
+              </p>
+            )}
+
+            {unattributedSpend > 0.5 && (
+              <p data-testid="unattributed-spend" className="font-mono text-[9px] text-amber-300/80 mb-1">
+                {fmtMoney(unattributedSpend)} of campaign spend isn&rsquo;t accounted for by any ad row
+                (a deleted ad, most likely). It sits in neither cost-per-result figure above rather than
+                being quietly charged to one of them.
+              </p>
+            )}
 
             {showAdjLog && (
               <div className="pb-card p-3 mb-2">
@@ -928,10 +1270,22 @@ export default function SuperMetaAds() {
               />
             </div>
 
-            {/* Funnel */}
-            <div className="mb-4">
-              <FunnelChart stages={campaign.funnel} />
-            </div>
+            {/* One funnel PER STREAM. The single campaign-wide funnel that used
+                to sit here mixed units the moment the webinar ad started
+                spending: campaign-wide impressions above a bottom row that only
+                counted trial signups, so the drop at the end read as a
+                conversion collapse when it was two products in one column. */}
+            {streams.length > 0 && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-4">
+                {streams.filter((s) => (s.impressions || 0) > 0).map((s) => (
+                  <FunnelChart
+                    key={s.stream}
+                    stages={s.funnel}
+                    title={`${s.label}: impressions to a registration`}
+                  />
+                ))}
+              </div>
+            )}
 
             {/* Registration-wizard step breakdown — fills in the gap between
                 Meta's own Lead and CompleteRegistration events. */}
@@ -1129,6 +1483,7 @@ export default function SuperMetaAds() {
                     selected={selectedAdId === ad.ad_id}
                     onSelect={() => setSelectedAdId((cur) => (cur === ad.ad_id ? null : ad.ad_id))}
                     trendDays={trendDays}
+                    annotations={annotations}
                   />
                 ))}
               </div>
@@ -1143,12 +1498,19 @@ export default function SuperMetaAds() {
                 <RangePicker value={trendDays} onChange={setTrendDays} />
               </div>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                <TrendChart title="Spend per day" data={history} dataKey="spend" kind="bar" color="var(--pb-accent)" money={new Set(['spend'])} />
-                <TrendChart title="Link CTR per day" data={history} dataKey="link_ctr" kind="line" color="#3b82f6" />
-                <TrendChart title="Cost per LPV per day" data={history} dataKey="cost_per_lpv" kind="line" color="#f59e0b" money={new Set(['cost_per_lpv'])} />
-                <TrendChart title="Leads per day (Meta-reported)" data={history} dataKey="leads" kind="bar" color="#a78bfa" />
+                <TrendChart title="Spend per day" data={history} dataKey="spend" kind="bar" color="var(--pb-accent)" money={new Set(['spend'])} annotations={annotations} provisionalFrom={provisionalFrom} />
+                <TrendChart title="Link CTR per day" data={history} dataKey="link_ctr" kind="line" color="#3b82f6" annotations={annotations} provisionalFrom={provisionalFrom} />
+                <TrendChart title="Cost per LPV per day" data={history} dataKey="cost_per_lpv" kind="line" color="#f59e0b" money={new Set(['cost_per_lpv'])} annotations={annotations} provisionalFrom={provisionalFrom} />
+                <TrendChart title="Leads per day (Meta-reported)" data={history} dataKey="leads" kind="bar" color="#a78bfa" annotations={annotations} provisionalFrom={provisionalFrom} />
               </div>
+              <ChartLegend
+                annotations={annotations}
+                days={history.map((d) => d.date)}
+                provisionalDays={provisionalDays}
+              />
             </div>
+
+            <CreativeTable creatives={summary?.creatives} />
 
             {/* On-site attribution & conversion, from our own visit tracking rather than Meta's numbers */}
             {attribution && (
@@ -1221,9 +1583,13 @@ export default function SuperMetaAds() {
                   <div className="font-mono text-[10px] uppercase tracking-wide text-pb-faint">
                     Self-serve trial signups &rarr; lead score
                   </div>
-                  {adSignups.rows.length > 0 && campaign?.spend > 0 && (
+                  {/* Divided by the TRIAL stream's own spend, not the campaign's.
+                      Using campaign spend here charged every trial signup with
+                      the webinar ad's spend too, which quietly overstated it by
+                      whatever the webinar was costing that week. */}
+                  {adSignups.rows.length > 0 && trialStream?.spend > 0 && (
                     <span className="font-mono text-[10px] text-pb-faintest">
-                      {fmtMoney(campaign.spend / Math.max(1, adSignups.rows.filter((r) => r.signup_source === 'self_serve_ad').length))} per ad-driven signup at current spend
+                      {fmtMoney(trialStream.spend / Math.max(1, adSignups.rows.filter((r) => r.signup_source === 'self_serve_ad').length))} per ad-driven signup, at trial-ad spend only
                     </span>
                   )}
                 </div>
