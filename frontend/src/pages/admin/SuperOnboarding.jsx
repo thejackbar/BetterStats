@@ -40,7 +40,7 @@ function WebinarRegistrations() {
   }, [])
 
   const csv = () => {
-    const cols = ['created_at', 'name', 'email', 'club', 'role', 'utm_campaign',
+    const cols = ['created_at', 'name', 'email', 'phone', 'club', 'role', 'utm_campaign',
                   'utm_source', 'utm_medium', 'utm_content', 'email_sent']
     const escape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`
     const body = [cols.join(','), ...rows.map((r) => cols.map((c) => escape(r[c])).join(','))].join('\n')
@@ -98,6 +98,7 @@ function WebinarRegistrations() {
               <tr className="text-left font-mono text-[10px] tracking-wide2 uppercase text-pb-faint border-b pb-hairline">
                 <th className="px-3 py-2.5">Date</th>
                 <th className="px-3 py-2.5">Name</th>
+                <th className="px-3 py-2.5">Phone</th>
                 <th className="px-3 py-2.5">Club</th>
                 <th className="px-3 py-2.5">Role</th>
                 <th className="px-3 py-2.5">Campaign</th>
@@ -111,6 +112,14 @@ function WebinarRegistrations() {
                   <td className="px-3 py-2.5">
                     <div className="text-pb-text">{r.name}</div>
                     <a href={`mailto:${r.email}`} className="text-xs text-pb-faint hover:text-pb-text underline">{r.email}</a>
+                  </td>
+                  {/* A real tel: link — this list is worked from a desk. Often
+                      blank, and that is expected: the field is optional, and a
+                      registration taken before it existed carries none either. */}
+                  <td className="px-3 py-2.5 whitespace-nowrap">
+                    {r.phone
+                      ? <a href={`tel:${String(r.phone).replace(/\s/g, '')}`} className="text-pb-text hover:underline">{r.phone}</a>
+                      : <span className="text-pb-faintest">-</span>}
                   </td>
                   <td className="px-3 py-2.5 text-pb-text">{r.club}</td>
                   <td className="px-3 py-2.5 text-pb-dim">{r.role || '-'}</td>

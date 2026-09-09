@@ -23,6 +23,7 @@ from sqlalchemy import select
 
 from app.content import blog as blog_content
 from app.services import instructional_videos as video_svc
+from app.services import webinar
 from app.models.db import Player, Organisation, get_db
 
 router = APIRouter(prefix="/og-preview", tags=["og-preview"])
@@ -69,12 +70,9 @@ MARKETING_PAGES: dict[str, tuple[str, str]] = {
         "$399 a year, add modules from $149, and bundle for a discount. One "
         "price per club.",
     ),
-    "/demo": (
-        "Watch the BetterCricket demo | Live demo + Q&A",
-        "See the whole of BetterCricket in one sitting — historical stats, "
-        "selection, socials, club admin and opposition analysis — then ask us "
-        "anything. Register free.",
-    ),
+    # /demo is deliberately absent — its copy depends on whether the event has
+    # been and gone, so it is resolved per request in _marketing_html from
+    # webinar.page_meta() rather than frozen here.
     "/trial": (
         "Start your club's free trial | BetterCricket",
         "Register your cricket club yourself and start a free trial of every "
@@ -387,7 +385,14 @@ def _html(
 
 def _marketing_html(path: str, base: str) -> str:
     key = "/" + path.strip("/").lower()
-    title, description = MARKETING_PAGES.get(key, (HOME_TITLE, HOME_DESC))
+    if key == "/demo":
+        # The one page whose card changes with the calendar: before the session
+        # it advertises a live demo, after it a recording. Resolved per request
+        # so the deploy that carries the event past its end date is not what
+        # updates the card.
+        title, description = webinar.page_meta()
+    else:
+        title, description = MARKETING_PAGES.get(key, (HOME_TITLE, HOME_DESC))
     return _html(
         title,
         description,

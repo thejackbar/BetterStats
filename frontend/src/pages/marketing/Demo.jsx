@@ -102,7 +102,7 @@ function TrialCta({ className = '' }) {
 // pixel beacon has to get out, and there is a calendar file and an inbox note
 // to hand over that a redirect would skip straight past.
 function SuccessState({ state, recordingPending, watchUrl }) {
-  const calendarUrl = googleCalendarUrl(watchUrl || WEBINAR.watchUrl)
+  const calendarUrl = googleCalendarUrl(watchUrl)
   return (
     <div className="text-left" data-testid="demo-success">
       <div className="pb-card p-6 bg-pb-surface">
@@ -115,10 +115,15 @@ function SuccessState({ state, recordingPending, watchUrl }) {
             : `See you on ${WEBINAR.dateLabel}`}
         </h2>
 
-        {recordingPending ? (
+        {/* No link to hand over: the recording is not up yet, or — since the
+            StreamYard link stopped being a bundled constant — the server has
+            not answered with one. Either way the confirmation email carries
+            it, so say so rather than drawing a button that goes nowhere. */}
+        {(recordingPending || !watchUrl) ? (
           <p className="text-sm text-pb-dim leading-relaxed mb-4">
-            We&rsquo;re finishing the recording now. It&rsquo;ll land in your inbox as soon as
-            it&rsquo;s ready.
+            {state.past
+              ? 'We’re finishing the recording now. It’ll land in your inbox as soon as it’s ready.'
+              : `${WEBINAR.dateLabel} · ${WEBINAR.timeLabel}. The joining link is in your inbox.`}
           </p>
         ) : (
           <>
@@ -129,7 +134,7 @@ function SuccessState({ state, recordingPending, watchUrl }) {
               </p>
             )}
             <a
-              href={watchUrl || WEBINAR.watchUrl}
+              href={watchUrl}
               target="_blank"
               rel="noopener noreferrer"
               data-testid="demo-watch-link"
@@ -176,6 +181,7 @@ function RegistrationForm({ state, onSuccess }) {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [club, setClub] = useState('')
+  const [phone, setPhone] = useState('')
   const [role, setRole] = useState('')
   const [showRole, setShowRole] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -193,6 +199,15 @@ function RegistrationForm({ state, onSuccess }) {
     if (!email.trim()) next.email = 'Add your email.'
     else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) next.email = 'That doesn’t look like an email address.'
     if (!club.trim()) next.club = 'Add your club.'
+    // Phone is OPTIONAL, and a blank one is never an error — see the field's
+    // own note. A number that IS typed still has to look like one: mirrors the
+    // server's rule (public_webinar.PHONE_MIN/MAX_DIGITS), enough digits to be
+    // a phone number and nothing stricter, because a landline is as good a
+    // number to ring a club secretary on as a mobile.
+    if (phone.trim()) {
+      const digits = phone.replace(/\D/g, '')
+      if (digits.length < 8 || digits.length > 15) next.phone = 'That doesn’t look like a phone number.'
+    }
     return next
   }
 
@@ -215,6 +230,7 @@ function RegistrationForm({ state, onSuccess }) {
         name: name.trim(),
         email: email.trim(),
         club: club.trim(),
+        phone: phone.trim(),
         role: role || null,
         attribution: getAttribution(),
         visitorId: getVisitorId(),
@@ -244,19 +260,20 @@ function RegistrationForm({ state, onSuccess }) {
         // will not match — Meta attributes on a 7-day click window.
         window.gtag('event', 'sign_up', { method: 'webinar' })
       }
-      // The server's own view of the link wins over the local constant — it is
-      // the side that knows whether a recording has been published.
+      // The server is the only side that knows the link — whether that is the
+      // live stream or a published recording.
       onSuccess({ watchUrl: result?.watch_url || null })
     } catch (err) {
       // GRACEFUL FAILURE: someone who has filled the form in and pressed the
       // button must not be trapped behind a broken backend. They get the link
       // anyway — but no pixel fires, because nothing was actually registered
       // and a conversion we invented is worse than one we missed.
-      setFormError(
-        err?.message
-        || 'Something went wrong saving your details. The link below still works, and '
-        + `and email ${SUPPORT_EMAIL} if you’d like us to send you the recording.`,
-      )
+      //
+      // The server's own message when it gave one, else a plain sentence. What
+      // to do NEXT is rendered separately, because a message from the server
+      // would otherwise replace it — and the next step is the half that
+      // matters when there is no link to fall back to.
+      setFormError(err?.message || 'Something went wrong saving your details.')
     } finally {
       setSubmitting(false)
     }
@@ -271,16 +288,35 @@ function RegistrationForm({ state, onSuccess }) {
       <div className="text-left">
         <div className="pb-card p-5 border-red-500/40">
           <p className="text-sm text-pb-text leading-relaxed mb-3">{formError}</p>
-          <a
-            href={state.watchUrl || WEBINAR.watchUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            data-testid="demo-fallback-link"
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg font-display font-semibold text-sm text-pb-bg"
-            style={{ background: 'var(--pb-accent)' }}
-          >
-            Open the demo link <span aria-hidden="true">→</span>
-          </a>
+          {/* GRACEFUL FAILURE still holds for the failure that actually
+              happens — the register WRITE erroring — because the link came
+              from the page-load READ, which by then has already succeeded.
+              What it can no longer cover is BOTH calls failing, and that is
+              the accepted cost of the link not being in the bundle. There the
+              next step is a sentence, never a button pointing at nothing. */}
+          {state.watchUrl ? (
+            <>
+              <p className="text-sm text-pb-dim leading-relaxed mb-3">
+                The link below still works, and you can email {SUPPORT_EMAIL} if
+                you&rsquo;d like us to send you the recording.
+              </p>
+              <a
+                href={state.watchUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid="demo-fallback-link"
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg font-display font-semibold text-sm text-pb-bg"
+                style={{ background: 'var(--pb-accent)' }}
+              >
+                Open the demo link <span aria-hidden="true">→</span>
+              </a>
+            </>
+          ) : (
+            <p className="text-sm text-pb-dim leading-relaxed">
+              Please try again in a moment, or email {SUPPORT_EMAIL} and
+              we&rsquo;ll register you and send the link over.
+            </p>
+          )}
         </div>
         <button
           type="button"
@@ -346,6 +382,33 @@ function RegistrationForm({ state, onSuccess }) {
           />
           {err('club')}
         </div>
+        {/* OPTIONAL, AND THE LABEL SAYS SO. It shipped as required for one
+            release and that was the wrong call: on cold paid traffic a
+            mandatory phone number is the highest-friction field there is, and
+            it reads as "we are going to ring you" — which contradicts the "no
+            sales call" promise `/trial` makes a click away. Asking and letting
+            people skip keeps most of the value: the ones who fill it in are
+            the warmer leads anyway, and their number still rides on the
+            conversion as a second hashed identifier. `type="tel"` plus
+            `inputMode="tel"` is what puts a phone keypad in front of the ~all
+            of this traffic that is on a phone. */}
+        <div>
+          <label htmlFor="demo-phone" className="block font-mono text-[11px] tracking-wide text-pb-faint mb-1.5">
+            PHONE <span className="text-pb-faintest">(OPTIONAL)</span>
+          </label>
+          <input
+            id="demo-phone"
+            type="tel"
+            inputMode="tel"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            autoComplete="tel"
+            aria-invalid={!!errors.phone}
+            aria-describedby={errors.phone ? 'demo-phone-error' : undefined}
+            className={FIELD_CLS}
+          />
+          {err('phone')}
+        </div>
 
         {/* Optional, and collapsed — every extra field on screen costs
             registrations, so this one asks to be opened rather than sitting
@@ -409,21 +472,11 @@ function RegistrationForm({ state, onSuccess }) {
 }
 
 export default function Demo() {
-  usePageMeta({
-    title: 'Watch the BetterCricket demo | Live demo + Q&A',
-    description:
-      'See the whole of BetterCricket in one sitting: historical stats, selection, '
-      + 'socials, club admin and opposition analysis, then ask us anything. Register free.',
-    image: 'https://betterat.cricket/og-cover.png',
-    url: 'https://betterat.cricket/demo',
-    jsonLd: DEMO_JSONLD,
-  })
-
-  // The recording link is the one thing the page can't know for itself, so it
-  // comes from the server. Everything else — the date, the headline, the
-  // button label — renders immediately from the local constant, because a
-  // request in front of the H1 is a request in front of LCP and this traffic
-  // is paid and mobile.
+  // The StreamYard link and the recording link are the two things the page
+  // can't know for itself, so they come from the server. Everything else — the
+  // date, the headline, the button label — renders immediately from the local
+  // constant, because a request in front of the H1 is a request in front of
+  // LCP and this traffic is paid and mobile.
   const [details, setDetails] = useState(null)
   const [success, setSuccess] = useState(null)
 
@@ -456,9 +509,23 @@ export default function Demo() {
       // constant only covers the moment before its answer arrives.
       isPast: typeof details?.is_past === 'boolean' ? details.is_past : null,
       recordingUrl: details?.recording_available ? details.watch_url : null,
+      // Before the event `watch_url` IS the StreamYard link. It is not in the
+      // bundle, so it is null until this request lands.
+      liveUrl: details?.recording_available ? null : (details?.watch_url || null),
     }),
     roles: details?.roles || ['President', 'Secretary', 'Committee', 'Coach', 'Captain', 'Player', 'Other'],
   }
+
+  // The tab and the share card follow the same state as the headline. The
+  // server-rendered card (services/webinar.page_meta) is what a crawler reads;
+  // this is what a person sees in their tab and what an in-app share picks up.
+  usePageMeta({
+    title: state.pageTitle,
+    description: state.pageDescription,
+    image: 'https://betterat.cricket/og-cover.png',
+    url: 'https://betterat.cricket/demo',
+    jsonLd: DEMO_JSONLD,
+  })
 
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text" data-theme="light">

@@ -35,6 +35,23 @@ router = APIRouter(prefix="/public/webinar", tags=["public-webinar"])
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
+# The shortest and longest run of digits that can be a real phone number. An
+# Australian landline with no area code is 8 digits and a mobile is 10; an
+# international number with a country code runs to 15 (E.164's own ceiling).
+#
+# THE FIELD ITSELF IS OPTIONAL. It shipped required for one release and that
+# was the wrong call on cold paid traffic — a mandatory phone number is the
+# highest-friction field on the form, and it reads as a promise to ring, which
+# contradicts the "no sales call" line on /trial. A blank one is accepted; this
+# range only governs a number somebody actually typed.
+#
+# DELIBERATELY NOT `admin_identity.mobile_valid`, which is the right rule for a
+# club admin's account and the wrong one here: it refuses anything that is not
+# an Australian mobile, and the clubroom landline a secretary writes down is a
+# perfectly good number to ring them on. This checks that what was typed COULD
+# be a phone number, and nothing more — the value is stored exactly as typed.
+PHONE_MIN_DIGITS, PHONE_MAX_DIGITS = 8, 15
+
 # Sized for a club committee filling the form in from one connection, not for
 # scraping. Every submission is a database write and a transactional email.
 REGISTER_LIMIT, REGISTER_WINDOW = 20, 3600
@@ -58,6 +75,7 @@ class RegisterIn(BaseModel):
     name: str = ""
     email: str = ""
     club: str = ""
+    phone: str = ""
     role: Optional[str] = None
     # First-touch UTM/click-id blob from lib/visitor.js `getAttribution()` — the
     # same capture every other public form on the site uses, rather than a
@@ -138,6 +156,7 @@ async def register(
     name = (payload.name or "").strip()
     email = (payload.email or "").strip().lower()
     club = (payload.club or "").strip()
+    phone = (payload.phone or "").strip()
 
     # A filled honeypot is a bot. Answer as though it worked — telling it
     # otherwise only teaches whoever wrote it to leave the field alone. Nothing
@@ -160,6 +179,13 @@ async def register(
         raise HTTPException(status_code=422, detail="Enter a valid email address.")
     if not club:
         raise HTTPException(status_code=422, detail="Enter your club.")
+    # OPTIONAL — a blank phone is a complete registration, not a refusal. See
+    # PHONE_MIN_DIGITS above for why, and why the check on a number that IS
+    # given is this loose.
+    if phone:
+        digits = re.sub(r"\D", "", phone)
+        if not (PHONE_MIN_DIGITS <= len(digits) <= PHONE_MAX_DIGITS):
+            raise HTTPException(status_code=422, detail="Enter a valid phone number.")
 
     rate_limit.enforce(
         f"webinar:register:{client_ip(request)}", REGISTER_LIMIT, REGISTER_WINDOW,
@@ -168,7 +194,7 @@ async def register(
 
     result = await webinar.register(
         db,
-        name=name, email=email, club=club, role=payload.role,
+        name=name, email=email, club=club, phone=phone, role=payload.role,
         attribution=payload.attribution or {},
         visitor_id=payload.visitorId,
         user_agent=request.headers.get("user-agent"),
@@ -189,12 +215,19 @@ async def register(
         # Server-side CompleteRegistration, sharing the browser pixel's own
         # event_id so Meta dedupes the pair into one conversion rather than
         # counting it twice. Best-effort and backgrounded (see meta_capi).
+        #
+        # The phone rides along BECAUSE it is a second hashed identifier for
+        # the same person: Meta matches a conversion to whoever saw the ad, and
+        # a registration carrying an email AND a phone matches more often than
+        # one carrying an email alone. `meta_capi._hash_phone` does the
+        # digits-only normalisation and hashing — the raw number never leaves.
         meta = payload.meta
         background.add_task(
             meta_capi.send_complete_registration_event,
             event_id=meta.eventId if meta else None,
             event_source_url=meta.eventSourceUrl if meta else None,
             email=email,
+            phone=phone,
             name=name,
             client_ip=client_ip(request),
             user_agent=request.headers.get("user-agent"),

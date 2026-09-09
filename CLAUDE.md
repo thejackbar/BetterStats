@@ -284,6 +284,10 @@ then hands the visitor the StreamYard link. Webinar Mon 21 Sep 2026.
   which had never been added**, so `/trial` was resolving "trial" as a club slug
   on every visit: a wasted `/api/clubs/trial` 404 and the club `Navbar` drawn on
   top of its own `MarketingNav`, on the exact page paid traffic lands on.
+  **CORRECTED in v9.71.3 below: only THREE of the four were updated.** The
+  fourth, `lib/marketingPaths.MARKETING_PATHS`, is the one that suppresses the
+  club Navbar, so the overlap this note claims to have fixed was still live on
+  both pages until then — and could be measured on the deployed site.
 - **Verified against a real Postgres** (`backend/verification/verify_webinar.py`,
   143 checks through the shipped route bodies and service: the DDL applied three
   times and again over a populated table, both copies of the date agreeing, 17:30
@@ -326,13 +330,151 @@ then hands the visitor the StreamYard link. Webinar Mon 21 Sep 2026.
   priority list (or iOS conversions are not attributed), and the ad's
   `conversion_domain`. Also worth fixing on the creative itself: it reads "WAST",
   which is West Africa Summer Time — Perth is **AWST**.
+- **THE FORM PRE-FILLS NOTHING ON STREAMYARD, AND THAT WAS ASKED AND ANSWERED
+  RATHER THAN ASSUMED (migration 297, v9.71.2).** `EVENT.watch_url` is handed
+  over as a plain link and no registration data crosses to it — there is no
+  StreamYard API call anywhere in this codebase. Read off the watch page's own
+  server-rendered props: the broadcast is configured as a **webinar**
+  (`webinarId`) and the page carries a `sessionRegistrationId`, which is
+  StreamYard's OWN registration mechanism and is empty for an anonymous
+  visitor. Whether that gate is switched on for this broadcast is a setting in
+  StreamYard, not something this code can see or change. **If it is on, a
+  registrant fills a form twice** — the fix is a StreamYard setting, not a
+  code change.
+- **A PHONE NUMBER IS GATHERED, AND IT IS OPTIONAL.** It shipped REQUIRED and
+  that was reversed the same week — see v9.71.3 below. The original reasoning
+  ("make sure we gather" is not satisfied by a field most people skip) is a
+  real argument and it loses to two better ones: on cold paid traffic a
+  mandatory phone number is the highest-friction field on the form, and it
+  reads as a promise to ring, which contradicts the "no sales call" line
+  `/trial` makes one click away.
+- **STORED EXACTLY AS TYPED, and validated on "could this be a phone number"
+  and nothing more.** `PHONE_MIN_DIGITS, PHONE_MAX_DIGITS = 8, 15` — an
+  Australian landline with no area code is 8 digits and E.164's own ceiling is
+  15. **DELIBERATELY NOT `admin_identity.mobile_valid`**, which is right for a
+  club admin's account and wrong here: it refuses anything that is not an
+  Australian mobile, and the clubroom landline a secretary writes down is a
+  perfectly good number to ring them on. Normalising the stored value would
+  only make it harder to read back to whoever rings it; the digits-only form
+  is derived once, at the Meta boundary, by `meta_capi._hash_phone`.
+- **IT RIDES ON THE CONVERSION BECAUSE IT IS A SECOND HASHED IDENTIFIER.**
+  `send_complete_registration_event` has always taken a `phone` and never had
+  one to hash — a conversion carrying an email AND a phone matches back to
+  whoever saw the ad more often, so this is an attribution improvement rather
+  than only a stored field.
+- **THE UPSERT COALESCES THE PHONE WHERE IT OVERWRITES THE NAME AND CLUB.**
+  Those two are always present, so a resubmission correcting them is
+  unambiguous; a phone can legitimately be absent (a browser served an older
+  bundle mid-deploy, a caller that is not the form), and losing a stored number
+  to one of those is worse than keeping a stale one. A new number still wins.
+- **MIGRATION 297 RE-RUNS THE WHOLE SHARED LIST rather than issuing a lone
+  ALTER**, so the CREATE covers a fresh database and an idempotent
+  `ADD COLUMN IF NOT EXISTS` covers one already at 296 — one list, no second
+  copy of the column to drift. **Its downgrade drops the COLUMN, never the
+  table**: 296 owns the table, and copying 296's downgrade would destroy every
+  registration over one column. The suite pins that.
+- **Verified** (the backend suite is 173 now: the pre-297 table rebuilt in raw
+  SQL and carried across with its rows, an earlier registration reading as no
+  phone rather than a blank, the number stored as typed, the corrected number
+  landing, a phone-less write not blanking one already stored, five shapes of
+  real number accepted incl. a landline and an international one, four
+  refusals, and the staff list carrying it) **with a control run**: 22 fail
+  against the previous commit and the run REPORTS rather than crashing.
+  **Driven in Chromium** (93: the field with its `tel` type, inputmode and
+  autocomplete, its label, the exact number on the wire, and both refusals
+  posting nothing and claiming no conversion) **with a control run**: 8 fail.
+- **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN, hit twice in one change.**
+  The backend's `SELECT phone` died on an `UndefinedColumnError` and said
+  nothing about the other 150 checks; the browser's bare `fill('#demo-phone')`
+  hung 30s on the locator and killed the run after six. Every phone read is
+  presence-checked now — `row.get("phone")` over `row["phone"]`, `attrOf()`
+  over a bare `getAttribute`. **The browser's refusal checks needed the WHOLE
+  BLOCK gated on the field existing, not each read guarded**: without the
+  field those submissions SUCCEED, the form is replaced by the success state,
+  and every later check in that section then hangs on a form that is gone.
+  Guarding one read at a time just moved the crash further down.
 - **NOTICED, NOT BUILT**: no reminder email before the event and no
   attended/no-show record afterwards, so "send the recording to everyone who
   registered" is a CSV export and a BetterComms list rather than one button. The
   event is one constant, so a second webinar means editing both copies rather
   than picking a row — `event_key` is on the table from the start for whenever
   that becomes worth a screen.
-### A disabled button that does not say why reads as broken (v9.71.2, Sep 2026)
+
+### What a review of the live page found, and one note it proved wrong (v9.71.3)
+
+Four findings off `betterat.cricket/demo` as deployed. The pixel behaviour —
+the part the page exists for — was confirmed correct; these are everything
+around it.
+
+- **THE PAGE ADVERTISED A RECORDING OF A DEMO THAT HAD NOT HAPPENED YET, on
+  every share of the link.** `<title>` and the server card's `og:title` were
+  both hardcoded to the post-event wording while the H1 correctly read "See
+  BetterCricket in action". The tab is the small half; the card is the real
+  one, because `usePageMeta` never reaches a crawler.
+- **SO THE COPY MOVED TO WHERE THE DATE ALREADY LIVES.**
+  `services/webinar.page_meta(is_past)` and `webinarState`'s `pageTitle` /
+  `pageDescription`, mirrored the way every other string on this page already
+  is, and asserted rather than trusted. **`_marketing_html` resolves `/demo`
+  per request** and the entry is GONE from `MARKETING_PAGES` — a frozen dict
+  cannot answer a question whose answer changes with the calendar, and leaving
+  a stale one there is how the two disagree.
+- **THE PHONE IS OPTIONAL, one week after shipping as required.** See the
+  corrected note above for why the original argument loses. The 8-15 digit
+  check still governs a number that IS typed; a blank one is a complete
+  registration. The label says "(OPTIONAL)" — asking silently and accepting
+  nothing is its own kind of dishonest.
+- **THE STREAMYARD LINK WAS IN THE JS BUNDLE, so the form was bypassable by
+  anyone who read the source.** It is off `WEBINAR` entirely now and comes from
+  `GET /public/webinar`, a request the page already makes. Grep the BUILT
+  bundle to confirm, not the source: `grep -rl <url> frontend/dist`.
+- **THE FULL GATE IS NOT BUILT, AND THE REASON IS A DIRECT CONFLICT WITH THE
+  BRIEF.** Genuinely gating registration means withholding `watch_url` from the
+  page-load read and returning it only from the register POST — which is
+  exactly the case the brief's own "a broken backend still hands over the link"
+  rule exists for. The two are mutually exclusive. **What ships is the middle
+  and it covers the failure that actually happens**: the register WRITE
+  erroring still hands the link over, because the page-load READ has already
+  succeeded. Only both failing leaves nothing, and there the page says what to
+  do instead of drawing a button that goes nowhere.
+- **THE OVERLAPPING LOCKUP WAS THE FOUR-LISTS TRAP, NOT A LOGO PROBLEM.**
+  Reported as "the header logo renders clipped at narrow widths — it reads as
+  'iiB Be… Cricket' with the wordmark overlapping the mark", which reads as a
+  CSS bug. Measured instead of guessed: `/demo` renders **a `HEADER` at y=0
+  AND a `NAV` at y=0**, the club `Navbar` and the page's own `MarketingNav`
+  stacked. The mark is three bars and a B ("iiB"), so two lockups a few pixels
+  apart is exactly the reported string.
+- **THE FOURTH LIST IS `lib/marketingPaths`, AND IT IS THE ONE THAT MATTERS
+  HERE.** `og_preview.RESERVED_ROOT_SEGMENTS`, `FaviconManager.RESERVED_ROOTS`
+  and `SponsorFooter.RESERVED_ROOT_SEGMENTS` all had `demo` and `trial`; the
+  list that suppresses the club Navbar did not.
+- **BUT NOT `MARKETING_PATHS` ITSELF, and that distinction is the whole fix.**
+  That list carries THREE behaviours: suppress the club Navbar, force the dark
+  marketing theme, and show `ClubCTABar`'s "get your club on BetterCricket"
+  bar. `/demo` and `/trial` want only the first — each forces LIGHT with its
+  own `data-theme` wrapper, and each IS a conversion page with its own call to
+  action, so a second competing CTA across the bottom is the friction they
+  exist to avoid. `OWN_NAV_PATHS` / `rendersOwnMarketingNav` is that one
+  behaviour on its own.
+- **Verified against a real Postgres** (`verify_webinar.py`, 198 checks: both
+  page-meta states and the two differing, the mirror carrying both titles, the
+  share card built from the state and the retired literal gone from it, `/demo`
+  no longer frozen in `MARKETING_PAGES` while another page still is, the watch
+  url absent from the mirror, and a blank phone registering, storing nothing
+  rather than a blank string, still being handed the link and still sending the
+  conversion with no phone to hash) **with a control run**: 8 fail against the
+  previous commit, named, with the other 171 still reported.
+- **A CHECK THAT COMPARES AGAINST AN EMPTY STRING CANNOT FAIL, and the control
+  run is what caught it.** The two share-card checks did `want_title in card`
+  with `want_title` defaulting to `""` when `page_meta` was absent — trivially
+  true. They assert the value is non-empty first now.
+- **Driven in Chromium** (110: the title in both states and `og:title` agreeing
+  with it, EXACTLY ONE header at the top of the page, the phone field not
+  marked required and its label saying optional, a blank phone posting and
+  reaching the success state, a malformed one still refused, the link handed
+  over being the one the server sent rather than a constant, and both calls
+  failing drawing no dead link).
+
+### A disabled button that does not say why reads as broken (v9.71.4, Sep 2026)
 
 Reported: "rediscover committee is disabled on club directory".
 

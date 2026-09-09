@@ -75,12 +75,43 @@ EVENT = WebinarEvent(
     time_label="5:30pm AWST / 7:30pm AEST",
 )
 
+
+def page_meta(is_past: Optional[bool] = None) -> tuple[str, str]:
+    """The /demo page title and description, for the state the event is in.
+
+    THE SHARE CARD IS SERVER-RENDERED, so this is what a crawler actually reads
+    — `usePageMeta` never reaches Facebook, LinkedIn or WhatsApp, none of which
+    run the page's JS. Both copies were hardcoded to the post-event wording for
+    one release, so every share of the page advertised a recording of a demo
+    that had not happened yet.
+
+    Mirrored in `frontend/src/data/webinar.js::webinarState` (pageTitle /
+    pageDescription) for the browser tab; the verification asserts the two
+    agree rather than taking it on trust.
+    """
+    past = EVENT.is_past() if is_past is None else is_past
+    if past:
+        return (
+            "Watch the BetterCricket demo | Recording + Q&A",
+            "Watch the BetterCricket demo recording: historical stats, "
+            "selection, socials, club admin and opposition analysis, plus the "
+            "questions clubs asked on the night.",
+        )
+    return (
+        "See BetterCricket in action | Live demo + Q&A",
+        "See the whole of BetterCricket in one sitting: historical stats, "
+        "selection, socials, club admin and opposition analysis, then ask us "
+        "anything. Register free.",
+    )
+
+
 ROLES = ["President", "Secretary", "Committee", "Coach", "Captain", "Player", "Other"]
 
 MAX_LENGTHS = {
     "name": 200,
     "email": 320,
     "club": 200,
+    "phone": 40,
     "role": 60,
     "utm": 200,
     "click_id": 300,
@@ -173,6 +204,7 @@ async def register(
     name: str,
     email: str,
     club: str,
+    phone: Optional[str] = None,
     role: Optional[str] = None,
     attribution: Optional[dict] = None,
     visitor_id: Optional[str] = None,
@@ -198,6 +230,7 @@ async def register(
     name = (name or "").strip()
     email = (email or "").strip()
     club = (club or "").strip()
+    phone = (phone or "").strip() or None
     role = (role or "").strip() or None
     if role and role not in ROLES:
         role = None
@@ -215,6 +248,7 @@ async def register(
         "name": _clip(name, MAX_LENGTHS["name"]) or "",
         "email": _clip(email, MAX_LENGTHS["email"]) or "",
         "club": _clip(club, MAX_LENGTHS["club"]) or "",
+        "phone": _clip(phone, MAX_LENGTHS["phone"]),
         "role": _clip(role, MAX_LENGTHS["role"]),
         "utm_source": attr("utm_source"),
         "utm_medium": attr("utm_medium"),
@@ -232,12 +266,12 @@ async def register(
 
     row = (await db.execute(text("""
         INSERT INTO webinar_registrations (
-            id, event_key, name, email, club, role,
+            id, event_key, name, email, club, phone, role,
             utm_source, utm_medium, utm_campaign, utm_content, utm_term,
             click_id, click_source, attribution, referrer, landing_path,
             visitor_id, user_agent
         ) VALUES (
-            CAST(:id AS uuid), :event_key, :name, :email, :club, :role,
+            CAST(:id AS uuid), :event_key, :name, :email, :club, :phone, :role,
             :utm_source, :utm_medium, :utm_campaign, :utm_content, :utm_term,
             :click_id, :click_source, CAST(:attribution AS jsonb), :referrer,
             :landing_path, :visitor_id, :user_agent
@@ -245,6 +279,13 @@ async def register(
         ON CONFLICT (event_key, lower(email)) DO UPDATE SET
             name = EXCLUDED.name,
             club = EXCLUDED.club,
+            -- A correction, so a new number wins — but never blanked back to
+            -- nothing by a submission that carried none. Name and club are
+            -- overwritten outright because they are always present; a phone
+            -- can legitimately be absent (a browser served an older bundle
+            -- mid-deploy, a caller that is not the form), and losing a stored
+            -- number to one of those is worse than keeping a stale one.
+            phone = COALESCE(EXCLUDED.phone, webinar_registrations.phone),
             role = COALESCE(EXCLUDED.role, webinar_registrations.role),
             -- Only fill a gap. A registration already credited to a campaign
             -- keeps that credit; one that arrived with no signal at all can be
