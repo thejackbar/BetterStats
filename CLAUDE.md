@@ -467,12 +467,22 @@ around it.
   run is what caught it.** The two share-card checks did `want_title in card`
   with `want_title` defaulting to `""` when `page_meta` was absent — trivially
   true. They assert the value is non-empty first now.
-- **Driven in Chromium** (110: the title in both states and `og:title` agreeing
+- **Driven in Chromium** (111: the title in both states and `og:title` agreeing
   with it, EXACTLY ONE header at the top of the page, the phone field not
   marked required and its label saying optional, a blank phone posting and
   reaching the success state, a malformed one still refused, the link handed
   over being the one the server sent rather than a constant, and both calls
-  failing drawing no dead link).
+  failing drawing no dead link) **with a control run**: 12 fail against the
+  previous commit, reporting the title as `Watch the BetterCricket demo | Live
+  demo + Q&A` and **THREE** headers at the top of `/demo` and of `/trial`.
+- **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN, hit again in this same
+  file.** The new blank-phone block opened with a bare
+  `getByTestId('demo-success').waitFor()`, which is exactly what a
+  required-phone build never reaches — so the control died there and said
+  nothing about the seventy checks below it. `reachedSuccess()` reports rather
+  than throws, and every read that depends on the success state is gated on
+  it: guarding one read at a time is not enough when a whole block assumes a
+  form has been replaced.
 
 ### A disabled button that does not say why reads as broken (v9.71.4, Sep 2026)
 
