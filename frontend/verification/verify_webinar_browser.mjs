@@ -134,6 +134,23 @@ async function open(path, {
 const registrations = (calls) => calls.filter((c) => c.path === '/public/webinar/register')
 const completeReg = (px) => px.filter((e) => e.lib === 'fbq' && e.args[1] === 'CompleteRegistration')
 
+/**
+ * Wait for the success state and report whether it arrived, rather than
+ * throwing.
+ *
+ * A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN. A bare `waitFor` here kills
+ * the whole run against a build where the submission is refused — which is
+ * exactly the build a control run uses — and every check after it says nothing.
+ */
+async function reachedSuccess(page, timeout = 5000) {
+  try {
+    await page.getByTestId('demo-success').waitFor({ timeout })
+    return true
+  } catch {
+    return false
+  }
+}
+
 async function fill(page, {
   name = 'Sam Committee', email = 'sam@example.com', club = 'Applecross CC',
   phone = '0412 345 678',
@@ -375,14 +392,17 @@ async function attrOf(page, selector, name) {
   const { page, ctx, calls, readPixel } = await open('/demo')
   await fill(page, { phone: '' })
   await page.getByTestId('demo-submit').click()
-  await page.getByTestId('demo-success').waitFor({ timeout: 5000 })
+  // Against a build where the phone is required the form refuses and stays
+  // put, so this must REPORT rather than throw — see reachedSuccess.
+  const arrived = await reachedSuccess(page)
   const posts = registrations(calls)
   ck('a blank phone still posts the registration', posts.length === 1, String(posts.length))
   ck('with an empty phone on the wire, not a fabricated one',
-    !(posts[0]?.body?.phone || ''), JSON.stringify(posts[0]?.body?.phone))
+    posts.length === 1 && !(posts[0]?.body?.phone || ''), JSON.stringify(posts[0]?.body?.phone))
   ck('and the conversion still fires', completeReg(await readPixel()).length === 1)
   ck('and they still reach the success state',
-    /YOU’RE REGISTERED/i.test(await page.getByTestId('demo-success').innerText()))
+    arrived && /YOU’RE REGISTERED/i.test(await page.getByTestId('demo-success').innerText()),
+    arrived ? '' : 'the form refused it')
   await ctx.close()
 }
 
@@ -397,13 +417,13 @@ async function attrOf(page, selector, name) {
   const { page, ctx } = await open('/demo', { watchUrl: OTHER })
   await fill(page)
   await page.getByTestId('demo-submit').click()
-  await page.getByTestId('demo-success').waitFor({ timeout: 5000 })
+  const arrived = await reachedSuccess(page)
   ck('the link handed over is the one the server sent',
-    await page.getByTestId('demo-watch-link').getAttribute('href') === OTHER,
-    await page.getByTestId('demo-watch-link').getAttribute('href'))
+    arrived && await page.getByTestId('demo-watch-link').getAttribute('href') === OTHER,
+    arrived ? String(await page.getByTestId('demo-watch-link').getAttribute('href')) : 'no success state')
   ck('the calendar link carries the server\'s link too',
-    decodeURIComponent(await page.getByTestId('demo-gcal').getAttribute('href') || '')
-      .includes(OTHER))
+    arrived && decodeURIComponent(await page.getByTestId('demo-gcal').getAttribute('href') || '')
+      .includes(OTHER), arrived ? '' : 'no success state')
   const html = await page.content()
   ck('and the retired constant is nowhere on the page', !html.includes(WATCH))
   await ctx.close()
