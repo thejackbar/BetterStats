@@ -1,5 +1,115 @@
 # BetterStats — Claude Session Notes
 
+## A TEMPLATE FILLS THE POST; IT IS NOT PLACED INTO ONE (v9.74.0, Sep 2026)
+
+Asked for directly: "I want to edit all the templates now so that they fit the
+4:5 and 9:16 post sizes." The word is **fit** — v9.73.0 had already shipped the
+three sizes a day earlier and answered them by FRAMING: a fixed 1080×1080
+layout was letterboxed onto the taller canvas (`fit`) or scaled up and cropped
+(`fill`). This is the templates themselves learning the canvas.
+
+- **A TEMPLATE IS NEVER RE-LAID-OUT PER SIZE, AND THAT IS THE WHOLE DESIGN.**
+  Three separately-tuned copies of one layout, across ~60 templates, is how they
+  start disagreeing with each other — and the existing precedent said so
+  loudly: the three scorecards' `square` prop is a SECOND hand-written layout
+  each, ~35 lines apiece, for ONE extra shape. Two more shapes that way is 124
+  hand-tuned layouts. So the artwork keeps composing at 1080×1080 and only the
+  CANVAS changes.
+- **WIDTH IS 1080 IN ALL THREE, WHICH IS WHAT MAKES IT WORK.** 1:1, 4:5 and
+  9:16 are 1080×1080 / 1080×1350 / 1080×1920, so nothing is ever scaled and
+  nothing is ever cropped — only the height moves. **A size that is not 1080
+  wide is a different change**, because then the artwork has to scale and every
+  trade-off above comes back.
+- **`PostCanvas` (cricket-templates) IS THE ONE PLACE A TEMPLATE BECOMES A
+  POST**: the root at the canvas size carrying the template's own background,
+  and an artwork box centred inside it at 1080×1080. Painting the band from the
+  template's OWN root is what makes it seamless — a composer-level frame cannot
+  know a template's background and has to guess it from the palette, which is
+  exactly what left v9.73.0's `fit` reading as a letterbox.
+- **ONLY THE CANVAS CLIPS, NEVER THE ARTWORK BOX**, and the first cut had it the
+  other way round. With the artwork box clipping, every full-bleed layer stopped
+  with a visible line partway down the post — measured on screen, not reasoned
+  about. Letting only the canvas clip means a glow or shape a template bleeds
+  off its own edge carries on into the extra height, so the design reads as
+  extended rather than matted.
+- **`useBleed` IS WHY ALL ~60 TEMPLATES GOT CORRECT TEXTURE WITH NONE OF THEM
+  EDITED.** Every one draws its grain, dots and stripes through the three shared
+  primitives (`Halftone` / `Stripes` / `GrainSVG`), so teaching those three to
+  reach the real canvas edges covered the lot. **Only ever for a DIRECT child of
+  the canvas** — the offsets are canvas pixels, so a nested one would stretch
+  past its own parent; the two nested texture layers in this tree are safe only
+  because both sit in a box that clips, and a caller's own `style` wins so
+  anything else can opt out.
+- **AN `<svg>` IS A REPLACED ELEMENT: `height: auto` WITH `top` AND `bottom` SET
+  USES ITS INTRINSIC HEIGHT RATHER THAN STRETCHING.** The grain reached the
+  canvas top and stopped 840px short of the bottom. Same trap one line over: an
+  absolutely positioned box given top, bottom AND a height ignores the bottom,
+  which is what left T3's wave short. Both found by the browser suite measuring
+  the real boxes, not by reading the code.
+- **`Bleed` IS FOR FULL-HEIGHT CHROME THAT IS THE POST'S, NOT THE ARTWORK'S** —
+  T1's club-name side rail, T3's wave and side panel, T10's name wash, two event
+  dot fields. **Six sites, found by enumerating direct children of each canvas
+  rather than by grepping for `inset: 0`**, which matches a bar inside a row
+  just as happily and would have stretched it across the whole post.
+- **A BANNER WITH A FIXED HEIGHT GROWS BY THE MATTE; IT IS NOT STRETCHED.**
+  `event-templates.PhotoLayer` is the post's own top edge, so it starts at the
+  CANVAS top — but it has to still END where the composition expects it (EV1
+  hands it `height={680}`), so it takes `top: -m, height: h + m` rather than the
+  top-and-bottom bleed a genuinely full-height one takes. Stretching it instead
+  would move every scrim and headline the composition sits under.
+- **ONE SIZE MODULE, NOT TWO.** `ART_W` / `ART_H` / `matteFor` live in main's
+  own `postSizes.jsx` beside `POST_SIZES` rather than in a second module of
+  mine — two places deciding what a post is is how the picker and the templates
+  start disagreeing about it.
+- **THE HEIGHT RIDES ON CONTEXT, NOT A PROP.** Sixty signatures learning about a
+  format is sixty chances to forget one, and a template mounted anywhere else (a
+  thumbnail, the mobile quick post, the super-admin launch poster) still gets the
+  square by default rather than needing every caller to remember.
+- **FOUR FILES, THIRTY-TWO ROOTS, AND THE LEVERAGE WAS WILDLY UNEVEN.**
+  `round-templates`' `Post` shell is ONE edit that converts nineteen templates;
+  `event-templates` spreads a `FRAME` const into eleven roots; `launch-templates`
+  is one; `cricket-templates` hardcodes seventeen. Worth measuring before
+  starting — the "62 hand edits" this looked like is really about thirty.
+- **THE THREE WIDE SCORECARDS ARE THE ONE LAYOUT A SIZE CANNOT RE-CANVAS.** They
+  compose 1920×1080, so a 1080-wide canvas could only crop them; the picker is
+  withheld (`sizeApplies`) and they keep their own Instagram-squares split. A
+  control that can only answer wrongly is worse than none.
+- **v9.73.0's `PostFrame` / `frameTransform` ARE KEPT AND READ BY NOTHING TODAY**
+  — `fillsCanvas` is true for every registered template — the call migration 267
+  made for `vote_settings`. They are the fallback for a future layout carrying
+  its own fixed `w`/`h`; nothing else should reach for them. The fit-or-crop
+  control renders only when `framed`, so it disappeared on its own rather than
+  being deleted, and the panel says the layout fills the canvas instead.
+- **Driven in Chromium** (`frontend/verification/verify_post_formats_browser.mjs`:
+  the canvas measured 1080×1350 and 1080×1920 off the node the export actually
+  captures, the preview and that node agreeing so a downloaded PNG cannot be a
+  different size from the thing on screen, the artwork's band measured EQUAL top
+  and bottom, the square carrying no band at all, no full-bleed layer stopping at
+  the artwork's edge, every background layer reaching the real top and bottom,
+  one sample per template file at all three sizes with no page error, the wide
+  scorecard offered no picker and still 1920×1080, and each size downloading its
+  own named file) — **84 checks, and a control run** with v9.73.0's framing put
+  back **fails 18**, naming every template file and reporting T1's own side rail
+  among the layers stopping at the artwork edge. The 66 that pass in both are
+  properties the framing already had (the post is the right size, the artwork is
+  centred and full width, the canvas clips, the preview and the export node
+  agree) rather than checks that should have caught this.
+- **A CHECK THAT MEASURES THE HARNESS IS NOT A CHECK, and two did.** "Nothing is
+  painted past the canvas" compared raw bounding boxes and `scrollWidth` — the
+  halftone is deliberately laid out 1.4× and clipped, on the SQUARE exactly as on
+  a story, so it reported 216px of overflow against code that has been correct
+  since these templates were written. It asserts the canvas clips. And the
+  full-bleed selector called a top-and-bottom-anchored CONTENT column full-bleed
+  and then demanded it reach the canvas edges, which it must not.
+- **THE PICKER IS ADDRESSED BY ITS OWN LABEL, NEVER A TESTID THIS CHANGE
+  INVENTED**, so a control run against v9.73.0 finds the buttons and fails on
+  what they DO rather than reporting "button not found" — which says nothing.
+- **NOTICED, NOT BUILT**: nothing yet makes a list template genuinely BREATHE
+  into the extra height (a fixtures roundup could spread its rows over a 9:16
+  rather than centring six of them), and the story bands carry no club chrome.
+  Both are per-template design decisions on top of a canvas that now exists,
+  rather than part of making the sizes work.
+
 ## ONE CAMPAIGN, TWO PRODUCTS, ONE PIXEL EVENT (v9.72.0, Sep 2026)
 
 The Meta ad account was restructured 8-9 Sep 2026 and `BC_AU_Trials_CBO_Aug2026`

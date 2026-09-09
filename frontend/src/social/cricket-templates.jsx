@@ -194,9 +194,10 @@ export function Bleed({ style = {}, children, ...rest }) {
 }
 
 export function GrainSVG({ opacity = 0.35, id = 'grain' }) {
+  const postH = usePostHeight()
   const bleed = useBleed()
   return (
-    <svg style={{ position: 'absolute', inset: 0, width: '100%', height: 'auto', pointerEvents: 'none', mixBlendMode: 'overlay', opacity, ...bleed }}>
+    <svg style={{ position: 'absolute', inset: 0, width: '100%', height: postH, pointerEvents: 'none', mixBlendMode: 'overlay', opacity, ...bleed }}>
       <filter id={id}>
         <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch" />
         <feColorMatrix values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.55 0" />
@@ -764,7 +765,7 @@ export function T3_SideNumbered({ team, opponent, match, players, palette, heroI
     <PostCanvas style={{
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
-      <svg width="1080" height={postH} preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, ...bleed, height: postH }}>
+      <svg width="1080" height={postH} style={{ position: 'absolute', inset: 0, ...bleed, height: postH }}>
         <defs>
           <linearGradient id="bgwv" x1="0" y1="0" x2="1" y2="1">
             <stop offset="0" stopColor={palette.primary} />

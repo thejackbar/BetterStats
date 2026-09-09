@@ -119,12 +119,13 @@ async function canvasGeometry(page) {
     const nb = r(node), cb = r(canvas), ab = r(art)
     return {
       node: nb, canvas: cb, art: ab,
-      // A texture layer is deliberately drawn wider than the canvas (Halftone
-      // scales 1.4 about its centre) and CLIPPED by it, so measuring raw
-      // bounding boxes would report a seam that is never painted. What has to
-      // hold is that the canvas clips and the post does not scroll.
+      // A texture layer is deliberately laid out wider than the canvas — the
+      // halftone scales 1.4 about its own centre — and is CLIPPED by it, on the
+      // square exactly as on a story. So neither raw bounding boxes nor
+      // scrollWidth say anything here (both report that overflow on the square
+      // too, which has been true and harmless since these templates were
+      // written); what has to hold is that the canvas itself clips.
       clips: canvas ? getComputedStyle(canvas).overflow : null,
-      scrollOverflow: canvas ? Math.max(canvas.scrollWidth - canvas.clientWidth, canvas.scrollHeight - canvas.clientHeight) : null,
     }
   })
 }
@@ -158,16 +159,18 @@ for (const f of FORMATS) {
     !!geo?.canvas && Math.round(geo.canvas.h) === f.h && Math.round(geo.canvas.w) === f.w,
     geo?.canvas ? `got ${Math.round(geo.canvas.w)}×${Math.round(geo.canvas.h)}` : 'no canvas')
 
-  const top = geo?.art && geo?.canvas ? geo.art.top - geo.canvas.top : null
-  const bottom = geo?.art && geo?.canvas ? geo.canvas.bottom - geo.art.bottom : null
-  ck(`${f.key}: the artwork is centred — the band above and below measure equal`,
+  const top = geo?.art && geo?.node ? geo.art.top - geo.node.top : null
+  const bottom = geo?.art && geo?.node ? geo.node.bottom - geo.art.bottom : null
+  ck(`${f.key}: the artwork is centred in the POST — the band above and below measure equal`,
     top != null && Math.abs(top - bottom) <= 1, `top ${top} bottom ${bottom}`)
+  ck(`${f.key}: the artwork is the post's full width, never scaled into it`,
+    !!geo?.art && !!geo?.node && Math.abs(geo.art.w - geo.node.w) < 1,
+    geo?.art ? `art ${Math.round(geo.art.w)} post ${Math.round(geo.node.w)}` : 'no artwork box')
   ck(`${f.key}: the artwork is still composed at 1080×1080`,
     !!geo?.art && Math.round(geo.art.h) === 1080 && Math.round(geo.art.w) === 1080,
     geo?.art ? `got ${Math.round(geo.art.w)}×${Math.round(geo.art.h)}` : 'no artwork box')
-  ck(`${f.key}: nothing is painted past the canvas — it clips its own edges`,
-    geo?.clips === 'hidden' && geo?.scrollOverflow <= 0,
-    `overflow ${geo?.clips} scroll ${geo?.scrollOverflow}`)
+  ck(`${f.key}: the canvas clips its own edges, so nothing is painted past them`,
+    geo?.clips === 'hidden', `overflow ${geo?.clips}`)
 
   // ONE definition of the canvas: the preview and the node the export captures
   // read the same W×H, so a downloaded PNG cannot be a different size from the
@@ -193,7 +196,10 @@ const edges = await page.evaluate(() => {
   const canvas = node.querySelector('[data-post-canvas]')
   const art = node.querySelector('[data-post-art]')
   if (!canvas || !art) return null
-  const cb = canvas.getBoundingClientRect()
+  // Against the POST, not the template's own canvas: where a layout is placed
+  // into the post rather than filling it, a layer can reach that inner canvas's
+  // edges and still leave a band on the post, which is the thing being checked.
+  const cb = node.getBoundingClientRect()
   const ab = art.getBoundingClientRect()
   // Direct children of the artwork box that declare themselves full height
   // (top AND bottom anchored, or a repeating background image — the shared
@@ -247,8 +253,17 @@ for (const s of SAMPLES) {
     ck(`${s.label} (${s.id}) renders at ${f.w}×${f.h}`,
       !!g && Math.round(g.node.h) === f.h && Math.round(g.node.w) === f.w,
       g ? `got ${Math.round(g.node.w)}×${Math.round(g.node.h)}` : 'no export node')
-    ck(`${s.label} (${s.id}) at ${f.key} keeps its artwork centred`,
-      !!g?.art && !!g?.canvas && Math.abs((g.art.top - g.canvas.top) - (g.canvas.bottom - g.art.bottom)) <= 1)
+    // Against the POST, never the template's own canvas: those two are the same
+    // box only when the layout genuinely fills the post, so comparing them to
+    // each other is a check that passes whether or not it does.
+    // The template's OWN canvas has to be the post — that is what separates a
+    // template that fills the size from one placed into it, and it is the half
+    // a width-and-centring check cannot see: a square letterboxed onto a taller
+    // post is still full width and still centred.
+    ck(`${s.label} (${s.id}) at ${f.key} IS the post rather than sitting on it`,
+      !!g?.canvas && !!g?.node && Math.round(g.canvas.h) === f.h && Math.round(g.canvas.w) === f.w
+      && Math.abs((g.art.top - g.node.top) - (g.node.bottom - g.art.bottom)) <= 1,
+      g?.canvas ? `canvas ${Math.round(g.canvas.w)}×${Math.round(g.canvas.h)} post ${Math.round(g.node.w)}×${Math.round(g.node.h)}` : 'no canvas')
   }
   ck(`${s.label} (${s.id}) renders every size with no page error`, e2.length === 0, e2.slice(0, 1).join(' | '))
   await c2.close()
@@ -274,17 +289,26 @@ for (const s of SAMPLES) {
 {
   const { page: p4, ctx: c4 } = await open()
   const names = []
-  p4.on('download', (d) => names.push(d.suggestedFilename()))
   for (const f of FORMATS) {
     await press(sizeBtn(p4, f))
     await p4.waitForTimeout(500)
-    await press(p4.locator('button', { hasText: /DOWNLOAD PNG/ }))
-    await p4.waitForTimeout(6000)
+    // Wait for the download EVENT, not a fixed timeout: capturing a 1080×1920
+    // PNG with the fonts embedded is slow and how slow depends on the machine,
+    // so a timeout long enough to be reliable is also long enough to be a bad
+    // check. A miss reports as a missing name rather than hanging the run.
+    const [dl] = await Promise.all([
+      p4.waitForEvent('download', { timeout: 40000 }).catch(() => null),
+      press(p4.locator('button', { hasText: /DOWNLOAD PNG/ })),
+    ])
+    if (dl) names.push(dl.suggestedFilename())
   }
   ck('every size downloads a file', names.length === 3, `got ${names.length}: ${names.join(', ')}`)
   ck('each download names its own size',
     FORMATS.every((f) => names.some((n) => n.includes(`${f.w}x${f.h}`))), names.join(', '))
-  ck('the three downloads are three different files', new Set(names).size === names.length, names.join(', '))
+  // Gated on all three having arrived: "three different files" is trivially
+  // true of one file, and a check that cannot fail is not a check.
+  ck('the three downloads are three different files',
+    names.length === 3 && new Set(names).size === 3, names.join(', '))
   await c4.close()
 }
 
