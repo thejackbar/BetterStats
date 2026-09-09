@@ -128,6 +128,8 @@ export function ClubLaunchPoster({
   subhead = 'A smarter way to run our club. A better experience for our players, coaches, members and supporters.',
   footerUrl = 'betterat.cricket',
   showCallout = true,
+  width = 1080,
+  height = 1080,
 }) {
   const P = palette || {}
   const bg = P.bg || '#0b0c10'
@@ -146,7 +148,7 @@ export function ClubLaunchPoster({
 
   return (
     <div style={{
-      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+      width, height, position: 'relative', overflow: 'hidden',
       background: `linear-gradient(120deg, ${bg} 38%, ${bg2} 100%)`,
       color: ink, fontFamily: "'Inter', sans-serif",
       display: 'flex', flexDirection: 'column', padding: 40, boxSizing: 'border-box',

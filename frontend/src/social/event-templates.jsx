@@ -105,16 +105,28 @@ function Watermark({ sponsor, color = 'rgba(255,255,255,0.42)' }) {
   )
 }
 
-const FRAME = { width: 1080, height: 1080, position: 'relative', overflow: 'hidden', fontFamily: "'Inter', sans-serif", boxSizing: 'border-box' }
+// The post's real size lands here, once, for all eleven event posters. Called
+// rather than spread so a template can't silently keep the old fixed square by
+// forgetting to pass its own width and height through.
+const FRAME = (width = 1080, height = 1080) => ({
+  width, height, position: 'relative', overflow: 'hidden',
+  fontFamily: "'Inter', sans-serif", boxSizing: 'border-box',
+})
+
+// A band that was N pixels tall on the square, kept at the same SHARE of a
+// taller canvas. A photo band fixed at 680 is two thirds of a square and barely
+// a third of a story, which reads as the design falling apart rather than as a
+// taller post — and this is exact at 1080, so the square is untouched.
+const share = (canvasH, at1080) => Math.round((canvasH * at1080) / 1080)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // EV1 — FLOODLIT · full-bleed photo + opacity filter (sporty, BetterStats-native)
 // ─────────────────────────────────────────────────────────────────────────────
-export function EVT_Floodlit({ team, event = {}, palette, motif }) {
+export function EVT_Floodlit({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
   const P = palette
   return (
-    <div style={{ ...FRAME, background: P.primary, color: '#fff' }}>
-      <PhotoLayer motif={motif} palette={P} height={680} scrimFrom={0.04} label={motif?.label} />
+    <div style={{ ...FRAME(width, height), background: P.primary, color: '#fff' }}>
+      <PhotoLayer motif={motif} palette={P} height={share(height, 680)} scrimFrom={0.04} label={motif?.label} />
       <div style={{ position: 'absolute', left: -180, top: -180, width: 520, height: 520, borderRadius: '50%', background: `radial-gradient(circle, ${a(P.accent, 0.3)}, transparent 68%)`, pointerEvents: 'none' }} />
 
       <div style={{ position: 'absolute', top: 56, left: 64, right: 64, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -153,11 +165,11 @@ export function EVT_Floodlit({ team, event = {}, palette, motif }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // EV2 — COLOUR BLOCK · club colour leads, giant motif (bold, high-energy)
 // ─────────────────────────────────────────────────────────────────────────────
-export function EVT_Block({ team, event = {}, palette, motif }) {
+export function EVT_Block({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
   const P = palette
   return (
-    <div style={{ ...FRAME, background: P.primary, color: '#fff' }}>
-      <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: 606, background: `linear-gradient(150deg, ${P.accent} 0%, ${a(P.accent, 0.78)} 100%)`, overflow: 'hidden' }}>
+    <div style={{ ...FRAME(width, height), background: P.primary, color: '#fff' }}>
+      <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: share(height, 606), background: `linear-gradient(150deg, ${P.accent} 0%, ${a(P.accent, 0.78)} 100%)`, overflow: 'hidden' }}>
         {motif?.imageUrl
           ? <img src={motif.imageUrl} alt="" crossOrigin="anonymous" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.3, mixBlendMode: 'overlay' }} />
           : <img src={motif?.icon || icoHandshake} alt="" style={{ position: 'absolute', right: -130, top: 54, width: 560, height: 560, objectFit: 'contain', opacity: 0.26, transform: 'rotate(-8deg)' }} />}
@@ -203,14 +215,14 @@ export function EVT_Block({ team, event = {}, palette, motif }) {
 // EV3 — TICKET · refined, editorial, motif watermark (premium occasions)
 // Light "paper" surface: uses palette.ink for paper, primary for type.
 // ─────────────────────────────────────────────────────────────────────────────
-export function EVT_Ticket({ team, event = {}, palette, motif }) {
+export function EVT_Ticket({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
   const P = palette
   const paper = P.paper || '#f4efe4'
   const ink = P.deepInk || '#1f1c14'
   const line = a(ink, 0.2)
   const SERIF = "'Cormorant Garamond', serif"
   return (
-    <div style={{ ...FRAME, background: paper, color: ink, fontFamily: SERIF }}>
+    <div style={{ ...FRAME(width, height), background: paper, color: ink, fontFamily: SERIF }}>
       <img src={motif?.icon || icoTrophy} alt="" style={{ position: 'absolute', left: '50%', top: 300, transform: 'translateX(-50%)', width: 600, height: 600, objectFit: 'contain', opacity: 0.12 }} />
       <div style={{ position: 'absolute', inset: 42, border: `1.5px solid ${line}`, pointerEvents: 'none' }} />
       <div style={{ position: 'absolute', inset: 50, border: `1px solid ${a(ink, 0.12)}`, pointerEvents: 'none' }} />
@@ -267,10 +279,10 @@ export function EVT_Ticket({ team, event = {}, palette, motif }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // EV4 — SCOREBOARD · LED dot-matrix, mono numerals (fixtures & selections)
 // ─────────────────────────────────────────────────────────────────────────────
-export function EVT_Scoreboard({ team, event = {}, palette, motif }) {
+export function EVT_Scoreboard({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
   const P = palette
   return (
-    <div style={{ ...FRAME, background: P.primary, color: '#fff' }}>
+    <div style={{ ...FRAME(width, height), background: P.primary, color: '#fff' }}>
       <div style={{ position: 'absolute', inset: 0, backgroundImage: `radial-gradient(${a(P.accent, 0.1)} 1.4px, transparent 1.6px)`, backgroundSize: '24px 24px' }} />
       <div style={{ position: 'absolute', left: -160, bottom: -160, width: 560, height: 560, borderRadius: '50%', background: `radial-gradient(circle, ${a(P.accent, 0.16)}, transparent 68%)` }} />
       <img src={motif?.icon || icoBat} alt="" style={{ position: 'absolute', right: 54, top: 64, width: 150, height: 150, objectFit: 'contain', opacity: 0.5 }} />
@@ -320,7 +332,7 @@ export function EVT_Scoreboard({ team, event = {}, palette, motif }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // EV5 — GAZETTE · newspaper masthead + serif headline (stately notices)
 // ─────────────────────────────────────────────────────────────────────────────
-export function EVT_Gazette({ team, event = {}, palette, motif }) {
+export function EVT_Gazette({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
   const P = palette
   const paper = P.paper || '#f4f0e6'
   const ink = P.deepInk || '#1a1814'
@@ -329,7 +341,7 @@ export function EVT_Gazette({ team, event = {}, palette, motif }) {
   const SERIF = "'Playfair Display', serif"
   const BODY = "'Spectral', serif"
   return (
-    <div style={{ ...FRAME, background: paper, color: ink, fontFamily: BODY }}>
+    <div style={{ ...FRAME(width, height), background: paper, color: ink, fontFamily: BODY }}>
       <div style={{ position: 'absolute', inset: 56, display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: faint, paddingBottom: 10 }}>
           <span>Vol. XCIV — No. 12</span><span>Est. 1921</span>
@@ -388,13 +400,13 @@ export function EVT_Gazette({ team, event = {}, palette, motif }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // EV6 — STICKER POP · playful rounded badges (casual socials)
 // ─────────────────────────────────────────────────────────────────────────────
-export function EVT_Sticker({ team, event = {}, palette, motif }) {
+export function EVT_Sticker({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
   const P = palette
   const paper = P.paper || '#fbf6ec'
   const ink = P.deepInk || '#23202c'
   const FUN = "'Fredoka', sans-serif"
   return (
-    <div style={{ ...FRAME, background: paper, color: ink }}>
+    <div style={{ ...FRAME(width, height), background: paper, color: ink }}>
       <div style={{ position: 'absolute', right: -130, top: -130, width: 480, height: 480, borderRadius: '50%', background: a(P.accent, 0.18) }} />
       <div style={{ position: 'absolute', left: -90, bottom: 110, width: 300, height: 300, borderRadius: '50%', border: `4px dashed ${a(P.accent, 0.4)}` }} />
 
@@ -450,13 +462,13 @@ export function EVT_Sticker({ team, event = {}, palette, motif }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // EV7 — KINETIC · diagonal bands, italic motion type (high-energy sport)
 // ─────────────────────────────────────────────────────────────────────────────
-export function EVT_Kinetic({ team, event = {}, palette, motif }) {
+export function EVT_Kinetic({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
   const P = palette
   const skew = { transform: 'skewX(-8deg)' }
   const unskew = { display: 'inline-block', transform: 'skewX(8deg)' }
   return (
-    <div style={{ ...FRAME, background: P.primary, color: '#fff' }}>
-      <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: 616, clipPath: 'polygon(0 0, 100% 0, 100% 100%, 0 76%)', overflow: 'hidden' }}>
+    <div style={{ ...FRAME(width, height), background: P.primary, color: '#fff' }}>
+      <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: share(height, 616), clipPath: 'polygon(0 0, 100% 0, 100% 100%, 0 76%)', overflow: 'hidden' }}>
         {motif?.imageUrl
           ? <img src={motif.imageUrl} alt="" crossOrigin="anonymous" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
           : <div style={{ position: 'absolute', inset: 0, background: `repeating-linear-gradient(120deg, ${a(P.accent, 0.06)} 0px, ${a(P.accent, 0.06)} 18px, ${a(P.accent, 0.12)} 18px, ${a(P.accent, 0.12)} 36px)`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -464,8 +476,8 @@ export function EVT_Kinetic({ team, event = {}, palette, motif }) {
             </div>}
         <div style={{ position: 'absolute', inset: 0, background: `linear-gradient(180deg, rgba(0,0,0,0.1) 0%, transparent 35%), linear-gradient(0deg, ${P.primary} 2%, transparent 50%)` }} />
       </div>
-      <div style={{ position: 'absolute', left: -60, top: 512, width: 1200, height: 18, background: P.accent, transform: 'rotate(8deg)' }} />
-      <div style={{ position: 'absolute', left: -60, top: 548, width: 1200, height: 7, background: a(P.accent, 0.45), transform: 'rotate(8deg)' }} />
+      <div style={{ position: 'absolute', left: -60, top: share(height, 512), width: 1200, height: 18, background: P.accent, transform: 'rotate(8deg)' }} />
+      <div style={{ position: 'absolute', left: -60, top: share(height, 548), width: 1200, height: 7, background: a(P.accent, 0.45), transform: 'rotate(8deg)' }} />
 
       <div style={{ position: 'absolute', top: 56, left: 64, right: 64, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -513,7 +525,7 @@ export function EVT_Kinetic({ team, event = {}, palette, motif }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // EV8 — SWISS · ultra-minimal Helvetica, baseline grid (clean & unmistakable)
 // ─────────────────────────────────────────────────────────────────────────────
-export function EVT_Swiss({ team, event = {}, palette }) {
+export function EVT_Swiss({ team, event = {}, width = 1080, height = 1080, palette }) {
   const P = palette
   const paper = P.paper || '#f6f5f2'
   const ink = P.deepInk || '#15171a'
@@ -521,7 +533,7 @@ export function EVT_Swiss({ team, event = {}, palette }) {
   const line = a(ink, 0.2)
   const HELV = "'Helvetica Neue', Helvetica, Arial, sans-serif"
   return (
-    <div style={{ ...FRAME, background: paper, color: ink, fontFamily: HELV }}>
+    <div style={{ ...FRAME(width, height), background: paper, color: ink, fontFamily: HELV }}>
       <div style={{ position: 'absolute', inset: 80, display: 'flex', flexDirection: 'column' }}>
         <div style={{ borderTop: `2px solid ${ink}`, paddingTop: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
@@ -568,14 +580,14 @@ export function EVT_Swiss({ team, event = {}, palette }) {
 // EV9 — CREST · heritage emblem, gold-on-green serif (prestige occasions)
 // Uses palette.primary as the deep field, palette.accent as the gold.
 // ─────────────────────────────────────────────────────────────────────────────
-export function EVT_Crest({ team, event = {}, palette, motif }) {
+export function EVT_Crest({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
   const P = palette
   const cream = P.cream || '#f3ead2'
   const SERIF = "'Cormorant Garamond', serif"
   const line = a(P.accent, 0.55)
   return (
-    <div style={{ ...FRAME, background: P.primary, color: cream, fontFamily: SERIF }}>
-      <div style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 560, background: `radial-gradient(ellipse 600px 420px at 50% 0%, ${a(P.accent, 0.18)}, transparent 70%)` }} />
+    <div style={{ ...FRAME(width, height), background: P.primary, color: cream, fontFamily: SERIF }}>
+      <div style={{ position: 'absolute', left: 0, right: 0, top: 0, height: share(height, 560), background: `radial-gradient(ellipse 600px 420px at 50% 0%, ${a(P.accent, 0.18)}, transparent 70%)` }} />
       <div style={{ position: 'absolute', inset: 44, border: `2px solid ${line}`, pointerEvents: 'none' }} />
       <div style={{ position: 'absolute', inset: 52, border: `1px solid ${a(P.accent, 0.3)}`, pointerEvents: 'none' }} />
 
@@ -627,7 +639,7 @@ export function EVT_Crest({ team, event = {}, palette, motif }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // EV10 — CHALKBOARD · clubhouse blackboard, chalk handwriting (casual notices)
 // ─────────────────────────────────────────────────────────────────────────────
-export function EVT_Chalkboard({ team, event = {}, palette }) {
+export function EVT_Chalkboard({ team, event = {}, width = 1080, height = 1080, palette }) {
   const P = palette
   const board = P.primary || '#20251f'
   const chalk = '#f1efe4'
@@ -635,7 +647,7 @@ export function EVT_Chalkboard({ team, event = {}, palette }) {
   const faint = 'rgba(241,239,228,0.4)'
   const HAND = "'Caveat', cursive"
   return (
-    <div style={{ ...FRAME, background: board, color: chalk }}>
+    <div style={{ ...FRAME(width, height), background: board, color: chalk }}>
       <div style={{ position: 'absolute', left: '8%', top: '14%', width: 420, height: 300, background: 'radial-gradient(ellipse, rgba(255,255,255,0.05), transparent 70%)', transform: 'rotate(-18deg)' }} />
       <div style={{ position: 'absolute', right: '6%', bottom: '18%', width: 380, height: 260, background: 'radial-gradient(ellipse, rgba(255,255,255,0.045), transparent 70%)', transform: 'rotate(12deg)' }} />
       <div style={{ position: 'absolute', inset: 44, border: `2px dashed ${faint}`, borderRadius: 8, pointerEvents: 'none' }} />
@@ -684,14 +696,14 @@ export function EVT_Chalkboard({ team, event = {}, palette }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // EV11 — POLAROID · taped scrapbook photo + marker pen (photo-led socials)
 // ─────────────────────────────────────────────────────────────────────────────
-export function EVT_Polaroid({ team, event = {}, palette, motif }) {
+export function EVT_Polaroid({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
   const P = palette
   const paper = P.paper || '#ece3d0'
   const ink = P.deepInk || '#2e2a22'
   const MARKER = "'Permanent Marker', cursive"
   const HAND = "'Caveat', cursive"
   return (
-    <div style={{ ...FRAME, background: paper, color: ink }}>
+    <div style={{ ...FRAME(width, height), background: paper, color: ink }}>
       <div style={{ position: 'absolute', inset: 0, backgroundImage: 'radial-gradient(rgba(120,100,70,0.06) 1px, transparent 1.4px)', backgroundSize: '5px 5px', opacity: 0.6 }} />
       <div style={{ position: 'absolute', inset: 76, display: 'flex', flexDirection: 'column' }}>
         <div style={{ marginBottom: 18 }}>

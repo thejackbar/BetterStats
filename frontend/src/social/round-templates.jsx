@@ -106,10 +106,15 @@ function AutoFit({ children, max, min = 24, style = {}, deps = [] }) {
   return <div ref={ref} style={{ fontSize: size, whiteSpace: 'nowrap', ...style }}>{children}</div>
 }
 
-function Post({ palette, children, style = {} }) {
+// The one shell every roundup template is drawn in, and so the one place the
+// post's real size lands. Each of these layouts is a top-anchored header, a
+// top-AND-bottom-anchored body and a bottom-anchored footer, so the body is
+// what absorbs a taller canvas — the rows simply get more room, which is what
+// a fixture list at 4:5 should do.
+function Post({ palette, children, w = 1080, h = 1080, style = {} }) {
   return (
     <div style={{
-      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+      width: w, height: h, position: 'relative', overflow: 'hidden',
       background: palette.primary, color: palette.ink, fontFamily: BODY, ...style,
     }}>{children}</div>
   )
@@ -143,10 +148,10 @@ function headLine(r, withVenue = false) {
 
 // ═══════════════════════════════ FIXTURES ROUNDUP ═══════════════════════════
 
-export function FixtureList({ palette: pal, meta = {}, fixtures = [], club = {}, sponsors }) {
+export function FixtureList({ palette: pal, width = 1080, height = 1080, meta = {}, fixtures = [], club = {}, sponsors }) {
   const rows = fixtures
   return (
-    <Post palette={pal}>
+    <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.06} size={11} />
       <Stripes color={pal.accent} opacity={0.035} gap={26} angle={0} />
       <div style={{ position: 'absolute', right: -40, bottom: 60, fontFamily: DISPLAY, fontSize: 560, lineHeight: 0.8, color: pal.ink, opacity: 0.04, letterSpacing: -16, userSelect: 'none' }}>{(meta.round || '').replace(/[^0-9]/g, '') ? 'R' + (meta.round || '').replace(/[^0-9]/g, '') : ''}</div>
@@ -196,11 +201,11 @@ export function FixtureList({ palette: pal, meta = {}, fixtures = [], club = {},
   )
 }
 
-export function FixtureHype({ palette: pal, meta = {}, fixtures = [], club = {}, sponsors }) {
+export function FixtureHype({ palette: pal, width = 1080, height = 1080, meta = {}, fixtures = [], club = {}, sponsors }) {
   const rows = fixtures
   const roundNum = (meta.round || '').replace(/[^0-9]/g, '') || '9'
   return (
-    <Post palette={pal}>
+    <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.07} size={10} />
       <div style={{ position: 'absolute', right: -90, top: 150, fontFamily: DISPLAY, fontSize: 900, lineHeight: 0.7, color: pal.accent, opacity: 0.1, letterSpacing: -20, userSelect: 'none' }}>{roundNum}</div>
       <div style={{ position: 'absolute', left: -200, width: 1600, top: 30, height: 268, background: pal.accent, transform: 'rotate(-5deg)', transformOrigin: 'top left' }} />
@@ -243,10 +248,10 @@ export function FixtureHype({ palette: pal, meta = {}, fixtures = [], club = {},
   )
 }
 
-export function FixtureGrid({ palette: pal, meta = {}, fixtures = [], club = {}, sponsors }) {
+export function FixtureGrid({ palette: pal, width = 1080, height = 1080, meta = {}, fixtures = [], club = {}, sponsors }) {
   const rows = fixtures
   return (
-    <Post palette={pal}>
+    <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.06} size={12} />
       <Stripes color={pal.accent} opacity={0.03} gap={30} angle={-18} />
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '44px 56px 26px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -293,11 +298,11 @@ export function FixtureGrid({ palette: pal, meta = {}, fixtures = [], club = {},
   )
 }
 
-export function FixtureBoard({ palette: pal, meta = {}, fixtures = [], club = {}, sponsors }) {
+export function FixtureBoard({ palette: pal, width = 1080, height = 1080, meta = {}, fixtures = [], club = {}, sponsors }) {
   const rows = fixtures
   const cols = '150px minmax(0,1fr) 122px 184px'
   return (
-    <Post palette={pal}>
+    <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.05} size={11} />
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '44px 56px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: `3px solid ${pal.accent}` }}>
         <div>
@@ -336,13 +341,13 @@ export function FixtureBoard({ palette: pal, meta = {}, fixtures = [], club = {}
   )
 }
 
-export function FixtureHeadline({ palette: pal, meta = {}, fixtures = [], club = {}, sponsors }) {
+export function FixtureHeadline({ palette: pal, width = 1080, height = 1080, meta = {}, fixtures = [], club = {}, sponsors }) {
   const rows = fixtures
   const feat = rows[0] || { grade: '', opp: '', oppMono: '', ha: 'H', time: '', venue: '' }
   const rest = rows.slice(1)
   const fHome = feat.ha === 'H'
   return (
-    <Post palette={pal}>
+    <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.06} size={11} />
       <Stripes color={pal.accent} opacity={0.03} gap={28} angle={0} />
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '44px 56px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -393,7 +398,7 @@ export function FixtureHeadline({ palette: pal, meta = {}, fixtures = [], club =
   )
 }
 
-export function FixtureSchedule({ palette: pal, meta = {}, fixtures = [], club = {}, sponsors }) {
+export function FixtureSchedule({ palette: pal, width = 1080, height = 1080, meta = {}, fixtures = [], club = {}, sponsors }) {
   const toMin = (t) => {
     const m = String(t || '').trim().match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i)
     if (!m) return 9999
@@ -403,7 +408,7 @@ export function FixtureSchedule({ palette: pal, meta = {}, fixtures = [], club =
   }
   const rows = [...fixtures].sort((a, b) => toMin(a.time) - toMin(b.time))
   return (
-    <Post palette={pal}>
+    <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.06} size={11} />
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '46px 56px 26px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: `3px solid ${pal.accent}` }}>
         <div>
@@ -442,11 +447,11 @@ export function FixtureSchedule({ palette: pal, meta = {}, fixtures = [], club =
 
 // ════════════════════════════════ SINGLE RESULT ═════════════════════════════
 
-export function ResultMarginHero({ palette: pal, result: r, sponsors }) {
+export function ResultMarginHero({ palette: pal, width = 1080, height = 1080, result: r, sponsors }) {
   const { won, winnerName, tied } = outcomeBits(r)
   const bigWord = tied ? 'TIE' : 'WIN'
   return (
-    <Post palette={pal}>
+    <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.06} size={11} />
       <Stripes color={pal.accent} opacity={0.04} gap={28} angle={-20} />
       <div style={{ position: 'absolute', left: -60, bottom: -40, fontFamily: DISPLAY, fontSize: 760, lineHeight: 0.72, color: pal.accent, opacity: 0.08, letterSpacing: -20, userSelect: 'none' }}>{won ? 'W' : tied ? 'T' : 'L'}</div>
@@ -496,7 +501,7 @@ export function ResultMarginHero({ palette: pal, result: r, sponsors }) {
   )
 }
 
-export function ResultBroadcast({ palette: pal, result: r, sponsors }) {
+export function ResultBroadcast({ palette: pal, width = 1080, height = 1080, result: r, sponsors }) {
   const { won, tied, line } = outcomeBits(r)
   // RS2 feedback: the top performers were clipping at the bottom. The whole body
   // is now a single flex column (header→footer) so the team rows shrink and the
@@ -533,7 +538,7 @@ export function ResultBroadcast({ palette: pal, result: r, sponsors }) {
     </div>
   )
   return (
-    <Post palette={pal}>
+    <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.06} size={10} />
       <Stripes color={pal.accent} opacity={0.03} gap={30} angle={0} />
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '40px 56px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: `3px solid ${pal.accent}` }}>
@@ -575,7 +580,7 @@ export function ResultBroadcast({ palette: pal, result: r, sponsors }) {
   )
 }
 
-export function ResultVersusColumns({ palette: pal, result: r, sponsors }) {
+export function ResultVersusColumns({ palette: pal, width = 1080, height = 1080, result: r, sponsors }) {
   const { won, tied, line } = outcomeBits(r)
   const Column = ({ t, isWinner }) => (
     <div style={{ flex: 1, position: 'relative', background: isWinner ? `${pal.accent}16` : 'transparent', border: `2px solid ${isWinner ? pal.accent : pal.ink + '1f'}`, padding: '28px 26px', display: 'flex', flexDirection: 'column' }}>
@@ -596,7 +601,7 @@ export function ResultVersusColumns({ palette: pal, result: r, sponsors }) {
     </div>
   )
   return (
-    <Post palette={pal}>
+    <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.06} size={11} />
       <Stripes color={pal.accent} opacity={0.035} gap={26} angle={-22} />
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '46px 56px 26px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -632,12 +637,12 @@ export function ResultVersusColumns({ palette: pal, result: r, sponsors }) {
   )
 }
 
-export function ResultStar({ palette: pal, result: r, sponsors }) {
+export function ResultStar({ palette: pal, width = 1080, height = 1080, result: r, sponsors }) {
   const p = r.potm
   const { winnerName, tied, line } = outcomeBits(r)
   const initials = (p.first[0] || '') + (p.last[0] || '')
   return (
-    <Post palette={pal}>
+    <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.06} size={11} />
       <Stripes color={pal.accent} opacity={0.04} gap={28} angle={-22} />
       <div style={{ position: 'absolute', left: -30, bottom: 110, fontFamily: DISPLAY, fontSize: 360, lineHeight: 0.8, color: pal.ink, opacity: 0.05, letterSpacing: -8, userSelect: 'none', whiteSpace: 'nowrap' }}>{p.last}</div>
@@ -683,7 +688,7 @@ export function ResultStar({ palette: pal, result: r, sponsors }) {
   )
 }
 
-export function ResultInningsBars({ palette: pal, result: r, sponsors }) {
+export function ResultInningsBars({ palette: pal, width = 1080, height = 1080, result: r, sponsors }) {
   const { won, tied, line } = outcomeBits(r)
   const runs = (s) => parseInt(String(s).includes('/') ? String(s).split('/')[1] : s, 10) || 0
   const oversNum = (o) => { const [a, b] = String(o).split('.').map(Number); return (a || 0) + (b || 0) / 6 }
@@ -714,7 +719,7 @@ export function ResultInningsBars({ palette: pal, result: r, sponsors }) {
     </div>
   )
   return (
-    <Post palette={pal}>
+    <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.06} size={11} />
       <Stripes color={pal.accent} opacity={0.03} gap={30} angle={0} />
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '46px 56px 26px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: `3px solid ${pal.accent}` }}>
@@ -749,11 +754,11 @@ export function ResultInningsBars({ palette: pal, result: r, sponsors }) {
   )
 }
 
-export function ResultTicket({ palette: pal, result: r, sponsors }) {
+export function ResultTicket({ palette: pal, width = 1080, height = 1080, result: r, sponsors }) {
   const { won, tied, line } = outcomeBits(r)
   const notch = (side) => ({ position: 'absolute', [side]: -17, top: '50%', transform: 'translateY(-50%)', width: 32, height: 32, borderRadius: '50%', background: pal.primary })
   return (
-    <Post palette={pal}>
+    <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.06} size={11} />
       <Stripes color={pal.accent} opacity={0.04} gap={26} angle={-20} />
       <div style={{ position: 'absolute', left: 80, right: 80, top: 108, bottom: 150, background: pal.secondary, border: `2px solid ${pal.accent}`, display: 'flex', flexDirection: 'column' }}>
@@ -801,11 +806,11 @@ export function ResultTicket({ palette: pal, result: r, sponsors }) {
 
 // ═══════════════════════════════ RESULTS ROUNDUP ════════════════════════════
 
-export function ResultsList({ palette: pal, meta = {}, results = [], club = {}, sponsors }) {
+export function ResultsList({ palette: pal, width = 1080, height = 1080, meta = {}, results = [], club = {}, sponsors }) {
   const rows = results
   const rec = record(rows)
   return (
-    <Post palette={pal}>
+    <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.06} size={11} />
       <Stripes color={pal.accent} opacity={0.03} gap={28} angle={0} />
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '44px 56px 28px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: `3px solid ${pal.accent}` }}>
@@ -865,7 +870,7 @@ export function ResultsList({ palette: pal, meta = {}, results = [], club = {}, 
 // our club (r.topBat / r.topBowl — up to 2 {name, line} entries each, sourced
 // from the match scorecard's "our team" innings). A grade with no performer
 // data yet (manually-added row) just renders its header line.
-export function ResultsListLeaders({ palette: pal, meta = {}, results = [], club = {}, sponsors }) {
+export function ResultsListLeaders({ palette: pal, width = 1080, height = 1080, meta = {}, results = [], club = {}, sponsors }) {
   const rows = results
   const rec = record(rows)
   const n = rows.length || 1
@@ -877,7 +882,7 @@ export function ResultsListLeaders({ palette: pal, meta = {}, results = [], club
   const lineF = n >= 8 ? 15 : n >= 6 ? 17 : 19
   const bar = n >= 8 ? 36 : n >= 6 ? 46 : 60
   return (
-    <Post palette={pal}>
+    <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.06} size={11} />
       <Stripes color={pal.accent} opacity={0.03} gap={28} angle={0} />
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '40px 56px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: `3px solid ${pal.accent}` }}>
@@ -955,11 +960,11 @@ export function ResultsListLeaders({ palette: pal, meta = {}, results = [], club
   )
 }
 
-export function ResultsScoreboard({ palette: pal, meta = {}, results = [], club = {}, sponsors }) {
+export function ResultsScoreboard({ palette: pal, width = 1080, height = 1080, meta = {}, results = [], club = {}, sponsors }) {
   const rows = results
   const rec = record(rows)
   return (
-    <Post palette={pal}>
+    <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.06} size={12} />
       <Stripes color={pal.accent} opacity={0.03} gap={30} angle={-18} />
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '44px 56px 26px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1008,11 +1013,11 @@ export function ResultsScoreboard({ palette: pal, meta = {}, results = [], club 
   )
 }
 
-export function ResultsRecord({ palette: pal, meta = {}, results = [], club = {}, sponsors }) {
+export function ResultsRecord({ palette: pal, width = 1080, height = 1080, meta = {}, results = [], club = {}, sponsors }) {
   const rows = results
   const rec = record(rows)
   return (
-    <Post palette={pal}>
+    <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.07} size={10} />
       <Stripes color={pal.accent} opacity={0.04} gap={26} angle={-20} />
       <div style={{ position: 'absolute', right: -50, top: 120, fontFamily: DISPLAY, fontSize: 620, lineHeight: 0.74, color: pal.ink, opacity: 0.05, letterSpacing: -18, userSelect: 'none' }}>{rec.w}–{rec.l}</div>
@@ -1054,7 +1059,7 @@ export function ResultsRecord({ palette: pal, meta = {}, results = [], club = {}
   )
 }
 
-export function ResultsHeadline({ palette: pal, meta = {}, results = [], club = {}, sponsors }) {
+export function ResultsHeadline({ palette: pal, width = 1080, height = 1080, meta = {}, results = [], club = {}, sponsors }) {
   const rows = results
   const rec = record(rows)
   const f = rows[0] || { grade: '', opp: '', oppMono: '', us: '', them: '', outcome: 'W', margin: '' }
@@ -1062,7 +1067,7 @@ export function ResultsHeadline({ palette: pal, meta = {}, results = [], club = 
   const fw = f.outcome === 'W'
   const fc = fw ? WIN : LOSS
   return (
-    <Post palette={pal}>
+    <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.06} size={11} />
       <Stripes color={pal.accent} opacity={0.03} gap={28} angle={0} />
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '44px 56px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1122,12 +1127,12 @@ export function ResultsHeadline({ palette: pal, meta = {}, results = [], club = 
   )
 }
 
-export function ResultsBoard({ palette: pal, meta = {}, results = [], club = {}, sponsors }) {
+export function ResultsBoard({ palette: pal, width = 1080, height = 1080, meta = {}, results = [], club = {}, sponsors }) {
   const rows = results
   const rec = record(rows)
   const cols = '140px minmax(0,1fr) 184px 86px'
   return (
-    <Post palette={pal}>
+    <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.05} size={11} />
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '44px 56px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: `3px solid ${pal.accent}` }}>
         <div>
@@ -1174,7 +1179,7 @@ export function ResultsBoard({ palette: pal, meta = {}, results = [], club = {},
   )
 }
 
-export function ResultsSplit({ palette: pal, meta = {}, results = [], club = {}, sponsors }) {
+export function ResultsSplit({ palette: pal, width = 1080, height = 1080, meta = {}, results = [], club = {}, sponsors }) {
   const rows = results
   const wins = rows.filter(r => r.outcome === 'W')
   const losses = rows.filter(r => r.outcome === 'L')
@@ -1201,7 +1206,7 @@ export function ResultsSplit({ palette: pal, meta = {}, results = [], club = {},
     </div>
   )
   return (
-    <Post palette={pal}>
+    <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.06} size={11} />
       <Stripes color={pal.accent} opacity={0.03} gap={28} angle={0} />
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '44px 56px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: `3px solid ${pal.accent}` }}>

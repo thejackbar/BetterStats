@@ -297,6 +297,121 @@ four of them things that exist and could not be found.
   uploads as-is rather than opening the editor per file — deliberate, since ten
   modals for ten photos is worse than the Edit affordance on each tile.
 
+## Every template reflows, and a block can go BEHIND the layout (v9.74.0, Sep 2026)
+
+The two things the v9.73.0 note above listed as NOT BUILT, asked for together:
+make the layouts actually fit 4:5 and 9:16 rather than being letterboxed into
+them, and let an added image go behind a template's own text.
+
+- **"40+ BESPOKE LAYOUTS, EACH HAND-RECREATED" WAS WRONG, AND MEASURING IS WHAT
+  SHOWED IT.** That estimate (this file's own, one release earlier) was about
+  DECOMPOSING a template into blocks. Reflow is a far smaller job: **30 of the
+  48 templates go through two shared shells** (`round-templates`' one `Post`
+  serves 19, `event-templates`' one `FRAME` serves 11), **all three post sizes
+  are 1080 WIDE** so the problem is purely vertical, and most layouts were
+  already top/bottom-anchored or flex columns. Threading `width`/`height`
+  through four files plus a handful of per-template fixes did the whole thing.
+- **THE TRANSFORMATION IS `top: X, height: Y` → `top: X, bottom: 1080−X−Y`**,
+  which is byte-identical at square by construction and simply gives the box
+  the extra room on a taller canvas. That is why the square output needed no
+  re-approval: it is the same arithmetic, not a re-design.
+- **A STRUCTURAL BAND KEEPS ITS SHARE, IT DOES NOT KEEP ITS PIXELS.**
+  `event-templates.share(canvasH, at1080)` — a photo band fixed at 680 is two
+  thirds of a square and barely a third of a story, which reads as the design
+  falling apart rather than as a taller post. Exact at 1080, so again the square
+  is untouched. Six bands across the event posters.
+- **A FIXED-HEIGHT CHILD IN A NOW-TALLER BOX IS THE TRAP, and the screenshots
+  could not see it.** T7/C3/C1 stand a cut-out headshot on the panel floor and
+  let it overflow the top — `height: 720` with the box bottom-anchored. Growing
+  the box alone just grows the DEAD AIR above a photo that never followed it.
+  Each is derived from the canvas now (`height - 360` / `- 320` / `- 260`),
+  which evaluates to exactly the old literal at 1080. **Measured through the
+  real editor: 720 / 990 / 1560, 760 / 1030 / 1600, 820 / 1090 / 1660.**
+- **THE HARNESS WAS TESTING THE WRONG BRANCH FOR FOUR RUNS.** Its roster stubbed
+  `photo_url: null`, so every hero layout rendered its CREST FALLBACK and the
+  cut-out never appeared at all — the screenshots showed a crest and I read the
+  empty space as a layout question. **A stub whose data misses a conditional is
+  worse than no stub**: it produces confident, wrong pictures. Both the shoot
+  harness and the suite give their players a photo now, with a route for it.
+- **T1 AND T3 NEEDED NOTHING** — their images are `inset: 0; width: 100%;
+  height: 100%; object-fit: cover`, which fills any box. Worth checking before
+  assuming a photo is broken by a taller canvas; only the fixed-height cut-outs
+  were.
+- **FIT/FILL IS GONE, NOT HIDDEN.** With every layout native, `framed` is always
+  false and the control could never be reached — a control that does nothing is
+  worse than none, the call this file already makes for `ageFilterOptions`. The
+  `PostFrame` / `tmpl.fixed` escape hatch stays for the scorecards, which keep
+  their own 1920×1080 and are still offered no picker.
+- **A BLOCK GOES BEHIND BY A FLAG, NOT BY DECOMPOSITION.** `templateToBlocks`
+  reaches four templates and extending it would destroy each layout's own
+  AutoFitText sizing, role chips and responsive squad logic. `useBlankLayer`'s
+  `behind` flag answers the actual complaint — "I can't send the image to the
+  back" — on all 48 with no per-template work.
+- **ARRAY ORDER IS Z-ORDER, SO THE ARRAY IS PARTITIONED.** Behind-group first,
+  front-group second; `setBehind` splices at `behindCount(next)`, which is the
+  same index either way because the end of one group and the start of the other
+  are the same slot. `moveBefore` carries the destination's own `behind` so a
+  drag cannot break the partition.
+- **THE LAYOUT STOPS PAINTING ITS OWN BACKGROUND, and only its own.**
+  `.pb-template-seethrough { display: contents }` plus
+  `> * { background: transparent !important }` — the SHORTHAND, which resets
+  `background-image` too, since most of these roots paint a gradient rather
+  than a colour. Scoped to the direct child on purpose: a blanket `*` would
+  strip every intentional chip and accent bar inside the template, which is
+  gutting the layout rather than revealing what is behind it.
+- **A BLOCK UNDER THE TEMPLATE CANNOT BE CLICKED unless the template stops
+  taking the pointer.** The see-through wrapper is `pointer-events: none`, the
+  front overlay layer takes `passThrough`, and each block re-arms
+  `pointer-events: auto` — otherwise sending an image back also makes it
+  unselectable, which reads as having lost it.
+- **Driven in Chromium** (`verify_post_designer_browser.mjs`, 64 checks: the
+  canvas and the export node moving together, the layout measured at the FULL
+  canvas rather than letterboxed, all three template families filling 4:5, the
+  scorecard keeping 1920×1080 and no picker, the cut-out unchanged at 1080 and
+  growing at story, a block starting over the layout and moving under it, the
+  layout's background measured before AND after, and no overflow at 390px)
+  **with a control run**: **17 of the 64 fail** against the previous commit,
+  reporting `framed=true`, the Fit/Fill control still present, and
+  `["layout","blocks"]` — the block over the layout, which is the reported
+  complaint verbatim. The 47 that pass in both are don't-regress guards.
+- **`backgroundColor` CANNOT SEE A GRADIENT, and that check was passing for the
+  wrong reason.** These roots paint `background-image`, so a gradient-backed
+  layout reads `rgba(0,0,0,0)` in BOTH states — "the layout stops painting over
+  it" would have passed whether or not anything was suppressed. **Caught by
+  adding the BEFORE measurement**, which is the general fix: a check that
+  something turned off is worth little without a check that it was on.
+- **AND THE PROBE HAD TO DESCEND THROUGH THE WRAPPER.** `display: contents`
+  means the see-through div has no width and is not the template root, so
+  addressing the layer's direct children found it and measured nothing —
+  reported as `null`, which is the shape of a broken probe rather than a real
+  failure. Read a `null` from a measurement as "my selector missed", not as
+  "the feature is broken".
+- **A CONTROL RUN'S DETAIL CAN BE TRUE FOR THE WRONG REASON.** The cut-out check
+  fails on the control reporting `44` — the old build does not honour
+  `?template=`, so it measured the default template, not T7. A genuine "not
+  reachable on the old build" signal, but NOT evidence about the arithmetic;
+  that came from the direct measurement above.
+- **`?template=` WAS ACCEPTED BY THE START SCREEN AND READ BY NOTHING.** The
+  editor skipped its "What are you posting?" screen for it and then opened the
+  default template anyway — a real user-facing dead link, found because the
+  harness needed it to reach one template per page load.
+- **SERVE THE PRODUCTION BUILD, NOT THE DEV SERVER, FOR A LONG SHOOT.** HMR
+  reloads on every src edit, and a running shoot then dies with "Failed to fetch
+  dynamically imported module". `vite preview` on its own port is immune, and it
+  took a 144-shot run from ~30s per shot to a few minutes. **Do not rebuild into
+  `dist` while a run is reading it** — that voided one verification pass with
+  404s on chunk hashes that no longer existed.
+- **A PLAYWRIGHT SCRIPT MUST LIVE UNDER `frontend/`** or it cannot resolve
+  `playwright`, and it needs the pinned `executablePath` the suites use.
+  `Locator.screenshot()` takes no `clip` — only `Page.screenshot` does. And the
+  contact sheet's `file://` thumbnails do not load from an `about:blank` page,
+  so read the individual PNGs rather than trusting the sheet.
+- **NOTICED, NOT BUILT**: still no portrait-NATIVE variants — a layout that
+  reflows well is not the same as one designed for 4:5, and that is a design job
+  per template. `templateToBlocks` still reaches four templates, so "edit this
+  layout's own text as blocks" is unchanged. Saved templates are still
+  `localStorage`.
+
 ## Twenty is retired; the engagement score, the CRM and Sales Management are not (v9.71.0, Sep 2026)
 
 Asked for directly: *"the calculation and continual re-calculation of engagement

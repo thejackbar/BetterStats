@@ -396,7 +396,7 @@ export function orgToPalette(org) {
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 1 — Hero cutout + bold name list
 // ─────────────────────────────────────────────────────────────────────────────
-export function T1_HeroList({ team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus }) {
+export function T1_HeroList({ width = 1080, height = 1080, team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus }) {
   const P = players.slice(0, 13)
   // Size the name rows down as the squad grows so a full 13 always fits the
   // available space (sized for the worst case: a tall headline + a wrapped vs
@@ -404,7 +404,7 @@ export function T1_HeroList({ team, opponent, match, players, palette, heroImage
   const rowMax = P.length >= 13 ? 28 : P.length >= 11 ? 32 : P.length >= 9 ? 36 : 42
   return (
     <div style={{
-      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+      width, height, position: 'relative', overflow: 'hidden',
       background: `linear-gradient(135deg, ${palette.primary} 0%, ${palette.secondary} 100%)`,
       color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
@@ -429,8 +429,11 @@ export function T1_HeroList({ team, opponent, match, players, palette, heroImage
       }}>{(team.fullName || team.name + ' CRICKET CLUB').toUpperCase()}</div>
       <Halftone color={palette.ink} opacity={0.08} size={12} />
       <Stripes color={palette.ink} opacity={0.04} gap={20} angle={-30} />
+      {/* Bottom-anchored rather than a fixed 845 high: at 1080 that is the same
+          box to the pixel, and on a taller canvas the photo gets the extra room
+          instead of leaving a dead band under it. */}
       <div style={{
-        position: 'absolute', left: 64, top: 210, width: 480, height: 845,
+        position: 'absolute', left: 64, top: 210, width: 480, bottom: 25,
         display: 'grid', placeItems: 'end center', overflow: 'hidden',
       }}>
         <div style={{
@@ -550,11 +553,11 @@ export function T1_HeroList({ team, opponent, match, players, palette, heroImage
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 2 — Trading card grid (4×3)
 // ─────────────────────────────────────────────────────────────────────────────
-export function T2_CardGrid({ team, opponent, match, players, palette }) {
+export function T2_CardGrid({ width = 1080, height = 1080, team, opponent, match, players, palette }) {
   const P = players.slice(0, 12)
   return (
     <div style={{
-      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+      width, height, position: 'relative', overflow: 'hidden',
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
       <Halftone color={palette.ink} opacity={0.05} size={10} />
@@ -661,7 +664,7 @@ export function T2_CardGrid({ team, opponent, match, players, palette }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 3 — Side image + numbered XI
 // ─────────────────────────────────────────────────────────────────────────────
-export function T3_SideNumbered({ team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus }) {
+export function T3_SideNumbered({ width = 1080, height = 1080, team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus }) {
   const P = players.slice(0, 11)
   // The vertical spine label echoes the post headline (defaults to STARTING XI).
   // Scale it down for longer headlines so it never runs off the top edge.
@@ -669,7 +672,7 @@ export function T3_SideNumbered({ team, opponent, match, players, palette, heroI
   const spineSize = Math.max(34, Math.min(80, Math.floor(1000 / Math.max(spine.length, 1))))
   return (
     <div style={{
-      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+      width, height, position: 'relative', overflow: 'hidden',
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
       <svg width="1080" height="1080" style={{ position: 'absolute', inset: 0 }}>
@@ -684,7 +687,7 @@ export function T3_SideNumbered({ team, opponent, match, players, palette, heroI
         <path d="M 1000 1080 C 850 900 1100 700 980 500 L 1080 500 L 1080 1080 Z" fill={palette.accent} opacity="0.06" />
       </svg>
       <div style={{
-        position: 'absolute', left: 0, top: 0, width: 380, height: 1080,
+        position: 'absolute', left: 0, top: 0, width: 380, bottom: 0,
         background: `linear-gradient(180deg, ${palette.secondary} 0%, ${palette.primary} 100%)`,
         overflow: 'hidden',
       }}>
@@ -780,11 +783,11 @@ export function T3_SideNumbered({ team, opponent, match, players, palette, heroI
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 4 — Batting order with role-coded rows
 // ─────────────────────────────────────────────────────────────────────────────
-export function T4_BattingOrder({ team, opponent, match, players, palette }) {
+export function T4_BattingOrder({ width = 1080, height = 1080, team, opponent, match, players, palette }) {
   const P = players.slice(0, 13)
   return (
     <div style={{
-      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+      width, height, position: 'relative', overflow: 'hidden',
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
       <Stripes color={palette.ink} opacity={0.04} gap={40} angle={0} />
@@ -856,11 +859,11 @@ export function T4_BattingOrder({ team, opponent, match, players, palette }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 5 — Brutalist typographic
 // ─────────────────────────────────────────────────────────────────────────────
-export function T5_Brutalist({ team, opponent, match, players, palette }) {
+export function T5_Brutalist({ width = 1080, height = 1080, team, opponent, match, players, palette }) {
   const P = players.slice(0, 11)
   return (
     <div style={{
-      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+      width, height, position: 'relative', overflow: 'hidden',
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
       <Stripes color={palette.ink} opacity={0.06} gap={6} angle={0} />
@@ -923,11 +926,11 @@ export function T5_Brutalist({ team, opponent, match, players, palette }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 6 — Diagonal poster
 // ─────────────────────────────────────────────────────────────────────────────
-export function T6_Diagonal({ team, opponent, match, players, palette, heroImage, featuredId }) {
+export function T6_Diagonal({ width = 1080, height = 1080, team, opponent, match, players, palette, heroImage, featuredId }) {
   const P = players.slice(0, 11)
   return (
     <div style={{
-      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+      width, height, position: 'relative', overflow: 'hidden',
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
       <Halftone color={palette.ink} opacity={0.07} size={10} />
@@ -1011,7 +1014,7 @@ export function T6_Diagonal({ team, opponent, match, players, palette, heroImage
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 7 — Milestone spotlight
 // ─────────────────────────────────────────────────────────────────────────────
-export function T7_CaptainSpotlight({ team, opponent, match, players, palette, milestone, heroImage }) {
+export function T7_CaptainSpotlight({ width = 1080, height = 1080, team, opponent, match, players, palette, milestone, heroImage }) {
   const player = milestone?.player || featuredOf(players)
   const value = milestone?.value || '1ST'
   const unit = milestone?.unit || 'XI'
@@ -1021,7 +1024,7 @@ export function T7_CaptainSpotlight({ team, opponent, match, players, palette, m
   const hasHead = !!(player && player.headshot)
   return (
     <div style={{
-      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+      width, height, position: 'relative', overflow: 'hidden',
       background: `linear-gradient(135deg, ${palette.primary} 0%, ${palette.secondary} 100%)`,
       color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
@@ -1036,9 +1039,16 @@ export function T7_CaptainSpotlight({ team, opponent, match, players, palette, m
           <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={palette.ink} size={60} shape="shield" />
         </div>
       </div>
-      <div style={{ position: 'absolute', right: 0, top: 60, width: 540, height: 660, display: 'grid', placeItems: 'end center', overflow: 'hidden' }}>
+      {/* Bottom-anchored: identical at 1080, and the cutout keeps standing on
+          the same line rather than floating with a gap beneath it. */}
+      <div style={{ position: 'absolute', right: 0, top: 60, width: 540, bottom: 360, display: 'grid', placeItems: 'end center', overflow: 'hidden' }}>
         {(heroImage || hasHead) ? (
-          <img src={heroImage || heroSrcOf(player)} alt={player.last} style={{ height: 720, width: 'auto', objectFit: 'contain', objectPosition: 'bottom', filter: `drop-shadow(0 40px 80px ${palette.primary}ee)` }} />
+          // A cut-out that deliberately overflows its box by 60 and is clipped
+          // at the top — the player bursting out of the panel. Derived from the
+          // canvas rather than fixed at 720, or a taller post just grows the box
+          // and leaves dead air above a photo that never followed it. Exactly
+          // 720 at 1080, so the square is untouched.
+          <img src={heroImage || heroSrcOf(player)} alt={player.last} style={{ height: height - 360, width: 'auto', objectFit: 'contain', objectPosition: 'bottom', filter: `drop-shadow(0 40px 80px ${palette.primary}ee)` }} />
         ) : (
           <img src={team.logo} alt={team.short} style={{ width: 380, height: 380, objectFit: 'contain', marginBottom: 40 }} />
         )}
@@ -1080,7 +1090,7 @@ export function T7_CaptainSpotlight({ team, opponent, match, players, palette, m
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 8 — Asymmetric mosaic
 // ─────────────────────────────────────────────────────────────────────────────
-export function T8_Mosaic({ team, opponent, match, players, palette, featuredIdx = 0 }) {
+export function T8_Mosaic({ width = 1080, height = 1080, team, opponent, match, players, palette, featuredIdx = 0 }) {
   const playersXI = players.slice(0, 11)
   const featuredP = playersXI[featuredIdx] || playersXI.find(p => p.captain) || playersXI[0]
   const rest = playersXI.filter(p => p !== featuredP)
@@ -1092,7 +1102,7 @@ export function T8_Mosaic({ team, opponent, match, players, palette, featuredIdx
   const ROLE_INK = { BAT: palette.primary, BOWL: palette.primary, AR: palette.ink, WK: palette.ink }
   return (
     <div style={{
-      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+      width, height, position: 'relative', overflow: 'hidden',
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
       <Halftone color={palette.ink} opacity={0.05} size={9} />
@@ -1162,14 +1172,14 @@ export function T8_Mosaic({ team, opponent, match, players, palette, featuredIdx
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 9 — Festival flyer
 // ─────────────────────────────────────────────────────────────────────────────
-export function T9_Flyer({ team, opponent, match, players, palette }) {
+export function T9_Flyer({ width = 1080, height = 1080, team, opponent, match, players, palette }) {
   const P = players.slice(0, 11)
   const tier1 = P.slice(0, 2)
   const tier2 = P.slice(2, 5)
   const tier3 = P.slice(5, 11)
   return (
     <div style={{
-      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+      width, height, position: 'relative', overflow: 'hidden',
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
       <Halftone color={palette.ink} opacity={0.08} size={10} />
@@ -1276,7 +1286,7 @@ function TornEdge({ color = '#fff', height = 26, width = 1080, style = {} }) {
   )
 }
 
-export function T10_TeamSheet({ team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus }) {
+export function T10_TeamSheet({ width = 1080, height = 1080, team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus }) {
   const P = players.slice(0, 13)
   // Shrink the rows as the squad grows so a full 13 still fits the column.
   const rowMax = P.length >= 13 ? 32 : P.length >= 12 ? 36 : P.length >= 11 ? 40 : P.length >= 9 ? 46 : 52
@@ -1302,7 +1312,7 @@ export function T10_TeamSheet({ team, opponent, match, players, palette, heroIma
   const comp = [match.competition, match.round].filter(Boolean).join('  ·  ').toUpperCase()
   return (
     <div style={{
-      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+      width, height, position: 'relative', overflow: 'hidden',
       background: `linear-gradient(160deg, ${palette.secondary} 0%, ${palette.primary} 70%)`,
       color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
@@ -1455,13 +1465,13 @@ export function T10_TeamSheet({ team, opponent, match, players, palette, heroIma
 // ─────────────────────────────────────────────────────────────────────────────
 // COMPANION 1 — Generic announcement
 // ─────────────────────────────────────────────────────────────────────────────
-export function C1_CaptainAnnounce({ announcement, team, opponent, match, palette, player: legacyPlayer }) {
+export function C1_CaptainAnnounce({ width = 1080, height = 1080, announcement, team, opponent, match, palette, player: legacyPlayer }) {
   const a = announcement || { kind: 'ANNOUNCEMENT', headline: 'NAMED', subheadline: '', player: legacyPlayer }
   const player = a.player || legacyPlayer
   const hasHead = !!(player && player.headshot)
   return (
     <div style={{
-      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+      width, height, position: 'relative', overflow: 'hidden',
       background: `linear-gradient(160deg, ${palette.primary} 0%, ${palette.secondary} 100%)`,
       color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
@@ -1470,7 +1480,9 @@ export function C1_CaptainAnnounce({ announcement, team, opponent, match, palett
       <div style={{ position: 'absolute', left: -40, top: -30, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 360, lineHeight: 0.82, color: palette.accent, opacity: 0.09, letterSpacing: -8, userSelect: 'none', whiteSpace: 'nowrap' }}>{(a.kind || 'ANNOUNCEMENT')}</div>
       <div style={{ position: 'absolute', left: 60, top: 90, right: 60, bottom: 200, display: 'grid', placeItems: 'end center', overflow: 'hidden' }}>
         {hasHead ? (
-          <img src={player.headshot} alt={player.last} style={{ height: 820, width: 'auto', objectFit: 'contain', objectPosition: 'bottom', filter: `drop-shadow(0 40px 80px ${palette.primary}ee)` }} />
+          // Same cut-out rule as T7 and C3 — height follows the canvas so the
+          // box and the player grow together. Exactly 820 at 1080.
+          <img src={player.headshot} alt={player.last} style={{ height: height - 260, width: 'auto', objectFit: 'contain', objectPosition: 'bottom', filter: `drop-shadow(0 40px 80px ${palette.primary}ee)` }} />
         ) : (
           <img src={team.logo} alt={team.short} style={{ width: 460, height: 460, objectFit: 'contain', marginBottom: 60 }} />
         )}
@@ -1498,12 +1510,12 @@ export function C1_CaptainAnnounce({ announcement, team, opponent, match, palett
 // ─────────────────────────────────────────────────────────────────────────────
 // COMPANION 2 — Toss
 // ─────────────────────────────────────────────────────────────────────────────
-export function C2_TossWon({ toss, team, opponent, match, palette }) {
+export function C2_TossWon({ width = 1080, height = 1080, toss, team, opponent, match, palette }) {
   const winnerIsOpponent = toss?.winner === 'OPPONENT'
   const decision = (toss?.decision || 'BAT').toUpperCase()
   return (
     <div style={{
-      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+      width, height, position: 'relative', overflow: 'hidden',
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
       <Halftone color={palette.ink} opacity={0.07} size={10} />
@@ -1549,13 +1561,13 @@ export function C2_TossWon({ toss, team, opponent, match, palette }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // COMPANION 3 — Man of the Match
 // ─────────────────────────────────────────────────────────────────────────────
-export function C3_ManOfMatch({ motm, team, opponent, match, palette }) {
+export function C3_ManOfMatch({ width = 1080, height = 1080, motm, team, opponent, match, palette }) {
   const player = motm?.player
   const stats = motm?.stats || []
   const hasHead = !!(player && player.headshot)
   return (
     <div style={{
-      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+      width, height, position: 'relative', overflow: 'hidden',
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
       <div style={{ position: 'absolute', left: -100, top: -100, width: 700, height: 1400, background: palette.secondary, transform: 'rotate(8deg)', transformOrigin: 'top left' }} />
@@ -1570,9 +1582,12 @@ export function C3_ManOfMatch({ motm, team, opponent, match, palette }) {
         </div>
         <BrandLockup team={team} palette={palette} size={150} layout="stack" nameSize={22} style={{ maxWidth: 320 }} />
       </div>
-      <div style={{ position: 'absolute', left: 0, top: 220, width: 520, height: 700, display: 'grid', placeItems: 'end center', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', left: 0, top: 220, width: 520, bottom: 160, display: 'grid', placeItems: 'end center', overflow: 'hidden' }}>
         {hasHead ? (
-          <img src={player.headshot} alt={player?.last} style={{ height: 760, width: 'auto', objectFit: 'contain', objectPosition: 'bottom', filter: `drop-shadow(0 40px 80px ${palette.primary}ee)` }} />
+          // Same cut-out rule as T7: the photo overflows its box by 60 and is
+          // clipped at the top, so its height has to follow the canvas or a
+          // taller post is all box and no player. Exactly 760 at 1080.
+          <img src={player.headshot} alt={player?.last} style={{ height: height - 320, width: 'auto', objectFit: 'contain', objectPosition: 'bottom', filter: `drop-shadow(0 40px 80px ${palette.primary}ee)` }} />
         ) : (
           <img src={team.logo} alt={team.short} style={{ width: 400, height: 400, objectFit: 'contain', marginBottom: 80 }} />
         )}
@@ -1607,7 +1622,7 @@ export function C3_ManOfMatch({ motm, team, opponent, match, palette }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // COMPANION 4 — Final score with top performers
 // ─────────────────────────────────────────────────────────────────────────────
-export function C4_FinalScore({ result, team, opponent, match, palette }) {
+export function C4_FinalScore({ width = 1080, height = 1080, result, team, opponent, match, palette }) {
   const winnerSide = result?.winner === 'OPPONENT' ? 'opponent' : (result?.winner === 'TIE' ? 'tie' : 'team')
   const tb = result?.topBatters || {}
   const tw = result?.topBowlers || {}
@@ -1627,7 +1642,7 @@ export function C4_FinalScore({ result, team, opponent, match, palette }) {
     .filter((v, i, a) => v && a.indexOf(v) === i).join(' · ')
   return (
     <div style={{
-      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+      width, height, position: 'relative', overflow: 'hidden',
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
       <Halftone color={palette.ink} opacity={0.06} size={10} />

@@ -393,3 +393,12 @@
   pointer-events: none;
 }
 .pb-richtext-editor:focus { outline: none; }
+
+/* BetterPosts — a Custom Edit block sent BEHIND the built-in layout is only
+   visible if the layout stops painting its own background over it. Every
+   template root sets `background` inline, so this has to be `!important` on the
+   wrapper's direct child; the wrapper is display:contents so it adds no box of
+   its own. Decoration the template draws as a full-bleed child (a photo layer,
+   a heavy gradient) still covers a block behind it — the Layers panel says so. */
+.pb-template-seethrough { display: contents; }
+.pb-template-seethrough > * { background: transparent !important; pointer-events: none !important; }

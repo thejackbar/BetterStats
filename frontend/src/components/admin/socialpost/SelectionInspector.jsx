@@ -13,6 +13,8 @@
 //   players                            roster for the player-block picker
 //   onPickImage(itemId)                opens the media library / file picker
 //   onEditImage(itemId)                opens the crop / background-removal editor
+//   onSetBehind(itemId, behind)        moves the block across the built-in layout
+//   layoutName                         the layout it would go behind (null on the blank canvas)
 import { useState } from 'react'
 import { Icon } from '../../../pages/admin/betterselect/ui'
 import { BLANK_FONTS } from '../../../social/blank-template'
@@ -74,7 +76,7 @@ function Swatches({ value, onChange, palette }) {
 
 export default function SelectionInspector({
   items, selIds, onUpdate, onReorder, onDuplicate, onRemove, onAlign,
-  palette, players = [], onPickImage, onEditImage,
+  palette, players = [], onPickImage, onEditImage, onSetBehind, layoutName = null,
 }) {
   const [more, setMore] = useState(false)
   const single = selIds.length === 1 ? items.find(it => it.id === selIds[0]) : null
@@ -173,6 +175,16 @@ export default function SelectionInspector({
         )}
 
         <div className="flex-1" />
+
+        {/* The block someone has just added lands on top of the layout, so the
+            way to put it behind belongs here, on the block, not only in a panel
+            they would have to go looking for. */}
+        {single && layoutName && onSetBehind && (
+          <Btn active={!!single.behind} title={single.behind ? `Bring in front of the ${layoutName} layout` : `Send behind the ${layoutName} layout`}
+            onClick={() => onSetBehind(single.id, !single.behind)}>
+            {single.behind ? 'Behind layout' : 'Send behind'}
+          </Btn>
+        )}
 
         {single && (
           <span className="flex items-center gap-0.5">
