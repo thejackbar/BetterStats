@@ -125,6 +125,10 @@ AD_ATTRIBUTION = {
     "injected_junk": "x" * 50,
 }
 
+# A valid phone, for the checks that are about something else. Written the way
+# a person writes one, spaces and all — the stored value is what they typed.
+PHONE = "0412 345 678"
+
 
 async def apply_ddl(conn) -> None:
     for stmt in WEBINAR_DDL:
@@ -197,10 +201,60 @@ async def main() -> None:
             "SELECT column_name FROM information_schema.columns "
             "WHERE table_name = 'webinar_registrations'"
         ))).all()}
-        for col in ("utm_source", "utm_medium", "utm_campaign", "utm_content",
+        for col in ("phone", "utm_source", "utm_medium", "utm_campaign", "utm_content",
                     "utm_term", "click_id", "click_source", "attribution",
                     "referrer", "landing_path", "visitor_id", "email_sent", "email_error"):
             check(f"the table carries {col}", col in cols)
+
+        print("\n-- migration 297: the phone reaches a database already at 296 --")
+        # The case a real deploy is, and the one the CREATE TABLE alone cannot
+        # cover: the table already exists WITHOUT the column, with rows in it.
+        # Rebuilt in raw SQL in its pre-297 shape rather than by dropping the
+        # column from the current one, so this is genuinely the older schema.
+        await conn.execute(text("DROP TABLE IF EXISTS webinar_registrations"))
+        await conn.execute(text("""
+            CREATE TABLE webinar_registrations (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                event_key TEXT NOT NULL, name TEXT NOT NULL, email TEXT NOT NULL,
+                club TEXT NOT NULL, role TEXT,
+                utm_source TEXT, utm_medium TEXT, utm_campaign TEXT,
+                utm_content TEXT, utm_term TEXT, click_id TEXT, click_source TEXT,
+                attribution JSONB, referrer TEXT, landing_path TEXT,
+                visitor_id TEXT, user_agent TEXT,
+                email_sent BOOLEAN NOT NULL DEFAULT FALSE, email_error TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text("""
+            INSERT INTO webinar_registrations (event_key, name, email, club)
+            VALUES ('webinar-2026-09-21', 'Registered At 296', 'at296@example.com', 'Early CC')
+        """))
+        for _ in range(3):
+            await apply_ddl(conn)
+        pre297 = {r[0] for r in (await conn.execute(text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'webinar_registrations'"
+        ))).all()}
+        check("applying it over a pre-297 table adds the phone", "phone" in pre297)
+        kept = (await conn.execute(text(
+            "SELECT count(*) FROM webinar_registrations WHERE email = 'at296@example.com'"
+        ))).scalar_one()
+        check("and keeps the registrations already taken", kept == 1, str(kept))
+        # Nobody typed one, so the honest answer for that row is nothing at all
+        # — never an invented blank that reads as a number we hold. Read only
+        # if the column is there, or a CONTROL RUN dies here on an
+        # UndefinedColumnError and says nothing about the rest of the suite.
+        if "phone" in pre297:
+            earlier = (await conn.execute(text(
+                "SELECT phone FROM webinar_registrations WHERE email = 'at296@example.com'"
+            ))).scalar_one()
+            check("a registration taken before the field existed reads as no phone",
+                  earlier is None, repr(earlier))
+        else:
+            check("a registration taken before the field existed reads as no phone",
+                  False, "no phone column to read")
+        await conn.execute(text("DELETE FROM webinar_registrations"))
 
     print("\n-- the lifespan mirror runs the same list --")
     # Read out of main.py's real source rather than retyped, so the two can't
@@ -217,6 +271,19 @@ async def main() -> None:
           "from app.services.webinar_ddl import" in migration)
     check("and revises 295 (a shared revision id breaks alembic outright)",
           'down_revision = "295"' in migration)
+    # Read defensively — a control run against a build without the migration
+    # must REPORT it rather than dying on a FileNotFoundError.
+    phone_path = (Path(__file__).resolve().parent.parent / "alembic" / "versions"
+                  / "297_webinar_phone.py")
+    phone_migration = phone_path.read_text() if phone_path.exists() else ""
+    check("migration 297 runs the same shared list rather than its own ALTER",
+          "from app.services.webinar_ddl import STATEMENTS" in phone_migration)
+    check("and revises 296", 'down_revision = "296"' in phone_migration)
+    # 296 owns the table. Undoing the column must not take every registration
+    # with it, which a `DROP TABLE` downgrade copied from 296 would.
+    check("its downgrade drops the column, never the table",
+          "DROP COLUMN IF EXISTS phone" in phone_migration
+          and "DROP TABLE" not in phone_migration)
 
     print("\n-- the event is declared once, and both copies agree --")
     event = webinar.EVENT
@@ -292,7 +359,7 @@ async def main() -> None:
         result = await register(
             RegisterIn(
                 name="Sam Committee", email="Sam@Example.com", club="Applecross CC",
-                role="Secretary", attribution=AD_ATTRIBUTION, visitorId="v-1",
+                phone="0412 345 678", role="Secretary", attribution=AD_ATTRIBUTION, visitorId="v-1",
                 meta=WebinarMeta(eventId="evt-1", eventSourceUrl="https://betterat.cricket/demo",
                                  fbp="fb.1.1.1", fbc="fb.1.2.IwAR0abcdef123"),
             ),
@@ -313,6 +380,11 @@ async def main() -> None:
         check("with the name", row and row["name"] == "Sam Committee")
         check("with the club", row and row["club"] == "Applecross CC")
         check("with the role", row and row["role"] == "Secretary")
+        # Stored EXACTLY as typed, spaces and all. Normalising here would only
+        # make it harder to read back to whoever rings them; the digits-only
+        # form is derived once, at the Meta boundary.
+        check("with the phone as they wrote it", row and row.get("phone") == "0412 345 678",
+              str(row and row.get("phone")))
 
         print("\n-- every UTM tag and the click id are persisted --")
         for col, expected in (("utm_source", "fb"), ("utm_medium", "paid_social"),
@@ -345,6 +417,12 @@ async def main() -> None:
               capi and capi[0].get("fbp") == "fb.1.1.1" and capi[0].get("fbc", "").endswith("IwAR0abcdef123"))
         check("and the registrant's email for matching",
               capi and capi[0].get("email") == "sam@example.com")
+        # A second hashed identifier for the same person: a conversion carrying
+        # an email AND a phone matches back to whoever saw the ad more often
+        # than one carrying an email alone.
+        check("and the phone, which is what improves the match quality",
+              capi and capi[0].get("phone") == "0412 345 678",
+              str(capi and capi[0].get("phone")))
         mail = bg.named("_send_confirmation_bg")
         check("the confirmation email is queued", len(mail) == 1, str(len(mail)))
         check("addressed to the registrant", mail and mail[0].get("email") == "sam@example.com")
@@ -359,7 +437,8 @@ async def main() -> None:
         bg = Background()
         again = await register(
             RegisterIn(name="Sam Committee-Smith", email="SAM@example.com",
-                       club="Applecross Cricket Club", attribution={},
+                       club="Applecross Cricket Club", phone="(08) 9364 1234",
+                       attribution={},
                        meta=WebinarMeta(eventId="evt-2")),
             FakeRequest(), bg, session,
         )
@@ -375,6 +454,10 @@ async def main() -> None:
         check("the corrected name lands on the row it already had",
               row and row["name"] == "Sam Committee-Smith")
         check("and the corrected club", row and row["club"] == "Applecross Cricket Club")
+        # Same treatment as the name and the club: a resubmission is somebody
+        # correcting what they typed, so the new number wins.
+        check("and the corrected phone", row and row.get("phone") == "(08) 9364 1234",
+              str(row and row.get("phone")))
         # A registration already credited to a campaign keeps that credit — the
         # second visit arrived with nothing, and overwriting would credit the
         # registration to whichever visit happened to be last.
@@ -385,16 +468,64 @@ async def main() -> None:
         # They still get the link — from their side nothing has gone wrong.
         check("they are still handed the watch link", again["watch_url"] == event.watch_url)
 
+    print("\n-- a phone-less write never blanks a number already stored --")
+    # The route requires a phone, so this is the service's own guard: a caller
+    # that is not the form (a browser served an older bundle mid-deploy, an
+    # internal call) must not be able to erase a number we already hold.
+    async with Session() as session:
+        try:
+            await webinar.register(session, name="Sam Committee-Smith",
+                                   email="sam@example.com", club="Applecross Cricket Club",
+                                   phone=None)
+        except TypeError as exc:  # pragma: no cover - control run only
+            await session.rollback()
+            check("the stored number survives a submission carrying none", False, str(exc))
+        else:
+            row = await row_for(session, "sam@example.com")
+            check("the stored number survives a submission carrying none",
+                  row and row.get("phone") == "(08) 9364 1234", str(row and row.get("phone")))
+
+    print("\n-- what counts as a phone number --")
+    # DELIBERATELY WIDER than admin_identity.mobile_valid, which refuses
+    # anything that is not an Australian mobile. The clubroom landline a
+    # secretary writes down is a perfectly good number to ring them on, and
+    # refusing it would send a real registrant away.
+    accepted = [
+        ("an Australian mobile", "0412 345 678"),
+        ("a landline with an area code", "(08) 9364 1234"),
+        ("a landline with no area code", "9364 1234"),
+        ("an international number", "+64 21 555 0100"),
+        ("one written with dashes", "0412-345-678"),
+    ]
+    async with Session() as session:
+        for label, value in accepted:
+            email = f"ok{abs(hash(value)) % 10**8}@example.com"
+            try:
+                await register(RegisterIn(name="Phone Test", email=email,
+                                          club="Phone CC", phone=value),
+                               FakeRequest(), Background(), session)
+            except Exception as exc:  # noqa: BLE001
+                check(f"{label} is accepted", False, str(exc))
+                continue
+            row = await row_for(session, email)
+            check(f"{label} is accepted", row is not None)
+            check(f"and {label} is stored exactly as written",
+                  row and row.get("phone") == value, str(row and row.get("phone")))
+        await session.execute(text("DELETE FROM webinar_registrations WHERE club = 'Phone CC'"))
+        await session.commit()
+
     print("\n-- an untagged registration can be upgraded once a signal arrives --")
     async with Session() as session:
         bg = Background()
         await register(RegisterIn(name="Organic Olive", email="olive@example.com",
-                                  club="Direct CC", attribution={"has_signal": False}),
+                                  club="Direct CC", phone="0400 000 000",
+                                  attribution={"has_signal": False}),
                        FakeRequest(), bg, session)
         row = await row_for(session, "olive@example.com")
         check("it stores with no campaign", row and row["utm_campaign"] is None)
         await register(RegisterIn(name="Organic Olive", email="olive@example.com",
-                                  club="Direct CC", attribution=AD_ATTRIBUTION),
+                                  club="Direct CC", phone="0400 000 000",
+                                  attribution=AD_ATTRIBUTION),
                        FakeRequest(), Background(), session)
         row = await row_for(session, "olive@example.com")
         check("and a later tagged visit fills the gap",
@@ -403,11 +534,16 @@ async def main() -> None:
     print("\n-- every refusal --")
     async with Session() as session:
         for label, payload in (
-            ("a blank name", RegisterIn(name="  ", email="a@b.com", club="X CC")),
-            ("a blank club", RegisterIn(name="A", email="a@b.com", club="  ")),
-            ("a blank email", RegisterIn(name="A", email="", club="X CC")),
-            ("an email with no @", RegisterIn(name="A", email="notanemail", club="X CC")),
-            ("an email with no domain dot", RegisterIn(name="A", email="a@b", club="X CC")),
+            ("a blank name", RegisterIn(name="  ", email="a@b.com", club="X CC", phone=PHONE)),
+            ("a blank club", RegisterIn(name="A", email="a@b.com", club="  ", phone=PHONE)),
+            ("a blank email", RegisterIn(name="A", email="", club="X CC", phone=PHONE)),
+            ("an email with no @", RegisterIn(name="A", email="notanemail", club="X CC", phone=PHONE)),
+            ("an email with no domain dot", RegisterIn(name="A", email="a@b", club="X CC", phone=PHONE)),
+            # The number is REQUIRED, per the direct instruction to gather it.
+            ("a blank phone", RegisterIn(name="A", email="a@b.com", club="X CC", phone="  ")),
+            ("a phone with too few digits", RegisterIn(name="A", email="a@b.com", club="X CC", phone="1234")),
+            ("a phone that is not a number at all", RegisterIn(name="A", email="a@b.com", club="X CC", phone="ring me")),
+            ("a phone with more digits than E.164 allows", RegisterIn(name="A", email="a@b.com", club="X CC", phone="0412345678901234")),
         ):
             before = await count_rows(session)
             try:
@@ -446,14 +582,14 @@ async def main() -> None:
         # a person with a wrong clock, not a bot — refusing them would be the
         # guard costing a real registration.
         skew = await register(
-            RegisterIn(name="Skewed Clock", email="skew@example.com", club="Skew CC",
+            RegisterIn(name="Skewed Clock", email="skew@example.com", club="Skew CC", phone=PHONE,
                        formStartedAt=now_ms + 600_000),
             FakeRequest(), Background(), session,
         )
         check("a device with a clock running fast is NOT refused", skew["created"] is True)
 
         old = await register(
-            RegisterIn(name="Real Person", email="real@example.com", club="Real CC",
+            RegisterIn(name="Real Person", email="real@example.com", club="Real CC", phone=PHONE,
                        formStartedAt=now_ms - 30_000),
             FakeRequest(), Background(), session,
         )
@@ -485,7 +621,7 @@ async def main() -> None:
 
             bg = Background()
             late = await register(
-                RegisterIn(name="Late Larry", email="late@example.com", club="Late CC"),
+                RegisterIn(name="Late Larry", email="late@example.com", club="Late CC", phone=PHONE),
                 FakeRequest(), bg, session,
             )
             check("somebody registering afterwards is still stored", late["created"] is True)
@@ -501,7 +637,7 @@ async def main() -> None:
 
             bg = Background()
             later = await register(
-                RegisterIn(name="Later Lucy", email="later@example.com", club="Later CC"),
+                RegisterIn(name="Later Lucy", email="later@example.com", club="Later CC", phone=PHONE),
                 FakeRequest(), bg, session,
             )
             check("a registration now hands over the recording",
@@ -643,6 +779,10 @@ async def main() -> None:
         check("and whether the confirmation email got out", sam and "email_sent" in sam)
         check("and the id as a string, not a raw UUID",
               sam and isinstance(sam["id"], str))
+        # The whole reason the number is gathered: a lead somebody rings.
+        # Without it on the staff list it may as well not be stored.
+        check("and the phone, which is what the list is worked from",
+              sam and sam.get("phone") == "(08) 9364 1234", str(sam and sam.get("phone")))
 
     print("\n-- the downgrade --")
     async with engine.begin() as conn:

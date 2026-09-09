@@ -4177,7 +4177,7 @@ async def list_webinar_registrations(
     """
     from sqlalchemy import text as _text
     rows = (await db.execute(_text("""
-        SELECT id, event_key, name, email, club, role,
+        SELECT id, event_key, name, email, club, phone, role,
                utm_source, utm_medium, utm_campaign, utm_content, utm_term,
                click_id, click_source, referrer, landing_path,
                visitor_id, email_sent, email_error, created_at

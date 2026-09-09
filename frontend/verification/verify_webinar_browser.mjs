@@ -125,10 +125,25 @@ async function open(path, {
 const registrations = (calls) => calls.filter((c) => c.path === '/public/webinar/register')
 const completeReg = (px) => px.filter((e) => e.lib === 'fbq' && e.args[1] === 'CompleteRegistration')
 
-async function fill(page, { name = 'Sam Committee', email = 'sam@example.com', club = 'Applecross CC' } = {}) {
+async function fill(page, {
+  name = 'Sam Committee', email = 'sam@example.com', club = 'Applecross CC',
+  phone = '0412 345 678',
+} = {}) {
   if (name !== null) await page.fill('#demo-name', name)
   if (email !== null) await page.fill('#demo-email', email)
   if (club !== null) await page.fill('#demo-club', club)
+  // Presence-checked, not filled blind: against a build without the field a
+  // bare fill() hangs on the locator and takes the whole run down with it —
+  // a control run that crashes is not a control run.
+  if (phone !== null && await page.locator('#demo-phone').count() === 1) {
+    await page.fill('#demo-phone', phone)
+  }
+}
+
+// Read an attribute without waiting for an element that may not exist.
+async function attrOf(page, selector, name) {
+  if (await page.locator(selector).count() !== 1) return null
+  return page.locator(selector).getAttribute(name)
 }
 
 // ---------------------------------------------------------------- before ----
@@ -156,11 +171,14 @@ async function fill(page, { name = 'Sam Committee', email = 'sam@example.com', c
   ck('and the "register anyway" recording line is under it',
     /Can’t make it live\? Register anyway/.test(sub))
 
-  // Three fields, and the role picker collapsed.
-  ck('name, email and club are all present',
+  // Four fields now, and the role picker still collapsed. The phone was
+  // asked for directly after the page shipped; the brief's own three-field
+  // rule is what keeps the role optional and out of the way.
+  ck('name, email, club and phone are all present',
     await page.locator('#demo-name').count() === 1
     && await page.locator('#demo-email').count() === 1
-    && await page.locator('#demo-club').count() === 1)
+    && await page.locator('#demo-club').count() === 1
+    && await page.locator('#demo-phone').count() === 1)
   ck('the optional role field is collapsed by default',
     await page.locator('#demo-role').count() === 0)
   await page.getByTestId('demo-role-toggle').click()
@@ -175,10 +193,18 @@ async function fill(page, { name = 'Sam Committee', email = 'sam@example.com', c
     await page.locator('#demo-email').getAttribute('autocomplete') === 'email')
   ck('the club field autocompletes as an organisation',
     await page.locator('#demo-club').getAttribute('autocomplete') === 'organization')
+  ck('the phone field autocompletes as a phone number',
+    await attrOf(page, '#demo-phone', 'autocomplete') === 'tel')
+  // What puts a keypad rather than a full keyboard in front of the ~all of
+  // this traffic that is on a phone.
+  ck('and asks for a phone keypad',
+    await attrOf(page, '#demo-phone', 'inputmode') === 'tel'
+    && await attrOf(page, '#demo-phone', 'type') === 'tel')
   ck('every field has a real label',
     await page.locator('label[for="demo-name"]').count() === 1
     && await page.locator('label[for="demo-email"]').count() === 1
-    && await page.locator('label[for="demo-club"]').count() === 1)
+    && await page.locator('label[for="demo-club"]').count() === 1
+    && await page.locator('label[for="demo-phone"]').count() === 1)
 
   // THE PIXEL MUST NOT HAVE FIRED YET.
   let px = await readPixel()
@@ -204,6 +230,35 @@ async function fill(page, { name = 'Sam Committee', email = 'sam@example.com', c
   ck('a malformed email is caught before posting', registrations(calls).length === 0)
   ck('and fires no CompleteRegistration', completeReg(await readPixel()).length === 0)
 
+  // The phone is required, so the same has to hold for it — caught in the
+  // browser, nothing posted, and no conversion claimed.
+  //
+  // The WHOLE block is gated on the field existing. Against a build without
+  // it these submissions SUCCEED, the form is replaced by the success state,
+  // and every later check in this section hangs on a form that is gone — a
+  // control run that crashes is not a control run. Absent, the three checks
+  // report and the page is left exactly as it was.
+  if (await page.locator('#demo-phone').count() === 1) {
+    await fill(page, { phone: '' })
+    await page.getByTestId('demo-submit').click()
+    await page.waitForTimeout(300)
+    ck('a missing phone is caught before posting', registrations(calls).length === 0)
+    ck('and it says which field is missing',
+      /Add your phone number\./.test(await page.getByTestId('demo-form').innerText()))
+    // A landline is a perfectly good number to ring a club secretary on, so
+    // the rule is 'could be a phone number', never 'is an Australian mobile'.
+    await fill(page, { phone: '1234' })
+    await page.getByTestId('demo-submit').click()
+    await page.waitForTimeout(300)
+    ck('and so is one with too few digits to be a phone number',
+      registrations(calls).length === 0 && completeReg(await readPixel()).length === 0)
+    await fill(page, { phone: '(08) 9364 1234' })
+  } else {
+    ck('a missing phone is caught before posting', false, 'no phone field')
+    ck('and it says which field is missing', false, 'no phone field')
+    ck('and so is one with too few digits to be a phone number', false, 'no phone field')
+  }
+
   // Now a real submission.
   await page.fill('#demo-email', 'sam@example.com')
   await page.selectOption('#demo-role', 'Secretary')
@@ -216,6 +271,9 @@ async function fill(page, { name = 'Sam Committee', email = 'sam@example.com', c
   ck('carrying the name', sent.name === 'Sam Committee', JSON.stringify(sent.name))
   ck('the email', sent.email === 'sam@example.com')
   ck('the club', sent.club === 'Applecross CC')
+  // Exactly as typed, spaces and brackets and all — the server stores what a
+  // person wrote rather than a form of it nobody would recognise.
+  ck('the phone as it was typed', sent.phone === '(08) 9364 1234', JSON.stringify(sent.phone))
   ck('and the role that was picked', sent.role === 'Secretary')
 
   // UTMs AND fbclid, end to end from the landing URL — captured by the same

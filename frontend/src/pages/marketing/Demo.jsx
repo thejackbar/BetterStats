@@ -176,6 +176,7 @@ function RegistrationForm({ state, onSuccess }) {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [club, setClub] = useState('')
+  const [phone, setPhone] = useState('')
   const [role, setRole] = useState('')
   const [showRole, setShowRole] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -193,6 +194,14 @@ function RegistrationForm({ state, onSuccess }) {
     if (!email.trim()) next.email = 'Add your email.'
     else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) next.email = 'That doesn’t look like an email address.'
     if (!club.trim()) next.club = 'Add your club.'
+    // Mirrors the server's own rule (public_webinar.PHONE_MIN/MAX_DIGITS):
+    // enough digits to be a phone number, and nothing stricter. A landline is
+    // as good a number to ring a club secretary on as a mobile.
+    if (!phone.trim()) next.phone = 'Add your phone number.'
+    else {
+      const digits = phone.replace(/\D/g, '')
+      if (digits.length < 8 || digits.length > 15) next.phone = 'That doesn’t look like a phone number.'
+    }
     return next
   }
 
@@ -215,6 +224,7 @@ function RegistrationForm({ state, onSuccess }) {
         name: name.trim(),
         email: email.trim(),
         club: club.trim(),
+        phone: phone.trim(),
         role: role || null,
         attribution: getAttribution(),
         visitorId: getVisitorId(),
@@ -345,6 +355,32 @@ function RegistrationForm({ state, onSuccess }) {
             className={FIELD_CLS}
           />
           {err('club')}
+        </div>
+        {/* A fourth required field costs some registrations — the brief that
+            asked for this page was emphatic about keeping it to three — and it
+            is here because it was asked for directly afterwards. It earns its
+            place twice: a phone number is how a lead actually gets followed
+            up, and it is a second hashed identifier on the conversion we send
+            Meta, which matches more of them back to the ad. `type="tel"` plus
+            `inputMode="tel"` is what puts a phone keypad in front of the ~all
+            of this traffic that is on a phone. */}
+        <div>
+          <label htmlFor="demo-phone" className="block font-mono text-[11px] tracking-wide text-pb-faint mb-1.5">
+            PHONE
+          </label>
+          <input
+            id="demo-phone"
+            type="tel"
+            inputMode="tel"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            autoComplete="tel"
+            required
+            aria-invalid={!!errors.phone}
+            aria-describedby={errors.phone ? 'demo-phone-error' : undefined}
+            className={FIELD_CLS}
+          />
+          {err('phone')}
         </div>
 
         {/* Optional, and collapsed — every extra field on screen costs

@@ -326,6 +326,68 @@ then hands the visitor the StreamYard link. Webinar Mon 21 Sep 2026.
   priority list (or iOS conversions are not attributed), and the ad's
   `conversion_domain`. Also worth fixing on the creative itself: it reads "WAST",
   which is West Africa Summer Time — Perth is **AWST**.
+- **THE FORM PRE-FILLS NOTHING ON STREAMYARD, AND THAT WAS ASKED AND ANSWERED
+  RATHER THAN ASSUMED (migration 297, v9.71.2).** `EVENT.watch_url` is handed
+  over as a plain link and no registration data crosses to it — there is no
+  StreamYard API call anywhere in this codebase. Read off the watch page's own
+  server-rendered props: the broadcast is configured as a **webinar**
+  (`webinarId`) and the page carries a `sessionRegistrationId`, which is
+  StreamYard's OWN registration mechanism and is empty for an anonymous
+  visitor. Whether that gate is switched on for this broadcast is a setting in
+  StreamYard, not something this code can see or change. **If it is on, a
+  registrant fills a form twice** — the fix is a StreamYard setting, not a
+  code change.
+- **A PHONE NUMBER IS GATHERED, AND IT IS REQUIRED.** Asked for directly, and
+  it cuts against the brief's own "keep it to three, every extra field costs
+  registrations" — the later instruction wins, and the cost is real and
+  accepted. Optional-but-visible was the alternative and was rejected: "make
+  sure we gather" is not satisfied by a field most people skip. Making it
+  optional again is one `if (!phone.trim())` at each end.
+- **STORED EXACTLY AS TYPED, and validated on "could this be a phone number"
+  and nothing more.** `PHONE_MIN_DIGITS, PHONE_MAX_DIGITS = 8, 15` — an
+  Australian landline with no area code is 8 digits and E.164's own ceiling is
+  15. **DELIBERATELY NOT `admin_identity.mobile_valid`**, which is right for a
+  club admin's account and wrong here: it refuses anything that is not an
+  Australian mobile, and the clubroom landline a secretary writes down is a
+  perfectly good number to ring them on. Normalising the stored value would
+  only make it harder to read back to whoever rings it; the digits-only form
+  is derived once, at the Meta boundary, by `meta_capi._hash_phone`.
+- **IT RIDES ON THE CONVERSION BECAUSE IT IS A SECOND HASHED IDENTIFIER.**
+  `send_complete_registration_event` has always taken a `phone` and never had
+  one to hash — a conversion carrying an email AND a phone matches back to
+  whoever saw the ad more often, so this is an attribution improvement rather
+  than only a stored field.
+- **THE UPSERT COALESCES THE PHONE WHERE IT OVERWRITES THE NAME AND CLUB.**
+  Those two are always present, so a resubmission correcting them is
+  unambiguous; a phone can legitimately be absent (a browser served an older
+  bundle mid-deploy, a caller that is not the form), and losing a stored number
+  to one of those is worse than keeping a stale one. A new number still wins.
+- **MIGRATION 297 RE-RUNS THE WHOLE SHARED LIST rather than issuing a lone
+  ALTER**, so the CREATE covers a fresh database and an idempotent
+  `ADD COLUMN IF NOT EXISTS` covers one already at 296 — one list, no second
+  copy of the column to drift. **Its downgrade drops the COLUMN, never the
+  table**: 296 owns the table, and copying 296's downgrade would destroy every
+  registration over one column. The suite pins that.
+- **Verified** (the backend suite is 173 now: the pre-297 table rebuilt in raw
+  SQL and carried across with its rows, an earlier registration reading as no
+  phone rather than a blank, the number stored as typed, the corrected number
+  landing, a phone-less write not blanking one already stored, five shapes of
+  real number accepted incl. a landline and an international one, four
+  refusals, and the staff list carrying it) **with a control run**: 22 fail
+  against the previous commit and the run REPORTS rather than crashing.
+  **Driven in Chromium** (93: the field with its `tel` type, inputmode and
+  autocomplete, its label, the exact number on the wire, and both refusals
+  posting nothing and claiming no conversion) **with a control run**: 8 fail.
+- **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN, hit twice in one change.**
+  The backend's `SELECT phone` died on an `UndefinedColumnError` and said
+  nothing about the other 150 checks; the browser's bare `fill('#demo-phone')`
+  hung 30s on the locator and killed the run after six. Every phone read is
+  presence-checked now — `row.get("phone")` over `row["phone"]`, `attrOf()`
+  over a bare `getAttribute`. **The browser's refusal checks needed the WHOLE
+  BLOCK gated on the field existing, not each read guarded**: without the
+  field those submissions SUCCEED, the form is replaced by the success state,
+  and every later check in that section then hangs on a form that is gone.
+  Guarding one read at a time just moved the crash further down.
 - **NOTICED, NOT BUILT**: no reminder email before the event and no
   attended/no-show record afterwards, so "send the recording to everyone who
   registered" is a CSV export and a BetterComms list rather than one button. The
