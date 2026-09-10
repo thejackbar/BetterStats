@@ -589,7 +589,8 @@ layers on all templates where each element except the background is a layer."*
   reordered — `LayerRoot` returns the exact div the template rendered before:
   no cloning, no z-index, no stacking context. **Measured rather than asserted:
   all 48 layouts re-shot at square AND at portrait on both builds are
-  byte-identical, 96 of 96.**
+  byte-identical, 96 of 96 — re-shot against the exact build being shipped, not
+  an earlier one.**
 - **WIRING IS ONE LINE PER ROOT, and 19 of the 48 came free.** The roundup
   family's shared `Post` shell covers all 19; the 17 cricket roots, 11 event
   roots and the launch poster are a `<div style={{…}}>` → `<LayerRoot
@@ -689,19 +690,22 @@ layers on all templates where each element except the background is a layer."*
   concurrent Chromium runs left the control shoot idle-waiting with 6 seconds of
   CPU and no write for eight minutes. Kill the browsers, then re-shoot only the
   templates that are missing rather than the whole set.
-- **Driven in Chromium** (`verify_post_designer_browser.mjs`, 91 checks — the 78
+- **Driven in Chromium** (`verify_post_designer_browser.mjs`, 92 checks — the 78
   from v9.75.0 plus a section that measures the stack off the OFF-SCREEN EXPORT
   NODE rather than the canvas, since the canvas agreeing with itself says
   nothing about the downloaded PNG: a layout listing its own elements by name, a
   new block starting in front of everything, Send to back putting it under every
   one of them with the background still painting, ONE STEP FORWARD PUTTING IT
   BETWEEN TWO OF THE LAYOUT'S OWN ELEMENTS, hiding an element taking it off the
-  exported post and putting it back, the blank canvas showing no layout rows at
-  all, and a saved template driven through a real RELOAD in one context so the
-  stack it comes back with can only have been read off the saved row) **with a
-  control run**: 13 of the 91 fail against the previous commit, reporting its own
-  empty layer list, every element at `z: 0` and `9 -> 9` where an element should
-  have come off the post. The 78 that pass in both are don't-regress guards.
+  exported post and putting it back, a real layout having element rows where the
+  blank canvas has none, and a saved template driven through a real RELOAD in one
+  context so the stack it comes back with can only have been read off the saved
+  row) **with a control run**: 16 of the 92 fail against the previous commit,
+  reporting its own empty layer list, every element at `z: 0`, `9 -> 9` where an
+  element should have come off the post, and `sent=false` where Send to back does
+  not exist. The 76 that pass in both are don't-regress guards or the structural
+  displayName check, which reads the source rather than the build and so is the
+  same either way.
 - **COMPARING THE TWO PASS SETS IS HOW YOU FIND A CHECK THAT CANNOT FAIL.**
   `comm -12 <(grep ^PASS run.log|sort) <(grep ^PASS control.log|sort)` lists
   every check that passes in both; anything in there naming the new feature is
