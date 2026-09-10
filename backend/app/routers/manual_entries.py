@@ -25,7 +25,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
-from sqlalchemy import select, func, delete as sa_delete, text as _t
+from sqlalchemy import select, func, delete as sa_delete, text as _t, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_MANUAL_ENTRIES, require_cap
@@ -1902,6 +1902,18 @@ async def undo_edit(
                     + (snap.get("children") or {}).get("fielding_stats", [])))
                 await _restore_manual_game(db, dict(snap), club.id)
             await db.flush()
+            # Deleting the superseded stand-ins above already unpaired their
+            # synced games (the FK is ON DELETE SET NULL / gone with the row),
+            # so those matches come straight back. The one thing left is the
+            # season re-source flag this import set — revert exactly the seasons
+            # it flipped, so a season already import-sourced by an earlier import
+            # is left alone.
+            auth_seasons = [uuid.UUID(s) for s in (after.get("authoritative_seasons_set") or [])]
+            if auth_seasons:
+                await db.execute(sa_update(Season)
+                                 .where(Season.id.in_(auth_seasons),
+                                        Season.organisation_id == club.id)
+                                 .values(import_authoritative=False))
             # The wizard also creates the reference data the sheet needed, so
             # undoing has to take that back or the club is left with seasons
             # and people it never asked for. Order matters: the games are gone
@@ -2426,18 +2438,28 @@ async def _write_games(
     overwritten_snapshots: list[dict] = []
     errors: list[dict] = []
     affected_player_ids: set = set()
+    superseded_ids: list[str] = []
+    authoritative_season_ids: set = set()
     ignored = 0
     ignored_synced = 0
 
     for game_key, group in by_game.items():
         dup = existing_by_game.get(game_key)
-        if dup and (not overwrite or dup["source"] != "manual"):
-            # skip mode discards every duplicate; overwrite mode still discards
-            # a synced game it cannot replace.
+        if dup and not overwrite:
+            # skip mode discards every duplicate, manual or synced, so the same
+            # match is never counted from two sources.
             ignored += 1
             if dup["source"] != "manual":
                 ignored_synced += 1
             continue
+
+        # In overwrite mode: a MANUAL duplicate is replaced in place (snapshot +
+        # delete + rewrite); a SYNCED (Cricket Australia) duplicate is SUPERSEDED
+        # — the imported match becomes the record for it, the synced game steps
+        # aside on read, and the pairing is LOCKED so a future sync never flips
+        # it back. Neither the synced game nor its data is deleted.
+        overwrite_manual = bool(dup) and dup["source"] == "manual"
+        supersede_synced = bool(dup) and dup["source"] != "manual"
 
         first_row_num, first = group[0]
         game_player_ids: set = set()
@@ -2445,7 +2467,7 @@ async def _write_games(
         snapshot = None
         try:
             async with db.begin_nested():
-                if dup:  # overwrite of a manual match — snapshot, then delete
+                if overwrite_manual:  # snapshot, then delete the existing manual match
                     snapshot = await _snapshot_manual_game(
                         db, uuid.UUID(dup["id"]), club.id)
                     await db.execute(sa_delete(ManualGame).where(
@@ -2488,6 +2510,14 @@ async def _write_games(
                     notes=None,
                     created_by_user_id=user_id,
                 )
+                if supersede_synced:
+                    # The imported match IS the synced game, and is the record
+                    # for it. pair_prefers_import makes the effective views show
+                    # this one and hide the synced copy; pairing_locked keeps the
+                    # automatic matcher's hands off it for good.
+                    game.superseded_by_game_id = uuid.UUID(dup["id"])
+                    game.pair_prefers_import = True
+                    game.pairing_locked = True
                 db.add(game)
                 await db.flush()
                 game_id = str(game.id)
@@ -2585,10 +2615,18 @@ async def _write_games(
             affected_player_ids |= set(_extract_player_ids(
                 ch.get("batting_innings", []) + ch.get("bowling_spells", [])
                 + ch.get("fielding_stats", [])))
+        if supersede_synced:
+            # The synced game this stood in for; its season is one the club is
+            # re-sourcing, so the caller marks it import-authoritative and the
+            # season totals count the import instead of CA's own summary.
+            superseded_ids.append(game_id)
+            authoritative_season_ids.add(season.id)
 
     return {
         "created": created_game_ids,
         "overwritten": overwritten_snapshots,
+        "superseded": superseded_ids,
+        "authoritative_season_ids": authoritative_season_ids,
         "ignored": ignored,
         "ignored_synced": ignored_synced,
         "errors": errors,
@@ -3249,15 +3287,18 @@ async def commit_manual_games(
         existing_by_game=plan["existing_by_game"],
         overwrite=overwrite,
     )
-    # Every written game, new or a replacement, so undo can remove them all;
-    # `overwritten` is the subset that stood in for an existing manual match.
+    # Every written game — new, a replacement, or the stand-in for a superseded
+    # synced match — is in `created`, so undo can remove them all. `overwritten`
+    # is the subset that replaced an existing manual match; `superseded` the
+    # subset that took over an incorrect Cricket Australia match.
     created_game_ids = written["created"]
     overwritten = written["overwritten"]
+    superseded = written["superseded"]
     affected_player_ids = written["player_ids"]
     ignored = written["ignored"]
     ignored_synced = written["ignored_synced"]
     errors = written["errors"] + resolved["row_errors"]
-    games_new = len(created_game_ids) - len(overwritten)
+    games_new = len(created_game_ids) - len(overwritten) - len(superseded)
 
     if not created_game_ids and not ignored:
         await db.rollback()
@@ -3271,15 +3312,56 @@ async def commit_manual_games(
             await game_import_staging.discard(db, token=req.token, org_id=club.id)
         await db.commit()
         return {
-            "games_created": 0, "games_overwritten": 0,
+            "games_created": 0, "games_overwritten": 0, "games_superseded": 0,
             "games_ignored": ignored, "games_ignored_synced": ignored_synced,
             "seasons_created": 0, "grades_created": 0, "players_created": 0,
+            "seasons_import_sourced": 0, "warnings": [],
             "errors": len(errors), "errors_detail": errors[:50],
         }
+
+    # A superseded synced match means the club is re-sourcing that season from
+    # its own import, so mark the season import-authoritative — the season and
+    # career TOTALS then count the import rather than PlayHQ's summary. Record
+    # only the seasons this import newly flips, so undo reverts exactly those.
+    auth_ids = written["authoritative_season_ids"]
+    seasons_import_sourced: list[str] = []
+    if auth_ids:
+        newly = (await db.execute(
+            select(Season.id).where(
+                Season.id.in_(auth_ids),
+                Season.organisation_id == club.id,
+                Season.import_authoritative.is_(False)))).scalars().all()
+        seasons_import_sourced = [str(s) for s in newly]
+        if newly:
+            await db.execute(sa_update(Season)
+                             .where(Season.id.in_(newly))
+                             .values(import_authoritative=True))
+
+    # Surface a season we are now sourcing from the import that STILL holds
+    # synced matches the file did not cover — their scores drop out of the
+    # season totals (CA's summary is stepped aside), so say so rather than let
+    # it read as data quietly going missing.
+    warnings: list[str] = []
+    if auth_ids:
+        uncovered = (await db.execute(_t("""
+            SELECT COUNT(*) FROM games g
+              JOIN grades gr ON gr.id = g.grade_id
+             WHERE gr.season_id = ANY(CAST(:seasons AS UUID[]))
+               AND NOT EXISTS (SELECT 1 FROM manual_games lk
+                                WHERE lk.superseded_by_game_id = g.id
+                                  AND lk.pairing_locked)
+        """), {"seasons": [str(s) for s in auth_ids]})).scalar() or 0
+        if uncovered:
+            warnings.append(
+                f"{uncovered} Cricket Australia match(es) in the re-sourced season(s) "
+                "were not in your file. Their scores are no longer counted in those "
+                "seasons' totals — check the file holds every match for those seasons.")
 
     parts = [f"{games_new} games"]
     if overwritten:
         parts.append(f"{len(overwritten)} overwritten")
+    if superseded:
+        parts.append(f"{len(superseded)} replacing Cricket Australia matches")
     if ignored:
         parts.append(f"{ignored} already-present ignored")
     await _log_edit(
@@ -3302,6 +3384,10 @@ async def commit_manual_games(
                # short the games it overwrote — the "never lose hand-typed work"
                # rule, applied to a deliberate overwrite.
                "overwritten_games": overwritten,
+               # The synced matches this import took over, and the seasons it
+               # flipped to import-sourced — so undo reverts exactly what it did.
+               "superseded_game_ids": superseded,
+               "authoritative_seasons_set": seasons_import_sourced,
                "filename": req.filename,
                "errors": errors[:20]},
     )
@@ -3315,11 +3401,14 @@ async def commit_manual_games(
     return {
         "games_created": games_new,
         "games_overwritten": len(overwritten),
+        "games_superseded": len(superseded),
         "games_ignored": ignored,
         "games_ignored_synced": ignored_synced,
         "seasons_created": len(created_season_ids),
         "grades_created": len(created_grade_ids),
         "players_created": len(created_player_ids),
+        "seasons_import_sourced": len(seasons_import_sourced),
+        "warnings": warnings,
         "errors": len(errors),
         "errors_detail": errors[:50],
     }

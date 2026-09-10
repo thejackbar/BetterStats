@@ -53,6 +53,26 @@ STATEMENTS: tuple[str, ...] = (
     "superseded_by_game_id UUID",
     "ALTER TABLE manual_games ADD COLUMN IF NOT EXISTS "
     "pair_prefers_import BOOLEAN NOT NULL DEFAULT FALSE",
+    # A HUMAN DELIBERATELY SET THIS PAIR, via an overwrite import that replaced
+    # an incorrect Cricket Australia match with the club's own correct record.
+    # `match_pairing.reconcile_org` leaves a locked row and its synced game
+    # alone — the automatic matcher must never flip a person's decision back to
+    # preferring the synced copy, which is the whole point of the lock. Set
+    # together with superseded_by_game_id + pair_prefers_import = TRUE.
+    "ALTER TABLE manual_games ADD COLUMN IF NOT EXISTS "
+    "pairing_locked BOOLEAN NOT NULL DEFAULT FALSE",
+    # A SEASON THE CLUB HAS RE-SOURCED FROM ITS OWN IMPORT, because Cricket
+    # Australia's records for it are wrong. Set by an overwrite import told the
+    # file holds the WHOLE season. Where TRUE, v_effective_player_season_stats
+    # counts the import's own matches and steps CA's season summary aside, so
+    # the profile and leaderboard TOTALS match the corrected scorecards rather
+    # than PlayHQ's figure. Distinct from the retired `stats_source`: that was
+    # set automatically per season and hid the losing source's unique matches;
+    # this is human-set and only for a season the club has stated is complete.
+    "ALTER TABLE seasons ADD COLUMN IF NOT EXISTS "
+    "import_authoritative BOOLEAN NOT NULL DEFAULT FALSE",
+    "CREATE INDEX IF NOT EXISTS ix_seasons_import_authoritative "
+    "ON seasons (id) WHERE import_authoritative",
     """DO $$
     BEGIN
         IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -195,6 +215,14 @@ STATEMENTS: tuple[str, ...] = (
           -- only the imported matches CA does NOT have, since a paired one is
           -- filtered out there. Neither half can reach the other's matches,
           -- so the season is counted once.
+          --
+          -- THE EXCEPTION IS A SEASON THE CLUB HAS RE-SOURCED. Where a club has
+          -- declared its own import authoritative for a season (PlayHQ was
+          -- wrong for it and the file holds the whole season), CA's summary is
+          -- stepped aside and the manual-game rollup below counts the import
+          -- instead — so the totals match the corrected scorecards. Everywhere
+          -- else this is FALSE and nothing changes.
+          AND NOT s.import_authoritative
     )
 
     UNION ALL
@@ -351,18 +379,27 @@ STATEMENTS: tuple[str, ...] = (
         -- imported matches CA does not have at all. Preferring the imported
         -- copy is a decision about which scorecard to SHOW, and it stays
         -- per-innings, where there is a row to drop.
-        WITH player_games AS (
-            SELECT mg.id AS manual_game_id, mg.season_id, mg.grade_id, mbi.player_id
-            FROM manual_games mg JOIN manual_batting_innings mbi ON mbi.manual_game_id = mg.id
+        -- `_counts_here` is the one rule for whether a manual game feeds the
+        -- season aggregate: an UNPAIRED match always does; a paired (superseded)
+        -- match does ONLY in a season the club has re-sourced from its import,
+        -- where CA's own summary is stepped aside above. Everywhere else a
+        -- paired match stays out, so the season is counted once.
+        WITH counts_here AS (
+            SELECT mg.id AS manual_game_id, mg.season_id, mg.grade_id
+            FROM manual_games mg
             WHERE mg.superseded_by_game_id IS NULL
+               OR EXISTS (SELECT 1 FROM seasons s
+                          WHERE s.id = mg.season_id AND s.import_authoritative)
+        ),
+        player_games AS (
+            SELECT ch.manual_game_id, ch.season_id, ch.grade_id, mbi.player_id
+            FROM counts_here ch JOIN manual_batting_innings mbi ON mbi.manual_game_id = ch.manual_game_id
             UNION
-            SELECT mg.id, mg.season_id, mg.grade_id, mbs.player_id
-            FROM manual_games mg JOIN manual_bowling_spells mbs ON mbs.manual_game_id = mg.id
-            WHERE mg.superseded_by_game_id IS NULL
+            SELECT ch.manual_game_id, ch.season_id, ch.grade_id, mbs.player_id
+            FROM counts_here ch JOIN manual_bowling_spells mbs ON mbs.manual_game_id = ch.manual_game_id
             UNION
-            SELECT mg.id, mg.season_id, mg.grade_id, mfs.player_id
-            FROM manual_games mg JOIN manual_fielding_stats mfs ON mfs.manual_game_id = mg.id
-            WHERE mg.superseded_by_game_id IS NULL
+            SELECT ch.manual_game_id, ch.season_id, ch.grade_id, mfs.player_id
+            FROM counts_here ch JOIN manual_fielding_stats mfs ON mfs.manual_game_id = ch.manual_game_id
         )
         SELECT
             pg.player_id,
@@ -581,6 +618,12 @@ _DROP_PAIR: tuple[str, ...] = (
     "fk_manual_games_superseded_by_game",
     "ALTER TABLE manual_games DROP COLUMN IF EXISTS pair_prefers_import",
     "ALTER TABLE manual_games DROP COLUMN IF EXISTS superseded_by_game_id",
+    # The overwrite-import lock and per-season re-source flag. The DOWNGRADE
+    # views above are the pre-pairing ones, which reference neither, so both
+    # drop cleanly here.
+    "ALTER TABLE manual_games DROP COLUMN IF EXISTS pairing_locked",
+    "DROP INDEX IF EXISTS ix_seasons_import_authoritative",
+    "ALTER TABLE seasons DROP COLUMN IF EXISTS import_authoritative",
 )
 
 # The views have to stop reading the pair columns BEFORE they can be dropped,

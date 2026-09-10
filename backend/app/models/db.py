@@ -1157,6 +1157,10 @@ class Season(Base):
     # wins and the effective views step the synced copy aside, so one
     # match is never counted from two sources.
     stats_source = Column(Text, nullable=True)
+    # Human-set: PlayHQ was wrong for this whole season and the club's import is
+    # the record. v_effective_player_season_stats then counts the import's own
+    # matches for it and steps CA's season summary aside (services/superseded_ddl).
+    import_authoritative = Column(Boolean, nullable=False, server_default="false")
     name = Column(Text, nullable=False)
     year = Column(Integer)
     synced_at = Column(TIMESTAMP(timezone=True))
@@ -2211,6 +2215,10 @@ class ManualGame(Base):
         UUID(as_uuid=True), ForeignKey("games.id", ondelete="SET NULL"),
         nullable=True)
     pair_prefers_import = Column(Boolean, nullable=False, server_default="false")
+    # A human set this pairing via an overwrite import (services/superseded_ddl).
+    # match_pairing.reconcile_org never touches a locked row, so a future sync
+    # cannot flip the club's correction back to the incorrect synced copy.
+    pairing_locked = Column(Boolean, nullable=False, server_default="false")
     created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)

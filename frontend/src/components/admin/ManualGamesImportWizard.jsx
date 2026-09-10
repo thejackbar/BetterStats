@@ -78,7 +78,7 @@ function DuplicatePolicy({ dupMode, setDupMode, duplicates }) {
   } else {
     const bits = []
     if (dup.manual) bits.push(`${dup.manual} existing match${dup.manual === 1 ? ' will be' : 'es will be'} overwritten`)
-    if (dup.synced) bits.push(`${dup.synced} already synced from Cricket Australia can’t be overwritten and will be skipped`)
+    if (dup.synced) bits.push(`${dup.synced} synced from Cricket Australia will become the import’s to keep, so your version wins and future syncs will not change it back`)
     projection = bits.join('; ') + '.'
   }
 
@@ -110,7 +110,7 @@ function DuplicatePolicy({ dupMode, setDupMode, duplicates }) {
         <Option
           value="overwrite"
           title="Overwrite existing matches"
-          body="A match already in BetterCricket is replaced by the sheet’s version. Synced Cricket Australia matches can’t be overwritten and are skipped. Undo the whole import from Audit & Undo."
+          body="Your file becomes the record. An existing entry is replaced by the sheet’s version, and a match synced from Cricket Australia is taken over by yours. Its whole season’s totals then count your import, and a later sync will not put the old figures back. Undo the whole import from Audit & Undo."
         />
       </div>
       <p className={`text-xs ${none ? 'text-pb-dim' : 'text-pb-accent-ink'}`}>{projection}</p>
@@ -265,22 +265,34 @@ export default function ManualGamesImportWizard({ onDone }) {
             <Figure label="Grades created" value={result.grades_created} />
             <Figure label="Players created" value={result.players_created} />
           </div>
-          {(result.games_overwritten > 0 || result.games_ignored > 0) && (
-            <div className="grid grid-cols-2 gap-2 mt-2">
+          {(result.games_overwritten > 0 || result.games_superseded > 0 || result.games_ignored > 0) && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-2">
               {result.games_overwritten > 0 && (
                 <Figure label="Overwritten" value={result.games_overwritten} tone="text-pb-accent-ink" />
+              )}
+              {result.games_superseded > 0 && (
+                <Figure label="Took over from Cricket Australia" value={result.games_superseded} tone="text-pb-accent-ink" />
               )}
               {result.games_ignored > 0 && (
                 <Figure label="Already present — ignored" value={result.games_ignored} tone="text-pb-dim" />
               )}
             </div>
           )}
-          {result.games_ignored_synced > 0 && (
+          {result.seasons_import_sourced > 0 && (
             <p className="text-xs text-pb-dim mt-3">
-              {result.games_ignored_synced} of the ignored match{result.games_ignored_synced === 1 ? ' is' : 'es are'} already
-              synced from Cricket Australia, which a spreadsheet import can’t overwrite.
+              {result.seasons_import_sourced} season{result.seasons_import_sourced === 1 ? '' : 's'} now count your
+              import instead of Cricket Australia’s figures. A later sync will not change that back.
             </p>
           )}
+          {result.games_ignored_synced > 0 && (
+            <p className="text-xs text-pb-dim mt-3">
+              {result.games_ignored_synced} of the ignored match{result.games_ignored_synced === 1 ? ' was' : 'es were'} already
+              synced from Cricket Australia and left untouched. Choose “Overwrite existing matches” to have your file take over instead.
+            </p>
+          )}
+          {(result.warnings || []).map((w, i) => (
+            <p key={i} className="text-xs text-amber-400 mt-3">{w}</p>
+          ))}
           {result.errors > 0 && (
             <p className="text-xs text-amber-400 mt-3">
               {result.errors} row(s) could not be read and their matches were left out.
