@@ -2072,6 +2072,10 @@ export function SC1_Broadcast({ match, palette = {}, square = false, only = 'hom
     </div>
   )}
 
+  // DELIBERATELY NOT A `LayerRoot`. A scorecard at square renders TWICE, once
+  // per side, and both roots would report the same structural ids — so one
+  // side's stack would be applied to the other. The landscape root above is
+  // the layered one; a square scorecard shows no layout rows.
   if (square) {
     const side = only === 'away' ? 'away' : 'home'
     const team = m[side] || {}
@@ -2227,6 +2231,10 @@ export function SC2_Brutalist({ match, palette = {}, square = false, only = 'hom
     </div>
   )}
 
+  // DELIBERATELY NOT A `LayerRoot`. A scorecard at square renders TWICE, once
+  // per side, and both roots would report the same structural ids — so one
+  // side's stack would be applied to the other. The landscape root above is
+  // the layered one; a square scorecard shows no layout rows.
   if (square) {
     const side = only === 'away' ? 'away' : 'home'
     return (
@@ -2381,6 +2389,10 @@ export function SC3_Dashboard({ match, palette = {}, square = false, only = 'hom
     </Card>
   )}
 
+  // DELIBERATELY NOT A `LayerRoot`. A scorecard at square renders TWICE, once
+  // per side, and both roots would report the same structural ids — so one
+  // side's stack would be applied to the other. The landscape root above is
+  // the layered one; a square scorecard shows no layout rows.
   if (square) {
     const side = only === 'away' ? 'away' : 'home'
     const team = m[side] || {}

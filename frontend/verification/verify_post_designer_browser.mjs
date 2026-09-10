@@ -707,7 +707,11 @@ async function pickSize(page, label) {
 
   await press(page.getByRole('button', { name: 'Design', exact: true }))
   await page.waitForTimeout(250)
-  await page.getByPlaceholder('Template name...').fill('Stacked')
+  // Every read goes through a helper that reports absence, so a build without
+  // this feature fails these four rather than dying here and saying nothing
+  // about the eighty below.
+  const named = await page.getByPlaceholder('Template name...').fill('Stacked').then(() => true, () => false)
+  ck('the Design tab offers a template name', named)
   await press(page.getByRole('button', { name: 'Save current' }))
   await page.waitForTimeout(400)
 
@@ -716,7 +720,13 @@ async function pickSize(page, label) {
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.getByRole('button', { name: /DOWNLOAD PNG|SLIDES/ }).first().waitFor({ timeout: 25000 })
   await page.waitForTimeout(600)
-  ck('a fresh load draws the layout whole again', (await countLayers()) === drawn, String(await countLayers()))
+  // A harness guard, not a feature check: without it the last check could pass
+  // because the hide simply survived in memory rather than because the saved
+  // template brought it back. Gated on the export node having been found at
+  // all, or two -1s would read as agreement.
+  const afterReload = await countLayers()
+  ck('the reload clears the stack, so what follows can only be the saved one',
+    drawn > 0 && afterReload === drawn, `${drawn} -> ${afterReload}`)
 
   await press(page.getByRole('button', { name: 'Design', exact: true }))
   await page.waitForTimeout(250)
