@@ -702,6 +702,18 @@ layers on all templates where each element except the background is a layer."*
   control run**: 13 of the 91 fail against the previous commit, reporting its own
   empty layer list, every element at `z: 0` and `9 -> 9` where an element should
   have come off the post. The 78 that pass in both are don't-regress guards.
+- **COMPARING THE TWO PASS SETS IS HOW YOU FIND A CHECK THAT CANNOT FAIL.**
+  `comm -12 <(grep ^PASS run.log|sort) <(grep ^PASS control.log|sort)` lists
+  every check that passes in both; anything in there naming the new feature is
+  either a don't-regress guard or a check passing for the wrong reason, and
+  reading thirty lines settles which. It found three here: "the background still
+  paints under a block sent to the back" (a build with no Send to back never
+  moves the block, so the background is trivially still there) and both halves
+  of "the blank canvas has no layout" (trivially true of a build that draws no
+  layout rows anywhere). Each is asserted as a CONTRAST now — gated on the send
+  having landed, and paired with the same read on a real layout. **Cheaper and
+  more complete than re-reading the checks by hand**, and worth running on every
+  suite that has a control.
 - **THE SUITE TAKES ITS BASE URL AS `argv[2]`, NOT AS `BASE=`.** An env var is
   silently ignored and the run dies on `ERR_CONNECTION_REFUSED` against the
   hardcoded dev port — which reads as the server being down rather than as the
