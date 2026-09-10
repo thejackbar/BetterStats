@@ -663,6 +663,17 @@ layers on all templates where each element except the background is a layer."*
   concurrent Chromium runs left the control shoot idle-waiting with 6 seconds of
   CPU and no write for eight minutes. Kill the browsers, then re-shoot only the
   templates that are missing rather than the whole set.
+- **Driven in Chromium** (`verify_post_designer_browser.mjs`, 86 checks — the 78
+  from v9.75.0 plus a section that measures the stack off the OFF-SCREEN EXPORT
+  NODE rather than the canvas, since the canvas agreeing with itself says
+  nothing about the downloaded PNG: a layout listing its own elements by name, a
+  new block starting in front of everything, Send to back putting it under every
+  one of them with the background still painting, ONE STEP FORWARD PUTTING IT
+  BETWEEN TWO OF THE LAYOUT'S OWN ELEMENTS, hiding an element taking it off the
+  exported post and putting it back, and the blank canvas showing no layout rows
+  at all) **with a control run**: 11 of the 86 fail against the previous commit,
+  reporting its own empty layer list and every element at `z: 0`. The 75 that
+  pass in both are don't-regress guards.
 - **NOTICED, NOT BUILT**: a layout's own element can be reordered and hidden but
   not MOVED or retyped — that is still `templateToBlocks` territory, and still
   four templates. A `transform` offset per layer would make moving cheap without
@@ -670,6 +681,12 @@ layers on all templates where each element except the background is a layer."*
   scorecards' square-split variant (SC1-SC3 rendered per side) is deliberately
   not a `LayerRoot`: two roots with colliding structural ids would apply one
   stack's order to the other. Saved templates are still `localStorage`.
+- **AND FOUR EVENT POSTERS KEEP EVERYTHING INSIDE ONE FRAME**, so they report one
+  or two layers rather than a stack — EV5 and EV8 draw a single inset panel and
+  everything else lives inside it. Descending into that wrapper would make its
+  grandchildren layers, and it is exactly the wrong move: the wrapper carries an
+  `inset`, so a block rendered inside it would be offset by that much from where
+  it was dropped. Naming the wrapper's own children is the fix, per template.
 
 ## A FACET LISTED IN THE KIT AND MISSING FROM ONE FUNCTION (v9.73.1, Sep 2026)
 
