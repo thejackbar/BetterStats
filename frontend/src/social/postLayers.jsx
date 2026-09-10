@@ -73,6 +73,9 @@ function typeName(node) {
 const FRIENDLY = {
   Halftone: 'Halftone texture',
   Stripes: 'Stripe texture',
+  // `Grain` is the import alias round-templates uses; the component's own
+  // displayName is GrainSVG, so that is the one that matches. Kept as a plain
+  // alias entry so a rename lands on its feet.
   Grain: 'Grain',
   GrainSVG: 'Grain',
   SponsorFooter: 'Sponsors',

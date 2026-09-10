@@ -11,7 +11,7 @@
 // blank canvas is genuinely the new size; that Preview shows every page of a
 // carousel; and that the four "where did that go" explanations are on screen
 // where somebody would look for them.
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { chromium } from 'playwright'
 
 const BASE = process.argv[2] || 'http://127.0.0.1:5199'
@@ -37,6 +37,28 @@ const MEDIA = [
   { id: 'm1', name: 'sponsor-white-bg.png', url: '/api/admin/social/media/m1/file' },
   { id: 'm2', name: 'team-photo.jpg', url: '/api/admin/social/media/m2/file' },
 ]
+
+// ── 0. Every named primitive survives minification ─────────────────────────
+// STRUCTURAL, and it runs before a browser is launched. A minified build mangles
+// `Component.name`, so a layer label read off it comes out as `R` or `ni` — the
+// FRIENDLY map is keyed on `displayName` instead, which is a string literal and
+// survives. A primitive added to that map later without one would read as noise
+// in the bundle and correctly in dev, which is the way round nobody catches.
+{
+  const layerSrc = readFileSync(new URL('../src/social/postLayers.jsx', import.meta.url), 'utf8')
+  const block = /const FRIENDLY = \{([\s\S]*?)\n\}/.exec(layerSrc)?.[1] || ''
+  const keys = [...block.matchAll(/^\s*([A-Za-z]+):/gm)].map((m) => m[1])
+  const DOM = new Set(['svg', 'img', 'canvas'])
+  const ALIAS = new Set(['Grain']) // an import alias; GrainSVG carries the displayName
+  const named = new Set()
+  for (const f of ['cricket-templates', 'round-templates', 'event-templates', 'launch-templates']) {
+    const src = readFileSync(new URL(`../src/social/${f}.jsx`, import.meta.url), 'utf8')
+    for (const m of src.matchAll(/([A-Za-z]+)\.displayName = /g)) named.add(m[1])
+  }
+  const missing = keys.filter((k) => !DOM.has(k) && !ALIAS.has(k) && !named.has(k))
+  ck('every primitive the layer names read from sets an explicit displayName',
+    keys.length > 10 && missing.length === 0, missing.join(', '))
+}
 
 const browser = await chromium.launch(existsSync(EXECUTABLE) ? { executablePath: EXECUTABLE } : {})
 
