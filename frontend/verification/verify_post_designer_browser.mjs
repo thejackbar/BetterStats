@@ -604,7 +604,7 @@ async function pickSize(page, label) {
   ck('the layout paints its own background', paints(bgBefore), JSON.stringify(bgBefore))
 
   // Send to back: under every one of the layout's own elements.
-  await press(page.getByRole('button', { name: 'Send to back' }))
+  const sent = await press(page.getByRole('button', { name: 'Send to back' }))
   await page.waitForTimeout(400)
   const back = await stackOf()
   ck('Send to back puts it under every element of the layout',
@@ -612,8 +612,13 @@ async function pickSize(page, label) {
 
   // THE BACKGROUND STAYS. It is the floor, so a block at the bottom of the
   // stack sits ON it rather than the layout being made see-through.
+  //
+  // GATED ON THE SEND HAVING LANDED. A build with no such control never moves
+  // the block, so the background is trivially still there and the check would
+  // pass for the wrong reason — which is the one thing a control run is for.
   const bgBack = await rootBg()
-  ck('the background still paints under a block sent to the back', paints(bgBack), JSON.stringify(bgBack))
+  ck('the background still paints under a block sent to the back',
+    sent && paints(bgBack), `sent=${sent} ${JSON.stringify(bgBack)}`)
 
   // The point of the whole change: one step forward and the block is BETWEEN
   // two of the layout's own elements, with a layout element on either side.
