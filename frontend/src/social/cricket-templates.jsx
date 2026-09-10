@@ -8,6 +8,7 @@
 
 import { useRef, useState, useLayoutEffect } from 'react'
 import { aspectOf, pick, share, grow } from './postAspect'
+import { LayerRoot } from './postLayers'
 import brandBlack from '../assets/bettercricket-black.svg'
 import brandWhite from '../assets/bettercricket-white.svg'
 
@@ -118,9 +119,12 @@ export function AutoFitText({ text, children, max, min = 8, lines = 1, pad = 0, 
 // SHARED VISUAL PRIMITIVES
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function GrainSVG({ opacity = 0.35, id = 'grain' }) {
+// `style` is spread last so a LayerRoot can put a z-index on it — a root-level
+// child that silently drops the prop would keep painting in markup order while
+// the panel said otherwise.
+export function GrainSVG({ opacity = 0.35, id = 'grain', style = {} }) {
   return (
-    <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', mixBlendMode: 'overlay', opacity }}>
+    <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', mixBlendMode: 'overlay', opacity, ...style }}>
       <filter id={id}>
         <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch" />
         <feColorMatrix values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.55 0" />
@@ -431,7 +435,7 @@ export function T1_HeroList({ width = 1080, height = 1080, team, opponent, match
   const rowMax = Math.round(base * pick(A, { square: 1, portrait: 1.22, story: 1.6 }))
   const heroTop = pick(A, { square: 210, portrait: 240, story: 300 })
   return (
-    <div style={{
+    <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
       background: `linear-gradient(135deg, ${palette.primary} 0%, ${palette.secondary} 100%)`,
       color: palette.ink, fontFamily: "'Inter', sans-serif",
@@ -578,7 +582,7 @@ export function T1_HeroList({ width = 1080, height = 1080, team, opponent, match
         <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.35} id="g1" />
-    </div>
+    </LayerRoot>
   )
 }
 
@@ -604,7 +608,7 @@ export function T2_CardGrid({ width = 1080, height = 1080, team, opponent, match
   // its cards at 440 leaves a dead band nobody put anything in.
   const gridTop = pick(A, { square: 380, portrait: 400, story: 372 })
   return (
-    <div style={{
+    <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
@@ -705,7 +709,7 @@ export function T2_CardGrid({ width = 1080, height = 1080, team, opponent, match
         <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.4} id="g2" />
-    </div>
+    </LayerRoot>
   )
 }
 
@@ -729,7 +733,7 @@ export function T3_SideNumbered({ width = 1080, height = 1080, team, opponent, m
   const numSize = pick(A, { square: 42, portrait: 48, story: 56 })
   const nameMax = pick(A, { square: 38, portrait: 42, story: 50 })
   return (
-    <div style={{
+    <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
@@ -847,7 +851,7 @@ export function T3_SideNumbered({ width = 1080, height = 1080, team, opponent, m
         </div>
       </div>
       <GrainSVG opacity={0.3} id="g3" />
-    </div>
+    </LayerRoot>
   )
 }
 
@@ -866,7 +870,7 @@ export function T4_BattingOrder({ width = 1080, height = 1080, team, opponent, m
   const nameMax = pick(A, { square: 30, portrait: 34, story: 42 })
   const headSize = pick(A, { square: 68, portrait: 78, story: 92 })
   return (
-    <div style={{
+    <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
       display: 'flex', flexDirection: 'column',
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
@@ -936,7 +940,7 @@ export function T4_BattingOrder({ width = 1080, height = 1080, team, opponent, m
         <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.25} id="g4" />
-    </div>
+    </LayerRoot>
   )
 }
 
@@ -954,7 +958,7 @@ export function T5_Brutalist({ width = 1080, height = 1080, team, opponent, matc
   // sits behind the middle of the list rather than a third of the way down.
   const nameMax = pick(A, { square: 64, portrait: 76, story: 92 })
   return (
-    <div style={{
+    <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
       display: 'flex', flexDirection: 'column',
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
@@ -1018,7 +1022,7 @@ export function T5_Brutalist({ width = 1080, height = 1080, team, opponent, matc
         </div>
       </div>
       <GrainSVG opacity={0.32} id="g5" />
-    </div>
+    </LayerRoot>
   )
 }
 
@@ -1038,7 +1042,7 @@ export function T6_Diagonal({ width = 1080, height = 1080, team, opponent, match
   const heroH = share(height, 370)
   const nameMax = pick(A, { square: 26, portrait: 30, story: 38 })
   return (
-    <div style={{
+    <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
@@ -1123,7 +1127,7 @@ export function T6_Diagonal({ width = 1080, height = 1080, team, opponent, match
         <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.35} id="g6" />
-    </div>
+    </LayerRoot>
   )
 }
 
@@ -1150,7 +1154,7 @@ export function T7_CaptainSpotlight({ width = 1080, height = 1080, team, opponen
   const valueSize = pick(A, { square: 320, portrait: 360, story: 420 })
   const lastSize = pick(A, { square: 76, portrait: 88, story: 104 })
   return (
-    <div style={{
+    <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
       background: `linear-gradient(135deg, ${palette.primary} 0%, ${palette.secondary} 100%)`,
       color: palette.ink, fontFamily: "'Inter', sans-serif",
@@ -1222,7 +1226,7 @@ export function T7_CaptainSpotlight({ width = 1080, height = 1080, team, opponen
         </div>
       </div>
       <GrainSVG opacity={0.32} id="g7" />
-    </div>
+    </LayerRoot>
   )
 }
 
@@ -1249,7 +1253,7 @@ export function T8_Mosaic({ width = 1080, height = 1080, team, opponent, match, 
   const cols = pick(A, { square: 5, story: 4 })
   const rows = pick(A, { square: 4, story: 6 })
   return (
-    <div style={{
+    <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
@@ -1313,7 +1317,7 @@ export function T8_Mosaic({ width = 1080, height = 1080, team, opponent, match, 
         <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.28} id="g8" />
-    </div>
+    </LayerRoot>
   )
 }
 
@@ -1342,7 +1346,7 @@ export function T9_Flyer({ width = 1080, height = 1080, team, opponent, match, p
   const t3Lines = []
   for (let i = 0; i < tier3.length; i += perLine) t3Lines.push(tier3.slice(i, i + perLine))
   return (
-    <div style={{
+    <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
       display: 'flex', flexDirection: 'column',
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
@@ -1423,7 +1427,7 @@ export function T9_Flyer({ width = 1080, height = 1080, team, opponent, match, p
         <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.4} id="g9" />
-    </div>
+    </LayerRoot>
   )
 }
 
@@ -1485,7 +1489,7 @@ export function T10_TeamSheet({ width = 1080, height = 1080, team, opponent, mat
   const fixture = [team.short || team.name, opponent.short || opponent.name].filter(Boolean).join(' V ').toUpperCase()
   const comp = [match.competition, match.round].filter(Boolean).join('  ·  ').toUpperCase()
   return (
-    <div style={{
+    <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
       background: `linear-gradient(160deg, ${palette.secondary} 0%, ${palette.primary} 70%)`,
       color: palette.ink, fontFamily: "'Inter', sans-serif",
@@ -1632,7 +1636,7 @@ export function T10_TeamSheet({ width = 1080, height = 1080, team, opponent, mat
         </div>
       </div>
       <GrainSVG opacity={0.4} id="g10" />
-    </div>
+    </LayerRoot>
   )
 }
 
@@ -1650,7 +1654,7 @@ export function C1_CaptainAnnounce({ width = 1080, height = 1080, announcement, 
   // 1,900px-tall player reads as a caption rather than the announcement.
   const lastSize = pick(A, { square: 200, portrait: 232, story: 280 })
   return (
-    <div style={{
+    <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
       background: `linear-gradient(160deg, ${palette.primary} 0%, ${palette.secondary} 100%)`,
       color: palette.ink, fontFamily: "'Inter', sans-serif",
@@ -1683,7 +1687,7 @@ export function C1_CaptainAnnounce({ width = 1080, height = 1080, announcement, 
         <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.32} id="ca1" />
-    </div>
+    </LayerRoot>
   )
 }
 
@@ -1701,7 +1705,7 @@ export function C2_TossWon({ width = 1080, height = 1080, toss, team, opponent, 
   // under it. The word itself steps up with the canvas.
   const decSize = pick(A, { square: 280, portrait: 330, story: 400 })
   return (
-    <div style={{
+    <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
@@ -1747,7 +1751,7 @@ export function C2_TossWon({ width = 1080, height = 1080, toss, team, opponent, 
         <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.3} id="ca2" />
-    </div>
+    </LayerRoot>
   )
 }
 
@@ -1767,7 +1771,7 @@ export function C3_ManOfMatch({ width = 1080, height = 1080, motm, team, opponen
   const lastSize = pick(A, { square: 124, portrait: 144, story: 172 })
   const statSize = pick(A, { square: 76, portrait: 86, story: 100 })
   return (
-    <div style={{
+    <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
@@ -1818,7 +1822,7 @@ export function C3_ManOfMatch({ width = 1080, height = 1080, motm, team, opponen
         <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.3} id="ca3" />
-    </div>
+    </LayerRoot>
   )
 }
 
@@ -1866,7 +1870,7 @@ export function C4_FinalScore({ width = 1080, height = 1080, result, team, oppon
     .filter((v, i, a) => v && a.indexOf(v) === i).join(' · ')
   const A = aspectOf(width, height)
   return (
-    <div style={{
+    <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
@@ -1925,7 +1929,7 @@ export function C4_FinalScore({ width = 1080, height = 1080, result, team, oppon
         <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.3} id="ca4" />
-    </div>
+    </LayerRoot>
   )
 }
 
@@ -2068,6 +2072,10 @@ export function SC1_Broadcast({ match, palette = {}, square = false, only = 'hom
     </div>
   )}
 
+  // DELIBERATELY NOT A `LayerRoot`. A scorecard at square renders TWICE, once
+  // per side, and both roots would report the same structural ids — so one
+  // side's stack would be applied to the other. The landscape root above is
+  // the layered one; a square scorecard shows no layout rows.
   if (square) {
     const side = only === 'away' ? 'away' : 'home'
     const team = m[side] || {}
@@ -2103,7 +2111,7 @@ export function SC1_Broadcast({ match, palette = {}, square = false, only = 'hom
   }
 
   return (
-    <div style={{ width: 1920, height: 1080, position: 'relative', overflow: 'hidden', background: bg, color: ink, fontFamily: SC_BODY }}>
+    <LayerRoot style={{ width: 1920, height: 1080, position: 'relative', overflow: 'hidden', background: bg, color: ink, fontFamily: SC_BODY }}>
       <Halftone color={ink} opacity={dark ? 0.04 : 0.05} size={12} />
       <div style={{ padding: '18px 24px 12px' }}>
         <div style={{ padding: '16px 24px', background: panel, border: `1px solid ${rule}`, display: 'grid', gridTemplateColumns: '1.4fr 1fr auto', alignItems: 'center', gap: 28 }}>
@@ -2133,7 +2141,7 @@ export function SC1_Broadcast({ match, palette = {}, square = false, only = 'hom
       </div>
       <ScSponsorFooter bg={panel} ink={ink} dim={dim} dimmer={dimmer} rule={rule} sponsors={m.meta?.sponsors} />
       <GrainSVG opacity={dark ? 0.22 : 0.16} id='sc1g' />
-    </div>
+    </LayerRoot>
   )
 }
 
@@ -2223,6 +2231,10 @@ export function SC2_Brutalist({ match, palette = {}, square = false, only = 'hom
     </div>
   )}
 
+  // DELIBERATELY NOT A `LayerRoot`. A scorecard at square renders TWICE, once
+  // per side, and both roots would report the same structural ids — so one
+  // side's stack would be applied to the other. The landscape root above is
+  // the layered one; a square scorecard shows no layout rows.
   if (square) {
     const side = only === 'away' ? 'away' : 'home'
     return (
@@ -2254,7 +2266,7 @@ export function SC2_Brutalist({ match, palette = {}, square = false, only = 'hom
   }
 
   return (
-    <div style={{ width: 1920, height: 1080, position: 'relative', overflow: 'hidden', background: bg, color: ink, fontFamily: SC_BODY }}>
+    <LayerRoot style={{ width: 1920, height: 1080, position: 'relative', overflow: 'hidden', background: bg, color: ink, fontFamily: SC_BODY }}>
       <Stripes color={ink} opacity={0.04} gap={6} angle={0} />
       <Halftone color={ink} opacity={dark ? 0.05 : 0.06} size={12} />
       <div style={{ position: 'absolute', right: -30, top: 200, fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 360, lineHeight: 0.8, color: ink, opacity: 0.04, letterSpacing: -10, userSelect: 'none' }}>FINAL</div>
@@ -2281,7 +2293,7 @@ export function SC2_Brutalist({ match, palette = {}, square = false, only = 'hom
       </div>
       <ScSponsorFooter bg={ink} ink={bg} dim={_toRgba(bg, 0.55)} dimmer={_toRgba(bg, 0.35)} rule={ruleStrong} sponsors={m.meta?.sponsors} style={{ borderRadius: 0, borderTop: `3px solid ${accent}` }} />
       <GrainSVG opacity={dark ? 0.28 : 0.18} id='sc2g' />
-    </div>
+    </LayerRoot>
   )
 }
 
@@ -2377,6 +2389,10 @@ export function SC3_Dashboard({ match, palette = {}, square = false, only = 'hom
     </Card>
   )}
 
+  // DELIBERATELY NOT A `LayerRoot`. A scorecard at square renders TWICE, once
+  // per side, and both roots would report the same structural ids — so one
+  // side's stack would be applied to the other. The landscape root above is
+  // the layered one; a square scorecard shows no layout rows.
   if (square) {
     const side = only === 'away' ? 'away' : 'home'
     const team = m[side] || {}
@@ -2410,7 +2426,7 @@ export function SC3_Dashboard({ match, palette = {}, square = false, only = 'hom
   }
 
   return (
-    <div style={{ width: 1920, height: 1080, position: 'relative', overflow: 'hidden', background: bg, color: ink, fontFamily: SC_BODY }}>
+    <LayerRoot style={{ width: 1920, height: 1080, position: 'relative', overflow: 'hidden', background: bg, color: ink, fontFamily: SC_BODY }}>
       <div style={{ padding: '20px 32px 12px' }}>
         <Card style={{ padding: '16px 24px', display: 'grid', gridTemplateColumns: '1.4fr 1fr auto', alignItems: 'center', gap: 28 }}>
           <div>
@@ -2438,6 +2454,19 @@ export function SC3_Dashboard({ match, palette = {}, square = false, only = 'hom
         <TeamCard team={m.away || {}} accentC={m.away?.color || '#10b981'} side='away' />
       </div>
       <ScSponsorFooter bg={card} ink={ink} dim={dim} dimmer={dimmer} rule={rule} sponsors={m.meta?.sponsors} />
-    </div>
+    </LayerRoot>
   )
 }
+
+// MINIFICATION MANGLES `Component.name`, so a layer label derived from it
+// reads as `R` or `ni` in a production build and as the real name in dev —
+// which is exactly the kind of thing only a built bundle shows. An explicit
+// displayName is a string literal, so it survives.
+CreditMark.displayName = 'CreditMark'
+AutoFitText.displayName = 'AutoFitText'
+GrainSVG.displayName = 'GrainSVG'
+Halftone.displayName = 'Halftone'
+ScSponsorFooter.displayName = 'ScSponsorFooter'
+Stripes.displayName = 'Stripes'
+ClubLogo.displayName = 'ClubLogo'
+BrandLockup.displayName = 'BrandLockup'

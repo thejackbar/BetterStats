@@ -32,3 +32,8 @@ sync_snapshots/
 # session. Never in a public repo: the converter (tools/convert_shoalwater_av.py)
 # is the part worth keeping, the data is the club's.
 data/shoalwater-av/
+
+# Throwaway build outputs from a before/after pixel comparison, and the
+# one-off probes a verification round writes to answer a single question.
+frontend/dist-*/
+frontend/verification/_*.mjs

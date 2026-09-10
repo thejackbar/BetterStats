@@ -21,6 +21,7 @@
 //       photo is supplied (auto-picked per preset, override in the editor).
 import { AutoFitText, BrandLockup, ClubLogo, GrainSVG, Halftone, Stripes } from './cricket-templates'
 import { aspectOf, share } from './postAspect'
+import { LayerRoot } from './postLayers'
 
 // Bundled motif glyphs (already in the repo at src/assets/thiings/).
 import icoTrophy from '../assets/thiings/trophy.png'
@@ -124,7 +125,7 @@ const FRAME = (width = 1080, height = 1080) => ({
 export function EVT_Floodlit({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
   const P = palette
   return (
-    <div style={{ ...FRAME(width, height), background: P.primary, color: '#fff' }}>
+    <LayerRoot style={{ ...FRAME(width, height), background: P.primary, color: '#fff' }}>
       <PhotoLayer motif={motif} palette={P} height={share(height, 680)} scrimFrom={0.04} label={motif?.label} />
       <div style={{ position: 'absolute', left: -180, top: -180, width: 520, height: 520, borderRadius: '50%', background: `radial-gradient(circle, ${a(P.accent, 0.3)}, transparent 68%)`, pointerEvents: 'none' }} />
 
@@ -157,7 +158,7 @@ export function EVT_Floodlit({ team, event = {}, width = 1080, height = 1080, pa
 
         <div style={{ marginTop: 38 }}><Watermark sponsor={event.sponsor} /></div>
       </div>
-    </div>
+    </LayerRoot>
   )
 }
 
@@ -167,7 +168,7 @@ export function EVT_Floodlit({ team, event = {}, width = 1080, height = 1080, pa
 export function EVT_Block({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
   const P = palette
   return (
-    <div style={{ ...FRAME(width, height), background: P.primary, color: '#fff' }}>
+    <LayerRoot style={{ ...FRAME(width, height), background: P.primary, color: '#fff' }}>
       <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: share(height, 606), background: `linear-gradient(150deg, ${P.accent} 0%, ${a(P.accent, 0.78)} 100%)`, overflow: 'hidden' }}>
         {motif?.imageUrl
           ? <img src={motif.imageUrl} alt="" crossOrigin="anonymous" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.3, mixBlendMode: 'overlay' }} />
@@ -225,7 +226,7 @@ export function EVT_Block({ team, event = {}, width = 1080, height = 1080, palet
         ) : null}
         <div style={{ marginTop: 'auto', flexShrink: 0, paddingTop: 28 }}><Watermark sponsor={event.sponsor} /></div>
       </div>
-    </div>
+    </LayerRoot>
   )
 }
 
@@ -240,7 +241,7 @@ export function EVT_Ticket({ team, event = {}, width = 1080, height = 1080, pale
   const line = a(ink, 0.2)
   const SERIF = "'Cormorant Garamond', serif"
   return (
-    <div style={{ ...FRAME(width, height), background: paper, color: ink, fontFamily: SERIF }}>
+    <LayerRoot style={{ ...FRAME(width, height), background: paper, color: ink, fontFamily: SERIF }}>
       <img src={motif?.icon || icoTrophy} alt="" style={{ position: 'absolute', left: '50%', top: share(height, 300), transform: 'translateX(-50%)', width: 600, height: 600, objectFit: 'contain', opacity: 0.12 }} />
       <div style={{ position: 'absolute', inset: 42, border: `1.5px solid ${line}`, pointerEvents: 'none' }} />
       <div style={{ position: 'absolute', inset: 50, border: `1px solid ${a(ink, 0.12)}`, pointerEvents: 'none' }} />
@@ -290,7 +291,7 @@ export function EVT_Ticket({ team, event = {}, width = 1080, height = 1080, pale
           </div>
         </div>
       </div>
-    </div>
+    </LayerRoot>
   )
 }
 
@@ -300,7 +301,7 @@ export function EVT_Ticket({ team, event = {}, width = 1080, height = 1080, pale
 export function EVT_Scoreboard({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
   const P = palette
   return (
-    <div style={{ ...FRAME(width, height), background: P.primary, color: '#fff' }}>
+    <LayerRoot style={{ ...FRAME(width, height), background: P.primary, color: '#fff' }}>
       <div style={{ position: 'absolute', inset: 0, backgroundImage: `radial-gradient(${a(P.accent, 0.1)} 1.4px, transparent 1.6px)`, backgroundSize: '24px 24px' }} />
       <div style={{ position: 'absolute', left: -160, bottom: -160, width: 560, height: 560, borderRadius: '50%', background: `radial-gradient(circle, ${a(P.accent, 0.16)}, transparent 68%)` }} />
       <img src={motif?.icon || icoBat} alt="" style={{ position: 'absolute', right: 54, top: 64, width: 150, height: 150, objectFit: 'contain', opacity: 0.5 }} />
@@ -343,7 +344,7 @@ export function EVT_Scoreboard({ team, event = {}, width = 1080, height = 1080, 
           <BSMark size={20} />
         </div>
       </div>
-    </div>
+    </LayerRoot>
   )
 }
 
@@ -359,8 +360,12 @@ export function EVT_Gazette({ team, event = {}, width = 1080, height = 1080, pal
   const SERIF = "'Playfair Display', serif"
   const BODY = "'Spectral', serif"
   return (
-    <div style={{ ...FRAME(width, height), background: paper, color: ink, fontFamily: BODY }}>
-      <div style={{ position: 'absolute', inset: 56, display: 'flex', flexDirection: 'column' }}>
+    <LayerRoot style={{ ...FRAME(width, height), background: paper, color: ink, fontFamily: BODY }}>
+      {/* This poster keeps everything inside ONE inset frame, so it is a single
+          layer rather than a stack. Naming it says so; splitting it would mean
+          promoting this div's own children, and a block spliced in among them
+          would be offset by the inset from where it was dropped. */}
+      <div data-layer="Poster content" style={{ position: 'absolute', inset: 56, display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: faint, paddingBottom: 10 }}>
           <span>Vol. XCIV — No. 12</span><span>Est. 1921</span>
         </div>
@@ -411,7 +416,7 @@ export function EVT_Gazette({ team, event = {}, width = 1080, height = 1080, pal
           </div>
         </div>
       </div>
-    </div>
+    </LayerRoot>
   )
 }
 
@@ -424,7 +429,7 @@ export function EVT_Sticker({ team, event = {}, width = 1080, height = 1080, pal
   const ink = P.deepInk || '#23202c'
   const FUN = "'Fredoka', sans-serif"
   return (
-    <div style={{ ...FRAME(width, height), background: paper, color: ink }}>
+    <LayerRoot style={{ ...FRAME(width, height), background: paper, color: ink }}>
       <div style={{ position: 'absolute', right: -130, top: -130, width: 480, height: 480, borderRadius: '50%', background: a(P.accent, 0.18) }} />
       <div style={{ position: 'absolute', left: -90, bottom: share(height, 110), width: 300, height: 300, borderRadius: '50%', border: `4px dashed ${a(P.accent, 0.4)}` }} />
 
@@ -473,7 +478,7 @@ export function EVT_Sticker({ team, event = {}, width = 1080, height = 1080, pal
         <BSMark size={18} />
         <span style={{ fontWeight: 500, fontSize: 13, letterSpacing: 1, color: a(ink, 0.5) }}>Made with BetterCricket{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
       </div>
-    </div>
+    </LayerRoot>
   )
 }
 
@@ -485,7 +490,7 @@ export function EVT_Kinetic({ team, event = {}, width = 1080, height = 1080, pal
   const skew = { transform: 'skewX(-8deg)' }
   const unskew = { display: 'inline-block', transform: 'skewX(8deg)' }
   return (
-    <div style={{ ...FRAME(width, height), background: P.primary, color: '#fff' }}>
+    <LayerRoot style={{ ...FRAME(width, height), background: P.primary, color: '#fff' }}>
       <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: share(height, 616), clipPath: 'polygon(0 0, 100% 0, 100% 100%, 0 76%)', overflow: 'hidden' }}>
         {motif?.imageUrl
           ? <img src={motif.imageUrl} alt="" crossOrigin="anonymous" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -536,7 +541,7 @@ export function EVT_Kinetic({ team, event = {}, width = 1080, height = 1080, pal
           </div>
         </div>
       </div>
-    </div>
+    </LayerRoot>
   )
 }
 
@@ -551,8 +556,9 @@ export function EVT_Swiss({ team, event = {}, width = 1080, height = 1080, palet
   const line = a(ink, 0.2)
   const HELV = "'Helvetica Neue', Helvetica, Arial, sans-serif"
   return (
-    <div style={{ ...FRAME(width, height), background: paper, color: ink, fontFamily: HELV }}>
-      <div style={{ position: 'absolute', inset: 80, display: 'flex', flexDirection: 'column' }}>
+    <LayerRoot style={{ ...FRAME(width, height), background: paper, color: ink, fontFamily: HELV }}>
+      {/* One inset frame holding the whole poster — see EVT_Gazette above. */}
+      <div data-layer="Poster content" style={{ position: 'absolute', inset: 80, display: 'flex', flexDirection: 'column' }}>
         <div style={{ borderTop: `2px solid ${ink}`, paddingTop: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
             {team.logo ? <ClubLogo src={team.logo} size={76} /> : <ClubLogo monogram={team.monogram} color={ink} size={76} shape="shield" />}
@@ -590,7 +596,7 @@ export function EVT_Swiss({ team, event = {}, width = 1080, height = 1080, palet
           </div>
         </div>
       </div>
-    </div>
+    </LayerRoot>
   )
 }
 
@@ -604,7 +610,7 @@ export function EVT_Crest({ team, event = {}, width = 1080, height = 1080, palet
   const SERIF = "'Cormorant Garamond', serif"
   const line = a(P.accent, 0.55)
   return (
-    <div style={{ ...FRAME(width, height), background: P.primary, color: cream, fontFamily: SERIF }}>
+    <LayerRoot style={{ ...FRAME(width, height), background: P.primary, color: cream, fontFamily: SERIF }}>
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, height: share(height, 560), background: `radial-gradient(ellipse 600px 420px at 50% 0%, ${a(P.accent, 0.18)}, transparent 70%)` }} />
       <div style={{ position: 'absolute', inset: 44, border: `2px solid ${line}`, pointerEvents: 'none' }} />
       <div style={{ position: 'absolute', inset: 52, border: `1px solid ${a(P.accent, 0.3)}`, pointerEvents: 'none' }} />
@@ -650,7 +656,7 @@ export function EVT_Crest({ team, event = {}, width = 1080, height = 1080, palet
           </div>
         </div>
       </div>
-    </div>
+    </LayerRoot>
   )
 }
 
@@ -665,7 +671,7 @@ export function EVT_Chalkboard({ team, event = {}, width = 1080, height = 1080, 
   const faint = 'rgba(241,239,228,0.4)'
   const HAND = "'Caveat', cursive"
   return (
-    <div style={{ ...FRAME(width, height), background: board, color: chalk }}>
+    <LayerRoot style={{ ...FRAME(width, height), background: board, color: chalk }}>
       <div style={{ position: 'absolute', left: '8%', top: '14%', width: 420, height: 300, background: 'radial-gradient(ellipse, rgba(255,255,255,0.05), transparent 70%)', transform: 'rotate(-18deg)' }} />
       <div style={{ position: 'absolute', right: '6%', bottom: '18%', width: 380, height: 260, background: 'radial-gradient(ellipse, rgba(255,255,255,0.045), transparent 70%)', transform: 'rotate(12deg)' }} />
       <div style={{ position: 'absolute', inset: 44, border: `2px dashed ${faint}`, borderRadius: 8, pointerEvents: 'none' }} />
@@ -707,7 +713,7 @@ export function EVT_Chalkboard({ team, event = {}, width = 1080, height = 1080, 
           </div>
         </div>
       </div>
-    </div>
+    </LayerRoot>
   )
 }
 
@@ -721,7 +727,7 @@ export function EVT_Polaroid({ team, event = {}, width = 1080, height = 1080, pa
   const MARKER = "'Permanent Marker', cursive"
   const HAND = "'Caveat', cursive"
   return (
-    <div style={{ ...FRAME(width, height), background: paper, color: ink }}>
+    <LayerRoot style={{ ...FRAME(width, height), background: paper, color: ink }}>
       <div style={{ position: 'absolute', inset: 0, backgroundImage: 'radial-gradient(rgba(120,100,70,0.06) 1px, transparent 1.4px)', backgroundSize: '5px 5px', opacity: 0.6 }} />
       <div style={{ position: 'absolute', inset: 76, display: 'flex', flexDirection: 'column' }}>
         <div style={{ marginBottom: 18 }}>
@@ -765,7 +771,7 @@ export function EVT_Polaroid({ team, event = {}, width = 1080, height = 1080, pa
           <span style={{ fontWeight: 500, fontSize: 13, letterSpacing: 1, color: a(ink, 0.5) }}>{team.name} · Made with BetterCricket{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
         </div>
       </div>
-    </div>
+    </LayerRoot>
   )
 }
 
@@ -867,3 +873,12 @@ export function eventPaletteFor(surface, palette) {
   if (surface !== 'light') return palette
   return { ...palette, paper: palette.paper || '#f4efe4', deepInk: palette.deepInk || '#1f1c14' }
 }
+
+// MINIFICATION MANGLES `Component.name`, so a layer label derived from it
+// reads as `R` or `ni` in a production build and as the real name in dev —
+// which is exactly the kind of thing only a built bundle shows. An explicit
+// displayName is a string literal, so it survives.
+BSMark.displayName = 'BSMark'
+PhotoLayer.displayName = 'PhotoLayer'
+ClubLockup.displayName = 'ClubLockup'
+Watermark.displayName = 'Watermark'

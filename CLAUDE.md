@@ -566,6 +566,182 @@ want a design per template done please."*
   post. `templateToBlocks` still reaches four templates. Saved templates are
   still `localStorage`. EV2's square panel still clips at its own size.
 
+## Every element of a layout is a layer (v9.76.0, Sep 2026)
+
+Asked in two steps: *"what about moving elements on a template forward and back
+within a design so you could upload an image and push it behind some text or in
+front of some other text?"*, then, once the answer was that a block could only
+go wholly behind or wholly in front of a layout: *"I want to be able to use
+layers on all templates where each element except the background is a layer."*
+
+- **THE ESTIMATE THAT SAID THIS WAS A BIG JOB WAS ABOUT THE WRONG MECHANISM, and
+  the same mistake this file already records one release earlier.**
+  `templateToBlocks` recreates a layout as freeform blocks with hand-placed
+  x/y/fontSize, reaches four of the 48, and extending it would mean redrawing
+  every layout AND throwing away each one's AutoFitText sizing, responsive squad
+  logic and the v9.75.0 portrait designs. **A LAYOUT DOES NOT HAVE TO BE
+  DECOMPOSED TO BE LAYERED.** Every template root is already a flat list of
+  absolutely-positioned children, so each child is a discrete visual element
+  that needed only an addressable z-index and a name. The template still renders
+  itself; it just does so through a root that knows what its own children are.
+- **THE UNTOUCHED PATH IS THE WHOLE REASON THIS IS SAFE UNDER ALL 48.** With no
+  order, nothing hidden and no blocks — every export of a post nobody has
+  reordered — `LayerRoot` returns the exact div the template rendered before:
+  no cloning, no z-index, no stacking context. **Measured rather than asserted:
+  all 48 layouts re-shot at square AND at portrait on both builds are
+  byte-identical, 96 of 96 — re-shot against the exact build being shipped, not
+  an earlier one.**
+- **WIRING IS ONE LINE PER ROOT, and 19 of the 48 came free.** The roundup
+  family's shared `Post` shell covers all 19; the 17 cricket roots, 11 event
+  roots and the launch poster are a `<div style={{…}}>` → `<LayerRoot
+  style={{…}}>` swap with the style untouched. `FRAME` in `event-templates` is a
+  STYLE HELPER, not a component, which is why those eleven are individual.
+- **IDENTITY IS STRUCTURAL, NEVER THE TEXT.** A layer named after its own words
+  would lose its place in the stack the moment somebody edited those words, so
+  the id is the element's type plus which one of that type it is
+  (`t:div#2`). A `data-layer` attribute overrides it, which is what a
+  CONDITIONALLY-RENDERED root child needs — `Children.toArray` drops a child
+  that is not rendered, so everything after it shifts as it comes and goes.
+- **THE NATURAL ORDER IS DOM ORDER *SORTED BY EXISTING z-index*, not DOM order.**
+  T1's match-day badge carries `zIndex: 5` and has to keep painting over the
+  hero photo that follows it in the markup. Read the markup alone and assigning
+  fresh z-indexes silently re-stacks the layout.
+- **THE BACKGROUND IS THE FLOOR, NOT A LAYER, which is what the ask actually
+  said.** `isolation: isolate` on the root makes it its own stacking context, so
+  a block at the bottom of the stack sits ON the club's colours rather than the
+  layout being made see-through. That is a better answer than the mechanism it
+  replaces: a non-full-bleed block sent behind used to blank the layout's
+  background everywhere.
+- **SO THE TWO-POSITION `behind` FLAG IS RETIRED, NOT HIDDEN** — the flag, the
+  array partition that kept it coherent, `setBehind`, `reorder`'s `crossLayout`
+  and the `pb-template-seethrough` CSS. A block's position in the stack is the
+  whole answer, so a control that could only say in front or behind had nothing
+  left to do: the call this file already makes for the Fit/Fill picker. An item
+  saved before this still carrying `behind` is ignored.
+- **BLOCKS RENDER AS RUNS, WHICH IS WHAT LET `BlankCanvas` STAY UNTOUCHED.**
+  Consecutive blocks between two of the layout's own elements become one
+  `BlankCanvas` with its own z-index. Splitting individual blocks out of it
+  would have meant re-plumbing its pointer-drag machinery.
+- **EVERY RUN IS `passThrough`.** Each one covers the whole canvas, so a run
+  that took pointer events would swallow every click meant for a layer under it.
+  Blocks re-arm `pointer-events: auto` themselves, which `BlankBlock` already
+  did.
+- **ONLY THE CANVAS REPORTS ITS LAYERS.** The same post renders several times
+  over — the canvas, the off-screen export node, the Preview overlay, a page per
+  carousel slide — and every one of them would otherwise register. A carousel
+  whose pages hold different rows would then have them fighting over one list.
+  `register` is passed only in the interactive context.
+- **THE STACK IS A PREFERENCE OVER WHAT THE LAYOUT PAINTS, NOT A COPY OF IT.**
+  `applyOrder` keeps the ids somebody has an opinion about and drops anything
+  else back at its natural index, so a template re-rendering with one element
+  more or less than last time cannot scramble the stack. Same call `sort_order`
+  makes elsewhere.
+- **EVERY PIECE OF THAT STATE CARRIES THE TEMPLATE IT BELONGS TO, and a mismatch
+  is resolved during RENDER rather than by an effect.** Restoring a saved design
+  sets the template and its stacking in one tick, so a clear-on-template-change
+  effect lands second and wipes what was just restored. Found by writing it that
+  way first.
+- **A SAVED TEMPLATE KEEPS ITS STACKING.** Without it a design saved with a
+  photo tucked behind the headline comes back with the photo on top, which is
+  the whole thing somebody was saving.
+- **`scale` IS LOCAL TO `renderCanvas`, SO IT IS AN ARGUMENT, NOT A CLOSURE.**
+  The first cut reached for the outer name from inside the layer context and
+  crashed with `ReferenceError: scale is not defined` — inside the template's
+  own render, a long way from the line that caused it. The temporal-dead-zone
+  trap this file already records for the Roster header, hit again.
+- **`Icon` DRAWS AN EMPTY SVG FOR A NAME IT DOES NOT HOLD.** `ICON_PATHS[name]
+  || null` means a missing glyph is invisible rather than an error — the old
+  Layers panel had been asking for `image` and drawing nothing since it was
+  written. `image`, `eye` and `eyeOff` are in the set now.
+- **A COMPONENT CHILD ONLY TAKES A z-index IF IT SPREADS `style`.** Halftone and
+  Stripes already did; `GrainSVG` did not, so a root-level grain would have kept
+  painting in markup order while the panel said otherwise. Labels for these come
+  from one `FRIENDLY` map keyed on the component name, which covers all 48 with
+  no per-template naming.
+- **A MINIFIED BUILD MANGLES `Component.name`, SO A MAP KEYED ON IT READS
+  CORRECTLY ON THE DEV SERVER AND TURNS TO NOISE IN THE BUNDLE A CLUB USES.**
+  `FRIENDLY` keyed on `fn.name` gave `Halftone texture` in dev and `R`, `ni`,
+  `E` and `Ei` in the real bundle — a Layers panel of two-letter labels. Every
+  primitive sets an explicit `displayName` (a string literal, which survives)
+  and the map is keyed on that. **Found by sweeping every template's labels on a
+  PRODUCTION build, not on the dev server** — nothing about this is visible
+  before `vite build`, which is the general lesson: anything that reads a
+  function's own name has to be measured on the shipped bundle.
+- **AND ONE PRIMITIVE WAS MISSED IN THAT PASS**, so SC1-SC3 still read `Ni`
+  until `ScSponsorFooter` got its own. The sweep is worth re-running on any
+  change here: it prints every template's labels in one go, and a mangled name
+  is obvious at a glance in a way one template opened by hand is not.
+- **A LAYOUT'S OWN WRAPPER OFTEN HAS NO WORDS TO BE NAMED AFTER, so pointing at
+  the row lights the element up instead.** Naming 300-odd children by hand was
+  the wrong fix for ~35 rows reading `Element N` — the honest answer to "which
+  one is Element 7" is to show it. Hover outlines it on the canvas and lifts it
+  to the top for as long as the pointer is there. Editor only: `hover` is never
+  passed to the export context, so it cannot reach a downloaded PNG.
+- **`pkill -f` / `pgrep -f` MATCHES ITS OWN SHELL, hit FOUR times in one
+  session (exit 144).** Splitting the pattern (`'shoot_temp''lates'`) only helps
+  while the pattern appears nowhere else in your own command line — a command
+  that kills a shoot AND then starts another one has the literal in its own
+  argv, so it kills itself before reaching the second half. Even
+  `pgrep -f chrome` matches the shell whose arguments contain the word.
+  **Match the process NAME, not the command line**: read `/proc/*/comm`, or use
+  `pkill -x`. And never put a kill in the same command as the thing it is
+  clearing the way for.
+- **A HUNG SHOOT IS THE PILED-UP-CHROMIUM TRAP, and the tell is CPU.** Three
+  concurrent Chromium runs left the control shoot idle-waiting with 6 seconds of
+  CPU and no write for eight minutes. Kill the browsers, then re-shoot only the
+  templates that are missing rather than the whole set.
+- **Driven in Chromium** (`verify_post_designer_browser.mjs`, 92 checks — the 78
+  from v9.75.0 plus a section that measures the stack off the OFF-SCREEN EXPORT
+  NODE rather than the canvas, since the canvas agreeing with itself says
+  nothing about the downloaded PNG: a layout listing its own elements by name, a
+  new block starting in front of everything, Send to back putting it under every
+  one of them with the background still painting, ONE STEP FORWARD PUTTING IT
+  BETWEEN TWO OF THE LAYOUT'S OWN ELEMENTS, hiding an element taking it off the
+  exported post and putting it back, a real layout having element rows where the
+  blank canvas has none, and a saved template driven through a real RELOAD in one
+  context so the stack it comes back with can only have been read off the saved
+  row) **with a control run**: 16 of the 92 fail against the previous commit,
+  reporting its own empty layer list, every element at `z: 0`, `9 -> 9` where an
+  element should have come off the post, and `sent=false` where Send to back does
+  not exist. The 76 that pass in both are don't-regress guards or the structural
+  displayName check, which reads the source rather than the build and so is the
+  same either way.
+- **COMPARING THE TWO PASS SETS IS HOW YOU FIND A CHECK THAT CANNOT FAIL.**
+  `comm -12 <(grep ^PASS run.log|sort) <(grep ^PASS control.log|sort)` lists
+  every check that passes in both; anything in there naming the new feature is
+  either a don't-regress guard or a check passing for the wrong reason, and
+  reading thirty lines settles which. It found three here: "the background still
+  paints under a block sent to the back" (a build with no Send to back never
+  moves the block, so the background is trivially still there) and both halves
+  of "the blank canvas has no layout" (trivially true of a build that draws no
+  layout rows anywhere). Each is asserted as a CONTRAST now — gated on the send
+  having landed, and paired with the same read on a real layout. **Cheaper and
+  more complete than re-reading the checks by hand**, and worth running on every
+  suite that has a control.
+- **THE SUITE TAKES ITS BASE URL AS `argv[2]`, NOT AS `BASE=`.** An env var is
+  silently ignored and the run dies on `ERR_CONNECTION_REFUSED` against the
+  hardcoded dev port — which reads as the server being down rather than as the
+  argument being in the wrong place. `shoot_templates.mjs` beside it DOES take
+  `BASE=`, which is what makes it easy to get wrong.
+- **NOTICED, NOT BUILT**: a layout's own element can be reordered and hidden but
+  not MOVED or retyped — that is still `templateToBlocks` territory, and still
+  four templates. A `transform` offset per layer would make moving cheap without
+  disturbing any layout's internal sizing, and is the obvious next step. The
+  scorecards' square-split variant (SC1-SC3 rendered per side) is deliberately
+  not a `LayerRoot`: two roots with colliding structural ids would apply one
+  stack's order to the other. Saved templates are still `localStorage`.
+- **AND FOUR EVENT POSTERS KEEP EVERYTHING INSIDE ONE FRAME**, so they report one
+  or two layers rather than a stack — EV5 and EV8 draw a single inset panel and
+  everything else lives inside it. Descending into that wrapper would make its
+  grandchildren layers, and it is exactly the wrong move: the wrapper carries an
+  `inset`, so a block rendered inside it would be offset by that much from where
+  it was dropped. Naming the wrapper's own children is the fix, per template.
+  **Until then the wrapper is named `Poster content` rather than left to read as
+  a fragment of its own text**, and on those two the feature honestly degrades
+  to the two positions it replaces: a block goes in front of the whole poster or
+  behind it. That is what the row says, so nobody is hunting for a stack that is
+  not there.
+
 ## A FACET LISTED IN THE KIT AND MISSING FROM ONE FUNCTION (v9.73.1, Sep 2026)
 
 Reported off `/admin/comms/lists` as `a[r.key] is not iterable`, straight after
@@ -8987,6 +9163,104 @@ Games list returning `Error: Internal Server Error`.
 - **Noticed, NOT fixed**: `_manual_opp_from_payload` sets no `logo_url` on a
   manual innings, so an uploaded card draws initials badges rather than crests.
   Pre-existing, and a manual upload has no club GUID to resolve one from.
+
+## THE SHEET IS PARSED ONCE, NOT CARRIED BY THE BROWSER (migration 302, v9.77.0, Sep 2026)
+
+A club's recovered archive is 97 seasons, 7,915 matches and **184,661 rows** in
+one `manual_games_scorecards.csv` of about 24 MB, and it could not be imported
+at all: `_MAX_GAME_UPLOAD_BYTES` refused anything over 8 MB, so it had to be
+split into 92 per-season sheets.
+
+- **RAISING THE CAP ALONE WOULD HAVE DONE NOTHING, AND MEASURING IS WHAT SHOWED
+  IT.** The import is preview -> resolve -> commit and **only preview takes a
+  file**; the browser held the parsed rows and posted every one of them back as
+  JSON on the other two steps. Measured on a 33 MB, 182,154-row fixture: the
+  same rows as a request body are **145.6 MB**, because all 33 column names
+  repeat on every row. And `resolve` fires AGAIN on every override change, so
+  that body went up the wire once per player matched, season picked and grade
+  named.
+- **THE SERVER-SIDE WORK WAS NEVER THE PROBLEM.** `_resolve_games` over that
+  whole sheet is **1.9s**. The entire interactive cost was the upload, which is
+  why the fix is to stop sending it rather than to make the matching faster.
+- **SO THE ROWS ARE STAGED AND THE TWO LATER STEPS NAME THEM BY TOKEN.**
+  Measured end to end through the shipped route bodies: the wizard now sends
+  **159 bytes** per resolve/commit instead of 145.6 MB.
+- **`rows` STAYS ON THE REQUEST, AND THAT IS WHAT MAKES THE CHANGE SAFE.**
+  `GameResolveRequest` takes EITHER; `_rows_for` prefers the token and falls
+  back. The pre-existing 90-odd checks in the suite all drive the rows path, so
+  their passing unchanged IS the proof a direct caller is unaffected, and the
+  suite additionally asserts the two shapes resolve byte-for-byte alike.
+- **A TABLE, NOT THE MEDIA VOLUME, AND THE REASON IS THE OPPOSITE ONE.** These
+  rows live for one sitting and are deleted the moment the import commits, so
+  they must never be backed up;
+  `/mnt/media/bettercricket/internal/videos` sits outside the backup because a
+  video is PERMANENT and merely too big to dump. A table also makes expiry and
+  club scoping one DELETE rather than a directory walk, and this is text.
+- **SCOPED IN THE WHERE CLAUSE, NEVER FETCHED THEN CHECKED**, so another club's
+  token, another user's, an expired one and one that never existed are
+  indistinguishable. An expired row reads as absent BEFORE any sweep runs: the
+  sweep (on preview, the one moment somebody is already paying for a large
+  write) is a tidy-up, never the thing that enforces the deadline.
+- **THE TOKEN IS DISCARDED IN THE SAME TRANSACTION AS THE GAMES**, so a
+  rolled-back import keeps its staged rows and can be retried, and a landed one
+  can never be imported twice.
+- **THE COMMIT WAS ALREADY FINE, AND THAT WAS MEASURED RATHER THAN ASSUMED.**
+  `_write_games` gives each game its OWN savepoint and flushes as it goes, so
+  nothing accumulates: `db.commit()` at the end is **instant** and no chunking
+  is needed. Per-request resident memory is ~460-620 MB across the three steps.
+- **BUT THE WRITE IS 68-124s, PAST nginx's OWN 60s `proxy_read_timeout`
+  DEFAULT** — which would hand the browser a 504 while the backend carried on
+  and finished, the exact "Gateway Time-out on a job that was working" shape
+  this deployment has already been bitten by once. Found by timing the write,
+  not by reading the config. So resolve and commit get their own locations for
+  the TIMEOUT, not for the body size.
+- **BOTH CAPS HAVE TO MOVE OR THE RAISE IS INVISIBLE.** `client_max_body_size
+  20m` on `location /api/` refuses the body before FastAPI is reached. The
+  suite asserts the app constant and the nginx block agree, so they cannot
+  drift.
+- **AN EXACT `location =`, BECAUSE A TRAILING-SLASH PREFIX ONE 301s A POST.**
+  nginx redirects `/games/import` to `/games/import/` whenever a trailing-slash
+  prefix location with a `proxy_pass` exists, and a 301 on a POST drops the
+  body — which would have broken the strict single-shot `POST /games/import`
+  beside it, silently. **Written as a prefix first and caught by running nginx
+  against a stub backend**, not by reading the config: eight probes across four
+  routes at 10/30/70 MB. That endpoint is deliberately left on the ordinary
+  /api/ limits, since it has no app-level size cap and raising nginx's would
+  let an unbounded body reach a route with no guard.
+- **THE PREVIEW'S OWN `rows` REPLY IS CAPPED AT THE OLD 8 MB LIMIT.** Returning
+  them for a 24 MB archive is a ~100 MB download nobody reads. The KEY stays on
+  the wire whatever the size (the `plan_report.unassigned` rule), and no caller
+  can regress because a sheet over the old cap was refused outright and so
+  never received them.
+- **Verified against a real Postgres** (`verify_manual_games_import.py` is 121
+  checks now: the DDL applied three times over a populated table, a deleted
+  club's staged rows going with it, the whole sheet staged in the shape
+  `_resolve_games` reads, a token with NO rows resolving it, the same again on
+  the next override change, all four scoping refusals, an expired token absent
+  before the sweep, the commit spending its token so the same archive cannot
+  land twice, and the two request shapes resolving byte-for-byte alike) **with
+  two control runs**: with the service absent it REPORTS it and the other 92
+  still pass; with the token ignored, **11 fail** on exactly that behaviour.
+- **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN, HIT TWICE IN ONE
+  CHANGE.** `preview_manual_games` takes a session now, so the first control
+  died on an unexpected keyword at check 1 and said nothing about the other
+  118 — a `preview()` wrapper reads the shipped signature instead. Then the
+  neutered run died on a 422 from `commit_manual_games`; every commit call in
+  that section reports the refusal rather than raising.
+- **A CHECK THAT PASSES AGAINST THE BROKEN CODE IS NOT A CHECK.** "the override
+  landed" was trivially true of an EMPTY sheet, because an override is applied
+  to the match map whether or not a row was found. It asserts the player's
+  `sheet` figures too now, which are summed from the rows themselves.
+- **A CHECK THAT MEASURES THE HARNESS IS NOT A CHECK EITHER.** The nginx probe
+  first reported 500s that were its own scratchpad temp dirs being unwritable
+  by `www-data`, and the end-to-end run died on `v_effective_player_season_stats`
+  missing — both harness gaps, not the feature's. `_view_ddl.py` is what the
+  suites use for the second.
+- **NOTICED, NOT BUILT**: nothing expires a staged sheet except the next
+  preview, so a club that uploads once and never returns leaves its rows until
+  somebody else imports. A nightly sweep is the obvious follow-up and was not
+  worth its own job for a table that is empty almost always. The strict
+  single-shot `POST /games/import` still has no app-level size cap of its own.
 
 ## A game brings its own season with it (v9.54.2, Aug 2026)
 

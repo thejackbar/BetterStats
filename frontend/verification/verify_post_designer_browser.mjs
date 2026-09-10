@@ -11,7 +11,7 @@
 // blank canvas is genuinely the new size; that Preview shows every page of a
 // carousel; and that the four "where did that go" explanations are on screen
 // where somebody would look for them.
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { chromium } from 'playwright'
 
 const BASE = process.argv[2] || 'http://127.0.0.1:5199'
@@ -37,6 +37,28 @@ const MEDIA = [
   { id: 'm1', name: 'sponsor-white-bg.png', url: '/api/admin/social/media/m1/file' },
   { id: 'm2', name: 'team-photo.jpg', url: '/api/admin/social/media/m2/file' },
 ]
+
+// ── 0. Every named primitive survives minification ─────────────────────────
+// STRUCTURAL, and it runs before a browser is launched. A minified build mangles
+// `Component.name`, so a layer label read off it comes out as `R` or `ni` — the
+// FRIENDLY map is keyed on `displayName` instead, which is a string literal and
+// survives. A primitive added to that map later without one would read as noise
+// in the bundle and correctly in dev, which is the way round nobody catches.
+{
+  const layerSrc = readFileSync(new URL('../src/social/postLayers.jsx', import.meta.url), 'utf8')
+  const block = /const FRIENDLY = \{([\s\S]*?)\n\}/.exec(layerSrc)?.[1] || ''
+  const keys = [...block.matchAll(/^\s*([A-Za-z]+):/gm)].map((m) => m[1])
+  const DOM = new Set(['svg', 'img', 'canvas'])
+  const ALIAS = new Set(['Grain']) // an import alias; GrainSVG carries the displayName
+  const named = new Set()
+  for (const f of ['cricket-templates', 'round-templates', 'event-templates', 'launch-templates']) {
+    const src = readFileSync(new URL(`../src/social/${f}.jsx`, import.meta.url), 'utf8')
+    for (const m of src.matchAll(/([A-Za-z]+)\.displayName = /g)) named.add(m[1])
+  }
+  const missing = keys.filter((k) => !DOM.has(k) && !ALIAS.has(k) && !named.has(k))
+  ck('every primitive the layer names read from sets an explicit displayName',
+    keys.length > 10 && missing.length === 0, missing.join(', '))
+}
 
 const browser = await chromium.launch(existsSync(EXECUTABLE) ? { executablePath: EXECUTABLE } : {})
 
@@ -494,8 +516,9 @@ async function pickSize(page, label) {
   await press(page.getByRole('button', { name: 'Layers', exact: true }))
   await page.waitForTimeout(200)
   const note = await textOf(page.getByTestId('layers-template-note'))
-  ck('the Layers panel explains a built-in layout', /behind/i.test(note), note.slice(0, 110))
-  ck('and offers the way out', /Blank canvas|movable blocks/i.test(note), note.slice(0, 110))
+  ck('the Layers panel says a block can sit among the layout\'s own elements',
+    /between two of them/i.test(note), note.slice(0, 140))
+  ck('and that the background stays at the floor', /background stays/i.test(note), note.slice(0, 140))
 
   // Hero: which layouts have the slot, rather than the section just vanishing.
   await press(page.getByRole('button', { name: 'Content', exact: true }))
@@ -531,90 +554,230 @@ async function pickSize(page, label) {
   await ctx.close()
 }
 
-// ── 7b. A block can go behind the built-in layout ──────────────────────────
+// ── 7b. Every element of a layout is a layer ───────────────────────────────
+// The layout's own elements are in the stack alongside the blocks somebody
+// adds, so a block can sit BETWEEN two of them. Measured off the off-screen
+// export node, because that is what the downloaded PNG is captured from — the
+// canvas agreeing with itself proves nothing about the file.
 {
   const { ctx, page, errors } = await openEditor()
 
-  // Adding a block on a real layout turns Custom Edit on by itself — this is
-  // the exact path somebody takes when they drop an image onto a lineup post
-  // and find it sitting over the club's own heading.
+  // The layout root inside the export node, and its layers in paint order.
+  // A run of blocks carries `data-testid="post-blocks"`; the layout's own DOM
+  // children carry the id the panel lists them under.
+  const stackOf = () => page.evaluate(() => {
+    const holder = [...document.querySelectorAll('div')].find(
+      (d) => d.style.left === '-9999px' && d.style.position === 'absolute',
+    )
+    const page_ = holder?.firstElementChild
+    if (!page_) return null
+    const root = [...page_.children].find((c) => c.tagName === 'DIV' && c.style.width && c.children.length > 1)
+    if (!root) return null
+    return [...root.children]
+      .map((c) => ({
+        z: Number(c.style.zIndex) || 0,
+        kind: c.getAttribute('data-testid') === 'post-blocks' ? 'blocks' : 'layout',
+        id: c.getAttribute('data-layer-id') || '',
+      }))
+      .sort((a, b) => a.z - b.z)
+  })
+  // The layout root's own background, which is the floor rather than a layer.
+  // Most of these layouts paint a GRADIENT (background-image), so reading the
+  // colour alone would report every one of them transparent.
+  const rootBg = () => page.evaluate(() => {
+    const holder = [...document.querySelectorAll('div')].find(
+      (d) => d.style.left === '-9999px' && d.style.position === 'absolute',
+    )
+    const page_ = holder?.firstElementChild
+    const root = page_ && [...page_.children].find((c) => c.tagName === 'DIV' && c.style.width && c.children.length > 1)
+    if (!root) return null
+    const s = getComputedStyle(root)
+    return { color: s.backgroundColor, image: s.backgroundImage }
+  })
+  const paints = (v) => !!v && ((v.color && v.color !== 'rgba(0, 0, 0, 0)' && v.color !== 'transparent') || (v.image && v.image !== 'none'))
+
+  const rowIds = () => page.evaluate(() => [...document.querySelectorAll('[data-layer-id]')]
+    .filter((r) => r.getAttribute('data-testid')?.startsWith('layer-row-'))
+    .map((r) => ({ id: r.getAttribute('data-layer-id'), kind: r.getAttribute('data-testid'), label: (r.innerText || '').trim() })))
+
+  await press(page.getByRole('button', { name: 'Layers', exact: true }))
+  await page.waitForTimeout(300)
+  const beforeAdd = await rowIds()
+  ck('a layout lists its own elements as layers',
+    beforeAdd.filter((r) => r.kind === 'layer-row-template').length >= 3,
+    JSON.stringify(beforeAdd.map((r) => r.label)).slice(0, 160))
+  ck('and they are named rather than numbered',
+    beforeAdd.some((r) => r.kind === 'layer-row-template' && r.label && !/^Element \d+$/.test(r.label)),
+    JSON.stringify(beforeAdd.map((r) => r.label)).slice(0, 160))
+  ck('the background is shown as the floor, not a layer', await seen(page.getByTestId('layers-background-row')))
+
+  // Adding a block on a real layout turns Custom Edit on by itself — the exact
+  // path somebody takes when they drop an image onto a lineup post.
   await press(page.getByRole('button', { name: 'Photos', exact: true }))
   await page.waitForTimeout(250)
   await press(page.getByRole('button', { name: /Empty image frame/i }))
-  await page.waitForTimeout(350)
+  await page.waitForTimeout(400)
 
-  const behindBtn = page.getByRole('button', { name: 'Send behind' })
-  ck('a selected block offers Send behind', await seen(behindBtn))
+  const before = await stackOf()
+  const blockAt = (st) => (st || []).findIndex((l) => l.kind === 'blocks')
+  ck('a new block starts in front of the whole layout',
+    Array.isArray(before) && blockAt(before) === before.length - 1, JSON.stringify(before))
+  const bgBefore = await rootBg()
+  ck('the layout paints its own background', paints(bgBefore), JSON.stringify(bgBefore))
 
-  // Order in the DOM is paint order: behind the layout means BEFORE it.
-  const orderOf = () => page.evaluate(() => {
-    const holder = [...document.querySelectorAll('div')].find(
-      (d) => d.style.left === '-9999px' && d.style.position === 'absolute',
-    )
-    const node = holder?.firstElementChild
-    if (!node) return null
-    // Every layer is a direct child; the one holding a block carries our marker.
-    return [...node.children].map((c) => (c.querySelector('[style*="cursor"]') ? 'blocks' : 'layout'))
-  })
-  // The layout's OWN root, which is a child of the see-through wrapper once a
-  // block has gone behind — addressing the layer's direct children finds the
-  // wrapper (display: contents, no width of its own) and measures nothing.
-  const layoutBg = () => page.evaluate(() => {
-    const holder = [...document.querySelectorAll('div')].find(
-      (d) => d.style.left === '-9999px' && d.style.position === 'absolute',
-    )
-    const node = holder?.firstElementChild
-    if (!node) return null
-    const layer = [...node.children].find((c) => !c.querySelector('[style*="cursor"]'))
-    if (!layer) return null
-    const root = layer.classList.contains('pb-template-seethrough') ? layer.firstElementChild : layer
-    if (!root) return null
-    const s = getComputedStyle(root)
-    // Most of these layouts paint a GRADIENT, which is background-image — read
-    // the colour alone and a gradient-backed root measures transparent in both
-    // states, so the check passes whether or not anything was suppressed.
-    return { color: s.backgroundColor, image: s.backgroundImage }
-  })
-  const transparent = (v) => !!v
-    && (v.color === 'rgba(0, 0, 0, 0)' || v.color === 'transparent')
-    && (v.image === 'none' || !v.image)
+  // Send to back: under every one of the layout's own elements.
+  const sent = await press(page.getByRole('button', { name: 'Send to back' }))
+  await page.waitForTimeout(400)
+  const back = await stackOf()
+  ck('Send to back puts it under every element of the layout',
+    Array.isArray(back) && blockAt(back) === 0, JSON.stringify(back))
 
-  const before = await orderOf()
-  ck('the block starts over the layout', Array.isArray(before) && before.lastIndexOf('blocks') > before.indexOf('layout'), JSON.stringify(before))
+  // THE BACKGROUND STAYS. It is the floor, so a block at the bottom of the
+  // stack sits ON it rather than the layout being made see-through.
+  //
+  // GATED ON THE SEND HAVING LANDED. A build with no such control never moves
+  // the block, so the background is trivially still there and the check would
+  // pass for the wrong reason — which is the one thing a control run is for.
+  const bgBack = await rootBg()
+  ck('the background still paints under a block sent to the back',
+    sent && paints(bgBack), `sent=${sent} ${JSON.stringify(bgBack)}`)
 
-  // Measured before as well as after: a template that never painted a
-  // background of its own would pass the after-check for the wrong reason.
-  const bgBefore = await layoutBg()
-  ck('the layout paints its own background to begin with', bgBefore !== null && !transparent(bgBefore), JSON.stringify(bgBefore))
-
-  await press(behindBtn)
-  await page.waitForTimeout(350)
-  const after = await orderOf()
-  ck('Send behind moves it under the layout', Array.isArray(after) && after.indexOf('blocks') < after.lastIndexOf('layout'), JSON.stringify(after))
-
-  // A block behind an opaque layout would be invisible, so the layout's own
-  // background has to stop painting — measured, not assumed.
-  const bg = await layoutBg()
-  ck('and the layout stops painting over it', transparent(bg), JSON.stringify(bg))
-
-  // The control reads back the state it put the block in.
-  ck('the control now reads as behind', await seen(page.getByRole('button', { name: 'Behind layout' })))
-
-  // The Layers panel shows the layout as a row, so the two sides are obvious.
+  // The point of the whole change: one step forward and the block is BETWEEN
+  // two of the layout's own elements, with a layout element on either side.
   await press(page.getByRole('button', { name: 'Layers', exact: true }))
   await page.waitForTimeout(250)
-  const layoutRow = await textOf(page.getByTestId('layers-layout-row'))
-  ck('the Layers panel lists the layout itself', /layout/i.test(layoutRow), layoutRow)
+  const rows = await rowIds()
+  const blockRow = rows.find((r) => r.kind === 'layer-row-block')
+  ck('the block is listed in the same stack as the layout', !!blockRow, JSON.stringify(rows.map((r) => r.kind)))
+  // Rows read front-first, so Forward on the block is the ⇧ button in its row.
+  await press(page.locator(`[data-layer-id="${blockRow?.id}"] button[title="Forward"]`))
+  await page.waitForTimeout(400)
+  const mid = await stackOf()
+  const i = blockAt(mid)
+  ck('one step forward puts the block between two of the layout\'s own elements',
+    i > 0 && i < (mid?.length ?? 0) - 1 && mid[i - 1].kind === 'layout' && mid[i + 1].kind === 'layout',
+    JSON.stringify(mid))
 
-  ck('no page errors sending a block behind', errors.length === 0, errors.slice(0, 2).join(' | '))
+  ck('no page errors moving a block through the stack', errors.length === 0, errors.slice(0, 2).join(' | '))
   await ctx.close()
+}
 
-  // The blank canvas has no layout to be behind, so it must not offer any of it.
+// ── 7c. Hiding one of the layout's own elements ────────────────────────────
+{
+  const { ctx, page, errors } = await openEditor()
+  await press(page.getByRole('button', { name: 'Layers', exact: true }))
+  await page.waitForTimeout(300)
+
+  const countLayers = () => page.evaluate(() => {
+    const holder = [...document.querySelectorAll('div')].find(
+      (d) => d.style.left === '-9999px' && d.style.position === 'absolute',
+    )
+    const page_ = holder?.firstElementChild
+    const root = page_ && [...page_.children].find((c) => c.tagName === 'DIV' && c.style.width && c.children.length > 1)
+    return root ? root.children.length : -1
+  })
+  const before = await countLayers()
+  ck('the export node draws the layout\'s elements', before > 2, String(before))
+
+  await press(page.locator('[data-testid="layer-hide"]').first())
+  await page.waitForTimeout(400)
+  const after = await countLayers()
+  ck('hiding an element takes it off the exported post', after === before - 1, `${before} -> ${after}`)
+
+  // And it says so in the list rather than the row simply disappearing.
+  const hiddenRow = await page.locator('[data-testid="layer-row-template"] .line-through').count().catch(() => 0)
+  ck('the hidden element is still listed, struck through', hiddenRow >= 1, String(hiddenRow))
+
+  // Putting it back is the same control.
+  await press(page.locator('[data-testid="layer-hide"]').first())
+  await page.waitForTimeout(400)
+  ck('showing it again puts it back', (await countLayers()) === before, String(await countLayers()))
+
+  ck('no page errors hiding an element', errors.length === 0, errors.slice(0, 2).join(' | '))
+  await ctx.close()
+}
+
+// ── 7d. The blank canvas has no layout ─────────────────────────────────────
+// ASSERTED AS A CONTRAST, not on its own. "No layout rows" is trivially true of
+// a build that never draws any, so each half is paired with the same read on a
+// real layout — which is what makes the pair fail on a build without this.
+{
+  const t = await openEditor()
+  await press(t.page.getByRole('button', { name: 'Layers', exact: true }))
+  await t.page.waitForTimeout(300)
+  const tplRows = await t.page.locator('[data-testid="layer-row-template"]').count()
+  const tplBg = await seen(t.page.getByTestId('layers-background-row'))
+  await t.ctx.close()
+
   const b = await openEditor('?type=blank')
   await press(b.page.getByRole('button', { name: 'Layers', exact: true }))
-  await b.page.waitForTimeout(250)
-  ck('the blank canvas has no layout row', !(await seen(b.page.getByTestId('layers-layout-row'))))
+  await b.page.waitForTimeout(300)
+  const blankRows = await b.page.locator('[data-testid="layer-row-template"]').count()
+  const blankBg = await seen(b.page.getByTestId('layers-background-row'))
   await b.ctx.close()
+
+  ck('a layout has a background row and the blank canvas does not',
+    tplBg && !blankBg, `layout=${tplBg} blank=${blankBg}`)
+  ck('a layout has element rows and the blank canvas has none',
+    tplRows > 0 && blankRows === 0, `layout=${tplRows} blank=${blankRows}`)
+}
+
+// ── 7e. A saved template keeps its stacking ────────────────────────────────
+// The whole point of saving a design is getting it back. Driven through a real
+// RELOAD in one context, because that is the round trip somebody makes: save,
+// come back later, apply it. A second context would have its own localStorage
+// and the check would be measuring the harness.
+{
+  const { ctx, page, errors } = await openEditor()
+  const countLayers = () => page.evaluate(() => {
+    const holder = [...document.querySelectorAll('div')].find(
+      (d) => d.style.left === '-9999px' && d.style.position === 'absolute',
+    )
+    const page_ = holder?.firstElementChild
+    const root = page_ && [...page_.children].find((c) => c.tagName === 'DIV' && c.style.width && c.children.length > 1)
+    return root ? root.children.length : -1
+  })
+
+  await press(page.getByRole('button', { name: 'Layers', exact: true }))
+  await page.waitForTimeout(300)
+  const drawn = await countLayers()
+  await press(page.locator('[data-testid="layer-hide"]').first())
+  await page.waitForTimeout(400)
+  const hiddenCount = await countLayers()
+  ck('a hidden element is off the post before saving', hiddenCount === drawn - 1, `${drawn} -> ${hiddenCount}`)
+
+  await press(page.getByRole('button', { name: 'Design', exact: true }))
+  await page.waitForTimeout(250)
+  // Every read goes through a helper that reports absence, so a build without
+  // this feature fails these four rather than dying here and saying nothing
+  // about the eighty below.
+  const named = await page.getByPlaceholder('Template name...').fill('Stacked').then(() => true, () => false)
+  ck('the Design tab offers a template name', named)
+  await press(page.getByRole('button', { name: 'Save current' }))
+  await page.waitForTimeout(400)
+
+  // Come back to it. A reload clears every bit of in-memory state, so what the
+  // stack reads afterwards can only have come from the saved template.
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByRole('button', { name: /DOWNLOAD PNG|SLIDES/ }).first().waitFor({ timeout: 25000 })
+  await page.waitForTimeout(600)
+  // A harness guard, not a feature check: without it the last check could pass
+  // because the hide simply survived in memory rather than because the saved
+  // template brought it back. Gated on the export node having been found at
+  // all, or two -1s would read as agreement.
+  const afterReload = await countLayers()
+  ck('the reload clears the stack, so what follows can only be the saved one',
+    drawn > 0 && afterReload === drawn, `${drawn} -> ${afterReload}`)
+
+  await press(page.getByRole('button', { name: 'Design', exact: true }))
+  await page.waitForTimeout(250)
+  await press(page.getByRole('button', { name: 'Stacked' }))
+  await page.waitForTimeout(600)
+  ck('applying the saved template brings its stacking back',
+    (await countLayers()) === drawn - 1, `${drawn} -> ${await countLayers()}`)
+
+  ck('no page errors saving and re-applying a template', errors.length === 0, errors.slice(0, 2).join(' | '))
+  await ctx.close()
 }
 
 // ── 8. Narrow viewport ─────────────────────────────────────────────────────

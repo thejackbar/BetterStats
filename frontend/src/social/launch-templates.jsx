@@ -7,6 +7,7 @@
 // fully whitelabelled per club. Copy reads from the club's point of view.
 import { AutoFitText, ClubLogo, GrainSVG, Halftone, Stripes } from './cricket-templates'
 import { share } from './postAspect'
+import { LayerRoot } from './postLayers'
 import brandWordmark from '../assets/bettercricket-white.svg'
 
 import statsLogo from '../assets/modules/betterstats.svg'
@@ -148,7 +149,7 @@ export function ClubLaunchPoster({
   ]
 
   return (
-    <div style={{
+    <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
       background: `linear-gradient(120deg, ${bg} 38%, ${bg2} 100%)`,
       color: ink, fontFamily: "'Inter', sans-serif",
@@ -309,6 +310,17 @@ export function ClubLaunchPoster({
           {footerUrl}
         </div>
       </div>
-    </div>
+    </LayerRoot>
   )
 }
+
+// MINIFICATION MANGLES `Component.name`, so a layer label derived from it
+// reads as `R` or `ni` in a production build and as the real name in dev —
+// which is exactly the kind of thing only a built bundle shows. An explicit
+// displayName is a string literal, so it survives.
+ValueIcon.displayName = 'ValueIcon'
+Mark.displayName = 'Mark'
+StatCell.displayName = 'StatCell'
+Panel.displayName = 'Panel'
+NavStrip.displayName = 'NavStrip'
+LeaderColumn.displayName = 'LeaderColumn'

@@ -539,6 +539,10 @@ export function BlankCanvas({
   interactive = false, scale = 1, selectedIds = [],
   onSelect, onDeselect, onPatchMany, onCommit, onGestureStart, onDuplicate, onRemove,
   transparent = false, width = 1080, height = 1080, style = {}, passThrough = false,
+  // Marks this layer in the DOM. A post can hold several block layers now —
+  // one per run of blocks between two of a layout's own elements — and telling
+  // them apart from the layout's own children is otherwise guesswork.
+  testId = null,
 }) {
   const rootRef = useRef(null)
   const selSet = new Set(selectedIds)
@@ -675,15 +679,17 @@ export function BlankCanvas({
   return (
     <div
       ref={rootRef}
+      data-testid={testId || undefined}
       onPointerDown={interactive ? (e) => { if (e.target === rootRef.current) onDeselect && onDeselect() } : undefined}
       style={{
         width, height, position: 'relative', overflow: 'hidden',
         background: transparent ? 'transparent' : (palette.primary || '#101113'),
         color: palette.ink || '#fff', fontFamily: "'Inter', sans-serif",
         // passThrough: this layer covers the whole canvas but must not swallow
-        // clicks meant for something UNDER it — the layout, or blocks a person
-        // has sent behind it. Blocks re-arm themselves (see BlankBlock), so they
-        // stay draggable while the empty space between them does not intercept.
+        // clicks meant for something UNDER it — one of the layout's own
+        // elements, or a block sitting below this run in the stack. Blocks
+        // re-arm themselves (see BlankBlock), so they stay draggable while the
+        // empty space between them does not intercept.
         ...(passThrough ? { pointerEvents: 'none' } : null),
         ...style,
       }}>
