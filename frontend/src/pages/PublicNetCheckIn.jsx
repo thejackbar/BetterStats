@@ -57,6 +57,10 @@ function sessionLine(s) {
 
 const FIELD = 'w-full bg-pb-surface2 border pb-hairline rounded-xl px-4 py-3 text-base focus:outline-none focus:border-pb-accent'
 
+// On a shared gate device the confirmation clears itself after this many
+// seconds, so the sign-in list is waiting for the next player with no tap.
+const AUTO_RESET_SECONDS = 5
+
 export default function PublicNetCheckIn() {
   const { token } = useParams()
   // loading | dead | closed | pick | pin | register | done
@@ -72,6 +76,7 @@ export default function PublicNetCheckIn() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [done, setDone] = useState(null) // { name, already_in, sessions, isNew }
+  const [resetIn, setResetIn] = useState(AUTO_RESET_SECONDS) // seconds until the confirmation reverts
   const [form, setForm] = useState({ full_name: '', phone: '', email: '', date_of_birth: '', previous_club: '' })
   const pinRef = useRef(null)
 
@@ -161,8 +166,28 @@ export default function PublicNetCheckIn() {
 
   async function switchPlayer() {
     try { await api.netsPublicSwitch(token) } catch { /* clearing is best-effort */ }
-    setChosen(null); setPin(''); setError(''); setDone(null); setStep('pick')
+    setChosen(null); setPin(''); setError(''); setDone(null); setSearch(''); setStep('pick')
   }
+
+  // Send the screen back to the sign-in list WITHOUT clearing the verified
+  // cookie. A returning player on their own phone keeps their week-two one-tap;
+  // on a shared gate device the next person to pick a name re-verifies and
+  // overwrites it. (The explicit "someone else" buttons still call
+  // switchPlayer, which does forget them.)
+  const resetToPick = useCallback(() => {
+    setChosen(null); setPin(''); setError(''); setDone(null); setSearch(''); setStep('pick')
+  }, [])
+
+  // Once checked in, the confirmation shows for a few seconds and the sign-in
+  // list returns on its own — so a gate iPad is ready for the next player with
+  // nobody having to tap "someone else".
+  useEffect(() => {
+    if (step !== 'done') return
+    setResetIn(AUTO_RESET_SECONDS)
+    const tick = setInterval(() => setResetIn((n) => Math.max(0, n - 1)), 1000)
+    const revert = setTimeout(resetToPick, AUTO_RESET_SECONDS * 1000)
+    return () => { clearInterval(tick); clearTimeout(revert) }
+  }, [step, resetToPick])
 
   async function submitRegister(e) {
     e.preventDefault()
@@ -408,8 +433,11 @@ export default function PublicNetCheckIn() {
               </p>
             )}
             <p className="text-pb-faint text-sm mt-5">Grab your pads.</p>
-            <div className="mt-6">
-              <button onClick={switchPlayer} className="text-pb-faint text-sm underline">Checking someone else in?</button>
+            <div className="mt-6 space-y-3">
+              <div className="font-mono text-[11px] tracking-wide2 text-pb-faintest uppercase">
+                Back to sign-in in {resetIn}s
+              </div>
+              <button onClick={switchPlayer} className="text-pb-faint text-sm underline">Check someone else in now</button>
             </div>
           </div>
         )}
