@@ -676,14 +676,28 @@ async function pickSize(page, label) {
 }
 
 // ── 7d. The blank canvas has no layout ─────────────────────────────────────
+// ASSERTED AS A CONTRAST, not on its own. "No layout rows" is trivially true of
+// a build that never draws any, so each half is paired with the same read on a
+// real layout — which is what makes the pair fail on a build without this.
 {
+  const t = await openEditor()
+  await press(t.page.getByRole('button', { name: 'Layers', exact: true }))
+  await t.page.waitForTimeout(300)
+  const tplRows = await t.page.locator('[data-testid="layer-row-template"]').count()
+  const tplBg = await seen(t.page.getByTestId('layers-background-row'))
+  await t.ctx.close()
+
   const b = await openEditor('?type=blank')
   await press(b.page.getByRole('button', { name: 'Layers', exact: true }))
   await b.page.waitForTimeout(300)
-  ck('the blank canvas shows no layout background row', !(await seen(b.page.getByTestId('layers-background-row'))))
-  ck('and no layout elements in its stack',
-    (await b.page.locator('[data-testid="layer-row-template"]').count()) === 0)
+  const blankRows = await b.page.locator('[data-testid="layer-row-template"]').count()
+  const blankBg = await seen(b.page.getByTestId('layers-background-row'))
   await b.ctx.close()
+
+  ck('a layout has a background row and the blank canvas does not',
+    tplBg && !blankBg, `layout=${tplBg} blank=${blankBg}`)
+  ck('a layout has element rows and the blank canvas has none',
+    tplRows > 0 && blankRows === 0, `layout=${tplRows} blank=${blankRows}`)
 }
 
 // ── 7e. A saved template keeps its stacking ────────────────────────────────
