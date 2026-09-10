@@ -23,6 +23,7 @@ Run:
 from __future__ import annotations
 
 import asyncio
+import inspect
 import io
 import os
 import sys
@@ -57,9 +58,22 @@ except ImportError as exc:  # pragma: no cover - control run only
     HAVE = False
     MISSING.append(str(exc))
 
+from fastapi import HTTPException
+
 from app.routers.manual_entries import (
-    GAME_CSV_COLUMNS, import_manual_games, list_audit, undo_edit,
+    GAME_CSV_COLUMNS, _MAX_GAME_UPLOAD_BYTES, import_manual_games, list_audit,
+    undo_edit,
 )
+
+try:
+    from app.services import game_import_staging
+    from app.services.game_import_staging_ddl import STATEMENTS as STAGING_DDL
+    HAVE_STAGING = True
+except ImportError as exc:  # pragma: no cover - control run only
+    HAVE_STAGING = False
+    STAGING_DDL = []
+    game_import_staging = None
+    MISSING.append(str(exc))
 
 DB = os.environ["DATABASE_URL"]
 engine = create_async_engine(DB, echo=False)
@@ -103,6 +117,22 @@ class FakeUpload:
 
     async def read(self):
         return self._data
+
+
+_PREVIEW_TAKES_DB = "db" in inspect.signature(preview_manual_games).parameters
+
+
+async def preview(*, file, current_user, club, db):
+    """`preview_manual_games`, with or without the session it now takes.
+
+    The staging build passes the sheet a session to hold it in; the build
+    before it had none. Reported rather than raised, or a control run dies on
+    the first call and says nothing about everything below it.
+    """
+    if _PREVIEW_TAKES_DB:
+        return await preview_manual_games(
+            file=file, current_user=current_user, club=club, db=db)
+    return await preview_manual_games(file=file, current_user=current_user, club=club)
 
 
 def csv_text(rows: list[dict], headers: list[str] | None = None) -> str:
@@ -232,6 +262,11 @@ async def main() -> None:
                 season TEXT
             )
         """))
+        # Migration 302's staging table, likewise invisible to create_all.
+        # Pulled out of the SHIPPED DDL rather than retyped, so a table that
+        # merely LOOKS right cannot pass.
+        for _stmt in STAGING_DDL:
+            await conn.execute(text(_stmt))
 
     async with Session() as session:
         await reset(session)
@@ -246,8 +281,8 @@ async def main() -> None:
     async with Session() as session:
         c = await club(session)
         u = await user(session)
-        prev = await preview_manual_games(
-            file=FakeUpload(csv_text(SHEET)), current_user=u, club=c)
+        prev = await preview(
+            file=FakeUpload(csv_text(SHEET)), current_user=u, club=c, db=session)
         check("the preview reads every row", prev["row_count"] == len(SHEET),
               str(prev["row_count"]))
         check("and reports no unknown columns", prev["unknown_columns"] == [],
@@ -612,16 +647,16 @@ async def main() -> None:
                          "Player Name": "Held, Harry", "Batting Runs": "5"}],
                        headers=["Game Key", "Season Name", "Player Name",
                                 "Batting Runs", "Notes"])
-        prev = await preview_manual_games(file=FakeUpload(odd), current_user=u, club=c)
+        prev = await preview(file=FakeUpload(odd), current_user=u, club=c, db=session)
         check("a header reading 'Batting Runs' lands on batting_runs",
               prev["rows"][0].get("batting_runs") == "5", str(prev["rows"][0]))
         check("and a column nobody asked for is reported, not silently dropped",
               prev["unknown_columns"] == ["Notes"], str(prev["unknown_columns"]))
         try:
-            await preview_manual_games(
+            await preview(
                 file=FakeUpload(csv_text([{"player_name": "x"}],
                                          headers=["player_name"])),
-                current_user=u, club=c)
+                current_user=u, club=c, db=session)
             check("a sheet with no game_key column is refused", False, "it was accepted")
         except Exception as e:
             check("a sheet with no game_key column is refused",
@@ -727,6 +762,243 @@ async def main() -> None:
         check("and creates nothing on the way",
               len((await session.execute(
                   select(Season).where(Season.organisation_id == ORG))).scalars().all()) == 1)
+
+    # ── the staged sheet ────────────────────────────────────────────────
+    #
+    # A club's recovered history is 97 seasons and 184,661 rows, and the
+    # binding limit was never the upload: the browser held the parsed rows and
+    # posted every one of them back on BOTH later steps, with `resolve` firing
+    # again on every override change. Those rows as a JSON body are ~4x the
+    # CSV, because all 33 column names repeat on every row.
+    print("\n-- THE SHEET IS STAGED SERVER-SIDE, NOT CARRIED BY THE BROWSER --")
+    if not HAVE_STAGING:  # pragma: no cover - control run only
+        check("the import staging service is available", False, "; ".join(MISSING))
+    else:
+        # Migration 302 and the lifespan mirror run the SAME list, and the
+        # lifespan re-runs it on every boot — so every statement has to be
+        # idempotent over a populated table.
+        async with Session() as session:
+            c, u = await club(session), await user(session)
+            await game_import_staging.store(
+                session, org_id=ORG, user_id=USER, rows=[{"game_key": "x"}],
+                filename="pre-existing.csv", unknown_columns=[])
+            await session.commit()
+        async with engine.begin() as conn:
+            for _ in range(3):
+                for _stmt in STAGING_DDL:
+                    await conn.execute(text(_stmt))
+        async with Session() as session:
+            kept = (await session.execute(text(
+                "SELECT COUNT(*) FROM manual_game_import_staging"))).scalar()
+            check("the DDL applies three times over a populated table", kept == 1, str(kept))
+            await session.execute(text("TRUNCATE manual_game_import_staging"))
+            await session.commit()
+
+        # An archived or deleted club takes its half-finished imports with it,
+        # rather than leaving a whole history staged against nothing.
+        async with Session() as session:
+            await game_import_staging.store(
+                session, org_id=OTHER, user_id=USER, rows=[{"game_key": "x"}],
+                filename="other.csv", unknown_columns=[])
+            await session.commit()
+            await session.execute(text("DELETE FROM organisations WHERE id = :o"), {"o": OTHER})
+            await session.commit()
+            left = (await session.execute(text(
+                "SELECT COUNT(*) FROM manual_game_import_staging"))).scalar()
+            check("a deleted club's staged rows go with it", left == 0, str(left))
+        async with Session() as session:
+            await reset(session)
+            await seed(session)
+
+        async with Session() as session:
+            await reset(session)
+            await seed(session)
+        async with Session() as session:
+            c, u = await club(session), await user(session)
+            prev = await preview(
+                file=FakeUpload(csv_text(SHEET)), current_user=u, club=c, db=session)
+
+            token = prev.get("token")
+            check("the preview hands back a token", bool(token), str(prev.get("token")))
+            check("and still reports the row count beside it",
+                  prev.get("row_count") == len(SHEET), str(prev.get("row_count")))
+
+            staged = await game_import_staging.load(
+                session, token=token, org_id=ORG, user_id=USER) if token else None
+            check("the whole sheet is staged, every row of it",
+                  bool(staged) and len(staged["rows"]) == len(SHEET),
+                  str(staged and len(staged["rows"])))
+            check("stored in the shape _resolve_games reads, so nothing re-parses it",
+                  bool(staged) and staged["rows"][0].get("game_key") == "1992-001",
+                  str(staged and staged["rows"][0])[:120])
+
+        # THE CHECK THIS WHOLE CHANGE EXISTS FOR. Resolve fires again on every
+        # override change; a suite that only asserted "the import worked" would
+        # pass with the rows still going up the wire each time.
+        async with Session() as session:
+            c, u = await club(session), await user(session)
+            first = await resolve_manual_games(
+                req=GameResolveRequest(filename="scorecards.csv", token=token),
+                current_user=u, club=c, db=session)
+            check("a token with NO rows resolves the whole sheet",
+                  first["games"] == 2 and first["rows"] == len(SHEET),
+                  f"{first['games']} games, {first['rows']} rows")
+
+            second = await resolve_manual_games(
+                req=GameResolveRequest(filename="scorecards.csv", token=token,
+                                       player_overrides={"Guest, Rob": "__new__"}),
+                current_user=u, club=c, db=session)
+            check("and again on the next override change, still carrying no rows",
+                  second["games"] == 2 and second["rows"] == len(SHEET),
+                  f"{second['games']} games, {second['rows']} rows")
+            # `sheet` is summed from the rows themselves, so it is only there
+            # when the staged sheet was really read. The status alone is not
+            # enough: an override is applied to the match map whether or not
+            # any row was found, so it reads "new" against an EMPTY sheet too.
+            rob = by_label(second["players"], "raw_name", "Guest, Rob") or {}
+            check("the override landed, on a sheet that was really read",
+                  rob.get("status") == "new" and (rob.get("sheet") or {}).get("games") == 2,
+                  str(rob)[:160])
+
+        print("\n-- A TOKEN IS SCOPED, AND LAPSES --")
+        async with Session() as session:
+            other_org = await session.get(Organisation, OTHER)
+            check("another club's token reads as one that never existed",
+                  await game_import_staging.load(
+                      session, token=token, org_id=OTHER, user_id=USER) is None)
+            check("and so does another user's",
+                  await game_import_staging.load(
+                      session, token=token, org_id=ORG, user_id=uuid.uuid4()) is None)
+            check("as does a token nobody ever minted",
+                  await game_import_staging.load(
+                      session, token="not-a-real-token", org_id=ORG, user_id=USER) is None)
+
+            # A stale wizard gets a sentence telling it to upload again, never a
+            # silently empty import.
+            u = await user(session)
+            detail = ""
+            try:
+                await resolve_manual_games(
+                    req=GameResolveRequest(token=token),
+                    current_user=u, club=other_org, db=session)
+                check("resolving another club's token is refused", False, "it was accepted")
+            except HTTPException as e:
+                detail = str(e.detail or "")
+                check("resolving another club's token is refused", e.status_code == 410,
+                      str(e.status_code))
+            # Refused with something a person can act on. Returning an empty
+            # sheet would read as "this archive is empty" and import nothing.
+            check("and says to upload the file again rather than reading as an empty sheet",
+                  "upload the file again" in detail.lower(), detail[:120])
+
+        async with Session() as session:
+            await session.execute(text(
+                "UPDATE manual_game_import_staging SET expires_at = NOW() - INTERVAL '1 hour'"))
+            await session.commit()
+            check("an expired token reads as absent BEFORE any sweep runs — the "
+                  "sweep is a tidy-up, never the thing that enforces the deadline",
+                  await game_import_staging.load(
+                      session, token=token, org_id=ORG, user_id=USER) is None)
+
+            c, u = await club(session), await user(session)
+            swept = await game_import_staging.sweep_expired(session)
+            await session.commit()
+            check("and the sweep then drops it", swept == 1, str(swept))
+            left = (await session.execute(text(
+                "SELECT COUNT(*) FROM manual_game_import_staging"))).scalar()
+            check("leaving nothing behind", left == 0, str(left))
+
+        print("\n-- A STAGED SHEET COMMITS, AND ITS TOKEN IS SPENT --")
+        async with Session() as session:
+            await reset(session)
+            await seed(session)
+        async with Session() as session:
+            c, u = await club(session), await user(session)
+            prev = await preview(
+                file=FakeUpload(csv_text(SHEET)), current_user=u, club=c, db=session)
+            tok = prev["token"]
+            overrides = {n: "__new__" for n in
+                         ("Guest, Rob", "Appleby, Rick", "Barlow, Craig R")}
+            # Reported rather than raised: a build that ignores the token
+            # refuses this outright, and a control run must not die here and
+            # say nothing about the sections below.
+            out, refused = {}, ""
+            try:
+                out = await commit_manual_games(
+                    req=GameResolveRequest(filename="scorecards.csv", token=tok,
+                                           player_overrides=overrides),
+                    current_user=u, club=c, db=session)
+            except HTTPException as e:
+                refused = f"{e.status_code}: {e.detail}"
+                await session.rollback()
+            check("a sheet named only by its token imports every match",
+                  out.get("games_created") == 2, refused or str(out))
+            check("creating the season it named",
+                  out.get("seasons_created") == 1, refused or str(out))
+
+        async with Session() as session:
+            check("and the token is spent — the same archive cannot land twice",
+                  await game_import_staging.load(
+                      session, token=tok, org_id=ORG, user_id=USER) is None)
+            u = await user(session)
+            c = await club(session)
+            try:
+                await commit_manual_games(
+                    req=GameResolveRequest(token=tok), current_user=u, club=c, db=session)
+                check("pressing import again is refused", False, "it was accepted")
+            except HTTPException as e:
+                check("pressing import again is refused", e.status_code == 410,
+                      f"{e.status_code}: {e.detail}")
+                await session.rollback()
+            games = (await session.execute(text(
+                "SELECT COUNT(*) FROM manual_games"))).scalar()
+            check("so the club holds its two matches, not four", games == 2, str(games))
+            await session.rollback()
+
+        print("\n-- A CALLER STILL POSTING ROWS IS UNAFFECTED --")
+        # The rest of this suite drives the rows path throughout, so it passing
+        # is the real proof. These two pin the two shapes against each other.
+        async with Session() as session:
+            await reset(session)
+            await seed(session)
+        async with Session() as session:
+            c, u = await club(session), await user(session)
+            prev = await preview(
+                file=FakeUpload(csv_text(SHEET)), current_user=u, club=c, db=session)
+            by_rows = await resolve_manual_games(
+                req=GameResolveRequest(rows=prev["rows"]), current_user=u, club=c, db=session)
+            by_token = await resolve_manual_games(
+                req=GameResolveRequest(token=prev["token"]), current_user=u, club=c, db=session)
+            check("the two shapes resolve to byte-for-byte the same review",
+                  by_rows == by_token,
+                  f"rows={by_rows.get('games')} token={by_token.get('games')}")
+            check("a request carrying NEITHER resolves an empty sheet rather than raising",
+                  (await resolve_manual_games(
+                      req=GameResolveRequest(), current_user=u, club=c,
+                      db=session))["games"] == 0)
+
+        print("\n-- THE UPLOAD CAP IS THE ONE nginx CARRIES --")
+        check("the app's cap is 64 MB, matching the client_max_body_size on "
+              "the preview location in nginx.conf",
+              _MAX_GAME_UPLOAD_BYTES == 64 * 1024 * 1024,
+              str(_MAX_GAME_UPLOAD_BYTES))
+        nginx = (Path(__file__).resolve().parent.parent.parent
+                 / "frontend" / "nginx.conf")
+        conf = nginx.read_text() if nginx.exists() else ""
+        check("nginx gives the preview route its own location, or the raise is invisible",
+              "location = /api/club-admin/manual-entries/games/import/preview" in conf)
+        check("with the matching 64m cap",
+              "client_max_body_size 64m;" in conf, "not found in nginx.conf")
+        check("and the two other steps get one too, for the write's own timeout",
+              "location = /api/club-admin/manual-entries/games/import/resolve" in conf
+              and "location = /api/club-admin/manual-entries/games/import/commit" in conf)
+        # An EXACT location, because a trailing-slash prefix one makes nginx
+        # answer `POST /games/import` with a 301 — which drops the body of the
+        # strict single-shot endpoint beside it. Measured; the prefix form was
+        # written first and 301'd.
+        check("as EXACT locations, so the strict /games/import beside them is "
+              "not 301'd into losing its body",
+              "location /api/club-admin/manual-entries/games/import/ {" not in conf)
 
     await engine.dispose()
     print(f"\n{PASS} passed, {FAIL} failed")

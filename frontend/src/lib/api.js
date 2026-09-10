@@ -1941,6 +1941,12 @@ export const api = {
   // The scorecard import wizard: preview -> resolve -> commit, the same shape
   // the historical-stats import uses. `resolve` is read-only and idempotent,
   // so the review screen calls it again on every answer the admin changes.
+  //
+  // Which is why `preview` hands back a TOKEN and the two steps after it send
+  // that rather than the rows: a club's recovered history is 184,661 rows and
+  // about 145 MB as a JSON body, and re-sending it per keystroke is what made
+  // a big import impossible. `rows` is still accepted by both, unchanged, for
+  // a caller that would rather post them itself.
   adminPreviewManualGames: (file) => {
     const form = new FormData()
     form.append('file', file)
