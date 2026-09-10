@@ -64,6 +64,12 @@ function typeName(node) {
 // The shared primitives every family draws with, named the way somebody
 // looking at the post would name them. One map covers all 48 templates, which
 // is why these never needed a `data-layer` of their own.
+//
+// KEYED ON `displayName`, WHICH EACH PRIMITIVE SETS EXPLICITLY. A minified
+// build mangles `Component.name` to `R` or `ni`, so a map keyed on that reads
+// correctly on the dev server and turns to noise in the bundle a club actually
+// uses — found by sweeping every template's labels on a real production build,
+// not on the dev server.
 const FRIENDLY = {
   Halftone: 'Halftone texture',
   Stripes: 'Stripe texture',
@@ -82,6 +88,20 @@ const FRIENDLY = {
   AutoFit: 'Headline',
   NavStrip: 'Nav strip',
   Panel: 'Panel',
+  Bug: 'BetterCricket credit',
+  BSMark: 'BetterCricket mark',
+  Slab: 'Label',
+  Kicker: 'Kicker',
+  StatCell: 'Stat',
+  ValueIcon: 'Icon',
+  Mark: 'Club mark',
+  LeaderColumn: 'Leaders',
+  // Plain DOM children that carry no words of their own. A texture or a
+  // full-bleed photo is worth naming; `div` never is, which is what the
+  // numbered fallback is for.
+  svg: 'Artwork',
+  img: 'Image',
+  canvas: 'Artwork',
 }
 
 // The first component inside an element that has a name worth showing — for a
@@ -203,8 +223,9 @@ export function LayerRoot({ style, children, ...rest }) {
   const blocks = ctx?.blocks
   const hidden = ctx?.hidden
   const order = ctx?.order
+  const hover = ctx?.hover
   const nothingToApply = !ctx
-    || (!order?.length && !hidden?.size && !blocks?.length)
+    || (!order?.length && !hidden?.size && !blocks?.length && !hover)
 
   // THE UNTOUCHED PATH. Byte-for-byte the div every template rendered before
   // any of this existed — no cloning, no z-index, no stacking context — so a
@@ -236,9 +257,19 @@ export function LayerRoot({ style, children, ...rest }) {
     flushRun()
     if (hidden?.has(id)) return
     z += 1
+    // POINTING AT A ROW SHOWS WHICH ELEMENT IT IS. A layout's own elements are
+    // named from their own words where they have any, and plenty of them are a
+    // wrapper with no words at all — so the honest answer to "which one is
+    // Element 7" is to light it up on the canvas rather than to invent a name
+    // for it. Only ever in the editor: `hover` is not passed to the export.
+    const lit = hover && hover === id
     out.push(cloneElement(node, {
       key: id,
-      style: { ...(node.props?.style || {}), zIndex: z },
+      style: {
+        ...(node.props?.style || {}),
+        zIndex: lit ? 9999 : z,
+        ...(lit ? { outline: '3px solid var(--pb-accent, #ffc233)', outlineOffset: -3 } : null),
+      },
       // Only a plain DOM child can carry it — a component would take it as an
       // unknown prop and drop it. Enough to name what is where in the stack,
       // which is what a check measuring "between these two" needs.

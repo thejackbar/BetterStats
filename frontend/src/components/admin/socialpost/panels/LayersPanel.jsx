@@ -15,6 +15,7 @@
 //   onStep(id, 'up' | 'down')           move one place through the whole stack
 //   onMove(dragId, overId)              drag reorder
 //   onToggleHidden(id)                  show / hide a layout element
+//   onHover(id | null)                  light that element up on the canvas
 //   onDuplicate(id), onRemove(id)       block ops
 //   backgroundName                      the layout's background, drawn as the floor
 //   historyLog  [{ label, t }]          from useEditHistory
@@ -25,7 +26,7 @@ import { itemLabel } from '../../../../social/blank-template'
 
 export default function LayersPanel({
   stack = [], selIds = [], hidden = null, onSelect, onStep, onMove, onToggleHidden,
-  onDuplicate, onRemove, historyLog = [], note = null, backgroundName = null,
+  onDuplicate, onRemove, historyLog = [], note = null, backgroundName = null, onHover = null,
 }) {
   const [dragId, setDragId] = useState(null)
   const [overId, setOverId] = useState(null)
@@ -48,6 +49,11 @@ export default function LayersPanel({
         onDragOver={(e) => { e.preventDefault(); if (overId !== l.id) setOverId(l.id) }}
         onDrop={(e) => { e.preventDefault(); if (dragId && dragId !== l.id) onMove(dragId, l.id); setDragId(null); setOverId(null) }}
         onClick={(e) => isBlock && onSelect && onSelect(l.id, e.shiftKey || e.ctrlKey || e.metaKey)}
+        // Pointing at a row lights that element up on the canvas, which is the
+        // honest answer to "which one is Element 7" — plenty of a layout's own
+        // wrappers have no words to be named after.
+        onMouseEnter={() => onHover && onHover(l.id)}
+        onMouseLeave={() => onHover && onHover(null)}
         className={`flex items-center justify-between gap-2 px-2 py-1.5 rounded-md cursor-grab border ${
           selIds.includes(l.id) ? 'border-pb-accent bg-pb-surface2' : 'border-transparent hover:bg-pb-surface2'
         } ${overId === l.id && dragId ? 'border-pb-accent' : ''}`}>

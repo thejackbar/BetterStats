@@ -1371,3 +1371,15 @@ export const DEFAULT_RESULTS = [
     topBat: [{ name: 'C. MURRAY', line: '46 (55)' }, { name: 'B. PAYNE', line: '33 (42)' }],
     topBowl: [{ name: 'D. GOODMAN', line: '2/19 (7)' }, { name: 'R. HALL', line: '2/24 (6)' }] },
 ]
+
+// MINIFICATION MANGLES `Component.name`, so a layer label derived from it
+// reads as `R` or `ni` in a production build and as the real name in dev —
+// which is exactly the kind of thing only a built bundle shows. An explicit
+// displayName is a string literal, so it survives.
+Monogram.displayName = 'Monogram'
+Slab.displayName = 'Slab'
+Kicker.displayName = 'Kicker'
+Bug.displayName = 'Bug'
+SponsorFooter.displayName = 'SponsorFooter'
+AutoFit.displayName = 'AutoFit'
+Shield.displayName = 'Shield'

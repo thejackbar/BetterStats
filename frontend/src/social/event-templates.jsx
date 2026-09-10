@@ -868,3 +868,12 @@ export function eventPaletteFor(surface, palette) {
   if (surface !== 'light') return palette
   return { ...palette, paper: palette.paper || '#f4efe4', deepInk: palette.deepInk || '#1f1c14' }
 }
+
+// MINIFICATION MANGLES `Component.name`, so a layer label derived from it
+// reads as `R` or `ni` in a production build and as the real name in dev —
+// which is exactly the kind of thing only a built bundle shows. An explicit
+// displayName is a string literal, so it survives.
+BSMark.displayName = 'BSMark'
+PhotoLayer.displayName = 'PhotoLayer'
+ClubLockup.displayName = 'ClubLockup'
+Watermark.displayName = 'Watermark'

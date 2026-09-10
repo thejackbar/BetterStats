@@ -1102,6 +1102,9 @@ export default function AdminSocialPost() {
   // The built-in layout's OWN elements as layers, so an added block can sit
   // between two of them rather than only wholly behind or wholly in front.
   const tlayers = useTemplateLayers(templateId)
+  // Which layer the pointer is over in the Layers panel, so the canvas can
+  // light it up. Editor-only — never passed to the export node.
+  const [hoverLayer, setHoverLayer] = useState(null)
   // Undo/redo + action log, one per layer (history is per page/layer).
   const canvasHistory = useEditHistory(canvas)
   const overlayHistory = useEditHistory(overlay)
@@ -2418,6 +2421,7 @@ export default function AdminSocialPost() {
     order: tlayers.order,
     hidden: tlayers.hidden,
     blocks: overlayItems,
+    hover: interactive ? hoverLayer : null,
     renderRun: (items, key, z) => (
       <BlankCanvas key={key} team={team} palette={templatePalette} items={items} data={blankData}
         transparent width={W} height={H} testId="post-blocks"
@@ -3067,7 +3071,7 @@ export default function AdminSocialPost() {
               <LayersPanel
                 stack={layerStack} selIds={layer.selIds} hidden={tlayers.hidden}
                 onSelect={layer.select} onStep={hStep} onMove={hMoveBefore}
-                onToggleHidden={hToggleHidden}
+                onToggleHidden={hToggleHidden} onHover={setHoverLayer}
                 onDuplicate={hDuplicate} onRemove={hRemove}
                 historyLog={history.log}
                 backgroundName={!isBlankTab ? tmpl.name : null}

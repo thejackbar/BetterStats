@@ -2445,3 +2445,15 @@ export function SC3_Dashboard({ match, palette = {}, square = false, only = 'hom
     </LayerRoot>
   )
 }
+
+// MINIFICATION MANGLES `Component.name`, so a layer label derived from it
+// reads as `R` or `ni` in a production build and as the real name in dev —
+// which is exactly the kind of thing only a built bundle shows. An explicit
+// displayName is a string literal, so it survives.
+CreditMark.displayName = 'CreditMark'
+AutoFitText.displayName = 'AutoFitText'
+GrainSVG.displayName = 'GrainSVG'
+Halftone.displayName = 'Halftone'
+Stripes.displayName = 'Stripes'
+ClubLogo.displayName = 'ClubLogo'
+BrandLockup.displayName = 'BrandLockup'

@@ -313,3 +313,14 @@ export function ClubLaunchPoster({
     </LayerRoot>
   )
 }
+
+// MINIFICATION MANGLES `Component.name`, so a layer label derived from it
+// reads as `R` or `ni` in a production build and as the real name in dev —
+// which is exactly the kind of thing only a built bundle shows. An explicit
+// displayName is a string literal, so it survives.
+ValueIcon.displayName = 'ValueIcon'
+Mark.displayName = 'Mark'
+StatCell.displayName = 'StatCell'
+Panel.displayName = 'Panel'
+NavStrip.displayName = 'NavStrip'
+LeaderColumn.displayName = 'LeaderColumn'
