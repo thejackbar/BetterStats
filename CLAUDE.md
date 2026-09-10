@@ -656,6 +656,25 @@ layers on all templates where each element except the background is a layer."*
   painting in markup order while the panel said otherwise. Labels for these come
   from one `FRIENDLY` map keyed on the component name, which covers all 48 with
   no per-template naming.
+- **A MINIFIED BUILD MANGLES `Component.name`, SO A MAP KEYED ON IT READS
+  CORRECTLY ON THE DEV SERVER AND TURNS TO NOISE IN THE BUNDLE A CLUB USES.**
+  `FRIENDLY` keyed on `fn.name` gave `Halftone texture` in dev and `R`, `ni`,
+  `E` and `Ei` in the real bundle — a Layers panel of two-letter labels. Every
+  primitive sets an explicit `displayName` (a string literal, which survives)
+  and the map is keyed on that. **Found by sweeping every template's labels on a
+  PRODUCTION build, not on the dev server** — nothing about this is visible
+  before `vite build`, which is the general lesson: anything that reads a
+  function's own name has to be measured on the shipped bundle.
+- **AND ONE PRIMITIVE WAS MISSED IN THAT PASS**, so SC1-SC3 still read `Ni`
+  until `ScSponsorFooter` got its own. The sweep is worth re-running on any
+  change here: it prints every template's labels in one go, and a mangled name
+  is obvious at a glance in a way one template opened by hand is not.
+- **A LAYOUT'S OWN WRAPPER OFTEN HAS NO WORDS TO BE NAMED AFTER, so pointing at
+  the row lights the element up instead.** Naming 300-odd children by hand was
+  the wrong fix for ~35 rows reading `Element N` — the honest answer to "which
+  one is Element 7" is to show it. Hover outlines it on the canvas and lifts it
+  to the top for as long as the pointer is there. Editor only: `hover` is never
+  passed to the export context, so it cannot reach a downloaded PNG.
 - **`pkill -f` MATCHES ITS OWN SHELL, hit twice more.** A hung shoot killed the
   command that was killing it (exit 144). Split the pattern, or run the kill on
   its own.
