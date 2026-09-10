@@ -1310,6 +1310,13 @@ async def lifespan(app: FastAPI):
         from app.services.webinar_ddl import STATEMENTS as _WEBINAR_DDL
         for _stmt in _WEBINAR_DDL:
             await conn.execute(text(_stmt))
+        # Mirrors migration 302 — the ONE copy is the service. Holds a parsed
+        # scorecard sheet between the import wizard's preview and its commit,
+        # so a club's whole history is not carried back up the wire by the
+        # browser on every override change.
+        from app.services.game_import_staging_ddl import STATEMENTS as _GAME_STAGING_DDL
+        for _stmt in _GAME_STAGING_DDL:
+            await conn.execute(text(_stmt))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS grade_merge_logs (
                 id SERIAL PRIMARY KEY,

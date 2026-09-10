@@ -9164,6 +9164,104 @@ Games list returning `Error: Internal Server Error`.
   manual innings, so an uploaded card draws initials badges rather than crests.
   Pre-existing, and a manual upload has no club GUID to resolve one from.
 
+## THE SHEET IS PARSED ONCE, NOT CARRIED BY THE BROWSER (migration 302, v9.77.0, Sep 2026)
+
+A club's recovered archive is 97 seasons, 7,915 matches and **184,661 rows** in
+one `manual_games_scorecards.csv` of about 24 MB, and it could not be imported
+at all: `_MAX_GAME_UPLOAD_BYTES` refused anything over 8 MB, so it had to be
+split into 92 per-season sheets.
+
+- **RAISING THE CAP ALONE WOULD HAVE DONE NOTHING, AND MEASURING IS WHAT SHOWED
+  IT.** The import is preview -> resolve -> commit and **only preview takes a
+  file**; the browser held the parsed rows and posted every one of them back as
+  JSON on the other two steps. Measured on a 33 MB, 182,154-row fixture: the
+  same rows as a request body are **145.6 MB**, because all 33 column names
+  repeat on every row. And `resolve` fires AGAIN on every override change, so
+  that body went up the wire once per player matched, season picked and grade
+  named.
+- **THE SERVER-SIDE WORK WAS NEVER THE PROBLEM.** `_resolve_games` over that
+  whole sheet is **1.9s**. The entire interactive cost was the upload, which is
+  why the fix is to stop sending it rather than to make the matching faster.
+- **SO THE ROWS ARE STAGED AND THE TWO LATER STEPS NAME THEM BY TOKEN.**
+  Measured end to end through the shipped route bodies: the wizard now sends
+  **159 bytes** per resolve/commit instead of 145.6 MB.
+- **`rows` STAYS ON THE REQUEST, AND THAT IS WHAT MAKES THE CHANGE SAFE.**
+  `GameResolveRequest` takes EITHER; `_rows_for` prefers the token and falls
+  back. The pre-existing 90-odd checks in the suite all drive the rows path, so
+  their passing unchanged IS the proof a direct caller is unaffected, and the
+  suite additionally asserts the two shapes resolve byte-for-byte alike.
+- **A TABLE, NOT THE MEDIA VOLUME, AND THE REASON IS THE OPPOSITE ONE.** These
+  rows live for one sitting and are deleted the moment the import commits, so
+  they must never be backed up;
+  `/mnt/media/bettercricket/internal/videos` sits outside the backup because a
+  video is PERMANENT and merely too big to dump. A table also makes expiry and
+  club scoping one DELETE rather than a directory walk, and this is text.
+- **SCOPED IN THE WHERE CLAUSE, NEVER FETCHED THEN CHECKED**, so another club's
+  token, another user's, an expired one and one that never existed are
+  indistinguishable. An expired row reads as absent BEFORE any sweep runs: the
+  sweep (on preview, the one moment somebody is already paying for a large
+  write) is a tidy-up, never the thing that enforces the deadline.
+- **THE TOKEN IS DISCARDED IN THE SAME TRANSACTION AS THE GAMES**, so a
+  rolled-back import keeps its staged rows and can be retried, and a landed one
+  can never be imported twice.
+- **THE COMMIT WAS ALREADY FINE, AND THAT WAS MEASURED RATHER THAN ASSUMED.**
+  `_write_games` gives each game its OWN savepoint and flushes as it goes, so
+  nothing accumulates: `db.commit()` at the end is **instant** and no chunking
+  is needed. Per-request resident memory is ~460-620 MB across the three steps.
+- **BUT THE WRITE IS 68-124s, PAST nginx's OWN 60s `proxy_read_timeout`
+  DEFAULT** — which would hand the browser a 504 while the backend carried on
+  and finished, the exact "Gateway Time-out on a job that was working" shape
+  this deployment has already been bitten by once. Found by timing the write,
+  not by reading the config. So resolve and commit get their own locations for
+  the TIMEOUT, not for the body size.
+- **BOTH CAPS HAVE TO MOVE OR THE RAISE IS INVISIBLE.** `client_max_body_size
+  20m` on `location /api/` refuses the body before FastAPI is reached. The
+  suite asserts the app constant and the nginx block agree, so they cannot
+  drift.
+- **AN EXACT `location =`, BECAUSE A TRAILING-SLASH PREFIX ONE 301s A POST.**
+  nginx redirects `/games/import` to `/games/import/` whenever a trailing-slash
+  prefix location with a `proxy_pass` exists, and a 301 on a POST drops the
+  body — which would have broken the strict single-shot `POST /games/import`
+  beside it, silently. **Written as a prefix first and caught by running nginx
+  against a stub backend**, not by reading the config: eight probes across four
+  routes at 10/30/70 MB. That endpoint is deliberately left on the ordinary
+  /api/ limits, since it has no app-level size cap and raising nginx's would
+  let an unbounded body reach a route with no guard.
+- **THE PREVIEW'S OWN `rows` REPLY IS CAPPED AT THE OLD 8 MB LIMIT.** Returning
+  them for a 24 MB archive is a ~100 MB download nobody reads. The KEY stays on
+  the wire whatever the size (the `plan_report.unassigned` rule), and no caller
+  can regress because a sheet over the old cap was refused outright and so
+  never received them.
+- **Verified against a real Postgres** (`verify_manual_games_import.py` is 121
+  checks now: the DDL applied three times over a populated table, a deleted
+  club's staged rows going with it, the whole sheet staged in the shape
+  `_resolve_games` reads, a token with NO rows resolving it, the same again on
+  the next override change, all four scoping refusals, an expired token absent
+  before the sweep, the commit spending its token so the same archive cannot
+  land twice, and the two request shapes resolving byte-for-byte alike) **with
+  two control runs**: with the service absent it REPORTS it and the other 92
+  still pass; with the token ignored, **11 fail** on exactly that behaviour.
+- **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN, HIT TWICE IN ONE
+  CHANGE.** `preview_manual_games` takes a session now, so the first control
+  died on an unexpected keyword at check 1 and said nothing about the other
+  118 — a `preview()` wrapper reads the shipped signature instead. Then the
+  neutered run died on a 422 from `commit_manual_games`; every commit call in
+  that section reports the refusal rather than raising.
+- **A CHECK THAT PASSES AGAINST THE BROKEN CODE IS NOT A CHECK.** "the override
+  landed" was trivially true of an EMPTY sheet, because an override is applied
+  to the match map whether or not a row was found. It asserts the player's
+  `sheet` figures too now, which are summed from the rows themselves.
+- **A CHECK THAT MEASURES THE HARNESS IS NOT A CHECK EITHER.** The nginx probe
+  first reported 500s that were its own scratchpad temp dirs being unwritable
+  by `www-data`, and the end-to-end run died on `v_effective_player_season_stats`
+  missing — both harness gaps, not the feature's. `_view_ddl.py` is what the
+  suites use for the second.
+- **NOTICED, NOT BUILT**: nothing expires a staged sheet except the next
+  preview, so a club that uploads once and never returns leaves its rows until
+  somebody else imports. A nightly sweep is the obvious follow-up and was not
+  worth its own job for a table that is empty almost always. The strict
+  single-shot `POST /games/import` still has no app-level size cap of its own.
+
 ## A game brings its own season with it (v9.54.2, Aug 2026)
 
 Reported straight after the uploaded-card fix above: the 1974 game is filed

@@ -63,7 +63,18 @@ function SheetNote({ sheet }) {
 }
 
 export default function ManualGamesImportWizard({ onDone }) {
-  const [rows, setRows] = useState(null)
+  // The TOKEN, not the sheet. The preview parses the file once and holds the
+  // rows server-side for an hour; this screen carries a handle to them and the
+  // overrides, which is a few hundred bytes however big the archive is.
+  //
+  // It used to hold the parsed rows and post every one of them back on BOTH
+  // later steps — and `resolve` fires again on every override change below, so
+  // a club's whole history went up the wire once per player matched, season
+  // picked and grade named. Measured on a 33 MB, 182,154-row sheet: those rows
+  // as a JSON body are 145.6 MB, because all 33 column names repeat on every
+  // row. The server-side work was never the problem (the same sheet resolves
+  // in 1.9s); the upload was.
+  const [token, setToken] = useState(null)
   const [filename, setFilename] = useState('')
   const [unknown, setUnknown] = useState([])
   const [review, setReview] = useState(null)
@@ -73,12 +84,12 @@ export default function ManualGamesImportWizard({ onDone }) {
   const [result, setResult] = useState(null)
   const fileRef = useRef(null)
 
-  const resolve = useCallback(async (nextOverrides, nextRows = rows, nextFile = filename) => {
+  const resolve = useCallback(async (nextOverrides, nextToken = token, nextFile = filename) => {
     setBusy('resolve'); setError('')
     try {
       const res = await api.adminResolveManualGames({
         filename: nextFile,
-        rows: nextRows,
+        token: nextToken,
         player_overrides: nextOverrides.players,
         season_overrides: nextOverrides.seasons,
         grade_overrides: nextOverrides.grades,
@@ -87,7 +98,7 @@ export default function ManualGamesImportWizard({ onDone }) {
     } catch (e) {
       setError(e.message || 'Could not read that sheet.')
     } finally { setBusy('') }
-  }, [rows, filename])
+  }, [token, filename])
 
   async function pickFile(e) {
     const file = e.target.files?.[0]
@@ -95,13 +106,13 @@ export default function ManualGamesImportWizard({ onDone }) {
     setBusy('preview'); setError(''); setResult(null); setReview(null)
     try {
       const prev = await api.adminPreviewManualGames(file)
-      setRows(prev.rows); setFilename(prev.filename || file.name); setUnknown(prev.unknown_columns || [])
+      setToken(prev.token); setFilename(prev.filename || file.name); setUnknown(prev.unknown_columns || [])
       const fresh = { players: {}, seasons: {}, grades: {} }
       setOverrides(fresh)
-      await resolve(fresh, prev.rows, prev.filename || file.name)
+      await resolve(fresh, prev.token, prev.filename || file.name)
     } catch (err) {
       setError(err.message || 'Could not read that file.')
-      setRows(null)
+      setToken(null)
     } finally { setBusy('') }
   }
 
@@ -129,12 +140,15 @@ export default function ManualGamesImportWizard({ onDone }) {
     try {
       const out = await api.adminCommitManualGames({
         filename,
-        rows,
+        token,
         player_overrides: overrides.players,
         season_overrides: overrides.seasons,
         grade_overrides: overrides.grades,
       })
-      setResult(out); setRows(null); setReview(null)
+      // The token is spent once its sheet has landed — the server drops the
+      // staged rows in the same transaction as the games, so holding on to it
+      // would only offer to import the same archive twice.
+      setResult(out); setToken(null); setReview(null)
       if (fileRef.current) fileRef.current.value = ''
       // Told after the result is on screen, and the parent must not remount
       // this component in response — see the stable key where it is mounted.

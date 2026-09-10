@@ -48,7 +48,7 @@ from app.models.db import (
     get_db,
 )
 from app.routers.auth import get_current_club, get_current_user
-from app.services import dismissal, import_cleanup
+from app.services import dismissal, game_import_staging, import_cleanup
 from app.services import import_ingest as ingest
 from app.services.grade_labels import suggest_categories, suggest_category
 from app.services.season_resolve import (
@@ -2601,6 +2601,21 @@ async def import_manual_games(
 
 class GameResolveRequest(BaseModel):
     filename: Optional[str] = None
+    # EITHER the rows themselves, OR a token naming the sheet /preview staged.
+    #
+    # `rows` is what this endpoint has always taken and still works untouched —
+    # a small sheet, or any caller posting rows directly, is byte-for-byte
+    # unaffected. The token is an alternative, never a requirement.
+    #
+    # It exists because the rows were the binding limit on a big import, and
+    # not through the upload: the browser held the parsed sheet and posted
+    # every row back on BOTH later steps, and `resolve` fires again on every
+    # override change. Measured on a 33 MB, 182,154-row sheet, those rows as a
+    # JSON body are 145.6 MB — all 33 column names repeat on every row — so a
+    # club's whole history went up the wire once per player matched. The
+    # server-side work was never the problem (`_resolve_games` over that sheet
+    # is 1.9s); the upload was.
+    token: Optional[str] = None
     rows: list[dict] = Field(default_factory=list)
     # raw sheet label -> an id/name, or one of the '__…__' choices below
     player_overrides: dict = Field(default_factory=dict)   # player id | '__new__' | '__skip__'
@@ -2608,7 +2623,43 @@ class GameResolveRequest(BaseModel):
     grade_overrides: dict = Field(default_factory=dict)    # grade name | '__new__' | '__none__'
 
 
-_MAX_GAME_UPLOAD_BYTES = 8 * 1024 * 1024
+# A whole club history is a big sheet: the archive that prompted this is 97
+# seasons and 184,661 rows at about 24 MB. nginx has its own cap and BOTH have
+# to move or raising this one is invisible — see the `location
+# /api/club-admin/manual-entries/games/import/preview` block in nginx.conf,
+# which carries the matching limit.
+_MAX_GAME_UPLOAD_BYTES = 64 * 1024 * 1024
+
+# The old upload cap, kept as the line under which the preview still answers
+# with the rows themselves — see the note where it is read.
+_PREVIEW_INLINE_ROWS_MAX_BYTES = 8 * 1024 * 1024
+
+
+async def _rows_for(
+    db: AsyncSession,
+    req: GameResolveRequest,
+    *,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> list[dict]:
+    """The sheet this request names — its own rows, or the staged ones.
+
+    A token that has lapsed, belongs to another club, or never existed all read
+    the same way, so a stale wizard gets a sentence telling it to upload again
+    rather than a silently empty import.
+    """
+    if not req.token:
+        return req.rows or []
+    staged = await game_import_staging.load(
+        db, token=req.token, org_id=org_id, user_id=user_id)
+    if staged is None:
+        raise HTTPException(
+            410,
+            "That upload has expired. Sheets are held for an hour while you work "
+            "through the review, so upload the file again to pick up where you "
+            "left off.",
+        )
+    return staged["rows"]
 
 
 def _apply_player_overrides(matches: dict, overrides: dict) -> None:
@@ -2658,14 +2709,24 @@ def _season_label_year(label: str) -> Optional[int]:
     return _season_start_year(label)
 
 
-async def _resolve_games(db: AsyncSession, club: Organisation, req: GameResolveRequest) -> dict:
+async def _resolve_games(
+    db: AsyncSession,
+    club: Organisation,
+    req: GameResolveRequest,
+    rows: Optional[list[dict]] = None,
+) -> dict:
     """Match the sheet's seasons, grades and players against what the club holds.
 
     Shared by /resolve and /commit so the review screen and the write can never
     disagree about what is about to be created. Returns the review payload plus
     the private `_plan` the commit reads.
+
+    `rows` is passed in by both callers, already resolved from either the
+    request's own rows or the staged sheet its token names — so this function
+    has one idea of the sheet however it arrived. It falls back to `req.rows`
+    for a caller that has not resolved them itself.
     """
-    rows = req.rows or []
+    rows = (req.rows or []) if rows is None else rows
     by_game, group_errors = _group_by_game(rows)
 
     season_labels, grade_labels, names = [], [], []
@@ -2830,13 +2891,21 @@ async def preview_manual_games(
     file: UploadFile = File(...),
     current_user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
     club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Parse an uploaded scorecard CSV. No DB writes; the client holds the rows."""
+    """Parse an uploaded scorecard CSV and stage it under a token.
+
+    The sheet is parsed ONCE, here, and held server-side for an hour, so the
+    two steps that follow name it by token instead of carrying it. `rows` is
+    still returned for a caller that would rather post them back itself — the
+    wizard no longer reads it, but the endpoint has always answered with it.
+    """
     data = await file.read()
     if not data:
         raise HTTPException(422, "Empty file.")
     if len(data) > _MAX_GAME_UPLOAD_BYTES:
-        raise HTTPException(413, "File too large (max 8 MB).")
+        mb = _MAX_GAME_UPLOAD_BYTES // (1024 * 1024)
+        raise HTTPException(413, f"File too large (max {mb} MB).")
     rows, unknown, missing = _read_game_csv(data.decode("utf-8-sig", errors="replace"))
     if missing:
         raise HTTPException(422, "The sheet is missing required column(s): "
@@ -2844,13 +2913,33 @@ async def preview_manual_games(
                                  + ". Download the template to see every column.")
     if not rows:
         raise HTTPException(422, "The sheet has a header row and nothing under it.")
+
+    # Swept here rather than on a nightly job: this is the one moment somebody
+    # is already paying for a large write, and the only moment new rows arrive.
+    await game_import_staging.sweep_expired(db)
+    token = await game_import_staging.store(
+        db, org_id=club.id, user_id=current_user.id,
+        rows=rows, filename=file.filename, unknown_columns=unknown)
+    await db.commit()
+
     return {
+        "token": token,
         "filename": file.filename,
         "columns": GAME_CSV_COLUMNS,
         "unknown_columns": unknown,
         "row_count": len(rows),
         "sample_rows": rows[:10],
-        "rows": rows,
+        # The key STAYS on the wire whatever the size, so a browser served an
+        # older bundle mid-deploy reads what it expects rather than crashing —
+        # the `plan_report.unassigned` rule.
+        #
+        # It is only FILLED for a sheet small enough to have been imported
+        # before this change, which is what makes capping it safe: those rows
+        # are ~4x the CSV as JSON (all 33 column names repeat on every row), so
+        # returning them for a 24 MB archive is a 100 MB download nobody reads.
+        # No caller can regress, because a sheet over the old cap was refused
+        # outright and so never received them.
+        "rows": rows if len(data) <= _PREVIEW_INLINE_ROWS_MAX_BYTES else [],
     }
 
 
@@ -2866,7 +2955,8 @@ async def resolve_manual_games(
     Idempotent and read-only — call it again each time the admin changes a
     match, which is exactly what the review screen does.
     """
-    out = await _resolve_games(db, club, req)
+    rows = await _rows_for(db, req, org_id=club.id, user_id=current_user.id)
+    out = await _resolve_games(db, club, req, rows)
     out.pop("_plan", None)
     return out
 
@@ -2885,7 +2975,8 @@ async def commit_manual_games(
     that loop would go down with it and leave the next game pointing at
     nothing.
     """
-    resolved = await _resolve_games(db, club, req)
+    rows = await _rows_for(db, req, org_id=club.id, user_id=current_user.id)
+    resolved = await _resolve_games(db, club, req, rows)
     plan = resolved["_plan"]
     if plan["unresolved"]:
         raise HTTPException(422, resolved["warnings"][0])
@@ -2988,6 +3079,11 @@ async def commit_manual_games(
                "filename": req.filename,
                "errors": errors[:20]},
     )
+    # The token is spent the moment its sheet lands. Dropped in the SAME
+    # transaction as the games, so a rolled-back import keeps its staged rows
+    # and can be tried again — and a landed one can never be imported twice.
+    if req.token:
+        await game_import_staging.discard(db, token=req.token, org_id=club.id)
     await db.commit()
     await _recompute_milestones(db, club.id, affected_player_ids)
     return {
