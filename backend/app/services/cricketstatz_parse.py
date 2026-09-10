@@ -34,6 +34,14 @@ import html
 import re
 from typing import Optional
 
+# Imported by name: `dismissal` is a local variable inside
+# `_parse_dismissal`, so the bare module name would be shadowed there.
+from app.services.dismissal import (
+    ABSENT_UNSTATED_NAMES,
+    absent_reading,
+    normalise_dismissal,
+)
+
 # ── the document.write() wrapper ─────────────────────────────────────────────
 
 _DOC_WRITE = re.compile(r'^\s*document\.write\("(.*)"\);?\s*$', re.S)
@@ -417,7 +425,17 @@ def _parse_dismissal(cell_html: str) -> dict:
     key = " ".join(howouts).strip()
     not_out = "not out" in key
     did_not_bat = key.startswith("dnb") or key in {"did not bat", "dnb"}
-    absent = key.startswith("absent")
+    # AN ABSENCE IS TRANSCRIBED, NOT DECIDED, HERE. This used to be
+    # `key.startswith("absent")`, which swept "absent out" in with "absent
+    # hurt" and stored both as a did-not-bat - so a competition that scores an
+    # absent batter as a dismissal had those innings vanish from every average.
+    # The prefix is exactly the trap `services/dismissal.py` documents for
+    # `LIKE 'retired%'`. What the card SAYS is carried out of here; what to
+    # STORE for the ambiguous bare word is the club's call and is applied by
+    # the importer, which is the one place that answer lives.
+    absent_says = absent_reading(key)
+    absent_unstated = normalise_dismissal(key) in ABSENT_UNSTATED_NAMES
+    absent = absent_says is not None
 
     dismissal: Optional[str] = None
     bowler: Optional[dict] = None
@@ -457,7 +475,15 @@ def _parse_dismissal(cell_html: str) -> dict:
         "batter": batter,
         "dismissal_type": dismissal,
         "not_out": not_out,
-        "did_not_bat": did_not_bat or absent,
+        # An "absent out" is a real dismissed innings, so it is NOT a
+        # did-not-bat; an "absent hurt" is. A bare "absent" defaults to Cricket
+        # Australia's reading (no innings) and the importer overrides it when
+        # the club says their competition scores it as out.
+        "did_not_bat": did_not_bat or absent_says == "no_innings",
+        # 'out' | 'no_innings' | None, and True only for the bare word, so the
+        # importer can apply the club's answer without re-parsing the text.
+        "absent_reading": absent_says,
+        "absent_unstated": absent_unstated,
         "bowler": bowler,
         "fielder": fielder,
         "is_captain": _has_marker(batter_html, "Captain"),

@@ -454,7 +454,8 @@ async def hand_edited_games(db: AsyncSession, org_id) -> set:
 
 
 async def import_match(db: AsyncSession, org_id, import_id, card: dict,
-                       row: dict, is_ours, caches: dict) -> Optional[str]:
+                       row: dict, is_ours, caches: dict,
+                       bare_absent_is_out: bool = False) -> Optional[str]:
     """Write one CricketStatz match. Returns a note when something was skipped."""
     source_id = str(card.get("source_match_id") or row.get("source_match_id") or "")
     if not source_id:
@@ -543,7 +544,8 @@ async def import_match(db: AsyncSession, org_id, import_id, card: dict,
         seq = inn.get("innings_number") or 1
 
         if is_ours(batting_team):
-            await _write_our_batting(db, org_id, game, inn, seq, caches)
+            await _write_our_batting(db, org_id, game, inn, seq, caches,
+                                     bare_absent_is_out)
         if is_ours(bowling_team):
             await _write_our_bowling(db, org_id, game, inn, seq, caches, fielding)
 
@@ -557,7 +559,20 @@ async def import_match(db: AsyncSession, org_id, import_id, card: dict,
     return None
 
 
-async def _write_our_batting(db, org_id, game, inn, seq, caches) -> None:
+def _absent_did_not_bat(b: dict, bare_absent_is_out: bool) -> bool:
+    """Whether this batting row is a did-not-bat, absence included.
+
+    A BARE "absent" is the only thing the club's answer touches. The card
+    saying "absent out" or "absent hurt" has already said which it is, and is
+    honoured either way - see `services/dismissal.absent_reading`.
+    """
+    if b.get("absent_unstated"):
+        return not bare_absent_is_out
+    return bool(b.get("did_not_bat"))
+
+
+async def _write_our_batting(db, org_id, game, inn, seq, caches,
+                             bare_absent_is_out: bool = False) -> None:
     """Our batting card, its fall of wickets and the stands behind it."""
     seen: set = set()
     for b in inn.get("batters", []):
@@ -584,7 +599,11 @@ async def _write_our_batting(db, org_id, game, inn, seq, caches) -> None:
             strike_rate=b.get("strike_rate"),
             dismissal_type=b.get("dismissal_type"),
             not_out=bool(b.get("not_out")),
-            did_not_bat=bool(b.get("did_not_bat")),
+            # THE CLUB'S ANSWER IS APPLIED HERE AND NOWHERE ELSE. The parser
+            # transcribes what the card says; only a BARE "absent" is
+            # ambiguous, and only that is overridden. An explicit "absent out"
+            # or "absent hurt" is read as written whatever this is set to.
+            did_not_bat=_absent_did_not_bat(b, bare_absent_is_out),
         ))
 
     for fall in inn.get("fall_of_wickets", []):
@@ -1087,7 +1106,8 @@ async def _set_progress(session_maker, import_id, **fields) -> None:
 
 
 async def run_import(session_maker, org_id, import_id, club_id: str,
-                     synced_years: str = "skip") -> None:
+                     synced_years: str = "skip",
+                     bare_absent_is_out: bool = False) -> None:
     """Pull the club's whole CricketStatz history. Never raises.
 
     Runs as a detached background task, so its own session is opened here and
@@ -1100,7 +1120,7 @@ async def run_import(session_maker, org_id, import_id, club_id: str,
         "records": 0, "players": 0, "notes": [],
         "notes_done": 0, "notes_total": 0, "awards": 0, "notes_read": 0,
         "skipped_synced_years": [], "replaced_synced_years": [],
-        "replaced_done": 0, "synced_years": [],
+        "replaced_done": 0, "synced_years": [], "absent_unstated": 0,
         "paired": 0, "only_cricketstatz": 0, "prefer_import": 0,
         "candidates_done": 0, "candidates_total": 0, "current_season": None,
     }
@@ -1240,9 +1260,22 @@ async def run_import(session_maker, org_id, import_id, club_id: str,
                                 "innings": []}
                     if card.get("innings"):
                         progress["scorecards"] += 1
+                    # HOW OFTEN THE AMBIGUOUS READING ACTUALLY BIT. A bare
+                    # "absent" is the only row `bare_absent_is_out` moves, so
+                    # reporting the count is what lets a club see whether the
+                    # question mattered at all - and re-import if they answered
+                    # it the wrong way round. Counted on OUR innings only,
+                    # since those are the only ones written.
+                    for _inn in card.get("innings", []):
+                        if not is_ours(_inn.get("batting_team") or ""):
+                            continue
+                        progress["absent_unstated"] += sum(
+                            1 for _b in _inn.get("batters", [])
+                            if _b.get("absent_unstated"))
                     try:
                         skipped = await import_match(
-                            db, org_id, import_id, card, row, is_ours, caches)
+                            db, org_id, import_id, card, row, is_ours, caches,
+                            bare_absent_is_out)
                         if skipped:
                             note(skipped)
                         # One match is the unit of work. Committing per match

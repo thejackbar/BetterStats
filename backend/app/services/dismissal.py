@@ -91,3 +91,71 @@ def not_out_sql(col: str) -> str:
     """
     names = ", ".join(f"'{n}'" for n in sorted(NOT_OUT_DISMISSAL_NAMES))
     return f"LOWER(BTRIM(REGEXP_REPLACE({col}, '\\s+', ' ', 'g'))) IN ({names})"
+
+
+# ---------------------------------------------------------------------------
+# Absence
+# ---------------------------------------------------------------------------
+# A BATTER WHO NEVER CAME IN IS SCORED DIFFERENTLY BY DIFFERENT COMPETITIONS,
+# and the difference lands in the average. Shoalwater Bay Cricket Club settled
+# it for their own archive (Sep 2026): "If you are named and absent, it gets
+# recorded as 'absent out'. That is different from did not bat. This would make
+# a difference to someone's average."
+#
+#   * "absent out"   IS a dismissal. It adds an innings AND a wicket, credited
+#                    to no bowler, and the batter wears the duck - the same
+#                    shape as Law 25.4.3's retired out.
+#   * "absent hurt"  is NOT a dismissal, and not an innings either. Illness or
+#                    injury, the same reasoning as Law 25.4.2's retirement.
+#   * a bare "absent" IS AMBIGUOUS and only the club can settle it. Cricket
+#                    Australia reads it as no innings at all (dismissalTypeId
+#                    15, which `sync.py` stores as `did_not_bat=True` with
+#                    `runs=None`), so that is the default here - but a
+#                    competition using it as shorthand for absent out means the
+#                    opposite, and an importer must ASK rather than assume.
+#
+# **NEVER match these with ``LIKE 'absent%'``**, which is the same trap this
+# module already documents for ``LIKE 'retired%'``: one word is the difference
+# between an innings that counts and one that does not, so a prefix sweeps
+# "absent out" in with "absent hurt" and silently drops a real dismissal.
+ABSENT_OUT_NAMES: frozenset[str] = frozenset({
+    "absent out",
+    "absent, out",
+})
+
+# Absent for a stated reason that is not a dismissal. No innings, no wicket.
+ABSENT_NO_INNINGS_NAMES: frozenset[str] = frozenset({
+    "absent hurt",
+    "absent ill",
+    "absent injured",
+    "absent sick",
+})
+
+# The bare word, which says nothing about which of the two it means.
+ABSENT_UNSTATED_NAMES: frozenset[str] = frozenset({"absent"})
+
+
+def absent_reading(
+    dismissal_type: str | None, *, bare_absent_is_out: bool = False
+) -> str | None:
+    """How an absence should be stored, or None when this is not an absence.
+
+    Returns ``'out'`` for an innings that counts as a dismissal, or
+    ``'no_innings'`` for one that counts as neither an innings nor a wicket.
+
+    ``bare_absent_is_out`` is the CLUB's answer for the ambiguous bare word and
+    nothing else - an explicit "absent out" or "absent hurt" already says which
+    it is, and is read as written whatever the flag says. Defaulting it to
+    False keeps Cricket Australia's reading, so a caller that never asks
+    behaves exactly as this app always has.
+    """
+    name = normalise_dismissal(dismissal_type)
+    if not name:
+        return None
+    if name in ABSENT_OUT_NAMES:
+        return "out"
+    if name in ABSENT_NO_INNINGS_NAMES:
+        return "no_innings"
+    if name in ABSENT_UNSTATED_NAMES:
+        return "out" if bare_absent_is_out else "no_innings"
+    return None

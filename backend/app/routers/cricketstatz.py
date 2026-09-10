@@ -62,6 +62,13 @@ class ClubUrl(BaseModel):
     # synced copy steps aside. There is deliberately no option that keeps both
     # — that is the double count this exists to prevent.
     synced_years: Literal["skip", "cricketstatz"] = "skip"
+    # HOW THIS COMPETITION SCORES A BARE "absent" on a card, which only the
+    # club can answer: 'did_not_bat' adds neither an innings nor a dismissal
+    # (Cricket Australia's reading, and the default so nothing changes for a
+    # club that never answers), 'out' adds both and the batter wears the duck.
+    # It touches the BARE word only - a card that says "absent out" or "absent
+    # hurt" has already said which it is and is read as written either way.
+    absent_reading: Literal["did_not_bat", "out"] = "did_not_bat"
 
 
 
@@ -173,7 +180,8 @@ async def start_import(
     # pattern the opposition-dossier builder uses.
     task = asyncio.create_task(
         importer.run_import(async_session_maker, club.id, import_id, club_id,
-                            synced_years=body.synced_years))
+                            synced_years=body.synced_years,
+                            bare_absent_is_out=body.absent_reading == "out"))
     _RUNNING[str(import_id)] = task
     task.add_done_callback(lambda _t: _RUNNING.pop(str(import_id), None))
 

@@ -329,6 +329,38 @@ dismissal, ask the club what their competition calls it to decide what to
 IMPORT, and do not let either answer overrule the other. Here both said
 dismissal; they need not.
 
+**So the converter takes the answer rather than holding one.**
+`--absent out` (the default, as Shoalwater confirmed) or
+`--absent did-not-bat`. It moves the game CSV, the season CSV and the workbook
+label together, because a code read one way in one file and the other way in
+the other is a bug wherever it appears. The FILE's own checks are untouched
+either way: the wickets identity is 916 of 916 under both, since what CSFW
+counts among its ten is not what the club calls it.
+
+**The CricketStatz web importer asks the same question in the app**, on the
+import screen beside the synced-years choice, defaulting to Cricket Australia's
+reading so a club that never answers is unaffected. Two things separate it from
+the binary path and both are worth knowing:
+
+  * **A web report carries WORDS, so most of it needs no question at all.**
+    "absent out" and "absent hurt" each say which they are and are read as
+    written, whatever the club answered. Only a bare "absent" is ambiguous, and
+    only that is what the answer moves. A question you do not need to ask is
+    friction.
+  * **It used to prefix-match** (`key.startswith("absent")`), which swept
+    "absent out" in with "absent hurt" and stored both as a did-not-bat. So a
+    competition scoring an absent batter as a dismissal had those innings
+    vanish from every average, and the row contradicted itself: it carried the
+    label "absent out" AND the did-not-bat flag, and the flag wins. That is the
+    trap `services/dismissal.py` already names for `LIKE 'retired%'`, hit in a
+    second place. **Match the whole phrase.**
+
+`services/dismissal.absent_reading` is the one rule both sides of the app read,
+so the parser, the writer and any importer added later cannot disagree about
+what an absence means. The import reports how many rows the ambiguous spelling
+actually reached, so a club can see whether the question mattered and re-import
+if they answered it the wrong way round.
+
 **A code confirmed by a club is still worth checking against the files.** Every
 one of the seven above sits where an absent batter would sit and behaves how an
 absent batter would behave. Had they been spread through the top order, or had
@@ -599,6 +631,14 @@ can ask the club what it means.
    with the club.
 8. **Import `manual_games_scorecards.csv`** through the Manual Games wizard.
    Verify the games count and the club's W/L/D line afterwards.
+
+**Verification:** `backend/verification/verify_absent_reading.py`, 39 checks
+across the shared rule, the CricketStatz parser and the writer that applies the
+club's answer. Run it with a control: against the previous commit 15 fail,
+reporting `did_not_bat=True` for a card that says "absent out", and the two
+missing parts are named rather than crashing the run. The nine that pass in
+both are don't-regress guards (the neighbouring dismissals, and the default
+staying Cricket Australia's).
 
 ### Reconciling runs and wickets against the club's summary screen
 

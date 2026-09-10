@@ -1819,10 +1819,12 @@ export const api = {
     request('/club-admin/cricketstatz/inspect', {
       method: 'POST', body: JSON.stringify({ url }),
     }),
-  csStartImport: (url, syncedYears = 'skip') =>
+  csStartImport: (url, syncedYears = 'skip', absentReading = 'did_not_bat') =>
     request('/club-admin/cricketstatz/import', {
       method: 'POST',
-      body: JSON.stringify({ url, synced_years: syncedYears }),
+      body: JSON.stringify({
+        url, synced_years: syncedYears, absent_reading: absentReading,
+      }),
     }),
   csRebuildPairing: () =>
     request('/club-admin/cricketstatz/pairing/rebuild', { method: 'POST' }),

@@ -247,9 +247,15 @@ def result_label(code) -> str:
     return RESULT_LABELS.get(code, f"code {code}")
 
 
-def dismissal_label(code) -> str:
+def dismissal_label(code, absent_is_out: bool = True) -> str:
     if code is None:
         return ""
+    # The file holds a code, not a word, so what a 29 is CALLED depends on the
+    # club's own competition. Reading it back as "Absent" where the club scores
+    # it as a did-not-bat is the honest label: it says the batter was absent
+    # and claims nothing about whether that cost them a wicket.
+    if code == ABSENT and not absent_is_out:
+        return "Absent"
     return DISMISSALS.get(code, f"code {code}")
 
 
@@ -527,7 +533,7 @@ def match_legs(legs: list) -> list:
     return scored or legs[:1]
 
 
-def build_rows(seasons: list) -> dict:
+def build_rows(seasons: list, absent_is_out: bool = True) -> dict:
     """Flatten every season into the sheets, collapsing two-day legs into one match."""
     matches, batting, bowling, fielding, fow_rows, votes, players = [], [], [], [], [], [], []
     match_no = 0
@@ -580,7 +586,8 @@ def build_rows(seasons: list) -> dict:
                                         "Batting position": b["position"], "Runs": b["runs"],
                                         "4s": b["fours"], "6s": b["sixes"],
                                         "Not out": "Y" if b["not_out"] else "",
-                                        "Dismissal": dismissal_label(b["dismissal_code"]),
+                                        "Dismissal": dismissal_label(
+                                            b["dismissal_code"], absent_is_out),
                                         "Dismissal code": b["dismissal_code"]})
                     if b["bowled"]:
                         bowling.append({**common, "Player": who, "Overs": b["overs"],
@@ -609,7 +616,8 @@ def build_rows(seasons: list) -> dict:
             "Players": players}
 
 
-def build_season_stats(seasons: list, by_grade: bool = True) -> list:
+def build_season_stats(seasons: list, by_grade: bool = True,
+                       absent_is_out: bool = True) -> list:
     """One row per player per season (and per grade unless told otherwise).
 
     ``by_grade=False`` rolls the same figures up without the grade. It is NOT
@@ -643,7 +651,13 @@ def build_season_stats(seasons: list, by_grade: bool = True) -> list:
                     })
                     # a two-day match is one game however many legs a player appears in
                     seen_games[k].add(key)
-                    if b["batted"]:
+                    # An absence is an innings and a duck only where the
+                    # club's competition scores it as absent out. Where it
+                    # scores it as a did-not-bat it is neither, so it must not
+                    # reach the innings count here either - the game CSV and
+                    # this file have to agree about it. See ABSENT at the top.
+                    if b["batted"] and (absent_is_out
+                                        or b["dismissal_code"] != ABSENT):
                         row["innings"] += 1
                         row["runs"] += b["runs"]
                         row["fours"] += b["fours"] or 0
@@ -883,7 +897,8 @@ GAME_CSV_COLUMNS = [
 ]
 
 
-def build_game_rows(seasons: list, club: str) -> list:
+def build_game_rows(seasons: list, club: str,
+                    absent_is_out: bool = True) -> list:
     """One row per player per match, in the Manual Games importer's own columns.
 
     This is the richer of the two ways in: it lands real per-game scorecards
@@ -923,7 +938,8 @@ def build_game_rows(seasons: list, club: str) -> list:
                     # `did_not_bat = false` plus a real 0 plus a dismissal
                     # says. See the ABSENT block at the top for why the label
                     # must be "absent out" and never the bare word.
-                    scored = b["batted"]
+                    scored = b["batted"] and (absent_is_out
+                                              or b["dismissal_code"] != ABSENT)
                     rows.append({
                         "game_key": mid,
                         "played_at": date.isoformat() if date else "",
@@ -944,8 +960,15 @@ def build_game_rows(seasons: list, club: str) -> list:
                         "did_not_bat": "false" if scored else "true",
                         # only the labels the data proves; an unmapped code is
                         # left blank rather than imported as a made-up method
-                        "dismissal_type": IMPORT_DISMISSALS.get(b["dismissal_code"], "")
-                                          if b["batted"] and not b["not_out"] else "",
+                        # "absent out" only where the club scores it that
+                        # way; otherwise the bare word, which every batting
+                        # average in the app excludes by name as well as by
+                        # the did_not_bat flag beside it.
+                        "dismissal_type":
+                            ("absent out" if absent_is_out else "absent")
+                            if b["dismissal_code"] == ABSENT and b["batted"]
+                            else IMPORT_DISMISSALS.get(b["dismissal_code"], "")
+                                 if b["batted"] and not b["not_out"] else "",
                         # Blank, never "false": the card saying nothing is a
                         # different answer from the card saying it was not the
                         # keeper, and only blank reads as a plain catch.
@@ -1134,7 +1157,16 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("source", type=Path, help="folder holding the .AV files")
     ap.add_argument("-o", "--out", type=Path, default=Path("."), help="output folder")
+    # THE BINARY HOLDS A CODE, NOT A WORD, so nothing in the file says which
+    # reading this competition used - only the club can. Getting it wrong moves
+    # a batting average, so it is asked for rather than assumed. Shoalwater Bay
+    # confirmed "absent out" for their own archive, which is the default here;
+    # a club whose competition scores it as a did-not-bat passes the other.
+    ap.add_argument("--absent", choices=("out", "did-not-bat"), default="out",
+                    help="how this club's competition scores a code 29 absence "
+                         "(default: out, as Shoalwater Bay confirmed)")
     args = ap.parse_args()
+    absent_is_out = args.absent == "out"
 
     files = sorted(p for p in args.source.iterdir() if p.suffix.lower() == ".av")
     if not files:
@@ -1142,14 +1174,14 @@ def main() -> None:
     seasons = [parse_file(p) for p in files]
     args.out.mkdir(parents=True, exist_ok=True)
 
-    sheets = build_rows(seasons)
+    sheets = build_rows(seasons, absent_is_out)
     sheets["Data quality"] = squad_clashes(seasons)
     sheets["Cross-check"] = cross_check(args.source, seasons)
     checks = verify(seasons)
     write_xlsx(sheets, checks, args.out / "match_detail.xlsx")
-    stats = build_season_stats(seasons)
+    stats = build_season_stats(seasons, absent_is_out=absent_is_out)
     write_csv(stats, args.out / "betterimport_season_stats.csv")
-    games = build_game_rows(seasons, seasons[0]["club"])
+    games = build_game_rows(seasons, seasons[0]["club"], absent_is_out)
     write_csv(games, args.out / "manual_games_scorecards.csv")
 
     club = seasons[0]["club"]

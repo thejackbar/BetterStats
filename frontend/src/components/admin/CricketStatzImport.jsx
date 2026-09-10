@@ -52,6 +52,10 @@ export default function CricketStatzImport() {
   // Australia: leave them to the sync, or make CricketStatz the record for
   // them. There is no third option that keeps both — that is the double count.
   const [syncedYears, setSyncedYears] = useState('skip')
+  // How this club's competition scores a bare "absent" on a card. Only
+  // the club can answer it, and it changes a batting average, so it is
+  // asked rather than assumed. Defaults to Cricket Australia's reading.
+  const [absentReading, setAbsentReading] = useState('did_not_bat')
   const [undoing, setUndoing] = useState(null)
   const [pairing, setPairing] = useState(false)
   const [readingNotes, setReadingNotes] = useState(false)
@@ -101,7 +105,7 @@ export default function CricketStatzImport() {
   async function start() {
     setStarting(true); setError('')
     try {
-      await api.csStartImport(url, syncedYears)
+      await api.csStartImport(url, syncedYears, absentReading)
       toast?.success?.('Import started — this page will keep you posted.')
       await loadStatus()
     } catch (e) {
@@ -302,6 +306,41 @@ export default function CricketStatzImport() {
                     </div>
                   </Note>
                 )}
+                <Note>
+                  <div className="font-semibold">
+                    How does your competition score an absent batter?
+                  </div>
+                  <div className="mt-1">
+                    Competitions differ, and the two readings give that player a
+                    different batting average. A card that already says{' '}
+                    <b>absent out</b> or <b>absent hurt</b> is read as written
+                    either way; this is only for a card that says plain{' '}
+                    <b>absent</b>. The import tells you afterwards how many rows
+                    it applied to, so you can check.
+                  </div>
+                  <div className="mt-2 space-y-2">
+                    <label className="flex items-start gap-2 cursor-pointer">
+                      <input type="radio" name="cs-absent" className="mt-1"
+                             checked={absentReading === 'did_not_bat'}
+                             onChange={() => setAbsentReading('did_not_bat')} />
+                      <span>
+                        <b>Did not bat.</b>{' '}
+                        Neither an innings nor a dismissal, so it does not touch
+                        the average. This is how Cricket Australia reads it.
+                      </span>
+                    </label>
+                    <label className="flex items-start gap-2 cursor-pointer">
+                      <input type="radio" name="cs-absent" className="mt-1"
+                             checked={absentReading === 'out'}
+                             onChange={() => setAbsentReading('out')} />
+                      <span>
+                        <b>Absent out.</b>{' '}
+                        An innings and a dismissal, and the batter wears the
+                        duck, the same as a retired out.
+                      </span>
+                    </label>
+                  </div>
+                </Note>
                 {!!preview.pairing?.imported && (
                   <Note>
                     {`You have already imported ${preview.pairing.imported} match(es). `}
@@ -398,6 +437,16 @@ export default function CricketStatzImport() {
                     {`your Cricket Australia sync were left out `}
                     {`(${p.skipped_synced_years[0]}\u2013${p.skipped_synced_years[p.skipped_synced_years.length - 1]}), `}
                     {`so those matches are not counted twice.`}
+                  </Caption>
+                )}
+                {p.absent_unstated > 0 && (
+                  <Caption>
+                    {`${p.absent_unstated} innings had a plain "absent" on the `}
+                    {`card and were read as `}
+                    {absentReading === 'out'
+                      ? 'absent out, so they count as an innings and a dismissal.'
+                      : 'did not bat, so they do not touch a batting average.'}
+                    {` Re-import if your competition scores it the other way.`}
                   </Caption>
                 )}
                 {plan && (
