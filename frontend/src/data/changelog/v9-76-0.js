@@ -7,7 +7,7 @@ export default {
   title: 'BetterPosts: every part of a layout is a layer',
   items: [
     'A photo or logo you add can now sit anywhere in a layout, not just on top of it. Drop it behind the headline or over the club crest, wherever you drag it in Layers.',
-    'The Layers panel lists the layout’s own parts alongside your own blocks in one stack, named for what they are: the headline, the scores, the sponsor strip, the club lockup. Drag a row, or step it forward and back a place at a time.',
+    'The Layers panel lists the layout’s own parts alongside your own blocks in one stack, named for what they are: the headline, the sponsor strip, the club crest, the grain texture. Drag a row, or step it forward and back a place at a time. Point at a row and it lights up on the canvas, so you can tell which part is which.',
     'You can take a part of a layout off a post without leaving the layout. Hide the sponsor strip on a post with no sponsor, or a texture you would rather not have, and put it back with the same control.',
     'The background stays where it is, under everything, so a block sent to the back sits on the club’s own colours instead of the layout going see-through.',
     'Every layout is in the list, and each one keeps its own design at all three post sizes.',
