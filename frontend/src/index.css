@@ -400,5 +400,3 @@
    wrapper's direct child; the wrapper is display:contents so it adds no box of
    its own. Decoration the template draws as a full-bleed child (a photo layer,
    a heavy gradient) still covers a block behind it — the Layers panel says so. */
-.pb-template-seethrough { display: contents; }
-.pb-template-seethrough > * { background: transparent !important; pointer-events: none !important; }

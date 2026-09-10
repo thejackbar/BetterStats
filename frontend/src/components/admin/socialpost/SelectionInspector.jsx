@@ -13,8 +13,9 @@
 //   players                            roster for the player-block picker
 //   onPickImage(itemId)                opens the media library / file picker
 //   onEditImage(itemId)                opens the crop / background-removal editor
-//   onSetBehind(itemId, behind)        moves the block across the built-in layout
-//   layoutName                         the layout it would go behind (null on the blank canvas)
+//   onSendTo(itemId, 'front'|'back')   jump to either end of the whole stack
+//   layoutName                         the built-in layout, named in the tooltip
+//                                      (null on the blank canvas, which has none)
 import { useState } from 'react'
 import { Icon } from '../../../pages/admin/betterselect/ui'
 import { BLANK_FONTS } from '../../../social/blank-template'
@@ -76,7 +77,7 @@ function Swatches({ value, onChange, palette }) {
 
 export default function SelectionInspector({
   items, selIds, onUpdate, onReorder, onDuplicate, onRemove, onAlign,
-  palette, players = [], onPickImage, onEditImage, onSetBehind, layoutName = null,
+  palette, players = [], onPickImage, onEditImage, onSendTo, layoutName = null,
 }) {
   const [more, setMore] = useState(false)
   const single = selIds.length === 1 ? items.find(it => it.id === selIds[0]) : null
@@ -176,13 +177,15 @@ export default function SelectionInspector({
 
         <div className="flex-1" />
 
-        {/* The block someone has just added lands on top of the layout, so the
-            way to put it behind belongs here, on the block, not only in a panel
-            they would have to go looking for. */}
-        {single && layoutName && onSetBehind && (
-          <Btn active={!!single.behind} title={single.behind ? `Bring in front of the ${layoutName} layout` : `Send behind the ${layoutName} layout`}
-            onClick={() => onSetBehind(single.id, !single.behind)}>
-            {single.behind ? 'Behind layout' : 'Send behind'}
+        {/* A block someone has just added lands in front of everything, so the
+            way to drop it to the bottom of the stack belongs here, on the
+            block, not only in a panel they would have to go looking for. On a
+            built-in layout the bottom is directly on the background, under
+            every one of the layout's own elements. */}
+        {single && onSendTo && (
+          <Btn title={layoutName ? `Send under every part of the ${layoutName} layout` : 'Send to the back of the stack'}
+            onClick={() => onSendTo(single.id, 'back')}>
+            Send to back
           </Btn>
         )}
 

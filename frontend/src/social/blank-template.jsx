@@ -539,6 +539,10 @@ export function BlankCanvas({
   interactive = false, scale = 1, selectedIds = [],
   onSelect, onDeselect, onPatchMany, onCommit, onGestureStart, onDuplicate, onRemove,
   transparent = false, width = 1080, height = 1080, style = {}, passThrough = false,
+  // Marks this layer in the DOM. A post can hold several block layers now —
+  // one per run of blocks between two of a layout's own elements — and telling
+  // them apart from the layout's own children is otherwise guesswork.
+  testId = null,
 }) {
   const rootRef = useRef(null)
   const selSet = new Set(selectedIds)
@@ -675,6 +679,7 @@ export function BlankCanvas({
   return (
     <div
       ref={rootRef}
+      data-testid={testId || undefined}
       onPointerDown={interactive ? (e) => { if (e.target === rootRef.current) onDeselect && onDeselect() } : undefined}
       style={{
         width, height, position: 'relative', overflow: 'hidden',

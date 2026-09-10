@@ -10,6 +10,7 @@
 import { useRef, useState, useLayoutEffect } from 'react'
 import { GrainSVG as Grain, Halftone, Stripes, ClubLogo, BrandLockup, CreditMark } from './cricket-templates'
 import { aspectOf, pick, share, grow } from './postAspect'
+import { LayerRoot } from './postLayers'
 
 const DISPLAY = "var(--social-display-font, 'Anton', sans-serif)"
 const MONO = "'JetBrains Mono', monospace"
@@ -158,12 +159,14 @@ const anchor = (A, sq, tall) => (A === 'square' ? sq : tall)
 // top-AND-bottom-anchored body and a bottom-anchored footer, so the body is
 // what absorbs a taller canvas — the rows simply get more room, which is what
 // a fixture list at 4:5 should do.
+// One shell for all 19 roundup templates, so per-element layers reach every one
+// of them from here rather than template by template.
 function Post({ palette, children, w = 1080, h = 1080, style = {} }) {
   return (
-    <div style={{
+    <LayerRoot style={{
       width: w, height: h, position: 'relative', overflow: 'hidden',
       background: palette.primary, color: palette.ink, fontFamily: BODY, ...style,
-    }}>{children}</div>
+    }}>{children}</LayerRoot>
   )
 }
 

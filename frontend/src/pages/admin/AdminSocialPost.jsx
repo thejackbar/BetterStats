@@ -36,6 +36,8 @@ import { EVENT_TEMPLATES, EVENT_PRESETS, DEFAULT_EVENT, resolveMotif, eventPalet
 import EventPostEditor from '../../components/admin/EventPostEditor'
 import { BlankCanvas, newBlankItem, defaultBlankItems } from '../../social/blank-template'
 import { useBlankLayer } from '../../social/useBlankLayer'
+import { useTemplateLayers } from '../../social/useTemplateLayers'
+import { PostLayerProvider } from '../../social/postLayers'
 import { useEditHistory } from '../../social/useEditHistory'
 import { usePages } from '../../social/usePages'
 import PageStrip from '../../components/admin/socialpost/PageStrip'
@@ -1097,6 +1099,9 @@ export default function AdminSocialPost() {
     return defaultBlankItems()
   })
   const overlay = useBlankLayer(EMPTY_LAYER)
+  // The built-in layout's OWN elements as layers, so an added block can sit
+  // between two of them rather than only wholly behind or wholly in front.
+  const tlayers = useTemplateLayers(templateId)
   // Undo/redo + action log, one per layer (history is per page/layer).
   const canvasHistory = useEditHistory(canvas)
   const overlayHistory = useEditHistory(overlay)
@@ -1131,6 +1136,10 @@ export default function AdminSocialPost() {
       name, templateId, custom: usingOverlay,
       style: { palette: paletteKey, dark: darkMode, font: fontKey, bg: bgStyle, bgColors, customBg, customAccent },
       blank: srcItems ? stripBlobImages(srcItems) : null,
+      // The stacking order goes with the design. Without it a template saved
+      // with a photo tucked behind the headline comes back with the photo on
+      // top, which is the whole thing somebody was saving.
+      layers: blankTab ? null : tlayers.serialise(),
     }
     const next = [...savedTemplates, tpl]
     setSavedTemplates(next)
@@ -1161,6 +1170,9 @@ export default function AdminSocialPost() {
       setCustomEdit(false)
       if (tpl.blank) canvas.reset(clone(tpl.blank))
     }
+    // Named with the template it belongs to: `setTemplateId` above has not
+    // taken effect yet, so the hook cannot work out which stack this is for.
+    tlayers.restore(tpl.templateId, tpl.layers)
   }
   // Enter/leave Custom Edit for the current real template.
   const startCustomEdit = () => {
@@ -1981,14 +1993,46 @@ export default function AdminSocialPost() {
   }
   // History-aware wrappers around the layer mutators the inspector/panels drive.
   const hUpdate = (id, patch) => { record('Edit block'); layer.update(id, patch) }
-  // Stepping off the end of a group crosses the built-in layout — only on the
-  // overlay, since the Blank Canvas has no layout to be in front of or behind.
-  const hReorder = (id, dir) => { record('Reorder'); layer.reorder(id, dir, { crossLayout: !isBlankTab }) }
-  const hSetBehind = (id, behind) => { record(behind ? 'Send behind layout' : 'Bring in front of layout'); layer.setBehind(id, behind) }
   const hDuplicate = (id) => { record('Duplicate'); layer.duplicate(id) }
   const hRemove = (id) => { record('Delete'); layer.remove(id) }
   const hAlign = (mode) => { record('Align'); layer.align(mode) }
-  const hMoveBefore = (a, b) => { record('Reorder'); layer.moveBefore(a, b) }
+
+  // Added blocks are drawn INSIDE the layout root, interleaved among the
+  // layout's own elements by the one stack order. So there is no separate
+  // behind/front pair of layers any more, and no see-through wrapper: the
+  // root's background is the floor and everything above it is a layer.
+  //
+  // Declared up here with the rest of the layer state, not down beside the
+  // render — `layerStack` reads it, and a const declared below its own reader
+  // is a temporal-dead-zone crash the first time the panel draws.
+  const overlayOn = customEdit && !isBlankTab
+  const overlayItems = overlayOn ? overlay.items : []
+
+  // ONE STACK, whichever surface is being edited. On a built-in layout it holds
+  // the layout's own elements and the added blocks together, ordered by
+  // `tlayers`; on the Blank Canvas there is no layout, so it is the blocks in
+  // their own array order. The panel is handed the stack and calls back with
+  // ids, so it never has to know which of the two it is looking at.
+  const layerStack = isBlankTab
+    ? canvas.items.map((it) => ({ id: it.id, kind: 'block', item: it }))
+    : tlayers.stack(overlayItems)
+  const stackIds = layerStack.map((l) => l.id)
+  const hStep = (id, dir) => {
+    record('Reorder')
+    if (isBlankTab) canvas.reorder(id, dir)
+    else tlayers.step(stackIds, id, dir)
+  }
+  const hMoveBefore = (a, b) => {
+    record('Reorder')
+    if (isBlankTab) canvas.moveBefore(a, b)
+    else tlayers.move(stackIds, a, b)
+  }
+  const hSendTo = (id, where) => {
+    record(where === 'back' ? 'Send to back' : 'Bring to front')
+    if (isBlankTab) canvas.reorder(id, where)
+    else tlayers.send(stackIds, id, where)
+  }
+  const hToggleHidden = (id) => { record('Show/hide element'); tlayers.toggleHidden(id) }
 
   // Keyboard: delete removes the selection; ⌘/Ctrl-Z undo, ⇧⌘Z redo. Ignored
   // while typing in a field.
@@ -2352,24 +2396,49 @@ export default function AdminSocialPost() {
   // on a layout that is one fixed design rather than a stack of movable parts —
   // and it only shows if the layout stops painting its own background over it,
   // which is what the see-through wrapper is for.
-  const overlayOn = customEdit && !isBlankTab
-  const overlayBehind = overlayOn ? overlay.items.filter((it) => it.behind) : []
-  const overlayFront = overlayOn ? overlay.items.filter((it) => !it.behind) : []
-  const seeThrough = overlayBehind.length > 0
-  const overlayLayer = (items) => (items.length ? (
-    <BlankCanvas team={team} palette={templatePalette} items={items} data={blankData}
-      transparent width={W} height={H} style={{ position: 'absolute', inset: 0 }} />
-  ) : null)
 
   // width/height go in ahead of extraProps so the Blank Canvas's own explicit
   // pair still wins — they are the same numbers either way, and one definition
   // of the canvas size is what keeps the preview and the download in step.
-  const templateNode = (props = {}) => {
+  // `interactive` is the ONE thing that differs between the canvas and every
+  // other render of the same post (the export node, the preview, mobile), so
+  // the layer stack is built once here and every site reads it. A second copy
+  // is how a downloaded PNG ends up in a different order from the canvas.
+  // `scale` is local to renderCanvas (it depends on the space the canvas has
+  // been given), so it arrives as an argument rather than being closed over —
+  // reaching for the outer name is a temporal-dead-zone crash inside the
+  // template's own render, a long way from the line that caused it.
+  const templateLayerValue = (interactive, scale = 1) => ({
+    // ONLY THE CANVAS REPORTS ITS LAYERS. The same post is rendered several
+    // times over (the canvas, the off-screen export node, the preview, a page
+    // per carousel slide), and every one of them would otherwise register — a
+    // carousel whose pages hold different rows would then have them fighting
+    // over one list. The canvas is the one a person is looking at.
+    register: interactive ? tlayers.register : undefined,
+    order: tlayers.order,
+    hidden: tlayers.hidden,
+    blocks: overlayItems,
+    renderRun: (items, key, z) => (
+      <BlankCanvas key={key} team={team} palette={templatePalette} items={items} data={blankData}
+        transparent width={W} height={H} testId="post-blocks"
+        // Every run covers the whole canvas, so each one has to let clicks
+        // through to whatever is under it — a block re-arms its own pointer
+        // events, the container never takes them.
+        passThrough
+        {...(interactive ? {
+          interactive: true, scale, selectedIds: overlay.selIds,
+          onSelect: overlay.select, onDeselect: overlay.deselect, onPatchMany: overlay.patchMany,
+          onGestureStart: () => record('Move block'), onDuplicate: hDuplicate, onRemove: hRemove,
+        } : null)}
+        style={{ position: 'absolute', inset: 0, zIndex: z }} />
+    ),
+  })
+  const templateNode = ({ interactive = false, scale = 1, ...props } = {}) => {
     const node = frameTemplate(
       <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers}
         palette={templatePalette} headline={headline} width={W} height={H} {...extraProps} {...props} />
     )
-    return seeThrough ? <div className="pb-template-seethrough">{node}</div> : node
+    return <PostLayerProvider value={templateLayerValue(interactive, scale)}>{node}</PostLayerProvider>
   }
   const postPages = (() => {
     if (isBlankTab && pages.count > 1) {
@@ -2399,9 +2468,7 @@ export default function AdminSocialPost() {
       content: (
         <>
           {pageBackground}
-          {overlayLayer(overlayBehind)}
           {templateNode()}
-          {overlayLayer(overlayFront)}
         </>
       ),
     }]
@@ -2421,11 +2488,9 @@ export default function AdminSocialPost() {
     const previewContent = (
       <>
         {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} {...bgExtraProps} />}
-        {overlayLayer(overlayBehind)}
         {isBlankTab
           ? <BlankCanvas team={team} palette={templatePalette} items={canvas.items} data={blankData} width={W} height={H} />
           : templateNode()}
-        {overlayLayer(overlayFront)}
       </>
     )
     // The three details that matter most for the active post type.
@@ -2713,7 +2778,7 @@ export default function AdminSocialPost() {
     content: 'this post', data: 'live', brand: 'colour · type',
     photos: `club library · ${mediaAssets.length}`,
     text: 'add words', elements: 'add shapes',
-    layers: `${layer.items.length} block${layer.items.length === 1 ? '' : 's'}`,
+    layers: `${layerStack.length} layer${layerStack.length === 1 ? '' : 's'}`,
   }[tool] || ''
 
   const renderCanvas = ({ availW, availH }) => {
@@ -2741,30 +2806,14 @@ export default function AdminSocialPost() {
         <div style={{ width: pw, height: ph, overflow: 'hidden', borderRadius: 6, background: '#080808', boxShadow: '0 24px 60px rgba(0,0,0,.55)' }}>
           <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: showBlankTools ? 'auto' : 'none', position: 'relative', background: canvasFill }}>
             {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} {...bgExtraProps} />}
-            {/* Blocks sent behind the layout are drawn first and stay editable
-                there — dragging one is the same gesture whichever side of the
-                layout it is on. */}
-            {overlayBehind.length > 0 && (
-              <BlankCanvas team={team} palette={templatePalette} items={overlayBehind} data={blankData} transparent width={W} height={H}
-                interactive scale={scale} selectedIds={overlay.selIds}
-                onSelect={overlay.select} onDeselect={overlay.deselect} onPatchMany={overlay.patchMany}
-                onGestureStart={() => record('Move block')} onDuplicate={hDuplicate} onRemove={hRemove}
-                style={{ position: 'absolute', inset: 0 }} />
-            )}
+            {/* On a built-in layout the blocks are drawn inside it, in among
+                its own elements, so there is nothing to stack around it here. */}
             {isBlankTab ? (
               <BlankCanvas team={team} palette={templatePalette} items={canvas.items} data={blankData}
                 interactive scale={scale} selectedIds={canvas.selIds}
                 onSelect={canvas.select} onDeselect={canvas.deselect} onPatchMany={canvas.patchMany}
                 onGestureStart={() => record('Move block')} onDuplicate={hDuplicate} onRemove={hRemove} />
-            ) : templateNode()}
-            {overlayFront.length > 0 && (
-              <BlankCanvas team={team} palette={templatePalette} items={overlayFront} data={blankData} transparent width={W} height={H}
-                passThrough={seeThrough}
-                interactive scale={scale} selectedIds={overlay.selIds}
-                onSelect={overlay.select} onDeselect={overlay.deselect} onPatchMany={overlay.patchMany}
-                onGestureStart={() => record('Move block')} onDuplicate={hDuplicate} onRemove={hRemove}
-                style={{ position: 'absolute', inset: 0 }} />
-            )}
+            ) : templateNode({ interactive: true, scale })}
           </div>
         </div>
         <div className="mt-2 flex items-center justify-between gap-3" style={{ width: pw }}>
@@ -2778,10 +2827,10 @@ export default function AdminSocialPost() {
   const inspectorNode = (
     <SelectionInspector
       items={layer.items} selIds={layer.selIds}
-      onUpdate={hUpdate} onReorder={hReorder}
+      onUpdate={hUpdate} onReorder={hStep}
       onDuplicate={hDuplicate} onRemove={hRemove} onAlign={hAlign}
       palette={themedPalette} players={allPlayers} onPickImage={pickImageForItem} onEditImage={editImageForItem}
-      onSetBehind={hSetBehind} layoutName={!isBlankTab ? tmpl.name : null}
+      onSendTo={hSendTo} layoutName={!isBlankTab ? tmpl.name : null}
     />
   )
 
@@ -3016,32 +3065,31 @@ export default function AdminSocialPost() {
             {tool === 'photos' && photosPanel}
             {tool === 'layers' && (
               <LayersPanel
-                items={layer.items} selIds={layer.selIds}
-                onSelect={layer.select} onReorder={hReorder}
+                stack={layerStack} selIds={layer.selIds} hidden={tlayers.hidden}
+                onSelect={layer.select} onStep={hStep} onMove={hMoveBefore}
+                onToggleHidden={hToggleHidden}
                 onDuplicate={hDuplicate} onRemove={hRemove}
-                onMoveLayerBefore={hMoveBefore} historyLog={history.log}
-                layoutName={!isBlankTab ? tmpl.name : null}
-                onSetBehind={!isBlankTab ? hSetBehind : null}
+                historyLog={history.log}
+                backgroundName={!isBlankTab ? tmpl.name : null}
                 note={!isBlankTab ? (
-                  // A block can now sit either side of the layout, so the note
-                  // is about the one thing that is still true: the layout is a
-                  // single drawn design, not a stack of its own parts. Backward
-                  // past the bottom sends a block under it and its background
-                  // stops painting, which is what makes "behind" mean anything.
                   <div className="rounded-md border pb-hairline bg-pb-surface2 p-2.5 flex flex-col gap-1.5" data-testid="layers-template-note">
                     <span className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faint">On a built-in layout</span>
                     <p className="text-[11px] leading-relaxed text-pb-dim">
-                      Backward past the bottom of the stack sends a block <strong className="text-pb-text">behind {tmpl.name}</strong>, and the layout's own background stops painting so it shows through. The layout is one design, though — its own headings and photos can't be reordered against each other.
+                      {tmpl.name}'s own elements are in the stack, so a block you add can sit
+                      {' '}<strong className="text-pb-text">between two of them</strong> — behind the headline and over the photo, say. The
+                      background stays at the floor. Hide an element to take it off the post.
                     </p>
-                    {CUSTOM_EDITABLE.includes(templateId) ? (
-                      <button onClick={beginCustomEdit} data-testid="layers-custom-edit"
+                    {tlayers.touched && (
+                      <button onClick={() => { record('Reset layers'); tlayers.clear() }} data-testid="layers-reset"
                         className="self-start px-2.5 py-1.5 rounded border text-[11px] font-mono text-pb-dim hover:text-pb-text transition-colors"
-                        style={{ borderColor: 'var(--pb-accent)', color: 'var(--pb-accent)' }}>
-                        ✎ Open as movable blocks
+                        style={{ borderColor: 'var(--pb-hairline)' }}>
+                        Back to the layout's own order
                       </button>
-                    ) : (
+                    )}
+                    {CUSTOM_EDITABLE.includes(templateId) && (
                       <p className="text-[11px] leading-relaxed text-pb-faintest">
-                        To move the layout's own parts too, build it on the <button onClick={() => switchTab('blank')} className="underline underline-offset-2 text-pb-dim hover:text-pb-text">Blank canvas</button>, where every element is its own layer.
+                        To retype and drag {tmpl.name}'s own text as well,{' '}
+                        <button onClick={beginCustomEdit} data-testid="layers-custom-edit" className="underline underline-offset-2 text-pb-dim hover:text-pb-text">open it as movable blocks</button>.
                       </p>
                     )}
                   </div>
@@ -3425,12 +3473,12 @@ export default function AdminSocialPost() {
                           ? '✎ Custom editing (overlay) — click to stop'
                           : CUSTOM_EDITABLE.includes(templateId)
                             ? '✎ Custom Edit — make every element movable'
-                            : '✎ Custom Edit — add blocks on top'}
+                            : '✎ Custom Edit — add your own blocks'}
                       </button>
                       <span className="text-pb-faintest text-[10px]">
                         {CUSTOM_EDITABLE.includes(templateId)
                           ? 'Opens this post as fully-editable blocks you can move, then save as a template.'
-                          : 'This layout keeps its content; you can add your own blocks on top.'}
+                          : "This layout keeps its content; your blocks go anywhere in its stack — under the headline, over the photo, wherever you drag them in Layers."}
                       </span>
                     </div>
                   )}

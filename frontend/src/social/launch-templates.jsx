@@ -7,6 +7,7 @@
 // fully whitelabelled per club. Copy reads from the club's point of view.
 import { AutoFitText, ClubLogo, GrainSVG, Halftone, Stripes } from './cricket-templates'
 import { share } from './postAspect'
+import { LayerRoot } from './postLayers'
 import brandWordmark from '../assets/bettercricket-white.svg'
 
 import statsLogo from '../assets/modules/betterstats.svg'
@@ -148,7 +149,7 @@ export function ClubLaunchPoster({
   ]
 
   return (
-    <div style={{
+    <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
       background: `linear-gradient(120deg, ${bg} 38%, ${bg2} 100%)`,
       color: ink, fontFamily: "'Inter', sans-serif",
@@ -309,6 +310,6 @@ export function ClubLaunchPoster({
           {footerUrl}
         </div>
       </div>
-    </div>
+    </LayerRoot>
   )
 }
