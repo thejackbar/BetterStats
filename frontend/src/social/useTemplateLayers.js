@@ -12,6 +12,13 @@
 // Restoring a saved design sets the template and its stacking order in the same
 // tick, so a clear-on-change effect would land second and wipe what was just
 // restored.
+//
+// PICKING ANOTHER TEMPLATE IS A NEW DESIGN, so the stack starts fresh rather
+// than being kept per template and handed back later. That matches what
+// `selectTemplate` already does (it turns Custom Edit off), and an arrangement
+// silently reappearing on a layout somebody came back to a week later is a
+// worse surprise than starting from what the layout draws. Saving it as a
+// template is how you keep one.
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { applyOrder } from './postLayers'
 
