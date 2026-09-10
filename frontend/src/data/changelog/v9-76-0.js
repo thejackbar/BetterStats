@@ -12,6 +12,6 @@ export default {
     'The background stays where it is, under everything, so a block sent to the back sits on the club’s own colours instead of the layout going see-through.',
     'This works on every layout, and each one keeps its own design at all three post sizes.',
     'Saving a design as a template now keeps its stacking too, so a post saved with a photo tucked behind the headline comes back that way.',
-    'Posts nobody has reordered come out exactly as they did. Checked by re-making all 48 square posts on the old and new versions and comparing them: every one is identical.',
+    'Posts nobody has reordered come out exactly as they did. Checked by re-making all 48 layouts at square and at portrait on the old and new versions and comparing them: all 96 are identical.',
   ],
 }

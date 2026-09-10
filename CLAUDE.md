@@ -588,7 +588,8 @@ layers on all templates where each element except the background is a layer."*
   order, nothing hidden and no blocks — every export of a post nobody has
   reordered — `LayerRoot` returns the exact div the template rendered before:
   no cloning, no z-index, no stacking context. **Measured rather than asserted:
-  all 48 squares re-shot on both builds are byte-identical.**
+  all 48 layouts re-shot at square AND at portrait on both builds are
+  byte-identical, 96 of 96.**
 - **WIRING IS ONE LINE PER ROOT, and 19 of the 48 came free.** The roundup
   family's shared `Post` shell covers all 19; the 17 cricket roots, 11 event
   roots and the launch poster are a `<div style={{…}}>` → `<LayerRoot
@@ -688,17 +689,24 @@ layers on all templates where each element except the background is a layer."*
   concurrent Chromium runs left the control shoot idle-waiting with 6 seconds of
   CPU and no write for eight minutes. Kill the browsers, then re-shoot only the
   templates that are missing rather than the whole set.
-- **Driven in Chromium** (`verify_post_designer_browser.mjs`, 86 checks — the 78
+- **Driven in Chromium** (`verify_post_designer_browser.mjs`, 91 checks — the 78
   from v9.75.0 plus a section that measures the stack off the OFF-SCREEN EXPORT
   NODE rather than the canvas, since the canvas agreeing with itself says
   nothing about the downloaded PNG: a layout listing its own elements by name, a
   new block starting in front of everything, Send to back putting it under every
   one of them with the background still painting, ONE STEP FORWARD PUTTING IT
   BETWEEN TWO OF THE LAYOUT'S OWN ELEMENTS, hiding an element taking it off the
-  exported post and putting it back, and the blank canvas showing no layout rows
-  at all) **with a control run**: 11 of the 86 fail against the previous commit,
-  reporting its own empty layer list and every element at `z: 0`. The 75 that
-  pass in both are don't-regress guards.
+  exported post and putting it back, the blank canvas showing no layout rows at
+  all, and a saved template driven through a real RELOAD in one context so the
+  stack it comes back with can only have been read off the saved row) **with a
+  control run**: 13 of the 91 fail against the previous commit, reporting its own
+  empty layer list, every element at `z: 0` and `9 -> 9` where an element should
+  have come off the post. The 78 that pass in both are don't-regress guards.
+- **THE SUITE TAKES ITS BASE URL AS `argv[2]`, NOT AS `BASE=`.** An env var is
+  silently ignored and the run dies on `ERR_CONNECTION_REFUSED` against the
+  hardcoded dev port — which reads as the server being down rather than as the
+  argument being in the wrong place. `shoot_templates.mjs` beside it DOES take
+  `BASE=`, which is what makes it easy to get wrong.
 - **NOTICED, NOT BUILT**: a layout's own element can be reordered and hidden but
   not MOVED or retyped — that is still `templateToBlocks` territory, and still
   four templates. A `transform` offset per layer would make moving cheap without
