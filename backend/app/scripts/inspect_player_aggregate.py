@@ -69,9 +69,15 @@ async def main(pid: str, year: int) -> None:
         body = (await db.execute(text(
             "SELECT pg_get_viewdef(to_regclass('v_effective_player_season_stats'))"
         ))).scalar() or ""
-        seg = body.split("player_games", 1)[1][:4000] if "player_games" in body else ""
-        print("--- aggregate branch still carries pair_prefers_import:",
-              "pair_prefers_import" in seg)
+        # The reliable needle is `superseded_by_game_id` — the SAME one
+        # superseded_ddl.verify() uses. Do NOT grep for `pair_prefers_import`:
+        # since v9.70.6 the aggregate branch counts only UNPAIRED imports
+        # (`superseded_by_game_id IS NULL`) and never mentions
+        # `pair_prefers_import`, so a healthy view reads False on that word and
+        # sends you chasing a bug that is not there — that exact red herring
+        # cost a round-trip once already.
+        print("--- deployed view carries the pairing clause (superseded_by_game_id):",
+              "superseded_by_game_id" in body)
 
 
 if __name__ == "__main__":
