@@ -361,7 +361,11 @@ export function EVT_Gazette({ team, event = {}, width = 1080, height = 1080, pal
   const BODY = "'Spectral', serif"
   return (
     <LayerRoot style={{ ...FRAME(width, height), background: paper, color: ink, fontFamily: BODY }}>
-      <div style={{ position: 'absolute', inset: 56, display: 'flex', flexDirection: 'column' }}>
+      {/* This poster keeps everything inside ONE inset frame, so it is a single
+          layer rather than a stack. Naming it says so; splitting it would mean
+          promoting this div's own children, and a block spliced in among them
+          would be offset by the inset from where it was dropped. */}
+      <div data-layer="Poster content" style={{ position: 'absolute', inset: 56, display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: faint, paddingBottom: 10 }}>
           <span>Vol. XCIV — No. 12</span><span>Est. 1921</span>
         </div>
@@ -553,7 +557,8 @@ export function EVT_Swiss({ team, event = {}, width = 1080, height = 1080, palet
   const HELV = "'Helvetica Neue', Helvetica, Arial, sans-serif"
   return (
     <LayerRoot style={{ ...FRAME(width, height), background: paper, color: ink, fontFamily: HELV }}>
-      <div style={{ position: 'absolute', inset: 80, display: 'flex', flexDirection: 'column' }}>
+      {/* One inset frame holding the whole poster — see EVT_Gazette above. */}
+      <div data-layer="Poster content" style={{ position: 'absolute', inset: 80, display: 'flex', flexDirection: 'column' }}>
         <div style={{ borderTop: `2px solid ${ink}`, paddingTop: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
             {team.logo ? <ClubLogo src={team.logo} size={76} /> : <ClubLogo monogram={team.monogram} color={ink} size={76} shape="shield" />}
