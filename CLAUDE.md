@@ -675,9 +675,15 @@ layers on all templates where each element except the background is a layer."*
   one is Element 7" is to show it. Hover outlines it on the canvas and lifts it
   to the top for as long as the pointer is there. Editor only: `hover` is never
   passed to the export context, so it cannot reach a downloaded PNG.
-- **`pkill -f` MATCHES ITS OWN SHELL, hit twice more.** A hung shoot killed the
-  command that was killing it (exit 144). Split the pattern, or run the kill on
-  its own.
+- **`pkill -f` / `pgrep -f` MATCHES ITS OWN SHELL, hit FOUR times in one
+  session (exit 144).** Splitting the pattern (`'shoot_temp''lates'`) only helps
+  while the pattern appears nowhere else in your own command line — a command
+  that kills a shoot AND then starts another one has the literal in its own
+  argv, so it kills itself before reaching the second half. Even
+  `pgrep -f chrome` matches the shell whose arguments contain the word.
+  **Match the process NAME, not the command line**: read `/proc/*/comm`, or use
+  `pkill -x`. And never put a kill in the same command as the thing it is
+  clearing the way for.
 - **A HUNG SHOOT IS THE PILED-UP-CHROMIUM TRAP, and the tell is CPU.** Three
   concurrent Chromium runs left the control shoot idle-waiting with 6 seconds of
   CPU and no write for eight minutes. Kill the browsers, then re-shoot only the
