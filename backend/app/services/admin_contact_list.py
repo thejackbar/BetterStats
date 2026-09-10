@@ -40,7 +40,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import (
-    ClubMembership, CommsContact, CommsList, CommsListMember, EmailSuppression,
+    ClubMembership, CommsContact, CommsSegment, CommsSegmentMember, EmailSuppression,
     MarketingClub, Organisation, User,
 )
 from app.services import comms_contacts as contacts_svc
@@ -64,20 +64,22 @@ CONTACT_SOURCE = "admin"
 _tasks: set = set()
 
 
-async def ensure_list(session: AsyncSession, organisation_id) -> CommsList:
-    """The list, created if it isn't there. An existing list of this name is
-    adopted as-is: its ``source``/``origin`` are left alone, because a list a
-    person made by hand is theirs and this only fills it."""
-    existing = (await session.execute(select(CommsList).where(
-        CommsList.organisation_id == organisation_id, CommsList.name == LIST_NAME
+async def ensure_segment(session: AsyncSession, organisation_id) -> CommsSegment:
+    """The auto static segment, created if it isn't there (Lists→Segments merge —
+    was an auto list). An existing segment of this name is adopted as-is: its
+    ``source``/``origin`` are left alone, because one a person made by hand is
+    theirs and this only fills it."""
+    existing = (await session.execute(select(CommsSegment).where(
+        CommsSegment.organisation_id == organisation_id, CommsSegment.name == LIST_NAME
     ))).scalar_one_or_none()
     if existing is not None:
         return existing
-    lst = CommsList(organisation_id=organisation_id, name=LIST_NAME,
-                    source="auto", origin=ORIGIN_LABEL)
-    session.add(lst)
+    seg = CommsSegment(organisation_id=organisation_id, name=LIST_NAME,
+                       definition={"match": "all", "rules": []},
+                       source="auto", origin=ORIGIN_LABEL)
+    session.add(seg)
     await session.flush()
-    return lst
+    return seg
 
 
 async def admin_rows(session: AsyncSession, *, club_id=None) -> list:
@@ -212,22 +214,22 @@ async def sync(session: AsyncSession, *, club_id=None, apply: bool = True) -> di
             CommsContact.email.in_(wanted.keys()),
         ))).scalars().all())
         suppressed = len(on_file - sendable)
-        lst = None
+        seg = None
         if apply:
-            lst = await ensure_list(session, outreach.id)
+            seg = await ensure_segment(session, outreach.id)
         else:
-            lst = (await session.execute(select(CommsList).where(
-                CommsList.organisation_id == outreach.id, CommsList.name == LIST_NAME
+            seg = (await session.execute(select(CommsSegment).where(
+                CommsSegment.organisation_id == outreach.id, CommsSegment.name == LIST_NAME
             ))).scalar_one_or_none()
-        already = set((await session.execute(select(CommsListMember.contact_id).where(
-            CommsListMember.list_id == lst.id,
-            CommsListMember.contact_id.in_(sendable),
-        ))).scalars().all()) if (lst is not None and sendable) else set()
+        already = set((await session.execute(select(CommsSegmentMember.contact_id).where(
+            CommsSegmentMember.segment_id == seg.id,
+            CommsSegmentMember.contact_id.in_(sendable),
+        ))).scalars().all()) if (seg is not None and sendable) else set()
         missing = sendable - already
         listed = len(missing)
         if apply:
             for cid in missing:
-                session.add(CommsListMember(list_id=lst.id, contact_id=cid))
+                session.add(CommsSegmentMember(segment_id=seg.id, contact_id=cid))
         else:
             # A contact that does not exist yet cannot be queried for, so project
             # it: a brand-new row is subscribed by construction and is only

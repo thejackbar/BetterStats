@@ -51,6 +51,28 @@ STAT_FIELDS = {
 # treasurer is looking at.
 SPECIAL_FIELDS = {"availability", "owes_money"}
 
+# ─── Club directory-attribute fields (the Lists→Segments merge) ──────────────
+# What kind of member someone is, resolved from the SAME directory.list_people
+# read the old List filters used, so an Active rule and the retired List filter
+# can never disagree. There is no SQL for these — the person's membership type /
+# tier / squad / role / honour / status lives across half a dozen tables — so
+# build_query resolves the matching people in Python (one list_people call) and
+# the rule becomes a plain `player_id IN (…) OR member_id IN (…)`, the exact
+# `owes_money` precedent one field group up. A directory-minted contact carries
+# BOTH ids (a read-through player has only player_id, a non-player only
+# member_id), so matching either covers every person shape.
+MEMBER_MULTI_FIELDS = {
+    "mem_membership_type", "mem_membership_tier", "mem_squad", "mem_gender",
+    "mem_club_role", "mem_honour",
+}
+MEMBER_FIELDS = MEMBER_MULTI_FIELDS | {"mem_is_playing", "mem_player_status"}
+# The Directory role segments (services/directory.py) a `mem_club_role` key maps
+# to. Kept in step with list_people's own labels.
+_CLUB_ROLE_SEG = {
+    "volunteer": "Volunteer", "committee": "Committee",
+    "official": "Official", "office_bearer": "Office Bearer",
+}
+
 # ─── Directory (BetterCricket outreach) fields ───────────────────────────────
 # These describe a prospect club / its officer rather than a player, so they only
 # appear in the BetterCricket Clubs Directory comms context. They let a segment
@@ -304,7 +326,7 @@ def _visited_clause(val):
         f"     WHERE o.id = marketing_clubs.existing_org_id AND o.slug = {path_code})))"
         + extra + ")")
 
-ALL_FIELDS = CONTACT_FIELDS | PLAYER_FIELDS | STAT_FIELDS | SPECIAL_FIELDS | DIRECTORY_FIELDS
+ALL_FIELDS = CONTACT_FIELDS | PLAYER_FIELDS | STAT_FIELDS | SPECIAL_FIELDS | MEMBER_FIELDS | DIRECTORY_FIELDS
 
 _STAT_COLUMN = {
     "matches_this_season": "matches",
@@ -542,6 +564,82 @@ def _directory_condition(rule: dict, cust, visits=None, trials=None):
     return None
 
 
+def _person_matches_member(field, value, p) -> bool:
+    """Does one directory.list_people person satisfy one member-field rule?
+
+    Ids are matched (types / tier / squad) rather than names, so a rename never
+    silently drops a rule; gender / role / honour / status read the same
+    computed fields the Directory filters on."""
+    if field == "mem_membership_type":
+        want = set(_as_list(value))
+        return any(t.get("id") in want for t in (p.get("membership_types") or []))
+    if field == "mem_membership_tier":
+        want = set(_as_list(value)); tier = p.get("tier")
+        return bool(tier and tier.get("id") in want)
+    if field == "mem_squad":
+        want = set(_as_list(value)); sq = p.get("squad")
+        return bool(sq and sq.get("id") in want)
+    if field == "mem_gender":
+        want = {v.lower() for v in _as_list(value)}
+        return (p.get("gender") or "").lower() in want
+    if field == "mem_club_role":
+        want = {v.lower() for v in _as_list(value)}
+        segs = set(p.get("segs") or [])
+        return any(_CLUB_ROLE_SEG[v] in segs for v in want if v in _CLUB_ROLE_SEG)
+    if field == "mem_honour":
+        want = {v.lower() for v in _as_list(value)}
+        return (("life_member" in want and bool(p.get("is_life_member")))
+                or ("honorary" in want and bool(p.get("is_honorary"))))
+    if field == "mem_is_playing":
+        return bool(p.get("player_id")) == _yes(value)
+    if field == "mem_player_status":
+        v = _vocab(value); st = p.get("player_status")
+        if v == "active":
+            return st == "active"
+        if v == "former":
+            return st == "inactive"
+    return False
+
+
+def _member_condition(rule: dict, people):
+    """One directory-attribute rule → a `player_id IN (…) OR member_id IN (…)`
+    clause over the people list_people returned.
+
+    Empty multi-select value drops the rule (widen), like every other multi
+    field. A real value matching NOBODY narrows to nobody (`false()`), never
+    widens — the fail-closed direction an email audience must take."""
+    field = (rule or {}).get("field")
+    value = (rule or {}).get("value")
+    if field in MEMBER_MULTI_FIELDS and not _as_list(value):
+        return None
+    if field == "mem_is_playing" and str(value).strip() == "":
+        return None
+    if field == "mem_player_status" and _vocab(value) not in ("active", "former"):
+        return None
+    pids, mids = [], []
+    for p in people:
+        if not _person_matches_member(field, value, p):
+            continue
+        if p.get("player_id"):
+            try:
+                pids.append(uuid.UUID(str(p["player_id"])))
+            except (ValueError, TypeError):
+                pass
+        if p.get("member_id"):
+            try:
+                mids.append(uuid.UUID(str(p["member_id"])))
+            except (ValueError, TypeError):
+                pass
+    if not pids and not mids:
+        return false()
+    parts = []
+    if pids:
+        parts.append(CommsContact.player_id.in_(pids))
+    if mids:
+        parts.append(CommsContact.member_id.in_(mids))
+    return or_(*parts) if len(parts) > 1 else parts[0]
+
+
 def _condition(rule: dict, stats, club_id, owing_ids=None):
     field = (rule or {}).get("field")
     op = (rule or {}).get("op")
@@ -643,6 +741,19 @@ async def build_query(session: AsyncSession, club, definition: dict):
                        "rules in a club context: %s", club.id, ", ".join(foreign))
         return q.where(false())
 
+    # The mirror boundary: the club directory-attribute fields (membership type,
+    # tier, squad, role, honour, playing, status) answer nothing in the outreach
+    # context — a prospect club has no members — and a segment saved in a club
+    # and opened as outreach could carry one. Fail closed, the same reason
+    # directory rules do in a club: widening to the whole outreach list is the
+    # far worse direction.
+    member = sorted({r["field"] for r in rules if r["field"] in MEMBER_FIELDS})
+    if member and org_is_outreach(club):
+        logger.warning("BetterComms: dropping segment for outreach org %s — club "
+                       "member-attribute rules in an outreach context: %s",
+                       club.id, ", ".join(member))
+        return q.where(false())
+
     if any(r["field"] in (PLAYER_FIELDS | STAT_FIELDS) for r in rules):
         q = q.join(Player, Player.id == CommsContact.player_id)
 
@@ -672,6 +783,14 @@ async def build_query(session: AsyncSession, club, definition: dict):
     if any(r["field"] == "owes_money" for r in rules):
         owing_ids = await _owing_player_ids(session, club.id)
 
+    # The directory people, resolved ONCE (lazy import — the same posture
+    # _owing_player_ids takes), reused by every member-attribute rule so a
+    # multi-condition segment reads the directory a single time.
+    people = None
+    if any(r["field"] in MEMBER_FIELDS for r in rules):
+        from app.services import directory
+        people = await directory.list_people(session, club.id)
+
     stats = None
     if any(r["field"] in STAT_FIELDS for r in rules):
         year = await _current_year(session, club.id)
@@ -696,6 +815,8 @@ async def build_query(session: AsyncSession, club, definition: dict):
     for rule in rules:
         if rule["field"] in DIRECTORY_FIELDS:
             cond = _directory_condition(rule, cust, visits, trials)
+        elif rule["field"] in MEMBER_FIELDS:
+            cond = _member_condition(rule, people or [])
         else:
             cond = _condition(rule, stats, club.id, owing_ids)
         if cond is not None:
@@ -703,20 +824,66 @@ async def build_query(session: AsyncSession, club, definition: dict):
     return q
 
 
-async def resolve_contacts(session: AsyncSession, club, definition: dict) -> list[CommsContact]:
-    q = await build_query(session, club, definition)
-    rows = (await session.execute(q.order_by(CommsContact.email))).scalars().all()
-    seen, out = set(), []
-    for c in rows:
-        if c.email in seen:
-            continue
-        seen.add(c.email)
-        out.append(c)
-    return out
+def _has_active_rules(definition: dict) -> bool:
+    """Whether a definition carries the RULE side at all — i.e. at least one rule
+    object naming a known field.
+
+    The value is deliberately NOT inspected here. build_query already drops a
+    rule with an empty value and widens (an unfilled or empty-multi rule matches
+    everyone, the documented multi-select semantics), so gating on the value
+    would turn "rule present but empty" into "nobody", which is wrong — the
+    frontend strips empty-value rules before sending, so a definition that still
+    carries one is a direct/hand-made call that expects the widen.
+
+    What this exists to catch is the PURE-STATIC segment: ``rules: []`` (what
+    /segments/from-directory writes, and what the editor sends once its one
+    seeded blank rule is filtered out). That must resolve to its hand-picked set
+    alone, never to build_query's no-rule "everyone sendable" path."""
+    for r in ((definition or {}).get("rules") or []):
+        if r and r.get("field") in ALL_FIELDS:
+            return True
+    return False
 
 
-async def count(session: AsyncSession, club, definition: dict) -> int:
-    q = await build_query(session, club, definition)
-    # Contacts are unique per (org, email), so a row count is the contact count.
-    n = await session.scalar(select(func.count()).select_from(q.subquery()))
+async def resolve_contacts(session: AsyncSession, club, definition: dict,
+                           *, static_ids=None) -> list[CommsContact]:
+    """The UNION of the rule matches and the frozen hand-picked (static) set.
+
+    Both sides pass sendable_where, so a suppressed hand-pick can never leak. A
+    pure-static segment (no active rules) resolves to its static set alone; a
+    definition with neither rules nor members resolves to nobody."""
+    # Run the rule side when there ARE rules, OR when there is no static set at
+    # all — a definition with no rules and no members is a pure-RULE segment
+    # whose empty rule list means "everyone sendable" (the legacy contract). Only
+    # a segment that carries a static set treats empty rules as "no rule side",
+    # so a from-directory / hand-picked segment resolves to its members alone
+    # rather than to everyone ∪ members.
+    by_email: dict = {}
+    if _has_active_rules(definition) or not static_ids:
+        q = await build_query(session, club, definition)
+        for c in (await session.execute(q.order_by(CommsContact.email))).scalars().all():
+            by_email.setdefault(c.email, c)
+    if static_ids:
+        sq = (select(CommsContact)
+              .where(*sendable_where(club.id), CommsContact.id.in_(list(static_ids)))
+              .order_by(CommsContact.email))
+        for c in (await session.execute(sq)).scalars().all():
+            by_email.setdefault(c.email, c)
+    return sorted(by_email.values(), key=lambda c: (c.email or ""))
+
+
+async def count(session: AsyncSession, club, definition: dict, *, static_ids=None) -> int:
+    """The size of the UNION, counted distinctly. Contacts are unique per
+    (org, email), so a distinct id count is the contact count."""
+    subs = []
+    if _has_active_rules(definition) or not static_ids:
+        q = await build_query(session, club, definition)
+        subs.append(select(q.subquery().c.id))
+    if static_ids:
+        subs.append(select(CommsContact.id)
+                    .where(*sendable_where(club.id), CommsContact.id.in_(list(static_ids))))
+    if not subs:
+        return 0
+    unioned = subs[0] if len(subs) == 1 else subs[0].union(*subs[1:])
+    n = await session.scalar(select(func.count()).select_from(unioned.subquery()))
     return int(n or 0)

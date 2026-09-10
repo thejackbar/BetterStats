@@ -150,13 +150,13 @@ function CreateListModal({ open, onClose, clubs, onCreated }) {
       {result ? (
         <div className="space-y-2 text-[13px]">
           <div className="text-pb-text">
-            Created list <span className="font-medium">"{result.name}"</span> with {result.added} contact
+            Created segment <span className="font-medium">"{result.name}"</span> with {result.added} contact
             {result.added === 1 ? '' : 's'} across {result.clubs} club{result.clubs === 1 ? '' : 's'}
             {result.created_contacts > 0 && <> ({result.created_contacts} new contact{result.created_contacts === 1 ? '' : 's'} created)</>}.
           </div>
           <div className="text-pb-faintest">
-            Find it in <Link to="/admin/comms/lists" className="underline hover:text-pb-text">BetterComms → Lists</Link> under
-            "Auto-generated lists". Send an email to it and this page will report the campaign and time against each club.
+            Find it in <Link to="/admin/comms/segments" className="underline hover:text-pb-text">BetterComms → Segments</Link> under
+            "Auto-generated segments". Send an email to it and this page will report the campaign and time against each club.
           </div>
         </div>
       ) : (
@@ -430,8 +430,8 @@ export default function SuperWizardClubs() {
           <Link to="/admin/super/crm/sales-lists" className="font-mono text-[10px] uppercase text-pb-faint hover:text-pb-text">
             Sales lists
           </Link>
-          <Link to="/admin/comms/lists" className="font-mono text-[10px] uppercase text-pb-faint hover:text-pb-text">
-            Comms lists
+          <Link to="/admin/comms/segments" className="font-mono text-[10px] uppercase text-pb-faint hover:text-pb-text">
+            Comms segments
           </Link>
           <Btn variant="subtle" sm onClick={() => setShowImportSales(true)} disabled={targetRows.length === 0}>
             Import to Sales List{selectedRows.length ? ` (${selectedRows.length})` : ''}

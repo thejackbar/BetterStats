@@ -44,7 +44,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.db import (
     User, Organisation, Player, ClubMembership, Team,
-    CommsContact, CommsCampaign, CommsRecipient, CommsSegment, CommsTemplate,
+    CommsContact, CommsCampaign, CommsRecipient, CommsSegment, CommsSegmentMember, CommsTemplate,
     CommsList, CommsListMember, EmailSuppression, EmailEvent, CommsLimitRequest,
     MarketingClub, MarketingClubContact,
     async_session_maker, get_db,
@@ -812,12 +812,27 @@ async def _resolve_audience(db: AsyncSession, club: Organisation, audience: dict
         seg = await db.get(CommsSegment, sid)
         if not seg or seg.organisation_id != club.id:
             return []
-        return await comms_segments.resolve_contacts(db, club, seg.definition)
+        static = list((await db.execute(
+            select(CommsSegmentMember.contact_id).where(CommsSegmentMember.segment_id == seg.id)
+        )).scalars().all())
+        return await comms_segments.resolve_contacts(db, club, seg.definition, static_ids=static)
     if atype == "saved_list":
         try:
             lid = uuid.UUID(str((audience or {}).get("list_id")))
         except (ValueError, TypeError):
             return []
+        # Lists→Segments merge: a historical campaign still names a list_id.
+        # Prefer the segment that list migrated into, so the audience is the live
+        # (editable) migrated segment; fall back to the list's own members for a
+        # list that predates the migration back-link.
+        seg = (await db.execute(select(CommsSegment).where(
+            CommsSegment.organisation_id == club.id,
+            CommsSegment.legacy_list_id == lid))).scalars().first()
+        if seg:
+            static = list((await db.execute(
+                select(CommsSegmentMember.contact_id).where(CommsSegmentMember.segment_id == seg.id)
+            )).scalars().all())
+            return await comms_segments.resolve_contacts(db, club, seg.definition, static_ids=static)
         member_ids = select(CommsListMember.contact_id).where(CommsListMember.list_id == lid)
         base = select(CommsContact).where(
             *comms_segments.sendable_where(club.id), CommsContact.id.in_(member_ids))
@@ -2338,8 +2353,54 @@ async def contact_events(
 
 # ─── Dynamic segments (Phase 2) ──────────────────────────────────────────────
 
-def _segment_out(s: CommsSegment) -> dict:
-    return {"id": str(s.id), "name": s.name, "definition": s.definition or {}}
+def _segment_out(s: CommsSegment, member_count: int = None) -> dict:
+    out = {
+        "id": str(s.id), "name": s.name, "definition": s.definition or {},
+        # A segment now carries the grouping a list did (Lists→Segments merge):
+        # 'manual' vs 'auto' + an origin label for an auto-generated one.
+        "source": getattr(s, "source", None) or "manual",
+        "origin": getattr(s, "origin", None),
+    }
+    if member_count is not None:
+        out["member_count"] = member_count      # size of the frozen STATIC set
+    return out
+
+
+async def _segment_static_ids(db: AsyncSession, segment_id) -> list:
+    """The contact ids in a segment's frozen hand-picked (static) set."""
+    return list((await db.execute(
+        select(CommsSegmentMember.contact_id).where(CommsSegmentMember.segment_id == segment_id)
+    )).scalars().all())
+
+
+async def _segment_member_count(db: AsyncSession, segment_id) -> int:
+    return int((await db.execute(
+        select(func.count(CommsSegmentMember.id)).where(CommsSegmentMember.segment_id == segment_id)
+    )).scalar_one() or 0)
+
+
+def _seg_chunks(seq, n=5000):
+    for i in range(0, len(seq), n):
+        yield seq[i:i + n]
+
+
+async def _validate_contact_ids(db: AsyncSession, club: Organisation, raw_ids) -> list:
+    """Keep only ids that are this club's own contacts — a draft static set (or a
+    from-directory selection) arrives from a browser. Chunked so a whole filtered
+    directory of ids is a handful of queries."""
+    ids = set()
+    for raw in (raw_ids or []):
+        try:
+            ids.add(uuid.UUID(str(raw)))
+        except (ValueError, TypeError):
+            continue
+    if not ids:
+        return []
+    valid = set()
+    for batch in _seg_chunks(list(ids)):
+        valid |= set((await db.execute(select(CommsContact.id).where(
+            CommsContact.organisation_id == club.id, CommsContact.id.in_(batch)))).scalars().all())
+    return list(valid)
 
 
 @router.get("/segments")
@@ -2352,12 +2413,16 @@ async def list_segments(
         select(CommsSegment).where(CommsSegment.organisation_id == club.id)
         .order_by(CommsSegment.name)
     )).scalars().all()
-    return [_segment_out(s) for s in rows]
+    return [_segment_out(s, member_count=await _segment_member_count(db, s.id)) for s in rows]
 
 
 class SegmentIn(BaseModel):
     name: str
     definition: dict = {}
+    # The frozen hand-picked set to preview the UNION against (preview/resolve
+    # only — create/update ignore it, since static members are managed through
+    # the dedicated member endpoints, immediate like a list's were).
+    static_member_ids: Optional[List[str]] = None
 
 
 def _reject_foreign_rules(club: Organisation, definition: dict) -> None:
@@ -2366,14 +2431,22 @@ def _reject_foreign_rules(club: Organisation, definition: dict) -> None:
     read, but a write is where a person is present to be told why — and it stops a
     segment that can only ever resolve to nobody from being saved and sent."""
     rules = (definition or {}).get("rules") or []
-    if comms_segments.directory_rules_allowed(club):
-        return
-    bad = sorted({str(r.get("field")) for r in rules
-                  if isinstance(r, dict) and r.get("field") in comms_segments.DIRECTORY_FIELDS})
-    if bad:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Not available for this club: {', '.join(bad)}")
+    fields = {str(r.get("field")) for r in rules if isinstance(r, dict)}
+    if not comms_segments.directory_rules_allowed(club):
+        bad = sorted(f for f in fields if f in comms_segments.DIRECTORY_FIELDS)
+        if bad:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Not available for this club: {', '.join(bad)}")
+    else:
+        # The mirror: a club member-attribute field (membership type, tier,
+        # squad, role, honour, playing, status) has no meaning in the outreach
+        # Directory and must never be stored there.
+        badm = sorted(f for f in fields if f in comms_segments.MEMBER_FIELDS)
+        if badm:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Not available for the directory: {', '.join(badm)}")
 
 
 @router.post("/segments")
@@ -2451,9 +2524,10 @@ async def preview_segment(
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
-    """Live count for an unsaved definition (powers the segment builder)."""
+    """Live count for an unsaved definition + draft static set (the UNION)."""
     await reconcile_contacts_from_directory(db, club)
-    contacts = await comms_segments.resolve_contacts(db, club, data.definition or {})
+    static = await _validate_contact_ids(db, club, data.static_member_ids)
+    contacts = await comms_segments.resolve_contacts(db, club, data.definition or {}, static_ids=static)
     return {
         "count": len(contacts),
         "sample": [{"email": c.email, "name": c.name} for c in contacts[:8]],
@@ -2496,7 +2570,8 @@ async def resolve_segment(
     its CSV export. The CONTACT LIST is capped for safety; every figure is exact,
     computed before the cap (see audience_figures)."""
     await reconcile_contacts_from_directory(db, club)
-    contacts = await comms_segments.resolve_contacts(db, club, data.definition or {})
+    static = await _validate_contact_ids(db, club, data.static_member_ids)
+    contacts = await comms_segments.resolve_contacts(db, club, data.definition or {}, static_ids=static)
     rows = contacts[:5000]
     mc_map = await _mc_map(db, rows)
     return {
@@ -2517,7 +2592,8 @@ async def export_segment_csv(
     Lists export. The segment re-evaluates on each download, so it always reflects
     who fits today."""
     seg = await _segment_or_404(db, club, segment_id)
-    contacts = await comms_segments.resolve_contacts(db, club, seg.definition or {})
+    static = await _segment_static_ids(db, seg.id)
+    contacts = await comms_segments.resolve_contacts(db, club, seg.definition or {}, static_ids=static)
     mc_map = await _mc_map(db, contacts)
     buf = io.StringIO()
     w = csv.writer(buf)
@@ -2574,11 +2650,30 @@ async def segment_options(
         select(Team).where(Team.organisation_id == club.id, Team.is_active.is_(True))
         .order_by(Team.name)
     )).scalars().all()
+    # The directory-attribute vocab (Lists→Segments merge): the club's own
+    # membership types + fee tiers + squads, so the new Active rule fields draw
+    # real values rather than guessing. `directory.filter_options` is the same
+    # season-scoped read the Directory's own filters use, so the two agree.
+    dir_opts = await directory.filter_options(db, club.id)
+    mem_types = (await db.execute(text(
+        "SELECT id, name FROM membership_types WHERE organisation_id = :org "
+        "ORDER BY sort_order, lower(name)"
+    ), {"org": club.id})).mappings().all()
     return {
         "context": "club",
         "roles": ["Batter", "Bowler", "All Rounder", "Wicketkeeper", "Wicketkeeper-Batter"],
-        "genders": [["male", "Male"], ["female", "Female"]],
+        # 'other' is offered too — a club records genders beyond male/female, and
+        # the Directory's own gender filter carries all three.
+        "genders": [["male", "Male"], ["female", "Female"], ["other", "Other"]],
         "teams": [{"id": str(t.id), "name": t.name} for t in teams],
+        "membership_types": [{"id": str(r["id"]), "name": r["name"]} for r in mem_types],
+        "membership_tiers": dir_opts.get("tiers", []),
+        "squads": dir_opts.get("squads", []),
+        # Fixed vocabularies — a role/honour is a computed directory segment, not
+        # a club-authored value.
+        "club_roles": [["volunteer", "Volunteer"], ["committee", "Committee"],
+                       ["official", "Official"], ["office_bearer", "Office Bearer"]],
+        "honours": [["life_member", "Life member"], ["honorary", "Honorary member"]],
     }
 
 
@@ -2660,7 +2755,219 @@ async def segment_entities(
     return {"options": options, "chosen": chosen}
 
 
-# ─── Static lists (Phase 2) ──────────────────────────────────────────────────
+# ─── Segment static members (the frozen hand-picked set) ─────────────────────
+# The Lists→Segments merge: a segment carries a frozen set of hand-picked
+# contacts alongside its live rules, and its audience is the UNION of the two.
+# These mirror the old list-member endpoints; members persist immediately (like
+# a list's did) and the live builder previews the union by passing the current
+# set to /segments/resolve.
+
+class SegmentMembersIn(BaseModel):
+    contact_ids: list[str] = []
+
+
+@router.get("/segments/{segment_id}/size")
+async def segment_size(
+    segment_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """The UNION size (rules ∪ static set) of a saved segment — the live figure
+    the rail shows. Server-side so it reads the stored members the caller doesn't
+    hold."""
+    seg = await _segment_or_404(db, club, segment_id)
+    static = await _segment_static_ids(db, seg.id)
+    n = await comms_segments.count(db, club, seg.definition or {}, static_ids=static)
+    return {"count": n}
+
+
+@router.get("/segments/{segment_id}/members")
+async def segment_members(
+    segment_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    seg = await _segment_or_404(db, club, segment_id)
+    rows = (await db.execute(
+        select(CommsContact)
+        .join(CommsSegmentMember, CommsSegmentMember.contact_id == CommsContact.id)
+        .where(CommsSegmentMember.segment_id == seg.id)
+        .order_by(CommsContact.email)
+    )).scalars().all()
+    mc_map = await _mc_map(db, rows)
+    return [_contact_out(c, mc_map.get(c.marketing_club_id)) for c in rows]
+
+
+@router.post("/segments/{segment_id}/members")
+async def add_segment_members(
+    segment_id: str,
+    data: SegmentMembersIn,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    seg = await _segment_or_404(db, club, segment_id)
+    valid = await _validate_contact_ids(db, club, data.contact_ids)
+    if not valid:
+        return {"added": 0, "count": await _segment_member_count(db, seg.id)}
+    existing = set()
+    for batch in _seg_chunks(valid):
+        existing |= set((await db.execute(select(CommsSegmentMember.contact_id).where(
+            CommsSegmentMember.segment_id == seg.id,
+            CommsSegmentMember.contact_id.in_(batch)))).scalars().all())
+    to_add = [cid for cid in valid if cid not in existing]
+    db.add_all([CommsSegmentMember(segment_id=seg.id, contact_id=cid) for cid in to_add])
+    await db.commit()
+    return {"added": len(to_add), "count": await _segment_member_count(db, seg.id)}
+
+
+@router.delete("/segments/{segment_id}/members/{contact_id}")
+async def remove_segment_member(
+    segment_id: str,
+    contact_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    seg = await _segment_or_404(db, club, segment_id)
+    try:
+        cid = uuid.UUID(contact_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid contact id")
+    await db.execute(
+        CommsSegmentMember.__table__.delete().where(
+            CommsSegmentMember.segment_id == seg.id, CommsSegmentMember.contact_id == cid))
+    await db.commit()
+    return {"status": "ok", "count": await _segment_member_count(db, seg.id)}
+
+
+@router.post("/segments/{segment_id}/members/remove")
+async def remove_segment_members(
+    segment_id: str,
+    data: SegmentMembersIn,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove several contacts from a segment's static set in one call."""
+    seg = await _segment_or_404(db, club, segment_id)
+    cids = set()
+    for raw in (data.contact_ids or []):
+        try:
+            cids.add(uuid.UUID(str(raw)))
+        except (ValueError, TypeError):
+            continue
+    removed = 0
+    if cids:
+        res = await db.execute(
+            CommsSegmentMember.__table__.delete().where(
+                CommsSegmentMember.segment_id == seg.id,
+                CommsSegmentMember.contact_id.in_(cids)))
+        removed = res.rowcount or 0
+        await db.commit()
+    return {"status": "ok", "removed": removed, "count": await _segment_member_count(db, seg.id)}
+
+
+async def _unique_segment_name(db: AsyncSession, org_id, base: str) -> str:
+    """`comms_segments` is unique on (org, name); an auto-generated name collides
+    easily. Suffix rather than 409 — the admin asked for a segment, not a lecture."""
+    base = (base or "").strip() or "Directory segment"
+    taken = set((await db.execute(
+        select(CommsSegment.name).where(CommsSegment.organisation_id == org_id))).scalars().all())
+    if base not in taken:
+        return base
+    for n in range(2, 1000):
+        cand = f"{base} ({n})"
+        if cand not in taken:
+            return cand
+    return f"{base} ({uuid.uuid4().hex[:6]})"
+
+
+class SegmentFromDirectoryIn(BaseModel):
+    name: str
+    keys: List[str]          # the Directory's own person keys, not emails
+
+
+@router.post("/segments/from-directory")
+async def create_segment_from_directory(
+    data: SegmentFromDirectoryIn,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Turn a filtered Directory selection into an auto STATIC segment
+    (source='auto', origin='Clubhouse Directory') — the former
+    /lists/from-directory, now writing a segment.
+
+    The browser sends person KEYS, never emails: the server re-reads the
+    Directory and takes the address from its own data, so a tampered payload
+    can't inject a recipient the club doesn't hold. Contacts are upserted through
+    `_upsert_contact`, so an unsubscribe or bounce is never resurrected."""
+    name = (data.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="A segment name is required")
+    wanted = set(data.keys or [])
+    if not wanted:
+        raise HTTPException(status_code=422, detail="Pick at least one person")
+
+    people = [p for p in await directory.list_people(db, club.id) if p["key"] in wanted]
+    no_email = [p for p in people if not _norm_email(p.get("email") or "")]
+
+    emails: list[str] = []
+    for p in people:
+        email = _norm_email(p.get("email") or "")
+        if not email:
+            continue
+
+        def _u(v):
+            return uuid.UUID(v) if isinstance(v, str) and v else (v or None)
+        await _upsert_contact(
+            db, club, email, p.get("name"),
+            "player" if p.get("player_id") else "member",
+            player_id=_u(p.get("player_id")), member_id=_u(p.get("member_id")),
+        )
+        emails.append(email)
+
+    if not emails:
+        raise HTTPException(
+            status_code=422,
+            detail="None of those people have an email address, so there is nobody to email.",
+        )
+
+    await db.flush()
+    contact_ids = list((await db.execute(select(CommsContact.id).where(
+        CommsContact.organisation_id == club.id, CommsContact.email.in_(set(emails))
+    ))).scalars().all())
+
+    final_name = await _unique_segment_name(db, club.id, name)
+    seg = CommsSegment(organisation_id=club.id, name=final_name,
+                       definition={"match": "all", "rules": []},
+                       source="auto", origin=DIRECTORY_ORIGIN)
+    db.add(seg)
+    await db.flush()
+    for cid in contact_ids:
+        db.add(CommsSegmentMember(segment_id=seg.id, contact_id=cid))
+    await db.commit()
+    await db.refresh(seg)
+    return {
+        "id": str(seg.id), "name": seg.name, "source": "auto", "origin": DIRECTORY_ORIGIN,
+        "count": len(contact_ids),
+        "selected": len(people),
+        "skipped_no_email": len(no_email),
+        "skipped_names": [p["name"] for p in no_email[:20]],
+    }
+
+
+# ─── Static lists (Phase 2) — retired write path ─────────────────────────────
+# The Lists concept is folded into Segments (see above). The tables are kept for
+# history and the `saved_list` campaign audience below; every list has been
+# migrated to a pure-static segment. Only the READ endpoints remain, for a
+# historical export view — nothing creates or mutates a list any more.
+
+DIRECTORY_ORIGIN = "Clubhouse Directory"
+
 
 async def _list_or_404(db: AsyncSession, club: Organisation, lid: str) -> CommsList:
     try:
@@ -2698,167 +3005,6 @@ async def list_lists(
             "origin": getattr(l, "origin", None),
         })
     return out
-
-
-class ListIn(BaseModel):
-    name: str
-
-
-@router.post("/lists")
-async def create_list(
-    data: ListIn,
-    _: User = _require,
-    club: Organisation = Depends(get_current_club),
-    db: AsyncSession = Depends(get_db),
-):
-    name = (data.name or "").strip()
-    if not name:
-        raise HTTPException(status_code=422, detail="A list name is required")
-    lst = CommsList(organisation_id=club.id, name=name, source="manual")
-    db.add(lst)
-    try:
-        await db.commit()
-    except IntegrityError:
-        await db.rollback()
-        raise HTTPException(status_code=409, detail="A list with that name already exists")
-    await db.refresh(lst)
-    return {"id": str(lst.id), "name": lst.name, "count": 0, "source": "manual", "origin": None}
-
-
-DIRECTORY_ORIGIN = "Clubhouse Directory"
-
-
-async def _unique_list_name(db: AsyncSession, org_id, base: str) -> str:
-    """`comms_lists` is unique on (org, name), and an auto-generated name is
-    derived from a filter so two runs collide easily. Suffix rather than 409:
-    the admin asked for a list, not a lecture about naming."""
-    base = (base or "").strip() or "Directory list"
-    taken = set((await db.execute(
-        select(CommsList.name).where(CommsList.organisation_id == org_id))).scalars().all())
-    if base not in taken:
-        return base
-    for n in range(2, 1000):
-        cand = f"{base} ({n})"
-        if cand not in taken:
-            return cand
-    return f"{base} ({uuid.uuid4().hex[:6]})"
-
-
-class ListFromDirectoryIn(BaseModel):
-    name: str
-    keys: List[str]          # the Directory's own person keys, not emails
-
-
-@router.post("/lists/from-directory")
-async def create_list_from_directory(
-    data: ListFromDirectoryIn,
-    _: User = _require,
-    club: Organisation = Depends(get_current_club),
-    db: AsyncSession = Depends(get_db),
-):
-    """Turn a filtered Directory selection into an auto list (source='auto',
-    origin='Clubhouse Directory'), so any grouping an admin can see on the
-    Directory can become an email audience.
-
-    The browser sends person KEYS, never emails: the server re-reads the
-    Directory itself and takes the address from its own data, so a tampered or
-    stale payload can't inject a recipient the club doesn't actually hold.
-
-    Contacts are upserted through `_upsert_contact`, which is what keeps an
-    unsubscribe or a bounce intact — building a list around someone who opted
-    out must never quietly resurrect them. People with no email are skipped and
-    counted, since that number is the whole point of the No-email filter.
-    """
-    name = (data.name or "").strip()
-    if not name:
-        raise HTTPException(status_code=422, detail="A list name is required")
-    wanted = set(data.keys or [])
-    if not wanted:
-        raise HTTPException(status_code=422, detail="Pick at least one person")
-
-    people = [p for p in await directory.list_people(db, club.id) if p["key"] in wanted]
-    no_email = [p for p in people if not _norm_email(p.get("email") or "")]
-
-    emails: list[str] = []
-    for p in people:
-        email = _norm_email(p.get("email") or "")
-        if not email:
-            continue
-        # list_people serialises ids as strings for the browser; these are going
-        # into UUID columns, so coerce rather than relying on the driver.
-        def _u(v):
-            return uuid.UUID(v) if isinstance(v, str) and v else (v or None)
-        await _upsert_contact(
-            db, club, email, p.get("name"),
-            "player" if p.get("player_id") else "member",
-            player_id=_u(p.get("player_id")), member_id=_u(p.get("member_id")),
-        )
-        emails.append(email)
-
-    if not emails:
-        raise HTTPException(
-            status_code=422,
-            detail="None of those people have an email address, so there is nobody to email.",
-        )
-
-    # Read the ids back rather than tracking them through the upsert: it returns
-    # a status string, and a person already on file resolves to their existing
-    # row (the (org, email) unique) rather than a new one.
-    await db.flush()
-    contact_ids = list((await db.execute(select(CommsContact.id).where(
-        CommsContact.organisation_id == club.id, CommsContact.email.in_(set(emails))
-    ))).scalars().all())
-
-    final_name = await _unique_list_name(db, club.id, name)
-    lst = CommsList(organisation_id=club.id, name=final_name,
-                    source="auto", origin=DIRECTORY_ORIGIN)
-    db.add(lst)
-    await db.flush()
-    for cid in contact_ids:
-        db.add(CommsListMember(list_id=lst.id, contact_id=cid))
-    await db.commit()
-    await db.refresh(lst)
-    return {
-        "id": str(lst.id), "name": lst.name, "source": "auto", "origin": DIRECTORY_ORIGIN,
-        "count": len(contact_ids),
-        "selected": len(people),
-        "skipped_no_email": len(no_email),
-        "skipped_names": [p["name"] for p in no_email[:20]],
-    }
-
-
-@router.put("/lists/{list_id}")
-async def rename_list(
-    list_id: str,
-    data: ListIn,
-    _: User = _require,
-    club: Organisation = Depends(get_current_club),
-    db: AsyncSession = Depends(get_db),
-):
-    lst = await _list_or_404(db, club, list_id)
-    name = (data.name or "").strip()
-    if not name:
-        raise HTTPException(status_code=422, detail="A list name is required")
-    lst.name = name
-    try:
-        await db.commit()
-    except IntegrityError:
-        await db.rollback()
-        raise HTTPException(status_code=409, detail="A list with that name already exists")
-    return {"id": str(lst.id), "name": lst.name, "count": await _list_count(db, lst.id)}
-
-
-@router.delete("/lists/{list_id}")
-async def delete_list(
-    list_id: str,
-    _: User = _require,
-    club: Organisation = Depends(get_current_club),
-    db: AsyncSession = Depends(get_db),
-):
-    lst = await _list_or_404(db, club, list_id)
-    await db.delete(lst)
-    await db.commit()
-    return {"status": "ok"}
 
 
 @router.get("/lists/{list_id}/members")
@@ -2920,148 +3066,6 @@ async def export_list_csv(
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
-
-
-class ListMembersIn(BaseModel):
-    contact_ids: list[str] = []
-
-
-@router.post("/lists/{list_id}/members")
-async def add_list_members(
-    list_id: str,
-    data: ListMembersIn,
-    _: User = _require,
-    club: Organisation = Depends(get_current_club),
-    db: AsyncSession = Depends(get_db),
-):
-    lst = await _list_or_404(db, club, list_id)
-    ids = []
-    for raw in (data.contact_ids or []):
-        try:
-            ids.append(uuid.UUID(str(raw)))
-        except (ValueError, TypeError):
-            continue
-    if not ids:
-        return {"added": 0, "count": await _list_count(db, lst.id)}
-    # Set-based + chunked so adding a whole filtered directory (thousands of ids)
-    # is a handful of queries, not two per contact (which would time out and can
-    # blow past the driver's bind-parameter limit).
-    def _chunks(seq, n=5000):
-        for i in range(0, len(seq), n):
-            yield seq[i:i + n]
-    valid = set()
-    for batch in _chunks(ids):
-        valid |= set((await db.execute(select(CommsContact.id).where(
-            CommsContact.organisation_id == club.id,
-            CommsContact.id.in_(batch)))).scalars().all())
-    if not valid:
-        return {"added": 0, "count": await _list_count(db, lst.id)}
-    existing = set()
-    for batch in _chunks(list(valid)):
-        existing |= set((await db.execute(select(CommsListMember.contact_id).where(
-            CommsListMember.list_id == lst.id,
-            CommsListMember.contact_id.in_(batch)))).scalars().all())
-    to_add = [cid for cid in valid if cid not in existing]
-    db.add_all([CommsListMember(list_id=lst.id, contact_id=cid) for cid in to_add])
-    await db.commit()
-    return {"added": len(to_add), "count": await _list_count(db, lst.id)}
-
-
-@router.delete("/lists/{list_id}/members/{contact_id}")
-async def remove_list_member(
-    list_id: str,
-    contact_id: str,
-    _: User = _require,
-    club: Organisation = Depends(get_current_club),
-    db: AsyncSession = Depends(get_db),
-):
-    lst = await _list_or_404(db, club, list_id)
-    try:
-        cid = uuid.UUID(contact_id)
-    except ValueError:
-        raise HTTPException(status_code=422, detail="Invalid contact id")
-    await db.execute(
-        CommsListMember.__table__.delete().where(
-            CommsListMember.list_id == lst.id, CommsListMember.contact_id == cid))
-    await db.commit()
-    return {"status": "ok", "count": await _list_count(db, lst.id)}
-
-
-def _uuid_set(raw_ids) -> set:
-    out = set()
-    for raw in (raw_ids or []):
-        try:
-            out.add(uuid.UUID(str(raw)))
-        except (ValueError, TypeError):
-            continue
-    return out
-
-
-@router.post("/lists/{list_id}/members/remove")
-async def remove_list_members(
-    list_id: str,
-    data: ListMembersIn,
-    _: User = _require,
-    club: Organisation = Depends(get_current_club),
-    db: AsyncSession = Depends(get_db),
-):
-    """Remove several contacts from a list in one call (group remove)."""
-    lst = await _list_or_404(db, club, list_id)
-    cids = _uuid_set(data.contact_ids)
-    removed = 0
-    if cids:
-        res = await db.execute(
-            CommsListMember.__table__.delete().where(
-                CommsListMember.list_id == lst.id,
-                CommsListMember.contact_id.in_(cids)))
-        removed = res.rowcount or 0
-        await db.commit()
-    return {"status": "ok", "removed": removed, "count": await _list_count(db, lst.id)}
-
-
-class CopyMembersIn(BaseModel):
-    contact_ids: list[str] = []
-    list_ids: list[str] = []
-
-
-@router.post("/lists/members/copy")
-async def copy_list_members(
-    data: CopyMembersIn,
-    _: User = _require,
-    club: Organisation = Depends(get_current_club),
-    db: AsyncSession = Depends(get_db),
-):
-    """Copy a set of contacts into one or more target lists (group copy). Only the
-    club's own contacts and lists are touched; existing memberships are left alone."""
-    cids = _uuid_set(data.contact_ids)
-    target_ids = _uuid_set(data.list_ids)
-    if not cids or not target_ids:
-        return {"results": []}
-    # Keep only contacts that belong to this club.
-    valid_cids = set((await db.execute(
-        select(CommsContact.id).where(
-            CommsContact.organisation_id == club.id, CommsContact.id.in_(cids))
-    )).scalars().all())
-    results = []
-    for lid in target_ids:
-        lst = await db.get(CommsList, lid)
-        if not lst or lst.organisation_id != club.id:
-            continue
-        existing = set((await db.execute(
-            select(CommsListMember.contact_id).where(
-                CommsListMember.list_id == lst.id,
-                CommsListMember.contact_id.in_(valid_cids))
-        )).scalars().all())
-        added = 0
-        for cid in valid_cids:
-            if cid in existing:
-                continue
-            db.add(CommsListMember(list_id=lst.id, contact_id=cid))
-            added += 1
-        await db.commit()
-        results.append({"list_id": str(lst.id), "name": lst.name,
-                        "added": added, "count": await _list_count(db, lst.id)})
-    return {"results": results}
 
 
 # ─── Email templates (Phase 3) ───────────────────────────────────────────────

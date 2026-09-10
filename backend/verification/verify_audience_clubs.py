@@ -222,10 +222,12 @@ async def main() -> int:
         internal = open(os.path.join(
             REPO, "frontend/src/pages/admin/clubhouse/InternalSegments.jsx")).read()
         check("the internal Segments screen passes it", "clubs={s.clubs}" in internal)
-        lists = open(os.path.join(
-            REPO, "frontend/src/pages/admin/bettercomms/CommsLists.jsx")).read()
-        check("the Lists screen computes and draws it",
-              "clubCount(members)" in lists and "clubs === 1 ? 'club' : 'clubs'" in lists)
+        # Lists were merged into Segments (migration 304); the standalone Lists
+        # screen is gone, and the club count is drawn by the shared segment
+        # CountBar (asserted above) rather than a second copy on a Lists page.
+        check("the Lists screen has been removed by the Lists→Segments merge",
+              not os.path.exists(os.path.join(
+                  REPO, "frontend/src/pages/admin/bettercomms/CommsLists.jsx")))
         engine_src = open(os.path.join(
             REPO, "frontend/src/pages/admin/clubhouse/segmentEngine.jsx")).read()
         check("a segment prefers the server's exact figures over the capped slice",

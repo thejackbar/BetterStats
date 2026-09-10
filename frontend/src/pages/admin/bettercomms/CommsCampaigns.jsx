@@ -145,9 +145,7 @@ export default function CommsCampaigns() {
           <Note toneKey="calm">
             An email goes to one audience, and that audience is one of your{' '}
             <Link to="/admin/comms/segments" className="underline" style={{ color: 'var(--pb-accent-ink)' }}>segments</Link>
-            {' '}or one of your{' '}
-            <Link to="/admin/comms/lists" className="underline" style={{ color: 'var(--pb-accent-ink)' }}>lists</Link>.
-            Nothing sends until you press Send.
+            {' '}— a live rule, a hand-picked set, or both. Nothing sends until you press Send.
           </Note>
         </RecordListPane>
 

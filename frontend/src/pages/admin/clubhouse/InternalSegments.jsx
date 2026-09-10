@@ -7,7 +7,8 @@ import {
 } from '../../../components/admin/ui'
 import { DIRECTORY_FIELD_DEFS } from '../bettercomms/segmentFields'
 import { CrudPanes, DetailPane, SaveRow } from './crudShell'
-import { useSegments, RuleBuilder, SegmentListPane, SegmentTitleRow, CountBar, reachability } from './segmentEngine'
+import { useSegments, RuleBuilder, SegmentListPane, SegmentTitleRow, CountBar, reachability, segmentKind } from './segmentEngine'
+import StaticMembers from './StaticMembers'
 
 // BetterCricket's own outreach segments, against the Clubs Directory.
 //
@@ -50,11 +51,9 @@ export default function InternalSegments() {
           emptyText="No segments yet. Start one and it counts as you build it."
         >
           <Note toneKey="calm">
-            A segment is a rule over the Clubs Directory. For clubs picked by hand, use a list — both can be
-            chosen as the audience when you write an email:{' '}
-            <Link to="/admin/clubhouse/internal/directory" className="underline" style={{ color: 'var(--pb-accent-ink)' }}>Directory</Link>
-            {' · '}
-            <Link to="/admin/comms/lists" className="underline" style={{ color: 'var(--pb-accent-ink)' }}>Lists</Link>
+            A segment can be a live rule over the Clubs Directory, a hand-picked set of clubs, or both. Browse
+            the directory in{' '}
+            <Link to="/admin/clubhouse/internal/directory" className="underline" style={{ color: 'var(--pb-accent-ink)' }}>Directory</Link>.
           </Note>
           <Note title="BetterCricket's own contacts" toneKey="calm">
             These conditions read the Clubs Directory — what a prospect club has done, its status and its
@@ -68,22 +67,42 @@ export default function InternalSegments() {
             <Empty>Pick a segment, or start a new one.</Empty>
           ) : (
             <>
-              <SegmentTitleRow
-                draft={s.draft} setDraft={s.setDraft} busy={s.busy} total={s.total}
-                onDuplicate={s.duplicate} onEmail={s.emailThese}
-                placeholder="Name this segment"
-                blurb="Every directory contact matching every condition below, worked out again each time you send."
-                actions={s.draft.id && (
-                  <Button size="sm" as="a" href={api.commsSegmentExportCsvUrl(s.draft.id)}
-                    title="Download this segment's current contacts">Export CSV</Button>
-                )}
-              />
+              {(() => {
+                const kind = segmentKind(s.definition.rules.length, s.staticMembers.length)
+                return (
+                  <SegmentTitleRow
+                    draft={s.draft} setDraft={s.setDraft} busy={s.busy} total={s.total}
+                    onDuplicate={s.duplicate} onEmail={s.emailThese}
+                    placeholder="Name this segment"
+                    blurb="A live rule over the directory, a hand-picked set, or both — the audience is everyone in either."
+                    actions={<>
+                      <Badge toneKey={kind.tone}>{kind.label}</Badge>
+                      {s.draft.id && (
+                        <Button size="sm" as="a" href={api.commsSegmentExportCsvUrl(s.draft.id)}
+                          title="Download this segment's current contacts">Export CSV</Button>
+                      )}
+                    </>}
+                  />
+                )
+              })()}
 
-              <div className="mt-6">
-                <RuleBuilder defs={DIRECTORY_FIELD_DEFS} rules={s.draft.rules} opts={s.opts}
-                  label="Match prospect clubs where all of these are true"
-                  setRules={fn => s.setDraft(d => ({ ...d, rules: typeof fn === 'function' ? fn(d.rules) : fn }))} />
-              </div>
+              <SectionHeading className="mt-6 mb-2.5">Active rules (live)</SectionHeading>
+              <RuleBuilder defs={DIRECTORY_FIELD_DEFS} rules={s.draft.rules} opts={s.opts}
+                label="Match prospect clubs where all of these are true"
+                setRules={fn => s.setDraft(d => ({ ...d, rules: typeof fn === 'function' ? fn(d.rules) : fn }))} />
+
+              <SectionHeading className="mt-8 mb-2.5">Static members (fixed)</SectionHeading>
+              {s.draft.id ? (
+                <StaticMembers
+                  segmentId={s.draft.id}
+                  onChanged={() => { s.reloadStaticMembers(s.draft.id); s.reload() }}
+                />
+              ) : (
+                <Note toneKey="calm">
+                  Save the segment first, then hand-pick specific clubs here. They stay exactly as picked and are
+                  added to whoever the rules above match.
+                </Note>
+              )}
 
               <CountBar counting={s.counting} total={s.total} reachable={s.reachable} otherRoute={s.otherRoute}
                 clubs={s.clubs} noun="contact" nounPlural="contacts" />

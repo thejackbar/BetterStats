@@ -44,9 +44,25 @@ export const CLUB_FIELD_DEFS = {
     label: 'In the directory as', input: 'select', ops: IS_OP,
     options: [['player', 'A player'], ['member', 'A fee member'], ['import', 'Imported'], ['manual', 'Added manually']],
   },
-  role: { label: 'Player role', input: 'select', ops: IS_OP, optionsKey: 'roles' },
-  gender: { label: 'Gender', input: 'select', ops: IS_OP, optionsKey: 'genders' },
-  squad_team: { label: 'Squad / team', input: 'select', ops: IS_OP, optionsKey: 'teams' },
+  // ── What kind of member (the former List filters, now live rule fields) ──
+  // Each resolves through the same directory.list_people read the Directory's
+  // own filters use, so an Active rule and the retired List filter agree.
+  mem_membership_type: { label: 'Membership type', input: 'multi', ops: [['eq', 'is any of']], optionsKey: 'membership_types' },
+  mem_membership_tier: { label: 'Membership tier', input: 'multi', ops: [['eq', 'is any of']], optionsKey: 'membership_tiers' },
+  mem_club_role: { label: 'Club role', input: 'multi', ops: [['eq', 'is any of']], optionsKey: 'club_roles' },
+  mem_honour: { label: 'Honour', input: 'multi', ops: [['eq', 'is any of']], optionsKey: 'honours' },
+  mem_is_playing: {
+    label: 'Playing member', input: 'select', ops: IS_OP,
+    options: [['yes', 'yes'], ['no', 'no']],
+  },
+  mem_player_status: {
+    label: 'Player status', input: 'select', ops: IS_OP,
+    options: [['active', 'Active'], ['former', 'Former (inactive)']],
+  },
+  mem_gender: { label: 'Gender', input: 'multi', ops: [['eq', 'is any of']], optionsKey: 'genders' },
+  mem_squad: { label: 'Squad', input: 'multi', ops: [['eq', 'is any of']], optionsKey: 'squads' },
+  // ── Cricket data (reads the linked player) ──
+  role: { label: 'Playing role', input: 'select', ops: IS_OP, optionsKey: 'roles' },
   availability: {
     label: 'Availability', input: 'select', ops: IS_OP,
     options: [['available', 'available for an upcoming game'], ['not_set', 'no availability set']],
@@ -163,6 +179,11 @@ export function optionsFor(def, opts) {
   if (def.optionsKey === 'roles') return (opts.roles || []).map(r => [r, r])
   if (def.optionsKey === 'genders') return opts.genders || []
   if (def.optionsKey === 'teams') return (opts.teams || []).map(t => [t.id, t.name])
+  if (def.optionsKey === 'membership_types') return (opts.membership_types || []).map(t => [t.id, t.name])
+  if (def.optionsKey === 'membership_tiers') return (opts.membership_tiers || []).map(t => [t.id, t.name])
+  if (def.optionsKey === 'squads') return (opts.squads || []).map(t => [t.id, t.name])
+  if (def.optionsKey === 'club_roles') return opts.club_roles || []
+  if (def.optionsKey === 'honours') return opts.honours || []
   if (def.optionsKey === 'states') return (opts.states || []).map(s => [s, s])
   if (def.optionsKey === 'associations') return (opts.associations || []).map(a => [a, a])
   if (def.optionsKey === 'countries') return (opts.countries || []).map(c => [c, c])

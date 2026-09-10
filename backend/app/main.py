@@ -2411,6 +2411,12 @@ async def lifespan(app: FastAPI):
         """))
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_comms_list_members_list ON comms_list_members(list_id)"))
+        # Lists→Segments merge (migration 304) — a segment gains a frozen static
+        # member set, existing lists migrate to pure-static segments. One copy in
+        # services/comms_segment_ddl.py, run here and by the migration.
+        from app.services.comms_segment_ddl import STATEMENTS as _COMMS_SEGMENT_DDL
+        for _stmt in _COMMS_SEGMENT_DDL:
+            await conn.execute(text(_stmt))
         # BetterComms Phase 3 (migration 113) — email templates + per-campaign UTM.
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS comms_templates (

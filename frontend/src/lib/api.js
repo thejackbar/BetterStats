@@ -3540,12 +3540,28 @@ export const api = {
   commsUpdateSegment: (id, name, definition) =>
     request(`/club-admin/comms/segments/${id}`, { method: 'PUT', body: JSON.stringify({ name, definition }) }),
   commsDeleteSegment: (id) => request(`/club-admin/comms/segments/${id}`, { method: 'DELETE' }),
-  commsPreviewSegment: (definition) =>
-    request('/club-admin/comms/segments/preview', { method: 'POST', body: JSON.stringify({ name: '', definition }) }),
-  commsResolveSegment: (definition) =>
-    request('/club-admin/comms/segments/resolve', { method: 'POST', body: JSON.stringify({ name: '', definition }) }),
+  // preview/resolve take the draft STATIC member set too, so the live count is
+  // the UNION of (rule matches) ∪ (hand-picked contacts).
+  commsPreviewSegment: (definition, staticIds = null) =>
+    request('/club-admin/comms/segments/preview', { method: 'POST', body: JSON.stringify({ name: '', definition, static_member_ids: staticIds }) }),
+  commsResolveSegment: (definition, staticIds = null) =>
+    request('/club-admin/comms/segments/resolve', { method: 'POST', body: JSON.stringify({ name: '', definition, static_member_ids: staticIds }) }),
   commsSegmentExportCsvUrl: (id) => `${BASE}/club-admin/comms/segments/${id}/export.csv`,
   commsSegmentOptions: () => request('/club-admin/comms/segments/options'),
+  // The UNION size of a saved segment (rules ∪ static set) — the rail figure.
+  commsSegmentSize: (id) => request(`/club-admin/comms/segments/${id}/size`),
+  // The frozen hand-picked (static) member set on a segment. Persist immediately.
+  commsSegmentMembers: (id) => request(`/club-admin/comms/segments/${id}/members`),
+  commsAddSegmentMembers: (id, contactIds) =>
+    request(`/club-admin/comms/segments/${id}/members`, { method: 'POST', body: JSON.stringify({ contact_ids: contactIds }) }),
+  commsRemoveSegmentMember: (id, contactId) =>
+    request(`/club-admin/comms/segments/${id}/members/${contactId}`, { method: 'DELETE' }),
+  commsRemoveSegmentMembers: (id, contactIds) =>
+    request(`/club-admin/comms/segments/${id}/members/remove`, { method: 'POST', body: JSON.stringify({ contact_ids: contactIds }) }),
+  // Turn a filtered BetterAdmin Directory selection into an auto static segment.
+  // Sends person keys, never emails — the server reads the addresses itself.
+  commsCreateSegmentFromDirectory: ({ name, keys }) =>
+    request('/club-admin/comms/segments/from-directory', { method: 'POST', body: JSON.stringify({ name, keys }) }),
   // Search for (and hydrate already-chosen) clubs/contacts for the
   // "is any of / is none of" segment rules. `ids` is answered whatever the
   // search term is, so a saved rule keeps rendering its chosen names.
@@ -3555,26 +3571,8 @@ export const api = {
     if (ids.length) p.set('ids', ids.join(','))
     return request(`/club-admin/comms/segments/entities?${p}`)
   },
-  // Static lists (Phase 2): curated sets of contacts.
-  commsListLists: () => request('/club-admin/comms/lists'),
-  commsCreateList: (name) => request('/club-admin/comms/lists', { method: 'POST', body: JSON.stringify({ name }) }),
-  // Turn a filtered BetterAdmin Directory selection into an auto-generated list.
-  // Sends person keys, never emails — the server reads the addresses from its
-  // own Directory data.
-  commsCreateListFromDirectory: ({ name, keys }) =>
-    request('/club-admin/comms/lists/from-directory', { method: 'POST', body: JSON.stringify({ name, keys }) }),
-  commsRenameList: (id, name) => request(`/club-admin/comms/lists/${id}`, { method: 'PUT', body: JSON.stringify({ name }) }),
-  commsDeleteList: (id) => request(`/club-admin/comms/lists/${id}`, { method: 'DELETE' }),
-  commsListMembers: (id) => request(`/club-admin/comms/lists/${id}/members`),
-  commsAddListMembers: (id, contactIds) =>
-    request(`/club-admin/comms/lists/${id}/members`, { method: 'POST', body: JSON.stringify({ contact_ids: contactIds }) }),
-  commsRemoveListMember: (id, contactId) =>
-    request(`/club-admin/comms/lists/${id}/members/${contactId}`, { method: 'DELETE' }),
-  commsRemoveListMembers: (id, contactIds) =>
-    request(`/club-admin/comms/lists/${id}/members/remove`, { method: 'POST', body: JSON.stringify({ contact_ids: contactIds }) }),
-  commsCopyListMembers: (contactIds, listIds) =>
-    request('/club-admin/comms/lists/members/copy', { method: 'POST', body: JSON.stringify({ contact_ids: contactIds, list_ids: listIds }) }),
-  commsListExportCsvUrl: (id) => `${BASE}/club-admin/comms/lists/${id}/export.csv`,
+  // (Lists→Segments merge: the old commsList* / commsCreateList* methods are
+  // gone. A "list" is now a static segment — see the segment methods above.)
   // Email templates (Phase 3).
   commsListTemplates: () => request('/club-admin/comms/templates'),
   commsGetTemplate: (id) => request(`/club-admin/comms/templates/${id}`),

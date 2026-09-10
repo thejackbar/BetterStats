@@ -109,7 +109,6 @@ export default function EmailDetail({ id, onChanged, onDeleted, onSent }) {
   // Start unselected — sending to "all subscribed" must be a deliberate choice.
   const [audience, setAudience] = useState({ type: '' })
   const [segments, setSegments] = useState([])
-  const [lists, setLists] = useState([])
   const [templates, setTemplates] = useState([])
   const [templateId, setTemplateId] = useState('')
   const [knownVars, setKnownVars] = useState(null) // Set of valid merge-variable names
@@ -153,7 +152,6 @@ export default function EmailDetail({ id, onChanged, onDeleted, onSent }) {
       .catch(e => setMsg({ kind: 'error', text: e.message }))
       .finally(() => setLoading(false))
     api.commsListSegments().then(setSegments).catch(() => {})
-    api.commsListLists().then(setLists).catch(() => {})
     api.commsListTemplates().then(setTemplates).catch(() => {})
     api.commsMergeVariables().then(v => {
       const names = new Set((v.variables || []).map(x => x.name))
@@ -439,9 +437,12 @@ export default function EmailDetail({ id, onChanged, onDeleted, onSent }) {
             )}
 
             <div className="pb-card p-4 mb-4">
-              {/* One slot, filled by one of the club's segments or lists. That
-                  is the whole vocabulary: an email has an audience; the
-                  audience is a segment or a list. */}
+              {/* One slot, filled by one of the club's segments. That is the
+                  whole vocabulary now that Lists are merged in: an email has an
+                  audience; the audience is a segment (which may itself carry a
+                  hand-picked static set). A `saved_list` from a draft written
+                  before the merge still decodes and resolves — the server maps
+                  its old list id onto the migrated segment. */}
               <SectionHeading className="mb-2">Audience</SectionHeading>
               <select
                 value={audience.type === 'segment' ? `segment:${audience.segment_id}`
@@ -462,10 +463,10 @@ export default function EmailDetail({ id, onChanged, onDeleted, onSent }) {
                     {segments.map(s => <option key={s.id} value={`segment:${s.id}`}>{s.name}</option>)}
                   </optgroup>
                 )}
-                {lists.length > 0 && (
-                  <optgroup label="Lists">
-                    {lists.map(l => <option key={l.id} value={`list:${l.id}`}>{l.name}</option>)}
-                  </optgroup>
+                {/* A historical draft addressed to a since-migrated list keeps a
+                    matching option so the dropdown still reads correctly. */}
+                {audience.type === 'saved_list' && audience.list_id && (
+                  <option value={`list:${audience.list_id}`}>Saved list (now a segment)</option>
                 )}
               </select>
               <div className="text-pb-faintest text-xs mt-2">
@@ -475,8 +476,6 @@ export default function EmailDetail({ id, onChanged, onDeleted, onSent }) {
                     ? <><span className="text-pb-faint">{audienceCount}</span> contact{audienceCount === 1 ? '' : 's'} will receive this.</>
                     : 'Counting…'}{' '}
                 <a href="/admin/comms/segments" className="underline" style={{ color: 'var(--pb-accent-ink)' }}>Segments</a>
-                {' · '}
-                <a href="/admin/comms/lists" className="underline" style={{ color: 'var(--pb-accent-ink)' }}>Lists</a>
               </div>
             </div>
 

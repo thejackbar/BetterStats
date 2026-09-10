@@ -4480,7 +4480,13 @@ class WizardClubList(Base):
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    list_id = Column(UUID(as_uuid=True), nullable=False)
+    # The container this export created. Migration 251 created lists (`list_id`,
+    # no FK); since the Lists→Segments merge (304) a fresh export creates a
+    # SEGMENT and records `segment_id` instead, leaving `list_id` for the
+    # exports made before. `_exports_by_key` resolves the name off whichever is
+    # set.
+    list_id = Column(UUID(as_uuid=True), nullable=True)
+    segment_id = Column(UUID(as_uuid=True), nullable=True)
     list_name = Column(Text, nullable=True)
     # The normalised (lowercased, trimmed) wizard club name — the same key the
     # Meta Ads selected/searched tables group on.
@@ -4510,8 +4516,34 @@ class CommsSegment(Base):
     organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
     name = Column(Text, nullable=False)
     definition = Column(JSONB, nullable=False, server_default="{}", default=dict)
+    # Lists→Segments merge (migration 304). A segment now also carries a frozen
+    # hand-picked STATIC set (comms_segment_members); the audience is the UNION
+    # of the rule matches and that set. `source`/`origin` group an
+    # auto-generated segment (CRM / Wizard Clubs / Club Admin Users) the way
+    # they used to group an auto list; `legacy_list_id` maps a segment migrated
+    # from a former list back to it, so a historical `saved_list` campaign still
+    # resolves.
+    source = Column(Text, nullable=False, server_default="manual", default="manual")
+    origin = Column(Text, nullable=True)
+    legacy_list_id = Column(UUID(as_uuid=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class CommsSegmentMember(Base):
+    """One contact's membership of a segment's STATIC (hand-picked) set
+    (migration 304). Mirror of CommsListMember: cascaded to both the segment and
+    the contact, so a deleted contact drops out automatically. The frozen set a
+    segment unions with its live rule matches."""
+    __tablename__ = "comms_segment_members"
+    __table_args__ = (
+        UniqueConstraint("segment_id", "contact_id", name="uq_comms_segment_member"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    segment_id = Column(UUID(as_uuid=True), ForeignKey("comms_segments.id", ondelete="CASCADE"), nullable=False)
+    contact_id = Column(UUID(as_uuid=True), ForeignKey("comms_contacts.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
 class CommsTemplate(Base):

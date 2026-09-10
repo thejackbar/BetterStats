@@ -224,7 +224,6 @@ const BetterSocialsHome = lazy(() => import('./pages/admin/BetterSocialsHome'))
 // one email open beside it. /admin/comms/:id is unchanged as a deep link.
 const CommsCampaigns = lazy(() => import('./pages/admin/bettercomms/CommsCampaigns'))
 const CommsContacts = lazy(() => import('./pages/admin/bettercomms/CommsContacts'))
-const CommsLists = lazy(() => import('./pages/admin/bettercomms/CommsLists'))
 const CommsTemplates = lazy(() => import('./pages/admin/bettercomms/CommsTemplates'))
 const CommsSettings = lazy(() => import('./pages/admin/bettercomms/CommsSettings'))
 
@@ -594,7 +593,8 @@ export default function App() {
               the sidebar, since the person spine is the Directory. */}
           <Route path="/admin/comms" element={<ProtectedRoute requireModule="comms"><CommsCampaigns /></ProtectedRoute>} />
           <Route path="/admin/comms/contacts" element={<ProtectedRoute requireModule="comms"><CommsContacts /></ProtectedRoute>} />
-          <Route path="/admin/comms/lists" element={<ProtectedRoute requireModule="comms"><CommsLists /></ProtectedRoute>} />
+          {/* Lists merged into Segments — the old URL still lands somewhere useful. */}
+          <Route path="/admin/comms/lists" element={<Navigate to="/admin/comms/segments" replace />} />
           <Route path="/admin/comms/templates" element={<ProtectedRoute requireModule="comms"><CommsTemplates /></ProtectedRoute>} />
           <Route path="/admin/comms/settings" element={<ProtectedRoute requireModule="comms"><CommsSettings /></ProtectedRoute>} />
           <Route path="/admin/comms/:id" element={<ProtectedRoute requireModule="comms"><CommsCampaigns /></ProtectedRoute>} />

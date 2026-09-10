@@ -7,20 +7,20 @@ import {
 } from '../../../components/admin/ui'
 import { CLUB_FIELD_DEFS } from '../bettercomms/segmentFields'
 import { CrudPanes, DetailPane, SaveRow } from './crudShell'
-import { useSegments, RuleBuilder, SegmentListPane, SegmentTitleRow, CountBar, reachability } from './segmentEngine'
+import { useSegments, RuleBuilder, SegmentListPane, SegmentTitleRow, CountBar, reachability, segmentKind } from './segmentEngine'
+import StaticMembers from './StaticMembers'
 import ScreenIntro, { useScreenIntro, INTROS } from './intro'
 import { money } from './data'
 
-// Segments — a group of people described by a rule, not by a roll call.
+// Segments — a group of people an email is addressed to. There is one concept
+// now, not two: a segment carries an ACTIVE part (a live rule, re-worked every
+// time you send, so someone who joins tomorrow is in it tomorrow) and a STATIC
+// part (a frozen roll call of contacts you picked by hand, which stays exactly
+// as picked). The old "Lists" feature is the static part, moved in here.
 //
-// A segment is a set of conditions that resolves at send time and is never
-// frozen: someone who joins tomorrow is in it tomorrow. That is the whole
-// difference from a List, which is people picked by hand and stays as picked.
-//
-// Both are things an email can be addressed to. The composer calls that slot
-// the AUDIENCE, and its dropdown offers the club's segments and its lists as
-// the two kinds of thing an audience can be. So: an email has one audience;
-// that audience is a segment or a list.
+// A segment can be either or both, and the final audience is the union of the
+// two. The composer calls that slot the AUDIENCE; an email has one audience,
+// and that audience is a segment.
 //
 // ⚠ Club scope only. This file imports CLUB_FIELD_DEFS and nothing else, and
 // it is the ONLY field set it can offer — `segmentEngine` takes `defs` as a
@@ -73,11 +73,8 @@ export default function ClubhouseSegments() {
           emptyText="No segments yet. Start one and it counts as you build it."
         >
           <Note toneKey="calm">
-            A segment is a rule. For people picked by hand, use a list — both can be chosen as the audience
-            when you write an email:{' '}
-            <Link to="/admin/comms/contacts" className="underline" style={{ color: 'var(--pb-accent-ink)' }}>Contacts</Link>
-            {' · '}
-            <Link to="/admin/comms/lists" className="underline" style={{ color: 'var(--pb-accent-ink)' }}>Lists</Link>
+            A segment can be a live rule, a hand-picked set, or both. Edit a person's own details in{' '}
+            <Link to="/admin/comms/contacts" className="underline" style={{ color: 'var(--pb-accent-ink)' }}>Contacts</Link>.
           </Note>
           <Note title="Club scope only" toneKey="calm">
             These conditions read your own club's people — the directory, accounts, roster and email activity.
@@ -90,17 +87,35 @@ export default function ClubhouseSegments() {
             <Empty>Pick a segment, or start a new one.</Empty>
           ) : (
             <>
-              <SegmentTitleRow
-                draft={s.draft} setDraft={s.setDraft} busy={s.busy} total={s.total}
-                onDuplicate={s.duplicate} onEmail={s.emailThese}
-                placeholder="Name this segment"
-                blurb="Everyone who matches every condition below, worked out again each time you send."
-              />
+              {(() => {
+                const kind = segmentKind(s.definition.rules.length, s.staticMembers.length)
+                return (
+                  <SegmentTitleRow
+                    draft={s.draft} setDraft={s.setDraft} busy={s.busy} total={s.total}
+                    onDuplicate={s.duplicate} onEmail={s.emailThese}
+                    placeholder="Name this segment"
+                    blurb="A live rule, a hand-picked set, or both — the audience is everyone in either."
+                    actions={<Badge toneKey={kind.tone}>{kind.label}</Badge>}
+                  />
+                )
+              })()}
 
-              <div className="mt-6">
-                <RuleBuilder defs={CLUB_FIELD_DEFS} rules={s.draft.rules} opts={s.opts}
-                  setRules={fn => s.setDraft(d => ({ ...d, rules: typeof fn === 'function' ? fn(d.rules) : fn }))} />
-              </div>
+              <SectionHeading className="mt-6 mb-2.5">Active rules (live)</SectionHeading>
+              <RuleBuilder defs={CLUB_FIELD_DEFS} rules={s.draft.rules} opts={s.opts}
+                setRules={fn => s.setDraft(d => ({ ...d, rules: typeof fn === 'function' ? fn(d.rules) : fn }))} />
+
+              <SectionHeading className="mt-8 mb-2.5">Static members (fixed)</SectionHeading>
+              {s.draft.id ? (
+                <StaticMembers
+                  segmentId={s.draft.id}
+                  onChanged={() => { s.reloadStaticMembers(s.draft.id); s.reload() }}
+                />
+              ) : (
+                <Note toneKey="calm">
+                  Save the segment first, then hand-pick specific contacts here. They stay exactly as picked
+                  and are added to whoever the rules above match.
+                </Note>
+              )}
 
               <CountBar counting={s.counting} total={s.total} reachable={s.reachable} otherRoute={s.otherRoute} />
 

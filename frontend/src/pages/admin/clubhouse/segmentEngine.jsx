@@ -10,6 +10,19 @@ import { RuleRow, newRule } from '../bettercomms/segmentFields'
 // screens' imports are unchanged.
 export { CountBar, reachability, clubCount }
 
+// A segment carries two parts now: an Active rule (live, re-evaluated on every
+// send) and a Static set (a frozen roll call of hand-picked contacts, the old
+// Lists mechanic moved inside the segment). One says which the draft is, so the
+// same wording appears on both mounts (club and outreach) rather than each
+// screen inventing its own. Both parts present is "Active" overall, because the
+// whole thing still resolves live.
+export function segmentKind(ruleCount, staticCount) {
+  if (ruleCount && staticCount) return { label: 'Active — with hand-picked additions', tone: 'ok' }
+  if (ruleCount) return { label: 'Active', tone: 'ok' }
+  if (staticCount) return { label: 'Static', tone: 'calm' }
+  return { label: 'Empty', tone: 'calm' }
+}
+
 // The segment builder's engine and its field-agnostic furniture.
 //
 // There are two mounts of the segment builder and there always will be: a club
@@ -60,10 +73,18 @@ export function RuleBuilder({ defs, rules, setRules, opts, label = 'Match people
 export function SegmentListPane({ segments, sizes, selId, onSelect, emptyText, children, query = '' }) {
   const items = (segments || []).map(s => {
     const n = (s.definition?.rules || []).length
+    const m = s.member_count || 0
+    // Say which kind it is: conditions are live (Active), a hand-picked set is
+    // frozen (Static), and a segment can carry both.
+    let sub
+    if (n && m) sub = `${n} condition${n === 1 ? '' : 's'} · ${m} picked`
+    else if (n) sub = `${n} condition${n === 1 ? '' : 's'} · live`
+    else if (m) sub = `${m} picked · static`
+    else sub = 'no conditions yet'
     return {
       id: s.id,
       name: s.name,
-      sub: `${n} condition${n === 1 ? '' : 's'} · live`,
+      sub,
       figure: sizes[s.id] == null ? '—' : sizes[s.id],
     }
   })
@@ -111,6 +132,7 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
   const [segments, setSegments] = useState(null)
   const [sizes, setSizes] = useState({})     // segment id → how many it matches today
   const [opts, setOpts] = useState({ roles: [], genders: [], teams: [] })
+  const [staticMembers, setStaticMembers] = useState([])   // the frozen hand-picked set
   const [selId, setSelId] = useState(null)
   const [draft, setDraft] = useState(null)      // { id, name, rules }
   const [resolved, setResolved] = useState(null)
@@ -126,8 +148,10 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
       setSelId(cur => cur || list[0]?.id || null)
       // A segment's size is a fact about today, not something stored, so ask
       // for each one rather than showing a number that would slowly go stale.
+      // The size is the UNION (rules ∪ static set), computed server-side since
+      // the rail doesn't hold the stored members.
       list.forEach(s => {
-        api.commsPreviewSegment(s.definition || { match: 'all', rules: [] })
+        api.commsSegmentSize(s.id)
           .then(r => setSizes(x => ({ ...x, [s.id]: r.count })))
           .catch(() => {})
       })
@@ -154,6 +178,17 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
   }, [wanted, segments])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const selected = useMemo(() => segments?.find(s => s.id === selId) || null, [segments, selId])
+
+  // The frozen hand-picked (static) set of the selected SAVED segment, loaded so
+  // the live preview can union it with the rules. A new unsaved draft has none
+  // (members are managed only once the segment is saved, like a list's were).
+  const reloadStaticMembers = useCallback((id) => {
+    if (!id) { setStaticMembers([]); return }
+    api.commsSegmentMembers(id).then(r => setStaticMembers(r || [])).catch(() => setStaticMembers([]))
+  }, [])
+  useEffect(() => { reloadStaticMembers(selected?.id || null) }, [selected?.id, reloadStaticMembers])
+  const staticIds = useMemo(() => staticMembers.map(m => m.id), [staticMembers])
+  const staticKey = staticIds.join(',')
 
   // Editing a saved segment works on a draft, so a half-built rule never
   // reaches the server.
@@ -187,12 +222,12 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
     let live = true
     setCounting(true)
     const t = setTimeout(() => {
-      api.commsResolveSegment(definition)
+      api.commsResolveSegment(definition, staticIds)
         .then(r => { if (live) { setResolved(r); setCounting(false) } })
         .catch(() => { if (live) { setResolved({ count: 0, contacts: [] }); setCounting(false) } })
     }, 350)
     return () => { live = false; clearTimeout(t) }
-  }, [defKey])   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [defKey, staticKey])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const contacts = resolved?.contacts || []
   const total = resolved?.count ?? 0
@@ -263,5 +298,8 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
     contacts, total, reachable, otherRoute, clubs, counting,
     busy, error, toast, setToast,
     save, duplicate, remove, startNew, emailThese,
+    // Static (frozen hand-picked) set + the current definition, for the Static
+    // section and the Active/Static badge.
+    definition, staticMembers, staticIds, reloadStaticMembers, reload: load,
   }
 }
