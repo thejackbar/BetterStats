@@ -124,9 +124,14 @@ NOT_OUT_CODES = frozenset({NOT_OUT, RETIRED_NOT_OUT})
 #
 # All seven rows in fifteen seasons agree with that, and were checked before
 # the label was accepted: every one is at batting position 10 or 11, every one
-# is 0 runs, and THREE OF THE SEVEN BOWLED IN THAT SAME MATCH - which is the
-# club's "arrived after the close of our innings" in the data. Every one of
-# those innings is all out with exactly ten dismissed batters.
+# is 0 runs, and THREE OF THE SEVEN BOWLED IN THAT SAME MATCH (1.0 overs, 3.0
+# and 7.0). Every one of those innings is all out with exactly ten dismissed
+# batters. The club then named the mechanism outright: "Some instances were
+# Shoalwater Bay batted first and the absent batter arrived after the close of
+# our innings, then bowled in the opposition's innings." So A ROW CARRYING
+# BOWLING FIGURES AGAINST A BATTER WHO NEVER BATTED IS THE EXPECTED SHAPE HERE,
+# not a fault - the importer writes the two halves from independent guards on
+# the one row, so the spell lands whole against a did-not-bat batting row.
 #
 # SO 29 STAYS OUT OF NOT_OUT_CODES: the file counts the absent batter as one of
 # the ten wickets, and reading it as a not out drops the wickets identity to
@@ -1016,8 +1021,9 @@ NOTES = [
                    "slips (which imports as a plain catch), and 29 ABSENT. That last one is "
                    "a player selected who was running late, did not turn up, or had to "
                    "leave early - and in some one-day games where we batted first, arrived "
-                   "after the close of our innings. All 7 of them are at "
-                   "number 10 or 11, all are 0, and 3 of the 7 bowled in that same match. "
+                   "after the close of our innings and then bowled in the opposition's. "
+                   "All 7 of them are at number 10 or 11, all are 0, and 3 of the 7 bowled "
+                   "in that same match, which is that last case in the data. "
                    "They stay a wicket here, because the file counts them among the ten, and "
                    "import as a did-not-bat with no runs, so nobody is handed a duck for a "
                    "game they never got to bat in. The raw code is in its own column beside "

@@ -267,9 +267,16 @@ after the close of our innings."
 All seven rows across fifteen seasons agree with that, and they were read out
 of the files before the label was accepted rather than after: every one is at
 batting position 10 or 11, every one is 0, and **three of the seven bowled in
-that same match**, which is the club's "arrived after the close of our innings"
-showing up in the data. Every one of those innings is all out with exactly ten
-dismissed batters.
+that same match** (1.0 overs, 3.0 and 7.0). Every one of those innings is all
+out with exactly ten dismissed batters.
+
+The club then confirmed the mechanism outright: "Some instances were Shoalwater
+Bay batted first and the absent batter arrived after the close of our innings,
+then bowled in the opposition's innings." That is exactly those three rows, so
+**a row carrying bowling figures against a batter who never batted is the
+expected shape here, not a fault.** The importer writes the two halves from
+independent guards on the one row, so the spell lands whole against a batting
+row marked did-not-bat.
 
 **So 29 stays a dismissal on the CSFW side, and imports as a did-not-bat.** The
 file counts the absent batter among the ten wickets, so reading the code as a
