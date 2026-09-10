@@ -1310,8 +1310,13 @@ async def get_player_batting_innings(
         (await _club_game_clause(session, player_id, params))
         .removeprefix(" AND ").strip())
     if _scoped(scope):
-        # Leading AND already; strip it, the clause list re-joins them.
-        clauses.append(scope.clause("g.grade_id").removeprefix(" AND ").strip())
+        # Leading AND already; strip it, the clause list re-joins them. A
+        # source-only scope (force_scorecard, the "BetterCricket scorecards"
+        # records source) is active but narrows nothing, so the clause is empty
+        # and must not be appended as a dangling AND.
+        frag = scope.clause("g.grade_id").removeprefix(" AND ").strip()
+        if frag:
+            clauses.append(frag)
         scope.bind(params)
     if season_ids:
         clauses.append("s.id = ANY(:sids)")
@@ -1371,8 +1376,12 @@ async def get_player_bowling_spells(
         (await _club_game_clause(session, player_id, params))
         .removeprefix(" AND ").strip())
     if _scoped(scope):
-        # Leading AND already; strip it, the clause list re-joins them.
-        clauses.append(scope.clause("g.grade_id").removeprefix(" AND ").strip())
+        # Leading AND already; strip it, the clause list re-joins them. A
+        # source-only scope (force_scorecard) narrows nothing, so its clause is
+        # empty and must not be appended as a dangling AND.
+        frag = scope.clause("g.grade_id").removeprefix(" AND ").strip()
+        if frag:
+            clauses.append(frag)
         scope.bind(params)
     if season_ids:
         clauses.append("s.id = ANY(:sids)")
@@ -4569,7 +4578,11 @@ async def _club_results(
     # same rule the leaderboards follow, but keeps the match type.
     eff = scope.formats_only() if (scope is not None and grade_id) else scope
     if _scoped(eff):
-        clauses.append(eff.clause("g.grade_id").removeprefix(" AND ").strip())
+        # A source-only scope (force_scorecard) narrows nothing, so skip an
+        # empty clause rather than appending a dangling AND.
+        frag = eff.clause("g.grade_id").removeprefix(" AND ").strip()
+        if frag:
+            clauses.append(frag)
         eff.bind(params)
 
     # g.result is ALSO relative to whichever club's sync wrote it first

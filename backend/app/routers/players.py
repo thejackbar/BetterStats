@@ -202,6 +202,16 @@ async def get_player_stats(
             "cannot otherwise answer. Omitted applies no competition filter."
         ),
     ),
+    source: Optional[str] = Query(
+        None,
+        description=(
+            "Records source: 'ca' (default) for Cricket Australia's own season "
+            "totals — the official record that matches PlayCricket — or "
+            "'scorecard' for BetterCricket's scorecard-derived career, which is "
+            "what the competition breakdown sums to. Cricket Australia is a "
+            "separate axis from the competition filter, not a competition."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     player = await db.get(Player, uuid.UUID(player_id))
@@ -211,7 +221,7 @@ async def get_player_stats(
     org = await db.get(Organisation, player.organisation_id) if player.organisation_id else None
     scope, auto_shown = await grade_scope.resolve_scope_for_player(
         db, player.organisation_id, player_id, categories, formats=formats,
-        competitions=competitions,
+        competitions=competitions, source=source,
         auto_widen=bool(org.stats_auto_show_played_grades) if org else True,
     )
     use_game_filter = last_n_games or start_date or end_date

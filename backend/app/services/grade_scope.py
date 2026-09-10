@@ -94,6 +94,32 @@ DEFAULT_CATEGORIES: tuple[str, ...] = tuple(c for c in GRADE_CATEGORIES if c != 
 # The wire value meaning "no filter at all" — every category, including junior.
 ALL = "all"
 
+# The two "records source" values. Cricket Australia is not a competition, and
+# its season totals carry no grade at all — so it can answer nothing about a
+# competition, a grade type or a format. It is therefore a source AXIS,
+# separate from every BetterCricket filter, not a hidden "All" state inside the
+# competition picker.
+#
+#   SOURCE_CA (the default)   Cricket Australia's own season aggregates. No
+#                             slicing. Nobody's figures move on first load.
+#   SOURCE_SCORECARD          Everything BetterCricket holds a scorecard for,
+#                             which IS sliceable — and whose "all competitions"
+#                             state genuinely equals the sum of the listed
+#                             competitions rather than CA's separate record.
+SOURCE_CA = "ca"
+SOURCE_SCORECARD = "scorecard"
+
+
+def wants_scorecards(source) -> bool:
+    """Does this source value ask for the per-game (scorecard) path?
+
+    The default and anything unrecognised is Cricket Australia's aggregate,
+    which is the conservative direction: a junk value never silently switches a
+    club onto the scorecard figures, which can read lower than the official
+    record.
+    """
+    return str(source or "").strip().lower() == SOURCE_SCORECARD
+
 
 def normalise_categories(value) -> Optional[tuple[str, ...]]:
     """Coerce a category selection to a sorted tuple of valid keys.
@@ -204,7 +230,7 @@ class GradeScope:
     __slots__ = (
         "categories", "formats", "excluded_ids", "excluded_categories",
         "format_fallback_ids", "param", "competitions", "competition_names",
-        "competition_extra_ids",
+        "competition_extra_ids", "force_scorecard",
     )
 
     def __init__(
@@ -218,6 +244,7 @@ class GradeScope:
         competitions: Optional[Sequence] = None,
         competition_names: Sequence[str] = (),
         competition_extra_ids: Sequence = (),
+        force_scorecard: bool = False,
     ):
         self.categories = tuple(categories)
         self.formats = tuple(formats) if formats is not None else None
@@ -242,6 +269,13 @@ class GradeScope:
         # its own competition. Kept as an explicit list because there are only
         # ever a handful, which is what lets the main test stay a subquery.
         self.competition_extra_ids = list(competition_extra_ids)
+        # The records-source axis. When True, the per-game (scorecard) path is
+        # taken even with no category/format/competition filter set — so the
+        # figures are the full BetterCricket scorecard total (every category,
+        # every format, every competition), which is the genuine "sum of all
+        # competitions" the competition breakdown reconciles to. It emits NO
+        # WHERE clause of its own: it only flips the source, it never narrows.
+        self.force_scorecard = bool(force_scorecard)
 
     @property
     def category_active(self) -> bool:
@@ -263,9 +297,12 @@ class GradeScope:
         exclusions of its own — every caller gates the switch to per-game
         sources on this, and both are only answerable from per-game rows
         (Cricket Australia's season aggregates carry no grade, so they can say
-        nothing about which competition a run was scored in).
+        nothing about which competition a run was scored in). It also includes
+        the records-source axis (:attr:`force_scorecard`), which asks for the
+        scorecard path with no narrowing at all.
         """
-        return self.category_active or self.format_active or self.competition_active
+        return (self.category_active or self.format_active
+                or self.competition_active or self.force_scorecard)
 
     @property
     def _fmt_param(self) -> str:
@@ -422,6 +459,7 @@ class GradeScope:
             formats=self.formats, format_fallback_ids=self.format_fallback_ids,
             competitions=self.competitions, competition_names=self.competition_names,
             competition_extra_ids=self.competition_extra_ids,
+            force_scorecard=self.force_scorecard,
         )
 
     def as_meta(self) -> dict:
@@ -436,6 +474,10 @@ class GradeScope:
             "category_active": self.category_active,
             "format_active": self.format_active,
             "competition_active": self.competition_active,
+            # Which records the figures came from, so a page can label them:
+            # Cricket Australia's official aggregate, or BetterCricket's own
+            # scorecard totals (anything that took the per-game path).
+            "source": SOURCE_SCORECARD if self.active else SOURCE_CA,
         }
 
 
@@ -468,6 +510,7 @@ async def resolve_scope(
     *,
     formats=None,
     competitions=None,
+    source=None,
     param: str = "gs_excluded_grade_ids",
 ) -> GradeScope:
     """Turn a category and/or format selection into the grade ids it leaves out.
@@ -498,10 +541,16 @@ async def resolve_scope(
     # a Girls Under 16 grade stays out of a default that leaves junior out,
     # rather than sneaking back in on its women's half, while someone asking for
     # women's still finds it.
+    force = wants_scorecards(source)
     explicit = normalise_categories(categories) is not None
     wanted = normalise_categories(categories)
     if wanted is None:
-        wanted = await club_default_categories(session, org_id)
+        # Asking for the scorecard total means EVERY match we hold, junior
+        # competitions included — so it must not inherit the club's
+        # junior-excluding default. "Sum of all competitions" has to count the
+        # junior ones a club plays (Peel Junior, Metro Junior). Cricket
+        # Australia's own record keeps its default, so nothing shrinks there.
+        wanted = tuple(GRADE_CATEGORIES) if force else await club_default_categories(session, org_id)
     wanted_formats = normalise_formats(formats)
     if wanted_formats is not None and set(wanted_formats) >= set(MATCH_FORMATS):
         # "every format" is the same question as "no format filter", and asking
@@ -526,6 +575,7 @@ async def resolve_scope(
         return GradeScope(
             wanted, [], [], param, formats=wanted_formats,
             competitions=comp_ids, competition_names=comp_names,
+            force_scorecard=force,
         )
 
     name_categories = (
@@ -584,6 +634,7 @@ async def resolve_scope(
         competitions=comp_ids,
         competition_names=comp_names,
         competition_extra_ids=comp_grade_ids,
+        force_scorecard=force,
     )
 
 
@@ -642,6 +693,7 @@ async def resolve_scope_for_player(
     *,
     formats=None,
     competitions=None,
+    source=None,
     auto_widen: bool = True,
     param: str = "gs_excluded_grade_ids",
 ) -> tuple[GradeScope, bool]:
@@ -669,7 +721,7 @@ async def resolve_scope_for_player(
     explicit = normalise_categories(categories) is not None
     scope = await resolve_scope(
         session, org_id, categories, formats=formats,
-        competitions=competitions, param=param,
+        competitions=competitions, source=source, param=param,
     )
     if explicit or not auto_widen or not scope.category_active:
         return scope, False
@@ -678,7 +730,7 @@ async def resolve_scope_for_player(
         return scope, False
     widened = await resolve_scope(
         session, org_id, sorted(set(scope.categories) | played),
-        formats=formats, competitions=competitions, param=param,
+        formats=formats, competitions=competitions, source=source, param=param,
     )
     return widened, True
 

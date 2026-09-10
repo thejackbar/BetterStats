@@ -183,7 +183,11 @@ async def list_games(
     if finals_only:
         clauses.append("g.is_final = TRUE")
     if scope.active:
-        clauses.append(scope.clause("g.grade_id").removeprefix(" AND ").strip())
+        # A source-only scope (force_scorecard) narrows nothing; skip its empty
+        # clause rather than appending a dangling AND.
+        frag = scope.clause("g.grade_id").removeprefix(" AND ").strip()
+        if frag:
+            clauses.append(frag)
         scope.bind(params)
 
     # g.result is ALSO relative to whichever club's sync wrote it first

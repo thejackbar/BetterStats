@@ -83,10 +83,21 @@ async def batting_leaderboard(
             "association from the next. Omitted applies no competition filter."
         ),
     ),
+    source: Optional[str] = Query(
+        None,
+        description=(
+            "Records source: 'ca' (default) for Cricket Australia's own season "
+            "totals, or 'scorecard' for BetterCricket's scorecard-derived "
+            "figures. Cricket Australia is NOT a competition and holds no "
+            "per-competition data, so it is a separate axis from the "
+            "competition filter. 'scorecard' with no competition picked is the "
+            "genuine sum of every competition the club plays."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions)
+    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions, source=source)
     rows = await get_batting_leaderboard_extended(
         db, org_id, season_id, grade_id, sort_by, limit,
         min_runs=min_runs,
@@ -145,10 +156,21 @@ async def bowling_leaderboard(
             "association from the next. Omitted applies no competition filter."
         ),
     ),
+    source: Optional[str] = Query(
+        None,
+        description=(
+            "Records source: 'ca' (default) for Cricket Australia's own season "
+            "totals, or 'scorecard' for BetterCricket's scorecard-derived "
+            "figures. Cricket Australia is NOT a competition and holds no "
+            "per-competition data, so it is a separate axis from the "
+            "competition filter. 'scorecard' with no competition picked is the "
+            "genuine sum of every competition the club plays."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions)
+    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions, source=source)
     rows = await get_bowling_leaderboard_extended(
         db, org_id, season_id, grade_id, sort_by, limit,
         min_overs=min_overs, min_wickets=min_wickets,
@@ -197,10 +219,21 @@ async def fielding_leaderboard(
             "association from the next. Omitted applies no competition filter."
         ),
     ),
+    source: Optional[str] = Query(
+        None,
+        description=(
+            "Records source: 'ca' (default) for Cricket Australia's own season "
+            "totals, or 'scorecard' for BetterCricket's scorecard-derived "
+            "figures. Cricket Australia is NOT a competition and holds no "
+            "per-competition data, so it is a separate axis from the "
+            "competition filter. 'scorecard' with no competition picked is the "
+            "genuine sum of every competition the club plays."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions)
+    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions, source=source)
     rows = await get_fielding_leaderboard(db, org_id, season_id, grade_id, sort_by, limit, grade_name, finals_only=finals_only, captain_only=captain_only, gender=gender, overseas=overseas, scope=scope)
     return _stringify(await _visible(db, org_id, viewer, rows))
 
@@ -242,10 +275,21 @@ async def sirs_batting(
             "association from the next. Omitted applies no competition filter."
         ),
     ),
+    source: Optional[str] = Query(
+        None,
+        description=(
+            "Records source: 'ca' (default) for Cricket Australia's own season "
+            "totals, or 'scorecard' for BetterCricket's scorecard-derived "
+            "figures. Cricket Australia is NOT a competition and holds no "
+            "per-competition data, so it is a separate axis from the "
+            "competition filter. 'scorecard' with no competition picked is the "
+            "genuine sum of every competition the club plays."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions)
+    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions, source=source)
     return await _visible(db, org_id, viewer, await get_sirs_batting(db, org_id, season_id, grade_name, finals_only, limit, captain_only=captain_only, gender=gender, overseas=overseas, scope=scope))
 
 
@@ -286,10 +330,21 @@ async def sirs_bowling_innings(
             "association from the next. Omitted applies no competition filter."
         ),
     ),
+    source: Optional[str] = Query(
+        None,
+        description=(
+            "Records source: 'ca' (default) for Cricket Australia's own season "
+            "totals, or 'scorecard' for BetterCricket's scorecard-derived "
+            "figures. Cricket Australia is NOT a competition and holds no "
+            "per-competition data, so it is a separate axis from the "
+            "competition filter. 'scorecard' with no competition picked is the "
+            "genuine sum of every competition the club plays."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions)
+    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions, source=source)
     return await _visible(db, org_id, viewer, await get_sirs_bowling_innings(db, org_id, season_id, grade_name, finals_only, limit, captain_only=captain_only, gender=gender, overseas=overseas, scope=scope))
 
 
@@ -330,8 +385,19 @@ async def sirs_bowling_match(
             "association from the next. Omitted applies no competition filter."
         ),
     ),
+    source: Optional[str] = Query(
+        None,
+        description=(
+            "Records source: 'ca' (default) for Cricket Australia's own season "
+            "totals, or 'scorecard' for BetterCricket's scorecard-derived "
+            "figures. Cricket Australia is NOT a competition and holds no "
+            "per-competition data, so it is a separate axis from the "
+            "competition filter. 'scorecard' with no competition picked is the "
+            "genuine sum of every competition the club plays."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions)
+    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions, source=source)
     return await _visible(db, org_id, viewer, await get_sirs_bowling_match(db, org_id, season_id, grade_name, finals_only, limit, captain_only=captain_only, gender=gender, overseas=overseas, scope=scope))
