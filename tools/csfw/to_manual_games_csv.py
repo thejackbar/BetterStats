@@ -86,7 +86,13 @@ def rows_for_file(path):
                               inn['opposition'].rstrip(' 12').strip()
                               if inn['result'] == 'lost' else ''),
                 result=RESULT.get(inn['result_code'], ''))
-            we_batted = inn['us']['total'] is not None
+            # We batted if a total was recorded OR anyone is flagged as
+            # having batted. The total alone is not enough: one 2016 match
+            # records the opposition all out for 169 and one of our batsmen
+            # bowled for 0, with our own total never entered. That innings
+            # is real and belongs in the archive.
+            we_batted = (inn['us']['total'] is not None
+                         or any(x['batted'] for x in inn['performances']))
             bat_inn = 2 * k + 1
             bowl_inn = 2 * k + 2
             for p in inn['performances']:
