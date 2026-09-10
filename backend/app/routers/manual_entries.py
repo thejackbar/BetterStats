@@ -1769,7 +1769,8 @@ async def _restore_manual_game(db: AsyncSession, snapshot: dict, org_id: uuid.UU
         raise HTTPException(status_code=403, detail="Audit row belongs to a different org")
     children = snapshot.pop("children", {}) or {}
     fields = {k: v for k, v in snapshot.items() if k not in {"created_at", "updated_at"}}
-    for fk in ("id", "organisation_id", "season_id", "grade_id", "created_by_user_id"):
+    for fk in ("id", "organisation_id", "season_id", "grade_id",
+               "created_by_user_id", "superseded_by_game_id"):
         if fields.get(fk) and isinstance(fields[fk], str):
             fields[fk] = uuid.UUID(fields[fk])
     if isinstance(fields.get("played_at"), str):
@@ -1887,6 +1888,19 @@ async def undo_edit(
                 if row and row.organisation_id == club.id:
                     undo_player_ids |= await _game_children_player_ids(gid)
                     await db.delete(row)
+            await db.flush()
+            # An overwrite import replaced an existing manual match with the
+            # sheet's version; deleting the replacement above leaves the club
+            # short that game, so its before-snapshot is restored here. Done
+            # after the replacements are gone (they carry a different id, so
+            # there is no clash) and before the refs are cleaned up, so the
+            # restored game holds anything it needs.
+            for snap in (after.get("overwritten_games") or []):
+                undo_player_ids |= set(_extract_player_ids(
+                    (snap.get("children") or {}).get("batting_innings", [])
+                    + (snap.get("children") or {}).get("bowling_spells", [])
+                    + (snap.get("children") or {}).get("fielding_stats", [])))
+                await _restore_manual_game(db, dict(snap), club.id)
             await db.flush()
             # The wizard also creates the reference data the sheet needed, so
             # undoing has to take that back or the club is left with seasons
@@ -2343,6 +2357,30 @@ def _has_any_value(*vals) -> bool:
 # scorecard row means.
 
 
+async def _snapshot_manual_game(db: AsyncSession, gid: uuid.UUID, org_id: uuid.UUID):
+    """The row + children of a manual game, in the shape undo restores from.
+
+    Byte-for-byte what delete_manual_game's `before` snapshot holds, so the
+    same `_restore_manual_game` puts an overwritten game back.
+    """
+    game = await db.get(ManualGame, gid)
+    if not game or game.organisation_id != org_id:
+        return None
+    snap = _row_to_dict(game)
+    bat = (await db.execute(select(ManualBattingInnings).where(
+        ManualBattingInnings.manual_game_id == gid))).scalars().all()
+    bowl = (await db.execute(select(ManualBowlingSpell).where(
+        ManualBowlingSpell.manual_game_id == gid))).scalars().all()
+    fld = (await db.execute(select(ManualFieldingStat).where(
+        ManualFieldingStat.manual_game_id == gid))).scalars().all()
+    snap["children"] = {
+        "batting_innings": [_row_to_dict(r) for r in bat],
+        "bowling_spells": [_row_to_dict(r) for r in bowl],
+        "fielding_stats": [_row_to_dict(r) for r in fld],
+    }
+    return snap
+
+
 async def _write_games(
     db: AsyncSession,
     *,
@@ -2352,31 +2390,67 @@ async def _write_games(
     season_for: callable,
     grade_for: callable,
     player_for: callable,
-) -> tuple[list[str], list[dict], set]:
-    """Write every grouped game, returning (created ids, errors, player ids).
+    existing_by_game: Optional[dict] = None,
+    overwrite: bool = False,
+) -> dict:
+    """Write every grouped game, returning what was created / overwritten / ignored.
 
     The three resolvers are what separate the two callers: the strict endpoint
     hands back None for anything the club does not already hold, so the row is
     refused; the wizard hands back the season, grade and player it has just
     created on the admin's say-so.
 
+    `existing_by_game` maps a game_key to the match already in BetterCricket it
+    duplicates ({id, source}); a key that is absent is genuinely new. When it is
+    a duplicate:
+      * 'skip' mode (overwrite=False) discards it — nothing is written;
+      * 'overwrite' mode replaces an existing MANUAL match (snapshot for undo,
+        delete, then write the sheet's version) but still discards a SYNCED one,
+        because a CSV import writes manual_games and cannot delete a Cricket
+        Australia game (a different table the sync owns) — and writing it beside
+        the synced one double-counts.
+    A caller that passes neither argument gets the old behaviour: every game is
+    written, nothing is deduplicated (the strict single-shot endpoint).
+
     Each game is written inside its OWN SAVEPOINT. A game rolls back whole when
     one of its rows fails — a scorecard missing a batter is worse than one that
     never arrived — and the savepoint is what lets the games either side of it
     survive. Deleting the children by hand instead cannot: a constraint the
     flush trips leaves the whole session needing a rollback, which would take
-    every game already written down with it.
+    every game already written down with it. The overwrite delete lives INSIDE
+    that savepoint too, so a failed rewrite rolls the delete back and the
+    existing game is never lost to a replacement that did not land.
     """
+    existing_by_game = existing_by_game or {}
     created_game_ids: list[str] = []
+    overwritten_snapshots: list[dict] = []
     errors: list[dict] = []
     affected_player_ids: set = set()
+    ignored = 0
+    ignored_synced = 0
 
     for game_key, group in by_game.items():
+        dup = existing_by_game.get(game_key)
+        if dup and (not overwrite or dup["source"] != "manual"):
+            # skip mode discards every duplicate; overwrite mode still discards
+            # a synced game it cannot replace.
+            ignored += 1
+            if dup["source"] != "manual":
+                ignored_synced += 1
+            continue
+
         first_row_num, first = group[0]
         game_player_ids: set = set()
         game_id = None
+        snapshot = None
         try:
             async with db.begin_nested():
+                if dup:  # overwrite of a manual match — snapshot, then delete
+                    snapshot = await _snapshot_manual_game(
+                        db, uuid.UUID(dup["id"]), club.id)
+                    await db.execute(sa_delete(ManualGame).where(
+                        ManualGame.id == uuid.UUID(dup["id"]),
+                        ManualGame.organisation_id == club.id))
                 sname = (first.get("season_name") or "").strip()
                 if not sname:
                     raise ValueError("season_name is required (on the first row for this game_key)")
@@ -2502,8 +2576,24 @@ async def _write_games(
 
         created_game_ids.append(game_id)
         affected_player_ids |= game_player_ids
+        if snapshot is not None:
+            # The savepoint held, so the old game really is gone — record its
+            # snapshot for undo, and count the players it took down so their
+            # career totals are recomputed alongside the new game's.
+            overwritten_snapshots.append(snapshot)
+            ch = snapshot.get("children") or {}
+            affected_player_ids |= set(_extract_player_ids(
+                ch.get("batting_innings", []) + ch.get("bowling_spells", [])
+                + ch.get("fielding_stats", [])))
 
-    return created_game_ids, errors, affected_player_ids
+    return {
+        "created": created_game_ids,
+        "overwritten": overwritten_snapshots,
+        "ignored": ignored,
+        "ignored_synced": ignored_synced,
+        "errors": errors,
+        "player_ids": affected_player_ids,
+    }
 
 
 # Sentinels the resolvers hand back for an answer the admin actually gave, as
@@ -2554,13 +2644,15 @@ async def import_manual_games(
     grade_lookup = _build_grade_lookup(grades)
 
     by_game, errors = _group_by_game(list(reader))
-    created_game_ids, write_errors, affected_player_ids = await _write_games(
+    written = await _write_games(
         db, club=club, user_id=current_user.id, by_game=by_game,
         season_for=lambda nm: season_lookup.get(nm.lower()),
         grade_for=lambda season, nm: grade_lookup.get((season.id, nm.lower())),
         player_for=lambda nm: player_lookup.get(nm.lower()),
     )
-    errors += write_errors
+    created_game_ids = written["created"]
+    affected_player_ids = written["player_ids"]
+    errors += written["errors"]
 
     summary = {
         "games_created": len(created_game_ids),
@@ -2621,6 +2713,14 @@ class GameResolveRequest(BaseModel):
     player_overrides: dict = Field(default_factory=dict)   # player id | '__new__' | '__skip__'
     season_overrides: dict = Field(default_factory=dict)   # season id | '__new__'
     grade_overrides: dict = Field(default_factory=dict)    # grade name | '__new__' | '__none__'
+    # What to do with a sheet match that already exists in BetterCricket — the
+    # choice the CricketStatz importer makes for a synced season, made here per
+    # match. 'skip' (the default, the safe direction) discards the duplicate and
+    # imports only what is genuinely new; 'overwrite' replaces the existing
+    # manual match with the sheet's version, keeping a snapshot so undo restores
+    # it. A match that is the club's synced Cricket Australia game is left alone
+    # either way — see `_write_games`.
+    duplicate_mode: str = "skip"                            # 'skip' | 'overwrite'
 
 
 # A whole club history is a big sheet: the archive that prompted this is 97
@@ -2707,6 +2807,69 @@ def _read_game_csv(content: str) -> tuple[list[dict], list[str], list[str]]:
 
 def _season_label_year(label: str) -> Optional[int]:
     return _season_start_year(label)
+
+
+# ─── duplicate detection: is this sheet match already in BetterCricket? ───────
+#
+# A CSV import writes manual_games, and both a synced Cricket Australia game and
+# an already-imported/hand-entered manual game roll into the same season and
+# career totals through v_effective_*, so the same real match in the sheet AND
+# in the data double-counts. The import can either discard such a match (the
+# default) or overwrite the existing MANUAL one; a synced game is never the CSV
+# import's to touch (a different table the sync owns) — see `_write_games`.
+#
+# Identity is (date, opposition), the same signal check_scorecard_duplicate
+# uses: played_at is the strong half, the opposition tokens disambiguate a club
+# that played several matches on one day. A sheet game with no date, or none we
+# can read, or no opposition, cannot be matched confidently and is always
+# imported as new — guessing would either discard a real match or overwrite the
+# wrong one.
+
+def _opp_tokens(*vals) -> set:
+    text = " ".join((v or "").lower() for v in vals)
+    return {w for w in re.split(r"[^a-z0-9]+", text) if len(w) > 2}
+
+
+async def _existing_game_index(db: AsyncSession, org_id: uuid.UUID) -> dict:
+    """played_at -> [ {id, source, tokens} ] for every game the club holds."""
+    rows = (await db.execute(_t("""
+        SELECT g.id::text AS id, g.played_at, g.source,
+               g.opp_club_name, g.home_team, g.away_team
+        FROM v_effective_games g
+        WHERE g.organisation_id = :org AND g.played_at IS NOT NULL
+    """), {"org": str(org_id)})).mappings().all()
+    index: dict = {}
+    for r in rows:
+        index.setdefault(r["played_at"], []).append({
+            "id": r["id"], "source": r["source"],
+            "tokens": _opp_tokens(r["opp_club_name"], r["home_team"], r["away_team"]),
+        })
+    return index
+
+
+def _match_existing(index: dict, played_at: str, opp_vals: tuple, consumed: set):
+    """The existing game this sheet game is the same match as, or None.
+
+    Each existing game is matched at most once (a `consumed` set), so two sheet
+    games landing on the same date and opposition as one existing record do not
+    both claim it — the second reads as new.
+    """
+    if not played_at:
+        return None
+    try:
+        d = date_cls.fromisoformat(played_at.strip())
+    except Exception:
+        return None
+    toks = _opp_tokens(*opp_vals)
+    if not toks:
+        return None
+    for ex in index.get(d, []):
+        if ex["id"] in consumed:
+            continue
+        if toks & ex["tokens"]:
+            consumed.add(ex["id"])
+            return {"id": ex["id"], "source": ex["source"]}
+    return None
 
 
 async def _resolve_games(
@@ -2843,6 +3006,27 @@ async def _resolve_games(
             if sid is None or (sid, name.strip().lower()) not in existing_grade_keys:
                 grade_rows_to_create += 1
 
+    # Which of the sheet's matches already exist in BetterCricket, so the
+    # review can say how many will be discarded or overwritten before anything
+    # is written, and the commit reads the same map rather than deciding twice.
+    existing_index = await _existing_game_index(db, club.id)
+    consumed: set = set()
+    existing_by_game: dict = {}
+    dup_manual = dup_synced = 0
+    for game_key, group in by_game.items():
+        first = group[0][1]
+        dup = _match_existing(
+            existing_index, (first.get("played_at") or "").strip(),
+            (first.get("opposition"), first.get("home_team"), first.get("away_team")),
+            consumed)
+        if not dup:
+            continue
+        existing_by_game[game_key] = dup
+        if dup["source"] == "manual":
+            dup_manual += 1
+        else:
+            dup_synced += 1
+
     warnings = []
     if unresolved:
         warnings.append(
@@ -2880,9 +3064,17 @@ async def _resolve_games(
             "players_skipped": sum(1 for m in pmatch.values() if m.get("status") == "skip"),
             "players_unresolved": len(unresolved),
         },
+        # A match already in BetterCricket: `manual` ones can be overwritten,
+        # `synced` ones are only ever discarded (the CSV import cannot replace a
+        # Cricket Australia game). `total` drives the review copy either way.
+        "duplicates": {
+            "total": dup_manual + dup_synced,
+            "manual": dup_manual,
+            "synced": dup_synced,
+        },
         "_plan": {"by_game": by_game, "smatch": smatch, "gmatch": gmatch,
                   "pmatch": pmatch, "grade_pairs": {k: sorted(v) for k, v in grade_pairs.items()},
-                  "unresolved": unresolved},
+                  "unresolved": unresolved, "existing_by_game": existing_by_game},
     }
 
 
@@ -3048,19 +3240,48 @@ async def commit_manual_games(
         player_by_name[nm] = p
     await db.flush()
 
-    created_game_ids, errors, affected_player_ids = await _write_games(
+    overwrite = req.duplicate_mode == "overwrite"
+    written = await _write_games(
         db, club=club, user_id=current_user.id, by_game=plan["by_game"],
         season_for=lambda sl: season_by_label.get(sl),
         grade_for=lambda season, gl: grade_by_key.get((season.id, gl)),
         player_for=lambda nm: player_by_name.get(nm),
+        existing_by_game=plan["existing_by_game"],
+        overwrite=overwrite,
     )
-    errors += resolved["row_errors"]
+    # Every written game, new or a replacement, so undo can remove them all;
+    # `overwritten` is the subset that stood in for an existing manual match.
+    created_game_ids = written["created"]
+    overwritten = written["overwritten"]
+    affected_player_ids = written["player_ids"]
+    ignored = written["ignored"]
+    ignored_synced = written["ignored_synced"]
+    errors = written["errors"] + resolved["row_errors"]
+    games_new = len(created_game_ids) - len(overwritten)
 
-    if not created_game_ids:
+    if not created_game_ids and not ignored:
         await db.rollback()
         raise HTTPException(422, "Nothing imported — every game had a row that failed. "
                                  "Fix the errors listed and upload again.")
+    if not created_game_ids:
+        # Everything the sheet held already exists and was discarded. Nothing
+        # was written, so there is nothing to log or undo — but this is a
+        # success, not the every-row-failed error above.
+        if req.token:
+            await game_import_staging.discard(db, token=req.token, org_id=club.id)
+        await db.commit()
+        return {
+            "games_created": 0, "games_overwritten": 0,
+            "games_ignored": ignored, "games_ignored_synced": ignored_synced,
+            "seasons_created": 0, "grades_created": 0, "players_created": 0,
+            "errors": len(errors), "errors_detail": errors[:50],
+        }
 
+    parts = [f"{games_new} games"]
+    if overwritten:
+        parts.append(f"{len(overwritten)} overwritten")
+    if ignored:
+        parts.append(f"{ignored} already-present ignored")
     await _log_edit(
         db,
         org_id=club.id,
@@ -3068,14 +3289,19 @@ async def commit_manual_games(
         action="import",
         target_table="manual_games",
         target_id=f"bulk:{len(created_game_ids)}games",
-        summary=(f"CSV import — manual games: {len(created_game_ids)} games, "
-                 f"{len(created_season_ids)} season(s), {len(created_grade_ids)} grade(s) and "
+        summary=("CSV import — manual games: " + ", ".join(parts)
+                 + f", {len(created_season_ids)} season(s), {len(created_grade_ids)} grade(s) and "
                  f"{len(created_player_ids)} player(s) created, {len(errors)} row errors"),
         before=None,
         after={"created_game_ids": created_game_ids,
                "created_season_ids": created_season_ids,
                "created_grade_ids": created_grade_ids,
                "created_player_ids": created_player_ids,
+               # The before-snapshots of the manual matches this import replaced,
+               # so undoing the import puts them back rather than leaving a club
+               # short the games it overwrote — the "never lose hand-typed work"
+               # rule, applied to a deliberate overwrite.
+               "overwritten_games": overwritten,
                "filename": req.filename,
                "errors": errors[:20]},
     )
@@ -3087,7 +3313,10 @@ async def commit_manual_games(
     await db.commit()
     await _recompute_milestones(db, club.id, affected_player_ids)
     return {
-        "games_created": len(created_game_ids),
+        "games_created": games_new,
+        "games_overwritten": len(overwritten),
+        "games_ignored": ignored,
+        "games_ignored_synced": ignored_synced,
         "seasons_created": len(created_season_ids),
         "grades_created": len(created_grade_ids),
         "players_created": len(created_player_ids),

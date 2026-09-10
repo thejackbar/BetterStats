@@ -112,8 +112,16 @@ ALLOWED_DELETES = {
     ("app/routers/manual_entries.py", "the editor replacing a game it is saving"),
     # Restoring a snapshot on undo: the rows going in are the ones coming back.
     ("app/routers/manual_entries.py", "undo putting a snapshot back"),
+    # A CSV import in overwrite mode replacing an existing manual match with the
+    # sheet's version — snapshotted first, so the undo above puts it back.
+    ("app/routers/manual_entries.py", "overwrite import replacing a manual match it snapshotted"),
     # Undoing an import removes what that import wrote, scoped by its own id.
     ("app/services/cricketstatz_import.py", "an import undoing its own work"),
+    # `manual_game_import_staging` holds an uploaded sheet's raw rows for an hour
+    # while the admin works through the review — a transient work queue, not a
+    # club's committed hand-entered games. Its name only matches the `manual_`
+    # prefix by coincidence; clearing a lapsed or spent token loses no work.
+    ("app/services/game_import_staging.py", "the CSV upload's transient staging table, not committed work"),
 }
 ALLOWED_FILES = {f for f, _ in ALLOWED_DELETES}
 

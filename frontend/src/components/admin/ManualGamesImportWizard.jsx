@@ -62,6 +62,62 @@ function SheetNote({ sheet }) {
   )
 }
 
+// The overwrite / discard choice, made before the import runs — the same call
+// the CricketStatz importer offers for a synced season, made here per match.
+// The projection under each option is worked out from the review's own
+// duplicate split, so changing the choice costs no server round trip.
+function DuplicatePolicy({ dupMode, setDupMode, duplicates }) {
+  const dup = duplicates || { total: 0, manual: 0, synced: 0 }
+  const none = !dup.total
+
+  let projection
+  if (none) {
+    projection = 'None of these matches are already in BetterCricket, so this makes no difference to this import.'
+  } else if (dupMode === 'skip') {
+    projection = `${dup.total} match${dup.total === 1 ? '' : 'es'} already in BetterCricket will be left as ${dup.total === 1 ? 'it is' : 'they are'} and skipped.`
+  } else {
+    const bits = []
+    if (dup.manual) bits.push(`${dup.manual} existing match${dup.manual === 1 ? ' will be' : 'es will be'} overwritten`)
+    if (dup.synced) bits.push(`${dup.synced} already synced from Cricket Australia can’t be overwritten and will be skipped`)
+    projection = bits.join('; ') + '.'
+  }
+
+  const Option = ({ value, title, body }) => (
+    <label className={`flex gap-2.5 items-start p-3 rounded border cursor-pointer ${dupMode === value ? 'border-pb-accent bg-pb-accent/5' : 'pb-hairline hover:bg-pb-surface2'}`}>
+      <input type="radio" name="dup-mode" className="mt-0.5 accent-pb-accent" checked={dupMode === value} onChange={() => setDupMode(value)} />
+      <span>
+        <span className="block text-sm font-medium text-pb-text">{title}</span>
+        <span className="block text-[11px] text-pb-dim mt-0.5">{body}</span>
+      </span>
+    </label>
+  )
+
+  return (
+    <section className="border pb-hairline rounded-lg bg-pb-surface p-4 space-y-2.5">
+      <div>
+        <h3 className="text-sm font-semibold text-pb-text">Matches already in BetterCricket</h3>
+        <p className="text-[11px] text-pb-dim mt-0.5">
+          A match is recognised as one you already have when it shares a date and opponent with an
+          existing record — a match with no date or opponent in the sheet is always brought in as new.
+        </p>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <Option
+          value="skip"
+          title="Only import new matches"
+          body="Any match already in BetterCricket is never overwritten — duplicates in the sheet are discarded, and only matches you don’t already have are brought in."
+        />
+        <Option
+          value="overwrite"
+          title="Overwrite existing matches"
+          body="A match already in BetterCricket is replaced by the sheet’s version. Synced Cricket Australia matches can’t be overwritten and are skipped. Undo the whole import from Audit & Undo."
+        />
+      </div>
+      <p className={`text-xs ${none ? 'text-pb-dim' : 'text-pb-accent-ink'}`}>{projection}</p>
+    </section>
+  )
+}
+
 export default function ManualGamesImportWizard({ onDone }) {
   // The TOKEN, not the sheet. The preview parses the file once and holds the
   // rows server-side for an hour; this screen carries a handle to them and the
@@ -79,6 +135,13 @@ export default function ManualGamesImportWizard({ onDone }) {
   const [unknown, setUnknown] = useState([])
   const [review, setReview] = useState(null)
   const [overrides, setOverrides] = useState({ players: {}, seasons: {}, grades: {} })
+  // What to do with a match already in BetterCricket. 'skip' is the safe
+  // default — it never touches what the club already has; 'overwrite' replaces
+  // an existing manual match with the sheet's version (undoable). The choice is
+  // local: changing it never re-hits the server, since the review already
+  // reports how many matches are duplicates and the outcome is worked out from
+  // that split.
+  const [dupMode, setDupMode] = useState('skip')
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
@@ -144,6 +207,7 @@ export default function ManualGamesImportWizard({ onDone }) {
         player_overrides: overrides.players,
         season_overrides: overrides.seasons,
         grade_overrides: overrides.grades,
+        duplicate_mode: dupMode,
       })
       // The token is spent once its sheet has landed — the server drops the
       // staged rows in the same transaction as the games, so holding on to it
@@ -196,11 +260,27 @@ export default function ManualGamesImportWizard({ onDone }) {
         <div className="border pb-hairline rounded-lg p-4 bg-pb-surface">
           <h3 className="text-base font-semibold text-pb-text mb-2">Imported</h3>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            <Figure label="Matches" value={result.games_created} />
+            <Figure label="New matches" value={result.games_created} />
             <Figure label="Seasons created" value={result.seasons_created} />
             <Figure label="Grades created" value={result.grades_created} />
             <Figure label="Players created" value={result.players_created} />
           </div>
+          {(result.games_overwritten > 0 || result.games_ignored > 0) && (
+            <div className="grid grid-cols-2 gap-2 mt-2">
+              {result.games_overwritten > 0 && (
+                <Figure label="Overwritten" value={result.games_overwritten} tone="text-pb-accent-ink" />
+              )}
+              {result.games_ignored > 0 && (
+                <Figure label="Already present — ignored" value={result.games_ignored} tone="text-pb-dim" />
+              )}
+            </div>
+          )}
+          {result.games_ignored_synced > 0 && (
+            <p className="text-xs text-pb-dim mt-3">
+              {result.games_ignored_synced} of the ignored match{result.games_ignored_synced === 1 ? ' is' : 'es are'} already
+              synced from Cricket Australia, which a spreadsheet import can’t overwrite.
+            </p>
+          )}
           {result.errors > 0 && (
             <p className="text-xs text-amber-400 mt-3">
               {result.errors} row(s) could not be read and their matches were left out.
@@ -332,6 +412,12 @@ export default function ManualGamesImportWizard({ onDone }) {
               ))}
             </div>
           </section>
+
+          <DuplicatePolicy
+            dupMode={dupMode}
+            setDupMode={setDupMode}
+            duplicates={review.duplicates}
+          />
 
           <div className="flex flex-wrap items-center gap-3">
             <button className={BTN_PRIMARY} onClick={commit} disabled={!!busy || unresolved > 0}>

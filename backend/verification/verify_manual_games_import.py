@@ -40,7 +40,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from _view_ddl import view_statements
 from app.models.db import (
-    Base, Grade, ManualBattingInnings, ManualBowlingSpell, ManualEditLog,
+    Base, Game, Grade, ManualBattingInnings, ManualBowlingSpell, ManualEditLog,
     ManualFieldingStat, ManualGame, Organisation, Player, Season, User,
 )
 
@@ -203,7 +203,7 @@ SHEET = [
 
 async def reset(session) -> None:
     for tbl in ("manual_fielding_stats", "manual_bowling_spells", "manual_batting_innings",
-                "manual_games", "manual_edit_logs", "grades", "seasons", "players",
+                "manual_games", "manual_edit_logs", "games", "grades", "seasons", "players",
                 "club_memberships", "organisations", "users"):
         await session.execute(text(f"TRUNCATE {tbl} CASCADE"))
     await session.commit()
@@ -976,6 +976,177 @@ async def main() -> None:
                   (await resolve_manual_games(
                       req=GameResolveRequest(), current_user=u, club=c,
                       db=session))["games"] == 0)
+
+        print("\n-- A MATCH ALREADY IN BETTERCRICKET: DISCARD, OR OVERWRITE --")
+        # The reported ask: on the review, choose whether a sheet match that is
+        # already in BetterCricket is discarded (never overwrite — the safe
+        # default) or replaces the existing manual match; a synced Cricket
+        # Australia game is never the CSV import's to touch either way. The
+        # counts are reported after the run.
+        DUP_SHEET = [
+            # genuinely new — no existing game on this date
+            game_row(game_key="NEW", played_at="2010-11-13", opposition="Bayswater",
+                     season_name="Summer 2010/11", grade_name="1st Grade",
+                     player_name="Held, Harry", innings_number="1",
+                     batting_runs="45", did_not_bat="false"),
+            # same date + opponent as an existing MANUAL game — its 99 makes an
+            # overwrite observable against the existing 10
+            game_row(game_key="DUP_MANUAL", played_at="2010-11-20", opposition="Rovers",
+                     season_name="Summer 2010/11", grade_name="1st Grade",
+                     player_name="Held, Harry", innings_number="1",
+                     batting_runs="99", did_not_bat="false"),
+            # same date + opponent as an existing SYNCED game
+            game_row(game_key="DUP_SYNCED", played_at="2010-12-04", opposition="Hawks",
+                     season_name="Summer 2010/11", grade_name="1st Grade",
+                     player_name="Held, Harry", innings_number="1",
+                     batting_runs="20", did_not_bat="false"),
+        ]
+
+        async def seed_existing(session):
+            """One hand-entered manual match (vs Rovers) and one synced CA game
+            (vs Hawks), both on the club's held season/grade."""
+            m = ManualGame(id=uuid.uuid4(), organisation_id=ORG, season_id=S_HELD,
+                           grade_id=G_HELD, played_at=date(2010, 11, 20),
+                           opposition="Rovers")
+            session.add(m)
+            await session.flush()
+            session.add(ManualBattingInnings(
+                manual_game_id=m.id, player_id=P_HELD, innings_number=1, runs=10))
+            session.add(Game(id=uuid.uuid4(), grade_id=G_HELD,
+                             played_at=date(2010, 12, 4), opp_club_name="Hawks"))
+            await session.commit()
+            return m.id
+
+        check("the request defaults to never overwriting",
+              getattr(GameResolveRequest(), "duplicate_mode", None) == "skip",
+              str(getattr(GameResolveRequest(), "duplicate_mode", None)))
+
+        # ---- SKIP (never overwrite): duplicates are discarded ----
+        async with Session() as session:
+            await reset(session); await seed(session)
+            manual_id = await seed_existing(session)
+            c = await club(session); u = await user(session)
+            prev = await preview(file=FakeUpload(csv_text(DUP_SHEET)),
+                                 current_user=u, club=c, db=session)
+            res = await resolve_manual_games(
+                req=GameResolveRequest(token=prev["token"]),
+                current_user=u, club=c, db=session)
+            dups = res.get("duplicates") or {}
+            check("the review counts the matches already in BetterCricket",
+                  dups.get("total") == 2, str(dups))
+            check("and splits them into the manual one and the synced one",
+                  dups.get("manual") == 1 and dups.get("synced") == 1, str(dups))
+
+            out = await commit_manual_games(
+                req=GameResolveRequest(token=prev["token"], duplicate_mode="skip"),
+                current_user=u, club=c, db=session)
+            check("skip imports only the genuinely new match",
+                  out.get("games_created") == 1, str(out))
+            check("skip overwrites nothing",
+                  out.get("games_overwritten") == 0, str(out))
+            check("skip reports both duplicates as ignored",
+                  out.get("games_ignored") == 2, str(out))
+            check("and names the synced one among them",
+                  out.get("games_ignored_synced") == 1, str(out))
+
+        async with Session() as session:
+            # the hand-entered match is untouched — still its own 10, not the 99
+            runs = (await session.execute(text(
+                "SELECT runs FROM manual_batting_innings "
+                "WHERE manual_game_id = :g"), {"g": str(manual_id)})).scalar()
+            check("the existing manual match is left exactly as it was",
+                  runs == 10, str(runs))
+            n_rovers = (await session.execute(text(
+                "SELECT count(*) FROM manual_games "
+                "WHERE organisation_id = :o AND opposition = 'Rovers'"),
+                {"o": str(ORG)})).scalar()
+            check("no second Rovers match was created beside it",
+                  n_rovers == 1, str(n_rovers))
+            n_manual = (await session.execute(text(
+                "SELECT count(*) FROM manual_games WHERE organisation_id = :o"),
+                {"o": str(ORG)})).scalar()
+            check("exactly one new manual game landed (the Bayswater one)",
+                  n_manual == 2, str(n_manual))  # Rovers (existing) + Bayswater (new)
+
+        # ---- OVERWRITE: the existing manual match is replaced, undo restores it ----
+        async with Session() as session:
+            await reset(session); await seed(session)
+            manual_id = await seed_existing(session)
+            c = await club(session); u = await user(session)
+            prev = await preview(file=FakeUpload(csv_text(DUP_SHEET)),
+                                 current_user=u, club=c, db=session)
+            out = await commit_manual_games(
+                req=GameResolveRequest(token=prev["token"], duplicate_mode="overwrite"),
+                current_user=u, club=c, db=session)
+            check("overwrite reports the manual match it replaced",
+                  out.get("games_overwritten") == 1, str(out))
+            check("overwrite still brings in the genuinely new match",
+                  out.get("games_created") == 1, str(out))
+            check("overwrite still cannot replace the synced match, so it is ignored",
+                  out.get("games_ignored") == 1 and out.get("games_ignored_synced") == 1, str(out))
+
+        async with Session() as session:
+            gone = await session.get(ManualGame, manual_id)
+            check("the overwritten manual game's original row is gone",
+                  gone is None)
+            rovers = (await session.execute(text(
+                "SELECT count(*), coalesce(max(bi.runs), -1) "
+                "FROM manual_games mg "
+                "LEFT JOIN manual_batting_innings bi ON bi.manual_game_id = mg.id "
+                "WHERE mg.organisation_id = :o AND mg.opposition = 'Rovers'"),
+                {"o": str(ORG)})).one()
+            check("one Rovers match remains, carrying the sheet's figure",
+                  rovers[0] == 1 and rovers[1] == 99, str(tuple(rovers)))
+            n_hawks_manual = (await session.execute(text(
+                "SELECT count(*) FROM manual_games "
+                "WHERE organisation_id = :o AND opposition = 'Hawks'"),
+                {"o": str(ORG)})).scalar()
+            check("the synced Hawks match spawned no manual copy",
+                  n_hawks_manual == 0, str(n_hawks_manual))
+            synced_still = (await session.execute(text(
+                "SELECT count(*) FROM games g JOIN grades gr ON gr.id = g.grade_id "
+                "WHERE gr.season_id = :s AND g.opp_club_name = 'Hawks'"),
+                {"s": str(S_HELD)})).scalar()
+            check("and the synced game itself is untouched",
+                  synced_still == 1, str(synced_still))
+
+        # undo the overwrite import -> the replacement goes, the original comes back
+        async with Session() as session:
+            c = await club(session); u = await user(session)
+            log_id = (await session.execute(text(
+                "SELECT id FROM manual_edit_logs WHERE organisation_id = :o "
+                "AND action = 'import' ORDER BY id DESC LIMIT 1"),
+                {"o": str(ORG)})).scalar()
+            await undo_edit(log_id=log_id, current_user=u, club=c, db=session)
+
+        async with Session() as session:
+            restored = await session.get(ManualGame, manual_id)
+            check("undo puts the overwritten manual game back, original id and all",
+                  restored is not None and restored.opposition == "Rovers", str(restored))
+            runs = (await session.execute(text(
+                "SELECT runs FROM manual_batting_innings WHERE manual_game_id = :g"),
+                {"g": str(manual_id)})).scalar()
+            check("with its own hand-entered figure, not the sheet's",
+                  runs == 10, str(runs))
+            n_manual = (await session.execute(text(
+                "SELECT count(*) FROM manual_games WHERE organisation_id = :o"),
+                {"o": str(ORG)})).scalar()
+            check("and the import's new match and its replacement are both gone",
+                  n_manual == 1, str(n_manual))
+
+        # ---- a sheet that is ENTIRELY duplicates imports nothing, cleanly ----
+        async with Session() as session:
+            await reset(session); await seed(session)
+            await seed_existing(session)
+            c = await club(session); u = await user(session)
+            only_dups = [r for r in DUP_SHEET if r["game_key"] != "NEW"]
+            prev = await preview(file=FakeUpload(csv_text(only_dups)),
+                                 current_user=u, club=c, db=session)
+            out = await commit_manual_games(
+                req=GameResolveRequest(token=prev["token"], duplicate_mode="skip"),
+                current_user=u, club=c, db=session)
+            check("an all-duplicate sheet is a clean no-op, not the every-row-failed error",
+                  out.get("games_created") == 0 and out.get("games_ignored") == 2, str(out))
 
         print("\n-- THE UPLOAD CAP IS THE ONE nginx CARRIES --")
         check("the app's cap is 64 MB, matching the client_max_body_size on "
