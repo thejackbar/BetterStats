@@ -681,6 +681,54 @@ async function pickSize(page, label) {
   await b.ctx.close()
 }
 
+// ── 7e. A saved template keeps its stacking ────────────────────────────────
+// The whole point of saving a design is getting it back. Driven through a real
+// RELOAD in one context, because that is the round trip somebody makes: save,
+// come back later, apply it. A second context would have its own localStorage
+// and the check would be measuring the harness.
+{
+  const { ctx, page, errors } = await openEditor()
+  const countLayers = () => page.evaluate(() => {
+    const holder = [...document.querySelectorAll('div')].find(
+      (d) => d.style.left === '-9999px' && d.style.position === 'absolute',
+    )
+    const page_ = holder?.firstElementChild
+    const root = page_ && [...page_.children].find((c) => c.tagName === 'DIV' && c.style.width && c.children.length > 1)
+    return root ? root.children.length : -1
+  })
+
+  await press(page.getByRole('button', { name: 'Layers', exact: true }))
+  await page.waitForTimeout(300)
+  const drawn = await countLayers()
+  await press(page.locator('[data-testid="layer-hide"]').first())
+  await page.waitForTimeout(400)
+  const hiddenCount = await countLayers()
+  ck('a hidden element is off the post before saving', hiddenCount === drawn - 1, `${drawn} -> ${hiddenCount}`)
+
+  await press(page.getByRole('button', { name: 'Design', exact: true }))
+  await page.waitForTimeout(250)
+  await page.getByPlaceholder('Template name...').fill('Stacked')
+  await press(page.getByRole('button', { name: 'Save current' }))
+  await page.waitForTimeout(400)
+
+  // Come back to it. A reload clears every bit of in-memory state, so what the
+  // stack reads afterwards can only have come from the saved template.
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByRole('button', { name: /DOWNLOAD PNG|SLIDES/ }).first().waitFor({ timeout: 25000 })
+  await page.waitForTimeout(600)
+  ck('a fresh load draws the layout whole again', (await countLayers()) === drawn, String(await countLayers()))
+
+  await press(page.getByRole('button', { name: 'Design', exact: true }))
+  await page.waitForTimeout(250)
+  await press(page.getByRole('button', { name: 'Stacked' }))
+  await page.waitForTimeout(600)
+  ck('applying the saved template brings its stacking back',
+    (await countLayers()) === drawn - 1, `${drawn} -> ${await countLayers()}`)
+
+  ck('no page errors saving and re-applying a template', errors.length === 0, errors.slice(0, 2).join(' | '))
+  await ctx.close()
+}
+
 // ── 8. Narrow viewport ─────────────────────────────────────────────────────
 {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } })

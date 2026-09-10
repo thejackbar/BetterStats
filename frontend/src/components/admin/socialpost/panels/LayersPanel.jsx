@@ -57,7 +57,10 @@ export default function LayersPanel({
         className={`flex items-center justify-between gap-2 px-2 py-1.5 rounded-md cursor-grab border ${
           selIds.includes(l.id) ? 'border-pb-accent bg-pb-surface2' : 'border-transparent hover:bg-pb-surface2'
         } ${overId === l.id && dragId ? 'border-pb-accent' : ''}`}>
-        <span className={`font-mono text-[11px] truncate flex items-center gap-1.5 ${isHidden ? 'text-pb-faintest line-through' : isBlock ? 'text-pb-text' : 'text-pb-dim'}`}>
+        {/* A hidden row is struck through, never faded to `--pb-faintest`: that
+            token computes to 1.64:1 and is for a rule or an icon, not for a
+            name somebody has to read to find the row and put it back. */}
+        <span className={`font-mono text-[11px] truncate flex items-center gap-1.5 ${isHidden ? 'text-pb-dim line-through' : isBlock ? 'text-pb-text' : 'text-pb-dim'}`}>
           <Icon name="grip" size={12} className="text-pb-faintest" />
           {label}
         </span>
@@ -98,7 +101,7 @@ export default function LayersPanel({
           <div data-testid="layers-background-row"
             className="flex items-center gap-2 px-2 py-1.5 rounded-md border border-dashed pb-hairline2 bg-pb-surface2/60">
             <Icon name="image" size={12} className="text-pb-faintest" />
-            <span className="font-mono text-[11px] text-pb-faintest truncate">{backgroundName} background</span>
+            <span className="font-mono text-[11px] text-pb-dim truncate">{backgroundName} background</span>
           </div>
         )}
       </div>

@@ -686,9 +686,10 @@ export function BlankCanvas({
         background: transparent ? 'transparent' : (palette.primary || '#101113'),
         color: palette.ink || '#fff', fontFamily: "'Inter', sans-serif",
         // passThrough: this layer covers the whole canvas but must not swallow
-        // clicks meant for something UNDER it — the layout, or blocks a person
-        // has sent behind it. Blocks re-arm themselves (see BlankBlock), so they
-        // stay draggable while the empty space between them does not intercept.
+        // clicks meant for something UNDER it — one of the layout's own
+        // elements, or a block sitting below this run in the stack. Blocks
+        // re-arm themselves (see BlankBlock), so they stay draggable while the
+        // empty space between them does not intercept.
         ...(passThrough ? { pointerEvents: 'none' } : null),
         ...style,
       }}>

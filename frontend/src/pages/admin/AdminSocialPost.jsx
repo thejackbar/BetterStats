@@ -2394,11 +2394,11 @@ export default function AdminSocialPost() {
   const pageBackground = bgActive
     ? <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} {...bgExtraProps} />
     : null
-  // Custom Edit blocks sit either side of the built-in layout: a block carrying
-  // `behind` is drawn UNDER it. That is what "send the image to the back" means
-  // on a layout that is one fixed design rather than a stack of movable parts —
-  // and it only shows if the layout stops painting its own background over it,
-  // which is what the see-through wrapper is for.
+  // Custom Edit blocks are spliced IN AMONG the layout's own elements, so a
+  // block can sit between any two of them. That replaced a `behind` flag with
+  // two positions — wholly in front, or wholly behind a layout made
+  // see-through — which could not express "under the headline, over the
+  // crest" and cost the layout its own background to do the half it could.
 
   // width/height go in ahead of extraProps so the Blank Canvas's own explicit
   // pair still wins — they are the same numbers either way, and one definition
