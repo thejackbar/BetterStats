@@ -59,7 +59,7 @@ const FIELD = 'w-full bg-pb-surface2 border pb-hairline rounded-xl px-4 py-3 tex
 
 // On a shared gate device the confirmation clears itself after this many
 // seconds, so the sign-in list is waiting for the next player with no tap.
-const AUTO_RESET_SECONDS = 5
+const AUTO_RESET_SECONDS = 3
 
 export default function PublicNetCheckIn() {
   const { token } = useParams()
