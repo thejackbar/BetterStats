@@ -255,61 +255,79 @@ own keepers. The resulting shares are ordinary club rates (caught 47.6%, bowled
 
 Seven more were **confirmed by the club from its own records**: 7 hit wicket,
 10 retired out, 13 caught and bowled, 14 and 37 caught by the keeper, 15 caught
-in slips, and **29 absent**.
+in slips, and **29 absent out**.
 
-**Code 29 is Absent, and it is the one code that is a dismissal in the file and
-not an innings in the app.** In the club's own words: "Most of Shoalwater Bay's
-games are one day fixtures, so I believe it is where a player was selected, and
-is either running late, or didn't turn up, or had to leave early. In some
-instances where Shoalwater Bay batted first, and the absent batter arrived
-after the close of our innings."
+**Code 29 is Absent out, and it is a dismissal on both sides.** In the club's
+own words: "Most of Shoalwater Bay's games are one day fixtures, so I believe
+it is where a player was selected, and is either running late, or didn't turn
+up, or had to leave early. In some instances where Shoalwater Bay batted first,
+and the absent batter arrived after the close of our innings, then bowled in
+the opposition's innings."
+
+**Absent out is not did-not-bat, and the difference is the average.** The club
+settled it outright: "If you are named and absent, it gets recorded as 'absent
+out'. That is different from did not bat. This would make a difference to
+someone's average." A did-not-bat adds neither an innings nor a dismissal; an
+absent out adds both, and the batter wears the duck.
+
+**Which way a competition records it is the competition's own rule, so ASK
+rather than assume.** Some competitions use "absent out"; "absent hurt" is
+normally no dismissal at all, the same way Law 25.4.2's retirement is not. So
+this is a per-club reading and not a property of the file format. Every 29 in
+Shoalwater's archive is an absent out.
 
 All seven rows across fifteen seasons agree with that, and they were read out
 of the files before the label was accepted rather than after: every one is at
 batting position 10 or 11, every one is 0, and **three of the seven bowled in
-that same match** (1.0 overs, 3.0 and 7.0). Every one of those innings is all
-out with exactly ten dismissed batters.
+that same match** (1.0 overs, 3.0 and 7.0), which is the club's "arrived after
+the close of our innings, then bowled in the opposition's" showing up in the
+data. Every one of those innings is all out with exactly ten dismissed batters.
 
-The club then confirmed the mechanism outright: "Some instances were Shoalwater
-Bay batted first and the absent batter arrived after the close of our innings,
-then bowled in the opposition's innings." That is exactly those three rows, so
-**a row carrying bowling figures against a batter who never batted is the
-expected shape here, not a fault.** The importer writes the two halves from
-independent guards on the one row, so the spell lands whole against a batting
-row marked did-not-bat.
-
-**So 29 stays a dismissal on the CSFW side, and imports as a did-not-bat.** The
-file counts the absent batter among the ten wickets, so reading the code as a
-not out breaks the wickets identity: **911 of 916 rather than 916 of 916**,
+**29 stays out of the not-out codes**, on the CSFW side as well. The file
+counts the absent batter among the ten wickets, so reading the code as a not
+out breaks the wickets identity: **911 of 916 rather than 916 of 916**,
 measured by running it that way rather than reasoned about. It costs five
 innings and not seven because two pairs of absent batters share an innings
 between them.
 
-Nobody faced a ball, though, so importing a real 0-run innings would hand a
-duck to a player who was not there. The row carries `did_not_bat = true`, no
-batting figures, and `dismissal_type = absent`. **Both halves are needed,
-because the app's two readers filter differently.** Every batting average in
-`aggregations.py` excludes it by the WORD
-(`LOWER(dismissal_type) NOT IN ('absent', 'did not bat', 'dnb')`), while
-`get_dismissal_breakdown`, the How I Get Out donut, has no such word filter and
-would draw "absent" as its own slice, so it is excluded by the FLAG instead.
-Being absent is not a way of getting out, the same call this app already makes
-for a retirement.
+**The import label is `absent out`, two words, and the bare word would have
+been wrong.** Every batting average in `aggregations.py` (twelve of them)
+excludes a row whose dismissal reads exactly one of
+`('absent', 'did not bat', 'dnb')`. That is Cricket Australia's convention,
+where an absent batter never came in: `sync.py` stores one as
+`did_not_bat=True` with `runs=None`, so no innings count or average can reach
+them. Storing the bare word here would have dropped these innings out of every
+average, which is the opposite of what the club records. **Those filters are
+whole-value `NOT IN` and never `LIKE 'absent%'`**, so `absent out` passes
+through all twelve and counts as the innings and the dismissal it is.
 
-**The import shape is the one the Cricket Australia sync already writes**, and
-that is a check rather than a coincidence: `sync.py` stores an absent batter as
-`did_not_bat=True` with `runs=None`, so a scorecard can still list them while
-no innings count or average can reach them. The converter lands on the same
-row from the other direction.
+That is the same distinction `services/dismissal.py` already draws between
+"retired" (Law 25.4.3, a wicket) and "retired not out" (25.4.2, not a wicket),
+and it is drawn the same way: match the whole phrase, never a prefix. On the
+How I Get Out donut the label falls through `get_dismissal_breakdown`'s CASE to
+its own slice, which is what the app already does for retired out - a dismissal
+crediting no bowler is still a way of getting out.
 
-**Where the two DO diverge is the wicket, and both are right.** CA's feed never
-counts an absent batter among the wickets (`sync._NON_WICKET_DT` holds
-"absent"), so nothing on that side has to reconcile. CSFW's own bookkeeping
-does count them, so the converter's wickets identity needs the code to stay a
-dismissal. Expect the same in another club's archive: reconcile a code against
-the innings wickets to decide whether it is a dismissal, and read the club's
-word for it to decide what to import, and do not let either answer overrule the
-other.
+**So the row carries `did_not_bat = false`, `batting_runs = 0`,
+`batting_not_out = false` and `dismissal_type = absent out`.** A row that also
+carries bowling figures is the expected shape here rather than a fault: the
+importer writes the batting and the bowling from independent guards on the one
+row, so the spell lands whole beside the innings.
+
+**The two output files are an independent check on the answer.**
+`build_season_stats` counts an innings off the `batted` flag alone and has
+never had a special case for this code, so the season-totals CSV has always
+read a 29 as an innings, a dismissal and a duck. Reading it the same way in the
+per-game CSV is what makes the two agree: career innings now match exactly for
+all seven affected players (107, 8, 127, 5, 2, 9 and 10). A code read one way
+in one file and the other way in the other is a bug wherever it appears, and
+comparing the two is how it surfaces.
+
+**Expect the same question in another club's archive.** Reconcile a code
+against the innings wickets to decide whether the FILE counts it as a
+dismissal, ask the club what their competition calls it to decide what to
+IMPORT, and do not let either answer overrule the other. Here both said
+dismissal; they need not.
 
 **A code confirmed by a club is still worth checking against the files.** Every
 one of the seven above sits where an absent batter would sit and behaves how an
@@ -364,6 +382,15 @@ figure to record. It was the difference between 897 matches and the club's own
 914.
 
 A match with a result and no figures is still a match. Keep it.
+
+**Reconcile the club's list against the extraction before believing either
+side.** Shoalwater's own list of the 17 named one as `18/10/2006 Grade 3`. That
+date is a Wednesday and every fixture that season is a Saturday, and the
+extraction held the same Grade 3 match against the same opponent on
+**28/10/2006**, so the club's list carried the typo rather than the converter
+carrying a date bug. Confirmed with the club afterwards. A transposed digit in
+a hand-typed list reads exactly like an extraction error, and the cheap way to
+tell them apart is the weekday.
 
 ### A two-day match is two records
 
@@ -563,9 +590,11 @@ can ask the club what it means.
 6. **Ask about any unmapped dismissal codes** before importing, then check the
    answer against the files rather than taking it and moving on: where each one
    sits in the batting order, what the batter scored, and whether they also
-   bowled. Leave a code blank rather than guessing at it. A code the club names
-   as **absent** or **did not bat** needs the extra step above, a dismissal in
-   the file and a `did_not_bat` row on import.
+   bowled. Leave a code blank rather than guessing at it. For any code about a
+   batter who did not bat, ask the SECOND question too: does the competition
+   record it as **absent out** (an innings and a dismissal) or as a **did not
+   bat** (neither)? The two are different figures in that player's average, and
+   only the club can say which their competition used.
 7. **Check the Data quality sheet** for same-day grade clashes and raise them
    with the club.
 8. **Import `manual_games_scorecards.csv`** through the Manual Games wizard.
