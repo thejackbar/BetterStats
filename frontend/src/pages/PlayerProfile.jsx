@@ -16,7 +16,7 @@ import {
   AnimatedNum, Sparkline, Label, Card, Btn, Kpi,
   ResultPill, PageHeader, PbSpinner, TabBar,
 } from '../lib/presskit'
-import { GradeTotalNote, MatchCoverageNote } from '../components/MatchCoverage'
+import { GradeTotalNote } from '../components/MatchCoverage'
 import { FilterReachDot, FilterReachNote } from '../components/FilterReach'
 import '../styles/honour-badge.css'
 import { countryFlagUrl } from '../data/countries'
@@ -2790,9 +2790,8 @@ export default function PlayerProfile() {
   // hook no-ops on null and the pills simply aren't drawn until then.
   const [profileOrgId, setProfileOrgId] = useState(null)
   const {
-    available: availableCategories, availableFormats, availableCompetitions,
+    available: availableCategories, availableFormats,
     gradeType, setGradeType, matchFormat, setMatchFormat,
-    competition, setCompetition,
     categoriesParam: catParam, formatsParam: fmtParam,
     competitionsParam: compParam,
   } = useGradeFilters(profileOrgId)
@@ -2803,12 +2802,10 @@ export default function PlayerProfile() {
     competitions: compParam,
   })
   const gradeScope = data?.grade_scope
-  // Why the career total and the per-competition figures differ. Sent only
-  // when they genuinely do, so the note draws on nobody it has nothing to
-  // tell. `scopeActive` only changes the wording — the note itself shows
-  // either way, so nobody has to discover the gap by adding the rows up.
+  // Why the career total and the per-competition figures differ — read by the
+  // Competitions tab's own breakdown, which still explains the gap where it is
+  // drawn.
   const matchCoverage = data?.match_coverage
-  const scopeActive = !!gradeScope?.active
   // The raw selection, null where untouched. The reach notes and tab marks
   // fire on THIS, never on `gradeScope.active`: a club with a junior programme
   // has a default scope on every visit, and the default is already announced
@@ -3131,13 +3128,6 @@ export default function PlayerProfile() {
               setGradeType={setGradeType}
               matchFormat={matchFormat}
               setMatchFormat={setMatchFormat}
-              competition={competition}
-              setCompetition={setCompetition}
-              availableCompetitions={
-                availableCompetitions.length
-                  ? availableCompetitions
-                  : (gradeScope?.available_competitions || [])
-              }
               availableCategories={availableCategories.length ? availableCategories : (gradeScope?.available || [])}
               availableFormats={availableFormats}
             />
@@ -3163,13 +3153,6 @@ export default function PlayerProfile() {
                     </span>
                   </div>
                 </div>
-                {/* Said before anyone has to notice: with no filter this is
-                    Cricket Australia's season total, and anything filtered is
-                    counted from the scorecards we hold, so the competitions do
-                    not sum to it. Drawn on the unfiltered view too, which is
-                    the whole point — nobody should discover this themselves
-                    and read it as a mistake. */}
-                <MatchCoverageNote coverage={matchCoverage} filtered={scopeActive} />
               </div>
               {player.is_overseas && (
                 <div className="pb-card p-4 flex items-center gap-3" style={{ borderColor: 'color-mix(in srgb, var(--pb-amber) 30%, transparent)' }}>
