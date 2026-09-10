@@ -3080,7 +3080,7 @@ export default function AdminSocialPost() {
                     <span className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faint">On a built-in layout</span>
                     <p className="text-[11px] leading-relaxed text-pb-dim">
                       {tmpl.name}'s own elements are in the stack, so a block you add can sit
-                      {' '}<strong className="text-pb-text">between two of them</strong> — behind the headline and over the photo, say. The
+                      {' '}<strong className="text-pb-text">between two of them</strong>: behind the headline and over the photo, say. The
                       background stays at the floor. Hide an element to take it off the post.
                     </p>
                     {tlayers.touched && (
