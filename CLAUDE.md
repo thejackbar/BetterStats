@@ -712,6 +712,11 @@ layers on all templates where each element except the background is a layer."*
   grandchildren layers, and it is exactly the wrong move: the wrapper carries an
   `inset`, so a block rendered inside it would be offset by that much from where
   it was dropped. Naming the wrapper's own children is the fix, per template.
+  **Until then the wrapper is named `Poster content` rather than left to read as
+  a fragment of its own text**, and on those two the feature honestly degrades
+  to the two positions it replaces: a block goes in front of the whole poster or
+  behind it. That is what the row says, so nobody is hunting for a stack that is
+  not there.
 
 ## A FACET LISTED IN THE KIT AND MISSING FROM ONE FUNCTION (v9.73.1, Sep 2026)
 
