@@ -76,6 +76,7 @@ const FRIENDLY = {
   Grain: 'Grain',
   GrainSVG: 'Grain',
   SponsorFooter: 'Sponsors',
+  ScSponsorFooter: 'Sponsors',
   Watermark: 'Sponsor watermark',
   BrandLockup: 'Club lockup',
   ClubLockup: 'Club lockup',
