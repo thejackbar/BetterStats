@@ -115,12 +115,30 @@ NOT_OUT_CODES = frozenset({NOT_OUT, RETIRED_NOT_OUT})
 # reasoned about. `services/dismissal.py` holds the same distinction on the
 # app's side, so "retired out" reads as a wicket there too.
 #
-# Code 29 (7 innings) is still with the club and is left as a raw code rather
-# than guessed at.
+# CODE 29 IS ABSENT, CONFIRMED BY THE CLUB (Sep 2026), and it is the one code
+# that is a dismissal in the file and NOT an innings in the app. The club's own
+# reading: "Most of Shoalwater Bay's games are one day fixtures, so I believe
+# it is where a player was selected, and is either running late, or didn't turn
+# up, or had to leave early. In some instances where Shoalwater Bay batted
+# first, and the absent batter arrived after the close of our innings."
+#
+# All seven rows in fifteen seasons agree with that, and were checked before
+# the label was accepted: every one is at batting position 10 or 11, every one
+# is 0 runs, and THREE OF THE SEVEN BOWLED IN THAT SAME MATCH - which is the
+# club's "arrived after the close of our innings" in the data. Every one of
+# those innings is all out with exactly ten dismissed batters.
+#
+# SO 29 STAYS OUT OF NOT_OUT_CODES: the file counts the absent batter as one of
+# the ten wickets, and reading it as a not out drops the wickets identity to
+# 911/916 - measured by running it that way, not reasoned about. Five innings
+# and not seven, because two pairs of absent batters share an innings between
+# them. It is a dismissal on the CSFW side and a did-not-bat on the import
+# side, and both of those are right - see IMPORT_DISMISSALS below.
+ABSENT = 29
 DISMISSALS = {0: "Bowled", 1: "Caught", 2: "LBW", 3: "Stumped",
               4: "Run out", 7: "Hit wicket", 10: "Retired out",
               13: "Caught and bowled", 14: "Caught behind",
-              15: "Caught", 37: "Caught behind",
+              15: "Caught", 37: "Caught behind", ABSENT: "Absent",
               NOT_OUT: "Not out", RETIRED_NOT_OUT: "Not out (retired)"}
 
 # The SAME codes in BetterStats' own stored vocabulary, which is short and
@@ -146,9 +164,20 @@ DISMISSALS = {0: "Bowled", 1: "Caught", 2: "LBW", 3: "Stumped",
 # verbatim, and "retired out" matches the donut's `LIKE 'ret%'` while failing
 # `is_not_out` - a wicket that is filed under retired, which is what Law 25.4.3
 # says it is. Both also reach StatLab's unusual-dismissals board.
+#
+# "absent" is the app's OWN word for it, not one invented here: every batting
+# average in `aggregations.py` already reads
+# `LOWER(dismissal_type) NOT IN ('absent', 'did not bat', 'dnb')`, and the CA
+# sync stores an absent batter as `did_not_bat=True` with `runs=None` rather
+# than as an innings. So carrying the word through is what makes a batter who
+# never got to the middle stop dragging a 0 into their average, and the import
+# row ends up the same shape the sync already writes - which is a check on it,
+# not a coincidence. The word alone is not enough, though: see the absent
+# branch in `build_game_rows`.
 IMPORT_DISMISSALS = {0: "b", 1: "c", 2: "lbw", 3: "st", 4: "run out",
                      7: "hit wicket", 10: "retired out",
-                     13: "c & b", 14: "c", 15: "c", 37: "c"}
+                     13: "c & b", 14: "c", 15: "c", 37: "c",
+                     ABSENT: "absent"}
 
 # The codes that ARE a catch by the wicket keeper, carried as the flag rather
 # than as words. A set, so a further such code can be added without touching
@@ -863,6 +892,22 @@ def build_game_rows(seasons: list, club: str) -> list:
                     name = s["players"].get(b["player_id"], {}).get("name")
                     if not name:
                         continue
+                    # AN ABSENT BATTER IS A DISMISSAL IN THE FILE AND A
+                    # DID-NOT-BAT IN THE APP, and both readings are right. The
+                    # file stores a present 0 for them because CSFW counts them
+                    # as one of the ten wickets - but they never faced a ball,
+                    # so importing a real 0-run innings would hand a duck to
+                    # somebody who was not there. The app's two readers then
+                    # want two different things and this satisfies both: every
+                    # average excludes it by the WORD ('absent'), while
+                    # `get_dismissal_breakdown` - the How I Get Out donut - has
+                    # no such word filter and would draw "absent" as its own
+                    # slice, so it is excluded by the FLAG instead. Being
+                    # absent is not a way of getting out, the same call this
+                    # app already makes for a retirement. The row that comes
+                    # out is the same shape `sync.py` writes for an absent
+                    # batter off CA's own feed.
+                    scored = b["batted"] and b["dismissal_code"] != ABSENT
                     rows.append({
                         "game_key": mid,
                         "played_at": date.isoformat() if date else "",
@@ -874,13 +919,13 @@ def build_game_rows(seasons: list, club: str) -> list:
                         "player_name": name,
                         "innings_number": innings,
                         "batting_position": b["position"] or "",
-                        "batting_runs": b["runs"] if b["batted"] else "",
+                        "batting_runs": b["runs"] if scored else "",
                         "batting_balls": "",                       # not in the format
-                        "batting_fours": b["fours"] if b["batted"] else "",
-                        "batting_sixes": b["sixes"] if b["batted"] else "",
-                        "batting_not_out": "true" if b["batted"] and b["not_out"] else
-                                           "false" if b["batted"] else "",
-                        "did_not_bat": "true" if not b["batted"] else "false",
+                        "batting_fours": b["fours"] if scored else "",
+                        "batting_sixes": b["sixes"] if scored else "",
+                        "batting_not_out": "true" if scored and b["not_out"] else
+                                           "false" if scored else "",
+                        "did_not_bat": "false" if scored else "true",
                         # only the labels the data proves; an unmapped code is
                         # left blank rather than imported as a made-up method
                         "dismissal_type": IMPORT_DISMISSALS.get(b["dismissal_code"], "")
@@ -966,12 +1011,17 @@ NOTES = [
                    "is a dismissal, code 10 included. 0-4 read as bowled, caught, LBW, "
                    "stumped and run out, which the shares back up (caught 47.6% of "
                    "dismissals, bowled 27.0, LBW 8.9, run out 6.1, stumped 2.5). The club "
-                   "confirmed six more from its own records: 7 hit wicket, 10 retired out, "
-                   "13 caught and bowled, 14 and 37 caught by the keeper, and 15 caught in "
-                   "slips, which imports as a plain catch. That leaves 7 innings on code 29, "
-                   "which the club is still checking; they import as out with no method "
-                   "given rather than as a guess, and the runs still count. The raw code is "
-                   "in its own column beside the label."),
+                   "confirmed seven more from its own records: 7 hit wicket, 10 retired out, "
+                   "13 caught and bowled, 14 and 37 caught by the keeper, 15 caught in "
+                   "slips (which imports as a plain catch), and 29 ABSENT. That last one is "
+                   "a player selected who was running late, did not turn up, or had to "
+                   "leave early - and in some one-day games where we batted first, arrived "
+                   "after the close of our innings. All 7 of them are at "
+                   "number 10 or 11, all are 0, and 3 of the 7 bowled in that same match. "
+                   "They stay a wicket here, because the file counts them among the ten, and "
+                   "import as a did-not-bat with no runs, so nobody is handed a duck for a "
+                   "game they never got to bat in. The raw code is in its own column beside "
+                   "the label."),
     ("Caught behind", "Codes 14 and 37 are UNDER-recorded, not wrong. Together they appear "
                       "454 times against our batters, while our own keepers took 958 catches "
                       "over the same fifteen seasons - so a scorer filling in our batting "

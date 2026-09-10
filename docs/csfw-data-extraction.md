@@ -228,7 +228,7 @@ either forced by the data's own arithmetic or confirmed by the club.
 DISMISSALS = {0: "Bowled", 1: "Caught", 2: "LBW", 3: "Stumped",
               4: "Run out", 7: "Hit wicket", 10: "Retired out",
               13: "Caught and bowled", 14: "Caught behind",
-              15: "Caught", 37: "Caught behind",
+              15: "Caught", 29: "Absent", 37: "Caught behind",
               11: "Not out", 12: "Not out (retired)"}
 ```
 
@@ -237,8 +237,10 @@ other code.** Count the dismissed batters in an innings and compare against
 that innings' own wickets figure. Treating only 11 as a not out balances 908 of
 916 innings. Adding 12 (8 innings across fifteen seasons) balances **916 of
 916**, and those 8 are exactly the 8 failures. Every other candidate makes the
-identity worse, which means 7, 10, 13, 14, 15, 29 and 37 are all genuine
-dismissals whatever they turn out to be called.
+identity worse, which means 7, 10, 13, 14, 15, 29 and 37 were all genuine
+dismissals before anybody knew what a single one of them was called. Do this
+first at a new club: it settles the whole vocabulary in one pass, and it is
+what the club's own answers are then checked against.
 
 **Code 10 is retired OUT and must stay a dismissal.** Law 25.4.3's retirement
 without the opposing captain's consent is a genuine wicket credited to no
@@ -251,13 +253,62 @@ not credited to a bowler, and stumped 196 times against 234 stumpings by our
 own keepers. The resulting shares are ordinary club rates (caught 47.6%, bowled
 27.0, LBW 8.9, run out 6.1, stumped 2.5).
 
-Six more were **confirmed by the club from its own records**: 7 hit wicket, 10
-retired out, 13 caught and bowled, 14 and 37 caught by the keeper, and 15
-caught in slips.
+Seven more were **confirmed by the club from its own records**: 7 hit wicket,
+10 retired out, 13 caught and bowled, 14 and 37 caught by the keeper, 15 caught
+in slips, and **29 absent**.
 
-**Code 29 (7 innings) is unresolved** and is deliberately left as a raw code
-rather than guessed at. It imports as out with no method given, and the runs
-still count.
+**Code 29 is Absent, and it is the one code that is a dismissal in the file and
+not an innings in the app.** In the club's own words: "Most of Shoalwater Bay's
+games are one day fixtures, so I believe it is where a player was selected, and
+is either running late, or didn't turn up, or had to leave early. In some
+instances where Shoalwater Bay batted first, and the absent batter arrived
+after the close of our innings."
+
+All seven rows across fifteen seasons agree with that, and they were read out
+of the files before the label was accepted rather than after: every one is at
+batting position 10 or 11, every one is 0, and **three of the seven bowled in
+that same match**, which is the club's "arrived after the close of our innings"
+showing up in the data. Every one of those innings is all out with exactly ten
+dismissed batters.
+
+**So 29 stays a dismissal on the CSFW side, and imports as a did-not-bat.** The
+file counts the absent batter among the ten wickets, so reading the code as a
+not out breaks the wickets identity: **911 of 916 rather than 916 of 916**,
+measured by running it that way rather than reasoned about. It costs five
+innings and not seven because two pairs of absent batters share an innings
+between them.
+
+Nobody faced a ball, though, so importing a real 0-run innings would hand a
+duck to a player who was not there. The row carries `did_not_bat = true`, no
+batting figures, and `dismissal_type = absent`. **Both halves are needed,
+because the app's two readers filter differently.** Every batting average in
+`aggregations.py` excludes it by the WORD
+(`LOWER(dismissal_type) NOT IN ('absent', 'did not bat', 'dnb')`), while
+`get_dismissal_breakdown`, the How I Get Out donut, has no such word filter and
+would draw "absent" as its own slice, so it is excluded by the FLAG instead.
+Being absent is not a way of getting out, the same call this app already makes
+for a retirement.
+
+**The import shape is the one the Cricket Australia sync already writes**, and
+that is a check rather than a coincidence: `sync.py` stores an absent batter as
+`did_not_bat=True` with `runs=None`, so a scorecard can still list them while
+no innings count or average can reach them. The converter lands on the same
+row from the other direction.
+
+**Where the two DO diverge is the wicket, and both are right.** CA's feed never
+counts an absent batter among the wickets (`sync._NON_WICKET_DT` holds
+"absent"), so nothing on that side has to reconcile. CSFW's own bookkeeping
+does count them, so the converter's wickets identity needs the code to stay a
+dismissal. Expect the same in another club's archive: reconcile a code against
+the innings wickets to decide whether it is a dismissal, and read the club's
+word for it to decide what to import, and do not let either answer overrule the
+other.
+
+**A code confirmed by a club is still worth checking against the files.** Every
+one of the seven above sits where an absent batter would sit and behaves how an
+absent batter would behave. Had they been spread through the top order, or had
+none of them bowled, the label would have needed another question rather than
+an import.
 
 **Caught behind is a floor, not a count.** Codes 14 and 37 appear 454 times
 against our batters, while our own keepers took 958 catches over the same
@@ -477,8 +528,12 @@ Twelve of Shoalwater's matches are exactly that.
 
 ### An unmapped dismissal code imports blank
 
-Better a match with the runs and no method than a made-up method. Code 29
-imports as out with no dismissal type.
+Better a match with the runs and no method than a made-up method. Every code
+Shoalwater's archive carries is now named, so nothing currently falls through,
+but the branch stays for the next club, whose files will carry codes this one
+never used. It keeps the innings and the runs and leaves `dismissal_type`
+empty, and the raw code sits in its own column on the Batting sheet so somebody
+can ask the club what it means.
 
 ## 10. Onboarding another club's `.AV` archive
 
@@ -498,8 +553,12 @@ imports as out with no dismissal type.
    lost, drawn, tied, abandoned). Reconcile the match count first, since that is
    the figure a club checks and the one most likely to expose a dropped-record
    bug like the 897-versus-914 case.
-6. **Ask about any unmapped dismissal codes** before importing. Leave them blank
-   rather than guessing.
+6. **Ask about any unmapped dismissal codes** before importing, then check the
+   answer against the files rather than taking it and moving on: where each one
+   sits in the batting order, what the batter scored, and whether they also
+   bowled. Leave a code blank rather than guessing at it. A code the club names
+   as **absent** or **did not bat** needs the extra step above, a dismissal in
+   the file and a `did_not_bat` row on import.
 7. **Check the Data quality sheet** for same-day grade clashes and raise them
    with the club.
 8. **Import `manual_games_scorecards.csv`** through the Manual Games wizard.
