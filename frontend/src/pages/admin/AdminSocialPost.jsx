@@ -41,7 +41,7 @@ import { usePages } from '../../social/usePages'
 import PageStrip from '../../components/admin/socialpost/PageStrip'
 import PostPreviewModal from '../../components/admin/socialpost/PostPreviewModal'
 import { templateToBlocks, CUSTOM_EDITABLE } from '../../social/templateToBlocks'
-import { POST_SIZES, DEFAULT_POST_SIZE, postSizeOf, PostFrame, frameTransform } from '../../social/postSizes'
+import { POST_SIZES, DEFAULT_POST_SIZE, postSizeOf, PostFrame } from '../../social/postSizes'
 import { resolveClubFonts, fontWeightFor, buildFontFaceCss } from '../../lib/theme'
 
 // Stable initial value for the (empty) Custom Edit overlay layer.
@@ -864,8 +864,13 @@ export default function AdminSocialPost() {
 
   const [templateId, setTemplateId] = useState(() => {
     // A ?type= deep link (from the Start screen or the dashboard) wins over the
-    // last-used template so the editor opens on the requested post type.
+    // last-used template so the editor opens on the requested post type, and a
+    // ?template= one names a single layout. Both already skip the Start screen
+    // (see showStart); until now only ?type= actually chose anything, so a link
+    // naming a layout opened on whatever was last used instead.
     const p = new URLSearchParams(window.location.search)
+    const one = p.get('template')
+    if (one && TEMPLATES.some((t) => t.id === one)) return one
     const t = p.get('type')
     if (t && TAB_FIRST[t]) return TAB_FIRST[t]
     return localStorage.getItem('bs_social_template') || 'T1'
@@ -915,14 +920,7 @@ export default function AdminSocialPost() {
   const [postSize, setPostSize] = useState(() =>
     localStorage.getItem('bs_social_post_size') || DEFAULT_POST_SIZE
   )
-  // How a fixed 1080×1080 layout is placed into a canvas that isn't square:
-  // 'fit' shows the whole layout with the background running past it, 'fill'
-  // scales it up and crops. Fit is the default because it never loses artwork.
-  const [postFit, setPostFit] = useState(() =>
-    localStorage.getItem('bs_social_post_fit') || 'fit'
-  )
   useEffect(() => { localStorage.setItem('bs_social_post_size', postSize) }, [postSize])
-  useEffect(() => { localStorage.setItem('bs_social_post_fit', postFit) }, [postFit])
   // Background texture, layered over any template — persisted like the other
   // Style controls so a club's preferred "finish" carries between posts.
   const [bgStyle, setBgStyle] = useState(() =>
@@ -1983,7 +1981,10 @@ export default function AdminSocialPost() {
   }
   // History-aware wrappers around the layer mutators the inspector/panels drive.
   const hUpdate = (id, patch) => { record('Edit block'); layer.update(id, patch) }
-  const hReorder = (id, dir) => { record('Reorder'); layer.reorder(id, dir) }
+  // Stepping off the end of a group crosses the built-in layout — only on the
+  // overlay, since the Blank Canvas has no layout to be in front of or behind.
+  const hReorder = (id, dir) => { record('Reorder'); layer.reorder(id, dir, { crossLayout: !isBlankTab }) }
+  const hSetBehind = (id, behind) => { record(behind ? 'Send behind layout' : 'Bring in front of layout'); layer.setBehind(id, behind) }
   const hDuplicate = (id) => { record('Duplicate'); layer.duplicate(id) }
   const hRemove = (id) => { record('Delete'); layer.remove(id) }
   const hAlign = (mode) => { record('Align'); layer.align(mode) }
@@ -2234,12 +2235,9 @@ export default function AdminSocialPost() {
   if (tmpl.kind === 'blank') {
     extraProps.items = canvas.items
     extraProps.data = blankData
-    // The blank canvas IS the post's shape (its blocks carry their own
-    // coordinates), so it has to be told the size rather than falling back to
-    // BlankCanvas's 1080×1080 default. Read straight off postSize — the shared
-    // W/H below is declared after this point in the render body.
-    extraProps.width = postSizeOf(postSize).w
-    extraProps.height = postSizeOf(postSize).h
+    // Size is no longer set here: every layout is handed width/height by
+    // templateNode now, so a second copy for this one could only ever drift
+    // from it.
   }
   if (tmpl.kind === 'event') {
     extraProps.event = event
@@ -2323,34 +2321,56 @@ export default function AdminSocialPost() {
   const activeSize = postSizeOf(postSize)
   const W = scSplitOn ? 1080 : sizeApplies ? activeSize.w : nativeW
   const H = scSplitOn ? 1080 : sizeApplies ? activeSize.h : nativeH
-  // The Blank Canvas is genuinely whatever shape the post is — its blocks carry
-  // their own coordinates. A fixed template can't re-lay itself out, so it is
-  // placed into the canvas instead (see social/postSizes.jsx).
-  const framed = !isBlankTab && (W !== nativeW || H !== nativeH)
-  const frameGeom = frameTransform(W, H, nativeW, nativeH, postFit)
-  // Wraps a fixed template for the canvas it's being posted on. Used by the
-  // live preview AND the off-screen export node, so the two cannot disagree.
+  // Every layout is DRAWN at the post's real size now — width and height are
+  // threaded into each template component (social/*-templates.jsx), so a taller
+  // canvas is more room for the design rather than a band above and below it.
+  // A layout that genuinely cannot reflow says so in the registry and is placed
+  // into the canvas instead, which is the only thing the letterbox path below is
+  // still for.
+  const nativeSize = !tmpl.fixed && !isScorecard
+  const framed = !isBlankTab && !nativeSize && (W !== nativeW || H !== nativeH)
+  // Wraps a layout that cannot reflow for the canvas it's being posted on. Used
+  // by the live preview AND the off-screen export node, so the two cannot
+  // disagree. Nothing declares `fixed` today, so in practice this is identity.
   const frameTemplate = (node) => (framed
-    ? <PostFrame canvasW={W} canvasH={H} nativeW={nativeW} nativeH={nativeH} mode={postFit}>{node}</PostFrame>
+    ? <PostFrame canvasW={W} canvasH={H} nativeW={nativeW} nativeH={nativeH} mode="fit">{node}</PostFrame>
     : node)
 
   // Every page this post exports as, in order — ONE definition, read by the
   // off-screen export nodes AND by the Preview overlay. Two copies of "what is
   // in this post" is how a preview starts showing something the download
   // doesn't have.
-  // What shows in the letterbox bands when a square layout is fitted onto a
-  // taller canvas. Without this they're the canvas well's own near-black, which
-  // reads as an unfinished export rather than a deliberate portrait post — a
-  // texture from Brand covers them, and the club's own primary is the sane
-  // default when there isn't one.
-  const canvasFill = framed && postFit === 'fit' ? renderPalette.primary : undefined
+  // What shows behind a layout that had to be placed rather than reflowed —
+  // the club's own primary, not the canvas well's near-black, which reads as an
+  // unfinished export. Undefined for every layout that fills the canvas itself.
+  const canvasFill = framed ? renderPalette.primary : undefined
   const pageBackground = bgActive
     ? <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} {...bgExtraProps} />
     : null
-  const templateNode = (props = {}) => frameTemplate(
-    <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers}
-      palette={templatePalette} headline={headline} {...extraProps} {...props} />
-  )
+  // Custom Edit blocks sit either side of the built-in layout: a block carrying
+  // `behind` is drawn UNDER it. That is what "send the image to the back" means
+  // on a layout that is one fixed design rather than a stack of movable parts —
+  // and it only shows if the layout stops painting its own background over it,
+  // which is what the see-through wrapper is for.
+  const overlayOn = customEdit && !isBlankTab
+  const overlayBehind = overlayOn ? overlay.items.filter((it) => it.behind) : []
+  const overlayFront = overlayOn ? overlay.items.filter((it) => !it.behind) : []
+  const seeThrough = overlayBehind.length > 0
+  const overlayLayer = (items) => (items.length ? (
+    <BlankCanvas team={team} palette={templatePalette} items={items} data={blankData}
+      transparent width={W} height={H} style={{ position: 'absolute', inset: 0 }} />
+  ) : null)
+
+  // width/height go in ahead of extraProps so the Blank Canvas's own explicit
+  // pair still wins — they are the same numbers either way, and one definition
+  // of the canvas size is what keeps the preview and the download in step.
+  const templateNode = (props = {}) => {
+    const node = frameTemplate(
+      <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers}
+        palette={templatePalette} headline={headline} width={W} height={H} {...extraProps} {...props} />
+    )
+    return seeThrough ? <div className="pb-template-seethrough">{node}</div> : node
+  }
   const postPages = (() => {
     if (isBlankTab && pages.count > 1) {
       return pages.all().map((items, i) => ({
@@ -2379,10 +2399,9 @@ export default function AdminSocialPost() {
       content: (
         <>
           {pageBackground}
+          {overlayLayer(overlayBehind)}
           {templateNode()}
-          {customEdit && !isBlankTab && (
-            <BlankCanvas team={team} palette={templatePalette} items={overlay.items} data={blankData} transparent width={W} height={H} style={{ position: 'absolute', inset: 0 }} />
-          )}
+          {overlayLayer(overlayFront)}
         </>
       ),
     }]
@@ -2402,14 +2421,11 @@ export default function AdminSocialPost() {
     const previewContent = (
       <>
         {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} {...bgExtraProps} />}
+        {overlayLayer(overlayBehind)}
         {isBlankTab
           ? <BlankCanvas team={team} palette={templatePalette} items={canvas.items} data={blankData} width={W} height={H} />
-          : frameTemplate(
-            <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />
-          )}
-        {customEdit && !isBlankTab && (
-          <BlankCanvas team={team} palette={templatePalette} items={overlay.items} data={blankData} transparent width={W} height={H} style={{ position: 'absolute', inset: 0 }} />
-        )}
+          : templateNode()}
+        {overlayLayer(overlayFront)}
       </>
     )
     // The three details that matter most for the active post type.
@@ -2725,16 +2741,25 @@ export default function AdminSocialPost() {
         <div style={{ width: pw, height: ph, overflow: 'hidden', borderRadius: 6, background: '#080808', boxShadow: '0 24px 60px rgba(0,0,0,.55)' }}>
           <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: showBlankTools ? 'auto' : 'none', position: 'relative', background: canvasFill }}>
             {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} {...bgExtraProps} />}
+            {/* Blocks sent behind the layout are drawn first and stay editable
+                there — dragging one is the same gesture whichever side of the
+                layout it is on. */}
+            {overlayBehind.length > 0 && (
+              <BlankCanvas team={team} palette={templatePalette} items={overlayBehind} data={blankData} transparent width={W} height={H}
+                interactive scale={scale} selectedIds={overlay.selIds}
+                onSelect={overlay.select} onDeselect={overlay.deselect} onPatchMany={overlay.patchMany}
+                onGestureStart={() => record('Move block')} onDuplicate={hDuplicate} onRemove={hRemove}
+                style={{ position: 'absolute', inset: 0 }} />
+            )}
             {isBlankTab ? (
               <BlankCanvas team={team} palette={templatePalette} items={canvas.items} data={blankData}
                 interactive scale={scale} selectedIds={canvas.selIds}
                 onSelect={canvas.select} onDeselect={canvas.deselect} onPatchMany={canvas.patchMany}
                 onGestureStart={() => record('Move block')} onDuplicate={hDuplicate} onRemove={hRemove} />
-            ) : frameTemplate(
-              <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />
-            )}
-            {customEdit && !isBlankTab && (
-              <BlankCanvas team={team} palette={templatePalette} items={overlay.items} data={blankData} transparent width={W} height={H}
+            ) : templateNode()}
+            {overlayFront.length > 0 && (
+              <BlankCanvas team={team} palette={templatePalette} items={overlayFront} data={blankData} transparent width={W} height={H}
+                passThrough={seeThrough}
                 interactive scale={scale} selectedIds={overlay.selIds}
                 onSelect={overlay.select} onDeselect={overlay.deselect} onPatchMany={overlay.patchMany}
                 onGestureStart={() => record('Move block')} onDuplicate={hDuplicate} onRemove={hRemove}
@@ -2756,6 +2781,7 @@ export default function AdminSocialPost() {
       onUpdate={hUpdate} onReorder={hReorder}
       onDuplicate={hDuplicate} onRemove={hRemove} onAlign={hAlign}
       palette={themedPalette} players={allPlayers} onPickImage={pickImageForItem} onEditImage={editImageForItem}
+      onSetBehind={hSetBehind} layoutName={!isBlankTab ? tmpl.name : null}
     />
   )
 
@@ -2994,18 +3020,18 @@ export default function AdminSocialPost() {
                 onSelect={layer.select} onReorder={hReorder}
                 onDuplicate={hDuplicate} onRemove={hRemove}
                 onMoveLayerBefore={hMoveBefore} historyLog={history.log}
+                layoutName={!isBlankTab ? tmpl.name : null}
+                onSetBehind={!isBlankTab ? hSetBehind : null}
                 note={!isBlankTab ? (
-                  // The stack below is the blocks YOU have added. A built-in
-                  // layout is one drawn component, not a set of layers, so
-                  // "send this image behind that heading" genuinely isn't a
-                  // thing on most of them — and its own background is opaque,
-                  // so a block behind it would be invisible anyway. Say which
-                  // way out applies rather than letting Forward/Backward look
-                  // broken.
+                  // A block can now sit either side of the layout, so the note
+                  // is about the one thing that is still true: the layout is a
+                  // single drawn design, not a stack of its own parts. Backward
+                  // past the bottom sends a block under it and its background
+                  // stops painting, which is what makes "behind" mean anything.
                   <div className="rounded-md border pb-hairline bg-pb-surface2 p-2.5 flex flex-col gap-1.5" data-testid="layers-template-note">
                     <span className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faint">On a built-in layout</span>
                     <p className="text-[11px] leading-relaxed text-pb-dim">
-                      {tmpl.name} is one fixed design, so blocks you add always sit on top of it — Forward and Backward order them against each other, not against the layout's own text.
+                      Backward past the bottom of the stack sends a block <strong className="text-pb-text">behind {tmpl.name}</strong>, and the layout's own background stops painting so it shows through. The layout is one design, though — its own headings and photos can't be reordered against each other.
                     </p>
                     {CUSTOM_EDITABLE.includes(templateId) ? (
                       <button onClick={beginCustomEdit} data-testid="layers-custom-edit"
@@ -3015,7 +3041,7 @@ export default function AdminSocialPost() {
                       </button>
                     ) : (
                       <p className="text-[11px] leading-relaxed text-pb-faintest">
-                        To reorder everything freely, build it on the <button onClick={() => switchTab('blank')} className="underline underline-offset-2 text-pb-dim hover:text-pb-text">Blank canvas</button>, where every element is its own layer.
+                        To move the layout's own parts too, build it on the <button onClick={() => switchTab('blank')} className="underline underline-offset-2 text-pb-dim hover:text-pb-text">Blank canvas</button>, where every element is its own layer.
                       </p>
                     )}
                   </div>
@@ -3357,32 +3383,22 @@ export default function AdminSocialPost() {
                     )
                   })}
                 </div>
-                {/* A fixed layout can't re-lay itself out at another shape, so
-                    say what is happening to it rather than leaving the bands to
-                    read as a bug. The Blank Canvas is genuinely this size and
-                    needs no choice at all. */}
+                {/* Only a layout that declares it cannot reflow is placed into
+                    the canvas rather than drawn at it. Nothing does today, so
+                    this says what happened rather than offering a choice — the
+                    Fit/Fill pair it replaces described a band that no longer
+                    exists. */}
                 {framed && (
-                  <div className="mt-3 flex flex-col gap-1.5">
-                    <span className="font-mono text-[9px] tracking-wide2 text-pb-faint uppercase">Fitting this layout</span>
-                    <div className="flex gap-1.5">
-                      {[
-                        { key: 'fit',  label: 'Fit whole', hint: 'Shows all of the layout; the background fills the rest.' },
-                        { key: 'fill', label: 'Fill & crop', hint: 'Scales the layout up to cover the canvas, trimming the edges.' },
-                      ].map((o) => (
-                        <button key={o.key} onClick={() => setPostFit(o.key)} title={o.hint}
-                          className={`flex-1 py-1.5 rounded border text-[11px] font-mono transition-colors ${postFit === o.key ? '' : 'text-pb-faint border-pb-hairline hover:border-pb-hairline2'}`}
-                          style={postFit === o.key ? { borderColor: 'var(--pb-accent)', color: 'var(--pb-accent)' } : undefined}>{o.label}</button>
-                      ))}
-                    </div>
-                    <span className="text-pb-faintest text-[10px]">
-                      {postFit === 'fit'
-                        ? `${tmpl.name} is drawn at ${nativeW}×${nativeH}, so it sits whole on the ${activeSize.label.toLowerCase()} canvas with the background running past it. Add a background under Brand, or use the Blank canvas to design at ${W}×${H} from scratch.`
-                        : `${tmpl.name} is scaled up to cover the canvas — the edges of the layout are cropped off.`}
-                    </span>
-                  </div>
+                  <p className="mt-3 text-pb-faintest text-[10px]">
+                    {tmpl.name} is drawn at {nativeW}×{nativeH} and sits whole on the {activeSize.label.toLowerCase()} canvas, with the club's colour running past it. Add a background under Brand, or use the Blank canvas to design at {W}×{H} from scratch.
+                  </p>
                 )}
-                {isBlankTab && postSize !== DEFAULT_POST_SIZE && (
-                  <p className="mt-2.5 text-pb-faintest text-[10px]">The blank canvas is genuinely {W}×{H} — put your blocks anywhere on it.</p>
+                {nativeSize && postSize !== DEFAULT_POST_SIZE && (
+                  <p className="mt-2.5 text-pb-faintest text-[10px]" data-testid="size-native-note">
+                    {isBlankTab
+                      ? `The blank canvas is genuinely ${W}×${H} — put your blocks anywhere on it.`
+                      : `${tmpl.name} is drawn at ${W}×${H} — the layout uses the whole canvas rather than sitting in a band.`}
+                  </p>
                 )}
               </section>
             )}

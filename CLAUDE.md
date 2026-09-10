@@ -297,6 +297,329 @@ four of them things that exist and could not be found.
   uploads as-is rather than opening the editor per file — deliberate, since ten
   modals for ten photos is worse than the Edit affordance on each tile.
 
+## Every template reflows, and a block can go BEHIND the layout (v9.74.0, Sep 2026)
+
+The two things the v9.73.0 note above listed as NOT BUILT, asked for together:
+make the layouts actually fit 4:5 and 9:16 rather than being letterboxed into
+them, and let an added image go behind a template's own text.
+
+- **"40+ BESPOKE LAYOUTS, EACH HAND-RECREATED" WAS WRONG, AND MEASURING IS WHAT
+  SHOWED IT.** That estimate (this file's own, one release earlier) was about
+  DECOMPOSING a template into blocks. Reflow is a far smaller job: **30 of the
+  48 templates go through two shared shells** (`round-templates`' one `Post`
+  serves 19, `event-templates`' one `FRAME` serves 11), **all three post sizes
+  are 1080 WIDE** so the problem is purely vertical, and most layouts were
+  already top/bottom-anchored or flex columns. Threading `width`/`height`
+  through four files plus a handful of per-template fixes did the whole thing.
+- **THE TRANSFORMATION IS `top: X, height: Y` → `top: X, bottom: 1080−X−Y`**,
+  which is byte-identical at square by construction and simply gives the box
+  the extra room on a taller canvas. That is why the square output needed no
+  re-approval: it is the same arithmetic, not a re-design.
+- **A STRUCTURAL BAND KEEPS ITS SHARE, IT DOES NOT KEEP ITS PIXELS.**
+  `event-templates.share(canvasH, at1080)` — a photo band fixed at 680 is two
+  thirds of a square and barely a third of a story, which reads as the design
+  falling apart rather than as a taller post. Exact at 1080, so again the square
+  is untouched. Six bands across the event posters.
+- **A FIXED-HEIGHT CHILD IN A NOW-TALLER BOX IS THE TRAP, and the screenshots
+  could not see it.** T7/C3/C1 stand a cut-out headshot on the panel floor and
+  let it overflow the top — `height: 720` with the box bottom-anchored. Growing
+  the box alone just grows the DEAD AIR above a photo that never followed it.
+  Each is derived from the canvas now (`height - 360` / `- 320` / `- 260`),
+  which evaluates to exactly the old literal at 1080. **Measured through the
+  real editor: 720 / 990 / 1560, 760 / 1030 / 1600, 820 / 1090 / 1660.**
+- **THE HARNESS WAS TESTING THE WRONG BRANCH FOR FOUR RUNS.** Its roster stubbed
+  `photo_url: null`, so every hero layout rendered its CREST FALLBACK and the
+  cut-out never appeared at all — the screenshots showed a crest and I read the
+  empty space as a layout question. **A stub whose data misses a conditional is
+  worse than no stub**: it produces confident, wrong pictures. Both the shoot
+  harness and the suite give their players a photo now, with a route for it.
+- **T1 AND T3 NEEDED NOTHING** — their images are `inset: 0; width: 100%;
+  height: 100%; object-fit: cover`, which fills any box. Worth checking before
+  assuming a photo is broken by a taller canvas; only the fixed-height cut-outs
+  were.
+- **FIT/FILL IS GONE, NOT HIDDEN.** With every layout native, `framed` is always
+  false and the control could never be reached — a control that does nothing is
+  worse than none, the call this file already makes for `ageFilterOptions`. The
+  `PostFrame` / `tmpl.fixed` escape hatch stays for the scorecards, which keep
+  their own 1920×1080 and are still offered no picker.
+- **A BLOCK GOES BEHIND BY A FLAG, NOT BY DECOMPOSITION.** `templateToBlocks`
+  reaches four templates and extending it would destroy each layout's own
+  AutoFitText sizing, role chips and responsive squad logic. `useBlankLayer`'s
+  `behind` flag answers the actual complaint — "I can't send the image to the
+  back" — on all 48 with no per-template work.
+- **ARRAY ORDER IS Z-ORDER, SO THE ARRAY IS PARTITIONED.** Behind-group first,
+  front-group second; `setBehind` splices at `behindCount(next)`, which is the
+  same index either way because the end of one group and the start of the other
+  are the same slot. `moveBefore` carries the destination's own `behind` so a
+  drag cannot break the partition.
+- **THE LAYOUT STOPS PAINTING ITS OWN BACKGROUND, and only its own.**
+  `.pb-template-seethrough { display: contents }` plus
+  `> * { background: transparent !important }` — the SHORTHAND, which resets
+  `background-image` too, since most of these roots paint a gradient rather
+  than a colour. Scoped to the direct child on purpose: a blanket `*` would
+  strip every intentional chip and accent bar inside the template, which is
+  gutting the layout rather than revealing what is behind it.
+- **A BLOCK UNDER THE TEMPLATE CANNOT BE CLICKED unless the template stops
+  taking the pointer.** The see-through wrapper is `pointer-events: none`, the
+  front overlay layer takes `passThrough`, and each block re-arms
+  `pointer-events: auto` — otherwise sending an image back also makes it
+  unselectable, which reads as having lost it.
+- **Driven in Chromium** (`verify_post_designer_browser.mjs`, 64 checks: the
+  canvas and the export node moving together, the layout measured at the FULL
+  canvas rather than letterboxed, all three template families filling 4:5, the
+  scorecard keeping 1920×1080 and no picker, the cut-out unchanged at 1080 and
+  growing at story, a block starting over the layout and moving under it, the
+  layout's background measured before AND after, and no overflow at 390px)
+  **with a control run**: **17 of the 64 fail** against the previous commit,
+  reporting `framed=true`, the Fit/Fill control still present, and
+  `["layout","blocks"]` — the block over the layout, which is the reported
+  complaint verbatim. The 47 that pass in both are don't-regress guards.
+- **`backgroundColor` CANNOT SEE A GRADIENT, and that check was passing for the
+  wrong reason.** These roots paint `background-image`, so a gradient-backed
+  layout reads `rgba(0,0,0,0)` in BOTH states — "the layout stops painting over
+  it" would have passed whether or not anything was suppressed. **Caught by
+  adding the BEFORE measurement**, which is the general fix: a check that
+  something turned off is worth little without a check that it was on.
+- **AND THE PROBE HAD TO DESCEND THROUGH THE WRAPPER.** `display: contents`
+  means the see-through div has no width and is not the template root, so
+  addressing the layer's direct children found it and measured nothing —
+  reported as `null`, which is the shape of a broken probe rather than a real
+  failure. Read a `null` from a measurement as "my selector missed", not as
+  "the feature is broken".
+- **A CONTROL RUN'S DETAIL CAN BE TRUE FOR THE WRONG REASON.** The cut-out check
+  fails on the control reporting `44` — the old build does not honour
+  `?template=`, so it measured the default template, not T7. A genuine "not
+  reachable on the old build" signal, but NOT evidence about the arithmetic;
+  that came from the direct measurement above.
+- **`?template=` WAS ACCEPTED BY THE START SCREEN AND READ BY NOTHING.** The
+  editor skipped its "What are you posting?" screen for it and then opened the
+  default template anyway — a real user-facing dead link, found because the
+  harness needed it to reach one template per page load.
+- **SERVE THE PRODUCTION BUILD, NOT THE DEV SERVER, FOR A LONG SHOOT.** HMR
+  reloads on every src edit, and a running shoot then dies with "Failed to fetch
+  dynamically imported module". `vite preview` on its own port is immune, and it
+  took a 144-shot run from ~30s per shot to a few minutes. **Do not rebuild into
+  `dist` while a run is reading it** — that voided one verification pass with
+  404s on chunk hashes that no longer existed.
+- **A PLAYWRIGHT SCRIPT MUST LIVE UNDER `frontend/`** or it cannot resolve
+  `playwright`, and it needs the pinned `executablePath` the suites use.
+  `Locator.screenshot()` takes no `clip` — only `Page.screenshot` does. And the
+  contact sheet's `file://` thumbnails do not load from an `about:blank` page,
+  so read the individual PNGs rather than trusting the sheet.
+- **NOTICED, NOT BUILT**: still no portrait-NATIVE variants — a layout that
+  reflows well is not the same as one designed for 4:5, and that is a design job
+  per template. `templateToBlocks` still reaches four templates, so "edit this
+  layout's own text as blocks" is unchanged. Saved templates are still
+  `localStorage`.
+
+## A portrait design per template, not a square one stretched (v9.75.0, Sep 2026)
+
+The thing the note above lists as NOT BUILT, asked for in those words: *"yeh i
+want a design per template done please."*
+
+- **REFLOWING AND DESIGNING ARE DIFFERENT JOBS, and the first is what shipped
+  last release.** v9.74.0 made all 48 layouts DRAW at 1080×1350 and 1080×1920 —
+  boxes grow, nothing overlaps, nothing is letterboxed. It did not make one of
+  them a portrait design: a fixture row is 45px of content sitting in a 200px
+  slot, a 196px masthead becomes a tenth of a story, and a 150px sponsor strip
+  becomes a hairline. That reads as a square with air pushed through it, which
+  is the complaint reflow does not answer.
+- **ALL THREE SIZES ARE 1080 WIDE, so a design per template is entirely a
+  decision about where the extra HEIGHT goes** — which band grows, which type
+  steps up, and what has to re-compose rather than stretch. There is no
+  re-columning problem to solve.
+- **`social/postAspect.js` IS THE VOCABULARY, and a template inventing its own
+  breakpoint is what it exists to stop.** `aspectOf` names the shape;
+  `pick(A, {square, portrait, story})` falls back square → portrait → story, so
+  a template names only the shapes it redesigns for; `share(h, at1080)` keeps a
+  band's SHARE; `grow(h, at1080, rate)` keeps its pixels and adds a fraction of
+  the extra; `type(h, at1080)` steps type up without tracking the canvas.
+- **EVERY PRIMITIVE IS EXACT AT 1080 BY CONSTRUCTION**: `share` is `h*n/1080`,
+  `grow` adds `max(0, h − 1080) × rate`, and every `pick` multiplier at square is
+  1. **That is necessary and it is nowhere near sufficient** — see the anchoring
+  note below, which is what shooting all 48 squares on both builds and comparing
+  byte for byte actually found.
+- **A PRIMITIVE BEING EXACT SAYS NOTHING ABOUT THE LAYOUT AROUND IT, and 15 of
+  the 48 squares moved before this was measured.** Every offending change was
+  the same shape: a block the square top-anchored at its NATURAL height turned
+  into a stretched box with its content centred or spread. Giving a 300px
+  medallion a 420px box and centring it moves it down 60px; re-pinning a block
+  from `top: 700` to `bottom: 240` only lands in the same place if its height
+  happens to be exactly 140; `space-between` on a panel that now fills the
+  column pushes its two halves apart; and `minHeight: 0` on a grid cell lets it
+  shrink past its own content, which on EV2's already-overflowing square
+  collapsed each cell to its label with the value gone. **`anchor(A, sq, tall)`
+  in round-templates and a plain `A === 'square' ? … : …` elsewhere is the fix:
+  the square keeps its original anchoring and only a taller canvas stretches.**
+- **THE FINAL COUNT IS 44 OF 48 BYTE-IDENTICAL, and the four are named rather
+  than rounded away.** T4 (40% of the post) and T9 (10%) changed because their
+  squares were ALREADY broken — T4's thirteenth row landed on top of the footer
+  and T9's billing ran 76px off the edge — so both are fixes and both are in the
+  changelog as such. T5 (3.5% of pixels, no pixel differing by more than 55 of a
+  possible 765) and C2 (0.8%, one glyph rasterising 1px taller) are sub-pixel:
+  measured, nothing moved.
+- **MEASURE THE CLAIM BEFORE YOU WRITE IT.** "Square posts are unchanged" went
+  into the changelog on the strength of the arithmetic being exact, and was
+  false for 15 templates at the time. The pixel comparison is cheap — one
+  `SIZES=square` shoot per build and `cmp` — and it is the only thing that
+  turns that sentence from a hope into a fact.
+- **A MASTHEAD KEEPS ITS PIXELS AND A PHOTO BAND KEEPS ITS SHARE.** That is the
+  whole reason `grow` and `share` are separate: `share` on a 150px footer
+  balloons it to 267 on a story, and `grow` on a 680px photo band leaves it a
+  third of the post. Use `grow` for chrome and `share` for structure.
+- **`roundScale()` IS THE SAME DECISION MADE ONCE FOR NINETEEN TEMPLATES.** The
+  roundup family is one shape — masthead, body of rows, sponsor strip — so it
+  gets one design scale (`head()`, `foot`, `row`, `big`) and each template
+  spends it. `sz(mult)` wraps it so a template still reads as the square sizes
+  it was drawn at rather than a column of arithmetic.
+- **ROW TYPE STEPS UP WITH THE SLOT IT SITS IN.** The single most visible half
+  of this release: a body that absorbs the whole of the extra height gives its
+  rows 200px each and then sets them at the size they were in a 60px row.
+- **THE PANELS THAT STOPPED WHERE THE SQUARE ENDED NOW RUN TO THE FOOTER.** T4's
+  batting order was document flow, so its rows kept their square height and left
+  a dead strip; the root is a flex column and the rows share what is left. Same
+  shape for T5, and for C4's two top-performer panels, which distribute batting
+  and bowling with `space-between` instead of clumping at the top.
+- **WHAT RE-COMPOSES RATHER THAN STRETCHING, and each is a real design decision
+  rather than a multiplier**: T2 and C1's card grids go 4×3 → 3×4 on a story so
+  the cards stay card-shaped instead of becoming letterboxes; T9's support act
+  re-sets two names to a line instead of three, so the billing is five lines and
+  each name is half as wide again; T1's squad list is set as ONE centred block
+  rather than 13 names spread 130px apart.
+- **CENTRED, NOT BOTTOM-ANCHORED, ON A STORY.** T1 first anchored its name block
+  to the foot of the rail on the reasoning that a phone shows the bottom. That
+  is backwards: a story's bottom couple of hundred pixels carry the app's own
+  reply bar and its top the profile row, so anything anchored to either edge is
+  the half that gets covered.
+- **`space-evenly` WAS TRIED ON T9 AND IS WORSE.** Spreading three tiers down a
+  story puts 350px between them and the billing reads as three unrelated lines.
+  A gig poster's billing is a block; the extra height buys more LINES, not more
+  air between the ones you have.
+- **AutoFitText MEASURED AGAINST THE PARENT'S `clientWidth`, WHICH INCLUDES ITS
+  PADDING.** So a node inside a padded parent was allowed to overflow by exactly
+  that padding with nothing detecting it — T9's tiers sat in a `padding: 0 40px`
+  box, measured 1076 against a parent `clientWidth` of 1080, and ran 76px off
+  the poster at full size. It measures the tighter of the node's own box and the
+  parent's now, so a node positioned wider than its parent is still caught. **A
+  general bug in a shared primitive, not a T9 one** — the same line is in
+  `round-templates`' own `AutoFit`.
+- **THE BLAST RADIUS WAS MEASURED BEFORE THE FIX WENT IN.** Probing 12
+  templates at square for `scrollWidth > clientWidth` found **zero** overflowing
+  nodes, so the change can only ever shrink text that was already clipped and
+  the square claim stays honest. A shared primitive is exactly where that
+  measurement is worth taking.
+- **Three real bugs found on the way, all shipped in v9.74.0's reflow**: EVT_Block
+  put its colour band on `share()` and its panel on a hardcoded `top: 606`, so
+  they overlapped by 152px at portrait and ~340 at story; T3's background was a
+  hardcoded `<svg width="1080" height="1080">`, so the gradient stopped two
+  thirds of the way down a story; and EV2's details grid needed its own
+  `1fr` rows to reach the panel foot.
+- **EV2's SQUARE HAS ALWAYS CLIPPED ITS OWN PANEL, and that is left alone.**
+  The first cut gave the grid `flex: 1` at every size, which on the
+  already-overflowing square hid the values entirely. Confirmed pre-existing,
+  so the share behaviour is gated on `aspectOf(...) !== 'square'` and the square
+  keeps its exact original fixed rows. Shrinking the square's own type to fix it
+  is a different change from the one that was asked for.
+- **Driven in Chromium** (`verify_post_designer_browser.mjs`, 78 checks — the 64
+  from v9.74.0 plus a new section that measures the DESIGN rather than the
+  geometry: a masthead keeping its share of the extra height, a sponsor strip
+  still a strip, row type stepping up with its slot, a body still reaching the
+  sponsor strip, EV2's band and panel meeting exactly at both sizes, T4's order
+  reaching the footer, and every one of them asserted UNCHANGED at 1080)
+  **with a control run**: all 6 of the new checks fail against the previous
+  commit, reporting a masthead going 18.15% → 14.52% of the post, a sponsor
+  strip 4.63% → 3.7%, row type frozen at `31px -> 31px`, and EV2's band bottom
+  at 56.15% against a panel top of 44.89% — the overlap, in the control's own
+  numbers.
+- **Judged from 144 SCREENSHOTS of the real editor**, not from the checks. The
+  geometry all passed on versions that read wrong: T1's story names clumped,
+  T2's portrait grid with a 140px dead band, T3's XI stopping short of the
+  credit rule, T9's billing running off the edge. A layout is a picture and
+  only a picture settles it.
+- **UNITS HAVE TO BE THE SAME ACROSS ONE RETURN OBJECT.** The measuring helper
+  returned positions as percentages of the post and `font` already multiplied by
+  1080, so the step-up check converted twice and read a genuine 31 → 35 as
+  31 → 28: a design that had worked, reported as a failure. Every field is a
+  plain percentage now and every check converts the same way.
+- **A CHECK THAT ASSUMES THE FIXTURE IS NOT A CHECK.** T4's row selector wanted
+  a container with more than two children; the suite seeds TWO players, so it
+  found nothing and reported the design as unmeasurable. Keyed on the one
+  flex-1 column in the layout instead.
+- **`SIZES=square` on `shoot_templates.mjs`** shoots one size, which is what
+  makes an all-48 square comparison against a control build practical.
+- **`npx vite build | tail -2` REPORTS A FAILED BUILD AS A SUCCESS.** A build
+  that fails ends in an esbuild stack trace, so the last two lines are
+  `at Pipe.onStreamRead` rather than the error — and `vite preview` then serves
+  the PREVIOUS `dist` quite happily, so the shoot runs, the screenshots come
+  back, and every measurement is of code that never compiled. Cost a full round
+  of "my fix had no effect". Grep for `built in|Build failed|ERROR` instead.
+- **A `{/* comment */}` CANNOT GO INSIDE A `.map()` ARROW'S RETURN.** The arrow
+  returns one expression, so a comment before the element is a second one. Put
+  it above the `.map(` call. This is what failed the build above.
+- **A `file://` PAGE CANNOT `getImageData` A `file://` IMAGE** — the canvas is
+  tainted cross-origin, and from `about:blank` the image will not load at all
+  (the trap this file already records for the contact sheet). Read the PNG in
+  node and pass it in as a `data:` URL; that is same-origin and decodes fine.
+- **NOTICED, NOT BUILT**: the scorecards (SC1-SC3) keep their own fixed
+  1920×1080 and are still offered no size picker, so they are the three of the
+  48 with no portrait design — they are a landscape document rather than a feed
+  post. `templateToBlocks` still reaches four templates. Saved templates are
+  still `localStorage`. EV2's square panel still clips at its own size.
+
+## A FACET LISTED IN THE KIT AND MISSING FROM ONE FUNCTION (v9.73.1, Sep 2026)
+
+Reported off `/admin/comms/lists` as `a[r.key] is not iterable`, straight after
+an Export to BetterComms added 800+ contacts — so it read as a problem in the
+inserted rows.
+
+- **IT IS NOT THE ROWS, AND ESTABLISHING THAT FIRST IS WHAT STOPPED THIS BEING
+  CHASED THROUGH THE DATABASE.** `facetOptionsFrom` ends
+  `[...opts[f.key]]` for EVERY entry in `FACETS`, and that line runs whatever
+  the contacts are. Reproduced with an empty list and with `null`: it throws
+  either way. The export was a coincidence of timing — the screen had been
+  down since the deploy before it.
+- **V8 PRINTS THE SOURCE TEXT OF THE OFFENDING EXPRESSION, which is what makes
+  a minified message locatable.** `a[r.key] is not iterable` is
+  `opts[f.key]` after minification, and a grep for a spread of a `.key`-indexed
+  member (`\.\.\.[a-z]+\[[a-z]+\.key\]`) returns **exactly one match in the
+  whole frontend**. Reach for the expression's shape, not for the variable
+  names.
+- **THE CAUSE IS A SECOND HAND-WRITTEN COPY OF THE FACET LIST.** `FACETS`
+  gained `role` in migration 295's commit; `facetOptionsFrom` built its `opts`
+  from a hardcoded five-key literal written before `role` existed, so
+  `opts.role` was undefined. **This is the trap this file already records one
+  function over** — `CommsLists.jsx`'s own `noFilters` literal, fixed in
+  v9.70.0 by aliasing it to `emptyFilters`. The same commit that fixed it there
+  introduced it here.
+- **TWO CRASH PATHS, AND ONLY ONE OF THEM NEEDS DATA.** The spread throws
+  unconditionally; `opts[f.key].add(...)` throws `Cannot read properties of
+  undefined (reading 'add')` only once a contact actually carries a role, which
+  is what the exported directory rows brought. The control run reports both.
+- **A COMMENT CAN DESCRIBE BEHAVIOUR THE FUNCTION CANNOT DELIVER.** The note
+  added beside `role` said "facetOptionsFrom only offers a facet that actually
+  has values, so it never appears for them" — true of the intent, and the
+  function threw before it could offer anything. It is true now.
+- **BOTH SHAPES ARE DERIVED FROM `FACETS` NOW, mirroring `emptyModes`**, which
+  had this right all along (`Object.fromEntries(MODE_FILTERS.map(...))`). A
+  facet added later reaches the filter shape, the options builder and the
+  matcher with no second list to keep in step.
+- **Verified** (`frontend/verification/verify_comms_facets.mjs`, 11 checks
+  against the SHIPPED functions lifted out of the file rather than retyped: an
+  empty and a null contact list, a club contact carrying no directory fields,
+  every `FACETS` key present in both shapes, role options collected and
+  de-duplicated, a facet nobody carries staying empty so it is never offered,
+  and the filter it then drives) **with a control run**: 7 of the 11 fail
+  against the previous commit, reporting the customer's own
+  `opts[f.key] is not iterable`.
+- **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN, hit again here.** The
+  first cut read `facetOptionsFrom(exported)` into a `const` at module level,
+  so the control died on it and said nothing about the four checks below.
+  Every read goes through the guarded `check()` now.
+- **NOTICED, NOT FIXED**: nothing asserts that a key added to `FACETS`,
+  `MODE_FILTERS` or the engagement filter reaches every consumer — the check
+  here covers `FACETS` only, and a structural sweep over the kit would be its
+  own change.
+
 ## Twenty is retired; the engagement score, the CRM and Sales Management are not (v9.71.0, Sep 2026)
 
 Asked for directly: *"the calculation and continual re-calculation of engagement
@@ -1036,6 +1359,133 @@ rather than making someone register twice."**
   a refusal as an ordinary recorded error, so if it stops working the worst case
   is one form and our own list — check the StreamYard column after the first
   registration to see which way it fell.
+- **AND THAT TOGGLE HAS A COST THIS NOTE ORIGINALLY FAILED TO NAME.** Reported
+  straight back: "turning off registrations means i can't see the registrants
+  list." Correct — StreamYard's registrant list AND its attendee report both
+  hang off registration being on, so switching it off trades the second form
+  for the attended-vs-registered split. It is a decision with two real sides,
+  not a step: **our own list is complete either way** (name, email, club, phone,
+  role, every campaign tag, CSV export), so the ONLY thing genuinely lost is
+  who turned up. **Untested third path**: their form carries an "Already
+  registered? Join here" link, and everyone the push registers genuinely IS
+  registered at their end — so that link may admit a registrant on their email
+  alone, keeping both. Not verified, so not asserted.
+
+### A skip that does not say why reads as a broken button (v9.73.2, Sep 2026)
+
+Reported: "It's not letting me push to streamyard - says 0 pushed, 2 skipped".
+
+- **NOTHING WAS BROKEN, AND THE SILENCE WAS THE BUG** — the same call this file
+  already records for the disabled Rediscover button and for a figure that is
+  correctly zero. Both rows had a single-word name, and StreamYard's own form
+  has firstName and lastName as separate REQUIRED fields: a blank surname is a
+  **400, re-verified against the live endpoint** while diagnosing this (a
+  refusal creates nothing, so it is a safe probe). The skip was right; the
+  reporting was not.
+- **THE OTHER TWO SKIP REASONS WERE RULED OUT BY MEASUREMENT, NOT BY READING.**
+  The live broadcast still answers `isRegistrationEnabled: true` with one
+  definition and all four fields, so "the broadcast has no registration form"
+  was not it; and `webinar_id_from` parses the shipped watch link, so neither
+  was "not a StreamYard broadcast". **A session failure is an ERROR, never a
+  skip** — `_field_map` calls `raise_for_status()` and an unauthenticated
+  `GET /webinars/{id}` answers **401**, which the outer handler records as a
+  failure. So "skipped" could only ever have been the surname.
+- **`sync_streamyard` REPORTS `reasons`, and the button names them.** A bare
+  count is the whole reported problem; the counts and the distinct outcomes now
+  come back together and the message reads them out.
+- **THE REASON IS WRITTEN OUT ON THE ROW, NOT LEFT ON HOVER.** It was on a
+  `title` tooltip, which is a state nobody can see — two rows reading NOT SENT
+  with the explanation hidden is how a working feature reads as a fault.
+- **A SKIP HAS TO BE FIXABLE OR THE REASON CAN NEVER STOP BEING TRUE.**
+  `sync_streamyard` already retries a previously-skipped row on purpose ("the
+  reason can stop being true if somebody corrects their name") — and nothing
+  could correct the name, so the row was stuck for good and the retry was
+  pointless. `PATCH /super/webinar-registrations/{id}` takes a name;
+  an **Add surname** button is offered on exactly the rows where a
+  single-word name is what is standing in the way, never on a row that pushed
+  fine.
+- **ONLY THE NAME IS EDITABLE, and that is deliberate.** The email is the
+  identity these rows fold on (`(event_key, lower(email))`) AND what
+  StreamYard's own idempotency keys on, so editing it would separate our row
+  from the registration already made at their end. The campaign fields are the
+  record of where a registration came from and are not ours to rewrite.
+- **A SURNAME IS STILL NEVER INVENTED.** It would sit beside that person's chat
+  messages in front of everyone watching. A person types the correction, or the
+  row stays skipped and says so.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_streamyard_skip_reporting.py`, 62 checks through
+  the shipped service and route bodies: the reported run replayed — one pushed,
+  two skipped — the reason counted and named, the reason landing on the row, a
+  second press not re-registering the one already done while retrying the two,
+  a corrected name then pushing, four refusals leaving the row exactly as it
+  was, the email absent from the patch model, and the shipped name split)
+  **with a control run**: 16 pass and **9 are REPORTED by name** rather than
+  dying on the first missing attribute. **No live call is made** —
+  `push_registration` is stubbed, because their API has no public DELETE and a
+  verification run must not create real registrations in somebody's account.
+
+### The form asked for one name where theirs needs two (migration 301, v9.73.3)
+
+Reported straight after: "Can you double check the form then because it does
+say first and last name so it should be pulling across - also, we want to
+ensure we pull through a phone number."
+
+- **THE PHONE ALREADY WORKED, AND SAYING SO BEAT BUILDING SOMETHING.** Verified
+  by pushing a marked test registration through the SHIPPED payload shape and
+  reading it back: `stored phone = '+61 400 111 222'`. It rides in
+  `fields.values` under the fetched phone field id, is accepted while optional,
+  and the same second POST returned the SAME id — their documented idempotency,
+  re-confirmed. Nothing to fix.
+- **THE FORM WAS THE MISMATCH, and the expectation was right.** StreamYard's
+  registration form has First name and Last name as separate REQUIRED fields;
+  ours had ONE field labelled `YOUR NAME`. So a registrant who typed one word
+  left nothing to send. The two boxes are `given-name` / `family-name` and sit
+  side by side, so two fields cost one line and one autofill tap — which is
+  what keeps this from being real friction on the paid traffic this page exists
+  for.
+- **SPLITTING A STRING IS A GUESS, NOT A FIX.** At the first space it reads
+  "Mary Jane Smith" as a surname of "Jane Smith", and it has no answer at all
+  for a mononym. Asking for the halves is the only version that cannot be
+  wrong, which is why the fix is the form rather than a cleverer splitter.
+- **`name` STAYS AND STAYS AUTHORITATIVE.** The confirmation greeting, the
+  reminder, the staff list and the CSV all read it, so it is stored as the
+  joined whole and the halves sit beside it — no backfill, and nothing
+  downstream changed.
+- **A SPLIT-DERIVED PAIR IS STORED AS NULL, never as a pair.** `resolve_name`
+  returns halves ONLY when both were given; a bare `name` (a browser served an
+  older bundle mid-deploy — the rule `plan_report.unassigned` already keeps)
+  stores NULL and the push falls back to splitting for itself. So NULL means
+  "we only ever had one string", which is exactly what a pre-301 row is.
+- **ONE HALF IS NOT A PAIR.** A surname box left empty IS the mononym case and
+  has to read as one — storing a lone first name as a pair would push a blank
+  surname, which is a 400 at their end.
+- **THE HALVES ARE COALESCED WHERE `name` IS OVERWRITTEN OUTRIGHT**, the same
+  call the phone already makes: `name` is always present so a correction is
+  unambiguous, whereas a one-field resubmission carries no halves and losing a
+  real pair to it is worse than keeping it.
+- **`streamyard.resolve_push_name` IS THE ONE RULE, AND ITS OWN FUNCTION SO IT
+  CAN BE CHECKED OFFLINE.** Everything else in `push_registration` talks to
+  StreamYard, so four lines inline meant the fallback could only be tested by
+  making a live call. **The stub CALLS it rather than retyping it** — a stub
+  that reimplements the rule is measuring the harness.
+- **THE STAFF CORRECTION SETS THE HALVES TOO**, or the row would keep pushing
+  the old name, since the push prefers them. And the **Add surname** button is
+  withdrawn once a row has both, so it only ever appears on the registrations
+  taken before the form asked.
+- **Verified** (the suite is 62 checks now: migration 301 applied three times
+  over a populated pre-301 table with the existing row's name untouched and no
+  invented halves, the downgrade dropping the two COLUMNS and never the table,
+  every `resolve_name` branch, the halves reaching the row and being sent
+  whole, the phone riding with them, a one-field resubmission not blanking a
+  stored pair while still correcting the club, and a pre-301 row still pushing
+  via the split) **with a control run**: 2 fail on the migration, **11 are
+  REPORTED** and nothing crashes. **Getting that control run clean took two
+  passes** — the suite's own `SELECT first_name` died on an
+  `UndefinedColumnError`, and the shared stub called `resolve_push_name`
+  unguarded; both are presence-checked now. **Driven in Chromium**
+  (`verify_webinar_browser.mjs`: both fields with their autocomplete tokens and
+  labels, both named in the validation message and marked invalid, and
+  `firstName`/`lastName` on the wire rather than one string).
 
 ### The second form is StreamYard's, and the reminder that replaces it (migration 299, v9.71.5)
 

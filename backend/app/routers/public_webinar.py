@@ -72,6 +72,11 @@ class WebinarMeta(BaseModel):
 
 
 class RegisterIn(BaseModel):
+    # The form posts the two halves; `name` is kept because a browser served an
+    # older bundle mid-deploy posts one field, and a registration must not fail
+    # on that. `webinar.resolve_name` is the one place the three are reconciled.
+    firstName: str = ""
+    lastName: str = ""
     name: str = ""
     email: str = ""
     club: str = ""
@@ -153,7 +158,12 @@ async def register(
     link and the calendar, because from the registrant's side nothing has gone
     wrong.
     """
-    name = (payload.name or "").strip()
+    # Reconciled through the ONE rule, so the route and the writer cannot
+    # disagree about what a name is. `first`/`last` come back None unless BOTH
+    # halves were given — a split-derived pair is never stored as though the
+    # person had typed it.
+    name, first, last = webinar.resolve_name(
+        name=payload.name, first_name=payload.firstName, last_name=payload.lastName)
     email = (payload.email or "").strip().lower()
     club = (payload.club or "").strip()
     phone = (payload.phone or "").strip()
@@ -175,6 +185,16 @@ async def register(
 
     if not name:
         raise HTTPException(status_code=422, detail="Enter your name.")
+    # BOTH HALVES, when the form is the caller. StreamYard's own registration
+    # form has first and last name as separate required fields and refuses a
+    # blank surname outright, so a registrant with only one of them cannot be
+    # pushed into their list — and asking here is the only place that can be
+    # fixed without a person patching the row by hand afterwards. An older
+    # bundle posting one `name` field is exempt, or a mid-deploy submission
+    # would fail on a field its own form never drew.
+    if (payload.firstName or payload.lastName) and not (first and last):
+        raise HTTPException(status_code=422,
+                            detail="Enter your first and last name.")
     if not _EMAIL_RE.match(email):
         raise HTTPException(status_code=422, detail="Enter a valid email address.")
     if not club:
@@ -194,7 +214,8 @@ async def register(
 
     result = await webinar.register(
         db,
-        name=name, email=email, club=club, phone=phone, role=payload.role,
+        name=name, first_name=first, last_name=last,
+        email=email, club=club, phone=phone, role=payload.role,
         attribution=payload.attribution or {},
         visitor_id=payload.visitorId,
         user_agent=request.headers.get("user-agent"),
@@ -222,6 +243,7 @@ async def register(
         background.add_task(
             _push_streamyard_bg,
             registration_id=result["id"], name=name, email=email, phone=phone,
+            first_name=first, last_name=last,
         )
 
     if result["created"]:
@@ -299,7 +321,9 @@ async def _send_confirmation_bg(*, registration_id: str, name: str, email: str,
 
 
 async def _push_streamyard_bg(*, registration_id: str, name: str, email: str,
-                              phone: Optional[str]) -> None:
+                              phone: Optional[str],
+                              first_name: Optional[str] = None,
+                              last_name: Optional[str] = None) -> None:
     """Own session — a background task must never borrow the request's, which is
     closed by the time this runs. Never raises."""
     from app.models.db import async_session_maker
@@ -309,6 +333,7 @@ async def _push_streamyard_bg(*, registration_id: str, name: str, email: str,
             await webinar.push_to_streamyard(
                 session, registration_id=registration_id, name=name,
                 email=email, phone=phone,
+                first_name=first_name, last_name=last_name,
             )
     except Exception:
         logger.exception("webinar: StreamYard push task failed for %s", email)

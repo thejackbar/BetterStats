@@ -28,8 +28,10 @@ const SETTINGS = {
   logo_url: null, primary_color: '#0b1530', accent_color: '#ffc233', theme_config: null,
 }
 const PLAYERS = [
-  { id: 'p1', name: 'Jack Barendse', display_name: 'Jack Barendse', status: 'active', photo_url: null },
-  { id: 'p2', name: 'Sam Alborn', display_name: 'Sam Alborn', status: 'active', photo_url: null },
+  // With no photo every hero layout renders its CREST FALLBACK instead of the
+  // cut-out, so a roster of photo-less players silently tests the wrong branch.
+  { id: 'p1', name: 'Jack Barendse', display_name: 'Jack Barendse', status: 'active', photo_url: '/api/images/players/p1/photo' },
+  { id: 'p2', name: 'Sam Alborn', display_name: 'Sam Alborn', status: 'active', photo_url: '/api/images/players/p2/photo' },
 ]
 const MEDIA = [
   { id: 'm1', name: 'sponsor-white-bg.png', url: '/api/admin/social/media/m1/file' },
@@ -60,6 +62,7 @@ async function openEditor(query = '?type=lineup') {
     const method = route.request().method()
     if (method !== 'GET') writes.push({ url, method })
     if (/\/social\/media\/[^/]+\/file/.test(url)) return route.fulfill({ status: 200, contentType: 'image/png', body: PNG })
+    if (/\/images\/players\/[^/]+\/photo/.test(url)) return route.fulfill({ status: 200, contentType: 'image/png', body: PNG })
     if (/\/auth\/me/.test(url)) return route.fulfill(json({
       id: 'u1', username: 'admin', role: 'club_admin', club_slug: 'applecross',
       entitlements: { modules: ['socials', 'select', 'stats', 'admin', 'iq'], status: 'active' },
@@ -104,6 +107,23 @@ async function exportNodeBox(page) {
   })
 }
 
+// The LAYOUT itself, inside the export node — the thing that has to be the new
+// size now that a taller canvas means more room rather than a band.
+async function templateBox(page) {
+  return page.evaluate(() => {
+    const holder = [...document.querySelectorAll('div')].find(
+      (d) => d.style.left === '-9999px' && d.style.position === 'absolute',
+    )
+    const node = holder?.firstElementChild
+    // The page div holds the background, the layout and any overlay layers; the
+    // layout is the child that is not the SocialBackground.
+    const kid = node && [...node.children].find((c) => c.tagName === 'DIV' && c.style.width)
+    if (!kid) return null
+    const r = kid.getBoundingClientRect()
+    return { w: Math.round(r.width), h: Math.round(r.height) }
+  })
+}
+
 async function pickSize(page, label) {
   await press(page.getByRole('button', { name: 'Design', exact: true }))
   await press(page.getByRole('button', { name: new RegExp(`^${label}`) }))
@@ -133,60 +153,47 @@ async function pickSize(page, label) {
   const portraitNode = await exportNodeBox(page)
   ck('the export node follows the canvas', portraitNode?.w === 1080 && portraitNode?.h === 1350, JSON.stringify(portraitNode))
 
-  // A fixed 1080×1080 layout must be PLACED into the taller canvas, not
-  // stretched: measured off the real element, not inferred from the code.
-  const fitGeom = await page.evaluate(() => {
-    const holder = [...document.querySelectorAll('div')].find((d) => d.style.left === '-9999px')
-    const node = holder?.firstElementChild
-    const framed = node?.querySelector('[data-post-frame]')
-    if (!framed) return null
-    const m = /scale\(([\d.]+)\)/.exec(framed.style.transform || '')
-    return { scale: m ? parseFloat(m[1]) : null, top: parseFloat(framed.style.top), width: parseFloat(framed.style.width) }
-  })
-  ck('the layout is placed whole, not stretched', fitGeom && fitGeom.scale === 1 && fitGeom.width === 1080, JSON.stringify(fitGeom))
-  ck('and centred, so the bands are even', fitGeom && Math.abs(fitGeom.top - 135) < 0.6, JSON.stringify(fitGeom))
+  // The LAYOUT is now drawn at the canvas size rather than placed into it —
+  // measured off the real element, not inferred from the code.
+  const drawn = await templateBox(page)
+  ck('the layout is drawn at the full canvas height', drawn?.h === 1350, JSON.stringify(drawn))
+  ck('and at the full width', drawn?.w === 1080, JSON.stringify(drawn))
 
-  const fitExplained = await page.getByText(/sits whole on the portrait canvas/i).isVisible().catch(() => false)
-  ck('the letterbox is explained rather than left to look broken', fitExplained)
-
-  // Fill scales the layout up to cover, cropping the edges.
-  await press(page.getByRole('button', { name: 'Fill & crop' }))
-  await page.waitForTimeout(150)
-  const fillGeom = await page.evaluate(() => {
+  // Nothing is scaled into a band any more, so there must be no frame at all.
+  const framed = await page.evaluate(() => {
     const holder = [...document.querySelectorAll('div')].find((d) => d.style.left === '-9999px')
-    const framed = holder?.firstElementChild?.querySelector('[data-post-frame]')
-    const m = /scale\(([\d.]+)\)/.exec(framed?.style.transform || '')
-    return { scale: m ? parseFloat(m[1]) : null, left: parseFloat(framed?.style.left) }
+    return !!holder?.firstElementChild?.querySelector('[data-post-frame]')
   })
-  ck('Fill covers the canvas', fillGeom && Math.abs(fillGeom.scale - 1.25) < 0.001, JSON.stringify(fillGeom))
-  ck('Fill crops evenly on both sides', fillGeom && Math.abs(fillGeom.left + 135) < 0.6, JSON.stringify(fillGeom))
+  ck('and is not letterboxed into the canvas', drawn?.h === 1350 && framed === false, `framed=${framed}`)
+
+  const nativeNote = await textOf(page.getByTestId('size-native-note'))
+  ck('the panel says the layout uses the whole canvas', /1080×1350/.test(nativeNote), nativeNote)
+
+  // The Fit/Fill control existed only to describe a band, so it must be gone.
+  ck('no Fit/Fill choice is offered any more', !(await seen(page.getByRole('button', { name: 'Fill & crop' }))))
 
   await pickSize(page, 'Story')
   const storyCap = await captionOf(page)
   ck('Story is 1080 × 1920', /1080 × 1920/.test(storyCap), storyCap)
+  const storyDrawn = await templateBox(page)
+  ck('and the layout fills the story too', storyDrawn?.h === 1920 && storyDrawn?.w === 1080, JSON.stringify(storyDrawn))
 
   ck('no page errors while resizing', errors.length === 0, errors.slice(0, 2).join(' | '))
   await ctx.close()
 }
 
-// ── 1b. The letterbox bands, and where the picker does NOT belong ──────────
+// ── 1b. Every family reflows, and where the picker does NOT belong ─────────
 {
-  const { ctx, page } = await openEditor()
-  await pickSize(page, 'Portrait')
-
-  // Left at the canvas well's near-black the bands read as an unfinished
-  // export; they carry the club's own colour instead. Read off the real
-  // element rather than the source.
-  const fill = await page.evaluate(() => {
-    const holder = [...document.querySelectorAll('div')].find((d) => d.style.left === '-9999px')
-    const node = holder?.firstElementChild
-    return node ? getComputedStyle(node).backgroundColor : null
-  })
-  const opaque = fill && fill !== 'rgba(0, 0, 0, 0)' && fill !== 'transparent'
-  ck('the fitted bands carry a colour, not the well', opaque, String(fill))
-  ck('and it is the club palette, not black', opaque && fill !== 'rgb(8, 8, 8)' && fill !== 'rgb(0, 0, 0)', String(fill))
-
-  await ctx.close()
+  // One layout from each family — they are drawn by three different shells
+  // (cricket's own roots, the roundup Post, the event FRAME), so one passing
+  // says nothing about the other two.
+  for (const [id, name] of [['T4', 'a lineup layout'], ['FX1', 'a roundup layout'], ['EV1', 'an event poster']]) {
+    const { ctx, page } = await openEditor(`?template=${id}`)
+    await pickSize(page, 'Portrait')
+    const box = await templateBox(page)
+    ck(`${name} fills the 4:5 canvas`, box?.w === 1080 && box?.h === 1350, `${id} ${JSON.stringify(box)}`)
+    await ctx.close()
+  }
 
   // A scorecard is 1920×1080 and already has its own reframing control, so
   // offering a second one would be two answers to one question.
@@ -198,6 +205,178 @@ async function pickSize(page, label) {
   const scCap = await captionOf(sc.page)
   ck('and keeps its own 1920 × 1080', /1920 × 1080/.test(scCap), scCap)
   await sc.ctx.close()
+}
+
+// ── 1c. A cut-out headshot grows with the canvas ───────────────────────────
+// T7/C3/C1 stand the player's cut-out ON the panel floor and let it overflow
+// the top — so its height is a FIXED number, and a taller canvas would grow the
+// box while the photo stayed put, leaving dead air above it. The height is now
+// derived from the canvas; at 1080 it is exactly the number it always was.
+{
+  const { ctx, page, errors } = await openEditor('?template=T7')
+
+  await press(page.getByRole('button', { name: 'Content', exact: true }))
+  await page.waitForTimeout(200)
+  for (const p of PLAYERS) await press(page.getByRole('button', { name: new RegExp(`^${p.name}\\b`) }))
+  await page.waitForTimeout(300)
+
+  // Only the cut-out is sized this way (a fixed height with an auto width); the
+  // crest fallback beside it is a square, so this cannot pick up the wrong img.
+  const cutout = () => page.evaluate(() => {
+    const holder = [...document.querySelectorAll('div')].find(
+      (d) => d.style.left === '-9999px' && d.style.position === 'absolute',
+    )
+    const node = holder?.firstElementChild
+    if (!node) return null
+    const img = [...node.querySelectorAll('img')].find((x) => x.style.width === 'auto' && x.style.height)
+    return img ? parseFloat(img.style.height) : null
+  })
+
+  const sq = await cutout()
+  ck('the hero cut-out renders at all', sq !== null, String(sq))
+  ck('and is unchanged at 1080', sq === 720, String(sq))
+
+  await pickSize(page, 'Story')
+  await page.waitForTimeout(250)
+  const st = await cutout()
+  ck('the cut-out grows with a taller canvas', st !== null && st > sq, `${sq} -> ${st}`)
+
+  ck('no page errors measuring the cut-out', errors.length === 0, errors.slice(0, 2).join(' | '))
+  await ctx.close()
+}
+
+// ── 1d. The taller canvas is DESIGNED for, not just filled ─────────────────
+// Reflow made every layout draw at the full canvas; it did not make any of them
+// a portrait design. These measure the difference: a masthead that keeps a
+// share of the extra height rather than becoming a tenth of the post, a sponsor
+// strip that is still a strip, row type that steps up with the slot it sits in,
+// and a body that runs to the footer instead of stopping where the square did.
+// Every one is read off the real element at both sizes, and every one is
+// asserted UNCHANGED at 1080 — the square output is the same post it was.
+{
+  // One element inside the export node, by a predicate run in the page.
+  const box = (page, findSrc) => page.evaluate((src) => {
+    const holder = [...document.querySelectorAll('div')].find(
+      (d) => d.style.left === '-9999px' && d.style.position === 'absolute',
+    )
+    const root = holder?.firstElementChild
+    if (!root) return null
+    // eslint-disable-next-line no-new-func
+    const find = new Function('root', src)
+    const el = find(root)
+    if (!el) return null
+    const rr = root.getBoundingClientRect()
+    const r = el.getBoundingClientRect()
+    const cs = getComputedStyle(el)
+    return {
+      // Relative to the layout, and unscaled — the live canvas is drawn at a
+      // preview scale, so raw client pixels would move with the zoom.
+      // EVERY field is a percentage of the post's own height, font included —
+      // one unit, so every check converts to real post pixels the same way
+      // (× 10.8 at square, × 13.5 at portrait). The first cut returned the font
+      // already multiplied by 1080 while the positions were plain percentages,
+      // so the step-up check converted twice and read a genuine 31 → 35 as
+      // 31 → 28, i.e. a design that had worked reported as a failure.
+      top: Math.round(((r.top - rr.top) / rr.height) * 10000) / 100,
+      bottom: Math.round(((r.bottom - rr.top) / rr.height) * 10000) / 100,
+      h: Math.round((r.height / rr.height) * 10000) / 100,
+      font: Math.round((parseFloat(cs.fontSize) / rr.height) * 10000) / 100,
+    }
+  }, findSrc)
+
+  // ── A fixture roundup: masthead, rows and sponsor strip ─────────────────
+  {
+    const { ctx, page, errors } = await openEditor('?template=FX1')
+    // The body box is the one absolutely-positioned block inset 56px a side.
+    const BODY = "return [...root.querySelectorAll('div')].find((d) => d.style.left === '56px' && d.style.right === '56px' && d.style.top) || null"
+    // The sponsor slots are the only dashed boxes on the post.
+    const SLOT = "return [...root.querySelectorAll('div')].find((d) => getComputedStyle(d).borderStyle === 'dashed') || null"
+    // A row's opponent name — the biggest thing in a row, and what a reader is
+    // scanning for.
+    const OPP = "return [...root.querySelectorAll('div')].find((d) => d.children.length === 0 && /SUBIACO/i.test(d.textContent || '')) || null"
+
+    const sqBody = await box(page, BODY)
+    const sqSlot = await box(page, SLOT)
+    const sqOpp = await box(page, OPP)
+    ck('the roundup body, sponsor strip and rows are all measurable', sqBody && sqSlot && sqOpp,
+      JSON.stringify({ sqBody, sqSlot, sqOpp }))
+    // Pinned so a later change cannot quietly move the square's own design.
+    ck('the square masthead is unchanged', sqBody && Math.abs(sqBody.top - (196 / 1080) * 100) < 0.6, String(sqBody?.top))
+    ck('the square sponsor slot is unchanged', sqSlot && Math.abs(sqSlot.h - (50 / 1080) * 100) < 0.6, String(sqSlot?.h))
+    ck('the square row type is unchanged', sqOpp && Math.abs(sqOpp.font * 10.8 - 31) < 1.2, String(sqOpp && sqOpp.font * 10.8))
+
+    await pickSize(page, 'Portrait')
+    await page.waitForTimeout(250)
+    const poBody = await box(page, BODY)
+    const poSlot = await box(page, SLOT)
+    const poOpp = await box(page, OPP)
+    // In post pixels: 196 → 239, 50 → 62, 31 → 35.
+    ck('the masthead keeps a share of the extra height',
+      poBody && poBody.top * 13.5 > sqBody.top * 10.8 + 20, `${sqBody?.top}% -> ${poBody?.top}%`)
+    ck('the sponsor strip grows with the post',
+      poSlot && poSlot.h * 13.5 > sqSlot.h * 10.8 + 5, `${sqSlot?.h}% -> ${poSlot?.h}%`)
+    ck('the row type steps up with the slot it sits in',
+      poOpp && poOpp.font * 13.5 > sqOpp.font * 10.8 + 1.5,
+      `${sqOpp && Math.round(sqOpp.font * 10.8)}px -> ${poOpp && Math.round(poOpp.font * 13.5)}px`)
+    // The body still runs to the sponsor strip rather than stopping short.
+    ck('and the body still reaches the sponsor strip',
+      poBody && poSlot && poSlot.top - poBody.bottom < 6, `${poBody?.bottom}% .. ${poSlot?.top}%`)
+
+    ck('no page errors measuring the roundup', errors.length === 0, errors.slice(0, 2).join(' | '))
+    await ctx.close()
+  }
+
+  // ── An event poster: the colour band and the panel under it ─────────────
+  // EV2 draws a band whose height follows the canvas and a panel that used to
+  // start at a hardcoded 606 — so on a portrait post the two overlapped by
+  // 150px and on a story by 340. They have to MEET.
+  {
+    const { ctx, page } = await openEditor('?template=EV2')
+    const BAND = "return [...root.querySelectorAll('div')].find((d) => d.style.top === '0px' && d.style.left === '0px' && d.style.height) || null"
+    const PANEL = "return [...root.querySelectorAll('div')].find((d) => d.style.left === '0px' && d.style.bottom === '0px' && d.style.top && d.style.top !== '0px') || null"
+    const sqBand = await box(page, BAND)
+    const sqPanel = await box(page, PANEL)
+    ck('the event band and its panel are measurable', sqBand && sqPanel, JSON.stringify({ sqBand, sqPanel }))
+    ck('they meet exactly on the square', sqBand && sqPanel && Math.abs(sqBand.bottom - sqPanel.top) < 0.3,
+      `${sqBand?.bottom}% vs ${sqPanel?.top}%`)
+
+    await pickSize(page, 'Portrait')
+    await page.waitForTimeout(250)
+    const poBand = await box(page, BAND)
+    const poPanel = await box(page, PANEL)
+    ck('and still meet on a portrait post', poBand && poPanel && Math.abs(poBand.bottom - poPanel.top) < 0.3,
+      `${poBand?.bottom}% vs ${poPanel?.top}%`)
+    await ctx.close()
+  }
+
+  // ── A batting order: the rows fill down to the footer ───────────────────
+  // T4 was document flow, so its rows kept the height they had on the square
+  // and left a dead strip above the footer on anything taller.
+  {
+    const { ctx, page } = await openEditor('?template=T4')
+    await press(page.getByRole('button', { name: 'Content', exact: true }))
+    await page.waitForTimeout(200)
+    for (const p of PLAYERS) await press(page.getByRole('button', { name: new RegExp(`^${p.name}\\b`) }))
+    await page.waitForTimeout(300)
+
+    // The last row of the order — the row grid is the only block of striped
+    // rows, and its last child is what has to reach the bottom.
+    // The one flex-1 column in T4 is the rows container. Keyed on that rather
+    // than on a child count: the suite seeds TWO players, so a "more than two
+    // rows" predicate found nothing and reported the design as unmeasurable.
+    const LAST = "const g = [...root.querySelectorAll('div')].find((d) => d.style.flex === '1 1 0%' && d.style.flexDirection === 'column' && d.children.length > 0); return g ? g.lastElementChild : null"
+    const sqLast = await box(page, LAST)
+    ck('the batting order rows are measurable', sqLast !== null, JSON.stringify(sqLast))
+
+    await pickSize(page, 'Portrait')
+    await page.waitForTimeout(250)
+    const poLast = await box(page, LAST)
+    // Within the footer's own band of the post, not stopping at the square's
+    // own last row (which would land around 78%).
+    ck('the order runs down to the footer on a portrait post',
+      poLast && poLast.bottom > 88, `${poLast?.bottom}%`)
+    await ctx.close()
+  }
 }
 
 // ── 2. The blank canvas is genuinely the new size ──────────────────────────
@@ -315,8 +494,8 @@ async function pickSize(page, label) {
   await press(page.getByRole('button', { name: 'Layers', exact: true }))
   await page.waitForTimeout(200)
   const note = await textOf(page.getByTestId('layers-template-note'))
-  ck('the Layers panel explains a built-in layout', /sit on top of it/i.test(note), note.slice(0, 90))
-  ck('and offers the way out', /Blank canvas|movable blocks/i.test(note), note.slice(0, 90))
+  ck('the Layers panel explains a built-in layout', /behind/i.test(note), note.slice(0, 110))
+  ck('and offers the way out', /Blank canvas|movable blocks/i.test(note), note.slice(0, 110))
 
   // Hero: which layouts have the slot, rather than the section just vanishing.
   await press(page.getByRole('button', { name: 'Content', exact: true }))
@@ -350,6 +529,92 @@ async function pickSize(page, label) {
 
   ck('no page errors while saving', errors.length === 0, errors.slice(0, 2).join(' | '))
   await ctx.close()
+}
+
+// ── 7b. A block can go behind the built-in layout ──────────────────────────
+{
+  const { ctx, page, errors } = await openEditor()
+
+  // Adding a block on a real layout turns Custom Edit on by itself — this is
+  // the exact path somebody takes when they drop an image onto a lineup post
+  // and find it sitting over the club's own heading.
+  await press(page.getByRole('button', { name: 'Photos', exact: true }))
+  await page.waitForTimeout(250)
+  await press(page.getByRole('button', { name: /Empty image frame/i }))
+  await page.waitForTimeout(350)
+
+  const behindBtn = page.getByRole('button', { name: 'Send behind' })
+  ck('a selected block offers Send behind', await seen(behindBtn))
+
+  // Order in the DOM is paint order: behind the layout means BEFORE it.
+  const orderOf = () => page.evaluate(() => {
+    const holder = [...document.querySelectorAll('div')].find(
+      (d) => d.style.left === '-9999px' && d.style.position === 'absolute',
+    )
+    const node = holder?.firstElementChild
+    if (!node) return null
+    // Every layer is a direct child; the one holding a block carries our marker.
+    return [...node.children].map((c) => (c.querySelector('[style*="cursor"]') ? 'blocks' : 'layout'))
+  })
+  // The layout's OWN root, which is a child of the see-through wrapper once a
+  // block has gone behind — addressing the layer's direct children finds the
+  // wrapper (display: contents, no width of its own) and measures nothing.
+  const layoutBg = () => page.evaluate(() => {
+    const holder = [...document.querySelectorAll('div')].find(
+      (d) => d.style.left === '-9999px' && d.style.position === 'absolute',
+    )
+    const node = holder?.firstElementChild
+    if (!node) return null
+    const layer = [...node.children].find((c) => !c.querySelector('[style*="cursor"]'))
+    if (!layer) return null
+    const root = layer.classList.contains('pb-template-seethrough') ? layer.firstElementChild : layer
+    if (!root) return null
+    const s = getComputedStyle(root)
+    // Most of these layouts paint a GRADIENT, which is background-image — read
+    // the colour alone and a gradient-backed root measures transparent in both
+    // states, so the check passes whether or not anything was suppressed.
+    return { color: s.backgroundColor, image: s.backgroundImage }
+  })
+  const transparent = (v) => !!v
+    && (v.color === 'rgba(0, 0, 0, 0)' || v.color === 'transparent')
+    && (v.image === 'none' || !v.image)
+
+  const before = await orderOf()
+  ck('the block starts over the layout', Array.isArray(before) && before.lastIndexOf('blocks') > before.indexOf('layout'), JSON.stringify(before))
+
+  // Measured before as well as after: a template that never painted a
+  // background of its own would pass the after-check for the wrong reason.
+  const bgBefore = await layoutBg()
+  ck('the layout paints its own background to begin with', bgBefore !== null && !transparent(bgBefore), JSON.stringify(bgBefore))
+
+  await press(behindBtn)
+  await page.waitForTimeout(350)
+  const after = await orderOf()
+  ck('Send behind moves it under the layout', Array.isArray(after) && after.indexOf('blocks') < after.lastIndexOf('layout'), JSON.stringify(after))
+
+  // A block behind an opaque layout would be invisible, so the layout's own
+  // background has to stop painting — measured, not assumed.
+  const bg = await layoutBg()
+  ck('and the layout stops painting over it', transparent(bg), JSON.stringify(bg))
+
+  // The control reads back the state it put the block in.
+  ck('the control now reads as behind', await seen(page.getByRole('button', { name: 'Behind layout' })))
+
+  // The Layers panel shows the layout as a row, so the two sides are obvious.
+  await press(page.getByRole('button', { name: 'Layers', exact: true }))
+  await page.waitForTimeout(250)
+  const layoutRow = await textOf(page.getByTestId('layers-layout-row'))
+  ck('the Layers panel lists the layout itself', /layout/i.test(layoutRow), layoutRow)
+
+  ck('no page errors sending a block behind', errors.length === 0, errors.slice(0, 2).join(' | '))
+  await ctx.close()
+
+  // The blank canvas has no layout to be behind, so it must not offer any of it.
+  const b = await openEditor('?type=blank')
+  await press(b.page.getByRole('button', { name: 'Layers', exact: true }))
+  await b.page.waitForTimeout(250)
+  ck('the blank canvas has no layout row', !(await seen(b.page.getByTestId('layers-layout-row'))))
+  await b.ctx.close()
 }
 
 // ── 8. Narrow viewport ─────────────────────────────────────────────────────

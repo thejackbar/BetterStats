@@ -494,6 +494,9 @@ function BlankBlock({ item, palette, team, data, interactive, selected, single, 
         outline: interactive && selected ? `${outline}px solid ${accent}` : 'none',
         outlineOffset: outline * 2, transform: rot, transformOrigin: 'center center',
         touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none',
+        // Re-armed explicitly so a block stays grabbable inside a pass-through
+        // layer, whose root deliberately takes no pointer events at all.
+        ...(interactive ? { pointerEvents: 'auto' } : null),
       }}>
       {renderContent(item, palette, team, data)}
       {interactive && single && (
@@ -535,7 +538,7 @@ export function BlankCanvas({
   items = [], palette = {}, team = {}, data = {},
   interactive = false, scale = 1, selectedIds = [],
   onSelect, onDeselect, onPatchMany, onCommit, onGestureStart, onDuplicate, onRemove,
-  transparent = false, width = 1080, height = 1080, style = {},
+  transparent = false, width = 1080, height = 1080, style = {}, passThrough = false,
 }) {
   const rootRef = useRef(null)
   const selSet = new Set(selectedIds)
@@ -677,6 +680,11 @@ export function BlankCanvas({
         width, height, position: 'relative', overflow: 'hidden',
         background: transparent ? 'transparent' : (palette.primary || '#101113'),
         color: palette.ink || '#fff', fontFamily: "'Inter', sans-serif",
+        // passThrough: this layer covers the whole canvas but must not swallow
+        // clicks meant for something UNDER it — the layout, or blocks a person
+        // has sent behind it. Blocks re-arm themselves (see BlankBlock), so they
+        // stay draggable while the empty space between them does not intercept.
+        ...(passThrough ? { pointerEvents: 'none' } : null),
         ...style,
       }}>
       {!transparent && <GrainSVG opacity={0.14} id="blankcanvas" />}

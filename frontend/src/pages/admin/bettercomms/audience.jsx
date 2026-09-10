@@ -40,7 +40,8 @@ export function matchesFilters(c, filters) {
   })
 }
 export function emptyFilters() {
-  return { role: [], club: [], association: [], country: [], utm_code: [], state: [] }
+  // Derived from `FACETS` for the same reason, mirroring `emptyModes` below.
+  return Object.fromEntries(FACETS.map(f => [f.key, []]))
 }
 
 // ─── Clubs Directory include/exclude filters (super-admin outreach) ───────────
@@ -238,7 +239,11 @@ export function EngagementFilterControls({ value, onChange, hasDirectory }) {
 }
 
 export function facetOptionsFrom(contacts) {
-  const opts = { club: new Set(), association: new Set(), country: new Set(), utm_code: new Set(), state: new Set() }
+  // Built FROM `FACETS`, never a second hand-written list: a hardcoded literal
+  // here silently misses any facet added to the kit, and the spread below then
+  // throws on an undefined Set — taking Lists, Contacts and Segments down on
+  // load, with no contact needing to carry the new facet for it to fire.
+  const opts = Object.fromEntries(FACETS.map(f => [f.key, new Set()]))
   for (const c of contacts || []) for (const f of FACETS) { if (c[f.key]) opts[f.key].add(c[f.key]) }
   return Object.fromEntries(FACETS.map(f => [f.key, [...opts[f.key]].sort((a, b) => a.localeCompare(b))]))
 }
