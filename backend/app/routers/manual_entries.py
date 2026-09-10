@@ -2759,6 +2759,15 @@ class GameResolveRequest(BaseModel):
     # it. A match that is the club's synced Cricket Australia game is left alone
     # either way — see `_write_games`.
     duplicate_mode: str = "skip"                            # 'skip' | 'overwrite'
+    # The club the wizard SHOWED the admin at review time, echoed back so the
+    # commit can refuse if the acting-as club has changed underneath them. A
+    # super admin manages every club by switching `active_club_id`, and an
+    # import writes to whatever that is at request time — so a wrong or stale
+    # club context would silently write a club's whole history against another
+    # club (reported live: a Shoalwater Bay import landing on Applecross). When
+    # set and it does not match the current club, the commit refuses rather
+    # than writing to the wrong club.
+    confirm_organisation_id: Optional[str] = None
 
 
 # A whole club history is a big sheet: the archive that prompted this is 97
@@ -3155,6 +3164,10 @@ async def preview_manual_games(
     return {
         "token": token,
         "filename": file.filename,
+        # The club the sheet was STAGED under — the server's own truth, not the
+        # browser's header state. The wizard shows this so a super admin sees
+        # which club the import will write to before they commit to anything.
+        "organisation": {"id": str(club.id), "name": club.name},
         "columns": GAME_CSV_COLUMNS,
         "unknown_columns": unknown,
         "row_count": len(rows),
@@ -3188,6 +3201,10 @@ async def resolve_manual_games(
     rows = await _rows_for(db, req, org_id=club.id, user_id=current_user.id)
     out = await _resolve_games(db, club, req, rows)
     out.pop("_plan", None)
+    # The club this resolve ran under IS the club the commit will write to
+    # (both resolve get_current_club). The review screen shows it and echoes
+    # its id back on commit, so a club that changed underneath is caught.
+    out["organisation"] = {"id": str(club.id), "name": club.name}
     return out
 
 
@@ -3205,6 +3222,18 @@ async def commit_manual_games(
     that loop would go down with it and leave the next game pointing at
     nothing.
     """
+    # Refuse if the acting-as club has changed since the admin reviewed this
+    # import. A super admin writes to whatever club they are currently acting
+    # as, so a stale or switched context would import a club's whole history
+    # against the wrong club. The wizard sends the club id it displayed at
+    # review; if it no longer matches, stop rather than write to the wrong one.
+    if req.confirm_organisation_id and req.confirm_organisation_id != str(club.id):
+        raise HTTPException(
+            409,
+            "This import was set up for a different club than the one you are "
+            f"managing now ({club.name}). Switch back to that club, or start "
+            "the import again, so the matches are not written to the wrong club.",
+        )
     rows = await _rows_for(db, req, org_id=club.id, user_id=current_user.id)
     resolved = await _resolve_games(db, club, req, rows)
     plan = resolved["_plan"]
@@ -3316,6 +3345,7 @@ async def commit_manual_games(
             "games_ignored": ignored, "games_ignored_synced": ignored_synced,
             "seasons_created": 0, "grades_created": 0, "players_created": 0,
             "seasons_import_sourced": 0, "warnings": [],
+            "organisation": {"id": str(club.id), "name": club.name},
             "errors": len(errors), "errors_detail": errors[:50],
         }
 
@@ -3409,6 +3439,7 @@ async def commit_manual_games(
         "players_created": len(created_player_ids),
         "seasons_import_sourced": len(seasons_import_sourced),
         "warnings": warnings,
+        "organisation": {"id": str(club.id), "name": club.name},
         "errors": len(errors),
         "errors_detail": errors[:50],
     }

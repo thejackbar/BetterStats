@@ -1,5 +1,6 @@
-import { useState, useMemo, useRef, useCallback } from 'react'
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react'
 import { api } from '../../lib/api'
+import { useAuth } from '../../contexts/AuthContext'
 
 // The scorecard CSV import, with the review step the historical-stats wizard
 // has. The strict endpoint underneath refuses a row naming a season, grade or
@@ -147,6 +148,20 @@ export default function ManualGamesImportWizard({ onDone }) {
   const [result, setResult] = useState(null)
   const fileRef = useRef(null)
 
+  const { user } = useAuth()
+  // A super admin manages every club by switching which one they act as, so an
+  // import can land on the wrong club if the context is stale (reported live: a
+  // Shoalwater Bay import written against Applecross). They confirm the club by
+  // hand before the write; a single-club admin has no such ambiguity.
+  const mustConfirmClub = !!user?.can_switch_clubs
+  const [clubConfirmed, setClubConfirmed] = useState(false)
+  // The club the SERVER staged/resolved this sheet under — its own truth, shown
+  // in the review so a wrong context is caught at the point of the write rather
+  // than trusted from the page header.
+  const targetOrg = review?.organisation || null
+  // A fresh sheet, or a club that changed underneath, resets the confirmation.
+  useEffect(() => { setClubConfirmed(false) }, [targetOrg?.id])
+
   const resolve = useCallback(async (nextOverrides, nextToken = token, nextFile = filename) => {
     setBusy('resolve'); setError('')
     try {
@@ -208,6 +223,9 @@ export default function ManualGamesImportWizard({ onDone }) {
         season_overrides: overrides.seasons,
         grade_overrides: overrides.grades,
         duplicate_mode: dupMode,
+        // The club the review showed. If the acting-as club has changed since,
+        // the server refuses rather than writing to the wrong one.
+        confirm_organisation_id: targetOrg?.id || null,
       })
       // The token is spent once its sheet has landed — the server drops the
       // staged rows in the same transaction as the games, so holding on to it
@@ -258,7 +276,9 @@ export default function ManualGamesImportWizard({ onDone }) {
 
       {result && (
         <div className="border pb-hairline rounded-lg p-4 bg-pb-surface">
-          <h3 className="text-base font-semibold text-pb-text mb-2">Imported</h3>
+          <h3 className="text-base font-semibold text-pb-text mb-2">
+            Imported{result.organisation ? ` into ${result.organisation.name}` : ''}
+          </h3>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <Figure label="New matches" value={result.games_created} />
             <Figure label="Seasons created" value={result.seasons_created} />
@@ -306,6 +326,19 @@ export default function ManualGamesImportWizard({ onDone }) {
 
       {review && (
         <>
+          {targetOrg && (
+            <div className={`rounded-lg p-4 border ${mustConfirmClub ? 'border-amber-400/50 bg-amber-400/10' : 'pb-hairline bg-pb-surface'}`}>
+              <div className="text-xs font-mono uppercase tracking-wide text-pb-dim">Importing into</div>
+              <div className="text-lg font-semibold text-pb-text mt-0.5">{targetOrg.name}</div>
+              {mustConfirmClub && (
+                <p className="text-[12px] text-amber-200/90 mt-1">
+                  Every match below will be written to this club. If this is not the
+                  club you meant, switch club first and start the import again.
+                </p>
+              )}
+            </div>
+          )}
+
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <Figure label="Matches" value={review.games} />
             <Figure label="New seasons" value={willCreate.seasons || 0} tone={willCreate.seasons ? 'text-pb-accent-ink' : undefined} />
@@ -431,14 +464,37 @@ export default function ManualGamesImportWizard({ onDone }) {
             duplicates={review.duplicates}
           />
 
+          {mustConfirmClub && targetOrg && (
+            <label className="flex gap-2.5 items-start p-3 rounded border border-amber-400/40 bg-amber-400/5 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5 accent-pb-accent"
+                checked={clubConfirmed}
+                onChange={e => setClubConfirmed(e.target.checked)}
+              />
+              <span className="text-sm text-pb-text">
+                These matches belong to <span className="font-semibold">{targetOrg.name}</span> and should be imported into that club.
+              </span>
+            </label>
+          )}
+
           <div className="flex flex-wrap items-center gap-3">
-            <button className={BTN_PRIMARY} onClick={commit} disabled={!!busy || unresolved > 0}>
-              {busy === 'commit' ? 'Importing…' : `Import ${review.games} match${review.games === 1 ? '' : 'es'}`}
+            <button
+              className={BTN_PRIMARY}
+              onClick={commit}
+              disabled={!!busy || unresolved > 0 || (mustConfirmClub && !clubConfirmed)}
+            >
+              {busy === 'commit'
+                ? 'Importing…'
+                : `Import ${review.games} match${review.games === 1 ? '' : 'es'}${targetOrg ? ` into ${targetOrg.name}` : ''}`}
             </button>
             {unresolved > 0 && (
               <span className="text-xs text-amber-400">
                 {unresolved} name{unresolved === 1 ? '' : 's'} still need an answer.
               </span>
+            )}
+            {mustConfirmClub && !clubConfirmed && unresolved === 0 && (
+              <span className="text-xs text-pb-dim">Confirm the club above to import.</span>
             )}
             {busy === 'resolve' && <span className="text-xs text-pb-dim">Checking…</span>}
           </div>

@@ -1298,6 +1298,77 @@ async def main() -> None:
             check("the competing CricketStatz import is left unpaired to it",
                   rival_pair is None, str(rival_pair))
 
+        print("\n-- THE IMPORT NAMES ITS TARGET CLUB, AND REFUSES A CHANGED ONE --")
+        # A super admin manages every club by switching which one they act as,
+        # and an import writes to whatever that is at request time. Reported
+        # live: a Shoalwater Bay import landed on Applecross because the context
+        # was stale. Every step now echoes the club the SERVER staged/resolved
+        # under, and the commit refuses if the club named at review no longer
+        # matches the one being written to.
+        CTX_SHEET = [
+            game_row(game_key="CTX", played_at="2010-11-27", opposition="Zenith",
+                     season_name="Summer 2010/11", grade_name="1st Grade",
+                     player_name="Held, Harry", innings_number="1",
+                     batting_runs="33", did_not_bat="false"),
+        ]
+        async with Session() as session:
+            await reset(session); await seed(session)
+            c = await club(session); u = await user(session)
+            prev = await preview(file=FakeUpload(csv_text(CTX_SHEET)),
+                                 current_user=u, club=c, db=session)
+            check("preview names the club it staged the sheet under",
+                  (prev.get("organisation") or {}).get("id") == str(ORG)
+                  and (prev.get("organisation") or {}).get("name") == "Shoalwater Bay",
+                  str(prev.get("organisation")))
+            res = await resolve_manual_games(
+                req=GameResolveRequest(token=prev["token"]),
+                current_user=u, club=c, db=session)
+            check("resolve names the club the commit will write to",
+                  (res.get("organisation") or {}).get("id") == str(ORG), str(res.get("organisation")))
+
+            # The club named at review is a DIFFERENT club than the one now being
+            # acted as — the commit must refuse rather than write to the wrong one.
+            refused = False
+            try:
+                await commit_manual_games(
+                    req=GameResolveRequest(token=prev["token"], confirm_organisation_id=str(OTHER)),
+                    current_user=u, club=c, db=session)
+            except HTTPException as e:
+                refused = e.status_code == 409
+            check("a commit whose confirmed club has changed is refused (409)", refused)
+
+        async with Session() as session:
+            n_after_refuse = (await session.execute(text(
+                "SELECT count(*) FROM manual_games WHERE organisation_id = :o AND opposition = 'Zenith'"),
+                {"o": str(ORG)})).scalar()
+            check("and nothing was written by the refused commit", n_after_refuse == 0, str(n_after_refuse))
+
+        # A matching confirmation lands, and the result names where it landed.
+        async with Session() as session:
+            await reset(session); await seed(session)
+            c = await club(session); u = await user(session)
+            prev = await preview(file=FakeUpload(csv_text(CTX_SHEET)),
+                                 current_user=u, club=c, db=session)
+            out = await commit_manual_games(
+                req=GameResolveRequest(token=prev["token"], confirm_organisation_id=str(ORG)),
+                current_user=u, club=c, db=session)
+            check("a matching confirmation imports normally", out.get("games_created") == 1, str(out))
+            check("and the result names the club it landed on",
+                  (out.get("organisation") or {}).get("id") == str(ORG), str(out.get("organisation")))
+
+        # No confirmation at all still works — the field is belt-and-braces over
+        # the token, which is already club-scoped, not a new requirement.
+        async with Session() as session:
+            await reset(session); await seed(session)
+            c = await club(session); u = await user(session)
+            prev = await preview(file=FakeUpload(csv_text(CTX_SHEET)),
+                                 current_user=u, club=c, db=session)
+            out = await commit_manual_games(
+                req=GameResolveRequest(token=prev["token"]),
+                current_user=u, club=c, db=session)
+            check("an import with no confirmation still lands (backward compatible)",
+                  out.get("games_created") == 1, str(out))
+
         print("\n-- THE UPLOAD CAP IS THE ONE nginx CARRIES --")
         check("the app's cap is 64 MB, matching the client_max_body_size on "
               "the preview location in nginx.conf",
