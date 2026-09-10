@@ -566,6 +566,111 @@ want a design per template done please."*
   post. `templateToBlocks` still reaches four templates. Saved templates are
   still `localStorage`. EV2's square panel still clips at its own size.
 
+## Every element of a layout is a layer (v9.76.0, Sep 2026)
+
+Asked in two steps: *"what about moving elements on a template forward and back
+within a design so you could upload an image and push it behind some text or in
+front of some other text?"*, then, once the answer was that a block could only
+go wholly behind or wholly in front of a layout: *"I want to be able to use
+layers on all templates where each element except the background is a layer."*
+
+- **THE ESTIMATE THAT SAID THIS WAS A BIG JOB WAS ABOUT THE WRONG MECHANISM, and
+  the same mistake this file already records one release earlier.**
+  `templateToBlocks` recreates a layout as freeform blocks with hand-placed
+  x/y/fontSize, reaches four of the 48, and extending it would mean redrawing
+  every layout AND throwing away each one's AutoFitText sizing, responsive squad
+  logic and the v9.75.0 portrait designs. **A LAYOUT DOES NOT HAVE TO BE
+  DECOMPOSED TO BE LAYERED.** Every template root is already a flat list of
+  absolutely-positioned children, so each child is a discrete visual element
+  that needed only an addressable z-index and a name. The template still renders
+  itself; it just does so through a root that knows what its own children are.
+- **THE UNTOUCHED PATH IS THE WHOLE REASON THIS IS SAFE UNDER ALL 48.** With no
+  order, nothing hidden and no blocks — every export of a post nobody has
+  reordered — `LayerRoot` returns the exact div the template rendered before:
+  no cloning, no z-index, no stacking context. **Measured rather than asserted:
+  all 48 squares re-shot on both builds are byte-identical.**
+- **WIRING IS ONE LINE PER ROOT, and 19 of the 48 came free.** The roundup
+  family's shared `Post` shell covers all 19; the 17 cricket roots, 11 event
+  roots and the launch poster are a `<div style={{…}}>` → `<LayerRoot
+  style={{…}}>` swap with the style untouched. `FRAME` in `event-templates` is a
+  STYLE HELPER, not a component, which is why those eleven are individual.
+- **IDENTITY IS STRUCTURAL, NEVER THE TEXT.** A layer named after its own words
+  would lose its place in the stack the moment somebody edited those words, so
+  the id is the element's type plus which one of that type it is
+  (`t:div#2`). A `data-layer` attribute overrides it, which is what a
+  CONDITIONALLY-RENDERED root child needs — `Children.toArray` drops a child
+  that is not rendered, so everything after it shifts as it comes and goes.
+- **THE NATURAL ORDER IS DOM ORDER *SORTED BY EXISTING z-index*, not DOM order.**
+  T1's match-day badge carries `zIndex: 5` and has to keep painting over the
+  hero photo that follows it in the markup. Read the markup alone and assigning
+  fresh z-indexes silently re-stacks the layout.
+- **THE BACKGROUND IS THE FLOOR, NOT A LAYER, which is what the ask actually
+  said.** `isolation: isolate` on the root makes it its own stacking context, so
+  a block at the bottom of the stack sits ON the club's colours rather than the
+  layout being made see-through. That is a better answer than the mechanism it
+  replaces: a non-full-bleed block sent behind used to blank the layout's
+  background everywhere.
+- **SO THE TWO-POSITION `behind` FLAG IS RETIRED, NOT HIDDEN** — the flag, the
+  array partition that kept it coherent, `setBehind`, `reorder`'s `crossLayout`
+  and the `pb-template-seethrough` CSS. A block's position in the stack is the
+  whole answer, so a control that could only say in front or behind had nothing
+  left to do: the call this file already makes for the Fit/Fill picker. An item
+  saved before this still carrying `behind` is ignored.
+- **BLOCKS RENDER AS RUNS, WHICH IS WHAT LET `BlankCanvas` STAY UNTOUCHED.**
+  Consecutive blocks between two of the layout's own elements become one
+  `BlankCanvas` with its own z-index. Splitting individual blocks out of it
+  would have meant re-plumbing its pointer-drag machinery.
+- **EVERY RUN IS `passThrough`.** Each one covers the whole canvas, so a run
+  that took pointer events would swallow every click meant for a layer under it.
+  Blocks re-arm `pointer-events: auto` themselves, which `BlankBlock` already
+  did.
+- **ONLY THE CANVAS REPORTS ITS LAYERS.** The same post renders several times
+  over — the canvas, the off-screen export node, the Preview overlay, a page per
+  carousel slide — and every one of them would otherwise register. A carousel
+  whose pages hold different rows would then have them fighting over one list.
+  `register` is passed only in the interactive context.
+- **THE STACK IS A PREFERENCE OVER WHAT THE LAYOUT PAINTS, NOT A COPY OF IT.**
+  `applyOrder` keeps the ids somebody has an opinion about and drops anything
+  else back at its natural index, so a template re-rendering with one element
+  more or less than last time cannot scramble the stack. Same call `sort_order`
+  makes elsewhere.
+- **EVERY PIECE OF THAT STATE CARRIES THE TEMPLATE IT BELONGS TO, and a mismatch
+  is resolved during RENDER rather than by an effect.** Restoring a saved design
+  sets the template and its stacking in one tick, so a clear-on-template-change
+  effect lands second and wipes what was just restored. Found by writing it that
+  way first.
+- **A SAVED TEMPLATE KEEPS ITS STACKING.** Without it a design saved with a
+  photo tucked behind the headline comes back with the photo on top, which is
+  the whole thing somebody was saving.
+- **`scale` IS LOCAL TO `renderCanvas`, SO IT IS AN ARGUMENT, NOT A CLOSURE.**
+  The first cut reached for the outer name from inside the layer context and
+  crashed with `ReferenceError: scale is not defined` — inside the template's
+  own render, a long way from the line that caused it. The temporal-dead-zone
+  trap this file already records for the Roster header, hit again.
+- **`Icon` DRAWS AN EMPTY SVG FOR A NAME IT DOES NOT HOLD.** `ICON_PATHS[name]
+  || null` means a missing glyph is invisible rather than an error — the old
+  Layers panel had been asking for `image` and drawing nothing since it was
+  written. `image`, `eye` and `eyeOff` are in the set now.
+- **A COMPONENT CHILD ONLY TAKES A z-index IF IT SPREADS `style`.** Halftone and
+  Stripes already did; `GrainSVG` did not, so a root-level grain would have kept
+  painting in markup order while the panel said otherwise. Labels for these come
+  from one `FRIENDLY` map keyed on the component name, which covers all 48 with
+  no per-template naming.
+- **`pkill -f` MATCHES ITS OWN SHELL, hit twice more.** A hung shoot killed the
+  command that was killing it (exit 144). Split the pattern, or run the kill on
+  its own.
+- **A HUNG SHOOT IS THE PILED-UP-CHROMIUM TRAP, and the tell is CPU.** Three
+  concurrent Chromium runs left the control shoot idle-waiting with 6 seconds of
+  CPU and no write for eight minutes. Kill the browsers, then re-shoot only the
+  templates that are missing rather than the whole set.
+- **NOTICED, NOT BUILT**: a layout's own element can be reordered and hidden but
+  not MOVED or retyped — that is still `templateToBlocks` territory, and still
+  four templates. A `transform` offset per layer would make moving cheap without
+  disturbing any layout's internal sizing, and is the obvious next step. The
+  scorecards' square-split variant (SC1-SC3 rendered per side) is deliberately
+  not a `LayerRoot`: two roots with colliding structural ids would apply one
+  stack's order to the other. Saved templates are still `localStorage`.
+
 ## A FACET LISTED IN THE KIT AND MISSING FROM ONE FUNCTION (v9.73.1, Sep 2026)
 
 Reported off `/admin/comms/lists` as `a[r.key] is not iterable`, straight after
