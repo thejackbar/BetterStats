@@ -37,6 +37,66 @@ export function FilterPillRow({ label, options, value, onChange, title, labelCla
   )
 }
 
+// The RECORDS SOURCE — a separate axis from the competition filter.
+//
+// Cricket Australia is NOT a competition, and its season totals carry no grade
+// at all, so they can say nothing about which competition (or grade type, or
+// format) a match belonged to. It therefore cannot sit inside the competition
+// picker as an "All" state — that was the whole confusion (Shoalwater Bay's
+// "Competition = All" was CA's own record, not the sum of the competitions).
+//
+//   'ca' (default)   Cricket Australia's own official season totals. Nothing a
+//                    club is used to seeing changes until they ask otherwise.
+//   'scorecard'      Everything BetterCricket holds a scorecard for, which IS
+//                    sliceable — and whose "all competitions" state genuinely
+//                    equals the sum of the listed competitions.
+export const SOURCE_CA = 'ca'
+export const SOURCE_SCORECARD = 'scorecard'
+
+export function isScorecardSource(source) {
+  return source === SOURCE_SCORECARD
+}
+
+export function RecordsSourceToggle({ source, onChange, labelClass }) {
+  const val = isScorecardSource(source) ? SOURCE_SCORECARD : SOURCE_CA
+  const opts = [
+    {
+      key: SOURCE_CA,
+      label: 'Cricket Australia',
+      title: "Cricket Australia's official season totals — the record that matches PlayCricket",
+    },
+    {
+      key: SOURCE_SCORECARD,
+      label: 'BetterCricket',
+      title: 'From the scorecards BetterCricket holds — split by competition, grade type and match type; "all" is the genuine sum of the competitions',
+    },
+  ]
+  return (
+    <div className="flex items-center gap-2">
+      <label className={labelClass || 'font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap hidden sm:block'}>
+        Records
+      </label>
+      <div className="flex items-center border pb-hairline rounded overflow-hidden">
+        {opts.map(opt => (
+          <button
+            key={opt.key}
+            onClick={() => onChange(opt.key)}
+            aria-pressed={val === opt.key}
+            title={opt.title}
+            className={`px-2.5 py-1.5 text-[10px] font-mono font-semibold tracking-wide3 transition-colors border-r pb-hairline-r last:border-r-0 ${
+              val === opt.key
+                ? 'bg-pb-accent/15 text-pb-accent'
+                : 'text-pb-faint hover:text-pb-dim hover:bg-pb-surface2'
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // The options a club's own grades justify offering. A club with no junior
 // programme is never shown a Juniors pill, which is also exactly when the
 // filter would do nothing.

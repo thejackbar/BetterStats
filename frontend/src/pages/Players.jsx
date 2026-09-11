@@ -36,8 +36,9 @@ export default function Players() {
   const {
     available: availableCategories, availableFormats, defaultCategories,
     gradeType, setGradeType, matchFormat, setMatchFormat,
-    categoriesParam, formatsParam, competitionsParam,
+    categoriesParam, formatsParam, competitionsParam, sourceParam,
     competition, setCompetition, availableCompetitions,
+    source, setSource,
   } = useGradeFilters(orgId)
 
   const [players, setPlayers] = useState([])
@@ -57,21 +58,21 @@ export default function Players() {
 
   useEffect(() => {
     if (!orgId) return
-    api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5000, finalsOnly, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam })
+    api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5000, finalsOnly, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam, source: sourceParam })
       .then(rows => {
         const map = {}
         rows.forEach(r => { map[r.player_id] = r })
         setBattingStats(map)
       })
       .catch(() => {})
-    api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5000, finalsOnly, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam })
+    api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5000, finalsOnly, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam, source: sourceParam })
       .then(rows => {
         const map = {}
         rows.forEach(r => { map[r.player_id] = r })
         setBowlingStats(map)
       })
       .catch(() => {})
-  }, [orgId, selectedSeason, selectedGrade, finalsOnly, categoriesParam, formatsParam, competitionsParam])
+  }, [orgId, selectedSeason, selectedGrade, finalsOnly, categoriesParam, formatsParam, competitionsParam, sourceParam])
 
   const filtered = useMemo(() => {
     if (!search.trim()) return players
@@ -142,6 +143,9 @@ export default function Players() {
             availableCategories={availableCategories}
             availableFormats={availableFormats}
             defaultCategories={defaultCategories}
+            source={source}
+            setSource={setSource}
+            showSourceFilter
             showCompetitionFilter
             showGradeTypeFilter
             showMatchFormatFilter

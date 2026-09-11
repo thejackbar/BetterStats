@@ -18,7 +18,7 @@ export function usePlayerStats(playerId, filters = {}) {
     // Type or Competition would build a new query and never re-run the effect,
     // leaving the old figures on screen.
   }, [playerId, filters.seasonId, filters.gradeId, filters.categories,
-      filters.formats, filters.competitions])
+      filters.formats, filters.competitions, filters.source])
 
   return { data, loading, error }
 }

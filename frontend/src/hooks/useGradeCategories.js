@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import { categoriesParam } from '../lib/gradeCategories'
+import { SOURCE_CA, isScorecardSource } from '../components/GradeFilterPills'
 
 /**
  * Which grade categories a stats page is counting, and which it can offer.
@@ -77,6 +78,12 @@ export function useGradeFilters(orgId) {
   const [gradeType, setGradeType] = useState(null)
   const [matchFormat, setMatchFormat] = useState(null)
   const [competition, setCompetition] = useState(null)
+  // The records source. Default is Cricket Australia's official record, so the
+  // opening view is exactly what the club has always seen. The sliceable
+  // filters (grade type, match type, competition) only apply once the reader
+  // switches to BetterCricket's scorecard-derived figures — which is what
+  // keeps Cricket Australia a separate axis rather than a competition state.
+  const [source, setSource] = useState(SOURCE_CA)
 
   useEffect(() => {
     if (!orgId) return
@@ -100,6 +107,19 @@ export function useGradeFilters(orgId) {
     return () => { cancelled = true }
   }, [orgId])
 
+  const sc = isScorecardSource(source)
+  // Switching back to Cricket Australia clears the slicing picks: they cannot
+  // apply to the official record, and a stale pick would otherwise silently
+  // narrow the moment the reader returned to BetterCricket.
+  const chooseSource = (s) => {
+    setSource(s)
+    if (!isScorecardSource(s)) {
+      setGradeType(null)
+      setMatchFormat(null)
+      setCompetition(null)
+    }
+  }
+
   return {
     available,
     availableFormats,
@@ -111,12 +131,16 @@ export function useGradeFilters(orgId) {
     setMatchFormat,
     competition,
     setCompetition,
-    // All three go on the wire as the same comma-separated params every stats
-    // endpoint already takes; null means "no filter", which for categories is
-    // the club's own default, for formats every format, and for competitions
-    // every competition.
-    categoriesParam: gradeType || null,
-    formatsParam: matchFormat || null,
-    competitionsParam: competition || null,
+    source,
+    setSource: chooseSource,
+    // The wire params. Cricket Australia (the default) sends NO slicing at all,
+    // so the backend returns the club's usual official figures — nothing a club
+    // is used to seeing changes on first load. BetterCricket sends
+    // source=scorecard plus any picks; with none picked, that is the genuine
+    // total across every competition.
+    categoriesParam: sc ? (gradeType || null) : null,
+    formatsParam: sc ? (matchFormat || null) : null,
+    competitionsParam: sc ? (competition || null) : null,
+    sourceParam: sc ? 'scorecard' : null,
   }
 }

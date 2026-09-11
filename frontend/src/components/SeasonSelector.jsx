@@ -2,6 +2,7 @@ import { formatSeason } from '../lib/cricketFormat'
 import { CATEGORY_LABELS, TOGGLEABLE_CATEGORIES, scopeNote } from '../lib/gradeCategories'
 import {
   FilterPillRow, competitionOptions, gradeTypeOptions, matchFormatOptions,
+  RecordsSourceToggle, isScorecardSource,
 } from './GradeFilterPills'
 
 export default function SeasonSelector({
@@ -56,7 +57,18 @@ export default function SeasonSelector({
   defaultCategories = null,
   showGradeTypeFilter = false,
   showMatchFormatFilter = false,
+  // The records SOURCE — Cricket Australia's official season totals, or
+  // BetterCricket's own scorecard-derived figures. When shown, it is a
+  // separate axis from the competition filter: the sliceable filters
+  // (competition, grade type, match type) only apply to the scorecard source,
+  // so Cricket Australia stays the unsliced official record it actually is.
+  source = 'ca',
+  setSource = () => {},
+  showSourceFilter = false,
 }) {
+  // Scorecard mode: either this screen has no source axis (so everything shows
+  // as it always did), or the reader has switched to BetterCricket's figures.
+  const sc = !showSourceFilter || isScorecardSource(source)
   // Senior is not offered as a toggle: it is the baseline every other category
   // is added to, and letting someone switch it off would mostly produce an
   // empty page. Turning a category ON adds those grades' games to the figures.
@@ -118,6 +130,15 @@ export default function SeasonSelector({
         <div className="h-5 w-px bg-pb-hairline mx-1 hidden sm:block" />
       )}
 
+      {/* Records source — its own axis, ahead of the competition filter, so
+          Cricket Australia is plainly not one of the competitions. */}
+      {showSourceFilter && (
+        <RecordsSourceToggle source={source} onChange={setSource} />
+      )}
+      {showSourceFilter && (grades.length > 0 || seasons.length > 0) && (
+        <div className="h-5 w-px bg-pb-hairline mx-1 hidden sm:block" />
+      )}
+
       {/* Grade */}
       {grades.length > 0 && (
         <div className="flex items-center gap-2">
@@ -137,7 +158,7 @@ export default function SeasonSelector({
           Hidden when the pick-one Grade Type row below is shown: the two answer
           the same question in two different ways, and a screen offering both
           just invites them to disagree. */}
-      {showCategoryFilter && !showGradeTypeFilter && toggleable.length > 0 && (
+      {sc && showCategoryFilter && !showGradeTypeFilter && toggleable.length > 0 && (
         <div className="flex items-center gap-2">
           <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap hidden sm:block">Include</label>
           <div className="flex items-center border pb-hairline rounded overflow-hidden">
@@ -173,7 +194,7 @@ export default function SeasonSelector({
           seeded one per association. It is what separates a club playing three
           associations in one season, and a side playing two competitions of
           one association in one season. */}
-      {showCompetitionFilter && compOptions.length > 0 && (
+      {sc && showCompetitionFilter && compOptions.length > 0 && (
         <FilterPillRow
           label="Competition"
           options={compOptions}
@@ -183,7 +204,7 @@ export default function SeasonSelector({
         />
       )}
 
-      {showGradeTypeFilter && (
+      {sc && showGradeTypeFilter && (
         <FilterPillRow
           label="Grade Type"
           options={typeOptions}
@@ -197,7 +218,7 @@ export default function SeasonSelector({
           grade: a 1st Grade season routinely mixes one-day and two-day games,
           so a grade-level answer would be wrong for most of them. Renders only
           for a club whose matches can actually be told apart. */}
-      {showMatchFormatFilter && (
+      {sc && showMatchFormatFilter && (
         <FilterPillRow
           label="Match Type"
           options={formatOptions}
@@ -309,6 +330,14 @@ export default function SeasonSelector({
         </div>
       )}
     </div>
+    {/* Says which records these figures are, and why the two can differ. */}
+    {showSourceFilter && (
+      <p className="text-[11px] text-pb-faint">
+        {sc
+          ? 'From the scorecards BetterCricket holds. Cricket Australia records official season totals but not which competition each match was in, so “All” here is the sum of the competitions.'
+          : 'Cricket Australia’s official season totals. Switch to BetterCricket to break them down by competition, grade type or match type.'}
+      </p>
+    )}
     {/* Says what the figures currently leave out, and where to change it. Only
         renders while something is actually excluded, so a club with only senior
         grades never reads about a filter that is doing nothing. */}

@@ -302,7 +302,7 @@ export const api = {
     const qs = params.toString()
     return request(`/players/${playerId}/formats${qs ? `?${qs}` : ''}`)
   },
-  getPlayerStats: (playerId, { seasonId, gradeId, lastNGames, startDate, endDate, categories, formats, competitions } = {}) => {
+  getPlayerStats: (playerId, { seasonId, gradeId, lastNGames, startDate, endDate, categories, formats, competitions, source } = {}) => {
     const params = new URLSearchParams()
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
@@ -312,6 +312,9 @@ export const api = {
     if (categories) params.set('categories', categories)
     if (formats) params.set('formats', formats)
     if (competitions) params.set('competitions', competitions)
+    // Records source: 'ca' (default) or 'scorecard'. Separate axis from the
+    // competition filter — Cricket Australia is not a competition.
+    if (source) params.set('source', source)
     return request(`/players/${playerId}/stats?${params}`)
   },
   // `scope` is the same grade-type / match-type selection the career stats call
@@ -2891,7 +2894,7 @@ export const api = {
   },
 
   // Leaderboard
-  battingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, minRuns, minRateInnings, finalsOnly, captainOnly, gender, overseas, categories, formats, competitions } = {}) => {
+  battingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, minRuns, minRateInnings, finalsOnly, captainOnly, gender, overseas, categories, formats, competitions, source } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
@@ -2907,9 +2910,10 @@ export const api = {
     if (categories) params.set('categories', categories)
     if (formats) params.set('formats', formats)
     if (competitions) params.set('competitions', competitions)
+    if (source) params.set('source', source)
     return request(`/leaderboard/batting?${params}`)
   },
-  bowlingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, minOvers, minWickets, minRateSpells, finalsOnly, captainOnly, gender, overseas, categories, formats, competitions } = {}) => {
+  bowlingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, minOvers, minWickets, minRateSpells, finalsOnly, captainOnly, gender, overseas, categories, formats, competitions, source } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
@@ -2926,9 +2930,10 @@ export const api = {
     if (categories) params.set('categories', categories)
     if (formats) params.set('formats', formats)
     if (competitions) params.set('competitions', competitions)
+    if (source) params.set('source', source)
     return request(`/leaderboard/bowling?${params}`)
   },
-  fieldingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, finalsOnly, captainOnly, gender, overseas, categories, formats, competitions } = {}) => {
+  fieldingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, finalsOnly, captainOnly, gender, overseas, categories, formats, competitions, source } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
@@ -2942,9 +2947,10 @@ export const api = {
     if (categories) params.set('categories', categories)
     if (formats) params.set('formats', formats)
     if (competitions) params.set('competitions', competitions)
+    if (source) params.set('source', source)
     return request(`/leaderboard/fielding?${params}`)
   },
-  sirsLeaderboard: (orgId, type, { seasonId, gradeName, finalsOnly, captainOnly, limit, gender, overseas, categories, formats, competitions } = {}) => {
+  sirsLeaderboard: (orgId, type, { seasonId, gradeName, finalsOnly, captainOnly, limit, gender, overseas, categories, formats, competitions, source } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
     if (seasonId) params.set('season_id', seasonId)
     if (gradeName) params.set('grade_name', gradeName)
@@ -2956,6 +2962,7 @@ export const api = {
     if (categories) params.set('categories', categories)
     if (formats) params.set('formats', formats)
     if (competitions) params.set('competitions', competitions)
+    if (source) params.set('source', source)
     return request(`/leaderboard/sirs/${type}?${params}`)
   },
   getPlayerCaptainStats: (playerId, scope) => request(`/players/${playerId}/captain-stats${scopeQuery(scope)}`),

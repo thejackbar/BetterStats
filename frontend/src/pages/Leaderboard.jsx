@@ -433,8 +433,9 @@ export default function Leaderboard() {
   const {
     available: availableCategories, availableFormats, defaultCategories,
     gradeType, setGradeType, matchFormat, setMatchFormat,
-    categoriesParam, formatsParam, competitionsParam,
+    categoriesParam, formatsParam, competitionsParam, sourceParam,
     competition, setCompetition, availableCompetitions,
+    source, setSource,
   } = useGradeFilters(orgId)
 
   const [mainTab, setMainTab] = useState('batting')
@@ -501,29 +502,29 @@ export default function Leaderboard() {
     if (!orgId) return
     setLoading(true)
     Promise.allSettled([
-      api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, sortBy: battingSort, limit: 30, minRuns: effectiveMinRuns, minRateInnings: effectiveMinRateInnings, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam }),
-      api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, sortBy: bowlingSort, limit: 30, minOvers: effectiveMinOvers, minWickets: effectiveMinWickets, minRateSpells: effectiveMinRateSpells, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam }),
-      api.fieldingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, sortBy: fieldingSort, limit: 30, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam }),
+      api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, sortBy: battingSort, limit: 30, minRuns: effectiveMinRuns, minRateInnings: effectiveMinRateInnings, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam, source: sourceParam }),
+      api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, sortBy: bowlingSort, limit: 30, minOvers: effectiveMinOvers, minWickets: effectiveMinWickets, minRateSpells: effectiveMinRateSpells, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam, source: sourceParam }),
+      api.fieldingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, sortBy: fieldingSort, limit: 30, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam, source: sourceParam }),
     ]).then(([b, bw, f]) => {
       if (b.status === 'fulfilled') setBattingRows(b.value)
       if (bw.status === 'fulfilled') setBowlingRows(bw.value)
       if (f.status === 'fulfilled') setFieldingRows(f.value)
     }).finally(() => setLoading(false))
-  }, [orgId, selectedSeason, selectedGradeName, battingSort, bowlingSort, fieldingSort, effectiveMinRuns, effectiveMinOvers, effectiveMinWickets, effectiveMinRateInnings, effectiveMinRateSpells, finalsOnly, captainOnly, gender, overseas, categoriesParam, formatsParam, competitionsParam])
+  }, [orgId, selectedSeason, selectedGradeName, battingSort, bowlingSort, fieldingSort, effectiveMinRuns, effectiveMinOvers, effectiveMinWickets, effectiveMinRateInnings, effectiveMinRateSpells, finalsOnly, captainOnly, gender, overseas, categoriesParam, formatsParam, competitionsParam, sourceParam])
 
   useEffect(() => {
     if (!orgId || mainTab !== 'sirs') return
     setSirsLoading(true)
     Promise.allSettled([
-      api.sirsLeaderboard(orgId, 'batting', { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam }),
-      api.sirsLeaderboard(orgId, 'bowling-innings', { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam }),
-      api.sirsLeaderboard(orgId, 'bowling-match', { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam }),
+      api.sirsLeaderboard(orgId, 'batting', { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam, source: sourceParam }),
+      api.sirsLeaderboard(orgId, 'bowling-innings', { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam, source: sourceParam }),
+      api.sirsLeaderboard(orgId, 'bowling-match', { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam, source: sourceParam }),
     ]).then(([sc, sbi, sbm]) => {
       if (sc.status === 'fulfilled') setCenturiesRows(sc.value)
       if (sbi.status === 'fulfilled') setBowlingInningsRows(sbi.value)
       if (sbm.status === 'fulfilled') setBowlingMatchRows(sbm.value)
     }).finally(() => setSirsLoading(false))
-  }, [orgId, selectedSeason, selectedGradeName, finalsOnly, captainOnly, gender, overseas, categoriesParam, formatsParam, mainTab])
+  }, [orgId, selectedSeason, selectedGradeName, finalsOnly, captainOnly, gender, overseas, categoriesParam, formatsParam, competitionsParam, sourceParam, mainTab])
 
   if (locked) return <ClubPinGate slug={clubSlug} lockInfo={locked} unlock={unlock} requestAccess={requestAccess} />
   if (inactive) return <ClubInactive slug={clubSlug} />
@@ -570,6 +571,9 @@ export default function Leaderboard() {
             availableCategories={availableCategories}
             availableFormats={availableFormats}
             defaultCategories={defaultCategories}
+            source={source}
+            setSource={setSource}
+            showSourceFilter
             showCompetitionFilter
             showGradeTypeFilter
             showMatchFormatFilter

@@ -9,14 +9,14 @@ import { usePageMeta } from '../hooks/usePageMeta'
 import { getSubcategoriesFromDefs, getAchievementsFromDefs, resolveAwardLabel } from '../lib/achievementOptions'
 import { usePlayerStats } from '../hooks/usePlayerStats'
 import { scopeNote, autoShownNote } from '../lib/gradeCategories'
-import { GradeFilterPills } from '../components/GradeFilterPills'
+import { GradeFilterPills, RecordsSourceToggle, isScorecardSource } from '../components/GradeFilterPills'
 import { useGradeFilters } from '../hooks/useGradeCategories'
 import { CATEGORY_ICON_SRC, MILESTONE_ICON_SRC, ThiingIcon, thiings } from '../assets/thiings'
 import {
   AnimatedNum, Sparkline, Label, Card, Btn, Kpi,
   ResultPill, PageHeader, PbSpinner, TabBar,
 } from '../lib/presskit'
-import { GradeTotalNote } from '../components/MatchCoverage'
+import { GradeTotalNote, MatchCoverageNote } from '../components/MatchCoverage'
 import { FilterReachDot, FilterReachNote } from '../components/FilterReach'
 import '../styles/honour-badge.css'
 import { countryFlagUrl } from '../data/countries'
@@ -1098,6 +1098,11 @@ function CompetitionsSection({ playerId, seasonId, matchCoverage = null }) {
   // figures visibly fail to add up and the reader is owed the reason at the
   // point they'd otherwise start doing the arithmetic themselves.
   const noScorecard = matchCoverage?.without_scorecard || 0
+  // The other direction: we hold MORE scorecards than Cricket Australia's
+  // season totals count, so the competitions add up to more than the official
+  // record. This is the reported Shoalwater case, and the footnote used to fire
+  // only the other way, leaving it unexplained.
+  const extraScorecards = matchCoverage?.extra_scorecards || 0
   const careerTotal = matchCoverage?.career_matches || 0
   if (!rows.length) {
     return (
@@ -1187,11 +1192,11 @@ function CompetitionsSection({ playerId, seasonId, matchCoverage = null }) {
           rows with no grade and so no competition. Without this the tables
           would simply not add up to the career total and nothing would say
           why. */}
-      {(unattributed > 0 || noScorecard > 0) && (
+      {(unattributed > 0 || noScorecard > 0 || extraScorecards > 0) && (
         <div className="text-[11px] text-pb-faint space-y-1">
           <p>
-            These {total} {total === 1 ? 'match' : 'matches'} are the ones we can place
-            in a competition{careerTotal ? `, out of ${careerTotal} in the career total` : ''}.
+            Across all competitions these come to {total} {total === 1 ? 'match' : 'matches'}
+            {careerTotal ? `, against ${careerTotal} in Cricket Australia's official season totals` : ''}.
           </p>
           {unattributed > 0 && (
             <p>
@@ -1203,9 +1208,15 @@ function CompetitionsSection({ playerId, seasonId, matchCoverage = null }) {
           {noScorecard > 0 && (
             <p>
               Another {noScorecard} {noScorecard === 1 ? 'match is' : 'matches are'} counted
-              in the career total from Cricket Australia's season figures, which we hold no
-              scorecard for. There is nothing to file {noScorecard === 1 ? 'it' : 'them'}{' '}
-              under.
+              in Cricket Australia's official total, which we hold no scorecard for. There is
+              nothing to file {noScorecard === 1 ? 'it' : 'them'} under.
+            </p>
+          )}
+          {extraScorecards > 0 && (
+            <p>
+              We hold {extraScorecards} more {extraScorecards === 1 ? 'scorecard' : 'scorecards'} than
+              Cricket Australia's season totals count, so the competitions add up to more than the
+              official record — not a miscount. Both figures are real.
             </p>
           )}
         </div>
@@ -2790,16 +2801,20 @@ export default function PlayerProfile() {
   // hook no-ops on null and the pills simply aren't drawn until then.
   const [profileOrgId, setProfileOrgId] = useState(null)
   const {
-    available: availableCategories, availableFormats,
+    available: availableCategories, availableFormats, availableCompetitions,
     gradeType, setGradeType, matchFormat, setMatchFormat,
+    competition, setCompetition,
     categoriesParam: catParam, formatsParam: fmtParam,
-    competitionsParam: compParam,
+    competitionsParam: compParam, sourceParam,
+    source, setSource,
   } = useGradeFilters(profileOrgId)
+  const scMode = isScorecardSource(source)
   const { data, loading, error } = usePlayerStats(playerId, {
     seasonId,
     categories: catParam,
     formats: fmtParam,
     competitions: compParam,
+    source: sourceParam,
   })
   const gradeScope = data?.grade_scope
   // Why the career total and the per-competition figures differ — read by the
@@ -3123,15 +3138,33 @@ export default function PlayerProfile() {
                 <option key={s.id} value={s.id}>{formatSeason(s)}</option>
               ))}
             </select>
-            <GradeFilterPills
-              gradeType={gradeType}
-              setGradeType={setGradeType}
-              matchFormat={matchFormat}
-              setMatchFormat={setMatchFormat}
-              availableCategories={availableCategories.length ? availableCategories : (gradeScope?.available || [])}
-              availableFormats={availableFormats}
-            />
+            {/* Records source — Cricket Australia's official record, or
+                BetterCricket's scorecard-derived figures. Its own axis, so the
+                grade-type / match-type pills (scorecard-only) show only in
+                BetterCricket mode. */}
+            <RecordsSourceToggle source={source} onChange={setSource} />
+            {scMode && (
+              <GradeFilterPills
+                gradeType={gradeType}
+                setGradeType={setGradeType}
+                matchFormat={matchFormat}
+                setMatchFormat={setMatchFormat}
+                competition={competition}
+                setCompetition={setCompetition}
+                availableCompetitions={availableCompetitions.length ? availableCompetitions : (gradeScope?.available_competitions || [])}
+                availableCategories={availableCategories.length ? availableCategories : (gradeScope?.available || [])}
+                availableFormats={availableFormats}
+              />
+            )}
           </div>
+        )}
+        {/* Say which record these figures are, up front. */}
+        {seasons.length > 0 && (
+          <p className="text-[11px] text-pb-faint mb-5 -mt-3">
+            {scMode
+              ? 'From the scorecards BetterCricket holds. Cricket Australia records official season totals but not which competition each match was in, so these can differ from the official record above.'
+              : 'Cricket Australia’s official season totals — the record that matches PlayCricket. Switch to BetterCricket for the scorecard-derived figures, split by competition.'}
+          </p>
         )}
         {(autoShownNote(gradeScope) || scopeNote(gradeScope)) && (
           <p className="text-[11px] text-pb-faint mb-5 -mt-3">
@@ -3263,6 +3296,11 @@ export default function PlayerProfile() {
                 )}
               </div>
             </div>
+            {/* Says both figures out loud — Cricket Australia's official total
+                and what BetterCricket holds a scorecard for — so nobody has to
+                discover for themselves that the per-competition figures don't
+                sum to the header. Drawn only when the two genuinely differ. */}
+            <MatchCoverageNote coverage={matchCoverage} filtered={scMode} />
           </div>
         )}
 
