@@ -1083,8 +1083,9 @@ export default function Records() {
   const {
     available: availableCategories, availableFormats, defaultCategories,
     gradeType, setGradeType, matchFormat, setMatchFormat,
-    categoriesParam, formatsParam, competitionsParam,
+    categoriesParam, formatsParam, competitionsParam, sourceParam,
     competition, setCompetition, availableCompetitions,
+    source, setSource,
   } = useGradeFilters(orgId)
   const [tab, setTab] = useState('batting')
   const [records, setRecords] = useState(null)
@@ -1107,11 +1108,11 @@ export default function Records() {
   useEffect(() => {
     if (!orgId) return
     setLoading(true)
-    api.getRecords(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly, gender, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam })
+    api.getRecords(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly, gender, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam, source: sourceParam })
       .then(setRecords)
       .catch(() => setRecords(null))
       .finally(() => setLoading(false))
-  }, [orgId, selectedSeason, selectedGradeName, finalsOnly, captainOnly, gender, categoriesParam, formatsParam, competitionsParam])
+  }, [orgId, selectedSeason, selectedGradeName, finalsOnly, captainOnly, gender, categoriesParam, formatsParam, competitionsParam, sourceParam])
 
   useEffect(() => {
     if (!orgId || tab !== 'club') return
@@ -1119,13 +1120,13 @@ export default function Records() {
     api.getClubRecords(orgId, {
       seasonId: selectedSeason, gradeName: selectedGradeName,
       finalsOnly, categories: categoriesParam, formats: formatsParam,
-      competitions: competitionsParam,
+      competitions: competitionsParam, source: sourceParam,
     })
       .then(setClubRecords)
       .catch(() => setClubRecords(null))
       .finally(() => setClubLoadingRecs(false))
   }, [orgId, tab, selectedSeason, selectedGradeName, finalsOnly, categoriesParam,
-      formatsParam, competitionsParam])
+      formatsParam, competitionsParam, sourceParam])
 
   useEffect(() => {
     if (!orgId) return
@@ -1175,6 +1176,9 @@ export default function Records() {
             availableCategories={availableCategories}
             availableFormats={availableFormats}
             defaultCategories={defaultCategories}
+            source={source}
+            setSource={setSource}
+            showSourceFilter
             showCompetitionFilter
             showGradeTypeFilter
             showMatchFormatFilter

@@ -74,9 +74,13 @@ async function clickBtn(row, text) {
   return false
 }
 
-// A leaderboard call carries the slicing params we care about; the summary /
-// seasons / grade-categories calls do not, so filter to the ones under test.
-const isDataCall = (c) => /leaderboard\/(batting|bowling|fielding|sirs)/.test(c.path)
+// The source-bearing aggregate endpoints: the leaderboards, the record boards
+// and the club summary. A per-match list (/games) is deliberately NOT here —
+// source narrows nothing on it, so it never carries the param.
+const isDataCall = (c) =>
+  /leaderboard\/(batting|bowling|fielding|sirs)/.test(c.path)
+  || /^\/records\//.test(c.path)
+  || /\/summary$/.test(c.path)
 const hasSource = (c) => 'source' in c.params
 const hasComp = (c) => 'competitions' in c.params
 
@@ -117,10 +121,14 @@ async function open(path, { width = 1440 } = {}) {
   return { page, ctx, errors, calls }
 }
 
-// -------------------------------------------------- the two list surfaces
+// -------------------------------------------------- the aggregate surfaces
+// Every page that shows a career/season aggregate beside competition pills, so
+// "Competition = All" was Cricket Australia's own total rather than the sum.
 for (const [name, path] of [
   ['Players', '/shoalwater-bay/players'],
   ['Leaderboard', '/shoalwater-bay/leaderboard'],
+  ['Records', '/shoalwater-bay/records'],
+  ['Dashboard', '/shoalwater-bay'],
 ]) {
   console.log(`\n${name}`)
   const { page, ctx, errors, calls } = await open(path)
@@ -196,6 +204,23 @@ for (const [name, path] of [
     JSON.stringify(backCalls.map(c => [c.params.source, c.params.competitions]).slice(0, 3)))
 
   ck(`${name}: no page errors`, errors.length === 0, errors.join(' | '))
+  await ctx.close()
+}
+
+// ------------------------------------ the games list is deliberately spared
+// A per-match list: "Competition = All" already IS the sum of the per-
+// competition lists, and source (force_scorecard) narrows nothing on it (the
+// games router documents this). A toggle here would be a control that can only
+// ever answer one thing — the exact no-op the repo rules against — so it must
+// NOT be drawn, while the ordinary competition filter still is.
+{
+  console.log('\nThe games list (no source toggle by design)')
+  const { page, ctx, errors } = await open('/shoalwater-bay/games')
+  ck('Games draws NO Records source toggle',
+    await page.locator('label', { hasText: /^Records$/ }).count() === 0)
+  ck('but the ordinary Competition filter is still there',
+    await page.locator('label', { hasText: /^Competition$/ }).count() > 0)
+  ck('Games: no page errors', errors.length === 0, errors.join(' | '))
   await ctx.close()
 }
 

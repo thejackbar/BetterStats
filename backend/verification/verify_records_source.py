@@ -51,6 +51,8 @@ try:
     from app.services import match_coverage
     from app.services.competition_stats import player_competition_breakdown
     from app.routers.players import get_player_stats
+    from app.routers.records import get_records, get_club_records
+    from app.routers.organisations import get_org_summary
     # The flag that separates CA from the competition filter.
     assert hasattr(grade_scope, "wants_scorecards")
     HAVE = True
@@ -123,6 +125,12 @@ async def build_schema() -> None:
                 alias_season_id UUID NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
                 undone_at TIMESTAMPTZ)
         """))
+        # migration 233 is a raw ALTER that never reached the ORM model, so
+        # create_all does not make it — and the club-records route (now
+        # exercised here) reads games.innings_totals through v_effective_games,
+        # so the column must exist BEFORE the views are created below.
+        await conn.execute(text(
+            "ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
         json_cols = (await conn.execute(text(
             "SELECT table_name, column_name FROM information_schema.columns "
             "WHERE table_schema = 'public' AND data_type = 'json'"))).all()
@@ -192,6 +200,37 @@ def _row(rows, pid):
         if str(r.get("player_id")) == str(pid) or str(r.get("id")) == str(pid):
             return r
     return None
+
+
+async def records_body(session, **kw):
+    """The SHIPPED /records/{org} route body, every FastAPI default filled in."""
+    params = dict(
+        season_id=None, grade_id=None, grade_name=None, finals_only=False,
+        captain_only=False, gender=None, categories=None, formats=None,
+        competitions=None, source=None, debug_timing=False,
+    )
+    params.update(kw)
+    return await get_records(org_id=str(ORG), db=session, viewer=None, **params)
+
+
+async def club_records_body(session, **kw):
+    """The SHIPPED /records/{org}/club route body."""
+    params = dict(
+        season_id=None, grade_id=None, grade_name=None, finals_only=False,
+        categories=None, formats=None, competitions=None, source=None,
+    )
+    params.update(kw)
+    return await get_club_records(org_id=str(ORG), db=session, **params)
+
+
+async def summary_body(session, **kw):
+    """The SHIPPED /organisations/{org}/summary route body (the Dashboard)."""
+    params = dict(
+        season_id=None, grade_id=None, categories=None, formats=None,
+        competitions=None, source=None,
+    )
+    params.update(kw)
+    return await get_org_summary(org_id=str(ORG), db=session, viewer=None, **params)
 
 
 async def main() -> None:
@@ -288,6 +327,46 @@ async def main() -> None:
               p_sc["grade_scope"]["source"] == "scorecard"
               and p_ca["grade_scope"]["source"] == "ca",
               f"{p_sc['grade_scope']['source']} / {p_ca['grade_scope']['source']}")
+
+        print("\n-- the Records page route bodies honour source --")
+        rec_ca = await records_body(session, source="ca")
+        rec_sc = await records_body(session, source="scorecard")
+        check("records reports the source it resolved (ca / scorecard)",
+              rec_ca["grade_scope"]["source"] == "ca"
+              and rec_sc["grade_scope"]["source"] == "scorecard",
+              f"{rec_ca['grade_scope']['source']} / {rec_sc['grade_scope']['source']}")
+        rr_ca = _row(rec_ca["batting"]["top_career_runs"], RITCHIE)
+        rr_sc = _row(rec_sc["batting"]["top_career_runs"], RITCHIE)
+        check("records source=ca board reads CA's own runs/matches (100/10)",
+              rr_ca and rr_ca["runs"] == CA_RUNS and rr_ca["matches"] == CA_MATCHES,
+              f"got {rr_ca and (rr_ca.get('runs'), rr_ca.get('matches'))}")
+        check("records source=scorecard board reads the scorecards held (120/12)",
+              rr_sc and rr_sc["runs"] == HELD_RUNS and rr_sc["matches"] == HELD_GAMES,
+              f"got {rr_sc and (rr_sc.get('runs'), rr_sc.get('matches'))}")
+
+        # The CLUB record boards are team totals from per-game scorecards, so
+        # with no competition picked BOTH sources see every game (ca is
+        # inactive, scorecard's clause is empty) — the toggle's job there is to
+        # reveal the competition filter. Assert the source reaches the route and
+        # the boards are source-invariant absent a competition.
+        club_ca = await club_records_body(session, source="ca")
+        club_sc = await club_records_body(session, source="scorecard")
+        check("club records route accepts source and reports it",
+              club_ca["grade_scope"]["source"] == "ca"
+              and club_sc["grade_scope"]["source"] == "scorecard")
+
+        print("\n-- the Dashboard summary route body honours source --")
+        sum_default = await summary_body(session)
+        sum_ca = await summary_body(session, source="ca")
+        sum_sc = await summary_body(session, source="scorecard")
+        check("summary default is CA (nothing shrinks on first load)",
+              sum_default["total_runs"] == CA_RUNS, f"got {sum_default['total_runs']}")
+        check("summary source=ca is CA's official total (100)",
+              sum_ca["total_runs"] == CA_RUNS and sum_ca["scope"]["source"] == "ca",
+              f"got {sum_ca['total_runs']}")
+        check("summary source=scorecard is the scorecard sum (120)",
+              sum_sc["total_runs"] == HELD_RUNS and sum_sc["scope"]["source"] == "scorecard",
+              f"got {sum_sc['total_runs']}")
 
 
 if __name__ == "__main__":

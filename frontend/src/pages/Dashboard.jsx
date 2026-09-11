@@ -131,8 +131,9 @@ export default function Dashboard() {
   const {
     gradeType, setGradeType, matchFormat, setMatchFormat,
     available: availableCategories, availableFormats, defaultCategories,
-    categoriesParam, formatsParam, competitionsParam,
+    categoriesParam, formatsParam, competitionsParam, sourceParam,
     competition, setCompetition, availableCompetitions,
+    source, setSource,
   } = gradeFilters
   const { games, loading: gamesLoading } = useRecentGames(orgId, {
     seasonId: selectedSeason,
@@ -164,7 +165,10 @@ export default function Dashboard() {
   useEffect(() => {
     if (!orgId) return
     setStatsLoading(true)
-    const scope = { categories: categoriesParam, formats: formatsParam, competitions: competitionsParam }
+    // The leaderboards and the summary are aggregate figures, so the records
+    // source applies to them. The recent-games list above is per-match — a
+    // source axis narrows nothing there — so it deliberately gets no source.
+    const scope = { categories: categoriesParam, formats: formatsParam, competitions: competitionsParam, source: sourceParam }
     Promise.allSettled([
       api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5, finalsOnly, ...scope }),
       api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5, finalsOnly, ...scope }),
@@ -176,7 +180,7 @@ export default function Dashboard() {
         if (s.status === 'fulfilled') setSummary(s.value)
       })
       .finally(() => setStatsLoading(false))
-  }, [orgId, selectedSeason, selectedGrade, finalsOnly, categoriesParam, formatsParam, competitionsParam])
+  }, [orgId, selectedSeason, selectedGrade, finalsOnly, categoriesParam, formatsParam, competitionsParam, sourceParam])
 
   useEffect(() => {
     if (!orgId) return
@@ -262,6 +266,9 @@ export default function Dashboard() {
             availableCategories={availableCategories}
             availableFormats={availableFormats}
             defaultCategories={defaultCategories}
+            source={source}
+            setSource={setSource}
+            showSourceFilter
             showCompetitionFilter
             showGradeTypeFilter
             showMatchFormatFilter

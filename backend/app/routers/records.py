@@ -196,6 +196,17 @@ async def get_records(
             "association from the next. Omitted applies no competition filter."
         ),
     ),
+    source: str | None = Query(
+        None,
+        description=(
+            "Records source: 'ca' (default) for Cricket Australia's own season "
+            "totals, or 'scorecard' for BetterCricket's scorecard-derived "
+            "figures. Cricket Australia is NOT a competition and holds no "
+            "per-competition data, so it is a separate axis from the "
+            "competition filter. 'scorecard' with no competition picked is the "
+            "genuine sum of every competition the club plays."
+        ),
+    ),
     debug_timing: bool = Query(
         False,
         description=(
@@ -243,7 +254,7 @@ async def get_records(
 
     scope = await _timed(
         "resolve_scope",
-        grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions),
+        grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions, source=source),
     )
     if grade_id or grade_name:
         scope = scope.formats_only()
@@ -1830,6 +1841,14 @@ async def get_club_records(
             "category axis — a grade in no competition drops out."
         ),
     ),
+    source: str | None = Query(
+        None,
+        description=(
+            "Records source: 'ca' (default) for Cricket Australia's own season "
+            "totals, or 'scorecard' for BetterCricket's scorecard-derived "
+            "figures — a separate axis from the competition filter."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """The CLUB's own records — team totals, margins, streaks, seasons.
@@ -1845,7 +1864,7 @@ async def get_club_records(
     total has neither.
     """
     scope = await grade_scope.resolve_scope(
-        db, org_id, categories, formats=formats, competitions=competitions)
+        db, org_id, categories, formats=formats, competitions=competitions, source=source)
     if grade_id or grade_name:
         # An explicitly picked grade beats the CATEGORY default and keeps the
         # FORMAT half — the same rule get_records applies above.

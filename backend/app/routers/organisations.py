@@ -442,12 +442,23 @@ async def get_org_summary(
             "association from the next. Omitted applies no competition filter."
         ),
     ),
+    source: str | None = Query(
+        None,
+        description=(
+            "Records source: 'ca' (default) for Cricket Australia's own season "
+            "totals, or 'scorecard' for BetterCricket's scorecard-derived "
+            "figures. Cricket Australia is NOT a competition and holds no "
+            "per-competition data, so it is a separate axis from the "
+            "competition filter. 'scorecard' with no competition picked is the "
+            "genuine sum of every competition the club plays."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
     # W/L/D/total_games/win_rate are computed from our own synced games inside
     # get_club_summary (DB-first) — the old PlayHQ Partner override is retired.
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions)
+    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions, source=source)
     summary = await get_club_summary(db, org_id, season_id, grade_id, scope=scope)
     summary["scope"] = scope.as_meta()
     # The club-level totals stay whole (a hidden player's runs still happened

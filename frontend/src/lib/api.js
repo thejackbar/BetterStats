@@ -257,13 +257,16 @@ export const api = {
   getSeasonGrades: (orgId, seasonId) => request(`/organisations/${orgId}/seasons/${seasonId}/grades`),
   triggerSync: (orgId) => request(`/organisations/${orgId}/sync`, { method: 'POST' }),
   getSyncLogs: (orgId) => request(`/organisations/${orgId}/sync-logs`),
-  getOrgSummary: (orgId, { seasonId, gradeId, categories, formats, competitions } = {}) => {
+  getOrgSummary: (orgId, { seasonId, gradeId, categories, formats, competitions, source } = {}) => {
     const params = new URLSearchParams()
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
     if (categories) params.set('categories', categories)
     if (formats) params.set('formats', formats)
     if (competitions) params.set('competitions', competitions)
+    // Records source: 'ca' (default) or 'scorecard'. Separate axis from the
+    // competition filter — see GradeFilterPills.RecordsSourceToggle.
+    if (source) params.set('source', source)
     return request(`/organisations/${orgId}/summary?${params}`)
   },
   getUpcomingMilestones: (orgId, limit = 20) =>
@@ -2855,7 +2858,7 @@ export const api = {
   // honours a club has already recorded against its players.
   getPremierships: (orgId) => request(`/honours/${orgId}/premierships`),
   getOfficeBearers: (orgId) => request(`/honours/${orgId}/office-bearers`),
-  getRecords: (orgId, { seasonId, gradeId, gradeName, finalsOnly, captainOnly, gender, categories, formats, competitions } = {}) => {
+  getRecords: (orgId, { seasonId, gradeId, gradeName, finalsOnly, captainOnly, gender, categories, formats, competitions, source } = {}) => {
     const params = new URLSearchParams()
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
@@ -2866,12 +2869,13 @@ export const api = {
     if (categories) params.set('categories', categories)
     if (formats) params.set('formats', formats)
     if (competitions) params.set('competitions', competitions)
+    if (source) params.set('source', source)
     return request(`/records/${orgId}?${params}`)
   },
   // The CLUB's own record book — team totals, margins, streaks, seasons.
   // No `gender` or `captainOnly`: both are attributes of a person, and a team
   // total has neither.
-  getClubRecords: (orgId, { seasonId, gradeId, gradeName, finalsOnly, categories, formats, competitions } = {}) => {
+  getClubRecords: (orgId, { seasonId, gradeId, gradeName, finalsOnly, categories, formats, competitions, source } = {}) => {
     const params = new URLSearchParams()
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
@@ -2880,6 +2884,7 @@ export const api = {
     if (categories) params.set('categories', categories)
     if (formats) params.set('formats', formats)
     if (competitions) params.set('competitions', competitions)
+    if (source) params.set('source', source)
     return request(`/records/${orgId}/club?${params}`)
   },
   getRecordsGrades: (orgId, seasonId) => {
