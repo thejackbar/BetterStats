@@ -25,7 +25,8 @@ from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import (
-    CommsContact, EmailSuppression, Player, PlayerSeasonStats, PlayerAvailability, Season,
+    CommsContact, CommsSegment, CommsSegmentMember, EmailSuppression, Player,
+    PlayerSeasonStats, PlayerAvailability, Season,
     MarketingClub, Organisation, CommsRecipient, EmailEvent, ClubOnboardingRequest,
     ClubMembership, CrmDeal, CrmPipeline, CrmStage,
 )
@@ -845,13 +846,57 @@ def _has_active_rules(definition: dict) -> bool:
     return False
 
 
-async def resolve_contacts(session: AsyncSession, club, definition: dict,
-                           *, static_ids=None) -> list[CommsContact]:
-    """The UNION of the rule matches and the frozen hand-picked (static) set.
+def _exclude_segment_ids(definition: dict) -> list:
+    """The ids in ``definition.exclude_segments`` — the OTHER saved segments whose
+    audience is subtracted from this one. Junk / non-uuid values are dropped, so a
+    definition from a browser or a hand-made request can never raise here."""
+    out = []
+    for raw in (definition or {}).get("exclude_segments") or []:
+        try:
+            out.append(uuid.UUID(str(raw)))
+        except (ValueError, TypeError, AttributeError):
+            continue
+    return out
 
-    Both sides pass sendable_where, so a suppressed hand-pick can never leak. A
-    pure-static segment (no active rules) resolves to its static set alone; a
-    definition with neither rules nor members resolves to nobody."""
+
+async def _segment_member_ids(session: AsyncSession, segment_id) -> list:
+    return list((await session.execute(
+        select(CommsSegmentMember.contact_id).where(CommsSegmentMember.segment_id == segment_id)
+    )).scalars().all())
+
+
+async def _collect_excluded_ids(session: AsyncSession, club, excl_ids, seen) -> set:
+    """The union of the audiences of every excluded segment, as a set of contact
+    ids, resolved RECURSIVELY (an excluded segment carries its own rules, static
+    set AND exclusions) with a cycle guard: an id already being resolved in this
+    chain contributes nothing rather than looping. A missing id, or one belonging
+    to another club, is skipped — an exclusion that no longer resolves simply
+    stops subtracting anyone."""
+    out: set = set()
+    for sid in excl_ids:
+        if sid in seen:
+            continue
+        seg = await session.get(CommsSegment, sid)
+        if seg is None or seg.organisation_id != club.id:
+            continue
+        static = await _segment_member_ids(session, seg.id)
+        rows = await resolve_contacts(session, club, seg.definition or {},
+                                      static_ids=static, _seen=seen | {sid})
+        out |= {c.id for c in rows}
+    return out
+
+
+async def resolve_contacts(session: AsyncSession, club, definition: dict,
+                           *, static_ids=None, _seen=frozenset()) -> list[CommsContact]:
+    """The audience: the UNION of the rule matches and the frozen hand-picked
+    (static) set, MINUS the audiences of any excluded segments.
+
+    Both sides of the union pass sendable_where, so a suppressed hand-pick can
+    never leak. A pure-static segment (no active rules) resolves to its static
+    set alone; a definition with neither rules nor members resolves to everyone
+    sendable (the legacy widen) — so a segment with no rules, no static set and a
+    couple of exclusions is "everyone MINUS those segments", which is exactly the
+    difference the exclusions are for."""
     # Run the rule side when there ARE rules, OR when there is no static set at
     # all — a definition with no rules and no members is a pure-RULE segment
     # whose empty rule list means "everyone sendable" (the legacy contract). Only
@@ -869,12 +914,26 @@ async def resolve_contacts(session: AsyncSession, club, definition: dict,
               .order_by(CommsContact.email))
         for c in (await session.execute(sq)).scalars().all():
             by_email.setdefault(c.email, c)
+
+    excl = [e for e in _exclude_segment_ids(definition) if e not in _seen]
+    if excl and by_email:
+        excluded = await _collect_excluded_ids(session, club, excl, _seen)
+        if excluded:
+            by_email = {e: c for e, c in by_email.items() if c.id not in excluded}
     return sorted(by_email.values(), key=lambda c: (c.email or ""))
 
 
-async def count(session: AsyncSession, club, definition: dict, *, static_ids=None) -> int:
-    """The size of the UNION, counted distinctly. Contacts are unique per
-    (org, email), so a distinct id count is the contact count."""
+async def count(session: AsyncSession, club, definition: dict, *, static_ids=None,
+                _seen=frozenset()) -> int:
+    """The size of the audience, counted distinctly. Contacts are unique per
+    (org, email), so a distinct id count is the contact count.
+
+    Exclusions are a Python set subtraction, so a definition that carries any is
+    counted through resolve_contacts; the common no-exclusion case keeps the fast
+    SQL union path."""
+    if _exclude_segment_ids(definition):
+        return len(await resolve_contacts(session, club, definition,
+                                          static_ids=static_ids, _seen=_seen))
     subs = []
     if _has_active_rules(definition) or not static_ids:
         q = await build_query(session, club, definition)

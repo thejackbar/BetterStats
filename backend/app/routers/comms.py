@@ -815,7 +815,8 @@ async def _resolve_audience(db: AsyncSession, club: Organisation, audience: dict
         static = list((await db.execute(
             select(CommsSegmentMember.contact_id).where(CommsSegmentMember.segment_id == seg.id)
         )).scalars().all())
-        return await comms_segments.resolve_contacts(db, club, seg.definition, static_ids=static)
+        return await comms_segments.resolve_contacts(db, club, seg.definition, static_ids=static,
+                                                     _seen=frozenset({seg.id}))
     if atype == "saved_list":
         try:
             lid = uuid.UUID(str((audience or {}).get("list_id")))
@@ -832,7 +833,8 @@ async def _resolve_audience(db: AsyncSession, club: Organisation, audience: dict
             static = list((await db.execute(
                 select(CommsSegmentMember.contact_id).where(CommsSegmentMember.segment_id == seg.id)
             )).scalars().all())
-            return await comms_segments.resolve_contacts(db, club, seg.definition, static_ids=static)
+            return await comms_segments.resolve_contacts(db, club, seg.definition, static_ids=static,
+                                                         _seen=frozenset({seg.id}))
         member_ids = select(CommsListMember.contact_id).where(CommsListMember.list_id == lid)
         base = select(CommsContact).where(
             *comms_segments.sendable_where(club.id), CommsContact.id.in_(member_ids))
@@ -2517,6 +2519,32 @@ async def delete_segment(
     return {"status": "ok"}
 
 
+@router.post("/segments/{segment_id}/duplicate")
+async def duplicate_segment(
+    segment_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Copy a segment whole — its definition (rules AND exclusions) AND its frozen
+    static member set. Done server-side because the members live in
+    comms_segment_members, which a client-side "create then re-add" would have to
+    walk one contact at a time; a duplicate of a hand-picked all-contacts segment
+    is the base a difference (…minus these segments) is built on."""
+    src = await _segment_or_404(db, club, segment_id)
+    name = await _unique_segment_name(db, club.id, f"{src.name} (copy)")
+    copy = CommsSegment(organisation_id=club.id, name=name,
+                        definition=src.definition or {"match": "all", "rules": []},
+                        source=src.source, origin=src.origin)
+    db.add(copy)
+    await db.flush()
+    members = await _segment_static_ids(db, src.id)
+    db.add_all([CommsSegmentMember(segment_id=copy.id, contact_id=cid) for cid in members])
+    await db.commit()
+    await db.refresh(copy)
+    return _segment_out(copy, member_count=len(members))
+
+
 @router.post("/segments/preview")
 async def preview_segment(
     data: SegmentIn,
@@ -2593,7 +2621,8 @@ async def export_segment_csv(
     who fits today."""
     seg = await _segment_or_404(db, club, segment_id)
     static = await _segment_static_ids(db, seg.id)
-    contacts = await comms_segments.resolve_contacts(db, club, seg.definition or {}, static_ids=static)
+    contacts = await comms_segments.resolve_contacts(db, club, seg.definition or {}, static_ids=static,
+                                                     _seen=frozenset({seg.id}))
     mc_map = await _mc_map(db, contacts)
     buf = io.StringIO()
     w = csv.writer(buf)
@@ -2773,12 +2802,15 @@ async def segment_size(
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
-    """The UNION size (rules ∪ static set) of a saved segment — the live figure
-    the rail shows. Server-side so it reads the stored members the caller doesn't
-    hold."""
+    """The audience size ((rules ∪ static) − excluded segments) of a saved
+    segment — the live figure the rail shows. Server-side so it reads the stored
+    members the caller doesn't hold. The segment's own id seeds the cycle guard,
+    so a segment that excludes one that (directly or transitively) excludes it
+    back cannot loop."""
     seg = await _segment_or_404(db, club, segment_id)
     static = await _segment_static_ids(db, seg.id)
-    n = await comms_segments.count(db, club, seg.definition or {}, static_ids=static)
+    n = await comms_segments.count(db, club, seg.definition or {}, static_ids=static,
+                                   _seen=frozenset({seg.id}))
     return {"count": n}
 
 

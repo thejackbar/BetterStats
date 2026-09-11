@@ -99,20 +99,82 @@ export function SegmentListPane({ segments, sizes, selId, onSelect, emptyText, c
 }
 
 // The name field and the actions that sit beside it.
-export function SegmentTitleRow({ draft, setDraft, placeholder, blurb, busy, onDuplicate, onEmail, total, actions }) {
+//
+// Save and Delete live up here, on the title line beside the kind badge, the
+// Duplicate button and the "Email these N now" jump-off — the whole record's
+// controls in one place at the top of the pane, rather than the primary action
+// being stranded at the foot of a scroll. Save is the one primary; Email is a
+// secondary route out, so it reads as a plain button beside the rest.
+export function SegmentTitleRow({
+  draft, setDraft, placeholder, blurb, busy, total, actions,
+  onSave, saveLabel, onDelete, deleteLabel = 'Delete', onDuplicate, onEmail,
+}) {
   return (
     <RecordTitleRow
       name={draft.name} onName={v => setDraft(d => ({ ...d, name: v }))}
       placeholder={placeholder} blurb={blurb}
       actions={<>
         {actions}
+        {onSave && (
+          <Button size="sm" variant="primary" onClick={onSave} disabled={busy}>{saveLabel}</Button>
+        )}
+        {onDelete && draft.id && (
+          <Button size="sm" variant="danger" onClick={onDelete} disabled={busy}>{deleteLabel}</Button>
+        )}
         {draft.id && <Button size="sm" onClick={onDuplicate} disabled={busy}>Duplicate</Button>}
-        <Button size="sm" variant="primary" onClick={onEmail} disabled={!draft.id || !total}
+        <Button size="sm" onClick={onEmail} disabled={!draft.id || !total}
           title={draft.id ? '' : 'Save the segment first'}>
           Email these {total} now
         </Button>
       </>}
     />
+  )
+}
+
+// The EXCLUDE section: pick other saved segments whose whole audience is
+// subtracted from this one. The audience becomes
+//   (rule matches ∪ static set) − (union of the excluded segments' audiences),
+// so "everyone MINUS the Females segment MINUS the engaged-clubs segment" is a
+// segment with no rules, no static set, and those two excluded. A segment can
+// never exclude itself (it is left out of the list), and the server guards a
+// cycle (A excludes B excludes A) at resolve time.
+export function SegmentExcludePicker({ segments, currentId, excludes, onChange, sizes = {} }) {
+  const others = (segments || []).filter(s => s.id !== currentId)
+  const set = new Set(excludes || [])
+  const toggle = (id) => {
+    const next = new Set(set)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    onChange([...next])
+  }
+  if (others.length === 0) {
+    return <Caption>Save another segment first — then you can subtract its audience here.</Caption>
+  }
+  return (
+    <div>
+      <Caption>Subtract the audience of these segments</Caption>
+      <div className="mt-2 space-y-1">
+        {others.map(s => {
+          const on = set.has(s.id)
+          const n = (s.definition?.rules || []).length
+          const m = s.member_count || 0
+          const kind = n && m ? 'rule + picked' : n ? 'rule' : m ? 'hand-picked' : 'empty'
+          return (
+            <label key={s.id}
+              className="flex items-center gap-3 py-1.5 px-1 rounded-md cursor-pointer hover:bg-pb-surface2">
+              <input type="checkbox" className="accent-pb-accent shrink-0" checked={on} onChange={() => toggle(s.id)} />
+              <span className="text-sm text-pb-text truncate flex-1">{s.name}</span>
+              <span className="text-pb-faintest text-[11px] shrink-0">{kind}</span>
+              {sizes[s.id] != null && <span className="text-pb-faint text-[11px] shrink-0 tabular-nums">{sizes[s.id]}</span>}
+            </label>
+          )
+        })}
+      </div>
+      {set.size > 0 && (
+        <div className="text-pb-faintest text-[11px] mt-2">
+          Anyone in {set.size === 1 ? 'that segment' : `those ${set.size} segments`} is removed from this one.
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -174,7 +236,7 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
       s.name.toLowerCase().includes(wanted))
     if (hit) { setSelId(hit.id); return }
     const preset = presets[wanted]
-    if (preset) { setSelId(null); setDraft({ id: null, name: preset.name, rules: preset.rules }) }
+    if (preset) { setSelId(null); setDraft({ id: null, name: preset.name, rules: preset.rules, excludes: [] }) }
   }, [wanted, segments])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const selected = useMemo(() => segments?.find(s => s.id === selId) || null, [segments, selId])
@@ -206,11 +268,17 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
       id: selected.id,
       name: selected.name,
       rules: selected.definition?.rules?.length ? selected.definition.rules : [newRule(defs)],
+      // The OTHER segments whose audience this one subtracts.
+      excludes: selected.definition?.exclude_segments || [],
     })
   }, [selected?.id])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const definition = useMemo(
-    () => ({ match: 'all', rules: (draft?.rules || []).filter(r => String(r.value ?? '').trim() !== '') }),
+    () => ({
+      match: 'all',
+      rules: (draft?.rules || []).filter(r => String(r.value ?? '').trim() !== ''),
+      exclude_segments: draft?.excludes || [],
+    }),
     [draft],
   )
   const defKey = JSON.stringify(definition)
@@ -252,11 +320,15 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
     } catch (e) { setError(e.message) } finally { setBusy(false) }
   }
 
+  // Copy the segment whole — server-side, so its frozen static members come with
+  // it (a client-side create carries only the definition). A duplicated
+  // all-contacts static segment is the base a "…minus these segments" difference
+  // is built on.
   const duplicate = async () => {
-    if (!draft) return
+    if (!draft?.id) return
     setBusy(true)
     try {
-      const copy = await api.commsCreateSegment(`${draft.name} (copy)`, definition)
+      const copy = await api.commsDuplicateSegment(draft.id)
       await load(); setSelId(copy.id)
     } catch (e) { setError(e.message) } finally { setBusy(false) }
   }
@@ -270,7 +342,7 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
 
   const startNew = () => {
     setSelId(null)
-    setDraft({ id: null, name: '', rules: [newRule(defs)] })
+    setDraft({ id: null, name: '', rules: [newRule(defs)], excludes: [] })
     setError('')
   }
 

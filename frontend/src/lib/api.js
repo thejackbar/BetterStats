@@ -3543,6 +3543,8 @@ export const api = {
   commsUpdateSegment: (id, name, definition) =>
     request(`/club-admin/comms/segments/${id}`, { method: 'PUT', body: JSON.stringify({ name, definition }) }),
   commsDeleteSegment: (id) => request(`/club-admin/comms/segments/${id}`, { method: 'DELETE' }),
+  // Copy a segment whole — its rules, its exclusions AND its frozen static set.
+  commsDuplicateSegment: (id) => request(`/club-admin/comms/segments/${id}/duplicate`, { method: 'POST' }),
   // preview/resolve take the draft STATIC member set too, so the live count is
   // the UNION of (rule matches) ∪ (hand-picked contacts).
   commsPreviewSegment: (definition, staticIds = null) =>

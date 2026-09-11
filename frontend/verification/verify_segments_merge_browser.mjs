@@ -74,6 +74,18 @@ const routes = (page, calls) => page.route('**/api/**', async (route) => {
   if ((m = url.match(/\/comms\/segments\/([^/]+)\/members/)) && req.method() === 'GET') {
     return json(MEMBERS_BY_SEG[m[1]] || [])
   }
+  if ((m = url.match(/\/comms\/segments\/([^/]+)\/duplicate/)) && req.method() === 'POST') {
+    return json({ id: 'copy1', name: 'Both seg (copy)', source: 'manual', origin: null,
+      member_count: 1, definition: SEGMENTS[2].definition })
+  }
+  // Update echoes the sent definition back, so a saved segment's exclusions
+  // round-trip through the wire the way the real router persists them.
+  if ((m = url.match(/\/comms\/segments\/([^/]+)$/)) && req.method() === 'PUT') {
+    let def = { match: 'all', rules: [] }
+    try { def = JSON.parse(req.postData()).definition || def } catch { /* keep default */ }
+    const base = SEGMENTS.find(s => s.id === m[1]) || { id: m[1], name: 'X', source: 'manual', origin: null, member_count: 0 }
+    return json({ ...base, definition: def })
+  }
   if (/\/comms\/segments\/resolve/.test(url) || /\/comms\/segments\/preview/.test(url)) {
     return json({ count: 1, contacts: [CONTACT], reachable: 1, other_route: 0, clubs: 0 })
   }
@@ -169,6 +181,73 @@ const run = async () => {
     })
     check('resolve sends the union (static_member_ids + rules) on the wire', withStatic,
       JSON.stringify(resolveCalls.map(c => c.body).slice(-2)))
+
+    // ── Phase 2: Save/Delete in the title row, and the exclude picker ──────
+    const body2 = await page.textContent('body')
+    check('the Exclude other segments section is labelled', body2.includes('Exclude other segments'))
+
+    // Save and Delete were moved out of a footer SaveRow and up into the title
+    // row — both sit ABOVE the "Active rules (live)" heading now.
+    const geo = await page.evaluate(() => {
+      const txt = el => (el.textContent || '').trim()
+      const btns = [...document.querySelectorAll('button')]
+      const save = btns.find(b => txt(b) === 'Save changes')
+      const del = btns.find(b => txt(b) === 'Delete')
+      const head = [...document.querySelectorAll('*')].find(
+        e => e.children.length === 0 && txt(e) === 'Active rules (live)')
+      return {
+        saveTop: save ? save.getBoundingClientRect().top : null,
+        delTop: del ? del.getBoundingClientRect().top : null,
+        activeTop: head ? head.getBoundingClientRect().top : null,
+      }
+    })
+    check('a Save button is present', geo.saveTop != null)
+    check('a Delete button is present', geo.delTop != null)
+    check('Save sits above the Active rules section (moved to the title row)',
+      geo.saveTop != null && geo.activeTop != null && geo.saveTop < geo.activeTop, JSON.stringify(geo))
+    check('Delete sits above the Active rules section (moved to the title row)',
+      geo.delTop != null && geo.activeTop != null && geo.delTop < geo.activeTop, JSON.stringify(geo))
+
+    // The exclude picker lists the OTHER saved segments and never the one being
+    // edited (a segment can't exclude itself).
+    const exNames = await page.evaluate(() => {
+      const kinds = new Set(['rule + picked', 'rule', 'hand-picked', 'empty'])
+      const out = []
+      for (const lab of document.querySelectorAll('label')) {
+        if (!lab.querySelector('input[type="checkbox"]')) continue
+        const spans = [...lab.querySelectorAll('span')].map(s => (s.textContent || '').trim())
+        if (spans.some(t => kinds.has(t))) out.push(spans[0])
+      }
+      return out
+    })
+    check('the exclude picker lists the other segments',
+      exNames.includes('Rule seg') && exNames.includes('Static seg'), JSON.stringify(exNames))
+    check('the exclude picker omits the segment being edited',
+      !exNames.includes('Both seg'), JSON.stringify(exNames))
+
+    // Ticking an exclude sends exclude_segments on the resolve wire. Guarded so
+    // a build with no exclude picker (the control) reports the miss rather than
+    // hanging on a locator that never resolves.
+    const exCb = page.locator('label:has-text("Rule seg") input[type="checkbox"]')
+    if (await exCb.count()) await exCb.first().click().catch(() => {})
+    await page.waitForTimeout(900)
+    const exResolve = calls.filter(c => /\/comms\/segments\/resolve/.test(c.url) && c.body).some(c => {
+      try { return (JSON.parse(c.body).definition?.exclude_segments || []).includes('s_rule') } catch { return false }
+    })
+    check('ticking an exclude sends exclude_segments on the resolve wire', exResolve)
+
+    // Save from the title row updates the segment, carrying the exclusions.
+    const saveBtn = page.locator('button:has-text("Save changes")')
+    if (await saveBtn.count()) await saveBtn.first().click().catch(() => {})
+    await page.waitForTimeout(700)
+    const putWithExcl = calls.filter(c => c.method === 'PUT' && /\/comms\/segments\/s_both$/.test(c.url) && c.body).some(c => {
+      try { return (JSON.parse(c.body).definition?.exclude_segments || []).includes('s_rule') } catch { return false }
+    })
+    check('Save (in the title row) sends a PUT carrying the exclusions', putWithExcl)
+
+    // Reselect Both seg for the field-scope checks below (Save reset the draft).
+    await page.click('text=Both seg')
+    await page.waitForTimeout(700)
 
     // Club scope: the field select offers club fields, never directory ones.
     const opts = await fieldOptions(page)

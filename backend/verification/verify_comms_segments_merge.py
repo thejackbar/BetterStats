@@ -461,6 +461,150 @@ async def section_producer(engine, Session):
               "CommsSegmentMember(" in src and "CommsList(" not in src)
 
 
+# ── Section 5: excluding other segments' audiences, and duplicate ─────────────
+async def section_exclusions(engine, Session):
+    print("\n── excluding other segments' audiences, and duplicate ─────────")
+    await build_schema(engine)
+    from app.routers import comms as comms_router
+
+    org_id = uuid.uuid4()
+    A, B, C, D = uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    async with Session() as db:
+        db.add(Organisation(id=org_id, name="Club", slug="club-ex"))
+        await db.flush()
+        # Two "females", one "engaged", one plain — the user's worked example in
+        # miniature: everyone MINUS the Females segment MINUS the engaged segment.
+        db.add_all([
+            CommsContact(id=A, organisation_id=org_id, email="a@x.com", source="member", tags=["female"]),
+            CommsContact(id=B, organisation_id=org_id, email="b@x.com", source="member", tags=["female"]),
+            CommsContact(id=C, organisation_id=org_id, email="c@x.com", source="member", tags=["engaged"]),
+            CommsContact(id=D, organisation_id=org_id, email="d@x.com", source="member"),
+        ])
+        await db.flush()
+
+        seg_f = CommsSegment(id=uuid.uuid4(), organisation_id=org_id, name="Females",
+                             definition={"match": "all", "rules": [{"field": "tag", "op": "eq", "value": "female"}]})
+        seg_e = CommsSegment(id=uuid.uuid4(), organisation_id=org_id, name="Engaged",
+                             definition={"match": "all", "rules": [{"field": "tag", "op": "eq", "value": "engaged"}]})
+        # "All contacts", a pure-static roll call of everyone (Segment 1).
+        seg_all = CommsSegment(id=uuid.uuid4(), organisation_id=org_id, name="All contacts",
+                               definition={"match": "all", "rules": []})
+        db.add_all([seg_f, seg_e, seg_all])
+        await db.flush()
+        db.add_all([CommsSegmentMember(segment_id=seg_all.id, contact_id=c) for c in (A, B, C, D)])
+        await db.commit()
+        club = await db.get(Organisation, org_id)
+
+        async def emails(defn, static=None, seen=frozenset()):
+            rows = await comms_segments.resolve_contacts(db, club, defn, static_ids=static, _seen=seen)
+            return {c.email for c in rows}
+
+        # The excluded segments each resolve to their own audience first.
+        check("the Females segment resolves to its two contacts",
+              await emails(seg_f.definition) == {"a@x.com", "b@x.com"})
+        check("the Engaged segment resolves to its one contact",
+              await emails(seg_e.definition) == {"c@x.com"})
+
+        # A static-all base MINUS Females MINUS Engaged = the plain contact alone.
+        diff_def = {"match": "all", "rules": [], "exclude_segments": [str(seg_f.id), str(seg_e.id)]}
+        got = await emails(diff_def, static=[A, B, C, D])
+        check("static-everyone minus Females minus Engaged leaves only the plain contact",
+              got == {"d@x.com"}, str(sorted(got)))
+
+        # The same result from a pure-RULE everyone base (empty rules, no static),
+        # which is what "duplicate the all-contacts base then exclude" resolves to
+        # when the base is a rule rather than a roll call.
+        got2 = await emails({"match": "all", "rules": [], "exclude_segments": [str(seg_f.id), str(seg_e.id)]})
+        check("rule-everyone minus Females minus Engaged also leaves only the plain contact",
+              got2 == {"d@x.com"}, str(sorted(got2)))
+
+        # Excluding just one of the two subtracts only that segment's audience.
+        one = await emails({"match": "all", "rules": [], "exclude_segments": [str(seg_f.id)]}, static=[A, B, C, D])
+        check("excluding only Females leaves the engaged and the plain contact",
+              one == {"c@x.com", "d@x.com"}, str(sorted(one)))
+
+        # count() takes the exclusion path and agrees with resolve.
+        n = await comms_segments.count(db, club, diff_def, static_ids=[A, B, C, D])
+        check("count agrees with the excluding resolve", n == 1, str(n))
+
+        # Control: DROP the exclusions and the base is everyone again — this is
+        # what the previous commit (no exclusion support) resolved to.
+        base = await emails({"match": "all", "rules": []}, static=[A, B, C, D])
+        check("control — without exclusions the base is all four contacts",
+              base == {"a@x.com", "b@x.com", "c@x.com", "d@x.com"}, str(sorted(base)))
+
+        # A junk id in exclude_segments is dropped, never raises.
+        junk = await emails({"match": "all", "rules": [], "exclude_segments": ["not-a-uuid", str(seg_f.id)]},
+                            static=[A, B, C, D])
+        check("a junk exclusion id is ignored; the valid one still subtracts",
+              junk == {"c@x.com", "d@x.com"}, str(sorted(junk)))
+
+        # An exclusion pointing at another club's segment subtracts nobody.
+        other = Organisation(id=uuid.uuid4(), name="Other", slug="other-ex")
+        db.add(other)
+        await db.flush()
+        oseg = CommsSegment(id=uuid.uuid4(), organisation_id=other.id, name="Theirs",
+                            definition={"match": "all", "rules": []})
+        db.add(oseg)
+        await db.commit()
+        club = await db.get(Organisation, org_id)
+        foreign = await comms_segments.resolve_contacts(
+            db, club, {"match": "all", "rules": [], "exclude_segments": [str(oseg.id)]}, static_ids=[A, B, C, D])
+        check("excluding another club's segment subtracts nobody",
+              {c.email for c in foreign} == {"a@x.com", "b@x.com", "c@x.com", "d@x.com"},
+              str(sorted(c.email for c in foreign)))
+
+        # CYCLE GUARD: X excludes Y, Y excludes X. Resolving X terminates.
+        x = CommsSegment(id=uuid.uuid4(), organisation_id=org_id, name="X",
+                         definition={"match": "all", "rules": []})
+        y = CommsSegment(id=uuid.uuid4(), organisation_id=org_id, name="Y",
+                         definition={"match": "all", "rules": []})
+        db.add_all([x, y])
+        await db.flush()
+        db.add_all([CommsSegmentMember(segment_id=x.id, contact_id=A),
+                    CommsSegmentMember(segment_id=y.id, contact_id=B)])
+        x.definition = {"match": "all", "rules": [], "exclude_segments": [str(y.id)]}
+        y.definition = {"match": "all", "rules": [], "exclude_segments": [str(x.id)]}
+        await db.commit()
+        club = await db.get(Organisation, org_id)
+        # X = {A} minus Y's audience; Y = {B} minus X's audience. The guard stops
+        # the recursion, so X resolves to {A} without hanging.
+        cyc = await comms_segments.resolve_contacts(
+            db, club, x.definition, static_ids=[A], _seen=frozenset({x.id}))
+        check("a mutual-exclusion cycle terminates and resolves to the base",
+              {c.email for c in cyc} == {"a@x.com"}, str(sorted(c.email for c in cyc)))
+
+        # DUPLICATE copies the definition (rules AND exclusions) AND the static set.
+        src = CommsSegment(id=uuid.uuid4(), organisation_id=org_id, name="Source",
+                           definition={"match": "all", "rules": [{"field": "tag", "op": "eq", "value": "female"}],
+                                       "exclude_segments": [str(seg_e.id)]}, source="manual")
+        db.add(src)
+        await db.flush()
+        db.add_all([CommsSegmentMember(segment_id=src.id, contact_id=A),
+                    CommsSegmentMember(segment_id=src.id, contact_id=B)])
+        await db.commit()
+        club = await db.get(Organisation, org_id)
+
+        copy_out = await comms_router.duplicate_segment(str(src.id), _=None, club=club, db=db)
+        check("the duplicate is named with a (copy) suffix",
+              copy_out["name"].startswith("Source (copy)"), copy_out["name"])
+        check("the duplicate carries the source's rules",
+              copy_out["definition"].get("rules") == [{"field": "tag", "op": "eq", "value": "female"}],
+              str(copy_out["definition"].get("rules")))
+        check("the duplicate carries the source's exclusions",
+              copy_out["definition"].get("exclude_segments") == [str(seg_e.id)],
+              str(copy_out["definition"].get("exclude_segments")))
+        check("the duplicate copied both static members", copy_out.get("member_count") == 2,
+              str(copy_out.get("member_count")))
+        copy_mem = (await db.execute(select(CommsSegmentMember).where(
+            CommsSegmentMember.segment_id == uuid.UUID(copy_out["id"])))).scalars().all()
+        check("the duplicate's members are real rows, not just a reported count", len(copy_mem) == 2, str(len(copy_mem)))
+        # The copy is a distinct segment — the source is untouched.
+        src_mem = (await db.execute(select(CommsSegmentMember).where(
+            CommsSegmentMember.segment_id == src.id))).scalars().all()
+        check("the source keeps its own members after duplication", len(src_mem) == 2, str(len(src_mem)))
+
+
 async def main() -> int:
     engine = create_async_engine(DB_URL)
     Session = async_sessionmaker(engine, expire_on_commit=False)
@@ -469,6 +613,7 @@ async def main() -> int:
     await section_member_fields(engine, Session)
     section_matcher_unit()
     await section_producer(engine, Session)
+    await section_exclusions(engine, Session)
     await engine.dispose()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     return 1 if FAIL else 0

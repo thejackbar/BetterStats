@@ -6,8 +6,11 @@ import {
   TableWrap, TableHead, TableRow, Cell,
 } from '../../../components/admin/ui'
 import { CLUB_FIELD_DEFS } from '../bettercomms/segmentFields'
-import { CrudPanes, DetailPane, SaveRow } from './crudShell'
-import { useSegments, RuleBuilder, SegmentListPane, SegmentTitleRow, CountBar, reachability, segmentKind } from './segmentEngine'
+import { CrudPanes, DetailPane } from './crudShell'
+import {
+  useSegments, RuleBuilder, SegmentListPane, SegmentTitleRow, SegmentExcludePicker,
+  CountBar, reachability, segmentKind,
+} from './segmentEngine'
 import StaticMembers from './StaticMembers'
 import ScreenIntro, { useScreenIntro, INTROS } from './intro'
 import { money } from './data'
@@ -92,6 +95,9 @@ export default function ClubhouseSegments() {
                 return (
                   <SegmentTitleRow
                     draft={s.draft} setDraft={s.setDraft} busy={s.busy} total={s.total}
+                    onSave={() => s.save('Segment')}
+                    saveLabel={s.busy ? 'Saving…' : s.draft.id ? 'Save changes' : 'Save segment'}
+                    onDelete={() => s.remove(`Delete "${s.draft.name}"? Emails already sent to it are unaffected.`)}
                     onDuplicate={s.duplicate} onEmail={s.emailThese}
                     placeholder="Name this segment"
                     blurb="A live rule, a hand-picked set, or both — the audience is everyone in either."
@@ -99,6 +105,8 @@ export default function ClubhouseSegments() {
                   />
                 )
               })()}
+
+              {s.error && <Note toneKey="block" className="mt-4">{s.error}</Note>}
 
               <SectionHeading className="mt-6 mb-2.5">Active rules (live)</SectionHeading>
               <RuleBuilder defs={CLUB_FIELD_DEFS} rules={s.draft.rules} opts={s.opts}
@@ -117,15 +125,14 @@ export default function ClubhouseSegments() {
                 </Note>
               )}
 
-              <CountBar counting={s.counting} total={s.total} reachable={s.reachable} otherRoute={s.otherRoute} />
-
-              <SaveRow
-                onSave={() => s.save('Segment')} busy={s.busy} error={s.error}
-                saveLabel={s.busy ? 'Saving…' : s.draft.id ? 'Save changes' : 'Save segment'}
-                onDelete={s.draft.id
-                  ? () => s.remove(`Delete "${s.draft.name}"? Emails already sent to it are unaffected.`)
-                  : null}
+              <SectionHeading className="mt-8 mb-2.5">Exclude other segments</SectionHeading>
+              <SegmentExcludePicker
+                segments={s.segments} currentId={s.draft.id} sizes={s.sizes}
+                excludes={s.draft.excludes || []}
+                onChange={ex => s.setDraft(d => ({ ...d, excludes: ex }))}
               />
+
+              <CountBar counting={s.counting} total={s.total} reachable={s.reachable} otherRoute={s.otherRoute} />
 
               <SectionHeading className="mt-8 mb-2.5">Who this is, right now</SectionHeading>
               <TableWrap>
