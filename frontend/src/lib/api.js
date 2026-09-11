@@ -2031,6 +2031,9 @@ export const api = {
     request(`/club-admin/super/onboarding-requests/${id}`, { method: 'DELETE' }),
   // Meta Ads HQ dashboard (super admin) — BetterCricket's own campaign spend.
   metaAdsSummary: () => request('/club-admin/meta-ads/summary'),
+  // Live validity + expiry of both Meta tokens (ads_read + CAPI). Drives the
+  // HQ page's expiry chip and the sidebar's attention badge.
+  metaAdsTokenHealth: () => request('/club-admin/meta-ads/token-health'),
   metaAdsHistory: (days = 14) => request(`/club-admin/meta-ads/history?days=${days}`),
   metaAdsAdHistory: (adId, days = 30) => request(`/club-admin/meta-ads/ad-history/${adId}?days=${days}`),
   metaAdsRefresh: () => request('/club-admin/meta-ads/refresh', { method: 'POST' }),

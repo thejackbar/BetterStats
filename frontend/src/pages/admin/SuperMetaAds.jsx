@@ -204,6 +204,34 @@ function Stat({ label, value, hint }) {
   )
 }
 
+// One Meta token's health, as a small header chip. Green while it has comfortable
+// runway (or never expires), amber inside the warn window, red once expired or
+// invalid. A deliberately-unset token reads as a muted "off" — it's a state, not
+// an alarm. This is the CAPI token's ONLY surface: its failure is otherwise
+// silent (server-side conversions just stop).
+function TokenChip({ label, t, warnWithin = 14 }) {
+  if (!t) return null
+  let tone = 'text-pb-faint border-pb-hairline'
+  let text = 'checking…'
+  if (!t.configured) { tone = 'text-pb-faintest border-pb-hairline'; text = 'off (not set)' }
+  else if (!t.checked) { text = 'status unknown' }
+  else if (t.valid === false) { tone = 'text-red-300 border-red-500/40 bg-red-500/10'; text = 'EXPIRED / invalid' }
+  else if (t.never) { tone = 'text-pb-dim border-pb-hairline'; text = 'valid · never expires' }
+  else if (t.days_left == null) { tone = 'text-pb-dim border-pb-hairline'; text = 'valid' }
+  else if (t.days_left <= warnWithin) {
+    tone = 'text-amber-300 border-amber-500/40 bg-amber-500/10'
+    text = `expires in ${t.days_left} day${t.days_left === 1 ? '' : 's'}`
+  } else { tone = 'text-emerald-300/90 border-emerald-500/30'; text = `expires in ${t.days_left} days` }
+  return (
+    <span
+      title={t.error || (t.expires_at ? `Expires ${t.expires_at}` : '')}
+      className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wide2 ${tone}`}
+    >
+      <span className="text-pb-faintest">{label}</span> {text}
+    </span>
+  )
+}
+
 function InsightRow({ insight }) {
   const style = SEVERITY_STYLE[insight.severity] || SEVERITY_STYLE.info
   return (
@@ -777,6 +805,7 @@ function CreativeTable({ creatives }) {
 
 export default function SuperMetaAds() {
   const [summary, setSummary] = useState(null)
+  const [tokenHealth, setTokenHealth] = useState(null)
   const [history, setHistory] = useState([])
   const [historyLoading, setHistoryLoading] = useState(true)
   const [loading, setLoading] = useState(true)
@@ -826,6 +855,7 @@ export default function SuperMetaAds() {
     api.metaAdsCampaigns()
       .then((d) => { setCampaigns(d.campaigns || []); setActiveCampaignId(d.active_campaign_id || '') })
       .catch(() => {})
+    api.metaAdsTokenHealth().then(setTokenHealth).catch(() => {})
   }, [])
 
   useEffect(() => { load() }, [load])
@@ -886,6 +916,9 @@ export default function SuperMetaAds() {
         const h = await api.metaAdsHistory(trendDays)
         setHistory(h.days || [])
       }
+      // The pull just exercised the token, and /refresh busts the server-side
+      // health cache — re-read it so a just-replaced token flips the chip.
+      api.metaAdsTokenHealth().then(setTokenHealth).catch(() => {})
     } catch (e) {
       setError(e.message || 'Refresh failed.')
     } finally {
@@ -1053,6 +1086,12 @@ export default function SuperMetaAds() {
             </>
           )}
         </div>
+        {tokenHealth && (
+          <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+            <TokenChip label="Ads token" t={tokenHealth.ads} warnWithin={tokenHealth.warn_within_days} />
+            <TokenChip label="CAPI token" t={tokenHealth.capi} warnWithin={tokenHealth.warn_within_days} />
+          </div>
+        )}
       </div>
       <div className="flex items-center gap-3">
         <span className="font-mono text-[10px] text-pb-faint">

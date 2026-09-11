@@ -399,6 +399,116 @@ def _num(v: Any) -> float:
         return 0.0
 
 
+# ─── Token health ──────────────────────────────────────────────────────────
+# The Aug→Sep 2026 outage was a silent one: the ads_read token expired and the
+# HQ page kept showing the last good snapshot for ten days before anyone opened
+# it and saw the banner. And the CAPI token — which quietly stops sending
+# server-side conversions when it lapses — has NO surface at all. So both tokens
+# are checked proactively (a countdown, not a post-mortem) via Meta's own
+# debug_token, and "expiring within TOKEN_WARN_WITHIN_DAYS" lights the sidebar
+# badge so it's caught before the data goes stale. The real fix for recurrence
+# is a never-expiring system-user token; this makes the 60-day one visible.
+TOKEN_WARN_WITHIN_DAYS = 14
+
+# debug_token is a live Meta call and the badge fetch fires on every super-admin
+# page mount, so cache it briefly — an expiry date doesn't change minute to
+# minute. Busted after a successful /refresh so a just-fixed token confirms
+# straight away rather than waiting out the TTL.
+_TOKEN_HEALTH_TTL = timedelta(minutes=30)
+_token_health_cache: dict[str, Any] = {"at": None, "value": None}
+
+
+def bust_token_health_cache() -> None:
+    _token_health_cache["at"] = None
+    _token_health_cache["value"] = None
+
+
+async def _debug_token(token: str) -> dict:
+    """Ask Meta about one token, using the token itself as the caller (no app
+    secret needed). Returns validity + expiry. Best-effort — never raises; a
+    check that couldn't run reports ``checked=False``. An expired token used as
+    its own caller comes back as a top-level 190 error, which reads here as
+    ``valid=False`` (the actionable signal), so we don't get an expiry date for
+    one that's already dead — that's fine, "it's dead" is the whole message."""
+    out: dict[str, Any] = {
+        "configured": bool(token), "checked": False, "valid": None,
+        "expires_at": None, "days_left": None, "never": False,
+        "type": None, "scopes": [], "error": None,
+    }
+    if not token:
+        return out
+    url = f"https://graph.facebook.com/{settings.meta_api_version}/debug_token"
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            resp = await client.get(url, params={"input_token": token, "access_token": token})
+        body = resp.json() if resp.content else {}
+    except (httpx.HTTPError, ValueError) as e:
+        out["error"] = f"Could not reach Meta: {e}"
+        return out
+
+    out["checked"] = True
+    err = body.get("error") if isinstance(body, dict) else None
+    if resp.status_code != 200 or err:
+        out["valid"] = False
+        out["error"] = (err or {}).get("message") or f"HTTP {resp.status_code}"
+        return out
+
+    data = (body.get("data") or {}) if isinstance(body, dict) else {}
+    out["valid"] = bool(data.get("is_valid"))
+    out["type"] = data.get("type")
+    out["scopes"] = data.get("scopes") or []
+    if not out["valid"]:
+        out["error"] = (data.get("error") or {}).get("message") or "Token reports not valid."
+    exp = data.get("expires_at")
+    if exp == 0:
+        out["never"] = True  # 0 = never expires (a properly-issued system-user token)
+    elif exp:
+        dt = datetime.fromtimestamp(exp, tz=timezone.utc)
+        out["expires_at"] = dt.isoformat()
+        out["days_left"] = (dt - datetime.now(timezone.utc)).days
+    return out
+
+
+def _token_needs_attention(t: dict) -> bool:
+    """A configured token that is failing, or expiring within the warn window.
+    A blank token is NOT attention — an unset CAPI token is a deliberate
+    "server-side events off" state, and an unset ads token has its own big
+    empty-state on the page already."""
+    if not t["configured"] or not t["checked"]:
+        return False
+    if t["valid"] is False:
+        return True
+    return t["days_left"] is not None and t["days_left"] <= TOKEN_WARN_WITHIN_DAYS
+
+
+async def token_health(*, force: bool = False) -> dict:
+    """Health of both Meta tokens — the ads_read dashboard token
+    (settings.meta_access_token) and the CAPI write token
+    (settings.meta_capi_access_token). ``attention`` is the one boolean the
+    sidebar badge and the daily scheduler check read: True when either
+    configured token is invalid/expired or within the warn window. Cached for
+    _TOKEN_HEALTH_TTL. Never raises."""
+    now = datetime.now(timezone.utc)
+    cached = _token_health_cache["value"]
+    if not force and cached is not None and _token_health_cache["at"] \
+            and now - _token_health_cache["at"] < _TOKEN_HEALTH_TTL:
+        return cached
+
+    ads = await _debug_token(settings.meta_access_token)
+    ads["purpose"] = "ads_read"
+    capi = await _debug_token(settings.meta_capi_access_token)
+    capi["purpose"] = "capi"
+    result = {
+        "ads": ads,
+        "capi": capi,
+        "attention": _token_needs_attention(ads) or _token_needs_attention(capi),
+        "warn_within_days": TOKEN_WARN_WITHIN_DAYS,
+    }
+    _token_health_cache["at"] = now
+    _token_health_cache["value"] = result
+    return result
+
+
 def _action_value(actions: list | None, action_types: set[str]) -> float:
     if not actions:
         return 0.0
