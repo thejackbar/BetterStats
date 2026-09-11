@@ -1520,6 +1520,27 @@ def _current_campaign_utm_contents() -> set[str]:
 _META_ATTRIBUTION_SOURCES = {"fb", "facebook", "meta", "ig", "instagram"}
 
 
+def _all_known_utm_contents() -> frozenset[str]:
+    """Every utm_content tag ANY campaign's ads use (AD_DESTINATIONS), across
+    all campaigns. A signup carrying one of these is tied to a specific
+    campaign, so — once it has failed the current-campaign checks — it must NOT
+    be swept in by the generic Meta-click fallback: it demonstrably belongs to
+    a different campaign. Case-sensitive, matching the current-campaign check."""
+    return frozenset(
+        meta["utm_content"] for meta in AD_DESTINATIONS.values() if meta.get("utm_content")
+    )
+
+
+def _all_known_utm_campaigns() -> frozenset[str]:
+    """Every utm_campaign tag ANY campaign's ads use (CAMPAIGN_UTM_CAMPAIGNS),
+    lowercased to match the current-campaign check. Same purpose as
+    _all_known_utm_contents: a recognised tag names a campaign, so it can't fall
+    through to the campaign-agnostic fallback."""
+    return frozenset(
+        name.lower() for names in CAMPAIGN_UTM_CAMPAIGNS.values() for name in names
+    )
+
+
 def _attribution_matches_campaign(attribution: dict | None) -> bool:
     """True if a stored signup_attribution counts as a registration for the
     CURRENT campaign (_campaign_id()), checked three independent ways — any
@@ -1530,13 +1551,23 @@ def _attribution_matches_campaign(attribution: dict | None) -> bool:
        campaign started running two destination taxonomies). More resilient
        than (1): doesn't need AD_DESTINATIONS kept in sync with every new ad;
     3. it otherwise carries a plain Meta click signal (a fb/ig/meta
-       utm_source, or a facebook/instagram click_source) — the loosest
-       check, but a genuine Meta-driven registration shouldn't silently
-       vanish from the count just because its UTM tags don't exactly match
-       a hand-maintained mapping. In practice only one campaign has ever
-       been live at a time, so "a Meta click happened" is a good enough
-       stand-in for "it was THIS campaign" when the more precise checks
-       above come up empty.
+       utm_source, or a facebook/instagram click_source) AND carries no UTM
+       tag that names a DIFFERENT known campaign — the loosest check, a safety
+       net so a genuine Meta-driven registration doesn't vanish from the count
+       just because its exact utm_content/utm_campaign isn't in the maps yet.
+
+       That last guard is what makes this campaign-SPECIFIC. Before it, the
+       Meta-click fallback fired for every Meta-sourced signup regardless of
+       which campaign it belonged to — so with more than one campaign in
+       history the tile read the all-time tracked total against WHICHEVER
+       campaign the dropdown had selected (spend/LPV filter by campaign_id, but
+       a signup carries only its UTM tags, so this is the equivalent filter).
+       A signup whose utm_content or utm_campaign is a recognised tag has
+       already been tested against THIS campaign in checks 1-2; if neither
+       fired, the tag names another campaign and the registration is not ours,
+       however it clicked in. Only a signup with no campaign-identifying tag at
+       all (or one tagged for a campaign not yet in the maps) reaches the
+       generic fallback.
     Used by get_registration_count() and the ad-signups report
     (routers/meta_ads.py) so the two can never disagree."""
     if not attribution:
@@ -1548,6 +1579,12 @@ def _attribution_matches_campaign(attribution: dict | None) -> bool:
     known = CAMPAIGN_UTM_CAMPAIGNS.get(_campaign_id()) or set()
     if utm_campaign and utm_campaign in {name.lower() for name in known}:
         return True
+    # The tag names a different known campaign → this registration is that
+    # campaign's, not the selected one. Don't let the generic fallback claim it.
+    if utm_content and utm_content in _all_known_utm_contents():
+        return False
+    if utm_campaign and utm_campaign in _all_known_utm_campaigns():
+        return False
     utm_source = (attribution.get("utm_source") or "").strip().lower()
     if utm_source in _META_ATTRIBUTION_SOURCES:
         return True

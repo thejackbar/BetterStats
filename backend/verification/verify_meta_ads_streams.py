@@ -317,6 +317,32 @@ async def main() -> int:
     ck("a registration with no attribution at all does not",
        not m._attribution_matches_campaign({}) and not m._attribution_matches_campaign(None))
 
+    # ── Attribution is CAMPAIGN-SPECIFIC, not "any Meta click ever" ──────────
+    # The tile used to read the all-time tracked total against whichever
+    # campaign the dropdown had selected: the generic fb/ig fallback fired for
+    # every Meta-sourced signup regardless of which campaign it belonged to.
+    # These pin that a signup tagged for ONE campaign does not count for a
+    # DIFFERENT selected one, while the untagged safety net is preserved.
+    OTHER = "120249890918010121"  # BC_AU_SelfServe_Aug2026 — a real, disjoint campaign
+    m._active_campaign.set(OTHER)
+    ck("a signup tagged for another campaign does NOT count for the selected one, "
+       "even with a Meta click signal (the reported bug)",
+       not m._attribution_matches_campaign(
+           {"utm_campaign": "trial_evergreen_sep2026", "utm_source": "facebook"}))
+    ck("nor does one carrying another campaign's ad content tag + a Meta click",
+       not m._attribution_matches_campaign(
+           {"utm_content": "club_history_hero", "click_source": "facebook"}))
+    ck("the selected campaign's OWN tag still counts",
+       m._attribution_matches_campaign({"utm_campaign": "BC_AU_SelfServe_Aug2026"}))
+    ck("an untagged Meta click still counts for the selected campaign (safety net kept)",
+       m._attribution_matches_campaign({"utm_source": "facebook"}))
+    ck("a signup whose tag names no known campaign still counts via the fallback",
+       m._attribution_matches_campaign({"utm_campaign": "brand_new_unmapped_2026", "utm_source": "facebook"}))
+    m._active_campaign.set(CAMPAIGN_ID)  # restore for the DB-backed checks below
+    ck("and back on its owning campaign, that same tag counts again",
+       m._attribution_matches_campaign(
+           {"utm_campaign": "trial_evergreen_sep2026", "utm_source": "facebook"}))
+
     # ── Webinar counts from our own table ───────────────────────────────────
     async with session_maker() as db:
         counts = await m.get_webinar_registration_counts(db)
