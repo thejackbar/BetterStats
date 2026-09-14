@@ -273,6 +273,13 @@ async def get_player_stats(
             "available_competitions": await grade_scope.org_available_competitions(
                 db, player.organisation_id
             ),
+            # Whether the club surfaces competitions publicly (migration 305).
+            # Gates the profile's own Competitions breakdown tab, the same
+            # switch that draws the filter row on the other stats pages, so the
+            # two never disagree about whether this club shows competitions.
+            "show_competition_filters": await grade_scope.org_show_competition_filters(
+                db, player.organisation_id
+            ),
             # True when the club default would have left this player with nothing
             # at all, so the categories they actually played were added back. The
             # profile says so rather than quietly showing a wider set than the

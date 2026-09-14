@@ -1739,6 +1739,11 @@ function MatchesBySeasonGrade({ rows = [], seasonRows = [] }) {
 
 function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGrade, byPosition, seasonStats, bowlingByGrade, bowlingDismissals = [], bowlingByBatterPosition = [], battingInnings = [], bowlingSpells = [], teamBreakdown = { rows: [], season_rows: [], unattributed: 0 }, seasonLabel = null, captainStats, byVenue = [], byOpposition = [], careerBatting = null, careerBowling = null, careerFielding = null, matchCoverage = null, gradeScope = null, filterPick = null, filterScope = null }) {
   const [subTab, setSubTab] = useState('profile')
+  // The Competitions breakdown is shown only where the club has switched its
+  // public Competition surfaces on — the same flag that draws the filter row on
+  // the other stats pages, so the two never disagree about whether this club
+  // shows competitions.
+  const showCompetitionsTab = !!gradeScope?.show_competition_filters
 
   const hasBattingData = dismissals?.length || partnerships?.length || byGrade?.length || byPosition?.length || seasonStats?.some(s => (s.total_runs ?? 0) > 0)
   const hasBowlingData = bowlingByGrade?.length || bowlingDismissals?.length || bowlingByBatterPosition?.some(p => (p.wickets ?? 0) > 0) || seasonStats?.some(s => (s.total_wickets ?? 0) > 0)
@@ -1747,7 +1752,7 @@ function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGr
     <div className="space-y-6">
       {/* Sub-tab navigation */}
       <div className="flex overflow-x-auto pb-no-scrollbar border-b border-pb-hairline">
-        {ANALYSIS_SUBTABS.map(t => (
+        {ANALYSIS_SUBTABS.filter(t => t.key !== 'competitions' || showCompetitionsTab).map(t => (
           <button
             key={t.key}
             onClick={() => setSubTab(t.key)}
@@ -2095,7 +2100,7 @@ function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGr
         </div>
       )}
 
-      {subTab === 'competitions' && (
+      {subTab === 'competitions' && showCompetitionsTab && (
         <div className="space-y-3">
           {/* Same: filtering it to one competition leaves one row. */}
           <FilterReachNote pick={filterPick} reason="enumeration" shows="every competition" />

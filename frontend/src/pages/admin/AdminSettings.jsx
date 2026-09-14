@@ -893,10 +893,11 @@ export default function AdminSettings() {
           <div className="pt-5 pb-hairline-t">
             <label className={LABEL}>Show Competition Filters</label>
             <p className="font-mono text-[10px] text-pb-faintest mb-3">
-              Show the Competition filter row on your public stats pages: Leaderboard,
-              Records, Players, Games and the club dashboard. Off by default. While it is
-              on, the "All" pill means the sum of every competition it lists, rather than
-              your Cricket Australia lifetime totals.
+              Show competition breakdowns on your public pages: the Competition filter
+              row on the Leaderboard, Records, Players, Games and dashboard, and the
+              Competitions tab on each player's profile. Off by default. While it is on,
+              the "All" pill means the sum of every competition it lists, rather than your
+              Cricket Australia lifetime totals.
             </p>
             <label className="flex items-start gap-2.5 cursor-pointer">
               <input type="checkbox" checked={!!form.show_competition_filters}
