@@ -321,6 +321,12 @@ class Organisation(Base):
     # only in the menu bar, and turning this on for everyone would change every
     # existing club's public site without anyone asking for it.
     public_header_logo = Column(Boolean, nullable=False, server_default="false", default=False)
+    # Show the Competition filter row on the club's public stats pages. Off by
+    # default: a club that has grouped its grades into competitions still keeps
+    # the filter to itself until it opts in, and while it is on the "All" pill
+    # means the sum of every competition listed rather than Cricket Australia's
+    # own lifetime totals (frontend: useGradeFilters).
+    show_competition_filters = Column(Boolean, nullable=False, server_default="false", default=False)
     # Which grade categories count towards this club's stats by default — a
     # JSONB list of grade_labels.GRADE_CATEGORIES keys (migration 228). NULL
     # means no club preference, and the platform default applies: everything

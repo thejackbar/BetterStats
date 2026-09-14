@@ -325,6 +325,18 @@ async def get_org_grade_categories(org_id: str, db: AsyncSession = Depends(get_d
     whose games predate `games.match_format` being recorded and whose grade
     names say nothing about format.
     """
+    # Whether the club has opted the Competition filter row in. Off by default,
+    # so a club that has grouped its grades keeps the filter to itself until it
+    # switches this on in its admin settings; it also decides what "All" means
+    # (the club's own competitions summed, vs Cricket Australia's lifetime
+    # totals — see useGradeFilters).
+    show_comp = await db.scalar(
+        text(
+            "SELECT COALESCE(show_competition_filters, false)"
+            " FROM organisations WHERE id = CAST(:id AS UUID)"
+        ),
+        {"id": org_id},
+    )
     return {
         "available": await grade_scope.org_available_categories(db, org_id),
         "default": list(await grade_scope.club_default_categories(db, org_id)),
@@ -334,6 +346,7 @@ async def get_org_grade_categories(org_id: str, db: AsyncSession = Depends(get_d
         # to choose between and the row doesn't render — the same rule the
         # empty `available` above follows.
         "available_competitions": await grade_scope.org_available_competitions(db, org_id),
+        "show_competition_filters": bool(show_comp),
     }
 
 

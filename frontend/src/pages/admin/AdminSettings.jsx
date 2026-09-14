@@ -244,6 +244,7 @@ export default function AdminSettings() {
         stats_min_rate_innings: s.stats_min_rate_innings ?? '',
         stats_min_rate_spells: s.stats_min_rate_spells ?? '',
         public_header_logo: !!s.public_header_logo,
+        show_competition_filters: !!s.show_competition_filters,
         password_protected: !!s.password_protected,
       })
     }).catch(() => {})
@@ -887,6 +888,26 @@ export default function AdminSettings() {
               </div>
             </div>
           )}
+
+          {/* --- Show Competition filters --- */}
+          <div className="pt-5 pb-hairline-t">
+            <label className={LABEL}>Show Competition Filters</label>
+            <p className="font-mono text-[10px] text-pb-faintest mb-3">
+              Show the Competition filter row on your public stats pages: Leaderboard,
+              Records, Players, Games and the club dashboard. Off by default. While it is
+              on, the "All" pill means the sum of every competition it lists, rather than
+              your Cricket Australia lifetime totals.
+            </p>
+            <label className="flex items-start gap-2.5 cursor-pointer">
+              <input type="checkbox" checked={!!form.show_competition_filters}
+                onChange={e => setForm(f => ({ ...f, show_competition_filters: e.target.checked }))}
+                className="accent-pb-accent mt-0.5 shrink-0" />
+              <span className="leading-tight">
+                <span className="text-pb-text text-sm">Show the Competition filter on public pages</span>
+                <span className="font-mono text-[10px] text-pb-faintest block">Only appears when your club plays in more than one competition</span>
+              </span>
+            </label>
+          </div>
 
           {/* --- Password protection --- */}
           <div className="pt-5 pb-hairline-t">

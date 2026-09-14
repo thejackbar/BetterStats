@@ -827,6 +827,10 @@ class SettingsPatch(BaseModel):
     stats_min_rate_spells: Optional[int] = None
     # Club crest beside the club name in public page headers (migration 226).
     public_header_logo: Optional[bool] = None
+    # Show the Competition filter row on public stats pages. Off by default; when
+    # on, the "All" pill means the sum of every competition rather than Cricket
+    # Australia's lifetime totals (see useGradeFilters on the frontend).
+    show_competition_filters: Optional[bool] = None
     # Who may open a committee document the club uploaded (migration 218).
     # True = the uploader, current Office Bearers and the Main Admin only.
     # False = any committee member who can reach the register.
@@ -980,6 +984,7 @@ async def get_settings(
         "stats_min_rate_spells": club.stats_min_rate_spells,
         "effective_rate_minimums": await stats_display.club_rate_minimums(db, club.id),
         "public_header_logo": bool(club.public_header_logo),
+        "show_competition_filters": bool(club.show_competition_filters),
         "committee_docs_office_bearer_only": bool(club.committee_docs_office_bearer_only),
         "diary_start_month": club.diary_start_month or 7,
         "socials_style": club.socials_style,
@@ -1059,6 +1064,8 @@ async def patch_settings(
             setattr(club, _field, stats_display.clean_minimum(getattr(data, _field)))
     if data.public_header_logo is not None:
         club.public_header_logo = bool(data.public_header_logo)
+    if data.show_competition_filters is not None:
+        club.show_competition_filters = bool(data.show_competition_filters)
     if data.committee_docs_office_bearer_only is not None:
         club.committee_docs_office_bearer_only = bool(data.committee_docs_office_bearer_only)
     if data.diary_start_month is not None:

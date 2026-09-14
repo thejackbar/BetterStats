@@ -3283,6 +3283,11 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
             "public_header_logo BOOLEAN NOT NULL DEFAULT false"
         ))
+        # Show the Competition filter row on public stats pages (opt-in).
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
+            "show_competition_filters BOOLEAN NOT NULL DEFAULT false"
+        ))
         # Stripe Checkout billing (migration 150) — see services/stripe_billing.py.
         await conn.execute(text(
             "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT"
