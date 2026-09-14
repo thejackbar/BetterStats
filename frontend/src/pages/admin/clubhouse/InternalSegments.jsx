@@ -2,14 +2,17 @@ import { Link } from 'react-router-dom'
 import { api } from '../../../lib/api'
 import BetterClubhouseLayout from '../../../components/admin/BetterClubhouseLayout'
 import {
-  Button, Note, Badge, Empty, Toast, SectionHeading,
+  Button, Note, Badge, Empty, Toast,
 } from '../../../components/admin/ui'
 import { DIRECTORY_FIELD_DEFS } from '../bettercomms/segmentFields'
 import { CrudPanes, DetailPane } from './crudShell'
 import {
   useSegments, RuleBuilder, SegmentListPane, SegmentTitleRow, SegmentRefPicker, segmentKind,
+  DefinitionSection,
 } from './segmentEngine'
-import StaticMembers from './StaticMembers'
+import {
+  StaticMembersProvider, SegmentTiles, StaticPicker, SegmentContactLists,
+} from './StaticMembers'
 
 // BetterCricket's own outreach segments, against the Clubs Directory.
 //
@@ -63,7 +66,12 @@ export default function InternalSegments() {
           {!s.draft ? (
             <Empty>Pick a segment, or start a new one.</Empty>
           ) : (
-            <>
+            <StaticMembersProvider
+              segmentId={s.draft.id}
+              audienceContacts={s.contacts} inCount={s.total} outCount={s.outCount}
+              reachable={s.reachable} otherRoute={s.otherRoute} clubs={s.clubs}
+              onChanged={() => { s.reloadStaticMembers(s.draft.id); s.reload() }}
+            >
               {(() => {
                 const kind = segmentKind(s.definition.rules.length, s.staticMembers.length)
                 return (
@@ -88,28 +96,28 @@ export default function InternalSegments() {
 
               {s.error && <Note toneKey="block" className="mt-4">{s.error}</Note>}
 
-              <SectionHeading className="mt-6 mb-2.5">Active rules (live)</SectionHeading>
-              <RuleBuilder defs={DIRECTORY_FIELD_DEFS} rules={s.draft.rules} opts={s.opts}
-                label="Match prospect clubs where these are true"
-                setRules={fn => s.setDraft(d => ({ ...d, rules: typeof fn === 'function' ? fn(d.rules) : fn }))} />
+              <div className="mt-6"><SegmentTiles /></div>
 
-              {/* Two live tiles (in / not in the segment) that move as any
-                  criterion changes; hand-picking the fixed set lives inside. */}
-              <SectionHeading className="mt-8 mb-2.5">Static members (fixed)</SectionHeading>
-              <StaticMembers
-                segmentId={s.draft.id}
-                audienceContacts={s.contacts} inCount={s.total} outCount={s.outCount}
-                reachable={s.reachable} otherRoute={s.otherRoute} clubs={s.clubs}
-                onChanged={() => { s.reloadStaticMembers(s.draft.id); s.reload() }}
-              />
+              <DefinitionSection title="Active rules (live)" className="mt-5">
+                <RuleBuilder defs={DIRECTORY_FIELD_DEFS} rules={s.draft.rules} opts={s.opts}
+                  label="Match prospect clubs where these are true"
+                  setRules={fn => s.setDraft(d => ({ ...d, rules: typeof fn === 'function' ? fn(d.rules) : fn }))} />
+              </DefinitionSection>
 
-              <SectionHeading className="mt-8 mb-2.5">Include or exclude other segments</SectionHeading>
-              <SegmentRefPicker
-                segments={s.segments} currentId={s.draft.id} sizes={s.sizes}
-                includes={s.draft.includes || []} excludes={s.draft.excludes || []}
-                onChange={({ includes, excludes }) => s.setDraft(d => ({ ...d, includes, excludes }))}
-              />
-            </>
+              <DefinitionSection title="Static members (fixed)" className="mt-4">
+                <StaticPicker />
+              </DefinitionSection>
+
+              <DefinitionSection title="Include or exclude other segments" className="mt-4">
+                <SegmentRefPicker
+                  segments={s.segments} currentId={s.draft.id} sizes={s.sizes}
+                  includes={s.draft.includes || []} excludes={s.draft.excludes || []}
+                  onChange={({ includes, excludes }) => s.setDraft(d => ({ ...d, includes, excludes }))}
+                />
+              </DefinitionSection>
+
+              <SegmentContactLists />
+            </StaticMembersProvider>
           )}
         </DetailPane>
       </CrudPanes>

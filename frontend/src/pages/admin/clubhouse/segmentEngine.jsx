@@ -1,9 +1,23 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../../../lib/api'
-import { Button, Caption, INPUT_CLS } from '../../../components/admin/ui'
+import { Button, Caption, INPUT_CLS, SectionHeading } from '../../../components/admin/ui'
 import { RecordListPane, RecordTitleRow, CountBar, reachability, clubCount } from './crudShell'
 import { RuleRow, newRule } from '../bettercomms/segmentFields'
+
+// A segment's definition has three separate areas — the live rule, the frozen
+// hand-picked set, and the other segments it folds in — and a person edits them
+// as distinct things. Draw each as its own bordered card so the boundaries are
+// obvious rather than three headings running into one column.
+export function DefinitionSection({ title, children, className = '' }) {
+  return (
+    <div className={`rounded-xl border border-pb-hairline px-4 py-4 ${className}`}
+      style={{ background: 'var(--pb-surface)' }}>
+      <SectionHeading className="mb-2.5">{title}</SectionHeading>
+      {children}
+    </div>
+  )
+}
 
 // The count bar and the reachability rule are shared furniture now — Lists and
 // Emails report their own reach the same way. Re-exported so the two segment
