@@ -170,7 +170,10 @@ export const DIRECTORY_FIELD_DEFS = {
 
 export function newRule(defs) {
   const first = Object.keys(defs)[0]
-  return { field: first, op: defs[first].ops[0][0], value: '' }
+  // `conj` says how this condition joins to the one BEFORE it (ignored on the
+  // first). Default AND, so a segment reads as "all of these" until a row is
+  // switched to OR. Standard precedence — AND binds tighter than OR.
+  return { field: first, op: defs[first].ops[0][0], value: '', conj: 'and' }
 }
 
 // Resolve a field's dropdown options from the fetched club/directory options.
@@ -337,7 +340,8 @@ export function RuleRow({ rule, defs, opts, onChange, onRemove, inputCls = 'px-2
       <select value={rule.field}
         onChange={e => {
           const nd = defs[e.target.value]
-          onChange({ field: e.target.value, op: nd.ops[0][0], value: '' })
+          // Reset op/value for the new field, but keep the AND/OR connector.
+          onChange({ ...rule, field: e.target.value, op: nd.ops[0][0], value: '' })
         }}
         className={inputCls}>
         {keys.map(k => <option key={k} value={k}>{defs[k].label}</option>)}

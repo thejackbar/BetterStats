@@ -3,17 +3,14 @@ import { Link } from 'react-router-dom'
 import BetterClubhouseLayout from '../../../components/admin/BetterClubhouseLayout'
 import {
   Button, Note, Badge, Empty, Toast, SectionHeading, SearchInput,
-  TableWrap, TableHead, TableRow, Cell,
 } from '../../../components/admin/ui'
 import { CLUB_FIELD_DEFS } from '../bettercomms/segmentFields'
 import { CrudPanes, DetailPane } from './crudShell'
 import {
-  useSegments, RuleBuilder, SegmentListPane, SegmentTitleRow, SegmentRefPicker,
-  CountBar, reachability, segmentKind,
+  useSegments, RuleBuilder, SegmentListPane, SegmentTitleRow, SegmentRefPicker, segmentKind,
 } from './segmentEngine'
 import StaticMembers from './StaticMembers'
 import ScreenIntro, { useScreenIntro, INTROS } from './intro'
-import { money } from './data'
 
 // Segments — a group of people an email is addressed to. There is one concept
 // now, not two: a segment carries an ACTIVE part (a live rule, re-worked every
@@ -31,9 +28,6 @@ import { money } from './data'
 // (is_trialing, engagement_score, …) are sales telemetry and live in the other
 // mount, InternalSegments, reached only while acting as the outreach org. See
 // docs/design_handoff_betterclubhouse/PROJECT_RULES.md.
-
-const COLS = 'minmax(180px,1fr) 160px 110px 120px'
-const MIN_W = 700
 
 // The segments Today can ask for by name when an officer follows an action.
 // `audience` is still read as a fallback so a Today page served from a cached
@@ -112,18 +106,16 @@ export default function ClubhouseSegments() {
               <RuleBuilder defs={CLUB_FIELD_DEFS} rules={s.draft.rules} opts={s.opts}
                 setRules={fn => s.setDraft(d => ({ ...d, rules: typeof fn === 'function' ? fn(d.rules) : fn }))} />
 
+              {/* Who's in the segment, as two live tiles (in / not in) that move
+                  as any criterion changes. Hand-picking (add / remove of the
+                  fixed set) lives inside. */}
               <SectionHeading className="mt-8 mb-2.5">Static members (fixed)</SectionHeading>
-              {s.draft.id ? (
-                <StaticMembers
-                  segmentId={s.draft.id}
-                  onChanged={() => { s.reloadStaticMembers(s.draft.id); s.reload() }}
-                />
-              ) : (
-                <Note toneKey="calm">
-                  Save the segment first, then hand-pick specific contacts here. They stay exactly as picked
-                  and are added to whoever the rules above match.
-                </Note>
-              )}
+              <StaticMembers
+                segmentId={s.draft.id}
+                audienceContacts={s.contacts} inCount={s.total} outCount={s.outCount}
+                reachable={s.reachable}
+                onChanged={() => { s.reloadStaticMembers(s.draft.id); s.reload() }}
+              />
 
               <SectionHeading className="mt-8 mb-2.5">Include or exclude other segments</SectionHeading>
               <SegmentRefPicker
@@ -131,41 +123,6 @@ export default function ClubhouseSegments() {
                 includes={s.draft.includes || []} excludes={s.draft.excludes || []}
                 onChange={({ includes, excludes }) => s.setDraft(d => ({ ...d, includes, excludes }))}
               />
-
-              <CountBar counting={s.counting} total={s.total} reachable={s.reachable} otherRoute={s.otherRoute} />
-
-              <SectionHeading className="mt-8 mb-2.5">Who this is, right now</SectionHeading>
-              <TableWrap>
-                <TableHead cols={COLS} minWidth={MIN_W}>
-                  <Cell head first>Person</Cell>
-                  <Cell head>In the directory as</Cell>
-                  <Cell head num>Balance</Cell>
-                  <Cell head last>Reachable</Cell>
-                </TableHead>
-                {s.contacts.length === 0 ? (
-                  <div style={{ minWidth: MIN_W }}><Empty>Nobody matches these conditions yet.</Empty></div>
-                ) : s.contacts.slice(0, 50).map(c => {
-                  const r = reachability(c)
-                  return (
-                    <TableRow key={c.id || c.email} cols={COLS} minWidth={MIN_W}>
-                      <Cell first>
-                        <div className="truncate text-pb-text">{c.name || c.email}</div>
-                        {c.name && c.email && <div className="font-mono text-[9.5px] text-pb-faint truncate">{c.email}</div>}
-                      </Cell>
-                      <Cell className="text-pb-dim capitalize">{c.source || '—'}</Cell>
-                      <Cell num className={c.balance > 0 ? 'text-pb-amber' : 'text-pb-faintest'}>
-                        {c.balance == null ? '—' : money(c.balance)}
-                      </Cell>
-                      <Cell last><Badge toneKey={r.tone}>{r.label}</Badge></Cell>
-                    </TableRow>
-                  )
-                })}
-              </TableWrap>
-              {s.contacts.length > 50 && (
-                <div className="font-mono text-[10px] tracking-wide2 uppercase text-pb-faintest mt-2">
-                  Showing the first 50 of {s.total}
-                </div>
-              )}
             </>
           )}
         </DetailPane>

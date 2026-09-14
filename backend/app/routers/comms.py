@@ -2602,8 +2602,14 @@ async def resolve_segment(
     contacts = await comms_segments.resolve_contacts(db, club, data.definition or {}, static_ids=static)
     rows = contacts[:5000]
     mc_map = await _mc_map(db, rows)
+    # The total sendable population, so the screen's two tiles ("in this segment"
+    # / "not in this segment") are drawn from one universe and add up: out =
+    # universe − count.
+    universe = await comms_segments.sendable_universe(db, club)
     return {
         "count": len(contacts),
+        "universe": universe,
+        "out_count": max(0, universe - len(contacts)),
         **audience_figures(contacts),
         "contacts": [_contact_out(c, mc_map.get(c.marketing_club_id)) for c in rows],
     }

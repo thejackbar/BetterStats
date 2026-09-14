@@ -12,6 +12,13 @@
 //   * the CLUB builder offers only club fields — the directory-only fields
 //     (Engagement score, Sales pipeline stage) never leak in;
 //   * the INTERNAL builder (acting as the outreach org) DOES offer them;
+//   * the Static section shows two live tiles (in / not in the segment) from
+//     /segments/resolve's count + out_count, and reveals a list only on click —
+//     the old always-both-lists screen is gone, as are its engagement browsing
+//     controls (relocated to the Active rules as a field);
+//   * the sections read Active rules → Static members → Include/exclude (C1);
+//   * a second condition shows an AND / OR connector, and switching it to OR
+//     sends conj:"or" on the resolve wire (C4 / C5);
 //   * /admin/comms/lists redirects to /admin/comms/segments;
 //   * there is no "Lists" nav item;
 //   * no horizontal overflow at 390px.
@@ -26,10 +33,19 @@ const check = (name, cond, detail = '') => {
   console.log(`${cond ? '  ok  ' : ' FAIL '} ${name}${!cond && detail ? '  — ' + detail : ''}`)
 }
 
-// A contact row (services/directory + routers/comms _contact_out shape).
+// A contact row (services/directory + routers/comms _contact_out shape). It
+// carries a `club` so the Static section's directory chips render — which is
+// also what the OLD build showed its (now-removed) engagement browsing controls
+// beside, making their absence discriminating.
 const CONTACT = {
   id: 'c1', name: 'Amardeep Gill', email: 'a@x.com', source: 'member',
-  subscribed: true, suppressed: false, club: null, state: null, player_id: 'pl1', member_id: 'm1',
+  subscribed: true, suppressed: false, club: 'Rovers', state: 'WA', player_id: 'pl1', member_id: 'm1',
+}
+// A second contact that is NOT in the resolved audience — so the "Not in this
+// segment" tile's list has a row to reveal.
+const CONTACT2 = {
+  id: 'c2', name: 'Bob Other', email: 'bob@x.com', source: 'member',
+  subscribed: true, suppressed: false, club: 'Rovers', state: 'WA', player_id: 'pl2', member_id: 'm2',
 }
 // Three saved segments: a rule-only (Active), a static-only (Static), and both.
 const SEGMENTS = [
@@ -87,10 +103,13 @@ const routes = (page, calls) => page.route('**/api/**', async (route) => {
     return json({ ...base, definition: def })
   }
   if (/\/comms\/segments\/resolve/.test(url) || /\/comms\/segments\/preview/.test(url)) {
-    return json({ count: 1, contacts: [CONTACT], reachable: 1, other_route: 0, clubs: 0 })
+    // universe / out_count drive the two In / Not-in tiles: in = count = 1,
+    // universe = 4, so the "Not in this segment" tile reads 3.
+    return json({ count: 1, universe: 4, out_count: 3, contacts: [CONTACT],
+                  reachable: 1, other_route: 0, clubs: 1 })
   }
   if (/\/comms\/segments$/.test(url) && req.method() === 'GET') return json(SEGMENTS)
-  if (/\/comms\/contacts/.test(url)) return json({ contacts: [CONTACT] })
+  if (/\/comms\/contacts/.test(url)) return json({ contacts: [CONTACT, CONTACT2] })
   if (/\/comms\/context/.test(url)) return json({ current: { is_marketing: INTERNAL } })
   if (/\/notifications\/(count|summary)/.test(url)) return json({ unseen_count: 0, items: [] })
   // Anything else the layout pokes at.
@@ -182,10 +201,92 @@ const run = async () => {
     check('resolve sends the union (static_member_ids + rules) on the wire', withStatic,
       JSON.stringify(resolveCalls.map(c => c.body).slice(-2)))
 
+    // ── The two live tiles (in / not in this segment), and click-to-reveal ────
+    // The Static section no longer paints both lists at once: it shows two count
+    // tiles (from /segments/resolve's count + out_count) and reveals a list only
+    // when a tile is clicked. 'Both seg' is selected.
+    const tiles = await page.evaluate(() => {
+      const out = []
+      for (const b of document.querySelectorAll('button')) {
+        const t = (b.textContent || '')
+        // The big count is the tile's first child div (text-2xl tabular-nums).
+        const num = (b.querySelector('div')?.textContent || '').trim()
+        if (t.includes('In this segment') && !t.includes('Not in this segment')) out.push(['in', num])
+        else if (t.includes('Not in this segment')) out.push(['out', num])
+      }
+      return out
+    })
+    const inTile = tiles.find(t => t[0] === 'in')
+    const outTile = tiles.find(t => t[0] === 'out')
+    check('the "In this segment" tile renders its count', !!inTile && inTile[1] === '1',
+      JSON.stringify(tiles))
+    check('the "Not in this segment" tile renders its count', !!outTile && outTile[1] === '3',
+      JSON.stringify(tiles))
+
+    // Before a tile is clicked, neither list is shown — the audience contact is
+    // NOT on the page (the old build always painted both lists).
+    const bodyPreClick = await page.textContent('body')
+    check('no contact list is shown until a tile is clicked',
+      !bodyPreClick.includes('Amardeep Gill') && !bodyPreClick.includes('Bob Other'),
+      'a name is visible before any tile click')
+
+    // Click "In this segment" → its list reveals the audience contact; both
+    // tiles stay on screen so you can flick between them.
+    await page.evaluate(() => {
+      for (const b of document.querySelectorAll('button')) {
+        const t = (b.textContent || '')
+        if (t.includes('In this segment') && !t.includes('Not in this segment')) { b.click(); return }
+      }
+    })
+    await page.waitForTimeout(600)
+    let bod = await page.textContent('body')
+    check('clicking the In tile reveals the in-segment contact', bod.includes('Amardeep Gill'), '')
+    check('both tiles remain on screen with a list open',
+      bod.includes('In this segment') && bod.includes('Not in this segment'))
+    check('the in list keeps its per-contact Remove/matched controls',
+      /matched|Remove/i.test(bod))
+
+    // The removed engagement browsing block: its inputs (placeholder "score min")
+    // sat beside the directory chips the open list still shows. Their absence is
+    // the C2 relocation (engagement is a rule field now, not a static filter).
+    const hasScoreMin = await page.$('input[placeholder="score min"]')
+    check('the engagement min/max browsing controls are gone from the static section',
+      hasScoreMin === null)
+
+    // Click "Not in this segment" → the OUT list reveals the other contact.
+    await page.evaluate(() => {
+      for (const b of document.querySelectorAll('button')) {
+        if ((b.textContent || '').includes('Not in this segment')) { b.click(); return }
+      }
+    })
+    await page.waitForTimeout(600)
+    bod = await page.textContent('body')
+    check('clicking the Not-in tile reveals a contact outside the segment (with Add)',
+      bod.includes('Bob Other') && /\bAdd\b/.test(bod))
+
     // ── Phase 2: Save/Delete in the title row, and the include/exclude picker ──
     const body2 = await page.textContent('body')
     check('the Include or exclude other segments section is labelled',
       body2.includes('Include or exclude other segments'))
+
+    // C1: the include/exclude section sits immediately BELOW the Static members
+    // section (Active rules → Static members → Include/exclude).
+    const order = await page.evaluate(() => {
+      const txt = el => (el.textContent || '').trim()
+      const head = (label) => {
+        const el = [...document.querySelectorAll('*')].find(
+          e => e.children.length === 0 && txt(e) === label)
+        return el ? el.getBoundingClientRect().top : null
+      }
+      return {
+        active: head('Active rules (live)'),
+        staticH: head('Static members (fixed)'),
+        refs: head('Include or exclude other segments'),
+      }
+    })
+    check('sections read Active rules → Static members → Include/exclude, top to bottom',
+      order.active != null && order.staticH != null && order.refs != null
+      && order.active < order.staticH && order.staticH < order.refs, JSON.stringify(order))
 
     // Save and Delete were moved out of a footer SaveRow and up into the title
     // row — both sit ABOVE the "Active rules (live)" heading now.
@@ -284,6 +385,44 @@ const run = async () => {
     check('the club builder does NOT leak directory fields', !!opts
       && !opts.includes('Engagement score') && !opts.includes('Sales pipeline stage'),
       JSON.stringify(opts))
+
+    // ── AND / OR connector between conditions (C4 / C5) ───────────────────────
+    // Add a second condition; a two-state AND/OR toggle appears between the rows
+    // (the first condition has no connector). 'Both seg' is selected with its one
+    // valued rule.
+    await page.click('button:has-text("Add condition")')
+    await page.waitForTimeout(300)
+    const conjButtons = await page.evaluate(() => {
+      const bs = [...document.querySelectorAll('button')].map(b => (b.textContent || '').trim())
+      return { and: bs.filter(t => t === 'AND').length, or: bs.filter(t => t === 'OR').length }
+    })
+    check('adding a condition shows an AND / OR connector',
+      conjButtons.and >= 1 && conjButtons.or >= 1, JSON.stringify(conjButtons))
+
+    // The new (2nd) condition defaults to the text `tag` field — give it a value
+    // so it survives into the definition, then switch its connector to OR.
+    await page.fill('input[placeholder="e.g. Committee"]', 'vip')
+    await page.evaluate(() => {
+      const or = [...document.querySelectorAll('button')].find(b => (b.textContent || '').trim() === 'OR')
+      if (or) or.click()
+    })
+    await page.waitForTimeout(300)
+    const orActive = await page.evaluate(() => {
+      const or = [...document.querySelectorAll('button')].find(b => (b.textContent || '').trim() === 'OR')
+      return or ? or.className.includes('bg-pb-accent') : false
+    })
+    check('clicking OR marks the connector active', orActive)
+
+    // C5: the connector travels on the resolve wire — rules[1].conj === 'or', so
+    // the tiles above recompute against the OR'd audience.
+    await page.waitForTimeout(900)   // debounced resolve
+    const conjOnWire = calls.filter(c => /\/comms\/segments\/resolve/.test(c.url) && c.body).some(c => {
+      try {
+        const rules = JSON.parse(c.body).definition?.rules || []
+        return rules.length >= 2 && rules.some(r => r.conj === 'or')
+      } catch { return false }
+    })
+    check('the OR connector travels on the resolve wire (conj:"or")', conjOnWire)
 
     // No Lists nav item anywhere; Segments is present.
     const listsNav = await page.$('a[href="/admin/comms/lists"]')

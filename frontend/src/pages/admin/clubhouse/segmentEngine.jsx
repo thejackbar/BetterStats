@@ -42,22 +42,47 @@ export function segmentKind(ruleCount, staticCount) {
 // Keep it that way. If you ever find yourself adding an `isInternal` prop here,
 // the thing you actually want is a third screen.
 
+// A two-state AND / OR pill that joins a condition to the one above it. Standard
+// precedence: a run of ANDs groups together, an OR breaks the group, so
+// "A AND B OR C" reads as "(A AND B) OR C" — the same as SQL, and what the
+// engine evaluates.
+function ConjToggle({ value, onChange }) {
+  const on = value === 'or' ? 'or' : 'and'
+  const cls = (v) => `px-2 py-0.5 text-[11px] font-semibold rounded ${on === v
+    ? 'bg-pb-accent text-pb-accent-ink' : 'text-pb-faint hover:text-pb-text'}`
+  return (
+    <div className="flex items-center gap-1 my-0.5">
+      <div className="inline-flex items-center rounded-md border pb-hairline overflow-hidden">
+        <button type="button" className={cls('and')} onClick={() => onChange('and')}>AND</button>
+        <button type="button" className={cls('or')} onClick={() => onChange('or')}>OR</button>
+      </div>
+    </div>
+  )
+}
+
 // The rule rows. `defs` is required — see the scope note above.
-export function RuleBuilder({ defs, rules, setRules, opts, label = 'Match people where all of these are true' }) {
+export function RuleBuilder({ defs, rules, setRules, opts, label = 'Match people where these are true' }) {
   // The rule row builds its own controls, so it takes the class rather than the
   // component. `!w-auto` because a condition is a row of three controls sized to
   // their content, not one full-width field.
   const inputCls = `${INPUT_CLS} !w-auto !py-1.5 !text-[13px]`
+  const setRule = (i, nr) => setRules(rs => rs.map((x, j) => (j === i ? nr : x)))
   return (
     <div>
       <Caption>{label}</Caption>
       <div className="mt-1.5">
         {rules.map((r, i) => (
-          <RuleRow
-            key={i} rule={r} defs={defs} opts={opts} inputCls={inputCls}
-            onChange={nr => setRules(rs => rs.map((x, j) => (j === i ? nr : x)))}
-            onRemove={() => setRules(rs => (rs.length > 1 ? rs.filter((_, j) => j !== i) : rs))}
-          />
+          <div key={i}>
+            {/* How this condition joins the one above it — AND or OR. */}
+            {i > 0 && (
+              <ConjToggle value={r.conj} onChange={c => setRule(i, { ...r, conj: c })} />
+            )}
+            <RuleRow
+              rule={r} defs={defs} opts={opts} inputCls={inputCls}
+              onChange={nr => setRule(i, nr)}
+              onRemove={() => setRules(rs => (rs.length > 1 ? rs.filter((_, j) => j !== i) : rs))}
+            />
+          </div>
         ))}
       </div>
       <Button size="sm" onClick={() => setRules(rs => [...rs, newRule(defs)])} className="mt-1.5">
@@ -321,6 +346,10 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
   const reachable = resolved?.reachable ?? contacts.filter(c => reachability(c).key === 'email').length
   const otherRoute = resolved?.other_route ?? contacts.filter(c => reachability(c).key === 'guardian').length
   const clubs = resolved?.clubs ?? clubCount(contacts)
+  // The "not in this segment" tile: the whole sendable population minus who is
+  // in. The server sends both so they are drawn from one universe and add up.
+  const universe = resolved?.universe ?? null
+  const outCount = resolved?.out_count ?? (universe != null ? Math.max(0, universe - total) : null)
 
   const save = async (noun = 'Segment') => {
     if (!draft?.name.trim()) { setError(`Give the ${noun.toLowerCase()} a name.`); return }
@@ -382,7 +411,7 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
 
   return {
     segments, sizes, opts, selId, setSelId, draft, setDraft,
-    contacts, total, reachable, otherRoute, clubs, counting,
+    contacts, total, reachable, otherRoute, clubs, universe, outCount, counting,
     busy, error, toast, setToast,
     save, duplicate, remove, startNew, emailThese,
     // Static (frozen hand-picked) set + the current definition, for the Static

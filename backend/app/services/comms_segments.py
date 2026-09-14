@@ -755,15 +755,32 @@ async def build_query(session: AsyncSession, club, definition: dict):
                        club.id, ", ".join(member))
         return q.where(false())
 
+    # A join is INNER for a pure-AND definition and LEFT OUTER once an OR is
+    # present, and the difference is load-bearing both ways:
+    #   * AND (inner) — an attribute rule narrows the audience to the contacts
+    #     that HAVE the joined row, even when its own condition resolves to
+    #     nothing (an empty multi-select): a directory rule narrows to
+    #     directory-linked contacts, a player rule to players. That is the
+    #     established, tested behaviour (see verify_primary_admin_segment).
+    #   * OR (outer) — `role = batter OR tag = vip` must keep a non-player
+    #     contact so the tag branch can match it; an inner Player join would
+    #     delete it before the OR is evaluated. A _DIR_MC_FIELDS condition is
+    #     then guarded with `MarketingClub.id IS NOT NULL` below so a NEGATION
+    #     (not-won, not-onboarded, page_views <= n) does not read TRUE for a
+    #     contact with no club — the outer join keeps such a contact only for
+    #     the sake of a contact-level OR branch.
+    has_or = any((r.get("conj") or "and") == "or" for r in rules[1:])
+    join = (lambda *a: q.outerjoin(*a)) if has_or else (lambda *a: q.join(*a))
+
     if any(r["field"] in (PLAYER_FIELDS | STAT_FIELDS) for r in rules):
-        q = q.join(Player, Player.id == CommsContact.player_id)
+        q = join(Player, Player.id == CommsContact.player_id)
 
     # Directory (outreach) joins: the linked prospect club, and — for customer
     # status — the org it converted into.
     cust = None
     visits = None
     if any(r["field"] in _DIR_MC_FIELDS for r in rules):
-        q = q.join(MarketingClub, MarketingClub.id == CommsContact.marketing_club_id)
+        q = join(MarketingClub, MarketingClub.id == CommsContact.marketing_club_id)
     if any(r["field"] == "customer_status" for r in rules):
         cust = aliased(Organisation)
         q = q.outerjoin(cust, cust.id == MarketingClub.existing_org_id)
@@ -811,18 +828,58 @@ async def build_query(session: AsyncSession, club, definition: dict):
             .group_by(PlayerSeasonStats.player_id)
             .subquery()
         )
-        q = q.join(stats, stats.c.pid == CommsContact.player_id)
+        q = join(stats, stats.c.pid == CommsContact.player_id)
 
+    pairs = []
     for rule in rules:
         if rule["field"] in DIRECTORY_FIELDS:
             cond = _directory_condition(rule, cust, visits, trials)
+            # A _DIR_MC_FIELDS condition is a fact about a PROSPECT CLUB. The
+            # MarketingClub join is LEFT OUTER (so an OR branch on a contact-level
+            # field — emailed, contact_is — still sees a contact with no linked
+            # club), but a NEGATION condition (not-won, not-onboarded,
+            # page_views <= n) would then read TRUE for a contact with no club at
+            # all. Require the club to exist: a no-op under the old inner join,
+            # semantics-preserving under the outer one.
+            if cond is not None and rule["field"] in _DIR_MC_FIELDS:
+                cond = and_(MarketingClub.id.isnot(None), cond)
         elif rule["field"] in MEMBER_FIELDS:
             cond = _member_condition(rule, people or [])
         else:
             cond = _condition(rule, stats, club.id, owing_ids)
-        if cond is not None:
-            q = q.where(cond)
+        # Each rule joins to the PREVIOUS with its own connector; the first is
+        # always AND (its stored conj, if any, is ignored). Missing = AND, so a
+        # segment saved before AND/OR existed is unchanged.
+        pairs.append((rule.get("conj") or "and", cond))
+    combined = _combine_conditions(pairs)
+    if combined is not None:
+        q = q.where(combined)
     return q
+
+
+def _combine_conditions(pairs):
+    """Combine ``(conj, condition)`` pairs into one predicate with STANDARD
+    boolean precedence — AND binds tighter than OR, exactly as SQL evaluates an
+    unparenthesised ``A AND B OR C`` as ``(A AND B) OR C``. Consecutive ANDs form
+    a group; an ``or`` starts a new group; the groups are then ORed. The first
+    pair always opens the first group (its conj is immaterial), and a None
+    condition (a rule that resolved to nothing to filter on) is skipped."""
+    groups, current = [], []
+    for conj, cond in pairs:
+        if cond is None:
+            continue
+        if conj == "or" and current:
+            groups.append(current)
+            current = [cond]
+        else:
+            current.append(cond)
+    if current:
+        groups.append(current)
+    if not groups:
+        return None
+    if len(groups) == 1:
+        return and_(*groups[0])
+    return or_(*[and_(*g) for g in groups])
 
 
 def _has_active_rules(definition: dict) -> bool:
@@ -966,3 +1023,13 @@ async def count(session: AsyncSession, club, definition: dict, *, static_ids=Non
     unioned = subs[0] if len(subs) == 1 else subs[0].union(*subs[1:])
     n = await session.scalar(select(func.count()).select_from(unioned.subquery()))
     return int(n or 0)
+
+
+async def sendable_universe(session: AsyncSession, club) -> int:
+    """How many sendable contacts the club has in total — the denominator behind
+    the "not in this segment" tile, which shows universe − (in the segment). Uses
+    the same sendable_where gate as every audience, so the two numbers are drawn
+    from one population and always add up."""
+    q = select(func.count()).select_from(
+        select(CommsContact.id).where(*sendable_where(club.id)).subquery())
+    return int(await session.scalar(q) or 0)
