@@ -131,47 +131,59 @@ export function SegmentTitleRow({
   )
 }
 
-// The EXCLUDE section: pick other saved segments whose whole audience is
-// subtracted from this one. The audience becomes
-//   (rule matches ∪ static set) − (union of the excluded segments' audiences),
+// The REFERENCE section: pick other saved segments to INCLUDE (add their whole
+// audience) or EXCLUDE (subtract it) from this one. The audience becomes
+//   (rule matches ∪ static set ∪ included segments) − (excluded segments),
 // so "everyone MINUS the Females segment MINUS the engaged-clubs segment" is a
-// segment with no rules, no static set, and those two excluded. A segment can
-// never exclude itself (it is left out of the list), and the server guards a
-// cycle (A excludes B excludes A) at resolve time.
-export function SegmentExcludePicker({ segments, currentId, excludes, onChange, sizes = {} }) {
+// segment with no rules, no static set, and those two excluded — and "the A-grade
+// segment PLUS the committee" is one with both included. Exclusion wins over
+// inclusion (subtracted last). A segment can never reference itself (it is left
+// out of the list); the server guards a cycle (A refs B refs A) at resolve time.
+export function SegmentRefPicker({ segments, currentId, includes, excludes, onChange, sizes = {} }) {
   const others = (segments || []).filter(s => s.id !== currentId)
-  const set = new Set(excludes || [])
-  const toggle = (id) => {
-    const next = new Set(set)
-    if (next.has(id)) next.delete(id); else next.add(id)
-    onChange([...next])
+  const inc = new Set(includes || [])
+  const exc = new Set(excludes || [])
+  // Include and exclude are mutually exclusive per segment; picking one clears
+  // the other, and picking the mode a row is already in turns it off.
+  const setMode = (id, mode) => {
+    const ni = new Set(inc), ne = new Set(exc)
+    ni.delete(id); ne.delete(id)
+    if (mode === 'include') ni.add(id)
+    else if (mode === 'exclude') ne.add(id)
+    onChange({ includes: [...ni], excludes: [...ne] })
   }
   if (others.length === 0) {
-    return <Caption>Save another segment first — then you can subtract its audience here.</Caption>
+    return <Caption>Save another segment first — then you can add or subtract its audience here.</Caption>
   }
   return (
     <div>
-      <Caption>Subtract the audience of these segments</Caption>
+      <Caption>Add or subtract the audience of other segments</Caption>
       <div className="mt-2 space-y-1">
         {others.map(s => {
-          const on = set.has(s.id)
+          const on = inc.has(s.id) ? 'include' : exc.has(s.id) ? 'exclude' : null
           const n = (s.definition?.rules || []).length
           const m = s.member_count || 0
           const kind = n && m ? 'rule + picked' : n ? 'rule' : m ? 'hand-picked' : 'empty'
           return (
-            <label key={s.id}
-              className="flex items-center gap-3 py-1.5 px-1 rounded-md cursor-pointer hover:bg-pb-surface2">
-              <input type="checkbox" className="accent-pb-accent shrink-0" checked={on} onChange={() => toggle(s.id)} />
+            <div key={s.id}
+              className="flex items-center gap-3 py-1.5 px-1 rounded-md">
               <span className="text-sm text-pb-text truncate flex-1">{s.name}</span>
               <span className="text-pb-faintest text-[11px] shrink-0">{kind}</span>
               {sizes[s.id] != null && <span className="text-pb-faint text-[11px] shrink-0 tabular-nums">{sizes[s.id]}</span>}
-            </label>
+              <div className="flex items-center gap-1 shrink-0">
+                <Button size="sm" variant={on === 'include' ? 'primary' : undefined}
+                  onClick={() => setMode(s.id, on === 'include' ? null : 'include')}>Include</Button>
+                <Button size="sm" variant={on === 'exclude' ? 'danger' : undefined}
+                  onClick={() => setMode(s.id, on === 'exclude' ? null : 'exclude')}>Exclude</Button>
+              </div>
+            </div>
           )
         })}
       </div>
-      {set.size > 0 && (
+      {(inc.size > 0 || exc.size > 0) && (
         <div className="text-pb-faintest text-[11px] mt-2">
-          Anyone in {set.size === 1 ? 'that segment' : `those ${set.size} segments`} is removed from this one.
+          {inc.size > 0 && <>Everyone in {inc.size === 1 ? 'the included segment' : `the ${inc.size} included segments`} is added to this one. </>}
+          {exc.size > 0 && <>Anyone in {exc.size === 1 ? 'the excluded segment' : `the ${exc.size} excluded segments`} is removed{inc.size > 0 ? ' afterwards' : ''}.</>}
         </div>
       )}
     </div>
@@ -236,7 +248,7 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
       s.name.toLowerCase().includes(wanted))
     if (hit) { setSelId(hit.id); return }
     const preset = presets[wanted]
-    if (preset) { setSelId(null); setDraft({ id: null, name: preset.name, rules: preset.rules, excludes: [] }) }
+    if (preset) { setSelId(null); setDraft({ id: null, name: preset.name, rules: preset.rules, includes: [], excludes: [] }) }
   }, [wanted, segments])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const selected = useMemo(() => segments?.find(s => s.id === selId) || null, [segments, selId])
@@ -268,7 +280,9 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
       id: selected.id,
       name: selected.name,
       rules: selected.definition?.rules?.length ? selected.definition.rules : [newRule(defs)],
-      // The OTHER segments whose audience this one subtracts.
+      // The OTHER segments whose audience this one adds (include) or subtracts
+      // (exclude).
+      includes: selected.definition?.include_segments || [],
       excludes: selected.definition?.exclude_segments || [],
     })
   }, [selected?.id])   // eslint-disable-line react-hooks/exhaustive-deps
@@ -277,6 +291,7 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
     () => ({
       match: 'all',
       rules: (draft?.rules || []).filter(r => String(r.value ?? '').trim() !== ''),
+      include_segments: draft?.includes || [],
       exclude_segments: draft?.excludes || [],
     }),
     [draft],
@@ -342,7 +357,7 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
 
   const startNew = () => {
     setSelId(null)
-    setDraft({ id: null, name: '', rules: [newRule(defs)], excludes: [] })
+    setDraft({ id: null, name: '', rules: [newRule(defs)], includes: [], excludes: [] })
     setError('')
   }
 

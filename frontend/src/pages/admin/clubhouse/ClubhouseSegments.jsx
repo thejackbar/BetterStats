@@ -8,7 +8,7 @@ import {
 import { CLUB_FIELD_DEFS } from '../bettercomms/segmentFields'
 import { CrudPanes, DetailPane } from './crudShell'
 import {
-  useSegments, RuleBuilder, SegmentListPane, SegmentTitleRow, SegmentExcludePicker,
+  useSegments, RuleBuilder, SegmentListPane, SegmentTitleRow, SegmentRefPicker,
   CountBar, reachability, segmentKind,
 } from './segmentEngine'
 import StaticMembers from './StaticMembers'
@@ -125,11 +125,11 @@ export default function ClubhouseSegments() {
                 </Note>
               )}
 
-              <SectionHeading className="mt-8 mb-2.5">Exclude other segments</SectionHeading>
-              <SegmentExcludePicker
+              <SectionHeading className="mt-8 mb-2.5">Include or exclude other segments</SectionHeading>
+              <SegmentRefPicker
                 segments={s.segments} currentId={s.draft.id} sizes={s.sizes}
-                excludes={s.draft.excludes || []}
-                onChange={ex => s.setDraft(d => ({ ...d, excludes: ex }))}
+                includes={s.draft.includes || []} excludes={s.draft.excludes || []}
+                onChange={({ includes, excludes }) => s.setDraft(d => ({ ...d, includes, excludes }))}
               />
 
               <CountBar counting={s.counting} total={s.total} reachable={s.reachable} otherRoute={s.otherRoute} />

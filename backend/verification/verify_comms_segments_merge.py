@@ -554,6 +554,42 @@ async def section_exclusions(engine, Session):
               {c.email for c in foreign} == {"a@x.com", "b@x.com", "c@x.com", "d@x.com"},
               str(sorted(c.email for c in foreign)))
 
+        # ── INCLUDE: add another segment's whole audience ─────────────────────
+        # A pure-include segment (no rules, no static) resolves to the UNION of
+        # its included segments — NOT everyone (which is what an empty rule list
+        # would widen to without the include source counting).
+        pi = await emails({"match": "all", "rules": [], "include_segments": [str(seg_f.id)]})
+        check("a pure-include segment resolves to the included audience, not everyone",
+              pi == {"a@x.com", "b@x.com"}, str(sorted(pi)))
+        pi2 = await emails({"match": "all", "rules": [], "include_segments": [str(seg_f.id), str(seg_e.id)]})
+        check("including two segments unions their audiences",
+              pi2 == {"a@x.com", "b@x.com", "c@x.com"}, str(sorted(pi2)))
+        # A static base PLUS an included segment.
+        base_plus = await emails({"match": "all", "rules": [], "include_segments": [str(seg_f.id)]}, static=[D])
+        check("a static base plus an included segment unions the two",
+              base_plus == {"a@x.com", "b@x.com", "d@x.com"}, str(sorted(base_plus)))
+        # INCLUDE then EXCLUDE, exclusion winning on the overlap: include everyone
+        # (the all-contacts static segment) then exclude Females → C and D only.
+        both = await emails({"match": "all", "rules": [],
+                             "include_segments": [str(seg_all.id)], "exclude_segments": [str(seg_f.id)]})
+        check("include-then-exclude subtracts last, so exclusion wins on the overlap",
+              both == {"c@x.com", "d@x.com"}, str(sorted(both)))
+        ninc = await comms_segments.count(db, club, {"match": "all", "rules": [], "include_segments": [str(seg_f.id)]})
+        check("count agrees with a pure-include resolve", ninc == 2, str(ninc))
+        # A junk / foreign include id adds nobody; a valid one still adds.
+        jinc = await emails({"match": "all", "rules": [], "include_segments": ["not-a-uuid", str(seg_e.id)]}, static=[D])
+        check("a junk include id is ignored; the valid one still adds",
+              jinc == {"c@x.com", "d@x.com"}, str(sorted(jinc)))
+        finc = await comms_segments.resolve_contacts(
+            db, club, {"match": "all", "rules": [], "include_segments": [str(oseg.id)]}, static_ids=[D])
+        check("including another club's segment adds nobody",
+              {c.email for c in finc} == {"d@x.com"}, str(sorted(c.email for c in finc)))
+        # Control: DROP the include and the static-only base is D alone — this is
+        # what the previous commit (no include support) resolved to.
+        ctrl_inc = await emails({"match": "all", "rules": []}, static=[D])
+        check("control — without an include the static base is D alone",
+              ctrl_inc == {"d@x.com"}, str(sorted(ctrl_inc)))
+
         # CYCLE GUARD: X excludes Y, Y excludes X. Resolving X terminates.
         x = CommsSegment(id=uuid.uuid4(), organisation_id=org_id, name="X",
                          definition={"match": "all", "rules": []})
@@ -577,6 +613,7 @@ async def section_exclusions(engine, Session):
         # DUPLICATE copies the definition (rules AND exclusions) AND the static set.
         src = CommsSegment(id=uuid.uuid4(), organisation_id=org_id, name="Source",
                            definition={"match": "all", "rules": [{"field": "tag", "op": "eq", "value": "female"}],
+                                       "include_segments": [str(seg_all.id)],
                                        "exclude_segments": [str(seg_e.id)]}, source="manual")
         db.add(src)
         await db.flush()
@@ -591,6 +628,9 @@ async def section_exclusions(engine, Session):
         check("the duplicate carries the source's rules",
               copy_out["definition"].get("rules") == [{"field": "tag", "op": "eq", "value": "female"}],
               str(copy_out["definition"].get("rules")))
+        check("the duplicate carries the source's inclusions",
+              copy_out["definition"].get("include_segments") == [str(seg_all.id)],
+              str(copy_out["definition"].get("include_segments")))
         check("the duplicate carries the source's exclusions",
               copy_out["definition"].get("exclude_segments") == [str(seg_e.id)],
               str(copy_out["definition"].get("exclude_segments")))

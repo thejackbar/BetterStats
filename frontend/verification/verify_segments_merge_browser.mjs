@@ -182,9 +182,10 @@ const run = async () => {
     check('resolve sends the union (static_member_ids + rules) on the wire', withStatic,
       JSON.stringify(resolveCalls.map(c => c.body).slice(-2)))
 
-    // ── Phase 2: Save/Delete in the title row, and the exclude picker ──────
+    // ── Phase 2: Save/Delete in the title row, and the include/exclude picker ──
     const body2 = await page.textContent('body')
-    check('the Exclude other segments section is labelled', body2.includes('Exclude other segments'))
+    check('the Include or exclude other segments section is labelled',
+      body2.includes('Include or exclude other segments'))
 
     // Save and Delete were moved out of a footer SaveRow and up into the title
     // row — both sit ABOVE the "Active rules (live)" heading now.
@@ -208,42 +209,69 @@ const run = async () => {
     check('Delete sits above the Active rules section (moved to the title row)',
       geo.delTop != null && geo.activeTop != null && geo.delTop < geo.activeTop, JSON.stringify(geo))
 
-    // The exclude picker lists the OTHER saved segments and never the one being
-    // edited (a segment can't exclude itself).
-    const exNames = await page.evaluate(() => {
-      const kinds = new Set(['rule + picked', 'rule', 'hand-picked', 'empty'])
+    // A ref row is a row carrying exactly an Include and an Exclude button; its
+    // first direct span is the segment's name. Read them off, and (below) drive
+    // them. Everything goes through page.evaluate so a build with no picker (the
+    // control) reports the miss rather than hanging on a locator.
+    const refNames = await page.evaluate(() => {
       const out = []
-      for (const lab of document.querySelectorAll('label')) {
-        if (!lab.querySelector('input[type="checkbox"]')) continue
-        const spans = [...lab.querySelectorAll('span')].map(s => (s.textContent || '').trim())
-        if (spans.some(t => kinds.has(t))) out.push(spans[0])
+      for (const row of document.querySelectorAll('div')) {
+        const labels = [...row.querySelectorAll('button')].map(b => (b.textContent || '').trim())
+        if (labels.length === 2 && labels.includes('Include') && labels.includes('Exclude')) {
+          const span = row.querySelector(':scope > span')
+          if (span) out.push((span.textContent || '').trim())
+        }
       }
-      return out
+      return [...new Set(out)]
     })
-    check('the exclude picker lists the other segments',
-      exNames.includes('Rule seg') && exNames.includes('Static seg'), JSON.stringify(exNames))
-    check('the exclude picker omits the segment being edited',
-      !exNames.includes('Both seg'), JSON.stringify(exNames))
+    check('the ref picker lists the other segments',
+      refNames.includes('Rule seg') && refNames.includes('Static seg'), JSON.stringify(refNames))
+    check('the ref picker omits the segment being edited',
+      !refNames.includes('Both seg'), JSON.stringify(refNames))
 
-    // Ticking an exclude sends exclude_segments on the resolve wire. Guarded so
-    // a build with no exclude picker (the control) reports the miss rather than
-    // hanging on a locator that never resolves.
-    const exCb = page.locator('label:has-text("Rule seg") input[type="checkbox"]')
-    if (await exCb.count()) await exCb.first().click().catch(() => {})
+    const clickRef = (name, mode) => page.evaluate(({ name, mode }) => {
+      for (const row of document.querySelectorAll('div')) {
+        const btns = [...row.querySelectorAll('button')]
+        const labels = btns.map(b => (b.textContent || '').trim())
+        if (labels.length === 2 && labels.includes('Include') && labels.includes('Exclude')) {
+          const span = row.querySelector(':scope > span')
+          if (span && (span.textContent || '').trim() === name) {
+            const b = btns.find(x => (x.textContent || '').trim() === mode)
+            if (b) { b.click(); return true }
+          }
+        }
+      }
+      return false
+    }, { name, mode })
+
+    // INCLUDE the rule segment → include_segments on the resolve wire.
+    await clickRef('Rule seg', 'Include')
     await page.waitForTimeout(900)
-    const exResolve = calls.filter(c => /\/comms\/segments\/resolve/.test(c.url) && c.body).some(c => {
-      try { return (JSON.parse(c.body).definition?.exclude_segments || []).includes('s_rule') } catch { return false }
+    const incResolve = calls.filter(c => /\/comms\/segments\/resolve/.test(c.url) && c.body).some(c => {
+      try { return (JSON.parse(c.body).definition?.include_segments || []).includes('s_rule') } catch { return false }
     })
-    check('ticking an exclude sends exclude_segments on the resolve wire', exResolve)
+    check('choosing Include sends include_segments on the resolve wire', incResolve)
 
-    // Save from the title row updates the segment, carrying the exclusions.
+    // EXCLUDE the static segment → exclude_segments on the resolve wire.
+    await clickRef('Static seg', 'Exclude')
+    await page.waitForTimeout(900)
+    const excResolve = calls.filter(c => /\/comms\/segments\/resolve/.test(c.url) && c.body).some(c => {
+      try { return (JSON.parse(c.body).definition?.exclude_segments || []).includes('s_static') } catch { return false }
+    })
+    check('choosing Exclude sends exclude_segments on the resolve wire', excResolve)
+
+    // Save from the title row updates the segment, carrying BOTH the include and
+    // the exclude reference.
     const saveBtn = page.locator('button:has-text("Save changes")')
     if (await saveBtn.count()) await saveBtn.first().click().catch(() => {})
     await page.waitForTimeout(700)
-    const putWithExcl = calls.filter(c => c.method === 'PUT' && /\/comms\/segments\/s_both$/.test(c.url) && c.body).some(c => {
-      try { return (JSON.parse(c.body).definition?.exclude_segments || []).includes('s_rule') } catch { return false }
+    const putRefs = calls.filter(c => c.method === 'PUT' && /\/comms\/segments\/s_both$/.test(c.url) && c.body).some(c => {
+      try {
+        const d = JSON.parse(c.body).definition || {}
+        return (d.include_segments || []).includes('s_rule') && (d.exclude_segments || []).includes('s_static')
+      } catch { return false }
     })
-    check('Save (in the title row) sends a PUT carrying the exclusions', putWithExcl)
+    check('Save (in the title row) sends a PUT carrying the include and exclude refs', putRefs)
 
     // Reselect Both seg for the field-scope checks below (Save reset the draft).
     await page.click('text=Both seg')
