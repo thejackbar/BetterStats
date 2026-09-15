@@ -70,6 +70,12 @@ export default function TrialReminderModal() {
   const status = trialStatus(user)
   const tier = status ? tierFor(status.daysLeft, status.expired) : null
 
+  // The pop-up is a club-admin reminder. A super admin acting as a club still
+  // gets the always-present banner button (trialStatus shows it), but not the
+  // modal — otherwise it would pop every time they scope into a trialling club
+  // while working across many of them.
+  if (user?.role === 'super_admin') return null
+
   // Nothing to nudge, too early, already seen this tier, or they're already on
   // the Account page actively subscribing — don't get in the way.
   if (!status || !tier) return null

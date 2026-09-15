@@ -16,11 +16,17 @@ export function subscribePath(trials) {
   return `/admin/account?subscribe=${(keys.length ? keys : ['core']).join(',')}`
 }
 
-// Returns null for anyone with no trial to nudge (a super admin acting
-// cross-club, a fully paid club, a club with no trial modules held) — every
-// caller treats null as "render nothing".
+// Returns null for anyone with no trial to nudge (a fully paid club, a club
+// with no trial modules held) — every caller treats null as "render nothing".
+//
+// A super admin acts cross-club, so a plain super-admin view has no single
+// club whose trial to convert; but once they've scoped INTO a specific club
+// (acting_as_club), the entitlements they carry are that one club's, and a
+// super admin counts as its primary admin, so the Subscribe CTA is both
+// meaningful and functional. Only that acting-as case is shown.
 export function trialStatus(user) {
-  if (!user || user.role === 'super_admin') return null
+  if (!user) return null
+  if (user.role === 'super_admin' && !user.acting_as_club) return null
 
   const mods = user.entitlements?.billing_modules || []
   const trials = mods.filter((m) => m.status === 'trial' && m.trial_ends_at)

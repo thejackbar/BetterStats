@@ -2,16 +2,18 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { trialStatus } from '../../lib/trialStatus'
 
-// Phase 18 (docs/self-serve-trial-onboarding-plan.md) — a slim, persistent
-// strip above every admin page while any module is on trial. Reads the shared
+// Phase 18 (docs/self-serve-trial-onboarding-plan.md) — a persistent bar above
+// every admin page while any module is on trial, so the Subscribe button is
+// present and prominent at all times during a trial. Reads the shared
 // trialStatus() helper (over user.entitlements.billing_modules, already
 // returned by /auth/me and /auth/login) so it can never disagree with the
-// TrialReminderModal pop-up about days left. Super admins act cross-club and
-// are never shown a club's own trial state (trialStatus returns null for them).
+// TrialReminderModal pop-up about days left.
 //
-// The primary CTA now goes to the real subscribe flow (/admin/account, which
-// pre-ticks the trialling modules for the primary admin) rather than the
-// marketing pricing page, so a club doesn't have to know where to convert.
+// The button always carries the club's accent fill (even early in the trial,
+// not only when urgent) so it reads as a real button whatever the countdown,
+// and goes to the real subscribe flow (/admin/account, which pre-ticks the
+// trialling modules for the primary admin) rather than the marketing pricing
+// page.
 export default function TrialBanner() {
   const { user } = useAuth()
   const navigate = useNavigate()
@@ -24,13 +26,13 @@ export default function TrialBanner() {
 
   return (
     <div
-      className={`px-4 py-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 text-center font-mono text-[11px] tracking-wide2 ${
+      className={`px-4 py-2.5 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-center text-sm ${
         urgent
-          ? 'bg-amber-500/15 text-amber-200 border-b border-amber-500/30'
-          : 'bg-pb-surface2 text-pb-faint border-b pb-hairline-b'
+          ? 'bg-amber-500/15 text-amber-100 border-b border-amber-500/40'
+          : 'bg-pb-surface2 text-pb-dim border-b pb-hairline-b'
       }`}
     >
-      <span>
+      <span className="font-medium">
         {expired ? (
           <>Your {soonest.name} trial has ended{others ? ` (and ${others} more)` : ''}.</>
         ) : (
@@ -39,16 +41,16 @@ export default function TrialBanner() {
       </span>
       <button
         onClick={() => navigate(subscribePath)}
-        className="rounded-full px-3 py-1 text-white font-semibold text-[11px] shadow-sm"
+        className="rounded-md px-4 py-1.5 text-white font-semibold text-sm shadow-sm hover:opacity-90"
         style={{ background: 'var(--pb-accent)' }}
       >
-        {expired ? 'Subscribe now' : 'Convert your trial'} &rarr;
+        Subscribe now &rarr;
       </button>
       <a
         href="/pricing"
         target="_blank"
         rel="noopener noreferrer"
-        className="underline hover:no-underline opacity-80"
+        className="text-xs underline hover:no-underline opacity-70"
       >
         See pricing
       </a>
