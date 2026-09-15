@@ -364,6 +364,10 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
   // in. The server sends both so they are drawn from one universe and add up.
   const universe = resolved?.universe ?? null
   const outCount = resolved?.out_count ?? (universe != null ? Math.max(0, universe - total) : null)
+  // The FULL set of in-segment contact ids — the Static screen partitions its
+  // own complete contact list with this, so the in / not-in lists agree with the
+  // counts above rather than being derived from the capped `contacts` sample.
+  const memberIds = resolved?.member_ids ?? null
 
   const save = async (noun = 'Segment') => {
     if (!draft?.name.trim()) { setError(`Give the ${noun.toLowerCase()} a name.`); return }
@@ -425,7 +429,7 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
 
   return {
     segments, sizes, opts, selId, setSelId, draft, setDraft,
-    contacts, total, reachable, otherRoute, clubs, universe, outCount, counting,
+    contacts, total, reachable, otherRoute, clubs, universe, outCount, memberIds, counting,
     busy, error, toast, setToast,
     save, duplicate, remove, startNew, emailThese,
     // Static (frozen hand-picked) set + the current definition, for the Static

@@ -88,7 +88,7 @@ export default function ClubhouseSegments() {
           ) : (
             <StaticMembersProvider
               segmentId={s.draft.id}
-              audienceContacts={s.contacts} inCount={s.total} outCount={s.outCount}
+              memberIds={s.memberIds} inCount={s.total} outCount={s.outCount}
               reachable={s.reachable}
               onChanged={() => { s.reloadStaticMembers(s.draft.id); s.reload() }}
             >

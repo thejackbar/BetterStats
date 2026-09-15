@@ -68,7 +68,7 @@ export default function InternalSegments() {
           ) : (
             <StaticMembersProvider
               segmentId={s.draft.id}
-              audienceContacts={s.contacts} inCount={s.total} outCount={s.outCount}
+              memberIds={s.memberIds} inCount={s.total} outCount={s.outCount}
               reachable={s.reachable} otherRoute={s.otherRoute} clubs={s.clubs}
               onChanged={() => { s.reloadStaticMembers(s.draft.id); s.reload() }}
             >

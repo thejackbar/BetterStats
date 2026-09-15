@@ -47,6 +47,17 @@ const CONTACT2 = {
   id: 'c2', name: 'Bob Other', email: 'bob@x.com', source: 'member',
   subscribed: true, suppressed: false, club: 'Rovers', state: 'WA', player_id: 'pl2', member_id: 'm2',
 }
+// A third contact that IS in the segment (in the resolve `member_ids`) but is
+// PAST the 5000-row cap — so it is absent from the capped `contacts` preview
+// the resolve returns. This is the reported bug: the OLD build derived list
+// membership from that capped preview, so Carol read as "not in" (she showed in
+// the out list, not the in list) though the count said she was in. The fix
+// partitions the club's OWN complete /comms/contacts list by `member_ids`, so
+// she lands in the in list and never the out list.
+const CONTACT3 = {
+  id: 'c3', name: 'Carol Past', email: 'carol@x.com', source: 'member',
+  subscribed: true, suppressed: false, club: 'Rovers', state: 'WA', player_id: 'pl3', member_id: 'm3',
+}
 // Three saved segments: a rule-only (Active), a static-only (Static), and both.
 const SEGMENTS = [
   { id: 's_rule', name: 'Rule seg', source: 'manual', origin: null, member_count: 0,
@@ -103,13 +114,16 @@ const routes = (page, calls) => page.route('**/api/**', async (route) => {
     return json({ ...base, definition: def })
   }
   if (/\/comms\/segments\/resolve/.test(url) || /\/comms\/segments\/preview/.test(url)) {
-    // universe / out_count drive the two In / Not-in tiles: in = count = 1,
-    // universe = 4, so the "Not in this segment" tile reads 3.
-    return json({ count: 1, universe: 4, out_count: 3, contacts: [CONTACT],
-                  reachable: 1, other_route: 0, clubs: 1 })
+    // universe / out_count drive the two In / Not-in tiles. Two contacts are IN
+    // the segment (c1 hand-picked, c3 matched by a rule) but the `contacts`
+    // preview is CAPPED to c1 alone — c3 is past the cap. `member_ids` is the
+    // full in-segment set the screen partitions its own contact list with, so
+    // the tiles (in = count = 2, not-in = out_count = 1) and the lists agree.
+    return json({ count: 2, universe: 3, out_count: 1, member_ids: ['c1', 'c3'],
+                  contacts: [CONTACT], reachable: 2, other_route: 0, clubs: 1 })
   }
   if (/\/comms\/segments$/.test(url) && req.method() === 'GET') return json(SEGMENTS)
-  if (/\/comms\/contacts/.test(url)) return json({ contacts: [CONTACT, CONTACT2] })
+  if (/\/comms\/contacts/.test(url)) return json({ contacts: [CONTACT, CONTACT2, CONTACT3] })
   if (/\/comms\/context/.test(url)) return json({ current: { is_marketing: INTERNAL } })
   if (/\/notifications\/(count|summary)/.test(url)) return json({ unseen_count: 0, items: [] })
   // Anything else the layout pokes at.
@@ -220,8 +234,8 @@ const run = async () => {
     })
     const inTile = tiles.find(t => t[0] === 'in')
     const outTile = tiles.find(t => t[0] === 'out')
-    check('the "In this segment" tile renders its count', !!inTile && inTile[1] === '1', JSON.stringify(tiles))
-    check('the "Not in this segment" tile renders its count', !!outTile && outTile[1] === '3', JSON.stringify(tiles))
+    check('the "In this segment" tile renders its count', !!inTile && inTile[1] === '2', JSON.stringify(tiles))
+    check('the "Not in this segment" tile renders its count', !!outTile && outTile[1] === '1', JSON.stringify(tiles))
 
     // Geometry, before any tile is clicked: the tiles sit above the Active rules
     // section; the always-visible hand-pick search box sits inside the Static
@@ -293,6 +307,12 @@ const run = async () => {
     await page.waitForTimeout(500)
     let bod = await page.textContent('body')
     check('clicking the In tile reveals the in-segment contact', bod.includes('Amardeep Gill'))
+    // Discriminating: a member PAST the resolve cap still lands in the in list,
+    // because the screen partitions the full contact list by `member_ids` rather
+    // than by the capped preview. The old build derived membership from the
+    // capped preview, so Carol was missing here.
+    check('the in list includes an in-segment member past the resolve cap (Carol)',
+      bod.includes('Carol Past'), 'a past-cap member is missing from the in list')
     check('both tiles remain on screen with a list open',
       bod.includes('In this segment') && bod.includes('Not in this segment'))
     check('the in list keeps its per-contact Remove/matched controls', /matched|Remove/i.test(bod))
@@ -333,6 +353,12 @@ const run = async () => {
     bod = await page.textContent('body')
     check('toggling the In tile again hides the In list',
       !bod.includes('Contacts in this segment') && bod.includes('Contacts not in this segment'))
+    // Discriminating: with only the Not-in list showing, an in-segment member
+    // past the cap (Carol) must NOT appear here — she is in the segment. The old
+    // build listed her in the out list because she was absent from the capped
+    // preview it derived membership from.
+    check('the Not-in list excludes an in-segment member past the resolve cap (Carol)',
+      !bod.includes('Carol Past'), 'a past-cap member wrongly appears in the not-in list')
 
     // ── Phase 2: Save/Delete in the title row, and the include/exclude picker ──
     const body2 = await page.textContent('body')

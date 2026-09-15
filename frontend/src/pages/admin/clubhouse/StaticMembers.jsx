@@ -4,9 +4,8 @@ import { Button, Badge, Caption, INPUT_CLS, Note, SectionHeading } from '../../.
 import { ContactDetailModal } from '../bettercomms/CommsContacts'
 import {
   FACETS, emptyFilters, matchesQuery, matchesFilters, facetOptionsFrom, MultiSelect,
-  matchesSuppressed, SuppressedToggle, emptyModes, matchesModes, anyMode,
-  DirectoryFilterChips, searchHint,
-  matchesUnsubscribed, UnsubscribedToggle, unsubscribedTitle,
+  emptyModes, matchesModes, anyMode,
+  DirectoryFilterChips, searchHint, unsubscribedTitle,
 } from '../bettercomms/audience'
 
 // Who is in this segment, split across three placement zones so each part sits
@@ -45,7 +44,7 @@ function Tile({ label, n, sub, active, tone, onClick }) {
         ${active ? 'border-pb-accent bg-pb-surface2' : 'border-pb-hairline hover:bg-pb-surface2'}`}>
       <div className="text-2xl font-bold tabular-nums"
         style={tone === 'ok' ? { color: 'var(--pb-positive-ink)' } : undefined}>
-        {n == null ? '—' : n}
+        {n == null ? '—' : n.toLocaleString()}
       </div>
       <div className="text-pb-dim text-[12.5px] mt-0.5">{label}</div>
       <div className="text-pb-faintest text-[10.5px] mt-0.5">{active ? 'Showing the list below — tap to hide' : sub}</div>
@@ -78,8 +77,16 @@ function ContactRow({ c, action, onDetails, last, checked, onCheck, tag }) {
   )
 }
 
+// A contact this browser reckons an email could actually reach. It is the
+// EXACT mirror of the server's `sendable_where` (subscribed IS TRUE, and not
+// bounced / complained / excluded / globally suppressed — `_contact_out` folds
+// the last four into `suppressed`), so the "not in this segment" list drawn
+// here equals the server's `out_count` rather than including the ~handful of
+// suppressed contacts the count leaves out.
+const isSendable = (c) => c.subscribed === true && !c.suppressed
+
 export function StaticMembersProvider({
-  children, segmentId, audienceContacts, inCount, outCount, reachable, otherRoute, clubs, onChanged,
+  children, segmentId, memberIds, inCount, outCount, reachable, otherRoute, clubs, onChanged,
 }) {
   const [memberRows, setMemberRows] = useState(segmentId ? null : [])
   const [contacts, setContacts] = useState(null)
@@ -89,8 +96,6 @@ export function StaticMembersProvider({
   const [query, setQuery] = useState('')
   const [filters, setFilters] = useState(noFilters)
   const [modes, setModes] = useState(emptyModes)
-  const [supp, setSupp] = useState('all')
-  const [unsub, setUnsub] = useState('all')
   const [selected, setSelected] = useState(() => new Set())
   const [busy, setBusy] = useState(false)
   const [detailId, setDetailId] = useState(null)
@@ -110,25 +115,35 @@ export function StaticMembersProvider({
   // A fresh segment resets the working selection, filters and open lists.
   useEffect(() => {
     setSelected(new Set()); setQuery(''); setFilters(noFilters()); setModes(emptyModes())
-    setSupp('all'); setUnsub('all'); setNote(''); setShow({ in: false, out: false })
+    setNote(''); setShow({ in: false, out: false })
   }, [segmentId])
 
-  const memberIds = useMemo(() => new Set((memberRows || []).map(r => r.id)), [memberRows])
-  const inIds = useMemo(() => new Set((audienceContacts || []).map(c => c.id)), [audienceContacts])
+  // The hand-picked (frozen) member ids — what the Remove button acts on.
+  const staticIds = useMemo(() => new Set((memberRows || []).map(r => r.id)), [memberRows])
+  // The WHOLE in-segment audience (rules ∪ static ∪ included − excluded),
+  // resolved server-side and passed in whole (ids only). Deriving it from the
+  // capped `contacts` PREVIEW instead is what made the lists disagree with the
+  // count tiles — a contact past the 5000-row cap read as "not in" though the
+  // count said it was in.
+  const inIds = useMemo(() => new Set(memberIds || []), [memberIds])
   const facetOptions = useMemo(() => facetOptionsFrom(contacts), [contacts])
   const showDirChips = useMemo(() => (contacts || []).some(c => c.club), [contacts])
 
   const q = query.trim().toLowerCase()
   const passes = useCallback((c) =>
-    matchesQuery(c, q) && matchesFilters(c, filters) && matchesModes(c, modes)
-    && matchesSuppressed(c, supp) && matchesUnsubscribed(c, unsub),
-    [q, filters, modes, supp, unsub])
+    matchesQuery(c, q) && matchesFilters(c, filters) && matchesModes(c, modes),
+    [q, filters, modes])
 
-  // The IN list is the resolved audience itself; the OUT list is every other
-  // sendable contact. Both are then narrowed by the browsing criteria.
-  const inList = useMemo(() => (audienceContacts || []).filter(passes), [audienceContacts, passes])
+  // Both lists partition the club's OWN complete contact list by the resolved
+  // membership, so the totals agree with the tiles above. The OUT list is
+  // sendable-gated so its length equals the server's `out_count` (a suppressed
+  // contact is never counted in, and adding one is a no-op, so it belongs in
+  // neither list).
+  const inList = useMemo(() =>
+    (contacts || []).filter(c => inIds.has(c.id) && passes(c)),
+    [contacts, inIds, passes])
   const outList = useMemo(() =>
-    (contacts || []).filter(c => !inIds.has(c.id) && passes(c)),
+    (contacts || []).filter(c => !inIds.has(c.id) && isSendable(c) && passes(c)),
     [contacts, inIds, passes])
 
   const isChecked = (id) => selected.has(id)
@@ -158,16 +173,16 @@ export function StaticMembersProvider({
     finally { setBusy(false) }
   }
 
-  const clearAll = () => { setQuery(''); setFilters(noFilters()); setModes(emptyModes()); setSupp('all'); setUnsub('all') }
-  const activeFilters = FACETS.some(f => filters[f.key].length) || anyMode(modes) || !!q || supp !== 'all' || unsub !== 'all'
+  const clearAll = () => { setQuery(''); setFilters(noFilters()); setModes(emptyModes()) }
+  const activeFilters = FACETS.some(f => filters[f.key].length) || anyMode(modes) || !!q
   const toggleTile = (which) => setShow(s => ({ ...s, [which]: !s[which] }))
 
   const value = {
     segmentId, inCount, outCount, reachable, otherRoute, clubs,
     show, toggleTile,
-    query, setQuery, filters, setFilters, modes, setModes, supp, setSupp, unsub, setUnsub,
+    query, setQuery, filters, setFilters, modes, setModes,
     facetOptions, showDirChips, activeFilters, clearAll,
-    memberRows, contacts, memberIds, inIds, inList, outList,
+    memberRows, contacts, staticIds, inIds, inList, outList,
     selected, isChecked, toggleOne, setMany, clearSelection,
     doAdd, doRemove, busy, note, setDetailId,
   }
@@ -192,9 +207,9 @@ export function SegmentTiles() {
       </div>
       {sm.inCount > 0 && (sm.reachable != null) && (
         <div className="text-pb-faintest text-[11.5px] mt-2">
-          <b style={{ color: 'var(--pb-positive-ink)' }}>{sm.reachable}</b> reachable by email
-          {sm.otherRoute > 0 && <> · <b style={{ color: '#f5b542' }}>{sm.otherRoute}</b> need another route</>}
-          {sm.clubs > 0 && <> · <b style={{ color: 'var(--pb-accent-ink)' }}>{sm.clubs}</b> {sm.clubs === 1 ? 'club' : 'clubs'}</>}
+          <b style={{ color: 'var(--pb-positive-ink)' }}>{sm.reachable.toLocaleString()}</b> reachable by email
+          {sm.otherRoute > 0 && <> · <b style={{ color: '#f5b542' }}>{sm.otherRoute.toLocaleString()}</b> need another route</>}
+          {sm.clubs > 0 && <> · <b style={{ color: 'var(--pb-accent-ink)' }}>{sm.clubs.toLocaleString()}</b> {sm.clubs === 1 ? 'club' : 'clubs'}</>}
         </div>
       )}
     </div>
@@ -226,8 +241,6 @@ export function StaticPicker() {
           <MultiSelect key={f.key} label={f.label} options={sm.facetOptions[f.key]}
             selected={sm.filters[f.key]} onChange={(v) => sm.setFilters(s => ({ ...s, [f.key]: v }))} />
         ))}
-        <SuppressedToggle value={sm.supp} onChange={sm.setSupp} />
-        <UnsubscribedToggle value={sm.unsub} onChange={sm.setUnsub} />
         {sm.activeFilters && (
           <button onClick={sm.clearAll}
             className="text-xs text-pb-faint hover:text-pb-accent underline underline-offset-2">Clear filters</button>
@@ -252,7 +265,7 @@ function ContactList({ which }) {
   // Bulk targets are the selection restricted to THIS list. The two lists are
   // disjoint, so one shared selection set drives both cleanly.
   const selHere = isIn
-    ? [...sm.selected].filter(id => sm.memberIds.has(id) && sm.inIds.has(id))
+    ? [...sm.selected].filter(id => sm.staticIds.has(id) && sm.inIds.has(id))
     : [...sm.selected].filter(id => !sm.inIds.has(id))
   const loading = sm.contacts == null || (isIn && sm.memberRows == null)
 
@@ -260,13 +273,13 @@ function ContactList({ which }) {
     <div className="rounded-xl border border-pb-hairline px-4 py-4 mt-4" style={{ background: 'var(--pb-surface)' }}>
       <div className="flex items-center justify-between mb-2">
         <SectionHeading className="!mb-0">{isIn ? 'Contacts in this segment' : 'Contacts not in this segment'}</SectionHeading>
-        <span className="text-pb-faintest text-xs">{shown.length} shown</span>
+        <span className="text-pb-faintest text-xs">{shown.length.toLocaleString()} shown</span>
       </div>
 
       {sm.segmentId && (
         <div className="flex flex-wrap items-center gap-2 mb-3 pb-3 pb-hairline-b">
           <Button size="sm" onClick={() => sm.setMany(shown.map(c => c.id), true)} disabled={!shown.length}>
-            Select all shown ({shown.length})
+            Select all shown ({shown.length.toLocaleString()})
           </Button>
           {selHere.length > 0 ? (
             <>
@@ -301,7 +314,7 @@ function ContactList({ which }) {
       ) : (
         <div className="max-h-[28rem] overflow-y-auto">
           {shown.slice(0, 500).map((c, i) => {
-            const isStatic = sm.memberIds.has(c.id)
+            const isStatic = sm.staticIds.has(c.id)
             return (
               <ContactRow key={c.id} c={c} last={i === 0} onDetails={sm.setDetailId}
                 checked={sm.isChecked(c.id)}
@@ -316,7 +329,7 @@ function ContactList({ which }) {
           })}
           {shown.length > 500 && (
             <div className="text-pb-faintest text-[10px] uppercase tracking-wide2 mt-2 py-1">
-              Showing the first 500 of {shown.length} — narrow with the filters above
+              Showing the first 500 of {shown.length.toLocaleString()} — narrow with the filters above
             </div>
           )}
         </div>

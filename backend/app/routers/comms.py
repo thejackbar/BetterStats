@@ -2610,6 +2610,12 @@ async def resolve_segment(
         "count": len(contacts),
         "universe": universe,
         "out_count": max(0, universe - len(contacts)),
+        # The FULL set of in-segment contact ids (ids only, not the capped rows
+        # below). The screen partitions its OWN complete contact list into the
+        # "in" and "not in" lists with this — deriving membership from the capped
+        # `contacts` sample instead made those lists disagree with the exact
+        # counts (a contact past the 5000 cap read as "not in" though it was in).
+        "member_ids": [str(c.id) for c in contacts],
         **audience_figures(contacts),
         "contacts": [_contact_out(c, mc_map.get(c.marketing_club_id)) for c in rows],
     }
