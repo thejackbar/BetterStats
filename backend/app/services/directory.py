@@ -40,6 +40,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 # module keeps only the Directory-specific reads/writes (the people list with
 # segments, and role assignment).
 from app.services.members import MEMBER_CATEGORIES  # noqa: F401  (re-exported for the router)
+from app.services.squad_membership import recompute_primary_squad
 
 # A membership type contributes a segment prefixed `type:`, so the club naming a
 # type "Volunteer" (every club that adopted the pre-248 starter set has one) can
@@ -567,24 +568,23 @@ async def set_squad(db: AsyncSession, org_id, player_id, team_id) -> None:
     old_team_id = (await db.execute(text(
         "SELECT squad_team_id FROM players WHERE id = :pid AND organisation_id = :org"
     ), {"pid": player_id, "org": org_id})).scalar()
-    await db.execute(text(
-        "UPDATE players SET squad_team_id = :t WHERE id = :pid AND organisation_id = :org"
-    ), {"t": team_id, "pid": player_id, "org": org_id})
-    # Mirror into team_members, exactly as services/squad_membership.py does for
-    # every other squad write — done in raw SQL here to keep this module out of
-    # the ORM graph. Without it the Directory was the one squad write that left
-    # team_members stale, so the "Squad" filter on Availability and Selection
-    # disagreed with the Squads board about who is in a squad.
+    # team_members is authoritative and a player can be in several squads. The
+    # Directory's single-squad control moves the primary: drop the old primary
+    # membership, add the new, then recompute players.squad_team_id from what's
+    # left. Other squads (added on the board) are untouched. Raw SQL keeps this
+    # module out of the ORM graph; recompute_primary_squad is text()-only too.
     if old_team_id != team_id:
         if old_team_id:
             await db.execute(text(
-                "DELETE FROM team_members WHERE team_id = :t AND player_id = :pid"
-            ), {"t": old_team_id, "pid": player_id})
+                "DELETE FROM team_members WHERE team_id = :t AND player_id = :pid "
+                "AND organisation_id = :org"
+            ), {"t": old_team_id, "pid": player_id, "org": org_id})
         if team_id:
             await db.execute(text(
                 "INSERT INTO team_members (team_id, player_id, organisation_id) "
                 "VALUES (:t, :pid, :org) ON CONFLICT DO NOTHING"
             ), {"t": team_id, "pid": player_id, "org": org_id})
+        await recompute_primary_squad(db, org_id, player_id)
 
 
 async def set_fee_tier(db: AsyncSession, org_id, member_id, season_id, fee_schedule_id) -> None:

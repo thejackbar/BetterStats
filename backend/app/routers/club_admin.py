@@ -191,6 +191,25 @@ async def list_players(
     for pid, lp in lp_res.fetchall():
         last_played[str(pid)] = lp.isoformat() if lp else None
 
+    # Every squad each player is in (team_members is authoritative for the
+    # multi-squad Squads board). The single squad_team_id below is the derived
+    # primary; the board reads squad_team_ids so a player shows in every squad
+    # they belong to. One grouped query.
+    squad_ids: dict[str, list] = {}
+    sm_res = await db.execute(_text(
+        "SELECT player_id, team_id FROM team_members WHERE organisation_id = :org"
+    ), {"org": club.id})
+    for pid, tid in sm_res.fetchall():
+        squad_ids.setdefault(str(pid), []).append(str(tid))
+
+    def _squad_team_ids(p: Player) -> list[str]:
+        ids = list(squad_ids.get(str(p.id), []))
+        # Fold in the primary for any legacy row that predates team_members
+        # mirroring, so the board never shows an assigned player as unassigned.
+        if p.squad_team_id and str(p.squad_team_id) not in ids:
+            ids.append(str(p.squad_team_id))
+        return ids
+
     return [
         {
             "id": str(p.id),
@@ -217,6 +236,7 @@ async def list_players(
             "is_financial_override": p.is_financial_override,
             "trained_override": p.trained_override,
             "squad_team_id": str(p.squad_team_id) if p.squad_team_id else None,
+            "squad_team_ids": _squad_team_ids(p),
             "last_played": last_played.get(str(p.id)),
             # Age, not date of birth, and only when the club's own
             # BetterSelect setting says so (migration 269) — a club showing
