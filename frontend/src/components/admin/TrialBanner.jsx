@@ -2,18 +2,18 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { trialStatus } from '../../lib/trialStatus'
 
-// Phase 18 (docs/self-serve-trial-onboarding-plan.md) — a persistent bar above
-// every admin page while any module is on trial, so the Subscribe button is
-// present and prominent at all times during a trial. Reads the shared
-// trialStatus() helper (over user.entitlements.billing_modules, already
-// returned by /auth/me and /auth/login) so it can never disagree with the
+// A prominent trial-conversion bar. Rendered by AdminLayout and ModuleLayout
+// directly under the sticky chrome header (not at the very top of the page),
+// so it sits in the admin content flow where it reads as part of the app.
+// Reads the shared trialStatus() helper (over user.entitlements.billing_modules,
+// already on /auth/me and /auth/login) so it can never disagree with the
 // TrialReminderModal pop-up about days left.
 //
-// The button always carries the club's accent fill (even early in the trial,
-// not only when urgent) so it reads as a real button whatever the countdown,
-// and goes to the real subscribe flow (/admin/account, which pre-ticks the
-// trialling modules for the primary admin) rather than the marketing pricing
-// page.
+// The bar carries the club's own primary->secondary gradient (a light tint over
+// the surface so text stays readable in both themes), an explainer line and an
+// animated arrow pointing at a solid "Subscribe now" button that goes to the
+// real subscribe flow (/admin/account, which pre-ticks the trialling modules
+// for the primary admin) rather than the marketing pricing page.
 export default function TrialBanner() {
   const { user } = useAuth()
   const navigate = useNavigate()
@@ -22,38 +22,63 @@ export default function TrialBanner() {
   if (!status) return null
 
   const { soonest, daysLeft, expired, others, subscribePath } = status
-  const urgent = expired || daysLeft <= 7
+  const othersSuffix = others > 0 ? ` (+${others} more)` : ''
+
+  let whenPhrase
+  if (daysLeft <= 0) whenPhrase = 'today'
+  else if (daysLeft === 1) whenPhrase = 'tomorrow'
+  else whenPhrase = `in ${daysLeft} days`
+
+  const explainer = expired ? (
+    <>Your {soonest.name} trial has ended{othersSuffix}. Subscribe now to restore full access to your club's stats and tools.</>
+  ) : (
+    <>Ready to keep going? Subscribe before your {soonest.name} trial ends {whenPhrase}{othersSuffix} so you don't lose access.</>
+  )
 
   return (
     <div
-      className={`px-4 py-2.5 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-center text-sm ${
-        urgent
-          ? 'bg-amber-500/15 text-amber-100 border-b border-amber-500/40'
-          : 'bg-pb-surface2 text-pb-dim border-b pb-hairline-b'
-      }`}
+      className="w-full px-4 py-2.5 border-b"
+      style={{
+        background:
+          'linear-gradient(90deg, color-mix(in srgb, var(--pb-accent) 22%, var(--pb-surface)) 0%, color-mix(in srgb, var(--pb-accent-2-safe) 22%, var(--pb-surface)) 100%)',
+        borderColor: 'color-mix(in srgb, var(--pb-accent) 35%, transparent)',
+      }}
     >
-      <span className="font-medium">
-        {expired ? (
-          <>Your {soonest.name} trial has ended{others ? ` (and ${others} more)` : ''}.</>
-        ) : (
-          <>{daysLeft} day{daysLeft === 1 ? '' : 's'} left in your {soonest.name} trial{others ? ` (+${others} more)` : ''}.</>
-        )}
-      </span>
-      <button
-        onClick={() => navigate(subscribePath)}
-        className="rounded-md px-4 py-1.5 text-white font-semibold text-sm shadow-sm hover:opacity-90"
-        style={{ background: 'var(--pb-accent)' }}
-      >
-        Subscribe now &rarr;
-      </button>
-      <a
-        href="/pricing"
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-xs underline hover:no-underline opacity-70"
-      >
-        See pricing
-      </a>
+      <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-center">
+        <span
+          className="font-mono text-[10px] tracking-wide2 px-2 py-0.5 rounded-full shrink-0 font-semibold"
+          style={{ background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }}
+        >
+          {expired ? 'TRIAL ENDED' : `${daysLeft} DAY${daysLeft === 1 ? '' : 'S'} LEFT`}
+        </span>
+
+        <span className="text-sm text-pb-text font-medium">{explainer}</span>
+
+        <span
+          aria-hidden="true"
+          className="pb-nudge-x text-lg font-bold shrink-0 leading-none"
+          style={{ color: 'var(--pb-accent-ink, var(--pb-accent))' }}
+        >
+          &rarr;
+        </span>
+
+        <button
+          onClick={() => navigate(subscribePath)}
+          className="rounded-md px-4 py-1.5 font-semibold text-sm shadow-sm hover:opacity-90 shrink-0"
+          style={{ background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }}
+        >
+          Subscribe now
+        </button>
+
+        <a
+          href="/pricing"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-xs text-pb-dim underline hover:no-underline opacity-80 shrink-0"
+        >
+          See pricing
+        </a>
+      </div>
     </div>
   )
 }

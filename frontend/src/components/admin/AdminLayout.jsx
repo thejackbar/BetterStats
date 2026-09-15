@@ -11,6 +11,7 @@ import { CHANGELOG } from '../../data/changelog'
 import NotificationBell from '../NotificationBell'
 import NotificationModal from '../NotificationModal'
 import ClubSwitcher from './ClubSwitcher'
+import TrialBanner from './TrialBanner'
 import BrandLogo from '../BrandLogo'
 import { SUPER_OVERVIEW, SUPER_SECTIONS, SALES_MANAGEMENT_ITEMS, visibleSectionItems, sectionBadgeCount } from '../../lib/superNav'
 
@@ -405,6 +406,10 @@ export default function AdminLayout({ children }) {
           </div>
         </div>
       </header>
+
+      {/* Trial-conversion bar — sits directly under the chrome header so a
+          trialling club always has a prominent way to subscribe. */}
+      <TrialBanner />
 
       {/* Acting-as banner — a persistent reminder that a Better staff member is
           scoped to a club other than their own, so changes land on the right

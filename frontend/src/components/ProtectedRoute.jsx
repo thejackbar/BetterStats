@@ -1,6 +1,5 @@
 import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import TrialBanner from './admin/TrialBanner'
 import TrialReminderModal from './admin/TrialReminderModal'
 import SetupReturnBar from './admin/SetupReturnBar'
 
@@ -77,7 +76,10 @@ export default function ProtectedRoute({ children, requireRole, requireModule, r
 
   return (
     <>
-      <TrialBanner />
+      {/* TrialBanner is rendered by AdminLayout / ModuleLayout directly under
+          the chrome header (not here at the very top), so it reads as part of
+          the app. The reminder modal is a full-screen overlay, so it stays
+          here where it covers every admin surface regardless of layout. */}
       <TrialReminderModal />
       <SetupReturnBar />
       {children}
