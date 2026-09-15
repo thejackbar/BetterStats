@@ -145,6 +145,16 @@ export const DIRECTORY_FIELD_DEFS = {
     label: 'Customer status', input: 'select', ops: IS_OP,
     options: [['none', 'not a customer'], ['trial', 'on a trial'], ['active', 'active customer'], ['lapsed', 'lapsed / paused']],
   },
+  // The DEFINITIVE paying-subscriber signal, distinct from Customer status
+  // above. Customer status reads the club org's subscription_status, which was
+  // ALSO set on clubs a super admin created only for an internal trial — so it
+  // is not proof of a real subscription. This reads whether the club carries a
+  // live BetterCricket Stripe subscription, which is created only by a completed
+  // checkout and cleared when the subscription is cancelled — so "yes" means the
+  // club is paying for at least one module right now.
+  is_subscriber: {
+    label: 'BetterCricket subscriber (Stripe)', input: 'select', ops: IS_OP, options: YESNO,
+  },
   // Where the club's own trial stands, read off its subscription rows. The same
   // definition resolves {{trial_days_left}} / {{trial_days_since_expiry}} /
   // {{trial_end_date}}, so the number the email prints is the number the

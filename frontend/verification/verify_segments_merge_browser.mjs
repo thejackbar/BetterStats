@@ -479,7 +479,8 @@ const run = async () => {
     check('the club builder offers club member fields', !!opts
       && opts.includes('Membership type') && opts.includes('Squad'), JSON.stringify(opts))
     check('the club builder does NOT leak directory fields', !!opts
-      && !opts.includes('Engagement score') && !opts.includes('Sales pipeline stage'),
+      && !opts.includes('Engagement score') && !opts.includes('Sales pipeline stage')
+      && !opts.includes('BetterCricket subscriber (Stripe)'),
       JSON.stringify(opts))
 
     // ── AND / OR connector between conditions (C4 / C5) ───────────────────────
@@ -548,6 +549,8 @@ const run = async () => {
     const opts = await fieldOptions(page)
     check('the internal builder offers the directory fields', !!opts
       && opts.includes('Engagement score'), JSON.stringify(opts))
+    check('the internal builder offers the Stripe-subscriber field', !!opts
+      && opts.includes('BetterCricket subscriber (Stripe)'), JSON.stringify(opts))
     check('no page errors on the internal Segments screen', errors.length === 0, errors.join('; '))
   }
 

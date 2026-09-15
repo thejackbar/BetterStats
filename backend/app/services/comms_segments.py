@@ -101,7 +101,7 @@ DIR_PICK_FIELDS = {"club_is", "contact_is"}
 DIR_MULTI_FIELDS = {"is_trialing", "requested_trial", "had_demo", "visited_page",
                     "primary_admin"}
 DIR_CLUB_FIELDS = {"club_state", "association", "country", "directory_status", "customer_status",
-                   "is_trialing", "requested_trial", "had_demo", "visited_page",
+                   "is_subscriber", "is_trialing", "requested_trial", "had_demo", "visited_page",
                    "primary_admin"} | DIR_DEAL_FIELDS
 # Where the club's own trial actually stands, read off its subscription rows via
 # services/club_trial_window.py — the SAME definition the {{trial_days_left}} /
@@ -122,8 +122,12 @@ DIRECTORY_FIELDS = (DIR_YESNO_FIELDS | DIR_CLUB_FIELDS | DIR_METRIC_FIELDS
 # correlates a usage_events row on marketing_clubs.utm_code; the trial/demo
 # fields read marketing_clubs columns; the metric fields read/join off it too).
 _DIR_MC_FIELDS = {"club_state", "association", "country", "directory_status", "customer_status",
-                  "is_trialing", "requested_trial", "had_demo", "visited_page",
+                  "is_subscriber", "is_trialing", "requested_trial", "had_demo", "visited_page",
                   "primary_admin"} | DIR_METRIC_FIELDS | DIR_TRIAL_FIELDS | DIR_DEAL_FIELDS
+# Directory fields that read the CUSTOMER Organisation the prospect converted
+# into (joined via marketing_clubs.existing_org_id): customer_status reads its
+# subscription_status, is_subscriber its live Stripe subscription id.
+_DIR_CUST_FIELDS = {"customer_status", "is_subscriber"}
 # The two visit-count fields need the extra usage_events aggregate join;
 # engagement_score reads straight off marketing_clubs.engagement_score.
 _DIR_VISIT_FIELDS = {"page_views", "distinct_visitors"}
@@ -546,6 +550,28 @@ def _directory_condition(rule: dict, cust, visits=None, trials=None):
         if val == "lapsed":
             return cust.subscription_status.in_(_LAPSED_STATUSES)
         return None
+    if field == "is_subscriber":
+        # The DEFINITIVE paying-subscriber signal, distinct from customer_status
+        # above. subscription_status is unreliable: it was ALSO set on clubs a
+        # super admin created purely for an internal trial, so it does not prove
+        # a real subscription. A live Stripe subscription
+        # (organisations.stripe_subscription_id) is set only by a completed
+        # checkout and cleared when the subscription is cancelled
+        # (stripe_billing.handle_subscription_deleted), so its presence means the
+        # club is paying for at least one module RIGHT NOW. A prospect that never
+        # onboarded has no customer org, so cust is NULL via the outer join and
+        # it reads as not a subscriber — which is correct.
+        #
+        # NOTE: a club subscribed by a manual super-admin approval with no Stripe
+        # checkout behind it (an invoice arrangement) carries no
+        # stripe_subscription_id, so it reads as NOT a Stripe subscriber. That is
+        # the deliberate meaning of this field — "has a live Stripe subscription"
+        # — and is exactly what separates a real self-serve subscriber from an
+        # internal trial set-up. customer_status is the field for the broader
+        # "on the books somehow" question.
+        if cust is None:
+            return None
+        return cust.stripe_subscription_id.isnot(None) if _yes(val) else cust.stripe_subscription_id.is_(None)
 
     if field == "engagement_score":
         n = _num(val)
@@ -781,7 +807,7 @@ async def build_query(session: AsyncSession, club, definition: dict):
     visits = None
     if any(r["field"] in _DIR_MC_FIELDS for r in rules):
         q = join(MarketingClub, MarketingClub.id == CommsContact.marketing_club_id)
-    if any(r["field"] == "customer_status" for r in rules):
+    if any(r["field"] in _DIR_CUST_FIELDS for r in rules):
         cust = aliased(Organisation)
         q = q.outerjoin(cust, cust.id == MarketingClub.existing_org_id)
     if any(r["field"] in _DIR_VISIT_FIELDS for r in rules):

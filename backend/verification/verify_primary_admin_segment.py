@@ -486,6 +486,101 @@ async def main() -> int:
               "contacts that have none",
               not ({"club_is", "contact_is"} & comms_segments._DIR_MC_FIELDS))
 
+        print("\n── A real Stripe subscriber, not the unreliable Customer flag ─")
+        # The DEFINITIVE paying-subscriber signal. The Customer flag /
+        # subscription_status is unreliable — it was ALSO set on clubs a super
+        # admin created only for an internal trial — so a live Stripe
+        # subscription is the proof.
+        #   live       — a genuine subscriber: a Stripe subscription AND active.
+        #   memberonly — a second genuine subscriber, so the yes-set is a real
+        #                subset rather than everyone.
+        #   testclub   — THE case this field exists for: active subscription_status
+        #                (the Customer flag says customer) but NO Stripe
+        #                subscription. An internal trial set-up, not a subscriber.
+        #   adminonly  — a subscription that was cancelled: Stripe id cleared,
+        #                status lapsed. handle_subscription_deleted leaves exactly
+        #                this.
+        #   prospect   — never onboarded, so no customer org at all.
+        orgs["live"].stripe_subscription_id = "sub_live_123"
+        orgs["live"].subscription_status = "active"
+        orgs["memberonly"].stripe_subscription_id = "sub_member_456"
+        orgs["memberonly"].subscription_status = "active"
+        orgs["testclub"].stripe_subscription_id = None
+        orgs["testclub"].subscription_status = "active"
+        orgs["adminonly"].stripe_subscription_id = None
+        orgs["adminonly"].subscription_status = "cancelled"
+        await db.commit()
+
+        async def subscriber(value):
+            rows = await comms_segments.resolve_contacts(db, outreach, {
+                "match": "all", "rules": [{"field": "is_subscriber", "op": "eq", "value": value}]})
+            return {c.email for c in rows}
+
+        async def customer(value):
+            rows = await comms_segments.resolve_contacts(db, outreach, {
+                "match": "all", "rules": [{"field": "customer_status", "op": "eq", "value": value}]})
+            return {c.email for c in rows}
+
+        yes = await subscriber("yes")
+        check("'yes' finds exactly the clubs with a live Stripe subscription",
+              yes == {"live@example.com", "memberonly@example.com"}, sorted(yes))
+        # The whole point of the field: the internal trial set-up reads as an
+        # active customer but is NOT a real subscriber.
+        active_customers = await customer("active")
+        check("the internal trial set-up reads as an active customer",
+              "testclub@example.com" in active_customers, sorted(active_customers))
+        check("...but is NOT a Stripe subscriber — what the Customer flag can't tell you",
+              "testclub@example.com" not in yes, sorted(yes))
+        check("the two questions genuinely disagree, so the field adds information",
+              active_customers != yes and bool(active_customers) and bool(yes),
+              f"{sorted(active_customers)} vs {sorted(yes)}")
+
+        no = await subscriber("no")
+        check("'no' covers the internal set-up, a cancelled sub and an un-onboarded prospect",
+              {"testclub@example.com", "adminonly@example.com", "prospect@example.com"} <= no,
+              sorted(no))
+        check("a cancelled subscription (Stripe id cleared) reads as not a subscriber",
+              "adminonly@example.com" in no and "adminonly@example.com" not in yes, sorted(no))
+        check("a prospect with no customer org reads as not a subscriber",
+              "prospect@example.com" in no and "prospect@example.com" not in yes, sorted(no))
+        # yes / no partition the directory-LINKED clubs. A contact with no club at
+        # all is in NEITHER — the negation guard requires the club to exist,
+        # exactly as every other directory negation does.
+        club_linked = everyone - {"loose@example.com"}
+        check("yes and no partition the directory-linked clubs, no overlap or gap",
+              not (yes & no) and (yes | no) == club_linked,
+              f"{sorted(yes)} | {sorted(no)}")
+        check("a contact with no directory club is matched by neither yes nor no",
+              "loose@example.com" not in (yes | no), sorted(yes | no))
+        # Case-insensitive; and a non-yes value reads as 'no', the same as every
+        # other yes/no directory field (exported, emailed, …) rather than
+        # inventing its own drop-the-rule behaviour.
+        for spelling in ("Yes", "YES", " yes "):
+            check(f"{spelling!r} means the same as 'yes'", await subscriber(spelling) == yes,
+                  sorted(await subscriber(spelling)))
+        check("an unrecognised value reads as 'no', like every yes/no field here",
+              await subscriber("garbage") == no and await subscriber("") == no,
+              sorted(await subscriber("garbage")))
+
+        print("\n── Scope and wiring for the subscriber field ─────────────────")
+        check("is_subscriber is a directory field, so a club build cannot reach it",
+              "is_subscriber" in comms_segments.DIRECTORY_FIELDS
+              and "is_subscriber" not in club_block)
+        check("...it reads the customer org (joined via existing_org_id)",
+              "is_subscriber" in getattr(comms_segments, "_DIR_CUST_FIELDS", set())
+              and "is_subscriber" in comms_segments._DIR_MC_FIELDS)
+        rows = await comms_segments.resolve_contacts(db, own, {
+            "match": "all", "rules": [{"field": "is_subscriber", "op": "eq", "value": "yes"}]})
+        check("a club build resolving it reaches nobody, per the scope guard",
+              {c.email for c in rows} == set(), sorted({c.email for c in rows}))
+        sub_entry = (dir_block.split("is_subscriber:")[1].split("},")[0]
+                     if "  is_subscriber:" in dir_block else "")
+        check("the picker offers the subscriber field", bool(sub_entry),
+              "the field is not in the picker")
+        check("...as a yes/no select",
+              "'select'" in sub_entry and "YESNO" in sub_entry,
+              "not in the picker" if not sub_entry else sub_entry[:70])
+
     await engine.dispose()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     for f in FAIL:
