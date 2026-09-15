@@ -33,6 +33,8 @@ function fmtWhen(s) {
   catch { return '' }
 }
 
+const fmtClubs = (n) => `${n} ${n === 1 ? 'club' : 'clubs'}`
+
 // The status of a recipient's email, for the Clubs view: the problem states win
 // over "Received" (they got it, no problem recorded).
 function statusOf(r) {
@@ -423,6 +425,10 @@ export default function EmailDetail({ id, onChanged, onDeleted, onSent }) {
 
   const isDraft = campaign.status === 'draft'
   const st = campaign.stats || {}
+  // Distinct directory clubs behind the recipients / the delivered, computed
+  // server-side. Blank (0) for a club's own send, so no club line is drawn.
+  const recipientClubs = campaign.club_stats?.recipients ?? 0
+  const deliveredClubs = campaign.club_stats?.delivered ?? 0
 
   return (
     <>
@@ -462,8 +468,16 @@ export default function EmailDetail({ id, onChanged, onDeleted, onSent }) {
 
           <div className="pb-card p-5 mt-5 max-w-2xl">
             <div className="grid grid-cols-3 gap-3 text-center">
-              <div className="pb-card p-3"><div className="text-xl font-display font-bold text-pb-text">{st.recipients ?? 0}</div><div className="text-pb-faintest text-xs">recipients</div></div>
-              <div className="pb-card p-3"><div className="text-xl font-display font-bold text-green-500">{st.sent ?? 0}</div><div className="text-pb-faintest text-xs">delivered</div></div>
+              <div className="pb-card p-3">
+                <div className="text-xl font-display font-bold text-pb-text">{st.recipients ?? 0}</div>
+                <div className="text-pb-faintest text-xs">recipients</div>
+                {recipientClubs > 0 && <div className="text-pb-faintest text-[11px] mt-0.5">{fmtClubs(recipientClubs)}</div>}
+              </div>
+              <div className="pb-card p-3">
+                <div className="text-xl font-display font-bold text-green-500">{st.sent ?? 0}</div>
+                <div className="text-pb-faintest text-xs">delivered</div>
+                {deliveredClubs > 0 && <div className="text-pb-faintest text-[11px] mt-0.5">{fmtClubs(deliveredClubs)}</div>}
+              </div>
               <div className="pb-card p-3"><div className="text-xl font-display font-bold text-pb-red">{st.failed ?? 0}</div><div className="text-pb-faintest text-xs">failed</div></div>
             </div>
             {campaign.status === 'sending' && <div className="text-pb-faint text-sm mt-3">Sending in progress…</div>}
