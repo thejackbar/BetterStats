@@ -424,6 +424,20 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
     for pid, name in mem_res.fetchall():
         squads.setdefault(str(pid), set()).add(name.strip())
 
+    # A player's actual squad MEMBERSHIPS, by team id — team_members is
+    # authoritative and a player can sit in several squads at once. This drives
+    # the tier / gender wall / squad-match below: a fringe player genuinely in
+    # the 2nd XI squad is an exact match when the 2nd XI is picked, and still a
+    # drop-down for the 1st XI. (The `squads` set above is NAMES for display and
+    # includes appearance history; this is ids for eligibility.)
+    player_squad_ids: dict[str, set] = {}
+    psid_res = await db.execute(
+        text("SELECT player_id, team_id FROM team_members WHERE organisation_id = :org"),
+        {"org": club.id},
+    )
+    for pid, tid in psid_res.fetchall():
+        player_squad_ids.setdefault(str(pid), set()).add(str(tid))
+
     # Availability for this fixture's playing date (explicit answer wins; period fallback).
     avail: dict[str, str] = {}
     avail_reason: dict[str, str] = {}
@@ -547,15 +561,28 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
         dormant = bool(lp) and lp < cutoff
         manual_inactive = p.status == "inactive"
         sq_tid = str(p.squad_team_id) if p.squad_team_id else None
-        sq_seq, sq_is_women = squad_meta.get(sq_tid, (0, False)) if sq_tid else (0, False)
+        # Every squad the player is in (team_members), with the derived primary
+        # folded in for any legacy row that was never mirrored.
+        my_squads = set(player_squad_ids.get(pid, set()))
+        if sq_tid:
+            my_squads.add(sq_tid)
 
-        squad_match = bool(_fixture_team_id and sq_tid == _fixture_team_id)
+        # They match this fixture's squad if they are literally in it. The tier
+        # and gender wall are judged across ALL their squads, best fit for this
+        # fixture — only squads whose grade women-ness matches the fixture can
+        # supply a tier, so a men's-squad-only player gets none for a women's
+        # fixture (gender_ok then False).
+        squad_match = bool(_fixture_team_id and _fixture_team_id in my_squads)
+        gender_squads = [s for s in my_squads if squad_meta.get(s, (0, False))[1] == fx_is_women]
+        gender_ok = bool(gender_squads)
         if fx_team_seq:
-            tier = _tier_for(fx_team_seq, sq_seq)
+            tier = None
+            for s in gender_squads:
+                t = _tier_for(fx_team_seq, squad_meta.get(s, (0, False))[0])
+                if t is not None and (tier is None or t < tier):
+                    tier = t
         else:
-            tier = 1 if squad_match else None
-
-        gender_ok = (fx_is_women == sq_is_women)
+            tier = 1 if (squad_match and gender_ok) else None
         recent_ok = bool(lp) and lp >= autofill_cutoff
         rb, rw, ss = recent_bat.get(pid), recent_bowl.get(pid), season_stats.get(pid)
         score = _compute_score(p.skill_positions, rb, rw, ss)

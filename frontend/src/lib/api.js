@@ -2988,17 +2988,23 @@ export const api = {
   bsSeedTeams: (body) => request('/teams/seed', { method: 'POST', body: body ? JSON.stringify(body) : undefined }),
   bsSeedCandidates: ({ seasons = 3 } = {}) => request(`/teams/seed-candidates?seasons=${seasons}`),
   bsResequenceTeams: () => request('/teams/resequence', { method: 'POST' }),
-  bsAutoAssignSuggest: ({ seasons = 2, onlyUnassigned = true } = {}) =>
-    request(`/teams/auto-assign-suggest?seasons=${seasons}&only_unassigned=${onlyUnassigned}`),
+  bsAutoAssignSuggest: ({ seasons = 2, onlyUnassigned = false, minShare = 0.2 } = {}) =>
+    request(`/teams/auto-assign-suggest?seasons=${seasons}&only_unassigned=${onlyUnassigned}&min_share=${minShare}`),
   bsTeamMembers: (id) => request(`/teams/${id}/members`),
   bsAddTeamMember: (id, playerId) =>
     request(`/teams/${id}/members`, { method: 'POST', body: JSON.stringify({ player_id: playerId }) }),
   bsRemoveTeamMember: (id, playerId) =>
     request(`/teams/${id}/members/${playerId}`, { method: 'DELETE' }),
-  // Assign one or many players to a single selection-pool squad (or null to
-  // unassign). Powers the Squads board's drag-to-reassign and bulk-add.
-  bsAssignSquad: (playerIds, squadTeamId) =>
-    request('/teams/squad-assign', { method: 'POST', body: JSON.stringify({ player_ids: playerIds, squad_team_id: squadTeamId ?? null }) }),
+  // Assign one or many players to selection-pool squads. A player can be in
+  // several squads, so `action` says what happens: 'set' (replace the whole
+  // set — the default), 'add' (keep the others), 'move' (from `from` to
+  // squadTeamId), 'remove' (drop `from`). Powers the Squads board's drag/move,
+  // per-squad add, card "＋" and auto-assign.
+  bsAssignSquad: (playerIds, squadTeamId, { action = 'set', from = null } = {}) =>
+    request('/teams/squad-assign', { method: 'POST', body: JSON.stringify({
+      player_ids: playerIds, squad_team_id: squadTeamId ?? null, action,
+      from_squad_team_id: from ?? null,
+    }) }),
 
   // ─── BetterSelect: Availability ─────────────────────────
   bsAvailabilityMatrix: () => request('/availability/matrix'),
