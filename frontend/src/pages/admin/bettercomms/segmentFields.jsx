@@ -155,6 +155,19 @@ export const DIRECTORY_FIELD_DEFS = {
   is_subscriber: {
     label: 'BetterCricket subscriber (Stripe)', input: 'select', ops: IS_OP, options: YESNO,
   },
+  // Whether the club STARTED a trial, by how it began — a self-serve
+  // registration (/trial) or a super-admin set-up. onboarding_method records
+  // the origin permanently, so this catches a club that has since converted or
+  // lapsed too ("has already started" is a historical fact). Multi, so "either
+  // or both" is one rule; "is none of" excludes clubs that started a trial.
+  trial_kind: {
+    label: 'Started a trial', input: 'multi',
+    ops: [['eq', 'is any of'], ['not_in', 'is none of']],
+    options: [
+      ['self_serve_trial', 'Self-serve trial'],
+      ['super_admin_trial', 'Super-admin trial'],
+    ],
+  },
   // Where the club's own trial stands, read off its subscription rows. The same
   // definition resolves {{trial_days_left}} / {{trial_days_since_expiry}} /
   // {{trial_end_date}}, so the number the email prints is the number the

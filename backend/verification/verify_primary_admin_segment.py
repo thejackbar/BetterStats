@@ -581,6 +581,91 @@ async def main() -> int:
               "'select'" in sub_entry and "YESNO" in sub_entry,
               "not in the picker" if not sub_entry else sub_entry[:70])
 
+        print("\n── Started a trial: self-serve or super-admin ────────────────")
+        # organisations.onboarding_method records how a club began (migration
+        # 225): a self-serve registration, a super-admin set-up, a direct
+        # subscription, or (pre-225) nothing.
+        #   live, other — started a SELF-SERVE trial (/trial).
+        #   memberonly  — started a SUPER-ADMIN trial (a super admin set it up).
+        #   testclub    — a direct subscriber: on the platform, never trialled.
+        #   adminonly   — onboarded before the field existed: origin unknown.
+        #   prospect    — never onboarded, so no customer org at all.
+        orgs["live"].onboarding_method = "self_serve_trial"
+        orgs["other"].onboarding_method = "self_serve_trial"
+        orgs["memberonly"].onboarding_method = "super_admin_trial"
+        orgs["testclub"].onboarding_method = "direct_subscriber"
+        orgs["adminonly"].onboarding_method = None
+        await db.commit()
+
+        async def trial(value, op="eq"):
+            rows = await comms_segments.resolve_contacts(db, outreach, {
+                "match": "all", "rules": [{"field": "trial_kind", "op": op, "value": value}]})
+            return {c.email for c in rows}
+
+        ss = await trial(["self_serve_trial"])
+        check("'is any of [self-serve]' finds the self-serve trial clubs",
+              ss == {"live@example.com", "other@example.com"}, sorted(ss))
+        sa = await trial(["super_admin_trial"])
+        check("'is any of [super-admin]' finds the super-admin trial club",
+              sa == {"memberonly@example.com"}, sorted(sa))
+        both = await trial(["self_serve_trial", "super_admin_trial"])
+        check("'is any of [both]' is either-or-both in one rule",
+              both == {"live@example.com", "other@example.com", "memberonly@example.com"},
+              sorted(both))
+
+        none = await trial(["self_serve_trial", "super_admin_trial"], op="not_in")
+        check("'is none of [both]' shares nobody with the include set",
+              not (none & both) and bool(none), f"{sorted(none)} & {sorted(both)}")
+        check("...and keeps a direct subscriber, an unknown-origin club and a prospect",
+              none == {"testclub@example.com", "adminonly@example.com", "prospect@example.com"},
+              sorted(none))
+        # include ∪ exclude partition the directory-linked clubs; a contact with
+        # no club is in neither, per the negation guard every directory field shares.
+        check("include and exclude partition the directory-linked clubs, no overlap or gap",
+              not (both & none) and (both | none) == club_linked,
+              f"{sorted(both)} | {sorted(none)}")
+        check("a contact with no directory club is matched by neither",
+              "loose@example.com" not in (both | none), sorted(both | none))
+        not_ss = await trial(["self_serve_trial"], op="not_in")
+        check("'is none of [self-serve]' keeps the super-admin trial and non-trial clubs",
+              not_ss == {"memberonly@example.com", "testclub@example.com",
+                         "adminonly@example.com", "prospect@example.com"}, sorted(not_ss))
+        check("a wrong-case value still resolves rather than widening",
+              await trial(["SELF_SERVE_TRIAL"]) == ss,
+              sorted(await trial(["SELF_SERVE_TRIAL"])))
+        # An empty / all-junk selection drops the condition and narrows to
+        # directory-linked contacts, exactly as every other _DIR_MC_FIELDS multi.
+        async def demo(value):
+            rows = await comms_segments.resolve_contacts(db, outreach, {
+                "match": "all", "rules": [{"field": "had_demo", "op": "eq", "value": value}]})
+            return {c.email for c in rows}
+        for label, value in [("an empty selection", []), ("an all-junk value", ["nope"])]:
+            mine = await trial(value)
+            check(f"{label} behaves exactly as the existing club multi-fields do",
+                  mine == await demo(value) and "loose@example.com" not in mine, sorted(mine))
+
+        print("\n── Scope and wiring for the trial-kind field ─────────────────")
+        check("trial_kind is a directory field, so a club build cannot reach it",
+              "trial_kind" in comms_segments.DIRECTORY_FIELDS
+              and "trial_kind" not in club_block)
+        check("...it reads the customer org's onboarding_method",
+              "trial_kind" in getattr(comms_segments, "_DIR_CUST_FIELDS", set())
+              and "trial_kind" in comms_segments._DIR_MC_FIELDS)
+        rows = await comms_segments.resolve_contacts(db, own, {
+            "match": "all", "rules": [{"field": "trial_kind", "op": "eq", "value": ["self_serve_trial"]}]})
+        check("a club build resolving it reaches nobody, per the scope guard",
+              {c.email for c in rows} == set(), sorted({c.email for c in rows}))
+        tk_entry = (dir_block.split("trial_kind:")[1].split("},")[0]
+                    if "  trial_kind:" in dir_block else "")
+        check("the picker offers the trial-kind field", bool(tk_entry),
+              "the field is not in the picker")
+        check("...as a multi with both an include and an exclude op",
+              "'multi'" in tk_entry and "['eq'," in tk_entry and "['not_in'," in tk_entry,
+              "not in the picker" if not tk_entry else tk_entry[:80])
+        check("...offering both trial kinds",
+              "self_serve_trial" in tk_entry and "super_admin_trial" in tk_entry,
+              "not in the picker" if not tk_entry else tk_entry[:90])
+
     await engine.dispose()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     for f in FAIL:

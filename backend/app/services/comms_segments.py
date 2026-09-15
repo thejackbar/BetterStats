@@ -101,8 +101,8 @@ DIR_PICK_FIELDS = {"club_is", "contact_is"}
 DIR_MULTI_FIELDS = {"is_trialing", "requested_trial", "had_demo", "visited_page",
                     "primary_admin"}
 DIR_CLUB_FIELDS = {"club_state", "association", "country", "directory_status", "customer_status",
-                   "is_subscriber", "is_trialing", "requested_trial", "had_demo", "visited_page",
-                   "primary_admin"} | DIR_DEAL_FIELDS
+                   "is_subscriber", "trial_kind", "is_trialing", "requested_trial", "had_demo",
+                   "visited_page", "primary_admin"} | DIR_DEAL_FIELDS
 # Where the club's own trial actually stands, read off its subscription rows via
 # services/club_trial_window.py — the SAME definition the {{trial_days_left}} /
 # {{trial_days_since_expiry}} merge variables resolve from, so the number an
@@ -122,12 +122,16 @@ DIRECTORY_FIELDS = (DIR_YESNO_FIELDS | DIR_CLUB_FIELDS | DIR_METRIC_FIELDS
 # correlates a usage_events row on marketing_clubs.utm_code; the trial/demo
 # fields read marketing_clubs columns; the metric fields read/join off it too).
 _DIR_MC_FIELDS = {"club_state", "association", "country", "directory_status", "customer_status",
-                  "is_subscriber", "is_trialing", "requested_trial", "had_demo", "visited_page",
-                  "primary_admin"} | DIR_METRIC_FIELDS | DIR_TRIAL_FIELDS | DIR_DEAL_FIELDS
+                  "is_subscriber", "trial_kind", "is_trialing", "requested_trial", "had_demo",
+                  "visited_page", "primary_admin"} | DIR_METRIC_FIELDS | DIR_TRIAL_FIELDS | DIR_DEAL_FIELDS
 # Directory fields that read the CUSTOMER Organisation the prospect converted
 # into (joined via marketing_clubs.existing_org_id): customer_status reads its
-# subscription_status, is_subscriber its live Stripe subscription id.
-_DIR_CUST_FIELDS = {"customer_status", "is_subscriber"}
+# subscription_status, is_subscriber its live Stripe subscription id, trial_kind
+# its onboarding_method (how the club started a trial).
+_DIR_CUST_FIELDS = {"customer_status", "is_subscriber", "trial_kind"}
+# The two onboarding_method values that mean "the club started a trial", by how
+# it began. The same grouping crm_targets uses for its trial deals.
+_TRIAL_KINDS = ("self_serve_trial", "super_admin_trial")
 # The two visit-count fields need the extra usage_events aggregate join;
 # engagement_score reads straight off marketing_clubs.engagement_score.
 _DIR_VISIT_FIELDS = {"page_views", "distinct_visitors"}
@@ -572,6 +576,28 @@ def _directory_condition(rule: dict, cust, visits=None, trials=None):
         if cust is None:
             return None
         return cust.stripe_subscription_id.isnot(None) if _yes(val) else cust.stripe_subscription_id.is_(None)
+    if field == "trial_kind":
+        # Whether the club STARTED a trial, and by which path — a self-serve
+        # registration (/trial) or a super-admin set-up. organisations.
+        # onboarding_method records the origin permanently (migration 225), so
+        # this catches a club that has since converted or lapsed too — "has
+        # already started a trial" is a historical fact, not a current state.
+        # Multi-value, so picking both kinds is "either or both" in one rule; the
+        # `is none of` op excludes the clubs that started one of the picked kinds
+        # (a prospect with no org, or a club onboarded some other way, is kept —
+        # it did not start one of these trials).
+        if cust is None:
+            return None
+        # Case-folded to the stored value, so a hand-made request with the wrong
+        # case does not silently drop the rule and widen the audience — the
+        # fail-open direction is the dangerous one for a send.
+        kinds = [k for k in (str(x).strip().lower() for x in _as_list(val)) if k in _TRIAL_KINDS]
+        if not kinds:
+            return None
+        clause = cust.onboarding_method.in_(kinds)
+        if op == "not_in":
+            return or_(cust.onboarding_method.is_(None), ~clause)
+        return clause
 
     if field == "engagement_score":
         n = _num(val)
