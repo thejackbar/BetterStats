@@ -1,6 +1,7 @@
 import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import TrialBanner from './admin/TrialBanner'
+import TrialReminderModal from './admin/TrialReminderModal'
 import SetupReturnBar from './admin/SetupReturnBar'
 
 export default function ProtectedRoute({ children, requireRole, requireModule, requireCore, requireActivePlan }) {
@@ -77,6 +78,7 @@ export default function ProtectedRoute({ children, requireRole, requireModule, r
   return (
     <>
       <TrialBanner />
+      <TrialReminderModal />
       <SetupReturnBar />
       {children}
     </>
