@@ -1351,18 +1351,55 @@ async def campaign_recipients(
             "at": created_at.isoformat() if created_at else None,
         })
 
-    def _out(email, name, status, error, sent_at, rid=None):
+    # When each address was LAST emailed by this org, across EVERY campaign — not
+    # just this one — so the row can show the person's real send recency (a later
+    # campaign may have emailed them since). A queued / failed row has a NULL
+    # sent_at, so MAX naturally ignores it: this is the last time we actually sent.
+    last_rows = (await db.execute(
+        select(func.lower(CommsRecipient.email), func.max(CommsRecipient.sent_at))
+        .where(CommsRecipient.organisation_id == club.id)
+        .group_by(func.lower(CommsRecipient.email))
+    )).all()
+    last_by_email = {em: (mx.isoformat() if mx else None) for em, mx in last_rows}
+
+    # The club each recipient is associated with, for the club column and the
+    # Clubs filter. Only a directory-linked (outreach) contact has one; an
+    # ordinary club's own member has marketing_club_id NULL, so `club` is blank
+    # there — which is why the Clubs filter only shows in the outreach context.
+    contact_ids = {r.contact_id for r in rows if r.contact_id}
+    contact_by_id: dict = {}
+    mc_map: dict = {}
+    if contact_ids:
+        crows = (await db.execute(
+            select(CommsContact).where(CommsContact.id.in_(contact_ids)))).scalars().all()
+        contact_by_id = {cc.id: cc for cc in crows}
+        mc_map = await _mc_map(db, crows)
+
+    def _club_for(contact_id) -> str:
+        cc = contact_by_id.get(contact_id)
+        if cc is None:
+            return ""
+        mc = mc_map.get(cc.marketing_club_id) if cc.marketing_club_id else None
+        return _dir_fields(cc, mc).get("club", "") or ""
+
+    def _out(email, name, status, error, sent_at, rid=None, club_name=""):
         evs = sorted(events_by_email.get((email or "").lower(), []), key=lambda e: e["at"] or "")
         types = {e["type"] for e in evs}
         return {
             "id": str(rid) if rid else None, "email": email, "name": name,
             "status": status, "error": error,
             "sent_at": sent_at.isoformat() if sent_at else None,
+            # The person's most recent send from this org, any campaign.
+            "last_emailed_at": last_by_email.get((email or "").lower()),
+            # The directory club this contact belongs to (blank for a club's own
+            # member). Drives the club column and the Clubs filter.
+            "club": club_name or None,
             "unsubscribed": "unsubscribe" in types, "complained": "complaint" in types,
             "bounced": "bounce" in types, "events": evs,
         }
 
-    out = [_out(r.email, r.name, r.status, r.error, r.sent_at, r.id) for r in rows]
+    out = [_out(r.email, r.name, r.status, r.error, r.sent_at, r.id, _club_for(r.contact_id))
+           for r in rows]
     # A recipient row can be missing (e.g. cleaned up since) even though its
     # email_events survive — surface those too, so the drill-down list always
     # accounts for the full aggregate count shown on the Emails list.

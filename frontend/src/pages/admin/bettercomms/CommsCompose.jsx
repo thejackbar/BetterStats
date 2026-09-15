@@ -33,29 +33,142 @@ function fmtWhen(s) {
   catch { return '' }
 }
 
+// The status of a recipient's email, for the Clubs view: the problem states win
+// over "Received" (they got it, no problem recorded).
+function statusOf(r) {
+  if (r.unsubscribed) return { label: 'Unsubscribed', tone: 'warn' }
+  if (r.complained) return { label: 'Spam', tone: 'block' }
+  if (r.bounced) return { label: 'Bounced', tone: 'block' }
+  return { label: 'Received', tone: 'ok' }
+}
+
+// One recipient row. `showStatus` (the Clubs view) reads out the single last-
+// email status; the other views keep the problem-only badges. Both show the
+// contact's club (blank for a club's own member) and when they were last
+// emailed, on the sub-line.
+function RecipientRow({ r, i, showStatus }) {
+  const s = showStatus ? statusOf(r) : null
+  return (
+    <div className={`px-3 py-2 text-sm ${i > 0 ? 'pb-hairline-t' : ''}`}>
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0 truncate">
+          <span className="text-pb-text">{r.name || r.email}</span>
+          {r.name && <span className="text-pb-faintest text-xs ml-1.5">{r.email}</span>}
+        </div>
+        <div className="flex gap-1 shrink-0 items-center">
+          {s ? <Badge toneKey={s.tone}>{s.label}</Badge> : <>
+            {r.unsubscribed && <Badge toneKey="warn">Unsub</Badge>}
+            {r.complained && <Badge toneKey="block">Spam</Badge>}
+            {r.bounced && <Badge toneKey="block">Bounced</Badge>}
+          </>}
+        </div>
+      </div>
+      {(r.club || r.last_emailed_at) && (
+        <div className="text-pb-faintest text-[11px] mt-0.5 flex flex-wrap gap-x-2 truncate">
+          {r.club && <span className="truncate">{r.club}</span>}
+          {r.last_emailed_at && <span className="shrink-0">Last emailed {fmtWhen(r.last_emailed_at)}</span>}
+        </div>
+      )}
+      {r.events?.length > 0 && (
+        <div className="text-pb-faintest text-[11px] mt-0.5 truncate"
+          title={r.events.map(e => `${e.type}${e.subtype ? ` (${e.subtype})` : ''}${e.reason ? ` — ${e.reason}` : ''}`).join(' · ')}>
+          {r.events.map(e => `${e.type}${e.at ? ` · ${fmtWhen(e.at)}` : ''}`).join(' · ')}
+        </div>
+      )}
+    </div>
+  )
+}
+
+const NO_CLUB = '__none__'
+const clubLabel = (v) => (v === NO_CLUB ? 'No club' : v)
+
+// A searchable single-select of the clubs among a campaign's recipients.
+function ClubSelect({ options, value, onChange }) {
+  const [open, setOpen] = useState(false)
+  const [q, setQ] = useState('')
+  const ref = useRef(null)
+  useEffect(() => {
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    const k = (e) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', h); document.addEventListener('keydown', k)
+    return () => { document.removeEventListener('mousedown', h); document.removeEventListener('keydown', k) }
+  }, [])
+  const shown = options.filter(o => clubLabel(o).toLowerCase().includes(q.trim().toLowerCase()))
+  return (
+    <div className="relative" ref={ref}>
+      <button type="button" onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-1.5 max-w-[240px] px-2.5 py-1 rounded-md bg-pb-surface2 text-pb-text border pb-hairline text-[13px]">
+        <span className="truncate">{value ? clubLabel(value) : 'Choose a club…'}</span>
+        <span className="text-pb-faint">▾</span>
+      </button>
+      {open && (
+        <div className="absolute z-30 mt-1 w-64 max-h-72 overflow-auto rounded-lg border pb-hairline bg-pb-surface2 shadow-lg p-2">
+          <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Search clubs…"
+            className="w-full mb-2 px-2 py-1.5 rounded bg-pb-surface text-pb-text border pb-hairline text-sm" />
+          {shown.length === 0 && <div className="text-pb-faintest text-xs px-1 py-1">No clubs match.</div>}
+          {shown.map(o => (
+            <button key={o} type="button" onClick={() => { onChange(o); setOpen(false); setQ('') }}
+              className={`block w-full text-left px-2 py-1 rounded text-sm hover:bg-pb-surface ${o === value ? 'text-pb-accent-ink' : 'text-pb-text'}`}>
+              {clubLabel(o)}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Who, by name/email, is behind this campaign's bounced / unsub / spam counts —
-// the aggregate badge on the Emails list has no drill-down otherwise. Tabs are
-// lazy-loaded (only the filtered subset the operator actually wants, not the
-// full send for a large campaign) and default to whichever problem exists.
+// the aggregate badge on the Emails list has no drill-down otherwise. Every row
+// carries the contact's club (outreach only) and when they were LAST emailed by
+// this org (any campaign). A fourth "Clubs" filter groups the send by club and
+// reads out each recipient's last-email status. Tabs are lazy-loaded; Clubs
+// reuses the same full ("all") set the All recipients tab loads.
 function RecipientsPanel({ campaignId, unsubCount, bouncedCount }) {
   const [tab, setTab] = useState(unsubCount > 0 ? 'unsub_supp' : (bouncedCount > 0 ? 'bounced' : null))
   const [rows, setRows] = useState(null)
   const [loading, setLoading] = useState(false)
-  const [loadedTab, setLoadedTab] = useState(null)
+  const [loadedKey, setLoadedKey] = useState(null)
+  const [clubSel, setClubSel] = useState(null)
+
+  const isClubs = tab === 'clubs'
+  // Clubs and All both read the whole send; the two problem tabs read their
+  // filtered subset. `key` is what actually gets fetched / cached.
+  const key = (!tab || isClubs) ? 'all' : tab
 
   useEffect(() => {
-    if (!tab || tab === loadedTab) return
+    if (!tab || key === loadedKey) return
     setLoading(true)
-    api.commsCampaignRecipients(campaignId, tab === 'all' ? null : tab)
-      .then(r => { setRows(r.recipients || []); setLoadedTab(tab) })
+    api.commsCampaignRecipients(campaignId, key === 'all' ? null : key)
+      .then(r => { setRows(r.recipients || []); setLoadedKey(key) })
       .catch(() => setRows([]))
       .finally(() => setLoading(false))
-  }, [tab, campaignId, loadedTab])
+  }, [tab, key, campaignId, loadedKey])
+
+  // The clubs present among the loaded recipients (Clubs view reads the full
+  // set). The "No club" bucket is only offered ALONGSIDE real clubs — a send
+  // whose recipients are all club-less (an ordinary club's own members) has
+  // nothing to group by, so the Clubs view says so rather than offering a lone
+  // "No club". That is what keeps the Clubs feature to the outreach context.
+  const clubOptions = useMemo(() => {
+    if (!isClubs || !rows) return []
+    const names = new Set()
+    let hasNone = false
+    for (const r of rows) { if (r.club) names.add(r.club); else hasNone = true }
+    const list = [...names].sort((a, b) => a.localeCompare(b))
+    return list.length && hasNone ? [...list, NO_CLUB] : list
+  }, [isClubs, rows])
+
+  const clubRows = useMemo(() => {
+    if (!isClubs || !clubSel || !rows) return []
+    return clubSel === NO_CLUB ? rows.filter(r => !r.club) : rows.filter(r => r.club === clubSel)
+  }, [isClubs, clubSel, rows])
 
   const TABS = [
     ['unsub_supp', `Unsubscribed / spam (${unsubCount})`],
     ['bounced', `Bounced (${bouncedCount})`],
     ['all', 'All recipients'],
+    ['clubs', 'Clubs'],
   ]
 
   return (
@@ -65,33 +178,29 @@ function RecipientsPanel({ campaignId, unsubCount, bouncedCount }) {
         {TABS.map(([v, label]) => (
           <FilterPill key={v} active={tab === v} onClick={() => setTab(v)}>{label}</FilterPill>
         ))}
+        {isClubs && !loading && clubOptions.length > 0 && (
+          <ClubSelect options={clubOptions} value={clubSel} onChange={setClubSel} />
+        )}
       </div>
       {tab && (
         loading ? <div className="text-pb-faint text-sm">Loading…</div>
+        : isClubs ? (
+          clubOptions.length === 0
+            ? <div className="text-pb-faint text-sm">No club information for these recipients.</div>
+            : !clubSel
+              ? <div className="text-pb-faint text-sm">Choose a club above to see its recipients and their last email status.</div>
+              : clubRows.length === 0
+                ? <div className="text-pb-faint text-sm">No recipients for this club.</div>
+                : (
+                  <div className="pb-card overflow-hidden max-h-80 overflow-y-auto">
+                    {clubRows.map((r, i) => <RecipientRow key={r.id || r.email} r={r} i={i} showStatus />)}
+                  </div>
+                )
+        )
         : !rows || rows.length === 0 ? <div className="text-pb-faint text-sm">No contacts here.</div>
         : (
           <div className="pb-card overflow-hidden max-h-80 overflow-y-auto">
-            {rows.map((r, i) => (
-              <div key={r.id || r.email} className={`px-3 py-2 text-sm ${i > 0 ? 'pb-hairline-t' : ''}`}>
-                <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0 truncate">
-                    <span className="text-pb-text">{r.name || r.email}</span>
-                    {r.name && <span className="text-pb-faintest text-xs ml-1.5">{r.email}</span>}
-                  </div>
-                  <div className="flex gap-1 shrink-0">
-                    {r.unsubscribed && <Badge toneKey="warn">Unsub</Badge>}
-                    {r.complained && <Badge toneKey="block">Spam</Badge>}
-                    {r.bounced && <Badge toneKey="block">Bounced</Badge>}
-                  </div>
-                </div>
-                {r.events?.length > 0 && (
-                  <div className="text-pb-faintest text-[11px] mt-0.5 truncate"
-                    title={r.events.map(e => `${e.type}${e.subtype ? ` (${e.subtype})` : ''}${e.reason ? ` — ${e.reason}` : ''}`).join(' · ')}>
-                    {r.events.map(e => `${e.type}${e.at ? ` · ${fmtWhen(e.at)}` : ''}`).join(' · ')}
-                  </div>
-                )}
-              </div>
-            ))}
+            {rows.map((r, i) => <RecipientRow key={r.id || r.email} r={r} i={i} />)}
           </div>
         )
       )}
