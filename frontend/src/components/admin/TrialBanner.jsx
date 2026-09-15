@@ -21,18 +21,21 @@ export default function TrialBanner() {
   const status = trialStatus(user)
   if (!status) return null
 
-  const { soonest, daysLeft, expired, others, subscribePath } = status
-  const othersSuffix = others > 0 ? ` (+${others} more)` : ''
+  const { daysLeft, expired, subscribePath } = status
 
   let whenPhrase
   if (daysLeft <= 0) whenPhrase = 'today'
   else if (daysLeft === 1) whenPhrase = 'tomorrow'
   else whenPhrase = `in ${daysLeft} days`
 
+  // "BetterCricket trial" (the product) rather than the soonest-expiring
+  // module's own name — a club is trialling BetterCricket, and naming one
+  // module while several are winding down reads as confusing. daysLeft is
+  // still the soonest expiry, so the countdown is the earliest one to act on.
   const explainer = expired ? (
-    <>Your {soonest.name} trial has ended{othersSuffix}. Subscribe now to restore full access to your club's stats and tools.</>
+    <>Your BetterCricket trial has ended. Subscribe now to restore full access to your club's stats and tools.</>
   ) : (
-    <>Ready to keep going? Subscribe before your {soonest.name} trial ends {whenPhrase}{othersSuffix} so you don't lose access.</>
+    <>Ready to keep going? Subscribe before your BetterCricket trial ends {whenPhrase} so you don't lose access.</>
   )
 
   return (

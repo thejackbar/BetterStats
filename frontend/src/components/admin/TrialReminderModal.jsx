@@ -82,7 +82,7 @@ export default function TrialReminderModal() {
   if (String(tier) === String(dismissedTier)) return null
   if (location.pathname.startsWith('/admin/account')) return null
 
-  const { soonest, daysLeft, expired, others } = status
+  const { soonest, daysLeft, expired } = status
   const endDate = fmtDate(soonest.trial_ends_at)
   const goSubscribe = () => {
     dismiss(tier)
@@ -100,11 +100,6 @@ export default function TrialReminderModal() {
   else if (daysLeft <= 0) whenPhrase = 'ends today'
   else if (daysLeft === 1) whenPhrase = 'ends tomorrow'
   else whenPhrase = `ends in ${daysLeft} days`
-
-  const othersLine =
-    others > 0
-      ? ` You have ${others} other trial${others === 1 ? '' : 's'} winding down too.`
-      : ''
 
   return (
     <div
@@ -138,7 +133,7 @@ export default function TrialReminderModal() {
         </h3>
 
         <p className="text-sm text-pb-dim leading-relaxed">
-          Your {soonest.name} trial {whenPhrase}.{othersLine}{' '}
+          Your BetterCricket trial {whenPhrase}.{' '}
           {expired
             ? "Subscribe to restore full access to your club's stats and tools."
             : 'Subscribe now to keep your access running without a break.'}
