@@ -39,7 +39,9 @@ from app.models.db import (  # noqa: E402
     Base, CommsCampaign, CommsContact, CommsRecipient, EmailEvent,
     MarketingClub, Organisation, User,
 )
-from app.routers.comms import campaign_recipients  # noqa: E402
+from app.routers.comms import (  # noqa: E402
+    _auto_campaign_name, campaign_recipients, get_campaign,
+)
 
 PASS: list[str] = []
 FAIL: list[str] = []
@@ -68,7 +70,26 @@ async def recipients(db, staff, club, campaign_id, only=None):
         campaign_id=str(campaign_id), only=only, _=staff, club=club, db=db)
 
 
+def check_auto_name() -> None:
+    """The auto suffix on an unnamed send is the club's own day-first date and
+    Perth clock, not month-first and UTC."""
+    print("\n── The auto campaign-name suffix (ddmm, Perth) ────────────────")
+    # 15 Sept 2026, 05:33 UTC → Perth is +08:00 → 13:33. Day-first: 1509.
+    got = _auto_campaign_name("Ready for another look at BetterCricket?",
+                              datetime(2026, 9, 15, 5, 33, tzinfo=timezone.utc))
+    check("the suffix is day-first and Perth time, not month-first UTC",
+          got.endswith("-1509-13:33"), got)
+    check("...and the reported month-first UTC form is gone",
+          "-0915-05:33" not in got, got)
+    # A cross-midnight case: 23:10 UTC on the 5th is 07:10 on the 6th in Perth,
+    # so the DATE rolls forward too — not just the clock.
+    roll = _auto_campaign_name("X", datetime(2026, 3, 5, 23, 10, tzinfo=timezone.utc))
+    check("crossing midnight rolls the date into Perth's day",
+          roll.endswith("-0603-07:10"), roll)
+
+
 async def main() -> int:
+    check_auto_name()
     engine = create_async_engine(DB_URL)
     async with engine.begin() as conn:
         await conn.execute(text("DROP SCHEMA public CASCADE"))
@@ -86,12 +107,14 @@ async def main() -> int:
         db.add(staff)
         await db.flush()
 
-        # Two prospect clubs.
+        # Three prospect clubs.
         alpha = MarketingClub(id=uuid.uuid4(), name="Alpha CC",
                               grassroots_guid="g-alpha", utm_code="alpha", state="WA")
         beta = MarketingClub(id=uuid.uuid4(), name="Beta CC",
                              grassroots_guid="g-beta", utm_code="beta", state="WA")
-        db.add_all([alpha, beta])
+        gamma = MarketingClub(id=uuid.uuid4(), name="Gamma CC",
+                              grassroots_guid="g-gamma", utm_code="gamma", state="WA")
+        db.add_all([alpha, beta, gamma])
         await db.flush()
 
         def contact(email, mc=None, org=None, source="directory", merge_vars=None):
@@ -109,6 +132,10 @@ async def main() -> int:
                           merge_vars={"club": "Carol's Own Club"})
         # A directory contact with no club at all.
         c_dave = contact("dave@example.com", None)
+        # A contact at a third club whose only recipient row FAILS — so its club
+        # is behind a recipient but NOT behind a delivered one, which makes the
+        # two tile counts differ (recipients 3 clubs, delivered 2).
+        c_gwen = contact("gwen@example.com", gamma)
         await db.flush()
 
         T1 = datetime(2026, 1, 10, 9, 0, tzinfo=timezone.utc)   # older send
@@ -135,6 +162,9 @@ async def main() -> int:
         recip(c1, c_bob, "bob@example.com", T1)
         recip(c1, c_carol, "carol@example.com", T1)
         recip(c1, c_dave, "dave@example.com", T1)
+        # Gwen's send failed — her club (Gamma) counts among the recipients but
+        # not among the delivered.
+        recip(c1, c_gwen, "gwen@example.com", None, status="failed")
         # March (C2): alice re-emailed at T2 (later). bob NOT in this campaign.
         recip(c2, c_alice, "alice@example.com", T2)
         await db.flush()
@@ -202,6 +232,17 @@ async def main() -> int:
                   and instant(r.get("last_emailed_at")) == T1
                   for r in bounced["recipients"]))
 
+        print("\n── The summary-tile club counts (get_campaign) ────────────────")
+        det = await get_campaign(campaign_id=str(c1.id), _=staff, club=outreach, db=db)
+        cs = det.get("club_stats") or {}
+        check("the recipients tile reports the distinct clubs behind ALL recipients",
+              cs.get("recipients") == 3, cs)   # Alpha, Beta, Gamma
+        check("the delivered tile reports the distinct clubs behind the DELIVERED",
+              cs.get("delivered") == 2, cs)     # Alpha, Beta — Gamma's only send failed
+        check("...so the two counts differ when a club's only send failed",
+              cs.get("recipients") != cs.get("delivered"),
+              f"{cs.get('recipients')}/{cs.get('delivered')}")
+
         print("\n── A club's own member: last-emailed, but no club ─────────────")
         m_ed = contact("ed@example.com", None, org=own, source="player")
         await db.flush()
@@ -219,6 +260,11 @@ async def main() -> int:
         check("the member's send is scoped to the club, not the outreach org",
               instant(by_email.get("alice@example.com", {}).get("last_emailed_at")) == T2,
               "outreach recency unchanged by the other org's send")
+
+        own_det = await get_campaign(campaign_id=str(c_own.id), _=staff, club=own, db=db)
+        own_cs = own_det.get("club_stats") or {}
+        check("a club's own send reports 0 clubs on both tiles, so no club line draws",
+              own_cs.get("recipients") == 0 and own_cs.get("delivered") == 0, own_cs)
 
     await engine.dispose()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")

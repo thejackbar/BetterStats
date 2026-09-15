@@ -59,6 +59,8 @@ const CLUB_MEMBERS = [
 
 let RECIPIENTS = OUTREACH
 let INTERNAL = true
+// Distinct clubs behind the recipients / delivered, for the summary tiles.
+let CLUB_STATS = { recipients: 3, delivered: 2 }
 
 const filterOnly = (rows, only) => {
   if (only === 'unsub_supp') return rows.filter(r => r.unsubscribed || r.complained)
@@ -94,6 +96,7 @@ const routes = (page, calls) => page.route('**/api/**', async (route) => {
       utm: {}, template_id: null, status: 'sent',
       engagement: { sent: 418, unsub_supp: 1, bounced: 1 },
       stats: { recipients: 419, sent: 418, failed: 1 },
+      club_stats: CLUB_STATS,
     })
   }
   if (/\/comms\/campaigns$/.test(url)) {
@@ -153,9 +156,24 @@ const run = async () => {
   })
 
   // ── Super Admin / outreach: clubs present ────────────────────────────────
-  RECIPIENTS = OUTREACH; INTERNAL = true
+  RECIPIENTS = OUTREACH; INTERNAL = true; CLUB_STATS = { recipients: 3, delivered: 2 }
   {
     const { ctx, page, errors } = await openDetail(browser)
+
+    // The summary tiles: Recipients + Delivered carry a distinct-club line;
+    // Failed does not.
+    const tiles = await page.evaluate(() => {
+      const map = {}
+      for (const label of ['recipients', 'delivered', 'failed']) {
+        const lab = [...document.querySelectorAll('div')].find(
+          d => d.children.length === 0 && (d.textContent || '').trim() === label)
+        map[label] = lab && lab.parentElement ? lab.parentElement.textContent : null
+      }
+      return map
+    })
+    check('the Recipients tile shows the distinct-club count', /3 clubs/.test(tiles.recipients || ''), tiles.recipients)
+    check('the Delivered tile shows the distinct-club count', /2 clubs/.test(tiles.delivered || ''), tiles.delivered)
+    check('the Failed tile shows no club line', !/club/.test(tiles.failed || ''), tiles.failed)
 
     // All recipients — the club column + last-emailed on ordinary rows.
     await clickPill(page, 'All recipients')
@@ -240,9 +258,19 @@ const run = async () => {
   }
 
   // ── Club Admin: no clubs, but last-emailed still shows ────────────────────
-  RECIPIENTS = CLUB_MEMBERS; INTERNAL = false
+  RECIPIENTS = CLUB_MEMBERS; INTERNAL = false; CLUB_STATS = { recipients: 0, delivered: 0 }
   {
     const { ctx, page, errors } = await openDetail(browser)
+
+    // A club's own send has no directory clubs, so no tile draws a club line.
+    const memberTiles = await page.evaluate(() => {
+      const t = [...document.querySelectorAll('div')].find(
+        d => d.children.length === 0 && (d.textContent || '').trim() === 'recipients')
+      return t && t.parentElement && t.parentElement.parentElement
+        ? t.parentElement.parentElement.textContent : ''
+    })
+    check('a club\'s own send draws no club line on any tile', !/club/.test(memberTiles || ''), memberTiles)
+
     await clickPill(page, 'All recipients')
     let body = await page.textContent('body')
     check('a club member\'s row still shows when they were last emailed', body.includes('Last emailed'))

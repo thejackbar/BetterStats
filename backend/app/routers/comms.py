@@ -27,13 +27,14 @@ import logging
 import re
 import uuid
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from typing import List, Optional
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from jose import jwt
 from pydantic import BaseModel
-from sqlalchemy import select, func, or_, text, update, exists
+from sqlalchemy import select, func, or_, text, update, exists, distinct, case
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -227,7 +228,8 @@ def campaign_warnings(subject: str, body_html: str, utm: dict) -> list[str]:
     return warnings
 
 
-def _campaign_out(c: CommsCampaign, engagement: "Optional[dict]" = None) -> dict:
+def _campaign_out(c: CommsCampaign, engagement: "Optional[dict]" = None,
+                  club_stats: "Optional[dict]" = None) -> dict:
     return {
         "id": str(c.id),
         "subject": c.subject,
@@ -247,6 +249,11 @@ def _campaign_out(c: CommsCampaign, engagement: "Optional[dict]" = None) -> dict
         # Per-campaign deliverability (sent / bounced / unsub+complaint), when the
         # caller has computed it (both the list and single-campaign endpoints do).
         "engagement": engagement,
+        # How many distinct directory clubs are behind this campaign's recipients
+        # and its delivered recipients — beside the person counts on the summary
+        # tiles. Only the single-campaign endpoint computes it; blank for a
+        # club's own send (no directory clubs), so the tile draws no club line.
+        "club_stats": club_stats,
     }
 
 
@@ -1309,6 +1316,28 @@ def _engagement_block(c: CommsCampaign, eng_map: dict) -> dict:
             "bounced": e.get("bounced", 0), "unsub_supp": e.get("unsub_supp", 0)}
 
 
+async def _campaign_club_counts(db: AsyncSession, campaign_id) -> dict:
+    """Distinct directory clubs behind one campaign's recipients, and behind its
+    DELIVERED recipients (status = 'sent') — for the summary tiles beside the
+    person counts. "Club" is the linked directory club (marketing_club_id), the
+    same unit `audience_figures` counts, so three officers at one club count
+    once and a club's own member (no directory club) counts as no club. One
+    grouped query; COUNT(DISTINCT ...) drops the NULLs, so a recipient with no
+    linked contact or no club contributes nothing."""
+    row = (await db.execute(
+        select(
+            func.count(distinct(CommsContact.marketing_club_id)),
+            func.count(distinct(case(
+                (CommsRecipient.status == "sent", CommsContact.marketing_club_id)))),
+        )
+        .select_from(CommsRecipient)
+        .join(CommsContact, CommsContact.id == CommsRecipient.contact_id)
+        .where(CommsRecipient.campaign_id == campaign_id)
+    )).first()
+    return {"recipients": int(row[0] or 0) if row else 0,
+            "delivered": int(row[1] or 0) if row else 0}
+
+
 @router.get("/campaigns")
 async def list_campaigns(
     _: User = _require,
@@ -1462,11 +1491,20 @@ class CampaignIn(BaseModel):
     template_id: Optional[str] = None
 
 
+_PERTH = ZoneInfo("Australia/Perth")
+
+
 def _auto_campaign_name(subject: str, when: datetime) -> str:
-    """Auto name for an unnamed Email: subject + a -MMDD-HH:MM timestamp,
-    e.g. 'Announcement' → 'Announcement-0526-10:30'. Falls back to 'Email'."""
+    """Auto name for an unnamed Email: subject + a -DDMM-HH:MM timestamp in
+    Perth time, e.g. 'Announcement' → 'Announcement-2605-10:30'. The club reads
+    this, so it is the club's own day-first date and local clock, not UTC.
+    Falls back to 'Email'."""
     base = (subject or "").strip() or "Email"
-    return f"{base}-{when.strftime('%m%d-%H:%M')}"
+    # The caller passes a UTC-aware `now`; guard a naive value as UTC too.
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    local = when.astimezone(_PERTH)
+    return f"{base}-{local.strftime('%d%m-%H:%M')}"
 
 
 def _parse_template_id(raw: Optional[str]):
@@ -1513,7 +1551,8 @@ async def get_campaign(
 ):
     c = await _campaign_or_404(db, club, campaign_id)
     eng = await _campaign_engagement(db, [c.id])
-    return _campaign_out(c, engagement=_engagement_block(c, eng))
+    clubs = await _campaign_club_counts(db, c.id)
+    return _campaign_out(c, engagement=_engagement_block(c, eng), club_stats=clubs)
 
 
 @router.patch("/campaigns/{campaign_id}")
