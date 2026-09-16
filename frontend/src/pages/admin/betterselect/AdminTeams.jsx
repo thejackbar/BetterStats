@@ -25,6 +25,7 @@
 // dropped; a card in any pool drags into a squad. Assigned squads always show
 // their FULL membership, so a dormant backup you filed stays visible.
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import BetterSelectLayout from '../../../components/admin/BetterSelectLayout'
 import { useAuth } from '../../../contexts/AuthContext'
 import { useToast } from '../../../contexts/ToastContext'
@@ -246,27 +247,61 @@ function BulkAddModal({ fixedTeam, teams, players, dormantCutoff, statusOf, onAs
 }
 
 /* ── "＋ Add to squad" control on a card ──────────────────────────────────────
- * A native <select> on purpose: its dropdown renders OUTSIDE the column's
- * overflow:auto box, where an absolutely-positioned popover would be clipped.
- * It never starts a card drag (draggable off + stopPropagation). Lists only the
- * squads the player is NOT already in — the way to give a fringe player a second
- * (or third) squad without leaving the one they're in. */
-function AddToSquadSelect({ p, teams, onAddToSquad }) {
+ * A small fixed-size icon button (never a native <select> — that sizes to its
+ * widest option and swallows the name). Its dropdown is rendered in a PORTAL at
+ * document.body with fixed positioning, so the column's overflow:auto box can't
+ * clip it. Lists only the squads the player is NOT already in — the way to give
+ * a fringe player a second squad without leaving the one they're in. Never
+ * starts a card drag (draggable off + stopPropagation). */
+function AddToSquadMenu({ p, teams, onAddToSquad }) {
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState(null)
+  const btnRef = useRef(null)
   const options = (teams || []).filter((t) => !inSquad(p, t.id))
+
+  useEffect(() => {
+    if (!open) return
+    const close = (e) => { if (!e.target.closest?.('[data-add-squad-menu]')) setOpen(false) }
+    const onScroll = () => setOpen(false)
+    document.addEventListener('mousedown', close)
+    window.addEventListener('scroll', onScroll, true)
+    window.addEventListener('resize', onScroll)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      window.removeEventListener('scroll', onScroll, true)
+      window.removeEventListener('resize', onScroll)
+    }
+  }, [open])
+
   if (!options.length) return null
+  const toggle = (e) => {
+    e.stopPropagation()
+    const r = btnRef.current?.getBoundingClientRect()
+    if (r) setPos({ top: r.bottom + 4, left: Math.min(r.left, window.innerWidth - 192) })
+    setOpen((v) => !v)
+  }
   return (
-    <select
-      value="" draggable={false}
-      onMouseDown={(e) => e.stopPropagation()}
-      onClick={(e) => e.stopPropagation()}
-      onDragStart={(e) => { e.preventDefault(); e.stopPropagation() }}
-      onChange={(e) => { const v = e.target.value; e.target.value = ''; if (v) onAddToSquad(p.id, v) }}
-      title="Add to another squad"
-      className="shrink-0 appearance-none cursor-pointer rounded-md border border-pb-hairline2 bg-pb-surface2 text-pb-faint hover:text-pb-accent hover:border-pb-accent/40 text-[12px] leading-none px-1 py-0.5 focus:outline-none focus:border-pb-accent"
-    >
-      <option value="">＋</option>
-      {options.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-    </select>
+    <>
+      <button ref={btnRef} type="button" draggable={false}
+        onMouseDown={(e) => e.stopPropagation()} onClick={toggle}
+        title="Add to another squad"
+        className="shrink-0 w-5 h-5 inline-flex items-center justify-center rounded-md border border-pb-hairline2 text-pb-faint hover:text-pb-accent hover:border-pb-accent/40 opacity-60 group-hover:opacity-100 focus:opacity-100 transition-opacity">
+        <Icon name="plus" size={12} />
+      </button>
+      {open && pos && createPortal(
+        <div data-add-squad-menu onMouseDown={(e) => e.stopPropagation()}
+          style={{ position: 'fixed', top: pos.top, left: pos.left, zIndex: 60, width: 180 }}
+          className="max-h-64 overflow-auto bg-pb-surface border border-pb-hairline2 rounded-lg shadow-2xl py-1 pb-scroll">
+          <div className="px-3 py-1 font-mono text-[9px] uppercase tracking-wide2 text-pb-faintest">Add to squad</div>
+          {options.map((t) => (
+            <button key={t.id} type="button"
+              onClick={() => { onAddToSquad(p.id, t.id); setOpen(false) }}
+              className="w-full text-left px-3 py-1.5 text-[12.5px] text-pb-text hover:bg-pb-accent/10 hover:text-pb-accent truncate">
+              {t.name}
+            </button>
+          ))}
+        </div>, document.body)}
+    </>
   )
 }
 
@@ -276,7 +311,7 @@ function PlayerCard({ p, status, dormantCutoff, draggable, onDragStart, onDragEn
   const badge = recencyBadge(p, dormantCutoff)
   return (
     <div draggable={draggable} onDragStart={onDragStart} onDragEnd={onDragEnd}
-      className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg border border-pb-hairline ${draggable ? 'cursor-grab active:cursor-grabbing' : ''}`}
+      className={`group flex items-center gap-2.5 px-2.5 py-2 rounded-lg border border-pb-hairline ${draggable ? 'cursor-grab active:cursor-grabbing' : ''}`}
       style={{ background: status === 'NO_RESPONSE' ? 'var(--pb-surface2)' : `color-mix(in srgb, ${meta.cssVar} 8%, var(--pb-surface2))` }}>
       {draggable && <span className="text-pb-faintest shrink-0"><Icon name="grip" size={14} /></span>}
       <AvailDot player={p} status={status} onEdit={onEditAvail} />
@@ -285,7 +320,7 @@ function PlayerCard({ p, status, dormantCutoff, draggable, onDragStart, onDragEn
       {p.status === 'inactive' && <span className="font-mono text-[8px] text-pb-faintest uppercase shrink-0" title="Marked inactive">inactive</span>}
       {badge && <span className="font-mono text-[8px] text-amber-300/60 uppercase shrink-0" title={badge.title}>{badge.text}</span>}
       <RoleChips roles={p.skill_positions} muted />
-      {draggable && onAddToSquad && <AddToSquadSelect p={p} teams={teams} onAddToSquad={onAddToSquad} />}
+      {draggable && onAddToSquad && <AddToSquadMenu p={p} teams={teams} onAddToSquad={onAddToSquad} />}
     </div>
   )
 }
