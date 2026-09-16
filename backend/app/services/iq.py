@@ -33,6 +33,7 @@ Org-scoping of games goes through ``grades → seasons`` (the views don't carry
 from __future__ import annotations
 
 import json
+import re
 import uuid
 
 from sqlalchemy import text
@@ -57,6 +58,68 @@ _ORG_SCOPE = (
     " JOIN grades gr ON gr.id = g.grade_id"
     " JOIN seasons s ON s.id = gr.season_id"
 )
+
+
+# Descriptor words dropped before token-matching two spellings of a club name.
+# A fixture's opponent name comes from the CA fixtures feed and keeps the
+# per-grade team suffix ("Rupertswood 1st XI"); our stored ``opp_club_name`` is
+# the SAME club run through ``sync.strip_team_suffix`` and often spelled by its
+# owning-org name instead ("Rupertswood Cricket Club"). Dropping the boilerplate
+# AND the team/grade suffix leaves only the identifying words, so both reduce to
+# {"rupertswood"}. Superset of the ladder's own stop list (``opponent_ladder``
+# reads this too, so the two can't drift).
+_CLUB_NAME_STOP = {
+    "cricket", "club", "cc", "the", "inc", "junior", "juniors", "seniors",
+    "grade", "xi", "xis", "mens", "womens", "firsts", "seconds", "thirds",
+    "1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th",
+    "1sts", "2nds", "3rds", "4ths",
+}
+
+
+def _club_core_tokens(name: str | None) -> set[str]:
+    """Club-identifying tokens of a name: lowercased words longer than two
+    characters that aren't boilerplate/team-suffix descriptors (_CLUB_NAME_STOP).
+    """
+    nm = (name or "").lower()
+    return {t for t in re.split(r"[^a-z0-9]+", nm) if len(t) > 2 and t not in _CLUB_NAME_STOP}
+
+
+def _best_opp_key_by_name(candidates, target: str | None):
+    """Pick the one opponent whose club name best matches ``target`` — a fixture's
+    opponent name — or None.
+
+    Exact equality between the fixtures feed and the scorecard feed systematically
+    misses (different spelling, and the fixture keeps a per-grade team suffix the
+    stored name has been stripped of), so match on the club-identifying tokens
+    (the ladder scheme): a candidate must share at least one core token; a full
+    substring match then wins, otherwise the most shared tokens. Returns None when
+    nothing overlaps, or when two DIFFERENT opp_keys tie for the lead — never guess
+    between two clubs.
+
+    ``candidates``: iterable of ``(opp_key, representative_name)``.
+    """
+    tnm = (target or "").strip().lower()
+    if not tnm:
+        return None
+    tcore = _club_core_tokens(target)
+    if not tcore:
+        return None
+    best_score = 0
+    best = None
+    tie = False
+    for opp_key, name in candidates:
+        if not opp_key or not name:
+            continue
+        overlap = tcore & _club_core_tokens(name)
+        if not overlap:
+            continue
+        h = name.strip().lower()
+        score = 100 if (tnm in h or h in tnm) else len(overlap)
+        if score > best_score:
+            best_score, best, tie = score, (opp_key, name), False
+        elif score == best_score and best is not None and opp_key != best[0]:
+            tie = True
+    return None if tie else best
 
 
 def _opp_scope(grade: str | None, season_ids: list[str] | None, params: dict) -> str:
@@ -222,6 +285,9 @@ async def list_opponents(session: AsyncSession, org_id: str) -> dict:
     # Manual matches saved by the user take precedence / fill the gaps.
     for alias_nm, (akey, _dn) in (await _load_aliases(session, org_id)).items():
         by_name[alias_nm] = akey
+    # Token fallback for a fixture whose opponent name (with its team suffix) has
+    # no exact/alias hit — same club, spelled differently across the two feeds.
+    opp_pairs = [(o["opp_key"], o["name"]) for o in opponents]
 
     fx_res = await session.execute(
         text(
@@ -250,11 +316,15 @@ async def list_opponents(session: AsyncSession, org_id: str) -> dict:
     upcoming = []
     for r in fx_res.mappings():
         nm = (r["opponent_name"] or "").strip().lower()
+        key = by_name.get(nm)
+        if not key:
+            fz = _best_opp_key_by_name(opp_pairs, r["opponent_name"])
+            key = fz[0] if fz else None
         upcoming.append(
             {
                 "fixture_id": r["id"],
                 "opponent_name": r["opponent_name"],
-                "opp_key": by_name.get(nm),  # None when we have no history vs them
+                "opp_key": key,  # None when we have no history vs them
                 "played_on": r["played_on"].isoformat() if r["played_on"] else None,
                 "home_away": r["home_away"],
                 "venue": r["venue"],
@@ -510,6 +580,29 @@ async def _resolve_opp_key(session: AsyncSession, org_id: str, *, opponent: str 
             # actually picked from the fixture, not MAX(opp_club_name) for the
             # key (which can be a shared association label).
             return krow["opp_key"], name
+        # Exact equality missed — the fixtures feed spells the club differently
+        # from the scorecard feed and keeps a team suffix ("Rupertswood 1st XI")
+        # our stored opp_club_name has been stripped of. Fall back to matching on
+        # the club-identifying tokens against every opponent we hold history
+        # against (refusing to guess between two clubs that tie).
+        cand_res = await session.execute(
+            text(
+                f"""
+                SELECT {_OPP_KEY} AS opp_key,
+                       mode() WITHIN GROUP (ORDER BY g.opp_club_name) AS name
+                FROM v_effective_games g{_ORG_SCOPE}
+                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                  AND g.opp_club_name IS NOT NULL AND g.opp_club_name <> ''
+                GROUP BY {_OPP_KEY}
+                """
+            ),
+            {"org_id": org_id},
+        )
+        fuzzy = _best_opp_key_by_name(
+            ((r["opp_key"], r["name"]) for r in cand_res.mappings()), name
+        )
+        if fuzzy:
+            return fuzzy[0], name
         return None, name  # named opponent, but no history held
 
     return None, None
@@ -1153,9 +1246,6 @@ async def _their_key_players(session: AsyncSession, opp_org_uuid: str) -> dict:
 
 
 # ─── Opponent ladder standing (live, current-season) ─────────────────────────
-# Words to strip from a club name before token-matching it against a ladder row,
-# so "Bassendean Cricket Club" matches on "bassendean", not "cricket"/"club".
-_LADDER_STOP = {"cricket", "club", "cc", "the", "inc", "junior", "juniors", "seniors", "grade"}
 
 
 def _ladder_rows(raw) -> tuple[list[dict], str | None]:
@@ -1221,7 +1311,7 @@ async def opponent_ladder(session: AsyncSession, org_id: str, *, opponent: str |
 
     our_row = next((r for r in rows if r["is_club"]), None)
     nm = (name or "").strip().lower()
-    core = [t for t in nm.replace("-", " ").split() if len(t) > 2 and t not in _LADDER_STOP]
+    core = list(_club_core_tokens(name))
     # Pick the BEST-matching opponent row (most name tokens in common), not the
     # first row to share any single token — otherwise "Wembley Districts" could
     # latch onto "Wembley Downs". A full-name substring match wins outright.
