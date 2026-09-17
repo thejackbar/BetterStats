@@ -2285,13 +2285,18 @@ async def _get_social_scorecard_inner(match_id: str, db: AsyncSession, club=None
         return result
 
     def parse_extras(inn: dict) -> dict:
-        # GR top-level fields confirmed from games router (523-538)
+        # GR top-level fields confirmed live off the /scores/* payload. The
+        # breakdown (byes/leg-byes/no-balls/wides/penalties) sums to
+        # totalExtras; penalties (PR) is real and non-trivial in junior grades
+        # (a U10 game carried 24/32 of them), so it must be carried too or the
+        # parts visibly fall short of the total on the scorecard.
         return {
             "total": inn.get("totalExtras") or 0,
             "b": inn.get("byesRuns") or 0,
             "lb": inn.get("legByesRuns") or 0,
             "nb": inn.get("noBalls") or 0,
             "wd": inn.get("wideBalls") or 0,
+            "pr": inn.get("penalties") or 0,
         }
 
     def team_totals(inn: dict, batting: list):

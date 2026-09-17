@@ -1958,6 +1958,39 @@ function _toRgba(hex, alpha) {
   return `rgba(${r},${g},${b},${alpha})`
 }
 
+// Base-6 cricket overs ("19.3" = 19 overs 3 balls) → a true decimal (19.5),
+// for run-rate maths. Tolerates a comma decimal and stray junk.
+function _scOversDecimal(overs) {
+  const o = parseFloat(String(overs ?? '').replace(',', '.'))
+  if (!Number.isFinite(o)) return 0
+  const whole = Math.floor(o)
+  const balls = Math.round((o - whole) * 10)
+  return whole + balls / 6
+}
+
+// Run rate for a scorecard team. Derived from the total and overs actually
+// shown, so a manual edit to either stays consistent, and falling back to the
+// value the fetch supplied. Null when there are no overs to divide by.
+function _scRunRate(team) {
+  const total = parseFloat(String(team?.total ?? '').replace(/[^\d.]/g, ''))
+  const ov = _scOversDecimal(team?.overs)
+  if (Number.isFinite(total) && ov > 0) return (total / ov).toFixed(2)
+  const rr = parseFloat(String(team?.runRate ?? ''))
+  return Number.isFinite(rr) && rr > 0 ? rr.toFixed(2) : null
+}
+
+// Extras breakdown text, e.g. "b 7 · lb 2 · nb 11 · wd 11 · pr 24". Byes,
+// leg-byes, no-balls and wides always show; penalty runs (PR) only when
+// non-zero — they're rare in senior grades and "pr 0" on every card is noise,
+// but a junior game can carry a lot of them, and without PR the parts visibly
+// fall short of the extras total.
+function _scExtrasParts(extras) {
+  const e = extras || {}
+  const parts = [`b ${e.b ?? 0}`, `lb ${e.lb ?? 0}`, `nb ${e.nb ?? 0}`, `wd ${e.wd ?? 0}`]
+  if ((e.pr ?? 0) > 0) parts.push(`pr ${e.pr}`)
+  return parts.join(' · ')
+}
+
 function ScSponsorFooter({ bg, ink, dim, dimmer, rule, style = {}, sponsors = [] }) {
   const slots = [0, 1]
   return (
@@ -2010,6 +2043,7 @@ export function SC1_Broadcast({ match, palette = {}, square = false, only = 'hom
     const wff = bff
     const wwf = Math.max(12, Math.round(bnf * 1.0))
     const wsf = bsf
+    const rr = _scRunRate(team)
     return (
     <div style={{ background: panel, border: `1px solid ${rule}`, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: 18, padding: '14px 22px', background: `linear-gradient(90deg, ${accentC}, ${accentC}aa 60%, transparent)`, color: headerInk, borderBottom: `1px solid ${rule}` }}>
@@ -2017,7 +2051,7 @@ export function SC1_Broadcast({ match, palette = {}, square = false, only = 'hom
         <div style={{ minWidth: 0 }}>
           <AutoFitText text={team.name} max={42} min={18} pad={4}
             style={{ fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", letterSpacing: 1.5, lineHeight: 1 }} />
-          <div style={{ fontFamily: SC_MONO, fontSize: 12, letterSpacing: 2, marginTop: 4, opacity: 0.75 }}>{side === 'home' ? '1ST INNINGS' : '2ND INNINGS · CHASE'} · {team.overs} OV</div>
+          <div style={{ fontFamily: SC_MONO, fontSize: 12, letterSpacing: 2, marginTop: 4, opacity: 0.75 }}>{side === 'home' ? '1ST INNINGS' : '2ND INNINGS · CHASE'} · {team.overs} OV{rr ? ` · RR ${rr}` : ''}</div>
         </div>
         <div style={{ textAlign: 'right', lineHeight: 0.9 }}>
           <div style={{ fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 68, letterSpacing: -1 }}>{team.total}{team.wickets < 10 ? `/${team.wickets}` : ''}</div>
@@ -2047,7 +2081,7 @@ export function SC1_Broadcast({ match, palette = {}, square = false, only = 'hom
           )
         })}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 56px', padding: '7px 2px', borderTop: `1px solid ${rule}`, fontFamily: SC_MONO, fontSize: 12, color: dim, letterSpacing: 1 }}>
-          <div>EXTRAS · b {team.extras?.b ?? 0} · lb {team.extras?.lb ?? 0} · nb {team.extras?.nb ?? 0} · wd {team.extras?.wd ?? 0}</div>
+          <div>EXTRAS · {_scExtrasParts(team.extras)}</div>
           <div style={{ textAlign: 'right', color: ink }}>{team.extras?.total ?? 0}</div>
         </div>
       </div>
@@ -2171,12 +2205,13 @@ export function SC2_Brutalist({ match, palette = {}, square = false, only = 'hom
     const wff = bff
     const wwf = Math.max(12, Math.round(bnf * 1.0))
     const wsf = bsf
+    const rr = _scRunRate(team)
     return (
     <div style={{ borderLeft: `2px solid ${ruleStrong}`, borderRight: `2px solid ${ruleStrong}`, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ background: ink, color: bg, padding: '16px 22px', display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: 18, borderBottom: `2px solid ${ruleStrong}` }}>
         <ClubLogo monogram={team.short} color={bg} src={team.logo || null} size={70} shape='shield' />
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontFamily: SC_MONO, fontSize: 11, letterSpacing: 3, opacity: 0.65 }}>{side === 'home' ? '1ST INNINGS' : '2ND INNINGS'} · {team.overs} OV</div>
+          <div style={{ fontFamily: SC_MONO, fontSize: 11, letterSpacing: 3, opacity: 0.65 }}>{side === 'home' ? '1ST INNINGS' : '2ND INNINGS'} · {team.overs} OV{rr ? ` · RR ${rr}` : ''}</div>
           <AutoFitText text={team.name} max={52} min={20} pad={4}
             style={{ fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", letterSpacing: 1, lineHeight: 0.95, marginTop: 2 }} />
         </div>
@@ -2206,7 +2241,7 @@ export function SC2_Brutalist({ match, palette = {}, square = false, only = 'hom
           )
         })}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 56px', padding: '6px 0', borderTop: `2px solid ${ruleStrong}`, fontFamily: SC_MONO, fontSize: 11, color: dim, letterSpacing: 1 }}>
-          <div>EXTRAS · b {team.extras?.b ?? 0} · lb {team.extras?.lb ?? 0} · nb {team.extras?.nb ?? 0} · wd {team.extras?.wd ?? 0}</div>
+          <div>EXTRAS · {_scExtrasParts(team.extras)}</div>
           <div style={{ textAlign: 'right', color: ink, fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 18 }}>{team.extras?.total ?? 0}</div>
         </div>
       </div>
@@ -2326,6 +2361,7 @@ export function SC3_Dashboard({ match, palette = {}, square = false, only = 'hom
     const brf = Math.max(12, Math.round(16 * sc))
     const bsf = Math.max(9, Math.round(11 * sc))
     const wwf = Math.max(12, Math.round(16 * sc))
+    const rr = _scRunRate(team)
     return (
     <Card style={{ display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: 16, padding: '18px 20px', borderBottom: `1px solid ${rule}` }}>
@@ -2334,7 +2370,7 @@ export function SC3_Dashboard({ match, palette = {}, square = false, only = 'hom
           : <div style={{ width: 68, height: 68, borderRadius: 12, background: `${accentC}22`, color: accentC, display: 'grid', placeItems: 'center', fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 26, letterSpacing: 1 }}>{team.short}</div>
         }
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontFamily: SC_BODY, fontSize: 12, letterSpacing: 1.5, color: dim, fontWeight: 500 }}>{side === 'home' ? '1ST INNINGS' : '2ND INNINGS'} · {team.overs} ov</div>
+          <div style={{ fontFamily: SC_BODY, fontSize: 12, letterSpacing: 1.5, color: dim, fontWeight: 500 }}>{side === 'home' ? '1ST INNINGS' : '2ND INNINGS'} · {team.overs} ov{rr ? ` · RR ${rr}` : ''}</div>
           <AutoFitText text={team.name} max={28} min={14} pad={4}
             style={{ fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", letterSpacing: 0.5, lineHeight: 1.1, color: ink }} />
         </div>
@@ -2363,7 +2399,7 @@ export function SC3_Dashboard({ match, palette = {}, square = false, only = 'hom
           )
         })}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', padding: '6px 0', borderTop: `1px solid ${rule}`, fontFamily: SC_BODY, fontSize: 11, color: dim }}>
-          <div>Extras · b {team.extras?.b ?? 0} · lb {team.extras?.lb ?? 0} · nb {team.extras?.nb ?? 0} · wd {team.extras?.wd ?? 0}</div>
+          <div>Extras · {_scExtrasParts(team.extras)}</div>
           <div style={{ fontWeight: 700, color: ink }}>{team.extras?.total ?? 0}</div>
         </div>
       </div>
