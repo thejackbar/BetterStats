@@ -195,17 +195,39 @@ export function StaticMembersProvider({
 }
 
 // ── Zone 1: the two count tiles (top of the pane, above Active rules) ─────────
+// With NO picker search/filter the tiles show the whole exact server-resolved
+// audience (rules ∪ static ∪ included − excluded). The moment a search or facet
+// filter is active in the Static picker below, they instead count who MATCHES
+// that filter — so typing a search gives immediate feedback (the count moves)
+// and the drill-down the tile opens agrees with it. Without this the count sat
+// at the whole-segment figure whatever you searched, and the matching contacts
+// were hidden until you scrolled down and toggled a tile — so a search read as
+// "nothing found". The matching counts are the same client-side lists the tile
+// drill-downs already draw, so tile and list can never disagree.
 export function SegmentTiles() {
   const sm = useSM()
+  const filtered = sm.activeFilters
+  // While the club's contact list is still loading there is nothing to filter
+  // yet, so show a dash rather than a wrong 0.
+  const pending = sm.contacts == null
+  const inN = filtered ? (pending ? null : sm.inList.length) : sm.inCount
+  const outN = filtered ? (pending ? null : sm.outList.length) : sm.outCount
   return (
     <div>
       <div className="flex flex-wrap gap-3">
-        <Tile label="In this segment" n={sm.inCount} tone="ok" active={sm.show.in}
-          sub="Rules, hand-picked and included — tap to view the list" onClick={() => sm.toggleTile('in')} />
-        <Tile label="Not in this segment" n={sm.outCount} active={sm.show.out}
-          sub="Everyone else you could add — tap to view the list" onClick={() => sm.toggleTile('out')} />
+        <Tile label="In this segment" n={inN} tone="ok" active={sm.show.in}
+          sub={filtered ? 'Matching your filter — tap to view' : 'Rules, hand-picked and included — tap to view the list'}
+          onClick={() => sm.toggleTile('in')} />
+        <Tile label="Not in this segment" n={outN} active={sm.show.out}
+          sub={filtered ? 'Matching, available to add — tap to view' : 'Everyone else you could add — tap to view the list'}
+          onClick={() => sm.toggleTile('out')} />
       </div>
-      {sm.inCount > 0 && (sm.reachable != null) && (
+      {filtered ? (
+        <div className="text-pb-faintest text-[11.5px] mt-2">
+          Showing who matches your search, out of <b style={{ color: 'var(--pb-positive-ink)' }}>{(sm.inCount ?? 0).toLocaleString()}</b> in the segment.
+          {' '}Clear the filter to see the whole audience.
+        </div>
+      ) : sm.inCount > 0 && (sm.reachable != null) && (
         <div className="text-pb-faintest text-[11.5px] mt-2">
           <b style={{ color: 'var(--pb-positive-ink)' }}>{sm.reachable.toLocaleString()}</b> reachable by email
           {sm.otherRoute > 0 && <> · <b style={{ color: '#f5b542' }}>{sm.otherRoute.toLocaleString()}</b> need another route</>}
