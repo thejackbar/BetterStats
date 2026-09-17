@@ -45,6 +45,11 @@ const SEGMENTS = [{ id: 's1', name: 'Cold seg', source: 'manual', origin: null, 
   definition: { match: 'all', rules: [{ field: 'exported', op: 'eq', value: ['yes'] }] } }]
 
 let INTERNAL = true
+// A club with NO saved segments never auto-selects one, so the screen sits in
+// the genuinely-empty state — pressing "New segment" then leaves the definition
+// byte-identical, which is where Issue B (the resolve effect never firing for a
+// new segment) actually bites. The saved-segment blocks keep their one segment.
+let NO_SEGMENTS = false
 
 const routes = (page) => page.route('**/api/**', async (route) => {
   const url = route.request().url()
@@ -56,7 +61,7 @@ const routes = (page) => page.route('**/api/**', async (route) => {
   if (/\/comms\/segments\/(resolve|preview)/.test(url)) return json({
     count: 40, universe: 50, out_count: 10, member_ids: MEMBER_IDS,
     contacts: CONTACTS.slice(0, 40), reachable: 40, other_route: 0, clubs: 3 })
-  if (/\/comms\/segments$/.test(url)) return json(SEGMENTS)
+  if (/\/comms\/segments$/.test(url)) return json(NO_SEGMENTS ? [] : SEGMENTS)
   if (/\/comms\/contacts/.test(url)) return json({
     contacts: INTERNAL ? CONTACTS : CONTACTS.map(c => ({
       ...c, club: undefined, association: undefined, country: undefined,
@@ -83,7 +88,7 @@ const listShown = (page) => page.evaluate(() =>
 const noOverflow = (page) => page.evaluate(() =>
   document.documentElement.scrollWidth - document.documentElement.clientWidth)
 
-async function open(browser, width = 1500) {
+async function open(browser, width = 1500, mode = 'saved') {
   const ctx = await browser.newContext({ viewport: { width, height: 1100 } })
   await ctx.addInitScript(() => {
     localStorage.setItem('token', 'stub')
@@ -95,7 +100,12 @@ async function open(browser, width = 1500) {
   await routes(page)
   await page.goto(BASE + '/admin/comms/segments', { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(1400)
-  await page.click('text=Cold seg').catch(() => {})
+  // 'saved' opens an existing segment; 'new' presses "New segment" from the
+  // fresh/empty state — the path whose blank starter rule leaves the definition
+  // byte-identical to the empty state, so the resolve effect must be nudged to
+  // fire or the tiles read 0.
+  if (mode === 'new') await page.click('button:has-text("New segment")').catch(() => {})
+  else await page.click('text=Cold seg').catch(() => {})
   await page.waitForTimeout(1200)
   return { ctx, page, errors }
 }
@@ -103,6 +113,15 @@ async function open(browser, width = 1500) {
 // contexts ("Search name, email, …" / "Search on name or email address"),
 // unlike the sidebar's "Search segments…", so this never grabs the wrong one.
 const search = (page, v) => page.$('input[placeholder*="email" i]').then(el => el && el.fill(v))
+// Open the Club facet dropdown and tick one club — the reported "select a club"
+// path. The facet button's accessible name starts with "Club"; the nav's
+// "BetterClubhouse" starts with "BetterC", so the anchored regex is unambiguous.
+const pickClub = async (page, name) => {
+  await page.getByRole('button', { name: /^Club/ }).first().click().catch(() => {})
+  await page.waitForTimeout(200)
+  await page.locator(`label:has-text("${name}") input[type=checkbox]`).first().check().catch(() => {})
+  await page.keyboard.press('Escape').catch(() => {})
+}
 
 const run = async () => {
   const browser = await chromium.launch({
@@ -150,6 +169,43 @@ const run = async () => {
     check('no page errors', errors.length === 0, errors.join(' | '))
     await ctx.close()
   }
+
+  // ── Outreach: a NEW unsaved segment resolves so its tiles show the universe ─
+  // Reported: on a new segment, typing a contact's name that exists (e.g.
+  // "Peter Moore") left "In this segment" at the whole-audience figure and the
+  // matches hidden — In never dropped to 1; picking a club never showed its 3.
+  // The cause was the resolve effect never firing for a new segment (its blank
+  // rule filters out, so defKey is unchanged from the fresh state), leaving
+  // member_ids null. With the fix the new segment resolves (In = the universe),
+  // then a search or club facet narrows it — exactly the reported expectation.
+  INTERNAL = true
+  NO_SEGMENTS = true
+  {
+    const { ctx, page, errors } = await open(browser, 1500, 'new')
+
+    let t = await tileCounts(page)
+    check('a new segment resolves — the "In" tile shows the universe, not 0', t.in === '40', JSON.stringify(t))
+
+    // A name search narrows it (the reported "Peter Moore" case).
+    await search(page, 'Member 1'); await page.waitForTimeout(600)
+    t = await tileCounts(page)
+    check('typing a name on a new segment drops the "In" tile to the match count', t.in === '11', JSON.stringify(t))
+    await page.click('button:has-text("In this segment")').catch(() => {})
+    await page.waitForTimeout(600)
+    check('clicking the tile lists exactly the matching contacts (new segment)',
+      (await listShown(page)).includes('11 shown'), JSON.stringify(await listShown(page)))
+
+    // A club facet narrows it too (the reported "Hoxton Park Tigers" case).
+    await search(page, ''); await page.waitForTimeout(400)
+    await pickClub(page, 'Alpha CC'); await page.waitForTimeout(600)
+    t = await tileCounts(page)
+    // Members whose club is Alpha CC: i in {0,3,…,39} = 14.
+    check('picking a club on a new segment drops the "In" tile to the club count', t.in === '14', JSON.stringify(t))
+
+    check('no page errors (new segment)', errors.length === 0, errors.join(' | '))
+    await ctx.close()
+  }
+  NO_SEGMENTS = false
 
   // ── Outreach at 390px ────────────────────────────────────────────────────
   INTERNAL = true

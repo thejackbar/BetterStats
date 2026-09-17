@@ -336,6 +336,13 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
     [draft],
   )
   const defKey = JSON.stringify(definition)
+  // A NEW blank segment filters its one starter rule out of `definition`, so its
+  // `defKey` is byte-identical to the fresh/empty state's — without this the
+  // resolve effect would never fire on New, leaving `member_ids` null and every
+  // tile reading 0 (an unfiltered new segment is the whole sendable audience,
+  // which the tiles must show before a search narrows it). So the effect also
+  // watches whether a draft is present at all.
+  const draftPresent = !!draft
 
   // A segment reports what it matches TODAY, so resolve it live rather than
   // storing a count that would slowly become a lie.
@@ -349,7 +356,7 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
         .catch(() => { if (live) { setResolved({ count: 0, contacts: [] }); setCounting(false) } })
     }, 350)
     return () => { live = false; clearTimeout(t) }
-  }, [defKey, staticKey])   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [defKey, staticKey, draftPresent])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const contacts = resolved?.contacts || []
   const total = resolved?.count ?? 0
