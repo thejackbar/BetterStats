@@ -27,13 +27,14 @@ import logging
 import re
 import uuid
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from typing import List, Optional
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from jose import jwt
 from pydantic import BaseModel
-from sqlalchemy import select, func, or_, text, update, exists
+from sqlalchemy import select, func, or_, text, update, exists, distinct, case
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -227,7 +228,8 @@ def campaign_warnings(subject: str, body_html: str, utm: dict) -> list[str]:
     return warnings
 
 
-def _campaign_out(c: CommsCampaign, engagement: "Optional[dict]" = None) -> dict:
+def _campaign_out(c: CommsCampaign, engagement: "Optional[dict]" = None,
+                  club_stats: "Optional[dict]" = None) -> dict:
     return {
         "id": str(c.id),
         "subject": c.subject,
@@ -247,6 +249,11 @@ def _campaign_out(c: CommsCampaign, engagement: "Optional[dict]" = None) -> dict
         # Per-campaign deliverability (sent / bounced / unsub+complaint), when the
         # caller has computed it (both the list and single-campaign endpoints do).
         "engagement": engagement,
+        # How many distinct directory clubs are behind this campaign's recipients
+        # and its delivered recipients — beside the person counts on the summary
+        # tiles. Only the single-campaign endpoint computes it; blank for a
+        # club's own send (no directory clubs), so the tile draws no club line.
+        "club_stats": club_stats,
     }
 
 
@@ -1309,6 +1316,28 @@ def _engagement_block(c: CommsCampaign, eng_map: dict) -> dict:
             "bounced": e.get("bounced", 0), "unsub_supp": e.get("unsub_supp", 0)}
 
 
+async def _campaign_club_counts(db: AsyncSession, campaign_id) -> dict:
+    """Distinct directory clubs behind one campaign's recipients, and behind its
+    DELIVERED recipients (status = 'sent') — for the summary tiles beside the
+    person counts. "Club" is the linked directory club (marketing_club_id), the
+    same unit `audience_figures` counts, so three officers at one club count
+    once and a club's own member (no directory club) counts as no club. One
+    grouped query; COUNT(DISTINCT ...) drops the NULLs, so a recipient with no
+    linked contact or no club contributes nothing."""
+    row = (await db.execute(
+        select(
+            func.count(distinct(CommsContact.marketing_club_id)),
+            func.count(distinct(case(
+                (CommsRecipient.status == "sent", CommsContact.marketing_club_id)))),
+        )
+        .select_from(CommsRecipient)
+        .join(CommsContact, CommsContact.id == CommsRecipient.contact_id)
+        .where(CommsRecipient.campaign_id == campaign_id)
+    )).first()
+    return {"recipients": int(row[0] or 0) if row else 0,
+            "delivered": int(row[1] or 0) if row else 0}
+
+
 @router.get("/campaigns")
 async def list_campaigns(
     _: User = _require,
@@ -1351,18 +1380,55 @@ async def campaign_recipients(
             "at": created_at.isoformat() if created_at else None,
         })
 
-    def _out(email, name, status, error, sent_at, rid=None):
+    # When each address was LAST emailed by this org, across EVERY campaign — not
+    # just this one — so the row can show the person's real send recency (a later
+    # campaign may have emailed them since). A queued / failed row has a NULL
+    # sent_at, so MAX naturally ignores it: this is the last time we actually sent.
+    last_rows = (await db.execute(
+        select(func.lower(CommsRecipient.email), func.max(CommsRecipient.sent_at))
+        .where(CommsRecipient.organisation_id == club.id)
+        .group_by(func.lower(CommsRecipient.email))
+    )).all()
+    last_by_email = {em: (mx.isoformat() if mx else None) for em, mx in last_rows}
+
+    # The club each recipient is associated with, for the club column and the
+    # Clubs filter. Only a directory-linked (outreach) contact has one; an
+    # ordinary club's own member has marketing_club_id NULL, so `club` is blank
+    # there — which is why the Clubs filter only shows in the outreach context.
+    contact_ids = {r.contact_id for r in rows if r.contact_id}
+    contact_by_id: dict = {}
+    mc_map: dict = {}
+    if contact_ids:
+        crows = (await db.execute(
+            select(CommsContact).where(CommsContact.id.in_(contact_ids)))).scalars().all()
+        contact_by_id = {cc.id: cc for cc in crows}
+        mc_map = await _mc_map(db, crows)
+
+    def _club_for(contact_id) -> str:
+        cc = contact_by_id.get(contact_id)
+        if cc is None:
+            return ""
+        mc = mc_map.get(cc.marketing_club_id) if cc.marketing_club_id else None
+        return _dir_fields(cc, mc).get("club", "") or ""
+
+    def _out(email, name, status, error, sent_at, rid=None, club_name=""):
         evs = sorted(events_by_email.get((email or "").lower(), []), key=lambda e: e["at"] or "")
         types = {e["type"] for e in evs}
         return {
             "id": str(rid) if rid else None, "email": email, "name": name,
             "status": status, "error": error,
             "sent_at": sent_at.isoformat() if sent_at else None,
+            # The person's most recent send from this org, any campaign.
+            "last_emailed_at": last_by_email.get((email or "").lower()),
+            # The directory club this contact belongs to (blank for a club's own
+            # member). Drives the club column and the Clubs filter.
+            "club": club_name or None,
             "unsubscribed": "unsubscribe" in types, "complained": "complaint" in types,
             "bounced": "bounce" in types, "events": evs,
         }
 
-    out = [_out(r.email, r.name, r.status, r.error, r.sent_at, r.id) for r in rows]
+    out = [_out(r.email, r.name, r.status, r.error, r.sent_at, r.id, _club_for(r.contact_id))
+           for r in rows]
     # A recipient row can be missing (e.g. cleaned up since) even though its
     # email_events survive — surface those too, so the drill-down list always
     # accounts for the full aggregate count shown on the Emails list.
@@ -1425,11 +1491,20 @@ class CampaignIn(BaseModel):
     template_id: Optional[str] = None
 
 
+_PERTH = ZoneInfo("Australia/Perth")
+
+
 def _auto_campaign_name(subject: str, when: datetime) -> str:
-    """Auto name for an unnamed Email: subject + a -MMDD-HH:MM timestamp,
-    e.g. 'Announcement' → 'Announcement-0526-10:30'. Falls back to 'Email'."""
+    """Auto name for an unnamed Email: subject + a -DDMM-HH:MM timestamp in
+    Perth time, e.g. 'Announcement' → 'Announcement-2605-10:30'. The club reads
+    this, so it is the club's own day-first date and local clock, not UTC.
+    Falls back to 'Email'."""
     base = (subject or "").strip() or "Email"
-    return f"{base}-{when.strftime('%m%d-%H:%M')}"
+    # The caller passes a UTC-aware `now`; guard a naive value as UTC too.
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    local = when.astimezone(_PERTH)
+    return f"{base}-{local.strftime('%d%m-%H:%M')}"
 
 
 def _parse_template_id(raw: Optional[str]):
@@ -1476,7 +1551,8 @@ async def get_campaign(
 ):
     c = await _campaign_or_404(db, club, campaign_id)
     eng = await _campaign_engagement(db, [c.id])
-    return _campaign_out(c, engagement=_engagement_block(c, eng))
+    clubs = await _campaign_club_counts(db, c.id)
+    return _campaign_out(c, engagement=_engagement_block(c, eng), club_stats=clubs)
 
 
 @router.patch("/campaigns/{campaign_id}")
@@ -2602,8 +2678,20 @@ async def resolve_segment(
     contacts = await comms_segments.resolve_contacts(db, club, data.definition or {}, static_ids=static)
     rows = contacts[:5000]
     mc_map = await _mc_map(db, rows)
+    # The total sendable population, so the screen's two tiles ("in this segment"
+    # / "not in this segment") are drawn from one universe and add up: out =
+    # universe − count.
+    universe = await comms_segments.sendable_universe(db, club)
     return {
         "count": len(contacts),
+        "universe": universe,
+        "out_count": max(0, universe - len(contacts)),
+        # The FULL set of in-segment contact ids (ids only, not the capped rows
+        # below). The screen partitions its OWN complete contact list into the
+        # "in" and "not in" lists with this — deriving membership from the capped
+        # `contacts` sample instead made those lists disagree with the exact
+        # counts (a contact past the 5000 cap read as "not in" though it was in).
+        "member_ids": [str(c.id) for c in contacts],
         **audience_figures(contacts),
         "contacts": [_contact_out(c, mc_map.get(c.marketing_club_id)) for c in rows],
     }

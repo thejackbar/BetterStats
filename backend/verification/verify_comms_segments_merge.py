@@ -19,7 +19,12 @@ This exercises the SHIPPED engine, DDL and router bodies:
   * saved_list campaign back-compat resolving through the migrated segment, and
     the pre-migration fallback to the list's own members;
   * every mem_* field agreeing with directory.list_people's real output;
-  * a repointed producer (admin_contact_list) writing a segment, not a list.
+  * a repointed producer (admin_contact_list) writing a segment, not a list;
+  * AND / OR between rules — the intersection vs the union, standard precedence
+    ((A AND B) OR C), and the Player OUTER join keeping a non-player contact an
+    OR branch matches (an inner join would drop it);
+  * sendable_universe and the resolve payload's universe / out_count, moving as
+    a rule flips AND→OR or a contact is hand-picked (the two in / not-in tiles).
 
     python -m verification.verify_comms_segments_merge
 """
@@ -554,6 +559,42 @@ async def section_exclusions(engine, Session):
               {c.email for c in foreign} == {"a@x.com", "b@x.com", "c@x.com", "d@x.com"},
               str(sorted(c.email for c in foreign)))
 
+        # ── INCLUDE: add another segment's whole audience ─────────────────────
+        # A pure-include segment (no rules, no static) resolves to the UNION of
+        # its included segments — NOT everyone (which is what an empty rule list
+        # would widen to without the include source counting).
+        pi = await emails({"match": "all", "rules": [], "include_segments": [str(seg_f.id)]})
+        check("a pure-include segment resolves to the included audience, not everyone",
+              pi == {"a@x.com", "b@x.com"}, str(sorted(pi)))
+        pi2 = await emails({"match": "all", "rules": [], "include_segments": [str(seg_f.id), str(seg_e.id)]})
+        check("including two segments unions their audiences",
+              pi2 == {"a@x.com", "b@x.com", "c@x.com"}, str(sorted(pi2)))
+        # A static base PLUS an included segment.
+        base_plus = await emails({"match": "all", "rules": [], "include_segments": [str(seg_f.id)]}, static=[D])
+        check("a static base plus an included segment unions the two",
+              base_plus == {"a@x.com", "b@x.com", "d@x.com"}, str(sorted(base_plus)))
+        # INCLUDE then EXCLUDE, exclusion winning on the overlap: include everyone
+        # (the all-contacts static segment) then exclude Females → C and D only.
+        both = await emails({"match": "all", "rules": [],
+                             "include_segments": [str(seg_all.id)], "exclude_segments": [str(seg_f.id)]})
+        check("include-then-exclude subtracts last, so exclusion wins on the overlap",
+              both == {"c@x.com", "d@x.com"}, str(sorted(both)))
+        ninc = await comms_segments.count(db, club, {"match": "all", "rules": [], "include_segments": [str(seg_f.id)]})
+        check("count agrees with a pure-include resolve", ninc == 2, str(ninc))
+        # A junk / foreign include id adds nobody; a valid one still adds.
+        jinc = await emails({"match": "all", "rules": [], "include_segments": ["not-a-uuid", str(seg_e.id)]}, static=[D])
+        check("a junk include id is ignored; the valid one still adds",
+              jinc == {"c@x.com", "d@x.com"}, str(sorted(jinc)))
+        finc = await comms_segments.resolve_contacts(
+            db, club, {"match": "all", "rules": [], "include_segments": [str(oseg.id)]}, static_ids=[D])
+        check("including another club's segment adds nobody",
+              {c.email for c in finc} == {"d@x.com"}, str(sorted(c.email for c in finc)))
+        # Control: DROP the include and the static-only base is D alone — this is
+        # what the previous commit (no include support) resolved to.
+        ctrl_inc = await emails({"match": "all", "rules": []}, static=[D])
+        check("control — without an include the static base is D alone",
+              ctrl_inc == {"d@x.com"}, str(sorted(ctrl_inc)))
+
         # CYCLE GUARD: X excludes Y, Y excludes X. Resolving X terminates.
         x = CommsSegment(id=uuid.uuid4(), organisation_id=org_id, name="X",
                          definition={"match": "all", "rules": []})
@@ -577,6 +618,7 @@ async def section_exclusions(engine, Session):
         # DUPLICATE copies the definition (rules AND exclusions) AND the static set.
         src = CommsSegment(id=uuid.uuid4(), organisation_id=org_id, name="Source",
                            definition={"match": "all", "rules": [{"field": "tag", "op": "eq", "value": "female"}],
+                                       "include_segments": [str(seg_all.id)],
                                        "exclude_segments": [str(seg_e.id)]}, source="manual")
         db.add(src)
         await db.flush()
@@ -591,6 +633,9 @@ async def section_exclusions(engine, Session):
         check("the duplicate carries the source's rules",
               copy_out["definition"].get("rules") == [{"field": "tag", "op": "eq", "value": "female"}],
               str(copy_out["definition"].get("rules")))
+        check("the duplicate carries the source's inclusions",
+              copy_out["definition"].get("include_segments") == [str(seg_all.id)],
+              str(copy_out["definition"].get("include_segments")))
         check("the duplicate carries the source's exclusions",
               copy_out["definition"].get("exclude_segments") == [str(seg_e.id)],
               str(copy_out["definition"].get("exclude_segments")))
@@ -605,6 +650,152 @@ async def section_exclusions(engine, Session):
         check("the source keeps its own members after duplication", len(src_mem) == 2, str(len(src_mem)))
 
 
+# ── Section 6: AND / OR between rules, and the in / not-in tiles ──────────────
+async def section_andor_universe(engine, Session):
+    print("\n── AND / OR precedence, outer-join safety, universe / out_count ─")
+    await build_schema(engine)
+    from app.routers import comms as comms_router
+
+    org_id = uuid.uuid4()
+    p_male, p_female = uuid.uuid4(), uuid.uuid4()
+    A, B, C, D, E = (uuid.uuid4() for _ in range(5))
+    async with Session() as db:
+        db.add(Organisation(id=org_id, name="Wanderers", slug="wand"))
+        await db.flush()
+        db.add_all([
+            Player(id=p_male, organisation_id=org_id, name="Male Player", gender="Male"),
+            Player(id=p_female, organisation_id=org_id, name="Fem Player", gender="Female"),
+        ])
+        await db.flush()
+        db.add_all([
+            # A: tag vip AND a male player — matches both branches.
+            CommsContact(id=A, organisation_id=org_id, email="a@x.com", source="member",
+                         tags=["vip"], player_id=p_male),
+            # B: tag vip but NO player — the outer-join canary. An inner Player
+            # join would delete it before an OR could reach the tag branch.
+            CommsContact(id=B, organisation_id=org_id, email="b@x.com", source="member",
+                         tags=["vip"]),
+            # C: a male player, no vip tag — the OR's other branch.
+            CommsContact(id=C, organisation_id=org_id, email="c@x.com", source="member",
+                         player_id=p_male),
+            # D: plain and sendable — in the universe, matched by nothing.
+            CommsContact(id=D, organisation_id=org_id, email="d@x.com", source="member"),
+            # E: would match, but unsubscribed — outside the sendable universe.
+            CommsContact(id=E, organisation_id=org_id, email="e@x.com", source="member",
+                         tags=["vip"], player_id=p_male, subscribed=False),
+        ])
+        await db.commit()
+        club = await db.get(Organisation, org_id)
+
+        async def emails(defn, static=None):
+            rows = await comms_segments.resolve_contacts(db, club, defn, static_ids=static)
+            return {c.email for c in rows}
+
+        tag_vip = {"field": "tag", "op": "eq", "value": "vip"}
+        male = {"field": "gender", "op": "eq", "value": "Male"}
+
+        # AND: the intersection. gender lives on Player, tag on the contact, so
+        # this also proves the Player OUTER join returns the same rows an inner
+        # join would for a pure AND.
+        and_def = {"match": "all", "rules": [tag_vip, {**male, "conj": "and"}]}
+        got_and = await emails(and_def)
+        check("A AND B is the intersection", got_and == {"a@x.com"}, str(sorted(got_and)))
+
+        # OR: the union — and B is the canary. With an inner Player join B is
+        # dropped before the tag branch is evaluated, so its presence is the
+        # whole point.
+        or_def = {"match": "all", "rules": [tag_vip, {**male, "conj": "or"}]}
+        got_or = await emails(or_def)
+        check("A OR B is the union", got_or == {"a@x.com", "b@x.com", "c@x.com"}, str(sorted(got_or)))
+        check("the OR keeps a non-player contact the tag branch matches (outer-join canary)",
+              "b@x.com" in got_or, str(sorted(got_or)))
+        # Discriminating: AND and OR of the SAME two rules differ — so the conj
+        # is genuinely read, not ignored.
+        check("AND and OR of the same rules give different audiences", got_and != got_or,
+              f"{sorted(got_and)} vs {sorted(got_or)}")
+        # A missing conj is AND (a pre-AND/OR segment is unchanged).
+        legacy = {"match": "all", "rules": [tag_vip, male]}   # no conj at all
+        check("a rule with no conj defaults to AND",
+              await emails(legacy) == got_and, "legacy != AND")
+
+    # Precedence: (A AND B) OR C, standard SQL binding, in a clean org so the
+    # counts are unambiguous.
+    prec_id = uuid.uuid4()
+    fem = uuid.uuid4()
+    P, Q, R, S = (uuid.uuid4() for _ in range(4))
+    async with Session() as db:
+        db.add(Organisation(id=prec_id, name="Precedence FC", slug="prec"))
+        await db.flush()
+        db.add(Player(id=fem, organisation_id=prec_id, name="She Player", gender="Female"))
+        await db.flush()
+        db.add_all([
+            # P: vip + member + female — matches all three.
+            CommsContact(id=P, organisation_id=prec_id, email="p@x.com", source="member",
+                         tags=["vip"], player_id=fem),
+            # Q: vip + member, not female — matches (A AND B) only.
+            CommsContact(id=Q, organisation_id=prec_id, email="q@x.com", source="member",
+                         tags=["vip"]),
+            # R: female only, not vip, source import — matches C only. The
+            # discriminator: present under (A∧B)∨C, absent under A∧(B∨C).
+            CommsContact(id=R, organisation_id=prec_id, email="r@x.com", source="import",
+                         player_id=fem),
+            # S: vip only (source import, no player) — matches A alone, so out.
+            CommsContact(id=S, organisation_id=prec_id, email="s@x.com", source="import",
+                         tags=["vip"]),
+        ])
+        await db.commit()
+        club = await db.get(Organisation, prec_id)
+
+        prec_def = {"match": "all", "rules": [
+            {"field": "tag", "op": "eq", "value": "vip"},
+            {"field": "source", "op": "eq", "value": "member", "conj": "and"},
+            {"field": "gender", "op": "eq", "value": "Female", "conj": "or"},
+        ]}
+        rows = await comms_segments.resolve_contacts(db, club, prec_def)
+        got = {c.email for c in rows}
+        check("(A AND B) OR C binds AND tighter than OR — the C-only row is IN",
+              got == {"p@x.com", "q@x.com", "r@x.com"}, str(sorted(got)))
+        check("the precedence discriminator (C-only) is present, not dropped",
+              "r@x.com" in got, str(sorted(got)))
+        check("the A-only row (vip alone) is out under (A AND B) OR C",
+              "s@x.com" not in got, str(sorted(got)))
+
+    # universe / out_count through the SHIPPED resolve endpoint body.
+    async with Session() as db:
+        club = await db.get(Organisation, org_id)
+        # getattr so a control run against a pre-feature engine REPORTS the miss
+        # rather than crashing before the resolve-payload checks below.
+        universe_fn = getattr(comms_segments, "sendable_universe", None)
+        if universe_fn is None:
+            check("sendable_universe exists", False, "not defined")
+            uni = None
+        else:
+            uni = await universe_fn(db, club)
+        check("sendable_universe counts every sendable contact, not the unsubscribed one",
+              uni == 4, str(uni))
+
+        payload = await comms_router.resolve_segment(
+            data=comms_router.SegmentIn(name="x", definition=and_def), _=None, club=club, db=db)
+        check("resolve payload carries the universe", payload.get("universe") == 4, str(payload.get("universe")))
+        check("resolve count is the in-segment total", payload.get("count") == 1, str(payload.get("count")))
+        check("out_count is universe minus in", payload.get("out_count") == 3, str(payload.get("out_count")))
+
+        or_payload = await comms_router.resolve_segment(
+            data=comms_router.SegmentIn(name="x", definition=or_def), _=None, club=club, db=db)
+        check("switching AND→OR moves the tiles (in 1→3, out 3→1)",
+              or_payload.get("count") == 3 and or_payload.get("out_count") == 1,
+              f"in={or_payload.get('count')} out={or_payload.get('out_count')}")
+
+        # A hand-picked contact (D matches no rule) joins the IN tile and leaves
+        # the OUT tile, live — the union the tiles are meant to show.
+        with_static = await comms_router.resolve_segment(
+            data=comms_router.SegmentIn(name="x", definition=and_def, static_member_ids=[str(D)]),
+            _=None, club=club, db=db)
+        check("a hand-picked non-matching contact lifts the in tile and lowers out",
+              with_static.get("count") == 2 and with_static.get("out_count") == 2,
+              f"in={with_static.get('count')} out={with_static.get('out_count')}")
+
+
 async def main() -> int:
     engine = create_async_engine(DB_URL)
     Session = async_sessionmaker(engine, expire_on_commit=False)
@@ -614,6 +805,7 @@ async def main() -> int:
     section_matcher_unit()
     await section_producer(engine, Session)
     await section_exclusions(engine, Session)
+    await section_andor_universe(engine, Session)
     await engine.dispose()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     return 1 if FAIL else 0

@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { api } from '../lib/api'
 import { PbSpinner, Card, ResultPill } from '../lib/presskit'
 import { useNameFormat } from '../lib/nameFormat'
-import { fmtOvers } from '../lib/cricketFormat'
+import { fmtOvers, oversToBalls, ballsToOvers } from '../lib/cricketFormat'
 import { useAuth } from '../contexts/AuthContext'
 import { CAP } from '../lib/capabilities'
 import { useClubTheme } from '../hooks/useClubTheme'
@@ -24,6 +24,25 @@ function sumOversBalls(bowlingRows) {
 function ballsToOversStr(balls) {
   if (!balls) return null
   return `${Math.floor(balls / 6)}.${balls % 6}`
+}
+
+// Extras breakdown, e.g. "(11Wd, 11NB, 2LB, 7B, 24PR)" — labels and order
+// match play.cricket (wides, no-balls, leg-byes, byes, penalty runs). Only the
+// components we actually hold and that are non-zero are shown; returns '' when
+// there's no breakdown at all (older or DB-fallback data carries just the
+// combined total).
+function extrasBreakdownStr(bd) {
+  if (!bd) return ''
+  const parts = [
+    [bd.wides, 'Wd'],
+    [bd.no_balls, 'NB'],
+    [bd.leg_byes, 'LB'],
+    [bd.byes, 'B'],
+    [bd.penalties, 'PR'],
+  ]
+    .filter(([v]) => v != null && v > 0)
+    .map(([v, l]) => `${v}${l}`)
+  return parts.length ? `(${parts.join(', ')})` : ''
 }
 
 // Runs/wickets format: 224/6. All out (10 wkts or null wkts) = just runs.
@@ -203,7 +222,10 @@ function MatchHeader({ game, innings }) {
     const batsRuns = t.runs ?? inn.batting.reduce((s, r) => s + (r.runs ?? 0), 0)
     const runs = batsRuns != null ? batsRuns + (t.extras ?? 0) : null
     const wickets = t.runs != null ? t.wickets : inn.batting.filter(r => !r.not_out && r.dismissal_type).length
-    const balls = sumOversBalls(inn.bowling)
+    // Innings-level overs from the feed when we have it (correct even for an
+    // innings CA only recorded as a total, with no bowling rows to sum); the
+    // summed bowling figures are the fallback.
+    const balls = t.overs != null ? oversToBalls(t.overs) : sumOversBalls(inn.bowling)
     const oversStr = ballsToOversStr(balls)
     const rr = (runs != null && balls > 0) ? (runs / (balls / 6)).toFixed(2) : null
     return { ...inn, runs, wickets, oversStr, rr, battingTeam: t.batting_team || '', logoUrl: t.logo_url || null }
@@ -346,8 +368,18 @@ function TeamCard({ label, teamName, opponentName, won = false, batting = [], bo
     ? inningsTotal.wickets
     : batted.filter(r => !r.not_out && r.dismissal_type).length
   const score = fmtScore(total, wickets)
-  // Overs faced = overs bowled at this team, i.e. the opponent's bowling figures.
-  const oversStr = ballsToOversStr(sumOversBalls(bowling))
+  // Overs faced = the innings' own overs from the feed when present, else the
+  // sum of the opponent's bowling figures bowled at this team.
+  const innOvers = inningsTotal?.overs
+  const totalBalls = innOvers != null ? oversToBalls(innOvers) : sumOversBalls(bowling)
+  const oversStr = ballsToOversStr(totalBalls)
+  // Clean overs display (no trailing ".0") + run rate for the total row.
+  // Empty when there are no overs at all, so the total row just shows the score.
+  const oversDisplay = totalBalls > 0
+    ? (innOvers != null ? fmtOvers(innOvers) : ballsToOvers(totalBalls))
+    : ''
+  const runRate = (total != null && totalBalls > 0) ? (total / (totalBalls / 6)).toFixed(2) : null
+  const extrasStr = extrasBreakdownStr(inningsTotal?.extras_breakdown)
 
   return (
     <div className="pb-card overflow-hidden">
@@ -440,13 +472,23 @@ function TeamCard({ label, teamName, opponentName, won = false, batting = [], bo
             <tfoot>
               {extras != null && extras > 0 && (
                 <tr className="pb-hairline-t">
-                  <td className="py-1.5 pl-5 font-mono text-[11px] text-pb-faint" colSpan={2}>Extras</td>
+                  <td className="py-1.5 pl-5 pr-3 font-mono text-[11px] text-pb-faint" colSpan={2}>
+                    Extras
+                    {extrasStr && <span className="text-pb-faintest ml-1.5">{extrasStr}</span>}
+                  </td>
                   <td className="py-1.5 px-3 font-mono text-[13px] text-pb-faint text-right">{extras}</td>
                   <td colSpan={3} />
                 </tr>
               )}
               <tr className="pb-hairline-t bg-pb-surface2/20">
-                <td colSpan={2} className="py-2 pl-5 font-mono text-[10px] tracking-wide2 text-pb-faint hidden sm:table-cell">BATTING TOTAL</td>
+                <td colSpan={2} className="py-2 pl-5 pr-3 align-middle">
+                  <div className="font-mono text-[10px] tracking-wide2 text-pb-faint">BATTING TOTAL</div>
+                  {oversDisplay && (
+                    <div className="font-mono text-[10px] text-pb-faintest mt-0.5">
+                      {oversDisplay} overs{runRate ? ` · RR ${runRate}` : ''}
+                    </div>
+                  )}
+                </td>
                 <td className="py-2 px-3 font-mono font-bold text-pb-text text-right pb-num">{score ?? '—'}</td>
                 <td colSpan={3} />
               </tr>

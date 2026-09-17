@@ -266,6 +266,22 @@ async def lifespan(app: FastAPI):
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_player_org_playhq_id "
             "ON players(organisation_id, playhq_id) WHERE playhq_id IS NOT NULL"
         ))
+        # Multi-squad membership: a player can sit in several squads at once
+        # (1st XI + 2nd XI + Colts + T20). team_members (composite PK
+        # (team_id, player_id)) is authoritative for the Squads board; players.
+        # squad_team_id is the derived primary. Index for the per-player and
+        # per-org reads the board makes (the PK doesn't cover player-first
+        # lookups), and backfill team_members from every existing single squad
+        # assignment so the two are consistent and no assigned player reads as
+        # unassigned. Both idempotent.
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_team_members_player ON team_members(player_id)"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_team_members_org ON team_members(organisation_id)"))
+        await conn.execute(text(
+            "INSERT INTO team_members (team_id, player_id, organisation_id) "
+            "SELECT squad_team_id, id, organisation_id FROM players "
+            "WHERE squad_team_id IS NOT NULL ON CONFLICT DO NOTHING"))
         # BetterSelect self-service availability (migration 068) — defensive
         # idempotent adds so the API boots even if alembic hasn't run yet.
         await conn.execute(text(
@@ -3282,6 +3298,11 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
             "public_header_logo BOOLEAN NOT NULL DEFAULT false"
+        ))
+        # Show the Competition filter row on public stats pages (opt-in).
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
+            "show_competition_filters BOOLEAN NOT NULL DEFAULT false"
         ))
         # Stripe Checkout billing (migration 150) — see services/stripe_billing.py.
         await conn.execute(text(

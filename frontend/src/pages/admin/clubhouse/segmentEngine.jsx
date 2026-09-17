@@ -1,9 +1,23 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../../../lib/api'
-import { Button, Caption, INPUT_CLS } from '../../../components/admin/ui'
+import { Button, Caption, INPUT_CLS, SectionHeading } from '../../../components/admin/ui'
 import { RecordListPane, RecordTitleRow, CountBar, reachability, clubCount } from './crudShell'
 import { RuleRow, newRule } from '../bettercomms/segmentFields'
+
+// A segment's definition has three separate areas — the live rule, the frozen
+// hand-picked set, and the other segments it folds in — and a person edits them
+// as distinct things. Draw each as its own bordered card so the boundaries are
+// obvious rather than three headings running into one column.
+export function DefinitionSection({ title, children, className = '' }) {
+  return (
+    <div className={`rounded-xl border border-pb-hairline px-4 py-4 ${className}`}
+      style={{ background: 'var(--pb-surface)' }}>
+      <SectionHeading className="mb-2.5">{title}</SectionHeading>
+      {children}
+    </div>
+  )
+}
 
 // The count bar and the reachability rule are shared furniture now — Lists and
 // Emails report their own reach the same way. Re-exported so the two segment
@@ -42,22 +56,47 @@ export function segmentKind(ruleCount, staticCount) {
 // Keep it that way. If you ever find yourself adding an `isInternal` prop here,
 // the thing you actually want is a third screen.
 
+// A two-state AND / OR pill that joins a condition to the one above it. Standard
+// precedence: a run of ANDs groups together, an OR breaks the group, so
+// "A AND B OR C" reads as "(A AND B) OR C" — the same as SQL, and what the
+// engine evaluates.
+function ConjToggle({ value, onChange }) {
+  const on = value === 'or' ? 'or' : 'and'
+  const cls = (v) => `px-2 py-0.5 text-[11px] font-semibold rounded ${on === v
+    ? 'bg-pb-accent text-pb-accent-ink' : 'text-pb-faint hover:text-pb-text'}`
+  return (
+    <div className="flex items-center gap-1 my-0.5">
+      <div className="inline-flex items-center rounded-md border pb-hairline overflow-hidden">
+        <button type="button" className={cls('and')} onClick={() => onChange('and')}>AND</button>
+        <button type="button" className={cls('or')} onClick={() => onChange('or')}>OR</button>
+      </div>
+    </div>
+  )
+}
+
 // The rule rows. `defs` is required — see the scope note above.
-export function RuleBuilder({ defs, rules, setRules, opts, label = 'Match people where all of these are true' }) {
+export function RuleBuilder({ defs, rules, setRules, opts, label = 'Match people where these are true' }) {
   // The rule row builds its own controls, so it takes the class rather than the
   // component. `!w-auto` because a condition is a row of three controls sized to
   // their content, not one full-width field.
   const inputCls = `${INPUT_CLS} !w-auto !py-1.5 !text-[13px]`
+  const setRule = (i, nr) => setRules(rs => rs.map((x, j) => (j === i ? nr : x)))
   return (
     <div>
       <Caption>{label}</Caption>
       <div className="mt-1.5">
         {rules.map((r, i) => (
-          <RuleRow
-            key={i} rule={r} defs={defs} opts={opts} inputCls={inputCls}
-            onChange={nr => setRules(rs => rs.map((x, j) => (j === i ? nr : x)))}
-            onRemove={() => setRules(rs => (rs.length > 1 ? rs.filter((_, j) => j !== i) : rs))}
-          />
+          <div key={i}>
+            {/* How this condition joins the one above it — AND or OR. */}
+            {i > 0 && (
+              <ConjToggle value={r.conj} onChange={c => setRule(i, { ...r, conj: c })} />
+            )}
+            <RuleRow
+              rule={r} defs={defs} opts={opts} inputCls={inputCls}
+              onChange={nr => setRule(i, nr)}
+              onRemove={() => setRules(rs => (rs.length > 1 ? rs.filter((_, j) => j !== i) : rs))}
+            />
+          </div>
         ))}
       </div>
       <Button size="sm" onClick={() => setRules(rs => [...rs, newRule(defs)])} className="mt-1.5">
@@ -131,47 +170,59 @@ export function SegmentTitleRow({
   )
 }
 
-// The EXCLUDE section: pick other saved segments whose whole audience is
-// subtracted from this one. The audience becomes
-//   (rule matches ∪ static set) − (union of the excluded segments' audiences),
+// The REFERENCE section: pick other saved segments to INCLUDE (add their whole
+// audience) or EXCLUDE (subtract it) from this one. The audience becomes
+//   (rule matches ∪ static set ∪ included segments) − (excluded segments),
 // so "everyone MINUS the Females segment MINUS the engaged-clubs segment" is a
-// segment with no rules, no static set, and those two excluded. A segment can
-// never exclude itself (it is left out of the list), and the server guards a
-// cycle (A excludes B excludes A) at resolve time.
-export function SegmentExcludePicker({ segments, currentId, excludes, onChange, sizes = {} }) {
+// segment with no rules, no static set, and those two excluded — and "the A-grade
+// segment PLUS the committee" is one with both included. Exclusion wins over
+// inclusion (subtracted last). A segment can never reference itself (it is left
+// out of the list); the server guards a cycle (A refs B refs A) at resolve time.
+export function SegmentRefPicker({ segments, currentId, includes, excludes, onChange, sizes = {} }) {
   const others = (segments || []).filter(s => s.id !== currentId)
-  const set = new Set(excludes || [])
-  const toggle = (id) => {
-    const next = new Set(set)
-    if (next.has(id)) next.delete(id); else next.add(id)
-    onChange([...next])
+  const inc = new Set(includes || [])
+  const exc = new Set(excludes || [])
+  // Include and exclude are mutually exclusive per segment; picking one clears
+  // the other, and picking the mode a row is already in turns it off.
+  const setMode = (id, mode) => {
+    const ni = new Set(inc), ne = new Set(exc)
+    ni.delete(id); ne.delete(id)
+    if (mode === 'include') ni.add(id)
+    else if (mode === 'exclude') ne.add(id)
+    onChange({ includes: [...ni], excludes: [...ne] })
   }
   if (others.length === 0) {
-    return <Caption>Save another segment first — then you can subtract its audience here.</Caption>
+    return <Caption>Save another segment first — then you can add or subtract its audience here.</Caption>
   }
   return (
     <div>
-      <Caption>Subtract the audience of these segments</Caption>
+      <Caption>Add or subtract the audience of other segments</Caption>
       <div className="mt-2 space-y-1">
         {others.map(s => {
-          const on = set.has(s.id)
+          const on = inc.has(s.id) ? 'include' : exc.has(s.id) ? 'exclude' : null
           const n = (s.definition?.rules || []).length
           const m = s.member_count || 0
           const kind = n && m ? 'rule + picked' : n ? 'rule' : m ? 'hand-picked' : 'empty'
           return (
-            <label key={s.id}
-              className="flex items-center gap-3 py-1.5 px-1 rounded-md cursor-pointer hover:bg-pb-surface2">
-              <input type="checkbox" className="accent-pb-accent shrink-0" checked={on} onChange={() => toggle(s.id)} />
+            <div key={s.id}
+              className="flex items-center gap-3 py-1.5 px-1 rounded-md">
               <span className="text-sm text-pb-text truncate flex-1">{s.name}</span>
               <span className="text-pb-faintest text-[11px] shrink-0">{kind}</span>
               {sizes[s.id] != null && <span className="text-pb-faint text-[11px] shrink-0 tabular-nums">{sizes[s.id]}</span>}
-            </label>
+              <div className="flex items-center gap-1 shrink-0">
+                <Button size="sm" variant={on === 'include' ? 'primary' : undefined}
+                  onClick={() => setMode(s.id, on === 'include' ? null : 'include')}>Include</Button>
+                <Button size="sm" variant={on === 'exclude' ? 'danger' : undefined}
+                  onClick={() => setMode(s.id, on === 'exclude' ? null : 'exclude')}>Exclude</Button>
+              </div>
+            </div>
           )
         })}
       </div>
-      {set.size > 0 && (
+      {(inc.size > 0 || exc.size > 0) && (
         <div className="text-pb-faintest text-[11px] mt-2">
-          Anyone in {set.size === 1 ? 'that segment' : `those ${set.size} segments`} is removed from this one.
+          {inc.size > 0 && <>Everyone in {inc.size === 1 ? 'the included segment' : `the ${inc.size} included segments`} is added to this one. </>}
+          {exc.size > 0 && <>Anyone in {exc.size === 1 ? 'the excluded segment' : `the ${exc.size} excluded segments`} is removed{inc.size > 0 ? ' afterwards' : ''}.</>}
         </div>
       )}
     </div>
@@ -236,7 +287,7 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
       s.name.toLowerCase().includes(wanted))
     if (hit) { setSelId(hit.id); return }
     const preset = presets[wanted]
-    if (preset) { setSelId(null); setDraft({ id: null, name: preset.name, rules: preset.rules, excludes: [] }) }
+    if (preset) { setSelId(null); setDraft({ id: null, name: preset.name, rules: preset.rules, includes: [], excludes: [] }) }
   }, [wanted, segments])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const selected = useMemo(() => segments?.find(s => s.id === selId) || null, [segments, selId])
@@ -268,7 +319,9 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
       id: selected.id,
       name: selected.name,
       rules: selected.definition?.rules?.length ? selected.definition.rules : [newRule(defs)],
-      // The OTHER segments whose audience this one subtracts.
+      // The OTHER segments whose audience this one adds (include) or subtracts
+      // (exclude).
+      includes: selected.definition?.include_segments || [],
       excludes: selected.definition?.exclude_segments || [],
     })
   }, [selected?.id])   // eslint-disable-line react-hooks/exhaustive-deps
@@ -277,6 +330,7 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
     () => ({
       match: 'all',
       rules: (draft?.rules || []).filter(r => String(r.value ?? '').trim() !== ''),
+      include_segments: draft?.includes || [],
       exclude_segments: draft?.excludes || [],
     }),
     [draft],
@@ -306,6 +360,14 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
   const reachable = resolved?.reachable ?? contacts.filter(c => reachability(c).key === 'email').length
   const otherRoute = resolved?.other_route ?? contacts.filter(c => reachability(c).key === 'guardian').length
   const clubs = resolved?.clubs ?? clubCount(contacts)
+  // The "not in this segment" tile: the whole sendable population minus who is
+  // in. The server sends both so they are drawn from one universe and add up.
+  const universe = resolved?.universe ?? null
+  const outCount = resolved?.out_count ?? (universe != null ? Math.max(0, universe - total) : null)
+  // The FULL set of in-segment contact ids — the Static screen partitions its
+  // own complete contact list with this, so the in / not-in lists agree with the
+  // counts above rather than being derived from the capped `contacts` sample.
+  const memberIds = resolved?.member_ids ?? null
 
   const save = async (noun = 'Segment') => {
     if (!draft?.name.trim()) { setError(`Give the ${noun.toLowerCase()} a name.`); return }
@@ -342,7 +404,7 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
 
   const startNew = () => {
     setSelId(null)
-    setDraft({ id: null, name: '', rules: [newRule(defs)], excludes: [] })
+    setDraft({ id: null, name: '', rules: [newRule(defs)], includes: [], excludes: [] })
     setError('')
   }
 
@@ -367,7 +429,7 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
 
   return {
     segments, sizes, opts, selId, setSelId, draft, setDraft,
-    contacts, total, reachable, otherRoute, clubs, counting,
+    contacts, total, reachable, otherRoute, clubs, universe, outCount, memberIds, counting,
     busy, error, toast, setToast,
     save, duplicate, remove, startNew, emailThese,
     // Static (frozen hand-picked) set + the current definition, for the Static

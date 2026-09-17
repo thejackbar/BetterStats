@@ -1084,8 +1084,8 @@ export default function Records() {
     available: availableCategories, availableFormats, defaultCategories,
     gradeType, setGradeType, matchFormat, setMatchFormat,
     categoriesParam, formatsParam, competitionsParam,
-    competition, setCompetition, availableCompetitions,
-  } = useGradeFilters(orgId)
+    competition, setCompetition, availableCompetitions, showCompetitionFilter,
+  } = useGradeFilters(orgId, { competitionFilter: true })
   const [tab, setTab] = useState('batting')
   const [records, setRecords] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -1175,7 +1175,7 @@ export default function Records() {
             availableCategories={availableCategories}
             availableFormats={availableFormats}
             defaultCategories={defaultCategories}
-            showCompetitionFilter
+            showCompetitionFilter={showCompetitionFilter}
             showGradeTypeFilter
             showMatchFormatFilter
             showGenderFilter={tab !== 'club'}

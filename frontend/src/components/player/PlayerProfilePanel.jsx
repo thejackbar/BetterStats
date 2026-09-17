@@ -451,9 +451,30 @@ function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, o
         }>
           <PInput value={draft.date_of_birth} onChange={(v) => set('date_of_birth', v)} type="date" />
         </Field>
-        <Field label="Squad (selection pool)" half>
-          <PSelect value={draft.squad_team_id || ''} onChange={(v) => set('squad_team_id', v || null)}
-            options={[['', '— Unassigned —'], ...teams.map((t) => [t.id, t.name])]} />
+        <Field label="Squads (selection pool)">
+          {/* A player can be pooled into several squads at once — a fringe 1st
+              XI player who's also a Colt and plays T20 sits in all of them.
+              Tap to add or remove; the first-ranked one is their primary. */}
+          <div className="flex flex-wrap gap-1.5">
+            {teams.length === 0 && <span className="text-[11.5px] text-pb-faintest">No squads yet.</span>}
+            {teams.map((t) => {
+              const on = (draft.squad_team_ids || []).includes(t.id)
+              return (
+                <button key={t.id} type="button"
+                  onClick={() => set('squad_team_ids', on
+                    ? (draft.squad_team_ids || []).filter((id) => id !== t.id)
+                    : [...(draft.squad_team_ids || []), t.id])}
+                  className={`px-2.5 py-1 rounded-full text-[11.5px] border transition-colors ${on
+                    ? 'border-pb-accent text-pb-accent bg-pb-accent/10'
+                    : 'border-pb-hairline2 text-pb-faint hover:text-pb-text hover:border-pb-hairline'}`}>
+                  {on ? '✓ ' : ''}{t.name}
+                </button>
+              )
+            })}
+          </div>
+          {(draft.squad_team_ids || []).length === 0 && teams.length > 0 && (
+            <div className="text-[11px] text-pb-faintest mt-1">Not in any squad.</div>
+          )}
         </Field>
         <Field label="Role" half>
           <PSelect value={draft.player_role || ''} onChange={(v) => set('player_role', v || null)} options={ROLE_OPTS} />
@@ -673,7 +694,9 @@ export function draftFromProfile(p) {
     status: p.status || 'active',
     email: p.email || '',
     phone: p.phone || '',
-    squad_team_id: p.squad_team_id || null,
+    // A player can be in several squads at once. The array is authoritative;
+    // fall back to the single primary for any payload that predates it.
+    squad_team_ids: p.squad_team_ids || (p.squad_team_id ? [p.squad_team_id] : []),
     is_overseas: !!p.is_overseas,
     overseas_country: p.overseas_country || '',
     skill_positions: p.skill_positions || [],
@@ -705,7 +728,9 @@ export function patchFromDraft(d) {
     status: d.status || 'active',
     email: norm(d.email),
     phone: norm(d.phone),
-    squad_team_id: d.squad_team_id || null,
+    // The whole squad set (team_members is authoritative). [] clears every
+    // squad; the server derives the primary squad_team_id from it.
+    squad_team_ids: d.squad_team_ids || [],
     is_overseas: !!d.is_overseas,
     overseas_country: norm(d.overseas_country),
     // Role is canonical — derive the skill codes the filters + chips read from

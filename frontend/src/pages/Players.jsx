@@ -37,8 +37,8 @@ export default function Players() {
     available: availableCategories, availableFormats, defaultCategories,
     gradeType, setGradeType, matchFormat, setMatchFormat,
     categoriesParam, formatsParam, competitionsParam,
-    competition, setCompetition, availableCompetitions,
-  } = useGradeFilters(orgId)
+    competition, setCompetition, availableCompetitions, showCompetitionFilter,
+  } = useGradeFilters(orgId, { competitionFilter: true })
 
   const [players, setPlayers] = useState([])
   const [battingStats, setBattingStats] = useState({})
@@ -142,7 +142,7 @@ export default function Players() {
             availableCategories={availableCategories}
             availableFormats={availableFormats}
             defaultCategories={defaultCategories}
-            showCompetitionFilter
+            showCompetitionFilter={showCompetitionFilter}
             showGradeTypeFilter
             showMatchFormatFilter
             showGenderFilter={false}

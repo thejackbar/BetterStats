@@ -120,8 +120,8 @@ export default function GamesPage() {
     available: availableCategories, availableFormats, defaultCategories,
     gradeType, setGradeType, matchFormat, setMatchFormat,
     categoriesParam, formatsParam, competitionsParam,
-    competition, setCompetition, availableCompetitions,
-  } = useGradeFilters(orgId)
+    competition, setCompetition, availableCompetitions, showCompetitionFilter,
+  } = useGradeFilters(orgId, { competitionFilter: true })
 
   // Deep-link support: ?season=<id>&grade=<gradeId> (e.g. from the Ladders page).
   const [searchParams] = useSearchParams()
@@ -214,7 +214,7 @@ export default function GamesPage() {
             availableCategories={availableCategories}
             availableFormats={availableFormats}
             defaultCategories={defaultCategories}
-            showCompetitionFilter
+            showCompetitionFilter={showCompetitionFilter}
             showGradeTypeFilter
             showMatchFormatFilter
             showGenderFilter={false}

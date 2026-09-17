@@ -40,6 +40,10 @@ const COMPETITIONS = [
 ]
 // One competition only — the club this feature must stay invisible for.
 const SINGLE = [COMPETITIONS[0]]
+// "All" is not the absence of a competition dimension: it is the sum of every
+// competition the row lists, sent as all their ids in the order the payload
+// returns them.
+const ALL_COMP_IDS = COMPETITIONS.map(c => c.id).join(',')
 
 const browser = await chromium.launch(existsSync(EXECUTABLE) ? { executablePath: EXECUTABLE } : {})
 
@@ -48,7 +52,7 @@ const browser = await chromium.launch(existsSync(EXECUTABLE) ? { executablePath:
  * made, so a check can assert what went ON THE WIRE rather than what the
  * screen says about itself.
  */
-async function open(path, { competitions = COMPETITIONS, width = 1440 } = {}) {
+async function open(path, { competitions = COMPETITIONS, width = 1440, showFilters = true } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: 1600 } })
   const page = await ctx.newPage()
   const errors = []
@@ -70,6 +74,7 @@ async function open(path, { competitions = COMPETITIONS, width = 1440 } = {}) {
         available: ['senior', 'womens'], default: ['senior', 'womens', 'masters', 'mixed'],
         available_formats: ['one_day', 't20'],
         available_competitions: competitions,
+        show_competition_filters: showFilters,
       })
     }
     if (/\/competitions$/.test(p) && /organisations/.test(p)) {
@@ -154,8 +159,31 @@ function compRow(page) {
     await buttons.filter({ hasText: /^All$/ }).first().click()
     await page.waitForTimeout(900)
   }
-  ck('clearing it sends no competitions param at all',
-    scoped.length > 0 && calls.length > 0 && calls.every(c => !c.params.competitions),
+  // "All" is the SUM of every competition, not the absence of the dimension —
+  // so it sends every competition id, not nothing. Sending nothing would fall
+  // back to Cricket Australia's lifetime totals, which do not equal the sum of
+  // the per-competition figures shown beside them.
+  const afterAll = calls.filter(c => c.params.competitions)
+  ck('picking All sends the sum of every competition on the wire, not nothing',
+    afterAll.length > 0 && afterAll.every(c => c.params.competitions === ALL_COMP_IDS),
+    JSON.stringify(afterAll.map(c => [c.path, c.params.competitions]).slice(0, 4)))
+  ck('no page errors', errors.length === 0, errors.join(' | '))
+  await ctx.close()
+}
+
+// -------------------------------- the club that has not switched the row on
+
+{
+  console.log('\nA club that has not switched the Competition filter on')
+  const { page, ctx, errors, calls } = await open('/applecross', { showFilters: false })
+  ck('is offered no Competition row at all — off by default until the club opts in',
+    await page.locator('label', { hasText: /^Competition$/ }).count() === 0)
+  ck('while the other filter rows are unaffected',
+    await page.locator('label', { hasText: /^Grade Type$/ }).count() > 0)
+  // And with the row off, "All" is the ordinary unfiltered reading — Cricket
+  // Australia's lifetime totals — so nothing goes on the wire for competitions.
+  ck('and no competitions param is sent at all',
+    calls.length > 0 && calls.every(c => !c.params.competitions),
     JSON.stringify(calls.map(c => c.params.competitions).slice(0, 4)))
   ck('no page errors', errors.length === 0, errors.join(' | '))
   await ctx.close()

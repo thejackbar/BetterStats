@@ -145,6 +145,29 @@ export const DIRECTORY_FIELD_DEFS = {
     label: 'Customer status', input: 'select', ops: IS_OP,
     options: [['none', 'not a customer'], ['trial', 'on a trial'], ['active', 'active customer'], ['lapsed', 'lapsed / paused']],
   },
+  // The DEFINITIVE paying-subscriber signal, distinct from Customer status
+  // above. Customer status reads the club org's subscription_status, which was
+  // ALSO set on clubs a super admin created only for an internal trial — so it
+  // is not proof of a real subscription. This reads whether the club carries a
+  // live BetterCricket Stripe subscription, which is created only by a completed
+  // checkout and cleared when the subscription is cancelled — so "yes" means the
+  // club is paying for at least one module right now.
+  is_subscriber: {
+    label: 'BetterCricket subscriber (Stripe)', input: 'select', ops: IS_OP, options: YESNO,
+  },
+  // Whether the club STARTED a trial, by how it began — a self-serve
+  // registration (/trial) or a super-admin set-up. onboarding_method records
+  // the origin permanently, so this catches a club that has since converted or
+  // lapsed too ("has already started" is a historical fact). Multi, so "either
+  // or both" is one rule; "is none of" excludes clubs that started a trial.
+  trial_kind: {
+    label: 'Started a trial', input: 'multi',
+    ops: [['eq', 'is any of'], ['not_in', 'is none of']],
+    options: [
+      ['self_serve_trial', 'Self-serve trial'],
+      ['super_admin_trial', 'Super-admin trial'],
+    ],
+  },
   // Where the club's own trial stands, read off its subscription rows. The same
   // definition resolves {{trial_days_left}} / {{trial_days_since_expiry}} /
   // {{trial_end_date}}, so the number the email prints is the number the
@@ -170,7 +193,10 @@ export const DIRECTORY_FIELD_DEFS = {
 
 export function newRule(defs) {
   const first = Object.keys(defs)[0]
-  return { field: first, op: defs[first].ops[0][0], value: '' }
+  // `conj` says how this condition joins to the one BEFORE it (ignored on the
+  // first). Default AND, so a segment reads as "all of these" until a row is
+  // switched to OR. Standard precedence — AND binds tighter than OR.
+  return { field: first, op: defs[first].ops[0][0], value: '', conj: 'and' }
 }
 
 // Resolve a field's dropdown options from the fetched club/directory options.
@@ -337,7 +363,8 @@ export function RuleRow({ rule, defs, opts, onChange, onRemove, inputCls = 'px-2
       <select value={rule.field}
         onChange={e => {
           const nd = defs[e.target.value]
-          onChange({ field: e.target.value, op: nd.ops[0][0], value: '' })
+          // Reset op/value for the new field, but keep the AND/OR connector.
+          onChange({ ...rule, field: e.target.value, op: nd.ops[0][0], value: '' })
         }}
         className={inputCls}>
         {keys.map(k => <option key={k} value={k}>{defs[k].label}</option>)}

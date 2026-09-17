@@ -295,6 +295,27 @@ def _to_float(v):
         return None
 
 
+def _extras_breakdown(inn: dict) -> dict:
+    """Innings-level extras breakdown from a Grassroots innings object.
+
+    GR carries the full split at innings level (verified live against the
+    /scores/* payload): `wideBalls`, `noBalls`, `byesRuns`, `legByesRuns` and
+    `penalties`, which sum to `totalExtras`. An older note in sync.py claimed
+    only the combined total was available and the breakdown lived on the
+    ball-by-ball `/balls` endpoint — that was wrong; the split is on this
+    payload, so no extra fetch is needed. Each component is nullable and the
+    frontend shows only the non-zero ones, in the same Wd/NB/LB/B/PR order
+    play.cricket uses.
+    """
+    return {
+        "wides": inn.get("wideBalls"),
+        "no_balls": inn.get("noBalls"),
+        "byes": inn.get("byesRuns"),
+        "leg_byes": inn.get("legByesRuns"),
+        "penalties": inn.get("penalties"),
+    }
+
+
 def _looks_redacted(name: Optional[str]) -> bool:
     """True for a name that carries no real information — blank, or CA's
     literal asterisk-redaction placeholder for a privacy-protected participant."""
@@ -370,6 +391,8 @@ async def _gr_scorecard_response(game_id: str) -> Optional[dict]:
             "runs": inn.get("runsScored"),
             "wickets": inn.get("numberOfWicketsFallen"),
             "extras": inn.get("totalExtras"),
+            "extras_breakdown": _extras_breakdown(inn),
+            "overs": inn.get("oversBowled"),
             "batting_team": team_name.get(bt_id),
         }
         for row in (inn.get("batting") or []):
@@ -466,6 +489,21 @@ def _manual_opp_from_payload(payload: dict, innings_totals: dict) -> tuple[list[
         extras = inn.get("extras") or {}
         if extras.get("total") is not None:
             meta["extras"] = extras["total"]
+        # Extras breakdown + innings overs from the uploaded card. scorecard_ocr
+        # stores byes/leg_byes/wides/no_balls/penalty per innings (note the
+        # singular `penalty` key here — normalise it to the `penalties` the GR
+        # path emits) plus the innings overs.
+        _mb = {
+            "wides": extras.get("wides"),
+            "no_balls": extras.get("no_balls"),
+            "byes": extras.get("byes"),
+            "leg_byes": extras.get("leg_byes"),
+            "penalties": extras.get("penalty"),
+        }
+        if any(v is not None for v in _mb.values()):
+            meta["extras_breakdown"] = _mb
+        if inn.get("overs") is not None:
+            meta["overs"] = inn.get("overs")
         if not inn.get("is_our_team"):
             # Opposition batted → their batters are the opp card; the bowling rows in
             # this innings are OURS (already in bowling_flat).
@@ -937,6 +975,8 @@ async def get_scorecard(
                     "runs": 0,
                     "wickets": 0,
                     "extras": inn.get("totalExtras") or 0,
+                    "extras_breakdown": _extras_breakdown(inn),
+                    "overs": inn.get("oversBowled"),
                     "batting_team": gr_team_name_by_id.get(bt_id) or (our_display_name if _bt_is_ours else opp_display_name),
                     "logo_url": (_our_logo if _bt_is_ours else None) or gr_team_logo_by_id.get(bt_id),
                 }
@@ -1068,7 +1108,8 @@ async def get_scorecard(
             # team total) here would double-count them.
             for inn_num, gr_tot in gr_inn_totals.items():
                 totals = new_innings_totals.setdefault(
-                    inn_num, {"runs": 0, "wickets": 0, "extras": 0, "batting_team": None, "logo_url": None})
+                    inn_num, {"runs": 0, "wickets": 0, "extras": 0, "extras_breakdown": None,
+                              "overs": None, "batting_team": None, "logo_url": None})
                 if gr_tot.get("wickets") is not None:
                     totals["wickets"] = gr_tot["wickets"]
                 if gr_tot.get("extras") is not None:
