@@ -7901,11 +7901,19 @@ existing, with no Bar Manager anywhere in the list.
   `lower(title)` path and the many title lookups all assume one role per name.**
   So the fix is not to scope the check to what the list shows (that would allow
   two same-titled roles and break those assumptions); it is to make the refusal
-  SAY where the clashing role lives. `create_role` now joins `club_role_types`,
-  and when the existing active role is committee-hidden (its `is_committee` flag
-  OR a committee-category type — the same combined test the list applies) and the
-  new one is not, the message points at the Committee screen and tells the admin
-  to pick a different name.
+  SAY where the clashing role lives. `_role_clash_message(existing, existing_type,
+  *, caller_is_committee)` is the ONE definition, joining `club_role_types`: when
+  the existing active role is committee-hidden (its `is_committee` flag OR a
+  committee-category type — the same combined test the list applies) and the
+  caller's own role is not, it points at the Committee screen and asks for a
+  different name.
+- **THE RENAME PATH SHARES THE SAME HELPER, so the two cannot disagree.**
+  `update_role`'s rename-collision check (added on `main` the same week, whose own
+  comment already noted the committee-hidden case but kept the bare message) now
+  joins the type and calls `_role_clash_message` too — so renaming a visible role
+  ONTO a hidden committee role reads the same explanation, from the other
+  direction. `caller_is_committee` there is the role's effective `is_committee`
+  after the update (`fields.get("is_committee", r.is_committee)`).
 - **THE ADVICE IS ALWAYS-TRUE, NOT "RECLASSIFY IT".** The list hides a role when
   `is_committee` OR the type category is committee, and the seeded committee role
   has the FLAG set — so clearing only the type category would not surface it. A
@@ -7916,13 +7924,16 @@ existing, with no Bar Manager anywhere in the list.
   caller's own list. An archived clash still reactivates rather than erroring,
   unchanged.
 - **Verified against a real Postgres**
-  (`backend/verification/verify_role_create_committee_clash.py`, 8 checks through
-  the shipped `create_role` over the ClubRole/ClubRoleType tables: the reported
-  case naming the Committee screen, the same when hidden by the type category
-  alone, the clash case-folded, a visible duplicate keeping the bare message and
-  never mentioning the Committee screen, an archived clash reactivated, and a
-  committee create keeping the bare message) **with a control run**: with the
-  committee-aware branch reverted, 4 fail — reporting the customer's own bare
+  (`backend/verification/verify_role_create_committee_clash.py`, 10 checks through
+  the shipped `create_role` AND `update_role` over the ClubRole/ClubRoleType
+  tables: the reported case naming the Committee screen, the same when hidden by
+  the type category alone, the clash case-folded, a visible duplicate keeping the
+  bare message and never mentioning the Committee screen, an archived clash
+  reactivated, a committee create keeping the bare message, and the rename path
+  naming the Committee screen while a rename onto a visible duplicate keeps the
+  bare message) **with a control run**: with the committee-aware branch of
+  `_role_clash_message` neutered, 5 of the 10 fail — every create and rename check
+  that should name the Committee screen reports the customer's own bare
   `A role called "Bar Manager" already exists`.
 
 ## Confirming the roster, a frozen first column, and the drags that never worked (migration 222, v9.10.0, Aug 2026)

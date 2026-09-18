@@ -291,6 +291,25 @@ async def seed_starter_role_types(session, org_id) -> int:
     return n
 
 
+def _role_clash_message(title, existing: ClubRole, existing_type, *, caller_is_committee: bool) -> str:
+    """The refusal for a title clashing with an existing active role, shared by
+    create_role and update_role's rename check. The Roles list hides a role that
+    is committee-classified — its is_committee flag OR a committee-category type
+    (the same combined test the list applies) — because those are managed as
+    positions on the Committee screen. The uniqueness check spans every role, so
+    a clash with a hidden committee role otherwise names a role that appears
+    nowhere on this list. Say where it lives rather than leaving the admin
+    hunting for it. Only when the caller's own role is NOT committee, since a
+    committee role is not hidden from the caller's own list."""
+    hidden_as_committee = existing.is_committee or (
+        existing_type is not None and getattr(existing_type, "category", None) == "committee")
+    if hidden_as_committee and not caller_is_committee:
+        return (f'A role called "{title}" already exists as a committee role, so it is '
+                'managed as a position on the Committee screen rather than shown in this '
+                'list. Give this one a different name.')
+    return f'A role called "{title}" already exists'
+
+
 async def list_roles(session: AsyncSession, org_id, *, include_inactive: bool = False,
                      committee: Optional[bool] = None) -> list[dict]:
     stmt = (select(ClubRole, ClubRoleType)
@@ -323,20 +342,7 @@ async def create_role(session: AsyncSession, org_id, *, title: str, role_type_id
                 existing.role_type_id = role_type_id
             existing.is_committee = is_committee
             return existing
-        # The Roles list hides a role that is committee-classified (its
-        # is_committee flag OR a committee-category type) — those are managed as
-        # positions on the Committee screen. The uniqueness check spans every
-        # role, so a title clashing with a hidden committee role otherwise reads
-        # as an error naming a role that appears nowhere on this list. Say where
-        # it lives rather than leaving the admin hunting for it.
-        hidden_as_committee = existing.is_committee or (
-            existing_type is not None and getattr(existing_type, "category", None) == "committee")
-        if hidden_as_committee and not is_committee:
-            raise ValueError(
-                f'A role called "{title}" already exists as a committee role, so it is '
-                'managed as a position on the Committee screen rather than shown in this '
-                'list. Give this one a different name.')
-        raise ValueError(f'A role called "{title}" already exists')
+        raise ValueError(_role_clash_message(title, existing, existing_type, caller_is_committee=is_committee))
     r = ClubRole(organisation_id=org_id, title=title[:200], role_type_id=role_type_id,
                  description=description, is_committee=is_committee)
     session.add(r)
@@ -355,15 +361,20 @@ async def update_role(session: AsyncSession, r: ClubRole, **fields) -> ClubRole:
         if not new_title:
             raise ValueError("Title is required")
         if new_title.lower() != (r.title or "").lower():
-            clash = (await session.execute(
-                select(ClubRole).where(
+            clash_row = (await session.execute(
+                select(ClubRole, ClubRoleType)
+                .outerjoin(ClubRoleType, ClubRoleType.id == ClubRole.role_type_id)
+                .where(
                     ClubRole.organisation_id == r.organisation_id,
                     func.lower(ClubRole.title) == new_title.lower(),
                     ClubRole.id != r.id,
                 )
-            )).scalars().first()
-            if clash is not None:
-                raise ValueError(f'A role called "{new_title}" already exists')
+            )).first()
+            if clash_row is not None:
+                clash, clash_type = clash_row
+                raise ValueError(_role_clash_message(
+                    new_title, clash, clash_type,
+                    caller_is_committee=fields.get("is_committee", r.is_committee)))
         fields["title"] = new_title
     for f in ("title", "description", "sort_order", "is_active", "is_committee"):
         if f in fields and fields[f] is not None:

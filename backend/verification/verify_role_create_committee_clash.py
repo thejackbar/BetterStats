@@ -18,10 +18,14 @@ ClubRoleType tables built from the ORM models), asserting:
   * a genuine VISIBLE (non-committee) duplicate → the bare message, unchanged;
   * an ARCHIVED clash is still reactivated, never an error (unchanged behaviour);
   * a committee caller (is_committee=True) clashing with a committee role → the
-    bare message, since it is not hidden from the caller's own list.
+    bare message, since it is not hidden from the caller's own list;
+  * the RENAME path (update_role) shares the one helper, so renaming a visible
+    role ONTO a hidden committee role names the Committee screen too, while a
+    rename onto a visible duplicate keeps the bare message.
 
-Control run: with the committee-aware branch reverted, the first two checks read
-the bare "already exists" message the customer saw.
+Control run: with the committee-aware branch of _role_clash_message neutered,
+5 of the 10 fail — every create and rename check that should name the Committee
+screen reads the bare "already exists" message the customer saw.
 
   DATABASE_URL=postgresql+asyncpg://cricket:cricket@/betterstats?host=/tmp&port=55432 \
     python -m verification.verify_role_create_committee_clash
@@ -33,6 +37,7 @@ import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from app.models.db import ClubRole, ClubRoleType
@@ -78,25 +83,26 @@ async def main():
 
     async with Session() as s:
         # A committee-category role type, and a plain volunteer one.
-        committee_type = ClubRoleType(id=uuid.uuid4(), organisation_id=org,
+        committee_type_id, volunteer_type_id = uuid.uuid4(), uuid.uuid4()
+        committee_type = ClubRoleType(id=committee_type_id, organisation_id=org,
                                       name="Committee Member", category="committee")
-        volunteer_type = ClubRoleType(id=uuid.uuid4(), organisation_id=org,
+        volunteer_type = ClubRoleType(id=volunteer_type_id, organisation_id=org,
                                       name="Food & Beverage", category="volunteer")
         s.add_all([committee_type, volunteer_type])
         await s.flush()
 
         # The seeded committee "Bar Manager": is_committee flag set, committee type.
         s.add(ClubRole(id=uuid.uuid4(), organisation_id=org, title="Bar Manager",
-                       role_type_id=committee_type.id, is_committee=True))
+                       role_type_id=committee_type_id, is_committee=True))
         # A role hidden ONLY by its type's category (flag not set).
         s.add(ClubRole(id=uuid.uuid4(), organisation_id=org, title="Grounds Manager",
-                       role_type_id=committee_type.id, is_committee=False))
+                       role_type_id=committee_type_id, is_committee=False))
         # A genuine visible, non-committee role.
         s.add(ClubRole(id=uuid.uuid4(), organisation_id=org, title="Canteen Manager",
-                       role_type_id=volunteer_type.id, is_committee=False))
+                       role_type_id=volunteer_type_id, is_committee=False))
         # An archived clash — reactivation must still win over any error.
         s.add(ClubRole(id=uuid.uuid4(), organisation_id=org, title="Photographer",
-                       role_type_id=volunteer_type.id, is_committee=False, is_active=False))
+                       role_type_id=volunteer_type_id, is_committee=False, is_active=False))
         await s.commit()
 
         # ── The reported case ────────────────────────────────────────────────
@@ -140,6 +146,37 @@ async def main():
         msg_com = await _clash_message(s, org, "Bar Manager", is_committee=True)
         check("a committee create clashing with a committee role keeps the plain message",
               msg_com == 'A role called "Bar Manager" already exists', msg_com)
+
+        # ── RENAME path shares the same helper (update_role) ─────────────────
+        # Renaming the visible "Canteen Manager" onto the hidden committee
+        # "Bar Manager" must name the Committee screen too — the same confusion
+        # from the other direction.
+        async def _rename_message(from_title, new_title, **fields):
+            # Re-query the role fully each call so no attribute lazy-loads after a
+            # nested rollback (the MissingGreenlet trap).
+            role = (await s.execute(
+                select(ClubRole).where(ClubRole.organisation_id == org,
+                                       func.lower(ClubRole.title) == from_title.lower())
+            )).scalars().first()
+            try:
+                await s.begin_nested()
+                await svc.update_role(s, role, title=new_title, **fields)
+                await s.rollback()
+                return None
+            except ValueError as e:
+                await s.rollback()
+                return str(e)
+
+        msg_rename = await _rename_message("Canteen Manager", "Bar Manager")
+        check("renaming a visible role onto a committee role names the Committee screen",
+              msg_rename is not None and "Committee screen" in msg_rename, msg_rename)
+        # Renaming onto a visible non-committee duplicate keeps the bare message.
+        s.add(ClubRole(id=uuid.uuid4(), organisation_id=org, title="Kit Manager",
+                       role_type_id=volunteer_type_id, is_committee=False))
+        await s.commit()
+        msg_rename_visible = await _rename_message("Canteen Manager", "Kit Manager")
+        check("renaming onto a visible duplicate keeps the plain message",
+              msg_rename_visible == 'A role called "Kit Manager" already exists', msg_rename_visible)
 
     await engine.dispose()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
