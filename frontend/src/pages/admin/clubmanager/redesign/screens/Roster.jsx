@@ -821,17 +821,28 @@ export default function Roster({ st, patch, narrow }) {
     </div>
   )
 
-  // The roles present among an area's shifts this week, in palette order. A role
-  // the club has set up but has no shift for this week has nothing to assign, so
-  // it isn't drawn; a shift with no role is the "General help" group, kept last.
+  // The roles of an area, in palette order, each with this week's shifts for it.
+  //
+  // Every role configured on the area is drawn, even one with no shift yet — a
+  // club sets an area's roles up (Match Day → Umpire, Scorer, Turf Curator,
+  // Groundskeeper) before, or without, a weekly shift pattern, and the whole
+  // point here is to SEE those roles and give each one shifts. Tying "show a
+  // role" to "has a shift this week" hid the roles of any area that had none, so
+  // a multi-role area with an empty week looked like a plain single row and
+  // would not open. A shift whose role was removed from the palette, or general
+  // help with no role at all, is a leftover group kept last.
   const areaRoleGroups = (a, areaShifts) => {
-    const paletteOrder = new Map((a.roles || []).map((r, i) => [r.role_id, i]))
+    const palette = a.roles || []
+    const known = new Set(palette.map(r => r.role_id))
     const groups = new Map()
+    // Seed a row per configured role first, in palette order; shifts fill in.
+    palette.forEach(r => groups.set(r.role_id, { role_id: r.role_id, role_name: r.role_name, shifts: [] }))
     areaShifts.forEach(x => {
-      const key = x.role_id || '__none'
+      const key = x.role_id && known.has(x.role_id) ? x.role_id : (x.role_id || '__none')
       if (!groups.has(key)) groups.set(key, { role_id: x.role_id || null, role_name: x.role_name || 'General help', shifts: [] })
       groups.get(key).shifts.push(x)
     })
+    const paletteOrder = new Map(palette.map((r, i) => [r.role_id, i]))
     return [...groups.values()].sort((g1, g2) => {
       if (g1.role_id === null) return 1
       if (g2.role_id === null) return -1
