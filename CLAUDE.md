@@ -7747,6 +7747,93 @@ Reported from a phone: the Directory reads well, and the older full editors
   `documentElement.scrollWidth > clientWidth`. That check is worth repeating
   whenever a Clubhouse screen is added.
 
+## A role is a level between the area and the shift (migration 306, v9.82.0, Sep 2026)
+
+Reported off Setup → Areas & roles: an operational area paired ONE role with
+ONE gating qualification ("ROLE THAT COVERS IT"), and the reporter wanted a
+Match Day area to involve several — Umpires, Scorers, Team Managers, the roles a
+junior fixture needs — stating the hierarchy in their own words: Department →
+Operational Area → **Role** → Shift → Volunteer, each area holding many roles and
+each role many shifts.
+
+- **THE ROLE WAS A PROPERTY OF THE AREA, AND "EACH ROLE HAS MANY SHIFTS" CANNOT
+  BE SAID THAT WAY.** `roster_areas.required_role_id` is one column and a shift
+  knew nothing about roles — it only pointed at its area. So role becomes a
+  first-class level: an area holds a PALETTE of roles (`roster_area_roles`, each
+  role paired with the qualification that gates that one role), and every
+  shift/pattern carries one `role_id` drawn from that palette.
+- **THE QUALIFICATION IS PER ROLE, WHICH IS THE WHOLE POINT.** A Match Day
+  Umpire needs an accreditation while the Scorer beside it needs nothing, so the
+  gate lives on the palette ENTRY (`roster_area_roles.required_qualification_type_id`),
+  not on the area. `check_assignment` reads the block and the role warning off
+  the SHIFT (`shift.required_qualification_type_id`, `shift.role_id`), so a
+  person cleared for one role on a fixture is not blocked for another on the same
+  one.
+- **PAID VS VOLUNTEER MOVED FROM THE AREA TO THE SHIFT'S ROLE, so one area can
+  mix both.** `area_pay_kinds` is gone; `confirm_review` and `hours_summary`
+  derive `is_paid` per shift by joining `club_roles` → `club_role_types` on
+  `s.role_id` (`category == 'paid'`, `PAID_CATEGORY`). Worked-hours paid still
+  reads the already-stamped `volunteer_hours.is_paid` (the snapshot rule).
+  `role_shortages` buckets open shifts by `s.role_id` directly rather than
+  resolving through the area — simpler and more accurate, and a NULL `role_id`
+  is the `no_role_required` bucket.
+- **THE BACKFILL MAKES AN EXISTING CLUB BYTE-IDENTICAL.** Migration 306's three
+  idempotent statements carry every single-role area into a one-entry palette
+  and stamp its patterns' and shifts' `role_id` from `required_role_id`, so a
+  club that never touches this behaves exactly as before. `roster_areas`'
+  `required_role_id`/`required_qualification_type_id` are KEPT but deprecated —
+  read only by the backfill; a new area leaves them NULL and the palette is the
+  source of truth. `list_areas` still emits `required_role_id`/`_name` = the
+  first palette entry, so an un-refreshed client shows something.
+- **THE WHOLE ROSTER SUBSYSTEM IS RAW SQL, OUT OF THE ORM/ALEMBIC GRAPH**
+  (`services/roster.py` docstring), so `roster_area_roles` and the two `role_id`
+  columns are mirrored idempotently in `main.py`'s lifespan, byte-identical to
+  306's `STATEMENTS`, right after the migration-222 block. `role_id` on both
+  patterns and shifts is `ON DELETE SET NULL` (a shift outlives a deleted role
+  as general help); a palette entry with no role is meaningless, so
+  `roster_area_roles.role_id` is `NOT NULL ON DELETE CASCADE`.
+- **`seed_starter_areas` seeds each starter's role into the palette** and adds a
+  multi-role **Match Day** starter (Umpire+accreditation, Scorer, Team Manager) —
+  the reporter's own example, and the demonstration that the capability is
+  reachable from the Starter Pack. A starter role that does not resolve to a
+  `club_roles` row is skipped rather than seeding a dangling palette entry.
+- **NUMBERED 306, down_revision 305** (the local branch head; `origin/main` tops
+  at 304 — re-check `origin/main` at merge, per the house rule this file records
+  repeatedly).
+- **Verified against a real Postgres**
+  (`backend/verification/verify_roster_area_roles.py`, 45 checks through the
+  shipped service: migration/lifespan applied idempotently, the backfill carrying
+  a legacy single-role area into a palette with its patterns and shifts
+  inheriting the role, `_generate_shifts` copying `role_id`, a multi-role Match
+  Day area gating each shift by its OWN role's qualification — the Umpire shift
+  blocked without accreditation while the SAME person is NOT blocked for the
+  Scorer shift — paid derived from the shift's role in confirm and hours,
+  `role_shortages` bucketed by shift role, a role removed from the palette, and
+  cross-club scoping) **with a control run**: with the feature reverted, 12 of
+  the checks fail on exactly the per-role qualification and role-on-shift
+  behaviour.
+- **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN, hit in the harness itself.**
+  `caught(label, svc.create_area(...))` evaluated the call — with its new `roles`
+  keyword — BEFORE wrapping it, so the control died with a `TypeError` instead of
+  reporting. `caught` takes a no-arg factory now (`lambda:`), so an absent
+  parameter is a reported failure rather than the end of the run.
+- **Driven in Chromium**
+  (`frontend/verification/verify_roster_area_roles_browser.mjs`, 16 checks: the
+  palette editor growing to two role rows with row 2 refusing the role already
+  chosen in row 1, the EXACT `roles: [...]` payload on the wire — Umpire carrying
+  its accreditation, Scorer a null qualification — the area sub-line listing both
+  roles with their quals, the per-pattern role picker scoped to the palette and
+  its `role_id` on the wire, an open shift's chip showing its role on the weekly
+  grid, and the AddShift picker scoped to the chosen area) **with a control run**:
+  12 of the 16 fail against the previous commit, the old pattern and shift POSTs
+  carrying no `role_id` at all. Every new element is read through `seen`/`press`/
+  `pick`/`opts`, which report absence rather than throwing, so the control fails
+  each new check cleanly instead of dying on the first missing locator.
+- **NOTICED, NOT BUILT**: nothing migrates a shift's people when its role is
+  changed, and there is no per-role headcount target on an area (a shift's
+  headcount is still per pattern). Both are follow-ups, not part of making role a
+  first-class level.
+
 ## Confirming the roster, a frozen first column, and the drags that never worked (migration 222, v9.10.0, Aug 2026)
 
 - **"Confirm roster" is the name, in the code as well as the UI.** The action was
