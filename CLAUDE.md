@@ -7884,6 +7884,55 @@ and filled for a role, so the grid should read that way.
   pass them vacuously — the "a check that can't fail is not a check" trap, caught
   by the control run passing them before they were tightened.
 
+### An open shift on an archived area read "undefined" (v9.82.4, Sep 2026)
+
+Reported off a live People-view roster: open-shift chips showed "undefined ×2" /
+"undefined ×8" as their description.
+
+- **THE CHIP NAMED A SHIFT BY LOOKING ITS AREA UP IN THE ACTIVE-AREAS SET, WHICH
+  MISSES AN ARCHIVED AREA.** `list_areas` returns `is_active = TRUE` areas only,
+  but `_generate_shifts` and `_shift_rows` don't filter active (the row still
+  exists — `delete_area` is a soft delete), so a week generated before an area
+  was archived keeps that area's shifts. The People-view chip's headline was
+  `areaById[shift.area_id].name`, and `areaById` is built from `list_areas` — so
+  an archived-area shift resolved to `{}` and rendered its name as `undefined`.
+  **React renders a bare `undefined` child as EMPTY; only the `count > 1` path
+  (`a.name + ' ×' + count` → string concat) produces the literal "undefined ×N"**
+  the screenshot showed — which is why the reproduction fixture needs a PAIR, not
+  a single, on the archived area.
+- **THE SHIFT CARRIES ITS OWN `area_name` NOW, off an UNFILTERED LEFT JOIN.**
+  `_shift_rows` LEFT JOINs `roster_areas` (not `list_areas`' active-only set), so
+  an archived area's name still travels on the shift. The frontend already
+  REFERENCED `x.area_name` in the section-search (`shiftHit`) — a field that was
+  intended but never populated, the tell that this was the gap. `areaLabel(shift)`
+  is the one robust namer: `shift.area_name || areaById[...]?.name || role_name ||
+  'Shift'`, never `undefined`.
+- **AND THE OPEN-SHIFTS ROW GROUPED BY AREA NAME + TIME, so two roles merged.**
+  A shift is FOR one role now, but the grouping keyed on the area name and hours
+  alone — so an Umpire slot and a Scorer slot at the same time in one Match Day
+  area collapsed into one "Match Day ×3" chip whose subtitle showed only the
+  representative role (the Scorer vanished). Keyed on `(area_id, role_id, start,
+  end)` now, so each role is its own chip and a same-role pair reads "×2".
+  Keying on the ids the shift already carries also stops every archived-area
+  shift lumping together under the old `undefined === undefined` name key.
+- **Verified against a real Postgres** (`verify_roster_area_roles.py` is 51 checks
+  now: every shift row carrying an `area_name`, a Match Day and a legacy shift
+  naming their areas, and — done last so it doesn't disturb the earlier sections
+  — an area archived after generation still naming its shift while `list_areas`
+  drops it) **with a control run**: with `area_name` reverted, 4 of the checks
+  fail. **Driven in Chromium** (`verify_roster_open_shift_labels_browser.mjs`, 11:
+  no chip reads "undefined", the archived area's real name shows, distinct roles
+  render as separate chips, and the same-role pair reads "Match Day ×2" not "×3")
+  **with a control run**: 5 of the 11 fail against the previous commit, the
+  captured text reading the reported "undefined ×2" beside a merged "Match Day
+  ×3".
+- **A HEADLINE CHECK THAT SUBSTRING-MATCHES THE ROLE CANNOT FAIL.** The first cut
+  asserted the archived chip showed "Grounds" while the role was "Groundskeeper"
+  — which `includes('Grounds')` passes on regardless, since React renders the
+  broken headline as empty rather than the string "undefined" at count 1. Fixed
+  by naming the archived area "Turf" (not a substring of its role) and using a
+  count-2 pair so the real "undefined ×2" bug reproduces.
+
 ### A duplicate role named a role the list will not show (v9.82.3, Sep 2026)
 
 Reported off Areas & roles → Roles: adding "Bar Manager" was refused as already

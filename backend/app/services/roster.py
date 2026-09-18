@@ -419,13 +419,18 @@ async def _shift_rows(db: AsyncSession, week_id) -> list[dict]:
     # requirement, unpaid.
     rows = (await db.execute(text("""
         SELECT s.id, s.area_id, s.day_of_week, s.start_time, s.end_time, s.assignee_member_id, s.warnings,
-               s.role_id, fm.full_name AS assignee_name, r.title AS role_name,
+               s.role_id, fm.full_name AS assignee_name, r.title AS role_name, ra.name AS area_name,
                (COALESCE(rt.category, '') = :paid) AS is_paid,
                ar.required_qualification_type_id AS req_qual_id, q.name AS req_qual_name
         FROM roster_shifts s
         LEFT JOIN fee_members fm ON fm.id = s.assignee_member_id
         LEFT JOIN club_roles r ON r.id = s.role_id
         LEFT JOIN club_role_types rt ON rt.id = r.role_type_id
+        -- The area name travels ON the shift so a chip can always name it, and
+        -- via an unfiltered LEFT JOIN (not list_areas' active-only set) so a
+        -- shift whose area was later archived still reads as its real area
+        -- rather than "undefined" in the People-view open-shifts row.
+        LEFT JOIN roster_areas ra ON ra.id = s.area_id
         LEFT JOIN roster_area_roles ar ON ar.area_id = s.area_id AND ar.role_id = s.role_id
         LEFT JOIN qualification_types q ON q.id = ar.required_qualification_type_id
         WHERE s.roster_week_id = :wid
@@ -436,6 +441,7 @@ async def _shift_rows(db: AsyncSession, week_id) -> list[dict]:
         "start_time": _f(r["start_time"]), "end_time": _f(r["end_time"]),
         "assignee_member_id": str(r["assignee_member_id"]) if r["assignee_member_id"] else None,
         "assignee_name": r["assignee_name"], "warnings": r["warnings"] or [],
+        "area_name": r["area_name"],
         "role_id": str(r["role_id"]) if r["role_id"] else None, "role_name": r["role_name"],
         "is_paid": bool(r["is_paid"]),
         "required_qualification_type_id": str(r["req_qual_id"]) if r["req_qual_id"] else None,

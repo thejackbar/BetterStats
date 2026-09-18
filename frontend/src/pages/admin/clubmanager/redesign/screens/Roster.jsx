@@ -580,6 +580,12 @@ export default function Roster({ st, patch, narrow }) {
   const areaById = {}; areas.forEach(a => { areaById[a.id] = a })
   const candById = {}; candidates.forEach(c => { candById[c.member_id] = c })
 
+  // A shift now names its own area (`area_name`, off the shift row), so a chip
+  // never depends on the area being in the active-areas list to label it — a
+  // shift whose area was archived reads as its real area, and a role-only /
+  // orphaned shift still says SOMETHING rather than the literal "undefined".
+  const areaLabel = (shift) => shift.area_name || areaById[shift.area_id]?.name || shift.role_name || 'Shift'
+
   // The roster shows an area's shifts; Areas & Roles is where they are created,
   // re-timed and removed. Clicking the name takes you there with that area
   // already open, rather than making you find it in the list a second time.
@@ -718,7 +724,7 @@ export default function Roster({ st, patch, narrow }) {
           ...(over ? { boxShadow: '0 0 0 1.5px var(--pb-accent)' } : {}) }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
           <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: a.color || 'var(--pb-accent)' }} />
-          <span style={{ fontWeight: 600, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{count > 1 ? a.name + ' ×' + count : a.name}</span>
+          <span style={{ fontWeight: 600, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{areaLabel(shift) + (count > 1 ? ' ×' + count : '')}</span>
           {warned ? <span style={{ marginLeft: 'auto', color: C.warn, fontSize: 11 }}>!</span> : null}
           {onCancel && (
             <button title="Return this shift to Open"
@@ -754,13 +760,20 @@ export default function Roster({ st, patch, narrow }) {
   const POOL_CAP = 25
   const candList = sorted.slice(0, POOL_CAP)
 
+  // A shift is FOR one role now, so two open shifts only collapse into one
+  // "×N" chip when they share an area AND a role AND the same hours — otherwise
+  // an Umpire slot and a Scorer slot at the same time in one Match Day area
+  // would merge and hide one of the roles. Keyed on the ids the shift already
+  // carries (not the area NAME, which is undefined for an archived area and so
+  // used to lump every orphaned shift together regardless of what it was for).
   const openCells = DOW.map((_, d) => {
-    const groups = []
+    const groups = new Map()
     open.filter(x => x.day_of_week === d).forEach(x => {
-      const g = groups.find(y => areaById[y.shift.area_id]?.name === areaById[x.area_id]?.name && y.shift.start_time === x.start_time && y.shift.end_time === x.end_time)
-      if (g) g.count++; else groups.push({ shift: x, count: 1 })
+      const key = [x.area_id, x.role_id || '', x.start_time, x.end_time].join('|')
+      const g = groups.get(key)
+      if (g) g.count++; else groups.set(key, { shift: x, count: 1 })
     })
-    return { d, groups }
+    return { d, groups: [...groups.values()] }
   })
 
   // ── the section search ────────────────────────────────────────────────

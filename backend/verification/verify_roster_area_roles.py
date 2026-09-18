@@ -331,6 +331,12 @@ async def main():
     check("a paid Bar shift sits in the SAME Match Day area", barmd is not None)
     check("that Bar shift is paid though the Scorer beside it is not", (barmd or {}).get("is_paid") is True)
     check("the legacy area's Bar shift is paid too", (barleg or {}).get("is_paid") is True)
+    # A shift carries its own area_name now, so the People-view open-shifts row
+    # can name it without a lookup into the active-areas set (which misses an
+    # archived area and rendered "undefined").
+    check("every shift row carries an area_name", all(s.get("area_name") for s in shifts))
+    check("a Match Day shift names its area", (ump or {}).get("area_name") == "Match Day")
+    check("the legacy area's shift names its area", (barleg or {}).get("area_name") == "Legacy Bar")
 
     print("\n=== the qualification block is the shift's role, not the area's ===")
     async with Session() as db:
@@ -407,6 +413,26 @@ async def main():
         theirs = {a["id"] for a in await svc.list_areas(db, OTHER)}
     check("another club's area is not in ours", str(OTHER_AREA) not in ours)
     check("that area is in the other club's own list", str(OTHER_AREA) in theirs)
+
+    # The reported bug: list_areas returns ACTIVE areas only, but a week's shifts
+    # include any whose area was archived after generation. The old People-view
+    # chip named a shift by looking its area up in that active set, so an
+    # archived-area shift read as "undefined". _shift_rows carries area_name off
+    # an UNFILTERED join, so the name survives archiving — done last so it does
+    # not disturb the sections above.
+    print("\n=== an archived area's shift still names its area (the 'undefined' bug) ===")
+    async with Session() as db:
+        await svc.delete_area(db, CLUB, MATCHDAY)
+        await db.commit()
+    async with Session() as db:
+        areas = await svc.list_areas(db, CLUB)
+        check("list_areas drops the archived Match Day area",
+              not any(a["id"] == str(MATCHDAY) for a in areas))
+        rows = await svc._shift_rows(db, LEGACY_WEEK)
+        md_shift = next((s for s in rows if s.get("area_id") == str(MATCHDAY)), None)
+        check("the archived area's shift is still on the week", md_shift is not None)
+        check("the archived area's shift still carries its area_name",
+              (md_shift or {}).get("area_name") == "Match Day")
 
     print(f"\n{'='*54}\n  {PASS} passed, {FAIL} failed")
     if FAILURES:
