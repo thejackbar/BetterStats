@@ -157,6 +157,27 @@ def _activity_dict(a: ClubActivity, type_name: Optional[str] = None) -> dict:
             "sort_order": a.sort_order, "is_active": a.is_active}
 
 
+# ─── Uniqueness guard (shared by every rename path) ──────────────────────────
+async def _ensure_unique(session: AsyncSession, model, org_id, *, field: str,
+                         value: str, exclude_id, label: str) -> None:
+    """Raise ValueError if ANOTHER row in the org already uses this name/title,
+    case-insensitively. The unique constraint spans active AND archived rows, so
+    a rename onto an archived starter role would otherwise raise a raw
+    IntegrityError (a 500). This mirrors the create_* guard so an update refuses
+    cleanly with a 422 instead. Excludes the row itself, so re-saving with the
+    same value (e.g. a description-only edit) never trips it."""
+    col = getattr(model, field)
+    clash = (await session.execute(
+        select(model.id).where(
+            model.organisation_id == org_id,
+            func.lower(col) == value.lower(),
+            model.id != exclude_id,
+        )
+    )).first()
+    if clash is not None:
+        raise ValueError(f'{label} already exists')
+
+
 # ─── Generic type catalogue helpers (role types + activity types) ────────────
 async def _list_types(session: AsyncSession, model, org_id, *, include_inactive: bool) -> list:
     stmt = select(model).where(model.organisation_id == org_id)
@@ -201,6 +222,12 @@ async def _get_or_create_type(session: AsyncSession, model, org_id, name: str):
 
 
 async def _update_type(session: AsyncSession, t, **fields):
+    if fields.get("name") is not None:
+        name = str(fields["name"]).strip()
+        if name:
+            await _ensure_unique(session, type(t), t.organisation_id, field="name",
+                                 value=name, exclude_id=t.id, label=f'A type called "{name}"')
+            fields["name"] = name[:120]
     for f in ("name", "description", "sort_order", "is_active", "category"):
         if f in fields and fields[f] is not None and hasattr(t, f):
             setattr(t, f, fields[f])
@@ -307,6 +334,12 @@ async def create_role(session: AsyncSession, org_id, *, title: str, role_type_id
 
 
 async def update_role(session: AsyncSession, r: ClubRole, **fields) -> ClubRole:
+    if fields.get("title") is not None:
+        title = str(fields["title"]).strip()
+        if title:
+            await _ensure_unique(session, ClubRole, r.organisation_id, field="title",
+                                 value=title, exclude_id=r.id, label=f'A role called "{title}"')
+            fields["title"] = title[:200]
     for f in ("title", "description", "sort_order", "is_active", "is_committee"):
         if f in fields and fields[f] is not None:
             setattr(r, f, fields[f])
@@ -413,6 +446,12 @@ async def create_activity(session: AsyncSession, org_id, *, title: str, activity
 
 
 async def update_activity(session: AsyncSession, a: ClubActivity, **fields) -> ClubActivity:
+    if fields.get("title") is not None:
+        title = str(fields["title"]).strip()
+        if title:
+            await _ensure_unique(session, ClubActivity, a.organisation_id, field="title",
+                                 value=title, exclude_id=a.id, label=f'An activity called "{title}"')
+            fields["title"] = title[:200]
     for f in ("title", "activity_type_id", "description", "sort_order", "is_active"):
         if f in fields and fields[f] is not None:
             setattr(a, f, fields[f])
