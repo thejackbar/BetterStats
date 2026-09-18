@@ -900,7 +900,12 @@ export default function Roster({ st, patch, narrow }) {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+    // The screen is bounded to the viewport (like Directory) rather than
+    // `minHeight: 100vh`, so the roster grid and the volunteer pool each scroll
+    // WITHIN their own region instead of the whole page scrolling as one.
+    // That is what keeps the day/date header row sticky under the grid, and
+    // stops scrolling the shifts from moving the pool (and vice versa).
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
       {header(<>
         {/* Centred on the title line: the title block and the actions on the
             right each take an equal share of what is left, so the four
@@ -971,9 +976,9 @@ export default function Roster({ st, patch, narrow }) {
 
       {view !== 'hours' && view !== 'confirm' && (
       <div style={{ display: 'flex', flex: 1, minHeight: 0, alignItems: 'stretch' }}>
-        <div className="pb-scroll" style={{ flex: 1, minWidth: 0, overflow: 'auto' }}>
+        <div className="pb-scroll" data-testid="roster-grid-scroll" style={{ flex: 1, minWidth: 0, overflow: 'auto' }}>
           <div style={{ minWidth: narrow ? 0 : 1266 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: gridCols, position: 'sticky', top: 0, zIndex: 20, background: C.bg, borderBottom: `1px solid ${C.hair2}` }}>
+            <div data-testid="roster-day-header" style={{ display: 'grid', gridTemplateColumns: gridCols, position: 'sticky', top: 0, zIndex: 20, background: C.bg, borderBottom: `1px solid ${C.hair2}` }}>
               <div style={rail({ zIndex: 22, padding: railMin ? '10px 6px' : '10px 14px', display: 'flex', alignItems: 'center', gap: 6 })}>
                 {!railMin && (
                   <span style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faintest, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -1177,7 +1182,7 @@ export default function Roster({ st, patch, narrow }) {
         )}
 
         {poolOpen && (
-          <aside className="pb-scroll" style={narrow
+          <aside className="pb-scroll" data-testid="roster-pool" style={narrow
             ? { width: 320, maxWidth: '92vw', position: 'fixed', right: 0, top: 0, bottom: 0, zIndex: 65, borderLeft: `1px solid ${C.hair2}`, background: C.surface, overflowY: 'auto', padding: 16, boxShadow: '0 0 40px rgba(0,0,0,0.5)' }
             : { width: 296, flex: '0 0 296px', borderLeft: `1px solid ${C.hair}`, background: C.surface, overflowY: 'auto', padding: 16 }}>
             {sel && (
