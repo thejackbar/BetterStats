@@ -288,16 +288,32 @@ async def create_role(session: AsyncSession, org_id, *, title: str, role_type_id
     title = (title or "").strip()
     if not title:
         raise ValueError("Title is required")
-    existing = (await session.execute(
-        select(ClubRole).where(ClubRole.organisation_id == org_id, func.lower(ClubRole.title) == title.lower())
-    )).scalars().first()
-    if existing is not None:
+    existing_row = (await session.execute(
+        select(ClubRole, ClubRoleType)
+        .outerjoin(ClubRoleType, ClubRoleType.id == ClubRole.role_type_id)
+        .where(ClubRole.organisation_id == org_id, func.lower(ClubRole.title) == title.lower())
+    )).first()
+    if existing_row is not None:
+        existing, existing_type = existing_row
         if not existing.is_active:
             existing.is_active = True
             if role_type_id is not None:
                 existing.role_type_id = role_type_id
             existing.is_committee = is_committee
             return existing
+        # The Roles list hides a role that is committee-classified (its
+        # is_committee flag OR a committee-category type) — those are managed as
+        # positions on the Committee screen. The uniqueness check spans every
+        # role, so a title clashing with a hidden committee role otherwise reads
+        # as an error naming a role that appears nowhere on this list. Say where
+        # it lives rather than leaving the admin hunting for it.
+        hidden_as_committee = existing.is_committee or (
+            existing_type is not None and getattr(existing_type, "category", None) == "committee")
+        if hidden_as_committee and not is_committee:
+            raise ValueError(
+                f'A role called "{title}" already exists as a committee role, so it is '
+                'managed as a position on the Committee screen rather than shown in this '
+                'list. Give this one a different name.')
         raise ValueError(f'A role called "{title}" already exists')
     r = ClubRole(organisation_id=org_id, title=title[:200], role_type_id=role_type_id,
                  description=description, is_committee=is_committee)
