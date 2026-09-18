@@ -7834,6 +7834,56 @@ each role many shifts.
   headcount is still per pattern). Both are follow-ups, not part of making role a
   first-class level.
 
+### The roster grid opens an area into its roles (v9.82.1, Sep 2026)
+
+Reported straight after v9.82.0 landed: Match Day now holds Umpire, Scorer, Turf
+Curator and Groundskeeper, but the ROSTER GRID's Areas view still drew Match Day
+as one row with every role's shifts mixed into the day cells. A shift is created
+and filled for a role, so the grid should read that way.
+
+- **FRONTEND ONLY, because the shift already carries its role.** `_shift_rows`
+  has returned `role_id`/`role_name` per shift and `list_areas` the `roles`
+  palette since v9.82.0, so the grid had everything it needed — the Areas view
+  just wasn't grouping by it. No migration, no service, no router change.
+- **THE GRID GROUPS THE SHIFTS THAT EXIST, NOT THE PALETTE.** A palette role with
+  no shift this week has nothing to display or assign, so it draws no row — the
+  grid shows shifts, and a per-role row is only meaningful where shifts sit.
+  `areaRoleGroups(a, areaShifts)` in `Roster.jsx` buckets the area's shifts by
+  `role_id` (null → a "General help" group, kept last), ordered by the palette's
+  `sort_order` first, then any role present but off-palette. A shift with no role
+  is the one bucket that isn't a palette role.
+- **ONE ROLE GROUP → THE ROW IS UNCHANGED.** A single-role area (or one with
+  shifts for one role this week) renders exactly the row it did before — no
+  header, no toggle, its role and qualification on the meta line. This is what
+  keeps a single-role club byte-identical, the same posture v9.82.0's backfill
+  took. Only two-or-more role groups draw the expanding header.
+- **A MULTI-ROLE AREA IS A HEADER THAT FOLDS ITS ROLES AWAY.** The header carries
+  the area total (filled/total, "N roles") and a toggle; each role is a sub-row
+  beneath it with only that role's shifts in its day cells and its own
+  filled/total and gating qualification. Collapsing leaves just the header.
+- **`areaDayCol(a, cellShifts, d)` IS THE ONE PLACE A SHIFT CHIP IS DRAWN ON THE
+  AREAS VIEW**, shared by the single-role row and every per-role sub-row, so they
+  select, drop and warn identically — a volunteer dragged onto a role's shift is
+  the same code path whichever row it lands in.
+- **COLLAPSE IS A PER-PERSON PREFERENCE**, `usePref('roster_areas_collapsed', {})`
+  keyed by area id, so a club with one area folded keeps the rest open and the
+  fold survives the browser closing. Default (empty map) is expanded — the
+  reported complaint was that the roles were hidden, so showing them is the
+  default and folding is the opt-in.
+- **Driven in Chromium** (`frontend/verification/verify_roster_role_grid_browser.mjs`,
+  16 checks: the multi-role header and its toggle, both role sub-rows shown by
+  default, the open Umpire shift landing in the Umpire sub-row and the assigned
+  Scorer shift in the Scorer sub-row, a single-role area staying a plain row with
+  no toggle, the toggle folding the sub-rows away and back, the fold surviving a
+  reload, no page errors and no overflow at 390px) **with a control run**: 12 of
+  the 16 fail against the previous commit, the 4 that pass in both being the
+  single-role-unchanged, no-errors and no-overflow guards.
+- **THE COLLAPSE CHECKS ARE CONTRASTS, NOT BARE ABSENCE.** "collapsing folds away
+  the sub-row" and "survives a reload" are gated on the sub-row having genuinely
+  been shown first (`wasExpanded`), or a build that never draws a sub-row would
+  pass them vacuously — the "a check that can't fail is not a check" trap, caught
+  by the control run passing them before they were tightened.
+
 ## Confirming the roster, a frozen first column, and the drags that never worked (migration 222, v9.10.0, Aug 2026)
 
 - **"Confirm roster" is the name, in the code as well as the UI.** The action was

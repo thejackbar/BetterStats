@@ -482,6 +482,12 @@ export default function Roster({ st, patch, narrow }) {
   // column narrow; one with three does not.
   const [railMin, setRailMin] = usePref('roster_rail_min', false)
   const [poolOpen, setPoolOpen] = usePref('roster_pool_open', true)
+  // Which operational areas have their roles collapsed on the Areas view. An
+  // area is a set of roles now (Umpire, Scorer, Turf Curator…) and shifts are
+  // created per role, so the grid draws a sub-row per role by default; this
+  // remembers the ones a person has folded away. Keyed by area, so a club with
+  // one Match Day area folded keeps the rest open.
+  const [areasCollapsed, setAreasCollapsed] = usePref('roster_areas_collapsed', {})
   // Pool search / role filter / sort. Deliberately NOT a saved preference —
   // a filter you left on last week hiding half the club is worse than retyping.
   const [poolQuery, setPoolQuery] = useState('')
@@ -783,6 +789,58 @@ export default function Roster({ st, patch, narrow }) {
 
   const depts = []; shownAreas.forEach(a => { if (!depts.includes(a.department || 'Areas')) depts.push(a.department || 'Areas') })
 
+  // ── Areas view: an area's roles, and the day cells that draw its shifts ──
+  //
+  // A shift belongs to a role now, so an area with several roles becomes a
+  // header that expands into a sub-row per role — which is what a shift is
+  // created and filled for. A shift with no role is the "General help" group.
+  //
+  // `areaDayCol` is the one place a shift chip is drawn on the Areas view,
+  // shared by the single-role row and the per-role sub-rows so they behave
+  // identically — same click-to-select, same drop target, same warning tint.
+  const areaDayCol = (a, cellShifts, d) => (
+    <div key={d} style={{ borderRight: `1px solid ${C.hair}`, padding: 6, minHeight: 74, display: 'flex', flexDirection: 'column', gap: 5, background: d >= 5 ? 'color-mix(in srgb, var(--pb-accent) 3%, transparent)' : undefined }}>
+      {cellShifts.filter(x => x.day_of_week === d).map(x => {
+        const warned = x.warnings && x.warnings.length
+        const over = st.overCell === 'slot-' + x.id
+        return (
+          <div key={x.id} onClick={() => patch({ selected: x.id })} {...slotDrop(x.id)}
+            style={{ borderRadius: 7, padding: '6px 8px', cursor: 'pointer', userSelect: 'none',
+              border: `1px solid ${x.assignee_member_id ? (warned ? 'rgba(245,181,66,0.5)' : `color-mix(in srgb, ${a.color || 'var(--pb-accent)'} 40%, transparent)`) : 'rgba(245,181,66,0.45)'}`,
+              background: x.assignee_member_id ? `color-mix(in srgb, ${a.color || 'var(--pb-accent)'} 13%, transparent)` : 'rgba(245,181,66,0.10)',
+              color: x.assignee_member_id ? (a.color || C.accent) : C.warn,
+              ...(over ? { boxShadow: '0 0 0 1.5px var(--pb-accent)' } : {}), ...(st.selected === x.id ? { outline: '1.5px solid var(--pb-accent)', outlineOffset: 1 } : {}) }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span style={{ fontWeight: 600, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', ...(x.assignee_member_id ? {} : { fontFamily: MONO, fontSize: 10, letterSpacing: '0.08em' }) }}>{x.assignee_name || 'OPEN'}</span>
+              {warned ? <span style={{ marginLeft: 'auto', color: C.warn, fontSize: 11 }}>!</span> : null}
+            </div>
+            <div style={{ fontFamily: MONO, fontSize: 10, opacity: 0.75, marginTop: 2 }}>{x.role_name ? x.role_name + ' · ' : ''}{fmtHour(x.start_time)}–{fmtHour(x.end_time)}</div>
+          </div>
+        )
+      })}
+    </div>
+  )
+
+  // The roles present among an area's shifts this week, in palette order. A role
+  // the club has set up but has no shift for this week has nothing to assign, so
+  // it isn't drawn; a shift with no role is the "General help" group, kept last.
+  const areaRoleGroups = (a, areaShifts) => {
+    const paletteOrder = new Map((a.roles || []).map((r, i) => [r.role_id, i]))
+    const groups = new Map()
+    areaShifts.forEach(x => {
+      const key = x.role_id || '__none'
+      if (!groups.has(key)) groups.set(key, { role_id: x.role_id || null, role_name: x.role_name || 'General help', shifts: [] })
+      groups.get(key).shifts.push(x)
+    })
+    return [...groups.values()].sort((g1, g2) => {
+      if (g1.role_id === null) return 1
+      if (g2.role_id === null) return -1
+      const i1 = paletteOrder.has(g1.role_id) ? paletteOrder.get(g1.role_id) : 1e9
+      const i2 = paletteOrder.has(g2.role_id) ? paletteOrder.get(g2.role_id) : 1e9
+      return (i1 - i2) || (g1.role_name || '').localeCompare(g2.role_name || '')
+    })
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
       {header(<>
@@ -937,45 +995,87 @@ export default function Roster({ st, patch, narrow }) {
                 {shownAreas.filter(a => (a.department || 'Areas') === dept).map(a => {
                   const mine = shifts.filter(x => x.area_id === a.id)
                   const filledN = mine.filter(x => x.assignee_member_id).length
-                  return (
-                    <div key={a.id} style={{ display: 'grid', gridTemplateColumns: gridCols, borderBottom: `1px solid ${C.hair}` }}>
-                      <div style={rail({ padding: railMin ? '10px 4px' : '10px 14px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 4, alignItems: railMin ? 'center' : 'stretch' })}
-                        title={railMin ? `${a.name} — ${filledN}/${mine.length} filled · click to edit the area` : undefined}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-                          <span onClick={() => openArea(a)} title={railMin ? undefined : `Edit ${a.name} and its shifts`}
-                            style={{ width: 9, height: 9, borderRadius: 3, flexShrink: 0, background: a.color || 'var(--pb-accent)', cursor: 'pointer' }} />
-                          {!railMin && <>
-                            <span onClick={() => openArea(a)} title={`Edit ${a.name} and its shifts`}
-                              style={{ fontSize: 13.5, fontWeight: 600, color: C.text, flex: 1, minWidth: 0, ...areaLinkStyle }}>{a.name}</span>
-                            <span style={{ fontFamily: MONO, fontSize: 9.5, color: filledN === mine.length ? C.ok : C.warn }}>{filledN}/{mine.length}</span>
-                          </>}
+                  const groups = areaRoleGroups(a, mine)
+                  const multi = groups.length > 1
+                  const collapsed = multi && !!areasCollapsed[a.id]
+
+                  // One role (or no shifts yet): a single row, exactly as before.
+                  // The role and its qualification read on the meta line, so
+                  // there is nothing to expand.
+                  if (!multi) {
+                    return (
+                      <div key={a.id} style={{ display: 'grid', gridTemplateColumns: gridCols, borderBottom: `1px solid ${C.hair}` }}>
+                        <div style={rail({ padding: railMin ? '10px 4px' : '10px 14px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 4, alignItems: railMin ? 'center' : 'stretch' })}
+                          title={railMin ? `${a.name} — ${filledN}/${mine.length} filled · click to edit the area` : undefined}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                            <span onClick={() => openArea(a)} title={railMin ? undefined : `Edit ${a.name} and its shifts`}
+                              style={{ width: 9, height: 9, borderRadius: 3, flexShrink: 0, background: a.color || 'var(--pb-accent)', cursor: 'pointer' }} />
+                            {!railMin && <>
+                              <span onClick={() => openArea(a)} title={`Edit ${a.name} and its shifts`}
+                                style={{ fontSize: 13.5, fontWeight: 600, color: C.text, flex: 1, minWidth: 0, ...areaLinkStyle }}>{a.name}</span>
+                              <span style={{ fontFamily: MONO, fontSize: 9.5, color: filledN === mine.length ? C.ok : C.warn }}>{filledN}/{mine.length}</span>
+                            </>}
+                          </div>
+                          {railMin
+                            ? <span style={{ fontFamily: MONO, fontSize: 9, color: filledN === mine.length ? C.ok : C.warn }}>{filledN}/{mine.length}</span>
+                            : <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>{[groups[0]?.role_name || a.required_role_name, a.required_qualification_name].filter(Boolean).join(' · ') || 'No role/qual set'}</div>}
                         </div>
-                        {railMin
-                          ? <span style={{ fontFamily: MONO, fontSize: 9, color: filledN === mine.length ? C.ok : C.warn }}>{filledN}/{mine.length}</span>
-                          : <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>{[a.required_role_name, a.required_qualification_name].filter(Boolean).join(' · ') || 'No role/qual set'}</div>}
+                        {DOW.map((_, d) => areaDayCol(a, mine, d))}
                       </div>
-                      {DOW.map((_, d) => (
-                        <div key={d} style={{ borderRight: `1px solid ${C.hair}`, padding: 6, minHeight: 74, display: 'flex', flexDirection: 'column', gap: 5, background: d >= 5 ? 'color-mix(in srgb, var(--pb-accent) 3%, transparent)' : undefined }}>
-                          {mine.filter(x => x.day_of_week === d).map(x => {
-                            const warned = x.warnings && x.warnings.length
-                            const over = st.overCell === 'slot-' + x.id
-                            return (
-                              <div key={x.id} onClick={() => patch({ selected: x.id })} {...slotDrop(x.id)}
-                                style={{ borderRadius: 7, padding: '6px 8px', cursor: 'pointer', userSelect: 'none',
-                                  border: `1px solid ${x.assignee_member_id ? (warned ? 'rgba(245,181,66,0.5)' : `color-mix(in srgb, ${a.color || 'var(--pb-accent)'} 40%, transparent)`) : 'rgba(245,181,66,0.45)'}`,
-                                  background: x.assignee_member_id ? `color-mix(in srgb, ${a.color || 'var(--pb-accent)'} 13%, transparent)` : 'rgba(245,181,66,0.10)',
-                                  color: x.assignee_member_id ? (a.color || C.accent) : C.warn,
-                                  ...(over ? { boxShadow: '0 0 0 1.5px var(--pb-accent)' } : {}), ...(st.selected === x.id ? { outline: '1.5px solid var(--pb-accent)', outlineOffset: 1 } : {}) }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                                  <span style={{ fontWeight: 600, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', ...(x.assignee_member_id ? {} : { fontFamily: MONO, fontSize: 10, letterSpacing: '0.08em' }) }}>{x.assignee_name || 'OPEN'}</span>
-                                  {warned ? <span style={{ marginLeft: 'auto', color: C.warn, fontSize: 11 }}>!</span> : null}
-                                </div>
-                                <div style={{ fontFamily: MONO, fontSize: 10, opacity: 0.75, marginTop: 2 }}>{x.role_name ? x.role_name + ' · ' : ''}{fmtHour(x.start_time)}–{fmtHour(x.end_time)}</div>
-                              </div>
-                            )
-                          })}
+                    )
+                  }
+
+                  // Several roles: a header that folds its per-role rows away.
+                  // The header carries the area total; each sub-row is one role,
+                  // with only that role's shifts in its day cells — which is what
+                  // a shift is created and assigned for.
+                  return (
+                    <div key={a.id} data-testid={`area-header-${a.id}`}>
+                      <div style={{ display: 'grid', gridTemplateColumns: gridCols, borderBottom: `1px solid ${C.hair}` }}>
+                        <div style={rail({ padding: railMin ? '9px 4px' : '9px 10px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 3, alignItems: railMin ? 'center' : 'stretch' })}
+                          title={railMin ? `${a.name} — ${groups.length} roles · ${filledN}/${mine.length} filled` : undefined}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <button onClick={() => setAreasCollapsed(m => ({ ...m, [a.id]: !m[a.id] }))}
+                              title={collapsed ? `Show ${a.name}'s roles` : `Hide ${a.name}'s roles`}
+                              data-testid={`area-toggle-${a.id}`}
+                              style={{ background: 'transparent', border: 'none', color: C.faint, cursor: 'pointer', fontSize: 10, lineHeight: 1, padding: 0, flexShrink: 0, width: 12 }}>
+                              {collapsed ? '▸' : '▾'}
+                            </button>
+                            <span onClick={() => openArea(a)} title={railMin ? undefined : `Edit ${a.name} and its shifts`}
+                              style={{ width: 9, height: 9, borderRadius: 3, flexShrink: 0, background: a.color || 'var(--pb-accent)', cursor: 'pointer' }} />
+                            {!railMin && <>
+                              <span onClick={() => openArea(a)} title={`Edit ${a.name} and its shifts`}
+                                style={{ fontSize: 13.5, fontWeight: 600, color: C.text, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', ...areaLinkStyle }}>{a.name}</span>
+                              <span style={{ fontFamily: MONO, fontSize: 9.5, color: filledN === mine.length ? C.ok : C.warn }}>{filledN}/{mine.length}</span>
+                            </>}
+                          </div>
+                          {!railMin && <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, paddingLeft: 18 }}>{groups.length} roles</div>}
+                          {railMin && <span style={{ fontFamily: MONO, fontSize: 9, color: filledN === mine.length ? C.ok : C.warn }}>{filledN}/{mine.length}</span>}
                         </div>
-                      ))}
+                        {DOW.map((_, d) => (
+                          <div key={d} style={{ borderRight: `1px solid ${C.hair}`, background: d >= 5 ? 'color-mix(in srgb, var(--pb-accent) 3%, transparent)' : undefined }} />
+                        ))}
+                      </div>
+                      {!collapsed && groups.map(g => {
+                        const gFilled = g.shifts.filter(x => x.assignee_member_id).length
+                        const qual = g.role_id ? (a.roles || []).find(r => r.role_id === g.role_id)?.required_qualification_name : null
+                        return (
+                          <div key={g.role_id || '__none'} data-testid={`area-role-row-${a.id}-${g.role_id || 'none'}`} style={{ display: 'grid', gridTemplateColumns: gridCols, borderBottom: `1px solid ${C.hair}` }}>
+                            <div style={rail({ padding: railMin ? '8px 4px' : '8px 12px 8px 26px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 3, alignItems: railMin ? 'center' : 'stretch', background: C.surface })}
+                              title={railMin ? `${g.role_name} — ${gFilled}/${g.shifts.length} filled` : undefined}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                                {!railMin && <span style={{ width: 5, height: 5, borderRadius: '50%', flexShrink: 0, background: a.color || 'var(--pb-accent)', opacity: 0.7 }} />}
+                                <span style={{ fontSize: 12.5, fontWeight: 600, color: C.dim, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {railMin ? (g.role_name || 'Gen').slice(0, 3) : g.role_name}
+                                </span>
+                                {!railMin && <span style={{ fontFamily: MONO, fontSize: 9, color: gFilled === g.shifts.length ? C.ok : C.warn }}>{gFilled}/{g.shifts.length}</span>}
+                              </div>
+                              {!railMin && qual && <div style={{ fontFamily: MONO, fontSize: 9, color: C.faint }}>needs {qual}</div>}
+                            </div>
+                            {DOW.map((_, d) => areaDayCol(a, g.shifts, d))}
+                          </div>
+                        )
+                      })}
                     </div>
                   )
                 })}
