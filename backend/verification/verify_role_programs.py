@@ -95,7 +95,7 @@ async def main() -> int:  # noqa: C901
 
     # ── DDL: create_all made the two tables; drop them and prove the SHIPPED
     #    statements build them, three times, idempotently ────────────────────
-    print("\n── DDL (migration 306) ──────────────────────────────────────")
+    print("\n── DDL (migration 307) ──────────────────────────────────────")
     async with engine.begin() as conn:
         await conn.execute(text("DROP TABLE IF EXISTS role_program_handover_items"))
         await conn.execute(text("DROP TABLE IF EXISTS role_program_handovers"))

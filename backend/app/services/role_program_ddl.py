@@ -1,6 +1,6 @@
 """The ONE copy of the Role Program handover DDL.
 
-Alembic (migration 306) and `main.py`'s lifespan mirror both run this list, in
+Alembic (migration 307) and `main.py`'s lifespan mirror both run this list, in
 this order, per the `vote_medal_ddl` rule — two copies is how the two drift.
 Every statement is idempotent, because the lifespan re-runs the whole list on
 every boot.

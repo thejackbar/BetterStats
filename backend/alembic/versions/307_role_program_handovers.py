@@ -9,15 +9,15 @@ walked through it, and have they understood and accepted it. Two tables, both
 defined once in services/role_program_ddl.py and shared with the lifespan
 mirror per the vote_medal_ddl rule.
 
-Revision ID: 306
-Revises: 305
+Revision ID: 307
+Revises: 306
 """
 from alembic import op
 
 from app.services.role_program_ddl import STATEMENTS
 
-revision = "306"
-down_revision = "305"
+revision = "307"
+down_revision = "306"
 branch_labels = None
 depends_on = None
 

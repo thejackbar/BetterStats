@@ -3786,7 +3786,7 @@ DIARY_TASK_FREQUENCIES = (
 DIARY_STANDING_FREQUENCIES = ("weekly", "matchday", "ongoing")
 DIARY_TASK_STATUSES = ("pending", "in_progress", "done", "not_applicable")
 
-# Role Program handovers (migration 306) — the succession/onboarding checklist.
+# Role Program handovers (migration 307) — the succession/onboarding checklist.
 ROLE_HANDOVER_STATUSES = ("in_progress", "completed", "cancelled")
 # The status of ONE element of a role being handed over. Deliberately about
 # understanding and acceptance (the club's stated goal), not job quality:
@@ -4039,7 +4039,7 @@ class DiaryTaskDependency(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
-# ─── Role Program handovers (migration 306) — succession & onboarding ────────
+# ─── Role Program handovers (migration 307) — succession & onboarding ────────
 # The Role Program (what a role entails) is assembled on read from the role, its
 # Club Diary tasks and its roster areas — no storage. What IS stored: when a
 # role changes hands, the onboarding checklist a responsible person works so the

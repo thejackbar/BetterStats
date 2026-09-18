@@ -1333,7 +1333,7 @@ async def lifespan(app: FastAPI):
         from app.services.game_import_staging_ddl import STATEMENTS as _GAME_STAGING_DDL
         for _stmt in _GAME_STAGING_DDL:
             await conn.execute(text(_stmt))
-        # Mirrors migration 306 — the ONE copy is the service. The onboarding
+        # Mirrors migration 307 — the ONE copy is the service. The onboarding
         # checklist tables behind a role's succession/handover tracker. The
         # Club Diary cadence widening in the same release is Python-only (no CHECK
         # on frequency), so it needs no mirror here.
