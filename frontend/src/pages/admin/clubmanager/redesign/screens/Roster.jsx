@@ -24,17 +24,19 @@ function weekDates(weekStartISO) {
 }
 const DEFAULT_CAP = 3
 
-// Client mirror of services/roster.check_assignment.
+// Client mirror of services/roster.check_assignment. The role/qualification
+// requirement is the SHIFT's own now (its role, and the qualification that
+// role's area-pairing gates on), not the area's.
 function checkClient(area, shift, cand, shifts, settings) {
   const blocks = [], warns = []
   const cap = settings.weekly_shift_cap || cand.max_shifts || DEFAULT_CAP
-  if (area.required_qualification_type_id && !cand.qual_type_ids.includes(area.required_qualification_type_id)) {
-    (settings.enforce_qualifications === false ? warns : blocks).push('Missing ' + (area.required_qualification_name || 'required qualification'))
+  if (shift.required_qualification_type_id && !cand.qual_type_ids.includes(shift.required_qualification_type_id)) {
+    (settings.enforce_qualifications === false ? warns : blocks).push('Missing ' + (shift.required_qualification_name || 'required qualification'))
   }
   if (!cand.available_days.includes(shift.day_of_week)) blocks.push('Not available ' + DOW[shift.day_of_week])
   const mine = shifts.filter(s => s.assignee_member_id === cand.member_id && s.id !== shift.id)
   if (mine.some(s => s.day_of_week === shift.day_of_week && s.start_time < shift.end_time && shift.start_time < s.end_time)) blocks.push('Overlaps another shift')
-  if (area.required_role_id && !cand.role_ids.includes(area.required_role_id)) warns.push('Not in the ' + (area.required_role_name || 'required') + ' role')
+  if (shift.role_id && !cand.role_ids.includes(shift.role_id)) warns.push('Not in the ' + (shift.role_name || 'required') + ' role')
   if (mine.length + 1 > cap) warns.push('Over their ' + cap + '-shift weekly cap')
   if (mine.length + 1 >= 4) warns.push('Heavy week — spread the load')
   if (cand.player_id && shift.day_of_week === 5 && shift.start_time < 18.5) warns.push('May be selected to play Saturday')
@@ -98,17 +100,27 @@ function EmailRostered({ weekStart, onToast }) {
 // Adding a shift that no weekly pattern covers: a final, a night game, an extra
 // hand behind the bar. Editing the pattern would change every week.
 function AddShift({ areas, weekId, onDone, onCancel }) {
-  const [f, setF] = useState({ area_id: areas[0]?.id || '', day_of_week: 5, start_time: '17', end_time: '21' })
+  const [f, setF] = useState({ area_id: areas[0]?.id || '', role_id: '', day_of_week: 5, start_time: '17', end_time: '21' })
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const inp = { padding: '6px 8px', borderRadius: 6, fontSize: 12, border: `1px solid ${C.hair2}`, background: C.surface2, color: C.text }
+  // The role this one-off shift is for, from the chosen area's palette. Picking
+  // another area drops a role that isn't in the new area's palette.
+  const areaRoles = (areas.find(a => a.id === f.area_id)?.roles) || []
+  const roleOk = f.role_id && areaRoles.some(r => r.role_id === f.role_id)
   return (
     <div style={{ background: C.surface2, border: `1px solid ${C.hair}`, borderRadius: 8, padding: 10, marginBottom: 10 }}>
       <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faintest, marginBottom: 8 }}>NEW SHIFT</div>
       <div style={{ display: 'grid', gap: 6 }}>
-        <select value={f.area_id} onChange={e => setF(v => ({ ...v, area_id: e.target.value }))} style={inp}>
+        <select value={f.area_id} onChange={e => setF(v => ({ ...v, area_id: e.target.value, role_id: '' }))} style={inp}>
           {areas.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select>
+        {areaRoles.length > 0 && (
+          <select value={roleOk ? f.role_id : ''} onChange={e => setF(v => ({ ...v, role_id: e.target.value }))} style={inp} data-testid="add-shift-role">
+            <option value="">Any role</option>
+            {areaRoles.map(r => <option key={r.role_id} value={r.role_id}>{r.role_name}</option>)}
+          </select>
+        )}
         <select value={f.day_of_week} onChange={e => setF(v => ({ ...v, day_of_week: Number(e.target.value) }))} style={inp}>
           {DOW.map((d, i) => <option key={i} value={i}>{d}</option>)}
         </select>
@@ -125,6 +137,7 @@ function AddShift({ areas, weekId, onDone, onCancel }) {
               await api.rosterCreateShift({
                 week_id: weekId, area_id: f.area_id, day_of_week: f.day_of_week,
                 start_time: Number(f.start_time), end_time: Number(f.end_time),
+                role_id: roleOk ? f.role_id : null,
               })
               onDone()
             } catch (e) { setErr(e.message) } finally { setBusy(false) }
@@ -422,7 +435,7 @@ function ConfirmRoster({ weekId, onDone, onToast }) {
                     <div style={{ padding: '8px 12px', fontSize: 13, fontWeight: 600 }}>{r.full_name}</div>
                     <div style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                       <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: r.color || 'var(--pb-accent)' }} />
-                      <span style={{ fontSize: 12.5, color: C.dim, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.area_name}</span>
+                      <span style={{ fontSize: 12.5, color: C.dim, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.area_name}{r.role_name ? ' · ' + r.role_name : ''}</span>
                     </div>
                     <div style={{ padding: '8px 12px', textAlign: 'right', fontFamily: MONO, fontSize: 11.5, color: C.faint, fontVariantNumeric: 'tabular-nums' }}>
                       {hrs(r.rostered_hours)}
@@ -707,7 +720,7 @@ export default function Roster({ st, patch, narrow }) {
               style={{ marginLeft: warned ? 4 : 'auto', flexShrink: 0, background: 'transparent', border: 'none', color: 'inherit', opacity: 0.55, cursor: 'pointer', fontSize: 12, lineHeight: 1, padding: 0 }}>×</button>
           )}
         </div>
-        <div style={{ fontFamily: MONO, fontSize: 10, opacity: 0.75, marginTop: 2 }}>{fmtHour(shift.start_time)}–{fmtHour(shift.end_time)}</div>
+        <div style={{ fontFamily: MONO, fontSize: 10, opacity: 0.75, marginTop: 2 }}>{shift.role_name ? shift.role_name + ' · ' : ''}{fmtHour(shift.start_time)}–{fmtHour(shift.end_time)}</div>
       </div>
     )
   }
@@ -957,7 +970,7 @@ export default function Roster({ st, patch, narrow }) {
                                   <span style={{ fontWeight: 600, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', ...(x.assignee_member_id ? {} : { fontFamily: MONO, fontSize: 10, letterSpacing: '0.08em' }) }}>{x.assignee_name || 'OPEN'}</span>
                                   {warned ? <span style={{ marginLeft: 'auto', color: C.warn, fontSize: 11 }}>!</span> : null}
                                 </div>
-                                <div style={{ fontFamily: MONO, fontSize: 10, opacity: 0.75, marginTop: 2 }}>{fmtHour(x.start_time)}–{fmtHour(x.end_time)}</div>
+                                <div style={{ fontFamily: MONO, fontSize: 10, opacity: 0.75, marginTop: 2 }}>{x.role_name ? x.role_name + ' · ' : ''}{fmtHour(x.start_time)}–{fmtHour(x.end_time)}</div>
                               </div>
                             )
                           })}
@@ -994,8 +1007,8 @@ export default function Roster({ st, patch, narrow }) {
                     <span onClick={() => openArea(selArea)} title={`Edit ${selArea.name} and its shifts`}
                       style={{ fontWeight: 600, fontSize: 14, ...areaLinkStyle }}>{selArea.name}</span>
                   </div>
-                  <div style={{ fontFamily: MONO, fontSize: 11, color: C.dim, marginTop: 4 }}>{DOW[sel.day_of_week]} {fmtHour(sel.start_time)}–{fmtHour(sel.end_time)}</div>
-                  <div style={{ fontFamily: MONO, fontSize: 10, color: C.faint, marginTop: 4 }}>{[selArea.required_role_name, selArea.required_qualification_name].filter(Boolean).join(' · ') || 'No requirement'}</div>
+                  <div style={{ fontFamily: MONO, fontSize: 11, color: C.dim, marginTop: 4 }}>{sel.role_name ? sel.role_name + ' · ' : ''}{DOW[sel.day_of_week]} {fmtHour(sel.start_time)}–{fmtHour(sel.end_time)}</div>
+                  <div style={{ fontFamily: MONO, fontSize: 10, color: C.faint, marginTop: 4 }}>{[sel.role_name, sel.required_qualification_name ? 'needs ' + sel.required_qualification_name : null].filter(Boolean).join(' · ') || 'No requirement'}</div>
                   <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
                     <button onClick={() => { if (candList[0]) doAssign(sel.id, candList[0].c.member_id) }} style={{ flex: 1, padding: '6px 10px', borderRadius: 6, fontSize: 12, fontWeight: 600, border: 'none', background: C.accent, color: '#fff', cursor: 'pointer' }}>Fill best match</button>
                     <button onClick={() => { doAssign(sel.id, null); patch({ selected: null }) }} style={{ padding: '6px 10px', borderRadius: 6, fontSize: 12, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.dim, cursor: 'pointer' }}>Clear</button>

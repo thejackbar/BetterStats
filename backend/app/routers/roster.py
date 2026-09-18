@@ -26,10 +26,19 @@ def _cand_api(c: dict) -> dict:
     return {**c, "role_ids": sorted(c["role_ids"]), "qual_type_ids": sorted(c["qual_type_ids"])}
 
 
+class AreaRoleIn(BaseModel):
+    role_id: str
+    required_qualification_type_id: Optional[str] = None
+
+
 class AreaUpsert(BaseModel):
     name: str
     department: Optional[str] = None
     color: Optional[str] = None
+    # The area's role palette: the roles it can involve, each paired with the
+    # qualification that gates that one role. `required_role_id`/`_qual` are the
+    # deprecated single-role fields, kept so an un-refreshed client still works.
+    roles: Optional[List[AreaRoleIn]] = None
     required_role_id: Optional[str] = None
     required_qualification_type_id: Optional[str] = None
     sort_order: Optional[int] = None
@@ -40,6 +49,7 @@ class PatternCreate(BaseModel):
     start_time: float
     end_time: float
     headcount: int = 1
+    role_id: Optional[str] = None
 
 
 class AssignBody(BaseModel):
@@ -61,6 +71,7 @@ async def get_areas(_: User = _cap, club: Organisation = Depends(get_current_clu
 @router.post("/areas")
 async def create_area(data: AreaUpsert, _: User = _cap, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
     aid = await svc.create_area(db, club.id, name=data.name, department=data.department, color=data.color,
+                                roles=[r.model_dump() for r in data.roles] if data.roles is not None else None,
                                 required_role_id=data.required_role_id, required_qualification_type_id=data.required_qualification_type_id)
     await db.commit()
     return {"id": aid}
@@ -153,7 +164,8 @@ async def seed_departments(_: User = _cap, club: Organisation = Depends(get_curr
 
 @router.post("/areas/{area_id}/patterns")
 async def add_pattern(area_id: str, data: PatternCreate, _: User = _cap, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
-    pid = await svc.add_pattern(db, club.id, area_id, day_of_week=data.day_of_week, start_time=data.start_time, end_time=data.end_time, headcount=data.headcount)
+    pid = await svc.add_pattern(db, club.id, area_id, day_of_week=data.day_of_week, start_time=data.start_time,
+                                end_time=data.end_time, headcount=data.headcount, role_id=data.role_id)
     await db.commit()
     return {"id": pid}
 
@@ -264,6 +276,7 @@ class ShiftCreate(BaseModel):
     day_of_week: int
     start_time: float
     end_time: float
+    role_id: Optional[str] = None
 
 
 class ShiftPatch(BaseModel):
@@ -271,6 +284,7 @@ class ShiftPatch(BaseModel):
     day_of_week: Optional[int] = None
     start_time: Optional[float] = None
     end_time: Optional[float] = None
+    role_id: Optional[str] = None
 
 
 def _valid_shift(day_of_week: Optional[int], start: Optional[float], end: Optional[float]):
@@ -286,7 +300,8 @@ async def create_shift(data: ShiftCreate, _: User = _cap, club: Organisation = D
     _valid_shift(data.day_of_week, data.start_time, data.end_time)
     sid = await svc.create_shift(db, club.id, uuid.UUID(data.week_id),
                                  area_id=uuid.UUID(data.area_id), day_of_week=data.day_of_week,
-                                 start_time=data.start_time, end_time=data.end_time)
+                                 start_time=data.start_time, end_time=data.end_time,
+                                 role_id=uuid.UUID(data.role_id) if data.role_id else None)
     await db.commit()
     return {"id": sid}
 
@@ -298,6 +313,9 @@ async def update_shift(shift_id: str, data: ShiftPatch, _: User = _cap,
     _valid_shift(fields.get("day_of_week"), fields.get("start_time"), fields.get("end_time"))
     if fields.get("area_id"):
         fields["area_id"] = uuid.UUID(fields["area_id"])
+    # role_id may be an explicit null (clear a one-off shift back to role-agnostic).
+    if fields.get("role_id"):
+        fields["role_id"] = uuid.UUID(fields["role_id"])
     await svc.update_shift(db, club.id, uuid.UUID(shift_id), **fields)
     await db.commit()
     return {"ok": True}

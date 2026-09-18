@@ -48,68 +48,143 @@ def day_index(value) -> Optional[int]:
 
 DEFAULT_CAP = 3  # per-person weekly cap when a club/person hasn't set one
 
+# A role's type category that marks it as paid work rather than volunteer.
+PAID_CATEGORY = "paid"
+
 
 def _f(v):
     return float(v) if v is not None else None
 
 
-# ── areas + patterns ────────────────────────────────────────────────────────
+# ── areas + role palette + patterns ─────────────────────────────────────────
+#
+# An operational area holds a PALETTE of roles (roster_area_roles), each paired
+# with the qualification that gates that one role — the plural form of the old
+# single (role, qualification) pair on the area. A shift/pattern is FOR one of
+# those roles. `roster_areas.required_role_id`/`.required_qualification_type_id`
+# are deprecated: read only by migration 306's backfill, never written here.
 async def list_areas(db: AsyncSession, org_id) -> list[dict]:
     rows = (await db.execute(text("""
-        SELECT a.id, a.name, a.department, a.color, a.required_role_id, a.required_qualification_type_id,
-               a.sort_order, a.is_active, r.title AS role_name, q.name AS qual_name
+        SELECT a.id, a.name, a.department, a.color, a.sort_order, a.is_active
         FROM roster_areas a
-        LEFT JOIN club_roles r ON r.id = a.required_role_id
-        LEFT JOIN qualification_types q ON q.id = a.required_qualification_type_id
         WHERE a.organisation_id = :org AND a.is_active = TRUE
         ORDER BY a.sort_order, lower(a.name)
     """), {"org": org_id})).mappings().all()
+    role_rows = (await db.execute(text("""
+        SELECT ar.area_id, ar.role_id, ar.required_qualification_type_id, ar.sort_order,
+               r.title AS role_name, q.name AS qual_name,
+               (COALESCE(rt.category, '') = :paid) AS is_paid
+        FROM roster_area_roles ar
+        JOIN club_roles r ON r.id = ar.role_id
+        LEFT JOIN club_role_types rt ON rt.id = r.role_type_id
+        LEFT JOIN qualification_types q ON q.id = ar.required_qualification_type_id
+        WHERE ar.organisation_id = :org
+        ORDER BY ar.sort_order, lower(r.title)
+    """), {"org": org_id, "paid": PAID_CATEGORY})).mappings().all()
     pats = (await db.execute(text("""
-        SELECT id, area_id, day_of_week, start_time, end_time, headcount
-        FROM roster_shift_patterns WHERE organisation_id = :org
-        ORDER BY day_of_week, start_time
+        SELECT p.id, p.area_id, p.day_of_week, p.start_time, p.end_time, p.headcount, p.role_id,
+               r.title AS role_name
+        FROM roster_shift_patterns p
+        LEFT JOIN club_roles r ON r.id = p.role_id
+        WHERE p.organisation_id = :org
+        ORDER BY p.day_of_week, p.start_time
     """), {"org": org_id})).mappings().all()
+    roles_by = {}
+    for r in role_rows:
+        roles_by.setdefault(str(r["area_id"]), []).append({
+            "role_id": str(r["role_id"]), "role_name": r["role_name"],
+            "required_qualification_type_id": str(r["required_qualification_type_id"]) if r["required_qualification_type_id"] else None,
+            "required_qualification_name": r["qual_name"],
+            "is_paid": bool(r["is_paid"]), "sort_order": r["sort_order"],
+        })
     by_area = {}
     for p in pats:
         by_area.setdefault(str(p["area_id"]), []).append({
             "id": str(p["id"]), "day_of_week": p["day_of_week"],
             "start_time": _f(p["start_time"]), "end_time": _f(p["end_time"]), "headcount": p["headcount"],
+            "role_id": str(p["role_id"]) if p["role_id"] else None, "role_name": p["role_name"],
         })
-    return [{
-        "id": str(a["id"]), "name": a["name"], "department": a["department"], "color": a["color"],
-        "required_role_id": str(a["required_role_id"]) if a["required_role_id"] else None,
-        "required_role_name": a["role_name"],
-        "required_qualification_type_id": str(a["required_qualification_type_id"]) if a["required_qualification_type_id"] else None,
-        "required_qualification_name": a["qual_name"],
-        "sort_order": a["sort_order"], "is_active": a["is_active"],
-        "patterns": by_area.get(str(a["id"]), []),
-    } for a in rows]
+    out = []
+    for a in rows:
+        aid = str(a["id"])
+        palette = roles_by.get(aid, [])
+        first = palette[0] if palette else None
+        out.append({
+            "id": aid, "name": a["name"], "department": a["department"], "color": a["color"],
+            "roles": palette,
+            # Deprecated single-role fields, kept so an un-refreshed client still
+            # shows something — the first palette entry. New clients read `roles`.
+            "required_role_id": first["role_id"] if first else None,
+            "required_role_name": first["role_name"] if first else None,
+            "required_qualification_type_id": first["required_qualification_type_id"] if first else None,
+            "required_qualification_name": first["required_qualification_name"] if first else None,
+            "sort_order": a["sort_order"], "is_active": a["is_active"],
+            "patterns": by_area.get(aid, []),
+        })
+    return out
 
 
-async def create_area(db: AsyncSession, org_id, *, name, department=None, color=None,
+async def _set_area_roles(db: AsyncSession, org_id, area_id, roles) -> None:
+    """Replace an area's role palette. `roles` is a list of
+    {role_id, required_qualification_type_id}; a role_id may appear once."""
+    await db.execute(text("DELETE FROM roster_area_roles WHERE area_id=:a AND organisation_id=:org"),
+                     {"a": area_id, "org": org_id})
+    seen, i = set(), 0
+    for r in roles or []:
+        rid = r.get("role_id") if isinstance(r, dict) else None
+        if not rid or str(rid) in seen:
+            continue
+        seen.add(str(rid))
+        await db.execute(text("""
+            INSERT INTO roster_area_roles (id, organisation_id, area_id, role_id, required_qualification_type_id, sort_order)
+            VALUES (:id, :org, :a, :role, :qual, :sort)
+        """), {"id": uuid.uuid4(), "org": org_id, "a": area_id, "role": rid,
+               "qual": (r.get("required_qualification_type_id") or None), "sort": i})
+        i += 1
+
+
+def _roles_from_fields(roles, required_role_id, required_qualification_type_id):
+    """The palette a caller asked for: the explicit `roles` list when given, else
+    a one-entry palette synthesised from a legacy single-role caller."""
+    if roles is not None:
+        return roles
+    if required_role_id:
+        return [{"role_id": required_role_id, "required_qualification_type_id": required_qualification_type_id}]
+    return None
+
+
+async def create_area(db: AsyncSession, org_id, *, name, department=None, color=None, roles=None,
                       required_role_id=None, required_qualification_type_id=None) -> str:
     aid = uuid.uuid4()
     n = (await db.execute(text("SELECT COALESCE(MAX(sort_order),0)+1 AS n FROM roster_areas WHERE organisation_id=:org"), {"org": org_id})).scalar() or 1
     await db.execute(text("""
-        INSERT INTO roster_areas (id, organisation_id, name, department, color, required_role_id, required_qualification_type_id, sort_order)
-        VALUES (:id, :org, :name, :dept, :color, :role, :qual, :sort)
-    """), {"id": aid, "org": org_id, "name": name, "dept": department, "color": color,
-           "role": required_role_id, "qual": required_qualification_type_id, "sort": n})
+        INSERT INTO roster_areas (id, organisation_id, name, department, color, sort_order)
+        VALUES (:id, :org, :name, :dept, :color, :sort)
+    """), {"id": aid, "org": org_id, "name": name, "dept": department, "color": color, "sort": n})
+    palette = _roles_from_fields(roles, required_role_id, required_qualification_type_id)
+    if palette is not None:
+        await _set_area_roles(db, org_id, str(aid), palette)
     return str(aid)
 
 
 async def update_area(db: AsyncSession, org_id, area_id, **fields) -> None:
-    cols = {"name": "name", "department": "department", "color": "color",
-            "required_role_id": "required_role_id", "required_qualification_type_id": "required_qualification_type_id",
-            "sort_order": "sort_order"}
+    cols = {"name": "name", "department": "department", "color": "color", "sort_order": "sort_order"}
     sets, params = [], {"id": area_id, "org": org_id}
     for k, col in cols.items():
         if k in fields:
             sets.append(f"{col} = :{k}")
             params[k] = fields[k]
-    if not sets:
-        return
-    await db.execute(text(f"UPDATE roster_areas SET {', '.join(sets)} WHERE id=:id AND organisation_id=:org"), params)
+    if sets:
+        await db.execute(text(f"UPDATE roster_areas SET {', '.join(sets)} WHERE id=:id AND organisation_id=:org"), params)
+    # The palette is only rewritten when the caller says so — a rename must not
+    # wipe it. `roles` from the new client; the legacy single-role fields from an
+    # un-refreshed one (its form always sends `required_role_id`).
+    if "roles" in fields and fields["roles"] is not None:
+        await _set_area_roles(db, org_id, area_id, fields["roles"])
+    elif "required_role_id" in fields:
+        rid = fields.get("required_role_id")
+        await _set_area_roles(db, org_id, area_id,
+                              [{"role_id": rid, "required_qualification_type_id": fields.get("required_qualification_type_id")}] if rid else [])
 
 
 async def delete_area(db: AsyncSession, org_id, area_id) -> None:
@@ -213,12 +288,13 @@ async def seed_starter_departments(db: AsyncSession, org_id) -> int:
     return seeded
 
 
-async def add_pattern(db: AsyncSession, org_id, area_id, *, day_of_week, start_time, end_time, headcount=1) -> str:
+async def add_pattern(db: AsyncSession, org_id, area_id, *, day_of_week, start_time, end_time, headcount=1, role_id=None) -> str:
     pid = uuid.uuid4()
     await db.execute(text("""
-        INSERT INTO roster_shift_patterns (id, organisation_id, area_id, day_of_week, start_time, end_time, headcount)
-        VALUES (:id, :org, :area, :dow, :start, :end, :hc)
-    """), {"id": pid, "org": org_id, "area": area_id, "dow": day_of_week, "start": start_time, "end": end_time, "hc": headcount})
+        INSERT INTO roster_shift_patterns (id, organisation_id, area_id, day_of_week, start_time, end_time, headcount, role_id)
+        VALUES (:id, :org, :area, :dow, :start, :end, :hc, :role)
+    """), {"id": pid, "org": org_id, "area": area_id, "dow": day_of_week, "start": start_time,
+           "end": end_time, "hc": headcount, "role": role_id})
     return str(pid)
 
 
@@ -292,18 +368,22 @@ async def candidates(db: AsyncSession, org_id) -> list[dict]:
 def check_assignment(area: dict, shift: dict, cand: dict, week_shifts: list[dict], settings: dict) -> dict:
     blocks, warns = [], []
     cap = settings.get("weekly_shift_cap") or cand.get("max_shifts") or DEFAULT_CAP
-    req_qual = area.get("required_qualification_type_id")
+    # The role/qualification requirement is the SHIFT's own now (its role, and
+    # the qualification that role's area-pairing gates on), not the area's — an
+    # area can hold a paid role that needs accreditation beside a volunteer one
+    # that needs nothing.
+    req_qual = shift.get("required_qualification_type_id")
     if req_qual and req_qual not in cand["qual_type_ids"]:
-        msg = "Missing " + (area.get("required_qualification_name") or "required qualification")
+        msg = "Missing " + (shift.get("required_qualification_name") or "required qualification")
         (warns if settings.get("enforce_qualifications") is False else blocks).append(msg)
     if shift["day_of_week"] not in cand["available_days"]:
         blocks.append("Not available " + DOW[shift["day_of_week"]])
     mine = [s for s in week_shifts if s.get("assignee_member_id") == cand["member_id"] and s["id"] != shift["id"]]
     if any(s["day_of_week"] == shift["day_of_week"] and s["start_time"] < shift["end_time"] and shift["start_time"] < s["end_time"] for s in mine):
         blocks.append("Overlaps another shift")
-    req_role = area.get("required_role_id")
+    req_role = shift.get("role_id")
     if req_role and req_role not in cand["role_ids"]:
-        warns.append("Not in the " + (area.get("required_role_name") or "required") + " role")
+        warns.append("Not in the " + (shift.get("role_name") or "required") + " role")
     if len(mine) + 1 > cap:
         warns.append(f"Over their {cap}-shift weekly cap")
     if len(mine) + 1 >= 4:
@@ -333,18 +413,33 @@ def _monday(d: date) -> date:
 
 
 async def _shift_rows(db: AsyncSession, week_id) -> list[dict]:
+    # Each shift carries its OWN role, and the role decides the rest: its name,
+    # whether it is paid (role type category), and the qualification that gates
+    # it (the area-role pairing). A shift with no role_id is general help — no
+    # requirement, unpaid.
     rows = (await db.execute(text("""
         SELECT s.id, s.area_id, s.day_of_week, s.start_time, s.end_time, s.assignee_member_id, s.warnings,
-               fm.full_name AS assignee_name
-        FROM roster_shifts s LEFT JOIN fee_members fm ON fm.id = s.assignee_member_id
+               s.role_id, fm.full_name AS assignee_name, r.title AS role_name,
+               (COALESCE(rt.category, '') = :paid) AS is_paid,
+               ar.required_qualification_type_id AS req_qual_id, q.name AS req_qual_name
+        FROM roster_shifts s
+        LEFT JOIN fee_members fm ON fm.id = s.assignee_member_id
+        LEFT JOIN club_roles r ON r.id = s.role_id
+        LEFT JOIN club_role_types rt ON rt.id = r.role_type_id
+        LEFT JOIN roster_area_roles ar ON ar.area_id = s.area_id AND ar.role_id = s.role_id
+        LEFT JOIN qualification_types q ON q.id = ar.required_qualification_type_id
         WHERE s.roster_week_id = :wid
         ORDER BY s.day_of_week, s.start_time
-    """), {"wid": week_id})).mappings().all()
+    """), {"wid": week_id, "paid": PAID_CATEGORY})).mappings().all()
     return [{
         "id": str(r["id"]), "area_id": str(r["area_id"]), "day_of_week": r["day_of_week"],
         "start_time": _f(r["start_time"]), "end_time": _f(r["end_time"]),
         "assignee_member_id": str(r["assignee_member_id"]) if r["assignee_member_id"] else None,
         "assignee_name": r["assignee_name"], "warnings": r["warnings"] or [],
+        "role_id": str(r["role_id"]) if r["role_id"] else None, "role_name": r["role_name"],
+        "is_paid": bool(r["is_paid"]),
+        "required_qualification_type_id": str(r["req_qual_id"]) if r["req_qual_id"] else None,
+        "required_qualification_name": r["req_qual_name"],
     } for r in rows]
 
 
@@ -377,17 +472,17 @@ async def _has_shifts(db: AsyncSession, week_id) -> bool:
 
 async def _generate_shifts(db: AsyncSession, org_id, week_id) -> None:
     pats = (await db.execute(text("""
-        SELECT p.area_id, p.day_of_week, p.start_time, p.end_time, p.headcount
+        SELECT p.area_id, p.role_id, p.day_of_week, p.start_time, p.end_time, p.headcount
         FROM roster_shift_patterns p JOIN roster_areas a ON a.id = p.area_id
         WHERE p.organisation_id = :org AND a.is_active = TRUE
     """), {"org": org_id})).mappings().all()
     for p in pats:
         for _ in range(int(p["headcount"] or 1)):
             await db.execute(text("""
-                INSERT INTO roster_shifts (id, roster_week_id, organisation_id, area_id, day_of_week, start_time, end_time)
-                VALUES (:id, :wid, :org, :area, :dow, :start, :end)
+                INSERT INTO roster_shifts (id, roster_week_id, organisation_id, area_id, role_id, day_of_week, start_time, end_time)
+                VALUES (:id, :wid, :org, :area, :role, :dow, :start, :end)
             """), {"id": uuid.uuid4(), "wid": week_id, "org": org_id, "area": p["area_id"],
-                   "dow": p["day_of_week"], "start": p["start_time"], "end": p["end_time"]})
+                   "role": p["role_id"], "dow": p["day_of_week"], "start": p["start_time"], "end": p["end_time"]})
 
 
 async def _week_context(db: AsyncSession, org_id, week_id):
@@ -466,19 +561,27 @@ async def reset_week(db: AsyncSession, org_id, week_id) -> None:
 
 
 # Default starter areas so a club can see the roster populate immediately. Roles
-# and qualifications are matched to the club's existing catalogue by name where
-# they exist, else left unlinked for the admin to wire up. [day,start,end,count]
+# and their gating qualifications are matched to the club's existing catalogue by
+# name where they exist, else left unlinked for the admin to wire up. "Match Day"
+# is deliberately multi-role — Umpires, Scorers and a Team Manager on one area —
+# to show the shape off. `roles` is a list of (role, gating qualification);
+# `patterns` is [day, start, end, headcount, role] so each shift is FOR one role.
 STARTER_AREAS = [
-    {"name": "Bar", "department": "Food & Beverage", "color": "#f5b542", "role": "Bar Supervisor", "qual": "RSA",
-     "patterns": [[1, 17, 21, 1], [3, 17, 22, 2], [5, 12, 24, 2], [6, 12, 24, 2]]},
-    {"name": "Kitchen", "department": "Food & Beverage", "color": "#f97316", "role": "Canteen", "qual": "Food Handling",
-     "patterns": [[3, 18, 20, 2], [5, 18, 20, 1], [6, 16, 20, 1]]},
-    {"name": "Umpires", "department": "Cricket Operations", "color": "#3b82f6", "role": "Umpire", "qual": "Umpire Accreditation",
-     "patterns": [[5, 12, 18.5, 4], [6, 12, 18.5, 4]]},
-    {"name": "Scorer", "department": "Cricket Operations", "color": "#06b6d4", "role": "Scorer", "qual": None,
-     "patterns": [[5, 12, 18.5, 4], [6, 12, 18.5, 4]]},
-    {"name": "Groundsman", "department": "Cricket Operations", "color": "#16c784", "role": "Groundsman", "qual": None,
-     "patterns": [[0, 12, 15, 1], [5, 9, 10, 1], [6, 9, 10, 1]]},
+    {"name": "Bar", "department": "Food & Beverage", "color": "#f5b542",
+     "roles": [("Bar Supervisor", "RSA")],
+     "patterns": [[1, 17, 21, 1, "Bar Supervisor"], [3, 17, 22, 2, "Bar Supervisor"],
+                  [5, 12, 24, 2, "Bar Supervisor"], [6, 12, 24, 2, "Bar Supervisor"]]},
+    {"name": "Kitchen", "department": "Food & Beverage", "color": "#f97316",
+     "roles": [("Canteen", "Food Handling")],
+     "patterns": [[3, 18, 20, 2, "Canteen"], [5, 18, 20, 1, "Canteen"], [6, 16, 20, 1, "Canteen"]]},
+    {"name": "Match Day", "department": "Cricket Operations", "color": "#3b82f6",
+     "roles": [("Umpire", "Umpire Accreditation"), ("Scorer", None), ("Team Manager", None)],
+     "patterns": [[5, 12, 18.5, 2, "Umpire"], [6, 12, 18.5, 2, "Umpire"],
+                  [5, 12, 18.5, 2, "Scorer"], [6, 12, 18.5, 2, "Scorer"],
+                  [5, 11, 18.5, 1, "Team Manager"], [6, 11, 18.5, 1, "Team Manager"]]},
+    {"name": "Groundsman", "department": "Cricket Operations", "color": "#16c784",
+     "roles": [("Groundsman", None)],
+     "patterns": [[0, 12, 15, 1, "Groundsman"], [5, 9, 10, 1, "Groundsman"], [6, 9, 10, 1, "Groundsman"]]},
 ]
 
 
@@ -494,11 +597,18 @@ async def seed_starter_areas(db: AsyncSession, org_id) -> int:
     await seed_starter_departments(db, org_id)
     seeded = 0
     for a in STARTER_AREAS:
-        aid = await create_area(db, org_id, name=a["name"], department=a["department"], color=a["color"],
-                                required_role_id=roles.get((a["role"] or "").lower()),
-                                required_qualification_type_id=quals.get((a["qual"] or "").lower()))
+        # Only roles the club actually has resolve into the palette (role_id is
+        # NOT NULL there); an absent role is skipped rather than left dangling.
+        palette = []
+        for (rname, qname) in a["roles"]:
+            rid = roles.get((rname or "").lower())
+            if rid:
+                palette.append({"role_id": rid, "required_qualification_type_id": quals.get((qname or "").lower())})
+        aid = await create_area(db, org_id, name=a["name"], department=a["department"], color=a["color"], roles=palette)
         for p in a["patterns"]:
-            await add_pattern(db, org_id, aid, day_of_week=p[0], start_time=p[1], end_time=p[2], headcount=p[3])
+            role_name = p[4] if len(p) > 4 else None
+            await add_pattern(db, org_id, aid, day_of_week=p[0], start_time=p[1], end_time=p[2],
+                              headcount=p[3], role_id=roles.get((role_name or "").lower()) if role_name else None)
         seeded += 1
     return seeded
 
@@ -546,12 +656,12 @@ async def rostered_contacts(db: AsyncSession, org_id, start: date, end: date) ->
 # its own right without touching the pattern it came from.
 
 async def create_shift(db: AsyncSession, org_id, week_id, *, area_id, day_of_week,
-                       start_time, end_time) -> str:
+                       start_time, end_time, role_id=None) -> str:
     sid = uuid.uuid4()
     await db.execute(text("""
-        INSERT INTO roster_shifts (id, roster_week_id, organisation_id, area_id, day_of_week, start_time, end_time)
-        VALUES (:id, :wid, :org, :area, :dow, :st, :et)
-    """), {"id": sid, "wid": week_id, "org": org_id, "area": area_id,
+        INSERT INTO roster_shifts (id, roster_week_id, organisation_id, area_id, role_id, day_of_week, start_time, end_time)
+        VALUES (:id, :wid, :org, :area, :role, :dow, :st, :et)
+    """), {"id": sid, "wid": week_id, "org": org_id, "area": area_id, "role": role_id,
            "dow": int(day_of_week), "st": start_time, "et": end_time})
     return str(sid)
 
@@ -564,6 +674,11 @@ async def update_shift(db: AsyncSession, org_id, shift_id, **fields) -> None:
         if k in fields and fields[k] is not None:
             sets.append(f"{col} = :{k}")
             params[k] = fields[k]
+    # role_id is handled explicitly, so a one-off shift can be cleared back to
+    # role-agnostic (an explicit NULL) rather than "leave alone".
+    if "role_id" in fields:
+        sets.append("role_id = :role_id")
+        params["role_id"] = fields["role_id"]
     if not sets:
         return
     await db.execute(text(
@@ -579,24 +694,10 @@ async def delete_shift(db: AsyncSession, org_id, shift_id) -> None:
 # ── Paid vs volunteer ────────────────────────────────────────────────────────
 #
 # A club's roster mixes people it employs with people doing it for nothing, and
-# until now it could not tell them apart. The distinction is NOT a new flag: an
-# area already requires a club_role, and a role already has a type whose
-# category can be 'paid'. Deriving it keeps one answer instead of two that can
-# disagree.
-
-PAID_CATEGORY = "paid"
-
-
-async def area_pay_kinds(db: AsyncSession, org_id) -> dict:
-    """area_id -> True when that area's required role is a paid one."""
-    rows = (await db.execute(text("""
-        SELECT a.id, COALESCE(rt.category, '') AS category
-        FROM roster_areas a
-        LEFT JOIN club_roles r ON r.id = a.required_role_id
-        LEFT JOIN club_role_types rt ON rt.id = r.role_type_id
-        WHERE a.organisation_id = :org
-    """), {"org": org_id})).mappings().all()
-    return {str(r["id"]): (r["category"] or "").lower() == PAID_CATEGORY for r in rows}
+# until now it could not tell them apart. The distinction is NOT a new flag: a
+# shift is FOR a club_role, and a role has a type whose category can be 'paid'.
+# Deriving it per shift (rather than per area) keeps one answer even when a
+# single area holds both a paid and a volunteer role.
 
 
 def shift_hours(start_time, end_time) -> float:
@@ -624,28 +725,32 @@ async def confirm_review(db: AsyncSession, org_id, week_id) -> dict:
     if not week:
         return {"week": None, "rows": [], "totals": {}}
 
-    paid_by_area = await area_pay_kinds(db, org_id)
     rows = (await db.execute(text("""
         SELECT s.id, s.area_id, s.day_of_week, s.start_time, s.end_time, s.worked_hours,
                s.assignee_member_id, m.full_name, a.name AS area_name, a.color,
+               cr.title AS role_name,
+               (COALESCE(rt.category, '') = :paid) AS is_paid,
                (h.id IS NOT NULL) AS posted
         FROM roster_shifts s
         JOIN fee_members m ON m.id = s.assignee_member_id
         JOIN roster_areas a ON a.id = s.area_id
+        LEFT JOIN club_roles cr ON cr.id = s.role_id
+        LEFT JOIN club_role_types rt ON rt.id = cr.role_type_id
         LEFT JOIN volunteer_hours h ON h.roster_shift_id = s.id
         WHERE s.roster_week_id = :wid AND s.organisation_id = :org
         ORDER BY s.day_of_week, s.start_time, a.name
-    """), {"wid": week_id, "org": org_id})).mappings().all()
+    """), {"wid": week_id, "org": org_id, "paid": PAID_CATEGORY})).mappings().all()
 
     out, totals = [], {"rostered": 0.0, "worked": 0.0, "worked_paid": 0.0, "worked_volunteer": 0.0}
     for r in rows:
         rostered = shift_hours(r["start_time"], r["end_time"])
         reviewed = r["worked_hours"] is not None
         worked = float(r["worked_hours"]) if reviewed else rostered
-        is_paid = paid_by_area.get(str(r["area_id"]), False)
+        is_paid = bool(r["is_paid"])
         out.append({
             "shift_id": str(r["id"]), "member_id": str(r["assignee_member_id"]),
             "full_name": r["full_name"], "area_name": r["area_name"], "color": r["color"],
+            "role_name": r["role_name"],
             "day_of_week": r["day_of_week"], "start_time": _f(r["start_time"]), "end_time": _f(r["end_time"]),
             "rostered_hours": round(rostered, 2), "worked_hours": round(worked, 2),
             "reviewed": reviewed, "is_paid": is_paid, "posted": bool(r["posted"]),
@@ -761,9 +866,9 @@ async def unconfirm_roster(db: AsyncSession, org_id, week_id) -> dict:
 async def role_shortages(db: AsyncSession, org_id, *, weeks: int = 4) -> dict:
     """Which roles the club is short of, read from the shifts nobody has filled.
 
-    Demand is the unfilled shifts in the weeks ahead, resolved through their
-    operational area to the role that area asks for. Supply is the people who
-    hold that role AND are free on the day the shift falls.
+    Demand is the unfilled shifts in the weeks ahead, resolved through the role
+    each shift is FOR. Supply is the people who hold that role AND are free on
+    the day the shift falls.
 
     The day matters, and it is the whole point of the function. Six people hold
     the Scorer role is a comforting number that means nothing if all six are
@@ -771,9 +876,9 @@ async def role_shortages(db: AsyncSession, org_id, *, weeks: int = 4) -> dict:
     drives this is per (role, day), and a role reads as short when a day it is
     needed on has fewer free holders than open shifts.
 
-    An area with no required role is reported separately rather than silently
-    dropped: those shifts are open too, and "we need people, for nothing in
-    particular" is a different conversation from "we need two more scorers".
+    A shift with no role is reported separately rather than silently dropped:
+    those shifts are open too, and "we need people, for nothing in particular"
+    is a different conversation from "we need two more scorers".
     """
     today = date.today()
     horizon = today + timedelta(weeks=max(1, min(weeks, 26)))
@@ -783,12 +888,12 @@ async def role_shortages(db: AsyncSession, org_id, *, weeks: int = 4) -> dict:
     open_rows = (await db.execute(text("""
         SELECT s.day_of_week, s.start_time, s.end_time,
                a.id AS area_id, a.name AS area_name, a.color,
-               a.required_role_id, r.title AS role_title,
+               s.role_id AS required_role_id, r.title AS role_title,
                (w.week_start + s.day_of_week) AS shift_date
         FROM roster_shifts s
         JOIN roster_weeks w ON w.id = s.roster_week_id
         JOIN roster_areas a ON a.id = s.area_id
-        LEFT JOIN club_roles r ON r.id = a.required_role_id
+        LEFT JOIN club_roles r ON r.id = s.role_id
         WHERE s.organisation_id = :org AND s.assignee_member_id IS NULL
           AND (w.week_start + s.day_of_week) BETWEEN :today AND :horizon
         ORDER BY (w.week_start + s.day_of_week), s.start_time
@@ -865,16 +970,17 @@ async def hours_summary(db: AsyncSession, org_id, *, start: date, end: date) -> 
     afterwards. They are deliberately separate numbers — the gap between them is
     the thing a club wants to see, and collapsing them would hide it.
     """
-    paid_by_area = await area_pay_kinds(db, org_id)
     shifts = (await db.execute(text("""
         SELECT s.assignee_member_id AS member_id, s.area_id, s.start_time, s.end_time,
-               m.full_name
+               m.full_name, (COALESCE(rt.category, '') = :paid) AS is_paid
         FROM roster_shifts s
         JOIN roster_weeks w ON w.id = s.roster_week_id
         JOIN fee_members m ON m.id = s.assignee_member_id
+        LEFT JOIN club_roles cr ON cr.id = s.role_id
+        LEFT JOIN club_role_types rt ON rt.id = cr.role_type_id
         WHERE s.organisation_id = :org AND s.assignee_member_id IS NOT NULL
           AND (w.week_start + s.day_of_week) BETWEEN :start AND :end
-    """), {"org": org_id, "start": start, "end": end})).mappings().all()
+    """), {"org": org_id, "start": start, "end": end, "paid": PAID_CATEGORY})).mappings().all()
 
     logged = (await db.execute(text("""
         SELECT h.member_id, m.full_name, h.hours, h.is_paid
@@ -893,7 +999,7 @@ async def hours_summary(db: AsyncSession, org_id, *, start: date, end: date) -> 
 
     for s in shifts:
         r = row(s["member_id"], s["full_name"])
-        key = "rostered_paid" if paid_by_area.get(str(s["area_id"])) else "rostered_volunteer"
+        key = "rostered_paid" if s["is_paid"] else "rostered_volunteer"
         r[key] += shift_hours(s["start_time"], s["end_time"])
     for h in logged:
         r = row(h["member_id"], h["full_name"])

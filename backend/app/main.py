@@ -5109,6 +5109,44 @@ async def lifespan(app: FastAPI):
             ON volunteer_hours(roster_shift_id) WHERE roster_shift_id IS NOT NULL
         """))
 
+        # Migration 306: an operational area holds several roles (a palette,
+        # each paired with the qualification that gates it), and a shift/pattern
+        # is FOR one of them. Byte-identical to
+        # alembic/versions/306_roster_area_roles.py, backfill included so an
+        # existing single-role area behaves identically.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS roster_area_roles (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                area_id UUID NOT NULL REFERENCES roster_areas(id) ON DELETE CASCADE,
+                role_id UUID NOT NULL REFERENCES club_roles(id) ON DELETE CASCADE,
+                required_qualification_type_id UUID REFERENCES qualification_types(id) ON DELETE SET NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_roster_area_roles UNIQUE (area_id, role_id)
+            )
+        """))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_roster_area_roles_area ON roster_area_roles(area_id)"))
+        await conn.execute(text("ALTER TABLE roster_shift_patterns ADD COLUMN IF NOT EXISTS role_id UUID REFERENCES club_roles(id) ON DELETE SET NULL"))
+        await conn.execute(text("ALTER TABLE roster_shifts ADD COLUMN IF NOT EXISTS role_id UUID REFERENCES club_roles(id) ON DELETE SET NULL"))
+        await conn.execute(text("""
+            INSERT INTO roster_area_roles (organisation_id, area_id, role_id, required_qualification_type_id, sort_order)
+                SELECT organisation_id, id, required_role_id, required_qualification_type_id, 0
+                FROM roster_areas
+                WHERE required_role_id IS NOT NULL
+                ON CONFLICT (area_id, role_id) DO NOTHING
+        """))
+        await conn.execute(text("""
+            UPDATE roster_shift_patterns p SET role_id = a.required_role_id
+                FROM roster_areas a
+                WHERE a.id = p.area_id AND p.role_id IS NULL AND a.required_role_id IS NOT NULL
+        """))
+        await conn.execute(text("""
+            UPDATE roster_shifts s SET role_id = a.required_role_id
+                FROM roster_areas a
+                WHERE a.id = s.area_id AND s.role_id IS NULL AND a.required_role_id IS NOT NULL
+        """))
+
         # Migration 230: a strategic plan is a record rather than a name typed
         # onto every objective, an objective carries its own due date/owner/
         # budget, and a motion can serve an objective the way an action already
