@@ -34,6 +34,10 @@ function buildNav({ modules, counts, storefront }) {
     { to: '/admin/clubhouse/directory', label: 'Directory', icon: 'teams', cap: [CAP.MANAGE_MEMBERS, CAP.MANAGE_VOLUNTEERS, CAP.MANAGE_COMMITTEE, CAP.MANAGE_QUALIFICATIONS] },
     { to: '/admin/clubhouse/roster', label: 'Roster', icon: 'fixtures', cap: CAP.MANAGE_VOLUNTEERS },
     { to: '/admin/committee', label: 'Committee', icon: 'sheet', cap: CAP.MANAGE_COMMITTEE },
+    // What each role involves (its recurring/seasonal/match-day duties) and the
+    // measurable handover of it to a new volunteer. Spans volunteer roles and
+    // committee seats, so either manager can open it.
+    { to: '/admin/clubhouse/role-programs', label: 'Role programs', icon: 'list', cap: [CAP.MANAGE_VOLUNTEERS, CAP.MANAGE_COMMITTEE] },
 
     { heading: 'Money' },
     { to: '/admin/fees', label: 'Accounts', icon: 'money', cap: CAP.MANAGE_FEES, module: 'fees', exact: true, badge: counts.owing },
