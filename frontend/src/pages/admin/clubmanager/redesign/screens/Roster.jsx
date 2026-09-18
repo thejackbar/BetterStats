@@ -804,7 +804,32 @@ export default function Roster({ st, patch, narrow }) {
   const shownCandidates = candidates.filter(personMatches)
   const shownAreas = areas.filter(areaMatches)
 
-  const depts = []; shownAreas.forEach(a => { if (!depts.includes(a.department || 'Areas')) depts.push(a.department || 'Areas') })
+  // A shift whose area was later archived still exists and still carries its
+  // own name (`area_name`, off the shift row). The People view groups by
+  // VOLUNTEER, so an assigned volunteer on such a shift shows there — but the
+  // Areas view iterates the ACTIVE areas (list_areas is active-only), and had
+  // no home for a shift whose area_id is not a live area, so those shifts,
+  // assigned volunteers and all, silently dropped out of this view (while
+  // still being counted in the "N / M FILLED" total). Every shift whose area
+  // is not shown is grouped under its own pseudo-area here so it can never
+  // vanish — named off the shift's own `area_name`, the same signal the
+  // People-view open-shifts chip already uses. `roles: []` means
+  // `areaRoleGroups` draws a sub-row per role the shifts actually carry.
+  const ORPHAN_DEPT = 'Archived areas'
+  const orphanAreas = (() => {
+    const byId = new Map()
+    shifts.forEach(x => {
+      if (areaById[x.area_id]) return            // a live area — drawn already
+      if (rq && !shiftHit(x)) return             // respect the section search
+      if (!byId.has(x.area_id)) byId.set(x.area_id, {
+        id: x.area_id, name: areaLabel(x), color: null, department: ORPHAN_DEPT, roles: [], __orphan: true,
+      })
+    })
+    return [...byId.values()].sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+  })()
+  const allShownAreas = [...shownAreas, ...orphanAreas]
+
+  const depts = []; allShownAreas.forEach(a => { if (!depts.includes(a.department || 'Areas')) depts.push(a.department || 'Areas') })
 
   // ── Areas view: an area's roles, and the day cells that draw its shifts ──
   //
@@ -1020,7 +1045,7 @@ export default function Roster({ st, patch, narrow }) {
                   <div style={{ position: 'sticky', left: 0, zIndex: 12, background: C.surface, padding: railMin ? '8px 6px' : '8px 14px', fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.dim, whiteSpace: 'nowrap' }}
                     title={dept}>{railMin ? dept.slice(0, 3).toUpperCase() : dept}</div>
                 </div>
-                {shownAreas.filter(a => (a.department || 'Areas') === dept).map(a => {
+                {allShownAreas.filter(a => (a.department || 'Areas') === dept).map(a => {
                   const mine = shifts.filter(x => x.area_id === a.id)
                   const filledN = mine.filter(x => x.assignee_member_id).length
                   const groups = areaRoleGroups(a, mine)
@@ -1032,7 +1057,7 @@ export default function Roster({ st, patch, narrow }) {
                   // there is nothing to expand.
                   if (!multi) {
                     return (
-                      <div key={a.id} style={{ display: 'grid', gridTemplateColumns: gridCols, borderBottom: `1px solid ${C.hair}` }}>
+                      <div key={a.id} data-testid={`area-row-${a.id}`} style={{ display: 'grid', gridTemplateColumns: gridCols, borderBottom: `1px solid ${C.hair}` }}>
                         <div style={rail({ padding: railMin ? '10px 4px' : '10px 14px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 4, alignItems: railMin ? 'center' : 'stretch' })}
                           title={railMin ? `${a.name} — ${filledN}/${mine.length} filled · click to edit the area` : undefined}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>

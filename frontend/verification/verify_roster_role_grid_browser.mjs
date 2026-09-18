@@ -12,6 +12,9 @@
 //   * each role's shifts land in its OWN sub-row — the open Umpire shift under
 //     Umpire, the assigned Scorer shift under Scorer;
 //   * a single-role area (Bar) stays a plain row with no toggle and no header;
+//   * an ASSIGNED shift whose area has since been ARCHIVED (its area is not in
+//     the active list_areas set) still renders in the Areas view with its
+//     volunteer named — it must not silently vanish the way it used to;
 //   * the toggle collapses the roles away (both sub-rows gone, header stays) and
 //     expands them back;
 //   * the collapsed state survives a reload (it is a per-person preference);
@@ -63,6 +66,13 @@ const WEEK = {
         required_qualification_type_id: null, required_qualification_name: null },
       { id: 'sh3', area_id: 'ar2', area_name: 'Bar', role_id: 'r-bar', role_name: 'Bar Steward',
         day_of_week: 6, start_time: 17, end_time: 21, headcount: 1, assignee_member_id: null,
+        required_qualification_type_id: null, required_qualification_name: null },
+      // A shift on an area (ar3) that is NOT in `areas` — the area was archived
+      // after this week generated. It carries its own name and an assigned
+      // volunteer, and must still show on the Areas view.
+      { id: 'sh4', area_id: 'ar3', area_name: 'Old Gate', role_id: 'r-gate', role_name: 'Gatekeeper',
+        day_of_week: 5, start_time: 9, end_time: 12, headcount: 1,
+        assignee_member_id: 'm1', assignee_name: 'Amardeep Gill',
         required_qualification_type_id: null, required_qualification_name: null },
     ],
   },
@@ -156,6 +166,18 @@ const run = async () => {
     !(await seen('[data-testid="area-toggle-ar2"]')))
   check('the single-role Bar area is not a role-expanding header',
     !(await seen('[data-testid="area-header-ar2"]')))
+
+  // ── An assigned shift on an ARCHIVED area still shows in the Areas view ──────
+  // ar3 is not in `areas`, so before the fix its shift (assigned volunteer and
+  // all) never rendered here even though the People view showed it. It now
+  // draws its own row, named off the shift's own area_name.
+  const gateRow = await textOf('[data-testid="area-row-ar3"]')
+  check('the archived area shift renders in the Areas view',
+    !!gateRow, JSON.stringify(gateRow.slice(0, 60)))
+  check('the archived area row is named off the shift own area name',
+    gateRow.includes('Old Gate'), JSON.stringify(gateRow))
+  check('the volunteer assigned to the archived-area shift is shown',
+    gateRow.includes('Amardeep Gill'), JSON.stringify(gateRow))
 
   // ── Collapse folds the roles away, the header stays ─────────────────────────
   // Each of these is a CONTRAST against the expanded state read above, so a
