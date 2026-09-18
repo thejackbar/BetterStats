@@ -3770,8 +3770,30 @@ class MaintenanceLog(Base):
 # recurring task last year, and the year before." See the migration 181
 # docstring and services/club_diary.py for the full reasoning.
 
-DIARY_TASK_FREQUENCIES = ("annual", "quarterly", "monthly", "once")
+# Cadences. The first six are DATED — they generate one dated occurrence per
+# period, so they carry a due date and appear on the season plan / Gantt.
+# season_start / season_end pin to the club's diary_start_month (the month the
+# club's season begins), which is finally read by the backend for these two.
+# The last three are STANDING — a weekly / matchday / ongoing duty that recurs
+# with no single due date, so it deliberately generates NO occurrences (it would
+# flood the season plan) and shows only as a standing duty on the role and the
+# board. frequency is a plain TEXT column (no CHECK), so this list is the only
+# gate; widening it is a code change, not a migration.
+DIARY_TASK_FREQUENCIES = (
+    "annual", "quarterly", "monthly", "once", "season_start", "season_end",
+    "weekly", "matchday", "ongoing",
+)
+DIARY_STANDING_FREQUENCIES = ("weekly", "matchday", "ongoing")
 DIARY_TASK_STATUSES = ("pending", "in_progress", "done", "not_applicable")
+
+# Role Program handovers (migration 307) — the succession/onboarding checklist.
+ROLE_HANDOVER_STATUSES = ("in_progress", "completed", "cancelled")
+# The status of ONE element of a role being handed over. Deliberately about
+# understanding and acceptance (the club's stated goal), not job quality:
+# not started -> walked through -> understood & accepted, plus N/A for an
+# element that does not apply to this handover.
+ROLE_HANDOVER_ITEM_STATUSES = ("pending", "walked_through", "accepted", "na")
+ROLE_HANDOVER_ITEM_KINDS = ("responsibility", "duty", "area", "knowledge", "custom")
 
 
 class DiaryCategory(Base):
@@ -4015,6 +4037,67 @@ class DiaryTaskDependency(Base):
     definition_id = Column(UUID(as_uuid=True), ForeignKey("club_diary_task_definitions.id", ondelete="CASCADE"), nullable=False)
     depends_on_definition_id = Column(UUID(as_uuid=True), ForeignKey("club_diary_task_definitions.id", ondelete="CASCADE"), nullable=False)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+# ─── Role Program handovers (migration 307) — succession & onboarding ────────
+# The Role Program (what a role entails) is assembled on read from the role, its
+# Club Diary tasks and its roster areas — no storage. What IS stored: when a
+# role changes hands, the onboarding checklist a responsible person works so the
+# club can SEE whether the new volunteer has been walked through and has
+# understood and accepted each element (or exactly where the gaps are). DDL is
+# defined once in services/role_program_ddl.py, shared with the lifespan mirror.
+
+class RoleProgramHandover(Base):
+    """One person being onboarded into one role (or one role changing hands).
+    Keyed on club_roles — the one anchor for a volunteer role AND a committee
+    seat. ``role_title`` is a snapshot so an archived/renamed role never blanks a
+    past handover; incoming/outgoing names snapshot too, so a member row going
+    NULL leaves the record readable."""
+    __tablename__ = "role_program_handovers"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    role_id = Column(UUID(as_uuid=True), ForeignKey("club_roles.id", ondelete="SET NULL"), nullable=True)
+    role_title = Column(Text, nullable=False)
+    committee_position_id = Column(UUID(as_uuid=True), ForeignKey("committee_positions.id", ondelete="SET NULL"), nullable=True)
+    incoming_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    incoming_name = Column(Text, nullable=True)
+    outgoing_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    outgoing_name = Column(Text, nullable=True)
+    status = Column(Text, nullable=False, server_default="in_progress", default="in_progress")
+    started_on = Column(Date, nullable=False, server_default=func.current_date())
+    target_date = Column(Date, nullable=True)
+    completed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class RoleProgramHandoverItem(Base):
+    """One checklist line of a handover, snapshotted from a program element at
+    the moment it was seeded. ``source_definition_id`` is a SET-NULL link back to
+    the live Club Diary task (for a jump-to link); ``source_key`` is what a
+    reseed dedupes on — a custom knowledge item has none, so the partial unique
+    index never fires for it."""
+    __tablename__ = "role_program_handover_items"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    handover_id = Column(UUID(as_uuid=True), ForeignKey("role_program_handovers.id", ondelete="CASCADE"), nullable=False)
+    source_kind = Column(Text, nullable=False)
+    source_key = Column(Text, nullable=True)
+    source_definition_id = Column(UUID(as_uuid=True), ForeignKey("club_diary_task_definitions.id", ondelete="SET NULL"), nullable=True)
+    label = Column(Text, nullable=False)
+    detail = Column(Text, nullable=True)
+    cadence = Column(Text, nullable=True)
+    status = Column(Text, nullable=False, server_default="pending", default="pending")
+    target_date = Column(Date, nullable=True)
+    note = Column(Text, nullable=True)
+    sort_order = Column(Integer, nullable=False, server_default="0", default=0)
+    updated_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
 # ─── BetterMerch (BetterAdmin module) — club stock register ──────────────────

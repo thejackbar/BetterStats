@@ -410,6 +410,7 @@ export default function App() {
           <Route path="/admin/clubhouse/directory" element={<ProtectedRoute><ClubManagerApp initialScreen="directory" /></ProtectedRoute>} />
           <Route path="/admin/clubhouse/roster" element={<ProtectedRoute><ClubManagerApp initialScreen="roster" /></ProtectedRoute>} />
           <Route path="/admin/clubhouse/areas-roles" element={<ProtectedRoute><ClubManagerApp initialScreen="setup" /></ProtectedRoute>} />
+          <Route path="/admin/clubhouse/role-programs" element={<ProtectedRoute><ClubManagerApp initialScreen="role_programs" /></ProtectedRoute>} />
           {/* BetterCricket's own directory, shown in place of the club Directory
               while a super admin is acting as the outreach org. requireRole is
               the real gate — the nav item only appears in internal mode, but a

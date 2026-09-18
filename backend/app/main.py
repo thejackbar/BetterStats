@@ -18,7 +18,7 @@ from app.routers import instructional_videos
 from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, cricketstatz, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, public_net_checkin, net_manager, website, comms, public_comms, public_ses, public_contact, public_webinar, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
     stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
     club_diary, social_media, votes, public_votes, roles_activities, club_room, roster, facility_requests, directory, \
-    public_club_room, sales_workspace, sales_commissions, honours
+    public_club_room, sales_workspace, sales_commissions, honours, role_programs
 # BetterScout — a separate tenant type (Scout Org) with its own login,
 # unrelated to the club Organisation model. Imported separately since it's a
 # submodule of routers.scout, not a top-level routers module; aliased to
@@ -1332,6 +1332,13 @@ async def lifespan(app: FastAPI):
         # browser on every override change.
         from app.services.game_import_staging_ddl import STATEMENTS as _GAME_STAGING_DDL
         for _stmt in _GAME_STAGING_DDL:
+            await conn.execute(text(_stmt))
+        # Mirrors migration 307 — the ONE copy is the service. The onboarding
+        # checklist tables behind a role's succession/handover tracker. The
+        # Club Diary cadence widening in the same release is Python-only (no CHECK
+        # on frequency), so it needs no mirror here.
+        from app.services.role_program_ddl import STATEMENTS as _ROLE_PROGRAM_DDL
+        for _stmt in _ROLE_PROGRAM_DDL:
             await conn.execute(text(_stmt))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS grade_merge_logs (
@@ -6182,6 +6189,7 @@ app.include_router(assets.router)        # Assets & Facilities (core capability,
 app.include_router(club_diary.router)    # Club Diary — annual/recurring compliance & maintenance tasks (core capability, not a paid module)
 app.include_router(club_room.router)     # Club Room Mode — TV slideshow (core capability, not a paid module)
 app.include_router(roles_activities.router)  # Roles & Activities taxonomy (core capability, shared by Volunteers + Qualifications)
+app.include_router(role_programs.router)  # Role Programs — what a role entails + its measurable handover (core capability, any-of MANAGE_VOLUNTEERS/MANAGE_COMMITTEE)
 app.include_router(directory.router)     # BetterClubManager Directory — non-player people + third parties (core capability, not a paid module)
 app.include_router(roster.router)        # BetterClubManager Roster — weekly volunteer roster (core capability, not a paid module)
 app.include_router(facility_requests.router)  # BetterClubManager Facilities — booking-requests approval queue (core capability, not a paid module)

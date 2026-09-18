@@ -964,6 +964,32 @@ export const api = {
     request(`/club-admin/club-diary/season/${year}/generate`, { method: 'POST' }),
   diarySeasonPlan: (year) => request(`/club-admin/club-diary/season/${year}`),
 
+  // Role Programs — what a role entails (assembled on read) + its measurable
+  // handover checklist. Duties are edited as Club Diary tasks tagged to the role.
+  rpProgram: (roleId) => request(`/club-admin/role-programs/roles/${roleId}/program`),
+  rpListHandovers: (opts = {}) => {
+    const p = new URLSearchParams()
+    if (opts.roleId) p.set('role_id', opts.roleId)
+    if (opts.status) p.set('status', opts.status)
+    const qs = p.toString()
+    return request(`/club-admin/role-programs/handovers${qs ? `?${qs}` : ''}`)
+  },
+  rpCreateHandover: (data) =>
+    request('/club-admin/role-programs/handovers', { method: 'POST', body: JSON.stringify(data) }),
+  rpHandover: (id) => request(`/club-admin/role-programs/handovers/${id}`),
+  rpUpdateHandover: (id, data) =>
+    request(`/club-admin/role-programs/handovers/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  rpReseedHandover: (id) =>
+    request(`/club-admin/role-programs/handovers/${id}/reseed`, { method: 'POST' }),
+  rpDeleteHandover: (id) =>
+    request(`/club-admin/role-programs/handovers/${id}`, { method: 'DELETE' }),
+  rpAddItem: (id, data) =>
+    request(`/club-admin/role-programs/handovers/${id}/items`, { method: 'POST', body: JSON.stringify(data) }),
+  rpUpdateItem: (id, itemId, data) =>
+    request(`/club-admin/role-programs/handovers/${id}/items/${itemId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  rpDeleteItem: (id, itemId) =>
+    request(`/club-admin/role-programs/handovers/${id}/items/${itemId}`, { method: 'DELETE' }),
+
   // Shared member/person picker across BetterClubManager (all org members).
   feeAllMembers: () => request('/club-admin/fees/all-members'),
   // Type-to-search across everyone in the club, members and not-yet-enrolled
