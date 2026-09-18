@@ -201,6 +201,28 @@ async def _get_or_create_type(session: AsyncSession, model, org_id, name: str):
 
 
 async def _update_type(session: AsyncSession, t, **fields):
+    # A rename that collides with another type of the same org hits the
+    # (org, name) unique constraint at commit, which is a 500 unless we refuse it
+    # here — mirroring _create_type. The SELECT runs BEFORE the setattr: a SELECT
+    # autoflushes, so setting the name first would flush the offending UPDATE and
+    # raise the IntegrityError before this check could produce a friendly error.
+    new_name = fields.get("name")
+    if new_name is not None:
+        new_name = new_name.strip()
+        if not new_name:
+            raise ValueError("Name is required")
+        if new_name.lower() != (t.name or "").lower():
+            model = type(t)
+            clash = (await session.execute(
+                select(model).where(
+                    model.organisation_id == t.organisation_id,
+                    func.lower(model.name) == new_name.lower(),
+                    model.id != t.id,
+                )
+            )).scalars().first()
+            if clash is not None:
+                raise ValueError(f'A type called "{new_name}" already exists')
+        fields["name"] = new_name
     for f in ("name", "description", "sort_order", "is_active", "category"):
         if f in fields and fields[f] is not None and hasattr(t, f):
             setattr(t, f, fields[f])
@@ -323,6 +345,26 @@ async def create_role(session: AsyncSession, org_id, *, title: str, role_type_id
 
 
 async def update_role(session: AsyncSession, r: ClubRole, **fields) -> ClubRole:
+    # A rename that collides with another role of the same org (including a
+    # committee role that never shows in the Roles list) hits uq_club_roles_org_title
+    # at commit — a 500 unless refused here, mirroring create_role. The SELECT
+    # runs BEFORE the setattr to avoid autoflushing the offending UPDATE.
+    new_title = fields.get("title")
+    if new_title is not None:
+        new_title = new_title.strip()
+        if not new_title:
+            raise ValueError("Title is required")
+        if new_title.lower() != (r.title or "").lower():
+            clash = (await session.execute(
+                select(ClubRole).where(
+                    ClubRole.organisation_id == r.organisation_id,
+                    func.lower(ClubRole.title) == new_title.lower(),
+                    ClubRole.id != r.id,
+                )
+            )).scalars().first()
+            if clash is not None:
+                raise ValueError(f'A role called "{new_title}" already exists')
+        fields["title"] = new_title
     for f in ("title", "description", "sort_order", "is_active", "is_committee"):
         if f in fields and fields[f] is not None:
             setattr(r, f, fields[f])
@@ -429,6 +471,25 @@ async def create_activity(session: AsyncSession, org_id, *, title: str, activity
 
 
 async def update_activity(session: AsyncSession, a: ClubActivity, **fields) -> ClubActivity:
+    # As with update_role: refuse a rename that collides with another activity of
+    # the same org here (SELECT before setattr) rather than letting
+    # uq_club_activities_org_title raise a 500 at commit.
+    new_title = fields.get("title")
+    if new_title is not None:
+        new_title = new_title.strip()
+        if not new_title:
+            raise ValueError("Title is required")
+        if new_title.lower() != (a.title or "").lower():
+            clash = (await session.execute(
+                select(ClubActivity).where(
+                    ClubActivity.organisation_id == a.organisation_id,
+                    func.lower(ClubActivity.title) == new_title.lower(),
+                    ClubActivity.id != a.id,
+                )
+            )).scalars().first()
+            if clash is not None:
+                raise ValueError(f'An activity called "{new_title}" already exists')
+        fields["title"] = new_title
     for f in ("title", "activity_type_id", "description", "sort_order", "is_active"):
         if f in fields and fields[f] is not None:
             setattr(a, f, fields[f])

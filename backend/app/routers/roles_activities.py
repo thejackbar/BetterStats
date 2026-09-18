@@ -88,7 +88,10 @@ async def create_role_type(data: TypeUpsert, _: User = _roles, club: Organisatio
 async def update_role_type(type_id: str, data: TypeUpsert, _: User = _roles,
                            club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
     t = await _or_404(db, ClubRoleType, club, type_id)
-    await svc.update_role_type(db, t, **data.model_dump(exclude_unset=True))
+    try:
+        await svc.update_role_type(db, t, **data.model_dump(exclude_unset=True))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     await db.commit()
     return svc._type_dict(t)
 
@@ -136,7 +139,10 @@ async def update_role(role_id: str, data: RoleUpsert, _: User = _roles,
     fields = data.model_dump(exclude_unset=True)
     if "role_type_id" in fields:
         fields["role_type_id"] = _uuid(fields["role_type_id"])
-    await svc.update_role(db, r, **fields)
+    try:
+        await svc.update_role(db, r, **fields)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     await db.commit()
     return svc._role_dict(r)
 
@@ -182,7 +188,10 @@ async def create_activity_type(data: TypeUpsert, _: User = _acts, club: Organisa
 async def update_activity_type(type_id: str, data: TypeUpsert, _: User = _acts,
                                club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
     t = await _or_404(db, ClubActivityType, club, type_id)
-    await svc.update_activity_type(db, t, **data.model_dump(exclude_unset=True))
+    try:
+        await svc.update_activity_type(db, t, **data.model_dump(exclude_unset=True))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     await db.commit()
     return svc._type_dict(t)
 
@@ -230,7 +239,10 @@ async def update_activity(activity_id: str, data: ActivityUpsert, _: User = _act
     fields = data.model_dump(exclude_unset=True)
     if "activity_type_id" in fields:
         fields["activity_type_id"] = _uuid(fields["activity_type_id"])
-    await svc.update_activity(db, a, **fields)
+    try:
+        await svc.update_activity(db, a, **fields)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     await db.commit()
     return svc._activity_dict(a)
 
