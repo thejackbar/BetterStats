@@ -179,6 +179,14 @@ const run = async () => {
   check('the volunteer assigned to the archived-area shift is shown',
     gateRow.includes('Amardeep Gill'), JSON.stringify(gateRow))
 
+  // Because a shift on a non-active area exists, the week predates the club's
+  // latest areas & roles — a staleness banner says so and offers a reset.
+  const banner = await textOf('[data-testid="roster-stale-banner"]')
+  check('the stale-week banner is shown when a shift is on an archived area',
+    !!banner, JSON.stringify(banner.slice(0, 80)))
+  check('the banner offers to reset the week',
+    banner.toLowerCase().includes('reset'), JSON.stringify(banner))
+
   // ── Collapse folds the roles away, the header stays ─────────────────────────
   // Each of these is a CONTRAST against the expanded state read above, so a
   // build that never draws a sub-row can't pass them vacuously: the toggle had

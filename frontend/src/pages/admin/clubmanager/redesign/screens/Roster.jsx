@@ -828,6 +828,11 @@ export default function Roster({ st, patch, narrow }) {
     return [...byId.values()].sort((a, b) => (a.name || '').localeCompare(b.name || ''))
   })()
   const allShownAreas = [...shownAreas, ...orphanAreas]
+  // How many shifts sit on an area that is no longer active — the signal that
+  // this week was built before the club changed its areas & roles. Counted
+  // over ALL shifts (not the search-filtered orphanAreas) so the staleness
+  // banner is not hidden by a query.
+  const orphanShiftCount = shifts.filter(x => !areaById[x.area_id]).length
 
   const depts = []; allShownAreas.forEach(a => { if (!depts.includes(a.department || 'Areas')) depts.push(a.department || 'Areas') })
 
@@ -933,6 +938,30 @@ export default function Roster({ st, patch, narrow }) {
       </>)}
 
       <Toast toast={st.toast} onClear={() => patch({ toast: null })} />
+
+      {/* This week still holds shifts on areas that are no longer active, which
+          means it was generated before the club last changed its areas & roles
+          — editing a pattern only rebuilds a week that has no shifts yet, so an
+          existing draft goes quietly stale. Rather than leave the "Archived
+          areas" section to be puzzled over, say what it means and offer the one
+          action that fixes it (Reset regenerates from the current patterns).
+          Draft weeks only — a published week is a record, not a draft to
+          rebuild. */}
+      {view !== 'hours' && view !== 'confirm' && orphanShiftCount > 0 && data.week.status !== 'published' && (
+        <div data-testid="roster-stale-banner" style={{ margin: '0 16px 4px', padding: '11px 14px', borderRadius: 9,
+          border: '1px solid rgba(245,181,66,0.35)', background: 'rgba(245,181,66,0.08)',
+          display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 220, fontSize: 12.5, color: C.dim, lineHeight: 1.5 }}>
+            <span style={{ fontWeight: 700, color: C.warn }}>This week predates your latest areas &amp; roles.</span>{' '}
+            {orphanShiftCount} shift{orphanShiftCount === 1 ? '' : 's'} here belong to areas you have since changed or archived (shown under <span style={{ fontFamily: MONO, fontSize: 11 }}>Archived areas</span> on the Areas view). Reset the week to rebuild it from your current patterns.
+          </div>
+          <button onClick={resetWeek}
+            style={{ flexShrink: 0, padding: '8px 14px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+              border: '1px solid color-mix(in srgb, var(--pb-accent) 45%, transparent)', color: C.accent, background: 'color-mix(in srgb, var(--pb-accent) 12%, transparent)' }}>
+            Reset the week
+          </button>
+        </div>
+      )}
 
       {view === 'hours' && <HoursView weekStart={data.week.week_start} />}
       {view === 'confirm' && (
