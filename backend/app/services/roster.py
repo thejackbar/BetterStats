@@ -365,13 +365,17 @@ async def candidates(db: AsyncSession, org_id) -> list[dict]:
 
 
 # ── rules engine ────────────────────────────────────────────────────────────
-def check_assignment(area: dict, shift: dict, cand: dict, week_shifts: list[dict], settings: dict) -> dict:
+def check_assignment(shift: dict, cand: dict, week_shifts: list[dict], settings: dict) -> dict:
+    # No `area` argument: since migration 306 the role/qualification requirement
+    # is the SHIFT's own (its role, and the qualification that role's area-pairing
+    # gates on), never the area's. The area was carried here only to be ignored,
+    # and the stale guard on it — `list_areas` is active-only — refused an
+    # assignment onto a shift whose area was later archived ("Unknown volunteer
+    # or area"), which is exactly the orphan the shift outlives.
     blocks, warns = [], []
     cap = settings.get("weekly_shift_cap") or cand.get("max_shifts") or DEFAULT_CAP
-    # The role/qualification requirement is the SHIFT's own now (its role, and
-    # the qualification that role's area-pairing gates on), not the area's — an
-    # area can hold a paid role that needs accreditation beside a volunteer one
-    # that needs nothing.
+    # An area can hold a paid role that needs accreditation beside a volunteer
+    # one that needs nothing, so the requirement is read off the shift's role.
     req_qual = shift.get("required_qualification_type_id")
     if req_qual and req_qual not in cand["qual_type_ids"]:
         msg = "Missing " + (shift.get("required_qualification_name") or "required qualification")
@@ -395,10 +399,10 @@ def check_assignment(area: dict, shift: dict, cand: dict, week_shifts: list[dict
     return {"blocks": blocks, "warns": warns}
 
 
-def _rank(shift, area, cands, week_shifts, settings):
+def _rank(shift, cands, week_shifts, settings):
     scored = []
     for c in cands:
-        res = check_assignment(area, shift, c, week_shifts, settings)
+        res = check_assignment(shift, c, week_shifts, settings)
         if res["blocks"]:
             continue
         load = len([s for s in week_shifts if s.get("assignee_member_id") == c["member_id"]])
@@ -509,10 +513,12 @@ async def assign(db: AsyncSession, org_id, week_id, shift_id, member_id) -> dict
         await db.execute(text("UPDATE roster_shifts SET assignee_member_id=NULL, warnings='[]'::jsonb WHERE id=:id AND organisation_id=:org"), {"id": shift_id, "org": org_id})
         return {"ok": True, "cleared": True, "shift_id": shift_id}
     cand = cand_by.get(member_id)
-    area = areas.get(shift["area_id"])
-    if not cand or not area:
-        return {"ok": False, "blocks": ["Unknown volunteer or area"], "warns": []}
-    res = check_assignment(area, shift, cand, shifts, settings)
+    if not cand:
+        return {"ok": False, "blocks": ["Unknown volunteer"], "warns": []}
+    # The shift's area is deliberately NOT required here — an archived area still
+    # has live shifts on it, and the assignment reads everything it needs off the
+    # shift's own role, not the area (which list_areas would not return anyway).
+    res = check_assignment(shift, cand, shifts, settings)
     if res["blocks"]:
         return {"ok": False, "blocks": res["blocks"], "warns": []}
     import json
@@ -528,10 +534,7 @@ async def autofill(db: AsyncSession, org_id, week_id) -> dict:
     for shift in shifts:
         if shift["assignee_member_id"]:
             continue
-        area = areas.get(shift["area_id"])
-        if not area:
-            continue
-        ranked = _rank(shift, area, cands, shifts, settings)
+        ranked = _rank(shift, cands, shifts, settings)
         best = next((x for x in ranked if not x[0]), None) or (ranked[0] if ranked else None)
         if best:
             warns, _load, c = best

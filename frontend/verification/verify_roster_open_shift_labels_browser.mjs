@@ -156,6 +156,35 @@ const run = async () => {
   check('the same-role Umpire pair reads "Match Day ×2"', /Match Day ×2/.test(t), JSON.stringify(t))
   check('no chip over-counts to ×3 (Scorer merged in)', !t.includes('×3'), JSON.stringify(t))
 
+  // ── The archived-area open shift can still be SELECTED and filled ──────────
+  // Reported one step on from the "undefined" labels: allocating a volunteer to
+  // an archived-area shift failed. The frontend half of that was the "Best fit
+  // for this shift" panel being gated on the area being in the active-areas list
+  // (`sel && selArea`), so an archived-area shift showed NO fill controls at
+  // all. Selecting the Turf chip must now surface the panel, named off the
+  // shift's own area_name.
+  const clickedTurf = await page.evaluate(() => {
+    const label = [...document.querySelectorAll('span')].find(n => (n.textContent || '').trim() === 'Open shifts')
+    if (!label) return false
+    let row = label
+    while (row && getComputedStyle(row).display !== 'grid') row = row.parentElement
+    if (!row) return false
+    // The chip that carries the onClick is the draggable root; the day-column
+    // div wrapping it also starts with "Turf" but has no handler.
+    const chip = [...row.querySelectorAll('div[draggable]')].find(d => /^Turf/.test((d.textContent || '').trim()))
+    if (!chip) return false
+    chip.click()
+    return true
+  })
+  check('the archived-area open shift is clickable', clickedTurf)
+  await page.waitForTimeout(400)
+  const panel = await page.evaluate(() => {
+    const h = [...document.querySelectorAll('div')].find(n => (n.textContent || '').trim() === 'BEST FIT FOR THIS SHIFT')
+    return h && h.parentElement ? h.parentElement.innerText : null
+  })
+  check('selecting the archived-area shift shows the Best fit panel', !!panel, JSON.stringify(panel))
+  check('the Best fit panel names the archived area (Turf)', (panel || '').includes('Turf'), JSON.stringify(panel))
+
   check('no page errors across the run', errors.length === 0, errors.join(' | '))
 
   await page.setViewportSize({ width: 390, height: 900 })

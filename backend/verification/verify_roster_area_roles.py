@@ -342,10 +342,17 @@ async def main():
     async with Session() as db:
         cands = {c["member_id"]: c for c in await svc.candidates(db, CLUB)}
         settings = await svc.get_settings(db, CLUB)
-        areas = {a["id"]: a for a in await svc.list_areas(db, CLUB)}
-    md_area = areas.get(str(MATCHDAY), {})
     def _res(shift, member):
-        return svc.check_assignment(md_area, shift, cands[str(member)], shifts, settings)
+        # check_assignment reads its requirement off the shift's role, not the
+        # area — that is what lets a shift on an archived area still be filled.
+        # Tolerate the pre-fix 5-arg signature so a control run (which stashes
+        # only the app code, keeping this script) reaches the assign checks below
+        # rather than crashing on the direct call here.
+        c = cands[str(member)]
+        try:
+            return svc.check_assignment(shift, c, shifts, settings)
+        except TypeError:
+            return svc.check_assignment({}, shift, c, shifts, settings)
     if ump and sco:
         rc_ump = _res(ump, CAND_C)
         check("no accreditation is BLOCKED for the Umpire shift", bool(rc_ump["blocks"]))
@@ -433,6 +440,26 @@ async def main():
         check("the archived area's shift is still on the week", md_shift is not None)
         check("the archived area's shift still carries its area_name",
               (md_shift or {}).get("area_name") == "Match Day")
+
+    # The second reported bug, one step on from the first: with Match Day
+    # archived, allocating a qualified volunteer onto one of its still-live
+    # Umpire shifts must SUCCEED. The old assign guarded `if not cand or not
+    # area`, and list_areas would not return the archived area — so it refused
+    # with "Unknown volunteer or area" even though the assignment reads its
+    # requirement off the shift's own role, never the area.
+    print("\n=== a shift on the archived area can still be rostered ===")
+    async with Session() as db:
+        rows = await svc._shift_rows(db, LEGACY_WEEK)
+        ump_shift = next((s for s in rows if s.get("area_id") == str(MATCHDAY) and s.get("role_id") == str(UMPIRE)), None)
+        check("an Umpire shift on the archived area is on the week", ump_shift is not None)
+        if ump_shift:
+            await svc.assign(db, CLUB, LEGACY_WEEK, ump_shift["id"], None)  # open it up
+            r = await svc.assign(db, CLUB, LEGACY_WEEK, ump_shift["id"], str(CAND_A))
+            await db.commit()
+            check("an accredited umpire is rostered onto the archived-area shift, not refused",
+                  bool(r.get("ok")))
+            check("the refusal is NOT the stale 'Unknown volunteer or area'",
+                  "Unknown volunteer or area" not in (r.get("blocks") or []))
 
     print(f"\n{'='*54}\n  {PASS} passed, {FAIL} failed")
     if FAILURES:

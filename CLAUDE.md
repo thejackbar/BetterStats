@@ -7933,6 +7933,46 @@ Reported off a live People-view roster: open-shift chips showed "undefined ×2" 
   by naming the archived area "Turf" (not a substring of its role) and using a
   count-2 pair so the real "undefined ×2" bug reproduces.
 
+### And then a shift on that archived area could not be rostered (v9.82.5, Sep 2026)
+
+Reported one step on from the "undefined" labels: allocating the volunteer
+"Abbas, Aamir" (Role: Bar Staff) to a Bar Staff shift returned **"Can't roster
+Abbas, Aamir here. Unknown volunteer or area"**.
+
+- **THE ASSIGNMENT NEVER NEEDED THE AREA, AND THE GUARD THAT SAID IT DID IS WHAT
+  BROKE.** `assign` resolved the shift's area through `list_areas` (active-only)
+  and refused on `if not cand or not area`. But since migration 306 the role and
+  the qualification that gates it live on the SHIFT, and `check_assignment` reads
+  everything off the shift — the `area` argument was carried only to be ignored.
+  An archived area is not in `list_areas`, so the guard refused a fill that
+  needed nothing from the area. It is the same orphan the shift outlives that the
+  v9.82.4 note documents, hit on the write path this time.
+- **THE DEAD `area` PARAMETER IS REMOVED, NOT WORKED AROUND**, from
+  `check_assignment` / `_rank` / `assign` / `autofill` and the frontend's
+  `checkClient` / `dropVerdict` — a stale guard on a value nothing reads is worse
+  than none, and leaving it invites the same trap on the next reader. `assign`
+  now refuses only "Unknown volunteer" (a real state), and only when the
+  candidate itself does not resolve.
+- **THE "BEST FIT FOR THIS SHIFT" PANEL WAS GATED ON THE AREA BEING ACTIVE**
+  (`sel && selArea`), so an archived-area shift showed no fill controls at all —
+  the drag path was fixed by the backend change but the panel still hid. It is
+  gated on the shift alone now, named off the shift's own `area_name`, with the
+  edit-the-area link dropped since an archived area is not in the list to edit.
+- **Verified against a real Postgres** (`verify_roster_area_roles.py` is 54
+  checks now: with Match Day archived, an accredited umpire is rostered onto one
+  of its still-live Umpire shifts rather than refused, and the refusal is NOT the
+  stale "Unknown volunteer or area") **with a control run**: with the fix
+  reverted, 2 fail on exactly that. The `check_assignment` call in the harness
+  tolerates both the old and new arity so the control reaches the assign checks
+  (which use the unchanged `assign` signature) rather than crashing on the direct
+  call — a control run that crashes is not a control run.
+- **Driven in Chromium** (`verify_roster_open_shift_labels_browser.mjs` is 14:
+  selecting the archived-area open shift surfaces the Best fit panel, named off
+  its own `area_name`) **with a control run**: 2 fail against the previous commit,
+  the panel `null` where the area was insisted upon. The chip that carries the
+  `onClick` is the draggable root; the day-column div wrapping it starts with the
+  same text but has no handler, so the check targets `div[draggable]`.
+
 ### A duplicate role named a role the list will not show (v9.82.3, Sep 2026)
 
 Reported off Areas & roles → Roles: adding "Bar Manager" was refused as already

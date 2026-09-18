@@ -27,7 +27,11 @@ const DEFAULT_CAP = 3
 // Client mirror of services/roster.check_assignment. The role/qualification
 // requirement is the SHIFT's own now (its role, and the qualification that
 // role's area-pairing gates on), not the area's.
-function checkClient(area, shift, cand, shifts, settings) {
+// No `area` argument: since the multi-role migration the role/qualification
+// requirement is the SHIFT's own, so the area was only ever ignored here. The
+// stale guard on it (an archived area is not in the active-only areas list)
+// blocked filling a shift whose area was later archived.
+function checkClient(shift, cand, shifts, settings) {
   const blocks = [], warns = []
   const cap = settings.weekly_shift_cap || cand.max_shifts || DEFAULT_CAP
   if (shift.required_qualification_type_id && !cand.qual_type_ids.includes(shift.required_qualification_type_id)) {
@@ -665,9 +669,9 @@ export default function Roster({ st, patch, narrow }) {
     if (personId === null) return { kind: 'unassign' }      // the Open shifts row
     if (dragShift.day_of_week !== day) return { kind: 'wrongday' }
     if (dragShift.assignee_member_id === personId) return { kind: 'wrongday' }  // already theirs
-    const cand = candById[personId], area = areaById[dragShift.area_id]
-    if (!cand || !area) return { kind: 'move' }
-    const res = checkClient(area, dragShift, cand, shifts, settings)
+    const cand = candById[personId]
+    if (!cand) return { kind: 'move' }
+    const res = checkClient(dragShift, cand, shifts, settings)
     return { kind: res.blocks.length ? 'blocked' : (res.warns.length ? 'warn' : 'move'), res }
   }
 
@@ -739,7 +743,7 @@ export default function Roster({ st, patch, narrow }) {
 
   const sel = st.selected ? shifts.find(x => x.id === st.selected) : null
   const selArea = sel ? areaById[sel.area_id] : null
-  const ranked = sel ? candidates.map(c => ({ c, res: checkClient(selArea, sel, c, shifts, settings), load: shifts.filter(s => s.assignee_member_id === c.member_id).length }))
+  const ranked = sel ? candidates.map(c => ({ c, res: checkClient(sel, c, shifts, settings), load: shifts.filter(s => s.assignee_member_id === c.member_id).length }))
     .filter(x => x.res.blocks.length === 0).sort((a, b) => (a.res.warns.length * 10 + a.load) - (b.res.warns.length * 10 + b.load))
     : candidates.map(c => ({ c, res: { warns: [] }, load: shifts.filter(s => s.assignee_member_id === c.member_id).length }))
 
@@ -1122,14 +1126,19 @@ export default function Roster({ st, patch, narrow }) {
           <aside className="pb-scroll" style={narrow
             ? { width: 320, maxWidth: '92vw', position: 'fixed', right: 0, top: 0, bottom: 0, zIndex: 65, borderLeft: `1px solid ${C.hair2}`, background: C.surface, overflowY: 'auto', padding: 16, boxShadow: '0 0 40px rgba(0,0,0,0.5)' }
             : { width: 296, flex: '0 0 296px', borderLeft: `1px solid ${C.hair}`, background: C.surface, overflowY: 'auto', padding: 16 }}>
-            {sel && selArea && (
+            {sel && (
               <div>
                 <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faintest, marginBottom: 8 }}>BEST FIT FOR THIS SHIFT</div>
                 <div style={{ background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 8, padding: 12, marginBottom: 14 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: selArea.color || 'var(--pb-accent)' }} />
-                    <span onClick={() => openArea(selArea)} title={`Edit ${selArea.name} and its shifts`}
-                      style={{ fontWeight: 600, fontSize: 14, ...areaLinkStyle }}>{selArea.name}</span>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: (selArea && selArea.color) || 'var(--pb-accent)' }} />
+                    {/* An archived area is not in the areas list, so it can't be
+                        edited from here — name it off the shift's own area_name
+                        rather than hiding the whole fill panel for it. */}
+                    {selArea
+                      ? <span onClick={() => openArea(selArea)} title={`Edit ${selArea.name} and its shifts`}
+                          style={{ fontWeight: 600, fontSize: 14, ...areaLinkStyle }}>{selArea.name}</span>
+                      : <span style={{ fontWeight: 600, fontSize: 14 }}>{areaLabel(sel)}</span>}
                   </div>
                   <div style={{ fontFamily: MONO, fontSize: 11, color: C.dim, marginTop: 4 }}>{sel.role_name ? sel.role_name + ' · ' : ''}{DOW[sel.day_of_week]} {fmtHour(sel.start_time)}–{fmtHour(sel.end_time)}</div>
                   <div style={{ fontFamily: MONO, fontSize: 10, color: C.faint, marginTop: 4 }}>{[sel.role_name, sel.required_qualification_name ? 'needs ' + sel.required_qualification_name : null].filter(Boolean).join(' · ') || 'No requirement'}</div>
