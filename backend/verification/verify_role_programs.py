@@ -76,6 +76,19 @@ CREATE TABLE IF NOT EXISTS roster_areas (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )
 """
+# The area role PALETTE (migration 306) role_programs._role_areas reads.
+ROSTER_AREA_ROLES_DDL = """
+CREATE TABLE IF NOT EXISTS roster_area_roles (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+    area_id UUID NOT NULL REFERENCES roster_areas(id) ON DELETE CASCADE,
+    role_id UUID NOT NULL REFERENCES club_roles(id) ON DELETE CASCADE,
+    required_qualification_type_id UUID REFERENCES qualification_types(id) ON DELETE SET NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_roster_area_roles UNIQUE (area_id, role_id)
+)
+"""
 
 
 async def occ_by_def(db, def_id):
@@ -90,6 +103,7 @@ async def main() -> int:  # noqa: C901
         await conn.execute(text("CREATE SCHEMA public"))
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text(ROSTER_AREAS_DDL))
+        await conn.execute(text(ROSTER_AREA_ROLES_DDL))
 
     Session = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -174,11 +188,17 @@ async def main() -> int:  # noqa: C901
         deff("Bookkeeping", "ongoing", treasurer)
         await db.flush()
 
-        # roster_areas raw insert (not ORM-mapped)
+        # roster_areas + role palette raw inserts (not ORM-mapped). The area
+        # lists the Canteen role in its palette with the Food Handling qual — the
+        # shape role_programs._role_areas reads after migration 306.
+        area_id = uuid.uuid4()
         await db.execute(text(
-            "INSERT INTO roster_areas (id, organisation_id, name, required_role_id, required_qualification_type_id) "
-            "VALUES (gen_random_uuid(), :o, :n, :r, :q)"),
-            {"o": org.id, "n": "Canteen", "r": canteen.id, "q": qtype.id})
+            "INSERT INTO roster_areas (id, organisation_id, name) VALUES (:id, :o, :n)"),
+            {"id": area_id, "o": org.id, "n": "Canteen"})
+        await db.execute(text(
+            "INSERT INTO roster_area_roles (id, organisation_id, area_id, role_id, required_qualification_type_id) "
+            "VALUES (gen_random_uuid(), :o, :a, :r, :q)"),
+            {"o": org.id, "a": area_id, "r": canteen.id, "q": qtype.id})
         await db.commit()
 
         # Plain-value ids for use after any rollback below — a rollback expires

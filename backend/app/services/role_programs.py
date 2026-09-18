@@ -168,15 +168,19 @@ async def _role_duties(session: AsyncSession, org_id, role_id) -> list[dict]:
 
 
 async def _role_areas(session: AsyncSession, org_id, role_id) -> list[dict]:
-    """Operational roster areas this role covers. roster_areas is a raw-SQL
-    table (services/roster.py's posture); guarded so a database without it (an
-    older schema) simply reports no areas rather than raising."""
+    """Operational roster areas this role covers. Reads the role PALETTE
+    (roster_area_roles, migration 306) rather than the deprecated single
+    roster_areas.required_role_id, so an area that lists this role among several
+    is found and the role's own gating qualification comes across. Both are
+    raw-SQL tables (services/roster.py's posture); guarded so an older schema
+    without the palette simply reports no areas rather than raising."""
     try:
         rows = (await session.execute(text("""
             SELECT a.id AS id, a.name AS name, qt.name AS qual_name
-            FROM roster_areas a
-            LEFT JOIN qualification_types qt ON qt.id = a.required_qualification_type_id
-            WHERE a.organisation_id = :org AND a.required_role_id = :role
+            FROM roster_area_roles ar
+            JOIN roster_areas a ON a.id = ar.area_id
+            LEFT JOIN qualification_types qt ON qt.id = ar.required_qualification_type_id
+            WHERE ar.organisation_id = :org AND ar.role_id = :role
             ORDER BY lower(a.name)
         """), {"org": org_id, "role": role_id})).mappings().all()
     except Exception:
