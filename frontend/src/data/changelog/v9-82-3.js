@@ -1,7 +1,7 @@
 export default {
-  version: 'v9.82.2',
+  version: 'v9.82.3',
   date: '2026-09-18',
-  // Above v9.82.1's sortKey (the highest on this branch). Check origin/main at
+  // Above v9.82.2's sortKey (the highest on origin/main). Check origin/main at
   // merge time.
   sortKey: '2026-09-28T18:00:00Z',
   title: 'A duplicate role now says where the role you cannot see lives',

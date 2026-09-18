@@ -7884,7 +7884,7 @@ and filled for a role, so the grid should read that way.
   pass them vacuously — the "a check that can't fail is not a check" trap, caught
   by the control run passing them before they were tightened.
 
-### A duplicate role named a role the list will not show (v9.82.2, Sep 2026)
+### A duplicate role named a role the list will not show (v9.82.3, Sep 2026)
 
 Reported off Areas & roles → Roles: adding "Bar Manager" was refused as already
 existing, with no Bar Manager anywhere in the list.
