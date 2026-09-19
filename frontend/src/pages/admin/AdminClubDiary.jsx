@@ -124,19 +124,23 @@ function Badges({ t }) {
 // ── Editable occurrence card (Season Plan + Calendar list/modal) ─────────────
 function TaskEditor({ task, members, roles, onPatch }) {
   const toast = useToast()
-  const [local, setLocal] = useState({
+  const seed = () => ({
     percent_complete: task.percent_complete ?? '',
     third_party: task.third_party ?? '',
     budget_estimate: task.budget_estimate ?? '',
     actual_expenditure: task.actual_expenditure ?? '',
+    // Dates are buffered locally and committed on blur, never written through
+    // the async patch on every keystroke: a native date input fires a change
+    // for each digit typed into the year (2 -> 20 -> 202 -> 2027), and a
+    // per-keystroke server round-trip resets the controlled value back to the
+    // partial year mid-typing, so the year can never be completed.
+    start_date: (task.start_date || '').slice(0, 10),
+    due_date: (task.due_date || '').slice(0, 10),
+    estimated_completion_date: (task.estimated_completion_date || '').slice(0, 10),
   })
+  const [local, setLocal] = useState(seed)
   useEffect(() => {
-    setLocal({
-      percent_complete: task.percent_complete ?? '',
-      third_party: task.third_party ?? '',
-      budget_estimate: task.budget_estimate ?? '',
-      actual_expenditure: task.actual_expenditure ?? '',
-    })
+    setLocal(seed())
   }, [task.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function patch(fields) {
@@ -150,6 +154,10 @@ function TaskEditor({ task, members, roles, onPatch }) {
     if (min != null) n = Math.max(min, n)
     if (max != null) n = Math.min(max, n)
     patch({ [key]: n })
+  }
+  const commitDate = (key) => {
+    const v = local[key]
+    patch({ [key]: v ? v : null })
   }
 
   const assigneeRole = roles.find(r => r.id === task.assigned_to_role_id)
@@ -194,15 +202,21 @@ function TaskEditor({ task, members, roles, onPatch }) {
         </label>
         <label className="block">
           <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest">START DATE</span>
-          <input type="date" className={inp} value={(task.start_date || '').slice(0, 10)} onChange={e => patch({ start_date: e.target.value || null })} />
+          <input type="date" className={inp} value={local.start_date}
+            onChange={e => setLocal(l => ({ ...l, start_date: e.target.value }))}
+            onBlur={() => commitDate('start_date')} />
         </label>
         <label className="block">
           <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest">DUE DATE</span>
-          <input type="date" className={inp} value={(task.due_date || '').slice(0, 10)} onChange={e => patch({ due_date: e.target.value || null })} />
+          <input type="date" className={inp} value={local.due_date}
+            onChange={e => setLocal(l => ({ ...l, due_date: e.target.value }))}
+            onBlur={() => commitDate('due_date')} />
         </label>
         <label className="block">
           <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest">ESTIMATED COMPLETION</span>
-          <input type="date" className={inp} value={(task.estimated_completion_date || '').slice(0, 10)} onChange={e => patch({ estimated_completion_date: e.target.value || null })} />
+          <input type="date" className={inp} value={local.estimated_completion_date}
+            onChange={e => setLocal(l => ({ ...l, estimated_completion_date: e.target.value }))}
+            onBlur={() => commitDate('estimated_completion_date')} />
         </label>
         <label className="block">
           <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest">THIRD PARTY</span>
