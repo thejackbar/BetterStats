@@ -831,18 +831,30 @@ _SINCE_LOWER_BOUND = "GREATEST(NOW() - (:days * INTERVAL '1 day'), COALESCE(:sin
 # facebook/instagram traffic_source). Keeps the wizard funnel and the
 # selected-clubs table to Meta traffic only, so an organic or EDM signup that
 # reached /trial some other way never shows on the Meta Ads dashboard.
-def _meta_visitor_subquery(created_at_bound: str) -> str:
+#
+# Written as an EXISTS correlated on visitor_id — served by
+# idx_usage_events_visitor_created (visitor_id, created_at) — and NOT as
+# `visitor_id IN (SELECT ... FROM usage_events WHERE <window>)`. The IN form
+# built its whole set with a full seq scan of usage_events, the platform's
+# largest table (every API request and page view lands here), on every Meta
+# Ads HQ page load. That scan grew with the table until get_latest_summary
+# exceeded the browser/nginx timeout and the dashboard sat on "Loading…"
+# forever — the outer query it gates is always a SMALL set of self_serve_step
+# rows, so driving from those and probing each visitor's own rows makes the
+# cost scale with the selections shown rather than the whole table. The outer
+# query must alias its usage_events row as `ue`.
+def _meta_visitor_exists(created_at_bound: str, alias: str = "ue") -> str:
     return f"""
-        visitor_id IN (
-            SELECT DISTINCT visitor_id FROM usage_events
-            WHERE created_at >= {created_at_bound}
-              AND visitor_id IS NOT NULL
+        EXISTS (
+            SELECT 1 FROM usage_events mv
+            WHERE mv.visitor_id = {alias}.visitor_id
+              AND mv.created_at >= {created_at_bound}
               AND (
-                traffic_source IN ('facebook', 'instagram')
-                OR lower(COALESCE(NULLIF(utm_source, ''),
-                         substring(path from 'utm_source=([^&]+)')))
+                mv.traffic_source IN ('facebook', 'instagram')
+                OR lower(COALESCE(NULLIF(mv.utm_source, ''),
+                         substring(mv.path from 'utm_source=([^&]+)')))
                     IN ('fb', 'facebook', 'meta', 'ig', 'instagram')
-                OR path ~* 'fbclid=' OR path ~* 'igshid='
+                OR mv.path ~* 'fbclid=' OR mv.path ~* 'igshid='
               )
         )
 """
@@ -850,11 +862,11 @@ def _meta_visitor_subquery(created_at_bound: str) -> str:
 
 # Since-aware — for the funnel STAT counts (get_club_selected_count), which
 # reset with the counting-since cutoff.
-_META_VISITOR_SUBQUERY = _meta_visitor_subquery(_SINCE_LOWER_BOUND)
+_META_VISITOR_EXISTS = _meta_visitor_exists(_SINCE_LOWER_BOUND)
 # Plain days-only, unaffected by the cutoff — for the "Clubs selected"/"Clubs
 # searched" TABLES (get_selected_clubs/get_searched_clubs), which stay a full
 # follow-up/lead-management list regardless of the funnel reset.
-_META_VISITOR_SUBQUERY_PLAIN = _meta_visitor_subquery("NOW() - (:days * INTERVAL '1 day')")
+_META_VISITOR_EXISTS_PLAIN = _meta_visitor_exists("NOW() - (:days * INTERVAL '1 day')")
 
 
 async def get_club_selected_count(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS) -> int:
@@ -867,12 +879,12 @@ async def get_club_selected_count(db: AsyncSession, days: int = CAMPAIGN_LENGTH_
     numbers on either side of it in that funnel rather than including
     selections from organic/EDM/other traffic."""
     count = (await db.execute(text(f"""
-        SELECT COUNT(DISTINCT visitor_id) FROM usage_events
-        WHERE event_type = 'self_serve_step'
-          AND route = 'club_prepared'
-          AND created_at >= {_SINCE_LOWER_BOUND}
-          AND visitor_id IS NOT NULL
-          AND {_META_VISITOR_SUBQUERY}
+        SELECT COUNT(DISTINCT ue.visitor_id) FROM usage_events ue
+        WHERE ue.event_type = 'self_serve_step'
+          AND ue.route = 'club_prepared'
+          AND ue.created_at >= {_SINCE_LOWER_BOUND}
+          AND ue.visitor_id IS NOT NULL
+          AND {_META_VISITOR_EXISTS}
     """), {"days": days, "since": _since()})).scalar()
     return int(count or 0)
 
@@ -968,8 +980,8 @@ async def get_selected_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
                MIN(created_at)          AS first_at,
                MAX(created_at)          AS last_at,
                COUNT(DISTINCT visitor_id) AS visitors,
-               bool_or({_META_VISITOR_SUBQUERY_PLAIN}) AS via_meta
-        FROM usage_events
+               bool_or({_META_VISITOR_EXISTS_PLAIN}) AS via_meta
+        FROM usage_events ue
         WHERE event_type = 'self_serve_step'
           AND route = 'club_prepared'
           AND created_at >= NOW() - (:days * INTERVAL '1 day')
@@ -1120,11 +1132,11 @@ async def get_searched_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
                MAX(created_at)          AS last_at,
                COUNT(DISTINCT visitor_id) AS visitors,
                COUNT(*)                   AS searches,
-               bool_or({_META_VISITOR_SUBQUERY_PLAIN}) AS via_meta,
+               bool_or({_META_VISITOR_EXISTS_PLAIN}) AS via_meta,
                (array_agg(DISTINCT NULLIF(TRIM(metadata->>'search_query'), ''))
                   FILTER (WHERE NULLIF(TRIM(metadata->>'search_query'), '') IS NOT NULL)
                )[1:5] AS queries
-        FROM usage_events
+        FROM usage_events ue
         WHERE event_type = 'self_serve_step'
           AND route = 'club_searched'
           AND created_at >= NOW() - (:days * INTERVAL '1 day')
@@ -1515,7 +1527,7 @@ def _current_campaign_utm_contents() -> set[str]:
 
 
 # Same "was this click Meta at all" signal get_selected_clubs/get_searched_clubs/
-# _META_VISITOR_SUBQUERY already use elsewhere on this dashboard — the loosest
+# _META_VISITOR_EXISTS already use elsewhere on this dashboard — the loosest
 # (and last-resort) of _attribution_matches_campaign's three checks.
 _META_ATTRIBUTION_SOURCES = {"fb", "facebook", "meta", "ig", "instagram"}
 
