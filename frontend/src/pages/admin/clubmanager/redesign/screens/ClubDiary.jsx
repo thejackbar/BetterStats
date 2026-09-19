@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../../../../../lib/api'
-import { C, MONO, Caption, ScreenHeader, NavToggle, SegTabs, SegGroup, SegItem, StatReadout, Toast, Drawer, ManageLink, HEAD_SIDE, HEAD_CENTRE, HEAD_SIDE_END, HeaderSearch, matchesQuery } from '../ui'
+import { C, MONO, Caption, ScreenHeader, NavToggle, SegTabs, SegGroup, SegItem, StatReadout, Toast, Drawer, HEAD_SIDE, HEAD_CENTRE, HEAD_SIDE_END, HeaderSearch, matchesQuery } from '../ui'
 import EntityManager from '../parts/EntityManager'
 
 // Club Diary on real data — the board (one current occurrence per active task
@@ -96,11 +97,20 @@ export default function ClubDiary({ st, patch, narrow }) {
         <h1 style={{ fontWeight: 700, fontSize: 19, margin: 0, letterSpacing: '-0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Club Diary</h1>
         <Caption tone={C.faint} style={{ marginTop: 2 }}>THE CLUB'S RECURRING OBLIGATIONS, BY SEASON</Caption>
       </div>
+      {/* The full-editor link sits BETWEEN the two toggles, so "go to the full
+          editor" reads as the natural step across from the season plan to the
+          templates rather than a stray button off to the right. */}
       <div style={HEAD_CENTRE}>
-        <SegTabs value={tab} onChange={k => patch({ diaryTab: k })} tabs={[{ key: 'plan', label: 'Season plan' }, { key: 'templates', label: 'Template library' }]} />
+        <SegGroup>
+          <SegItem active={tab === 'plan'} onClick={() => patch({ diaryTab: 'plan' })}>Season plan</SegItem>
+          <Link to="/admin/clubhouse/diary/manage" style={{
+            padding: '5px 12px', borderRadius: 6, fontSize: 12.5, fontWeight: 600,
+            border: `1px solid ${C.hair2}`, color: C.dim, textDecoration: 'none', whiteSpace: 'nowrap',
+          }}>Full diary editor</Link>
+          <SegItem active={tab === 'templates'} onClick={() => patch({ diaryTab: 'templates' })}>Template library</SegItem>
+        </SegGroup>
       </div>
       <div style={HEAD_SIDE_END}>
-        <ManageLink to="/admin/clubhouse/diary/manage">Full diary editor</ManageLink>
         {children}
       </div>
     </ScreenHeader>
