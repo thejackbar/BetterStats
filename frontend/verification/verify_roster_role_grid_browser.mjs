@@ -130,6 +130,7 @@ const run = async () => {
   // The text inside an addressed sub-row / header (or '' when it is absent).
   const textOf = async (sel) => { if (!(await seen(sel))) return ''; return page.locator(sel).first().innerText().catch(() => '') }
   const attrOf = async (sel, name) => { if (!(await seen(sel))) return ''; return (await page.locator(sel).first().getAttribute(name).catch(() => '')) || '' }
+  const colorOf = async (sel) => { if (!(await seen(sel))) return ''; return page.locator(sel).first().evaluate(el => getComputedStyle(el).color).catch(() => '') }
 
   const open = async (path) => {
     await page.goto(BASE + path, { waitUntil: 'domcontentloaded' })
@@ -218,6 +219,18 @@ const run = async () => {
     await seen(satCell + ' [data-filled="1"]'))
   check('the collapsed summary marks the still-open shift with a ring',
     await seen(satCell + ' [data-open="1"]'))
+  // Match Day's colour is #3b82f6. Both the filled and the open role name are
+  // painted in it, so fill vs open is carried by the marker shape alone and
+  // every chip reads as belonging to this area rather than a different one.
+  const AREA_RGB = 'rgb(59, 130, 246)'
+  const filledColor = await colorOf(satCell + ' [data-filled="1"] [data-role-label]')
+  const openColor = await colorOf(satCell + ' [data-open="1"] [data-role-label]')
+  check('the collapsed filled role name is painted in the area colour',
+    filledColor === AREA_RGB, filledColor)
+  check('the collapsed open role name is painted in the area colour too',
+    openColor === AREA_RGB, openColor)
+  check('filled and open roles are NOT colour-coded apart (same area colour)',
+    !!filledColor && filledColor === openColor)
   check('a day with no shifts draws an empty collapsed cell',
     (await attrOf('[data-testid="area-collapsed-day-ar1-0"]', 'data-shift-count')) === '0')
 

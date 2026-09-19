@@ -871,11 +871,12 @@ export default function Roster({ st, patch, narrow }) {
   // Collapsed multi-role area: the header's day cells still name the shifts
   // folded away underneath, so collapsing an area doesn't hide which roles it
   // needs on a given day or whether they are covered. One compact chip per
-  // shift — a status marker (a solid disc in the area's own colour for a filled
-  // shift, an amber ring for one still open) beside the ROLE name, the name
-  // itself amber while open and neutral once filled — so the role AND whether it
-  // is filled read at a glance without expanding. Clicking a day that has shifts
-  // expands the area back to its per-role rows.
+  // shift — a status marker beside the ROLE name, BOTH in the area's own colour
+  // so every chip reads as belonging to this area rather than looking like a
+  // different role. Filled vs open is carried by the marker's SHAPE alone — a
+  // solid disc for a filled shift, a hollow ring (same colour) for one still
+  // open — not by a second colour, which made the open ones read as a different
+  // area at a glance. Clicking a day that has shifts expands the area.
   const MAX_COLLAPSED_ROWS = 6
   const areaCollapsedDayCol = (a, mine, d) => {
     const dayShifts = mine.filter(x => x.day_of_week === d)
@@ -885,17 +886,16 @@ export default function Roster({ st, patch, narrow }) {
     const areaColor = a.color || 'var(--pb-accent)'
     const chip = (x) => {
       const filled = !!x.assignee_member_id
-      const warned = x.warnings && x.warnings.length
       const label = x.role_name || 'General help'
       return (
         <div key={x.id} data-filled={filled ? '1' : undefined} data-open={filled ? undefined : '1'}
           title={`${label} — ${filled ? (x.assignee_name ? 'filled · ' + x.assignee_name : 'filled') : 'open'}`}
           style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
-          <span style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+          <span style={{ width: 9, height: 9, borderRadius: '50%', flexShrink: 0,
             ...(filled
-              ? { background: warned ? C.warn : `color-mix(in srgb, ${areaColor} 80%, transparent)` }
-              : { background: 'transparent', border: '1.5px solid rgba(245,181,66,0.75)' }) }} />
-          <span style={{ fontSize: 10.5, fontWeight: filled ? 600 : 500, color: filled ? (warned ? C.warn : C.dim) : C.warn,
+              ? { background: areaColor }
+              : { background: 'transparent', border: `1.75px solid ${areaColor}` }) }} />
+          <span data-role-label style={{ fontSize: 10.5, fontWeight: filled ? 600 : 500, color: areaColor,
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
         </div>
       )
