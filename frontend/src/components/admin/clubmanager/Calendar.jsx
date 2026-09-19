@@ -19,8 +19,10 @@ const startOfDay = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); retur
 const endOfDay = (d) => { const x = new Date(d); x.setHours(23, 59, 59, 999); return x }
 const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x }
 const addMonths = (d, n) => { const x = new Date(d); x.setMonth(x.getMonth() + n); return x }
+const addYears = (d, n) => { const x = new Date(d); x.setFullYear(x.getFullYear() + n); return x }
 const startOfWeek = (d) => { const x = startOfDay(d); const dow = (x.getDay() + 6) % 7; return addDays(x, -dow) }
 const startOfMonth = (d) => { const x = startOfDay(d); x.setDate(1); return x }
+const startOfYear = (d) => { const x = startOfDay(d); x.setMonth(0, 1); return x }
 const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
 const isToday = (d) => sameDay(new Date(d), new Date())
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -28,6 +30,7 @@ const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 export function calendarWindow(calMode, cursor) {
   if (calMode === 'day') return [startOfDay(cursor), endOfDay(cursor)]
   if (calMode === 'week') { const s = startOfWeek(cursor); return [s, endOfDay(addDays(s, 6))] }
+  if (calMode === 'year') { const s = startOfYear(cursor); return [s, endOfDay(new Date(s.getFullYear(), 11, 31))] }
   const s = startOfWeek(startOfMonth(cursor)); return [s, endOfDay(addDays(s, 41))]
 }
 
@@ -47,7 +50,7 @@ export default function Calendar({ items = [], getStart, getEnd, renderChip, onI
     return spans.filter(sp => d0 >= sp.start && d0 <= sp.end).map(sp => sp.it)
   }
 
-  const step = (dir) => setCursor(c => calMode === 'month' ? addMonths(c, dir) : addDays(c, dir * (calMode === 'week' ? 7 : 1)))
+  const step = (dir) => setCursor(c => calMode === 'year' ? addYears(c, dir) : calMode === 'month' ? addMonths(c, dir) : addDays(c, dir * (calMode === 'week' ? 7 : 1)))
 
   const periodLabel = useMemo(() => {
     if (calMode === 'day') return cursor.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
@@ -55,6 +58,7 @@ export default function Calendar({ items = [], getStart, getEnd, renderChip, onI
       const s = startOfWeek(cursor), e = addDays(s, 6)
       return `${s.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })} – ${e.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}`
     }
+    if (calMode === 'year') return String(cursor.getFullYear())
     return cursor.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' })
   }, [calMode, cursor])
 
@@ -67,6 +71,24 @@ export default function Calendar({ items = [], getStart, getEnd, renderChip, onI
     : calMode === 'day' ? [startOfDay(cursor)]
     : Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(cursor), i))
 
+  // Year view: one mini-month per month of the cursor's year. Each month's cells
+  // are the leading weekday blanks then its real days (Mon-first, matching the
+  // month grid), so a day sits under the same weekday column throughout.
+  const yearMonths = useMemo(() => {
+    if (calMode !== 'year') return []
+    const y = cursor.getFullYear()
+    return Array.from({ length: 12 }, (_, m) => {
+      const first = new Date(y, m, 1)
+      const lead = (first.getDay() + 6) % 7
+      const dim = new Date(y, m + 1, 0).getDate()
+      const cells = [
+        ...Array(lead).fill(null),
+        ...Array.from({ length: dim }, (_, d) => new Date(y, m, d + 1)),
+      ]
+      return { first, cells }
+    })
+  }, [calMode, cursor])
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -77,7 +99,7 @@ export default function Calendar({ items = [], getStart, getEnd, renderChip, onI
           <span className="font-display font-bold text-[14px] ml-1">{periodLabel}</span>
         </div>
         <div className="flex items-center gap-2">
-          {['month', 'week', 'day'].map(m => (
+          {['month', 'week', 'day', 'year'].map(m => (
             <button key={m} onClick={() => setCalMode(m)} className={pill(calMode === m)} style={pillStyle(calMode === m)}>
               {m[0].toUpperCase() + m.slice(1)}
             </button>
@@ -85,7 +107,43 @@ export default function Calendar({ items = [], getStart, getEnd, renderChip, onI
         </div>
       </div>
 
-      {calMode === 'month' ? (
+      {calMode === 'year' ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+          {yearMonths.map(({ first, cells }, mi) => (
+            <div key={mi} className="pb-card p-2">
+              <button
+                onClick={() => { setCursor(first); setCalMode('month') }}
+                title="Open this month"
+                className="w-full text-left font-display font-bold text-[12.5px] px-1 pb-1.5 hover:text-pb-accent">
+                {first.toLocaleDateString('en-AU', { month: 'long' })}
+              </button>
+              <div className="grid grid-cols-7 text-[8.5px] font-mono uppercase text-pb-faintest mb-0.5">
+                {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, k) => <div key={k} className="text-center">{d}</div>)}
+              </div>
+              <div className="grid grid-cols-7 gap-px">
+                {cells.map((day, di) => {
+                  if (!day) return <div key={di} />
+                  const count = itemsForDay(day).length
+                  const today = isToday(day)
+                  return (
+                    <button key={di}
+                      onClick={() => { setCursor(day); setCalMode('day') }}
+                      title={count ? `${count} on ${day.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}` : day.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      className={`relative aspect-square rounded flex items-center justify-center text-[9.5px] leading-none transition ${
+                        today ? 'font-bold text-white' : count ? 'text-pb-text hover:brightness-125' : 'text-pb-faint hover:bg-pb-surface2'}`}
+                      style={today ? { background: accent } : count ? { background: `${accent}2e` } : undefined}>
+                      {day.getDate()}
+                      {count > 0 && !today && (
+                        <span className="absolute bottom-0.5 w-1 h-1 rounded-full" style={{ background: accent }} />
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : calMode === 'month' ? (
         <div className="pb-card overflow-hidden">
           <div className="grid grid-cols-7 text-[10.5px] font-mono uppercase tracking-wide text-pb-faint border-b border-pb-hairline">
             {WEEKDAYS.map(d => <div key={d} className="px-2 py-1.5 text-center">{d}</div>)}
