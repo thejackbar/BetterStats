@@ -26,6 +26,9 @@ const startOfYear = (d) => { const x = startOfDay(d); x.setMonth(0, 1); return x
 const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
 const isToday = (d) => sameDay(new Date(d), new Date())
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+// Most items to list inside a Year-view month tile before "+N more" (which
+// opens the month), so a busy month can't blow the tile out to full height.
+const YEAR_TILE_MAX = 6
 
 export function calendarWindow(calMode, cursor) {
   if (calMode === 'day') return [startOfDay(cursor), endOfDay(cursor)]
@@ -71,11 +74,11 @@ export default function Calendar({ items = [], getStart, getEnd, renderChip, onI
     : calMode === 'day' ? [startOfDay(cursor)]
     : Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(cursor), i))
 
-  // Year view: twelve MONTH BLOCKS, not twelve mini-calendars. Each block is one
-  // month with a count of the items falling in it; there is no per-day grid. The
-  // block opens the month view. `count` is the number of items whose span
-  // overlaps the month at all, so a multi-day item is counted in each month it
-  // touches.
+  // Year view: twelve MONTH BLOCKS, not twelve mini-calendars. Each block lists
+  // the items falling in that month (earliest first) and each row drills into
+  // that item via onItemClick; there is no per-day grid. The month heading opens
+  // the month view. `items` are those whose span overlaps the month at all, so a
+  // multi-day item appears in each month it touches.
   const yearMonths = useMemo(() => {
     if (calMode !== 'year') return []
     const y = cursor.getFullYear()
@@ -84,9 +87,12 @@ export default function Calendar({ items = [], getStart, getEnd, renderChip, onI
       const first = new Date(y, m, 1)
       const mStart = startOfDay(first)
       const mEnd = endOfDay(new Date(y, m + 1, 0))
-      const count = spans.filter(sp => sp.start <= mEnd && sp.end >= mStart).length
+      const items = spans
+        .filter(sp => sp.start <= mEnd && sp.end >= mStart)
+        .sort((a, b) => a.start - b.start)
+        .map(sp => sp.it)
       const isThisMonth = now.getFullYear() === y && now.getMonth() === m
-      return { first, count, isThisMonth }
+      return { first, items, isThisMonth }
     })
   }, [calMode, cursor, spans])
 
@@ -109,31 +115,44 @@ export default function Calendar({ items = [], getStart, getEnd, renderChip, onI
       </div>
 
       {calMode === 'year' ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-          {yearMonths.map(({ first, count, isThisMonth }, mi) => (
-            <button key={mi}
-              onClick={() => { setCursor(first); setCalMode('month') }}
-              title={`Open ${first.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' })}`}
-              className="pb-card p-4 text-left transition hover:border-pb-accent/50"
-              style={isThisMonth ? { borderColor: accent } : undefined}>
-              <div className="flex items-center justify-between">
-                <span className="font-display font-bold text-[15px]" style={isThisMonth ? { color: accent } : undefined}>
-                  {first.toLocaleDateString('en-AU', { month: 'long' })}
-                </span>
-                {isThisMonth && <span className="font-mono text-[9px] uppercase tracking-wide" style={{ color: accent }}>Now</span>}
-              </div>
-              <div className="mt-2.5 flex items-center gap-2">
-                {count > 0 ? (
-                  <>
-                    <span className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded-full text-[11px] font-semibold text-white" style={{ background: accent }}>{count}</span>
-                    <span className="text-[11.5px] text-pb-faint">item{count === 1 ? '' : 's'}</span>
-                  </>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 items-start">
+          {yearMonths.map(({ first, items, isThisMonth }, mi) => {
+            const shown = items.slice(0, YEAR_TILE_MAX)
+            const extra = items.length - shown.length
+            return (
+              <div key={mi} className="pb-card p-3" style={isThisMonth ? { borderColor: accent } : undefined}>
+                <button
+                  onClick={() => { setCursor(first); setCalMode('month') }}
+                  title={`Open ${first.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' })}`}
+                  className="w-full flex items-center justify-between mb-2 group">
+                  <span className="font-display font-bold text-[15px] group-hover:text-pb-accent transition" style={isThisMonth ? { color: accent } : undefined}>
+                    {first.toLocaleDateString('en-AU', { month: 'long' })}
+                  </span>
+                  <span className="flex items-center gap-2">
+                    {isThisMonth && <span className="font-mono text-[9px] uppercase tracking-wide" style={{ color: accent }}>Now</span>}
+                    {items.length > 0 && <span className="font-mono text-[10px] text-pb-faintest">{items.length}</span>}
+                  </span>
+                </button>
+                {items.length === 0 ? (
+                  <div className="text-[11.5px] text-pb-faintest px-0.5 py-1">Nothing scheduled</div>
                 ) : (
-                  <span className="text-[11.5px] text-pb-faintest">Nothing scheduled</span>
+                  <div className="space-y-1">
+                    {shown.map((it, k) => (
+                      <div key={k} onClick={() => onItemClick && onItemClick(it)} className="cursor-pointer">
+                        {renderChip(it, { compact: true })}
+                      </div>
+                    ))}
+                    {extra > 0 && (
+                      <button onClick={() => { setCursor(first); setCalMode('month') }}
+                        className="text-[10.5px] text-pb-faint hover:text-pb-accent px-1 py-0.5">
+                        +{extra} more
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
-            </button>
-          ))}
+            )
+          })}
         </div>
       ) : calMode === 'month' ? (
         <div className="pb-card overflow-hidden">

@@ -7,6 +7,6 @@ export default {
   title: 'Calendars now have a Year view',
   items: [
     'The calendars in the Club Diary, Events and Facilities & Assets screens gained a Year view, sitting to the left of Month / Week / Day.',
-    'Year view shows the twelve months of the year as blocks, each with a count of what falls in it — not a wall of days. Click a month to open it.',
+    'Year view shows the twelve months as blocks, each listing what falls in it — not a wall of days. Click an item to open it, or the month heading to open the month.',
   ],
 }
