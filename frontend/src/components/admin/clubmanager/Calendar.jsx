@@ -71,23 +71,24 @@ export default function Calendar({ items = [], getStart, getEnd, renderChip, onI
     : calMode === 'day' ? [startOfDay(cursor)]
     : Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(cursor), i))
 
-  // Year view: one mini-month per month of the cursor's year. Each month's cells
-  // are the leading weekday blanks then its real days (Mon-first, matching the
-  // month grid), so a day sits under the same weekday column throughout.
+  // Year view: twelve MONTH BLOCKS, not twelve mini-calendars. Each block is one
+  // month with a count of the items falling in it; there is no per-day grid. The
+  // block opens the month view. `count` is the number of items whose span
+  // overlaps the month at all, so a multi-day item is counted in each month it
+  // touches.
   const yearMonths = useMemo(() => {
     if (calMode !== 'year') return []
     const y = cursor.getFullYear()
+    const now = new Date()
     return Array.from({ length: 12 }, (_, m) => {
       const first = new Date(y, m, 1)
-      const lead = (first.getDay() + 6) % 7
-      const dim = new Date(y, m + 1, 0).getDate()
-      const cells = [
-        ...Array(lead).fill(null),
-        ...Array.from({ length: dim }, (_, d) => new Date(y, m, d + 1)),
-      ]
-      return { first, cells }
+      const mStart = startOfDay(first)
+      const mEnd = endOfDay(new Date(y, m + 1, 0))
+      const count = spans.filter(sp => sp.start <= mEnd && sp.end >= mStart).length
+      const isThisMonth = now.getFullYear() === y && now.getMonth() === m
+      return { first, count, isThisMonth }
     })
-  }, [calMode, cursor])
+  }, [calMode, cursor, spans])
 
   return (
     <div className="space-y-3">
@@ -99,7 +100,7 @@ export default function Calendar({ items = [], getStart, getEnd, renderChip, onI
           <span className="font-display font-bold text-[14px] ml-1">{periodLabel}</span>
         </div>
         <div className="flex items-center gap-2">
-          {['month', 'week', 'day', 'year'].map(m => (
+          {['year', 'month', 'week', 'day'].map(m => (
             <button key={m} onClick={() => setCalMode(m)} className={pill(calMode === m)} style={pillStyle(calMode === m)}>
               {m[0].toUpperCase() + m.slice(1)}
             </button>
@@ -109,38 +110,29 @@ export default function Calendar({ items = [], getStart, getEnd, renderChip, onI
 
       {calMode === 'year' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-          {yearMonths.map(({ first, cells }, mi) => (
-            <div key={mi} className="pb-card p-2">
-              <button
-                onClick={() => { setCursor(first); setCalMode('month') }}
-                title="Open this month"
-                className="w-full text-left font-display font-bold text-[12.5px] px-1 pb-1.5 hover:text-pb-accent">
-                {first.toLocaleDateString('en-AU', { month: 'long' })}
-              </button>
-              <div className="grid grid-cols-7 text-[8.5px] font-mono uppercase text-pb-faintest mb-0.5">
-                {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, k) => <div key={k} className="text-center">{d}</div>)}
+          {yearMonths.map(({ first, count, isThisMonth }, mi) => (
+            <button key={mi}
+              onClick={() => { setCursor(first); setCalMode('month') }}
+              title={`Open ${first.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' })}`}
+              className="pb-card p-4 text-left transition hover:border-pb-accent/50"
+              style={isThisMonth ? { borderColor: accent } : undefined}>
+              <div className="flex items-center justify-between">
+                <span className="font-display font-bold text-[15px]" style={isThisMonth ? { color: accent } : undefined}>
+                  {first.toLocaleDateString('en-AU', { month: 'long' })}
+                </span>
+                {isThisMonth && <span className="font-mono text-[9px] uppercase tracking-wide" style={{ color: accent }}>Now</span>}
               </div>
-              <div className="grid grid-cols-7 gap-px">
-                {cells.map((day, di) => {
-                  if (!day) return <div key={di} />
-                  const count = itemsForDay(day).length
-                  const today = isToday(day)
-                  return (
-                    <button key={di}
-                      onClick={() => { setCursor(day); setCalMode('day') }}
-                      title={count ? `${count} on ${day.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}` : day.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}
-                      className={`relative aspect-square rounded flex items-center justify-center text-[9.5px] leading-none transition ${
-                        today ? 'font-bold text-white' : count ? 'text-pb-text hover:brightness-125' : 'text-pb-faint hover:bg-pb-surface2'}`}
-                      style={today ? { background: accent } : count ? { background: `${accent}2e` } : undefined}>
-                      {day.getDate()}
-                      {count > 0 && !today && (
-                        <span className="absolute bottom-0.5 w-1 h-1 rounded-full" style={{ background: accent }} />
-                      )}
-                    </button>
-                  )
-                })}
+              <div className="mt-2.5 flex items-center gap-2">
+                {count > 0 ? (
+                  <>
+                    <span className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded-full text-[11px] font-semibold text-white" style={{ background: accent }}>{count}</span>
+                    <span className="text-[11.5px] text-pb-faint">item{count === 1 ? '' : 's'}</span>
+                  </>
+                ) : (
+                  <span className="text-[11.5px] text-pb-faintest">Nothing scheduled</span>
+                )}
               </div>
-            </div>
+            </button>
           ))}
         </div>
       ) : calMode === 'month' ? (
