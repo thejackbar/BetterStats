@@ -375,7 +375,7 @@ export default function RolePrograms({ st, patch, narrow }) {
   const pastHandovers = (program?.handovers || []).filter(h => h.id !== openId)
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <ScreenHeader>
         <NavToggle narrow={narrow} onClick={() => patch({ navOpen: true })} />
         <div style={HEAD_SIDE}>
