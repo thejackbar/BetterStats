@@ -207,8 +207,13 @@ const run = async () => {
   // open — while a day with nothing shows none. This is what keeps it obvious
   // there are shifts on that day without expanding.
   const satCell = '[data-testid="area-collapsed-day-ar1-5"]'
+  const satText = await textOf(satCell)
   check('collapsing shows a per-day shift summary on the header',
     wasExpanded && (await attrOf(satCell, 'data-shift-count')) === '2')
+  check('the collapsed summary names the still-open Umpire role',
+    satText.includes('Umpire'))
+  check('the collapsed summary names the filled Scorer role',
+    satText.includes('Scorer'))
   check('the collapsed summary marks the filled shift with a solid dot',
     await seen(satCell + ' [data-filled="1"]'))
   check('the collapsed summary marks the still-open shift with a ring',
