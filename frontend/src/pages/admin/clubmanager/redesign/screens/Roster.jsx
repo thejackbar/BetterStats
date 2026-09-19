@@ -868,6 +868,48 @@ export default function Roster({ st, patch, narrow }) {
     </div>
   )
 
+  // Collapsed multi-role area: the header's day cells still show evidence of the
+  // shifts folded away underneath, so collapsing an area doesn't hide that it
+  // has any on a given day. One dot per shift, colour-coded the same way the
+  // expanded chips are — a solid dot in the area's own colour for a filled
+  // shift, an amber ring for one still open, solid amber for a filled-but-warned
+  // one — so filled vs unfilled reads at a glance without expanding. Clicking a
+  // day that has shifts expands the area back to its per-role rows.
+  const MAX_COLLAPSED_DOTS = 12
+  const areaCollapsedDayCol = (a, mine, d) => {
+    const dayShifts = mine.filter(x => x.day_of_week === d)
+    const n = dayShifts.length
+    const f = dayShifts.filter(x => x.assignee_member_id).length
+    const o = n - f
+    const areaColor = a.color || 'var(--pb-accent)'
+    const dot = (x) => {
+      const filled = !!x.assignee_member_id
+      const warned = x.warnings && x.warnings.length
+      return (
+        <span key={x.id} data-filled={filled ? '1' : undefined} data-open={filled ? undefined : '1'}
+          style={{ width: 9, height: 9, borderRadius: '50%', flexShrink: 0,
+            ...(filled
+              ? { background: warned ? C.warn : `color-mix(in srgb, ${areaColor} 80%, transparent)` }
+              : { background: 'transparent', border: '1.5px solid rgba(245,181,66,0.75)' }) }} />
+      )
+    }
+    // Keep the last dot budget for the "+N" tally rather than a shift, so a busy
+    // day reads as "more than shown" instead of losing the count.
+    const shown = n > MAX_COLLAPSED_DOTS ? dayShifts.slice(0, MAX_COLLAPSED_DOTS - 1) : dayShifts
+    return (
+      <div key={d} data-testid={`area-collapsed-day-${a.id}-${d}`} data-shift-count={n}
+        onClick={n ? () => setAreasCollapsed(m => ({ ...m, [a.id]: false })) : undefined}
+        title={n ? `${n} shift${n === 1 ? '' : 's'} · ${f} filled${o ? `, ${o} open` : ''} — click to expand` : undefined}
+        style={{ borderRight: `1px solid ${C.hair}`, padding: 6, minHeight: 40,
+          display: 'flex', flexWrap: 'wrap', alignItems: 'center', alignContent: 'center', gap: 4,
+          cursor: n ? 'pointer' : 'default',
+          background: d >= 5 ? 'color-mix(in srgb, var(--pb-accent) 3%, transparent)' : undefined }}>
+        {shown.map(dot)}
+        {n > MAX_COLLAPSED_DOTS && <span style={{ fontFamily: MONO, fontSize: 9, color: C.faint }}>+{n - (MAX_COLLAPSED_DOTS - 1)}</span>}
+      </div>
+    )
+  }
+
   // The roles of an area, in palette order, each with this week's shifts for it.
   //
   // Every role configured on the area is drawn, even one with no shift yet — a
@@ -1139,9 +1181,13 @@ export default function Roster({ st, patch, narrow }) {
                           {!railMin && <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, paddingLeft: 18 }}>{groups.length} roles</div>}
                           {railMin && <span style={{ fontFamily: MONO, fontSize: 9, color: filledN === mine.length ? C.ok : C.warn }}>{filledN}/{mine.length}</span>}
                         </div>
-                        {DOW.map((_, d) => (
-                          <div key={d} style={{ borderRight: `1px solid ${C.hair}`, background: d >= 5 ? 'color-mix(in srgb, var(--pb-accent) 3%, transparent)' : undefined }} />
-                        ))}
+                        {/* Expanded, the header's day cells stay empty (the
+                            shifts show in the per-role sub-rows below).
+                            Collapsed, they carry a colour-coded dot per shift so
+                            the folded-away days are still visible. */}
+                        {DOW.map((_, d) => collapsed
+                          ? areaCollapsedDayCol(a, mine, d)
+                          : <div key={d} style={{ borderRight: `1px solid ${C.hair}`, background: d >= 5 ? 'color-mix(in srgb, var(--pb-accent) 3%, transparent)' : undefined }} />)}
                       </div>
                       {!collapsed && groups.map(g => {
                         const gFilled = g.shifts.filter(x => x.assignee_member_id).length

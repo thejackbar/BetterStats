@@ -129,6 +129,7 @@ const run = async () => {
   const press = async (sel) => { if (await seen(sel)) { await page.locator(sel).first().click().catch(() => {}); return true } return false }
   // The text inside an addressed sub-row / header (or '' when it is absent).
   const textOf = async (sel) => { if (!(await seen(sel))) return ''; return page.locator(sel).first().innerText().catch(() => '') }
+  const attrOf = async (sel, name) => { if (!(await seen(sel))) return ''; return (await page.locator(sel).first().getAttribute(name).catch(() => '')) || '' }
 
   const open = async (path) => {
     await page.goto(BASE + path, { waitUntil: 'domcontentloaded' })
@@ -199,6 +200,21 @@ const run = async () => {
     wasExpanded && !(await seen('[data-testid="area-role-row-ar1-r-ump"]')))
   check('collapsing folds away the Scorer sub-row that was shown',
     wasExpanded && !(await seen('[data-testid="area-role-row-ar1-r-sco"]')))
+
+  // ── Collapsed, the header's day cells still show the shifts as dots ──────────
+  // Match Day's Saturday (day 5) has an OPEN Umpire shift and a FILLED Scorer
+  // shift, so its collapsed header cell must carry two dots — one filled, one
+  // open — while a day with nothing shows none. This is what keeps it obvious
+  // there are shifts on that day without expanding.
+  const satCell = '[data-testid="area-collapsed-day-ar1-5"]'
+  check('collapsing shows a per-day shift summary on the header',
+    wasExpanded && (await attrOf(satCell, 'data-shift-count')) === '2')
+  check('the collapsed summary marks the filled shift with a solid dot',
+    await seen(satCell + ' [data-filled="1"]'))
+  check('the collapsed summary marks the still-open shift with a ring',
+    await seen(satCell + ' [data-open="1"]'))
+  check('a day with no shifts draws an empty collapsed cell',
+    (await attrOf('[data-testid="area-collapsed-day-ar1-0"]', 'data-shift-count')) === '0')
 
   // ── Expand brings them back ─────────────────────────────────────────────────
   await press('[data-testid="area-toggle-ar1"]')
