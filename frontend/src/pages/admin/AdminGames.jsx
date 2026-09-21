@@ -8,6 +8,10 @@ import { formatSeason } from '../../lib/cricketFormat'
 // backend is what decides, this is only how it reads.
 const CALLED_OFF = ['ABANDONED', 'CANCELLED']
 const isCalledOff = g => CALLED_OFF.includes((g.status || '').toUpperCase())
+// A game brought in from CricketStatz or an uploaded scorecard, not the CA
+// sync. It never carries a PlayHQ status, so it's neither "called off" nor
+// "status not synced yet" — those are synced-only states.
+const isImported = g => g.source === 'manual'
 
 function StatusTag({ status }) {
   const s = (status || '').toUpperCase()
@@ -22,6 +26,22 @@ function StatusTag({ status }) {
       }}
     >
       {s}
+    </span>
+  )
+}
+
+// Marks a match that came in from CricketStatz or an uploaded scorecard rather
+// than the CA sync, so a club can tell its imported history apart at a glance.
+function ImportedTag() {
+  return (
+    <span
+      className="font-mono text-[9px] tracking-wide3 px-1.5 py-0.5 rounded shrink-0 text-pb-faint"
+      style={{
+        background: 'color-mix(in srgb, var(--pb-text) 6%, transparent)',
+        border: '1px solid color-mix(in srgb, var(--pb-text) 14%, transparent)',
+      }}
+    >
+      IMPORTED
     </span>
   )
 }
@@ -53,7 +73,10 @@ export default function AdminGames() {
   // A fixture nobody was named in never counted towards anyone, so saying so
   // would send an admin looking for a correction that was never needed.
   const affecting = useMemo(() => calledOff.filter(g => (g.players_named || 0) > 0), [calledOff])
-  const unknownStatus = useMemo(() => games.some(g => !g.status), [games])
+  // Only a SYNCED fixture can be "missing its status" — an imported game never
+  // has one and never will, so it must not trip the run-a-sync hint.
+  const unknownStatus = useMemo(() => games.some(g => !g.status && !isImported(g)), [games])
+  const importedCount = useMemo(() => games.filter(isImported).length, [games])
 
   return (
     <BetterStatsLayout>
@@ -71,7 +94,9 @@ export default function AdminGames() {
             ))}
           </select>
           <span className="font-mono text-[10px] text-pb-faint">
-            Match data is synced automatically and is read-only here.
+            {importedCount > 0
+              ? 'Synced and imported matches, read-only here.'
+              : 'Match data is synced automatically and is read-only here.'}
           </span>
         </div>
 
@@ -130,7 +155,10 @@ export default function AdminGames() {
             </div>
             {games.map((g, i) => (
               <div key={g.id} className={`grid grid-cols-[1fr_1fr_auto] px-5 py-3 text-sm ${i > 0 ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
-                <span className="text-pb-text truncate">{g.home_team} v {g.away_team}</span>
+                <span className="text-pb-text truncate flex items-center gap-2">
+                  <span className="truncate">{g.home_team} v {g.away_team}</span>
+                  {isImported(g) && <ImportedTag />}
+                </span>
                 <span className="text-pb-dim truncate">
                   {isCalledOff(g) ? <StatusTag status={g.status} /> : (g.result || '—')}
                 </span>
