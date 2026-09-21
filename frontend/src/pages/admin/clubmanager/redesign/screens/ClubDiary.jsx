@@ -342,21 +342,18 @@ export default function ClubDiary({ st, patch, narrow }) {
   const overdueNow = dated.filter(t => t.status === 'overdue')
   const dueThisWeek = dated.filter(t => t.status !== 'done' && withinDays(t.due, 7, T))
 
-  // The right side of every header: the two figures a committee glances at, the
-  // season selector (only where a year is being VIEWED), and the Setup menu —
-  // templates/season-setup live here, off the day-to-day path but one click away.
+  // The right side of every header is IDENTICAL across every view — the two
+  // figures a committee glances at, then the Setup menu (templates/season-setup,
+  // off the day-to-day path but one click away). The season selector is
+  // deliberately NOT here: it belongs to the three date views that it scopes and
+  // lives in each of their own toolbars (`SeasonSelect`). Keeping the header's
+  // right cluster the same everywhere is what stops List/Calendar/Timeline
+  // wrapping it onto a second row and dropping the title/tabs out of line with
+  // Overview and By-role.
   const rightSide = (
     <>
       <StatReadout value={String(overdueNow.length)} label="OVERDUE" fg={overdueNow.length ? C.block : C.ok} />
       <StatReadout value={String(dueThisWeek.length)} label="DUE THIS WEEK" fg={dueThisWeek.length ? C.warn : C.ok} />
-      {(tab === 'list' || tab === 'calendar' || tab === 'timeline') && (
-        <select value={selectedYear} onChange={e => patch({ diaryYear: Number(e.target.value) })}
-          aria-label="Season" style={selStyle}>
-          {seasonOptions(base.years, currentSeasonYear).map(y => (
-            <option key={y} value={y}>{seasonLabel(y)}{base.years.includes(y) ? '' : ' · not generated'}</option>
-          ))}
-        </select>
-      )}
       <MenuButton label="Setup" width={230} align="right">
         {(close) => (
           <>
@@ -565,7 +562,7 @@ function ListView({ v, st }) {
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <StatusKey />
       <div style={{ padding: '11px 20px', borderBottom: `1px solid ${C.hair}`, display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-start' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', alignSelf: 'stretch' }}>
           <SegTabs value={catFilter} onChange={c => patch({ diaryCatFilter: c })} tabs={cats.map(c => ({ key: c, label: c }))} />
           <MenuButton label="Status" value={statusFilter === 'All' ? '' : (TONE[statusFilter]?.label || statusFilter)} width={200} seg>
             {(close) => (
@@ -576,6 +573,7 @@ function ListView({ v, st }) {
               </>
             )}
           </MenuButton>
+          <div style={{ marginLeft: 'auto' }}><SeasonSelect v={v} /></div>
         </div>
         <HeaderSearch value={st.diaryQuery} onChange={val => patch({ diaryQuery: val })}
           placeholder="Search tasks, roles and who's responsible…" style={{ flex: '0 0 auto' }} />
@@ -657,7 +655,10 @@ function CalendarView({ v }) {
             <button onClick={() => setCalCursor(stepMonth(cursor, 1))} style={navBtn}>›</button>
           </div>
         )}
-        <div style={{ marginLeft: 'auto' }}><StatusMiniKey /></div>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <SeasonSelect v={v} />
+          <StatusMiniKey />
+        </div>
       </div>
       {loading ? (
         <div style={{ padding: 24, fontSize: 13, color: C.faint }}>Loading the {seasonLabel(selectedYear)} season…</div>
@@ -789,22 +790,27 @@ function TimelineView({ v }) {
   const empty = !season || season.tasks.length === 0
   const cp = criticalPath(model.seasonTasks, model)
   return (
-    <div className="pb-scroll" style={{ flex: 1, overflow: 'auto', padding: 16 }}>
-      {empty ? (
-        <SeasonEmpty year={selectedYear} current={currentSeasonYear} onGenerate={generateSeason} busy={busy} />
-      ) : (
-        <>
-          {cp.path.length > 0 && (
-            <div style={{ marginBottom: 12 }}>
-              <div style={cap}>CRITICAL PATH · {cp.len} days of chained work</div>
-              <div style={{ fontSize: 13, color: C.text, lineHeight: 1.5, background: 'rgba(239,91,91,0.07)', border: '1px solid rgba(239,91,91,0.25)', borderRadius: 8, padding: '10px 12px' }}>
-                {cp.path.map(id => model.defById[id]?.title || '?').join('  →  ')}
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 20px', borderBottom: `1px solid ${C.hair}`, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+        <SeasonSelect v={v} />
+      </div>
+      <div className="pb-scroll" style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+        {empty ? (
+          <SeasonEmpty year={selectedYear} current={currentSeasonYear} onGenerate={generateSeason} busy={busy} />
+        ) : (
+          <>
+            {cp.path.length > 0 && (
+              <div style={{ marginBottom: 12 }}>
+                <div style={cap}>CRITICAL PATH · {cp.len} days of chained work</div>
+                <div style={{ fontSize: 13, color: C.text, lineHeight: 1.5, background: 'rgba(239,91,91,0.07)', border: '1px solid rgba(239,91,91,0.25)', borderRadius: 8, padding: '10px 12px' }}>
+                  {cp.path.map(id => model.defById[id]?.title || '?').join('  →  ')}
+                </div>
               </div>
-            </div>
-          )}
-          <DiaryGantt tasks={season.tasks} year={selectedYear} onTaskClick={(occId) => openTask(occId)} />
-        </>
-      )}
+            )}
+            <DiaryGantt tasks={season.tasks} year={selectedYear} onTaskClick={(occId) => openTask(occId)} />
+          </>
+        )}
+      </div>
     </div>
   )
 }
@@ -815,7 +821,12 @@ function RolesView({ v }) {
   const { model, openTask, patch } = v
   const seats = seatDetail(model) // [{id, name, holder, responsibilities, tasks[]}]
   const withTasks = seats.filter(s => s.tasks.length > 0)
-  const other = model.boardTasks.filter(t => !t.seatId) // no committee seat
+  // Only the dated diary tasks belong here. A STANDING duty (weekly/matchday/
+  // ongoing) is a perpetual responsibility, not something in the season's diary
+  // with a deadline and a status — it reads as the seat's job description rather
+  // than work to track, so it is confined to the Overview's "ongoing duties"
+  // strip and excluded from every seat's task list here.
+  const other = model.boardTasks.filter(t => !t.standing && !t.seatId) // no committee seat
   const nonCommittee = other.filter(t => t.roleId)
   const unassigned = other.filter(t => !t.roleId)
 
@@ -1092,6 +1103,25 @@ function Empty({ children }) {
   return <div style={{ fontSize: 13, color: C.faint, padding: '10px 0' }}>{children}</div>
 }
 
+// The season-year selector for the date views (List / Calendar / Timeline). It
+// lives on each view's own toolbar rather than in the screen header, so the
+// header's right cluster stays identical across all five views and none of them
+// wraps it onto a second row.
+function SeasonSelect({ v }) {
+  const { base, selectedYear, currentSeasonYear, patch } = v
+  return (
+    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 7, flexShrink: 0 }}>
+      <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.12em', color: C.faint }}>SEASON</span>
+      <select value={selectedYear} onChange={e => patch({ diaryYear: Number(e.target.value) })}
+        aria-label="Season" style={selStyle}>
+        {seasonOptions(base.years, currentSeasonYear).map(y => (
+          <option key={y} value={y}>{seasonLabel(y)}{base.years.includes(y) ? '' : ' · not generated'}</option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
 function SeasonEmpty({ year, current, onGenerate, busy }) {
   return (
     <div style={{ padding: '40px 24px', textAlign: 'center', maxWidth: 460, margin: '0 auto' }}>
@@ -1172,7 +1202,7 @@ function seatLoads(model) {
   const map = {}
   model.seats.forEach(s => { map[s.id] = { id: s.id, name: s.name, holder: s.holder, total: 0, late: 0, open: 0, upcoming: 0, done: 0 } })
   model.boardTasks.forEach(t => {
-    if (!t.seatId || !map[t.seatId]) return
+    if (t.standing || !t.seatId || !map[t.seatId]) return
     const m = map[t.seatId]; m.total++
     if (t.status === 'overdue' || t.status === 'blocked') m.late++
     else if (t.status === 'open') m.open++
@@ -1186,7 +1216,9 @@ function seatLoads(model) {
 function seatDetail(model) {
   const map = {}
   model.seats.forEach(s => { map[s.id] = { id: s.id, name: s.name, holder: s.holder, responsibilities: s.responsibilities, tasks: [] } })
-  model.boardTasks.forEach(t => { if (t.seatId && map[t.seatId]) map[t.seatId].tasks.push(t) })
+  // Standing duties are excluded — the By-role cards list only the dated diary
+  // tasks a seat is carrying, not its perpetual ongoing responsibilities.
+  model.boardTasks.forEach(t => { if (!t.standing && t.seatId && map[t.seatId]) map[t.seatId].tasks.push(t) })
   return Object.values(map).sort((a, b) => {
     const la = a.tasks.filter(t => t.status === 'overdue' || t.status === 'blocked').length
     const lb = b.tasks.filter(t => t.status === 'overdue' || t.status === 'blocked').length

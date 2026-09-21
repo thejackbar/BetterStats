@@ -204,6 +204,18 @@ const run = async () => {
 
   // season selector present on List
   check('the season selector is shown on a date view', await seen('select'), 'no select on List')
+  // …and it moved OUT of the sticky header into the view's own toolbar, so the
+  // header's right cluster (and therefore the title/tabs alignment) is identical
+  // on every view. On the old build the select sat in the header and pushed the
+  // Setup button onto a second row on the date views only.
+  const selInHeader = await page.evaluate(() => {
+    // The SCREEN header specifically (the one holding the "Club Diary" title),
+    // not the club Navbar <header> at the top of the page.
+    const h1 = Array.from(document.querySelectorAll('h1')).find(e => /Club Diary/.test(e.textContent || ''))
+    const hdr = h1 && h1.closest('header')
+    return !!(hdr && hdr.querySelector('select'))
+  }).catch(() => true)
+  check('the season selector is not in the sticky header', !selInHeader, `selInHeader=${selInHeader}`)
 
   // ── Calendar ─────────────────────────────────────────────────────────────────
   await tab('Calendar')
@@ -229,6 +241,13 @@ const run = async () => {
   const vacantSeats = await countOf('[data-testid="diary-seat"][data-vacant="1"]')
   const vacantText = await textOf('[data-testid="diary-seat"][data-vacant="1"]')
   check('a vacant seat that owns tasks is flagged', vacantSeats >= 1 && /VACANT/.test(vacantText), `vacant=${vacantSeats} ${vacantText.slice(0, 60)}`)
+  // By role is confined to the season's DATED diary tasks. The Grounds seat owns
+  // both a dated task (Ground preparation) and a weekly standing duty (Weekly
+  // wicket prep); only the dated one belongs on the card — a perpetual ongoing
+  // duty reads as the seat's job description, not work in the diary to track.
+  const groundsCard = await page.locator('[data-testid="diary-seat"]', { hasText: 'Grounds' }).first().innerText().catch(() => '')
+  check('the Grounds card lists its dated diary task', /Ground preparation/.test(groundsCard), groundsCard.slice(0, 120))
+  check('By role excludes standing/ongoing duties from a seat card', groundsCard && !/Weekly wicket prep/.test(groundsCard), groundsCard.slice(0, 140))
   const rolesBody = await bodyText()
   check('a seat with no diary tasks is listed separately', /SEATS WITH NO DIARY TASKS/.test(rolesBody) && /Social/.test(rolesBody))
 
