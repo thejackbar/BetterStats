@@ -473,6 +473,221 @@ function ConfirmRoster({ weekId, onDone, onToast }) {
   )
 }
 
+// A shared field style for the small forms/modals below.
+const inpStyle = { padding: '6px 8px', borderRadius: 6, fontSize: 12.5, border: `1px solid ${C.hair2}`, background: C.surface2, color: C.text }
+
+// A small centred modal shell. Declared at MODULE level (never inside a render)
+// so its child inputs keep their caret across re-renders.
+function ModalShell({ title, sub, onClose, children, maxWidth = 460 }) {
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 90, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+      <div onClick={e => e.stopPropagation()} className="pb-scroll" data-testid="roster-modal"
+        style={{ width: '100%', maxWidth, maxHeight: '86vh', overflow: 'auto', background: C.surface, border: `1px solid ${C.hair2}`, borderRadius: 12, padding: 18, boxShadow: '0 20px 60px rgba(0,0,0,0.5)' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, marginBottom: sub ? 4 : 10 }}>
+          <div style={{ fontWeight: 700, fontSize: 15 }}>{title}</div>
+          <button onClick={onClose} style={{ fontFamily: MONO, fontSize: 10.5, background: 'none', border: 'none', color: C.faint, cursor: 'pointer', paddingTop: 3 }}>close</button>
+        </div>
+        {sub && <div style={{ fontFamily: MONO, fontSize: 10.5, color: C.faint, marginBottom: 12 }}>{sub}</div>}
+        {children}
+      </div>
+    </div>
+  )
+}
+
+// A ranked, clickable list of volunteers for a shift — available first, blocked
+// hidden, warnings noted. Shared by the assign modal (Areas view) and reused for
+// the "add a shift" flow. Uses the same rule mirror the side pool ranks with.
+function CandidatePicker({ shift, candidates, shifts, settings, onPick }) {
+  const [q, setQ] = useState('')
+  const ranked = candidates
+    .map(c => ({ c, res: checkClient(shift, c, shifts, settings), load: shifts.filter(s => s.assignee_member_id === c.member_id).length }))
+    .filter(x => x.res.blocks.length === 0)
+    .sort((a, b) => (a.res.warns.length * 10 + a.load) - (b.res.warns.length * 10 + b.load))
+  const term = q.trim().toLowerCase()
+  const list = term ? ranked.filter(x => x.c.name.toLowerCase().includes(term) || (x.c.role_names || []).some(r => r.toLowerCase().includes(term))) : ranked
+  const blockedCount = candidates.length - ranked.length
+  return (
+    <div>
+      <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search a volunteer…" autoFocus
+        data-testid="assign-search" style={{ ...inpStyle, width: '100%', marginBottom: 8 }} />
+      {list.length === 0 ? (
+        <div style={{ fontSize: 12.5, color: C.faint, lineHeight: 1.5, padding: '6px 0' }}>
+          {candidates.length === 0 ? 'No volunteers on file yet.' : `Nobody available and qualified for this shift${blockedCount ? ` (${blockedCount} blocked by the rules)` : ''}.`}
+        </div>
+      ) : (
+        <div className="pb-scroll" data-testid="assign-candidates" style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 300, overflow: 'auto' }}>
+          {list.map(({ c, res, load }) => (
+            <button key={c.member_id} onClick={() => onPick(c.member_id)} data-testid={`assign-cand-${c.member_id}`}
+              style={{ textAlign: 'left', background: C.surface2, border: `1px solid ${res.warns.length ? 'rgba(245,181,66,0.4)' : C.hair}`, borderRadius: 8, padding: '8px 10px', cursor: 'pointer', color: C.text }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ width: 24, height: 24, borderRadius: '50%', background: C.surface, border: `1.5px solid ${C.hair2}`, color: C.dim, fontFamily: MONO, fontSize: 9, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{initials(c.name)}</span>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</div>
+                  <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{res.warns.length ? res.warns[0] : 'Clear match · ' + load + ' shift' + (load === 1 ? '' : 's')}</div>
+                </div>
+                <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.08em', padding: '2px 5px', borderRadius: 4, flexShrink: 0, ...(res.warns.length ? { background: 'rgba(245,181,66,0.15)', color: C.warn } : { background: 'color-mix(in srgb, var(--pb-accent) 15%, transparent)', color: C.accent }) }}>{res.warns.length ? 'WARN' : 'FIT'}</span>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Areas view: clicking a shift that nobody is on opens this so a volunteer can be
+// picked without hunting through the side pool — it works whether the pool is
+// open or minimised. Fill best match / Clear sit above the picker.
+function AssignModal({ shift, areaName, candidates, shifts, settings, onPick, onFillBest, onClear, onClose }) {
+  return (
+    <ModalShell title={`Assign · ${areaName}`}
+      sub={`${shift.role_name ? shift.role_name + ' · ' : ''}${DOW[shift.day_of_week]} ${fmtHour(shift.start_time)}–${fmtHour(shift.end_time)}`}
+      onClose={onClose}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+        <button onClick={onFillBest} data-testid="assign-fill-best" style={{ flex: 1, padding: '7px 10px', borderRadius: 7, fontSize: 12.5, fontWeight: 600, border: 'none', background: C.accent, color: '#fff', cursor: 'pointer' }}>Fill best match</button>
+        <button onClick={onClear} data-testid="assign-clear" style={{ padding: '7px 12px', borderRadius: 7, fontSize: 12.5, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.dim, cursor: 'pointer' }}>Clear</button>
+      </div>
+      <CandidatePicker shift={shift} candidates={candidates} shifts={shifts} settings={settings} onPick={onPick} />
+    </ModalShell>
+  )
+}
+
+// People view: a volunteer's free day with no shift on it shows a "+ add" link;
+// this lists the day's open shifts so one can be handed straight to them. A shift
+// the rules block for this person is shown disabled, with the reason.
+function AddOpenShiftModal({ personName, cand, day, openShifts, shifts, settings, areaLabelFor, onPick, onClose }) {
+  const forDay = openShifts.filter(s => s.day_of_week === day)
+  return (
+    <ModalShell title={`Add ${personName} to a shift`} sub={`Open shifts on ${DOW[day]}`} onClose={onClose}>
+      {forDay.length === 0 ? (
+        <div style={{ fontSize: 12.5, color: C.faint, lineHeight: 1.5 }}>No open shifts on {DOW[day]}. Add one from the Areas view, or the “+ Add a shift” panel.</div>
+      ) : (
+        <div className="pb-scroll" data-testid="add-open-list" style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 340, overflow: 'auto' }}>
+          {forDay.map(s => {
+            const res = cand ? checkClient(s, cand, shifts, settings) : { blocks: [], warns: [] }
+            const blocked = res.blocks.length > 0
+            return (
+              <button key={s.id} disabled={blocked} onClick={() => !blocked && onPick(s.id)}
+                data-testid={`add-open-shift-${s.id}`} title={blocked ? res.blocks.join(' · ') : (res.warns.join(' · ') || undefined)}
+                style={{ textAlign: 'left', background: C.surface2, border: `1px solid ${blocked ? C.hair : (res.warns.length ? 'rgba(245,181,66,0.4)' : 'color-mix(in srgb, var(--pb-accent) 30%, transparent)')}`, borderRadius: 8, padding: '8px 10px', cursor: blocked ? 'not-allowed' : 'pointer', color: C.text, opacity: blocked ? 0.55 : 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontWeight: 600, fontSize: 12.5 }}>{areaLabelFor(s)}</span>
+                  <span style={{ marginLeft: 'auto', fontFamily: MONO, fontSize: 10, color: C.faint }}>{fmtHour(s.start_time)}–{fmtHour(s.end_time)}</span>
+                </div>
+                <div style={{ fontFamily: MONO, fontSize: 9.5, color: blocked ? C.block : (res.warns.length ? C.warn : C.faint), marginTop: 3 }}>
+                  {s.role_name || 'General help'}{blocked ? ' · ' + res.blocks[0] : (res.warns.length ? ' · ' + res.warns[0] : '')}
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </ModalShell>
+  )
+}
+
+// Areas view: an empty day cell offers "+ Add" to create a one-off shift there —
+// its role (from the area's palette, prefilled to the row's own role) and time —
+// and hand it straight to a volunteer, all in one step.
+function NewAreaShiftModal({ area, day, roleId, candidates, shifts, settings, onCreate, onClose }) {
+  const palette = area.roles || []
+  const [f, setF] = useState({ role_id: roleId || '', start_time: '17', end_time: '21' })
+  const [assignee, setAssignee] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+  const start = Number(f.start_time), end = Number(f.end_time)
+  const role = palette.find(r => r.role_id === f.role_id)
+  // Preview candidate fit against the shift being defined, so the volunteer
+  // dropdown only offers people who can actually take it.
+  const hypo = {
+    id: '__new', area_id: area.id, day_of_week: day, start_time: start, end_time: end,
+    role_id: f.role_id || null, role_name: role?.role_name,
+    required_qualification_type_id: role?.required_qualification_type_id || null,
+    required_qualification_name: role?.required_qualification_name || null,
+  }
+  const available = candidates
+    .map(c => ({ c, res: checkClient(hypo, c, shifts, settings) }))
+    .filter(x => x.res.blocks.length === 0)
+    .sort((a, b) => a.res.warns.length - b.res.warns.length || a.c.name.localeCompare(b.c.name))
+  return (
+    <ModalShell title={`Add a shift · ${area.name}`} sub={`${DOW[day]} · new shift`} onClose={onClose}>
+      <div style={{ display: 'grid', gap: 8 }}>
+        <label style={{ display: 'grid', gap: 3 }}>
+          <span style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.12em', color: C.faintest }}>ROLE</span>
+          <select value={f.role_id} onChange={e => { setF(v => ({ ...v, role_id: e.target.value })); setAssignee('') }} style={inpStyle} data-testid="new-area-shift-role">
+            <option value="">General help (no role)</option>
+            {palette.map(r => <option key={r.role_id} value={r.role_id}>{r.role_name}{r.required_qualification_name ? ` · needs ${r.required_qualification_name}` : ''}</option>)}
+          </select>
+        </label>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <label style={{ display: 'grid', gap: 3, flex: 1 }}>
+            <span style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.12em', color: C.faintest }}>FROM</span>
+            <input type="number" step="0.25" min="0" max="24" value={f.start_time} onChange={e => setF(v => ({ ...v, start_time: e.target.value }))} style={inpStyle} data-testid="new-area-shift-start" />
+          </label>
+          <label style={{ display: 'grid', gap: 3, flex: 1 }}>
+            <span style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.12em', color: C.faintest }}>TO</span>
+            <input type="number" step="0.25" min="0" max="24" value={f.end_time} onChange={e => setF(v => ({ ...v, end_time: e.target.value }))} style={inpStyle} data-testid="new-area-shift-end" />
+          </label>
+        </div>
+        <div style={{ fontFamily: MONO, fontSize: 9, color: C.faintest }}>Times are 24-hour, so 17.5 is 5:30pm.</div>
+        <label style={{ display: 'grid', gap: 3 }}>
+          <span style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.12em', color: C.faintest }}>ASSIGN A VOLUNTEER (OPTIONAL)</span>
+          <select value={assignee} onChange={e => setAssignee(e.target.value)} style={inpStyle} data-testid="new-area-shift-assignee">
+            <option value="">— leave open —</option>
+            {available.map(({ c, res }) => <option key={c.member_id} value={c.member_id}>{c.name}{res.warns.length ? ' (warning)' : ''}</option>)}
+          </select>
+        </label>
+        {err && <div style={{ fontSize: 11.5, color: C.block }}>{err}</div>}
+        <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
+          <button disabled={busy} data-testid="new-area-shift-create" onClick={async () => {
+            if (!(end > start)) { setErr('A shift has to finish after it starts.'); return }
+            setBusy(true); setErr(null)
+            try { await onCreate({ start_time: start, end_time: end, role_id: f.role_id || null, assignee: assignee || null }) }
+            catch (e) { setErr(String(e?.message || e)); setBusy(false) }
+          }} style={{ flex: 1, padding: '7px 10px', borderRadius: 7, fontSize: 12.5, fontWeight: 600, border: 'none', background: C.accent, color: '#fff', cursor: 'pointer', opacity: busy ? 0.6 : 1 }}>
+            {busy ? 'Adding…' : (assignee ? 'Add shift & assign' : 'Add shift')}
+          </button>
+          <button onClick={onClose} style={{ padding: '7px 12px', borderRadius: 7, fontSize: 12.5, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.dim, cursor: 'pointer' }}>Cancel</button>
+        </div>
+      </div>
+    </ModalShell>
+  )
+}
+
+// Clicking a shift lets its day and time be changed in place, and it deleted.
+// Rendered with key={shift.id} where it sits, so switching shifts reseeds it.
+function ShiftEditForm({ shift, onSave, onDelete, busy }) {
+  const [day, setDay] = useState(shift.day_of_week)
+  const [start, setStart] = useState(String(shift.start_time))
+  const [end, setEnd] = useState(String(shift.end_time))
+  const [err, setErr] = useState(null)
+  const changed = day !== shift.day_of_week || Number(start) !== shift.start_time || Number(end) !== shift.end_time
+  return (
+    <div style={{ background: C.surface2, border: `1px solid ${C.hair}`, borderRadius: 8, padding: 10, marginBottom: 10 }}>
+      <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faintest, marginBottom: 8 }}>EDIT DAY &amp; TIME</div>
+      <div style={{ display: 'grid', gap: 6 }}>
+        <select value={day} onChange={e => setDay(Number(e.target.value))} style={{ ...inpStyle, fontSize: 12 }} data-testid="edit-shift-day">
+          {DOW.map((d, i) => <option key={i} value={i}>{d}</option>)}
+        </select>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input type="number" step="0.25" min="0" max="24" value={start} onChange={e => setStart(e.target.value)} style={{ ...inpStyle, flex: 1, fontSize: 12 }} placeholder="From" data-testid="edit-shift-start" />
+          <input type="number" step="0.25" min="0" max="24" value={end} onChange={e => setEnd(e.target.value)} style={{ ...inpStyle, flex: 1, fontSize: 12 }} placeholder="To" data-testid="edit-shift-end" />
+        </div>
+        {err && <div style={{ fontSize: 11.5, color: C.block }}>{err}</div>}
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button disabled={busy || !changed} data-testid="edit-shift-save" onClick={() => {
+            const s = Number(start), e = Number(end)
+            if (!(e > s)) { setErr('A shift has to finish after it starts.'); return }
+            setErr(null); onSave({ day_of_week: day, start_time: s, end_time: e })
+          }} style={{ flex: 1, padding: '6px 10px', borderRadius: 6, fontSize: 12, fontWeight: 600, border: 'none', background: changed ? C.accent : C.surface, color: changed ? '#fff' : C.faint, cursor: changed ? 'pointer' : 'default', opacity: busy ? 0.6 : 1 }}>Save changes</button>
+          <button disabled={busy} data-testid="edit-shift-delete" onClick={onDelete}
+            style={{ padding: '6px 10px', borderRadius: 6, fontSize: 12, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.block, cursor: 'pointer' }}>Delete</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function Roster({ st, patch, narrow }) {
   const navigate = useNavigate()
   const [data, setData] = useState(null)  // { week, areas, candidates, settings }
@@ -481,6 +696,12 @@ export default function Roster({ st, patch, narrow }) {
   const [busy, setBusy] = useState(false)
   const [addingShift, setAddingShift] = useState(false)
   const [openPerson, setOpenPerson] = useState(null)
+  // Modals: assign a volunteer to an unassigned shift (Areas view), add an
+  // available person to one of a day's open shifts (People view "+ add"), and
+  // create a one-off shift in a blank Areas cell (Areas view "+ Add").
+  const [assignFor, setAssignFor] = useState(null)   // shift id
+  const [addFor, setAddFor] = useState(null)         // { personId, day }
+  const [addAreaFor, setAddAreaFor] = useState(null) // { areaId, day, roleId }
   // Both of these belong to the person, not the club, and both survive the
   // browser closing. A club with fourteen operational areas wants the first
   // column narrow; one with three does not.
@@ -655,29 +876,96 @@ export default function Roster({ st, patch, narrow }) {
     patch({ toast: { tone: 'info', title: 'Week reset.', body: 'Every shift is open again.' } })
   }
 
+  // The best-fitting volunteer for a shift — the first the rules don't block,
+  // ranked by fewest warnings then lightest week. Used by "Fill best match".
+  const bestFor = (shift) => {
+    const r = candidates
+      .map(c => ({ c, res: checkClient(shift, c, shifts, settings), load: shifts.filter(s => s.assignee_member_id === c.member_id).length }))
+      .filter(x => x.res.blocks.length === 0)
+      .sort((a, b) => (a.res.warns.length * 10 + a.load) - (b.res.warns.length * 10 + b.load))
+    return r[0]?.c.member_id || null
+  }
+
+  // Move a shift to a new day/time (and, in the People view, a new person).
+  //
+  // A shift is a first-class row now, so it can be dragged to another day or
+  // edited in place. `want` carries the intended day/time (and area/role); the
+  // position change goes through PATCH /shifts. `assignTo` is the member it
+  // should end up on — undefined KEEPS whoever is on it (an Areas-view day move
+  // or an in-place edit), a member id reassigns it (a People-view drop). If the
+  // new position no longer suits the assignee (e.g. they aren't available the
+  // new day), the shift is left open rather than in a half-moved state.
+  const relocateShift = async (shiftId, want, assignTo) => {
+    const shift = shifts.find(s => s.id === shiftId)
+    if (!shift) return
+    const fields = {}
+    if (want.day_of_week != null && want.day_of_week !== shift.day_of_week) fields.day_of_week = want.day_of_week
+    if (want.area_id && want.area_id !== shift.area_id) fields.area_id = want.area_id
+    if ('role_id' in want && (want.role_id || null) !== (shift.role_id || null)) fields.role_id = want.role_id || null
+    // Times are coupled: send both whenever either changes, so the server can
+    // check the shift still finishes after it starts.
+    const timeChanged = (want.start_time != null && want.start_time !== shift.start_time) ||
+                        (want.end_time != null && want.end_time !== shift.end_time)
+    if (timeChanged) { fields.start_time = want.start_time ?? shift.start_time; fields.end_time = want.end_time ?? shift.end_time }
+    const movingPos = Object.keys(fields).length > 0
+    const keepAssignee = assignTo === undefined
+    const finalAssignee = keepAssignee ? shift.assignee_member_id : assignTo
+    if (!movingPos && finalAssignee === shift.assignee_member_id) return   // nothing to do
+    if (movingPos) {
+      try { await api.rosterUpdateShift(shiftId, fields) }
+      catch (e) { patch({ toast: { tone: 'block', title: 'Could not update the shift.', body: String(e?.message || e) } }); return }
+      setShifts(prev => prev.map(s => s.id === shiftId ? { ...s, ...fields } : s))
+    }
+    if (finalAssignee) {
+      const res = await api.rosterAssign(data.week.id, shiftId, finalAssignee).catch(() => ({ ok: false, blocks: ['Network error'] }))
+      if (!res.ok) {
+        await api.rosterAssign(data.week.id, shiftId, null).catch(() => {})
+        setShifts(prev => prev.map(s => s.id === shiftId ? { ...s, assignee_member_id: null, assignee_name: null, warnings: [] } : s))
+        const cand = candById[finalAssignee]
+        patch({ toast: { tone: 'warn', title: 'Shift moved, left open.', body: (cand ? cand.name + ': ' : '') + (res.blocks || []).join(' · ') } })
+        return
+      }
+      setShifts(prev => prev.map(s => s.id === shiftId ? { ...s, assignee_member_id: finalAssignee, assignee_name: res.assignee_name, warnings: res.warns || [] } : s))
+      if (movingPos) patch({ toast: (res.warns && res.warns.length)
+        ? { tone: 'warn', title: (res.assignee_name || 'Shift') + ' rostered with a warning.', body: res.warns.join(' · ') }
+        : { tone: 'ok', title: (res.assignee_name || 'Shift') + ' rostered.', body: '' } })
+    } else if (movingPos) {
+      patch({ toast: { tone: 'info', title: 'Shift updated.', body: '' } })
+    }
+  }
+
+  const deleteSelectedShift = async (id) => {
+    if (!window.confirm('Delete this shift? This only affects this week.')) return
+    try { await api.rosterDeleteShift(id); patch({ selected: null }); load() }
+    catch (e) { patch({ toast: { tone: 'block', title: 'Could not delete the shift.', body: String(e?.message || e) } }) }
+  }
+
   // What the drag currently in flight would do if dropped here.
   //
-  // A shift belongs to a day, so it can only move BETWEEN people, never between
-  // days — dropping Saturday's bar shift on someone's Monday used to be accepted
-  // silently and leave it on Saturday, which reads as the roster ignoring you.
-  // Other days are simply not drop targets, so the cursor says so before the
-  // mouse is released. Everything else is offered and let the server judge, so
-  // a refusal comes back as a sentence rather than as nothing happening.
+  // A shift now carries its own day, so it CAN be moved to another day: dropping
+  // it on a different-day cell moves it there (and, in the People view, onto that
+  // person). The cell is judged against the shift AT the destination day, so an
+  // unavailable day reads as blocked. A blocked SAME-day reassign is still
+  // offered (the server judges it and refuses with a sentence); a blocked
+  // day MOVE is refused before the drop so nothing half-moves.
   const dragShift = st.dragId ? shifts.find(s => s.id === st.dragId) : null
   const dropVerdict = (personId, day) => {
     if (!dragShift) return null
     if (personId === null) return { kind: 'unassign' }      // the Open shifts row
-    if (dragShift.day_of_week !== day) return { kind: 'wrongday' }
-    if (dragShift.assignee_member_id === personId) return { kind: 'wrongday' }  // already theirs
+    const moved = dragShift.day_of_week !== day
+    if (!moved && dragShift.assignee_member_id === personId) return { kind: 'noop' }  // already theirs
     const cand = candById[personId]
-    if (!cand) return { kind: 'move' }
-    const res = checkClient(dragShift, cand, shifts, settings)
-    return { kind: res.blocks.length ? 'blocked' : (res.warns.length ? 'warn' : 'move'), res }
+    if (!cand) return { kind: 'move', moved }
+    const res = checkClient(moved ? { ...dragShift, day_of_week: day } : dragShift, cand, shifts, settings)
+    return { kind: res.blocks.length ? 'blocked' : (res.warns.length ? 'warn' : 'move'), res, moved }
   }
 
   const cellDrop = (key, personId, day) => {
     const v = dropVerdict(personId, day)
-    const accepts = !!v && v.kind !== 'wrongday'
+    // Refuse a no-op, and refuse a blocked MOVE up front (so a shift never lands
+    // half-moved on a day its assignee can't work). A blocked same-day reassign
+    // is still accepted and left to the server to refuse with a reason.
+    const accepts = !!v && v.kind !== 'noop' && !(v.moved && v.kind === 'blocked')
     return {
       onDragOver: e => {
         if (!accepts) return               // no preventDefault ⇒ the cursor shows "no drop"
@@ -688,8 +976,12 @@ export default function Roster({ st, patch, narrow }) {
       onDrop: e => {
         if (!accepts) return
         e.preventDefault(); const id = st.dragId
+        const sh = id ? shifts.find(s => s.id === id) : null
         patch({ overCell: null, dragId: null })
-        if (id) doAssign(id, personId)
+        if (!sh) return
+        if (personId === null) doAssign(sh.id, null)                       // Open row → unassign
+        else if (sh.day_of_week === day) doAssign(sh.id, personId)         // same day → plain reassign
+        else relocateShift(sh.id, { day_of_week: day }, personId)          // cross-day → move + assign
       },
     }
   }
@@ -719,7 +1011,7 @@ export default function Roster({ st, patch, narrow }) {
     const warned = shift.warnings && shift.warnings.length
     const over = dropTarget && st.overCell === 'slot-' + shift.id
     return (
-      <div draggable onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; patch({ dragId: shift.id, selected: shift.id }) }} onDragEnd={() => patch({ dragId: null, overCell: null })} onClick={() => patch({ selected: shift.id })}
+      <div draggable onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; patch({ dragId: shift.id, selected: shift.id }) }} onDragEnd={() => patch({ dragId: null, overCell: null })} onClick={() => { patch({ selected: shift.id }); if (!poolOpen) setPoolOpen(true) }}
         {...(dropTarget ? slotDrop(shift.id) : {})}
         style={{ borderRadius: 7, padding: '6px 8px', cursor: 'grab', userSelect: 'none',
           border: `1px solid ${inOpen ? 'rgba(245,181,66,0.45)' : (warned ? 'rgba(245,181,66,0.5)' : `color-mix(in srgb, ${a.color || 'var(--pb-accent)'} 40%, transparent)`)}`,
@@ -842,31 +1134,64 @@ export default function Roster({ st, patch, narrow }) {
   // header that expands into a sub-row per role — which is what a shift is
   // created and filled for. A shift with no role is the "General help" group.
   //
+  // A shift dragged onto a DIFFERENT DAY of the SAME area+role row moves there.
+  // Restricted to the same area+role (the grid position the row already fixes),
+  // so a day drag only ever changes the day — the requested "move it to another
+  // day". Dropping keeps whoever is on it (the person is orthogonal in this view).
+  const areaCellDrop = (areaId, roleId, day) => {
+    const key = 'acell-' + areaId + '-' + (roleId || 'none') + '-' + day
+    const accepts = !!dragShift && dragShift.area_id === areaId &&
+      (dragShift.role_id || null) === (roleId || null) && dragShift.day_of_week !== day
+    return {
+      over: st.overCell === key,
+      onDragOver: e => { if (!accepts) return; e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (st.overCell !== key) patch({ overCell: key }) },
+      onDragLeave: () => { if (st.overCell === key) patch({ overCell: null }) },
+      onDrop: e => { if (!accepts) return; e.preventDefault(); const id = st.dragId; patch({ overCell: null, dragId: null }); if (id) relocateShift(id, { day_of_week: day }, undefined) },
+    }
+  }
+
   // `areaDayCol` is the one place a shift chip is drawn on the Areas view,
   // shared by the single-role row and the per-role sub-rows so they behave
-  // identically — same click-to-select, same drop target, same warning tint.
-  const areaDayCol = (a, cellShifts, d) => (
-    <div key={d} style={{ borderRight: `1px solid ${C.hair}`, padding: 6, minHeight: 74, display: 'flex', flexDirection: 'column', gap: 5, background: d >= 5 ? 'color-mix(in srgb, var(--pb-accent) 3%, transparent)' : undefined }}>
-      {cellShifts.filter(x => x.day_of_week === d).map(x => {
-        const warned = x.warnings && x.warnings.length
-        const over = st.overCell === 'slot-' + x.id
-        return (
-          <div key={x.id} onClick={() => patch({ selected: x.id })} {...slotDrop(x.id)}
-            style={{ borderRadius: 7, padding: '6px 8px', cursor: 'pointer', userSelect: 'none',
-              border: `1px solid ${x.assignee_member_id ? (warned ? 'rgba(245,181,66,0.5)' : `color-mix(in srgb, ${a.color || 'var(--pb-accent)'} 40%, transparent)`) : 'rgba(245,181,66,0.45)'}`,
-              background: x.assignee_member_id ? `color-mix(in srgb, ${a.color || 'var(--pb-accent)'} 13%, transparent)` : 'rgba(245,181,66,0.10)',
-              color: x.assignee_member_id ? (a.color || C.accent) : C.warn,
-              ...(over ? { boxShadow: '0 0 0 1.5px var(--pb-accent)' } : {}), ...(st.selected === x.id ? { outline: '1.5px solid var(--pb-accent)', outlineOffset: 1 } : {}) }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <span style={{ fontWeight: 600, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', ...(x.assignee_member_id ? {} : { fontFamily: MONO, fontSize: 10, letterSpacing: '0.08em' }) }}>{x.assignee_name || 'OPEN'}</span>
-              {warned ? <span style={{ marginLeft: 'auto', color: C.warn, fontSize: 11 }}>!</span> : null}
+  // identically — same click, same drop targets, same warning tint. `roleId` is
+  // the row's own role: a chip is draggable to another day of the same row, an
+  // unassigned chip opens the assign modal on click, and an EMPTY cell offers
+  // "+ Add" to create a shift for that role/day and hand it to a volunteer.
+  const areaDayCol = (a, cellShifts, d, roleId) => {
+    const dayShifts = cellShifts.filter(x => x.day_of_week === d)
+    const drop = areaCellDrop(a.id, roleId, d)
+    return (
+      <div key={d} onDragOver={drop.onDragOver} onDragLeave={drop.onDragLeave} onDrop={drop.onDrop}
+        style={{ borderRight: `1px solid ${C.hair}`, padding: 6, minHeight: 74, display: 'flex', flexDirection: 'column', gap: 5,
+          background: d >= 5 ? 'color-mix(in srgb, var(--pb-accent) 3%, transparent)' : undefined, ...(drop.over ? OVER.move : {}) }}>
+        {dayShifts.map(x => {
+          const warned = x.warnings && x.warnings.length
+          const over = st.overCell === 'slot-' + x.id
+          return (
+            <div key={x.id} draggable
+              onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; patch({ dragId: x.id, selected: x.id }) }}
+              onDragEnd={() => patch({ dragId: null, overCell: null })}
+              onClick={() => { patch({ selected: x.id }); if (!poolOpen) setPoolOpen(true); if (!x.assignee_member_id) setAssignFor(x.id) }} {...slotDrop(x.id)}
+              style={{ borderRadius: 7, padding: '6px 8px', cursor: 'grab', userSelect: 'none',
+                border: `1px solid ${x.assignee_member_id ? (warned ? 'rgba(245,181,66,0.5)' : `color-mix(in srgb, ${a.color || 'var(--pb-accent)'} 40%, transparent)`) : 'rgba(245,181,66,0.45)'}`,
+                background: x.assignee_member_id ? `color-mix(in srgb, ${a.color || 'var(--pb-accent)'} 13%, transparent)` : 'rgba(245,181,66,0.10)',
+                color: x.assignee_member_id ? (a.color || C.accent) : C.warn,
+                ...(over ? { boxShadow: '0 0 0 1.5px var(--pb-accent)' } : {}), ...(st.selected === x.id ? { outline: '1.5px solid var(--pb-accent)', outlineOffset: 1 } : {}) }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ fontWeight: 600, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', ...(x.assignee_member_id ? {} : { fontFamily: MONO, fontSize: 10, letterSpacing: '0.08em' }) }}>{x.assignee_name || 'OPEN'}</span>
+                {warned ? <span style={{ marginLeft: 'auto', color: C.warn, fontSize: 11 }}>!</span> : null}
+              </div>
+              <div style={{ fontFamily: MONO, fontSize: 10, opacity: 0.75, marginTop: 2 }}>{x.role_name ? x.role_name + ' · ' : ''}{fmtHour(x.start_time)}–{fmtHour(x.end_time)}</div>
             </div>
-            <div style={{ fontFamily: MONO, fontSize: 10, opacity: 0.75, marginTop: 2 }}>{x.role_name ? x.role_name + ' · ' : ''}{fmtHour(x.start_time)}–{fmtHour(x.end_time)}</div>
-          </div>
-        )
-      })}
-    </div>
-  )
+          )
+        })}
+        {dayShifts.length === 0 && !a.__orphan && (
+          <button onClick={() => setAddAreaFor({ areaId: a.id, day: d, roleId: roleId || null })}
+            data-testid={`area-add-${a.id}-${roleId || 'none'}-${d}`}
+            style={{ margin: 'auto', fontFamily: MONO, fontSize: 10, letterSpacing: '0.06em', color: C.faint, background: 'transparent', border: `1px dashed ${C.hair2}`, borderRadius: 6, padding: '4px 8px', cursor: 'pointer' }}>+ Add</button>
+        )}
+      </div>
+    )
+  }
 
   // Collapsed multi-role area: the header's day cells still name the shifts
   // folded away underneath, so collapsing an area doesn't hide which roles it
@@ -1114,6 +1439,13 @@ export default function Roster({ st, patch, narrow }) {
                     return (
                       <div key={d} style={cellStyle(st.overCell === key, avail ? {} : { background: 'repeating-linear-gradient(45deg, transparent, transparent 6px, rgba(58,63,80,0.10) 6px, rgba(58,63,80,0.10) 12px)' }, verdict?.kind)} {...cellDrop(key, p.member_id, d)}>
                         {chips.map(x => <ShiftChip key={x.id} shift={x} onCancel={() => doAssign(x.id, null)} />)}
+                        {/* Available and free → offer to add them to one of the
+                            day's open shifts; not available → shaded UNAVAILABLE. */}
+                        {!chips.length && avail && (
+                          <button onClick={() => setAddFor({ personId: p.member_id, day: d })}
+                            data-testid={`people-add-${p.member_id}-${d}`}
+                            style={{ margin: 'auto', fontFamily: MONO, fontSize: 10, letterSpacing: '0.06em', color: C.faint, background: 'transparent', border: `1px dashed ${C.hair2}`, borderRadius: 6, padding: '4px 8px', cursor: 'pointer' }}>+ add</button>
+                        )}
                         {!chips.length && !avail && <div style={{ fontFamily: MONO, fontSize: 9, color: C.faintest, letterSpacing: '0.08em', margin: 'auto' }}>UNAVAILABLE</div>}
                       </div>
                     )
@@ -1156,7 +1488,7 @@ export default function Roster({ st, patch, narrow }) {
                             ? <span style={{ fontFamily: MONO, fontSize: 9, color: filledN === mine.length ? C.ok : C.warn }}>{filledN}/{mine.length}</span>
                             : <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>{[groups[0]?.role_name || a.required_role_name, a.required_qualification_name].filter(Boolean).join(' · ') || 'No role/qual set'}</div>}
                         </div>
-                        {DOW.map((_, d) => areaDayCol(a, mine, d))}
+                        {DOW.map((_, d) => areaDayCol(a, mine, d, groups[0]?.role_id ?? null))}
                       </div>
                     )
                   }
@@ -1212,7 +1544,7 @@ export default function Roster({ st, patch, narrow }) {
                               </div>
                               {!railMin && qual && <div style={{ fontFamily: MONO, fontSize: 9, color: C.faint }}>needs {qual}</div>}
                             </div>
-                            {DOW.map((_, d) => areaDayCol(a, g.shifts, d))}
+                            {DOW.map((_, d) => areaDayCol(a, g.shifts, d, g.role_id))}
                           </div>
                         )
                       })}
@@ -1262,14 +1594,12 @@ export default function Roster({ st, patch, narrow }) {
               </div>
             )}
 
+            {/* Clicking a shift lets its day and time be changed here, and it
+                deleted. Keyed on the shift so switching shifts reseeds the form. */}
             {sel && (
-              <button onClick={async () => {
-                if (!confirm('Delete this shift?')) return
-                try { await api.rosterDeleteShift(sel.id); patch({ selected: null }); load() }
-                catch (e) { patch({ toast: e.message }) }
-              }} style={{ width: '100%', padding: '6px 10px', borderRadius: 6, fontSize: 12, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.block, cursor: 'pointer', marginBottom: 10 }}>
-                Delete this shift
-              </button>
+              <ShiftEditForm key={sel.id} shift={sel} busy={busy}
+                onSave={fields => relocateShift(sel.id, fields, undefined)}
+                onDelete={() => deleteSelectedShift(sel.id)} />
             )}
 
             {addingShift
@@ -1361,6 +1691,54 @@ export default function Roster({ st, patch, narrow }) {
         )}
       </div>
       )}
+
+      {/* Areas view: assign a volunteer to an unassigned shift, from anywhere. */}
+      {assignFor && (() => {
+        const s = shifts.find(x => x.id === assignFor)
+        if (!s) return null
+        return (
+          <AssignModal shift={s} areaName={areaLabel(s)} candidates={candidates} shifts={shifts} settings={settings}
+            onPick={mid => { setAssignFor(null); doAssign(s.id, mid) }}
+            onFillBest={() => { const b = bestFor(s); setAssignFor(null); if (b) doAssign(s.id, b); else patch({ toast: { tone: 'warn', title: 'Nobody available.', body: 'No qualified, available volunteer for this shift.' } }) }}
+            onClear={() => { setAssignFor(null); doAssign(s.id, null) }}
+            onClose={() => setAssignFor(null)} />
+        )
+      })()}
+
+      {/* People view "+ add": hand the person one of the day's open shifts. */}
+      {addFor && (() => {
+        const cand = candById[addFor.personId]
+        return (
+          <AddOpenShiftModal personName={cand?.name || 'this volunteer'} cand={cand} day={addFor.day}
+            openShifts={open} shifts={shifts} settings={settings} areaLabelFor={areaLabel}
+            onPick={sid => { setAddFor(null); doAssign(sid, addFor.personId) }}
+            onClose={() => setAddFor(null)} />
+        )
+      })()}
+
+      {/* Areas view "+ Add": create a one-off shift for a role/day and, in the
+          same step, hand it to a volunteer. */}
+      {addAreaFor && (() => {
+        const a = areaById[addAreaFor.areaId]
+        if (!a) return null
+        return (
+          <NewAreaShiftModal area={a} day={addAreaFor.day} roleId={addAreaFor.roleId}
+            candidates={candidates} shifts={shifts} settings={settings}
+            onClose={() => setAddAreaFor(null)}
+            onCreate={async ({ start_time, end_time, role_id, assignee }) => {
+              const res = await api.rosterCreateShift({ week_id: data.week.id, area_id: a.id, day_of_week: addAreaFor.day, start_time, end_time, role_id })
+              const newId = res.id
+              let assigned = null
+              if (assignee) assigned = await api.rosterAssign(data.week.id, newId, assignee).catch(() => ({ ok: false }))
+              const day = addAreaFor.day
+              setAddAreaFor(null)
+              await load()
+              patch({ selected: newId, toast: (assignee && assigned?.ok)
+                ? { tone: assigned.warns?.length ? 'warn' : 'ok', title: `Shift added, ${assigned.assignee_name || 'volunteer'} rostered.`, body: (assigned.warns || []).join(' · ') || `${a.name} · ${DOW[day]}` }
+                : { tone: 'ok', title: 'Shift added.', body: `${a.name} · ${DOW[day]}` } })
+            }} />
+        )
+      })()}
     </div>
   )
 }
