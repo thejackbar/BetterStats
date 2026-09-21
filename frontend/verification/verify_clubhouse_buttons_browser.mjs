@@ -406,19 +406,22 @@ const run = async () => {
   }
 
   // ── Club Diary ────────────────────────────────────────────────────────────
+  // The diary landing now opens on Overview with a view switcher (Overview /
+  // List / Calendar / Timeline / By role) as the centred segmented control; the
+  // search + cadence filters live inside the List view.
   await open('/admin/club-diary', 'h1')
   {
-    const ord = await isAbove(page, 'Overdue & blocked only', 'input[placeholder*="Search tasks"]')
-    check('Club Diary: the search sits below the cadence buttons', !!ord?.above, JSON.stringify(ord))
-    const t = await typesWithoutLosingFocus(page, 'Search tasks', 'BAS')
-    check('Club Diary: search keeps focus per character', t.held && t.value === 'BAS', JSON.stringify(t))
-    // Clear it again so the cadence row is measured unfiltered.
-    await page.fill('input[placeholder*="Search tasks"]', '').catch(() => {})
-    await page.waitForTimeout(200)
-    for (const label of ['All', 'Annual', 'Quarterly', 'Overdue & blocked only']) {
+    for (const label of ['Overview', 'List', 'Calendar', 'Timeline', 'By role']) {
       const box = await segBox(page, label)
-      check(`Club Diary: "${label}" wears the Committee button box`, looksSeg(box), JSON.stringify(box))
+      check(`Club Diary: "${label}" view tab wears the Committee button box`, looksSeg(box), JSON.stringify(box))
     }
+    const c = await centredInHeader(page, 'Calendar')
+    check('Club Diary: the view tabs are centred', c && c.drift <= 24, `drift ${c?.drift}px`)
+    // Switch to List; its search box keeps focus per character.
+    await page.getByRole('button', { name: 'List', exact: true }).click().catch(() => {})
+    await page.waitForTimeout(200)
+    const t = await typesWithoutLosingFocus(page, 'Search tasks', 'BAS')
+    check('Club Diary: List search keeps focus per character', t.held && t.value === 'BAS', JSON.stringify(t))
   }
 
   // ── Events ────────────────────────────────────────────────────────────────

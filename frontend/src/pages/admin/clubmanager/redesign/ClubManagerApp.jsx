@@ -46,7 +46,7 @@ export default function ClubManagerApp({ initialScreen = 'overview' }) {
       openExpanded: false,
       w, panelOpen: w >= 1280, navOpen: false,
       // per-screen locals
-      diaryTab: 'plan', cadFilter: 'All', issuesOnly: false, diaryCollapsed: {},
+      diaryTab: 'overview', diaryUpTo: 'month', diaryCatFilter: 'All', diaryStatusFilter: 'All',
       dirQuery: '', dirSeg: 'All', dirRole: null, dirExpiring: false, dirSel: null,
       dirType: '', dirPlaying: 'all',
       facTab: 'availability', bookings: null, requests: null, returned: {},
