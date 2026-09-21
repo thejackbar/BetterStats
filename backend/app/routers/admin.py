@@ -1770,7 +1770,7 @@ async def undo_merge(req: UndoMergeRequest, db: AsyncSession = Depends(get_db), 
             "UPDATE players SET cricketstatz_player_id = :cs WHERE id = :rid"),
             {"cs": log["removed_cricketstatz_player_id"], "rid": str(remove_id)})
 
-        imported_ids = _jlist(log.get("imported_stat_ids"))
+    imported_ids = _jlist(log.get("imported_stat_ids"))
     if imported_ids:
         await db.execute(
             text("UPDATE imported_stats SET player_id = :pid WHERE id = ANY(:ids)"),
