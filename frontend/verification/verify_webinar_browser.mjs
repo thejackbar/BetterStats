@@ -17,6 +17,12 @@
 // horizontal overflow at 390px.
 import { existsSync } from 'node:fs'
 import { chromium } from 'playwright'
+// The /trial promo's copy is driven purely by the local clock (webinarState()
+// with no server isPast), so it flips to the recording wording the moment the
+// event passes. Import the same source of truth the page uses and assert the
+// promo matches it, rather than hard-coding pre-event strings that go stale on
+// the day of the event. webinar.js is dependency-free ESM, so node imports it.
+import { webinarState } from '../src/data/webinar.js'
 
 const BASE = process.argv[2] || 'http://127.0.0.1:5203'
 const EXECUTABLE = process.env.PW_CHROMIUM || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome'
@@ -123,7 +129,14 @@ async function open(path, {
   // checks are about instead.
   await page.goto(`${BASE}${path}`, { waitUntil: 'domcontentloaded' })
   await page.waitForSelector('#main-content', { timeout: 15000 })
-  if (path.startsWith('/demo')) await page.waitForSelector('[data-testid="demo-form"]', { timeout: 15000 })
+  // Before the event the hero holds the registration form; after it, the
+  // embedded recording. Wait for whichever this state renders.
+  if (path.startsWith('/demo')) {
+    await page.waitForSelector(
+      isPast ? '[data-testid="demo-recording"]' : '[data-testid="demo-form"]',
+      { timeout: 15000 },
+    )
+  }
   const readPixel = async () => page.evaluate(() => [
     ...(window.__pixel || []),
     ...Array.from(window.dataLayer || []).map((a) => ({ lib: 'gtag', args: Array.from(a) })),
@@ -516,8 +529,15 @@ async function attrOf(page, selector, name) {
   // The ACCEPTED COST of the link not being in the bundle. Both the read and
   // the write failing is the one case that can no longer produce a link, and a
   // button pointing at nothing is worse than a sentence saying what to do.
+  //
+  // Pinned to the not-past state via the server's own `is_past: false` (this is
+  // a FORM scenario), because a details FAILURE would fall back to the local
+  // clock — and the event date is now in the past, which would render the
+  // embedded recording rather than the form. The read here instead SUCCEEDS but
+  // carries no link (`watchUrl: null`), which reaches the same `!state.watchUrl`
+  // error branch: the read gave nothing to hand over and the write failed too.
   const { page, ctx, errors } = await open('/demo', {
-    registerStatus: 500, detailsStatus: 503,
+    registerStatus: 500, watchUrl: null,
   })
   await fill(page)
   await page.getByTestId('demo-submit').click()
@@ -558,15 +578,8 @@ async function attrOf(page, selector, name) {
 
 // ------------------------------------------------------------ after ----
 {
-  console.log('\n-- /demo after the event, recording published --')
-  const { page, ctx, errors, readPixel } = await open('/demo', {
-    isPast: true, recordingUrl: RECORDING,
-    registerBody: {
-      ok: true, created: true, is_past: true, watch_url: RECORDING,
-      recording_available: true, date_label: 'Monday 21 September',
-      time_label: '5:30pm AWST / 7:30pm AEST', roles: [],
-    },
-  })
+  console.log('\n-- /demo after the event, the recording is embedded --')
+  const { page, ctx, errors } = await open('/demo', { isPast: true, recordingUrl: RECORDING })
   const h1 = (await page.locator('h1').first().innerText()).trim()
   ck('the H1 becomes "Watch the BetterCricket demo"', /watch the bettercricket demo/i.test(h1), h1)
   // The tab follows it, because both come off the same state object.
@@ -577,34 +590,53 @@ async function attrOf(page, selector, name) {
   ck('the date block reads "Recorded 21 September 2026"',
     /Recorded 21 September 2026/.test(when), when)
   ck('and no longer advertises a live time', !/5:30pm AWST/.test(when), when)
-  ck('the button becomes "Get the recording"',
-    (await page.getByTestId('demo-submit').innerText()).trim() === 'Get the recording')
 
-  await fill(page)
-  await page.getByTestId('demo-submit').click()
-  await page.getByTestId('demo-success').waitFor({ timeout: 5000 })
-  ck('the recording link is served, not the dead live link',
-    await page.getByTestId('demo-watch-link').getAttribute('href') === RECORDING)
-  // The pixel event is deliberately unchanged after the event, so the
-  // conversion history stays continuous.
-  ck('CompleteRegistration still fires, under the same category',
-    completeReg(await readPixel())[0]?.args[2]?.content_category === 'webinar')
-  ck('and no calendar controls, for an event that has been and gone',
-    await page.getByTestId('demo-gcal').count() === 0)
+  // THE FORM IS GONE — the recording plays in its place.
+  ck('the registration form is no longer on the page',
+    await page.getByTestId('demo-form').count() === 0)
+  ck('there is no "get the recording" button either',
+    await page.getByTestId('demo-submit').count() === 0)
+
+  // The recording is embedded, pointing at StreamYard's embed link.
+  const frame = page.getByTestId('demo-recording-frame')
+  ck('the recording is embedded inline', await frame.count() === 1)
+  const src = await frame.getAttribute('src')
+  ck('the iframe is the StreamYard embed for this recording',
+    src === 'https://streamyard.com/e/pkwuu5xsbecn', src)
+  // Measured off the real element: a 16:9 box that actually has size on screen,
+  // not a collapsed frame.
+  const box = await frame.boundingBox()
+  ck('the player has real dimensions (roughly 16:9)',
+    !!box && box.width > 300 && box.height > 150
+      && Math.abs((box.width / box.height) - 16 / 9) < 0.15,
+    box && `${Math.round(box.width)}x${Math.round(box.height)}`)
+
+  // A description of the session sits under the video.
+  const about = await page.getByTestId('demo-recording').innerText()
+  ck('a description of what the session covered is shown',
+    /ABOUT THIS SESSION/.test(about) && /opposition analysis/i.test(about), about)
+  ck('and the recorded date and length are stated',
+    /Recorded 21 September 2026/.test(about) && /minutes/.test(about), about)
+
+  // The "start a trial instead" path survives — the recording page still wants
+  // to convert.
+  ck('the trial CTA is still offered', /Start your free trial/i.test(about))
+
   ck('no page errors', errors.length === 0, errors.join(' | '))
   await ctx.close()
 }
 
 {
-  console.log('\n-- /demo after the event, no recording yet --')
-  const { page, ctx } = await open('/demo', { isPast: true, recordingUrl: null })
-  await fill(page)
-  await page.getByTestId('demo-submit').click()
-  await page.getByTestId('demo-success').waitFor({ timeout: 5000 })
-  const text = await page.getByTestId('demo-success').innerText()
-  ck('it says the recording is on its way', /recording is on its way/i.test(text), text)
-  // Never a link that goes nowhere.
-  ck('and offers no link at all', await page.getByTestId('demo-watch-link').count() === 0)
+  // The embed is a fixed constant, so the page shows it whether or not a super
+  // admin has pasted a recording link into General Settings — there is no
+  // longer a "recording pending" state to fall into.
+  console.log('\n-- /demo after the event, no server recording link set --')
+  const { page, ctx, errors } = await open('/demo', { isPast: true, recordingUrl: null })
+  ck('the recording is still embedded',
+    await page.getByTestId('demo-recording-frame').count() === 1)
+  ck('and no registration form appears',
+    await page.getByTestId('demo-form').count() === 0)
+  ck('no page errors', errors.length === 0, errors.join(' | '))
   await ctx.close()
 }
 
@@ -622,10 +654,16 @@ async function attrOf(page, selector, name) {
     .length)
   ck('/trial renders exactly one header too', trialBars === 1, String(trialBars))
   const text = await promo.innerText()
-  ck('it offers the guided tour', /Want a guided tour first\?/.test(text), text)
-  ck('naming the date and both timezones',
-    /Monday 21 September/.test(text) && /5:30pm AWST/.test(text) && /7:30pm AEST/.test(text))
-  ck('the CTA reads "Save your spot"', /Save your spot/.test(text))
+  // Asserted against webinarState() so this holds in either state: before the
+  // event the promo offers the guided tour with the date; after it, the
+  // recording. innerText upper-cases nothing here, so a direct includes is safe.
+  const ws = webinarState()
+  ck('the promo heading reflects the current webinar state',
+    text.includes(ws.promoHeading), `${ws.promoHeading} | ${text}`)
+  ck('the promo body reflects the current webinar state',
+    text.includes(ws.promoBody), `${ws.promoBody} | ${text}`)
+  ck('the CTA reflects the current webinar state',
+    text.includes(ws.promoCta), `${ws.promoCta} | ${text}`)
   ck('and links to /demo',
     await promo.locator('a').first().getAttribute('href') === '/demo')
 
@@ -645,8 +683,14 @@ async function attrOf(page, selector, name) {
 }
 
 // --------------------------------------------------------------- 390px ----
-for (const [label, path] of [['/demo', '/demo'], ['/trial', '/trial']]) {
-  const { page, ctx, errors } = await open(path, { width: 390 })
+// The embedded recording state is included, since it is a new full-width block
+// on the narrowest phone.
+for (const [label, path, opts] of [
+  ['/demo (form)', '/demo', { width: 390 }],
+  ['/demo (recording)', '/demo', { width: 390, isPast: true }],
+  ['/trial', '/trial', { width: 390 }],
+]) {
+  const { page, ctx, errors } = await open(path, opts)
   const over = await page.evaluate(() =>
     document.documentElement.scrollWidth - document.documentElement.clientWidth)
   ck(`${label} does not overflow sideways at 390px`, over <= 0, `${over}px`)
