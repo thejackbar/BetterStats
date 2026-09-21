@@ -73,7 +73,22 @@ export function AutoFitText({ text, children, max, min = 8, lines = 1, pad = 0, 
         const nodeW = node.clientWidth > 0 ? node.clientWidth : parent.clientWidth
         const boxW = Math.min(nodeW, parent.clientWidth)
         const overflowW = node.scrollWidth > boxW + 0.5
-        const overflowH = lines > 1 && node.scrollHeight > parent.clientHeight + 0.5
+        // For multi-line, `lines` is a HARD clamp — the render never shows more
+        // than `lines` lines, so the text must be shrunk until it WRAPS to at
+        // most that many. During measurement the node is a plain (unclamped)
+        // block, so scrollHeight is the natural wrapped height; compare it to the
+        // `lines`-line budget, not just the box. A box exactly `lines` tall (or
+        // taller) would otherwise let a 3rd natural line's height still "fit",
+        // and the clamp then truncates the last visible line to an ellipsis — a
+        // long word-set in a narrow column (EV8's "Awards Presentation") that
+        // wraps rather than overflowing width, so overflowW never catches it.
+        let overflowH = false
+        if (lines > 1) {
+          const lhStr = getComputedStyle(node).lineHeight
+          const lh = lhStr.endsWith('px') ? parseFloat(lhStr) : next * 1.2
+          const budget = Math.min(parent.clientHeight, lines * lh)
+          overflowH = node.scrollHeight > budget + 0.5
+        }
         if (!overflowW && !overflowH) break
         next -= 1
         node.style.fontSize = next + 'px'
