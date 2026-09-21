@@ -123,7 +123,7 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
         SELECT fm.id, fm.full_name, fm.email, fm.mobile, fm.player_id, fm.member_category,
                fm.is_life_member, fm.life_member_since, fm.life_member_detail,
                fm.gender AS member_gender, fm.is_honorary, fm.honorary_expires_at, fm.archived_at,
-               fm.shirt_size, fm.pants_size,
+               fm.shirt_size, fm.pants_size, fm.notes,
                mt.id AS membership_type_id, mt.name AS membership_type_name, mt.is_playing AS membership_type_playing,
                p.id AS our_player_id, p.photo_url, p.email AS player_email, p.phone AS player_phone,
                p.status AS player_status, p.gender AS player_gender, p.shirt_number,
@@ -370,6 +370,11 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
             # number to hold, which is why it is None rather than "".
             "shirt_number": m["shirt_number"] if our_pid else None,
             "shirt_size": m["shirt_size"], "pants_size": m["pants_size"],
+            # A free-text general note about the person, on the shared spine.
+            # Multi-line: the column is Text and update_person never truncates
+            # it. Absent from the read-through player rows below, which have no
+            # member row to carry one — recording a note mints it.
+            "notes": m["notes"],
             "roles": roles_by.get(mid, []),
             "total_hours": hours_by.get(mid, 0.0),
             "quals_total": q.get("total", 0), "flagged": q.get("expiring", 0),
@@ -421,6 +426,8 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
             # no row on it yet. Recording one mints the row, the same way
             # ticking a membership type does.
             "shirt_number": p["shirt_number"], "shirt_size": None, "pants_size": None,
+            # No member row yet, so no note either — recording one mints it.
+            "notes": None,
             "roles": [], "total_hours": 0.0, "quals_total": 0, "flagged": 0, "segs": psegs,
         })
 

@@ -300,8 +300,13 @@ export default function Directory({ st, patch, narrow }) {
   const refreshMember = async (mid) => { await Promise.all([loadDetail(mid), reload()]) }
 
   // ── mutations ──────────────────────────────────────────────────────────────
-  const openAdd = () => setModal({ editId: null, playerId: null, form: { full_name: '', email: '', mobile: '', notes: '' }, types: [] })
-  const openEdit = (p) => setModal({ editId: p.member_id, playerId: p.player_id, form: { full_name: p.name, email: p.email, mobile: p.phone, notes: '' }, types: (p.membership_types || []).map(t => t.id) })
+  // The general NOTE is edited inline from its own card, not here — the modal is
+  // name/email/mobile/types only. It used to carry a `notes: ''` that nothing
+  // rendered but the save still sent, so editing a name through the modal
+  // silently wiped whatever note the person had; leaving it out means an edit
+  // here never touches the note.
+  const openAdd = () => setModal({ editId: null, playerId: null, form: { full_name: '', email: '', mobile: '' }, types: [] })
+  const openEdit = (p) => setModal({ editId: p.member_id, playerId: p.player_id, form: { full_name: p.name, email: p.email, mobile: p.phone }, types: (p.membership_types || []).map(t => t.id) })
   const setForm = (k, v) => setModal(m => ({ ...m, form: { ...m.form, [k]: v } }))
   const toggleModalType = (id) => setModal(m => ({ ...m, types: m.types.includes(id) ? m.types.filter(x => x !== id) : [...m.types, id] }))
   const saveMember = async () => {
@@ -1093,6 +1098,19 @@ export default function Directory({ st, patch, narrow }) {
                   )}
                 </Card>
               )}
+
+              {/* A free-text general note about the person. Multi-line, and its
+                  own inline editor rather than a field in the Add/Edit modal —
+                  the same one-writer, edit-in-place pattern the contact, gender,
+                  squad and kit fields follow. Saving one mints the member row
+                  for a read-through player, so a note can be kept about anybody. */}
+              <Card title="NOTES">
+                <textarea disabled={busy} defaultValue={sel.notes || ''} key={sel.key + ':notes'}
+                  rows={4} placeholder="Anything worth recording about this person…"
+                  onBlur={e => { if (e.target.value !== (sel.notes || '')) savePersonField(sel, 'notes', e.target.value) }}
+                  style={{ ...inp, resize: 'vertical', minHeight: 80, lineHeight: 1.45, fontFamily: 'inherit' }} />
+                {!sel.member_id && <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginTop: 6 }}>Adding a note adds this player to the member directory.</div>}
+              </Card>
 
               {/* AXIS 2 — what they do. */}
               <Card title="ROLES">
