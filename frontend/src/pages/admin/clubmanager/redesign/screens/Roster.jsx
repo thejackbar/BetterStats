@@ -1,6 +1,8 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../../../../lib/api'
+import { useAuth } from '../../../../../contexts/AuthContext'
+import { CAP } from '../../../../../lib/capabilities'
 import { C, MONO, ScreenHeader, NavToggle, Toast, initials, usePref, SegTabs, SegGroup, segItemStyle, HEAD_SIDE, HEAD_CENTRE, HEAD_SIDE_END, HeaderSearch } from '../ui'
 
 // Roster on the real backend. Operational areas + shift patterns are config; a
@@ -688,8 +690,181 @@ function ShiftEditForm({ shift, onSave, onDelete, busy }) {
   )
 }
 
+// The seven day-of-week toggles, shown inline on the People rail when a
+// volunteer is expanded so their availability is set where they are read rather
+// than in a panel on the other side of the screen. stopPropagation on the row
+// so a day tap does not also collapse the person it belongs to.
+function AvailabilityRow({ days, onToggle, testid }) {
+  return (
+    <div data-testid={testid} onClick={e => e.stopPropagation()}
+      style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginTop: 7 }}>
+      {DOW.map((label, i) => {
+        const on = (days || []).includes(i)
+        return (
+          <button key={i} onClick={() => onToggle(i)} data-testid={`${testid}-${i}`}
+            style={{ padding: '3px 6px', borderRadius: 5, fontFamily: MONO, fontSize: 9.5, cursor: 'pointer',
+              border: `1px solid ${on ? 'transparent' : C.hair2}`,
+              background: on ? C.accent : 'transparent', color: on ? '#fff' : C.faint }}>{label}</button>
+        )
+      })}
+    </div>
+  )
+}
+
+// The "+ Add" beside a volunteer's roles: pick a club role they don't already
+// hold. Roles already assigned are left out so the list is only ever additions.
+function AddRoleModal({ memberName, currentIds, roles, onPick, onClose }) {
+  const [q, setQ] = useState('')
+  const avail = roles.filter(r => !currentIds.includes(r.id))
+  const term = q.trim().toLowerCase()
+  const list = term ? avail.filter(r => r.title.toLowerCase().includes(term)) : avail
+  return (
+    <ModalShell title={`Add a role · ${memberName}`} onClose={onClose} maxWidth={380}>
+      <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search a role…" autoFocus
+        data-testid="add-role-search" style={{ ...inpStyle, width: '100%', marginBottom: 8 }} />
+      {list.length === 0 ? (
+        <div style={{ fontSize: 12.5, color: C.faint, lineHeight: 1.5, padding: '4px 0' }}>
+          {roles.length === 0 ? 'No roles set up yet. Add them in Areas & Roles.'
+            : avail.length === 0 ? 'They already hold every role.' : 'No role matches.'}
+        </div>
+      ) : (
+        <div className="pb-scroll" data-testid="add-role-list" style={{ display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 300, overflow: 'auto' }}>
+          {list.map(r => (
+            <button key={r.id} onClick={() => onPick(r.id)} data-testid={`add-role-opt-${r.id}`}
+              style={{ textAlign: 'left', background: C.surface2, border: `1px solid ${C.hair}`, borderRadius: 8, padding: '8px 10px', cursor: 'pointer', color: C.text, fontSize: 13, fontWeight: 600 }}>{r.title}</button>
+          ))}
+        </div>
+      )}
+    </ModalShell>
+  )
+}
+
+// The "+ Add volunteer" launcher opens this: search every club member, pick one,
+// and give them a volunteer profile in one step — the roles they cover, the days
+// they can do, and (only where the user holds MANAGE_QUALIFICATIONS) any
+// accreditations. A member who is already a volunteer is not hidden; picking
+// them updates their profile rather than making a second one.
+function AddVolunteerModal({ roles, qualTypes, canQuals, onAdd, onClose }) {
+  const [q, setQ] = useState('')
+  const [results, setResults] = useState([])
+  const [searching, setSearching] = useState(false)
+  const [picked, setPicked] = useState(null)   // { member_id, full_name, is_volunteer }
+  const [roleIds, setRoleIds] = useState([])
+  const [days, setDays] = useState([])
+  const [qualIds, setQualIds] = useState([])
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+  const seq = useRef(0)
+
+  // Debounced member search. A stale response is dropped (the sequence guard),
+  // so a slow search for "sm" never lands on top of the results for "smith".
+  // Once a member is picked the search stops entirely.
+  useEffect(() => {
+    if (picked) return
+    const term = q.trim()
+    const mine = ++seq.current
+    setSearching(true)
+    const t = setTimeout(async () => {
+      try {
+        const r = await api.volunteerSearchMembers(term || undefined, 30)
+        if (seq.current === mine) setResults(r.members || [])
+      } catch { if (seq.current === mine) setResults([]) }
+      finally { if (seq.current === mine) setSearching(false) }
+    }, 220)
+    return () => clearTimeout(t)
+  }, [q, picked])
+
+  const toggleRole = id => setRoleIds(v => v.includes(id) ? v.filter(x => x !== id) : [...v, id])
+  const toggleDay = i => setDays(v => v.includes(i) ? v.filter(x => x !== i) : [...v, i].sort((a, b) => a - b))
+  const toggleQual = id => setQualIds(v => v.includes(id) ? v.filter(x => x !== id) : [...v, id])
+
+  async function submit() {
+    setBusy(true); setErr(null)
+    try { await onAdd({ member_id: picked.member_id, role_ids: roleIds, days, qual_ids: qualIds }) }
+    catch (e) { setErr(String(e?.message || e)); setBusy(false) }
+  }
+
+  const chip = (on) => ({ padding: '4px 9px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
+    border: `1px solid ${on ? 'transparent' : C.hair2}`, background: on ? C.accent : 'transparent', color: on ? '#fff' : C.dim })
+
+  return (
+    <ModalShell title="Add a volunteer" sub={picked ? picked.full_name : 'Pick a club member'} onClose={onClose}>
+      {!picked ? (
+        <div>
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search club members…" autoFocus
+            data-testid="add-vol-search" style={{ ...inpStyle, width: '100%', marginBottom: 8 }} />
+          {searching && <div style={{ fontFamily: MONO, fontSize: 10, color: C.faintest, padding: '4px 0' }}>Searching…</div>}
+          {!searching && results.length === 0 && <div style={{ fontSize: 12.5, color: C.faint, padding: '4px 0' }}>No members found.</div>}
+          <div className="pb-scroll" data-testid="add-vol-results" style={{ display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 320, overflow: 'auto' }}>
+            {results.map(m => (
+              <button key={m.member_id} onClick={() => setPicked(m)} data-testid={`add-vol-member-${m.member_id}`}
+                style={{ textAlign: 'left', background: C.surface2, border: `1px solid ${C.hair}`, borderRadius: 8, padding: '8px 10px', cursor: 'pointer', color: C.text, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ width: 24, height: 24, borderRadius: '50%', background: C.surface, border: `1.5px solid ${C.hair2}`, color: C.dim, fontFamily: MONO, fontSize: 9, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{initials(m.full_name)}</span>
+                <span style={{ fontSize: 13, fontWeight: 600, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.full_name}</span>
+                {m.is_volunteer && <span style={{ fontFamily: MONO, fontSize: 8, letterSpacing: '0.06em', padding: '2px 5px', borderRadius: 4, flexShrink: 0, background: 'color-mix(in srgb, var(--pb-accent) 15%, transparent)', color: C.accent }}>ALREADY IN</span>}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 12 }}>
+          {picked.is_volunteer && (
+            <div style={{ fontSize: 11.5, color: C.warn, lineHeight: 1.45 }}>{picked.full_name} is already a volunteer — this updates their profile.</div>
+          )}
+          <div>
+            <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.12em', color: C.faintest, marginBottom: 5 }}>VOLUNTEER ROLES</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+              {roles.length === 0 && <div style={{ fontSize: 12, color: C.faint }}>No roles set up yet.</div>}
+              {roles.map(r => (
+                <button key={r.id} onClick={() => toggleRole(r.id)} data-testid={`add-vol-role-${r.id}`} style={chip(roleIds.includes(r.id))}>{r.title}</button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.12em', color: C.faintest, marginBottom: 5 }}>AVAILABLE</div>
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+              {DOW.map((label, i) => {
+                const on = days.includes(i)
+                return (
+                  <button key={i} onClick={() => toggleDay(i)} data-testid={`add-vol-day-${i}`}
+                    style={{ padding: '4px 8px', borderRadius: 6, fontFamily: MONO, fontSize: 10, cursor: 'pointer', border: `1px solid ${on ? 'transparent' : C.hair2}`, background: on ? C.accent : 'transparent', color: on ? '#fff' : C.faint }}>{label}</button>
+                )
+              })}
+            </div>
+          </div>
+          {canQuals && qualTypes.length > 0 && (
+            <div>
+              <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.12em', color: C.faintest, marginBottom: 5 }}>QUALIFICATIONS (OPTIONAL)</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                {qualTypes.map(t => (
+                  <button key={t.id} onClick={() => toggleQual(t.id)} data-testid={`add-vol-qual-${t.id}`} style={chip(qualIds.includes(t.id))}>{t.name}</button>
+                ))}
+              </div>
+            </div>
+          )}
+          {err && <div style={{ fontSize: 11.5, color: C.block }}>{err}</div>}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button disabled={busy} onClick={submit} data-testid="add-vol-save"
+              style={{ flex: 1, padding: '8px 12px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: 'none', background: C.accent, color: '#fff', cursor: 'pointer', opacity: busy ? 0.6 : 1 }}>
+              {busy ? 'Adding…' : (picked.is_volunteer ? 'Update volunteer' : 'Add to volunteer pool')}
+            </button>
+            <button disabled={busy} onClick={() => setPicked(null)}
+              style={{ padding: '8px 12px', borderRadius: 8, fontSize: 12.5, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.dim, cursor: 'pointer' }}>Back</button>
+          </div>
+        </div>
+      )}
+    </ModalShell>
+  )
+}
+
 export default function Roster({ st, patch, narrow }) {
   const navigate = useNavigate()
+  const { hasCapability } = useAuth()
+  // Choosing what lands in a volunteer's own profile only needs MANAGE_VOLUNTEERS;
+  // recording an accreditation is MANAGE_QUALIFICATIONS, which a roster user may
+  // not hold — so the optional-qualifications half of "add a volunteer" is gated
+  // on it rather than widening the roster capability.
+  const canQuals = hasCapability(CAP.MANAGE_QUALIFICATIONS)
   const [data, setData] = useState(null)  // { week, areas, candidates, settings }
   const [shifts, setShifts] = useState([])
   const [err, setErr] = useState(null)
@@ -702,6 +877,15 @@ export default function Roster({ st, patch, narrow }) {
   const [assignFor, setAssignFor] = useState(null)   // shift id
   const [addFor, setAddFor] = useState(null)         // { personId, day }
   const [addAreaFor, setAddAreaFor] = useState(null) // { areaId, day, roleId }
+  // People rail (left column): add a volunteer from the club member list, add a
+  // role to one, and expand a volunteer to set their availability inline.
+  const [addVolOpen, setAddVolOpen] = useState(false)
+  const [addRoleFor, setAddRoleFor] = useState(null) // member id
+  const [expandedPerson, setExpandedPerson] = useState(null) // member id
+  // The club's role catalogue and qualification types, for the two add flows.
+  // Fetched once; a role/qual list is small and does not change mid-session.
+  const [allRoles, setAllRoles] = useState([])
+  const [qualTypes, setQualTypes] = useState([])
   // Both of these belong to the person, not the club, and both survive the
   // browser closing. A club with fourteen operational areas wants the first
   // column narrow; one with three does not.
@@ -727,6 +911,8 @@ export default function Roster({ st, patch, narrow }) {
     .then(res => { setData(res); setShifts(res.week.shifts || []) })
     .catch(e => setErr((e?.status ? `HTTP ${e.status} · ` : '') + String(e?.message || e)))
   useEffect(() => { load() }, [st.rosterWeek])
+  useEffect(() => { api.raRoles({ committee: false }).then(r => setAllRoles(r.roles || [])).catch(() => {}) }, [])
+  useEffect(() => { if (canQuals) api.qualListTypes(false).then(r => setQualTypes(r.types || [])).catch(() => {}) }, [canQuals])
 
   const view = st.view
   // The first column carries who or what each row is, so it has to stay put
@@ -938,6 +1124,53 @@ export default function Roster({ st, patch, narrow }) {
     if (!window.confirm('Delete this shift? This only affects this week.')) return
     try { await api.rosterDeleteShift(id); patch({ selected: null }); load() }
     catch (e) { patch({ toast: { tone: 'block', title: 'Could not delete the shift.', body: String(e?.message || e) } }) }
+  }
+
+  // ── People rail (left column) edits ─────────────────────────────────────
+  //
+  // A volunteer's availability is set where they are read, from the inline row
+  // that opens when their name is clicked. Optimistic: the People grid shades
+  // its cells off `candidates[].available_days`, so the day the cell reflects
+  // the change moves with the toggle rather than waiting on the round trip.
+  const toggleAvailability = async (memberId, dayIdx) => {
+    const c = candById[memberId]; if (!c) return
+    const has = (c.available_days || []).includes(dayIdx)
+    const next = has ? c.available_days.filter(x => x !== dayIdx) : [...(c.available_days || []), dayIdx].sort((a, b) => a - b)
+    setData(d => ({ ...d, candidates: d.candidates.map(x => x.member_id === memberId ? { ...x, available_days: next } : x) }))
+    try { await api.rosterSetAvailability(memberId, next) }
+    catch (e) { patch({ toast: { tone: 'block', title: 'Could not save availability.', body: String(e?.message || e) } }); load() }
+  }
+
+  // Add a role a volunteer doesn't already hold, from the "+ Add" beside their
+  // roles. Sends the WHOLE role set (the profiles endpoint replaces, not appends),
+  // and updates the pool optimistically so the chip appears at once.
+  const addRoleToVolunteer = async (memberId, roleId) => {
+    const c = candById[memberId]; if (!c) return
+    setAddRoleFor(null)
+    const nextIds = [...new Set([...(c.role_ids || []), roleId])]
+    const role = allRoles.find(r => r.id === roleId)
+    const nextNames = role && !(c.role_names || []).includes(role.title)
+      ? [...(c.role_names || []), role.title].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))
+      : (c.role_names || [])
+    setData(d => ({ ...d, candidates: d.candidates.map(x => x.member_id === memberId ? { ...x, role_ids: nextIds, role_names: nextNames } : x) }))
+    try { await api.volunteerUpsertProfile({ member_id: memberId, role_ids: nextIds }) }
+    catch (e) { patch({ toast: { tone: 'block', title: 'Could not add the role.', body: String(e?.message || e) } }); load() }
+  }
+
+  // Give a club member a volunteer profile in one step — the roles they cover,
+  // the days they can do, and (only where the user holds MANAGE_QUALIFICATIONS)
+  // any accreditations. A full reload afterwards is what lands them in the pool
+  // and, when they are already a volunteer, refreshes the merged profile.
+  const addVolunteer = async ({ member_id, role_ids, days, qual_ids }) => {
+    await api.volunteerUpsertProfile({ member_id, role_ids, available_days: days })
+    if (canQuals) {
+      for (const qid of (qual_ids || [])) {
+        await api.qualAddQualification({ member_id, qualification_type_id: qid }).catch(() => {})
+      }
+    }
+    setAddVolOpen(false)
+    await load()
+    patch({ toast: { tone: 'ok', title: 'Volunteer added.', body: 'They are in the pool and ready to be rostered.' } })
   }
 
   // What the drag currently in flight would do if dropped here.
@@ -1405,6 +1638,23 @@ export default function Roster({ st, patch, narrow }) {
               </div>
             )}
 
+            {/* Above the list of volunteers: add one from the club member list.
+                The search over every member lives in the modal this opens, so a
+                new volunteer is a member picked, given roles/availability, and
+                dropped straight into the pool. */}
+            {view === 'people' && (
+              <div style={{ display: 'grid', gridTemplateColumns: gridCols, borderBottom: `1px solid ${C.hair2}` }}>
+                <div style={rail({ padding: railMin ? '8px 4px' : '8px 10px', display: 'flex', alignItems: 'center' })}>
+                  <button onClick={() => setAddVolOpen(true)} data-testid="add-volunteer-open"
+                    title={railMin ? 'Add a volunteer' : undefined}
+                    style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: railMin ? '5px 0' : '7px 10px', borderRadius: 7, fontSize: railMin ? 14 : 12.5, fontWeight: 600, cursor: 'pointer', border: '1px dashed color-mix(in srgb, var(--pb-accent) 40%, transparent)', background: 'color-mix(in srgb, var(--pb-accent) 8%, transparent)', color: C.accent }}>
+                    {railMin ? '+' : '+ Add volunteer'}
+                  </button>
+                </div>
+                {DOW.map((_, d) => <div key={d} style={{ borderRight: `1px solid ${C.hair}`, background: d >= 5 ? 'color-mix(in srgb, var(--pb-accent) 3%, transparent)' : undefined }} />)}
+              </div>
+            )}
+
             {view === 'people' && shownCandidates.map(p => {
               const mine = shifts.filter(x => x.assignee_member_id === p.member_id)
               const cap = settings.weekly_shift_cap || p.max_shifts || DEFAULT_CAP
@@ -1413,22 +1663,41 @@ export default function Roster({ st, patch, narrow }) {
               return (
                 <div key={p.member_id} style={{ display: 'grid', gridTemplateColumns: gridCols, borderBottom: `1px solid ${C.hair}` }}>
                   <div style={rail({ padding: railMin ? '10px 4px' : '10px 14px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: railMin ? 'center' : 'stretch', cursor: 'pointer' })}
-                    onClick={() => setOpenPerson(p.member_id)}
-                    title={railMin ? `${p.name} — ${mine.length}/${cap} shifts` : 'Open availability and qualifications'}>
+                    onClick={() => railMin ? setOpenPerson(p.member_id) : setExpandedPerson(x => x === p.member_id ? null : p.member_id)}
+                    title={railMin ? `${p.name} — ${mine.length}/${cap} shifts` : (expandedPerson === p.member_id ? 'Hide availability' : 'Show availability')}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
                       <span style={{ width: 28, height: 28, borderRadius: '50%', background: C.surface2, border: `1.5px solid ${over ? C.block : C.hair2}`, color: C.dim, fontFamily: MONO, fontSize: 10, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{initials(p.name)}</span>
                       {!railMin && (
-                        <div style={{ minWidth: 0 }}>
+                        <div style={{ minWidth: 0, flex: 1 }}>
                           <div style={{ fontSize: 13.5, fontWeight: 600, color: C.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
-                          <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.available_days.length ? 'Avail ' + p.available_days.map(d => DOW[d]).join(' ') : 'No availability set'}</div>
                         </div>
                       )}
                     </div>
                     {!railMin && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 7 }}>
-                        <div style={{ flex: 1, height: 4, borderRadius: 2, background: C.surface2, overflow: 'hidden' }}><div style={{ height: '100%', width: loadPct + '%', background: over ? C.block : C.accent }} /></div>
-                        <span style={{ fontFamily: MONO, fontSize: 9.5, color: over ? C.block : C.faint }}>{mine.length}/{cap}</span>
-                      </div>
+                      <>
+                        {/* The volunteer's roles sit beneath their name, always,
+                            with a "+ Add" for a quick new one. stopPropagation so
+                            a chip or the add tap doesn't collapse the row. */}
+                        <div data-testid={`people-roles-${p.member_id}`} onClick={e => e.stopPropagation()}
+                          style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6, alignItems: 'center' }}>
+                          {(p.role_names || []).map(r => (
+                            <span key={r} style={{ fontFamily: MONO, fontSize: 8.5, letterSpacing: '0.06em', padding: '2px 5px', borderRadius: 4, background: 'color-mix(in srgb, var(--pb-accent) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--pb-accent) 28%, transparent)', color: C.accent, whiteSpace: 'nowrap' }}>{r.toUpperCase()}</span>
+                          ))}
+                          {!(p.role_names || []).length && <span style={{ fontFamily: MONO, fontSize: 8.5, letterSpacing: '0.06em', color: C.faintest }}>NO ROLE</span>}
+                          <button onClick={() => setAddRoleFor(p.member_id)} data-testid={`add-role-${p.member_id}`}
+                            title="Add a role" style={{ fontFamily: MONO, fontSize: 8.5, letterSpacing: '0.06em', color: C.faint, background: 'transparent', border: `1px dashed ${C.hair2}`, borderRadius: 4, padding: '2px 5px', cursor: 'pointer' }}>+ ADD</button>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 7 }}>
+                          <div style={{ flex: 1, height: 4, borderRadius: 2, background: C.surface2, overflow: 'hidden' }}><div style={{ height: '100%', width: loadPct + '%', background: over ? C.block : C.accent }} /></div>
+                          <span style={{ fontFamily: MONO, fontSize: 9.5, color: over ? C.block : C.faint }}>{mine.length}/{cap}</span>
+                        </div>
+                        {/* Clicking the row shows their availability inline here,
+                            rather than in the panel on the far side of the grid. */}
+                        {expandedPerson === p.member_id && (
+                          <AvailabilityRow days={p.available_days} testid={`people-avail-${p.member_id}`}
+                            onToggle={i => toggleAvailability(p.member_id, i)} />
+                        )}
+                      </>
                     )}
                   </div>
                   {DOW.map((_, d) => {
@@ -1702,6 +1971,21 @@ export default function Roster({ st, patch, narrow }) {
             onFillBest={() => { const b = bestFor(s); setAssignFor(null); if (b) doAssign(s.id, b); else patch({ toast: { tone: 'warn', title: 'Nobody available.', body: 'No qualified, available volunteer for this shift.' } }) }}
             onClear={() => { setAssignFor(null); doAssign(s.id, null) }}
             onClose={() => setAssignFor(null)} />
+        )
+      })()}
+
+      {/* People rail: add a volunteer from the club member list. */}
+      {addVolOpen && (
+        <AddVolunteerModal roles={allRoles} qualTypes={qualTypes} canQuals={canQuals}
+          onAdd={addVolunteer} onClose={() => setAddVolOpen(false)} />
+      )}
+
+      {/* People rail "+ Add" beside a volunteer's roles. */}
+      {addRoleFor && (() => {
+        const c = candById[addRoleFor]
+        return (
+          <AddRoleModal memberName={c?.name || 'this volunteer'} currentIds={c?.role_ids || []} roles={allRoles}
+            onPick={rid => addRoleToVolunteer(addRoleFor, rid)} onClose={() => setAddRoleFor(null)} />
         )
       })()}
 

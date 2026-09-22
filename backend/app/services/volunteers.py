@@ -81,6 +81,30 @@ async def set_member_roles(session: AsyncSession, org_id, member_id, role_ids) -
     await session.flush()
 
 
+async def search_members(session: AsyncSession, org_id, *, q: Optional[str] = None, limit: int = 40) -> dict:
+    """Club members (fee_members) for the "add a volunteer" picker, each flagged
+    with whether they already have a volunteer profile. Archived members are not
+    offered. One extra row is asked for so the caller can say "there are more".
+    """
+    vp = (select(VolunteerProfile.member_id)
+          .where(VolunteerProfile.organisation_id == org_id)).subquery()
+    stmt = (select(FeeMember.id, FeeMember.full_name, FeeMember.email,
+                   vp.c.member_id.label("vp_member"))
+            .outerjoin(vp, vp.c.member_id == FeeMember.id)
+            .where(FeeMember.organisation_id == org_id, FeeMember.archived_at.is_(None)))
+    if q and q.strip():
+        like = f"%{q.strip().lower()}%"
+        stmt = stmt.where(
+            func.lower(FeeMember.full_name).like(like)
+            | func.lower(func.coalesce(FeeMember.email, "")).like(like))
+    stmt = stmt.order_by(func.lower(FeeMember.full_name)).limit(limit + 1)
+    rows = (await session.execute(stmt)).all()
+    more = len(rows) > limit
+    members = [{"member_id": str(r[0]), "full_name": r[1], "email": r[2],
+                "is_volunteer": r[3] is not None} for r in rows[:limit]]
+    return {"members": members, "more": more}
+
+
 async def directory(session: AsyncSession, org_id) -> list[dict]:
     """Every volunteer profile with their member name, assigned roles and total
     logged hours — the volunteer directory's one fetch. Filtering (role/day) is

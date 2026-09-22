@@ -649,6 +649,9 @@ export const api = {
 
   // Volunteer Management (core capability, not a paid module)
   volunteerDirectory: () => request('/club-admin/volunteers/directory'),
+  // Club members to add as a volunteer (each flagged is_volunteer already).
+  volunteerSearchMembers: (q, limit = 40) =>
+    request(`/club-admin/volunteers/members?limit=${limit}${q ? `&q=${encodeURIComponent(q)}` : ''}`),
   volunteerUpsertProfile: (data) =>
     request('/club-admin/volunteers/profiles', { method: 'POST', body: JSON.stringify(data) }),
   volunteerProfile: (memberId) => request(`/club-admin/volunteers/members/${memberId}/profile`),
