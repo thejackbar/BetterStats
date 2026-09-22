@@ -487,6 +487,13 @@ const inpStyle = { padding: '6px 8px', borderRadius: 6, fontSize: 12.5, border: 
 // A small centred modal shell. Declared at MODULE level (never inside a render)
 // so its child inputs keep their caret across re-renders.
 function ModalShell({ title, sub, onClose, children, maxWidth = 460 }) {
+  // Escape closes it — expected of any dialog, and what keeps a modal from
+  // trapping the screen behind it if the backdrop is missed.
+  useEffect(() => {
+    const onKey = e => { if (e.key === 'Escape') onClose?.() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 90, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
       <div onClick={e => e.stopPropagation()} className="pb-scroll" data-testid="roster-modal"
@@ -922,6 +929,10 @@ export default function Roster({ st, patch, narrow }) {
   const [poolQuery, setPoolQuery] = useState('')
   const [poolRole, setPoolRole] = useState('')
   const [poolSort, setPoolSort] = useState('fit')   // 'fit' | 'name'
+  // The day the Match-day board is focused on. null = the auto default (the
+  // soonest day with an open shift). Local state — a match day is a single
+  // sitting, not a preference worth remembering across weeks.
+  const [dayBoardDay, setDayBoardDay] = useState(null)
 
   // api.js stamps the HTTP status onto the error, which is the difference
   // between "you lack a capability" (403) and "the server threw" (500).
@@ -939,6 +950,20 @@ export default function Roster({ st, patch, narrow }) {
       .catch(() => {})
   }, [])
   useEffect(() => { if (canQuals) api.qualListTypes(false).then(r => setQualTypes(r.types || [])).catch(() => {}) }, [canQuals])
+
+  // Carry your place across the People ⇄ Areas ⇄ Match-day toggle. The selected
+  // shift is kept (the tab bar no longer clears it), and on a view change its
+  // chip is scrolled into view — the two views are transposes of one matrix, so
+  // "the same place" is the shift you were working on, not a raw scroll offset.
+  // Only on a view change, so clicking around within a view doesn't yank it.
+  useEffect(() => {
+    if (!st.selected) return
+    const t = setTimeout(() => {
+      const el = document.querySelector(`[data-shift-chip="${st.selected}"]`)
+      if (el) el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' })
+    }, 140)
+    return () => clearTimeout(t)
+  }, [st.view])
 
   const view = st.view
   // The first column carries who or what each row is, so it has to stay put
@@ -1272,7 +1297,7 @@ export default function Roster({ st, patch, narrow }) {
     const warned = shift.warnings && shift.warnings.length
     const over = dropTarget && st.overCell === 'slot-' + shift.id
     return (
-      <div draggable onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; patch({ dragId: shift.id, selected: shift.id }) }} onDragEnd={() => patch({ dragId: null, overCell: null })} onClick={() => { patch({ selected: shift.id }); if (!poolOpen) setPoolOpen(true) }}
+      <div draggable data-shift-chip={shift.id} onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; patch({ dragId: shift.id, selected: shift.id }) }} onDragEnd={() => patch({ dragId: null, overCell: null })} onClick={() => { patch({ selected: shift.id }); if (!poolOpen) setPoolOpen(true) }}
         {...(dropTarget ? slotDrop(shift.id) : {})}
         style={{ borderRadius: 7, padding: '6px 8px', cursor: 'grab', userSelect: 'none',
           border: `1px solid ${inOpen ? 'rgba(245,181,66,0.45)' : (warned ? 'rgba(245,181,66,0.5)' : `color-mix(in srgb, ${a.color || 'var(--pb-accent)'} 40%, transparent)`)}`,
@@ -1333,6 +1358,16 @@ export default function Roster({ st, patch, narrow }) {
     return { d, groups: [...groups.values()] }
   })
 
+  // The Match-day board opens on the soonest day that still has a gap (that is
+  // the day you would go to work on), falling back to the soonest day with any
+  // shift, then Saturday. `dayBoardDay` (a click) overrides it.
+  const boardDay = (() => {
+    if (dayBoardDay != null) return dayBoardDay
+    for (let d = 0; d < 7; d++) if (open.some(x => x.day_of_week === d)) return d
+    for (let d = 0; d < 7; d++) if (shifts.some(x => x.day_of_week === d)) return d
+    return 5
+  })()
+
   // ── the section search ────────────────────────────────────────────────
   //
   // A roster is people, areas, roles and shifts at once, so the box reaches all
@@ -1389,6 +1424,27 @@ export default function Roster({ st, patch, narrow }) {
 
   const depts = []; allShownAreas.forEach(a => { if (!depts.includes(a.department || 'Areas')) depts.push(a.department || 'Areas') })
 
+  // ── the "To fill" worklist ──────────────────────────────────────────────
+  //
+  // Every unfilled shift as a ranked to-do, soonest first, so a coordinator on
+  // a Friday night works a list of gaps rather than scanning a grid for OPEN
+  // chips. Identical open shifts (same area+role+time+day) collapse into one row
+  // carrying a count — assigning fills one of them. Respects the section search.
+  const openGroups = (() => {
+    const shown = open.filter(x => !rq || shiftHit(x))
+    const m = new Map()
+    shown.forEach(x => {
+      const key = [x.day_of_week, x.area_id, x.role_id || '', x.start_time, x.end_time].join('|')
+      const g = m.get(key)
+      if (g) { g.count++; g.ids.push(x.id) } else m.set(key, { shift: x, count: 1, ids: [x.id] })
+    })
+    return [...m.values()].sort((a, b) =>
+      a.shift.day_of_week - b.shift.day_of_week ||
+      a.shift.start_time - b.shift.start_time ||
+      areaLabel(a.shift).localeCompare(areaLabel(b.shift)) ||
+      (a.shift.role_name || '').localeCompare(b.shift.role_name || ''))
+  })()
+
   // ── Areas view: an area's roles, and the day cells that draw its shifts ──
   //
   // A shift belongs to a role now, so an area with several roles becomes a
@@ -1428,7 +1484,7 @@ export default function Roster({ st, patch, narrow }) {
           const warned = x.warnings && x.warnings.length
           const over = st.overCell === 'slot-' + x.id
           return (
-            <div key={x.id} draggable
+            <div key={x.id} draggable data-shift-chip={x.id}
               onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; patch({ dragId: x.id, selected: x.id }) }}
               onDragEnd={() => patch({ dragId: null, overCell: null })}
               onClick={() => { patch({ selected: x.id }); if (!poolOpen) setPoolOpen(true); if (!x.assignee_member_id) setAssignFor(x.id) }} {...slotDrop(x.id)}
@@ -1534,6 +1590,151 @@ export default function Roster({ st, patch, narrow }) {
     })
   }
 
+  // ── #1 · the "To fill" worklist ─────────────────────────────────────────
+  // A ranked list of the week's gaps, each with its best-fit volunteer one tap
+  // away. Not a grid — the one surface that draws on both axes (the shift and
+  // the person) without being a transposed grid. `header` etc. are the same
+  // render-function pattern, not components, so no caret/hook traps.
+  const renderFill = () => {
+    const byDay = {}
+    openGroups.forEach(g => { (byDay[g.shift.day_of_week] = byDay[g.shift.day_of_week] || []).push(g) })
+    const days = Object.keys(byDay).map(Number).sort((a, b) => a - b)
+    return (
+      <div className="pb-scroll" data-testid="roster-fill" style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: '18px 22px' }}>
+        {openGroups.length === 0 ? (
+          <div data-testid="fill-empty" style={{ fontSize: 13.5, color: C.dim, maxWidth: '44rem', lineHeight: 1.6, background: C.surface2, border: `1px solid ${C.hair}`, borderRadius: 10, padding: 18 }}>
+            <span style={{ fontWeight: 700, color: C.ok }}>Every shift is covered.</span>{' '}
+            {rq ? 'Nothing open matches your search. Clear it to see the whole week.' : 'There is nothing left to fill this week. Publish it when you are ready, or add a one-off shift from the People or Areas view.'}
+          </div>
+        ) : (
+          <>
+            <div style={{ fontSize: 12.5, color: C.faint, marginBottom: 14, maxWidth: '52rem', lineHeight: 1.55 }}>
+              {open.length} shift{open.length === 1 ? '' : 's'} still to fill, soonest first. Assign the suggested best fit in one tap, or choose someone else. <span style={{ color: C.dim }}>Auto-fill</span> (top right) proposes the lot at once.
+            </div>
+            {days.map(d => (
+              <div key={d} style={{ marginBottom: 18 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
+                  <span style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.dim }}>{DOW[d].toUpperCase()}</span>
+                  <span style={{ fontFamily: MONO, fontSize: 10, color: C.faint }}>{DATES[d]}</span>
+                  <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest }}>· {byDay[d].reduce((n, g) => n + g.count, 0)} open</span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {byDay[d].map(g => {
+                    const s = g.shift
+                    const a = areaById[s.area_id] || {}
+                    const bestId = bestFor(s)
+                    const best = bestId ? candById[bestId] : null
+                    const res = best ? checkClient(s, best, shifts, settings) : null
+                    const bLoad = best ? shifts.filter(x => x.assignee_member_id === bestId).length : 0
+                    return (
+                      <div key={s.id} data-testid={`fill-row-${s.id}`}
+                        style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', background: C.surface2, border: `1px solid ${C.hair}`, borderRadius: 10, padding: '10px 14px' }}>
+                        <div style={{ minWidth: 190, flex: '1 1 220px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                            <span style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: a.color || 'var(--pb-accent)' }} />
+                            <span style={{ fontWeight: 600, fontSize: 13.5 }}>{areaLabel(s)}</span>
+                            {g.count > 1 && <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.06em', padding: '1px 6px', borderRadius: 999, background: 'rgba(245,181,66,0.15)', color: C.warn }}>×{g.count}</span>}
+                          </div>
+                          <div style={{ fontFamily: MONO, fontSize: 10, color: C.faint, marginTop: 3 }}>{s.role_name ? s.role_name + ' · ' : ''}{fmtHour(s.start_time)}–{fmtHour(s.end_time)}{s.required_qualification_name ? ' · needs ' + s.required_qualification_name : ''}</div>
+                        </div>
+                        <div style={{ flex: '1 1 260px', display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                          {best ? (
+                            <>
+                              <div style={{ textAlign: 'right', minWidth: 0 }}>
+                                <div style={{ fontSize: 12.5, fontWeight: 600, color: res.warns.length ? C.warn : C.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{best.name}</div>
+                                <div style={{ fontFamily: MONO, fontSize: 9, color: C.faint }}>{res.warns.length ? res.warns[0] : 'Best fit'} · {bLoad} shift{bLoad === 1 ? '' : 's'}</div>
+                              </div>
+                              <button data-testid={`fill-assign-${s.id}`} onClick={() => doAssign(g.ids[0], bestId)}
+                                style={{ padding: '7px 12px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, border: 'none', background: C.accent, color: '#fff', cursor: 'pointer', whiteSpace: 'nowrap' }}>Assign {best.name.split(/\s+/)[0]}</button>
+                            </>
+                          ) : (
+                            <div style={{ fontFamily: MONO, fontSize: 10, color: C.faint, textAlign: 'right' }}>No available volunteer</div>
+                          )}
+                          <button data-testid={`fill-choose-${s.id}`} onClick={() => { patch({ selected: g.ids[0] }); setAssignFor(g.ids[0]) }}
+                            style={{ padding: '7px 11px', borderRadius: 8, fontSize: 12.5, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.dim, cursor: 'pointer', whiteSpace: 'nowrap' }}>{best ? 'Choose…' : 'Pick anyway'}</button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+    )
+  }
+
+  // ── #3 · the single-day "Match day" board ───────────────────────────────
+  // One day at a time, areas → roles down the side with room to read full
+  // names, and the volunteer pool alongside to drag from. Reuses `areaDayCol`
+  // (the same chip, click-to-assign, "+ Add" and drop targets as the Areas
+  // view) so a shift behaves identically; only the layout is different.
+  const renderDayBoard = () => {
+    const boardLabelW = narrow ? 132 : 220
+    const boardCols = `${boardLabelW}px minmax(0, 1fr)`
+    return (
+      <div style={{ minWidth: 0 }}>
+        <div data-testid="dayboard-picker" style={{ position: 'sticky', top: 0, zIndex: 20, background: C.bg, borderBottom: `1px solid ${C.hair2}`, padding: '10px 14px', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faintest, marginRight: 4 }}>MATCH DAY</span>
+          {DOW.map((label, i) => {
+            const n = shifts.filter(x => x.day_of_week === i).length
+            const o = open.filter(x => x.day_of_week === i).length
+            const on = i === boardDay
+            return (
+              <button key={i} data-testid={`dayboard-pick-${i}`} onClick={() => setDayBoardDay(i)}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+                  border: `1px solid ${on ? 'transparent' : C.hair2}`, background: on ? C.accent : 'transparent', color: on ? '#fff' : C.dim }}>
+                <span>{label} <span style={{ fontFamily: MONO, fontSize: 10, opacity: 0.8 }}>{DATES[i]}</span></span>
+                {n > 0 && <span style={{ fontFamily: MONO, fontSize: 8.5, padding: '1px 5px', borderRadius: 999, background: on ? 'rgba(255,255,255,0.2)' : (o ? 'rgba(245,181,66,0.15)' : 'color-mix(in srgb, var(--pb-accent) 14%, transparent)'), color: on ? '#fff' : (o ? C.warn : C.accent) }}>{o ? o + ' open' : '✓'}</span>}
+              </button>
+            )
+          })}
+        </div>
+        {allShownAreas.length === 0 ? (
+          <div style={{ padding: 22, fontSize: 13, color: C.faint }}>{rq ? 'Nothing matches your search on this day.' : 'No areas to show.'}</div>
+        ) : depts.map(dept => (
+          <div key={dept}>
+            <div style={{ position: 'sticky', left: 0, background: C.surface, padding: '8px 14px', fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.dim, borderBottom: `1px solid ${C.hair}` }}>{dept}</div>
+            {allShownAreas.filter(a => (a.department || 'Areas') === dept).map(a => {
+              const areaShifts = shifts.filter(x => x.area_id === a.id)
+              const dayShifts = areaShifts.filter(x => x.day_of_week === boardDay)
+              const filledN = dayShifts.filter(x => x.assignee_member_id).length
+              const groups = areaRoleGroups(a, areaShifts)
+              return (
+                <div key={a.id} data-testid={`dayboard-area-${a.id}`}>
+                  <div style={{ display: 'grid', gridTemplateColumns: boardCols, borderBottom: `1px solid ${C.hair}`, background: 'color-mix(in srgb, var(--pb-accent) 4%, transparent)' }}>
+                    <div style={{ padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                      <span onClick={() => openArea(a)} style={{ width: 9, height: 9, borderRadius: 3, flexShrink: 0, background: a.color || 'var(--pb-accent)', cursor: 'pointer' }} />
+                      {!a.__orphan
+                        ? <span onClick={() => openArea(a)} title={`Edit ${a.name} and its shifts`} style={{ fontSize: 13, fontWeight: 700, color: C.text, ...areaLinkStyle, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
+                        : <span style={{ fontSize: 13, fontWeight: 700, color: C.text }}>{a.name}</span>}
+                    </div>
+                    <div style={{ padding: '8px 12px', display: 'flex', alignItems: 'center' }}>
+                      <span style={{ fontFamily: MONO, fontSize: 9.5, color: dayShifts.length && filledN === dayShifts.length ? C.ok : C.warn }}>{filledN}/{dayShifts.length} {dayShifts.length === 1 ? 'shift' : 'shifts'} filled</span>
+                    </div>
+                  </div>
+                  {groups.map(g => {
+                    const qual = g.role_id ? (a.roles || []).find(r => r.role_id === g.role_id)?.required_qualification_name : null
+                    return (
+                      <div key={g.role_id || '__none'} data-testid={`dayboard-role-${a.id}-${g.role_id || 'none'}`} style={{ display: 'grid', gridTemplateColumns: boardCols, borderBottom: `1px solid ${C.hair}` }}>
+                        <div style={{ padding: '8px 12px 8px 22px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 2, minWidth: 0, background: C.surface }}>
+                          <span style={{ fontSize: 12.5, fontWeight: 600, color: C.dim, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.role_name}</span>
+                          {qual && <span style={{ fontFamily: MONO, fontSize: 9, color: C.faint }}>needs {qual}</span>}
+                        </div>
+                        {areaDayCol(a, g.shifts, boardDay, g.role_id)}
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })}
+          </div>
+        ))}
+      </div>
+    )
+  }
+
   return (
     // The screen is bounded to the viewport (like Directory) rather than
     // `minHeight: 100vh`, so the roster grid and the volunteer pool each scroll
@@ -1547,8 +1748,18 @@ export default function Roster({ st, patch, narrow }) {
             buttons land in the middle of the header rather than wherever the
             week label happens to end. */}
         <div style={HEAD_CENTRE}>
-          <SegTabs value={view} onChange={v => patch({ view: v, selected: null })}
-            tabs={[{ key: 'people', label: 'People' }, { key: 'areas', label: 'Areas' }, { key: 'confirm', label: 'Confirm' }, { key: 'hours', label: 'Hours' }]} />
+          {/* Selection is NOT cleared on a view change — the People, Areas and
+              Match-day views are transposes of one matrix, so carrying the
+              selected shift (and scrolling it into view) keeps your place. */}
+          <SegTabs value={view} onChange={v => patch({ view: v })}
+            tabs={[
+              { key: 'people', label: 'People' },
+              { key: 'areas', label: 'Areas' },
+              { key: 'day', label: 'Match day' },
+              { key: 'fill', label: 'To fill', badge: open.length },
+              { key: 'confirm', label: 'Confirm' },
+              { key: 'hours', label: 'Hours' },
+            ]} />
         </div>
         {/* Every one of these acts on the shift grid, so none of them mean
             anything on the hours or confirmation tabs. The BOX stays either
@@ -1562,7 +1773,11 @@ export default function Roster({ st, patch, narrow }) {
             <span style={{ fontFamily: MONO, fontSize: 10, color: C.faint, letterSpacing: '0.08em' }}>/ {shifts.length} FILLED</span>
           </div>
           <div style={{ width: 120, height: 6, borderRadius: 3, background: C.surface2, overflow: 'hidden' }}><div style={{ height: '100%', width: pct + '%', background: pct === 100 ? C.ok : C.accent }} /></div>
-          <button onClick={() => setPoolOpen(v => !v)} style={{ padding: '8px 12px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', ...(poolOpen ? { border: '1px solid color-mix(in srgb, var(--pb-accent) 45%, transparent)', color: C.accent, background: 'color-mix(in srgb, var(--pb-accent) 10%, transparent)' } : { border: `1px solid ${C.hair2}`, color: C.dim, background: 'transparent' }) }}>{poolOpen ? 'Hide pool' : 'Volunteer pool'}</button>
+          {/* The pool sits beside the grid on People/Areas/Match-day; the "To
+              fill" worklist assigns inline, so it has no pool to toggle. */}
+          {view !== 'fill' && (
+            <button onClick={() => setPoolOpen(v => !v)} style={{ padding: '8px 12px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', ...(poolOpen ? { border: '1px solid color-mix(in srgb, var(--pb-accent) 45%, transparent)', color: C.accent, background: 'color-mix(in srgb, var(--pb-accent) 10%, transparent)' } : { border: `1px solid ${C.hair2}`, color: C.dim, background: 'transparent' }) }}>{poolOpen ? 'Hide pool' : 'Volunteer pool'}</button>
+          )}
           {/* The three that act on the week itself, in Committee's own
               segmented control — one box rather than three loose buttons.
               "Volunteer pool" is a view toggle, so it does not join them, and
@@ -1587,7 +1802,7 @@ export default function Roster({ st, patch, narrow }) {
           action that fixes it (Reset regenerates from the current patterns).
           Draft weeks only — a published week is a record, not a draft to
           rebuild. */}
-      {view !== 'hours' && view !== 'confirm' && orphanShiftCount > 0 && data.week.status !== 'published' && (
+      {(view === 'people' || view === 'areas' || view === 'day') && orphanShiftCount > 0 && data.week.status !== 'published' && (
         <div data-testid="roster-stale-banner" style={{ margin: '0 16px 4px', padding: '11px 14px', borderRadius: 9,
           border: '1px solid rgba(245,181,66,0.35)', background: 'rgba(245,181,66,0.08)',
           display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
@@ -1609,9 +1824,12 @@ export default function Roster({ st, patch, narrow }) {
           onDone={load} />
       )}
 
-      {view !== 'hours' && view !== 'confirm' && (
+      {view === 'fill' && renderFill()}
+
+      {(view === 'people' || view === 'areas' || view === 'day') && (
       <div style={{ display: 'flex', flex: 1, minHeight: 0, alignItems: 'stretch' }}>
         <div className="pb-scroll" data-testid="roster-grid-scroll" style={{ flex: 1, minWidth: 0, overflow: 'auto' }}>
+          {view === 'day' ? renderDayBoard() : (
           <div style={{ minWidth: narrow ? 0 : 1266 }}>
             <div data-testid="roster-day-header" style={{ display: 'grid', gridTemplateColumns: gridCols, position: 'sticky', top: 0, zIndex: 20, background: C.bg, borderBottom: `1px solid ${C.hair2}` }}>
               <div style={rail({ zIndex: 22, padding: railMin ? '10px 6px' : '10px 14px', display: 'flex', alignItems: 'center', gap: 6 })}>
@@ -1851,6 +2069,7 @@ export default function Roster({ st, patch, narrow }) {
               </div>
             ))}
           </div>
+          )}
         </div>
 
         {/* Minimised, the pool becomes a thin rail rather than vanishing, so
