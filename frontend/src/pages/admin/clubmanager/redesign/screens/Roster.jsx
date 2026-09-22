@@ -10,6 +10,12 @@ import { C, MONO, ScreenHeader, NavToggle, Toast, initials, usePref, SegTabs, Se
 // server rules engine (and are mirrored client-side here for candidate ranking).
 
 const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+// The long form the volunteer-profile endpoint stores. Its `available_days` is
+// typed List[str], and the roster reads it back tolerantly (day_index accepts
+// names, abbreviations or indexes), so a new volunteer's days go over as names —
+// the vocabulary the Volunteers screen already uses. The inline availability
+// toggle writes through a different endpoint (List[int]) and stays integers.
+const DOW_FULL = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 function fmtHour(h) {
   const hh = Math.floor(h), mm = Math.round((h - hh) * 60)
   if (hh === 24) return '12am'
@@ -1182,7 +1188,9 @@ export default function Roster({ st, patch, narrow }) {
   // any accreditations. A full reload afterwards is what lands them in the pool
   // and, when they are already a volunteer, refreshes the merged profile.
   const addVolunteer = async ({ member_id, role_ids, days, qual_ids }) => {
-    await api.volunteerUpsertProfile({ member_id, role_ids, available_days: days })
+    // The profile endpoint types available_days as List[str], so the day indexes
+    // go over as names (the roster reads either back).
+    await api.volunteerUpsertProfile({ member_id, role_ids, available_days: (days || []).map(i => DOW_FULL[i]) })
     if (canQuals) {
       for (const qid of (qual_ids || [])) {
         await api.qualAddQualification({ member_id, qualification_type_id: qid }).catch(() => {})

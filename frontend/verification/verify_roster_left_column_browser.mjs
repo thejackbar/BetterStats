@@ -224,8 +224,13 @@ const run = async () => {
     await press('[data-testid="add-vol-save"]')
     await page.waitForTimeout(400)
     const prof = lastCall(x => /\/volunteers\/profiles/.test(x.url) && x.method === 'POST')
-    check('saving POSTs a profile with the chosen role and availability',
-      !!prof && prof.body?.member_id === 'm9' && (prof.body?.role_ids || []).includes('r-sco') && (prof.body?.available_days || []).includes(5) && (prof.body?.available_days || []).includes(6),
+    // available_days goes over as day NAMES (the endpoint types it List[str]);
+    // day 5 = Saturday, day 6 = Sunday. Every value must be a string, or the
+    // backend rejects it with "Input should be a valid string".
+    const ad = prof?.body?.available_days || []
+    check('saving POSTs a profile with the chosen role and availability (as strings)',
+      !!prof && prof.body?.member_id === 'm9' && (prof.body?.role_ids || []).includes('r-sco')
+        && ad.includes('Saturday') && ad.includes('Sunday') && ad.every(d => typeof d === 'string'),
       JSON.stringify(prof?.body))
     const qual = lastCall(x => /\/qualifications\/members\/qualification/.test(x.url) && x.method === 'POST')
     check('saving records the ticked qualification',
