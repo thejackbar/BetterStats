@@ -1,8 +1,9 @@
-// Roster: the "To fill" worklist, carry-selection across the toggle, and the
+// Roster: the "Coverage" worklist, carry-selection across the toggle, and the
 // single-day Match-day board — against the REAL screen, API stubbed.
 //
-//   1. To fill  — a ranked list of the week's gaps; assign the best fit in one
-//      tap, or choose someone else. The tab carries an open-count badge.
+//   1. Coverage  — a ranked list of the week's gaps; assign the best fit in one
+//      tap, or choose someone else. A Full-week / per-day picker (multi-select)
+//      narrows the gaps; add a shift or a volunteer from here. Open-count badge.
 //   2. Carry state — selecting a shift and switching People⇄Areas⇄Match day
 //      keeps the selection (the chip keeps its ring on the other view).
 //   3. Match day — one day at a time; a day picker; areas/roles down the side;
@@ -114,8 +115,8 @@ const run = async () => {
   const press = async (sel) => { if (await seen(sel)) { await page.locator(sel).first().click().catch(() => {}); await page.waitForTimeout(250); return true } return false }
   const textOf = async (sel) => { if (!(await seen(sel))) return ''; return page.locator(sel).first().innerText().catch(() => '') }
   const lastCall = (pred) => [...calls].reverse().find(pred)
-  // Non-exact: the "To fill" tab carries a count badge, so its accessible name
-  // is "To fill 2", not "To fill".
+  // Non-exact: the "Coverage" tab carries a count badge, so its accessible name
+  // is "Coverage 2", not "Coverage".
   const tab = async (label) => { await page.getByRole('button', { name: label }).first().click().catch(() => {}); await page.waitForTimeout(450) }
 
   await page.goto(BASE + '/admin/clubhouse/roster', { waitUntil: 'domcontentloaded' })
@@ -124,11 +125,11 @@ const run = async () => {
 
   // ── The two new tabs exist ────────────────────────────────────────────────
   check('a "Match day" tab is offered', await seen('button:has-text("Match day")'))
-  check('a "To fill" tab is offered', await seen('button:has-text("To fill")'))
+  check('a "Coverage" tab is offered', await seen('button:has-text("Coverage")'))
 
-  // ── 1. To fill worklist ───────────────────────────────────────────────────
-  await tab('To fill')
-  check('the To fill tab shows the worklist', await seen('[data-testid="roster-fill"]'))
+  // ── 1. Coverage worklist ──────────────────────────────────────────────────
+  await tab('Coverage')
+  check('the Coverage tab shows the worklist', await seen('[data-testid="roster-fill"]'))
   check('both gaps are listed (Umpire Sat, Bar Tue)',
     await seen('[data-testid="fill-row-s-ump"]') && await seen('[data-testid="fill-row-s-bar"]'))
   // Bar Tue sorts before Umpire Sat (soonest first): the Bar row is above.
@@ -150,6 +151,40 @@ const run = async () => {
   // Choose someone else opens the assign modal.
   await press('[data-testid="fill-choose-s-bar"]')
   check('"Choose…" opens the assign modal for that shift', await seen('[data-testid="roster-modal"]'))
+  await page.keyboard.press('Escape').catch(() => {})
+  await page.waitForTimeout(200)
+
+  // ── 1b. Coverage day picker (Full week / days, multi-select) + add actions ─
+  // Reload: the section above assigned s-ump (optimistic), so a fresh week is
+  // needed for both gaps to read OPEN again.
+  await page.goto(BASE + '/admin/clubhouse/roster', { waitUntil: 'domcontentloaded' })
+  await page.waitForSelector('h1', { timeout: 15000 }).catch(() => {})
+  await page.waitForTimeout(800)
+  await tab('Coverage')
+  check('the Coverage view has a Full-week + day picker',
+    (await seen('[data-testid="coverage-fullweek"]')) && (await seen('[data-testid="coverage-day-1"]')) && (await seen('[data-testid="coverage-day-5"]')))
+  check('Full week (the default) lists every gap',
+    (await seen('[data-testid="fill-row-s-bar"]')) && (await seen('[data-testid="fill-row-s-ump"]')))
+  // Pick Tuesday only → the Tue Bar gap shows, the Sat Umpire gap does not.
+  await press('[data-testid="coverage-day-1"]')
+  check('picking a day narrows the gaps to that day',
+    (await seen('[data-testid="fill-row-s-bar"]')) && !(await seen('[data-testid="fill-row-s-ump"]')))
+  // Add Saturday too (multi-select) → both gaps show again.
+  await press('[data-testid="coverage-day-5"]')
+  check('a second day can be picked at once (Tue + Sat)',
+    (await seen('[data-testid="fill-row-s-bar"]')) && (await seen('[data-testid="fill-row-s-ump"]')))
+  await press('[data-testid="coverage-fullweek"]')
+  check('Full week restores every gap',
+    (await seen('[data-testid="fill-row-s-bar"]')) && (await seen('[data-testid="fill-row-s-ump"]')))
+  // Adding a shift and a volunteer both live in this view.
+  await press('[data-testid="coverage-add-shift"]')
+  check('Coverage "+ Add a shift" opens the add-shift modal',
+    (await seen('[data-testid="roster-modal"]')) && (await seen('[data-testid="add-shift-area"]')))
+  await page.keyboard.press('Escape').catch(() => {})
+  await page.waitForTimeout(200)
+  await press('[data-testid="coverage-add-volunteer"]')
+  check('Coverage "+ Add volunteer" opens the add-volunteer modal',
+    (await seen('[data-testid="roster-modal"]')) && (await seen('[data-testid="add-vol-search"]')))
   await page.keyboard.press('Escape').catch(() => {})
   await page.waitForTimeout(200)
 
@@ -218,10 +253,29 @@ const run = async () => {
     (await seen('[data-testid="people-roles-m1"]')) && !(await seen('[data-testid="people-roles-m3"]')))
   await press('[data-testid="role-filter-clear"]')
   check('clearing the role filter restores the full list', await seen('[data-testid="people-roles-m3"]'))
-  // "+ Add a shift" is a toolbar button opening a modal (was a pool panel).
-  await press('[data-testid="add-shift-open"]')
-  check('"+ Add a shift" is a toolbar button that opens a modal',
-    (await seen('[data-testid="roster-modal"]')) && (await seen('[data-testid="add-shift-role"]')))
+
+  // ── "+ Add a shift" is contextual now, not a top-right toolbar button ─────
+  check('the top-right "+ Add a shift" toolbar button is gone', !(await seen('[data-testid="add-shift-open"]')))
+  // People view: a per-day "+ Add a shift" sits at the bottom of the Open
+  // shifts cell and prefills that day.
+  await press('[data-testid="open-add-shift-1"]')
+  const addOpen = (await seen('[data-testid="roster-modal"]')) && (await seen('[data-testid="add-shift-day"]'))
+  check('a per-day "+ Add a shift" opens the add-shift modal with the day prefilled',
+    addOpen && (await page.locator('[data-testid="add-shift-day"]').inputValue().catch(() => '')) === '1', 'day=' + await page.locator('[data-testid="add-shift-day"]').inputValue().catch(() => '?'))
+  check('the add-shift modal offers to assign a volunteer in the same step', await seen('[data-testid="add-shift-assignee"]'))
+  await page.keyboard.press('Escape').catch(() => {})
+  await page.waitForTimeout(200)
+
+  // Areas view: a collapsed multi-role area carries its own "+ Add a shift"
+  // (prefilled to that area) so you needn't expand it first.
+  await tab('Areas')
+  await page.waitForTimeout(300)
+  await press('[data-testid="area-toggle-ar1"]')   // collapse Match Day
+  check('a collapsed area shows a "+ Add a shift" button', await seen('[data-testid="area-collapsed-add-ar1"]'))
+  await press('[data-testid="area-collapsed-add-ar1"]')
+  const addArea = (await seen('[data-testid="roster-modal"]')) && (await seen('[data-testid="add-shift-area"]'))
+  check('the collapsed-area add prefills that area (Match Day)',
+    addArea && (await page.locator('[data-testid="add-shift-area"]').inputValue().catch(() => '')) === 'ar1', 'area=' + await page.locator('[data-testid="add-shift-area"]').inputValue().catch(() => '?'))
   await page.keyboard.press('Escape').catch(() => {})
   await page.waitForTimeout(200)
 
@@ -254,9 +308,9 @@ const run = async () => {
   await narrow.waitForSelector('h1', { timeout: 15000 }).catch(() => {})
   await narrow.waitForTimeout(900)
   const noOverflow = async () => narrow.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)
-  await narrow.getByRole('button', { name: 'To fill' }).first().click().catch(() => {})
+  await narrow.getByRole('button', { name: 'Coverage' }).first().click().catch(() => {})
   await narrow.waitForTimeout(400)
-  check('the To fill worklist does not overflow at 390px', await noOverflow())
+  check('the Coverage worklist does not overflow at 390px', await noOverflow())
   await narrow.getByRole('button', { name: 'Match day' }).first().click().catch(() => {})
   await narrow.waitForTimeout(400)
   check('the Match day board does not overflow at 390px', await noOverflow())

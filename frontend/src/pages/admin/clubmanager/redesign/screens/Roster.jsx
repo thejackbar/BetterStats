@@ -123,56 +123,96 @@ function EmailRostered({ weekStart, onToast }) {
 }
 
 // Adding a shift that no weekly pattern covers: a final, a night game, an extra
-// hand behind the bar. Editing the pattern would change every week.
-function AddShift({ areas, weekId, onDone, onCancel }) {
-  const [f, setF] = useState({ area_id: areas[0]?.id || '', role_id: '', day_of_week: 5, start_time: '17', end_time: '21' })
+// hand behind the bar. Editing the pattern would change every week. Its area,
+// role, day and time are picked here, and — in the same step — it can be handed
+// straight to a volunteer. `prefill` seeds the day (from a People open-shifts
+// cell), the area (from a collapsed Areas area), or a role. `onCreate` does the
+// POST + optional assign; this modal only collects the fields.
+function AddShiftModal({ areas, prefill, candidates, shifts, settings, onCreate, onClose }) {
+  const [areaId, setAreaId] = useState(prefill?.areaId || areas[0]?.id || '')
+  const area = areas.find(a => a.id === areaId)
+  const palette = area?.roles || []
+  const [f, setF] = useState({
+    role_id: prefill?.roleId || '',
+    day_of_week: prefill?.day != null ? prefill.day : 5,
+    start_time: '17', end_time: '21',
+  })
+  const [assignee, setAssignee] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
-  const inp = { padding: '6px 8px', borderRadius: 6, fontSize: 12, border: `1px solid ${C.hair2}`, background: C.surface2, color: C.text }
-  // The role this one-off shift is for, from the chosen area's palette. Picking
-  // another area drops a role that isn't in the new area's palette.
-  const areaRoles = (areas.find(a => a.id === f.area_id)?.roles) || []
-  const roleOk = f.role_id && areaRoles.some(r => r.role_id === f.role_id)
+  const roleOk = f.role_id && palette.some(r => r.role_id === f.role_id)
+  const role = palette.find(r => r.role_id === f.role_id)
+  const start = Number(f.start_time), end = Number(f.end_time)
+  // Preview candidate fit against the shift being defined, so the volunteer
+  // dropdown only offers people who can actually take it that day.
+  const hypo = {
+    id: '__new', area_id: areaId, day_of_week: f.day_of_week, start_time: start, end_time: end,
+    role_id: roleOk ? f.role_id : null, role_name: role?.role_name,
+    required_qualification_type_id: role?.required_qualification_type_id || null,
+    required_qualification_name: role?.required_qualification_name || null,
+  }
+  const available = candidates
+    .map(c => ({ c, res: checkClient(hypo, c, shifts, settings) }))
+    .filter(x => x.res.blocks.length === 0)
+    .sort((a, b) => a.res.warns.length - b.res.warns.length || a.c.name.localeCompare(b.c.name))
+  const changeArea = (id) => { setAreaId(id); setF(v => ({ ...v, role_id: '' })); setAssignee('') }
   return (
-    <div style={{ background: C.surface2, border: `1px solid ${C.hair}`, borderRadius: 8, padding: 10, marginBottom: 10 }}>
-      <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faintest, marginBottom: 8 }}>NEW SHIFT</div>
-      <div style={{ display: 'grid', gap: 6 }}>
-        <select value={f.area_id} onChange={e => setF(v => ({ ...v, area_id: e.target.value, role_id: '' }))} style={inp}>
-          {areas.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-        </select>
-        {areaRoles.length > 0 && (
-          <select value={roleOk ? f.role_id : ''} onChange={e => setF(v => ({ ...v, role_id: e.target.value }))} style={inp} data-testid="add-shift-role">
-            <option value="">Any role</option>
-            {areaRoles.map(r => <option key={r.role_id} value={r.role_id}>{r.role_name}</option>)}
+    <ModalShell title="Add a shift" sub="A one-off shift no weekly pattern covers" onClose={onClose}>
+      <div style={{ display: 'grid', gap: 8 }}>
+        <label style={{ display: 'grid', gap: 3 }}>
+          <span style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.12em', color: C.faintest }}>OPERATIONAL AREA</span>
+          <select value={areaId} onChange={e => changeArea(e.target.value)} style={inpStyle} data-testid="add-shift-area">
+            {areas.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
+        </label>
+        {palette.length > 0 && (
+          <label style={{ display: 'grid', gap: 3 }}>
+            <span style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.12em', color: C.faintest }}>ROLE</span>
+            <select value={roleOk ? f.role_id : ''} onChange={e => { setF(v => ({ ...v, role_id: e.target.value })); setAssignee('') }} style={inpStyle} data-testid="add-shift-role">
+              <option value="">General help (no role)</option>
+              {palette.map(r => <option key={r.role_id} value={r.role_id}>{r.role_name}{r.required_qualification_name ? ` · needs ${r.required_qualification_name}` : ''}</option>)}
+            </select>
+          </label>
         )}
-        <select value={f.day_of_week} onChange={e => setF(v => ({ ...v, day_of_week: Number(e.target.value) }))} style={inp}>
-          {DOW.map((d, i) => <option key={i} value={i}>{d}</option>)}
-        </select>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <input type="number" step="0.25" min="0" max="24" value={f.start_time} onChange={e => setF(v => ({ ...v, start_time: e.target.value }))} style={{ ...inp, flex: 1 }} placeholder="From" />
-          <input type="number" step="0.25" min="0" max="24" value={f.end_time} onChange={e => setF(v => ({ ...v, end_time: e.target.value }))} style={{ ...inp, flex: 1 }} placeholder="To" />
+        <label style={{ display: 'grid', gap: 3 }}>
+          <span style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.12em', color: C.faintest }}>DAY</span>
+          <select value={f.day_of_week} onChange={e => setF(v => ({ ...v, day_of_week: Number(e.target.value) }))} style={inpStyle} data-testid="add-shift-day">
+            {DOW.map((d, i) => <option key={i} value={i}>{d}</option>)}
+          </select>
+        </label>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <label style={{ display: 'grid', gap: 3, flex: 1 }}>
+            <span style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.12em', color: C.faintest }}>FROM</span>
+            <input type="number" step="0.25" min="0" max="24" value={f.start_time} onChange={e => setF(v => ({ ...v, start_time: e.target.value }))} style={inpStyle} data-testid="add-shift-start" />
+          </label>
+          <label style={{ display: 'grid', gap: 3, flex: 1 }}>
+            <span style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.12em', color: C.faintest }}>TO</span>
+            <input type="number" step="0.25" min="0" max="24" value={f.end_time} onChange={e => setF(v => ({ ...v, end_time: e.target.value }))} style={inpStyle} data-testid="add-shift-end" />
+          </label>
         </div>
-        <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest }}>Times are 24-hour, so 17.5 is 5:30pm.</div>
+        <div style={{ fontFamily: MONO, fontSize: 9, color: C.faintest }}>Times are 24-hour, so 17.5 is 5:30pm.</div>
+        <label style={{ display: 'grid', gap: 3 }}>
+          <span style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.12em', color: C.faintest }}>ASSIGN A VOLUNTEER (OPTIONAL)</span>
+          <select value={assignee} onChange={e => setAssignee(e.target.value)} style={inpStyle} data-testid="add-shift-assignee">
+            <option value="">— leave open —</option>
+            {available.map(({ c, res }) => <option key={c.member_id} value={c.member_id}>{c.name}{res.warns.length ? ' (warning)' : ''}</option>)}
+          </select>
+        </label>
         {err && <div style={{ fontSize: 11.5, color: C.block }}>{err}</div>}
-        <div style={{ display: 'flex', gap: 6 }}>
-          <button disabled={busy || !f.area_id} onClick={async () => {
+        <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
+          <button disabled={busy || !areaId} data-testid="add-shift-create" onClick={async () => {
+            if (!(end > start)) { setErr('A shift has to finish after it starts.'); return }
             setBusy(true); setErr(null)
             try {
-              await api.rosterCreateShift({
-                week_id: weekId, area_id: f.area_id, day_of_week: f.day_of_week,
-                start_time: Number(f.start_time), end_time: Number(f.end_time),
-                role_id: roleOk ? f.role_id : null,
-              })
-              onDone()
-            } catch (e) { setErr(e.message) } finally { setBusy(false) }
-          }} style={{ flex: 1, padding: '6px 10px', borderRadius: 6, fontSize: 12, fontWeight: 600, border: 'none', background: C.accent, color: '#fff', cursor: 'pointer' }}>
-            {busy ? 'Adding…' : 'Add shift'}
+              await onCreate({ area_id: areaId, day_of_week: f.day_of_week, start_time: start, end_time: end, role_id: roleOk ? f.role_id : null, assignee: assignee || null })
+            } catch (e) { setErr(String(e?.message || e)); setBusy(false) }
+          }} style={{ flex: 1, padding: '7px 10px', borderRadius: 7, fontSize: 12.5, fontWeight: 600, border: 'none', background: C.accent, color: '#fff', cursor: 'pointer', opacity: busy ? 0.6 : 1 }}>
+            {busy ? 'Adding…' : (assignee ? 'Add shift & assign' : 'Add shift')}
           </button>
-          <button onClick={onCancel} style={{ padding: '6px 10px', borderRadius: 6, fontSize: 12, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.dim, cursor: 'pointer' }}>Cancel</button>
+          <button onClick={onClose} style={{ padding: '7px 12px', borderRadius: 7, fontSize: 12.5, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.dim, cursor: 'pointer' }}>Cancel</button>
         </div>
       </div>
-    </div>
+    </ModalShell>
   )
 }
 
@@ -925,7 +965,11 @@ export default function Roster({ st, patch, narrow }) {
   const [shifts, setShifts] = useState([])
   const [err, setErr] = useState(null)
   const [busy, setBusy] = useState(false)
-  const [addingShift, setAddingShift] = useState(false)
+  // Add-a-shift modal. Null = closed; an object seeds the modal — { day } from a
+  // People open-shifts cell, { areaId } from a collapsed Areas area, {} from the
+  // Coverage view. The old top-right toolbar button is gone; adding a shift is a
+  // contextual action now.
+  const [addShiftFor, setAddShiftFor] = useState(null)
   const [openPerson, setOpenPerson] = useState(null)
   // Modals: the shift-detail modal (clicking any shift — assign/reassign, edit
   // day & time, delete), add an available person to one of a day's open shifts
@@ -964,6 +1008,10 @@ export default function Roster({ st, patch, narrow }) {
   // soonest day with an open shift). Local state — a match day is a single
   // sitting, not a preference worth remembering across weeks.
   const [dayBoardDay, setDayBoardDay] = useState(null)
+  // The Coverage view's day selection: an array of day indexes to narrow the
+  // gaps to. Empty = the whole week. Several days can be picked at once (a club
+  // that runs Tue AND Thu nets works both nights from one list).
+  const [coverageDays, setCoverageDays] = useState([])
 
   // api.js stamps the HTTP status onto the error, which is the difference
   // between "you lack a capability" (403) and "the server threw" (500).
@@ -1112,6 +1160,24 @@ export default function Roster({ st, patch, narrow }) {
   // was removed. `selected` is still set so the chip keeps its ring and the
   // People⇄Areas⇄Match-day carry-your-place scroll still finds it.
   const openShiftDetail = (id) => { patch({ selected: id }); setShiftDetail(id) }
+
+  // Create a one-off shift and, optionally, assign a volunteer in the same step.
+  // Shared by the "+ Add a shift" modal (People cells / collapsed Areas /
+  // Coverage) and the Areas blank-cell "+ Add". It does the writes, reloads and
+  // toasts; the caller closes its own modal on success (so a failure keeps the
+  // modal open with its error). Returns the new shift id.
+  const createOneOffShift = async ({ area_id, day_of_week, start_time, end_time, role_id, assignee }) => {
+    const res = await api.rosterCreateShift({ week_id: data.week.id, area_id, day_of_week, start_time, end_time, role_id })
+    const newId = res.id
+    let assigned = null
+    if (assignee) assigned = await api.rosterAssign(data.week.id, newId, assignee).catch(() => ({ ok: false }))
+    await load()
+    const a = areaById[area_id]
+    patch({ selected: newId, toast: (assignee && assigned?.ok)
+      ? { tone: assigned.warns?.length ? 'warn' : 'ok', title: `Shift added, ${assigned.assignee_name || 'volunteer'} rostered.`, body: (assigned.warns || []).join(' · ') || `${a?.name || 'Shift'} · ${DOW[day_of_week]}` }
+      : { tone: 'ok', title: 'Shift added.', body: `${a?.name || 'Shift'} · ${DOW[day_of_week]}` } })
+    return newId
+  }
 
   // no config yet → offer to seed a starter set (also handy for testing)
   if (areas.length === 0) {
@@ -1649,26 +1715,74 @@ export default function Roster({ st, patch, narrow }) {
     })
   }
 
-  // ── #1 · the "To fill" worklist ─────────────────────────────────────────
+  // ── #1 · the "Coverage" view ────────────────────────────────────────────
   // A ranked list of the week's gaps, each with its best-fit volunteer one tap
   // away. Not a grid — the one surface that draws on both axes (the shift and
-  // the person) without being a transposed grid. `header` etc. are the same
-  // render-function pattern, not components, so no caret/hook traps.
-  const renderFill = () => {
+  // the person) without being a transposed grid. A day picker (Full week, or any
+  // combination of days) narrows the gaps to the day(s) you are covering. Adding
+  // a shift or a volunteer lives here too, so a coordinator can work the whole
+  // job from one screen. `header` etc. are the same render-function pattern, not
+  // components, so no caret/hook traps.
+  const renderCoverage = () => {
+    const fullWeek = coverageDays.length === 0
+    const selGroups = fullWeek ? openGroups : openGroups.filter(g => coverageDays.includes(g.shift.day_of_week))
     const byDay = {}
-    openGroups.forEach(g => { (byDay[g.shift.day_of_week] = byDay[g.shift.day_of_week] || []).push(g) })
+    selGroups.forEach(g => { (byDay[g.shift.day_of_week] = byDay[g.shift.day_of_week] || []).push(g) })
     const days = Object.keys(byDay).map(Number).sort((a, b) => a - b)
+    const selOpen = selGroups.reduce((n, g) => n + g.count, 0)
+    const openOnDay = (d) => open.filter(x => x.day_of_week === d && (!rq || shiftHit(x))).length
+    const toggleDay = (d) => setCoverageDays(cur => cur.includes(d) ? cur.filter(x => x !== d) : [...cur, d].sort((a, b) => a - b))
+    // "+ Add a shift" from here prefills the first selected day (so a shift you
+    // add while covering Tuesday lands on Tuesday), else leaves the day open.
+    const addDay = coverageDays.length ? coverageDays[0] : undefined
+    const pickBtn = (on) => ({
+      display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+      border: `1px solid ${on ? 'transparent' : C.hair2}`, background: on ? C.accent : 'transparent', color: on ? '#fff' : C.dim,
+    })
+    const badge = (on, o) => ({ fontFamily: MONO, fontSize: 8.5, padding: '1px 5px', borderRadius: 999, background: on ? 'rgba(255,255,255,0.2)' : (o ? 'rgba(245,181,66,0.15)' : 'color-mix(in srgb, var(--pb-accent) 14%, transparent)'), color: on ? '#fff' : (o ? C.warn : C.accent) })
+    const ghostBtn = { padding: '6px 11px', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: '1px dashed color-mix(in srgb, var(--pb-accent) 40%, transparent)', background: 'color-mix(in srgb, var(--pb-accent) 8%, transparent)', color: C.accent, whiteSpace: 'nowrap' }
     return (
-      <div className="pb-scroll" data-testid="roster-fill" style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: '18px 22px' }}>
-        {openGroups.length === 0 ? (
+      <div className="pb-scroll" data-testid="roster-fill" style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+        {/* The day picker + add actions, sticky so they stay put as the list
+            scrolls. Full week (every gap) or any combination of days. */}
+        <div data-testid="coverage-picker" style={{ position: 'sticky', top: 0, zIndex: 20, background: C.bg, borderBottom: `1px solid ${C.hair2}`, padding: '10px 14px', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faintest, marginRight: 2 }}>COVERAGE</span>
+          <button data-testid="coverage-fullweek" onClick={() => setCoverageDays([])} style={pickBtn(fullWeek)}>
+            <span>Full week</span>
+            {open.length > 0 && <span style={badge(fullWeek, open.length)}>{open.length} open</span>}
+          </button>
+          {DOW.map((label, i) => {
+            const o = openOnDay(i)
+            const on = coverageDays.includes(i)
+            return (
+              <button key={i} data-testid={`coverage-day-${i}`} onClick={() => toggleDay(i)} style={pickBtn(on)}>
+                <span>{label} <span style={{ fontFamily: MONO, fontSize: 10, opacity: 0.8 }}>{DATES[i]}</span></span>
+                {o > 0 && <span style={badge(on, o)}>{o} open</span>}
+              </button>
+            )
+          })}
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+            <button data-testid="coverage-add-shift" onClick={() => setAddShiftFor(addDay != null ? { day: addDay } : {})} style={ghostBtn}>+ Add a shift</button>
+            <button data-testid="coverage-add-volunteer" onClick={() => setAddVolOpen(true)} style={ghostBtn}>+ Add volunteer</button>
+          </div>
+        </div>
+
+        <div style={{ padding: '18px 22px' }}>
+        {selOpen === 0 ? (
           <div data-testid="fill-empty" style={{ fontSize: 13.5, color: C.dim, maxWidth: '44rem', lineHeight: 1.6, background: C.surface2, border: `1px solid ${C.hair}`, borderRadius: 10, padding: 18 }}>
-            <span style={{ fontWeight: 700, color: C.ok }}>Every shift is covered.</span>{' '}
-            {rq ? 'Nothing open matches your search. Clear it to see the whole week.' : 'There is nothing left to fill this week. Publish it when you are ready, or add a one-off shift from the People or Areas view.'}
+            {open.length === 0 ? (
+              <><span style={{ fontWeight: 700, color: C.ok }}>Every shift is covered.</span>{' '}
+              {rq ? 'Nothing open matches your search. Clear it to see the whole week.' : 'There is nothing left to fill this week. Publish it when you are ready, or add a one-off shift up top.'}</>
+            ) : fullWeek ? (
+              <><span style={{ fontWeight: 700, color: C.ok }}>Every shift is covered.</span> Nothing open matches your search. Clear it to see the whole week.</>
+            ) : (
+              <><span style={{ fontWeight: 700, color: C.ok }}>Nothing open on the day{coverageDays.length === 1 ? '' : 's'} you picked.</span> {open.length} shift{open.length === 1 ? '' : 's'} still open elsewhere this week — switch to Full week to see {open.length === 1 ? 'it' : 'them'}.</>
+            )}
           </div>
         ) : (
           <>
             <div style={{ fontSize: 12.5, color: C.faint, marginBottom: 14, maxWidth: '52rem', lineHeight: 1.55 }}>
-              {open.length} shift{open.length === 1 ? '' : 's'} still to fill, soonest first. Assign the suggested best fit in one tap, or choose someone else. <span style={{ color: C.dim }}>Auto-fill</span> (top right) proposes the lot at once.
+              {selOpen} shift{selOpen === 1 ? '' : 's'} {fullWeek ? 'still to fill this week' : `to fill on the day${coverageDays.length === 1 ? '' : 's'} you picked`}, soonest first. Assign the suggested best fit in one tap, or choose someone else. <span style={{ color: C.dim }}>Auto-fill</span> (top right) proposes the lot at once.
             </div>
             {days.map(d => (
               <div key={d} style={{ marginBottom: 18 }}>
@@ -1720,6 +1834,7 @@ export default function Roster({ st, patch, narrow }) {
             ))}
           </>
         )}
+        </div>
       </div>
     )
   }
@@ -1814,7 +1929,7 @@ export default function Roster({ st, patch, narrow }) {
               { key: 'people', label: 'People' },
               { key: 'areas', label: 'Areas' },
               { key: 'day', label: 'Match day' },
-              { key: 'fill', label: 'To fill', badge: open.length },
+              { key: 'fill', label: 'Coverage', badge: open.length },
               { key: 'confirm', label: 'Confirm' },
               { key: 'hours', label: 'Hours' },
             ]} />
@@ -1832,13 +1947,10 @@ export default function Roster({ st, patch, narrow }) {
           </div>
           <div style={{ width: 120, height: 6, borderRadius: 3, background: C.surface2, overflow: 'hidden' }}><div style={{ height: '100%', width: pct + '%', background: pct === 100 ? C.ok : C.accent }} /></div>
           {/* The persistent volunteer pool is gone — assigning runs through the
-              shift-detail modal (click a shift) and the two "+ add" flows. The
-              pool's "+ Add a shift" is now a toolbar button opening a modal, and
-              its Roles filter moved down onto the left-hand list. */}
-          {view !== 'fill' && (
-            <button onClick={() => setAddingShift(true)} data-testid="add-shift-open"
-              style={{ padding: '8px 12px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: `1px solid ${C.hair2}`, color: C.dim, background: 'transparent', whiteSpace: 'nowrap' }}>+ Add a shift</button>
-          )}
+              shift-detail modal (click a shift) and the two "+ add" flows.
+              Adding a shift is a contextual action now (a per-day button in the
+              People open-shifts row, a collapsed Areas area, the Coverage view),
+              not a button pinned to the top-right corner. */}
           {/* The three that act on the week itself, in Committee's own
               segmented control — one box rather than three loose buttons.
               "Publish week" is the primary action and has moved up onto the
@@ -1884,7 +1996,7 @@ export default function Roster({ st, patch, narrow }) {
           onDone={load} />
       )}
 
-      {view === 'fill' && renderFill()}
+      {view === 'fill' && renderCoverage()}
 
       {/* The Roles filter, moved off the retired pool, sits on the left of the
           detail page and narrows the list below it — people who volunteered for
@@ -1964,6 +2076,13 @@ export default function Roster({ st, patch, narrow }) {
                       {(hidden > 0 || (st.openExpanded && groups.length > 2)) && (
                         <button onClick={() => patch(s => ({ openExpanded: !s.openExpanded }))} style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.08em', color: C.warn, background: 'transparent', border: '1px dashed rgba(245,181,66,0.4)', borderRadius: 6, padding: '4px 6px', cursor: 'pointer', textAlign: 'left' }}>{hidden > 0 ? '+ ' + hidden + ' more' : 'show less'}</button>
                       )}
+                      {/* Add a one-off shift on this day, straight from the day it
+                          is for (its day is prefilled), and optionally hand it to
+                          a volunteer in the same step. Sits at the bottom of the
+                          cell so it is out of the way of the open shifts above. */}
+                      <button onClick={() => setAddShiftFor({ day: d })} data-testid={`open-add-shift-${d}`}
+                        title={`Add a shift on ${DOW[d]}`}
+                        style={{ marginTop: 'auto', fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.06em', color: C.faint, background: 'transparent', border: `1px dashed ${C.hair2}`, borderRadius: 6, padding: '4px 6px', cursor: 'pointer', textAlign: 'center' }}>+ Add a shift</button>
                     </div>
                   )
                 })}
@@ -2120,6 +2239,15 @@ export default function Roster({ st, patch, narrow }) {
                           </div>
                           {!railMin && <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, paddingLeft: 18 }}>{groups.length} roles</div>}
                           {railMin && <span style={{ fontFamily: MONO, fontSize: 9, color: filledN === mine.length ? C.ok : C.warn }}>{filledN}/{mine.length}</span>}
+                          {/* Collapsed, the per-role "+ Add" cells are folded
+                              away, so a collapsed area carries its own add here —
+                              prefilled to this area — rather than making you
+                              expand it first just to add a shift. */}
+                          {collapsed && !railMin && (
+                            <button onClick={() => setAddShiftFor({ areaId: a.id })} data-testid={`area-collapsed-add-${a.id}`}
+                              title={`Add a shift in ${a.name}`}
+                              style={{ marginLeft: 18, marginTop: 2, fontFamily: MONO, fontSize: 9, letterSpacing: '0.06em', color: C.faint, background: 'transparent', border: `1px dashed ${C.hair2}`, borderRadius: 6, padding: '3px 7px', cursor: 'pointer', alignSelf: 'flex-start' }}>+ Add a shift</button>
+                          )}
                         </div>
                         {/* Expanded, the header's day cells stay empty (the
                             shifts show in the per-role sub-rows below).
@@ -2178,13 +2306,13 @@ export default function Roster({ st, patch, narrow }) {
         )
       })()}
 
-      {/* "+ Add a shift" (a toolbar button now, not a pool panel): a one-off
-          shift no weekly pattern covers, in its own modal. */}
-      {addingShift && (
-        <ModalShell title="Add a shift" sub="A one-off shift no weekly pattern covers" onClose={() => setAddingShift(false)}>
-          <AddShift areas={areas} weekId={data.week.id}
-            onDone={() => { setAddingShift(false); load() }} onCancel={() => setAddingShift(false)} />
-        </ModalShell>
+      {/* "+ Add a shift" — a contextual action (People open-shifts cells with a
+          day prefilled, a collapsed Areas area with the area prefilled, or the
+          Coverage view). Optionally assigns a volunteer in the same step. */}
+      {addShiftFor && (
+        <AddShiftModal areas={areas} prefill={addShiftFor} candidates={candidates} shifts={shifts} settings={settings}
+          onCreate={async (fields) => { await createOneOffShift(fields); setAddShiftFor(null) }}
+          onClose={() => setAddShiftFor(null)} />
       )}
 
       {/* A volunteer's availability and qualifications, opened from the People
@@ -2231,16 +2359,8 @@ export default function Roster({ st, patch, narrow }) {
             candidates={candidates} shifts={shifts} settings={settings}
             onClose={() => setAddAreaFor(null)}
             onCreate={async ({ start_time, end_time, role_id, assignee }) => {
-              const res = await api.rosterCreateShift({ week_id: data.week.id, area_id: a.id, day_of_week: addAreaFor.day, start_time, end_time, role_id })
-              const newId = res.id
-              let assigned = null
-              if (assignee) assigned = await api.rosterAssign(data.week.id, newId, assignee).catch(() => ({ ok: false }))
-              const day = addAreaFor.day
+              await createOneOffShift({ area_id: a.id, day_of_week: addAreaFor.day, start_time, end_time, role_id, assignee })
               setAddAreaFor(null)
-              await load()
-              patch({ selected: newId, toast: (assignee && assigned?.ok)
-                ? { tone: assigned.warns?.length ? 'warn' : 'ok', title: `Shift added, ${assigned.assignee_name || 'volunteer'} rostered.`, body: (assigned.warns || []).join(' · ') || `${a.name} · ${DOW[day]}` }
-                : { tone: 'ok', title: 'Shift added.', body: `${a.name} · ${DOW[day]}` } })
             }} />
         )
       })()}
