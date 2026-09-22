@@ -4,7 +4,7 @@
 //   1. To fill  — a ranked list of the week's gaps; assign the best fit in one
 //      tap, or choose someone else. The tab carries an open-count badge.
 //   2. Carry state — selecting a shift and switching People⇄Areas⇄Match day
-//      keeps the selection (the pool's fill panel persists).
+//      keeps the selection (the chip keeps its ring on the other view).
 //   3. Match day — one day at a time; a day picker; areas/roles down the side;
 //      an OPEN cell opens the assign modal (the same areaDayCol as Areas view).
 //
@@ -104,7 +104,6 @@ const run = async () => {
     localStorage.setItem('token', 'stub')
     localStorage.setItem('bs_clubhouse_intro_mode_boss', JSON.stringify('never'))
     localStorage.setItem('bs_clubhouse_intro_mode_anon', JSON.stringify('never'))
-    localStorage.setItem('roster_pool_open_boss', JSON.stringify(true))
   })
   const page = await ctx.newPage()
   const errors = []
@@ -184,19 +183,47 @@ const run = async () => {
   await page.waitForTimeout(200)
 
   // ── 2. Carry selection across the toggle ─────────────────────────────────
-  // Select the assigned Scorer on Areas, switch to People, the pool still shows
-  // the fill panel for it (selection was not cleared).
+  // Select the assigned Scorer on Areas (opens its detail modal), close it, and
+  // the chip keeps its selected ring. Switch to People and the SAME shift's chip
+  // there carries the ring too — selection is not cleared on a view change.
+  await page.goto(BASE + '/admin/clubhouse/roster', { waitUntil: 'domcontentloaded' })
+  await page.waitForSelector('h1', { timeout: 15000 }).catch(() => {})
+  await page.waitForTimeout(800)
   await tab('Areas')
   await page.evaluate(() => {
     const chip = [...document.querySelectorAll('div[draggable]')].find(d => /Sam Scorer/.test(d.textContent || ''))
     if (chip) chip.click()
   })
   await page.waitForTimeout(300)
-  const poolHadFill = await seen('[data-testid="roster-pool"]') && /BEST FIT FOR THIS SHIFT/.test(await textOf('[data-testid="roster-pool"]'))
-  check('selecting a shift shows its fill panel in the pool', poolHadFill)
+  check('clicking a shift opens its detail modal', await seen('[data-testid="roster-modal"]'))
+  await page.keyboard.press('Escape').catch(() => {})
+  await page.waitForTimeout(200)
+  const selectedOnAreas = await seen('[data-shift-chip="s-sco"][data-shift-selected="true"]')
+  check('the selected shift keeps its ring on Areas', selectedOnAreas)
   await tab('People')
-  const poolStillFill = /BEST FIT FOR THIS SHIFT/.test(await textOf('[data-testid="roster-pool"]'))
-  check('switching People⇄Areas keeps the selected shift (fill panel persists)', poolStillFill)
+  await page.waitForTimeout(300)
+  const selectedOnPeople = await seen('[data-shift-chip="s-sco"][data-shift-selected="true"]')
+  check('switching Areas⇄People keeps the selected shift (its chip stays ringed)', selectedOnPeople)
+
+  // ── Volunteer column removed; its controls relocated ─────────────────────
+  await page.goto(BASE + '/admin/clubhouse/roster', { waitUntil: 'domcontentloaded' })
+  await page.waitForSelector('h1', { timeout: 15000 }).catch(() => {})
+  await page.waitForTimeout(800)
+  check('the persistent volunteer pool column is gone', !(await seen('[data-testid="roster-pool"]')))
+  // The Roles filter now sits on the detail page and narrows the LEFT list.
+  check('the Roles filter sits on the detail page', await seen('[data-testid="role-filter"]'))
+  await page.selectOption('[data-testid="role-filter"]', 'Umpire').catch(() => {})
+  await page.waitForTimeout(300)
+  check('filtering to a role keeps only that role\'s volunteers in the list',
+    (await seen('[data-testid="people-roles-m1"]')) && !(await seen('[data-testid="people-roles-m3"]')))
+  await press('[data-testid="role-filter-clear"]')
+  check('clearing the role filter restores the full list', await seen('[data-testid="people-roles-m3"]'))
+  // "+ Add a shift" is a toolbar button opening a modal (was a pool panel).
+  await press('[data-testid="add-shift-open"]')
+  check('"+ Add a shift" is a toolbar button that opens a modal',
+    (await seen('[data-testid="roster-modal"]')) && (await seen('[data-testid="add-shift-role"]')))
+  await page.keyboard.press('Escape').catch(() => {})
+  await page.waitForTimeout(200)
 
   // ── Week paging pills ─────────────────────────────────────────────────────
   const weekFetch = () => [...calls].reverse().find(x => x.weekStart)

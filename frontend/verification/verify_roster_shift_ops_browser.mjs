@@ -106,8 +106,6 @@ const run = async () => {
     localStorage.setItem('token', 'stub')
     localStorage.setItem('bs_clubhouse_intro_mode_boss', JSON.stringify('never'))
     localStorage.setItem('bs_clubhouse_intro_mode_anon', JSON.stringify('never'))
-    // Keep the volunteer pool open so the edit form is visible.
-    localStorage.setItem('roster_pool_open_boss', JSON.stringify(true))
   })
   const page = await ctx.newPage()
   const errors = []
@@ -149,10 +147,11 @@ const run = async () => {
     }
   }
 
-  // ── 2. Edit a shift's day & time from the side panel ─────────────────────────
+  // ── 2. Edit a shift's day & time from the detail modal ───────────────────────
   await open('/admin/clubhouse/roster')
   await toAreas()
-  // Select the assigned Scorer shift (assigned → sidebar, no modal).
+  // Click the assigned Scorer shift → the shift-detail modal (the pool is gone;
+  // clicking any shift opens the modal that carries the edit form).
   await page.evaluate(() => {
     const chip = [...document.querySelectorAll('div[draggable]')].find(d => /Sam Scorer/.test(d.textContent || ''))
     if (chip) chip.click()
@@ -192,15 +191,19 @@ const run = async () => {
     check('picking a volunteer from the modal assigns them to the shift',
       !!c && c.body?.shift_id === 's-ump' && c.body?.member_id === 'm1', JSON.stringify(c?.body))
   }
-  // An ASSIGNED shift click must NOT pop the modal (keep current behaviour).
+  // An ASSIGNED shift click opens the same detail modal, showing who is on it,
+  // a reassign picker and the edit form (the pool that used to carry this is gone).
   await open('/admin/clubhouse/roster')
   await toAreas()
   await page.evaluate(() => {
     const chip = [...document.querySelectorAll('div[draggable]')].find(d => /Sam Scorer/.test(d.textContent || ''))
     if (chip) chip.click()
   })
-  await page.waitForTimeout(300)
-  check('clicking an ASSIGNED shift does not open the assign modal', !(await seen('[data-testid="roster-modal"]')))
+  await page.waitForTimeout(400)
+  check('clicking an ASSIGNED shift opens its detail modal', await seen('[data-testid="roster-modal"]'))
+  check('the detail modal names the current assignee', /Sam Scorer/.test(await textOf('[data-testid="shift-detail-assignee"]')))
+  check('the detail modal carries the edit day & time form', await seen('[data-testid="edit-shift-day"]'))
+  check('the detail modal offers to reassign (candidate list)', await seen('[data-testid="assign-cand-m2"]'))
 
   // ── 5. Areas view: "+ Add" in a blank cell → create + assign ────────────────
   await open('/admin/clubhouse/roster')

@@ -563,19 +563,35 @@ function CandidatePicker({ shift, candidates, shifts, settings, onPick }) {
   )
 }
 
-// Areas view: clicking a shift that nobody is on opens this so a volunteer can be
-// picked without hunting through the side pool — it works whether the pool is
-// open or minimised. Fill best match / Clear sit above the picker.
-function AssignModal({ shift, areaName, candidates, shifts, settings, onPick, onFillBest, onClear, onClose }) {
+// Clicking any shift chip — on any view, filled or open — opens this. It is
+// where the retired side-pool's best-fit panel and edit form went: assign or
+// reassign a volunteer (best match, a named pick, or clear), and edit the
+// shift's day & time or delete it. One modal, so a shift behaves the same
+// whichever view you clicked it from.
+function ShiftDetailModal({ shift, areaName, candidates, shifts, settings, onPick, onFillBest, onClear, onSaveEdit, onDelete, busy, onClose }) {
+  const assignee = shift.assignee_name
   return (
-    <ModalShell title={`Assign · ${areaName}`}
+    <ModalShell title={`${assignee ? '' : 'Assign · '}${areaName}`}
       sub={`${shift.role_name ? shift.role_name + ' · ' : ''}${DOW[shift.day_of_week]} ${fmtHour(shift.start_time)}–${fmtHour(shift.end_time)}`}
       onClose={onClose}>
+      {assignee && (
+        <div data-testid="shift-detail-assignee" style={{ display: 'flex', alignItems: 'center', gap: 8, background: C.surface2, border: `1px solid ${C.hair}`, borderRadius: 8, padding: '8px 10px', marginBottom: 12 }}>
+          <span style={{ width: 24, height: 24, borderRadius: '50%', background: C.surface, border: `1.5px solid ${C.hair2}`, color: C.dim, fontFamily: MONO, fontSize: 9, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{initials(assignee)}</span>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.12em', color: C.faintest }}>ROSTERED</div>
+            <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{assignee}</div>
+          </div>
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-        <button onClick={onFillBest} data-testid="assign-fill-best" style={{ flex: 1, padding: '7px 10px', borderRadius: 7, fontSize: 12.5, fontWeight: 600, border: 'none', background: C.accent, color: '#fff', cursor: 'pointer' }}>Fill best match</button>
-        <button onClick={onClear} data-testid="assign-clear" style={{ padding: '7px 12px', borderRadius: 7, fontSize: 12.5, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.dim, cursor: 'pointer' }}>Clear</button>
+        <button onClick={onFillBest} data-testid="assign-fill-best" style={{ flex: 1, padding: '7px 10px', borderRadius: 7, fontSize: 12.5, fontWeight: 600, border: 'none', background: C.accent, color: '#fff', cursor: 'pointer' }}>{assignee ? 'Fill best match' : 'Fill best match'}</button>
+        <button onClick={onClear} data-testid="assign-clear" style={{ padding: '7px 12px', borderRadius: 7, fontSize: 12.5, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.dim, cursor: 'pointer' }}>{assignee ? 'Clear' : 'Clear'}</button>
       </div>
+      <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.12em', color: C.faintest, marginBottom: 6 }}>{assignee ? 'REASSIGN TO' : 'ASSIGN TO'}</div>
       <CandidatePicker shift={shift} candidates={candidates} shifts={shifts} settings={settings} onPick={onPick} />
+      <div style={{ marginTop: 12 }}>
+        <ShiftEditForm key={shift.id} shift={shift} busy={busy} onSave={onSaveEdit} onDelete={onDelete} />
+      </div>
     </ModalShell>
   )
 }
@@ -588,7 +604,7 @@ function AddOpenShiftModal({ personName, cand, day, openShifts, shifts, settings
   return (
     <ModalShell title={`Add ${personName} to a shift`} sub={`Open shifts on ${DOW[day]}`} onClose={onClose}>
       {forDay.length === 0 ? (
-        <div style={{ fontSize: 12.5, color: C.faint, lineHeight: 1.5 }}>No open shifts on {DOW[day]}. Add one from the Areas view, or the “+ Add a shift” panel.</div>
+        <div style={{ fontSize: 12.5, color: C.faint, lineHeight: 1.5 }}>No open shifts on {DOW[day]}. Add one from the Areas view, or the “+ Add a shift” button up top.</div>
       ) : (
         <div className="pb-scroll" data-testid="add-open-list" style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 340, overflow: 'auto' }}>
           {forDay.map(s => {
@@ -911,10 +927,13 @@ export default function Roster({ st, patch, narrow }) {
   const [busy, setBusy] = useState(false)
   const [addingShift, setAddingShift] = useState(false)
   const [openPerson, setOpenPerson] = useState(null)
-  // Modals: assign a volunteer to an unassigned shift (Areas view), add an
-  // available person to one of a day's open shifts (People view "+ add"), and
-  // create a one-off shift in a blank Areas cell (Areas view "+ Add").
-  const [assignFor, setAssignFor] = useState(null)   // shift id
+  // Modals: the shift-detail modal (clicking any shift — assign/reassign, edit
+  // day & time, delete), add an available person to one of a day's open shifts
+  // (People view "+ add"), and create a one-off shift in a blank Areas cell.
+  // The persistent right-hand volunteer pool is gone: assignment now runs
+  // through this modal and the two "+ add" flows, and the pool's own filters
+  // (search, role, sort) moved onto the left-hand list.
+  const [shiftDetail, setShiftDetail] = useState(null)  // shift id
   const [addFor, setAddFor] = useState(null)         // { personId, day }
   const [addAreaFor, setAddAreaFor] = useState(null) // { areaId, day, roleId }
   // People rail (left column): add a volunteer from the club member list, add a
@@ -930,18 +949,17 @@ export default function Roster({ st, patch, narrow }) {
   // browser closing. A club with fourteen operational areas wants the first
   // column narrow; one with three does not.
   const [railMin, setRailMin] = usePref('roster_rail_min', false)
-  const [poolOpen, setPoolOpen] = usePref('roster_pool_open', true)
   // Which operational areas have their roles collapsed on the Areas view. An
   // area is a set of roles now (Umpire, Scorer, Turf Curator…) and shifts are
   // created per role, so the grid draws a sub-row per role by default; this
   // remembers the ones a person has folded away. Keyed by area, so a club with
   // one Match Day area folded keeps the rest open.
   const [areasCollapsed, setAreasCollapsed] = usePref('roster_areas_collapsed', {})
-  // Pool search / role filter / sort. Deliberately NOT a saved preference —
-  // a filter you left on last week hiding half the club is worse than retyping.
-  const [poolQuery, setPoolQuery] = useState('')
-  const [poolRole, setPoolRole] = useState('')
-  const [poolSort, setPoolSort] = useState('fit')   // 'fit' | 'name'
+  // The Roles filter that used to sit in the pool now narrows the left-hand
+  // list (people who volunteered for a role, or areas whose palette carries it).
+  // Deliberately NOT a saved preference — a filter you left on last week hiding
+  // half the club is worse than picking it again.
+  const [roleFilter, setRoleFilter] = useState('')
   // The day the Match-day board is focused on. null = the auto default (the
   // soonest day with an open shift). Local state — a match day is a single
   // sitting, not a preference worth remembering across weeks.
@@ -1087,6 +1105,13 @@ export default function Roster({ st, patch, narrow }) {
   // already open, rather than making you find it in the list a second time.
   const openArea = (a) => navigate(`/admin/clubhouse/areas-roles?tab=areas&area=${a.id}`)
   const areaLinkStyle = { cursor: 'pointer', textDecoration: 'underline dotted', textDecorationColor: C.faint, textUnderlineOffset: 3 }
+
+  // Clicking any shift chip — open or filled, on any view — opens one detail
+  // modal to assign/reassign it, edit its day & time, or delete it. This is
+  // where the old side-pool's best-fit panel and edit form went once the pool
+  // was removed. `selected` is still set so the chip keeps its ring and the
+  // People⇄Areas⇄Match-day carry-your-place scroll still finds it.
+  const openShiftDetail = (id) => { patch({ selected: id }); setShiftDetail(id) }
 
   // no config yet → offer to seed a starter set (also handy for testing)
   if (areas.length === 0) {
@@ -1331,13 +1356,16 @@ export default function Roster({ st, patch, narrow }) {
     const warned = shift.warnings && shift.warnings.length
     const over = dropTarget && st.overCell === 'slot-' + shift.id
     return (
-      <div draggable data-shift-chip={shift.id} onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; patch({ dragId: shift.id, selected: shift.id }) }} onDragEnd={() => patch({ dragId: null, overCell: null })} onClick={() => { patch({ selected: shift.id }); if (!poolOpen) setPoolOpen(true) }}
+      <div draggable data-shift-chip={shift.id} data-shift-selected={st.selected === shift.id ? 'true' : undefined}
+        onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; patch({ dragId: shift.id, selected: shift.id }) }} onDragEnd={() => patch({ dragId: null, overCell: null })}
+        onClick={() => openShiftDetail(shift.id)}
         {...(dropTarget ? slotDrop(shift.id) : {})}
         style={{ borderRadius: 7, padding: '6px 8px', cursor: 'grab', userSelect: 'none',
           border: `1px solid ${inOpen ? 'rgba(245,181,66,0.45)' : (warned ? 'rgba(245,181,66,0.5)' : `color-mix(in srgb, ${a.color || 'var(--pb-accent)'} 40%, transparent)`)}`,
           background: inOpen ? 'rgba(245,181,66,0.10)' : `color-mix(in srgb, ${a.color || 'var(--pb-accent)'} 13%, transparent)`,
           color: inOpen ? C.warn : (a.color || C.accent),
-          ...(over ? { boxShadow: '0 0 0 1.5px var(--pb-accent)' } : {}) }}>
+          ...(over ? { boxShadow: '0 0 0 1.5px var(--pb-accent)' } : {}),
+          ...(st.selected === shift.id ? { outline: '1.5px solid var(--pb-accent)', outlineOffset: 1 } : {}) }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
           <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: a.color || 'var(--pb-accent)' }} />
           <span style={{ fontWeight: 600, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{areaLabel(shift) + (count > 1 ? ' ×' + count : '')}</span>
@@ -1353,28 +1381,20 @@ export default function Roster({ st, patch, narrow }) {
     )
   }
 
-  const sel = st.selected ? shifts.find(x => x.id === st.selected) : null
-  const selArea = sel ? areaById[sel.area_id] : null
-  const ranked = sel ? candidates.map(c => ({ c, res: checkClient(sel, c, shifts, settings), load: shifts.filter(s => s.assignee_member_id === c.member_id).length }))
-    .filter(x => x.res.blocks.length === 0).sort((a, b) => (a.res.warns.length * 10 + a.load) - (b.res.warns.length * 10 + b.load))
-    : candidates.map(c => ({ c, res: { warns: [] }, load: shifts.filter(s => s.assignee_member_id === c.member_id).length }))
+  // The shift the detail modal is open on (or, when it is closed, whatever the
+  // last-clicked chip left selected — used only for the chip's own ring).
+  const detailShift = shiftDetail ? shifts.find(x => x.id === shiftDetail) : null
+  const detailArea = detailShift ? areaById[detailShift.area_id] : null
 
-  // Every role anyone in the pool has put their hand up for, for the filter.
-  // Built from the names the candidates carry rather than a second fetch of the
-  // roles catalogue — a role nobody volunteers for is not worth filtering by.
-  const poolRoles = [...new Set(candidates.flatMap(c => c.role_names || []))].sort((a, b) => a.localeCompare(b))
-  const q = poolQuery.trim().toLowerCase()
-  const filtered = ranked.filter(({ c }) => {
-    if (poolRole && !(c.role_names || []).includes(poolRole)) return false
-    if (!q) return true
-    return c.name.toLowerCase().includes(q) || (c.role_names || []).some(r => r.toLowerCase().includes(q))
-  })
-  // Best fit is only a real ordering when a shift is selected — with nothing
-  // selected `ranked` carries no verdicts, so it falls back to name either way.
-  const byName = poolSort === 'name' || !sel
-  const sorted = byName ? [...filtered].sort((a, b) => a.c.name.localeCompare(b.c.name)) : filtered
-  const POOL_CAP = 25
-  const candList = sorted.slice(0, POOL_CAP)
+  // The Roles filter's options: every role a volunteer put their hand up for,
+  // PLUS every role in an area's palette — so the one control makes sense on
+  // both the People list (filter to people who do that role) and the Areas
+  // list (filter to areas that carry it). Built from held data, not a second
+  // fetch — a role nobody volunteers for and no area lists is not worth showing.
+  const roleFilterOptions = [...new Set([
+    ...candidates.flatMap(c => c.role_names || []),
+    ...areas.flatMap(a => (a.roles || []).map(r => r.role_name)),
+  ].filter(Boolean))].sort((a, b) => a.localeCompare(b))
 
   // A shift is FOR one role now, so two open shifts only collapse into one
   // "×N" chip when they share an area AND a role AND the same hours — otherwise
@@ -1423,8 +1443,13 @@ export default function Roster({ st, patch, narrow }) {
   const areaMatches = (a) => !rq
     || rHit(a.name, a.department, a.required_role_name, a.required_qualification_name)
     || shifts.some(x => x.area_id === a.id && shiftHit(x))
-  const shownCandidates = candidates.filter(personMatches)
-  const shownAreas = areas.filter(areaMatches)
+  // The Roles filter (moved off the old pool) narrows both left-hand lists: a
+  // person by the role they volunteered for, an area by the roles in its
+  // palette. An empty filter keeps everyone, so it never hides the club.
+  const personRoleOk = (p) => !roleFilter || (p.role_names || []).includes(roleFilter)
+  const areaRoleOk = (a) => !roleFilter || (a.roles || []).some(r => r.role_name === roleFilter)
+  const shownCandidates = candidates.filter(p => personMatches(p) && personRoleOk(p))
+  const shownAreas = areas.filter(a => areaMatches(a) && areaRoleOk(a))
 
   // A shift whose area was later archived still exists and still carries its
   // own name (`area_name`, off the shift row). The People view groups by
@@ -1518,10 +1543,10 @@ export default function Roster({ st, patch, narrow }) {
           const warned = x.warnings && x.warnings.length
           const over = st.overCell === 'slot-' + x.id
           return (
-            <div key={x.id} draggable data-shift-chip={x.id}
+            <div key={x.id} draggable data-shift-chip={x.id} data-shift-selected={st.selected === x.id ? 'true' : undefined}
               onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; patch({ dragId: x.id, selected: x.id }) }}
               onDragEnd={() => patch({ dragId: null, overCell: null })}
-              onClick={() => { patch({ selected: x.id }); if (!poolOpen) setPoolOpen(true); if (!x.assignee_member_id) setAssignFor(x.id) }} {...slotDrop(x.id)}
+              onClick={() => openShiftDetail(x.id)} {...slotDrop(x.id)}
               style={{ borderRadius: 7, padding: '6px 8px', cursor: 'grab', userSelect: 'none',
                 border: `1px solid ${x.assignee_member_id ? (warned ? 'rgba(245,181,66,0.5)' : `color-mix(in srgb, ${a.color || 'var(--pb-accent)'} 40%, transparent)`) : 'rgba(245,181,66,0.45)'}`,
                 background: x.assignee_member_id ? `color-mix(in srgb, ${a.color || 'var(--pb-accent)'} 13%, transparent)` : 'rgba(245,181,66,0.10)',
@@ -1684,7 +1709,7 @@ export default function Roster({ st, patch, narrow }) {
                           ) : (
                             <div style={{ fontFamily: MONO, fontSize: 10, color: C.faint, textAlign: 'right' }}>No available volunteer</div>
                           )}
-                          <button data-testid={`fill-choose-${s.id}`} onClick={() => { patch({ selected: g.ids[0] }); setAssignFor(g.ids[0]) }}
+                          <button data-testid={`fill-choose-${s.id}`} onClick={() => openShiftDetail(g.ids[0])}
                             style={{ padding: '7px 11px', borderRadius: 8, fontSize: 12.5, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.dim, cursor: 'pointer', whiteSpace: 'nowrap' }}>{best ? 'Choose…' : 'Pick anyway'}</button>
                         </div>
                       </div>
@@ -1701,9 +1726,9 @@ export default function Roster({ st, patch, narrow }) {
 
   // ── #3 · the single-day "Match day" board ───────────────────────────────
   // One day at a time, areas → roles down the side with room to read full
-  // names, and the volunteer pool alongside to drag from. Reuses `areaDayCol`
-  // (the same chip, click-to-assign, "+ Add" and drop targets as the Areas
-  // view) so a shift behaves identically; only the layout is different.
+  // names. Reuses `areaDayCol` (the same chip, click-to-open-the-detail-modal,
+  // "+ Add" and drop targets as the Areas view) so a shift behaves identically;
+  // only the layout is different.
   const renderDayBoard = () => {
     const boardLabelW = narrow ? 132 : 220
     const boardCols = `${boardLabelW}px minmax(0, 1fr)`
@@ -1771,10 +1796,9 @@ export default function Roster({ st, patch, narrow }) {
 
   return (
     // The screen is bounded to the viewport (like Directory) rather than
-    // `minHeight: 100vh`, so the roster grid and the volunteer pool each scroll
-    // WITHIN their own region instead of the whole page scrolling as one.
-    // That is what keeps the day/date header row sticky under the grid, and
-    // stops scrolling the shifts from moving the pool (and vice versa).
+    // `minHeight: 100vh`, so the roster grid scrolls WITHIN its own region
+    // instead of the whole page scrolling as one. That is what keeps the
+    // day/date header row sticky under the grid.
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
       {header(<>
         {/* Centred on the title line: the title block and the actions on the
@@ -1807,14 +1831,16 @@ export default function Roster({ st, patch, narrow }) {
             <span style={{ fontFamily: MONO, fontSize: 10, color: C.faint, letterSpacing: '0.08em' }}>/ {shifts.length} FILLED</span>
           </div>
           <div style={{ width: 120, height: 6, borderRadius: 3, background: C.surface2, overflow: 'hidden' }}><div style={{ height: '100%', width: pct + '%', background: pct === 100 ? C.ok : C.accent }} /></div>
-          {/* The pool sits beside the grid on People/Areas/Match-day; the "To
-              fill" worklist assigns inline, so it has no pool to toggle. */}
+          {/* The persistent volunteer pool is gone — assigning runs through the
+              shift-detail modal (click a shift) and the two "+ add" flows. The
+              pool's "+ Add a shift" is now a toolbar button opening a modal, and
+              its Roles filter moved down onto the left-hand list. */}
           {view !== 'fill' && (
-            <button onClick={() => setPoolOpen(v => !v)} style={{ padding: '8px 12px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', ...(poolOpen ? { border: '1px solid color-mix(in srgb, var(--pb-accent) 45%, transparent)', color: C.accent, background: 'color-mix(in srgb, var(--pb-accent) 10%, transparent)' } : { border: `1px solid ${C.hair2}`, color: C.dim, background: 'transparent' }) }}>{poolOpen ? 'Hide pool' : 'Volunteer pool'}</button>
+            <button onClick={() => setAddingShift(true)} data-testid="add-shift-open"
+              style={{ padding: '8px 12px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: `1px solid ${C.hair2}`, color: C.dim, background: 'transparent', whiteSpace: 'nowrap' }}>+ Add a shift</button>
           )}
           {/* The three that act on the week itself, in Committee's own
               segmented control — one box rather than three loose buttons.
-              "Volunteer pool" is a view toggle, so it does not join them, and
               "Publish week" is the primary action and has moved up onto the
               search line. */}
           <SegGroup>
@@ -1859,6 +1885,32 @@ export default function Roster({ st, patch, narrow }) {
       )}
 
       {view === 'fill' && renderFill()}
+
+      {/* The Roles filter, moved off the retired pool, sits on the left of the
+          detail page and narrows the list below it — people who volunteered for
+          a role (People) or areas that carry it in their palette (Areas / Match
+          day). Left where the list is, not up in the header's right-hand group.
+          Only drawn when there is more than one role to pick between. */}
+      {(view === 'people' || view === 'areas' || view === 'day') && roleFilterOptions.length > 1 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', borderBottom: `1px solid ${C.hair}`, flexWrap: 'wrap' }}>
+          <span style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.14em', color: C.faintest }}>ROLE</span>
+          <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)} data-testid="role-filter"
+            title="Show only the people or areas for a role"
+            style={{ background: C.surface2, border: `1px solid ${roleFilter ? 'color-mix(in srgb, var(--pb-accent) 45%, transparent)' : C.hair2}`, borderRadius: 7, padding: '6px 10px', color: roleFilter ? C.text : C.dim, fontSize: 12.5, outline: 'none', minWidth: 160 }}>
+            <option value="">All roles</option>
+            {roleFilterOptions.map(r => <option key={r} value={r}>{r}</option>)}
+          </select>
+          {roleFilter && (
+            <button onClick={() => setRoleFilter('')} data-testid="role-filter-clear"
+              style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.04em', padding: '5px 9px', borderRadius: 6, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.dim, cursor: 'pointer' }}>Clear</button>
+          )}
+          <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginLeft: 'auto' }}>
+            {view === 'people'
+              ? `${shownCandidates.length} ${shownCandidates.length === 1 ? 'person' : 'people'}`
+              : `${shownAreas.length} ${shownAreas.length === 1 ? 'area' : 'areas'}`}
+          </span>
+        </div>
+      )}
 
       {(view === 'people' || view === 'areas' || view === 'day') && (
       <div style={{ display: 'flex', flex: 1, minHeight: 0, alignItems: 'stretch' }}>
@@ -2106,154 +2158,42 @@ export default function Roster({ st, patch, narrow }) {
           )}
         </div>
 
-        {/* Minimised, the pool becomes a thin rail rather than vanishing, so
-            there is always a way back to it from where it used to be. */}
-        {!poolOpen && !narrow && (
-          <aside style={{ width: 30, flex: '0 0 30px', borderLeft: `1px solid ${C.hair}`, background: C.surface, display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 14, gap: 10 }}>
-            <button onClick={() => setPoolOpen(true)} title="Show the volunteer pool"
-              style={{ background: 'transparent', border: `1px solid ${C.hair2}`, borderRadius: 5, color: C.faint, cursor: 'pointer', fontSize: 11, lineHeight: 1, padding: '3px 5px' }}>«</button>
-            <span style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.14em', color: C.faintest, writingMode: 'vertical-rl', whiteSpace: 'nowrap' }}>VOLUNTEER POOL</span>
-          </aside>
-        )}
-
-        {poolOpen && (
-          <aside className="pb-scroll" data-testid="roster-pool" style={narrow
-            ? { width: 320, maxWidth: '92vw', position: 'fixed', right: 0, top: 0, bottom: 0, zIndex: 65, borderLeft: `1px solid ${C.hair2}`, background: C.surface, overflowY: 'auto', padding: 16, boxShadow: '0 0 40px rgba(0,0,0,0.5)' }
-            : { width: 296, flex: '0 0 296px', borderLeft: `1px solid ${C.hair}`, background: C.surface, overflowY: 'auto', padding: 16 }}>
-            {sel && (
-              <div>
-                <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faintest, marginBottom: 8 }}>BEST FIT FOR THIS SHIFT</div>
-                <div style={{ background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 8, padding: 12, marginBottom: 14 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: (selArea && selArea.color) || 'var(--pb-accent)' }} />
-                    {/* An archived area is not in the areas list, so it can't be
-                        edited from here — name it off the shift's own area_name
-                        rather than hiding the whole fill panel for it. */}
-                    {selArea
-                      ? <span onClick={() => openArea(selArea)} title={`Edit ${selArea.name} and its shifts`}
-                          style={{ fontWeight: 600, fontSize: 14, ...areaLinkStyle }}>{selArea.name}</span>
-                      : <span style={{ fontWeight: 600, fontSize: 14 }}>{areaLabel(sel)}</span>}
-                  </div>
-                  <div style={{ fontFamily: MONO, fontSize: 11, color: C.dim, marginTop: 4 }}>{sel.role_name ? sel.role_name + ' · ' : ''}{DOW[sel.day_of_week]} {fmtHour(sel.start_time)}–{fmtHour(sel.end_time)}</div>
-                  <div style={{ fontFamily: MONO, fontSize: 10, color: C.faint, marginTop: 4 }}>{[sel.role_name, sel.required_qualification_name ? 'needs ' + sel.required_qualification_name : null].filter(Boolean).join(' · ') || 'No requirement'}</div>
-                  <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                    <button onClick={() => { if (candList[0]) doAssign(sel.id, candList[0].c.member_id) }} style={{ flex: 1, padding: '6px 10px', borderRadius: 6, fontSize: 12, fontWeight: 600, border: 'none', background: C.accent, color: '#fff', cursor: 'pointer' }}>Fill best match</button>
-                    <button onClick={() => { doAssign(sel.id, null); patch({ selected: null }) }} style={{ padding: '6px 10px', borderRadius: 6, fontSize: 12, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.dim, cursor: 'pointer' }}>Clear</button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Clicking a shift lets its day and time be changed here, and it
-                deleted. Keyed on the shift so switching shifts reseeds the form. */}
-            {sel && (
-              <ShiftEditForm key={sel.id} shift={sel} busy={busy}
-                onSave={fields => relocateShift(sel.id, fields, undefined)}
-                onDelete={() => deleteSelectedShift(sel.id)} />
-            )}
-
-            {addingShift
-              ? <AddShift areas={areas} weekId={data.week.id}
-                  onDone={() => { setAddingShift(false); load() }} onCancel={() => setAddingShift(false)} />
-              : <button onClick={() => setAddingShift(true)} style={{ width: '100%', padding: '6px 10px', borderRadius: 6, fontSize: 12, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.dim, cursor: 'pointer', marginBottom: 10 }}>+ Add a shift</button>}
-
-            {openPerson && <PersonPanel memberId={openPerson} onClose={() => setOpenPerson(null)} onSaved={load} />}
-
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8 }}>
-              <span style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faintest }}>{sel ? 'RANKED CANDIDATES' : 'VOLUNTEER POOL'}</span>
-              <span style={{ fontFamily: MONO, fontSize: 10, color: C.faint, marginLeft: 'auto' }}>
-                {sorted.length === candidates.length ? `${sorted.length} people` : `${sorted.length} of ${candidates.length}`}
-              </span>
-              <button onClick={() => setPoolOpen(false)} title="Minimise the volunteer pool"
-                style={{ background: 'transparent', border: `1px solid ${C.hair2}`, borderRadius: 5, color: C.faint, cursor: 'pointer', fontSize: 11, lineHeight: 1, padding: '3px 5px', flexShrink: 0 }}>»</button>
-            </div>
-            <div style={{ fontSize: 11.5, color: C.faint, lineHeight: 1.45, marginBottom: 10 }}>{view === 'areas' ? 'Drag a volunteer onto a shift, or select a shift to rank them.' : 'Drag a volunteer onto an open shift, or a shift onto someone else on the same day.'}</div>
-            {candidates.length === 0 && <div style={{ fontSize: 12.5, color: C.faint, lineHeight: 1.5 }}>No volunteers yet. Add volunteer profiles (with availability) in the Directory/Volunteers so they can be rostered.</div>}
-
-            {candidates.length > 0 && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
-                <div style={{ position: 'relative' }}>
-                  <input value={poolQuery} onChange={e => setPoolQuery(e.target.value)} placeholder="Search name or role…"
-                    style={{ width: '100%', background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 7, padding: '6px 24px 6px 9px', color: C.text, fontSize: 12.5, outline: 'none' }} />
-                  {poolQuery && (
-                    <button onClick={() => setPoolQuery('')} title="Clear the search"
-                      style={{ position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: C.faint, cursor: 'pointer', fontSize: 13, lineHeight: 1, padding: '2px 4px' }}>×</button>
-                  )}
-                </div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <select value={poolRole} onChange={e => setPoolRole(e.target.value)} title="Filter by the role a volunteer put their hand up for"
-                    style={{ flex: 1, minWidth: 0, background: C.surface2, border: `1px solid ${poolRole ? 'color-mix(in srgb, var(--pb-accent) 45%, transparent)' : C.hair2}`, borderRadius: 7, padding: '6px 8px', color: poolRole ? C.text : C.dim, fontSize: 12, outline: 'none' }}>
-                    <option value="">All roles</option>
-                    {poolRoles.map(r => <option key={r} value={r}>{r}</option>)}
-                  </select>
-                  <select value={byName ? 'name' : 'fit'} onChange={e => setPoolSort(e.target.value)} title={sel ? 'Order the candidates' : 'Best fit needs a shift selected'} disabled={!sel}
-                    style={{ width: 104, flexShrink: 0, background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 7, padding: '6px 8px', color: sel ? C.dim : C.faintest, fontSize: 12, outline: 'none', cursor: sel ? 'pointer' : 'default' }}>
-                    <option value="name">By name</option>
-                    <option value="fit">Best fit</option>
-                  </select>
-                </div>
-              </div>
-            )}
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {candList.map(({ c, res, load }) => (
-                <div key={c.member_id} draggable onClick={() => { if (sel) doAssign(sel.id, c.member_id); else setOpenPerson(c.member_id) }} onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; patch({ dragPerson: c.member_id }) }} onDragEnd={() => patch({ dragPerson: null, overCell: null })}
-                  style={{ background: C.surface2, border: `1px solid ${sel && !res.warns.length ? 'color-mix(in srgb, var(--pb-accent) 35%, transparent)' : C.hair}`, borderRadius: 8, padding: '9px 10px', cursor: 'pointer' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ width: 26, height: 26, borderRadius: '50%', background: C.surface, border: `1.5px solid ${C.hair2}`, color: C.dim, fontFamily: MONO, fontSize: 9.5, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{initials(c.name)}</span>
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</div>
-                      <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sel ? (res.warns.length ? res.warns[0] : 'Clear match · ' + load + ' shift' + (load === 1 ? '' : 's')) : (load + ' shift' + (load === 1 ? '' : 's') + ' this week')}</div>
-                    </div>
-                    {sel && <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.08em', padding: '2px 5px', borderRadius: 4, flexShrink: 0, ...(res.warns.length ? { background: 'rgba(245,181,66,0.15)', color: C.warn } : { background: 'color-mix(in srgb, var(--pb-accent) 15%, transparent)', color: C.accent }) }}>{res.warns.length ? 'WARN' : 'FIT'}</span>}
-                  </div>
-                  {/* What they volunteered for and when they can do it — the two
-                      things you need to know before dragging someone onto a shift. */}
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 7 }}>
-                    {(c.role_names || []).length
-                      ? c.role_names.map(r => (
-                        <span key={r} style={{ fontFamily: MONO, fontSize: 8.5, letterSpacing: '0.06em', padding: '2px 5px', borderRadius: 4, background: 'color-mix(in srgb, var(--pb-accent) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--pb-accent) 28%, transparent)', color: C.accent, whiteSpace: 'nowrap' }}>{r.toUpperCase()}</span>
-                      ))
-                      : <span style={{ fontFamily: MONO, fontSize: 8.5, letterSpacing: '0.06em', color: C.faintest }}>NO ROLE SET</span>}
-                  </div>
-                  <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, marginTop: 5 }}>
-                    {c.available_days.length
-                      ? <>AVAIL {DOW.map((d, i) => (
-                        <span key={i} style={{ marginRight: 3, color: c.available_days.includes(i) ? (sel && sel.day_of_week === i ? C.accent : C.dim) : C.faintest, fontWeight: c.available_days.includes(i) ? 600 : 400 }}>{d}</span>
-                      ))}</>
-                      : 'NO AVAILABILITY SET'}
-                  </div>
-                </div>
-              ))}
-              {candidates.length > 0 && sorted.length === 0 && (
-                <div style={{ fontSize: 12.5, color: C.faint, lineHeight: 1.5 }}>
-                  Nobody matches{poolRole ? ` the ${poolRole} role` : ''}{q ? ` "${poolQuery.trim()}"` : ''}
-                  {sel ? '. Ranked candidates already exclude anyone the rules block for this shift.' : '.'}
-                </div>
-              )}
-              {sorted.length > POOL_CAP && (
-                <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, textAlign: 'center', padding: '4px 0' }}>
-                  SHOWING {POOL_CAP} OF {sorted.length} — SEARCH TO NARROW
-                </div>
-              )}
-            </div>
-          </aside>
-        )}
       </div>
       )}
 
-      {/* Areas view: assign a volunteer to an unassigned shift, from anywhere. */}
-      {assignFor && (() => {
-        const s = shifts.find(x => x.id === assignFor)
+      {/* Clicking any shift (open or filled, any view) opens its detail modal:
+          assign/reassign a volunteer, edit its day & time, or delete it. This
+          is where the old side-pool's best-fit panel and edit form went. */}
+      {shiftDetail && (() => {
+        const s = shifts.find(x => x.id === shiftDetail)
         if (!s) return null
         return (
-          <AssignModal shift={s} areaName={areaLabel(s)} candidates={candidates} shifts={shifts} settings={settings}
-            onPick={mid => { setAssignFor(null); doAssign(s.id, mid) }}
-            onFillBest={() => { const b = bestFor(s); setAssignFor(null); if (b) doAssign(s.id, b); else patch({ toast: { tone: 'warn', title: 'Nobody available.', body: 'No qualified, available volunteer for this shift.' } }) }}
-            onClear={() => { setAssignFor(null); doAssign(s.id, null) }}
-            onClose={() => setAssignFor(null)} />
+          <ShiftDetailModal shift={s} areaName={areaLabel(s)} candidates={candidates} shifts={shifts} settings={settings} busy={busy}
+            onPick={mid => { setShiftDetail(null); doAssign(s.id, mid) }}
+            onFillBest={() => { const b = bestFor(s); setShiftDetail(null); if (b) doAssign(s.id, b); else patch({ toast: { tone: 'warn', title: 'Nobody available.', body: 'No qualified, available volunteer for this shift.' } }) }}
+            onClear={() => { setShiftDetail(null); doAssign(s.id, null); patch({ selected: null }) }}
+            onSaveEdit={fields => { setShiftDetail(null); relocateShift(s.id, fields, undefined) }}
+            onDelete={() => { setShiftDetail(null); deleteSelectedShift(s.id) }}
+            onClose={() => setShiftDetail(null)} />
         )
       })()}
+
+      {/* "+ Add a shift" (a toolbar button now, not a pool panel): a one-off
+          shift no weekly pattern covers, in its own modal. */}
+      {addingShift && (
+        <ModalShell title="Add a shift" sub="A one-off shift no weekly pattern covers" onClose={() => setAddingShift(false)}>
+          <AddShift areas={areas} weekId={data.week.id}
+            onDone={() => { setAddingShift(false); load() }} onCancel={() => setAddingShift(false)} />
+        </ModalShell>
+      )}
+
+      {/* A volunteer's availability and qualifications, opened from the People
+          rail. It lived in the pool; with the pool gone it is a modal. */}
+      {openPerson && (
+        <ModalShell title="Volunteer" onClose={() => setOpenPerson(null)}>
+          <PersonPanel memberId={openPerson} onClose={() => setOpenPerson(null)} onSaved={load} />
+        </ModalShell>
+      )}
 
       {/* People rail: add a volunteer from the club member list. */}
       {addVolOpen && (
