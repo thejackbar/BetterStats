@@ -32,6 +32,19 @@ function weekDates(weekStartISO) {
 }
 const DEFAULT_CAP = 3
 
+// Week paging. A week_start is a Monday as 'YYYY-MM-DD'; step it a week either
+// way, and work out the Monday of the current week — all in local time, the way
+// weekDates already reads the string, so the pills and the grid agree on a day.
+function addDaysISO(iso, n) {
+  const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + n)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+function thisMondayISO() {
+  const d = new Date(); d.setHours(0, 0, 0, 0)
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7))   // getDay(): 0=Sun → shift so Mon is 0
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 // Client mirror of services/roster.check_assignment. The role/qualification
 // requirement is the SHIFT's own now (its role, and the qualification that
 // role's area-pairing gates on), not the area's.
@@ -1000,6 +1013,27 @@ export default function Roster({ st, patch, narrow }) {
       <div style={HEAD_SIDE}>
         <h1 style={{ fontWeight: 700, fontSize: 19, margin: 0, letterSpacing: '-0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Roster</h1>
         <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faint, marginTop: 2 }}>{data?.week ? 'WEEK OF ' + weekDates(data.week.week_start)[0].toUpperCase() + (data.week.status === 'published' ? ' · PUBLISHED' : (data.week.status === 'confirmed' ? ' · CONFIRMED' : '')) : 'THIS WEEK'}</div>
+        {/* Page between weeks. `st.rosterWeek` is the week_start the load effect
+            reads, so a pill just sets it. "This week" is highlighted (and does
+            nothing) while it is the one on screen. */}
+        {data?.week && (() => {
+          const cur = data.week.week_start
+          const onThisWeek = !st.rosterWeek || cur === thisMondayISO()
+          const goWeek = (iso) => patch({ rosterWeek: iso, selected: null })
+          const pill = (active) => ({
+            fontFamily: MONO, fontSize: 10, letterSpacing: '0.04em', padding: '4px 9px', borderRadius: 6, cursor: 'pointer',
+            border: `1px solid ${active ? 'transparent' : C.hair2}`,
+            background: active ? 'color-mix(in srgb, var(--pb-accent) 16%, transparent)' : 'transparent',
+            color: active ? C.accent : C.dim,
+          })
+          return (
+            <div style={{ display: 'flex', gap: 5, marginTop: 6 }}>
+              <button data-testid="week-prior" onClick={() => goWeek(addDaysISO(cur, -7))} title="Previous week" style={pill(false)}>‹ Prior</button>
+              <button data-testid="week-this" onClick={() => { if (!onThisWeek) goWeek(thisMondayISO()) }} title="This week" style={pill(onThisWeek)}>This week</button>
+              <button data-testid="week-next" onClick={() => goWeek(addDaysISO(cur, 7))} title="Next week" style={pill(false)}>Next ›</button>
+            </div>
+          )
+        })()}
       </div>
       {children}
       {/* The search sits on its own line under the heading, the place every

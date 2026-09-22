@@ -78,7 +78,12 @@ const routes = (page) => page.route('**/api/**', async (route) => {
   if (/\/roster\/shifts\/[^/]+/.test(url) && method === 'PATCH') { calls.push({ method, url, body }); return json({ ok: true }) }
   if (/\/roster\/shifts\/[^/]+/.test(url) && method === 'DELETE') { calls.push({ method, url, body }); return json({ deleted: true }) }
   if (/\/roster\/shifts(\?|$)/.test(url) && method === 'POST') { calls.push({ method, url, body }); return json({ id: 'new-shift-1' }) }
-  if (/\/roster\/week/.test(url)) return json(WEEK)
+  if (/\/roster\/week/.test(url)) {
+    // Honour the requested week_start so the paging pills read realistically.
+    const ws = new URL(url).searchParams.get('week_start') || '2026-09-21'
+    calls.push({ method: 'GET', url, weekStart: ws })
+    return json({ ...WEEK, week: { ...WEEK.week, week_start: ws } })
+  }
   if (/\/roster\/areas(\?|$)/.test(url)) return json({ areas: [MATCH_DAY, BAR] })
   if (/\/roster\/hours/.test(url)) return json({ rows: [], totals: {} })
   if (/\/roster\/shortages/.test(url)) return json({ roles: [], no_role_required: 0 })
@@ -192,6 +197,22 @@ const run = async () => {
   await tab('People')
   const poolStillFill = /BEST FIT FOR THIS SHIFT/.test(await textOf('[data-testid="roster-pool"]'))
   check('switching People⇄Areas keeps the selected shift (fill panel persists)', poolStillFill)
+
+  // ── Week paging pills ─────────────────────────────────────────────────────
+  const weekFetch = () => [...calls].reverse().find(x => x.weekStart)
+  check('week paging pills are shown', await seen('[data-testid="week-prior"]') && await seen('[data-testid="week-this"]') && await seen('[data-testid="week-next"]'))
+  calls.length = 0
+  await press('[data-testid="week-prior"]'); await page.waitForTimeout(300)
+  check('Prior loads the previous week', weekFetch()?.weekStart === '2026-09-14', weekFetch()?.weekStart)
+  calls.length = 0
+  await press('[data-testid="week-next"]'); await page.waitForTimeout(300)   // 14th → 21st
+  check('Next pages forward a week', weekFetch()?.weekStart === '2026-09-21', weekFetch()?.weekStart)
+  calls.length = 0
+  await press('[data-testid="week-next"]'); await page.waitForTimeout(300)   // 21st → 28th
+  check('Next again reaches the following week', weekFetch()?.weekStart === '2026-09-28', weekFetch()?.weekStart)
+  calls.length = 0
+  await press('[data-testid="week-this"]'); await page.waitForTimeout(300)   // back to this Monday
+  check('This week returns to the current week (this Monday)', weekFetch()?.weekStart === '2026-09-21', weekFetch()?.weekStart)
 
   check('no page errors across the run', errors.length === 0, errors.slice(0, 3).join(' | '))
   await page.close()
