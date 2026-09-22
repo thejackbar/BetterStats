@@ -752,9 +752,14 @@ function AddVolunteerModal({ roles, qualTypes, canQuals, onAdd, onClose }) {
   const [roleIds, setRoleIds] = useState([])
   const [days, setDays] = useState([])
   const [qualIds, setQualIds] = useState([])
+  const [more, setMore] = useState(false)   // the club has more members than shown
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const seq = useRef(0)
+  // A big club has hundreds of members, so the list is capped and the search is
+  // the way to the rest — the same trade the volunteer pool makes. The note
+  // below says so, so a first page of A-surnames doesn't read as the whole club.
+  const LIMIT = 50
 
   // Debounced member search. A stale response is dropped (the sequence guard),
   // so a slow search for "sm" never lands on top of the results for "smith".
@@ -766,9 +771,9 @@ function AddVolunteerModal({ roles, qualTypes, canQuals, onAdd, onClose }) {
     setSearching(true)
     const t = setTimeout(async () => {
       try {
-        const r = await api.volunteerSearchMembers(term || undefined, 30)
-        if (seq.current === mine) setResults(r.members || [])
-      } catch { if (seq.current === mine) setResults([]) }
+        const r = await api.volunteerSearchMembers(term || undefined, LIMIT)
+        if (seq.current === mine) { setResults(r.members || []); setMore(!!r.more) }
+      } catch { if (seq.current === mine) { setResults([]); setMore(false) } }
       finally { if (seq.current === mine) setSearching(false) }
     }, 220)
     return () => clearTimeout(t)
@@ -805,6 +810,15 @@ function AddVolunteerModal({ roles, qualTypes, canQuals, onAdd, onClose }) {
               </button>
             ))}
           </div>
+          {/* The list is capped, so a first page of A-surnames is not the whole
+              club. Say so, and point at the search — the way to everyone else. */}
+          {more && !searching && (
+            <div data-testid="add-vol-more" style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, letterSpacing: '0.04em', padding: '8px 2px 2px', lineHeight: 1.5 }}>
+              {q.trim()
+                ? `Showing the first ${results.length} matches — keep typing to narrow.`
+                : `Showing the first ${results.length} members — search by name to find anyone else.`}
+            </div>
+          )}
         </div>
       ) : (
         <div style={{ display: 'grid', gap: 12 }}>
@@ -911,7 +925,13 @@ export default function Roster({ st, patch, narrow }) {
     .then(res => { setData(res); setShifts(res.week.shifts || []) })
     .catch(e => setErr((e?.status ? `HTTP ${e.status} · ` : '') + String(e?.message || e)))
   useEffect(() => { load() }, [st.rosterWeek])
-  useEffect(() => { api.raRoles({ committee: false }).then(r => setAllRoles(r.roles || [])).catch(() => {}) }, [])
+  // Roles are shown as pickers (add a volunteer, add a role), so they read by
+  // NAME alphabetically rather than in the catalogue's own sort order.
+  useEffect(() => {
+    api.raRoles({ committee: false })
+      .then(r => setAllRoles((r.roles || []).slice().sort((a, b) => (a.title || '').toLowerCase().localeCompare((b.title || '').toLowerCase()))))
+      .catch(() => {})
+  }, [])
   useEffect(() => { if (canQuals) api.qualListTypes(false).then(r => setQualTypes(r.types || [])).catch(() => {}) }, [canQuals])
 
   const view = st.view

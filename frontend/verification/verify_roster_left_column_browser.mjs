@@ -84,7 +84,9 @@ const routes = (page, user) => page.route('**/api/**', async (route) => {
   if (/\/volunteers\/members(\?|$)/.test(url) && method === 'GET') {
     const u = new URL(url); const q = (u.searchParams.get('q') || '').toLowerCase()
     const members = q ? MEMBERS.filter(m => m.full_name.toLowerCase().includes(q) || (m.email || '').toLowerCase().includes(q)) : MEMBERS
-    return json({ members, more: false })
+    // Unfiltered, report "there are more" — a big club is capped and reached via
+    // the search; a query narrows to the exact matches with nothing beyond them.
+    return json({ members, more: !q })
   }
   if (/\/volunteers\/profiles(\?|$)/.test(url) && method === 'POST') { calls.push({ method, url, body }); return json({ member_id: body?.member_id, role_ids: body?.role_ids || [] }) }
   if (/\/qualifications\/members\/qualification(\?|$)/.test(url) && method === 'POST') { calls.push({ method, url, body }); return json({ id: 'newq' }) }
@@ -192,13 +194,24 @@ const run = async () => {
     check('the launcher opens a member-search modal', await seen('[data-testid="add-vol-search"]'))
     check('the modal lists a club member to add (a non-volunteer)', await seen('[data-testid="add-vol-member-m9"]'))
     check('the modal also lists an existing volunteer', await seen('[data-testid="add-vol-member-m1"]'))
+    // A capped list says so and points at the search, rather than reading as
+    // the whole club.
+    const moreNote = await textOf('[data-testid="add-vol-more"]')
+    check('a capped member list says so and points at the search', /search/i.test(moreNote), moreNote)
     // Search narrows.
     await page.fill('[data-testid="add-vol-search"]', 'nina')
     await page.waitForTimeout(400)
     check('searching narrows the member list', await seen('[data-testid="add-vol-member-m9"]') && !(await seen('[data-testid="add-vol-member-m1"]')))
+    check('the cap note clears once the search has narrowed to the matches', !(await seen('[data-testid="add-vol-more"]')))
     // Pick the new member.
     await press('[data-testid="add-vol-member-m9"]')
     check('picking a member shows the role picker', await seen('[data-testid="add-vol-role-r-ump"]'))
+    // Roles read alphabetically by name (the stub feeds them Umpire, Scorer,
+    // Groundskeeper — out of order on purpose).
+    const roleOrder = await page.evaluate(() =>
+      [...document.querySelectorAll('[data-testid^="add-vol-role-"]')].map(b => (b.textContent || '').trim()))
+    const sortedRoles = [...roleOrder].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))
+    check('the role picker is in alphabetical order', JSON.stringify(roleOrder) === JSON.stringify(sortedRoles), JSON.stringify(roleOrder))
     check('picking a member shows the availability picker', await seen('[data-testid="add-vol-day-5"]'))
     // A club_admin holds MANAGE_QUALIFICATIONS → the quals section is offered.
     check('the qualifications section shows for a club admin', await seen('[data-testid="add-vol-qual-q-acc"]'))
