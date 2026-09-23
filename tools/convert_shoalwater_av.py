@@ -57,6 +57,7 @@ FILE_LEN = HEADER_LEN + PLAYER_N * PLAYER_REC + PSTATS_N * PSTATS_REC \
     + FIXTURE_N * FIXTURE_REC + MATCH_N * MATCH_REC          # 549,871
 
 # within a match record
+M_TYPE = 8                             # the competition's match type - see MATCH_TYPES
 M_ROUND, M_ROUND_LEN = 10, 20
 M_GROUND_IDX, M_GROUND, M_GROUND_LEN = 30, 32, 30
 M_RESULT = 496                         # the club's OWN recorded result - see RESULT_LABELS
@@ -227,6 +228,79 @@ CAUGHT_BEHIND_CODES = frozenset({14, 37})
 # scoreline alone says none of that. The 11 matches where the two disagree are
 # reported by `verify` rather than quietly resolved either way.
 RESULT_LABELS = {0: "Won", 1: "Lost", 2: "Drawn", 3: "Tied", 4: "Abandoned"}
+
+# ── the grade a team plays in ────────────────────────────────────────────────
+#
+# THE NAMES ARE NOT IN THE FILE. A fixture record carries a team INDEX and
+# nothing else; CSFW keeps the team list in an installation-level file that a
+# club's data export does not include. Grep the whole archive for "grade" and
+# it is not there. So this map is DERIVED rather than read, and it was derived
+# by measurement rather than by taking the club's word for it: every fixture in
+# the club's pre-rename export was matched to the same fixture in its
+# post-rename one on (date, opponent), and all 389 agree.
+#
+#   old 1 (1st XI) -> 18 on 208 matches      old 3 (3rd XI) -> 20 on 168
+#   old 2 (2nd XI) -> 19 on 257              old 3 (3rd XI) -> 22 on  83
+#                                            old 4 (4th XI) -> 21 on  58
+#                                            old 4 (4th XI) -> 23 on  57
+#
+# THE SPLIT OF OLD 3 AND OLD 4 IS THE WHOLE REASON 22 AND 23 EXIST, and the
+# seasons carrying them are exactly the ones the club named: 22 appears in
+# 1995/96, 2001/02, 2002/03 and 2003/04 and nowhere else, and 23 in the last
+# three of those. The club's own account is "1995/96, 2001/02 & 2002/03 we had
+# two C grade teams in the one grade, 2003/04 Peel split C grade into 2
+# divisions" - so those four seasons have no D grade at all, and the rest have
+# no C1 or C2. 18-21 then read in CSFW's own list order (A, B, C, D added
+# first) with 22 and 23 appended after, which is the same shape the added
+# match types below take.
+GRADE_NAMES = {18: "A grade", 19: "B grade", 20: "C grade", 21: "D grade",
+               22: "C1 grade", 23: "C2 grade"}
+
+# THE PRE-RENAME NUMBERING, which survives on one file. 2007/08 was started in
+# CSFW after the export the club re-graded, so its single match still carries
+# team 1. Mapped for that one index only, on two independent signals: old 1 was
+# the 1st XI, and 9 of the 12 who played it were A grade the season before.
+# Every other legacy index is left UNMAPPED on purpose - old 3 and old 4 mean
+# different grades in different seasons (see above), so a blanket map would be
+# confidently wrong rather than merely silent.
+LEGACY_GRADE_NAMES = {1: "A grade"}
+
+# ── match type (match record byte 8) ─────────────────────────────────────────
+#
+# Found by diffing the club's pre- and post-rename exports: the ONLY byte that
+# moved anywhere in the fixture record was the team index, and almost nothing
+# moved in the match record - so the club RENAMED its match types rather than
+# re-tagging its matches, and the per-match index is untouched. Byte 8 is the
+# only small enum in the match header besides the result.
+#
+# Every value is corroborated against something outside the file:
+#   1  Two day     30 records, A GRADE ONLY, and only in 1993/94 and 1994/95 -
+#                  which is exactly the club's "1993/94 & 1994/95 A grade
+#                  played proper two day fixtures (two weekends)". Their total
+#                  overs run 142-173 against 68-90 for a one-day game the same
+#                  season.
+#   4  One day     the bulk of every season.
+#   6  Semi Final  1-3 a season; one carries the literal round text "Semi Final".
+#   7  Grand Final 1-2 a season; one carries the literal text "Grand Final".
+#   8/9            two matches each, 2002/03 only, which is where the club's
+#                  "I have also added: Qualifying Final, Preliminary Final"
+#                  lands. The order follows CSFW's own append order, the same
+#                  way 22 and 23 follow 18-21. NOT independently corroborated -
+#                  nothing in the file distinguishes the two, so if the club
+#                  reads them the other way round it is a one-line swap.
+MATCH_TYPES = {1: "Two day", 4: "One day", 6: "Semi Final",
+               7: "Grand Final", 8: "Qualifying Final", 9: "Preliminary Final"}
+
+# The types that are a final. BetterStats stores only a BOOLEAN `is_final`, so
+# which final it was survives in the workbook and not in the import.
+FINALS_TYPES = frozenset({6, 7, 8, 9})
+
+# The two types that state a FORMAT, in the vocabulary BetterStats parses:
+# `grade_labels.format_from_match_type` reads "Two Day"/"One Day" (the same
+# strings Cricket Australia's own matchType uses) and returns None for anything
+# it cannot place - so a finals name must NEVER be written here, or the app's
+# Match type filter leaves those games out entirely.
+FORMAT_BY_TYPE = {1: "Two Day", 4: "One Day"}
 
 # The SAME results in BetterStats' own stored vocabulary, which is uppercase
 # (`WIN`/`LOSS`/`DRAW`/`TIE` - every reader in the app compares against those
@@ -469,6 +543,7 @@ def parse_file(path: Path) -> dict:
         # Keeping them is what makes the total 914, which is the club's own.
         matches.append({
             **fixtures[idx],
+            "type_code": rec[M_TYPE],
             "round": text(rec, M_ROUND, M_ROUND_LEN),
             "ground": text(rec, M_GROUND, M_GROUND_LEN),
             "ground_index": opt(i16(rec, M_GROUND_IDX)),
@@ -487,7 +562,54 @@ def parse_file(path: Path) -> dict:
 
 
 def grade_label(team: int) -> str:
-    return f"Grade {team}" if team and team > 0 else "Grade (unknown)"
+    """The club's own name for a team index, or a LOUD label when unmapped.
+
+    An index nobody has mapped reads `Grade #7 (unmapped)` rather than a
+    plausible-looking guess, so it is obvious on the sheet and in the import
+    instead of quietly filing a season under a grade it never played in.
+    """
+    if not team or team < 0:
+        return "Grade (unknown)"
+    if team in GRADE_NAMES:
+        return GRADE_NAMES[team]
+    if team in LEGACY_GRADE_NAMES:
+        return LEGACY_GRADE_NAMES[team]
+    return f"Grade #{team} (unmapped)"
+
+
+def match_type_label(code) -> str:
+    if code is None:
+        return ""
+    return MATCH_TYPES.get(code, f"type {code}")
+
+
+def match_format_for(type_code, season_two_day_teams, team, total_overs,
+                     season_one_day_max) -> str:
+    """The format to import for one match, in BetterStats' own vocabulary.
+
+    A type that STATES the format answers for itself. A finals type does not -
+    the competition records which final it was, not how long it ran - so it is
+    settled by measurement rather than by a guess: a final is two-day only
+    where its own grade actually played two-day fixtures that season AND its
+    own total overs exceed what a one-day game reached that season. Everywhere
+    the club played nothing but one-day cricket the first test fails and the
+    rule never fires, which is every season from 1995/96 on.
+
+    Measured on the four finals it can reach: 1992/93's grand final at 70.3
+    overs (one-day range 72.2-81.7) reads One Day, 1993/94's A grade semi at
+    125.3 (one-day 68-90, two-day 142-173) reads Two Day, and the two B grade
+    semis at 88.0 and 86.5 read One Day. That matches the club's own rule -
+    only A grade, only those two seasons - rather than resting on a threshold
+    invented here.
+    """
+    if type_code in FORMAT_BY_TYPE:
+        return FORMAT_BY_TYPE[type_code]
+    if type_code in FINALS_TYPES:
+        if (team in season_two_day_teams and season_one_day_max
+                and total_overs > season_one_day_max):
+            return "Two Day"
+        return "One Day"
+    return ""
 
 
 def group_legs(season: dict) -> list:
@@ -533,6 +655,29 @@ def match_legs(legs: list) -> list:
     return scored or legs[:1]
 
 
+def total_overs(legs: list) -> float:
+    """Overs bowled across a whole match, both sides, every leg."""
+    return sum(overs_to_balls(l["us"]["overs"] or 0)
+               + overs_to_balls(l["them"]["overs"] or 0) for l in legs) / 6.0
+
+
+def season_format_context(season: dict) -> tuple:
+    """(teams that played two-day fixtures, the longest one-day match) for a season.
+
+    Both are read off the season's OWN matches rather than being configured, so
+    a club whose two-day era sits in different years needs no edit here.
+    """
+    two_day_teams, one_day_overs = set(), []
+    for mid, date, team, opponent, all_legs in group_legs(season):
+        legs = match_legs(all_legs)
+        code = legs[0].get("type_code")
+        if code == 1:
+            two_day_teams.add(team)
+        elif code == 4:
+            one_day_overs.append(total_overs(legs))
+    return two_day_teams, (max(one_day_overs) if one_day_overs else 0.0)
+
+
 def build_rows(seasons: list, absent_is_out: bool = True) -> dict:
     """Flatten every season into the sheets, collapsing two-day legs into one match."""
     matches, batting, bowling, fielding, fow_rows, votes, players = [], [], [], [], [], [], []
@@ -575,6 +720,8 @@ def build_rows(seasons: list, absent_is_out: bool = True) -> dict:
                     "Their byes": l["them"]["byes"], "Their leg byes": l["them"]["leg_byes"],
                     "Their wides": l["them"]["wides"], "Their no balls": l["them"]["no_balls"],
                     "Their penalty": l["them"]["penalty"], "Their extras": l["them"]["extras"],
+                    "Match type": match_type_label(l.get("type_code")),
+                    "Is final": "Y" if l.get("type_code") in FINALS_TYPES else "",
                     "Match result": result if l is legs[0] else "",
                     "Named side (no scorecard)": squad if l is legs[0] else "",
                     "Source file": s["source"], "Record index": l["index"],
@@ -727,6 +874,145 @@ def build_season_stats(seasons: list, by_grade: bool = True,
     return rows
 
 
+# ── a season the club holds no scorebook for ─────────────────────────────────
+
+# UNKNOWN IS A VALUE IN THESE FILES, WRITTEN OUT. CSFW prints "???" where it
+# was never given a figure, and a blank where the figure is genuinely nothing.
+# Both must stay blank on import rather than becoming a zero - a 0 reads as a
+# recorded nought, which is the rule this whole converter keeps.
+_UNKNOWN = {"???", "?", "-", "n/a", "na"}
+
+# Column headings, matched by NAME rather than by position. The three exports
+# have different widths (17, 23 and 11 columns) and a reader keyed on position
+# would file a bowling "Runs" as a wicket count the first time CSFW's report
+# layout moves.
+_C2_BAT = {"mch": "games", "inn": "innings", "n o": "not_outs", "runs": "runs",
+           "h s": "hs", "100s": "hundreds", "50s": "fifties",
+           "6s": "sixes", "4s": "fours"}
+_C2_BOWL = {"mch": "games", "ov": "overs", "mdn": "maidens", "wkts": "wickets",
+            "runs": "conceded"}
+_C2_FIELD = {"mch": "games", "ct": "catches", "wk ct": "catches_wk"}
+
+
+def _c2_num(value):
+    """A figure from a CSFW text report, or None where it says nothing."""
+    v = (value or "").strip()
+    if not v or v.lower() in _UNKNOWN:
+        return None
+    v = v.rstrip("*")
+    try:
+        return int(v)
+    except ValueError:
+        try:
+            return float(v)
+        except ValueError:
+            return None
+
+
+def _read_c2_report(path: Path, wanted: dict) -> dict:
+    """One CSFW text report, keyed by player name in this converter's own shape.
+
+    The header row is found rather than assumed to be line 4: these exports
+    carry a title block of one to four lines depending on the report.
+    """
+    out = {}
+    # A folder without these reports is the ordinary case - they exist because
+    # ONE club lost ONE scorebook. Missing is not an error.
+    if not path.exists():
+        return out
+    lines = path.read_text(encoding="utf-8-sig").splitlines()
+    head = None
+    for line in lines:
+        cells = [c.strip().lower() for c in line.split("\t")]
+        if "club" in cells and "mch" in cells:
+            head = cells
+            continue
+        if head is None:
+            continue
+        cells = line.split("\t")
+        if len(cells) < 4 or not cells[1].strip():
+            continue
+        name = player_display(cells[1].strip(), cells[0].strip(), cells[2].strip())
+        row = out.setdefault(name, {})
+        for i, key in enumerate(head):
+            if i < len(cells) and key in wanted:
+                raw = cells[i].strip()
+                row[wanted[key]] = _c2_num(raw)
+                # The raw text too: a high score carries its not-out star, and
+                # stripping it would turn 87* into a dismissed 87.
+                row[wanted[key] + "_text"] = "" if raw.lower() in _UNKNOWN else raw
+    return out
+
+
+def build_c2_season_rows(folder: Path, season: str, grade: str) -> list:
+    """The 1995/96 C2 side, from the club's three CSFW text reports.
+
+    THE CLUB HOLDS NO SCOREBOOK FOR THIS SIDE, so there is nothing to write a
+    scorecard from and these rows go into the SEASON TOTALS file only. They can
+    never appear in `manual_games_scorecards.csv`: a season total is not a
+    match, and inventing eighteen matches to carry it would put fixtures in the
+    club's records that nobody can check.
+
+    THE BOWLING "Ov" COLUMN IS A PLACEHOLDER AND IS DROPPED. Every one of the
+    nineteen players reads exactly 10 overs, which is not a figure - it is what
+    CSFW prints when it was never given one. Wickets and runs conceded vary
+    properly and are kept, so a bowling average survives and an economy rate
+    correctly does not.
+    """
+    bat = _read_c2_report(folder / "9596 c2 batting.txt", _C2_BAT)
+    bowl = _read_c2_report(folder / "9596 c2 bowling.txt", _C2_BOWL)
+    field = _read_c2_report(folder / "9596 c2 catches.txt", _C2_FIELD)
+    if not bat:
+        return []
+
+    placeholder_overs = len({b.get("overs") for b in bowl.values()}) == 1
+
+    rows = []
+    for name in sorted(set(bat) | set(bowl) | set(field)):
+        b = bat.get(name, {})
+        w = bowl.get(name, {})
+        f = field.get(name, {})
+        inns, nos = b.get("innings"), b.get("not_outs")
+        runs = b.get("runs")
+        outs = (inns - nos) if inns is not None and nos is not None else None
+        wkts, conc = w.get("wickets"), w.get("conceded")
+        # THE REPORT LISTS EVERY SQUAD MEMBER, BOWLER OR NOT. A player reading
+        # 0 wickets for 0 runs never turned an arm over, and importing that as
+        # a figure gives them a bowling record they do not have - the same
+        # "a zero reads as a recorded nought" rule this converter keeps
+        # everywhere else. Nothing is lost: every zero in this report is a
+        # 0-and-0, so no real spell is blanked by it.
+        if not wkts and not conc:
+            wkts = conc = None
+        rows.append({
+            "Player": name, "Season": season, "Grade": grade,
+            "Games": b.get("games") or w.get("games") or f.get("games") or "",
+            "Innings": inns if inns is not None else "",
+            "Runs": runs if runs is not None else "",
+            "NO": nos if nos is not None else "",
+            "HS": b.get("hs_text") or "",
+            "Avg": round(runs / outs, 2) if runs is not None and outs else "",
+            # "???" in the report, so blank here. Never 0.
+            "4s": b.get("fours") if b.get("fours") is not None else "",
+            "6s": b.get("sixes") if b.get("sixes") is not None else "",
+            "50s": b.get("fifties") if b.get("fifties") is not None else "",
+            "100s": b.get("hundreds") if b.get("hundreds") is not None else "",
+            "Ducks": "",                       # the report does not carry it
+            "Bowling Innings": "",             # nor how many times they bowled
+            "Wickets": wkts if wkts is not None else "",
+            "Overs": "" if placeholder_overs else (w.get("overs") or ""),
+            "Maidens": w.get("maidens") if w.get("maidens") is not None else "",
+            "Runs Conceded": conc if conc is not None else "",
+            "Bowl Avg": round(conc / wkts, 2) if wkts and conc is not None else "",
+            "Econ": "",                        # no overs to divide by
+            "5WI": "", "Wides": "", "No Balls": "", "Best": "",
+            "Catches": f.get("catches") if f.get("catches") is not None else "",
+            "Catches WK": f.get("catches_wk") if f.get("catches_wk") is not None else "",
+            "Stumpings": "", "Votes": "",
+        })
+    return rows
+
+
 FIX_REC = 34            # sibling fixture file: slot, date, team, name
 MCH_REC = 1756          # sibling match file: 604-byte header then 12 blocks of 96
 MCH_GROUND = 24
@@ -762,8 +1048,15 @@ def cross_check(source: Path, seasons: list) -> list:
                     continue
                 n += 1
                 m = mine[slot]
-                if (EPOCH + datetime.timedelta(days=serial), i16(buf, off + 10), name) == \
-                        (m["date"], m["team"], m["name"]):
+                # DATE AND OPPONENT ONLY, because the team NUMBER is not
+                # comparable across two exports. These siblings are the club's
+                # PREVIOUS export and still carry the pre-rename numbering
+                # (1-4); the .AV carries the new one (18-23). Comparing them
+                # would report 0 of 34 agreeing on a season where every fixture
+                # in fact matches, which reads as the data being broken. It
+                # would also be circular: the only thing that could translate
+                # them is the very map this conversion derives.
+                if (EPOCH + datetime.timedelta(days=serial), name) == (m["date"], m["name"]):
                     ok += 1
             row["Fixtures checked"], row["Fixtures agreeing"] = n, ok
         if mch_p.exists():
@@ -910,8 +1203,16 @@ def build_game_rows(seasons: list, club: str,
     """
     rows = []
     for s in seasons:
+        two_day_teams, one_day_max = season_format_context(s)
         for mid, date, team, opponent, all_legs in group_legs(s):
             played = match_legs(all_legs)
+            # The competition's own match type, which the file has carried all
+            # along and an earlier cut of this converter never read. A finals
+            # type says WHICH final rather than how long it ran, so the format
+            # is settled per match - see `match_format_for`.
+            type_code = played[0].get("type_code")
+            fmt = match_format_for(type_code, two_day_teams, team,
+                                   total_overs(played), one_day_max)
             # The club's own result, in the app's own vocabulary. An abandoned
             # match comes back blank: it was played and it counts as a match,
             # but it is not a win, a loss or a draw.
@@ -945,7 +1246,8 @@ def build_game_rows(seasons: list, club: str,
                         "played_at": date.isoformat() if date else "",
                         "opposition": opponent, "venue": l["ground"],
                         "season_name": s["season"], "grade_name": grade_label(team),
-                        "is_final": "", "match_format": "",
+                        "is_final": "true" if type_code in FINALS_TYPES else "",
+                        "match_format": fmt,
                         "home_team": "", "away_team": "",
                         "winning_team": winner, "result": result,
                         "player_name": name,
@@ -1000,6 +1302,12 @@ def build_game_rows(seasons: list, club: str,
                     "opposition": opponent, "venue": played[0]["ground"],
                     "season_name": s["season"], "grade_name": grade_label(team),
                     "winning_team": winner, "result": result,
+                    # A match nobody was named for still has a type, and a
+                    # forfeited final is still a final. The first cut left both
+                    # blank here because this branch builds its row from an
+                    # empty template rather than from the one above.
+                    "is_final": "true" if type_code in FINALS_TYPES else "",
+                    "match_format": fmt,
                 })
                 rows.append(blank)
     return rows
@@ -1016,17 +1324,47 @@ NOTES = [
     ("Things worth knowing", ""),
     ("Overs", "Cricket notation. 93.3 is 93 overs and 3 balls, so season totals are "
               "summed as balls and written back the same way."),
-    ("Grade", "Taken from the team number the fixture record carries. The files hold no "
-              "grade NAME, so these are 'Grade 1'..'Grade 4' and can be renamed on import. "
-              "1992 stores 2 for every fixture, which may be a default rather than a real "
-              "team number."),
-    ("Two-day matches", "Seasons up to 1997 store a match as two records, 'Opponent 1' and "
-                        "'Opponent 2'. They share a date and a team, so they are one match "
-                        "here, with the Leg column saying which record a row came from. "
-                        "Games played counts the match once. In 231 of them the second day "
-                        "names the side again and records no figures - the game was settled "
-                        "on day one - so that day is left out rather than imported as a "
-                        "second innings nobody batted in."),
+    ("Grade", "A, B, C, C1, C2 and D, as the club renamed them in CSFW. The files hold "
+              "no grade NAME - a fixture carries a team NUMBER and CSFW keeps the list "
+              "somewhere a data export does not reach - so the mapping was worked out by "
+              "matching all 389 fixtures in the club's pre-rename export to the same "
+              "fixtures in its post-rename one, on date and opponent. Each of the six "
+              "resolves cleanly. C1 and C2 appear only in 1995/96, 2001/02, 2002/03 and "
+              "2003/04, which is exactly the seasons the club ran two C grade sides, and "
+              "those four seasons have no D grade at all."),
+    ("Match type", "Two day, One day, Semi Final, Grand Final, Qualifying Final and "
+                   "Preliminary Final, read from the match record. The two day games are "
+                   "A grade in 1993/94 and 1994/95 only - the club's own account - and "
+                   "their 142-173 total overs against 68-90 for a one day game the same "
+                   "season confirms it. A finals type says WHICH final, not how long it "
+                   "ran, so the format column for those four early finals is settled on "
+                   "overs: 1993/94's A grade semi at 125.3 reads Two Day, the rest read "
+                   "One Day. Every season from 1995/96 is one day cricket throughout."),
+    ("Two innings a side", "Seasons up to 1997 store EVERY match as two records, 'Opponent "
+                        "1' and 'Opponent 2' - not just the two day ones. They share a "
+                        "date and a team, so they are one match here, with the Leg column "
+                        "saying which record a row came from, and games played counts the "
+                        "match once. That is the club's 'one day games but with two day "
+                        "rules' era, where a side dismissed cheaply could be sent back in. "
+                        "In 231 of them the second record names the side again and records "
+                        "no figures - the game was settled first time - so that record is "
+                        "left out rather than imported as an innings nobody batted in."),
+    ("1995/96 C2", "The club holds no scorebook for its second C grade side that season, so "
+                   "there is nothing to build scorecards from. Its 19 players are on their "
+                   "own sheet here and in the season totals file, read from the club's "
+                   "three CSFW text reports. They are NOT in the match file: a season total "
+                   "is not a match, and inventing eighteen fixtures to carry it would put "
+                   "games in the club's records nobody can check. The bowling report's "
+                   "overs column reads exactly 10 for all nineteen, which is a placeholder "
+                   "rather than a figure, so it is dropped - wickets and runs conceded are "
+                   "real and are kept, so a bowling average survives and an economy rate "
+                   "correctly does not."),
+    ("2007/08", "One match, 13 Oct 2007 against Warnbro/Carreba at Warnbro Rec, a full "
+                "scorecard. It sits outside the 1992/93-2006/07 range the club described, "
+                "and its fixture still carries the PRE-rename team number, so its grade is "
+                "read as A grade on two signals: old team 1 was the 1st XI, and 9 of the 12 "
+                "who played it were A grade the season before. Worth confirming before "
+                "importing, or delete its rows."),
     ("Matches with no scorecard", "17 matches carry a result and no figures: 10 won by "
                                   "forfeit, 3 drawn and 4 abandoned. They are matches the "
                                   "club played and counts, so they are here, and they are "
@@ -1094,8 +1432,12 @@ NOTES = [
                              "was named for is one row with the match filled in and the "
                              "player column empty, which is how the importer takes a game "
                              "with no scorecard under it."),
-    ("", "betterimport_season_stats.csv is the simpler alternative: season totals per "
-         "player, no match detail. Import ONE of the two, never both - the same runs "
+    ("", "betterimport_c2_1995-96.csv goes WITH it. Those 19 players are the one side "
+         "with no scorebook, so they are season totals and appear in no match file. "
+         "Importing it alongside the match file overlaps nothing."),
+    ("", "betterimport_season_stats.csv is the simpler alternative to BOTH of those: "
+         "season totals per player for every grade, C2 included, and no match detail. "
+         "Import either the two files above OR this one, never both - the same runs "
          "would be counted twice."),
     ("", ""),
     ("Checks run against the files' own arithmetic", ""),
@@ -1178,8 +1520,23 @@ def main() -> None:
     sheets["Data quality"] = squad_clashes(seasons)
     sheets["Cross-check"] = cross_check(args.source, seasons)
     checks = verify(seasons)
-    write_xlsx(sheets, checks, args.out / "match_detail.xlsx")
     stats = build_season_stats(seasons, absent_is_out=absent_is_out)
+    # The one side the club holds no scorebook for, from its own CSFW text
+    # reports. Season totals only - see `build_c2_season_rows`.
+    c2 = build_c2_season_rows(args.source, "1995/96", "C2 grade")
+    if c2:
+        sheets["C2 1995-96 (no scorebook)"] = c2
+        # ON ITS OWN AS WELL, and that is not a convenience. The match file and
+        # the season-totals file are alternatives - importing both counts every
+        # run twice - but C2 1995/96 exists in the season file ALONE, because
+        # there is no scorebook to make matches from. A club importing the
+        # match file would otherwise lose that side entirely, so it gets a file
+        # of its own that can be imported alongside without overlapping
+        # anything.
+        write_csv(c2, args.out / "betterimport_c2_1995-96.csv")
+        stats.extend(c2)
+        stats.sort(key=lambda x: (x["Season"], x.get("Grade", ""), x["Player"]))
+    write_xlsx(sheets, checks, args.out / "match_detail.xlsx")
     write_csv(stats, args.out / "betterimport_season_stats.csv")
     games = build_game_rows(seasons, seasons[0]["club"], absent_is_out)
     write_csv(games, args.out / "manual_games_scorecards.csv")
@@ -1188,7 +1545,8 @@ def main() -> None:
     print(f"{club}: {len(seasons)} seasons, {seasons[0]['season']} to {seasons[-1]['season']}")
     for name, rows in sheets.items():
         print(f"  {name:<16} {len(rows):>6} rows")
-    print(f"  season stats     {len(stats):>6} rows")
+    print(f"  season stats     {len(stats):>6} rows"
+          + (f"  (incl. {len(c2)} C2 1995/96 with no scorebook)" if c2 else ""))
     print(f"  game scorecards  {len(games):>6} rows")
     print()
     for label, ok, total in checks:

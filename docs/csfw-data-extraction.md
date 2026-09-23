@@ -424,11 +424,24 @@ carrying a date bug. Confirmed with the club afterwards. A transposed digit in
 a hand-typed list reads exactly like an extraction error, and the cheap way to
 tell them apart is the weekday.
 
-### A two-day match is two records
+### Two records is a STORAGE convention of the early files, not a two-day marker
 
 Seasons up to 1997 store a match as two fixture records named `"Opponent 1"`
 and `"Opponent 2"`, sharing a date and a team number. These are the two legs of
 one match, not two opponents and not the grade.
+
+**Every match in those seasons is stored that way, whatever its match type.**
+Measured across Shoalwater's archive: 1992/93 to 1997/98 have 17, 33, 52, 56,
+58 and 57 leg pairs and no unpaired matches at all, and from 1998/99 there are
+none. Reading the pairing as "this was a two-day fixture" would therefore call
+273 matches two-day when only 15 were.
+
+The club's own explanation is what it really is: *"1992/93 & 1995/96 season
+onwards all teams played one day games but with two-day rules, if a team was
+dismissed cheaply then the opposition could choose to put them in or bat
+again."* Two innings a side, one afternoon, two records. **The match type (byte
+8) is the only thing that says two-day**, and on this club it says so for 15
+matches, all A grade, all in 1993/94 and 1994/95.
 
 `split_leg()` strips the suffix **only where the sibling leg is actually
 present**, so an opponent whose real name genuinely ends in a digit is left
@@ -467,20 +480,118 @@ def match_legs(legs: list) -> list:
 of this rule is how the workbook and the import CSV start disagreeing about how
 many games a player played.
 
-### Grade comes from the team number, and has no name
+### The grade and the match type are NUMBERS, and their names are in neither file
 
-The fixture record carries a team number, not a grade name. The format holds no
-grade names at all, so grades come out as `"Grade 1"` through `"Grade 4"` and
-can be renamed at import time.
+A fixture record carries a team NUMBER; a match record carries a match-type
+NUMBER. **Neither name is anywhere in a club's data export.** CSFW keeps both
+lists in an installation-level file that `.AV` / `.DAT` / `.FIX` / `.MCH` /
+`.PLR` / `.000` do not include. Grep a whole archive for "grade" and it is not
+there. So both maps are DERIVED, and a converter must never present one as
+having been read.
 
-**1992 stores 2 for every fixture**, which may be a program default rather than
-a real team number. Worth flagging to the club rather than presenting as fact.
+**Ask the club for its own list, then hold it to the data.** Shoalwater gave
+theirs (1st XI -> A grade, 2nd XI -> B grade, 3rd XI -> C, C1 and C2, 4th XI ->
+D grade) and every part of it was checked before being used.
+
+### Deriving a renamed team map from two exports
+
+A club that re-grades its teams in CSFW gets NEW team numbers, and a second
+export is then the cheapest way to work out which is which: **match every
+fixture in the old export to the same fixture in the new one on (date,
+opponent), and read the team numbers off both.** Across Shoalwater's 389
+fixtures:
+
+```
+old 1 (1st XI) -> 18 on 208 matches      old 3 (3rd XI) -> 20 on 168
+old 2 (2nd XI) -> 19 on 257              old 3 (3rd XI) -> 22 on  83
+                                          old 4 (4th XI) -> 21 on  58
+                                          old 4 (4th XI) -> 23 on  57
+```
+
+**A split like old 3 into 20 and 22 is the interesting part, not noise.** The
+seasons carrying 22 are exactly 1995/96, 2001/02, 2002/03 and 2003/04, which is
+exactly the four the club named as having two C grade sides - so 22 and 23 are
+C1 and C2, those four seasons have no D grade at all, and the rest have no C1
+or C2. 18-21 then read in CSFW's own list order (A, B, C, D first) with 22 and
+23 appended after.
+
+**The old numbering can survive on a file the club never re-graded.**
+Shoalwater's 2007/08 was started after the export they re-graded and still
+carries team 1. Map a stray legacy index only where you can corroborate it, and
+NEVER as a blanket old-to-new table: old 3 and old 4 mean different grades in
+different seasons, so a blanket map would be confidently wrong rather than
+merely silent. An index nobody has mapped should read `Grade #7 (unmapped)`, so
+it is obvious on the sheet rather than filed under a plausible guess.
+
+### Match type is byte 8 of the match record
+
+Found by diffing a club's pre- and post-rename exports: the only byte that
+moved anywhere in the fixture record was the team index, and almost nothing
+moved in the match record - so the club RENAMED its match types rather than
+re-tagging its matches, and the per-match index was untouched. Byte 8 is the
+only small enum in the match header besides the result at 496.
+
+Shoalwater's values, each corroborated outside the file:
+
+| code | name | how it was confirmed |
+|---|---|---|
+| 1 | Two day | 30 records, **A grade only**, **1993/94 and 1994/95 only** - the club's own account. Their total overs run 142-173 against 68-90 for a one-day game the same season. |
+| 4 | One day | the bulk of every season |
+| 6 | Semi Final | 1-3 a season; one carries the literal round text "Semi Final" |
+| 7 | Grand Final | 1-2 a season; one carries the literal text "Grand Final" |
+| 8, 9 | Qualifying / Preliminary Final | two matches each, 2002/03 only, which is where the club's "I have also added" lands. Order follows CSFW's append order. **Not independently corroborated** - nothing in the file separates the two. |
+
+**A club's corrections show up here.** The pre-rename archive carried codes 10,
+11 and 12 on three 2002/03 matches and a B grade match tagged two-day; the
+post-rename one has neither. Re-running this comparison is a cheap way to see
+what a club actually fixed.
+
+### A finals type says WHICH final, not how long it ran
+
+So it must never be written to `match_format`.
+`grade_labels.format_from_match_type` reads "Two Day" / "One Day" (the strings
+Cricket Australia's own `matchType` uses) and returns None for anything else -
+so a "Grand Final" there makes the app's Match type filter leave those games
+out entirely. The finals designation belongs in `is_final`, and **BetterCricket
+stores only a boolean**, so which final it was survives in the workbook and not
+in the import.
+
+Where a finals match's own format is not stated, settle it by measurement
+rather than a guess: a final is two-day only where its own grade actually
+played two-day fixtures that season AND its own total overs exceed what a
+one-day game reached that season. On Shoalwater's four early finals that gives
+One Day at 70.3 overs, **Two Day at 125.3** (A grade, one-day range 68-90,
+two-day 142-173), and One Day at 88.0 and 86.5 - which is the club's own rule
+rather than a threshold invented in the converter.
 
 ### Blank is not zero
 
 Balls faced, batting strike rate, run outs, and the bowler or fielder credited
 with a wicket are **not in the format at all**. They are left blank, never
 zeroed. A zero would read as a recorded nought, which is a different claim.
+
+### A side the club has no scorebook for
+
+A club can hold season TOTALS for a side whose scorebook is lost - Shoalwater's
+1995/96 C2 grade, three CSFW text reports and nothing else. Those rows go into
+the season-totals file and **must never reach the match file**: a season total
+is not a match, and inventing eighteen fixtures to carry it would put games in
+the club's records nobody can check.
+
+**That breaks the import-one-file-or-the-other rule, so write a third file.**
+The match file and the season-totals file are normally alternatives (importing
+both counts every run twice) - but a side that exists only in the season
+totals would be lost entirely by a club importing the match file. Emitting
+those rows ON THEIR OWN as well lets them be imported alongside the match file
+with no overlap.
+
+**A column that reads the same for every player is a placeholder, not a
+figure.** All nineteen of Shoalwater's C2 players show exactly 10 overs, which
+is what CSFW prints when it was never given one. Dropped, so a bowling average
+still survives off the real wickets and runs and an economy rate correctly does
+not. **And a player reading 0 wickets for 0 runs never bowled** - the report
+lists every squad member whether or not they turned an arm over, so those are
+blanked too, per the blank-is-not-zero rule above.
 
 ### One person, two grades on one day
 
@@ -726,3 +837,37 @@ database, no configuration.
 
 Despite the file name it is not Shoalwater specific. The club name comes out of
 the file header.
+
+---
+
+## 11. Shoalwater Bay, second pass (Sep 2026)
+
+The club re-graded and re-typed its whole archive in CSFW and re-exported. What
+that changed, and what it taught:
+
+- **Every `.AV` file changed, and a sixteenth appeared.** 1992/93 to 2007/08.
+  The new 2007/08 holds one complete match and still carries the pre-rename
+  team numbering, which is the case the legacy-index rule above exists for.
+- **The club's own edits are measurable, and they improved the data.** Batting
+  runs reconciliation 90.0% -> 91.7%, bowlers' runs 80.2% -> 84.3%, bowlers'
+  wickets 99.9% -> 100%, and the four same-day grade clashes gone entirely -
+  which is the C1/C2 split doing its job, since those clashes were one person
+  appearing in two grades that were really two different sides.
+- **Three match-type codes disappeared.** The old archive carried 10, 11 and 12
+  on three 2002/03 matches and a B grade match tagged two-day; the new one has
+  neither. Diffing the two exports is a cheap way to see what a club fixed.
+- **A cross-check against a club's PREVIOUS export can go circular.** The
+  `.FIX` siblings still hold the old team numbers, so comparing the team
+  reported 0 of 34 agreeing on seasons where every fixture in fact matches -
+  which reads as broken data. It compares date and opponent now, which is the
+  fixture's real identity, and the team number is left out because the only
+  thing that could translate it is the map this conversion derives.
+- **Verification:** `tools/verify_shoalwater_conversion.py <folder>`, 30 checks
+  over the derived grade map, the match types, the format column (against the
+  app's own `format_from_match_type` rather than a retyped list), the club's
+  own 914-match count and the no-scorebook side. Run it with a control: against
+  the pre-rename archive 11 fail, naming the unmapped team indexes, the three
+  retired match-type codes and the B grade two-day match.
+- **A check that crashes on a missing file is not a control run**, hit again -
+  the C2 text reports do not exist in the older archive, so the reader returns
+  nothing rather than raising, and the suite reports the absence.
