@@ -33,7 +33,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import (
-    CommsContact, CommsList, CommsListMember, CrmDeal, CrmDealContact, CrmPerson,
+    CommsContact, CommsSegment, CommsSegmentMember, CrmDeal, CrmDealContact, CrmPerson,
     MarketingClub, MarketingClubContact, Organisation,
 )
 from app.services.marketing_org import get_outreach_org
@@ -203,10 +203,10 @@ async def prepare_list_from_deals(session: AsyncSession, deal_ids: list[str]) ->
     }
 
 
-async def _unique_list_name(session: AsyncSession, org_id, base: str) -> str:
+async def _unique_segment_name(session: AsyncSession, org_id, base: str) -> str:
     base = (base or "").strip() or "CRM list"
     existing = set((await session.execute(
-        select(CommsList.name).where(CommsList.organisation_id == org_id))).scalars().all())
+        select(CommsSegment.name).where(CommsSegment.organisation_id == org_id))).scalars().all())
     if base not in existing:
         return base
     for n in range(2, 1000):
@@ -228,9 +228,10 @@ async def commit_list_from_deals(session: AsyncSession, *, name: str,
         return {"error": "no_outreach_org",
                 "detail": "Designate a BetterCricket marketing org in BetterComms first."}
 
-    final_name = await _unique_list_name(session, outreach.id, name)
-    lst = CommsList(organisation_id=outreach.id, name=final_name,
-                    source="auto", origin=ORIGIN_LABEL)
+    final_name = await _unique_segment_name(session, outreach.id, name)
+    lst = CommsSegment(organisation_id=outreach.id, name=final_name,
+                       definition={"match": "all", "rules": []},
+                       source="auto", origin=ORIGIN_LABEL)
     session.add(lst)
     await session.flush()  # need lst.id for the membership rows
 
@@ -305,16 +306,20 @@ async def commit_list_from_deals(session: AsyncSession, *, name: str,
     added = 0
     if contact_ids:
         already = set((await session.execute(
-            select(CommsListMember.contact_id).where(
-                CommsListMember.list_id == lst.id))).scalars().all())
+            select(CommsSegmentMember.contact_id).where(
+                CommsSegmentMember.segment_id == lst.id))).scalars().all())
         for cid in contact_ids:
             if cid in already:
                 continue
-            session.add(CommsListMember(list_id=lst.id, contact_id=cid))
+            session.add(CommsSegmentMember(segment_id=lst.id, contact_id=cid))
             added += 1
 
     await session.commit()
     return {
+        # Lists→Segments merge: this now creates a static segment. `list_id` is
+        # kept as an alias of the id for any caller that still reads it.
+        "segment_id": str(lst.id),
+        "id": str(lst.id),
         "list_id": str(lst.id),
         "name": final_name,
         "added": added,

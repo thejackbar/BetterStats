@@ -499,6 +499,32 @@ async def snapshot_meta_ads():
             logger.error(f"Meta Ads snapshot failed: {e}")
 
 
+async def check_meta_token_health():
+    """Daily server-side heartbeat for the two Meta tokens. The sidebar badge
+    already warns a super admin who opens the app; this leaves a persistent log
+    line so an expiry is visible even to nobody watching the UI — the Aug 2026
+    token lapsed unnoticed for ten days. WARNING when a token is within the warn
+    window, ERROR once it's expired/invalid. Never raises."""
+    try:
+        from app.services import meta_ads
+        health = await meta_ads.token_health(force=True)
+    except Exception as e:
+        logger.error(f"Meta token health check failed to run: {e}")
+        return
+    for key in ("ads", "capi"):
+        t = health.get(key, {})
+        if not t.get("configured"):
+            continue
+        label = f"Meta {t.get('purpose', key)} token"
+        if t.get("valid") is False:
+            logger.error(f"{label} is INVALID/EXPIRED — regenerate it: {t.get('error')}")
+        elif t.get("days_left") is not None and t["days_left"] <= health["warn_within_days"]:
+            logger.warning(
+                f"{label} expires in {t['days_left']} day(s) ({t.get('expires_at')}) — "
+                "regenerate before it lapses (ideally as a never-expiring system-user token)."
+            )
+
+
 async def sweep_module_trials():
     """Refresh the held-modules cache for any club whose module trial has passed
     its end, so the synchronous gate drops it even where the per-module rows aren't
@@ -916,6 +942,20 @@ def start_scheduler():
         minute=5,
         timezone=PERTH,
         id="daily_meta_ads_snapshot",
+        replace_existing=True,
+    )
+    # Meta token health — once a day at 08:10 Perth, a persistent WARNING/ERROR
+    # log line when either the ads_read or CAPI token is expiring/expired, so a
+    # silent lapse (the Aug 2026 outage) doesn't sit unseen for days. The live
+    # sidebar badge covers a super admin who opens the app; this covers one who
+    # doesn't.
+    scheduler.add_job(
+        check_meta_token_health,
+        trigger="cron",
+        hour=8,
+        minute=10,
+        timezone=PERTH,
+        id="daily_meta_token_health",
         replace_existing=True,
     )
     # BetterFantasyCricket — advance lapsed draft clocks every 15 minutes.

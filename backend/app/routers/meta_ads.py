@@ -46,6 +46,16 @@ async def summary(db: AsyncSession = Depends(get_db), _: User = Depends(require_
     return data
 
 
+@router.get("/token-health")
+async def token_health(_: User = Depends(require_super_admin)):
+    """Live validity + expiry of both Meta tokens (ads_read dashboard token and
+    the CAPI server-side conversion token). A live debug_token call (cached
+    ~30 min in the service), so it's fetched separately from the fast /summary
+    path. Drives the HQ page's proactive expiry chip and the sidebar's
+    attention badge — see meta_ads.token_health."""
+    return await meta_ads.token_health()
+
+
 @router.get("/history")
 async def history(
     days: int = Query(14, ge=1, le=90),
@@ -77,6 +87,10 @@ async def refresh(db: AsyncSession = Depends(get_db), _: User = Depends(require_
         await meta_ads.run_snapshot(db)
     except MetaAdsError as e:
         return {"error": {"kind": e.kind, "message": e.message}, "token_configured": True}
+    # A successful pull means the token just worked — clear the cached health so
+    # a super admin who just replaced an expired token sees the chip go green
+    # on their next glance rather than waiting out the TTL.
+    meta_ads.bust_token_health_cache()
     data = await meta_ads.get_latest_summary(db)
     data["token_configured"] = True
     return data

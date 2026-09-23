@@ -31,7 +31,7 @@ const LABEL_W = 200
 const ROW_H = 34
 const HEADER_H = 36
 
-export default function DiaryGantt({ tasks = [], year }) {
+export default function DiaryGantt({ tasks = [], year, onTaskClick }) {
   const [unit, setUnit] = useState('month') // month | week | day
 
   // Bar extents per task (start/end fallbacks per the spec).
@@ -191,7 +191,9 @@ export default function DiaryGantt({ tasks = [], year }) {
               const x = hasBar ? xFor(r.start) : 0
               const w = hasBar ? Math.max(6, xFor(r.end) - xFor(r.start)) : 0
               return (
-                <div key={t.id} className="relative flex items-stretch border-b border-pb-hairline" style={{ height: ROW_H }}>
+                <div key={t.id} onClick={() => onTaskClick && onTaskClick(t.id)}
+                  className={`relative flex items-stretch border-b border-pb-hairline ${onTaskClick ? 'cursor-pointer hover:bg-pb-surface2/30' : ''}`}
+                  style={{ height: ROW_H }}>
                   <div className="sticky left-0 z-10 bg-pb-card border-r border-pb-hairline flex items-center gap-1.5 px-2 shrink-0"
                     style={{ width: LABEL_W }}>
                     <span className="w-2 h-2 rounded-full shrink-0" style={{ background: color }} />

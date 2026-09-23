@@ -199,7 +199,7 @@ const DEFAULT_TEAM = (name, short, color) => ({
   total: '0', overs: '0.0', wickets: 0, runRate: '0.00',
   batting: Array.from({ length: 11 }, (_, i) => DEFAULT_BATTING_ROW(i + 1)),
   bowling: Array.from({ length: 6 }, (_, i) => DEFAULT_BOWLING_ROW(i)),
-  extras: { total: 0, b: 0, lb: 0, nb: 0, wd: 0 },
+  extras: { total: 0, b: 0, lb: 0, nb: 0, wd: 0, pr: 0 },
 })
 const DEFAULT_SCORECARD = {
   meta: {
@@ -4335,12 +4335,12 @@ export default function AdminSocialPost() {
                           <Field label="Wkts"><TextInput value={String(t.wickets)} onChange={v => patchScTeam(side, { wickets: Number(v) || 0 })} placeholder="7" /></Field>
                           <Field label="Overs"><TextInput value={t.overs} onChange={v => patchScTeam(side, { overs: v })} placeholder="20.0" /></Field>
                           <div className="col-span-4">
-                            <Field label="Extras (b·lb·nb·wd)">
-                              <div className="grid grid-cols-4 gap-1">
-                                {['b','lb','nb','wd'].map(k => (
-                                  <input key={k} type="number" min="0" value={t.extras[k]} onChange={e => {
+                            <Field label="Extras (b·lb·nb·wd·pr)">
+                              <div className="grid grid-cols-5 gap-1">
+                                {['b','lb','nb','wd','pr'].map(k => (
+                                  <input key={k} type="number" min="0" value={t.extras[k] ?? 0} onChange={e => {
                                     const next = { ...t.extras, [k]: +e.target.value }
-                                    next.total = next.b + next.lb + next.nb + next.wd
+                                    next.total = (next.b || 0) + (next.lb || 0) + (next.nb || 0) + (next.wd || 0) + (next.pr || 0)
                                     patchScExtras(side, next)
                                   }} placeholder={k} className="bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono text-center" />
                                 ))}

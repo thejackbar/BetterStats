@@ -334,6 +334,11 @@ async def get_org_grade_categories(org_id: str, db: AsyncSession = Depends(get_d
         # to choose between and the row doesn't render — the same rule the
         # empty `available` above follows.
         "available_competitions": await grade_scope.org_available_competitions(db, org_id),
+        # Whether the club has opted its public Competition surfaces in. Off by
+        # default; it gates the filter pill row and decides what "All" means
+        # (the club's own competitions summed, vs Cricket Australia's lifetime
+        # totals — see useGradeFilters).
+        "show_competition_filters": await grade_scope.org_show_competition_filters(db, org_id),
     }
 
 

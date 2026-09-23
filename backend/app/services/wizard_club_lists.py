@@ -48,7 +48,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import (
-    CommsContact, CommsList, CommsListMember, MarketingClub, MarketingClubContact,
+    CommsContact, CommsList, CommsSegment, CommsSegmentMember, MarketingClub, MarketingClubContact,
     WizardClubList,
 )
 from app.services.marketing_org import get_outreach_org
@@ -607,7 +607,8 @@ _EMAIL_HISTORY_SQL = """
     JOIN comms_contacts  cc   ON cc.id   = r.contact_id
     WHERE r.status = 'sent'
       AND cc.marketing_club_id IS NOT NULL
-      AND camp.audience->>'list_id' IN (SELECT DISTINCT list_id::text FROM wizard_club_lists)
+      AND (camp.audience->>'list_id' IN (SELECT DISTINCT list_id::text FROM wizard_club_lists WHERE list_id IS NOT NULL)
+           OR camp.audience->>'segment_id' IN (SELECT DISTINCT segment_id::text FROM wizard_club_lists WHERE segment_id IS NOT NULL))
     GROUP BY 1, 2, 3
     ORDER BY MAX(r.sent_at) DESC
 """
@@ -638,19 +639,26 @@ async def _exports_by_key(session: AsyncSession) -> dict:
     """club_key -> the lists it has been exported into, newest first. A list a
     super admin has since deleted still shows (``deleted: true``) — the export
     happened, and its campaigns still count towards the club's email history."""
+    # A fresh export creates a SEGMENT (Lists→Segments merge); the exports made
+    # before still point at a list. The container is "live" if whichever it
+    # created still exists.
     rows = (await session.execute(
-        select(WizardClubList, CommsList.id.label("live_id"))
+        select(WizardClubList,
+               CommsList.id.label("live_list_id"),
+               CommsSegment.id.label("live_seg_id"))
         .outerjoin(CommsList, CommsList.id == WizardClubList.list_id)
+        .outerjoin(CommsSegment, CommsSegment.id == WizardClubList.segment_id)
         .order_by(WizardClubList.created_at.desc())
     )).all()
     out: dict = {}
-    for w, live_id in rows:
+    for w, live_list_id, live_seg_id in rows:
+        container = w.segment_id or w.list_id
         out.setdefault(w.club_key, []).append({
-            "list_id": str(w.list_id),
+            "list_id": str(container) if container else "",
             "list_name": w.list_name or "",
             "contacts_added": int(w.contacts_added or 0),
             "created_at": _iso(w.created_at),
-            "deleted": live_id is None,
+            "deleted": (live_seg_id is None) if w.segment_id else (live_list_id is None),
         })
     return out
 
@@ -708,10 +716,10 @@ async def list_wizard_clubs(session: AsyncSession, days: int) -> dict:
 
 # ── create a list from a filtered set ────────────────────────────────────────
 
-async def _unique_list_name(session: AsyncSession, org_id, base: str) -> str:
+async def _unique_segment_name(session: AsyncSession, org_id, base: str) -> str:
     base = (base or "").strip() or "Wizard clubs"
     existing = set((await session.execute(
-        select(CommsList.name).where(CommsList.organisation_id == org_id))).scalars().all())
+        select(CommsSegment.name).where(CommsSegment.organisation_id == org_id))).scalars().all())
     if base not in existing:
         return base
     for n in range(2, 1000):
@@ -789,9 +797,10 @@ async def create_list_from_clubs(session: AsyncSession, *, name: str, days: int,
         )).scalars().all():
             contacts_by_club.setdefault(c.marketing_club_id, []).append(c)
 
-    final_name = await _unique_list_name(session, outreach.id, name)
-    lst = CommsList(organisation_id=outreach.id, name=final_name,
-                    source="auto", origin=ORIGIN_LABEL)
+    final_name = await _unique_segment_name(session, outreach.id, name)
+    lst = CommsSegment(organisation_id=outreach.id, name=final_name,
+                       definition={"match": "all", "rules": []},
+                       source="auto", origin=ORIGIN_LABEL)
     session.add(lst)
     await session.flush()  # need lst.id for the membership rows
 
@@ -848,16 +857,20 @@ async def create_list_from_clubs(session: AsyncSession, *, name: str, days: int,
                 added_here += 1
 
         session.add(WizardClubList(
-            list_id=lst.id, list_name=final_name, club_key=r["key"], club_name=r["name"],
+            segment_id=lst.id, list_name=final_name, club_key=r["key"], club_name=r["name"],
             marketing_club_id=club.id, contacts_added=added_here, created_by=created_by,
         ))
         per_club.append({"club": r["name"], "contacts": added_here})
 
     for cid in member_ids:
-        session.add(CommsListMember(list_id=lst.id, contact_id=cid))
+        session.add(CommsSegmentMember(segment_id=lst.id, contact_id=cid))
 
     await session.commit()
     result = {
+        # Lists→Segments merge: creates a static segment now. `list_id` kept as
+        # an alias of the id for callers that still read it.
+        "segment_id": str(lst.id),
+        "id": str(lst.id),
         "list_id": str(lst.id),
         "name": final_name,
         "clubs": len(per_club),

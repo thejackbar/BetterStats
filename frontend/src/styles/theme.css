@@ -208,6 +208,15 @@
 }
 .pb-rise { animation: pb-rise 700ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }
 
+/* A gentle rightward nudge, used to draw the eye toward a call-to-action
+   button (the trial-conversion bar's arrow). */
+@keyframes pb-nudge-x {
+  0%, 100% { transform: translateX(0); }
+  50%      { transform: translateX(4px); }
+}
+.pb-nudge-x { animation: pb-nudge-x 1s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .pb-nudge-x { animation: none; } }
+
 /* Primary→secondary club gradient. `.pb-gradient` fills, `.pb-gradient-text`
    clips it to the text. Both fall back gracefully to a solid accent when a
    club has only set one colour (accent2 defaults to the accent's sibling). */

@@ -136,3 +136,14 @@ export function googleCalendarUrl(watchUrl) {
 }
 
 export const WEBINAR_ICS_URL = '/api/public/webinar/calendar.ics'
+
+// The published recording, embedded inline on /demo once the event is past.
+//
+// This is StreamYard's EMBED url (`/e/<id>`), which is a different thing from
+// the watch link the server hands a registrant (`streamyard.com/watch/<id>`):
+// an embed plays inside an iframe, so the page itself becomes the recording
+// rather than sending people off to StreamYard. It is a fixed constant the same
+// way the date is — the recording exists and is not going to change — so the
+// past state can render it on first paint with no request, exactly as the
+// headline does.
+export const WEBINAR_RECORDING_EMBED_URL = 'https://streamyard.com/e/pkwuu5xsbecn'

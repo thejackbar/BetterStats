@@ -11,7 +11,7 @@ import { ModuleWordmark } from '../../components/ModuleLockup'
 import { getAttribution, getVisitorId } from '../../lib/visitor'
 import { getMetaEventContext } from '../../lib/metaPixel'
 import {
-  WEBINAR, WEBINAR_ICS_URL, googleCalendarUrl, webinarState,
+  WEBINAR, WEBINAR_ICS_URL, WEBINAR_RECORDING_EMBED_URL, googleCalendarUrl, webinarState,
 } from '../../data/webinar'
 
 // The webinar registration page — the destination for a paid Meta campaign
@@ -27,7 +27,9 @@ import {
 // Every before/after-the-event state comes from ONE constant
 // (src/data/webinar.js), so the page turns itself into a recording page rather
 // than needing a deploy on the night — and can never sit there advertising a
-// webinar that has already happened.
+// webinar that has already happened. Before the event that means the
+// registration form below; after it, the form is gone and the recording is
+// embedded inline (RecordingState) with a description of what it covered.
 //
 // Forced LIGHT, mobile-first, and matching /trial: the ad creative is 4:5
 // portrait feed, so essentially all of this traffic is on a phone, and ~11% of
@@ -172,6 +174,52 @@ function SuccessState({ state, recordingPending, watchUrl }) {
           </div>
         )}
       </div>
+      <TrialCta className="mt-4" />
+    </div>
+  )
+}
+
+// Shown once the event is past: the recording is embedded inline and plays on
+// the page, with a short account of what the session covered underneath it.
+// This REPLACES the registration form — the form's whole job was to hand over a
+// link before the recording existed, and now that it does, sending people off
+// to StreamYard to watch a video that plays right here is friction for nothing.
+function RecordingState() {
+  return (
+    <div className="text-left" data-testid="demo-recording">
+      {/* 16:9, sized with padding-bottom rather than an aspect class so the box
+          holds its shape before the iframe loads and can't shift the layout. */}
+      <div
+        className="rounded-xl overflow-hidden border pb-hairline bg-black"
+        style={{ position: 'relative', width: '100%', paddingBottom: '56.25%' }}
+      >
+        <iframe
+          src={WEBINAR_RECORDING_EMBED_URL}
+          title="BetterCricket live demo recording"
+          data-testid="demo-recording-frame"
+          allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+          allowFullScreen
+          loading="lazy"
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0 }}
+        />
+      </div>
+
+      <div className="pb-card p-6 mt-4 bg-pb-surface">
+        <p className="font-mono text-[11px] tracking-wide text-pb-faint mb-2">ABOUT THIS SESSION</p>
+        <p className="text-sm text-pb-dim leading-relaxed mb-4">
+          A walk through the whole of BetterCricket: how every season your club
+          has played imports itself, running selection and availability without
+          the group chat, match graphics and a public club site that keep
+          themselves current, fees, members and the committee&rsquo;s own
+          paperwork in one place, and opposition analysis worked out from the
+          scorecards you already have. It finishes with the questions clubs
+          asked on the night.
+        </p>
+        <p className="font-mono text-[11px] tracking-wide text-pb-faintest">
+          {WEBINAR.recordedLabel} · about {WEBINAR.durationMinutes} minutes
+        </p>
+      </div>
+
       <TrialCta className="mt-4" />
     </div>
   )
@@ -587,7 +635,10 @@ export default function Demo() {
               </p>
             </div>
 
-            {success ? (
+            {state.past ? (
+              // The event has been and gone: the recording plays here, no form.
+              <RecordingState />
+            ) : success ? (
               <SuccessState
                 state={state}
                 watchUrl={success.watchUrl || state.watchUrl}
@@ -609,7 +660,7 @@ export default function Demo() {
         <section className="px-4 sm:px-6 lg:px-10 pt-10 pb-14">
           <div className="max-w-[900px] mx-auto">
             <h2 className="font-display font-bold text-2xl mb-6 text-center">
-              What we&rsquo;ll cover
+              {state.past ? 'What the session covers' : 'What we’ll cover'}
             </h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {COVERS.map(([title, body]) => (

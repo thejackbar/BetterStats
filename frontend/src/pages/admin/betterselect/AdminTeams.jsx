@@ -1,22 +1,31 @@
-// BetterSelect → Squads. A drag-and-drop board of selection pools: one card
-// per team plus a leading "Unassigned" pool. A player belongs to exactly one
-// squad via players.squad_team_id; dragging a card (or bulk-adding) reassigns
-// it through POST /teams/squad-assign.
+// BetterSelect → Squads. A drag-and-drop board of selection pools: one card per
+// team plus the "Unassigned" pools. A PLAYER CAN BE IN SEVERAL SQUADS AT ONCE —
+// a fringe 1st XI player who is also a Colt and plays T20 sits in the 1st XI,
+// 2nd XI, Colts and T20 squads, so their card shows in each of those columns.
+// Membership is team_members (players.squad_team_ids on the payload); the single
+// players.squad_team_id is the derived primary the rest of the app reads.
+//
+// Dragging a card MOVES it: from one squad to another it moves (leaving every
+// other squad the player is in alone), and to Unassigned it removes them from
+// that one squad. To ADD a player to a SECOND squad, use the squad's "Add
+// players" button, the "＋" on the card, or Auto-assign — all additive. Writes
+// go through POST /teams/squad-assign with an action (move/add/remove).
 //
 // Clubs can have many squads (16+ for Applecross), so the columns WRAP into a
 // responsive grid rather than a single off-screen row, and each is collapsible
 // to a compact header.
 //
-// THE UNASSIGNED SIDE IS THREE POOLS, NOT ONE, and that is what keeps the first
-// one usable. "Unassigned" is the working list — active players who are still
-// around and have no squad — so a club's whole history doesn't sit in the
-// column a selector actually reads. Everyone else is still on the board, just
-// filed where they belong: "Potential fill-ins" for players who have dropped
-// off (dig back as far as you like), "Not yet played" for a new signing with no
-// appearance yet. Nothing is dropped; a card in any pool drags into a squad.
-// Assigned squads always show their FULL membership, so a dormant backup you
-// deliberately filed stays visible where you put them.
+// THE UNASSIGNED SIDE IS THREE POOLS, split by gender when the club has a mix.
+// "Unassigned" is the working list — active players who are still around and in
+// no squad — so a club's whole history doesn't sit in the column a selector
+// reads. Everyone else is still on the board, just filed: "Potential fill-ins"
+// for players who have dropped off, "Not yet played" for a new signing with no
+// appearance. A club that fields both men's and women's sides sees each pool
+// split into Men / Women (/ Unspecified) so the lists stay short. Nothing is
+// dropped; a card in any pool drags into a squad. Assigned squads always show
+// their FULL membership, so a dormant backup you filed stays visible.
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import BetterSelectLayout from '../../../components/admin/BetterSelectLayout'
 import { useAuth } from '../../../contexts/AuthContext'
 import { useToast } from '../../../contexts/ToastContext'
@@ -36,6 +45,21 @@ function matchesName(p, q) {
   if (!needle) return true
   return `${p.display_name || ''} ${p.name || ''}`.toLowerCase().includes(needle)
 }
+
+// Gender as the board buckets it — 'male' | 'female' | '' (unspecified). Free
+// text on the player, so read the first letter (same rule as BetterSelect
+// Players). '' when nothing is recorded.
+function normGender(g) {
+  const s = (g || '').toLowerCase()
+  return s.startsWith('f') ? 'female' : s.startsWith('m') ? 'male' : ''
+}
+
+// A player's squads (team_members). squad_team_ids is authoritative for the
+// board; the single squad_team_id is folded in server-side for legacy rows.
+function squadIds(p) { return p.squad_team_ids || [] }
+function inSquad(p, teamId) { return squadIds(p).includes(teamId) }
+function hasNoSquad(p) { return squadIds(p).length === 0 }
+const GENDER_COLS = [{ g: 'male', lbl: 'Men' }, { g: 'female', lbl: 'Women' }, { g: '', lbl: 'Unspecified' }]
 
 // Which unassigned pool a player belongs in. `cutoff` is the club's own
 // dormancy window as a YYYY-MM-DD string — the same definition of "still
@@ -146,11 +170,12 @@ function BulkAddModal({ fixedTeam, teams, players, dormantCutoff, statusOf, onAs
 
   const nameById = useMemo(() => new Map((teams || []).map((t) => [t.id, t.name])), [teams])
   const targetName = fixedTeam?.name || nameById.get(targetId) || ''
-  // Candidates = everyone not already in the chosen target. An inactive player
-  // is never offered: marking someone inactive takes them OUT of their squad
-  // server-side, so adding them here would only be undone.
+  // Candidates = everyone not ALREADY IN the chosen target (a player can be in
+  // several squads, so this only excludes the target itself, not every squad).
+  // An inactive player is never offered: marking someone inactive takes them
+  // OUT of their squads server-side, so adding them here would only be undone.
   const list = useMemo(() => (players || []).filter((p) =>
-    (p.squad_team_id || null) !== (targetId || null) && p.status !== 'inactive'
+    !(targetId && inSquad(p, targetId)) && p.status !== 'inactive'
     && matchesName(p, q) && playedWithinYears(p.last_played, years),
   ), [players, targetId, q, years])
 
@@ -187,7 +212,8 @@ function BulkAddModal({ fixedTeam, teams, players, dormantCutoff, statusOf, onAs
         <div className="overflow-auto flex-1 pb-scroll">
           {list.map((p) => {
             const on = sel.has(p.id)
-            const cur = p.squad_team_id ? nameById.get(p.squad_team_id) : null
+            const nSquads = squadIds(p).length
+            const cur = nSquads === 1 ? nameById.get(squadIds(p)[0]) : (nSquads > 1 ? `${nSquads} squads` : null)
             const badge = recencyBadge(p, dormantCutoff)
             return (
               <label key={p.id} className={`flex items-center gap-3 px-4 py-2 border-b pb-hairline cursor-pointer ${on ? 'bg-pb-accent/[0.06]' : ''}`}>
@@ -220,13 +246,72 @@ function BulkAddModal({ fixedTeam, teams, players, dormantCutoff, statusOf, onAs
   )
 }
 
+/* ── "＋ Add to squad" control on a card ──────────────────────────────────────
+ * A small fixed-size icon button (never a native <select> — that sizes to its
+ * widest option and swallows the name). Its dropdown is rendered in a PORTAL at
+ * document.body with fixed positioning, so the column's overflow:auto box can't
+ * clip it. Lists only the squads the player is NOT already in — the way to give
+ * a fringe player a second squad without leaving the one they're in. Never
+ * starts a card drag (draggable off + stopPropagation). */
+function AddToSquadMenu({ p, teams, onAddToSquad }) {
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState(null)
+  const btnRef = useRef(null)
+  const options = (teams || []).filter((t) => !inSquad(p, t.id))
+
+  useEffect(() => {
+    if (!open) return
+    const close = (e) => { if (!e.target.closest?.('[data-add-squad-menu]')) setOpen(false) }
+    const onScroll = () => setOpen(false)
+    document.addEventListener('mousedown', close)
+    window.addEventListener('scroll', onScroll, true)
+    window.addEventListener('resize', onScroll)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      window.removeEventListener('scroll', onScroll, true)
+      window.removeEventListener('resize', onScroll)
+    }
+  }, [open])
+
+  if (!options.length) return null
+  const toggle = (e) => {
+    e.stopPropagation()
+    const r = btnRef.current?.getBoundingClientRect()
+    if (r) setPos({ top: r.bottom + 4, left: Math.min(r.left, window.innerWidth - 192) })
+    setOpen((v) => !v)
+  }
+  return (
+    <>
+      <button ref={btnRef} type="button" draggable={false}
+        onMouseDown={(e) => e.stopPropagation()} onClick={toggle}
+        title="Add to another squad"
+        className="shrink-0 w-5 h-5 inline-flex items-center justify-center rounded-md border border-pb-hairline2 text-pb-faint hover:text-pb-accent hover:border-pb-accent/40 opacity-60 group-hover:opacity-100 focus:opacity-100 transition-opacity">
+        <Icon name="plus" size={12} />
+      </button>
+      {open && pos && createPortal(
+        <div data-add-squad-menu onMouseDown={(e) => e.stopPropagation()}
+          style={{ position: 'fixed', top: pos.top, left: pos.left, zIndex: 60, width: 180 }}
+          className="max-h-64 overflow-auto bg-pb-surface border border-pb-hairline2 rounded-lg shadow-2xl py-1 pb-scroll">
+          <div className="px-3 py-1 font-mono text-[9px] uppercase tracking-wide2 text-pb-faintest">Add to squad</div>
+          {options.map((t) => (
+            <button key={t.id} type="button"
+              onClick={() => { onAddToSquad(p.id, t.id); setOpen(false) }}
+              className="w-full text-left px-3 py-1.5 text-[12.5px] text-pb-text hover:bg-pb-accent/10 hover:text-pb-accent truncate">
+              {t.name}
+            </button>
+          ))}
+        </div>, document.body)}
+    </>
+  )
+}
+
 /* ── A draggable player card ───────────────────────────────────────────────── */
-function PlayerCard({ p, status, dormantCutoff, draggable, onDragStart, onDragEnd, onEditAvail }) {
+function PlayerCard({ p, status, dormantCutoff, draggable, onDragStart, onDragEnd, onEditAvail, teams, onAddToSquad }) {
   const meta = AVAILABILITY[status] || AVAILABILITY.NO_RESPONSE
   const badge = recencyBadge(p, dormantCutoff)
   return (
     <div draggable={draggable} onDragStart={onDragStart} onDragEnd={onDragEnd}
-      className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg border border-pb-hairline ${draggable ? 'cursor-grab active:cursor-grabbing' : ''}`}
+      className={`group flex items-center gap-2.5 px-2.5 py-2 rounded-lg border border-pb-hairline ${draggable ? 'cursor-grab active:cursor-grabbing' : ''}`}
       style={{ background: status === 'NO_RESPONSE' ? 'var(--pb-surface2)' : `color-mix(in srgb, ${meta.cssVar} 8%, var(--pb-surface2))` }}>
       {draggable && <span className="text-pb-faintest shrink-0"><Icon name="grip" size={14} /></span>}
       <AvailDot player={p} status={status} onEdit={onEditAvail} />
@@ -235,12 +320,13 @@ function PlayerCard({ p, status, dormantCutoff, draggable, onDragStart, onDragEn
       {p.status === 'inactive' && <span className="font-mono text-[8px] text-pb-faintest uppercase shrink-0" title="Marked inactive">inactive</span>}
       {badge && <span className="font-mono text-[8px] text-amber-300/60 uppercase shrink-0" title={badge.title}>{badge.text}</span>}
       <RoleChips roles={p.skill_positions} muted />
+      {draggable && onAddToSquad && <AddToSquadMenu p={p} teams={teams} onAddToSquad={onAddToSquad} />}
     </div>
   )
 }
 
 /* ── One squad column (collapsible) ────────────────────────────────────────── */
-function SquadColumn({ col, members, dormantCutoff, statusOf, canManage, collapsed, onToggleCollapse, isOver, dragHandlers, onAdd, onEdit, onDelete, onEditAvail }) {
+function SquadColumn({ col, members, dormantCutoff, statusOf, canManage, collapsed, onToggleCollapse, isOver, dragHandlers, onAdd, onEdit, onDelete, onEditAvail, teams, onAddToSquad }) {
   const hasKeeper = members.some(isKeeper)
   const nAvail = members.filter((m) => statusOf(m.id) === 'AVAILABLE').length
   // The card handlers belong to the cards, not the column — spreading them onto
@@ -286,7 +372,8 @@ function SquadColumn({ col, members, dormantCutoff, statusOf, canManage, collaps
             {sorted.map((p) => (
               <PlayerCard key={p.id} p={p} status={statusOf(p.id)} dormantCutoff={dormantCutoff} draggable={canManage}
                 onDragStart={() => onCardDragStart(p.id)} onDragEnd={onCardDragEnd}
-                onEditAvail={onEditAvail ? () => onEditAvail(p) : undefined} />
+                onEditAvail={onEditAvail ? () => onEditAvail(p) : undefined}
+                teams={teams} onAddToSquad={onAddToSquad} />
             ))}
             {members.length === 0 && (
               <div className="m-1 px-2.5 py-5 text-center text-pb-faintest text-[11.5px] border border-dashed border-pb-hairline2 rounded-lg">
@@ -312,26 +399,29 @@ function SquadColumn({ col, members, dormantCutoff, statusOf, canManage, collaps
 function AutoAssignModal({ onApply, onClose }) {
   const toast = useToast()
   const [seasons, setSeasons] = useState(2)
-  const [onlyUnassigned, setOnlyUnassigned] = useState(true)
+  const [onlyUnassigned, setOnlyUnassigned] = useState(false)
+  const [minSharePct, setMinSharePct] = useState(20)   // a team counts at ≥ this share of a player's games
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)      // { seasons_considered, suggestions, unmatched }
-  const [picked, setPicked] = useState(() => new Set())
+  const [picked, setPicked] = useState(() => new Set())  // keyed `${player_id}:${team_id}`
   const [applying, setApplying] = useState(false)
   const [showUnmatched, setShowUnmatched] = useState(false)
 
-  const preview = useCallback(async (s = seasons, ou = onlyUnassigned) => {
+  const keyOf = (s) => `${s.player_id}:${s.team_id}`
+
+  const preview = useCallback(async (s = seasons, ou = onlyUnassigned, share = minSharePct) => {
     setLoading(true); setResult(null)
     try {
-      const d = await api.bsAutoAssignSuggest({ seasons: s, onlyUnassigned: ou })
+      const d = await api.bsAutoAssignSuggest({ seasons: s, onlyUnassigned: ou, minShare: share / 100 })
       setResult(d)
-      setPicked(new Set((d.suggestions || []).map((x) => x.player_id)))
+      setPicked(new Set((d.suggestions || []).map((x) => `${x.player_id}:${x.team_id}`)))
     } catch (e) { toast.error('Preview failed: ' + e.message) }
     finally { setLoading(false) }
-  }, [seasons, onlyUnassigned, toast])
+  }, [seasons, onlyUnassigned, minSharePct, toast])
 
-  useEffect(() => { preview(2, true) }, [])   // initial preview with defaults
+  useEffect(() => { preview(2, false, 20) }, [])   // initial preview with defaults
 
-  const toggle = (pid) => setPicked((s) => { const n = new Set(s); n.has(pid) ? n.delete(pid) : n.add(pid); return n })
+  const toggle = (k) => setPicked((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n })
 
   const groups = useMemo(() => {
     const m = new Map()
@@ -343,14 +433,15 @@ function AutoAssignModal({ onApply, onClose }) {
   }, [result])
 
   const apply = async () => {
-    const chosen = (result?.suggestions || []).filter((s) => picked.has(s.player_id))
+    const chosen = (result?.suggestions || []).filter((s) => picked.has(keyOf(s)))
     if (!chosen.length) return
     setApplying(true)
     try {
       const byTeam = new Map()
       chosen.forEach((s) => { if (!byTeam.has(s.team_id)) byTeam.set(s.team_id, []); byTeam.get(s.team_id).push(s.player_id) })
       await onApply([...byTeam.entries()])
-      toast.success(`Assigned ${chosen.length} player${chosen.length === 1 ? '' : 's'} to their squads`)
+      const nPlayers = new Set(chosen.map((s) => s.player_id)).size
+      toast.success(`Added ${nPlayers} player${nPlayers === 1 ? '' : 's'} to their squads`)
       onClose()
     } catch (e) { toast.error('Apply failed: ' + e.message) }
     finally { setApplying(false) }
@@ -366,7 +457,7 @@ function AutoAssignModal({ onApply, onClose }) {
           <div className="flex-1 min-w-0">
             <div className="font-mono text-[10px] uppercase tracking-wide3 text-pb-accent">Auto-assign squads</div>
             <div className="font-display font-bold text-[18px] mt-0.5">From where players actually played</div>
-            <div className="text-[12px] text-pb-faint mt-1">Each player is matched to the squad they played the most games for over the chosen window. Review and adjust before applying — nothing is saved until you hit Apply.</div>
+            <div className="text-[12px] text-pb-faint mt-1">A player is suggested for every squad that is a meaningful share of their games — someone who's played 50% 1sts, 40% 2nds and 10% 3rds is suggested for the 1st and 2nd XI, not the 3rd. This ADDS squads; it never removes one. Nothing is saved until you hit Apply.</div>
           </div>
           <button onClick={onClose} className="text-pb-faint hover:text-pb-text p-1 shrink-0"><Icon name="close" size={18} /></button>
         </div>
@@ -376,13 +467,19 @@ function AutoAssignModal({ onApply, onClose }) {
           <span className="inline-flex items-center gap-1.5 text-[12px] text-pb-faint">
             Last
             {[1, 2, 3, 5].map((n) => (
-              <Chip key={n} label={`${n}`} active={seasons === n} onClick={() => { setSeasons(n); preview(n, onlyUnassigned) }} />
+              <Chip key={n} label={`${n}`} active={seasons === n} onClick={() => { setSeasons(n); preview(n, onlyUnassigned, minSharePct) }} />
             ))}
             season{seasons === 1 ? '' : 's'}
           </span>
+          <span className="inline-flex items-center gap-1.5 text-[12px] text-pb-faint" title="A squad is suggested when it is at least this share of the player's games in the window">
+            Min share
+            {[10, 20, 33, 50].map((n) => (
+              <Chip key={n} label={`${n}%`} active={minSharePct === n} onClick={() => { setMinSharePct(n); preview(seasons, onlyUnassigned, n) }} />
+            ))}
+          </span>
           <label className="inline-flex items-center gap-2 text-[12px] text-pb-faint cursor-pointer">
-            <input type="checkbox" checked={onlyUnassigned} onChange={(e) => { setOnlyUnassigned(e.target.checked); preview(seasons, e.target.checked) }} className="accent-pb-accent w-[14px] h-[14px]" />
-            Only players without a squad
+            <input type="checkbox" checked={onlyUnassigned} onChange={(e) => { setOnlyUnassigned(e.target.checked); preview(seasons, e.target.checked, minSharePct) }} className="accent-pb-accent w-[14px] h-[14px]" />
+            Only players in no squad yet
           </label>
           {result?.seasons_considered?.length > 0 && (
             <span className="ml-auto font-mono text-[10px] text-pb-faintest truncate" title={result.seasons_considered.join(', ')}>{result.seasons_considered.join(' · ')}</span>
@@ -393,22 +490,23 @@ function AutoAssignModal({ onApply, onClose }) {
         <div className="overflow-auto flex-1 pb-scroll">
           {loading ? <div className="py-10"><PbSpinner message="Working out squads…" /></div> : (
             total === 0 ? (
-              <div className="px-4 py-10"><Empty>{onlyUnassigned ? 'No unassigned players have games in this window. Try more seasons, or untick “only players without a squad”.' : 'Everyone is already in the squad they played most for.'}</Empty></div>
+              <div className="px-4 py-10"><Empty>{onlyUnassigned ? 'No players in no squad have games in this window. Try more seasons, or untick “only players in no squad yet”.' : 'Everyone is already in every squad they play a real share of.'}</Empty></div>
             ) : (
               <>
                 {groups.map((g) => (
                   <div key={g.name}>
                     <div className="sticky top-0 z-10 bg-pb-surface2 px-4 py-1.5 flex items-center gap-2 border-b pb-hairline">
                       <span className="font-display font-bold text-[13px]">{g.name}</span>
-                      <span className="font-mono text-[10px] text-pb-faint">{g.rows.filter((r) => picked.has(r.player_id)).length}/{g.rows.length}</span>
+                      <span className="font-mono text-[10px] text-pb-faint">{g.rows.filter((r) => picked.has(keyOf(r))).length}/{g.rows.length}</span>
                     </div>
                     {g.rows.map((s) => {
-                      const on = picked.has(s.player_id)
+                      const k = keyOf(s)
+                      const on = picked.has(k)
                       return (
-                        <label key={s.player_id} className={`flex items-center gap-3 px-4 py-2 border-b pb-hairline cursor-pointer ${on ? '' : 'opacity-50'}`}>
-                          <input type="checkbox" checked={on} onChange={() => toggle(s.player_id)} className="accent-pb-accent w-[15px] h-[15px]" />
+                        <label key={k} className={`flex items-center gap-3 px-4 py-2 border-b pb-hairline cursor-pointer ${on ? '' : 'opacity-50'}`}>
+                          <input type="checkbox" checked={on} onChange={() => toggle(k)} className="accent-pb-accent w-[15px] h-[15px]" />
                           <span className="flex-1 text-[13.5px] font-medium truncate">{s.player_name}</span>
-                          {s.current_team_name && <span className="font-mono text-[10px] text-pb-faintest truncate">from {s.current_team_name}</span>}
+                          {typeof s.share === 'number' && <span className="font-mono text-[10px] text-pb-faintest shrink-0">{Math.round(s.share * 100)}%</span>}
                           {s.matched_by === 'grade' && <span className="font-mono text-[8.5px] text-pb-faint uppercase" title="Matched via grade name (no squad matched the team name)">via grade</span>}
                           <span className="font-mono text-[11px] text-pb-faint pb-num shrink-0">{s.games}g</span>
                         </label>
@@ -581,7 +679,7 @@ function ManageSquadsModal({ teams, players, onDeleted, onClose }) {
 
   const memberCount = useMemo(() => {
     const m = new Map()
-    ;(players || []).forEach((p) => { if (p.squad_team_id) m.set(p.squad_team_id, (m.get(p.squad_team_id) || 0) + 1) })
+    ;(players || []).forEach((p) => squadIds(p).forEach((tid) => m.set(tid, (m.get(tid) || 0) + 1)))
     return m
   }, [players])
 
@@ -670,10 +768,14 @@ export default function AdminTeams() {
   const [dormancyMonths, setDormancyMonths] = useState(DEFAULT_DORMANCY_MONTHS)
   const [fillInYears, setFillInYears] = useState(3)    // how far back the fill-in pool digs
   const [selectedIds, setSelectedIds] = useState(() => new Set()) // picked in any XI this round
-  // The two secondary pools open collapsed: they're a place to look when you
-  // need one, not the list you work from.
-  const [collapsed, setCollapsed] = useState(() => new Set(['__fillins__', '__newcomers__']))
-  const dragId = useRef(null)
+  // Collapse state as explicit user overrides (key → bool); a column with no
+  // override falls back to its default — the secondary pools (fill-ins, not yet
+  // played) start collapsed, everything else open. Kept as overrides because
+  // the gender split makes the column keys dynamic.
+  const [collapseOverride, setCollapseOverride] = useState(() => new Map())
+  // The dragged card: the player AND which squad column they were dragged FROM
+  // (null for an unassigned pool), so a drop can MOVE them out of that one squad.
+  const dragRef = useRef(null)
 
   const loadTeams = useCallback(() => {
     api.bsListTeams(true).then(setTeams).catch((e) => { toast.error(e.message); setTeams([]) })
@@ -717,40 +819,80 @@ export default function AdminTeams() {
   // player falls in. Counted before any facet so a column doesn't vanish
   // mid-search — the facets empty it out with the usual empty state instead.
   const dormantCutoff = useMemo(() => monthsAgoISO(dormancyMonths), [dormancyMonths])
-  const poolCounts = useMemo(() => {
-    const c = { unassigned: 0, fillins: 0, newcomers: 0, inactive: 0 }
+
+  // Split the unassigned pools by gender only when the club fields both — a
+  // men's-only (or women's-only) club keeps single lists, the same call
+  // ageFilterOptions makes: a split that can only ever answer "everyone" is
+  // worse than none. Decided off the ACTIVE unassigned players.
+  const genderSplit = useMemo(() => {
+    const gs = new Set()
     ;(players || []).forEach((p) => {
-      if (p.squad_team_id) return
+      if (hasNoSquad(p) && p.status !== 'inactive') gs.add(normGender(p.gender))
+    })
+    return gs.has('male') && gs.has('female')
+  }, [players])
+
+  // Pre-facet counts of the unassigned side, keyed `${pool}:${bucket}` (+ a
+  // `${pool}:__all__` roll-up), plus the inactive count held out of every pool.
+  const poolCounts = useMemo(() => {
+    const c = { inactive: 0 }
+    ;(players || []).forEach((p) => {
+      if (!hasNoSquad(p)) return
       if (p.status === 'inactive') { c.inactive += 1; return }
-      c[poolOf(p, dormantCutoff)] += 1
+      const pool = poolOf(p, dormantCutoff)
+      const bucket = normGender(p.gender)
+      c[`${pool}:${bucket}`] = (c[`${pool}:${bucket}`] || 0) + 1
+      c[`${pool}:__all__`] = (c[`${pool}:__all__`] || 0) + 1
     })
     return c
   }, [players, dormantCutoff])
+  const poolTotal = useCallback(
+    (col) => poolCounts[`${col.pool}:${col.gender === null ? '__all__' : col.gender}`] || 0,
+    [poolCounts],
+  )
 
-  // Columns: the unassigned pools first, then teams by sequence/name. The two
-  // secondary pools only exist when they hold someone — a permanently empty
-  // "Not yet played" column is one more thing to read past.
+  // Columns: the unassigned pools (each split by gender when the club has a
+  // mix) first, then teams by sequence/name. Fill-ins and Not-yet-played only
+  // appear when they hold someone; the primary Unassigned always shows (both
+  // Men and Women when split, so each working list is there even when empty).
   const columns = useMemo(() => {
-    const cols = [{
-      key: '__unassigned__', id: null, pool: 'unassigned', unassigned: true, tint: UNASSIGNED_TINT,
-      name: 'Unassigned', emptyText: 'Everyone active is in a squad',
-    }]
-    if (poolCounts.fillins > 0) cols.push({
-      key: '__fillins__', id: null, pool: 'fillins', unassigned: true, tint: UNASSIGNED_TINT,
-      name: 'Potential fill-ins', emptyText: 'Nobody in this window',
-      note: 'Played before, but not lately',
-    })
-    if (poolCounts.newcomers > 0) cols.push({
-      key: '__newcomers__', id: null, pool: 'newcomers', unassigned: true, tint: UNASSIGNED_TINT,
-      name: 'Not yet played', emptyText: 'Nobody waiting on a first game',
-      note: 'No appearances recorded yet',
+    const cols = []
+    const buckets = genderSplit ? GENDER_COLS : [{ g: null, lbl: null }]
+    const POOLS = [
+      { pool: 'unassigned', base: 'Unassigned', emptyText: 'Everyone active is in a squad', primary: true },
+      { pool: 'fillins', base: 'Potential fill-ins', note: 'Played before, but not lately' },
+      { pool: 'newcomers', base: 'Not yet played', note: 'No appearances recorded yet' },
+    ]
+    let primaryFirst = true
+    POOLS.forEach((P) => {
+      buckets.forEach((b) => {
+        const n = poolCounts[`${P.pool}:${b.g === null ? '__all__' : b.g}`] || 0
+        // Primary pool: always show the Men & Women lists (and the single
+        // Unassigned when not split); Unspecified only when it holds someone.
+        // Secondary pools: only when non-empty.
+        const show = P.primary
+          ? (b.g === null || b.g === 'male' || b.g === 'female' ? true : n > 0)
+          : n > 0
+        if (!show) return
+        const genderKey = b.g === null ? 'all' : (b.g || 'none')
+        const isPrimaryFirst = P.primary && primaryFirst
+        if (P.primary) primaryFirst = false
+        cols.push({
+          key: P.primary && b.g === null ? '__unassigned__' : `__${P.pool}__${genderKey}`,
+          id: null, pool: P.pool, gender: b.g, unassigned: true, secondary: !P.primary,
+          tint: UNASSIGNED_TINT,
+          name: b.lbl ? `${P.base} — ${b.lbl}` : P.base,
+          emptyText: P.emptyText || 'Nobody in this window', note: P.note,
+          inactiveNote: isPrimaryFirst,
+        })
+      })
     })
     ;(teams || []).forEach((t, i) => cols.push({
       key: t.id, id: t.id, name: t.name, short_name: t.short_name, grade_name: t.grade_name,
       tint: COLUMN_TINTS[i % COLUMN_TINTS.length], team: t,
     }))
     return cols
-  }, [teams, poolCounts.fillins, poolCounts.newcomers])
+  }, [teams, poolCounts, genderSplit])
 
   const facets = useMemo(() => [
     { key: 'squad', label: 'Squad', type: 'multi', options: (teams || []).map((t) => ({ value: t.id, label: t.name })) },
@@ -797,13 +939,20 @@ export default function AdminTeams() {
   // squad always shows its full membership, so a dormant "backup" you filed
   // there on purpose stays visible.
   const membersOf = useCallback((col) => {
-    let list = (players || []).filter((p) => (p.squad_team_id || null) === col.id)
-    if (col.pool) {
+    let list
+    if (col.unassigned) {
+      list = (players || []).filter(hasNoSquad)
       // A club marks someone inactive precisely to take them out of selection,
       // so they are off every pool unless you ask for them.
       if (!values.showinactive) list = list.filter((p) => p.status !== 'inactive')
       list = list.filter((p) => poolOf(p, dormantCutoff) === col.pool)
+      if (col.gender !== null && col.gender !== undefined) list = list.filter((p) => normGender(p.gender) === col.gender)
       if (col.pool === 'fillins' && fillInCutoff) list = list.filter((p) => p.last_played >= fillInCutoff)
+    } else {
+      // A squad column shows everyone whose membership includes it — a player
+      // in several squads appears in each. Full membership always (a dormant
+      // backup you filed here stays visible).
+      list = (players || []).filter((p) => inSquad(p, col.id))
     }
     if (search.trim()) list = list.filter((p) => matchesName(p, search))
     if (values.role?.length) list = list.filter((p) => (p.skill_positions || []).some((r) => values.role.includes(r)))
@@ -813,26 +962,55 @@ export default function AdminTeams() {
     return list
   }, [players, search, values, dormantCutoff, fillInCutoff, statusOf, selectedIds])
 
-  const assign = useCallback(async (ids, squadId) => {
-    if (!ids.length) return
+  // Optimistically edit a player's membership set, then persist. A drag from
+  // one squad to another is a MOVE (remove + add in one call); a drag to
+  // Unassigned is a remove; the "Add players" button and the card "＋" are adds.
+  const editMembership = useCallback(async (id, { add = null, remove = null }) => {
+    if (!add && !remove) return
     const prev = players
-    setPlayers((ps) => ps.map((p) => (ids.includes(p.id) ? { ...p, squad_team_id: squadId } : p)))
-    try { await api.bsAssignSquad(ids, squadId) }
-    catch (e) { setPlayers(prev); toast.error('Move failed: ' + e.message) }
+    setPlayers((ps) => ps.map((p) => {
+      if (p.id !== id) return p
+      const s = new Set(squadIds(p))
+      if (remove) s.delete(remove)
+      if (add) s.add(add)
+      return { ...p, squad_team_ids: [...s] }
+    }))
+    try {
+      if (add && remove) await api.bsAssignSquad([id], add, { action: 'move', from: remove })
+      else if (add) await api.bsAssignSquad([id], add, { action: 'add' })
+      else await api.bsAssignSquad([id], null, { action: 'remove', from: remove })
+    } catch (e) { setPlayers(prev); toast.error('Move failed: ' + e.message) }
+  }, [players, toast])
+
+  // Additive: add one or many players to a squad, keeping every squad they are
+  // already in. Backs the per-squad "Add players" modal and the card "＋".
+  const addToSquad = useCallback(async (ids, teamId) => {
+    const list = Array.isArray(ids) ? ids : [ids]
+    if (!list.length || !teamId) return
+    const prev = players
+    setPlayers((ps) => ps.map((p) => (list.includes(p.id) && !inSquad(p, teamId)
+      ? { ...p, squad_team_ids: [...squadIds(p), teamId] } : p)))
+    try { await api.bsAssignSquad(list, teamId, { action: 'add' }) }
+    catch (e) { setPlayers(prev); toast.error('Add failed: ' + e.message) }
   }, [players, toast])
 
   const onDrop = (col) => {
     setOver(null)
-    const id = dragId.current
-    dragId.current = null
-    if (!id) return
-    const player = players.find((p) => p.id === id)
-    if (player && (player.squad_team_id || null) !== col.id) assign([id], col.id)
+    const d = dragRef.current
+    dragRef.current = null
+    if (!d) return
+    const toId = col.id || null   // null for any unassigned pool
+    if ((d.fromId || null) === toId) return   // dropped back where it came from
+    editMembership(d.id, { add: toId, remove: d.fromId || null })
   }
 
-  const toggleCollapse = (key) => setCollapsed((s) => { const n = new Set(s); n.has(key) ? n.delete(key) : n.add(key); return n })
-  const collapseAll = () => setCollapsed(new Set(columns.map((c) => c.key)))
-  const expandAll = () => setCollapsed(new Set())
+  const isCollapsed = useCallback(
+    (col) => (collapseOverride.has(col.key) ? collapseOverride.get(col.key) : !!col.secondary),
+    [collapseOverride],
+  )
+  const toggleCollapse = (col) => setCollapseOverride((m) => { const n = new Map(m); n.set(col.key, !isCollapsed(col)); return n })
+  const collapseAll = () => setCollapseOverride(new Map(columns.map((c) => [c.key, true])))
+  const expandAll = () => setCollapseOverride(new Map(columns.map((c) => [c.key, false])))
 
   const pickAvail = async (status) => {
     const p = availEdit
@@ -849,9 +1027,9 @@ export default function AdminTeams() {
     try { await api.bsDeleteTeam(t.id); toast.success('Deleted'); loadTeams(); loadPlayers() }
     catch (e) { toast.error('Delete failed: ' + e.message) }
   }
-  // Apply auto-assign: one squad-assign call per target team, then reload.
+  // Apply auto-assign: one ADD per target team (never removes a squad), reload.
   const applyAutoAssign = async (entries) => {
-    for (const [teamId, ids] of entries) await api.bsAssignSquad(ids, teamId)
+    for (const [teamId, ids] of entries) await api.bsAssignSquad(ids, teamId, { action: 'add' })
     loadPlayers()
   }
   // Re-guess column order for auto-seeded squads (fixes squads created under
@@ -881,7 +1059,7 @@ export default function AdminTeams() {
       )}
       {addTo !== undefined && (
         <BulkAddModal fixedTeam={addTo} teams={teams || []} players={players || []}
-          dormantCutoff={dormantCutoff} statusOf={statusOf} onAssign={assign} onClose={() => setAddTo(undefined)} />
+          dormantCutoff={dormantCutoff} statusOf={statusOf} onAssign={addToSquad} onClose={() => setAddTo(undefined)} />
       )}
       {availEdit && (
         <QuickAvailModal player={availEdit} dateLabel={firstDate}
@@ -911,7 +1089,7 @@ export default function AdminTeams() {
             <FilterBar
               filters={filters} facets={facets} searchPlaceholder="Search players…" className="mb-3"
               right={(<>
-                {poolCounts.fillins > 0 && (
+                {(poolCounts['fillins:__all__'] || 0) > 0 && (
                   <RecencySelect value={fillInReach} onChange={setFillInYears} options={fillInOptions}
                     title="How far back the Potential fill-ins pool reaches" />
                 )}
@@ -927,29 +1105,30 @@ export default function AdminTeams() {
             <div className="grid gap-3 items-start" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))' }}>
               {visibleColumns.map((col) => {
                 const members = membersOf(col)
-                const poolTotal = col.pool ? poolCounts[col.pool] : 0
+                const total = col.unassigned ? poolTotal(col) : 0
                 const facetsOn = !!(values.role?.length || values.avail?.length || values.selected || search.trim())
                 return (
                   <div key={col.key}>
                     <SquadColumn
                       col={col} members={members} dormantCutoff={dormantCutoff} statusOf={statusOf} canManage={canManage}
-                      collapsed={collapsed.has(col.key)} onToggleCollapse={() => toggleCollapse(col.key)}
+                      collapsed={isCollapsed(col)} onToggleCollapse={() => toggleCollapse(col)}
                       isOver={over === col.key}
+                      teams={teams} onAddToSquad={addToSquad}
                       dragHandlers={{
                         onDragOver: canManage ? (e) => { e.preventDefault(); setOver(col.key) } : undefined,
                         onDragLeave: canManage ? () => setOver((o) => (o === col.key ? null : o)) : undefined,
                         onDrop: canManage ? () => onDrop(col) : undefined,
-                        onCardDragStart: (id) => { dragId.current = id },
-                        onCardDragEnd: () => { dragId.current = null; setOver(null) },
+                        onCardDragStart: (id) => { dragRef.current = { id, fromId: col.id || null } },
+                        onCardDragEnd: () => { dragRef.current = null; setOver(null) },
                       }}
                       onAdd={() => setAddTo(col.team)} onEdit={() => setEditing(col.team)} onDelete={() => del(col.team)}
                       onEditAvail={canManage ? setAvailEdit : undefined} />
-                    {col.pool && !collapsed.has(col.key) && (
+                    {col.unassigned && !isCollapsed(col) && (
                       <div className="text-[10.5px] text-pb-faintest mt-1 px-1 space-y-0.5">
-                        {facetsOn && members.length < poolTotal && (
-                          <div>Showing {members.length} of {poolTotal} · {poolTotal - members.length} hidden by filters</div>
+                        {facetsOn && members.length < total && (
+                          <div>Showing {members.length} of {total} · {total - members.length} hidden by filters</div>
                         )}
-                        {col.pool === 'unassigned' && !values.showinactive && poolCounts.inactive > 0 && (
+                        {col.inactiveNote && !values.showinactive && poolCounts.inactive > 0 && (
                           <div>{poolCounts.inactive} inactive not shown — tick “Show inactive players” to include them.</div>
                         )}
                       </div>

@@ -7747,6 +7747,284 @@ Reported from a phone: the Directory reads well, and the older full editors
   `documentElement.scrollWidth > clientWidth`. That check is worth repeating
   whenever a Clubhouse screen is added.
 
+## A role is a level between the area and the shift (migration 306, v9.82.0, Sep 2026)
+
+Reported off Setup → Areas & roles: an operational area paired ONE role with
+ONE gating qualification ("ROLE THAT COVERS IT"), and the reporter wanted a
+Match Day area to involve several — Umpires, Scorers, Team Managers, the roles a
+junior fixture needs — stating the hierarchy in their own words: Department →
+Operational Area → **Role** → Shift → Volunteer, each area holding many roles and
+each role many shifts.
+
+- **THE ROLE WAS A PROPERTY OF THE AREA, AND "EACH ROLE HAS MANY SHIFTS" CANNOT
+  BE SAID THAT WAY.** `roster_areas.required_role_id` is one column and a shift
+  knew nothing about roles — it only pointed at its area. So role becomes a
+  first-class level: an area holds a PALETTE of roles (`roster_area_roles`, each
+  role paired with the qualification that gates that one role), and every
+  shift/pattern carries one `role_id` drawn from that palette.
+- **THE QUALIFICATION IS PER ROLE, WHICH IS THE WHOLE POINT.** A Match Day
+  Umpire needs an accreditation while the Scorer beside it needs nothing, so the
+  gate lives on the palette ENTRY (`roster_area_roles.required_qualification_type_id`),
+  not on the area. `check_assignment` reads the block and the role warning off
+  the SHIFT (`shift.required_qualification_type_id`, `shift.role_id`), so a
+  person cleared for one role on a fixture is not blocked for another on the same
+  one.
+- **PAID VS VOLUNTEER MOVED FROM THE AREA TO THE SHIFT'S ROLE, so one area can
+  mix both.** `area_pay_kinds` is gone; `confirm_review` and `hours_summary`
+  derive `is_paid` per shift by joining `club_roles` → `club_role_types` on
+  `s.role_id` (`category == 'paid'`, `PAID_CATEGORY`). Worked-hours paid still
+  reads the already-stamped `volunteer_hours.is_paid` (the snapshot rule).
+  `role_shortages` buckets open shifts by `s.role_id` directly rather than
+  resolving through the area — simpler and more accurate, and a NULL `role_id`
+  is the `no_role_required` bucket.
+- **THE BACKFILL MAKES AN EXISTING CLUB BYTE-IDENTICAL.** Migration 306's three
+  idempotent statements carry every single-role area into a one-entry palette
+  and stamp its patterns' and shifts' `role_id` from `required_role_id`, so a
+  club that never touches this behaves exactly as before. `roster_areas`'
+  `required_role_id`/`required_qualification_type_id` are KEPT but deprecated —
+  read only by the backfill; a new area leaves them NULL and the palette is the
+  source of truth. `list_areas` still emits `required_role_id`/`_name` = the
+  first palette entry, so an un-refreshed client shows something.
+- **THE WHOLE ROSTER SUBSYSTEM IS RAW SQL, OUT OF THE ORM/ALEMBIC GRAPH**
+  (`services/roster.py` docstring), so `roster_area_roles` and the two `role_id`
+  columns are mirrored idempotently in `main.py`'s lifespan, byte-identical to
+  306's `STATEMENTS`, right after the migration-222 block. `role_id` on both
+  patterns and shifts is `ON DELETE SET NULL` (a shift outlives a deleted role
+  as general help); a palette entry with no role is meaningless, so
+  `roster_area_roles.role_id` is `NOT NULL ON DELETE CASCADE`.
+- **`seed_starter_areas` seeds each starter's role into the palette** and adds a
+  multi-role **Match Day** starter (Umpire+accreditation, Scorer, Team Manager) —
+  the reporter's own example, and the demonstration that the capability is
+  reachable from the Starter Pack. A starter role that does not resolve to a
+  `club_roles` row is skipped rather than seeding a dangling palette entry.
+- **NUMBERED 306, down_revision 305** (the local branch head; `origin/main` tops
+  at 304 — re-check `origin/main` at merge, per the house rule this file records
+  repeatedly).
+- **Verified against a real Postgres**
+  (`backend/verification/verify_roster_area_roles.py`, 45 checks through the
+  shipped service: migration/lifespan applied idempotently, the backfill carrying
+  a legacy single-role area into a palette with its patterns and shifts
+  inheriting the role, `_generate_shifts` copying `role_id`, a multi-role Match
+  Day area gating each shift by its OWN role's qualification — the Umpire shift
+  blocked without accreditation while the SAME person is NOT blocked for the
+  Scorer shift — paid derived from the shift's role in confirm and hours,
+  `role_shortages` bucketed by shift role, a role removed from the palette, and
+  cross-club scoping) **with a control run**: with the feature reverted, 12 of
+  the checks fail on exactly the per-role qualification and role-on-shift
+  behaviour.
+- **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN, hit in the harness itself.**
+  `caught(label, svc.create_area(...))` evaluated the call — with its new `roles`
+  keyword — BEFORE wrapping it, so the control died with a `TypeError` instead of
+  reporting. `caught` takes a no-arg factory now (`lambda:`), so an absent
+  parameter is a reported failure rather than the end of the run.
+- **Driven in Chromium**
+  (`frontend/verification/verify_roster_area_roles_browser.mjs`, 16 checks: the
+  palette editor growing to two role rows with row 2 refusing the role already
+  chosen in row 1, the EXACT `roles: [...]` payload on the wire — Umpire carrying
+  its accreditation, Scorer a null qualification — the area sub-line listing both
+  roles with their quals, the per-pattern role picker scoped to the palette and
+  its `role_id` on the wire, an open shift's chip showing its role on the weekly
+  grid, and the AddShift picker scoped to the chosen area) **with a control run**:
+  12 of the 16 fail against the previous commit, the old pattern and shift POSTs
+  carrying no `role_id` at all. Every new element is read through `seen`/`press`/
+  `pick`/`opts`, which report absence rather than throwing, so the control fails
+  each new check cleanly instead of dying on the first missing locator.
+- **NOTICED, NOT BUILT**: nothing migrates a shift's people when its role is
+  changed, and there is no per-role headcount target on an area (a shift's
+  headcount is still per pattern). Both are follow-ups, not part of making role a
+  first-class level.
+
+### The roster grid opens an area into its roles (v9.82.1, Sep 2026)
+
+Reported straight after v9.82.0 landed: Match Day now holds Umpire, Scorer, Turf
+Curator and Groundskeeper, but the ROSTER GRID's Areas view still drew Match Day
+as one row with every role's shifts mixed into the day cells. A shift is created
+and filled for a role, so the grid should read that way.
+
+- **FRONTEND ONLY, because the shift already carries its role.** `_shift_rows`
+  has returned `role_id`/`role_name` per shift and `list_areas` the `roles`
+  palette since v9.82.0, so the grid had everything it needed — the Areas view
+  just wasn't grouping by it. No migration, no service, no router change.
+- **THE GRID GROUPS THE SHIFTS THAT EXIST, NOT THE PALETTE.** A palette role with
+  no shift this week has nothing to display or assign, so it draws no row — the
+  grid shows shifts, and a per-role row is only meaningful where shifts sit.
+  `areaRoleGroups(a, areaShifts)` in `Roster.jsx` buckets the area's shifts by
+  `role_id` (null → a "General help" group, kept last), ordered by the palette's
+  `sort_order` first, then any role present but off-palette. A shift with no role
+  is the one bucket that isn't a palette role.
+- **ONE ROLE GROUP → THE ROW IS UNCHANGED.** A single-role area (or one with
+  shifts for one role this week) renders exactly the row it did before — no
+  header, no toggle, its role and qualification on the meta line. This is what
+  keeps a single-role club byte-identical, the same posture v9.82.0's backfill
+  took. Only two-or-more role groups draw the expanding header.
+- **A MULTI-ROLE AREA IS A HEADER THAT FOLDS ITS ROLES AWAY.** The header carries
+  the area total (filled/total, "N roles") and a toggle; each role is a sub-row
+  beneath it with only that role's shifts in its day cells and its own
+  filled/total and gating qualification. Collapsing leaves just the header.
+- **`areaDayCol(a, cellShifts, d)` IS THE ONE PLACE A SHIFT CHIP IS DRAWN ON THE
+  AREAS VIEW**, shared by the single-role row and every per-role sub-row, so they
+  select, drop and warn identically — a volunteer dragged onto a role's shift is
+  the same code path whichever row it lands in.
+- **COLLAPSE IS A PER-PERSON PREFERENCE**, `usePref('roster_areas_collapsed', {})`
+  keyed by area id, so a club with one area folded keeps the rest open and the
+  fold survives the browser closing. Default (empty map) is expanded — the
+  reported complaint was that the roles were hidden, so showing them is the
+  default and folding is the opt-in.
+- **Driven in Chromium** (`frontend/verification/verify_roster_role_grid_browser.mjs`,
+  16 checks: the multi-role header and its toggle, both role sub-rows shown by
+  default, the open Umpire shift landing in the Umpire sub-row and the assigned
+  Scorer shift in the Scorer sub-row, a single-role area staying a plain row with
+  no toggle, the toggle folding the sub-rows away and back, the fold surviving a
+  reload, no page errors and no overflow at 390px) **with a control run**: 12 of
+  the 16 fail against the previous commit, the 4 that pass in both being the
+  single-role-unchanged, no-errors and no-overflow guards.
+- **THE COLLAPSE CHECKS ARE CONTRASTS, NOT BARE ABSENCE.** "collapsing folds away
+  the sub-row" and "survives a reload" are gated on the sub-row having genuinely
+  been shown first (`wasExpanded`), or a build that never draws a sub-row would
+  pass them vacuously — the "a check that can't fail is not a check" trap, caught
+  by the control run passing them before they were tightened.
+
+### An open shift on an archived area read "undefined" (v9.82.4, Sep 2026)
+
+Reported off a live People-view roster: open-shift chips showed "undefined ×2" /
+"undefined ×8" as their description.
+
+- **THE CHIP NAMED A SHIFT BY LOOKING ITS AREA UP IN THE ACTIVE-AREAS SET, WHICH
+  MISSES AN ARCHIVED AREA.** `list_areas` returns `is_active = TRUE` areas only,
+  but `_generate_shifts` and `_shift_rows` don't filter active (the row still
+  exists — `delete_area` is a soft delete), so a week generated before an area
+  was archived keeps that area's shifts. The People-view chip's headline was
+  `areaById[shift.area_id].name`, and `areaById` is built from `list_areas` — so
+  an archived-area shift resolved to `{}` and rendered its name as `undefined`.
+  **React renders a bare `undefined` child as EMPTY; only the `count > 1` path
+  (`a.name + ' ×' + count` → string concat) produces the literal "undefined ×N"**
+  the screenshot showed — which is why the reproduction fixture needs a PAIR, not
+  a single, on the archived area.
+- **THE SHIFT CARRIES ITS OWN `area_name` NOW, off an UNFILTERED LEFT JOIN.**
+  `_shift_rows` LEFT JOINs `roster_areas` (not `list_areas`' active-only set), so
+  an archived area's name still travels on the shift. The frontend already
+  REFERENCED `x.area_name` in the section-search (`shiftHit`) — a field that was
+  intended but never populated, the tell that this was the gap. `areaLabel(shift)`
+  is the one robust namer: `shift.area_name || areaById[...]?.name || role_name ||
+  'Shift'`, never `undefined`.
+- **AND THE OPEN-SHIFTS ROW GROUPED BY AREA NAME + TIME, so two roles merged.**
+  A shift is FOR one role now, but the grouping keyed on the area name and hours
+  alone — so an Umpire slot and a Scorer slot at the same time in one Match Day
+  area collapsed into one "Match Day ×3" chip whose subtitle showed only the
+  representative role (the Scorer vanished). Keyed on `(area_id, role_id, start,
+  end)` now, so each role is its own chip and a same-role pair reads "×2".
+  Keying on the ids the shift already carries also stops every archived-area
+  shift lumping together under the old `undefined === undefined` name key.
+- **Verified against a real Postgres** (`verify_roster_area_roles.py` is 51 checks
+  now: every shift row carrying an `area_name`, a Match Day and a legacy shift
+  naming their areas, and — done last so it doesn't disturb the earlier sections
+  — an area archived after generation still naming its shift while `list_areas`
+  drops it) **with a control run**: with `area_name` reverted, 4 of the checks
+  fail. **Driven in Chromium** (`verify_roster_open_shift_labels_browser.mjs`, 11:
+  no chip reads "undefined", the archived area's real name shows, distinct roles
+  render as separate chips, and the same-role pair reads "Match Day ×2" not "×3")
+  **with a control run**: 5 of the 11 fail against the previous commit, the
+  captured text reading the reported "undefined ×2" beside a merged "Match Day
+  ×3".
+- **A HEADLINE CHECK THAT SUBSTRING-MATCHES THE ROLE CANNOT FAIL.** The first cut
+  asserted the archived chip showed "Grounds" while the role was "Groundskeeper"
+  — which `includes('Grounds')` passes on regardless, since React renders the
+  broken headline as empty rather than the string "undefined" at count 1. Fixed
+  by naming the archived area "Turf" (not a substring of its role) and using a
+  count-2 pair so the real "undefined ×2" bug reproduces.
+
+### And then a shift on that archived area could not be rostered (v9.82.5, Sep 2026)
+
+Reported one step on from the "undefined" labels: allocating the volunteer
+"Abbas, Aamir" (Role: Bar Staff) to a Bar Staff shift returned **"Can't roster
+Abbas, Aamir here. Unknown volunteer or area"**.
+
+- **THE ASSIGNMENT NEVER NEEDED THE AREA, AND THE GUARD THAT SAID IT DID IS WHAT
+  BROKE.** `assign` resolved the shift's area through `list_areas` (active-only)
+  and refused on `if not cand or not area`. But since migration 306 the role and
+  the qualification that gates it live on the SHIFT, and `check_assignment` reads
+  everything off the shift — the `area` argument was carried only to be ignored.
+  An archived area is not in `list_areas`, so the guard refused a fill that
+  needed nothing from the area. It is the same orphan the shift outlives that the
+  v9.82.4 note documents, hit on the write path this time.
+- **THE DEAD `area` PARAMETER IS REMOVED, NOT WORKED AROUND**, from
+  `check_assignment` / `_rank` / `assign` / `autofill` and the frontend's
+  `checkClient` / `dropVerdict` — a stale guard on a value nothing reads is worse
+  than none, and leaving it invites the same trap on the next reader. `assign`
+  now refuses only "Unknown volunteer" (a real state), and only when the
+  candidate itself does not resolve.
+- **THE "BEST FIT FOR THIS SHIFT" PANEL WAS GATED ON THE AREA BEING ACTIVE**
+  (`sel && selArea`), so an archived-area shift showed no fill controls at all —
+  the drag path was fixed by the backend change but the panel still hid. It is
+  gated on the shift alone now, named off the shift's own `area_name`, with the
+  edit-the-area link dropped since an archived area is not in the list to edit.
+- **Verified against a real Postgres** (`verify_roster_area_roles.py` is 54
+  checks now: with Match Day archived, an accredited umpire is rostered onto one
+  of its still-live Umpire shifts rather than refused, and the refusal is NOT the
+  stale "Unknown volunteer or area") **with a control run**: with the fix
+  reverted, 2 fail on exactly that. The `check_assignment` call in the harness
+  tolerates both the old and new arity so the control reaches the assign checks
+  (which use the unchanged `assign` signature) rather than crashing on the direct
+  call — a control run that crashes is not a control run.
+- **Driven in Chromium** (`verify_roster_open_shift_labels_browser.mjs` is 14:
+  selecting the archived-area open shift surfaces the Best fit panel, named off
+  its own `area_name`) **with a control run**: 2 fail against the previous commit,
+  the panel `null` where the area was insisted upon. The chip that carries the
+  `onClick` is the draggable root; the day-column div wrapping it starts with the
+  same text but has no handler, so the check targets `div[draggable]`.
+
+### A duplicate role named a role the list will not show (v9.82.3, Sep 2026)
+
+Reported off Areas & roles → Roles: adding "Bar Manager" was refused as already
+existing, with no Bar Manager anywhere in the list.
+
+- **THE ROLE WAS THERE, HIDDEN, AND THE SILENCE WAS THE BUG** — the same call this
+  file already records for a disabled Rediscover button and a figure that is
+  correctly zero. The committee starter pack (`STARTER_COMMITTEE_ROLES`) seeds
+  "Bar Manager" as a COMMITTEE role (`is_committee=True`), and the Roles list
+  filters those out (`!x.is_committee && x.role_type_category !== 'committee'`)
+  because they are managed as positions on the Committee screen. So a real,
+  active role existed and the tab that raised the error was the one place it
+  could never appear.
+- **THE UNIQUENESS CHECK SPANS EVERY ROLE, WHICH IS RIGHT — the reactivation-by-
+  `lower(title)` path and the many title lookups all assume one role per name.**
+  So the fix is not to scope the check to what the list shows (that would allow
+  two same-titled roles and break those assumptions); it is to make the refusal
+  SAY where the clashing role lives. `_role_clash_message(existing, existing_type,
+  *, caller_is_committee)` is the ONE definition, joining `club_role_types`: when
+  the existing active role is committee-hidden (its `is_committee` flag OR a
+  committee-category type — the same combined test the list applies) and the
+  caller's own role is not, it points at the Committee screen and asks for a
+  different name.
+- **THE RENAME PATH SHARES THE SAME HELPER, so the two cannot disagree.**
+  `update_role`'s rename-collision check (added on `main` the same week, whose own
+  comment already noted the committee-hidden case but kept the bare message) now
+  joins the type and calls `_role_clash_message` too — so renaming a visible role
+  ONTO a hidden committee role reads the same explanation, from the other
+  direction. `caller_is_committee` there is the role's effective `is_committee`
+  after the update (`fields.get("is_committee", r.is_committee)`).
+- **THE ADVICE IS ALWAYS-TRUE, NOT "RECLASSIFY IT".** The list hides a role when
+  `is_committee` OR the type category is committee, and the seeded committee role
+  has the FLAG set — so clearing only the type category would not surface it. A
+  distinct name always works, so that is what the message says; suggesting a
+  reclassification that would not actually list it is worse than saying nothing.
+- **A GENUINE VISIBLE DUPLICATE KEEPS THE PLAIN MESSAGE**, and a committee CALLER
+  clashing with a committee role keeps it too — it is not hidden from that
+  caller's own list. An archived clash still reactivates rather than erroring,
+  unchanged.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_role_create_committee_clash.py`, 10 checks through
+  the shipped `create_role` AND `update_role` over the ClubRole/ClubRoleType
+  tables: the reported case naming the Committee screen, the same when hidden by
+  the type category alone, the clash case-folded, a visible duplicate keeping the
+  bare message and never mentioning the Committee screen, an archived clash
+  reactivated, a committee create keeping the bare message, and the rename path
+  naming the Committee screen while a rename onto a visible duplicate keeps the
+  bare message) **with a control run**: with the committee-aware branch of
+  `_role_clash_message` neutered, 5 of the 10 fail — every create and rename check
+  that should name the Committee screen reports the customer's own bare
+  `A role called "Bar Manager" already exists`.
+
 ## Confirming the roster, a frozen first column, and the drags that never worked (migration 222, v9.10.0, Aug 2026)
 
 - **"Confirm roster" is the name, in the code as well as the UI.** The action was

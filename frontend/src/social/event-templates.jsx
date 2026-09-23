@@ -20,7 +20,7 @@
 //     · icon — a bundled 3D "thiings" glyph used as a faded watermark when no
 //       photo is supplied (auto-picked per preset, override in the editor).
 import { AutoFitText, BrandLockup, ClubLogo, GrainSVG, Halftone, Stripes } from './cricket-templates'
-import { aspectOf, share } from './postAspect'
+import { aspectOf, pick, share } from './postAspect'
 import { LayerRoot } from './postLayers'
 
 // Bundled motif glyphs (already in the repo at src/assets/thiings/).
@@ -119,6 +119,15 @@ const FRAME = (width = 1080, height = 1080) => ({
 // three template families, so an event poster and a fixture list cannot end up
 // with different ideas of how a band grows.
 
+// A headline slot sized to exactly TWO lines at its own max font. AutoFitText
+// clamps a 2-line headline and only shrinks on HEIGHT overflow, so a slot taller
+// than two lines lets it fit a THREE-line block and then the clamp truncates the
+// third line to an ellipsis (seen on a long "Grand Final Awards Presentation").
+// Sizing the slot to two lines forces the shrink to land on two real lines. The
+// font is capped at `max` regardless, so a taller canvas gains nothing from a
+// taller slot — its extra height belongs in the flex spacers, not here.
+const twoLineBox = (max, lineHeight) => Math.round(2 * max * lineHeight) + 12
+
 // ─────────────────────────────────────────────────────────────────────────────
 // EV1 — FLOODLIT · full-bleed photo + opacity filter (sporty, BetterStats-native)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -136,7 +145,7 @@ export function EVT_Floodlit({ team, event = {}, width = 1080, height = 1080, pa
 
       <div style={{ position: 'absolute', left: 64, right: 64, bottom: 60, display: 'flex', flexDirection: 'column' }}>
         <div style={{ fontFamily: MONO, fontSize: 18, letterSpacing: 6, textTransform: 'uppercase', color: P.accent, marginBottom: 14 }}>{event.kicker}</div>
-        <div style={{ height: share(height, 280), display: 'flex', alignItems: 'flex-end' }}>
+        <div style={{ height: twoLineBox(148, 0.86), display: 'flex', alignItems: 'flex-end' }}>
           <AutoFitText text={(event.title || '').toUpperCase()} max={148} min={56} lines={2} measureDeps={[event.title]}
             style={{ fontFamily: SPORT, fontWeight: 800, lineHeight: 0.86, textTransform: 'uppercase', color: '#fff', letterSpacing: 1 }} />
         </div>
@@ -167,9 +176,14 @@ export function EVT_Floodlit({ team, event = {}, width = 1080, height = 1080, pa
 // ─────────────────────────────────────────────────────────────────────────────
 export function EVT_Block({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
   const P = palette
+  const aspect = aspectOf(width, height)
+  // The colour band is a touch shorter on the square so the detail panel has
+  // room for all four cells + the CTA — the square used to clip the Venue/Entry
+  // row clean off. Portrait/story keep their share of the canvas.
+  const bandH = aspect === 'square' ? 566 : share(height, 606)
   return (
     <LayerRoot style={{ ...FRAME(width, height), background: P.primary, color: '#fff' }}>
-      <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: share(height, 606), background: `linear-gradient(150deg, ${P.accent} 0%, ${a(P.accent, 0.78)} 100%)`, overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: bandH, background: `linear-gradient(150deg, ${P.accent} 0%, ${a(P.accent, 0.78)} 100%)`, overflow: 'hidden' }}>
         {motif?.imageUrl
           ? <img src={motif.imageUrl} alt="" crossOrigin="anonymous" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.3, mixBlendMode: 'overlay' }} />
           : <img src={motif?.icon || icoHandshake} alt="" style={{ position: 'absolute', right: -130, top: 54, width: 560, height: 560, objectFit: 'contain', opacity: 0.26, transform: 'rotate(-8deg)' }} />}
@@ -180,51 +194,39 @@ export function EVT_Block({ team, event = {}, width = 1080, height = 1080, palet
           <div style={{ marginLeft: 'auto', fontFamily: MONO, fontSize: 13, letterSpacing: 3, textTransform: 'uppercase', color: '#fff', border: '1.5px solid rgba(255,255,255,0.55)', borderRadius: 999, padding: '9px 18px' }}>Club Event</div>
         </div>
 
-        <div style={{ position: 'absolute', left: 64, right: 64, bottom: 54 }}>
+        <div style={{ position: 'absolute', left: 64, right: 64, bottom: 52 }}>
           <div style={{ fontFamily: MONO, fontSize: 18, letterSpacing: 6, textTransform: 'uppercase', color: 'rgba(255,255,255,0.9)', marginBottom: 16 }}>{event.kicker}</div>
-          <div style={{ height: share(height, 280), display: 'flex', alignItems: 'flex-end' }}>
+          <div style={{ height: twoLineBox(158, 0.82), display: 'flex', alignItems: 'flex-end' }}>
             <AutoFitText text={(event.title || '').toUpperCase()} max={158} min={56} lines={2} measureDeps={[event.title]}
               style={{ fontFamily: SPORT, fontWeight: 800, lineHeight: 0.82, textTransform: 'uppercase', color: '#fff', letterSpacing: 1, textShadow: '0 4px 30px rgba(0,0,0,0.18)' }} />
           </div>
         </div>
       </div>
 
-      <div style={{ position: 'absolute', left: 0, top: share(height, 606), right: 0, bottom: 0, padding: '46px 64px 56px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
-        {event.subtitle ? <div style={{ fontSize: 27, color: 'rgba(255,255,255,0.74)', lineHeight: 1.32, maxWidth: 840, marginBottom: 30, flexShrink: 0 }}>{event.subtitle}</div> : null}
-        {/* On a taller post the four details SHARE what the panel has left, so
-            they sit in a grid that breathes rather than a fixed stack that runs
-            past the CTA. The square keeps its own fixed rows exactly as they
-            were — its panel has never quite fitted this much copy, and shrinking
-            the square's own type to fix that is a different change from
-            designing the portrait one. */}
-        {(() => {
-          const tall = aspectOf(width, height) !== 'square'
-          return (
-            <div style={{
-              ...(tall ? { flex: 1, minHeight: 0, gridTemplateRows: 'repeat(2, minmax(0, 1fr))' } : null),
-              display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1,
-              background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 14, overflow: 'hidden',
-            }}>
-              {/* `minHeight: 0` on a cell is TALL-ONLY. On the square this panel
-                  already overflows its own box, and letting a cell shrink below
-                  its content there collapses it to the label with the value
-                  gone — a worse square than the one it started with. */}
-              {[['Date', event.date], ['Time', event.time], ['Venue', event.venue], ['Entry', event.price]].map(([l, v]) => (
-                <div key={l} style={{ background: P.primary, padding: '20px 24px', ...(tall ? { minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', overflow: 'hidden' } : null) }}>
-                  <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 3, textTransform: 'uppercase', color: P.accent }}>{l}</div>
-                  <div style={{ fontFamily: SPORT, fontWeight: 700, fontSize: 40, color: '#fff', marginTop: 4, ...(tall ? { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } : null) }}>{v}</div>
-                </div>
-              ))}
+      <div style={{ position: 'absolute', left: 0, top: bandH, right: 0, bottom: 0, padding: pick(aspect, { square: '38px 64px 46px', portrait: '46px 64px 56px', story: '54px 64px 64px' }), boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
+        {event.subtitle ? <div style={{ fontSize: pick(aspect, { square: 26, portrait: 27, story: 29 }), color: 'rgba(255,255,255,0.74)', lineHeight: 1.32, maxWidth: 840, marginBottom: pick(aspect, { square: 22, portrait: 30, story: 34 }), flexShrink: 0 }}>{event.subtitle}</div> : null}
+        {/* The four details SHARE whatever the panel has left, at every size, so
+            they fill the space and centre their content instead of the fixed
+            2×2 stack running past the panel (the square used to clip its bottom
+            row). A long value wraps to two lines rather than being truncated. */}
+        <div style={{
+          flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: 'repeat(2, minmax(0, 1fr))', gap: 1,
+          background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 14, overflow: 'hidden',
+        }}>
+          {[['Date', event.date], ['Time', event.time], ['Venue', event.venue], ['Entry', event.price]].map(([l, v]) => (
+            <div key={l} style={{ background: P.primary, padding: '16px 24px', minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', overflow: 'hidden' }}>
+              <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 3, textTransform: 'uppercase', color: P.accent, marginBottom: 5 }}>{l}</div>
+              <div style={{ fontFamily: SPORT, fontWeight: 700, fontSize: pick(aspect, { square: 36, portrait: 40, story: 44 }), color: '#fff', lineHeight: 1.04, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{v}</div>
             </div>
-          )
-        })()}
+          ))}
+        </div>
         {event.cta ? (
-          <div style={{ marginTop: 26, flexShrink: 0, background: P.accent, borderRadius: 14, padding: '20px 28px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontFamily: SPORT, fontWeight: 800, fontSize: 42, textTransform: 'uppercase', letterSpacing: 1, color: P.primary }}>{event.cta}</span>
-            <span style={{ fontFamily: MONO, fontSize: 15, color: P.primary, opacity: 0.7 }}>↗</span>
+          <div style={{ marginTop: pick(aspect, { square: 20, portrait: 26, story: 28 }), flexShrink: 0, background: P.accent, borderRadius: 14, padding: pick(aspect, { square: '17px 28px', portrait: '20px 28px', story: '22px 30px' }), display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+            <span style={{ fontFamily: SPORT, fontWeight: 800, fontSize: pick(aspect, { square: 40, portrait: 42, story: 44 }), textTransform: 'uppercase', letterSpacing: 1, color: P.primary, lineHeight: 1 }}>{event.cta}</span>
+            <span style={{ fontFamily: MONO, fontSize: 15, color: P.primary, opacity: 0.7, flexShrink: 0 }}>↗</span>
           </div>
         ) : null}
-        <div style={{ marginTop: 'auto', flexShrink: 0, paddingTop: 28 }}><Watermark sponsor={event.sponsor} /></div>
+        <div style={{ marginTop: 'auto', flexShrink: 0, paddingTop: pick(aspect, { square: 22, portrait: 28, story: 30 }) }}><Watermark sponsor={event.sponsor} /></div>
       </div>
     </LayerRoot>
   )
@@ -236,6 +238,7 @@ export function EVT_Block({ team, event = {}, width = 1080, height = 1080, palet
 // ─────────────────────────────────────────────────────────────────────────────
 export function EVT_Ticket({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
   const P = palette
+  const aspect = aspectOf(width, height)
   const paper = P.paper || '#f4efe4'
   const ink = P.deepInk || '#1f1c14'
   const line = a(ink, 0.2)
@@ -246,49 +249,56 @@ export function EVT_Ticket({ team, event = {}, width = 1080, height = 1080, pale
       <div style={{ position: 'absolute', inset: 42, border: `1.5px solid ${line}`, pointerEvents: 'none' }} />
       <div style={{ position: 'absolute', inset: 50, border: `1px solid ${a(ink, 0.12)}`, pointerEvents: 'none' }} />
 
+      {/* Stamp lives in the top-right corner (the content is centred, so that
+          corner is always clear) rather than at a fixed y that the headline
+          slides under on a taller canvas. */}
       {event.price ? (
-        <div style={{ position: 'absolute', top: share(height, 250), right: 108, width: 148, height: 148, borderRadius: '50%', border: `2px solid ${P.accent}`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', transform: 'rotate(-9deg)', background: paper }}>
+        <div style={{ position: 'absolute', top: pick(aspect, { square: 118, portrait: 130, story: 150 }), right: 94, width: 138, height: 138, borderRadius: '50%', border: `2px solid ${P.accent}`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', transform: 'rotate(-9deg)', background: paper }}>
           <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 3, textTransform: 'uppercase', color: P.accent }}>Entry</div>
-          <div style={{ fontFamily: SERIF, fontWeight: 600, fontSize: 52, lineHeight: 1, color: ink, marginTop: 2 }}>{event.price}</div>
+          <div style={{ fontFamily: SERIF, fontWeight: 600, fontSize: 46, lineHeight: 1, color: ink, marginTop: 2 }}>{event.price}</div>
         </div>
       ) : null}
 
-      <div style={{ position: 'absolute', inset: '96px 100px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, marginTop: 8 }}>
-          {team.logo ? <ClubLogo src={team.logo} size={100} /> : <ClubLogo monogram={team.monogram} color={P.accent} size={100} shape="shield" />}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
-            <div style={{ width: 60, height: 1, background: line }} />
-            <div style={{ fontFamily: SPORT, fontSize: 32, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: ink, lineHeight: 0.95 }}>{team.fullName || team.name}</div>
-            <div style={{ width: 60, height: 1, background: line }} />
+      <div style={{ position: 'absolute', inset: '92px 100px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+        <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
+          {team.logo ? <ClubLogo src={team.logo} size={98} /> : <ClubLogo monogram={team.monogram} color={P.accent} size={98} shape="shield" />}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 18, maxWidth: '84%' }}>
+            <div style={{ width: 44, height: 1, background: line, flexShrink: 0 }} />
+            <div style={{ fontFamily: SPORT, fontSize: 30, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: ink, lineHeight: 0.98 }}>{team.fullName || team.name}</div>
+            <div style={{ width: 44, height: 1, background: line, flexShrink: 0 }} />
           </div>
         </div>
 
-        <div style={{ marginTop: 'auto' }}>
-          <div style={{ fontFamily: MONO, fontSize: 17, letterSpacing: 6, textTransform: 'uppercase', color: P.accent, marginBottom: 18 }}>{event.kicker}</div>
-          <AutoFitText text={event.title} max={158} min={64} lines={2} measureDeps={[event.title]}
-            style={{ fontFamily: SERIF, fontWeight: 600, lineHeight: 0.92, color: ink, letterSpacing: 1 }} />
-          {event.subtitle ? <div style={{ fontFamily: SERIF, fontStyle: 'italic', fontWeight: 500, fontSize: 38, color: a(ink, 0.66), marginTop: 18, maxWidth: 720, lineHeight: 1.3 }}>{event.subtitle}</div> : null}
-        </div>
+        {/* Hero + ticket stub as ONE block, centred in the leftover space (auto
+            margins top and bottom) — the poster reads as a ticket with its
+            details, not three groups flung to the top, middle and edges. */}
+        <div style={{ marginTop: 'auto', marginBottom: 'auto', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 30 }}>
+          <div style={{ fontFamily: MONO, fontSize: 17, letterSpacing: 6, textTransform: 'uppercase', color: P.accent, marginBottom: 16 }}>{event.kicker}</div>
+          <div style={{ height: twoLineBox(158, 0.92), display: 'flex', alignItems: 'center', width: '100%' }}>
+            <AutoFitText text={event.title} max={158} min={60} lines={2} measureDeps={[event.title]}
+              style={{ fontFamily: SERIF, fontWeight: 600, lineHeight: 0.92, color: ink, letterSpacing: 1, textAlign: 'center', width: '100%' }} />
+          </div>
+          {event.subtitle ? <div style={{ fontFamily: SERIF, fontStyle: 'italic', fontWeight: 500, fontSize: pick(aspect, { square: 34, portrait: 37, story: 39 }), color: a(ink, 0.66), marginTop: 14, maxWidth: 720, lineHeight: 1.3 }}>{event.subtitle}</div> : null}
 
-        <div style={{ marginTop: 'auto', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <div style={{ position: 'relative', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 34 }}>
+          <div style={{ position: 'relative', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '34px 0 32px' }}>
             <div style={{ position: 'absolute', left: -58, width: 34, height: 34, borderRadius: '50%', background: a(ink, 0.08), border: `1px solid ${line}` }} />
             <div style={{ flex: 1, borderTop: `2px dashed ${line}` }} />
             <div style={{ position: 'absolute', right: -58, width: 34, height: 34, borderRadius: '50%', background: a(ink, 0.08), border: `1px solid ${line}` }} />
           </div>
-          <div style={{ display: 'flex', alignItems: 'stretch' }}>
+          <div style={{ display: 'flex', alignItems: 'stretch', maxWidth: '100%' }}>
             {[['Date', event.date], ['Time', event.time], ['Venue', event.venue]].map(([l, v], i) => (
-              <div key={l} style={{ padding: '0 36px', textAlign: 'center', borderLeft: i ? `1px solid ${line}` : 'none' }}>
+              <div key={l} style={{ padding: '0 30px', textAlign: 'center', borderLeft: i ? `1px solid ${line}` : 'none', minWidth: 0 }}>
                 <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 3, textTransform: 'uppercase', color: a(ink, 0.5) }}>{l}</div>
-                <div style={{ fontFamily: SERIF, fontWeight: 600, fontSize: 40, color: ink, marginTop: 4 }}>{v}</div>
+                <div style={{ fontFamily: SERIF, fontWeight: 600, fontSize: 36, color: ink, marginTop: 4, lineHeight: 1.08 }}>{v}</div>
               </div>
             ))}
           </div>
-          {event.cta ? <div style={{ marginTop: 30, fontFamily: MONO, fontSize: 15, letterSpacing: 3, textTransform: 'uppercase', color: P.accent, border: `1.5px solid ${P.accent}`, borderRadius: 999, padding: '11px 26px' }}>{event.cta}</div> : null}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 30 }}>
-            <BSMark size={18} color={P.accent} />
-            <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: a(ink, 0.5) }}>Made with BetterCricket{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
-          </div>
+          {event.cta ? <div style={{ marginTop: 28, fontFamily: MONO, fontSize: 15, letterSpacing: 3, textTransform: 'uppercase', color: P.accent, border: `1.5px solid ${P.accent}`, borderRadius: 999, padding: '11px 26px' }}>{event.cta}</div> : null}
+        </div>
+
+        <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <BSMark size={18} color={P.accent} />
+          <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: a(ink, 0.5) }}>Made with BetterCricket{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
         </div>
       </div>
     </LayerRoot>
@@ -300,6 +310,14 @@ export function EVT_Ticket({ team, event = {}, width = 1080, height = 1080, pale
 // ─────────────────────────────────────────────────────────────────────────────
 export function EVT_Scoreboard({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
   const P = palette
+  const aspect = aspectOf(width, height)
+  // Title box grows modestly with the canvas; the FLEX GAP below the headline
+  // takes the rest, so a taller post breathes in the middle rather than the
+  // fixture card sliding under the CTA bar (the reported collision — the card
+  // and the footer used to be two separate absolute blocks with nothing
+  // stopping them meeting).
+  const titleH = twoLineBox(150, 0.84)
+  const rowPad = pick(aspect, { square: 18, portrait: 22, story: 30 })
   return (
     <LayerRoot style={{ ...FRAME(width, height), background: P.primary, color: '#fff' }}>
       <div style={{ position: 'absolute', inset: 0, backgroundImage: `radial-gradient(${a(P.accent, 0.1)} 1.4px, transparent 1.6px)`, backgroundSize: '24px 24px' }} />
@@ -310,38 +328,46 @@ export function EVT_Scoreboard({ team, event = {}, width = 1080, height = 1080, 
         <BrandLockup team={team} palette={P} size={96} nameColor="#fff" nameSize={32} />
       </div>
 
-      <div style={{ position: 'absolute', left: 64, right: 64, top: share(height, 240) }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
-          <div style={{ width: 13, height: 13, borderRadius: '50%', background: P.accent, boxShadow: `0 0 16px ${P.accent}` }} />
-          <div style={{ fontFamily: MONO, fontSize: 18, letterSpacing: 6, textTransform: 'uppercase', color: P.accent }}>{event.kicker}</div>
+      {/* One column bounded top AND bottom, so the fixture card can never reach
+          the footer. Header block at top, footer group at bottom, slack pooled
+          between them. */}
+      <div style={{ position: 'absolute', left: 64, right: 64, top: share(height, 214), bottom: 56, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
+            <div style={{ width: 13, height: 13, borderRadius: '50%', background: P.accent, boxShadow: `0 0 16px ${P.accent}` }} />
+            <div style={{ fontFamily: MONO, fontSize: 18, letterSpacing: 6, textTransform: 'uppercase', color: P.accent }}>{event.kicker}</div>
+          </div>
+          <div style={{ height: titleH, display: 'flex', alignItems: 'flex-end' }}>
+            <AutoFitText text={(event.title || '').toUpperCase()} max={150} min={56} lines={2} measureDeps={[event.title]}
+              style={{ fontFamily: SPORT, fontWeight: 800, lineHeight: 0.84, textTransform: 'uppercase', color: '#fff', letterSpacing: 1 }} />
+          </div>
+          {event.subtitle ? <div style={{ fontFamily: MONO, fontSize: 21, color: 'rgba(255,255,255,0.6)', marginTop: 6, lineHeight: 1.5, maxWidth: 820 }}>{event.subtitle}</div> : null}
         </div>
-        <div style={{ height: share(height, 270), display: 'flex', alignItems: 'flex-start' }}>
-          <AutoFitText text={(event.title || '').toUpperCase()} max={150} min={56} lines={2} measureDeps={[event.title]}
-            style={{ fontFamily: SPORT, fontWeight: 800, lineHeight: 0.84, textTransform: 'uppercase', color: '#fff', letterSpacing: 1 }} />
-        </div>
-        {event.subtitle ? <div style={{ fontFamily: MONO, fontSize: 21, color: 'rgba(255,255,255,0.6)', marginTop: 4, lineHeight: 1.5, maxWidth: 820 }}>{event.subtitle}</div> : null}
 
-        <div style={{ marginTop: 44, border: `1.5px solid ${a(P.accent, 0.3)}`, borderRadius: 18, background: a(P.accent, 0.1), overflow: 'hidden' }}>
+        {/* Card floats in the middle of the slack (auto margins top AND bottom),
+            so a taller post keeps the headline at the top and the footer at the
+            foot with the details centred between — not one pooled gap. */}
+        <div style={{ marginTop: 'auto', marginBottom: 'auto', flexShrink: 0, border: `1.5px solid ${a(P.accent, 0.3)}`, borderRadius: 18, background: a(P.accent, 0.1), overflow: 'hidden' }}>
           <div style={{ background: a(P.accent, 0.16), padding: '14px 28px', borderBottom: `1px solid ${a(P.accent, 0.3)}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span style={{ fontFamily: MONO, fontSize: 14, letterSpacing: 4, textTransform: 'uppercase', color: P.accent }}>▸ Fixture Card</span>
             <span style={{ fontFamily: MONO, fontSize: 14, letterSpacing: 2, color: 'rgba(255,255,255,0.4)' }}>{event.price}</span>
           </div>
           <div style={{ padding: '6px 28px' }}>
             {[['Date', event.date], ['Time', event.time], ['Venue', event.venue]].map(([l, v], i) => (
-              <div key={l} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '20px 0', borderBottom: i < 2 ? `1px dashed ${a(P.accent, 0.3)}` : 'none' }}>
-                <span style={{ fontFamily: MONO, fontSize: 16, letterSpacing: 4, textTransform: 'uppercase', color: 'rgba(255,255,255,0.5)' }}>{l}</span>
-                <span style={{ fontFamily: SPORT, fontWeight: 700, fontSize: 46, color: i === 2 ? P.accent : '#fff' }}>{v}</span>
+              <div key={l} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 20, padding: `${rowPad}px 0`, borderBottom: i < 2 ? `1px dashed ${a(P.accent, 0.3)}` : 'none' }}>
+                <span style={{ fontFamily: MONO, fontSize: 16, letterSpacing: 4, textTransform: 'uppercase', color: 'rgba(255,255,255,0.5)', flexShrink: 0 }}>{l}</span>
+                <span style={{ fontFamily: SPORT, fontWeight: 700, fontSize: 46, color: i === 2 ? P.accent : '#fff', textAlign: 'right', lineHeight: 1.05 }}>{v}</span>
               </div>
             ))}
           </div>
         </div>
-      </div>
 
-      <div style={{ position: 'absolute', left: 64, right: 64, bottom: 54, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ fontFamily: MONO, fontSize: 16, letterSpacing: 2, textTransform: 'uppercase', color: P.accent }}>{event.cta}</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-          {event.sponsor ? <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: 'rgba(255,255,255,0.4)' }}>{event.sponsor}</span> : null}
-          <BSMark size={20} />
+        <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+          <div style={{ fontFamily: MONO, fontSize: 16, letterSpacing: 2, textTransform: 'uppercase', color: P.accent }}>{event.cta}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexShrink: 0 }}>
+            {event.sponsor ? <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: 'rgba(255,255,255,0.4)' }}>{event.sponsor}</span> : null}
+            <BSMark size={20} />
+          </div>
         </div>
       </div>
     </LayerRoot>
@@ -353,12 +379,14 @@ export function EVT_Scoreboard({ team, event = {}, width = 1080, height = 1080, 
 // ─────────────────────────────────────────────────────────────────────────────
 export function EVT_Gazette({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
   const P = palette
+  const aspect = aspectOf(width, height)
   const paper = P.paper || '#f4f0e6'
   const ink = P.deepInk || '#1a1814'
   const line = a(ink, 0.28)
   const faint = a(ink, 0.55)
   const SERIF = "'Playfair Display', serif"
   const BODY = "'Spectral', serif"
+  const t5max = pick(aspect, { square: 112, portrait: 128, story: 138 })
   return (
     <LayerRoot style={{ ...FRAME(width, height), background: paper, color: ink, fontFamily: BODY }}>
       {/* This poster keeps everything inside ONE inset frame, so it is a single
@@ -369,20 +397,27 @@ export function EVT_Gazette({ team, event = {}, width = 1080, height = 1080, pal
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: faint, paddingBottom: 10 }}>
           <span>Vol. XCIV — No. 12</span><span>Est. 1921</span>
         </div>
-        <div style={{ borderTop: `3px solid ${ink}`, borderBottom: `1px solid ${ink}`, padding: '18px 0 14px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 26 }}>
-          {team.logo ? <ClubLogo src={team.logo} size={96} /> : <ClubLogo monogram={team.monogram} color={ink} size={88} shape="shield" />}
-          <div style={{ fontFamily: SERIF, fontWeight: 900, fontSize: 78, lineHeight: 0.95, color: ink, letterSpacing: 0.5, textAlign: 'center' }}>{team.fullName || team.name}</div>
+        <div style={{ borderTop: `3px solid ${ink}`, borderBottom: `1px solid ${ink}`, padding: '16px 0 12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 26 }}>
+          {team.logo ? <ClubLogo src={team.logo} size={88} /> : <ClubLogo monogram={team.monogram} color={ink} size={80} shape="shield" />}
+          {/* AutoFit the masthead so a long club name shrinks instead of wrapping
+              to a two-line block that eats the poster. */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <AutoFitText text={team.fullName || team.name} max={72} min={34} lines={2} measureDeps={[team.fullName || team.name]}
+              style={{ fontFamily: SERIF, fontWeight: 900, lineHeight: 0.96, color: ink, letterSpacing: 0.5, textAlign: 'center' }} />
+          </div>
         </div>
         <div style={{ borderBottom: `3px solid ${ink}`, padding: '9px 0', textAlign: 'center', fontFamily: MONO, fontSize: 14, letterSpacing: 5, textTransform: 'uppercase', color: ink }}>{event.kicker}</div>
 
-        <div style={{ textAlign: 'center', padding: '46px 0 10px' }}>
-          <div style={{ fontFamily: MONO, fontSize: 15, letterSpacing: 5, textTransform: 'uppercase', color: P.accent, marginBottom: 18 }}>— Official Notice —</div>
-          <AutoFitText text={event.title} max={128} min={52} lines={2} measureDeps={[event.title]}
-            style={{ fontFamily: SERIF, fontWeight: 900, lineHeight: 0.9, color: ink }} />
-          {event.subtitle ? <div style={{ fontFamily: BODY, fontStyle: 'italic', fontSize: 34, color: a(ink, 0.72), marginTop: 20, maxWidth: 840, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.34 }}>{event.subtitle}</div> : null}
+        <div style={{ textAlign: 'center', padding: pick(aspect, { square: '30px 0 6px', portrait: '44px 0 10px', story: '54px 0 12px' }) }}>
+          <div style={{ fontFamily: MONO, fontSize: 15, letterSpacing: 5, textTransform: 'uppercase', color: P.accent, marginBottom: pick(aspect, { square: 14, portrait: 18, story: 20 }) }}>— Official Notice —</div>
+          <div style={{ height: twoLineBox(t5max, 0.9), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <AutoFitText text={event.title} max={t5max} min={52} lines={2} measureDeps={[event.title]}
+              style={{ fontFamily: SERIF, fontWeight: 900, lineHeight: 0.9, color: ink }} />
+          </div>
+          {event.subtitle ? <div style={{ fontFamily: BODY, fontStyle: 'italic', fontSize: pick(aspect, { square: 28, portrait: 33, story: 36 }), color: a(ink, 0.72), marginTop: pick(aspect, { square: 14, portrait: 20, story: 22 }), maxWidth: 840, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.32 }}>{event.subtitle}</div> : null}
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1.35fr 1fr', gap: 40, marginTop: 34, flex: 1, borderTop: `1px solid ${line}`, paddingTop: 34 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1.35fr 1fr', gap: 40, marginTop: pick(aspect, { square: 20, portrait: 34, story: 40 }), flex: 1, minHeight: 0, borderTop: `1px solid ${line}`, paddingTop: pick(aspect, { square: 22, portrait: 34, story: 40 }) }}>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             <div style={{ flex: 1, border: `1px solid ${ink}`, backgroundColor: '#d8d3c6', backgroundImage: motif?.imageUrl ? undefined : `radial-gradient(${a(ink, 0.42)} 1.3px, transparent 1.6px)`, backgroundSize: '7px 7px', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               {motif?.imageUrl
@@ -392,22 +427,22 @@ export function EVT_Gazette({ team, event = {}, width = 1080, height = 1080, pal
             <div style={{ fontFamily: BODY, fontStyle: 'italic', fontSize: 18, color: faint, marginTop: 10 }}>Pictured: members at last year's event.</div>
           </div>
 
-          <div style={{ border: `2px solid ${ink}`, padding: '24px 26px', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ fontFamily: SERIF, fontWeight: 700, fontSize: 30, color: ink, borderBottom: `2px solid ${ink}`, paddingBottom: 12, marginBottom: 6 }}>At a Glance</div>
+          <div style={{ border: `2px solid ${ink}`, padding: pick(aspect, { square: '18px 24px', portrait: '24px 26px', story: '28px 28px' }), display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <div style={{ fontFamily: SERIF, fontWeight: 700, fontSize: 28, color: ink, borderBottom: `2px solid ${ink}`, paddingBottom: 10, marginBottom: 4, flexShrink: 0 }}>At a Glance</div>
             {[['Date', event.date], ['Time', event.time], ['Venue', event.venue]].map(([l, v]) => (
-              <div key={l} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '15px 0', borderBottom: `1px solid ${line}` }}>
-                <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: faint }}>{l}</span>
-                <span style={{ fontFamily: SERIF, fontWeight: 700, fontSize: 30, color: ink }}>{v}</span>
+              <div key={l} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, padding: pick(aspect, { square: '11px 0', portrait: '15px 0', story: '17px 0' }), borderBottom: `1px solid ${line}` }}>
+                <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: faint, flexShrink: 0 }}>{l}</span>
+                <span style={{ fontFamily: SERIF, fontWeight: 700, fontSize: 27, color: ink, textAlign: 'right', lineHeight: 1.1 }}>{v}</span>
               </div>
             ))}
-            <div style={{ marginTop: 'auto', background: ink, padding: '14px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: 'rgba(255,255,255,0.6)' }}>Admission</span>
-              <span style={{ fontFamily: SERIF, fontWeight: 900, fontSize: 32, color: '#fff' }}>{event.price}</span>
+            <div style={{ marginTop: 'auto', background: ink, padding: '13px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+              <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: 'rgba(255,255,255,0.6)', flexShrink: 0 }}>Admission</span>
+              <span style={{ fontFamily: SERIF, fontWeight: 900, fontSize: 30, color: '#fff' }}>{event.price}</span>
             </div>
           </div>
         </div>
 
-        <div style={{ borderTop: `3px solid ${ink}`, marginTop: 28, paddingTop: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ borderTop: `3px solid ${ink}`, marginTop: pick(aspect, { square: 18, portrait: 26, story: 30 }), paddingTop: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
           <span style={{ fontFamily: BODY, fontStyle: 'italic', fontSize: 22, color: ink }}>{event.cta}</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             {event.sponsor ? <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: faint }}>{event.sponsor}</span> : null}
@@ -425,6 +460,7 @@ export function EVT_Gazette({ team, event = {}, width = 1080, height = 1080, pal
 // ─────────────────────────────────────────────────────────────────────────────
 export function EVT_Sticker({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
   const P = palette
+  const aspect = aspectOf(width, height)
   const paper = P.paper || '#fbf6ec'
   const ink = P.deepInk || '#23202c'
   const FUN = "'Fredoka', sans-serif"
@@ -440,37 +476,44 @@ export function EVT_Sticker({ team, event = {}, width = 1080, height = 1080, pal
       </div>
 
       <div style={{ position: 'absolute', inset: 72, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 18 }}>
+        <div style={{ flexShrink: 0, alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 18, maxWidth: 640 }}>
           {team.logo ? <ClubLogo src={team.logo} size={92} /> : <ClubLogo monogram={team.monogram} color={P.accent} size={92} shape="shield" />}
-          <div style={{ background: P.accent, color: '#fff', fontFamily: FUN, fontWeight: 600, fontSize: 28, letterSpacing: 1, padding: '12px 26px', borderRadius: 999, transform: 'rotate(-3deg)', boxShadow: `0 8px 22px ${a(P.accent, 0.4)}`, maxWidth: 480 }}>{team.fullName || team.name}</div>
+          <div style={{ background: P.accent, color: '#fff', fontFamily: FUN, fontWeight: 600, fontSize: 28, letterSpacing: 1, padding: '12px 26px', borderRadius: 999, transform: 'rotate(-3deg)', boxShadow: `0 8px 22px ${a(P.accent, 0.4)}` }}>{team.fullName || team.name}</div>
         </div>
 
-        <div style={{ marginTop: 'auto' }}>
-          <div style={{ display: 'inline-block', background: a(P.accent, 0.18), color: P.accent, fontFamily: FUN, fontWeight: 600, fontSize: 22, padding: '8px 18px', borderRadius: 999, marginBottom: 18 }}>{event.kicker}</div>
-          <div style={{ height: share(height, 280), display: 'flex', alignItems: 'flex-end' }}>
-            <AutoFitText text={event.title} max={158} min={60} lines={2} measureDeps={[event.title]}
-              style={{ fontFamily: FUN, fontWeight: 700, lineHeight: 0.9, color: ink, letterSpacing: -1 }} />
+        {/* Hero + chips + CTA sit as one cluster: centred on square/portrait,
+            and on the very tall story anchored a set distance below the logo
+            (breathing room at the foot) so the logo isn't stranded above a huge
+            centred gap. The title box is capped per aspect, not share()d up to
+            498px on a story. */}
+        <div style={{ marginTop: pick(aspect, { square: 'auto', portrait: 'auto', story: 96 }), marginBottom: 'auto', width: '100%', display: 'flex', flexDirection: 'column', paddingTop: 28 }}>
+          <div>
+            <div style={{ display: 'inline-block', background: a(P.accent, 0.18), color: P.accent, fontFamily: FUN, fontWeight: 600, fontSize: 22, padding: '8px 18px', borderRadius: 999, marginBottom: 18 }}>{event.kicker}</div>
+            <div style={{ height: twoLineBox(158, 0.9), display: 'flex', alignItems: 'flex-end' }}>
+              <AutoFitText text={event.title} max={158} min={60} lines={2} measureDeps={[event.title]}
+                style={{ fontFamily: FUN, fontWeight: 700, lineHeight: 0.9, color: ink, letterSpacing: -1 }} />
+            </div>
+            {event.subtitle ? <div style={{ fontWeight: 500, fontSize: 29, color: a(ink, 0.7), marginTop: 18, maxWidth: 760, lineHeight: 1.36 }}>{event.subtitle}</div> : null}
           </div>
-          {event.subtitle ? <div style={{ fontWeight: 500, fontSize: 29, color: a(ink, 0.7), marginTop: 20, maxWidth: 760, lineHeight: 1.36 }}>{event.subtitle}</div> : null}
-        </div>
 
-        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 40 }}>
-          {[['Date', event.date], ['Time', event.time], ['Venue', event.venue]].map(([l, v]) => (
-            <div key={l} style={{ background: '#fff', border: `2.5px solid ${ink}`, borderRadius: 18, padding: '14px 22px', boxShadow: `5px 5px 0 ${ink}` }}>
-              <div style={{ fontWeight: 600, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: P.accent }}>{l}</div>
-              <div style={{ fontFamily: FUN, fontWeight: 600, fontSize: 34, color: ink, lineHeight: 1.1 }}>{v}</div>
-            </div>
-          ))}
-        </div>
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: pick(aspect, { square: 30, portrait: 36, story: 40 }) }}>
+            {[['Date', event.date], ['Time', event.time], ['Venue', event.venue]].map(([l, v]) => (
+              <div key={l} style={{ background: '#fff', border: `2.5px solid ${ink}`, borderRadius: 18, padding: '14px 22px', boxShadow: `5px 5px 0 ${ink}` }}>
+                <div style={{ fontWeight: 600, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: P.accent }}>{l}</div>
+                <div style={{ fontFamily: FUN, fontWeight: 600, fontSize: 34, color: ink, lineHeight: 1.1 }}>{v}</div>
+              </div>
+            ))}
+          </div>
 
-        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginTop: 44 }}>
-          {event.cta ? <div style={{ background: ink, color: '#fff', fontFamily: FUN, fontWeight: 600, fontSize: 34, padding: '18px 38px', borderRadius: 999, boxShadow: '0 10px 26px rgba(0,0,0,0.2)' }}>{event.cta}</div> : <span />}
-          {event.price ? (
-            <div style={{ width: 150, height: 150, borderRadius: '50%', background: P.accent, color: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', transform: 'rotate(-9deg)', boxShadow: `0 12px 30px ${a(P.accent, 0.4)}` }}>
-              <span style={{ fontWeight: 600, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', opacity: 0.85 }}>Entry</span>
-              <span style={{ fontFamily: FUN, fontWeight: 700, fontSize: 42, lineHeight: 1 }}>{event.price}</span>
-            </div>
-          ) : null}
+          <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, marginTop: pick(aspect, { square: 34, portrait: 42, story: 46 }) }}>
+            {event.cta ? <div style={{ background: ink, color: '#fff', fontFamily: FUN, fontWeight: 600, fontSize: 34, padding: '18px 38px', borderRadius: 999, boxShadow: '0 10px 26px rgba(0,0,0,0.2)' }}>{event.cta}</div> : <span />}
+            {event.price ? (
+              <div style={{ width: 150, height: 150, borderRadius: '50%', background: P.accent, color: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', transform: 'rotate(-9deg)', boxShadow: `0 12px 30px ${a(P.accent, 0.4)}`, flexShrink: 0 }}>
+                <span style={{ fontWeight: 600, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', opacity: 0.85 }}>Entry</span>
+                <span style={{ fontFamily: FUN, fontWeight: 700, fontSize: 42, lineHeight: 1 }}>{event.price}</span>
+              </div>
+            ) : null}
+          </div>
         </div>
       </div>
 
@@ -487,6 +530,7 @@ export function EVT_Sticker({ team, event = {}, width = 1080, height = 1080, pal
 // ─────────────────────────────────────────────────────────────────────────────
 export function EVT_Kinetic({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
   const P = palette
+  const aspect = aspectOf(width, height)
   const skew = { transform: 'skewX(-8deg)' }
   const unskew = { display: 'inline-block', transform: 'skewX(8deg)' }
   return (
@@ -510,34 +554,40 @@ export function EVT_Kinetic({ team, event = {}, width = 1080, height = 1080, pal
         <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 3, textTransform: 'uppercase', color: P.accent, border: `1.5px solid ${a(P.accent, 0.45)}`, borderRadius: 4, padding: '9px 16px', ...skew }}><span style={unskew}>Club Event</span></div>
       </div>
 
-      <div style={{ position: 'absolute', left: 56, right: 64, top: share(height, 632), ...skew }}>
-        <div style={{ fontFamily: MONO, fontSize: 18, letterSpacing: 6, textTransform: 'uppercase', color: P.accent, marginBottom: 12, ...unskew }}>{event.kicker}</div>
-        <div style={{ height: share(height, 230) }}>
-          <AutoFitText text={(event.title || '').toUpperCase()} max={138} min={52} lines={2} measureDeps={[event.title]}
-            style={{ fontFamily: SPORT, fontStyle: 'italic', fontWeight: 800, lineHeight: 0.84, textTransform: 'uppercase', color: '#fff' }} />
+      {/* One column bounded top AND bottom: the italic title group up top, the
+          detail bar pinned to the foot, slack pooled between. The title block
+          and the bar used to be separate absolute blocks, so a long headline or
+          a wrapping venue drove them straight into each other. */}
+      <div style={{ position: 'absolute', left: 64, right: 64, top: share(height, 624), bottom: 54, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flexShrink: 0, ...skew }}>
+          <div style={{ fontFamily: MONO, fontSize: 18, letterSpacing: 6, textTransform: 'uppercase', color: P.accent, marginBottom: 12, ...unskew }}>{event.kicker}</div>
+          <div style={{ height: twoLineBox(138, 0.84), display: 'flex', alignItems: 'flex-end' }}>
+            <AutoFitText text={(event.title || '').toUpperCase()} max={138} min={52} lines={2} measureDeps={[event.title]}
+              style={{ fontFamily: SPORT, fontStyle: 'italic', fontWeight: 800, lineHeight: 0.84, textTransform: 'uppercase', color: '#fff' }} />
+          </div>
+          {event.subtitle ? <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 27, color: 'rgba(255,255,255,0.74)', marginTop: 18, maxWidth: 760, lineHeight: 1.3, ...unskew }}>{event.subtitle}</div> : null}
         </div>
-        {event.subtitle ? <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 27, color: 'rgba(255,255,255,0.74)', marginTop: 18, maxWidth: 760, lineHeight: 1.3, ...unskew }}>{event.subtitle}</div> : null}
-      </div>
 
-      <div style={{ position: 'absolute', left: 64, right: 64, bottom: 54 }}>
-        <div style={{ display: 'flex', alignItems: 'stretch', borderLeft: `4px solid ${P.accent}`, paddingLeft: 22 }}>
-          {[['Date', event.date, 1], ['Time', event.time, 1], ['Venue', event.venue, 1.3]].map(([l, v, fl]) => (
-            <div key={l} style={{ flex: fl }}>
-              <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 3, textTransform: 'uppercase', color: 'rgba(255,255,255,0.45)' }}>{l}</div>
-              <div style={{ fontFamily: SPORT, fontStyle: 'italic', fontWeight: 800, fontSize: 42, color: '#fff' }}>{v}</div>
+        <div style={{ marginTop: 'auto', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, borderLeft: `4px solid ${P.accent}`, paddingLeft: 22 }}>
+            {[['Date', event.date, 1], ['Time', event.time, 1], ['Venue', event.venue, 1.3]].map(([l, v, fl]) => (
+              <div key={l} style={{ flex: fl, minWidth: 0 }}>
+                <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 3, textTransform: 'uppercase', color: 'rgba(255,255,255,0.45)' }}>{l}</div>
+                <div style={{ fontFamily: SPORT, fontStyle: 'italic', fontWeight: 800, fontSize: 40, color: '#fff', lineHeight: 1.06 }}>{v}</div>
+              </div>
+            ))}
+            {event.price ? (
+              <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                <div style={{ background: P.accent, color: P.primary, fontFamily: SPORT, fontStyle: 'italic', fontWeight: 800, fontSize: 40, textTransform: 'uppercase', padding: '10px 24px', ...skew }}><span style={unskew}>{event.price}</span></div>
+              </div>
+            ) : null}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginTop: 26, paddingTop: 20, borderTop: '1px solid rgba(255,255,255,0.14)' }}>
+            <span style={{ fontFamily: MONO, fontSize: 16, letterSpacing: 2, textTransform: 'uppercase', color: P.accent }}>{event.cta}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0 }}>
+              {event.sponsor ? <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: 'rgba(255,255,255,0.42)' }}>{event.sponsor}</span> : null}
+              <BSMark size={20} />
             </div>
-          ))}
-          {event.price ? (
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-              <div style={{ background: P.accent, color: P.primary, fontFamily: SPORT, fontStyle: 'italic', fontWeight: 800, fontSize: 40, textTransform: 'uppercase', padding: '10px 24px', ...skew }}><span style={unskew}>{event.price}</span></div>
-            </div>
-          ) : null}
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 30, paddingTop: 22, borderTop: '1px solid rgba(255,255,255,0.14)' }}>
-          <span style={{ fontFamily: MONO, fontSize: 16, letterSpacing: 2, textTransform: 'uppercase', color: P.accent }}>{event.cta}</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            {event.sponsor ? <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: 'rgba(255,255,255,0.42)' }}>{event.sponsor}</span> : null}
-            <BSMark size={20} />
           </div>
         </div>
       </div>
@@ -571,7 +621,11 @@ export function EVT_Swiss({ team, event = {}, width = 1080, height = 1080, palet
           <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase', color: P.accent, marginBottom: 26 }}>{event.kicker}</div>
           <div style={{ display: 'flex', alignItems: 'stretch', gap: 28 }}>
             <div style={{ width: 10, background: P.accent, flexShrink: 0, margin: '8px 0' }} />
-            <div style={{ height: share(height, 320), flex: 1 }}>
+            {/* alignSelf:flex-start keeps this box at its real 2-line height — a
+                stretch row would grow it to fit the unclamped measurement pass,
+                so AutoFit's height check never trips and a long title clamps to
+                an ellipsis. The bar stretches to match it. */}
+            <div style={{ height: twoLineBox(152, 0.9), flex: 1, minWidth: 0, alignSelf: 'flex-start' }}>
               <AutoFitText text={event.title} max={152} min={56} lines={2} measureDeps={[event.title]}
                 style={{ fontWeight: 800, lineHeight: 0.9, letterSpacing: -3, color: ink }} />
             </div>
@@ -630,8 +684,10 @@ export function EVT_Crest({ team, event = {}, width = 1080, height = 1080, palet
             <div style={{ width: 80, height: 1, background: P.accent }} />
           </div>
           <div style={{ fontFamily: MONO, fontSize: 17, letterSpacing: 6, textTransform: 'uppercase', color: P.accent, marginBottom: 14 }}>{event.kicker}</div>
-          <AutoFitText text={event.title} max={130} min={52} lines={2} measureDeps={[event.title]}
-            style={{ fontFamily: SERIF, fontWeight: 700, lineHeight: 0.92, color: cream, letterSpacing: 1 }} />
+          <div style={{ height: twoLineBox(130, 0.92), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <AutoFitText text={event.title} max={130} min={52} lines={2} measureDeps={[event.title]}
+              style={{ fontFamily: SERIF, fontWeight: 700, lineHeight: 0.92, color: cream, letterSpacing: 1 }} />
+          </div>
           {event.subtitle ? <div style={{ fontFamily: SERIF, fontStyle: 'italic', fontWeight: 500, fontSize: 36, color: a(cream, 0.72), marginTop: 16, maxWidth: 720, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.32 }}>{event.subtitle}</div> : null}
         </div>
 
@@ -665,6 +721,7 @@ export function EVT_Crest({ team, event = {}, width = 1080, height = 1080, palet
 // ─────────────────────────────────────────────────────────────────────────────
 export function EVT_Chalkboard({ team, event = {}, width = 1080, height = 1080, palette }) {
   const P = palette
+  const aspect = aspectOf(width, height)
   const board = P.primary || '#20251f'
   const chalk = '#f1efe4'
   const chalk2 = 'rgba(241,239,228,0.74)'
@@ -677,7 +734,7 @@ export function EVT_Chalkboard({ team, event = {}, width = 1080, height = 1080, 
       <div style={{ position: 'absolute', inset: 44, border: `2px dashed ${faint}`, borderRadius: 8, pointerEvents: 'none' }} />
 
       <div style={{ position: 'absolute', inset: '88px 92px', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+        <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 20 }}>
           {team.logo ? <ClubLogo src={team.logo} size={88} /> : <ClubLogo monogram={team.monogram} color={chalk} size={88} shape="shield" />}
           <div>
             <div style={{ fontWeight: 700, fontSize: 28, letterSpacing: 3, textTransform: 'uppercase', color: chalk, lineHeight: 1 }}>{team.fullName || team.name}</div>
@@ -686,17 +743,18 @@ export function EVT_Chalkboard({ team, event = {}, width = 1080, height = 1080, 
           </div>
         </div>
 
-        <div style={{ marginTop: 'auto' }}>
+        {/* The notice and its details are ONE block: centred on square/portrait,
+            and pinned a set distance below the masthead on a story (the board
+            extends below it) rather than stranding the masthead above a huge gap. */}
+        <div style={{ marginTop: pick(aspect, { square: 'auto', portrait: 'auto', story: 104 }), marginBottom: 'auto', width: '100%', paddingTop: 34 }}>
           <div style={{ fontFamily: HAND, fontWeight: 600, fontSize: 48, color: P.accent, lineHeight: 1, marginBottom: 6, transform: 'rotate(-1deg)' }}>{event.kicker}</div>
-          <div style={{ height: share(height, 280), transform: 'rotate(-1.5deg)' }}>
+          <div style={{ height: twoLineBox(172, 0.82), transform: 'rotate(-1.5deg)', display: 'flex', alignItems: 'flex-end' }}>
             <AutoFitText text={event.title} max={172} min={64} lines={2} measureDeps={[event.title]}
               style={{ fontFamily: HAND, fontWeight: 700, lineHeight: 0.82, color: chalk }} />
           </div>
-          {event.subtitle ? <div style={{ fontFamily: HAND, fontWeight: 500, fontSize: 46, color: chalk2, marginTop: 18, maxWidth: 780, lineHeight: 1.15 }}>{event.subtitle}</div> : null}
-        </div>
+          {event.subtitle ? <div style={{ fontFamily: HAND, fontWeight: 500, fontSize: 46, color: chalk2, marginTop: 16, maxWidth: 780, lineHeight: 1.15 }}>{event.subtitle}</div> : null}
 
-        <div style={{ marginTop: 'auto' }}>
-          <div style={{ border: `2px dashed ${faint}`, borderRadius: 10, padding: '22px 30px' }}>
+          <div style={{ border: `2px dashed ${faint}`, borderRadius: 10, padding: pick(aspect, { square: '18px 30px', portrait: '22px 30px', story: '26px 32px' }), marginTop: pick(aspect, { square: 34, portrait: 44, story: 52 }) }}>
             {[['When', `${event.date || ''}${event.date && event.time ? ' · ' : ''}${event.time || ''}`], ['Where', event.venue], ['Cost', event.price]].map(([l, v]) => (
               <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 18, padding: '11px 0' }}>
                 <span style={{ fontWeight: 600, fontSize: 14, letterSpacing: 3, textTransform: 'uppercase', color: P.accent, width: 90 }}>{l}</span>
@@ -722,10 +780,14 @@ export function EVT_Chalkboard({ team, event = {}, width = 1080, height = 1080, 
 // ─────────────────────────────────────────────────────────────────────────────
 export function EVT_Polaroid({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
   const P = palette
+  const aspect = aspectOf(width, height)
   const paper = P.paper || '#ece3d0'
   const ink = P.deepInk || '#2e2a22'
   const MARKER = "'Permanent Marker', cursive"
   const HAND = "'Caveat', cursive"
+  // The polaroid is the hero, so it grows with the canvas — a fixed 404 square
+  // adrift in a 1920 story reads as a stamp lost on the page.
+  const photo = pick(aspect, { square: 404, portrait: 470, story: 540 })
   return (
     <LayerRoot style={{ ...FRAME(width, height), background: paper, color: ink }}>
       <div style={{ position: 'absolute', inset: 0, backgroundImage: 'radial-gradient(rgba(120,100,70,0.06) 1px, transparent 1.4px)', backgroundSize: '5px 5px', opacity: 0.6 }} />
@@ -733,19 +795,19 @@ export function EVT_Polaroid({ team, event = {}, width = 1080, height = 1080, pa
         <div style={{ marginBottom: 18 }}>
           <BrandLockup team={team} palette={P} size={84} nameColor={ink} nameSize={30} />
         </div>
-        <div>
+        <div style={{ flexShrink: 0 }}>
           <div style={{ fontFamily: HAND, fontWeight: 600, fontSize: 46, color: P.accent, lineHeight: 1, transform: 'rotate(-1deg)' }}>{event.kicker}</div>
-          <div style={{ height: share(height, 150), marginTop: 4 }}>
+          <div style={{ height: pick(aspect, { square: 150, portrait: 162, story: 176 }), marginTop: 4, display: 'flex', alignItems: 'flex-end' }}>
             <AutoFitText text={event.title} max={118} min={44} lines={1} measureDeps={[event.title]}
               style={{ fontFamily: MARKER, lineHeight: 0.9, color: ink }} />
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 54, alignItems: 'center', marginTop: 'auto', marginBottom: 'auto' }}>
+        <div style={{ display: 'flex', gap: pick(aspect, { square: 54, portrait: 54, story: 60 }), alignItems: 'center', marginTop: pick(aspect, { square: 'auto', portrait: 'auto', story: 90 }), marginBottom: 'auto' }}>
           <div style={{ position: 'relative', flexShrink: 0, transform: 'rotate(-3.5deg)' }}>
             <div style={{ position: 'absolute', top: -20, left: 54, width: 150, height: 42, background: a(P.accent, 0.42), transform: 'rotate(-7deg)', boxShadow: '0 2px 6px rgba(0,0,0,0.08)', zIndex: 2 }} />
             <div style={{ background: '#fff', padding: '18px 18px 26px', boxShadow: '0 22px 50px rgba(60,45,25,0.26)' }}>
-              <div style={{ width: 404, height: 404, overflow: 'hidden', background: motif?.imageUrl ? undefined : 'repeating-linear-gradient(135deg, #e8ddc7 0px, #e8ddc7 16px, #ddd0b4 16px, #ddd0b4 32px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ width: photo, height: photo, overflow: 'hidden', background: motif?.imageUrl ? undefined : 'repeating-linear-gradient(135deg, #e8ddc7 0px, #e8ddc7 16px, #ddd0b4 16px, #ddd0b4 32px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 {motif?.imageUrl
                   ? <img src={motif.imageUrl} alt="" crossOrigin="anonymous" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                   : <span style={{ fontFamily: MONO, fontSize: 14, letterSpacing: 3, textTransform: 'uppercase', color: 'rgba(80,64,40,0.6)', background: '#fff', padding: '6px 14px' }}>{motif?.label || 'Add a photo'}</span>}
@@ -754,19 +816,19 @@ export function EVT_Polaroid({ team, event = {}, width = 1080, height = 1080, pa
             </div>
           </div>
 
-          <div style={{ flex: 1 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'inline-block', fontWeight: 600, fontSize: 14, letterSpacing: 3, textTransform: 'uppercase', color: P.accent, border: `2px solid ${P.accent}`, padding: '8px 16px', transform: 'rotate(-6deg)', opacity: 0.92 }}>★ Save the Date</div>
             {[['When', `${event.date || ''}${event.date && event.time ? ' · ' : ''}${event.time || ''}`], ['Where', event.venue], ['Cost', event.price]].map(([l, v], i) => (
-              <div key={l} style={{ marginTop: i ? 22 : 34 }}>
+              <div key={l} style={{ marginTop: i ? pick(aspect, { square: 22, portrait: 26, story: 30 }) : pick(aspect, { square: 32, portrait: 38, story: 44 }) }}>
                 <div style={{ fontWeight: 600, fontSize: 13, letterSpacing: 3, textTransform: 'uppercase', color: P.accent, marginBottom: 2 }}>{l}</div>
-                <div style={{ fontFamily: HAND, fontWeight: 600, fontSize: 52, color: ink, lineHeight: 1 }}>{v}</div>
+                <div style={{ fontFamily: HAND, fontWeight: 600, fontSize: pick(aspect, { square: 50, portrait: 54, story: 58 }), color: ink, lineHeight: 1.02 }}>{v}</div>
               </div>
             ))}
-            {event.cta ? <div style={{ marginTop: 30, display: 'inline-block', background: ink, color: paper, fontFamily: MARKER, fontSize: 30, padding: '12px 28px', transform: 'rotate(-1.5deg)' }}>{event.cta}</div> : null}
+            {event.cta ? <div style={{ marginTop: pick(aspect, { square: 28, portrait: 34, story: 40 }), display: 'inline-block', background: ink, color: paper, fontFamily: MARKER, fontSize: 30, padding: '12px 28px', transform: 'rotate(-1.5deg)' }}>{event.cta}</div> : null}
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+        <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 9 }}>
           <BSMark size={18} color="#be185d" />
           <span style={{ fontWeight: 500, fontSize: 13, letterSpacing: 1, color: a(ink, 0.5) }}>{team.name} · Made with BetterCricket{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
         </div>

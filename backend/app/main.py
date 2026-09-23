@@ -18,7 +18,7 @@ from app.routers import instructional_videos
 from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, cricketstatz, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, public_net_checkin, net_manager, website, comms, public_comms, public_ses, public_contact, public_webinar, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
     stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
     club_diary, social_media, votes, public_votes, roles_activities, club_room, roster, facility_requests, directory, \
-    public_club_room, sales_workspace, sales_commissions, honours
+    public_club_room, sales_workspace, sales_commissions, honours, role_programs
 # BetterScout — a separate tenant type (Scout Org) with its own login,
 # unrelated to the club Organisation model. Imported separately since it's a
 # submodule of routers.scout, not a top-level routers module; aliased to
@@ -266,6 +266,22 @@ async def lifespan(app: FastAPI):
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_player_org_playhq_id "
             "ON players(organisation_id, playhq_id) WHERE playhq_id IS NOT NULL"
         ))
+        # Multi-squad membership: a player can sit in several squads at once
+        # (1st XI + 2nd XI + Colts + T20). team_members (composite PK
+        # (team_id, player_id)) is authoritative for the Squads board; players.
+        # squad_team_id is the derived primary. Index for the per-player and
+        # per-org reads the board makes (the PK doesn't cover player-first
+        # lookups), and backfill team_members from every existing single squad
+        # assignment so the two are consistent and no assigned player reads as
+        # unassigned. Both idempotent.
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_team_members_player ON team_members(player_id)"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_team_members_org ON team_members(organisation_id)"))
+        await conn.execute(text(
+            "INSERT INTO team_members (team_id, player_id, organisation_id) "
+            "SELECT squad_team_id, id, organisation_id FROM players "
+            "WHERE squad_team_id IS NOT NULL ON CONFLICT DO NOTHING"))
         # BetterSelect self-service availability (migration 068) — defensive
         # idempotent adds so the API boots even if alembic hasn't run yet.
         await conn.execute(text(
@@ -1316,6 +1332,13 @@ async def lifespan(app: FastAPI):
         # browser on every override change.
         from app.services.game_import_staging_ddl import STATEMENTS as _GAME_STAGING_DDL
         for _stmt in _GAME_STAGING_DDL:
+            await conn.execute(text(_stmt))
+        # Mirrors migration 307 — the ONE copy is the service. The onboarding
+        # checklist tables behind a role's succession/handover tracker. The
+        # Club Diary cadence widening in the same release is Python-only (no CHECK
+        # on frequency), so it needs no mirror here.
+        from app.services.role_program_ddl import STATEMENTS as _ROLE_PROGRAM_DDL
+        for _stmt in _ROLE_PROGRAM_DDL:
             await conn.execute(text(_stmt))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS grade_merge_logs (
@@ -2411,6 +2434,12 @@ async def lifespan(app: FastAPI):
         """))
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_comms_list_members_list ON comms_list_members(list_id)"))
+        # Lists→Segments merge (migration 304) — a segment gains a frozen static
+        # member set, existing lists migrate to pure-static segments. One copy in
+        # services/comms_segment_ddl.py, run here and by the migration.
+        from app.services.comms_segment_ddl import STATEMENTS as _COMMS_SEGMENT_DDL
+        for _stmt in _COMMS_SEGMENT_DDL:
+            await conn.execute(text(_stmt))
         # BetterComms Phase 3 (migration 113) — email templates + per-campaign UTM.
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS comms_templates (
@@ -3276,6 +3305,11 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
             "public_header_logo BOOLEAN NOT NULL DEFAULT false"
+        ))
+        # Show the Competition filter row on public stats pages (opt-in).
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
+            "show_competition_filters BOOLEAN NOT NULL DEFAULT false"
         ))
         # Stripe Checkout billing (migration 150) — see services/stripe_billing.py.
         await conn.execute(text(
@@ -5082,6 +5116,44 @@ async def lifespan(app: FastAPI):
             ON volunteer_hours(roster_shift_id) WHERE roster_shift_id IS NOT NULL
         """))
 
+        # Migration 306: an operational area holds several roles (a palette,
+        # each paired with the qualification that gates it), and a shift/pattern
+        # is FOR one of them. Byte-identical to
+        # alembic/versions/306_roster_area_roles.py, backfill included so an
+        # existing single-role area behaves identically.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS roster_area_roles (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                area_id UUID NOT NULL REFERENCES roster_areas(id) ON DELETE CASCADE,
+                role_id UUID NOT NULL REFERENCES club_roles(id) ON DELETE CASCADE,
+                required_qualification_type_id UUID REFERENCES qualification_types(id) ON DELETE SET NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_roster_area_roles UNIQUE (area_id, role_id)
+            )
+        """))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_roster_area_roles_area ON roster_area_roles(area_id)"))
+        await conn.execute(text("ALTER TABLE roster_shift_patterns ADD COLUMN IF NOT EXISTS role_id UUID REFERENCES club_roles(id) ON DELETE SET NULL"))
+        await conn.execute(text("ALTER TABLE roster_shifts ADD COLUMN IF NOT EXISTS role_id UUID REFERENCES club_roles(id) ON DELETE SET NULL"))
+        await conn.execute(text("""
+            INSERT INTO roster_area_roles (organisation_id, area_id, role_id, required_qualification_type_id, sort_order)
+                SELECT organisation_id, id, required_role_id, required_qualification_type_id, 0
+                FROM roster_areas
+                WHERE required_role_id IS NOT NULL
+                ON CONFLICT (area_id, role_id) DO NOTHING
+        """))
+        await conn.execute(text("""
+            UPDATE roster_shift_patterns p SET role_id = a.required_role_id
+                FROM roster_areas a
+                WHERE a.id = p.area_id AND p.role_id IS NULL AND a.required_role_id IS NOT NULL
+        """))
+        await conn.execute(text("""
+            UPDATE roster_shifts s SET role_id = a.required_role_id
+                FROM roster_areas a
+                WHERE a.id = s.area_id AND s.role_id IS NULL AND a.required_role_id IS NOT NULL
+        """))
+
         # Migration 230: a strategic plan is a record rather than a name typed
         # onto every objective, an objective carries its own due date/owner/
         # budget, and a motion can serve an objective the way an action already
@@ -6117,6 +6189,7 @@ app.include_router(assets.router)        # Assets & Facilities (core capability,
 app.include_router(club_diary.router)    # Club Diary — annual/recurring compliance & maintenance tasks (core capability, not a paid module)
 app.include_router(club_room.router)     # Club Room Mode — TV slideshow (core capability, not a paid module)
 app.include_router(roles_activities.router)  # Roles & Activities taxonomy (core capability, shared by Volunteers + Qualifications)
+app.include_router(role_programs.router)  # Role Programs — what a role entails + its measurable handover (core capability, any-of MANAGE_VOLUNTEERS/MANAGE_COMMITTEE)
 app.include_router(directory.router)     # BetterClubManager Directory — non-player people + third parties (core capability, not a paid module)
 app.include_router(roster.router)        # BetterClubManager Roster — weekly volunteer roster (core capability, not a paid module)
 app.include_router(facility_requests.router)  # BetterClubManager Facilities — booking-requests approval queue (core capability, not a paid module)

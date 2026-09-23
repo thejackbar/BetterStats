@@ -191,6 +191,25 @@ async def list_players(
     for pid, lp in lp_res.fetchall():
         last_played[str(pid)] = lp.isoformat() if lp else None
 
+    # Every squad each player is in (team_members is authoritative for the
+    # multi-squad Squads board). The single squad_team_id below is the derived
+    # primary; the board reads squad_team_ids so a player shows in every squad
+    # they belong to. One grouped query.
+    squad_ids: dict[str, list] = {}
+    sm_res = await db.execute(_text(
+        "SELECT player_id, team_id FROM team_members WHERE organisation_id = :org"
+    ), {"org": club.id})
+    for pid, tid in sm_res.fetchall():
+        squad_ids.setdefault(str(pid), []).append(str(tid))
+
+    def _squad_team_ids(p: Player) -> list[str]:
+        ids = list(squad_ids.get(str(p.id), []))
+        # Fold in the primary for any legacy row that predates team_members
+        # mirroring, so the board never shows an assigned player as unassigned.
+        if p.squad_team_id and str(p.squad_team_id) not in ids:
+            ids.append(str(p.squad_team_id))
+        return ids
+
     return [
         {
             "id": str(p.id),
@@ -217,6 +236,7 @@ async def list_players(
             "is_financial_override": p.is_financial_override,
             "trained_override": p.trained_override,
             "squad_team_id": str(p.squad_team_id) if p.squad_team_id else None,
+            "squad_team_ids": _squad_team_ids(p),
             "last_played": last_played.get(str(p.id)),
             # Age, not date of birth, and only when the club's own
             # BetterSelect setting says so (migration 269) — a club showing
@@ -736,30 +756,40 @@ async def list_games(
     db: AsyncSession = Depends(get_db),
 ):
     from sqlalchemy import text
+    # Reads `v_effective_games` (synced `games` ∪ imported/hand-uploaded
+    # `manual_games`), so a club whose season came in from CricketStatz or an
+    # uploaded scorecard sees its matches here too — not only its CA-synced
+    # ones. Scope and season come off the VIEW'S OWN season_id/organisation_id
+    # columns (migration 169), never by joining through grade_id: a manual game
+    # can legitimately have no grade, and reading `organisation_id` off the view
+    # avoids the blanket `source = 'manual'` cross-club leak (see v8.76.1). The
+    # grade/season joins are therefore LEFT (a grade-less manual game keeps its
+    # row) and only supply display names.
+    #
     # `status` is CA's own word for the fixture (migration 266) and
     # `players_named` is how many of ours were in the side. Together they are
     # what lets this screen show a club exactly which fixtures were called off
     # and how many players' match counts that keeps clean — the club can see
     # the correction rather than wondering why our figure disagrees with
-    # PlayHQ's. The count is only worth reading for a called-off fixture, so
-    # it is only computed for one.
+    # PlayHQ's. Both are synced-only: a manual game carries a NULL status, so
+    # the CASE never fires and it never appears in the called-off panel.
     query = """
         SELECT g.id, g.played_at, g.home_team, g.away_team, g.result, g.winning_team,
-               g.status,
+               g.status, g.source,
                CASE WHEN g.status IN (""" + NOT_PLAYED_SQL_LIST + """) THEN (
                    SELECT COUNT(*) FROM game_appearances ga WHERE ga.game_id = g.id
                ) ELSE NULL END AS players_named,
                COALESCE(gr.display_name_override, gr.name) AS grade_name, s.name AS season_name
-        FROM games g
-        JOIN grades gr ON gr.id = g.grade_id
-        JOIN seasons s ON s.id = gr.season_id
-        WHERE s.organisation_id = :org_id
+        FROM v_effective_games g
+        LEFT JOIN grades gr ON gr.id = g.grade_id
+        LEFT JOIN seasons s ON s.id = g.season_id
+        WHERE g.organisation_id = :org_id
     """
     params: dict = {"org_id": str(club.id)}
     if season_id:
-        query += " AND s.id = :season_id"
+        query += " AND g.season_id = :season_id"
         params["season_id"] = season_id
-    query += " ORDER BY g.played_at DESC LIMIT 200"
+    query += " ORDER BY g.played_at DESC NULLS LAST LIMIT 200"
 
     rows = await db.execute(text(query), params)
     return [
@@ -771,6 +801,7 @@ async def list_games(
             "result": r.result,
             "winning_team": r.winning_team,
             "status": r.status,
+            "source": r.source,
             "players_named": r.players_named,
             "grade": r.grade_name,
             "season": r.season_name,
@@ -827,6 +858,10 @@ class SettingsPatch(BaseModel):
     stats_min_rate_spells: Optional[int] = None
     # Club crest beside the club name in public page headers (migration 226).
     public_header_logo: Optional[bool] = None
+    # Show the Competition filter row on public stats pages. Off by default; when
+    # on, the "All" pill means the sum of every competition rather than Cricket
+    # Australia's lifetime totals (see useGradeFilters on the frontend).
+    show_competition_filters: Optional[bool] = None
     # Who may open a committee document the club uploaded (migration 218).
     # True = the uploader, current Office Bearers and the Main Admin only.
     # False = any committee member who can reach the register.
@@ -980,6 +1015,7 @@ async def get_settings(
         "stats_min_rate_spells": club.stats_min_rate_spells,
         "effective_rate_minimums": await stats_display.club_rate_minimums(db, club.id),
         "public_header_logo": bool(club.public_header_logo),
+        "show_competition_filters": bool(club.show_competition_filters),
         "committee_docs_office_bearer_only": bool(club.committee_docs_office_bearer_only),
         "diary_start_month": club.diary_start_month or 7,
         "socials_style": club.socials_style,
@@ -1059,6 +1095,8 @@ async def patch_settings(
             setattr(club, _field, stats_display.clean_minimum(getattr(data, _field)))
     if data.public_header_logo is not None:
         club.public_header_logo = bool(data.public_header_logo)
+    if data.show_competition_filters is not None:
+        club.show_competition_filters = bool(data.show_competition_filters)
     if data.committee_docs_office_bearer_only is not None:
         club.committee_docs_office_bearer_only = bool(data.committee_docs_office_bearer_only)
     if data.diary_start_month is not None:

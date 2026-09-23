@@ -14,7 +14,12 @@ from app.models.db import (
 )
 from app.routers.auth import get_current_user, get_optional_user, user_can_view_org_private, get_current_club
 from app.auth.capabilities import require_cap, MANAGE_PLAYERS
-from app.services.squad_membership import sync_squad_membership
+from app.services.squad_membership import (
+    clear_all_squad_memberships,
+    member_team_ids,
+    move_squad_membership,
+    set_squad_memberships,
+)
 from app.services.name_format import name_sort_key
 from app.services import rate_coverage as rc
 from app.services.aggregations import (
@@ -271,6 +276,13 @@ async def get_player_stats(
             # one competition, and the row then doesn't render — a control that
             # can only answer "everything" is worse than none.
             "available_competitions": await grade_scope.org_available_competitions(
+                db, player.organisation_id
+            ),
+            # Whether the club surfaces competitions publicly (migration 305).
+            # Gates the profile's own Competitions breakdown tab, the same
+            # switch that draws the filter row on the other stats pages, so the
+            # two never disagree about whether this club shows competitions.
+            "show_competition_filters": await grade_scope.org_show_competition_filters(
                 db, player.organisation_id
             ),
             # True when the club default would have left this player with nothing
@@ -935,6 +947,11 @@ class PlayerProfileUpdate(BaseModel):
     email: Optional[str] = None
     phone: Optional[str] = None
     squad_team_id: Optional[str] = None
+    # A player can be in several squads at once (1st XI + 2nd XI + Colts + T20).
+    # The Squads board and the profile multi-select send the whole set here;
+    # the single squad_team_id above stays for legacy single-field callers and
+    # means "move the primary squad to this one". An explicit [] clears all.
+    squad_team_ids: Optional[list[str]] = None
     is_overseas: Optional[bool] = None
     overseas_country: Optional[str] = None
     # Public visibility + the two BetterSelect flags (migration 265). All
@@ -993,6 +1010,22 @@ def _profile_fields(player: Player) -> dict:
         "trained_override": player.trained_override,
         "shirt_number": player.shirt_number,
     }
+
+
+async def _owned_team_ids(db: AsyncSession, org_id, raw_ids) -> list:
+    """Coerce string team ids to UUIDs, keeping only teams this club owns."""
+    want = []
+    for r in raw_ids or []:
+        try:
+            want.append(uuid.UUID(str(r)))
+        except (ValueError, TypeError):
+            continue
+    if not want:
+        return []
+    rows = (await db.execute(
+        select(Team.id).where(Team.organisation_id == org_id, Team.id.in_(want))
+    )).scalars().all()
+    return list(rows)
 
 
 async def _squad_obj(db: AsyncSession, player: Player) -> Optional[dict]:
@@ -1154,6 +1187,13 @@ async def _snapshot(db: AsyncSession, player: Player) -> dict:
 async def _full_profile(db: AsyncSession, player: Player) -> dict:
     data = _profile_fields(player)
     data["squad"] = await _squad_obj(db, player)
+    # Every squad the player is in (team_members), primary folded in for a
+    # legacy row that predates mirroring. The profile's squad multi-select
+    # reads this; `squad`/`squad_team_id` above stay as the derived primary.
+    _ids = [str(t) for t in await member_team_ids(db, player.organisation_id, player.id)]
+    if player.squad_team_id and str(player.squad_team_id) not in _ids:
+        _ids.append(str(player.squad_team_id))
+    data["squad_team_ids"] = _ids
     data["snapshot"] = await _snapshot(db, player)
     # The age the SELECTION screens would show for this player under the
     # club's own rule — None when ages are off, or when this player is
@@ -1206,33 +1246,38 @@ async def update_player_profile(
     # so a rename via this route also gets remembered as an alias — same as
     # the plain-name rename_player endpoint above.
     old_display_name = player.display_name if "display_name_override" in data else None
-    # squad_team_id arrives as a string (or None to unassign) — coerce to UUID,
-    # then mirror the change into team_members so "Squad" resolves to the same
-    # set on every BetterSelect screen.
-    if "squad_team_id" in data:
-        val = data.pop("squad_team_id")
-        old_team_id = player.squad_team_id
-        new_team_id = uuid.UUID(val) if val else None
-        player.squad_team_id = new_team_id
-        if new_team_id is None:
-            await sync_squad_membership(db, player.organisation_id, player.id, old_team_id, None, user.id)
-        else:
-            target = await db.get(Team, new_team_id)
-            if target and target.organisation_id == player.organisation_id:
-                await sync_squad_membership(db, player.organisation_id, player.id, old_team_id, new_team_id, user.id)
+    # Squad membership (team_members is authoritative; squad_team_id is the
+    # derived primary). Two ways in: squad_team_ids = the whole set (the profile
+    # multi-select; [] clears), or the legacy single squad_team_id = "move the
+    # primary to this one, keep the rest". Popped before the setattr loop since
+    # neither is a plain column; applied after it so status is in place.
+    has_multi = "squad_team_ids" in data
+    multi_val = data.pop("squad_team_ids", None)
+    has_single = "squad_team_id" in data
+    single_val = data.pop("squad_team_id", None)
     for key, value in data.items():
         setattr(player, key, value)
-    # Marking someone inactive takes them out of their squad in the SAME write.
+    # Marking someone inactive takes them out of EVERY squad in the SAME write.
     # An inactive player is not in this season's selection pool, so leaving them
     # filed in a squad is what makes the Squads board disagree with the roster —
     # and the board would go on offering them for an XI. Gated on this request
     # actually setting the status, so editing an already-inactive player's phone
-    # number doesn't quietly move them. Reactivating does NOT put them back:
-    # which squad they belong in now is the club's call, not ours.
-    if data.get("status") == "inactive" and player.squad_team_id is not None:
-        old_squad_id = player.squad_team_id
-        player.squad_team_id = None
-        await sync_squad_membership(db, player.organisation_id, player.id, old_squad_id, None, user.id)
+    # number doesn't quietly move them. Inactive wins over any squad field in the
+    # same request. Reactivating does NOT put them back: which squad they belong
+    # in now is the club's call, not ours.
+    if data.get("status") == "inactive":
+        await clear_all_squad_memberships(db, player.organisation_id, player.id)
+    elif has_multi:
+        ids = await _owned_team_ids(db, player.organisation_id, multi_val or [])
+        await set_squad_memberships(db, player.organisation_id, player.id, ids, user.id)
+    elif has_single:
+        new_id = uuid.UUID(single_val) if single_val else None
+        if new_id is not None:
+            target = await db.get(Team, new_id)
+            if not target or target.organisation_id != player.organisation_id:
+                new_id = None  # ignore a foreign / unknown team
+        await move_squad_membership(
+            db, player.organisation_id, player.id, player.squad_team_id, new_id, user.id)
     if old_display_name and old_display_name != player.display_name:
         await seed_alias_on_rename(db, player.organisation_id, player.id, old_display_name)
     await db.commit()

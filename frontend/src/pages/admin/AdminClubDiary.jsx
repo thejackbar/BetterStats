@@ -46,7 +46,7 @@ function underBudget(t) {
 
 // ── Tab bar ──────────────────────────────────────────────────────────────────
 function TabBar({ tab, setTab }) {
-  const tabs = [['calendar', 'Calendar'], ['plan', 'Season Plan'], ['templates', 'Templates'], ['gantt', 'Gantt']]
+  const tabs = [['calendar', 'Calendar'], ['plan', 'Season Plan'], ['gantt', 'Gantt'], ['templates', 'Templates']]
   return (
     <div className="flex flex-wrap gap-1 mb-5">
       {tabs.map(([k, l]) => (
@@ -124,19 +124,23 @@ function Badges({ t }) {
 // ── Editable occurrence card (Season Plan + Calendar list/modal) ─────────────
 function TaskEditor({ task, members, roles, onPatch }) {
   const toast = useToast()
-  const [local, setLocal] = useState({
+  const seed = () => ({
     percent_complete: task.percent_complete ?? '',
     third_party: task.third_party ?? '',
     budget_estimate: task.budget_estimate ?? '',
     actual_expenditure: task.actual_expenditure ?? '',
+    // Dates are buffered locally and committed on blur, never written through
+    // the async patch on every keystroke: a native date input fires a change
+    // for each digit typed into the year (2 -> 20 -> 202 -> 2027), and a
+    // per-keystroke server round-trip resets the controlled value back to the
+    // partial year mid-typing, so the year can never be completed.
+    start_date: (task.start_date || '').slice(0, 10),
+    due_date: (task.due_date || '').slice(0, 10),
+    estimated_completion_date: (task.estimated_completion_date || '').slice(0, 10),
   })
+  const [local, setLocal] = useState(seed)
   useEffect(() => {
-    setLocal({
-      percent_complete: task.percent_complete ?? '',
-      third_party: task.third_party ?? '',
-      budget_estimate: task.budget_estimate ?? '',
-      actual_expenditure: task.actual_expenditure ?? '',
-    })
+    setLocal(seed())
   }, [task.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function patch(fields) {
@@ -150,6 +154,10 @@ function TaskEditor({ task, members, roles, onPatch }) {
     if (min != null) n = Math.max(min, n)
     if (max != null) n = Math.min(max, n)
     patch({ [key]: n })
+  }
+  const commitDate = (key) => {
+    const v = local[key]
+    patch({ [key]: v ? v : null })
   }
 
   const assigneeRole = roles.find(r => r.id === task.assigned_to_role_id)
@@ -194,15 +202,21 @@ function TaskEditor({ task, members, roles, onPatch }) {
         </label>
         <label className="block">
           <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest">START DATE</span>
-          <input type="date" className={inp} value={(task.start_date || '').slice(0, 10)} onChange={e => patch({ start_date: e.target.value || null })} />
+          <input type="date" className={inp} value={local.start_date}
+            onChange={e => setLocal(l => ({ ...l, start_date: e.target.value }))}
+            onBlur={() => commitDate('start_date')} />
         </label>
         <label className="block">
           <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest">DUE DATE</span>
-          <input type="date" className={inp} value={(task.due_date || '').slice(0, 10)} onChange={e => patch({ due_date: e.target.value || null })} />
+          <input type="date" className={inp} value={local.due_date}
+            onChange={e => setLocal(l => ({ ...l, due_date: e.target.value }))}
+            onBlur={() => commitDate('due_date')} />
         </label>
         <label className="block">
           <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest">ESTIMATED COMPLETION</span>
-          <input type="date" className={inp} value={(task.estimated_completion_date || '').slice(0, 10)} onChange={e => patch({ estimated_completion_date: e.target.value || null })} />
+          <input type="date" className={inp} value={local.estimated_completion_date}
+            onChange={e => setLocal(l => ({ ...l, estimated_completion_date: e.target.value }))}
+            onBlur={() => commitDate('estimated_completion_date')} />
         </label>
         <label className="block">
           <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest">THIRD PARTY</span>
@@ -230,14 +244,16 @@ function TaskEditor({ task, members, roles, onPatch }) {
   )
 }
 
-function TaskPlanCard({ task, members, roles, onPatch, defaultOpen = false }) {
-  const [open, setOpen] = useState(defaultOpen)
+// A task in any list. Clicking it opens the editor in a modal (onOpen) rather
+// than expanding inline, so a task reads and edits the same way whether it was
+// clicked in the list, on the calendar, or on the Gantt.
+function TaskPlanCard({ task, members, roles, onOpen }) {
   const assignee = members.find(m => m.member_id === task.assigned_to_member_id)?.full_name
   const roleName = roles.find(r => r.id === task.assigned_to_role_id)?.title
   const who = assignee || roleName || task.third_party
   return (
-    <div className="pb-card px-4 py-3">
-      <div className="flex items-start justify-between gap-2 cursor-pointer" onClick={() => setOpen(o => !o)}>
+    <div className="pb-card px-4 py-3 cursor-pointer hover:border-pb-accent/40 transition" onClick={() => onOpen(task.id)}>
+      <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: task.category_color || 'var(--pb-accent)' }} />
@@ -253,15 +269,9 @@ function TaskPlanCard({ task, members, roles, onPatch, defaultOpen = false }) {
           <span className={`font-mono text-[9px] tracking-wide2 rounded px-1.5 py-0.5 border ${task.status === 'done' ? 'text-pb-accent border-pb-accent/40' : 'text-pb-faint pb-hairline'}`}>
             {STATUS_LABELS[task.status] || '—'}
           </span>
-          <button className="font-mono text-[9px] text-pb-faintest">{open ? '▾' : '▸'}</button>
         </div>
       </div>
       <div className="mt-1.5"><Badges t={task} /></div>
-      {open && (
-        <div className="mt-3 pt-3 border-t pb-hairline-t">
-          <TaskEditor task={task} members={members} roles={roles} onPatch={onPatch} />
-        </div>
-      )}
     </div>
   )
 }
@@ -278,12 +288,10 @@ function Modal({ title, onClose, children }) {
 }
 
 // ── Calendar tab ─────────────────────────────────────────────────────────────
-function CalendarTab({ plan, members, roles, categories, onPatch }) {
+function CalendarTab({ plan, members, roles, categories, onOpen }) {
   const [view, setView] = useState('calendar')
   const [f, setF] = useState(EMPTY_FILTERS)
-  const [selected, setSelected] = useState(null)
   const tasks = useMemo(() => applyFilters(plan, f), [plan, f])
-  const selectedTask = selected ? plan.find(t => t.id === selected) : null
 
   const renderChip = (t) => {
     const color = t.category_color || '#8b7cf6'
@@ -315,27 +323,21 @@ function CalendarTab({ plan, members, roles, categories, onPatch }) {
           getStart={t => t.start_date || t.due_date || t.estimated_completion_date}
           getEnd={t => t.due_date || t.estimated_completion_date || t.start_date}
           renderChip={renderChip}
-          onItemClick={t => setSelected(t.id)}
+          onItemClick={t => onOpen(t.id)}
         />
       ) : tasks.length === 0 ? (
         <div className="pb-card p-6 text-center text-pb-dim text-sm">No tasks match. Try clearing the filters, or generate this season under "Season Plan".</div>
       ) : (
         <div className="space-y-2">
-          {tasks.map(t => <TaskPlanCard key={t.id} task={t} members={members} roles={roles} onPatch={onPatch} />)}
+          {tasks.map(t => <TaskPlanCard key={t.id} task={t} members={members} roles={roles} onOpen={onOpen} />)}
         </div>
-      )}
-      {selectedTask && (
-        <Modal title={selectedTask.title} onClose={() => setSelected(null)}>
-          <div className="mb-3"><Badges t={selectedTask} /></div>
-          <TaskEditor task={selectedTask} members={members} roles={roles} onPatch={onPatch} />
-        </Modal>
       )}
     </div>
   )
 }
 
 // ── Season Plan tab ──────────────────────────────────────────────────────────
-function SeasonPlanTab({ plan, planLoading, members, roles, categories, year, setYear, seasonYears, onGenerate, generating, onPatch }) {
+function SeasonPlanTab({ plan, planLoading, members, roles, categories, year, setYear, seasonYears, onGenerate, generating, onOpen }) {
   const [f, setF] = useState(EMPTY_FILTERS)
   const tasks = useMemo(() => applyFilters(plan, f), [plan, f])
   const yearOptions = useMemo(() => {
@@ -366,7 +368,7 @@ function SeasonPlanTab({ plan, planLoading, members, roles, categories, year, se
         </div>
       ) : (
         <div className="space-y-2">
-          {tasks.map(t => <TaskPlanCard key={t.id} task={t} members={members} roles={roles} onPatch={onPatch} />)}
+          {tasks.map(t => <TaskPlanCard key={t.id} task={t} members={members} roles={roles} onOpen={onOpen} />)}
         </div>
       )}
     </div>
@@ -374,7 +376,7 @@ function SeasonPlanTab({ plan, planLoading, members, roles, categories, year, se
 }
 
 // ── Gantt tab ────────────────────────────────────────────────────────────────
-function GanttTab({ plan, members, roles, categories, year }) {
+function GanttTab({ plan, members, roles, categories, year, onOpen }) {
   const [search, setSearch] = useState('')
   const [frequency, setFrequency] = useState('')
   const [memberId, setMemberId] = useState('')
@@ -415,7 +417,7 @@ function GanttTab({ plan, members, roles, categories, year }) {
             className="pb-btn pb-btn-sm pb-btn-quiet">clear</button>
         )}
       </div>
-      <DiaryGantt tasks={tasks} categories={categories} roles={roles} members={members} year={year} />
+      <DiaryGantt tasks={tasks} categories={categories} roles={roles} members={members} year={year} onTaskClick={onOpen} />
     </div>
   )
 }
@@ -783,6 +785,9 @@ function TemplatesTab({ definitions, categories, roles, onReload, onCreateCatego
 export default function AdminClubDiary() {
   const toast = useToast()
   const [tab, setTab] = useState('calendar')
+  // The one task-editor modal for the whole screen — opened by a click on a
+  // task in any list, on the calendar, or on the Gantt.
+  const [selectedId, setSelectedId] = useState(null)
 
   const [categories, setCategories] = useState([])
   const [definitions, setDefinitions] = useState(null)
@@ -854,6 +859,8 @@ export default function AdminClubDiary() {
     } catch (e) { toast.error(e.message) } finally { setGenerating(false) }
   }
 
+  const selectedTask = selectedId ? plan.find(t => t.id === selectedId) : null
+
   return (
     <BetterClubManagerLayout title="Club Diary" caption="The club's annual operating plan">
       <div className="max-w-5xl">
@@ -864,17 +871,24 @@ export default function AdminClubDiary() {
         ) : (
           <>
             {tab === 'calendar' && (
-              <CalendarTab plan={plan} members={members} roles={roles} categories={categories} onPatch={patchOccurrence} />
+              <CalendarTab plan={plan} members={members} roles={roles} categories={categories} onOpen={setSelectedId} />
             )}
             {tab === 'plan' && (
               <SeasonPlanTab plan={plan} planLoading={planLoading} members={members} roles={roles} categories={categories}
-                year={year} setYear={setYear} seasonYears={seasonYears} onGenerate={generateSeason} generating={generating} onPatch={patchOccurrence} />
+                year={year} setYear={setYear} seasonYears={seasonYears} onGenerate={generateSeason} generating={generating} onOpen={setSelectedId} />
             )}
             {tab === 'templates' && (
               <TemplatesTab definitions={definitions} categories={categories} roles={roles} onReload={reloadTemplates} onCreateCategory={createCategory} />
             )}
             {tab === 'gantt' && (
-              <GanttTab plan={plan} members={members} roles={roles} categories={categories} year={year} />
+              <GanttTab plan={plan} members={members} roles={roles} categories={categories} year={year} onOpen={setSelectedId} />
+            )}
+
+            {selectedTask && (
+              <Modal title={selectedTask.title} onClose={() => setSelectedId(null)}>
+                <div className="mb-3"><Badges t={selectedTask} /></div>
+                <TaskEditor task={selectedTask} members={members} roles={roles} onPatch={patchOccurrence} />
+              </Modal>
             )}
           </>
         )}

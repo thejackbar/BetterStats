@@ -90,7 +90,7 @@ export const SUPER_SECTIONS = [
     items: [
       { to: '/admin/changelog', label: 'Changelog', blurb: 'Release history across the platform.' },
       { to: '/admin/super/login-attempts', label: 'Login Attempts', blurb: 'Recent sign-in activity and failures.' },
-      { to: '/admin/super/meta-ads', label: 'Meta Ads', blurb: 'Campaign performance and ad signups.' },
+      { to: '/admin/super/meta-ads', label: 'Meta Ads', blurb: 'Campaign performance and ad signups.', badge: 'metaToken' },
       { to: '/admin/super/wizard-analytics', label: 'Setup Wizard Analytics', blurb: 'How clubs move through setup.' },
       { to: '/admin/usage', label: 'Usage', blurb: 'Traffic, features and per-club engagement.' },
     ],
@@ -107,11 +107,12 @@ export function visibleSectionItems(section, { selfServeEnabled } = {}) {
 
 // Aggregate badge count for a section's sidebar button — sums the counts of
 // whichever badge-bearing items it contains.
-export function sectionBadgeCount(section, { moduleReqCount = 0, commsReqCount = 0, unpauseReqCount = 0 } = {}) {
+export function sectionBadgeCount(section, { moduleReqCount = 0, commsReqCount = 0, unpauseReqCount = 0, metaTokenAlert = 0 } = {}) {
   return section.items.reduce((n, i) => {
     if (i.badge === 'moduleRequests') return n + moduleReqCount
     if (i.badge === 'commsRequests') return n + commsReqCount
     if (i.badge === 'unpauseRequests') return n + unpauseReqCount
+    if (i.badge === 'metaToken') return n + metaTokenAlert
     return n
   }, 0)
 }

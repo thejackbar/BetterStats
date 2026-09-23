@@ -300,8 +300,13 @@ export default function Directory({ st, patch, narrow }) {
   const refreshMember = async (mid) => { await Promise.all([loadDetail(mid), reload()]) }
 
   // ── mutations ──────────────────────────────────────────────────────────────
-  const openAdd = () => setModal({ editId: null, playerId: null, form: { full_name: '', email: '', mobile: '', notes: '' }, types: [] })
-  const openEdit = (p) => setModal({ editId: p.member_id, playerId: p.player_id, form: { full_name: p.name, email: p.email, mobile: p.phone, notes: '' }, types: (p.membership_types || []).map(t => t.id) })
+  // The general NOTE is edited inline from its own card, not here — the modal is
+  // name/email/mobile/types only. It used to carry a `notes: ''` that nothing
+  // rendered but the save still sent, so editing a name through the modal
+  // silently wiped whatever note the person had; leaving it out means an edit
+  // here never touches the note.
+  const openAdd = () => setModal({ editId: null, playerId: null, form: { full_name: '', email: '', mobile: '' }, types: [] })
+  const openEdit = (p) => setModal({ editId: p.member_id, playerId: p.player_id, form: { full_name: p.name, email: p.email, mobile: p.phone }, types: (p.membership_types || []).map(t => t.id) })
   const setForm = (k, v) => setModal(m => ({ ...m, form: { ...m.form, [k]: v } }))
   const toggleModalType = (id) => setModal(m => ({ ...m, types: m.types.includes(id) ? m.types.filter(x => x !== id) : [...m.types, id] }))
   const saveMember = async () => {
@@ -569,13 +574,13 @@ export default function Directory({ st, patch, narrow }) {
   const createList = async () => {
     setBusy(true)
     try {
-      const r = await api.commsCreateListFromDirectory({
+      const r = await api.commsCreateSegmentFromDirectory({
         name: (mkList.name || '').trim(),
         keys: list.filter(hasEmail).map(p => p.key),
       })
       setMkList(m => ({ ...m, result: r, error: null }))
     } catch (e) {
-      setMkList(m => ({ ...m, error: e?.detail || e?.message || 'Could not create the list.' }))
+      setMkList(m => ({ ...m, error: e?.detail || e?.message || 'Could not create the segment.' }))
     } finally { setBusy(false) }
   }
 
@@ -752,7 +757,7 @@ export default function Directory({ st, patch, narrow }) {
                   <MenuItem onClick={() => { close(); navigate('/admin/clubhouse/directory/volunteers') }}>Volunteer bulk entry</MenuItem>
                   <MenuDivider />
                   <MenuItem disabled={!emailable} onClick={() => { close(); openMakeList() }}>
-                    Create a list{emailable ? ` (${emailable})` : ''}
+                    Create a segment{emailable ? ` (${emailable})` : ''}
                   </MenuItem>
                   <MenuItem onClick={() => { close(); setImp({ text: '', preview: null, result: null }) }}>Import people from CSV</MenuItem>
                 </>
@@ -1094,6 +1099,19 @@ export default function Directory({ st, patch, narrow }) {
                 </Card>
               )}
 
+              {/* A free-text general note about the person. Multi-line, and its
+                  own inline editor rather than a field in the Add/Edit modal —
+                  the same one-writer, edit-in-place pattern the contact, gender,
+                  squad and kit fields follow. Saving one mints the member row
+                  for a read-through player, so a note can be kept about anybody. */}
+              <Card title="NOTES">
+                <textarea disabled={busy} defaultValue={sel.notes || ''} key={sel.key + ':notes'}
+                  rows={4} placeholder="Anything worth recording about this person…"
+                  onBlur={e => { if (e.target.value !== (sel.notes || '')) savePersonField(sel, 'notes', e.target.value) }}
+                  style={{ ...inp, resize: 'vertical', minHeight: 80, lineHeight: 1.45, fontFamily: 'inherit' }} />
+                {!sel.member_id && <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginTop: 6 }}>Adding a note adds this player to the member directory.</div>}
+              </Card>
+
               {/* AXIS 2 — what they do. */}
               <Card title="ROLES">
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
@@ -1367,35 +1385,35 @@ export default function Directory({ st, patch, narrow }) {
           <div onClick={e => e.stopPropagation()} style={{ width: 'min(460px, 100%)', background: C.surface, border: `1px solid ${C.hair2}`, borderRadius: 12, padding: 20 }}>
             {!mkList.result ? (
               <>
-                <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 4 }}>Create a list</div>
+                <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 4 }}>Create a segment</div>
                 <div style={{ fontSize: 12.5, color: C.faint, marginBottom: 16 }}>
-                  This makes a list in BetterAdmin → Comms → Lists, under “Auto-generated lists”, so you can use it as an audience on an email.
+                  This makes a static segment in BetterAdmin → Comms → Segments, under “Auto-generated segments”, so you can use it as an audience on an email. The people picked stay exactly as picked.
                 </div>
-                <label style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>LIST NAME *
+                <label style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>SEGMENT NAME *
                   <input value={mkList.name} onChange={e => setMkList(m => ({ ...m, name: e.target.value }))} style={{ ...inp, marginTop: 4 }} />
                 </label>
                 <div style={{ fontSize: 12.5, color: C.faint, marginTop: 14, lineHeight: 1.5 }}>
-                  <strong style={{ color: C.text }}>{emailable}</strong> {emailable === 1 ? 'person goes' : 'people go'} on the list.
+                  <strong style={{ color: C.text }}>{emailable}</strong> {emailable === 1 ? 'person goes' : 'people go'} in the segment.
                   {list.length > emailable && <> The other {list.length - emailable} in this filter have no email address, so they are left off. Use the <strong style={{ color: C.text }}>No email</strong> filter to see who they are.</>}
-                  <div style={{ marginTop: 8 }}>Anyone who has unsubscribed or bounced stays suppressed and will not be emailed, even from this list.</div>
+                  <div style={{ marginTop: 8 }}>Anyone who has unsubscribed or bounced stays suppressed and will not be emailed, even from this segment.</div>
                 </div>
                 {mkList.error && <div style={{ fontSize: 12.5, color: C.block, marginTop: 12 }}>{mkList.error}</div>}
                 <div style={{ display: 'flex', gap: 8, marginTop: 18, justifyContent: 'flex-end' }}>
                   <button onClick={() => setMkList(null)} style={btnS}>Cancel</button>
-                  <button onClick={createList} disabled={busy || !(mkList.name || '').trim()} style={{ ...btnP, opacity: (busy || !(mkList.name || '').trim()) ? 0.6 : 1 }}>{busy ? 'Creating…' : 'Create list'}</button>
+                  <button onClick={createList} disabled={busy || !(mkList.name || '').trim()} style={{ ...btnP, opacity: (busy || !(mkList.name || '').trim()) ? 0.6 : 1 }}>{busy ? 'Creating…' : 'Create segment'}</button>
                 </div>
               </>
             ) : (
               <>
-                <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 4 }}>List created</div>
+                <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 4 }}>Segment created</div>
                 <div style={{ fontSize: 13, color: C.faint, marginTop: 8, lineHeight: 1.55 }}>
                   <strong style={{ color: C.text }}>{mkList.result.name}</strong> has {mkList.result.count} {mkList.result.count === 1 ? 'contact' : 'contacts'}.
-                  {mkList.result.name !== (mkList.name || '').trim() && <> A list of that name already existed, so this one was numbered.</>}
-                  <div style={{ marginTop: 8 }}>Find it in Comms → Lists under “Auto-generated lists”.</div>
+                  {mkList.result.name !== (mkList.name || '').trim() && <> A segment of that name already existed, so this one was numbered.</>}
+                  <div style={{ marginTop: 8 }}>Find it in Comms → Segments under “Auto-generated segments”.</div>
                 </div>
                 <div style={{ display: 'flex', gap: 8, marginTop: 18, justifyContent: 'flex-end' }}>
                   <button onClick={() => setMkList(null)} style={btnS}>Close</button>
-                  <Link to="/admin/comms/lists" style={btnP}>Go to Lists</Link>
+                  <Link to="/admin/comms/segments" style={btnP}>Go to Segments</Link>
                 </div>
               </>
             )}

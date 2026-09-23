@@ -1,14 +1,41 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../../../lib/api'
-import { Button, Caption, INPUT_CLS } from '../../../components/admin/ui'
+import { Button, Caption, INPUT_CLS, SectionHeading } from '../../../components/admin/ui'
 import { RecordListPane, RecordTitleRow, CountBar, reachability, clubCount } from './crudShell'
 import { RuleRow, newRule } from '../bettercomms/segmentFields'
+
+// A segment's definition has three separate areas — the live rule, the frozen
+// hand-picked set, and the other segments it folds in — and a person edits them
+// as distinct things. Draw each as its own bordered card so the boundaries are
+// obvious rather than three headings running into one column.
+export function DefinitionSection({ title, children, className = '' }) {
+  return (
+    <div className={`rounded-xl border border-pb-hairline px-4 py-4 ${className}`}
+      style={{ background: 'var(--pb-surface)' }}>
+      <SectionHeading className="mb-2.5">{title}</SectionHeading>
+      {children}
+    </div>
+  )
+}
 
 // The count bar and the reachability rule are shared furniture now — Lists and
 // Emails report their own reach the same way. Re-exported so the two segment
 // screens' imports are unchanged.
 export { CountBar, reachability, clubCount }
+
+// A segment carries two parts now: an Active rule (live, re-evaluated on every
+// send) and a Static set (a frozen roll call of hand-picked contacts, the old
+// Lists mechanic moved inside the segment). One says which the draft is, so the
+// same wording appears on both mounts (club and outreach) rather than each
+// screen inventing its own. Both parts present is "Active" overall, because the
+// whole thing still resolves live.
+export function segmentKind(ruleCount, staticCount) {
+  if (ruleCount && staticCount) return { label: 'Active — with hand-picked additions', tone: 'ok' }
+  if (ruleCount) return { label: 'Active', tone: 'ok' }
+  if (staticCount) return { label: 'Static', tone: 'calm' }
+  return { label: 'Empty', tone: 'calm' }
+}
 
 // The segment builder's engine and its field-agnostic furniture.
 //
@@ -29,22 +56,47 @@ export { CountBar, reachability, clubCount }
 // Keep it that way. If you ever find yourself adding an `isInternal` prop here,
 // the thing you actually want is a third screen.
 
+// A two-state AND / OR pill that joins a condition to the one above it. Standard
+// precedence: a run of ANDs groups together, an OR breaks the group, so
+// "A AND B OR C" reads as "(A AND B) OR C" — the same as SQL, and what the
+// engine evaluates.
+function ConjToggle({ value, onChange }) {
+  const on = value === 'or' ? 'or' : 'and'
+  const cls = (v) => `px-2 py-0.5 text-[11px] font-semibold rounded ${on === v
+    ? 'bg-pb-accent text-pb-accent-ink' : 'text-pb-faint hover:text-pb-text'}`
+  return (
+    <div className="flex items-center gap-1 my-0.5">
+      <div className="inline-flex items-center rounded-md border pb-hairline overflow-hidden">
+        <button type="button" className={cls('and')} onClick={() => onChange('and')}>AND</button>
+        <button type="button" className={cls('or')} onClick={() => onChange('or')}>OR</button>
+      </div>
+    </div>
+  )
+}
+
 // The rule rows. `defs` is required — see the scope note above.
-export function RuleBuilder({ defs, rules, setRules, opts, label = 'Match people where all of these are true' }) {
+export function RuleBuilder({ defs, rules, setRules, opts, label = 'Match people where these are true' }) {
   // The rule row builds its own controls, so it takes the class rather than the
   // component. `!w-auto` because a condition is a row of three controls sized to
   // their content, not one full-width field.
   const inputCls = `${INPUT_CLS} !w-auto !py-1.5 !text-[13px]`
+  const setRule = (i, nr) => setRules(rs => rs.map((x, j) => (j === i ? nr : x)))
   return (
     <div>
       <Caption>{label}</Caption>
       <div className="mt-1.5">
         {rules.map((r, i) => (
-          <RuleRow
-            key={i} rule={r} defs={defs} opts={opts} inputCls={inputCls}
-            onChange={nr => setRules(rs => rs.map((x, j) => (j === i ? nr : x)))}
-            onRemove={() => setRules(rs => (rs.length > 1 ? rs.filter((_, j) => j !== i) : rs))}
-          />
+          <div key={i}>
+            {/* How this condition joins the one above it — AND or OR. */}
+            {i > 0 && (
+              <ConjToggle value={r.conj} onChange={c => setRule(i, { ...r, conj: c })} />
+            )}
+            <RuleRow
+              rule={r} defs={defs} opts={opts} inputCls={inputCls}
+              onChange={nr => setRule(i, nr)}
+              onRemove={() => setRules(rs => (rs.length > 1 ? rs.filter((_, j) => j !== i) : rs))}
+            />
+          </div>
         ))}
       </div>
       <Button size="sm" onClick={() => setRules(rs => [...rs, newRule(defs)])} className="mt-1.5">
@@ -60,10 +112,18 @@ export function RuleBuilder({ defs, rules, setRules, opts, label = 'Match people
 export function SegmentListPane({ segments, sizes, selId, onSelect, emptyText, children, query = '' }) {
   const items = (segments || []).map(s => {
     const n = (s.definition?.rules || []).length
+    const m = s.member_count || 0
+    // Say which kind it is: conditions are live (Active), a hand-picked set is
+    // frozen (Static), and a segment can carry both.
+    let sub
+    if (n && m) sub = `${n} condition${n === 1 ? '' : 's'} · ${m} picked`
+    else if (n) sub = `${n} condition${n === 1 ? '' : 's'} · live`
+    else if (m) sub = `${m} picked · static`
+    else sub = 'no conditions yet'
     return {
       id: s.id,
       name: s.name,
-      sub: `${n} condition${n === 1 ? '' : 's'} · live`,
+      sub,
       figure: sizes[s.id] == null ? '—' : sizes[s.id],
     }
   })
@@ -78,20 +138,94 @@ export function SegmentListPane({ segments, sizes, selId, onSelect, emptyText, c
 }
 
 // The name field and the actions that sit beside it.
-export function SegmentTitleRow({ draft, setDraft, placeholder, blurb, busy, onDuplicate, onEmail, total, actions }) {
+//
+// Save and Delete live up here, on the title line beside the kind badge, the
+// Duplicate button and the "Email these N now" jump-off — the whole record's
+// controls in one place at the top of the pane, rather than the primary action
+// being stranded at the foot of a scroll. Save is the one primary; Email is a
+// secondary route out, so it reads as a plain button beside the rest.
+export function SegmentTitleRow({
+  draft, setDraft, placeholder, blurb, busy, total, actions,
+  onSave, saveLabel, onDelete, deleteLabel = 'Delete', onDuplicate, onEmail,
+}) {
   return (
     <RecordTitleRow
       name={draft.name} onName={v => setDraft(d => ({ ...d, name: v }))}
       placeholder={placeholder} blurb={blurb}
       actions={<>
         {actions}
+        {onSave && (
+          <Button size="sm" variant="primary" onClick={onSave} disabled={busy}>{saveLabel}</Button>
+        )}
+        {onDelete && draft.id && (
+          <Button size="sm" variant="danger" onClick={onDelete} disabled={busy}>{deleteLabel}</Button>
+        )}
         {draft.id && <Button size="sm" onClick={onDuplicate} disabled={busy}>Duplicate</Button>}
-        <Button size="sm" variant="primary" onClick={onEmail} disabled={!draft.id || !total}
+        <Button size="sm" onClick={onEmail} disabled={!draft.id || !total}
           title={draft.id ? '' : 'Save the segment first'}>
           Email these {total} now
         </Button>
       </>}
     />
+  )
+}
+
+// The REFERENCE section: pick other saved segments to INCLUDE (add their whole
+// audience) or EXCLUDE (subtract it) from this one. The audience becomes
+//   (rule matches ∪ static set ∪ included segments) − (excluded segments),
+// so "everyone MINUS the Females segment MINUS the engaged-clubs segment" is a
+// segment with no rules, no static set, and those two excluded — and "the A-grade
+// segment PLUS the committee" is one with both included. Exclusion wins over
+// inclusion (subtracted last). A segment can never reference itself (it is left
+// out of the list); the server guards a cycle (A refs B refs A) at resolve time.
+export function SegmentRefPicker({ segments, currentId, includes, excludes, onChange, sizes = {} }) {
+  const others = (segments || []).filter(s => s.id !== currentId)
+  const inc = new Set(includes || [])
+  const exc = new Set(excludes || [])
+  // Include and exclude are mutually exclusive per segment; picking one clears
+  // the other, and picking the mode a row is already in turns it off.
+  const setMode = (id, mode) => {
+    const ni = new Set(inc), ne = new Set(exc)
+    ni.delete(id); ne.delete(id)
+    if (mode === 'include') ni.add(id)
+    else if (mode === 'exclude') ne.add(id)
+    onChange({ includes: [...ni], excludes: [...ne] })
+  }
+  if (others.length === 0) {
+    return <Caption>Save another segment first — then you can add or subtract its audience here.</Caption>
+  }
+  return (
+    <div>
+      <Caption>Add or subtract the audience of other segments</Caption>
+      <div className="mt-2 space-y-1">
+        {others.map(s => {
+          const on = inc.has(s.id) ? 'include' : exc.has(s.id) ? 'exclude' : null
+          const n = (s.definition?.rules || []).length
+          const m = s.member_count || 0
+          const kind = n && m ? 'rule + picked' : n ? 'rule' : m ? 'hand-picked' : 'empty'
+          return (
+            <div key={s.id}
+              className="flex items-center gap-3 py-1.5 px-1 rounded-md">
+              <span className="text-sm text-pb-text truncate flex-1">{s.name}</span>
+              <span className="text-pb-faintest text-[11px] shrink-0">{kind}</span>
+              {sizes[s.id] != null && <span className="text-pb-faint text-[11px] shrink-0 tabular-nums">{sizes[s.id]}</span>}
+              <div className="flex items-center gap-1 shrink-0">
+                <Button size="sm" variant={on === 'include' ? 'primary' : undefined}
+                  onClick={() => setMode(s.id, on === 'include' ? null : 'include')}>Include</Button>
+                <Button size="sm" variant={on === 'exclude' ? 'danger' : undefined}
+                  onClick={() => setMode(s.id, on === 'exclude' ? null : 'exclude')}>Exclude</Button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      {(inc.size > 0 || exc.size > 0) && (
+        <div className="text-pb-faintest text-[11px] mt-2">
+          {inc.size > 0 && <>Everyone in {inc.size === 1 ? 'the included segment' : `the ${inc.size} included segments`} is added to this one. </>}
+          {exc.size > 0 && <>Anyone in {exc.size === 1 ? 'the excluded segment' : `the ${exc.size} excluded segments`} is removed{inc.size > 0 ? ' afterwards' : ''}.</>}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -111,6 +245,7 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
   const [segments, setSegments] = useState(null)
   const [sizes, setSizes] = useState({})     // segment id → how many it matches today
   const [opts, setOpts] = useState({ roles: [], genders: [], teams: [] })
+  const [staticMembers, setStaticMembers] = useState([])   // the frozen hand-picked set
   const [selId, setSelId] = useState(null)
   const [draft, setDraft] = useState(null)      // { id, name, rules }
   const [resolved, setResolved] = useState(null)
@@ -126,8 +261,10 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
       setSelId(cur => cur || list[0]?.id || null)
       // A segment's size is a fact about today, not something stored, so ask
       // for each one rather than showing a number that would slowly go stale.
+      // The size is the UNION (rules ∪ static set), computed server-side since
+      // the rail doesn't hold the stored members.
       list.forEach(s => {
-        api.commsPreviewSegment(s.definition || { match: 'all', rules: [] })
+        api.commsSegmentSize(s.id)
           .then(r => setSizes(x => ({ ...x, [s.id]: r.count })))
           .catch(() => {})
       })
@@ -150,10 +287,21 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
       s.name.toLowerCase().includes(wanted))
     if (hit) { setSelId(hit.id); return }
     const preset = presets[wanted]
-    if (preset) { setSelId(null); setDraft({ id: null, name: preset.name, rules: preset.rules }) }
+    if (preset) { setSelId(null); setDraft({ id: null, name: preset.name, rules: preset.rules, includes: [], excludes: [] }) }
   }, [wanted, segments])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const selected = useMemo(() => segments?.find(s => s.id === selId) || null, [segments, selId])
+
+  // The frozen hand-picked (static) set of the selected SAVED segment, loaded so
+  // the live preview can union it with the rules. A new unsaved draft has none
+  // (members are managed only once the segment is saved, like a list's were).
+  const reloadStaticMembers = useCallback((id) => {
+    if (!id) { setStaticMembers([]); return }
+    api.commsSegmentMembers(id).then(r => setStaticMembers(r || [])).catch(() => setStaticMembers([]))
+  }, [])
+  useEffect(() => { reloadStaticMembers(selected?.id || null) }, [selected?.id, reloadStaticMembers])
+  const staticIds = useMemo(() => staticMembers.map(m => m.id), [staticMembers])
+  const staticKey = staticIds.join(',')
 
   // Editing a saved segment works on a draft, so a half-built rule never
   // reaches the server.
@@ -171,11 +319,20 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
       id: selected.id,
       name: selected.name,
       rules: selected.definition?.rules?.length ? selected.definition.rules : [newRule(defs)],
+      // The OTHER segments whose audience this one adds (include) or subtracts
+      // (exclude).
+      includes: selected.definition?.include_segments || [],
+      excludes: selected.definition?.exclude_segments || [],
     })
   }, [selected?.id])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const definition = useMemo(
-    () => ({ match: 'all', rules: (draft?.rules || []).filter(r => String(r.value ?? '').trim() !== '') }),
+    () => ({
+      match: 'all',
+      rules: (draft?.rules || []).filter(r => String(r.value ?? '').trim() !== ''),
+      include_segments: draft?.includes || [],
+      exclude_segments: draft?.excludes || [],
+    }),
     [draft],
   )
   const defKey = JSON.stringify(definition)
@@ -187,12 +344,12 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
     let live = true
     setCounting(true)
     const t = setTimeout(() => {
-      api.commsResolveSegment(definition)
+      api.commsResolveSegment(definition, staticIds)
         .then(r => { if (live) { setResolved(r); setCounting(false) } })
         .catch(() => { if (live) { setResolved({ count: 0, contacts: [] }); setCounting(false) } })
     }, 350)
     return () => { live = false; clearTimeout(t) }
-  }, [defKey])   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [defKey, staticKey])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const contacts = resolved?.contacts || []
   const total = resolved?.count ?? 0
@@ -203,6 +360,14 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
   const reachable = resolved?.reachable ?? contacts.filter(c => reachability(c).key === 'email').length
   const otherRoute = resolved?.other_route ?? contacts.filter(c => reachability(c).key === 'guardian').length
   const clubs = resolved?.clubs ?? clubCount(contacts)
+  // The "not in this segment" tile: the whole sendable population minus who is
+  // in. The server sends both so they are drawn from one universe and add up.
+  const universe = resolved?.universe ?? null
+  const outCount = resolved?.out_count ?? (universe != null ? Math.max(0, universe - total) : null)
+  // The FULL set of in-segment contact ids — the Static screen partitions its
+  // own complete contact list with this, so the in / not-in lists agree with the
+  // counts above rather than being derived from the capped `contacts` sample.
+  const memberIds = resolved?.member_ids ?? null
 
   const save = async (noun = 'Segment') => {
     if (!draft?.name.trim()) { setError(`Give the ${noun.toLowerCase()} a name.`); return }
@@ -217,11 +382,15 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
     } catch (e) { setError(e.message) } finally { setBusy(false) }
   }
 
+  // Copy the segment whole — server-side, so its frozen static members come with
+  // it (a client-side create carries only the definition). A duplicated
+  // all-contacts static segment is the base a "…minus these segments" difference
+  // is built on.
   const duplicate = async () => {
-    if (!draft) return
+    if (!draft?.id) return
     setBusy(true)
     try {
-      const copy = await api.commsCreateSegment(`${draft.name} (copy)`, definition)
+      const copy = await api.commsDuplicateSegment(draft.id)
       await load(); setSelId(copy.id)
     } catch (e) { setError(e.message) } finally { setBusy(false) }
   }
@@ -235,7 +404,7 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
 
   const startNew = () => {
     setSelId(null)
-    setDraft({ id: null, name: '', rules: [newRule(defs)] })
+    setDraft({ id: null, name: '', rules: [newRule(defs)], includes: [], excludes: [] })
     setError('')
   }
 
@@ -260,8 +429,11 @@ export function useSegments({ defs, presets = {}, presetFrom = () => null }) {
 
   return {
     segments, sizes, opts, selId, setSelId, draft, setDraft,
-    contacts, total, reachable, otherRoute, clubs, counting,
+    contacts, total, reachable, otherRoute, clubs, universe, outCount, memberIds, counting,
     busy, error, toast, setToast,
     save, duplicate, remove, startNew, emailThese,
+    // Static (frozen hand-picked) set + the current definition, for the Static
+    // section and the Active/Static badge.
+    definition, staticMembers, staticIds, reloadStaticMembers, reload: load,
   }
 }

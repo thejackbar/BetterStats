@@ -34,6 +34,10 @@ function buildNav({ modules, counts, storefront }) {
     { to: '/admin/clubhouse/directory', label: 'Directory', icon: 'teams', cap: [CAP.MANAGE_MEMBERS, CAP.MANAGE_VOLUNTEERS, CAP.MANAGE_COMMITTEE, CAP.MANAGE_QUALIFICATIONS] },
     { to: '/admin/clubhouse/roster', label: 'Roster', icon: 'fixtures', cap: CAP.MANAGE_VOLUNTEERS },
     { to: '/admin/committee', label: 'Committee', icon: 'sheet', cap: CAP.MANAGE_COMMITTEE },
+    // What each role involves (its recurring/seasonal/match-day duties) and the
+    // measurable handover of it to a new volunteer. Spans volunteer roles and
+    // committee seats, so either manager can open it.
+    { to: '/admin/clubhouse/role-programs', label: 'Role programs', icon: 'list', cap: [CAP.MANAGE_VOLUNTEERS, CAP.MANAGE_COMMITTEE] },
 
     { heading: 'Money' },
     { to: '/admin/fees', label: 'Accounts', icon: 'money', cap: CAP.MANAGE_FEES, module: 'fees', exact: true, badge: counts.owing },
@@ -47,10 +51,9 @@ function buildNav({ modules, counts, storefront }) {
     { heading: 'Comms' },
     { to: '/admin/comms', label: 'Emails', icon: 'list', cap: CAP.MANAGE_COMMS, module: 'comms', exact: true, badge: counts.drafts },
     // An audience is not a place you go. It is the slot on an email, and what
-    // fills it is a segment or a list — so those two get the items, named for
-    // what they are. Both carry an "Email these N now" button that opens a
-    // draft already addressed to them.
-    { to: '/admin/comms/lists', label: 'Lists', icon: 'teams', cap: CAP.MANAGE_COMMS, module: 'comms' },
+    // fills it is a segment — a live rule, a hand-picked static set, or both.
+    // (Lists were merged into Segments.) It carries an "Email these N now"
+    // button that opens a draft already addressed to it.
     { to: '/admin/comms/segments', label: 'Segments', icon: 'filter', cap: CAP.MANAGE_COMMS, module: 'comms' },
     { to: '/admin/comms/templates', label: 'Templates', icon: 'sheet', cap: CAP.MANAGE_COMMS, module: 'comms' },
     { to: '/admin/comms/settings', label: 'Email settings', icon: 'settings', cap: CAP.MANAGE_COMMS, module: 'comms' },
@@ -99,7 +102,6 @@ function buildInternalNav({ counts }) {
 
     { heading: 'Comms' },
     { to: '/admin/comms', label: 'Emails', icon: 'list', exact: true, badge: counts.drafts },
-    { to: '/admin/comms/lists', label: 'Lists', icon: 'teams' },
     { to: '/admin/comms/segments', label: 'Segments', icon: 'filter' },
     { to: '/admin/comms/templates', label: 'Templates', icon: 'sheet' },
     { to: '/admin/comms/settings', label: 'Email settings', icon: 'settings' },

@@ -713,6 +713,26 @@ async def org_available_competitions(session: AsyncSession, org_id) -> list[dict
     return [c for c in await list_competitions(session, org_id) if c["grade_count"]]
 
 
+async def org_show_competition_filters(session: AsyncSession, org_id) -> bool:
+    """Whether the club has switched its public Competition surfaces on.
+
+    Off by default (migration 305). One switch for everything competition-based
+    on the public site: the filter pill row on every stats page AND the
+    Competitions breakdown tab on the player profile. It also decides what "All"
+    means on those pills — see useGradeFilters on the frontend.
+    """
+    if not org_id:
+        return False
+    val = await session.scalar(
+        text(
+            "SELECT COALESCE(show_competition_filters, false)"
+            " FROM organisations WHERE id = CAST(:id AS UUID)"
+        ),
+        {"id": str(org_id)},
+    )
+    return bool(val)
+
+
 async def org_available_formats(session: AsyncSession, org_id) -> list[str]:
     """The formats this club's grades actually play, in canonical order.
 

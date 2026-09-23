@@ -9,6 +9,7 @@ import { TINT, Caption, HelpDot, initials } from './ui'
 import ModuleLockup from '../ModuleLockup'
 import ModuleSwitcher from './ModuleSwitcher'
 import BookmarkButton from './BookmarkButton'
+import TrialBanner from './TrialBanner'
 
 // Generic chrome for a Better module surface (BetterAdmin, BetterSocials, …)
 // — a focused sidebar with just that module's tools, separate from the main
@@ -317,6 +318,10 @@ export default function ModuleLayout({
           )}
         </header>
         )}
+        {/* Trial-conversion bar — directly under the module header, full width
+            of the main column, so a trialling club can subscribe from any
+            module surface too. */}
+        <TrialBanner />
         {bare
           ? <div className="flex-1 min-w-0 min-h-0 flex flex-col">{children}</div>
           : <main className="flex-1 p-5 md:px-6 md:py-[22px] max-w-[1400px] w-full">{children}</main>}

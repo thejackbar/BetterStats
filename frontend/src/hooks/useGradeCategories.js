@@ -69,10 +69,14 @@ export function useGradeCategories(orgId) {
  * an explicit selection would instead pin the page to a list that the club
  * could later change without the page noticing.
  */
-export function useGradeFilters(orgId) {
+export function useGradeFilters(orgId, { competitionFilter = false } = {}) {
   const [available, setAvailable] = useState([])
   const [availableFormats, setAvailableFormats] = useState([])
   const [availableCompetitions, setAvailableCompetitions] = useState([])
+  // Whether THIS club has switched the Competition filter row on. Off by
+  // default; a page still only draws the row where it also asks for it
+  // (`competitionFilter`) and there is more than one competition to choose from.
+  const [showCompetitionFilters, setShowCompetitionFilters] = useState(false)
   const [defaultCategories, setDefaultCategories] = useState(null)
   const [gradeType, setGradeType] = useState(null)
   const [matchFormat, setMatchFormat] = useState(null)
@@ -83,11 +87,13 @@ export function useGradeFilters(orgId) {
     let cancelled = false
     api.orgGradeCategories(orgId)
       .then(({ available: av, default: def, available_formats: fmts,
-              available_competitions: comps }) => {
+              available_competitions: comps,
+              show_competition_filters: showComps }) => {
         if (cancelled) return
         setAvailable(av || [])
         setAvailableFormats(fmts || [])
         setAvailableCompetitions(comps || [])
+        setShowCompetitionFilters(!!showComps)
         setDefaultCategories(def || [])
       })
       .catch(() => {
@@ -95,15 +101,25 @@ export function useGradeFilters(orgId) {
         setAvailable([])
         setAvailableFormats([])
         setAvailableCompetitions([])
+        setShowCompetitionFilters(false)
         setDefaultCategories(null)
       })
     return () => { cancelled = true }
   }, [orgId])
 
+  // The Competition filter is live only where the page asks for it, the club
+  // has switched it on, and there is more than one competition to pick between
+  // (matching SeasonSelector's own row-render rule, so the two never disagree).
+  const competitionFilterOn =
+    competitionFilter && showCompetitionFilters && availableCompetitions.length > 1
+
   return {
     available,
     availableFormats,
     availableCompetitions,
+    // Whether the Competition pill row should be drawn — passed straight to
+    // SeasonSelector's `showCompetitionFilter` prop.
+    showCompetitionFilter: competitionFilterOn,
     defaultCategories,
     gradeType,
     setGradeType,
@@ -111,12 +127,22 @@ export function useGradeFilters(orgId) {
     setMatchFormat,
     competition,
     setCompetition,
-    // All three go on the wire as the same comma-separated params every stats
+    // These go on the wire as the same comma-separated params every stats
     // endpoint already takes; null means "no filter", which for categories is
-    // the club's own default, for formats every format, and for competitions
-    // every competition.
+    // the club's own default and for formats every format.
     categoriesParam: gradeType || null,
     formatsParam: matchFormat || null,
-    competitionsParam: competition || null,
+    // For competitions, "All" is NOT the absence of a competition dimension —
+    // it is the sum of every competition the filter lists, so the null (All)
+    // selection sends the whole set of competition ids rather than nothing.
+    // Sending nothing would fall back to Cricket Australia's own lifetime
+    // totals, which include ungrouped grades and so do not equal the sum of
+    // the per-competition figures shown beside them. Where the filter is not
+    // shown, a null selection stays null — that lifetime reading is correct.
+    competitionsParam: competition
+      ? competition
+      : (competitionFilterOn
+          ? availableCompetitions.map(c => String(c.id)).join(',')
+          : null),
   }
 }

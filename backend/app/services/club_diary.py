@@ -23,9 +23,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import (
     DiaryCategory, DiaryTaskDefinition, DiaryTaskOccurrence, DiaryTaskDependency, ClubRole,
+    Organisation, DIARY_TASK_FREQUENCIES, DIARY_STANDING_FREQUENCIES,
 )
 
-_FREQUENCIES = ("annual", "quarterly", "monthly", "once")
+# The one gate on cadence lives on the model; the service just enforces it.
+_FREQUENCIES = DIARY_TASK_FREQUENCIES
+# Standing cadences (weekly / matchday / ongoing) recur with no single due date,
+# so they deliberately generate NO occurrences — they would flood a season plan
+# with one dated row per week or per match. They show only as standing duties.
+_STANDING = set(DIARY_STANDING_FREQUENCIES)
+
+
+async def _diary_start_month(session: AsyncSession, org_id) -> int:
+    """The month (1-12) the club's diary/season year begins — 7 (July) for an
+    Australian cricket season. season_start / season_end pin to it. Read here
+    rather than threaded from the router so every occurrence-generating path
+    agrees on the boundary."""
+    m = (await session.execute(
+        select(Organisation.diary_start_month).where(Organisation.id == org_id)
+    )).scalar_one_or_none()
+    return int(m) if m else 7
 
 # (name, hex colour) — a starter palette so the Gantt colour-codes by category
 # out of the box.
@@ -127,20 +144,27 @@ def _current_period_label(frequency: str, today: date) -> str:
         return f"{today.year} Q{quarter}"
     if frequency == "monthly":
         return f"{today.year}-{today.month:02d}"
+    # annual / once / season_start / season_end — one per calendar year.
     return str(today.year)
 
 
 def _period_labels_for_year(frequency: str, year: int) -> list[str]:
-    """Every period label a definition of this frequency has in one year."""
+    """Every period label a definition of this frequency has in one year.
+    Standing cadences (weekly/matchday/ongoing) have none — they are not dated."""
+    if frequency in _STANDING:
+        return []
     if frequency == "quarterly":
         return [f"{year} Q{q}" for q in (1, 2, 3, 4)]
     if frequency == "monthly":
         return [f"{year}-{m:02d}" for m in range(1, 13)]
-    return [str(year)]  # annual / once
+    return [str(year)]  # annual / once / season_start / season_end
 
 
-def _due_for_period(d: DiaryTaskDefinition, period_label: str, year: int) -> Optional[date]:
-    """A sensible default target-end date for a generated occurrence."""
+def _due_for_period(d: DiaryTaskDefinition, period_label: str, year: int,
+                    start_month: int = 7) -> Optional[date]:
+    """A sensible default target-end date for a generated occurrence. An explicit
+    default_month always wins (the club has said when); otherwise season_start
+    pins to the diary-year start month and season_end to the month before it."""
     if d.frequency == "quarterly" and " Q" in period_label:
         q = int(period_label.rsplit("Q", 1)[1])
         month = q * 3  # end month of the quarter
@@ -153,6 +177,13 @@ def _due_for_period(d: DiaryTaskDefinition, period_label: str, year: int) -> Opt
             return date(year, d.default_month, 1)
         except ValueError:
             return None
+    if d.frequency == "season_start":
+        return date(year, start_month, 1)
+    if d.frequency == "season_end":
+        # The season runs to the month before the next season begins; for a
+        # July-start club that is June of the same calendar diary-year.
+        end_month = start_month - 1 or 12
+        return date(year, end_month, 1)
     return None
 
 
@@ -363,11 +394,15 @@ async def ensure_occurrences_for_period(session: AsyncSession, org_id, *, today:
     gets a single occurrence, regardless of period — once any occurrence
     exists for it, it's never rolled forward."""
     today = today or date.today()
+    start_month = await _diary_start_month(session, org_id)
     definitions = (await session.execute(
         select(DiaryTaskDefinition).where(DiaryTaskDefinition.organisation_id == org_id, DiaryTaskDefinition.is_active.is_(True))
     )).scalars().all()
     created = []
     for d in definitions:
+        if d.frequency in _STANDING:
+            # A standing duty (weekly/matchday/ongoing) has no dated occurrence.
+            continue
         if d.frequency == "once":
             existing = (await session.execute(
                 select(DiaryTaskOccurrence).where(DiaryTaskOccurrence.definition_id == d.id)
@@ -383,7 +418,7 @@ async def ensure_occurrences_for_period(session: AsyncSession, org_id, *, today:
             )).scalars().first()
             if existing is not None:
                 continue
-        due = _due_for_period(d, period, today.year)
+        due = _due_for_period(d, period, today.year, start_month)
         occ = DiaryTaskOccurrence(
             organisation_id=org_id, definition_id=d.id, period_label=period, due_date=due,
             assigned_to_member_id=d.default_assignee_member_id,
@@ -408,6 +443,10 @@ async def board(session: AsyncSession, org_id, *, today: Optional[date] = None) 
     )).scalars().all()
     out = []
     for d in definitions:
+        if d.frequency in _STANDING:
+            # Shown as a standing duty; it has no dated occurrence.
+            out.append({**_definition_dict(d), "occurrence": None})
+            continue
         if d.frequency == "once":
             occ = (await session.execute(
                 select(DiaryTaskOccurrence).where(DiaryTaskOccurrence.definition_id == d.id)
@@ -472,12 +511,15 @@ async def generate_season(session: AsyncSession, org_id, year: int) -> int:
     a period that already has an occurrence is skipped, so re-running just
     fills gaps (e.g. after adding a new definition). Values (responsible role,
     third party, budget) are copied from the definition as starting points."""
+    start_month = await _diary_start_month(session, org_id)
     definitions = (await session.execute(
         select(DiaryTaskDefinition).where(DiaryTaskDefinition.organisation_id == org_id,
                                           DiaryTaskDefinition.is_active.is_(True))
     )).scalars().all()
     created = 0
     for d in definitions:
+        if d.frequency in _STANDING:
+            continue  # standing duties never materialise dated occurrences
         if d.frequency == "once":
             exists = (await session.execute(
                 select(DiaryTaskOccurrence.id).where(DiaryTaskOccurrence.definition_id == d.id)
@@ -495,7 +537,7 @@ async def generate_season(session: AsyncSession, org_id, year: int) -> int:
                 continue
             session.add(DiaryTaskOccurrence(
                 organisation_id=org_id, definition_id=d.id, period_label=period,
-                due_date=_due_for_period(d, period, year),
+                due_date=_due_for_period(d, period, year, start_month),
                 assigned_to_member_id=d.default_assignee_member_id,
                 assigned_to_role_id=d.responsibility_role_id,
                 third_party=d.third_party, budget_estimate=d.budget_estimate,
