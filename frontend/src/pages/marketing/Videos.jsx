@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import MarketingNav from '../../components/MarketingNav'
 import MarketingFooter from '../../components/marketing/MarketingFooter'
 import VideoThumb from '../../components/marketing/VideoThumb'
+import { DemoFeatureCard } from '../../components/marketing/DemoLinks'
 import { VideoAdminBar, VideoCardControls, VideoEditorModal } from '../../components/marketing/VideoManager'
 import { usePageMeta } from '../../hooks/usePageMeta'
 import { useVideos } from '../../hooks/useVideos'
@@ -176,6 +177,8 @@ export default function Videos() {
           {VIDEO_INTRO.heading}
         </h1>
         <p className="text-pb-dim text-lg max-w-2xl mb-12">{VIDEO_INTRO.blurb}</p>
+
+        <DemoFeatureCard />
 
         {canManage && (
           <VideoAdminBar

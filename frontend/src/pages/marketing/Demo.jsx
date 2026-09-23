@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom'
 import MarketingNav from '../../components/MarketingNav'
 import MarketingFooter from '../../components/marketing/MarketingFooter'
 import TrustedByStrip from '../../components/marketing/TrustedByStrip'
+import VideoThumb from '../../components/marketing/VideoThumb'
+import { useVideos } from '../../hooks/useVideos'
 import { api } from '../../lib/api'
 import { SUPPORT_EMAIL } from '../../data/marketing'
 import { usePageMeta } from '../../hooks/usePageMeta'
@@ -549,6 +551,42 @@ function RegistrationForm({ state, onSuccess }) {
   )
 }
 
+// Once the recording is up, the how-to library is the natural next step: the
+// demo shows how it all fits together, these go deeper one job at a time. Read
+// live from the library, so a video added later appears here with no edit.
+// Draws nothing while the library is empty or has not loaded.
+function GoDeeper() {
+  const { videos } = useVideos()
+  if (!videos.length) return null
+  const shown = videos.slice(0, 4)
+  return (
+    <div className="mt-12" data-testid="demo-go-deeper">
+      <div className="flex items-baseline justify-between gap-4 mb-5">
+        <h2 className="font-display font-bold text-2xl">Go deeper, one module at a time</h2>
+        <Link to="/videos" className="text-sm text-accent font-medium hover:underline whitespace-nowrap">
+          See all videos →
+        </Link>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+        {shown.map((v) => (
+          <Link key={v.id} to={`/videos/${v.slug}`} className="group block">
+            <VideoThumb poster={v.poster} title={v.title} />
+            <div className="pt-3">
+              {v.module_label && (
+                <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">{v.module_label}</p>
+              )}
+              <div className="flex items-baseline gap-3">
+                <p className="font-display font-semibold text-base leading-snug group-hover:text-accent transition-colors">{v.title}</p>
+                {v.duration && <span className="ml-auto shrink-0 font-mono text-[11px] text-pb-faint tabular-nums">{v.duration}</span>}
+              </div>
+            </div>
+          </Link>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function Demo() {
   // The StreamYard link and the recording link are the two things the page
   // can't know for itself, so they come from the server. Everything else — the
@@ -670,6 +708,8 @@ export default function Demo() {
                 </div>
               ))}
             </div>
+
+            {state.past && <GoDeeper />}
 
             {/* One screenshot, reusing an existing site asset — lazy and
                 explicitly sized so it can't shift the layout or drag LCP. */}

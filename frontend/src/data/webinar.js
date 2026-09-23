@@ -147,3 +147,25 @@ export const WEBINAR_ICS_URL = '/api/public/webinar/calendar.ics'
 // past state can render it on first paint with no request, exactly as the
 // headline does.
 export const WEBINAR_RECORDING_EMBED_URL = 'https://streamyard.com/e/pkwuu5xsbecn'
+
+// The recorded demo, as every other page links to it. One definition so the
+// menu, the home page, the footer and the videos library all say the same
+// thing about it — a length written out in five places is five places to fix
+// the day somebody checks it.
+export const DEMO = {
+  path: '/demo',
+  title: 'Full platform demo',
+  length: '60 min',
+  recordedLabel: WEBINAR.recordedLabel,
+  // A still of the product until a frame from the recording is supplied.
+  poster: '/marketing/feature-leaderboard.jpg',
+}
+
+// Which placement a demo click came from, so the analytics can say which of
+// the links actually sends people to the recording. Best-effort: no GA4 on the
+// page means no event, never an error.
+export function trackDemoClick(placement) {
+  if (typeof window !== 'undefined' && typeof window.gtag === 'function') {
+    window.gtag('event', 'demo_click', { placement })
+  }
+}
