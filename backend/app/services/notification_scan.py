@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime, timedelta, timezone
+from typing import Optional
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,6 +46,7 @@ from app.services import email_service, milestone_scan
 from app.services import notification_events as ev
 from app.services import notifications as notif
 from app.services.milestone_rules import is_displayable
+from app.services.session_safety import rollback_keeping
 
 logger = logging.getLogger(__name__)
 
@@ -132,21 +134,74 @@ async def _src_milestone_upcoming(session: AsyncSession, org_id, config: dict) -
     return out
 
 
+_QUAL_STAGE_RANK = {"lapsed": 0, "final": 1, "notice": 2}
+
+
+def _qualification_stage(days: int, final_days: int) -> str:
+    """Which notice a certificate is due, from the days left on it.
+
+    Only the CURRENT stage is ever raised. A club switching this on the day a
+    certificate lapses hears "expired", not a notice, a final reminder and an
+    expiry notice all at once for the same piece of paper.
+    """
+    if days < 0:
+        return "lapsed"
+    if final_days > 0 and days <= final_days:
+        return "final"
+    return "notice"
+
+
+async def _legacy_qualification_stages(session: AsyncSession, org_id) -> dict[str, int]:
+    """Days-left recorded on qualification notices written before stages existed.
+
+    Those rows carry a key with no stage on it, so the first scan after this
+    shipped would otherwise re-announce a certificate the club was already told
+    had lapsed. Their payload says how many days were left when they were
+    raised, which is enough to know which stages they already covered.
+    """
+    rows = (await session.execute(text("""
+        SELECT dedupe_key, payload->>'days_remaining' AS days
+        FROM notifications
+        WHERE organisation_id = :org AND event_key = 'qualification_expiring'
+          AND payload->>'stage' IS NULL
+    """), {"org": str(org_id)})).all()
+    out = {}
+    for key, days in rows:
+        try:
+            out[key] = int(days)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 async def _src_qualification_expiring(session: AsyncSession, org_id, config: dict) -> list[dict]:
-    """Volunteer and official certifications approaching their expiry date.
+    """Volunteer and official certifications approaching or past their expiry.
 
-    The notice period is the club's own (``lead_days``), because how long a
-    renewal takes is not the same everywhere: a Working With Children check can
-    take weeks to come back, a first aid refresher is a weekend.
+    Three notices per certificate, each its own fact with its own dedupe key:
+    when it enters the club's notice period (``lead_days``), a final reminder
+    (``final_days``, 0 = none), and the day it lapses. The first cut raised ONE
+    notice per certificate — so a WWCC announced sixty days out was never
+    mentioned again, lapse included, which is the moment that matters most.
 
-    An ALREADY EXPIRED certificate is included, not filtered out — it is the
-    most urgent case there is, and a club that has just switched notifications
-    on should hear about the ones already lapsed rather than only the ones about
-    to.
+    What is deliberately left out:
+
+      * **a certificate that has been renewed.** A renewal is usually logged as
+        a NEW record, leaving the old one to expire on schedule; a newer record
+        of the same type for the same person (later expiry, or none) supersedes
+        it. Chasing a renewal that has already happened is how a club learns to
+        ignore these.
+      * **a person archived from the Directory**, and a certificate type the
+        club has retired — nobody is going to renew either.
+      * **a certificate that lapsed longer ago than ``lapsed_days``.** The first
+        cut ordered by expiry and capped at forty, so a club switching this on
+        was told about forty certificates from years ago and none of the ones
+        expiring next week. Lapsed is still raised whatever the notice period,
+        just not forever.
     """
     lead_days = int(config.get("lead_days", 60))
+    final_days = int(config.get("final_days", 14))
+    lapsed_days = int(config.get("lapsed_days", 90))
     today = date.today()
-    horizon = today + timedelta(days=lead_days)
     rows = (await session.execute(text("""
         SELECT mq.id, mq.expires_at, qt.name AS qualification_name,
                fm.id AS member_id, fm.full_name
@@ -155,38 +210,123 @@ async def _src_qualification_expiring(session: AsyncSession, org_id, config: dic
         JOIN fee_members fm ON fm.id = mq.member_id
         WHERE mq.organisation_id = :org
           AND mq.expires_at IS NOT NULL
-          AND mq.expires_at <= :horizon
+          AND mq.expires_at BETWEEN :oldest AND :horizon
+          AND fm.archived_at IS NULL
+          AND COALESCE(qt.is_active, TRUE)
+          AND NOT EXISTS (
+              SELECT 1 FROM member_qualifications newer
+              WHERE newer.member_id = mq.member_id
+                AND newer.qualification_type_id = mq.qualification_type_id
+                AND newer.id <> mq.id
+                AND (newer.expires_at IS NULL OR newer.expires_at > mq.expires_at)
+          )
         ORDER BY mq.expires_at ASC
-        LIMIT :cap
-    """), {"org": str(org_id), "horizon": horizon, "cap": MAX_PER_EVENT})).mappings().all()
+    """), {"org": str(org_id), "horizon": today + timedelta(days=lead_days),
+           "oldest": today - timedelta(days=lapsed_days)})).mappings().all()
 
+    legacy = await _legacy_qualification_stages(session, org_id) if rows else {}
     out = []
     for r in rows:
         expires = r["expires_at"]
         days = (expires - today).days
-        if days < 0:
+        stage = _qualification_stage(days, final_days)
+        on = expires.strftime('%-d %b %Y')
+        base_key = f"qualification:{r['id']}:{expires.isoformat()}"
+
+        # A notice written before stages existed already covered this stage.
+        told = legacy.get(base_key)
+        if told is not None and (
+            stage == "notice"
+            or (stage == "final" and told <= final_days)
+            or (stage == "lapsed" and told < 0)
+        ):
+            continue
+
+        if stage == "lapsed":
             when = f"expired {abs(days)} day{'s' if abs(days) != 1 else ''} ago"
-            body = f"Lapsed on {expires.strftime('%-d %b %Y')}. They should not be rostered until it is renewed."
+            body = f"Lapsed on {on}. They should not be rostered until it is renewed."
         elif days == 0:
             when = "expires today"
-            body = "Today is the last day it is valid."
+            body = "Today is the last day it is valid, and no renewal has been recorded."
+        elif stage == "final":
+            when = f"expires in {days} day{'s' if days != 1 else ''}"
+            body = f"Final reminder: due to expire on {on} and no renewal has been recorded yet."
         else:
             when = f"expires in {days} day{'s' if days != 1 else ''}"
-            body = f"Due to expire on {expires.strftime('%-d %b %Y')}."
+            body = f"Due to expire on {on}."
         out.append({
-            # The expiry DATE is in the key, so a renewal creates a new fact to
-            # warn about next time round and an unchanged one is raised once.
-            "dedupe_key": f"qualification:{r['id']}:{expires.isoformat()}",
+            # The expiry DATE is in the key, so a renewal that EDITS the record
+            # is a new fact too. The notice stage keeps the key it always had,
+            # so a certificate already announced is not announced again.
+            "dedupe_key": base_key if stage == "notice" else f"{base_key}:{stage}",
             "title": f"{r['full_name']}'s {r['qualification_name']} {when}",
             "body": body,
             "link": "/admin/clubhouse/qualifications",
+            "severity": "urgent" if stage == "lapsed" else "warning",
             "payload": {
                 "member_id": str(r["member_id"]),
                 "member_name": r["full_name"],
                 "qualification": r["qualification_name"],
                 "expires_at": expires.isoformat(),
                 "days_remaining": days,
+                "stage": stage,
             },
+        })
+    out.sort(key=lambda i: (_QUAL_STAGE_RANK[i["payload"]["stage"]], i["payload"]["expires_at"]))
+    return out[:MAX_PER_EVENT]
+
+
+# Grade labels read "runs in 1st Grade", so the stat word stands alone here.
+_GRADE_STAT_LABELS = {
+    "grade_runs": "runs",
+    "grade_wickets": "wickets",
+    "grade_matches": "matches",
+    "grade_catches": "catches",
+}
+
+
+async def _grade_scan(session: AsyncSession, org_id) -> dict:
+    """Both grade sources read one pass, so the per-grade scan runs once per
+    club per session rather than once per event."""
+    key = ("grade_milestones", str(org_id))
+    cached = session.info.get(key)
+    if cached is None:
+        cached = await milestone_scan.grade_milestones(
+            session, str(org_id), recent_since=date.today() - timedelta(days=LOOKBACK_DAYS))
+        session.info[key] = cached
+    return cached
+
+
+async def _src_grade_milestone_achieved(session: AsyncSession, org_id, config: dict) -> list[dict]:
+    rows = sorted((await _grade_scan(session, org_id))["achieved"],
+                  key=lambda r: -r["milestone_value"])
+    out = []
+    for r in rows[:MAX_PER_EVENT]:
+        stat = _GRADE_STAT_LABELS.get(r["type"], r["type"])
+        out.append({
+            "dedupe_key": (f"grade_milestone:{r['player_id']}:{r['type']}:"
+                           f"{r['grade_key']}:{r['milestone_value']}"),
+            "title": f"{r['player_name']} reached {r['milestone_value']:,} {stat} in {r['grade']}",
+            "body": f"Now on {r['current']:,} in that grade.",
+            "link": "/admin/milestones",
+            "payload": r,
+        })
+    return out
+
+
+async def _src_grade_milestone_upcoming(session: AsyncSession, org_id, config: dict) -> list[dict]:
+    rows = sorted((await _grade_scan(session, org_id))["upcoming"],
+                  key=lambda r: (r["needed"], -r["target"]))
+    out = []
+    for r in rows[:MAX_PER_EVENT]:
+        stat = _GRADE_STAT_LABELS.get(r["type"], r["type"])
+        out.append({
+            "dedupe_key": (f"grade_milestone_upcoming:{r['player_id']}:{r['type']}:"
+                           f"{r['grade_key']}:{r['target']}"),
+            "title": f"{r['player_name']} is {r['needed']} from {r['target']:,} {stat} in {r['grade']}",
+            "body": f"Currently on {r['current']:,} in that grade.",
+            "link": "/admin/milestones",
+            "payload": r,
         })
     return out
 
@@ -331,6 +471,8 @@ async def _src_sync_completed(session: AsyncSession, org_id, config: dict) -> li
 SOURCES = {
     "milestone_achieved": _src_milestone_achieved,
     "milestone_upcoming": _src_milestone_upcoming,
+    "grade_milestone_achieved": _src_grade_milestone_achieved,
+    "grade_milestone_upcoming": _src_grade_milestone_upcoming,
     "qualification_expiring": _src_qualification_expiring,
     "asset_service_due": _src_asset_service_due,
     "merch_low_stock": _src_merch_low_stock,
@@ -346,6 +488,7 @@ SOURCES = {
 async def scan_org(session: AsyncSession, org: Organisation) -> dict:
     """Ask every enabled source what it can see, and record what is new."""
     stats = {"emitted": 0, "events_run": 0, "sources_failed": 0}
+    org_id = org.id
     club_settings = await notif.club_settings(session, org.id)
     if not club_settings.get("enabled", True):
         return stats
@@ -376,8 +519,13 @@ async def scan_org(session: AsyncSession, org: Organisation) -> dict:
         except Exception:
             # One source is never the whole run. A statement timeout on a big
             # club's milestone scan must not cost it the lapsing WWCC notice.
-            logger.exception("notification scan: source %s failed for org %s", event.key, org.id)
-            await session.rollback()
+            logger.exception("notification scan: source %s failed for org %s", event.key, org_id)
+            # rollback_keeping, NOT a bare rollback: a rollback expires every
+            # instance the session holds, and the next read of ``org`` is then
+            # a lazy refresh that raises MissingGreenlet — which took the whole
+            # club's scan down with the one source, the opposite of this
+            # except's purpose. Found by a source failing in the verification.
+            await rollback_keeping(session, org)
             stats["sources_failed"] += 1
             continue
 
@@ -413,7 +561,7 @@ def _should_email_today(club_settings: dict, today: date) -> bool:
 
 
 def _digest_html(club_name: str, greeting: str, groups: list[dict], link: str,
-                 settings_link: str) -> tuple[str, str]:
+                 settings_link: str, *, test: bool = False) -> tuple[str, str]:
     """Plain inline-styled HTML — a system transactional send, not a BetterComms
     campaign, so no club shell and no marketing unsubscribe wrapper. The footer
     still points at the settings screen, because a person told something they
@@ -440,11 +588,12 @@ def _digest_html(club_name: str, greeting: str, groups: list[dict], link: str,
             text_lines.append(f"- and {more} more")
         text_blocks.append(g["label"] + "\n" + "\n".join(text_lines))
 
+    intro = (_TEST_INTRO if test else "Here is what has come up at the club.")
     html = f"""
     <div style="font-family:Arial,Helvetica,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#1a1a1a">
       <p style="font-size:13px;color:#555;margin:0 0 16px">{_esc(club_name)} · BetterCricket</p>
       <p style="font-size:14px;line-height:1.5;margin:0 0 4px">Hi {_esc(greeting)},</p>
-      <p style="font-size:14px;line-height:1.5;margin:0">Here is what has come up at the club.</p>
+      <p style="font-size:14px;line-height:1.5;margin:0">{_esc(intro)}</p>
       {''.join(blocks)}
       <p style="margin:24px 0">
         <a href="{link}" style="display:inline-block;background:#16c784;color:#fff;text-decoration:none;
@@ -456,10 +605,17 @@ def _digest_html(club_name: str, greeting: str, groups: list[dict], link: str,
       </p>
     </div>
     """
-    text_body = "\n\n".join([f"Hi {greeting},", "Here is what has come up at the club.",
+    text_body = "\n\n".join([f"Hi {greeting},", intro,
                              *text_blocks, f"Open BetterCricket: {link}",
                              f"Choose what you are told about: {settings_link}"])
     return html, text_body
+
+
+_TEST_INTRO = (
+    "This is a test email you asked for from the notification settings. It shows "
+    "the most recent things raised at the club; nothing here has been marked as "
+    "sent, so the daily email still goes out as normal."
+)
 
 
 def _esc(value) -> str:
@@ -481,6 +637,16 @@ async def dispatch_emails(session: AsyncSession, org: Organisation) -> dict:
     if not club_settings.get("enabled", True):
         return stats
     if not _should_email_today(club_settings, date.today()):
+        return stats
+
+    provider = email_service.get_email_provider()
+    if provider.name == "console":
+        # THE CONSOLE PROVIDER IS NOT A SEND. It logs a line and reports
+        # success, so treating that as delivered marked every notification
+        # email "sent" on a box with no provider configured and made the
+        # delivery record useless for "did it go?". The deliveries stay
+        # pending and go out as one digest once a real provider is connected.
+        stats["not_live"] = True
         return stats
 
     rows = (await session.execute(text("""
@@ -527,7 +693,7 @@ async def dispatch_emails(session: AsyncSession, org: Organisation) -> dict:
             org.name or "Your club", greeting, groups,
             f"{base}/admin", f"{base}/admin/notifications")
 
-        result = await email_service.get_email_provider().send(email_service.EmailMessage(
+        result = await provider.send(email_service.EmailMessage(
             to_email=address,
             to_name=items[0]["display_name"] or None,
             subject=subject, html=html, text=text_body,
@@ -556,6 +722,102 @@ async def dispatch_emails(session: AsyncSession, org: Organisation) -> dict:
             """), {"ids": ids, "err": (result.error or "send failed")[:500]})
             stats["failed"] += len(ids)
     return stats
+
+
+#: How many recent notifications a test email shows.
+TEST_EMAIL_ITEMS = 8
+
+
+async def send_test_email(session: AsyncSession, org: Organisation, user) -> dict:
+    """Send ONE person a copy of the digest, now, to their own address.
+
+    It exists so a club can check its notification email actually arrives
+    without waiting for 8:45 tomorrow. What it deliberately does NOT do:
+
+      * email anybody else — it only ever goes to the person pressing it, so it
+        cannot be used to spam a club's other admins;
+      * touch a delivery row — the real digest still goes out on schedule, and
+        a test must never be the thing that marks tomorrow's email as sent;
+      * pretend. With no real provider connected it says so rather than
+        reporting a send that only wrote a log line.
+
+    The content is the most recent notifications raised at the club for any
+    channel, so the test looks like the real thing; a club with nothing raised
+    yet gets one sample line instead of an empty email.
+    """
+    provider = email_service.get_email_provider()
+    address = (getattr(user, "email", None) or "").strip()
+    result = {"to": address or None, "provider": provider.name,
+              "live": provider.name != "console", "ok": False,
+              "message_id": None, "error": None, "items": 0}
+    if not address:
+        result["error"] = "Your account has no email address, so there is nowhere to send it."
+        return result
+    if not result["live"]:
+        result["error"] = ("No email provider is connected on this server, so nothing "
+                           "was sent. Notifications still show in the app.")
+        return result
+
+    rows = (await session.execute(text("""
+        SELECT event_key, title, body FROM notifications
+        WHERE organisation_id = :org
+        ORDER BY created_at DESC
+        LIMIT :lim
+    """), {"org": str(org.id), "lim": TEST_EMAIL_ITEMS})).mappings().all()
+    grouped: dict[str, list] = {}
+    for r in rows:
+        if r["event_key"] in ev.EVENTS_BY_KEY:
+            grouped.setdefault(r["event_key"], []).append({"title": r["title"], "body": r["body"]})
+    groups = [{"label": ev.EVENTS_BY_KEY[k].label, "items": v} for k, v in grouped.items()]
+    if not groups:
+        groups = [{"label": "Nothing raised yet", "items": [{
+            "title": "This club has no notifications yet",
+            "body": "Once a milestone, a lapsing certificate or anything else you have "
+                    "switched on comes up, it will appear here.",
+        }]}]
+    result["items"] = sum(len(g["items"]) for g in groups)
+
+    greeting = ((getattr(user, "first_name", None) or getattr(user, "display_name", None)
+                 or "there").strip().split(" ")[0] or "there")
+    base = app_settings.public_base_url.rstrip("/")
+    html, text_body = _digest_html(org.name or "Your club", greeting, groups,
+                                   f"{base}/admin", f"{base}/admin/notifications", test=True)
+    sent = await provider.send(email_service.EmailMessage(
+        to_email=address,
+        to_name=getattr(user, "display_name", None) or None,
+        subject=f"[Test] {org.name or 'Your club'}: notification email",
+        html=html, text=text_body,
+        from_email=app_settings.email_from_address,
+        from_name=org.name or app_settings.email_from_name,
+        reply_to=app_settings.email_reply_to,
+        configuration_set=(app_settings.ses_configuration_set_transactional or "").strip() or None,
+    ))
+    result["ok"] = bool(sent.ok)
+    result["message_id"] = getattr(sent, "message_id", None)
+    result["error"] = None if sent.ok else (sent.error or "The provider refused the message.")
+    return result
+
+
+async def last_email_delivery(session: AsyncSession, org_id, user_id) -> Optional[dict]:
+    """The most recent notification email this person was due, and what became
+    of it — the answer to "did it go?" without anybody reading a log."""
+    row = (await session.execute(text("""
+        SELECT d.status, d.sent_at, d.error, n.created_at, n.title
+        FROM notification_deliveries d
+        JOIN notifications n ON n.id = d.notification_id
+        WHERE n.organisation_id = :org AND d.user_id = :uid AND d.channel = :ch
+        ORDER BY COALESCE(d.sent_at, n.created_at) DESC
+        LIMIT 1
+    """), {"org": str(org_id), "uid": str(user_id), "ch": ev.CHANNEL_EMAIL})).mappings().first()
+    if row is None:
+        return None
+    return {
+        "status": row["status"],
+        "sent_at": row["sent_at"].isoformat() if row["sent_at"] else None,
+        "raised_at": row["created_at"].isoformat() if row["created_at"] else None,
+        "error": row["error"],
+        "title": row["title"],
+    }
 
 
 async def run_all() -> dict:

@@ -298,6 +298,7 @@ async def emit(session: AsyncSession, org_id, *, event_key: str, dedupe_key: str
                title: str, body: str = "", link: Optional[str] = None,
                payload: Optional[dict] = None,
                occurred_at: Optional[datetime] = None,
+               severity: Optional[str] = None,
                settings: Optional[dict] = None,
                rules: Optional[dict] = None,
                entitled_modules: Optional[Iterable[str]] = None,
@@ -345,7 +346,10 @@ async def emit(session: AsyncSession, org_id, *, event_key: str, dedupe_key: str
         RETURNING id
     """), {
         "org": str(org_id), "event": event_key, "dedupe": dedupe_key,
-        "severity": event.severity, "title": title, "body": body or "",
+        # A source may raise one fact more urgently than its event's default —
+        # a certificate that has lapsed rather than one about to.
+        "severity": severity if severity in ev.SEVERITIES else event.severity,
+        "title": title, "body": body or "",
         "link": link, "payload": _json(payload or {}),
         "occurred_at": occurred_at,
     })).first()

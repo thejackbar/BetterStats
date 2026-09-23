@@ -2023,6 +2023,35 @@ period before expiry left for the club to define**.
   MEMBER about their own lapsing qualification through the member portal — a
   different audience from this, and deliberately left alone.
 
+### Certificate stages, grade milestones and a test email (v9.89.0, Sep 2026)
+
+- **A CERTIFICATE WAS ANNOUNCED ONCE AND NEVER AGAIN, LAPSE INCLUDED.** Now three
+  stages, each its own dedupe key: notice (the ORIGINAL unsuffixed key, so a
+  certificate already announced is not re-announced), `:final` (`final_days`,
+  0 = off) and `:lapsed` (severity `urgent`, via `emit(severity=...)`). Only the
+  CURRENT stage is raised. A pre-stage notice is read by its payload's
+  `days_remaining` so the stages it already covered are not repeated.
+- **Left out on purpose**: a certificate superseded by a newer record of the same
+  type for the same person (later expiry, or none), an archived member, a retired
+  type, and anything lapsed longer than `lapsed_days` ago. The old
+  `ORDER BY expires_at LIMIT 40` served forty certificates from years ago first.
+- **Grade milestones** (`milestone_scan.grade_milestones`): grade = name folded
+  through the club's active `grade_merge_logs`, label = the club's display
+  override, active players only, bound as a `uuid[]` (never a subquery). "Reached"
+  = crossed in the last `LOOKBACK_DAYS` by scorecard date. A player with a record
+  in only one grade is skipped, judged across ALL stats (a per-stat check dropped
+  a batter whose runs sat in one grade). Upcoming needs a game in that grade since
+  the active cutoff. Both events share one pass via `session.info`.
+- **`scan_org` used a bare rollback after a failing source**, which expired `org`
+  and crashed the rest of the club's scan with MissingGreenlet. `rollback_keeping`.
+- **Console is not a send in `dispatch_emails` either** (the sales-email rule): with
+  no provider the deliveries stay pending. `POST .../settings/test-email` sends the
+  caller alone a `[Test]` digest of the club's recent notifications, never touches
+  a delivery, 5 per 10 minutes. `my_last_email` on the settings payload reads the
+  delivery record.
+- **Verified**: `verify_notifications.py` 146 (control: 20 fail),
+  `verify_notifications_browser.mjs` 56 (control: 7 fail).
+
 ## Suggested duplicate grades: the discriminator rule (migration 294, v9.70.1, Sep 2026)
 
 Asked for on Manage Grades: a smarter way of merging potential duplicates by

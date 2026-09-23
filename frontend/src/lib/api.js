@@ -1695,6 +1695,8 @@ export const api = {
       { method: 'PUT', body: JSON.stringify({ channels }) }),
   runNotificationScanNow: () =>
     request('/club-admin/notifications/settings/run-now', { method: 'POST' }),
+  sendNotificationTestEmail: () =>
+    request('/club-admin/notifications/settings/test-email', { method: 'POST' }),
   getNotificationFeed: ({ limit = 30, unreadOnly = false } = {}) =>
     request(`/club-admin/notifications/feed?limit=${limit}&unread_only=${unreadOnly ? 'true' : 'false'}`),
   markNotificationFeedRead: (notificationIds) =>
