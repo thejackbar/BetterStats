@@ -427,6 +427,68 @@ async def fetch_gr_by_player_for_grade(session, org_uuid, pids, grade_label: str
     return out
 
 
+def is_team_labelled(grade_labels) -> bool:
+    """True when an org's upload names MORE THAN ONE grade.
+
+    Grade-scoped reconciliation (migration 154) compares a labelled group
+    against the player's GR coverage for that one grade NAME. That is right for
+    a club that uploads a single competition's book ("1st Grade" only), and
+    wrong the moment the sheet is the club's whole book broken down by its own
+    TEAMS ("1XI", "2XI", "3XI"): Cricket Australia files the same side under a
+    different grade name most seasons ("Division 3" one year, "4 Norm Reeves
+    Shield Reserve" the next), so a label maps to one of them and every season
+    the player spent under another reads as missing online and is added on top
+    of what is already there. Reported off The Basin: Leigh Cook's sheet says
+    240 and matches the online data season for season, and the import read 355.
+
+    A sheet listing several teams is the player's whole book, so it is
+    reconciled against their whole GR record, season by season. The labels are
+    still stored on every row; only the comparison changes.
+    """
+    return len({g for g in grade_labels if g is not None}) >= 2
+
+
+def covered_by_year(gr_season_ids, year_by_season: dict) -> set:
+    """Widen GR's covered season ids to every season row of the same YEAR.
+
+    A club can hold two season rows for one year (a hand-made "1996/97" beside
+    the synced "Summer 1996/97"), and the sheet's season can be matched to
+    either. An id-only test then reads a season GR already covers as missing
+    and adds the club's figures for it on top.
+    """
+    ids = set(gr_season_ids or ())
+    years = {year_by_season.get(s) for s in ids} - {None}
+    if not years:
+        return ids
+    return ids | {s for s, y in year_by_season.items() if y in years}
+
+
+def season_rows_by_grade(items, season_ids) -> list:
+    """(season_id, grade_label, metrics) for the given seasons, one per grade,
+    so a season delta written for a team-labelled sheet keeps the grade its
+    own row named."""
+    wanted = set(season_ids)
+    acc: dict = {}
+    for it in items:
+        sid = it.get("season_id")
+        if it.get("scope") != "season" or sid is None or sid not in wanted or it.get("is_prior_bucket"):
+            continue
+        key = (sid, _grade_key(it.get("grade_label")))
+        acc[key] = accumulate(acc.get(key), it["metrics"])
+    return [(sid, g, m) for (sid, g), m in acc.items()]
+
+
+async def season_years(session, org_uuid) -> dict:
+    """{season_id: start year} for an org, name first then the year column —
+    the same reading ``season_resolve.season_of`` gives every other screen."""
+    from sqlalchemy import select
+    from app.models.db import Season
+    from app.services.season_resolve import season_of
+
+    rows = (await session.execute(select(Season).where(Season.organisation_id == org_uuid))).scalars().all()
+    return {s.id: season_of(s) for s in rows}
+
+
 # ── column maps between the stored tables and the canonical metric dict ───────
 
 # imported_stats (truth) column  →  canonical metric key
@@ -544,10 +606,12 @@ async def reconcile_imported_totals(org_id_str: str) -> int:
 
         # Group by (player, grade_key) — a player may have rows for more than
         # one grade (a future club could upload both a 1sts and a 2nds sheet).
+        team_labelled = is_team_labelled(_grade_key(r.grade_label) for r in truth_rows)
         by_group: dict = {}
         for r in truth_rows:
-            key = (r.player_id, _grade_key(r.grade_label))
+            key = (r.player_id, None if team_labelled else _grade_key(r.grade_label))
             by_group.setdefault(key, []).append(r)
+        year_by_season = await season_years(session, org_uuid)
 
         ungraded_pids = [pid for pid, grade in by_group.keys() if grade is None]
         grade_labels = sorted({grade for _pid, grade in by_group.keys() if grade is not None})
@@ -567,24 +631,32 @@ async def reconcile_imported_totals(org_id_str: str) -> int:
 
         written = 0
         for (pid, grade), rows in by_group.items():
-            club, import_seasons = assemble_club_inputs([
-                {"scope": r.scope, "season_id": r.season_id,
+            items = [
+                {"scope": r.scope, "season_id": r.season_id, "grade_label": r.grade_label,
                  "is_prior_bucket": r.is_prior_bucket, "metrics": imported_to_metrics(r)}
                 for r in rows
-            ])
+            ]
+            club, import_seasons = assemble_club_inputs(items)
             gr_pool = gr_by_grade[grade] if grade is not None else gr_by_player
             gr = gr_pool.get(pid, {"season_ids": set(), "totals": None})
             gr_totals = gr["totals"] if gr["totals"] is not None else _blank()
+            covered = gr["season_ids"] if grade is not None else covered_by_year(gr["season_ids"], year_by_season)
 
             season_deltas, career = reconcile_player(
-                club, gr_totals, import_seasons, gr["season_ids"]
+                club, gr_totals, import_seasons, covered
             )
 
-            for season_id, metrics in season_deltas:
+            if team_labelled:
+                # One row per grade the sheet named, so a grade-filtered board
+                # still finds an imported season under the team it was.
+                emitted_rows = season_rows_by_grade(items, [sid for sid, _m in season_deltas])
+            else:
+                emitted_rows = [(sid, grade, m) for sid, m in season_deltas]
+            for season_id, label, metrics in emitted_rows:
                 session.add(ImportEffectiveDelta(
                     organisation_id=org_uuid, player_id=pid,
                     scope="season", season_id=season_id, grade_id=None,
-                    grade_label=grade,
+                    grade_label=label,
                     **delta_kwargs(metrics),
                 ))
                 written += 1

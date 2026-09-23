@@ -742,6 +742,52 @@ layers on all templates where each element except the background is a layer."*
   behind it. That is what the row says, so nobody is hunting for a stack that is
   not there.
 
+## A SHEET SPLIT BY TEAM IS NOT A SHEET SPLIT BY GRADE (v9.89.1, Sep 2026)
+
+Reported off The Basin's Import Stats review: Leigh Cook's sheet says 240 and
+the preview read ONLINE 135, RESIDUAL +0, FINAL 355. His profile had already
+gone to 433 from an earlier commit.
+
+- **THE SHEET AND THE ONLINE DATA AGREE SEASON FOR SEASON**, and checking the
+  real spreadsheet against his live grid is what named the cause. The sheet
+  labels rows by the club's own TEAMS (1XI / 2XI / 3XI / 4XI / 20/20). CA files
+  the same side under a different GRADE name most years ("Division 3",
+  "4 Norm Reeves Shield Reserve", "Community 1"...). Grade-scoped
+  reconciliation (migration 154) mapped each label to ONE grade name and
+  compared against that grade alone, so ONLINE read 135 of his ~256 and every
+  season spent under another name was emitted as a season delta on top.
+  `final = GR + emitted + residual` has no cap on `emitted`, so the "can never
+  exceed the club's total" promise on the review screen only held while the
+  season test was right.
+- **`import_reconcile.is_team_labelled` IS THE SWITCH**: an org whose imported
+  rows name two or more grade labels is reconciled per player against their
+  WHOLE GR record (the ungraded path), season by season. The labels are still
+  stored; pre-GR season deltas keep the team their row named
+  (`season_rows_by_grade`); the career residual carries no grade. A club that
+  uploaded ONE competition's book keeps the grade-scoped path unchanged. Both
+  the commit and the preview (`routers/imports.py::_resolve`) make the same
+  call, the preview reading the club's earlier uploads too since the commit
+  reconciles all of them. **Accepted cost**: a club uploading its 1sts and 2nds
+  as separate sheets is now read as its whole book, so a grade CA has that the
+  sheets omit is not topped up per grade.
+- **`covered_by_year`**: a season is covered when GR holds that YEAR under any
+  season row. An id-only test read a hand-made "2015/16" beside the synced
+  "Summer 2015/16" as missing (267 against 256 in the control run).
+- **THE EXPECTED RESULT IS THE ONLINE FIGURE, NOT THE SHEET'S**, whenever
+  online holds more: for Leigh that is 256 (2009/10's 11 games are online and
+  not in the sheet, plus five seasons one game apart). "GR wins per season" is
+  the documented rule; making the sheet win would be a different rule.
+- **Recovery needs no re-import**: `reconcile_imported_totals` rebuilds every
+  delta from `imported_stats`, and runs at the end of every sync;
+  `python -m app.scripts.reconcile_imports <org>` does it now.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_import_team_labels.py`, 17 checks through the
+  shipped `reconcile_imported_totals`, Leigh's real rows and his real online
+  seasons) **with a control run**: with the year widening removed, 5 fail and
+  his career reads 267. The fuller control (team switch off too) goes down the
+  grade path, which needs the lifespan views this harness does not build, so
+  that half was replayed through the pure functions instead.
+
 ## A FACET LISTED IN THE KIT AND MISSING FROM ONE FUNCTION (v9.73.1, Sep 2026)
 
 Reported off `/admin/comms/lists` as `a[r.key] is not iterable`, straight after
