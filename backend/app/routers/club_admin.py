@@ -2074,6 +2074,10 @@ def _club_payload(
         # Per-club override of platform_settings.billing_checkout_enabled
         # (migration 151) — NULL = follow the platform default.
         "billing_checkout_override": org.billing_checkout_override,
+        # Pay by invoice (migration 308) — OFFERED to the club only when a
+        # Super Admin switches it on here. Off by default, new clubs included.
+        "invoice_billing_enabled": bool(org.invoice_billing_enabled),
+        "billing_method": org.billing_method or "card",
         "default_trial_days": org_default_trial_days(org),
         "comms_tier": getattr(org, "comms_tier", None) or "sandbox",
         "comms_sandbox_cap": getattr(org, "comms_sandbox_cap", None),
@@ -2864,6 +2868,9 @@ class ClubUpdate(BaseModel):
     # patch_club below — Pydantic's exclude_unset distinguishes "not sent"
     # from "sent as null").
     billing_checkout_override: Optional[bool] = None
+    # Pay by invoice (migration 308): whether the club is offered it at all.
+    # Only a Super Admin sets it; see patch_club for what switching it off does.
+    invoice_billing_enabled: Optional[bool] = None
     # Per-club override of platform_settings.member_portal_enabled (migration
     # 178) — same None/omitted-vs-explicit-null semantics as
     # billing_checkout_override above.
@@ -2928,6 +2935,17 @@ async def patch_club(
     if "subscription_status" in fields:
         if fields["subscription_status"] not in ALL_STATUSES:
             raise HTTPException(status_code=422, detail=f"Status must be one of: {', '.join(ALL_STATUSES)}")
+
+    # Switching invoicing OFF for a club that pays by invoice moves it back to
+    # card, or the renewal job would go on invoicing a club that can no longer
+    # see the option. The period already paid runs to its end and an invoice
+    # still open stays payable; nothing is voided or removed.
+    if "invoice_billing_enabled" in fields:
+        if fields["invoice_billing_enabled"] is None:
+            fields.pop("invoice_billing_enabled")
+        elif not fields["invoice_billing_enabled"] and (org.billing_method or "card") == "invoice":
+            org.billing_method = "card"
+            org.billing_method_changed_at = _datetime.now(_timezone.utc)
 
     if fields.get("billing_cycle") is not None and fields["billing_cycle"] not in ALL_BILLING_CYCLES:
         raise HTTPException(status_code=422, detail=f"Billing cycle must be one of: {', '.join(ALL_BILLING_CYCLES)}")
@@ -3467,6 +3485,15 @@ async def get_account_plan(
         # yet (never checked out) has nothing to manage there. Just a
         # presence flag, never the raw id itself.
         "stripe_customer_id": bool(club.stripe_customer_id),
+        # Pay by invoice (migration 308) — 'card' or 'invoice'. The Account
+        # page reads the rest from /club-admin/billing/invoice-billing.
+        "billing_method": club.billing_method or "card",
+        # Whether a Super Admin has offered this club invoice billing (All
+        # Clubs). Off by default — the Account page shows no invoicing option.
+        "invoice_billing_enabled": bool(club.invoice_billing_enabled),
+        # Any club admin (not only the primary) may elect invoice billing and
+        # ask for an invoice; the invoice itself always goes to the primary.
+        "is_club_admin": bool(m and m.role in ("club_admin", "super_admin")),
     }
 
 

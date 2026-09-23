@@ -540,6 +540,38 @@ async def sweep_module_trials():
             logger.error(f"Module trial sweep failed: {e}")
 
 
+async def lapse_unpaid_invoice_periods():
+    """Pay by invoice (migration 308): pause every invoice-billed module whose
+    period ended unpaid. Runs just after midnight Perth, because a period ends
+    at the START of its renewal date and a club should not keep a paid module
+    for most of a day it has not paid for. Idempotent."""
+    from app.services import invoice_billing
+    async with async_session_maker() as session:
+        try:
+            affected = await invoice_billing.lapse_unpaid(session)
+            if affected:
+                logger.info(f"Invoice billing: lapsed unpaid periods for {len(affected)} club(s)")
+        except Exception as e:
+            await session.rollback()
+            logger.error(f"Invoice billing lapse sweep failed: {e}")
+
+
+async def issue_invoice_renewals():
+    """Pay by invoice (migration 308): raise and email the renewal invoice for
+    every club whose period ends within 14 days. Business hours, since it is an
+    email a person acts on. A period already carrying its renewal invoice is
+    skipped, so a missed day just catches up the next morning."""
+    from app.services import invoice_billing
+    async with async_session_maker() as session:
+        try:
+            stats = await invoice_billing.issue_due_renewals(session)
+            if stats.get("issued") or stats.get("failed"):
+                logger.info(f"Invoice billing renewals: {stats}")
+        except Exception as e:
+            await session.rollback()
+            logger.error(f"Invoice billing renewals failed: {e}")
+
+
 async def send_trial_lifecycle_nudges():
     """Phase 16 (docs/self-serve-trial-onboarding-plan.md) — scan every club's
     module trials for lifecycle events (started/ending soon/ended/converted)
@@ -844,6 +876,30 @@ def start_scheduler():
         trigger="cron",
         minute=20,
         id="hourly_effective_view_repair",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    # Pay by invoice (migration 308) — lapse at the start of the renewal date,
+    # renewal invoices in business hours. Both PERTH, like every club-facing job.
+    scheduler.add_job(
+        lapse_unpaid_invoice_periods,
+        trigger="cron",
+        hour=0,
+        minute=15,
+        timezone=PERTH,
+        id="daily_invoice_lapse",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        issue_invoice_renewals,
+        trigger="cron",
+        hour=8,
+        minute=0,
+        timezone=PERTH,
+        id="daily_invoice_renewals",
         replace_existing=True,
         max_instances=1,
         coalesce=True,

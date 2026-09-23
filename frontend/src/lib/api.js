@@ -2263,6 +2263,39 @@ export const api = {
       body: JSON.stringify({ module_keys: moduleKeys, coupon_code: couponCode || undefined }),
     }),
   billingListInvoices: () => request('/club-admin/billing/invoices'),
+  // Pay by invoice (migration 308) — routers/billing.py + services/invoice_billing.py.
+  // Any club admin may switch the club to invoice billing and ask for an
+  // invoice; it is always emailed to the Primary Club Admin. The super* twins
+  // do the same for any club by id.
+  billingInvoiceOverview: () => request('/club-admin/billing/invoice-billing'),
+  billingSetMethod: (method) =>
+    request('/club-admin/billing/billing-method', { method: 'PUT', body: JSON.stringify({ method }) }),
+  billingRequestInvoice: (moduleKeys, couponCode) =>
+    request('/club-admin/billing/invoices/request', {
+      method: 'POST',
+      body: JSON.stringify({ module_keys: moduleKeys, coupon_code: couponCode || undefined }),
+    }),
+  billingResendInvoice: (invoiceId) =>
+    request(`/club-admin/billing/invoices/${invoiceId}/resend`, { method: 'POST' }),
+  superInvoiceOverview: (orgId) => request(`/club-admin/billing/super/clubs/${orgId}/invoice-billing`),
+  superSetBillingMethod: (orgId, method) =>
+    request(`/club-admin/billing/super/clubs/${orgId}/billing-method`, { method: 'PUT', body: JSON.stringify({ method }) }),
+  superInvoiceQuote: (orgId, moduleKeys, couponCode) =>
+    request(`/club-admin/billing/super/clubs/${orgId}/invoice-quote`, {
+      method: 'POST',
+      body: JSON.stringify({ module_keys: moduleKeys, coupon_code: couponCode || undefined }),
+    }),
+  superRequestInvoice: (orgId, moduleKeys, couponCode) =>
+    request(`/club-admin/billing/super/clubs/${orgId}/invoices`, {
+      method: 'POST',
+      body: JSON.stringify({ module_keys: moduleKeys, coupon_code: couponCode || undefined }),
+    }),
+  superIssueRenewalInvoice: (orgId) =>
+    request(`/club-admin/billing/super/clubs/${orgId}/renewal-invoice`, { method: 'POST' }),
+  superResendInvoice: (orgId, invoiceId) =>
+    request(`/club-admin/billing/super/clubs/${orgId}/invoices/${invoiceId}/resend`, { method: 'POST' }),
+  superVoidInvoice: (orgId, invoiceId) =>
+    request(`/club-admin/billing/super/clubs/${orgId}/invoices/${invoiceId}/void`, { method: 'POST' }),
   // Payment method management — routers/billing.py. Primary-admin self-serve
   // (current club) and Super Admin (any club by org_id) share the same
   // response shape ({default_payment_method_id, payment_methods}).

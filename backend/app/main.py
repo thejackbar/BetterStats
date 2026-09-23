@@ -15,7 +15,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.config.settings import settings
 from app.auth.modules import require_module
 from app.routers import instructional_videos
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, cricketstatz, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, public_net_checkin, net_manager, website, comms, public_comms, public_ses, public_contact, public_webinar, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, cricketstatz, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, public_net_checkin, net_manager, website, comms, public_comms, public_ses, public_contact, public_webinar, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, public_billing, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
     stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
     club_diary, social_media, votes, public_votes, roles_activities, club_room, roster, facility_requests, directory, \
     public_club_room, sales_workspace, sales_commissions, honours, role_programs
@@ -3354,6 +3354,14 @@ async def lifespan(app: FastAPI):
         ))
         await conn.execute(text("ALTER TABLE billing_invoices ADD COLUMN IF NOT EXISTS payment_method_type TEXT"))
         await conn.execute(text("ALTER TABLE billing_invoices ADD COLUMN IF NOT EXISTS payment_method_summary TEXT"))
+        # Mirrors migration 308 — the ONE copy is the service. Pay by invoice:
+        # the club's billing method, what pays for each module, and the
+        # invoice-billing columns on billing_invoices. MUST sit below
+        # the billing_invoices CREATE above, which is why it lives here rather
+        # than with the other service-owned DDL lists.
+        from app.services.invoice_billing_ddl import STATEMENTS as _INVOICE_BILLING_DDL
+        for _stmt in _INVOICE_BILLING_DDL:
+            await conn.execute(text(_stmt))
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_billing_invoices_coupon_code ON billing_invoices(coupon_code) "
             "WHERE coupon_code IS NOT NULL"
@@ -6263,6 +6271,7 @@ app.include_router(public_webinar.router)                                       
 app.include_router(public_square.router)                                                  # BetterMerch (Square OAuth callback)
 app.include_router(public_xero.router)                                                    # BetterFees (Xero OAuth callback)
 app.include_router(public_stripe.router)                                                  # Billing (Stripe webhook, signature-verified)
+app.include_router(public_billing.router)                                                 # Pay-by-invoice email link (public, token-scoped redirect to Stripe)
 app.include_router(public_fantasy.router)                                                 # BetterFantasyCricket (public manager play)
 app.include_router(ladders.router)  # standings power public club pages — not gated
 app.include_router(iq.router, dependencies=[Depends(require_module("iq"))])               # BetterIQ

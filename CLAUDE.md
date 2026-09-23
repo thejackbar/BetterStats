@@ -14079,6 +14079,95 @@ live checkout end to end, then flip the platform default on for everyone once
 satisfied (the per-club overrides can stay — they only matter when the
 platform default is off, or when someone still needs a specific club blocked).
 
+## Pay by invoice: BetterCricket runs the annual cycle (migration 308, v9.90.0, Sep 2026)
+
+Asked for by a club in a live trial that wanted to subscribe and be INVOICED,
+with a renewal invoice 14 days before each period ends, and no dependence on a
+Super Admin to do it for them. Then, mid-build: **invoicing is OFF for every club
+by default, new clubs included, and only a Super Admin can switch it on for a
+club from All Clubs.** Until then the club sees no invoicing option at all.
+
+- **IT IS NOT A STRIPE SUBSCRIPTION WITH `collection_method=send_invoice`, and
+  that is the whole design.** A subscription raises its renewal invoice ON the
+  renewal date and cannot raise it 14 days early, so "settle before the period
+  ends" is unreachable with one. `services/invoice_billing.py` runs the cycle and
+  asks Stripe for ONE-OFF invoices (`stripe_client.create_one_off_invoice`).
+  Stripe still numbers them, renders the PDF, works out GST (`automatic_tax`,
+  lines `tax_behavior=exclusive`) and hosts the payment page with whatever
+  payment methods the account offers.
+- **`auto_advance=False` and we never call Stripe's send.** BetterCricket emails
+  the invoice to the PRIMARY Club Admin (whoever asked) with our own pay link;
+  Stripe emailing the Customer's address as well would be a duplicate at best
+  and the wrong person at worst.
+- **Three switches, three meanings.** `organisations.invoice_billing_enabled`
+  (Super Admin only, default false) is whether the club is OFFERED it;
+  `organisations.billing_method` ('card' | 'invoice') is what the club chose;
+  `org_module_subscriptions.billing_source` ('invoice' | 'stripe' | NULL) is what
+  pays for each module's current period. **Only an 'invoice' row is ever renewed
+  or lapsed by the invoice job**, so a card module (Stripe owns its renewal) and
+  a hand-granted one (nobody does) can never be invoiced or cut off by
+  accident. Every card grant path stamps 'stripe' for the same reason.
+- **Switching the offer OFF moves an invoice club back to card** (in
+  `patch_club`): the paid period runs to its end, no renewal invoice is raised,
+  open invoices stay payable. The renewal job also filters on the offer.
+- **ONE PRICING DEFINITION.** `plan_invoice` is what the Account page previews
+  AND what the invoice carries: `billing_pricing.price_for` with the live bundle
+  schedule, a code via `apply_coupon_to_quote` (moved out of the router so both
+  paths share it). The discount reaches Stripe as ONE flat `amount_off` coupon
+  worked out by that maths, so the charge matches the preview exactly.
+- **KINDS.** `initial` (Core + selection, bundle, code; the year starts when the
+  trial on those modules ends, so paying early costs no trial, or on payment if
+  later); `addon` (no bundle and no code, prorated to the period's renewal date
+  so the club renews together); `renewal` (every module still on the period,
+  full price, a still-owed 'forever'/'repeating' code applied, never the bundle,
+  which is a once-only reward on the card flow too).
+- **DATES ARE PERTH.** A period is `[start, end)`: end = the renewal date, the
+  card flow's convention. A renewal is due at 11:59:59pm Perth the day before
+  (`due_by`); modules still on the period are PAUSED at the start of the renewal
+  date (job at 00:15 Perth). Paused, not removed: paying the open renewal
+  invoice late switches them back on for the rest of that period. Renewal
+  invoices go out at 08:00 Perth, 14 days ahead (`RENEWAL_NOTICE_DAYS`).
+- **PAYING IS WHAT GRANTS.** The `invoice.paid` webhook, routed off the
+  subscription path by `metadata.billing_method == 'invoice'`. A renewal date
+  only ever moves FORWARD, so a replayed old event cannot undo a later renewal;
+  a renewal paid after a module was cancelled does not switch it back on.
+- **A NEW FIRST OR ADD-ON INVOICE VOIDS THE PREVIOUS OPEN ONE** (and a new first
+  invoice also voids a renewal left open by a lapsed period), so a club can never
+  pay twice for one selection. One live renewal per period is enforced by a
+  partial unique index; the loser of a race voids its own Stripe invoice.
+- **COMMISSION.** A one-off invoice's `billing_reason` is 'manual', which the
+  ledger reads as "earns nothing", so `_upsert_invoice` takes an override:
+  initial → subscription_create, addon → subscription_update, renewal →
+  subscription_cycle. Same earnings as the same purchase by card.
+- **THE PAY LINK IS OURS** (`GET /public/billing/pay/{token}`, unauthenticated,
+  token-scoped): it asks STRIPE whether the invoice is still payable before
+  redirecting to its current hosted page, and lands on the Account page once
+  paid or voided, so a late webhook can never send somebody to pay twice.
+- **THE CONSOLE PROVIDER IS NOT A SEND** (the sales-email rule): with no email
+  provider the invoice is raised, `email_error` says it was not emailed, and the
+  Account page offers the pay link instead.
+- **Card checkout refuses an invoice club (409)**, and a club on a live card
+  subscription cannot switch to invoice, so nobody is billed twice.
+- **Deploy**: add `invoice.voided` and `invoice.marked_uncollectible` to the
+  Stripe webhook's subscribed events (invoice.paid / payment_failed are already
+  there). Payment methods on the hosted invoice page come from the Stripe
+  Dashboard's own settings.
+- **Verified against a real Postgres** (`backend/verification/verify_invoice_billing.py`,
+  94 checks through the shipped service, webhook routing and route bodies, with
+  Stripe and email stubbed: 308 over a populated table, the pricing incl. the
+  code after the bundle, the non-primary admin asking and the PRIMARY receiving,
+  replace-on-reissue, payment granting from the trial end, replay safety, the
+  add-on proration, the renewal at 14 days and not 15, the lapse on the renewal
+  date and not the day before, paying late, the card / hand-granted / switched
+  back / not-offered clubs left alone, the offer gate from both sides, and the
+  pay link) **with two control runs**: the previous commit REPORTS the feature
+  absent; with the lapse scope, the setting filter and replace-on-reissue
+  neutered, 5 fail. **Driven in Chromium** (`frontend/verification/verify_invoice_billing_browser.mjs`,
+  44) **with a control run**: 32 fail against the previous commit.
+- **NOTICED, NOT BUILT**: a BECS/PayTo payment made on the due day can take days
+  to confirm, so the modules may pause briefly and come back when it lands.
+  No reminder beyond the 14-day invoice; Resend is the manual nudge.
+
 ## BetterCricket-managed discount coupons (migration 156, Jul 2026)
 
 A full coupon engine, entirely owned by BetterCricket — per direct

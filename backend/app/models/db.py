@@ -395,6 +395,19 @@ class Organisation(Base):
     # it either way for this club regardless of the platform default. See
     # services/platform_settings.billing_checkout_enabled_for_org.
     billing_checkout_override = Column(Boolean, nullable=True)
+    # How this club pays for its modules (migration 308): 'card' is the Stripe
+    # Checkout + recurring Stripe Subscription flow; 'invoice' is BetterCricket's
+    # own annual invoicing — a one-off Stripe invoice emailed to the Primary Club
+    # Admin, and a renewal invoice 14 days before each period ends. See
+    # services/invoice_billing.py for why invoice mode is not a Stripe
+    # Subscription at all.
+    billing_method = Column(Text, nullable=False, server_default="card", default="card")
+    billing_method_changed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    billing_method_changed_by = Column(UUID(as_uuid=True), nullable=True)
+    # Whether invoice billing is OFFERED to this club (migration 308). Off by
+    # default, new clubs included; only a Super Admin turns it on (All Clubs).
+    # While it is off the club sees no invoicing option at all.
+    invoice_billing_enabled = Column(Boolean, nullable=False, server_default="false", default=False)
     # Per-club override of platform_settings.member_portal_enabled (migration 178)
     # — same NULL/True/False shape as billing_checkout_override above, so a
     # super admin can switch the member self-service portal on for one test
@@ -899,6 +912,13 @@ class OrgModuleSubscription(Base):
     trial_started_at = Column(TIMESTAMP(timezone=True), nullable=True)
     trial_ends_at = Column(TIMESTAMP(timezone=True), nullable=True)
     renewal_date = Column(Date, nullable=True)
+    # What is paying for this module (migration 308): 'invoice' when the
+    # current period was bought on a BetterCricket annual invoice, 'stripe'
+    # when a Stripe Subscription carries it, NULL for a trial or a module a
+    # super admin granted by hand. Only an 'invoice' row is renewed by the
+    # invoice job and lapsed when its period ends unpaid — a card-billed
+    # module's renewal belongs to Stripe, and a hand-granted one to nobody.
+    billing_source = Column(Text, nullable=True)
     started_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
@@ -987,6 +1007,26 @@ class BillingInvoice(Base):
     # •••• 4242", "PayTo (...0400)" — see stripe_client.describe_payment_method.
     payment_method_type = Column(Text, nullable=True)
     payment_method_summary = Column(Text, nullable=True)
+    # BetterCricket annual invoicing (migration 308). NULL on every invoice a
+    # Stripe Subscription raised. ``invoice_kind`` is 'initial' (first
+    # subscribe), 'addon' (modules added mid-period, prorated to the renewal)
+    # or 'renewal'. ``billing_keys`` is what paying it grants; the service
+    # period is the dates it pays for, NOT Stripe's period_start/period_end,
+    # which on a one-off invoice are just the moment it was raised.
+    billing_method = Column(Text, nullable=True)
+    invoice_kind = Column(Text, nullable=True)
+    invoice_number = Column(Text, nullable=True)
+    billing_keys = Column(JSONB, nullable=True)
+    service_start_date = Column(Date, nullable=True)
+    service_end_date = Column(Date, nullable=True)
+    due_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    amount_total_cents = Column(Integer, nullable=True)
+    pay_token = Column(Text, nullable=True)
+    sent_to_email = Column(Text, nullable=True)
+    emailed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    email_error = Column(Text, nullable=True)
+    issued_by_user_id = Column(UUID(as_uuid=True), nullable=True)
+    coupon_redemption_id = Column(UUID(as_uuid=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 

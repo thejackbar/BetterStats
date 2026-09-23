@@ -44,7 +44,7 @@ from stripe import error as stripe_error
 from app.auth.modules import BILLABLE_MODULES, STATUS_ACTIVE, account_plan_status
 from app.models.db import BillingInvoice, ClubMembership, Organisation, User, get_db
 from app.routers.auth import get_current_user, get_current_club, require_super_admin
-from app.services import billing_pricing, discount_coupons, module_subscriptions, platform_settings, stripe_client
+from app.services import billing_address, billing_pricing, discount_coupons, invoice_billing, module_subscriptions, platform_settings, stripe_client
 from app.services.platform_settings import require_billing_checkout_enabled
 
 router = APIRouter(prefix="/club-admin/billing", tags=["club-admin-billing"])
@@ -56,146 +56,17 @@ class QuoteIn(BaseModel):
     coupon_code: Optional[str] = None
 
 
-def _apply_coupon_to_quote(quote: dict, coupon) -> dict:
-    """Folds a validated discount-coupon into a new_subscription price_for()
-    quote — pure local math for the preview (no Stripe call, matching /quote's
-    existing no-Stripe-call design); the real Checkout Session's own discounts
-    array is Stripe's own authoritative number at actual checkout. A
-    non-stackable coupon REPLACES the bundle discount rather than combining
-    with it, mirroring stripe_client.create_checkout_session's own rule.
-
-    A STACKING coupon is calculated on top of the bundle discount, not
-    alongside it — mirrors Stripe's own behaviour: create_checkout_session
-    passes both coupons in a `discounts` list (bundle first, then the
-    stacking coupon), and Stripe applies multiple discounts sequentially in
-    that order, so the real checkout already charges bundle-then-coupon.
-    Computing the coupon off the raw pre-bundle subtotal here would show a
-    preview total that doesn't match what Stripe actually charges. The
-    bundle discount itself is a flat dollar amount across the whole
-    selection, not itemised per module, so when a coupon is scoped to only
-    some modules its share of the bundle discount is allocated
-    proportionally to its slice of the full subtotal."""
-    covered = set(coupon.module_keys) if coupon.module_keys else {li["key"] for li in quote["line_items"]}
-    covered_subtotal = sum(li["price"] for li in quote["line_items"] if li["key"] in covered)
-
-    if not coupon.stackable_with_bundle and quote["discount"] > 0:
-        # Replaces the bundle discount outright — computed against the plain
-        # covered subtotal, since there's no bundle reduction left in play.
-        if coupon.discount_type == "percent":
-            coupon_off = round(covered_subtotal * float(coupon.discount_value) / 100, 2)
-        else:
-            coupon_off = min(float(coupon.discount_value), covered_subtotal)
-        quote["discount"] = 0
-        quote["total"] = quote["subtotal"] - coupon_off
-    else:
-        bundle_share = (
-            quote["discount"] * covered_subtotal / quote["subtotal"] if quote["subtotal"] else 0
-        )
-        covered_after_bundle = covered_subtotal - bundle_share
-        if coupon.discount_type == "percent":
-            coupon_off = round(covered_after_bundle * float(coupon.discount_value) / 100, 2)
-        else:
-            coupon_off = min(float(coupon.discount_value), covered_after_bundle)
-        quote["total"] = round(quote["total"] - coupon_off, 2)
-    quote["coupon"] = {
-        "code": coupon.code,
-        "display_name": coupon.display_name,
-        "discount_type": coupon.discount_type,
-        "discount_value": float(coupon.discount_value),
-        "amount_off": coupon_off,
-        "stackable_with_bundle": coupon.stackable_with_bundle,
-    }
-    return quote
+# The ONE copy of the coupon maths now lives in billing_pricing, shared with the
+# invoice-billing path (services/invoice_billing.py) so an emailed invoice and a
+# Checkout Session discount the same selection identically.
+_apply_coupon_to_quote = billing_pricing.apply_coupon_to_quote
 
 
-# Full country name (what PlayHQ and the Club Directory store — e.g.
-# "Australia", not the code Stripe wants) → ISO 3166-1 alpha-2. Kept small
-# and additive: today's clubs are AU, UK Play-Cricket is the next expansion.
-_COUNTRY_NAME_TO_ISO = {
-    "australia": "AU",
-    "new zealand": "NZ",
-    "united kingdom": "GB",
-    "great britain": "GB",
-    "england": "GB",
-    "scotland": "GB",
-    "wales": "GB",
-    "northern ireland": "GB",
-    "ireland": "IE",
-    "south africa": "ZA",
-    "india": "IN",
-    "united states": "US",
-    "usa": "US",
-    "united states of america": "US",
-}
-
-
-def _country_iso(club: Organisation) -> str:
-    """The club's ISO 3166-1 alpha-2 country code for Stripe (Customer.address
-    and automatic tax both want the code, not a full name). Derived so it
-    stays correct once non-AU clubs (e.g. UK Play-Cricket) are onboarded,
-    rather than blindly hardcoding AU for everything:
-
-    1. A stored country wins (from self-serve registration's address
-       resolution — PlayHQ returns a full name like "Australia", so it's
-       normalised to a code; an already-2-letter value is used as-is). This
-       is the branch a future non-AU club takes — its own onboarding source
-       records its real country, which overrides the AU default below.
-    2. Otherwise Australia. Every club onboarded today is a Cricket Australia
-       club (its identity is a PlayHQ/CA GUID), and there is no non-Australian
-       onboarding path yet — so a club with no country on file is Australian.
-
-    This is deliberately NOT gated on the `playhq_id` column: that's a legacy
-    field only populated by a low-value PlayHQ Partner-API lookup during sync,
-    so it's NULL for many genuinely-Australian clubs (Trinity College (WA)
-    among them — which is exactly why gating on it left the Customer with no
-    country). Keying the AU default on "no other-country signal" instead of
-    on that column is what makes GST + the AU payment methods actually work
-    for every current club, while the stored-country branch keeps it honest
-    for the non-AU clubs to come."""
-    raw = (club.country or "").strip()
-    if raw:
-        if len(raw) == 2 and raw.isalpha():
-            return raw.upper()
-        mapped = _COUNTRY_NAME_TO_ISO.get(raw.lower())
-        if mapped:
-            return mapped
-        # An unrecognised non-empty country string — fall through to the AU
-        # default rather than sending Stripe something it would reject.
-    return "AU"
-
-
-def _stripe_address(club: Organisation) -> dict | None:
-    """Stripe's Address shape ({"line1","city","state","postal_code","country"})
-    from what we can determine about the club (see self_serve_trial.
-    _resolve_club_address for where the street fields come from).
-
-    Returns None only when the club's country can't be determined at all
-    (see _country_iso) — automatic_tax then falls back to whatever the payer
-    enters at checkout (customer_update: {"address": "auto"} in
-    stripe_client.create_checkout_session). When a country IS known it's
-    always included even with no street address, because that country alone
-    is what makes both of these work from the first checkout attempt:
-      * automatic_tax has a jurisdiction to apply tax against (a country-level
-        tax like AU GST needs only the country; postcode/state refine it),
-        instead of $0 with no country set; and
-      * Stripe offers that country's local recurring payment methods (for AU:
-        PayTo, BECS Direct Debit) — both are filtered out of Checkout entirely
-        when the Customer's country is unknown, leaving only the globally
-        available ones (Card, Klarna).
-    Street-level fields are added only when present."""
-    country = _country_iso(club)
-    if not country:
-        return None
-    addr = {"country": country}
-    if club.address_line1:
-        addr["line1"] = club.address_line1
-    if club.suburb:
-        addr["city"] = club.suburb
-    if club.state:
-        addr["state"] = club.state
-    if club.postcode:
-        addr["postal_code"] = club.postcode
-    return addr
+# Moved to services/billing_address.py so the invoice-billing job (which has no
+# request) can build the same Stripe Customer address. Aliased so nothing that
+# reached for the router's names breaks.
+_country_iso = billing_address.country_iso
+_stripe_address = billing_address.stripe_address
 
 
 def _validate_keys(module_keys: List[str]) -> list[str]:
@@ -244,6 +115,13 @@ async def get_quote(
     Any club admin can preview; only the primary admin can actually check out
     (see /checkout-session)."""
     keys = _validate_keys(body.module_keys)
+    if (club.billing_method or invoice_billing.METHOD_CARD) == invoice_billing.METHOD_INVOICE:
+        # The same numbers the invoice will carry — see invoice_billing.plan_invoice.
+        try:
+            plan = await invoice_billing.plan_invoice(db, club, keys, body.coupon_code)
+        except invoice_billing.InvoiceBillingError as e:
+            raise HTTPException(status_code=e.status, detail=str(e))
+        return invoice_billing.plan_out(plan)
     if club.stripe_subscription_id:
         try:
             preview = await stripe_client.preview_add_modules(db, club.stripe_subscription_id, _addon_keys(keys))
@@ -282,6 +160,14 @@ async def create_checkout_session(
     is_super = bool(m and m.role == "super_admin")
     if not is_super and not (m and m.club_id == club.id and m.role == "club_admin" and m.is_primary_admin):
         raise HTTPException(status_code=403, detail="Only the club's primary admin can subscribe")
+
+    if (club.billing_method or invoice_billing.METHOD_CARD) == invoice_billing.METHOD_INVOICE:
+        # A club that elected to be invoiced must not also end up on a card
+        # subscription — the two would bill the same modules twice.
+        raise HTTPException(
+            status_code=409,
+            detail="This club pays by invoice. Request an invoice instead, or switch the club back to card payments.",
+        )
 
     # Never let a checkout re-buy something the club already pays for — the
     # quote/UI should already prevent this, but it's cheap to enforce here too.
@@ -332,6 +218,7 @@ async def create_checkout_session(
         now = datetime.now(timezone.utc)
         for key in addon_keys:
             module_subscriptions.set_status_billing(club, key, STATUS_ACTIVE, renewal_date=renewal_date, now=now)
+            module_subscriptions.set_billing_source(club, key, invoice_billing.SOURCE_STRIPE, now=now)
         try:
             await db.commit()
         except IntegrityError:
@@ -446,6 +333,15 @@ async def list_invoices(
             "payment_method_type": r.payment_method_type,
             "payment_method_summary": r.payment_method_summary,
             "created_at": r.created_at.isoformat() if r.created_at else None,
+            # Pay by invoice (migration 308) — NULL/None on a card invoice.
+            "billing_method": r.billing_method,
+            "invoice_kind": r.invoice_kind,
+            "invoice_number": r.invoice_number,
+            "amount_total_cents": r.amount_total_cents,
+            "due_at": r.due_at.isoformat() if r.due_at else None,
+            "service_start_date": r.service_start_date.isoformat() if r.service_start_date else None,
+            "service_end_date": r.service_end_date.isoformat() if r.service_end_date else None,
+            "pay_url": invoice_billing.pay_url(r) if (r.pay_token and r.status == "open") else None,
         }
         for r in rows
     ]
@@ -609,6 +505,226 @@ async def super_set_default_payment_method(org_id: str, pm_id: str, db: AsyncSes
 async def super_remove_payment_method(org_id: str, pm_id: str, db: AsyncSession = Depends(get_db)):
     club = await _get_club_or_404(db, org_id)
     return await _remove_payment_method_for(club, pm_id)
+
+
+# ─── Pay by invoice (migration 308) ────────────────────────────────────────
+# See services/invoice_billing.py. Any club admin may elect invoice billing and
+# ask for an invoice — per direct instruction the club should never need a
+# Super Admin to do it for them — and the invoice itself always goes to the
+# Primary Club Admin, whoever asked. A Super Admin can do every one of these
+# for any club by id, with no "acting as" round trip.
+
+class BillingMethodIn(BaseModel):
+    method: str
+
+
+class InvoiceRequestIn(BaseModel):
+    module_keys: List[str] = []
+    coupon_code: Optional[str] = None
+
+
+async def _require_club_admin_or_super(db: AsyncSession, current_user: User, club: Organisation) -> bool:
+    """A club admin of THIS club (primary or not) or a super admin. A plain
+    club_member — somebody given access to a few screens — does not decide how
+    the club pays. Returns whether the caller is a super admin."""
+    m = (await db.execute(
+        select(ClubMembership).where(ClubMembership.user_id == current_user.id)
+    )).scalar_one_or_none()
+    if m and m.role == "super_admin":
+        return True
+    if m and m.club_id == club.id and m.role == "club_admin":
+        return False
+    raise HTTPException(status_code=403, detail="Only a club admin can manage how the club pays")
+
+
+async def _club_with_modules(db: AsyncSession, org_id: str) -> Organisation:
+    from sqlalchemy.orm import selectinload
+    import uuid as _uuid
+    try:
+        oid = _uuid.UUID(str(org_id))
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=404, detail="Club not found")
+    club = await db.get(Organisation, oid, options=[selectinload(Organisation.module_subscriptions)])
+    if not club:
+        raise HTTPException(status_code=404, detail="Club not found")
+    return club
+
+
+async def _invoice_call(coro):
+    """One translation of every way raising an invoice can fail, so the club
+    route and the Super Admin route answer identically."""
+    try:
+        return await coro
+    except invoice_billing.InvoiceBillingError as e:
+        raise HTTPException(status_code=e.status, detail=str(e))
+    except stripe_client.StripeNotConfigured:
+        raise HTTPException(status_code=503, detail="Online billing isn't configured yet.")
+    except stripe_error.StripeError as e:
+        raise HTTPException(status_code=502, detail=str(e) or "Stripe could not create the invoice")
+
+
+async def _request_invoice(db, club, body: InvoiceRequestIn, user, *, applied_via: str) -> dict:
+    keys = _validate_keys(body.module_keys)
+    plan = await _invoice_call(invoice_billing.plan_invoice(db, club, keys, body.coupon_code))
+    row = await _invoice_call(invoice_billing.issue_invoice(db, club, plan, issued_by=user, applied_via=applied_via))
+    return {"invoice": invoice_billing.invoice_out(row), "emailed": bool(row.emailed_at),
+            "email_error": row.email_error}
+
+
+async def _load_invoice_row(db, club, invoice_id: str) -> BillingInvoice:
+    import uuid as _uuid
+    try:
+        iid = _uuid.UUID(str(invoice_id))
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    row = await db.get(BillingInvoice, iid)
+    if row is None or row.organisation_id != club.id or row.billing_method != invoice_billing.METHOD_INVOICE:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    return row
+
+
+async def _resend(db, club, invoice_id: str) -> dict:
+    row = await _load_invoice_row(db, club, invoice_id)
+    if row.status != "open":
+        raise HTTPException(status_code=409, detail=f"This invoice is {row.status}, so there is nothing to pay.")
+    result = await invoice_billing.send_invoice_email(db, club, row)
+    return {**result, "invoice": invoice_billing.invoice_out(row)}
+
+
+@router.get("/invoice-billing")
+async def get_invoice_billing(
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    return await invoice_billing.overview(db, club)
+
+
+@router.put("/billing-method", dependencies=[Depends(require_billing_checkout_enabled)])
+async def set_billing_method(
+    body: BillingMethodIn,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    await _require_club_admin_or_super(db, current_user, club)
+    await _invoice_call(invoice_billing.set_billing_method(db, club, body.method, user=current_user))
+    return await invoice_billing.overview(db, club)
+
+
+@router.post("/invoices/request", dependencies=[Depends(require_billing_checkout_enabled)])
+async def request_invoice(
+    body: InvoiceRequestIn,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    is_super = await _require_club_admin_or_super(db, current_user, club)
+    if not club.invoice_billing_enabled:
+        raise HTTPException(status_code=403, detail="Invoicing isn't available for this club.")
+    if (club.billing_method or invoice_billing.METHOD_CARD) != invoice_billing.METHOD_INVOICE:
+        raise HTTPException(status_code=409, detail="Switch the club to invoice billing first.")
+    return await _request_invoice(db, club, body, current_user,
+                                  applied_via="super_admin" if is_super else "self_serve")
+
+
+@router.post("/invoices/{invoice_id}/resend")
+async def resend_invoice(
+    invoice_id: str,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    await _require_club_admin_or_super(db, current_user, club)
+    return await _resend(db, club, invoice_id)
+
+
+@router.get("/super/clubs/{org_id}/invoice-billing", dependencies=[Depends(require_super_admin)])
+async def super_get_invoice_billing(org_id: str, db: AsyncSession = Depends(get_db)):
+    club = await _club_with_modules(db, org_id)
+    return {
+        **await invoice_billing.overview(db, club),
+        "modules": account_plan_status(club),
+    }
+
+
+@router.put("/super/clubs/{org_id}/billing-method")
+async def super_set_billing_method(
+    org_id: str, body: BillingMethodIn,
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    club = await _club_with_modules(db, org_id)
+    await _invoice_call(invoice_billing.set_billing_method(db, club, body.method, user=current_user))
+    return await super_get_invoice_billing(org_id, db)
+
+
+@router.post("/super/clubs/{org_id}/invoice-quote", dependencies=[Depends(require_super_admin)])
+async def super_invoice_quote(org_id: str, body: InvoiceRequestIn, db: AsyncSession = Depends(get_db)):
+    club = await _club_with_modules(db, org_id)
+    keys = _validate_keys(body.module_keys)
+    plan = await _invoice_call(invoice_billing.plan_invoice(db, club, keys, body.coupon_code))
+    return invoice_billing.plan_out(plan)
+
+
+@router.post("/super/clubs/{org_id}/invoices")
+async def super_request_invoice(
+    org_id: str, body: InvoiceRequestIn,
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """A Super Admin raising the invoice on the club's behalf. Deliberately NOT
+    behind require_billing_checkout_enabled — that flag keeps an unfinished flow
+    away from clubs, and a Super Admin helping a club is the deliberate case.
+    The club is moved to invoice billing if it was not already, since raising an
+    invoice for a card club would leave it with two ways of paying. Invoicing
+    has to have been switched ON for the club first (All Clubs), so a Super
+    Admin raising one is always a deliberate second step, never a side effect."""
+    club = await _club_with_modules(db, org_id)
+    if not club.invoice_billing_enabled:
+        raise HTTPException(status_code=409, detail="Switch invoicing on for this club first.")
+    if (club.billing_method or invoice_billing.METHOD_CARD) != invoice_billing.METHOD_INVOICE:
+        await _invoice_call(invoice_billing.set_billing_method(
+            db, club, invoice_billing.METHOD_INVOICE, user=current_user))
+    return await _request_invoice(db, club, body, current_user, applied_via="super_admin")
+
+
+@router.post("/super/clubs/{org_id}/renewal-invoice")
+async def super_issue_renewal(
+    org_id: str,
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Raise this period's renewal invoice NOW rather than waiting for the
+    daily job to reach the 14-day mark. Returns the existing one if it has
+    already gone out, so pressing it twice sends nothing twice."""
+    club = await _club_with_modules(db, org_id)
+    plan = await _invoice_call(invoice_billing.plan_renewal(db, club))
+    if plan is None:
+        raise HTTPException(status_code=422, detail="This club holds no invoice-billed period to renew.")
+    row = await _invoice_call(invoice_billing.issue_invoice(db, club, plan, issued_by=current_user,
+                                                            applied_via="super_admin"))
+    return {"invoice": invoice_billing.invoice_out(row), "emailed": bool(row.emailed_at),
+            "email_error": row.email_error}
+
+
+@router.post("/super/clubs/{org_id}/invoices/{invoice_id}/resend", dependencies=[Depends(require_super_admin)])
+async def super_resend_invoice(org_id: str, invoice_id: str, db: AsyncSession = Depends(get_db)):
+    club = await _club_with_modules(db, org_id)
+    return await _resend(db, club, invoice_id)
+
+
+@router.post("/super/clubs/{org_id}/invoices/{invoice_id}/void", dependencies=[Depends(require_super_admin)])
+async def super_void_invoice(org_id: str, invoice_id: str, db: AsyncSession = Depends(get_db)):
+    """Cancel an invoice nobody should pay. Nothing it would have granted is
+    touched — a void only stops the payment, it does not remove a module."""
+    club = await _club_with_modules(db, org_id)
+    row = await _load_invoice_row(db, club, invoice_id)
+    if row.status != "open":
+        raise HTTPException(status_code=409, detail=f"This invoice is already {row.status}.")
+    from datetime import datetime as _dt, timezone as _tz
+    await _invoice_call(invoice_billing._void_row(db, row, _dt.now(_tz.utc)))
+    await db.commit()
+    return {"invoice": invoice_billing.invoice_out(row)}
 
 
 @router.get("/discount-report", dependencies=[Depends(require_super_admin)])
