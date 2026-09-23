@@ -66,15 +66,21 @@ def _ctx_scope(ctx: dict):
     return scope if scope is not None and getattr(scope, "active", False) else None
 
 
-def _scope_clause_for_join(scope, column: str, params: dict) -> str:
+def _scope_clause_for_join(scope, column: str, params: dict,
+                           label_column: str | None = None) -> str:
     """An aggregate-kind scope condition (leading AND), bound into `params`.
 
     For the two family targets, which sum `player_season_stats` directly and so
     have no game to read a format from. Returns "" when there is no scope.
+
+    `label_column` is the residual's `grade_label` (an import row has one where
+    it has no grade_id), so a category filter judges it by that label instead
+    of keeping every import residual under every category — passed only where
+    the column read is `v_effective_player_season_stats`, never a games alias.
     """
     if not scope:
         return ""
-    clause = scope.clause(column, "aggregate")
+    clause = scope.clause(column, "aggregate", label_column=label_column)
     if clause:
         scope.bind(params)
     return clause
@@ -546,7 +552,7 @@ def _residual_scope_clause(context: dict, params: dict, prefix: str) -> str:
     # category-only scope still keeps residuals, per _RESIDUAL_SOURCES.
     scope = _ctx_scope(context)
     if scope:
-        frag = _scope_fragment(scope.clause("pss.grade_id", "aggregate"))
+        frag = _scope_fragment(scope.clause("pss.grade_id", "aggregate", label_column="pss.grade_label"))
         if frag:
             clauses.append(frag)
             scope.bind(params)
@@ -1956,7 +1962,7 @@ async def query_family_career(
     # season total. In the join condition, not the WHERE — a family whose every
     # row is out of scope should still list, at zero, rather than disappear.
     scope = _ctx_scope(context)
-    scope_clause = _scope_clause_for_join(scope, "pss.grade_id", params)
+    scope_clause = _scope_clause_for_join(scope, "pss.grade_id", params, "pss.grade_label")
     covered = _family_covered_ctes(scope, params, by_season=False)
     sql = f"""
         WITH {covered},
@@ -2011,7 +2017,7 @@ async def query_family_season(
 
     season_filter = _pss_season_filter(context, params, "ctx_fs_")
     # Same aggregate-only scope as family_career above — see its note.
-    scope_clause = _scope_clause_for_join(_ctx_scope(context), "pss.grade_id", params)
+    scope_clause = _scope_clause_for_join(_ctx_scope(context), "pss.grade_id", params, "pss.grade_label")
     where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
 
     select_cols = _family_agg_select_cols()
@@ -4822,7 +4828,7 @@ async def derived_most_minutes_in_season(
     # targets this one can only answer the aggregate-kind scope: a category
     # exclusion lands on the rows carrying a grade, and a match type empties it
     # rather than filing a season total under a format it can't know.
-    scope_clause = _scope_clause_for_join(_ctx_scope(context), "pss.grade_id", params)
+    scope_clause = _scope_clause_for_join(_ctx_scope(context), "pss.grade_id", params, "pss.grade_label")
     sql = f"""
         SELECT
             p.id::text                                   AS player_id,

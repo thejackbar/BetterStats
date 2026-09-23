@@ -7349,6 +7349,67 @@ await_only() here`.
   **with a control run**: putting the old column name and the bare rollback
   back reproduces the reported greenlet error exactly.
 
+## AN IMPORT RESIDUAL IS CLASSIFIED BY ITS LABEL, NOT KEPT BLIND (v9.89.2, Sep 2026)
+
+Reported off The Basin: Nathan Freeling, a senior player whose only record for
+2006/07-2008/09 is a BetterImport residual under senior grade labels ("Division
+3/4/5"), read **18 matches / 376 runs under the JUNIORS filter — and the same
+under Women's and Masters**, on a player with no junior grades at all.
+
+- **THE CATEGORY FILTER IS EXCLUSION-BASED AND AN IMPORT RESIDUAL HAS NO
+  grade_id, SO IT SURVIVED EVERY PICK.** `GradeScope.clause`'s category branch is
+  `column IS NULL OR NOT (column = ANY(excluded_ids))` — correct for the DEFAULT
+  ("no juniors": a row we can't classify is probably senior, keep it) and wrong
+  for an EXPLICIT pick. An import residual carries `grade_id = NULL`, so
+  `grade_id IS NULL` is TRUE and it was kept under Juniors, Women's and Masters
+  alike. Nathan's three seasons exist ONLY as residuals (CA's per-grade data
+  starts 2009/10), so they were swept into every category. **This hit every
+  BetterImport club with pre-CA seasons**, not just him.
+- **THE RESIDUAL CARRIES A CLASSIFIABLE grade_label NOW, so it is no longer
+  genuinely unclassifiable.** Migration 252 put `grade_label` on the import
+  branch of `v_effective_player_season_stats`, and the team-labelled reconcile
+  (v9.89.1) writes a real per-grade label. So the row IS classifiable — the
+  filter was just looking at the NULL grade_id instead of the label.
+- **`resolve_scope` BUILDS `excluded_labels` THE SAME WAY IT BUILDS
+  `excluded_ids`.** One extra `SELECT DISTINCT grade_label FROM
+  import_effective_deltas`, only when a category filter is active, each label
+  classified with `categories_for_name` (its stored categories, else
+  `suggest_categories`) and `judged = cats if explicit else {primary}` — the
+  identical rule the grade walk applies. No per-row cost; empty for a club with
+  no imports, so those queries are byte-for-byte what they were.
+- **`clause(..., label_column=...)` IS A CASE, NOT A BLANKET KEEP.** grade_id
+  present -> judged by grade_id (unchanged, a season adjustment still filters by
+  its real grade); grade_label present -> judged by the label
+  (`NOT (label = ANY(excluded_labels))`, cast to `text[]` so an empty list is
+  safe); grade_label NULL -> KEPT, because a career-level lump with neither is
+  genuinely unclassifiable, the one case the old reasoning still holds for.
+- **THE FIVE RESIDUAL FILTER SITES ALL READ `pss` (the view with grade_label),
+  so all move together**: `_career_residuals` (the profile cards + MATCHES
+  stat), `_residual_totals_cte` (leaderboards), `_season_by_season_scoped` (the
+  season table) and StatLab's family + career/season residuals. The by-grade
+  grid is NOT one of them — it matches an import residual to a real grade row by
+  NAME (`_IMPORT_GRADE_MATCH`) and filters on that grade's `gr.id`, so it already
+  classified correctly.
+- **THE DEFAULT IS UNTOUCHED, WHICH IS THE HALF THAT COULD HAVE BROKEN.** Under a
+  club default that excludes junior, a senior label ("Division 3") is NOT in
+  `excluded_labels` (its category is what's wanted), so the senior residual is
+  still KEPT — a club's pre-CA senior seasons still show on the ordinary page.
+  Only an explicit non-matching pick drops them.
+- **No re-import, no migration** — it's a read-path scope change, so every
+  affected club corrects on the next page load.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_junior_residual_scope.py`, 24 checks through the
+  shipped `resolve_scope` / `_career_residuals` / `_season_by_season_scoped` /
+  `_residual_totals_cte` over the real view: the reported senior residual reading
+  0 under Juniors/Women's/Masters and its full 18/376 under Men's and the
+  junior-excluding club default, a genuine junior residual showing under Juniors
+  only, a label-less career lump kept under every category, a real-grade_id
+  residual still excluded by its id, the season table and leaderboard agreeing,
+  and another club's identical residual untouched) **with a control run**: 10 of
+  the 24 fail against the previous commit, reporting the customer's own **18/376**
+  under Juniors and the same under Women's and Masters. The control reports rather
+  than crashing — `excluded_labels` is read through `getattr`.
+
 ## Junior stats split off career stats (migration 228, v9.18.0, Aug 2026)
 
 An Under-14 season was landing inside a senior career average. `grades.category`
