@@ -1705,8 +1705,10 @@ async def main() -> None:
             plan = "\n".join((await session.execute(text(
                 "EXPLAIN SELECT SUM(runs) FROM v_effective_player_season_stats "
                 "WHERE player_id = :p"), {"p": str(rob or P_HELD)})).scalars().all())
-            check("a single player's read materialises no CTE (the id reaches every scan)",
-                  "CTE Scan" not in plan, plan[:400])
+            ctes = sorted({m.strip() for m in re.findall(r"^\s*CTE \w+", plan, re.M)})
+            check("a single player's read materialises ONLY the player-independent "
+                  "auth_games (the id reaches every other scan)",
+                  ctes == ["CTE auth_games"], str(ctes) or plan[:400])
             lines = plan.split("\n")
             scans = [i for i, l in enumerate(lines)
                      if re.search(r"Scan on (batting_innings|bowling_spells|fielding_stats|"

@@ -71,10 +71,20 @@ no filter should be able to do. Diagnosed on the live database
   `WHERE player_id = X` never reached inside: every single-player read rolled
   up every re-sourced season on the platform, then threw it away. `EXPLAIN`
   showed `CTE auth_games` / `CTE ours` / `CTE counts_here` with unfiltered
-  scans of `batting_innings` and friends. Every CTE in both branches is
-  `NOT MATERIALIZED` now; the same EXPLAIN shows no CTE Scan and a
+  scans of `batting_innings` and friends. Every player-dependent CTE in both
+  branches is `NOT MATERIALIZED` now; the same EXPLAIN shows a
   `player_id = X` filter on every per-innings scan, which the suite asserts
   by reading the plan. **No index was needed**: the wall, not the tables.
+- **BUT `auth_games` STAYS MATERIALISED, and the first deploy without that
+  took the page from slow to 45 SECONDS (measured live on `/stats`).** It
+  does not depend on the player, so inlining buys no pushdown and costs one
+  evaluation per reference: four arms of `player_games` times four readers
+  of `ours` is sixteen scans per view read, and its shared-fixture arm was
+  a scan of every game on the platform with a LATERAL per row. It is
+  `AS MATERIALIZED` (once per read, small) and that arm is driven FROM the
+  re-sourced seasons through the indexed `home_org_id`/`away_org_id`, with
+  `DISTINCT ON (g.id)` keeping the one-season-per-game rule. **Inline a CTE
+  only when there is a predicate to push into it.**
 - **THE 037-SHAPE FAN-OUT IS FIXED, not only noticed.** The `manual_game`
   rollup LEFT JOINed batting, bowling and fielding side by side on one
   (player, game) key; a player who batted twice and bowled once in a two-day

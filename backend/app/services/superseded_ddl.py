@@ -588,7 +588,21 @@ STATEMENTS: tuple[str, ...] = (
         ca_agg.stumpings,
         NULL::text AS grade_label
     FROM (
-        WITH auth_games AS NOT MATERIALIZED (
+        -- `auth_games` IS THE ONE CTE HERE THAT STAYS MATERIALISED. It does
+        -- not depend on the player, so there is nothing to push into it, and
+        -- inlined it was evaluated once per reference: four arms of
+        -- `player_games` times four readers of `ours` is sixteen scans per
+        -- view read, which took a player page from slow to 45 seconds
+        -- (measured live). Materialised it runs once per read and is small —
+        -- only the games of seasons a club has re-sourced.
+        --
+        -- The second arm is driven FROM those seasons, never from every game
+        -- on the platform: for each re-sourced season, the fixtures where
+        -- that club is one of the two sides (both columns indexed, migration
+        -- 167) but the game sits under the OTHER club's season row. DISTINCT
+        -- ON the game keeps the "exactly one of ours" rule — a year with two
+        -- season rows cannot count a game twice — CA season guid first.
+        WITH auth_games AS MATERIALIZED (
             SELECT g.id AS game_id, s.id AS season_id, g.grade_id,
                    s.organisation_id, g.status
             FROM seasons s
@@ -599,32 +613,34 @@ STATEMENTS: tuple[str, ...] = (
                                WHERE pm.superseded_by_game_id = g.id
                                  AND pm.pair_prefers_import)
             UNION
-            SELECT g.id, ours.id, g.grade_id, ours.organisation_id, g.status
-            FROM games g
-            JOIN grades gr ON gr.id = g.grade_id
-            JOIN seasons theirs ON theirs.id = gr.season_id
-            JOIN LATERAL (
-                SELECT s.id, s.organisation_id
+            SELECT game_id, season_id, grade_id, organisation_id, status
+            FROM (
+                SELECT DISTINCT ON (g.id)
+                       g.id AS game_id, s.id AS season_id, g.grade_id,
+                       s.organisation_id, g.status
                 FROM seasons s
+                JOIN games g ON (g.home_org_id = s.organisation_id
+                                 OR g.away_org_id = s.organisation_id)
+                JOIN grades gr ON gr.id = g.grade_id
+                JOIN seasons theirs ON theirs.id = gr.season_id
+                                   AND theirs.organisation_id <> s.organisation_id
                 WHERE s.import_authoritative
-                  AND s.organisation_id IN (g.home_org_id, g.away_org_id)
-                  AND s.organisation_id <> theirs.organisation_id
                   AND ((s.grassroots_id IS NOT NULL
                         AND s.grassroots_id = theirs.grassroots_id)
                        OR (s.year IS NOT NULL AND s.year = theirs.year))
-                ORDER BY (s.grassroots_id IS NOT NULL
+                  AND NOT EXISTS (SELECT 1 FROM manual_games pm
+                                   WHERE pm.superseded_by_game_id = g.id
+                                     AND pm.pair_prefers_import)
+                ORDER BY g.id,
+                         (s.grassroots_id IS NOT NULL
                           AND s.grassroots_id = theirs.grassroots_id) DESC,
                          s.id
-                LIMIT 1
-            ) ours ON TRUE
-            WHERE NOT EXISTS (SELECT 1 FROM manual_games pm
-                               WHERE pm.superseded_by_game_id = g.id
-                                 AND pm.pair_prefers_import)
+            ) shared
         ),
-        -- `NOT MATERIALIZED` on every CTE here, for the reason the 'manual_game'
-        -- branch above gives: a materialised CTE stops a single player's id
-        -- reaching these scans, and every profile load then rolled up every
-        -- re-sourced season on the platform.
+        -- `NOT MATERIALIZED` on every CTE from here down, for the reason the
+        -- 'manual_game' branch above gives: a materialised CTE stops a single
+        -- player's id reaching these scans, and every profile load then
+        -- rolled up every re-sourced season on the platform.
         -- Every (player, game) that is a match played, from the four sources.
         -- A player named in the side who recorded nothing counts a match
         -- unless the fixture never went ahead — migration 266's rule.
