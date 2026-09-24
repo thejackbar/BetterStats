@@ -26,6 +26,7 @@ import asyncio
 import inspect
 import io
 import os
+import re
 import sys
 import uuid
 from datetime import date
@@ -74,6 +75,12 @@ try:
 except ImportError as exc:  # pragma: no cover - control run only
     HAVE_REPAIR = False
     repair_org = None
+    MISSING.append(str(exc))
+
+try:
+    from app.services import statlab
+except ImportError as exc:  # pragma: no cover - control run only
+    statlab = None
     MISSING.append(str(exc))
 
 try:
@@ -280,6 +287,18 @@ async def main() -> None:
                 player_id UUID,
                 organisation_id UUID,
                 season TEXT
+            )
+        """))
+        # StatLab's live path reads the grade-merge log, another lifespan-only
+        # raw-SQL table; copied column for column from main.py.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS grade_merge_logs (
+                id SERIAL PRIMARY KEY,
+                merged_at TIMESTAMPTZ DEFAULT NOW(),
+                org_id UUID NOT NULL,
+                canonical_name TEXT NOT NULL,
+                alias_name TEXT NOT NULL,
+                undone_at TIMESTAMPTZ
             )
         """))
         # Migration 302's staging table, likewise invisible to create_all.
@@ -1653,6 +1672,69 @@ async def main() -> None:
                       and len(res.get("held") or []) == 1, str(res))
         else:  # pragma: no cover - control run only
             check("the repair script is available", False, "; ".join(MISSING))
+
+        print("\n-- THE ROLLUP COUNTS EACH INNINGS ONCE, AND A PLAYER'S READ STAYS CHEAP --")
+        # Guest, Rob bats in both innings of the two-day Mandurah match and
+        # bowls in one. Migration 037's rollup LEFT JOINed the three tables
+        # side by side on (player, game), so his one spell rode on both
+        # batting rows: 2 bowling innings, 4 wickets, 2 catches. Each table
+        # is aggregated on its own now.
+        async with Session() as session:
+            await reset(session); await seed(session)
+            c = await club(session); u = await user(session)
+            prev = await preview(file=FakeUpload(csv_text(SHEET)),
+                                 current_user=u, club=c, db=session)
+            await commit_manual_games(
+                req=GameResolveRequest(token=prev["token"],
+                                       player_overrides={"Guest, Rob": "__new__",
+                                                         "Appleby, Rick": "__new__"}),
+                current_user=u, club=c, db=session)
+        async with Session() as session:
+            rob = (await session.execute(
+                select(Player.id).where(Player.organisation_id == ORG,
+                                        Player.name == "Guest, Rob"))).scalar()
+            row = (await session.execute(text(
+                "SELECT matches, batting_innings, runs, bowling_innings, wickets, catches "
+                "FROM v_effective_player_season_stats WHERE player_id = :p"),
+                {"p": str(rob)})).one() if rob else None
+            check("a two-innings match is 1 match, 2 innings, 19+4 runs",
+                  row is not None and tuple(row[:3]) == (1, 2, 23), str(row))
+            check("and the ONE spell in it is 1 bowling innings and 2 wickets, not 2 and 4",
+                  row is not None and (row[3], row[4]) == (1, 2), str(row))
+            check("and the one catch is 1, not doubled", row is not None and row[5] == 1, str(row))
+            plan = "\n".join((await session.execute(text(
+                "EXPLAIN SELECT SUM(runs) FROM v_effective_player_season_stats "
+                "WHERE player_id = :p"), {"p": str(rob or P_HELD)})).scalars().all())
+            check("a single player's read materialises no CTE (the id reaches every scan)",
+                  "CTE Scan" not in plan, plan[:400])
+            lines = plan.split("\n")
+            scans = [i for i, l in enumerate(lines)
+                     if re.search(r"Scan on (batting_innings|bowling_spells|fielding_stats|"
+                                  r"manual_batting_innings|manual_bowling_spells|manual_fielding_stats)", l)]
+            unfiltered = [lines[i].strip() for i in scans
+                          if not any("player_id" in lines[j] for j in range(i + 1, min(i + 3, len(lines))))]
+            check("every per-innings scan in that plan carries the player's id",
+                  bool(scans) and not unfiltered, "; ".join(unfiltered) or f"{len(scans)} scans")
+            if statlab is not None:
+                try:
+                    rows = await statlab.query_player_career(
+                        session, org_id=str(ORG), sort_by="runs", sort_dir="desc", limit=50,
+                        metric_filters=None, filter_tree=None,
+                        context={"grade_name": "Grade 2"})
+                except Exception as exc:  # pragma: no cover - reported, never fatal
+                    await session.rollback()
+                    rows = []
+                    check("StatLab's live path answers", False, repr(exc)[:300])
+                got = {r.get("player_name"): r for r in rows}
+                g = got.get("Guest, Rob") or {}
+                check("StatLab with a grade picked counts the imported match as played: "
+                      "1 match, 2 innings, not 0 matches",
+                      g.get("matches") == 1 and g.get("batting_innings") == 2, str(g))
+                a = got.get("Appleby, Rick") or {}
+                check("and a batter who only batted in it is 1 match too",
+                      a.get("matches") == 1, str(a))
+            else:  # pragma: no cover - control run only
+                check("StatLab is importable", False, "; ".join(MISSING))
 
         print("\n-- THE UPLOAD CAP IS THE ONE nginx CARRIES --")
         check("the app's cap is 64 MB, matching the client_max_body_size on "

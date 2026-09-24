@@ -393,7 +393,15 @@ STATEMENTS: tuple[str, ...] = (
         -- 'api_scorecard' branch beside this one. Everywhere else a paired
         -- match stays out, so the season is counted once — per MATCH, from
         -- whichever side the pair prefers, never per season.
-        WITH counts_here AS (
+        -- EVERY CTE HERE IS `NOT MATERIALIZED`, and that is what makes a
+        -- single player's read of this view cheap. A CTE referenced more
+        -- than once is materialised by default, and a materialised CTE is a
+        -- wall the outer `WHERE player_id = X` cannot pass through: the whole
+        -- club's imported history was being rolled up for every profile
+        -- load, then thrown away. Inlined, the planner pushes the player's id
+        -- into each table scan. The `api_scorecard` branch beside this one
+        -- had the same wall, and it is what made a player page take seconds.
+        WITH counts_here AS NOT MATERIALIZED (
             SELECT mg.id AS manual_game_id, mg.season_id, mg.grade_id
             FROM manual_games mg
             WHERE mg.superseded_by_game_id IS NULL
@@ -401,7 +409,7 @@ STATEMENTS: tuple[str, ...] = (
                    AND EXISTS (SELECT 1 FROM seasons s
                                WHERE s.id = mg.season_id AND s.import_authoritative))
         ),
-        player_games AS (
+        player_games AS NOT MATERIALIZED (
             SELECT ch.manual_game_id, ch.season_id, ch.grade_id, mbi.player_id
             FROM counts_here ch JOIN manual_batting_innings mbi ON mbi.manual_game_id = ch.manual_game_id
             UNION
@@ -410,58 +418,106 @@ STATEMENTS: tuple[str, ...] = (
             UNION
             SELECT ch.manual_game_id, ch.season_id, ch.grade_id, mfs.player_id
             FROM counts_here ch JOIN manual_fielding_stats mfs ON mfs.manual_game_id = ch.manual_game_id
+        ),
+        -- EACH TABLE IS AGGREGATED ON ITS OWN BEFORE THE THREE ARE JOINED.
+        -- Migration 037's shape LEFT JOINed batting, bowling and fielding
+        -- side by side on one (player, game) key, which multiplies a player
+        -- who batted twice and bowled once in a two-day match into two rows
+        -- and doubles the bowling and fielding sums — the same trap the
+        -- `api_scorecard` branch was written to avoid. Reported off StatLab
+        -- as innings running far ahead of matches played.
+        keys AS NOT MATERIALIZED (
+            SELECT player_id, season_id, grade_id,
+                   COUNT(DISTINCT manual_game_id)::integer AS matches
+            FROM player_games GROUP BY player_id, season_id, grade_id
+        ),
+        bat AS NOT MATERIALIZED (
+            SELECT pg.player_id, pg.season_id, pg.grade_id,
+                COUNT(*) FILTER (WHERE NOT mbi.did_not_bat)::integer AS batting_innings,
+                COALESCE(SUM(mbi.runs) FILTER (WHERE NOT mbi.did_not_bat), 0)::integer AS runs,
+                COUNT(*) FILTER (WHERE mbi.not_out)::integer AS not_outs,
+                COALESCE(SUM(mbi.balls) FILTER (WHERE NOT mbi.did_not_bat), 0)::integer AS balls_faced,
+                COUNT(*) FILTER (WHERE mbi.runs >= 50 AND mbi.runs < 100)::integer AS fifties,
+                COUNT(*) FILTER (WHERE mbi.runs >= 100)::integer AS hundreds,
+                COUNT(*) FILTER (WHERE mbi.runs = 0 AND NOT mbi.not_out AND NOT mbi.did_not_bat)::integer AS ducks,
+                MAX(mbi.runs) FILTER (WHERE NOT mbi.did_not_bat) AS high_score,
+                -- The not-out flag of the highest score; a tie at the top
+                -- reads not out if any of them was.
+                COALESCE((ARRAY_AGG(mbi.not_out
+                                    ORDER BY mbi.runs DESC NULLS LAST, mbi.not_out DESC)
+                          FILTER (WHERE NOT mbi.did_not_bat))[1],
+                         false) AS is_hs_not_out,
+                COALESCE(SUM(mbi.fours) FILTER (WHERE NOT mbi.did_not_bat), 0)::integer AS fours,
+                COALESCE(SUM(mbi.sixes) FILTER (WHERE NOT mbi.did_not_bat), 0)::integer AS sixes
+            FROM player_games pg
+            JOIN manual_batting_innings mbi
+                ON mbi.manual_game_id = pg.manual_game_id AND mbi.player_id = pg.player_id
+            GROUP BY pg.player_id, pg.season_id, pg.grade_id
+        ),
+        bowl AS NOT MATERIALIZED (
+            SELECT pg.player_id, pg.season_id, pg.grade_id,
+                COUNT(*)::integer AS bowling_innings,
+                COALESCE(SUM(mbs.wickets), 0)::integer AS wickets,
+                COALESCE(SUM(mbs.overs), 0)::numeric AS overs,
+                COALESCE(SUM(FLOOR(mbs.overs)::integer * 6
+                             + ((mbs.overs - FLOOR(mbs.overs)) * 10)::integer), 0)::integer AS bowling_balls,
+                COALESCE(SUM(mbs.runs), 0)::integer AS runs_conceded,
+                COALESCE(SUM(mbs.maidens), 0)::integer AS maidens,
+                MAX(mbs.wickets) AS best_bowling_wickets,
+                COUNT(*) FILTER (WHERE mbs.wickets >= 5)::integer AS five_wicket_innings,
+                COALESCE(SUM(mbs.wides), 0)::integer AS wides,
+                COALESCE(SUM(mbs.no_balls), 0)::integer AS no_balls
+            FROM player_games pg
+            JOIN manual_bowling_spells mbs
+                ON mbs.manual_game_id = pg.manual_game_id AND mbs.player_id = pg.player_id
+            GROUP BY pg.player_id, pg.season_id, pg.grade_id
+        ),
+        field AS NOT MATERIALIZED (
+            SELECT pg.player_id, pg.season_id, pg.grade_id,
+                COALESCE(SUM(mfs.catches), 0)::integer AS catches,
+                COALESCE(SUM(mfs.catches_wk), 0)::integer AS catches_wk,
+                COALESCE(SUM(mfs.run_outs), 0)::integer AS run_outs,
+                COALESCE(SUM(mfs.stumpings), 0)::integer AS stumpings
+            FROM player_games pg
+            JOIN manual_fielding_stats mfs
+                ON mfs.manual_game_id = pg.manual_game_id AND mfs.player_id = pg.player_id
+            GROUP BY pg.player_id, pg.season_id, pg.grade_id
         )
         SELECT
-            pg.player_id,
-            pg.season_id,
-            pg.grade_id,
-            COUNT(DISTINCT pg.manual_game_id)::integer AS matches,
-            COUNT(*) FILTER (WHERE mbi.id IS NOT NULL AND NOT mbi.did_not_bat)::integer AS batting_innings,
-            COALESCE(SUM(mbi.runs) FILTER (WHERE NOT mbi.did_not_bat), 0)::integer AS runs,
-            COUNT(*) FILTER (WHERE mbi.not_out)::integer AS not_outs,
-            COALESCE(SUM(mbi.balls) FILTER (WHERE NOT mbi.did_not_bat), 0)::integer AS balls_faced,
-            COUNT(*) FILTER (WHERE mbi.runs >= 50 AND mbi.runs < 100)::integer AS fifties,
-            COUNT(*) FILTER (WHERE mbi.runs >= 100)::integer AS hundreds,
-            COUNT(*) FILTER (WHERE mbi.runs = 0 AND NOT mbi.not_out AND NOT mbi.did_not_bat)::integer AS ducks,
-            MAX(mbi.runs) FILTER (WHERE NOT mbi.did_not_bat) AS high_score,
-            COALESCE(BOOL_OR(mbi.not_out) FILTER (
-                WHERE mbi.runs = (
-                    SELECT MAX(mbi2.runs)
-                    FROM manual_batting_innings mbi2
-                    JOIN manual_games mg2 ON mg2.id = mbi2.manual_game_id
-                    WHERE mbi2.player_id = pg.player_id
-                      AND mg2.season_id = pg.season_id
-                      AND COALESCE(mg2.grade_id, '00000000-0000-0000-0000-000000000000'::uuid)
-                          = COALESCE(pg.grade_id, '00000000-0000-0000-0000-000000000000'::uuid)
-                      AND NOT mbi2.did_not_bat
-                )
-            ), false) AS is_hs_not_out,
-            COALESCE(SUM(mbi.fours) FILTER (WHERE NOT mbi.did_not_bat), 0)::integer AS fours,
-            COALESCE(SUM(mbi.sixes) FILTER (WHERE NOT mbi.did_not_bat), 0)::integer AS sixes,
-            COUNT(*) FILTER (WHERE mbs.id IS NOT NULL)::integer AS bowling_innings,
-            COALESCE(SUM(mbs.wickets), 0)::integer AS wickets,
-            COALESCE(SUM(mbs.overs), 0)::numeric AS overs,
-            COALESCE(SUM(FLOOR(mbs.overs)::integer * 6
-                         + ((mbs.overs - FLOOR(mbs.overs)) * 10)::integer), 0)::integer AS bowling_balls,
-            COALESCE(SUM(mbs.runs), 0)::integer AS runs_conceded,
-            COALESCE(SUM(mbs.maidens), 0)::integer AS maidens,
-            MAX(mbs.wickets) AS best_bowling_wickets,
+            k.player_id, k.season_id, k.grade_id, k.matches,
+            COALESCE(b.batting_innings, 0) AS batting_innings,
+            COALESCE(b.runs, 0) AS runs,
+            COALESCE(b.not_outs, 0) AS not_outs,
+            COALESCE(b.balls_faced, 0) AS balls_faced,
+            COALESCE(b.fifties, 0) AS fifties,
+            COALESCE(b.hundreds, 0) AS hundreds,
+            COALESCE(b.ducks, 0) AS ducks,
+            b.high_score,
+            COALESCE(b.is_hs_not_out, false) AS is_hs_not_out,
+            COALESCE(b.fours, 0) AS fours,
+            COALESCE(b.sixes, 0) AS sixes,
+            COALESCE(w.bowling_innings, 0) AS bowling_innings,
+            COALESCE(w.wickets, 0) AS wickets,
+            COALESCE(w.overs, 0)::numeric AS overs,
+            COALESCE(w.bowling_balls, 0) AS bowling_balls,
+            COALESCE(w.runs_conceded, 0) AS runs_conceded,
+            COALESCE(w.maidens, 0) AS maidens,
+            w.best_bowling_wickets,
             NULL::text AS best_bowling_figures,
-            COUNT(*) FILTER (WHERE mbs.wickets >= 5)::integer AS five_wicket_innings,
-            COALESCE(SUM(mbs.wides), 0)::integer AS wides,
-            COALESCE(SUM(mbs.no_balls), 0)::integer AS no_balls,
-            COALESCE(SUM(mfs.catches), 0)::integer AS catches,
-            COALESCE(SUM(mfs.catches_wk), 0)::integer AS catches_wk,
-            COALESCE(SUM(mfs.run_outs), 0)::integer AS run_outs,
-            COALESCE(SUM(mfs.stumpings), 0)::integer AS stumpings
-        FROM player_games pg
-        LEFT JOIN manual_batting_innings mbi
-            ON mbi.manual_game_id = pg.manual_game_id AND mbi.player_id = pg.player_id
-        LEFT JOIN manual_bowling_spells mbs
-            ON mbs.manual_game_id = pg.manual_game_id AND mbs.player_id = pg.player_id
-        LEFT JOIN manual_fielding_stats mfs
-            ON mfs.manual_game_id = pg.manual_game_id AND mfs.player_id = pg.player_id
-        GROUP BY pg.player_id, pg.season_id, pg.grade_id
+            COALESCE(w.five_wicket_innings, 0) AS five_wicket_innings,
+            COALESCE(w.wides, 0) AS wides,
+            COALESCE(w.no_balls, 0) AS no_balls,
+            COALESCE(f.catches, 0) AS catches,
+            COALESCE(f.catches_wk, 0) AS catches_wk,
+            COALESCE(f.run_outs, 0) AS run_outs,
+            COALESCE(f.stumpings, 0) AS stumpings
+        FROM keys k
+        LEFT JOIN bat b ON b.player_id = k.player_id AND b.season_id = k.season_id
+                       AND b.grade_id IS NOT DISTINCT FROM k.grade_id
+        LEFT JOIN bowl w ON w.player_id = k.player_id AND w.season_id = k.season_id
+                        AND w.grade_id IS NOT DISTINCT FROM k.grade_id
+        LEFT JOIN field f ON f.player_id = k.player_id AND f.season_id = k.season_id
+                         AND f.grade_id IS NOT DISTINCT FROM k.grade_id
     ) mg_agg
 
     UNION ALL
@@ -532,7 +588,7 @@ STATEMENTS: tuple[str, ...] = (
         ca_agg.stumpings,
         NULL::text AS grade_label
     FROM (
-        WITH auth_games AS (
+        WITH auth_games AS NOT MATERIALIZED (
             SELECT g.id AS game_id, s.id AS season_id, g.grade_id,
                    s.organisation_id, g.status
             FROM seasons s
@@ -565,10 +621,14 @@ STATEMENTS: tuple[str, ...] = (
                                WHERE pm.superseded_by_game_id = g.id
                                  AND pm.pair_prefers_import)
         ),
+        -- `NOT MATERIALIZED` on every CTE here, for the reason the 'manual_game'
+        -- branch above gives: a materialised CTE stops a single player's id
+        -- reaching these scans, and every profile load then rolled up every
+        -- re-sourced season on the platform.
         -- Every (player, game) that is a match played, from the four sources.
         -- A player named in the side who recorded nothing counts a match
         -- unless the fixture never went ahead — migration 266's rule.
-        player_games AS (
+        player_games AS NOT MATERIALIZED (
             SELECT ag.game_id, ag.season_id, ag.grade_id, ag.organisation_id, bi.player_id
             FROM auth_games ag JOIN batting_innings bi ON bi.game_id = ag.game_id
             UNION
@@ -585,7 +645,7 @@ STATEMENTS: tuple[str, ...] = (
         ),
         -- OUR OWN PLAYERS ONLY. A shared fixture carries both clubs' rows on
         -- one game; a NULL-org player is kept, as the api branch keeps it.
-        ours AS (
+        ours AS NOT MATERIALIZED (
             SELECT DISTINCT pg.game_id, pg.season_id, pg.grade_id, pg.player_id
             FROM player_games pg
             JOIN players pl ON pl.id = pg.player_id
@@ -595,12 +655,12 @@ STATEMENTS: tuple[str, ...] = (
         -- Joining the per-innings rows side by side multiplies a player who
         -- batted twice and bowled twice in one match into four rows and
         -- doubles every sum.
-        keys AS (
+        keys AS NOT MATERIALIZED (
             SELECT player_id, season_id, grade_id,
                    COUNT(DISTINCT game_id)::integer AS matches
             FROM ours GROUP BY player_id, season_id, grade_id
         ),
-        bat AS (
+        bat AS NOT MATERIALIZED (
             SELECT o.player_id, o.season_id, o.grade_id,
                 COUNT(*) FILTER (WHERE NOT COALESCE(bi.did_not_bat, false))::integer AS batting_innings,
                 COALESCE(SUM(bi.runs) FILTER (WHERE NOT COALESCE(bi.did_not_bat, false)), 0)::integer AS runs,
@@ -627,7 +687,7 @@ STATEMENTS: tuple[str, ...] = (
             JOIN batting_innings bi ON bi.game_id = o.game_id AND bi.player_id = o.player_id
             GROUP BY o.player_id, o.season_id, o.grade_id
         ),
-        bowl AS (
+        bowl AS NOT MATERIALIZED (
             SELECT o.player_id, o.season_id, o.grade_id,
                 COUNT(*)::integer AS bowling_innings,
                 COALESCE(SUM(bs.wickets), 0)::integer AS wickets,
@@ -644,7 +704,7 @@ STATEMENTS: tuple[str, ...] = (
             JOIN bowling_spells bs ON bs.game_id = o.game_id AND bs.player_id = o.player_id
             GROUP BY o.player_id, o.season_id, o.grade_id
         ),
-        field AS (
+        field AS NOT MATERIALIZED (
             SELECT o.player_id, o.season_id, o.grade_id,
                 COALESCE(SUM(fs.catches), 0)::integer AS catches,
                 COALESCE(SUM(fs.catches_wk), 0)::integer AS catches_wk,

@@ -1180,8 +1180,9 @@ def _player_agg_innings_cte(
     universe = _game_universe_sql(ctx_clauses)
     innings_extra = (" AND " + " AND ".join(innings_clauses)) if innings_clauses else ""
     player_extra = (" AND " + " AND ".join(player_clauses)) if player_clauses else ""
-    # The alias is `gap` in the appear CTE below, which is the row this tests.
-    played_clause = appearance_counts_as_match("gap")
+    # The roster arm of the appear CTE below is aliased `gap0`, and that
+    # arm is the only one the called-off rule applies to.
+    played_clause_roster = appearance_counts_as_match("gap0")
     # gap LEFT JOIN exposes this player's per-game appearance row so the
     # captain_only / keeper_only filters can apply at the right scope.
     return f"""
@@ -1256,20 +1257,48 @@ def _player_agg_innings_cte(
             GROUP BY {group_cols}
         ),
         appear AS (
-            -- This CTE is the ONLY source of StatLab's `matches`, so the
-            -- called-off rule has to live here as well as in
-            -- v_effective_player_season_stats. Without it a washout a player
-            -- was named in counts here while the same player's season row on
-            -- every other screen has it netted off, and StatLab reads as
-            -- broken. See services/game_status.py.
+            -- This CTE is the ONLY source of StatLab's `matches`, so it has to
+            -- count a match wherever the player has ANY row in it — a batting
+            -- innings, a bowling spell, a fielding row, or a bare roster
+            -- appearance — the same four sources the profile's own MATCHES
+            -- figure unions (aggregations._scoped_games_played). It used to
+            -- read `game_appearances` alone, and an imported match (a club's
+            -- own archive, a CricketStatz history) never has one of those:
+            -- every one of its innings counted here while the match itself
+            -- did not, so a player with a long imported career read far more
+            -- innings than matches. Reported off an A-grade summary as five
+            -- players "with a lot more innings than games played".
+            --
+            -- The called-off rule (services/game_status.py) lives on the
+            -- roster arm only: a game somebody recorded something in was
+            -- played, whatever its status says. `gap` is joined on every arm
+            -- so the captain_only / keeper_only filters apply to each.
             SELECT
                 {select_cols}
                 COUNT(DISTINCT gu.game_id) AS matches
-            FROM game_universe gu
-            JOIN game_appearances gap ON gap.game_id = gu.game_id
-            JOIN players p ON p.id = gap.player_id
+            FROM (
+                SELECT gu.game_id, bi.player_id
+                FROM game_universe gu
+                JOIN v_effective_batting_innings bi ON bi.game_id = gu.game_id
+                UNION
+                SELECT gu.game_id, bs.player_id
+                FROM game_universe gu
+                JOIN v_effective_bowling_spells bs ON bs.game_id = gu.game_id
+                UNION
+                SELECT gu.game_id, fs.player_id
+                FROM game_universe gu
+                JOIN v_effective_fielding_stats fs ON fs.game_id = gu.game_id
+                WHERE fs.player_id IS NOT NULL
+                UNION
+                SELECT gu.game_id, gap0.player_id
+                FROM game_universe gu
+                JOIN game_appearances gap0 ON gap0.game_id = gu.game_id
+                WHERE {played_clause_roster}
+            ) pg
+            JOIN game_universe gu ON gu.game_id = pg.game_id
+            JOIN players p ON p.id = pg.player_id
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id {player_extra}
-              AND {played_clause}
             GROUP BY {group_cols}
         )
     """

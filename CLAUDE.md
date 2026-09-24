@@ -62,6 +62,45 @@ no filter should be able to do. Diagnosed on the live database
   which in a re-sourced season is usually one of the junior fixtures the
   archive never tracked. The script now holds those back and prints them under
   "held back, check by hand". The live matcher is unchanged.
+- **A MATERIALISED CTE IS A WALL THE PLAYER'S ID CANNOT PASS (v9.90.4).**
+  Reported as "the player page takes much longer to load now": once a club
+  leaves juniors out by default, every profile read is scoped and reads
+  `v_effective_player_season_stats` several times over. Both rollup branches
+  (`manual_game`, `api_scorecard`) were `WITH` chains whose CTEs are
+  referenced more than once, so Postgres MATERIALISED them and the outer
+  `WHERE player_id = X` never reached inside: every single-player read rolled
+  up every re-sourced season on the platform, then threw it away. `EXPLAIN`
+  showed `CTE auth_games` / `CTE ours` / `CTE counts_here` with unfiltered
+  scans of `batting_innings` and friends. Every CTE in both branches is
+  `NOT MATERIALIZED` now; the same EXPLAIN shows no CTE Scan and a
+  `player_id = X` filter on every per-innings scan, which the suite asserts
+  by reading the plan. **No index was needed**: the wall, not the tables.
+- **THE 037-SHAPE FAN-OUT IS FIXED, not only noticed.** The `manual_game`
+  rollup LEFT JOINed batting, bowling and fielding side by side on one
+  (player, game) key; a player who batted twice and bowled once in a two-day
+  imported match read 2 bowling innings, 4 wickets and 2 catches. It is now
+  the `api_scorecard` shape: each table aggregated on its own, then joined.
+- **STATLAB COUNTED A MATCH FROM `game_appearances` ALONE, and an imported
+  match never has one.** So on a grade-filtered summary every innings of a
+  club's archive counted while the match did not, and five A-grade players
+  read "a lot more innings than games played" (Guest, Rob in the suite: 2
+  innings, 0 matches). The `appear` CTE unions the four sources
+  `_scoped_games_played` unions now, the called-off rule kept on the roster
+  arm alone. Two innings per two-day match is still the correct gap.
+- **THE STAGE WAS WRONG FOR EVERY CLUB, NOT ONE.** The view is applied by the
+  lifespan on every boot, and the matcher and re-import fixes live in the
+  importer, so a deploy fixes every club. What is per club is the after-the-
+  fact repair of pairs an EARLIER import left unpaired: only Shoalwater Bay
+  had `repair_overwrite_pairs` run. `python -m app.scripts.repair_overwrite_pairs
+  all` (dry run) lists every club with a re-sourced season; run it with
+  `--apply` after reading the held-back list.
+- **Verified** (`verify_manual_games_import.py` is 194 checks: the one spell
+  reading 1 and 2 rather than 2 and 4, the catch not doubled, a plan with no
+  CTE Scan and the id on every scan, and StatLab reading 1 match for the
+  imported two-day match) **with a control run**: 6 fail against the
+  previous commit, reporting `(2, 4, 2)`, `matches: 0` beside 2 innings, and
+  `Seq Scan on batting_innings ... rows=590` with no filter. StatLab's live
+  path needs the lifespan-only `grade_merge_logs`, copied into the harness.
 - **THE COMMIT'S WARNING SAID THE OPPOSITE OF WHAT IS NOW TRUE.** It warned that
   uncovered matches "are no longer counted"; they are, and it says so, naming
   separately the ones that carry no scorecard of ours and so add nothing.
