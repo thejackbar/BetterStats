@@ -655,32 +655,46 @@ async def player_categories(session: AsyncSession, player_id, org_id) -> set[str
     """
     if not player_id or not org_id:
         return set()
+    # ONE PASS FROM THE PLAYER OUTWARDS, never a probe per grade. The first
+    # cut asked, for EVERY grade row the club holds, "does this player have a
+    # row in a game of yours" — a correlated EXISTS over `v_effective_games`
+    # per grade, hundreds of them for an established club, and this runs on
+    # every profile endpoint the moment the club's default leaves a category
+    # out. Measured live at ~5s of a 6s response, on every club. Start from
+    # the player's own rows (indexed on player_id), collect the grades those
+    # games sit in, and only then name them.
     res = await session.execute(
         text(
             """
+            WITH player_games AS (
+                SELECT bi.game_id FROM v_effective_batting_innings bi
+                 WHERE bi.player_id = CAST(:pid AS UUID)
+                UNION
+                SELECT bs.game_id FROM v_effective_bowling_spells bs
+                 WHERE bs.player_id = CAST(:pid AS UUID)
+                UNION
+                SELECT fs.game_id FROM v_effective_fielding_stats fs
+                 WHERE fs.player_id = CAST(:pid AS UUID)
+                UNION
+                SELECT ga.game_id FROM game_appearances ga
+                 WHERE ga.player_id = CAST(:pid AS UUID)
+            ),
+            played_grades AS (
+                SELECT g.grade_id
+                FROM v_effective_games g
+                JOIN player_games pg ON pg.game_id = g.id
+                WHERE g.grade_id IS NOT NULL
+                UNION
+                SELECT pss.grade_id
+                FROM v_effective_player_season_stats pss
+                WHERE pss.player_id = CAST(:pid AS UUID)
+                  AND pss.grade_id IS NOT NULL
+            )
             SELECT DISTINCT gr.name
             FROM grades gr
             JOIN seasons s ON s.id = gr.season_id
+            JOIN played_grades pg ON pg.grade_id = gr.id
             WHERE s.organisation_id = CAST(:org AS UUID)
-              AND (
-                EXISTS (
-                    SELECT 1 FROM v_effective_games g
-                    WHERE g.grade_id = gr.id AND (
-                        EXISTS (SELECT 1 FROM v_effective_batting_innings bi
-                                WHERE bi.game_id = g.id AND bi.player_id = CAST(:pid AS UUID))
-                     OR EXISTS (SELECT 1 FROM v_effective_bowling_spells bs
-                                WHERE bs.game_id = g.id AND bs.player_id = CAST(:pid AS UUID))
-                     OR EXISTS (SELECT 1 FROM v_effective_fielding_stats fs
-                                WHERE fs.game_id = g.id AND fs.player_id = CAST(:pid AS UUID))
-                     OR EXISTS (SELECT 1 FROM game_appearances ga
-                                WHERE ga.game_id = g.id AND ga.player_id = CAST(:pid AS UUID))
-                    )
-                )
-                OR EXISTS (
-                    SELECT 1 FROM v_effective_player_season_stats pss
-                    WHERE pss.player_id = CAST(:pid AS UUID) AND pss.grade_id = gr.id
-                )
-              )
             """
         ),
         {"pid": str(player_id), "org": str(org_id)},

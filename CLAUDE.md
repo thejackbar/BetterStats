@@ -85,6 +85,20 @@ no filter should be able to do. Diagnosed on the live database
   re-sourced seasons through the indexed `home_org_id`/`away_org_id`, with
   `DISTINCT ON (g.id)` keeping the one-season-per-game rule. **Inline a CTE
   only when there is a predicate to push into it.**
+- **THE VIEW WAS NOT THE 6 SECONDS. `player_categories` WAS, and it was
+  found by timing endpoints, not by reading.** After the view fix every
+  profile endpoint still took ~6s, INCLUDING ones that never read the
+  season-stats view (dismissals, by-position) and on Applecross, which has
+  no import at all; the same endpoint with an explicit `?categories=` took
+  1.1s. The one thing a club-default read does that an explicit one does
+  not is the auto-widen probe, and `player_categories` asked "does this
+  player have a row in one of your games" as a correlated EXISTS over
+  `v_effective_games` for EVERY grade row the club holds — hundreds of
+  subplans per call, thirteen calls per page. It starts from the player's
+  own rows now (indexed on player_id), collects their grades, and names
+  them: zero SubPlans in the plan. **When every endpoint on a page is
+  uniformly slow, look for the thing they all call, not the thing that
+  changed.**
 - **THE 037-SHAPE FAN-OUT IS FIXED, not only noticed.** The `manual_game`
   rollup LEFT JOINed batting, bowling and fielding side by side on one
   (player, game) key; a player who batted twice and bowled once in a two-day
