@@ -742,6 +742,52 @@ layers on all templates where each element except the background is a layer."*
   behind it. That is what the row says, so nobody is hunting for a stack that is
   not there.
 
+## A SHEET SPLIT BY TEAM IS NOT A SHEET SPLIT BY GRADE (v9.89.1, Sep 2026)
+
+Reported off The Basin's Import Stats review: Leigh Cook's sheet says 240 and
+the preview read ONLINE 135, RESIDUAL +0, FINAL 355. His profile had already
+gone to 433 from an earlier commit.
+
+- **THE SHEET AND THE ONLINE DATA AGREE SEASON FOR SEASON**, and checking the
+  real spreadsheet against his live grid is what named the cause. The sheet
+  labels rows by the club's own TEAMS (1XI / 2XI / 3XI / 4XI / 20/20). CA files
+  the same side under a different GRADE name most years ("Division 3",
+  "4 Norm Reeves Shield Reserve", "Community 1"...). Grade-scoped
+  reconciliation (migration 154) mapped each label to ONE grade name and
+  compared against that grade alone, so ONLINE read 135 of his ~256 and every
+  season spent under another name was emitted as a season delta on top.
+  `final = GR + emitted + residual` has no cap on `emitted`, so the "can never
+  exceed the club's total" promise on the review screen only held while the
+  season test was right.
+- **`import_reconcile.is_team_labelled` IS THE SWITCH**: an org whose imported
+  rows name two or more grade labels is reconciled per player against their
+  WHOLE GR record (the ungraded path), season by season. The labels are still
+  stored; pre-GR season deltas keep the team their row named
+  (`season_rows_by_grade`); the career residual carries no grade. A club that
+  uploaded ONE competition's book keeps the grade-scoped path unchanged. Both
+  the commit and the preview (`routers/imports.py::_resolve`) make the same
+  call, the preview reading the club's earlier uploads too since the commit
+  reconciles all of them. **Accepted cost**: a club uploading its 1sts and 2nds
+  as separate sheets is now read as its whole book, so a grade CA has that the
+  sheets omit is not topped up per grade.
+- **`covered_by_year`**: a season is covered when GR holds that YEAR under any
+  season row. An id-only test read a hand-made "2015/16" beside the synced
+  "Summer 2015/16" as missing (267 against 256 in the control run).
+- **THE EXPECTED RESULT IS THE ONLINE FIGURE, NOT THE SHEET'S**, whenever
+  online holds more: for Leigh that is 256 (2009/10's 11 games are online and
+  not in the sheet, plus five seasons one game apart). "GR wins per season" is
+  the documented rule; making the sheet win would be a different rule.
+- **Recovery needs no re-import**: `reconcile_imported_totals` rebuilds every
+  delta from `imported_stats`, and runs at the end of every sync;
+  `python -m app.scripts.reconcile_imports <org>` does it now.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_import_team_labels.py`, 17 checks through the
+  shipped `reconcile_imported_totals`, Leigh's real rows and his real online
+  seasons) **with a control run**: with the year widening removed, 5 fail and
+  his career reads 267. The fuller control (team switch off too) goes down the
+  grade path, which needs the lifespan views this harness does not build, so
+  that half was replayed through the pure functions instead.
+
 ## A FACET LISTED IN THE KIT AND MISSING FROM ONE FUNCTION (v9.73.1, Sep 2026)
 
 Reported off `/admin/comms/lists` as `a[r.key] is not iterable`, straight after
@@ -7302,6 +7348,67 @@ await_only() here`.
   club still readable afterwards — plus 11 on the query and the rollback rule,
   **with a control run**: putting the old column name and the bare rollback
   back reproduces the reported greenlet error exactly.
+
+## AN IMPORT RESIDUAL IS CLASSIFIED BY ITS LABEL, NOT KEPT BLIND (v9.89.2, Sep 2026)
+
+Reported off The Basin: Nathan Freeling, a senior player whose only record for
+2006/07-2008/09 is a BetterImport residual under senior grade labels ("Division
+3/4/5"), read **18 matches / 376 runs under the JUNIORS filter — and the same
+under Women's and Masters**, on a player with no junior grades at all.
+
+- **THE CATEGORY FILTER IS EXCLUSION-BASED AND AN IMPORT RESIDUAL HAS NO
+  grade_id, SO IT SURVIVED EVERY PICK.** `GradeScope.clause`'s category branch is
+  `column IS NULL OR NOT (column = ANY(excluded_ids))` — correct for the DEFAULT
+  ("no juniors": a row we can't classify is probably senior, keep it) and wrong
+  for an EXPLICIT pick. An import residual carries `grade_id = NULL`, so
+  `grade_id IS NULL` is TRUE and it was kept under Juniors, Women's and Masters
+  alike. Nathan's three seasons exist ONLY as residuals (CA's per-grade data
+  starts 2009/10), so they were swept into every category. **This hit every
+  BetterImport club with pre-CA seasons**, not just him.
+- **THE RESIDUAL CARRIES A CLASSIFIABLE grade_label NOW, so it is no longer
+  genuinely unclassifiable.** Migration 252 put `grade_label` on the import
+  branch of `v_effective_player_season_stats`, and the team-labelled reconcile
+  (v9.89.1) writes a real per-grade label. So the row IS classifiable — the
+  filter was just looking at the NULL grade_id instead of the label.
+- **`resolve_scope` BUILDS `excluded_labels` THE SAME WAY IT BUILDS
+  `excluded_ids`.** One extra `SELECT DISTINCT grade_label FROM
+  import_effective_deltas`, only when a category filter is active, each label
+  classified with `categories_for_name` (its stored categories, else
+  `suggest_categories`) and `judged = cats if explicit else {primary}` — the
+  identical rule the grade walk applies. No per-row cost; empty for a club with
+  no imports, so those queries are byte-for-byte what they were.
+- **`clause(..., label_column=...)` IS A CASE, NOT A BLANKET KEEP.** grade_id
+  present -> judged by grade_id (unchanged, a season adjustment still filters by
+  its real grade); grade_label present -> judged by the label
+  (`NOT (label = ANY(excluded_labels))`, cast to `text[]` so an empty list is
+  safe); grade_label NULL -> KEPT, because a career-level lump with neither is
+  genuinely unclassifiable, the one case the old reasoning still holds for.
+- **THE FIVE RESIDUAL FILTER SITES ALL READ `pss` (the view with grade_label),
+  so all move together**: `_career_residuals` (the profile cards + MATCHES
+  stat), `_residual_totals_cte` (leaderboards), `_season_by_season_scoped` (the
+  season table) and StatLab's family + career/season residuals. The by-grade
+  grid is NOT one of them — it matches an import residual to a real grade row by
+  NAME (`_IMPORT_GRADE_MATCH`) and filters on that grade's `gr.id`, so it already
+  classified correctly.
+- **THE DEFAULT IS UNTOUCHED, WHICH IS THE HALF THAT COULD HAVE BROKEN.** Under a
+  club default that excludes junior, a senior label ("Division 3") is NOT in
+  `excluded_labels` (its category is what's wanted), so the senior residual is
+  still KEPT — a club's pre-CA senior seasons still show on the ordinary page.
+  Only an explicit non-matching pick drops them.
+- **No re-import, no migration** — it's a read-path scope change, so every
+  affected club corrects on the next page load.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_junior_residual_scope.py`, 24 checks through the
+  shipped `resolve_scope` / `_career_residuals` / `_season_by_season_scoped` /
+  `_residual_totals_cte` over the real view: the reported senior residual reading
+  0 under Juniors/Women's/Masters and its full 18/376 under Men's and the
+  junior-excluding club default, a genuine junior residual showing under Juniors
+  only, a label-less career lump kept under every category, a real-grade_id
+  residual still excluded by its id, the season table and leaderboard agreeing,
+  and another club's identical residual untouched) **with a control run**: 10 of
+  the 24 fail against the previous commit, reporting the customer's own **18/376**
+  under Juniors and the same under Women's and Masters. The control reports rather
+  than crashing — `excluded_labels` is read through `getattr`.
 
 ## Junior stats split off career stats (migration 228, v9.18.0, Aug 2026)
 

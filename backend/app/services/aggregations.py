@@ -137,7 +137,7 @@ def _residual_totals_cte(scope: GradeScope, season_ids, params: dict) -> str:
                 COALESCE(SUM(pss.run_outs), 0) AS total_run_outs,
                 COALESCE(SUM(pss.stumpings), 0) AS total_stumpings
             FROM v_effective_player_season_stats pss
-            WHERE pss.source = ANY(:residual_sources){season_clause}{scope.clause("pss.grade_id", "aggregate")}
+            WHERE pss.source = ANY(:residual_sources){season_clause}{scope.clause("pss.grade_id", "aggregate", label_column="pss.grade_label")}
             GROUP BY pss.player_id
         )
     """
@@ -168,7 +168,7 @@ async def _career_residuals(
     season_clause = " AND pss.season_id = ANY(:sids)" if season_ids else ""
     if season_ids:
         params["sids"] = season_ids
-    scope_clause = scope.clause("pss.grade_id", "aggregate") if _scoped(scope) else ""
+    scope_clause = scope.clause("pss.grade_id", "aggregate", label_column="pss.grade_label") if _scoped(scope) else ""
     if _scoped(scope):
         scope.bind(params)
     res = await session.execute(
@@ -2331,7 +2331,7 @@ async def _season_by_season_scoped(
     scope.bind(params)
     clause = (scope.clause("g.grade_id")
               + await _club_game_clause(session, player_id, params))
-    resid_clause = scope.clause("pss.grade_id", "aggregate")
+    resid_clause = scope.clause("pss.grade_id", "aggregate", label_column="pss.grade_label")
     fold = _SEASON_FOLD_CTE.rstrip() + ",\n"
     res = await session.execute(
         text(f"""
