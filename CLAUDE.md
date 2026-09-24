@@ -1,5 +1,82 @@
 # BetterStats — Claude Session Notes
 
+## A RE-SOURCED SEASON COUNTS PER MATCH, NOT PER SEASON (migration 309, v9.90.3, Sep 2026)
+
+Reported off Shoalwater Bay after their CSFW archive went in through the CSV
+import's OVERWRITE mode: on most players "All" read LOWER than "Men's", which
+no filter should be able to do. Diagnosed on the live database
+(`ops/diagnostics/csv_import_unpaired.sql`) before a line was changed.
+
+- **THE PAGE WAS NOT DOUBLE-COUNTING "ALL". IT WAS DROPPING MATCHES FROM IT.**
+  An overwrite import marks each season it touches `import_authoritative`,
+  which stepped the WHOLE season's Cricket Australia summary aside in
+  `v_effective_player_season_stats`. So every synced match the file did not
+  hold — 83 junior-grade games the archive never tracked, and 32 senior
+  matches the matcher missed — vanished from "All", while "Men's" (an explicit
+  scope, so read from the per-innings views) kept them. Two definitions of one
+  season, and a filter that raises a total is the tell.
+- **A SEASON TOTAL HAS NO PER-MATCH GRANULARITY, so the only way to replace
+  SOME of a season is to count the whole season from scorecards.** The new
+  `api_scorecard` branch rolls up every synced game in a re-sourced season that
+  has no preferred imported twin, from `batting_innings` / `bowling_spells` /
+  `fielding_stats` / `game_appearances` — the four sources `_scoped_games_played`
+  already unions — org-scoped through `players`. The import's own rollup counts
+  the matches the file held; the two are disjoint by construction. The "and,
+  not or" rule the pairing already keeps, applied at the aggregate level.
+- **EACH TABLE IS AGGREGATED ON ITS OWN BEFORE THE THREE ARE JOINED.** The
+  manual rollup beside it LEFT JOINs batting, bowling and fielding rows side by
+  side on one `(player, game)` key, which multiplies a player who batted twice
+  and bowled twice in one match into four rows and doubles every sum. Noticed,
+  NOT fixed there — it is migration 037's shape and its own change.
+- **A FIXTURE THE OTHER CLUB SYNCED FIRST IS KEYED ONTO OUR OWN SEASON** for
+  the same real season, CA season guid first and year second, through a
+  `LATERAL ... LIMIT 1` so a year with two season rows cannot count it twice.
+  It is filed on THEIR grade id, which the by-grade grid already resolves by
+  name.
+- **THE MATCHER HAD THREE REAL GAPS, and the diagnostic named them with
+  counts**: `_existing_game_index` read `v_effective_games.organisation_id`,
+  so a fixture the OTHER club synced first was never a candidate (19); an
+  opponent the two sources spell with no shared word never matched (11:
+  "Rockingham Hornets Cricket Club" against "Hillman"); and a two-day match
+  each source dates differently never matched (2). The index is now the club's
+  season OR either side of the fixture, and a sheet match the date rule leaves
+  unmatched gets a SECOND LOOK through `match_pairing.assign` — the CricketStatz
+  matcher's own rules, never a second copy — on a `(player_id, runs)`
+  signature built from the sheet's resolved players. `match_pairing.load_synced`
+  is the one query all three readers of the synced side now share.
+- **RE-IMPORTING THE SAME FILE USED TO UNPAIR EVERYTHING.** An overwrite of a
+  manual duplicate deleted the old row and wrote a fresh one with no pairing,
+  so the synced copy came straight back beside the sheet's version. The
+  replacement inherits the old row's pair now, exactly as it was.
+- **`python -m app.scripts.repair_overwrite_pairs <org|all> [--apply]`** is the
+  same second look run after the fact, over what an earlier import left
+  unpaired. Only matches an IMPORT created are candidates — read off the
+  import's own audit rows — never a game somebody typed in, and only in a
+  re-sourced season. Dry run by default. **Run it on the box after this
+  deploys**, for the 32 already counted twice.
+- **THE COMMIT'S WARNING SAID THE OPPOSITE OF WHAT IS NOW TRUE.** It warned that
+  uncovered matches "are no longer counted"; they are, and it says so, naming
+  separately the ones that carry no scorecard of ours and so add nothing.
+- **Verified against a real Postgres** (`verify_manual_games_import.py` is 185
+  checks: the uncovered games counted from their scorecards including the
+  bowling, the aggregate view agreeing with the per-innings views TO THE RUN,
+  the other club's fixture under our season on their grade with their batter's
+  99 never ours, all three miss shapes paired, a same-day match sharing no
+  score NOT paired, a re-import keeping every pair, and the repair script's dry
+  run writing nothing then apply pairing it once) **with a control run**: 19
+  fail against the previous commit, reporting `aggregate 1/20 vs scorecards
+  3/110` and the three misses as `{'total': 0}`; the script is REPORTED absent
+  rather than crashing the run. Neighbours re-run: match coverage 66,
+  cricketstatz import 305.
+- **THE SUITES SHARE ONE DATABASE AND THEIR STUB TABLES COLLIDE, hit again.**
+  `verify_cricketstatz_import.py` died on `player_achievements.org_id` because
+  the manual-games suite had left its own four-column stub of that table
+  behind. Not the change; it passes on a fresh database. Run a suite whose
+  stubs differ on its own database.
+- **THE JUNIOR GAMES ARE RIGHT TO STAY LIVE.** They were never in the archive,
+  the Men's filter leaves them out anyway, and they are exactly what "All"
+  should hold beyond "Men's". Nothing here touches them.
+
 ## ONE CAMPAIGN, TWO PRODUCTS, ONE PIXEL EVENT (v9.72.0, Sep 2026)
 
 The Meta ad account was restructured 8-9 Sep 2026 and `BC_AU_Trials_CBO_Aug2026`

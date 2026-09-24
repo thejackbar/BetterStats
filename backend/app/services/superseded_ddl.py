@@ -218,10 +218,16 @@ STATEMENTS: tuple[str, ...] = (
           --
           -- THE EXCEPTION IS A SEASON THE CLUB HAS RE-SOURCED. Where a club has
           -- declared its own import authoritative for a season (PlayHQ was
-          -- wrong for it and the file holds the whole season), CA's summary is
-          -- stepped aside and the manual-game rollup below counts the import
-          -- instead — so the totals match the corrected scorecards. Everywhere
-          -- else this is FALSE and nothing changes.
+          -- wrong for it), CA's summary is stepped aside — but NOT the
+          -- matches behind it. A season total has no per-match granularity,
+          -- so the only way to replace SOME of a season's matches is to count
+          -- the whole season from scorecards: the import's own rollup below
+          -- carries every match the file held, and the 'api_scorecard' branch
+          -- carries every synced game the file did NOT hold, from CA's own
+          -- per-innings rows. The two are disjoint by construction (a synced
+          -- game with a preferred imported twin is in the second, never the
+          -- first), so the season is the union of both sources counted once.
+          -- Everywhere else this is FALSE and nothing changes.
           AND NOT s.import_authoritative
     )
 
@@ -379,17 +385,21 @@ STATEMENTS: tuple[str, ...] = (
         -- imported matches CA does not have at all. Preferring the imported
         -- copy is a decision about which scorecard to SHOW, and it stays
         -- per-innings, where there is a row to drop.
-        -- `_counts_here` is the one rule for whether a manual game feeds the
+        -- `counts_here` is the one rule for whether a manual game feeds the
         -- season aggregate: an UNPAIRED match always does; a paired (superseded)
-        -- match does ONLY in a season the club has re-sourced from its import,
-        -- where CA's own summary is stepped aside above. Everywhere else a
-        -- paired match stays out, so the season is counted once.
+        -- match does ONLY where it is the PREFERRED half of its pair AND its
+        -- season is one the club has re-sourced, where CA's own summary is
+        -- stepped aside above and the synced twin is left out of the
+        -- 'api_scorecard' branch beside this one. Everywhere else a paired
+        -- match stays out, so the season is counted once — per MATCH, from
+        -- whichever side the pair prefers, never per season.
         WITH counts_here AS (
             SELECT mg.id AS manual_game_id, mg.season_id, mg.grade_id
             FROM manual_games mg
             WHERE mg.superseded_by_game_id IS NULL
-               OR EXISTS (SELECT 1 FROM seasons s
-                          WHERE s.id = mg.season_id AND s.import_authoritative)
+               OR (mg.pair_prefers_import
+                   AND EXISTS (SELECT 1 FROM seasons s
+                               WHERE s.id = mg.season_id AND s.import_authoritative))
         ),
         player_games AS (
             SELECT ch.manual_game_id, ch.season_id, ch.grade_id, mbi.player_id
@@ -453,6 +463,232 @@ STATEMENTS: tuple[str, ...] = (
             ON mfs.manual_game_id = pg.manual_game_id AND mfs.player_id = pg.player_id
         GROUP BY pg.player_id, pg.season_id, pg.grade_id
     ) mg_agg
+
+    UNION ALL
+
+    -- THE SYNCED GAMES A RE-SOURCED SEASON STILL COUNTS, from their own
+    -- scorecards. A club's import rarely holds EVERY match Cricket Australia
+    -- does — a junior grade the old program never tracked, a fixture the
+    -- other club synced first — and stepping CA's whole season summary aside
+    -- used to drop every one of those from the totals while the per-innings
+    -- views (which every filtered read uses) kept them. That is how a
+    -- player's "Men's" figure came to read HIGHER than their "All". So a
+    -- synced game in a re-sourced season with no preferred imported twin is
+    -- rolled up here, per (player, season, grade), from batting_innings /
+    -- bowling_spells / fielding_stats / game_appearances — the same four
+    -- sources `_scoped_games_played` unions — org-scoped through `players`
+    -- so a shared fixture's opposition rows never count as ours.
+    --
+    -- Two ways a game belongs to a re-sourced season: it sits in one of the
+    -- club's own grades, or it is a shared fixture the OTHER club synced
+    -- first (filed under THEIR season, ours by `home_org_id`/`away_org_id`
+    -- — the rule club_game_sql already keeps). The second is keyed onto our
+    -- own season for the same real season, CA season guid first, year second,
+    -- and onto exactly one of ours, so a year with two season rows cannot
+    -- count the game twice.
+    --
+    -- Empty for every club that has re-sourced nothing: the partial index on
+    -- `seasons.import_authoritative` is the first thing each arm reads.
+    SELECT
+        ca_agg.player_id,
+        ca_agg.season_id,
+        ca_agg.grade_id,
+        'api_scorecard'::text AS source,
+        ca_agg.matches,
+        ca_agg.batting_innings,
+        ca_agg.runs,
+        ca_agg.not_outs,
+        ca_agg.balls_faced,
+        ca_agg.fifties,
+        ca_agg.hundreds,
+        ca_agg.ducks,
+        ca_agg.high_score,
+        ca_agg.is_hs_not_out,
+        NULL::numeric AS batting_average,
+        NULL::numeric AS batting_strike_rate,
+        ca_agg.fours,
+        ca_agg.sixes,
+        NULL::integer AS batting_minutes,
+        ca_agg.bowling_innings,
+        ca_agg.wickets,
+        ca_agg.overs,
+        ca_agg.bowling_balls,
+        ca_agg.runs_conceded,
+        ca_agg.maidens,
+        NULL::numeric AS bowling_economy,
+        NULL::numeric AS bowling_average,
+        NULL::numeric AS bowling_strike_rate,
+        ca_agg.best_bowling_wickets,
+        NULL::text AS best_bowling_figures,
+        ca_agg.five_wicket_innings,
+        ca_agg.wides,
+        ca_agg.no_balls,
+        ca_agg.catches,
+        ca_agg.catches_wk,
+        GREATEST(ca_agg.catches - ca_agg.catches_wk, 0) AS catches_non_wk,
+        ca_agg.run_outs,
+        0 AS assisted_run_outs,
+        ca_agg.run_outs AS unassisted_run_outs,
+        ca_agg.stumpings,
+        NULL::text AS grade_label
+    FROM (
+        WITH auth_games AS (
+            SELECT g.id AS game_id, s.id AS season_id, g.grade_id,
+                   s.organisation_id, g.status
+            FROM seasons s
+            JOIN grades gr ON gr.season_id = s.id
+            JOIN games g ON g.grade_id = gr.id
+            WHERE s.import_authoritative
+              AND NOT EXISTS (SELECT 1 FROM manual_games pm
+                               WHERE pm.superseded_by_game_id = g.id
+                                 AND pm.pair_prefers_import)
+            UNION
+            SELECT g.id, ours.id, g.grade_id, ours.organisation_id, g.status
+            FROM games g
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons theirs ON theirs.id = gr.season_id
+            JOIN LATERAL (
+                SELECT s.id, s.organisation_id
+                FROM seasons s
+                WHERE s.import_authoritative
+                  AND s.organisation_id IN (g.home_org_id, g.away_org_id)
+                  AND s.organisation_id <> theirs.organisation_id
+                  AND ((s.grassroots_id IS NOT NULL
+                        AND s.grassroots_id = theirs.grassroots_id)
+                       OR (s.year IS NOT NULL AND s.year = theirs.year))
+                ORDER BY (s.grassroots_id IS NOT NULL
+                          AND s.grassroots_id = theirs.grassroots_id) DESC,
+                         s.id
+                LIMIT 1
+            ) ours ON TRUE
+            WHERE NOT EXISTS (SELECT 1 FROM manual_games pm
+                               WHERE pm.superseded_by_game_id = g.id
+                                 AND pm.pair_prefers_import)
+        ),
+        -- Every (player, game) that is a match played, from the four sources.
+        -- A player named in the side who recorded nothing counts a match
+        -- unless the fixture never went ahead — migration 266's rule.
+        player_games AS (
+            SELECT ag.game_id, ag.season_id, ag.grade_id, ag.organisation_id, bi.player_id
+            FROM auth_games ag JOIN batting_innings bi ON bi.game_id = ag.game_id
+            UNION
+            SELECT ag.game_id, ag.season_id, ag.grade_id, ag.organisation_id, bs.player_id
+            FROM auth_games ag JOIN bowling_spells bs ON bs.game_id = ag.game_id
+            UNION
+            SELECT ag.game_id, ag.season_id, ag.grade_id, ag.organisation_id, fs.player_id
+            FROM auth_games ag JOIN fielding_stats fs ON fs.game_id = ag.game_id
+            WHERE fs.player_id IS NOT NULL
+            UNION
+            SELECT ag.game_id, ag.season_id, ag.grade_id, ag.organisation_id, ga.player_id
+            FROM auth_games ag JOIN game_appearances ga ON ga.game_id = ag.game_id
+            WHERE COALESCE(ag.status, '') NOT IN ('ABANDONED', 'CANCELLED')
+        ),
+        -- OUR OWN PLAYERS ONLY. A shared fixture carries both clubs' rows on
+        -- one game; a NULL-org player is kept, as the api branch keeps it.
+        ours AS (
+            SELECT DISTINCT pg.game_id, pg.season_id, pg.grade_id, pg.player_id
+            FROM player_games pg
+            JOIN players pl ON pl.id = pg.player_id
+             AND (pl.organisation_id IS NULL OR pl.organisation_id = pg.organisation_id)
+        ),
+        -- Each table is aggregated ON ITS OWN before the three are joined.
+        -- Joining the per-innings rows side by side multiplies a player who
+        -- batted twice and bowled twice in one match into four rows and
+        -- doubles every sum.
+        keys AS (
+            SELECT player_id, season_id, grade_id,
+                   COUNT(DISTINCT game_id)::integer AS matches
+            FROM ours GROUP BY player_id, season_id, grade_id
+        ),
+        bat AS (
+            SELECT o.player_id, o.season_id, o.grade_id,
+                COUNT(*) FILTER (WHERE NOT COALESCE(bi.did_not_bat, false))::integer AS batting_innings,
+                COALESCE(SUM(bi.runs) FILTER (WHERE NOT COALESCE(bi.did_not_bat, false)), 0)::integer AS runs,
+                COUNT(*) FILTER (WHERE COALESCE(bi.not_out, false)
+                                   AND NOT COALESCE(bi.did_not_bat, false))::integer AS not_outs,
+                COALESCE(SUM(bi.balls) FILTER (WHERE NOT COALESCE(bi.did_not_bat, false)), 0)::integer AS balls_faced,
+                COUNT(*) FILTER (WHERE bi.runs >= 50 AND bi.runs < 100
+                                   AND NOT COALESCE(bi.did_not_bat, false))::integer AS fifties,
+                COUNT(*) FILTER (WHERE bi.runs >= 100
+                                   AND NOT COALESCE(bi.did_not_bat, false))::integer AS hundreds,
+                COUNT(*) FILTER (WHERE bi.runs = 0 AND NOT COALESCE(bi.not_out, false)
+                                   AND NOT COALESCE(bi.did_not_bat, false))::integer AS ducks,
+                MAX(bi.runs) FILTER (WHERE NOT COALESCE(bi.did_not_bat, false)) AS high_score,
+                -- The not-out flag of the highest score; a tie at the top
+                -- reads not out if any of them was, as the manual rollup does.
+                COALESCE((ARRAY_AGG(COALESCE(bi.not_out, false)
+                                    ORDER BY bi.runs DESC NULLS LAST,
+                                             COALESCE(bi.not_out, false) DESC)
+                          FILTER (WHERE NOT COALESCE(bi.did_not_bat, false)))[1],
+                         false) AS is_hs_not_out,
+                COALESCE(SUM(bi.fours) FILTER (WHERE NOT COALESCE(bi.did_not_bat, false)), 0)::integer AS fours,
+                COALESCE(SUM(bi.sixes) FILTER (WHERE NOT COALESCE(bi.did_not_bat, false)), 0)::integer AS sixes
+            FROM ours o
+            JOIN batting_innings bi ON bi.game_id = o.game_id AND bi.player_id = o.player_id
+            GROUP BY o.player_id, o.season_id, o.grade_id
+        ),
+        bowl AS (
+            SELECT o.player_id, o.season_id, o.grade_id,
+                COUNT(*)::integer AS bowling_innings,
+                COALESCE(SUM(bs.wickets), 0)::integer AS wickets,
+                COALESCE(SUM(bs.overs), 0)::numeric AS overs,
+                COALESCE(SUM(FLOOR(bs.overs)::integer * 6
+                             + ((bs.overs - FLOOR(bs.overs)) * 10)::integer), 0)::integer AS bowling_balls,
+                COALESCE(SUM(bs.runs), 0)::integer AS runs_conceded,
+                COALESCE(SUM(bs.maidens), 0)::integer AS maidens,
+                MAX(bs.wickets) AS best_bowling_wickets,
+                COUNT(*) FILTER (WHERE bs.wickets >= 5)::integer AS five_wicket_innings,
+                COALESCE(SUM(bs.wides), 0)::integer AS wides,
+                COALESCE(SUM(bs.no_balls), 0)::integer AS no_balls
+            FROM ours o
+            JOIN bowling_spells bs ON bs.game_id = o.game_id AND bs.player_id = o.player_id
+            GROUP BY o.player_id, o.season_id, o.grade_id
+        ),
+        field AS (
+            SELECT o.player_id, o.season_id, o.grade_id,
+                COALESCE(SUM(fs.catches), 0)::integer AS catches,
+                COALESCE(SUM(fs.catches_wk), 0)::integer AS catches_wk,
+                COALESCE(SUM(fs.run_outs), 0)::integer AS run_outs,
+                COALESCE(SUM(fs.stumpings), 0)::integer AS stumpings
+            FROM ours o
+            JOIN fielding_stats fs ON fs.game_id = o.game_id AND fs.player_id = o.player_id
+            GROUP BY o.player_id, o.season_id, o.grade_id
+        )
+        SELECT
+            k.player_id, k.season_id, k.grade_id, k.matches,
+            COALESCE(b.batting_innings, 0) AS batting_innings,
+            COALESCE(b.runs, 0) AS runs,
+            COALESCE(b.not_outs, 0) AS not_outs,
+            COALESCE(b.balls_faced, 0) AS balls_faced,
+            COALESCE(b.fifties, 0) AS fifties,
+            COALESCE(b.hundreds, 0) AS hundreds,
+            COALESCE(b.ducks, 0) AS ducks,
+            b.high_score,
+            COALESCE(b.is_hs_not_out, false) AS is_hs_not_out,
+            COALESCE(b.fours, 0) AS fours,
+            COALESCE(b.sixes, 0) AS sixes,
+            COALESCE(w.bowling_innings, 0) AS bowling_innings,
+            COALESCE(w.wickets, 0) AS wickets,
+            COALESCE(w.overs, 0)::numeric AS overs,
+            COALESCE(w.bowling_balls, 0) AS bowling_balls,
+            COALESCE(w.runs_conceded, 0) AS runs_conceded,
+            COALESCE(w.maidens, 0) AS maidens,
+            w.best_bowling_wickets,
+            COALESCE(w.five_wicket_innings, 0) AS five_wicket_innings,
+            COALESCE(w.wides, 0) AS wides,
+            COALESCE(w.no_balls, 0) AS no_balls,
+            COALESCE(f.catches, 0) AS catches,
+            COALESCE(f.catches_wk, 0) AS catches_wk,
+            COALESCE(f.run_outs, 0) AS run_outs,
+            COALESCE(f.stumpings, 0) AS stumpings
+        FROM keys k
+        LEFT JOIN bat b ON b.player_id = k.player_id AND b.season_id = k.season_id
+                       AND b.grade_id IS NOT DISTINCT FROM k.grade_id
+        LEFT JOIN bowl w ON w.player_id = k.player_id AND w.season_id = k.season_id
+                        AND w.grade_id IS NOT DISTINCT FROM k.grade_id
+        LEFT JOIN field f ON f.player_id = k.player_id AND f.season_id = k.season_id
+                         AND f.grade_id IS NOT DISTINCT FROM k.grade_id
+    ) ca_agg
 
     UNION ALL
 

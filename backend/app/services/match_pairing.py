@@ -391,7 +391,7 @@ _SYNCED_CARD_SQL = """
       FROM batting_innings bi
       JOIN players p ON p.id = bi.player_id AND p.organisation_id = :org
      WHERE bi.game_id = ANY(CAST(:ids AS UUID[]))
-       AND NOT bi.did_not_bat AND bi.runs IS NOT NULL
+       AND NOT COALESCE(bi.did_not_bat, false) AND bi.runs IS NOT NULL
 """
 
 _IMPORTED_SQL = """
@@ -453,15 +453,48 @@ async def load_sides(db: AsyncSession, org_id, season_ids=None
         imported.append(MatchRow(row["id"], row["played_at"], opp,
                                  frozenset(imp_cards.get(row["id"], ())), ours))
 
-    syn_sql, syn_params = _SYNCED_SQL, {"org": str(org_id)}
+    from_day = to_day = None
     if season_ids:
         dates = [m.played_at for m in imported if m.played_at is not None]
         if dates:
             span = timedelta(days=WINDOW_DAYS)
-            syn_sql = (f"SELECT * FROM ({_SYNCED_SQL}) w\n"
-                       " WHERE w.played_at IS NULL"
-                       "    OR (w.played_at >= :from_day AND w.played_at <= :to_day)")
-            syn_params |= {"from_day": min(dates) - span, "to_day": max(dates) + span}
+            from_day, to_day = min(dates) - span, max(dates) + span
+    synced = await load_synced(db, org_id, club_tokens=club_tokens,
+                               from_day=from_day, to_day=to_day)
+    return imported, synced
+
+
+async def load_synced(db: AsyncSession, org_id, *, club_tokens=None,
+                      from_day=None, to_day=None,
+                      exclude_twinned: bool = False) -> list[MatchRow]:
+    """The synced side of a club's record, with our own cards attached.
+
+    One query for the three readers of it — the CricketStatz matcher, the CSV
+    import's own duplicate check and the repair script — so they cannot
+    disagree about which synced games are the club's. Ours is the season's
+    org OR either side of the fixture (`home_org_id`/`away_org_id`), the rule
+    `club_game_sql` keeps: a fixture between two synced clubs is ONE `games`
+    row owned by whoever synced it first, and reading only the club's own
+    grades never sees the other half of its own fixtures — which is exactly
+    how an overwrite import left 19 of one club's matches counted twice.
+
+    A game locked to an overwrite import is never returned. `exclude_twinned`
+    also leaves out a game that already has ANY imported twin: the pair index
+    is one-to-one, and a caller about to write a new pair must not be handed
+    a game a CricketStatz match already holds.
+    """
+    if club_tokens is None:
+        club_tokens = team_tokens((await db.execute(
+            text(_CLUB_NAME_SQL), {"org": str(org_id)})).scalar() or "")
+    syn_sql, syn_params = _SYNCED_SQL, {"org": str(org_id)}
+    if exclude_twinned:
+        syn_sql += ("\n       AND NOT EXISTS (SELECT 1 FROM manual_games tw"
+                    "\n                        WHERE tw.superseded_by_game_id = g.id)")
+    if from_day is not None and to_day is not None:
+        syn_sql = (f"SELECT * FROM ({syn_sql}) w\n"
+                   " WHERE w.played_at IS NULL"
+                   "    OR (w.played_at >= :from_day AND w.played_at <= :to_day)")
+        syn_params |= {"from_day": from_day, "to_day": to_day}
 
     syn_rows = (await db.execute(text(syn_sql), syn_params)).mappings().all()
     syn_cards = await _cards(db, _SYNCED_CARD_SQL,
@@ -473,7 +506,7 @@ async def load_sides(db: AsyncSession, org_id, season_ids=None
                                 row["opposition"], club_tokens)
         synced.append(MatchRow(row["id"], row["played_at"], opp,
                                frozenset(syn_cards.get(row["id"], ())), ours))
-    return imported, synced
+    return synced
 
 
 async def reconcile_org(db: AsyncSession, org_id, *, season_ids=None,

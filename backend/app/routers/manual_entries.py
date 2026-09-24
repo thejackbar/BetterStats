@@ -19,7 +19,7 @@ import io
 import json
 import re
 import uuid
-from datetime import datetime, timezone, date as date_cls
+from datetime import datetime, timedelta, timezone, date as date_cls
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
@@ -2518,6 +2518,16 @@ async def _write_games(
                     game.superseded_by_game_id = uuid.UUID(dup["id"])
                     game.pair_prefers_import = True
                     game.pairing_locked = True
+                elif overwrite_manual and dup.get("paired_to"):
+                    # The manual match being replaced was itself the stand-in
+                    # for a synced game (an earlier overwrite import, or a
+                    # CricketStatz pairing). The replacement inherits the pair
+                    # exactly as it was — dropping it would bring the synced
+                    # copy back beside the sheet's version and count the match
+                    # twice, which a re-import of the same file must never do.
+                    game.superseded_by_game_id = uuid.UUID(dup["paired_to"])
+                    game.pair_prefers_import = bool(dup.get("pair_prefers_import"))
+                    game.pairing_locked = bool(dup.get("pairing_locked"))
                 db.add(game)
                 await db.flush()
                 game_id = str(game.id)
@@ -2856,12 +2866,26 @@ def _season_label_year(label: str) -> Optional[int]:
 # default) or overwrite the existing MANUAL one; a synced game is never the CSV
 # import's to touch (a different table the sync owns) — see `_write_games`.
 #
-# Identity is (date, opposition), the same signal check_scorecard_duplicate
+# Identity is (date, opposition) first, the same signal check_scorecard_duplicate
 # uses: played_at is the strong half, the opposition tokens disambiguate a club
 # that played several matches on one day. A sheet game with no date, or none we
 # can read, or no opposition, cannot be matched confidently and is always
 # imported as new — guessing would either discard a real match or overwrite the
 # wrong one.
+#
+# THAT RULE ALONE LEFT 32 OF ONE CLUB'S MATCHES COUNTED TWICE, measured on the
+# live database after an overwrite import (ops/diagnostics/csv_import_unpaired.sql):
+# 19 were fixtures the OTHER club synced first, so they sat in that club's
+# season and the index — read off `v_effective_games.organisation_id` — never
+# saw them; 11 were opponents the two sources spell with no word in common
+# ("Rockingham Hornets Cricket Club" against "Hillman"); 2 were two-day matches
+# each source dates by a different day. So a sheet match the date-and-opponent
+# rule leaves unmatched gets a SECOND look through `match_pairing`, the
+# scorecard matcher the CricketStatz import already runs: three batters with
+# the same scores is not a coincidence whatever the opponent is called, and a
+# week's difference in the date is ordinary for a two-day game. A synced game
+# is a candidate there whether the club's own season holds it or the other
+# side of the fixture does.
 
 def _opp_tokens(*vals) -> set:
     text = " ".join((v or "").lower() for v in vals)
@@ -2869,18 +2893,37 @@ def _opp_tokens(*vals) -> set:
 
 
 async def _existing_game_index(db: AsyncSession, org_id: uuid.UUID) -> dict:
-    """played_at -> [ {id, source, tokens} ] for every game the club holds."""
+    """played_at -> [ {id, source, tokens, ...} ] for every game that is the club's.
+
+    Ours is the season's org OR either side of the fixture, the rule
+    `club_grades.club_game_sql` keeps everywhere else: a match between two
+    synced clubs is one `games` row owned by whoever synced it first, and a
+    club re-importing its own history has to be able to recognise the half of
+    its fixtures that live under the other club's season.
+
+    A manual game carries its pairing columns too, so an overwrite that
+    replaces a locked stand-in can carry the pair onto the replacement rather
+    than dropping it and bringing the synced copy back into the count.
+    """
     rows = (await db.execute(_t("""
         SELECT g.id::text AS id, g.played_at, g.source,
-               g.opp_club_name, g.home_team, g.away_team
+               g.opp_club_name, g.home_team, g.away_team,
+               pm.superseded_by_game_id::text AS paired_to,
+               pm.pair_prefers_import, pm.pairing_locked
         FROM v_effective_games g
-        WHERE g.organisation_id = :org AND g.played_at IS NOT NULL
+        LEFT JOIN manual_games pm ON g.source = 'manual' AND pm.id = g.id
+        WHERE (g.organisation_id = :org
+               OR g.home_org_id = :org OR g.away_org_id = :org)
+          AND g.played_at IS NOT NULL
     """), {"org": str(org_id)})).mappings().all()
     index: dict = {}
     for r in rows:
         index.setdefault(r["played_at"], []).append({
             "id": r["id"], "source": r["source"],
             "tokens": _opp_tokens(r["opp_club_name"], r["home_team"], r["away_team"]),
+            "paired_to": r["paired_to"],
+            "pair_prefers_import": bool(r["pair_prefers_import"]),
+            "pairing_locked": bool(r["pairing_locked"]),
         })
     return index
 
@@ -2906,8 +2949,99 @@ def _match_existing(index: dict, played_at: str, opp_vals: tuple, consumed: set)
             continue
         if toks & ex["tokens"]:
             consumed.add(ex["id"])
-            return {"id": ex["id"], "source": ex["source"]}
+            return {"id": ex["id"], "source": ex["source"], "matched_on": "date",
+                    "paired_to": ex.get("paired_to"),
+                    "pair_prefers_import": ex.get("pair_prefers_import", False),
+                    "pairing_locked": ex.get("pairing_locked", False)}
     return None
+
+
+def _sheet_signature(group: list, pmatch: dict) -> frozenset:
+    """(player_id, runs) for every batted innings on a sheet match whose
+    player already resolves to a record — the same shape `match_pairing` reads
+    off a scorecard. A player still to be created has no id to compare and is
+    left out, which only ever makes the match harder to pair, never wrong."""
+    sig: set = set()
+    for _row_num, raw in group:
+        pname = (raw.get("player_name") or "").strip()
+        m = pmatch.get(pname) or {}
+        pid = m.get("player_id")
+        if not pid or _parse_bool(raw.get("did_not_bat")):
+            continue
+        runs = _parse_int(raw.get("batting_runs"), nullable=True)
+        if runs is None:
+            continue
+        sig.add((str(pid), runs))
+    return frozenset(sig)
+
+
+async def _match_unmatched_by_scores(
+    db: AsyncSession, club: Organisation, by_game: dict, pmatch: dict,
+    existing_by_game: dict, consumed: set,
+) -> int:
+    """The second look: pair the sheet matches the date-and-opponent rule
+    left unmatched against the club's synced games on their scorecards.
+
+    Runs `match_pairing.assign` over the still-unmatched sheet matches and the
+    synced games nothing has claimed — the CricketStatz matcher's own rules,
+    not a second copy of them — so a two-day match dated a week apart, an
+    opponent the two sources spell differently, and a fixture the other club
+    synced first all resolve the way they already do for that import. Only
+    SYNCED games are candidates here: a manual duplicate is a re-import of the
+    same sheet, and the exact date-and-opponent rule is the right one for it.
+
+    Returns how many were matched this way, and writes them into
+    `existing_by_game` marked `matched_on: 'scores'`.
+    """
+    from app.services import match_pairing as mp
+
+    pending: list = []
+    for game_key, group in by_game.items():
+        if game_key in existing_by_game:
+            continue
+        first = group[0][1]
+        played_at = None
+        raw_date = (first.get("played_at") or "").strip()
+        if raw_date:
+            try:
+                played_at = date_cls.fromisoformat(raw_date)
+            except Exception:
+                played_at = None
+        sig = _sheet_signature(group, pmatch)
+        if played_at is None and not sig:
+            continue  # nothing to compare on either axis
+        pending.append((game_key, group, played_at, sig))
+    if not pending:
+        return 0
+
+    club_tokens = mp.team_tokens(club.name or "")
+    sheet_rows: list = []
+    for game_key, group, played_at, sig in pending:
+        first = group[0][1]
+        ours, opp = mp.split_sides(first.get("home_team") or "",
+                                   first.get("away_team") or "",
+                                   first.get("opposition") or "", club_tokens)
+        sheet_rows.append(mp.MatchRow(game_key, played_at, opp, sig, ours))
+
+    dates = [r.played_at for r in sheet_rows if r.played_at is not None]
+    from_day = to_day = None
+    if dates:
+        span = timedelta(days=mp.WINDOW_DAYS)
+        from_day, to_day = min(dates) - span, max(dates) + span
+    synced = [m for m in await mp.load_synced(
+                  db, club.id, club_tokens=club_tokens,
+                  from_day=from_day, to_day=to_day, exclude_twinned=True)
+              if m.id not in consumed]
+    if not synced:
+        return 0
+
+    matched = 0
+    for game_key, (syn_id, _prefer) in mp.assign(sheet_rows, synced).items():
+        existing_by_game[game_key] = {"id": syn_id, "source": "api",
+                                      "matched_on": "scores"}
+        consumed.add(syn_id)
+        matched += 1
+    return matched
 
 
 async def _resolve_games(
@@ -3064,6 +3198,9 @@ async def _resolve_games(
             dup_manual += 1
         else:
             dup_synced += 1
+    dup_scores = await _match_unmatched_by_scores(
+        db, club, by_game, pmatch, existing_by_game, consumed)
+    dup_synced += dup_scores
 
     warnings = []
     if unresolved:
@@ -3109,6 +3246,10 @@ async def _resolve_games(
             "total": dup_manual + dup_synced,
             "manual": dup_manual,
             "synced": dup_synced,
+            # The subset of `synced` the date-and-opponent rule missed and the
+            # scorecard matcher found — a two-day match dated a week apart, an
+            # opponent spelt differently, a fixture the other club synced first.
+            "matched_on_scores": dup_scores,
         },
         "_plan": {"by_game": by_game, "smatch": smatch, "gmatch": gmatch,
                   "pmatch": pmatch, "grade_pairs": {k: sorted(v) for k, v in grade_pairs.items()},
@@ -3337,25 +3478,41 @@ async def commit_manual_games(
                              .where(Season.id.in_(newly))
                              .values(import_authoritative=True))
 
-    # Surface a season we are now sourcing from the import that STILL holds
-    # synced matches the file did not cover — their scores drop out of the
-    # season totals (CA's summary is stepped aside), so say so rather than let
-    # it read as data quietly going missing.
+    # Say how much of a re-sourced season the file did NOT cover. Those synced
+    # matches still count — from Cricket Australia's own scorecards, since the
+    # season's totals are now built per match rather than from CA's summary —
+    # so this is information, not a warning that figures have gone missing.
+    # The one thing that genuinely drops out is a synced match CA holds no
+    # scorecard of ours for; that is named separately so it does not read as
+    # a fault in the import.
     warnings: list[str] = []
     if auth_ids:
-        uncovered = (await db.execute(_t("""
-            SELECT COUNT(*) FROM games g
+        uncovered, no_card = (await db.execute(_t("""
+            SELECT COUNT(*),
+                   COUNT(*) FILTER (WHERE NOT EXISTS (
+                       SELECT 1 FROM batting_innings bi
+                        JOIN players p ON p.id = bi.player_id
+                                      AND p.organisation_id = :org
+                       WHERE bi.game_id = g.id))
+              FROM games g
               JOIN grades gr ON gr.id = g.grade_id
              WHERE gr.season_id = ANY(CAST(:seasons AS UUID[]))
                AND NOT EXISTS (SELECT 1 FROM manual_games lk
                                 WHERE lk.superseded_by_game_id = g.id
-                                  AND lk.pairing_locked)
-        """), {"seasons": [str(s) for s in auth_ids]})).scalar() or 0
+                                  AND lk.pair_prefers_import)
+        """), {"seasons": [str(s) for s in auth_ids],
+                "org": str(club.id)})).one()
+        uncovered = uncovered or 0
+        no_card = no_card or 0
         if uncovered:
-            warnings.append(
-                f"{uncovered} Cricket Australia match(es) in the re-sourced season(s) "
-                "were not in your file. Their scores are no longer counted in those "
-                "seasons' totals — check the file holds every match for those seasons.")
+            msg = (f"{uncovered} Cricket Australia match(es) in the re-sourced "
+                   "season(s) were not in your file. They still count, from "
+                   "Cricket Australia's own scorecards.")
+            if no_card:
+                msg += (f" {no_card} of them carry no scorecard of your club's "
+                        "players, so they add nothing to the totals until one "
+                        "is synced or imported.")
+            warnings.append(msg)
 
     parts = [f"{games_new} games"]
     if overwritten:
