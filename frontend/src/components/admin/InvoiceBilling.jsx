@@ -218,4 +218,94 @@ export function InvoiceQuoteSummary({ quote }) {
   )
 }
 
+// The Super Admin's live draft of the invoice being built, laid out the way
+// the emailed one reads: who it goes to, one line per module, the bundle and
+// the code, GST, and when it is due. Every figure comes from the server's
+// plan_invoice, the same function the real invoice is raised from, so what is
+// previewed is what is sent. GST is shown at 10% because the invoice adds it;
+// Stripe works out the exact figure when the invoice is raised.
+export function InvoicePreview({ club, admin, quote, pricing, empty, error }) {
+  const exGst = quote ? Number(quote.total || 0) : 0
+  const gst = Math.round(exGst * 10) / 100
+  const addon = quote?.kind === 'addon'
+  return (
+    <div
+      className="min-w-0 rounded border pb-hairline bg-pb-surface2 p-4 self-start"
+      data-testid="invoice-preview"
+      aria-live="polite"
+      aria-busy={pricing ? 'true' : 'false'}
+    >
+      <div className="flex items-start justify-between gap-2 mb-3">
+        <div className="min-w-0">
+          <p className="font-display font-bold text-sm text-pb-text">Invoice</p>
+          <p className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase">
+            Draft · {addon ? 'modules added to the current year' : quote ? 'first subscription' : 'not raised yet'}
+          </p>
+        </div>
+        {pricing && <span className="font-mono text-[10px] text-pb-faint shrink-0">Updating…</span>}
+      </div>
+      <div className="mb-3">
+        <p className={LABEL}>Bill to</p>
+        <p className="text-[13px] text-pb-text">{club?.name}</p>
+        {admin ? (
+          <p className="text-[12px] text-pb-dim break-all">{admin.name}{admin.email ? ` · ${admin.email}` : ''}</p>
+        ) : (
+          <p className="text-[12px] text-pb-red">No Primary Club Admin with an email address to send it to.</p>
+        )}
+      </div>
+      {empty ? (
+        <p className="text-[12px] text-pb-dim py-3" data-testid="invoice-preview-empty">Pick a module to start the invoice.</p>
+      ) : error && !quote ? (
+        <p className="font-mono text-[11px] text-pb-red py-3">{error}</p>
+      ) : !quote ? (
+        <p className="text-[12px] text-pb-dim py-3">Working out the invoice…</p>
+      ) : (
+        <div className={`space-y-1 ${pricing ? 'opacity-60' : ''}`} data-testid="invoice-quote">
+          {quote.line_items.map((li) => (
+            <div key={li.key} className="flex items-center justify-between font-mono text-[11px] text-pb-dim gap-2" data-testid="invoice-line">
+              <span className="min-w-0">{stripPrefix(li.name)}</span>
+              <span className="shrink-0">
+                {addon && li.amount !== li.full_price && (
+                  <span className="text-pb-faint line-through mr-1">{money(li.full_price)}</span>
+                )}
+                {money(li.amount)}
+              </span>
+            </div>
+          ))}
+          {quote.discount > 0 && (
+            <div className="flex items-center justify-between font-mono text-[11px] text-emerald-400">
+              <span>Bundle discount</span>
+              <span>-{money(quote.discount)}</span>
+            </div>
+          )}
+          {quote.coupon && (
+            <div className="flex items-center justify-between font-mono text-[11px] text-emerald-400" data-testid="invoice-coupon-line">
+              <span className="min-w-0">{quote.coupon.display_name} ({quote.coupon.code})</span>
+              <span className="shrink-0">-{money(quote.coupon.amount_off)}</span>
+            </div>
+          )}
+          <div className="flex items-center justify-between font-mono text-[11px] text-pb-text pt-2 mt-1 border-t pb-hairline">
+            <span>Subtotal (ex GST)</span>
+            <span data-testid="invoice-total-ex">{money(exGst)}</span>
+          </div>
+          <div className="flex items-center justify-between font-mono text-[11px] text-pb-dim">
+            <span>GST 10%</span>
+            <span>{money(gst)}</span>
+          </div>
+          <div className="flex items-center justify-between font-mono text-[12px] text-pb-text font-semibold pt-1">
+            <span>Total</span>
+            <span>{money(exGst + gst)}</span>
+          </div>
+          <p className="text-[11px] text-pb-dim pt-2 leading-snug">
+            {addon
+              ? `Prorated to the renewal on ${fmtDate(quote.service_end_date)} (${quote.prorated?.days} of ${quote.prorated?.of_days} days), so the whole club renews together.`
+              : `Covers ${fmtDate(quote.service_start_date)} to ${fmtDate(quote.service_end_date)}. A trial still running is not cut short: the year starts when it ends.`}
+            {' '}Due by {fmtDue(quote.due_at)}. Stripe confirms the GST when the invoice is raised.
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export { fmtDue }

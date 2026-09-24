@@ -236,7 +236,10 @@ const moduleBox = (page, name) => page.locator('.pb-card', { hasText: name }).lo
     if (path === `/club-admin/super/clubs/${ORG}` && verb === 'PATCH') { st.offered = !!payload.invoice_billing_enabled; return json({ ...club, invoice_billing_enabled: st.offered }) }
     const base = `/club-admin/billing/super/clubs/${ORG}`
     if (path === `${base}/invoice-billing`) return json(ov())
-    if (path === `${base}/invoice-quote`) return json(planFor(payload.module_keys, payload.coupon_code))
+    if (path === `${base}/invoice-quote`) {
+      if (payload.coupon_code && payload.coupon_code.toUpperCase() !== 'TENOFF') return route.fulfill({ status: 422, contentType: 'application/json', body: JSON.stringify({ detail: "That code isn't valid" }) })
+      return json(planFor(payload.module_keys, payload.coupon_code))
+    }
     if (path === `${base}/invoices`) { st.method = 'invoice'; st.open = [OPEN_INVOICE]; return json({ invoice: OPEN_INVOICE, emailed: true, email_error: null }) }
     if (path === `${base}/renewal-invoice`) return json({ invoice: { ...OPEN_INVOICE, invoice_kind: 'renewal' }, emailed: true, email_error: null })
     if (path === `${base}/invoices/inv-row-1/void`) { st.open = []; return json({ invoice: { ...OPEN_INVOICE, status: 'void' } }) }
@@ -261,16 +264,44 @@ const moduleBox = (page, name) => page.locator('.pb-card', { hasText: name }).lo
   await page.waitForSelector('text=Raise an invoice', { timeout: 10000 }).catch(() => {})
   ck('then the invoicing tools appear', (await page.getByText('Raise an invoice', { exact: true }).count()) > 0)
   const modal = page.locator('div.pb-card', { hasText: 'Raise an invoice' }).last()
+  const lines = () => page.locator('[data-testid="invoice-line"]').count()
+  ck('the draft invoice is on screen before anything is picked', (await byTestId(page, 'invoice-preview').count()) === 1
+    && (await byTestId(page, 'invoice-preview-empty').count()) === 1)
+  ck('it is addressed to the Primary Club Admin', /Pat Primary.*pat@club\.test/.test(await text(byTestId(page, 'invoice-preview'))))
+  ck('the discount code box is there before a module is picked', (await byTestId(page, 'invoice-coupon').count()) === 1)
   await modal.locator('label', { hasText: 'BetterSelect' }).locator('input').check().catch(() => {})
+  await page.waitForTimeout(700)
+  const oneLine = await lines()
+  ck('ticking one module draws Core and that module', oneLine === 2, `${oneLine} lines`)
+  ck('with no bundle discount yet', !/Bundle discount/.test(await text(byTestId(page, 'invoice-quote'))))
   await modal.locator('label', { hasText: 'BetterSocials' }).locator('input').check().catch(() => {})
   await page.waitForTimeout(700)
+  ck('ticking a second updates the invoice live', (await lines()) === 3, `${await lines()} lines`)
   ck('it prices the invoice', /Bundle discount\s*-\$48\.00/.test(await text(byTestId(page, 'invoice-quote'))), await text(byTestId(page, 'invoice-quote')))
+  ck('and shows GST and the total', /GST 10%/.test(await text(byTestId(page, 'invoice-quote'))) && /Total/.test(await text(byTestId(page, 'invoice-quote'))))
+  const quotesSoFar = calls.filter((c) => c.path === `/club-admin/billing/super/clubs/${ORG}/invoice-quote`).length
+  ck('each pick asked the server to price it', quotesSoFar >= 2, `${quotesSoFar} quote calls`)
+
+  await byTestId(page, 'invoice-coupon').fill('WRONG').catch(() => {})
+  await page.getByRole('button', { name: 'APPLY' }).click().catch(() => {})
+  await page.waitForTimeout(900)
+  ck('a code the server refuses says why', /isn't valid/.test(await text(byTestId(page, 'invoice-coupon-error'))))
+  ck('and the invoice is still drawn without it', (await lines()) === 3 && (await byTestId(page, 'invoice-coupon-line').count()) === 0)
+  await page.getByRole('button', { name: 'REMOVE' }).click().catch(() => {})
+  await byTestId(page, 'invoice-coupon').fill('tenoff').catch(() => {})
+  await byTestId(page, 'invoice-coupon').press('Enter').catch(() => {})
+  await page.waitForTimeout(900)
+  const couponCall = calls.filter((c) => c.path === `/club-admin/billing/super/clubs/${ORG}/invoice-quote`).pop()
+  ck('a code is sent with the selection to be priced', couponCall?.payload?.coupon_code === 'tenoff', JSON.stringify(couponCall?.payload))
+  ck('and appears on the invoice as a discount', /TENOFF/.test(await text(byTestId(page, 'invoice-coupon-line'))), await text(byTestId(page, 'invoice-quote')))
+  ck('the total drops by it', /\$64\.90/.test(await text(byTestId(page, 'invoice-coupon-line'))), await text(byTestId(page, 'invoice-coupon-line')))
   ck('and says raising it moves the club to invoice billing', (await page.locator('text=Raising an invoice moves this club to invoice billing').count()) === 1)
   await page.getByRole('button', { name: /EMAIL INVOICE TO PAT PRIMARY/ }).click().catch(() => {})
   await page.waitForTimeout(800)
   const req = calls.find((c) => c.path === `/club-admin/billing/super/clubs/${ORG}/invoices`)
   ck('the Super Admin raises it for that club by id', req?.method === 'POST'
     && ['select', 'socials'].every((k) => req.payload.module_keys.includes(k)), JSON.stringify(req?.payload))
+  ck('the code goes with it', req?.payload?.coupon_code === 'tenoff', JSON.stringify(req?.payload))
   ck('the open invoice is listed with its pay link', (await page.getByRole('link', { name: 'PAY NOW' }).count()) === 1)
   await page.getByRole('button', { name: 'SEND RENEWAL INVOICE NOW' }).click().catch(() => {})
   await page.waitForTimeout(700)
