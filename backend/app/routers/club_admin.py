@@ -3625,6 +3625,14 @@ async def cancel_own_module(
     if not is_super:
         if not (m and m.club_id == club.id and m.role == "club_admin" and m.is_primary_admin):
             raise HTTPException(status_code=403, detail="Only the club's primary admin can cancel a subscription")
+        # A club on invoice billing had it arranged by BetterCricket, so a
+        # change to what it holds goes through us too (see billing.py's
+        # _require_super_for_invoicing).
+        if (club.billing_method or "card") == "invoice":
+            raise HTTPException(
+                status_code=403,
+                detail="Your club pays by invoice, which BetterCricket manages. Contact support@bettersports.com.au to cancel a module.",
+            )
 
     from app.auth.modules import account_plan_status, MODULE_CORE
     row = next((r for r in account_plan_status(club) if r["module"] == module_key), None)

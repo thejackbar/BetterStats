@@ -20,7 +20,10 @@ const stripPrefix = (name) => (name || '').replace(/^BetterCricket\s*—\s*/, ''
 const LABEL = 'font-mono text-[10px] tracking-wide2 text-pb-faint uppercase'
 const BTN = 'font-mono text-[10px] tracking-wide2 px-3 py-1.5 rounded border pb-hairline text-pb-text hover:bg-pb-surface2 disabled:opacity-50 shrink-0'
 
-export function BillingMethodCard({ overview, canEdit, busy, onChange }) {
+// `clubView` is the club's own Account page: invoicing is arranged by a Super
+// Admin, never chosen by the club, so there it is a statement of how the club
+// pays rather than a choice between the two.
+export function BillingMethodCard({ overview, canEdit, busy, onChange, clubView = false }) {
   if (!overview) return null
   const method = overview.billing_method
   const who = overview.primary_admin
@@ -46,6 +49,15 @@ export function BillingMethodCard({ overview, canEdit, busy, onChange }) {
   return (
     <div className="pb-card p-4" data-testid="billing-method">
       <p className={`${LABEL} mb-3`}>How your club pays</p>
+      {clubView ? (
+        <div data-testid="billing-method-status">
+          <p className="font-display font-bold text-sm text-pb-text">Pay by invoice</p>
+          <p className="text-[12px] text-pb-dim leading-snug mt-0.5">
+            BetterCricket manages your club's invoices. To add or cancel a module, or to go back to paying by card,
+            contact <a className="underline" href="mailto:support@bettersports.com.au">support@bettersports.com.au</a>.
+          </p>
+        </div>
+      ) : (
       <div className="grid gap-2 sm:grid-cols-2">
         {option('card', 'Pay by card', 'Check out through Stripe now. Renews automatically each year on the same card.')}
         {option(
@@ -55,7 +67,8 @@ export function BillingMethodCard({ overview, canEdit, busy, onChange }) {
           !overview.can_use_invoice,
         )}
       </div>
-      {!overview.can_use_invoice && (
+      )}
+      {!clubView && !overview.can_use_invoice && (
         <p className="text-[12px] text-pb-dim mt-2">
           Your club already pays by card through a Stripe subscription, so invoice billing can be chosen once that
           subscription has ended.

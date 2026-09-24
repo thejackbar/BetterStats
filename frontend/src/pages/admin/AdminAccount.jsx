@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import AdminLayout from '../../components/admin/AdminLayout'
 import { api } from '../../lib/api'
 import { moduleBrand } from '../../lib/moduleBrand'
-import { BillingMethodCard, InvoiceQuoteSummary, OpenInvoicesCard, fmtDue } from '../../components/admin/InvoiceBilling'
+import { BillingMethodCard, OpenInvoicesCard } from '../../components/admin/InvoiceBilling'
 
 // Phase 19 (docs/self-serve-trial-onboarding-plan.md) — the club's own
 // self-serve plan status page. A trial (any club admin) and a cancellation
@@ -79,7 +79,6 @@ export default function AdminAccount() {
   // Pay by invoice (migration 308) — services/invoice_billing.py's overview:
   // how the club pays, who invoices go to, the period held and what is open.
   const [invoiceOverview, setInvoiceOverview] = useState(null)
-  const [methodBusy, setMethodBusy] = useState(false)
   const [resendBusy, setResendBusy] = useState('')
 
   const load = () =>
@@ -164,7 +163,8 @@ export default function AdminAccount() {
     const param = searchParams.get('subscribe')
     if (!param) return
     if (!Array.isArray(plan?.modules) || !plan.modules.length) return  // wait for plan
-    const mayPick = plan.invoice_billing_enabled && plan.billing_method === 'invoice' ? plan.is_club_admin : plan.is_primary_admin
+    // A club on invoice billing picks nothing here: a Super Admin raises its invoices.
+    const mayPick = plan.invoice_billing_enabled && plan.billing_method === 'invoice' ? false : plan.is_primary_admin
     if (!mayPick) { setSubscribeApplied(true); return }
     const byModule = Object.fromEntries(plan.modules.map((r) => [r.module, r]))
     const next = new Set()
@@ -241,13 +241,12 @@ export default function AdminAccount() {
       .catch(() => {})
   }, [])
 
-  // Invoicing is offered to a club only once a Super Admin has switched it on
-  // in All Clubs. Until then the page is exactly the card flow it always was.
-  const invoiceOffered = !!plan?.invoice_billing_enabled
-  const invoiceMode = invoiceOffered && plan?.billing_method === 'invoice'
-  // Any club admin may ask for an invoice (it always goes to the primary);
-  // subscribing by card stays with the primary admin alone.
-  const canSelect = invoiceMode ? !!plan?.is_club_admin : !!plan?.is_primary_admin
+  // Invoicing is a Super Admin arrangement (All Clubs → Invoice this club): a
+  // club asks for it, and never chooses it or raises an invoice here. So a card
+  // club sees exactly the card flow it always did, and an invoice club sees how
+  // it pays and what it owes, with nothing to pick.
+  const invoiceMode = !!plan?.invoice_billing_enabled && plan?.billing_method === 'invoice'
+  const canSelect = invoiceMode ? false : !!plan?.is_primary_admin
   const primaryName = invoiceOverview?.primary_admin?.name || primaryAdminName
 
   const rows = plan?.modules || []
@@ -281,8 +280,9 @@ export default function AdminAccount() {
   const toggle = (row) => {
     if (!row.can_subscribe) return
     if (!canSelect) {
-      setBlockedMsg(
-        `Only your club's Primary Admin User can subscribe to modules. Please contact ${primaryAdminName || "your club's primary admin"}.`
+      setBlockedMsg(invoiceMode
+        ? 'Your club pays by invoice, which BetterCricket manages. Contact support@bettersports.com.au to add a module.'
+        : `Only your club's Primary Admin User can subscribe to modules. Please contact ${primaryAdminName || "your club's primary admin"}.`
       )
       return
     }
@@ -457,48 +457,6 @@ export default function AdminAccount() {
     }
   }
 
-  const changeBillingMethod = async (method) => {
-    if (method === plan?.billing_method) return
-    setMethodBusy(true)
-    setError('')
-    setMsg('')
-    try {
-      setInvoiceOverview(await api.billingSetMethod(method))
-      setSelected(new Set())
-      setQuote(null)
-      clearCoupon()
-      await load()
-      setMsg(method === 'invoice'
-        ? `Your club now pays by invoice. Pick the modules you want and we'll email the invoice to ${primaryName || 'your Primary Admin'}.`
-        : 'Your club now pays by card.')
-    } catch (e) {
-      setError(e.message || 'Could not change how your club pays')
-    } finally {
-      setMethodBusy(false)
-    }
-  }
-
-  const submitInvoice = async () => {
-    setCheckoutBusy(true)
-    setError('')
-    setMsg('')
-    try {
-      const res = await api.billingRequestInvoice([...selected], appliedCouponCode)
-      const inv = res.invoice
-      setMsg(res.emailed
-        ? `Invoice ${inv.invoice_number || ''} emailed to ${inv.sent_to_email}. It is due by ${fmtDue(inv.due_at)}.`
-        : `Invoice ${inv.invoice_number || ''} raised, but it could not be emailed (${res.email_error}). Pay it from "Invoices to pay" below.`)
-      setSelected(new Set())
-      setQuote(null)
-      clearCoupon()
-      await Promise.all([loadInvoiceOverview(), loadInvoices()])
-    } catch (e) {
-      setError(e.message || 'Could not raise the invoice')
-    } finally {
-      setCheckoutBusy(false)
-    }
-  }
-
   const resendInvoice = async (inv) => {
     setResendBusy(inv.id)
     setError('')
@@ -545,14 +503,9 @@ export default function AdminAccount() {
           // layout doesn't fit smaller screens).
           <div className={hasSummary ? 'grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start' : ''}>
             <div>
-              {plan.billing_checkout_enabled && invoiceOffered && invoiceOverview && (
+              {invoiceMode && invoiceOverview && (
                 <div className="mb-4">
-                  <BillingMethodCard
-                    overview={invoiceOverview}
-                    canEdit={!!plan.is_club_admin}
-                    busy={methodBusy}
-                    onChange={changeBillingMethod}
-                  />
+                  <BillingMethodCard overview={invoiceOverview} clubView />
                 </div>
               )}
               {invoiceOverview?.open_invoices?.length > 0 && (
@@ -573,8 +526,8 @@ export default function AdminAccount() {
                 // Never Trialed and Trial Expired all qualify. Keying on the
                 // status list here used to omit Trial Expired, so a lapsed-trial
                 // club saw no checkbox and couldn't subscribe.
-                const showCheckbox = row.can_subscribe
-                const showCancel = row.status === 'subscribed' && plan.is_primary_admin
+                const showCheckbox = row.can_subscribe && !invoiceMode
+                const showCancel = row.status === 'subscribed' && plan.is_primary_admin && !invoiceMode
                 const showStartTrial = row.status === 'never_trialed' && row.trial_eligible
                 const cancelling = cancelConfirm?.module === row.module
 
@@ -816,7 +769,7 @@ export default function AdminAccount() {
               <p className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-3">
                 {selected.size} module{selected.size === 1 ? '' : 's'} selected
               </p>
-                {plan.billing_checkout_enabled && (invoiceMode ? quote?.kind !== 'addon' : !plan.stripe_subscription_active) && (
+                {plan.billing_checkout_enabled && !plan.stripe_subscription_active && (
                   <div className="mb-3">
                     <div className="flex gap-2">
                       <input
@@ -852,9 +805,6 @@ export default function AdminAccount() {
                       </p>
                     )}
                   </div>
-                )}
-                {plan.billing_checkout_enabled && quote && quote.mode === 'invoice' && (
-                  <InvoiceQuoteSummary quote={quote} />
                 )}
                 {plan.billing_checkout_enabled && quote && quote.mode === 'new_subscription' && (
                   <div className="mb-3 space-y-1">
@@ -922,21 +872,6 @@ export default function AdminAccount() {
                     Online subscribing isn't connected yet — this is coming in a follow-up build.
                     In the meantime, contact the BetterCricket team directly to subscribe.
                   </p>
-                ) : invoiceMode && plan.billing_checkout_enabled ? (
-                  <div className="space-y-2">
-                    <button
-                      onClick={submitInvoice}
-                      disabled={checkoutBusy || !quote || !invoiceOverview?.primary_admin?.email}
-                      className="font-mono text-[10px] tracking-wide2 px-3 py-1.5 rounded font-semibold disabled:opacity-50"
-                      style={{ background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }}
-                    >
-                      {checkoutBusy ? 'RAISING INVOICE…' : `EMAIL INVOICE TO ${(primaryName || 'PRIMARY ADMIN').toUpperCase()}`}
-                    </button>
-                    <p className="text-[11px] text-pb-dim leading-snug">
-                      Nothing is charged now. The invoice has a link to pay it through Stripe by card or any other
-                      method offered there. Your modules are subscribed once it is paid.
-                    </p>
-                  </div>
                 ) : (
                   <button
                     onClick={submitSubscribe}

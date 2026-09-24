@@ -14253,6 +14253,13 @@ club from All Clubs.** Until then the club sees no invoicing option at all.
 - **THE CONSOLE PROVIDER IS NOT A SEND** (the sales-email rule): with no email
   provider the invoice is raised, `email_error` says it was not emailed, and the
   Account page offers the pay link instead.
+- **INVOICING IS A SUPER ADMIN ARRANGEMENT, NEVER A CLUB'S CHOICE (v9.90.1).** A
+  club asks and BetterCricket sets it up. `_require_super_for_invoicing` refuses
+  the club-side `PUT /billing-method` and `POST /invoices/request` for every club
+  admin, primary included, and `cancel_own_module` refuses an invoice club. The
+  Account page shows an invoice club its status and open invoices (pay, PDF,
+  resend) with no module picker. A card club, the default, is untouched: it still
+  picks modules and checks out by card itself.
 - **Card checkout refuses an invoice club (409)**, and a club on a live card
   subscription cannot switch to invoice, so nobody is billed twice.
 - **Deploy**: add `invoice.voided` and `invoice.marked_uncollectible` to the

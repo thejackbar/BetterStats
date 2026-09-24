@@ -2264,17 +2264,10 @@ export const api = {
     }),
   billingListInvoices: () => request('/club-admin/billing/invoices'),
   // Pay by invoice (migration 308) — routers/billing.py + services/invoice_billing.py.
-  // Any club admin may switch the club to invoice billing and ask for an
-  // invoice; it is always emailed to the Primary Club Admin. The super* twins
-  // do the same for any club by id.
+  // Invoicing is arranged by a Super Admin (the super* calls, by club id); a
+  // club reads its own overview and can have an open invoice re-emailed, but
+  // never switches to invoicing or raises one.
   billingInvoiceOverview: () => request('/club-admin/billing/invoice-billing'),
-  billingSetMethod: (method) =>
-    request('/club-admin/billing/billing-method', { method: 'PUT', body: JSON.stringify({ method }) }),
-  billingRequestInvoice: (moduleKeys, couponCode) =>
-    request('/club-admin/billing/invoices/request', {
-      method: 'POST',
-      body: JSON.stringify({ module_keys: moduleKeys, coupon_code: couponCode || undefined }),
-    }),
   billingResendInvoice: (invoiceId) =>
     request(`/club-admin/billing/invoices/${invoiceId}/resend`, { method: 'POST' }),
   superInvoiceOverview: (orgId) => request(`/club-admin/billing/super/clubs/${orgId}/invoice-billing`),

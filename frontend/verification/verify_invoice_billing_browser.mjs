@@ -138,63 +138,39 @@ const moduleBox = (page, name) => page.locator('.pb-card', { hasText: name }).lo
 }
 
 {
-  console.log('\nA club admin who is not the primary moves the club to invoice billing')
-  const { page, ctx, errors, calls, state } = await openAccount({ primary: false })
+  console.log('\nA club a Super Admin has offered invoicing to, still paying by card')
+  const { page, ctx, errors, calls } = await openAccount({ primary: true, offered: true, method: 'card' })
+  ck('sees no invoicing option — only a Super Admin can put a club on it',
+    (await byTestId(page, 'billing-method').count()) === 0 && (await page.locator('text=Pay by invoice').count()) === 0)
+  await moduleBox(page, 'BetterSelect').check().catch(() => {})
+  await page.waitForTimeout(700)
+  ck('the Primary Admin still gets the ordinary card checkout',
+    (await page.getByRole('button', { name: /PROCEED TO SECURE CHECKOUT/ }).count()) === 1)
+  ck('and nothing asks to switch how the club pays', !calls.some((c) => c.path === '/club-admin/billing/billing-method'))
+  ck('no page errors', errors.length === 0, errors.join(' | '))
+  await ctx.close()
+}
+
+{
+  console.log('\nA club BetterCricket has put on invoice billing')
+  const { page, ctx, errors, calls, state } = await openAccount({ primary: true, method: 'invoice' })
+  state.open = [OPEN_INVOICE]
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForSelector('[data-testid="open-invoices"]', { timeout: 20000 }).catch(() => {})
+  await page.waitForTimeout(600)
   const card = byTestId(page, 'billing-method')
-  ck('the page says how the club pays', (await card.count()) === 1)
+  ck('the page says the club pays by invoice', (await card.count()) === 1 && (await text(card)).includes('Pay by invoice'), await text(card))
+  ck('it is a statement, not a choice (no radio buttons)', (await card.locator('input[type="radio"]').count()) === 0)
+  ck('it says BetterCricket manages it and how to ask for a change',
+    (await text(card)).includes('BetterCricket manages') && (await text(card)).includes('support@bettersports.com.au'), await text(card))
   ck('it says who invoices go to', (await text(card)).includes('Pat Primary'), await text(card))
-
-  await moduleBox(page, 'BetterSelect').check().catch(() => {})
-  ck('on card billing a non-primary admin still cannot subscribe',
-    (await page.locator('text=Only your club\'s Primary Admin User can subscribe').count()) === 1)
-
-  const radio = card.locator('input[type="radio"]').nth(1)
-  // A click, not check(): the radio is controlled by the server's answer, so it
-  // only flips after the PUT round trip, which check() does not wait for.
-  if (await radio.count()) await radio.click()
-  await page.waitForTimeout(700)
-  const put = calls.find((c) => c.path === '/club-admin/billing/billing-method')
-  ck('choosing "Pay by invoice" sends exactly that', put?.method === 'PUT' && put?.payload?.method === 'invoice', JSON.stringify(put))
-  ck('and the screen says what happens next', (await page.locator('text=now pays by invoice').count()) > 0)
-
-  console.log('\nPicking modules prices the invoice')
-  await moduleBox(page, 'BetterSelect').check().catch(() => {})
-  await moduleBox(page, 'BetterSocials').check().catch(() => {})
-  await moduleBox(page, 'BetterIQ').check().catch(() => {})
-  await page.waitForTimeout(800)
-  const q = byTestId(page, 'invoice-quote')
-  const qt = await text(q)
-  ck('a non-primary admin CAN pick modules once the club pays by invoice', (await q.count()) === 1, qt)
-  ck('Core is on the invoice', qt.includes('BetterStats'))
-  ck('the bundle discount shows', /Bundle discount\s*-\$97\.00/.test(qt), qt)
-  ck('the total is ex GST and says so', /plus GST\s*\$849\.00/i.test(qt), qt)
-  ck('it says when it is due', /Due by 3 Oct 2026/.test(qt), qt)
-  const quoteCall = calls.filter((c) => c.path === '/club-admin/billing/quote').at(-1)
-  ck('the quote asked for exactly the ticked modules (Core added server-side)',
-    JSON.stringify([...(quoteCall?.payload?.module_keys || [])].sort()) === JSON.stringify(['core', 'iq', 'select', 'socials'].filter((k) => quoteCall?.payload?.module_keys?.includes(k)).sort())
-    && ['select', 'socials', 'iq'].every((k) => quoteCall?.payload?.module_keys?.includes(k)), JSON.stringify(quoteCall?.payload))
-
-  await fillIn(page.getByPlaceholder('Have a discount code?'), 'tenoff')
-  await press(page.getByRole('button', { name: 'APPLY' }))
-  await page.waitForTimeout(700)
-  const qt2 = await text(byTestId(page, 'invoice-quote'))
-  ck('a code comes off after the bundle', /Ten percent \(TENOFF\)\s*-\$84\.90/.test(qt2), qt2)
-
-  const btn = page.getByRole('button', { name: /EMAIL INVOICE TO PAT PRIMARY/ })
-  ck('the button names who the invoice goes to', (await btn.count()) === 1)
-  ck('nothing has been raised yet', !calls.some((c) => c.path === '/club-admin/billing/invoices/request'))
-  await press(btn)
-  await page.waitForTimeout(900)
-  const req = calls.find((c) => c.path === '/club-admin/billing/invoices/request')
-  ck('pressing it raises the invoice with the modules and the code',
-    req?.method === 'POST' && ['select', 'socials', 'iq'].every((k) => req.payload.module_keys.includes(k))
-    && req.payload.coupon_code === 'tenoff', JSON.stringify(req?.payload))
-  ck('and never goes near the card checkout', !calls.some((c) => c.path === '/club-admin/billing/checkout-session'))
-  ck('the screen says where it went and when it is due',
-    (await page.locator('text=emailed to pat@club.test').count()) > 0 && (await page.locator('text=due by 3 Oct 2026').count()) > 0)
+  ck('even the Primary Admin gets no module checkboxes to pick from',
+    (await page.locator('main .pb-card input[type="checkbox"]').count()) === 0)
+  ck('and no CANCEL on a module', (await page.getByRole('button', { name: 'CANCEL' }).count()) === 0)
+  ck('there is no button to raise an invoice', (await page.getByRole('button', { name: /EMAIL INVOICE/ }).count()) === 0)
 
   const open = byTestId(page, 'open-invoices')
-  ck('the invoice is listed to pay', (await open.count()) === 1 && (await text(open)).includes('BC-1042'), await text(open))
+  ck('an invoice to pay is listed', (await open.count()) === 1 && (await text(open)).includes('BC-1042'), await text(open))
   const pay = open.getByRole('link', { name: 'PAY NOW' })
   const payHref = (await pay.count()) ? await pay.getAttribute('href').catch(() => '') : ''
   ck('with a PAY NOW link to the invoice\'s pay page', payHref === OPEN_INVOICE.pay_url, payHref)
@@ -203,7 +179,9 @@ const moduleBox = (page, name) => page.locator('.pb-card', { hasText: name }).lo
   ck('it shows the GST-inclusive total and the due date', /\$602\.80 incl\. GST/.test(await text(open)) && /Due by 3 Oct 2026/.test(await text(open)))
   await press(open.getByRole('button', { name: 'EMAIL IT AGAIN' }))
   await page.waitForTimeout(600)
-  ck('resending posts to that invoice', calls.some((c) => c.path === '/club-admin/billing/invoices/inv-row-1/resend' && c.method === 'POST'))
+  ck('the club can still have it emailed again', calls.some((c) => c.path === '/club-admin/billing/invoices/inv-row-1/resend' && c.method === 'POST'))
+  ck('nothing on the page raised an invoice or changed how the club pays',
+    !calls.some((c) => c.path === '/club-admin/billing/invoices/request' || c.path === '/club-admin/billing/billing-method'))
   ck('no page errors', errors.length === 0, errors.join(' | '))
   await ctx.close()
 }

@@ -289,19 +289,37 @@ async def main() -> int:
         except ib.InvoiceBillingError as e:
             check("an unknown code is refused", e.status == 422, str(e))
 
-        print("\n── Asking for it, as a club admin who is not the primary ─────")
+        print("\n── Only a Super Admin raises it, never the club ──────────────")
         from app.routers import billing as billing_router
         body = billing_router.InvoiceRequestIn(module_keys=["select", "socials"], coupon_code="TENOFF")
-        try:
-            await billing_router.request_invoice(body, current_user=member, club=org, db=db)
-            check("a club member (not an admin) cannot ask for an invoice", False, "allowed")
-        except Exception as e:
-            check("a club member (not an admin) cannot ask for an invoice", getattr(e, "status_code", None) == 403, str(e))
-        res = await billing_router.request_invoice(body, current_user=second, club=org, db=db)
+        n_before = len(fake.created)
+        for label, who in (("a club member", member), ("a non-primary club admin", second),
+                           ("even the Primary Club Admin", primary)):
+            try:
+                await billing_router.request_invoice(body, current_user=who, club=org, db=db)
+                check(f"{label} cannot raise an invoice", False, "allowed")
+            except Exception as e:
+                check(f"{label} cannot raise an invoice", getattr(e, "status_code", None) == 403, str(e))
+            try:
+                await billing_router.set_billing_method(
+                    billing_router.BillingMethodIn(method="card"), current_user=who, club=org, db=db)
+                check(f"{label} cannot change how the club pays", False, "allowed")
+            except Exception as e:
+                check(f"{label} cannot change how the club pays", getattr(e, "status_code", None) == 403, str(e))
+        check("and none of those refusals reached Stripe", len(fake.created) == n_before)
+        org = await fresh(db, org_id)
+        check("the club is still on invoice billing after all that", org.billing_method == "invoice", org.billing_method)
+        early_sa = User(id=uuid.uuid4(), username=f"super-{uuid.uuid4().hex[:4]}", email="early-sa@better.test")
+        db.add(early_sa)
+        await db.flush()
+        db.add(ClubMembership(club_id=org_id, user_id=early_sa.id, role="super_admin"))
+        await db.commit()
+        org = await fresh(db, org_id)
+        res = await billing_router.super_request_invoice(str(org_id), body, current_user=early_sa, db=db)
         first_id = res["invoice"]["id"]
         created = fake.created[-1]
-        check("a non-primary club admin can ask for one", res["invoice"]["status"] == "open", str(res))
-        check("the invoice is emailed to the PRIMARY club admin, not whoever asked",
+        check("a Super Admin raises it from All Clubs", res["invoice"]["status"] == "open", str(res))
+        check("the invoice is emailed to the PRIMARY club admin, not whoever raised it",
               provider.sent and provider.sent[-1].to_email == "primary@club.test",
               provider.sent[-1].to_email if provider.sent else "nothing sent")
         msg = provider.sent[-1]
@@ -328,8 +346,8 @@ async def main() -> int:
               status_of(org, "select").status == "trial", status_of(org, "select").status)
 
         print("\n── Changing their mind replaces the invoice ──────────────────")
-        res2 = await billing_router.request_invoice(
-            billing_router.InvoiceRequestIn(module_keys=["select", "socials", "iq"]), current_user=primary, club=org, db=db)
+        res2 = await billing_router.super_request_invoice(
+            str(org_id), billing_router.InvoiceRequestIn(module_keys=["select", "socials", "iq"]), current_user=early_sa, db=db)
         old = await db.get(BillingInvoice, uuid.UUID(first_id), populate_existing=True)
         check("the first invoice is voided so it can never be paid as well", old.status == "void" and "in_1" in fake.voided)
         redemption = await db.get(DiscountCouponRedemption, redemption.id, populate_existing=True)
@@ -371,6 +389,17 @@ async def main() -> int:
         await sb.handle_invoice_paid(db, inv)
         org = await fresh(db, org_id)
         check("replaying the webhook changes nothing", status_of(org, "select").renewal_date == want_renewal)
+        from app.routers import club_admin as club_admin_router
+        try:
+            await club_admin_router.cancel_own_module(
+                "select", club_admin_router.ModuleCancelIn(confirm="confirm"),
+                current_user=primary, club=org, db=db)
+            check("an invoice club's Primary Admin cannot cancel a module themselves", False, "cancelled")
+        except Exception as e:
+            check("an invoice club's Primary Admin cannot cancel a module themselves",
+                  getattr(e, "status_code", None) == 403, str(e))
+        org = await fresh(db, org_id)
+        check("so it is still subscribed", status_of(org, "select").status == "active")
 
         print("\n── Adding a module part way through the year ──────────────────")
         org = await fresh(db, org_id)

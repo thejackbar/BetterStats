@@ -591,6 +591,22 @@ async def _resend(db, club, invoice_id: str) -> dict:
     return {**result, "invoice": invoice_billing.invoice_out(row)}
 
 
+async def _require_super_for_invoicing(db, current_user, club) -> None:
+    """Invoicing is a Super Admin arrangement, never a club's own choice: a club
+    ASKS to be invoiced and BetterCricket sets it up. So switching how a club
+    pays and raising an invoice are refused for club admins, whatever the
+    club's settings say. A Super Admin acting as the club gets through here;
+    the All Clubs modal (the /super/clubs/{org_id}/... routes) is the normal
+    place to do it. A club admin can still see its invoices, pay them and have
+    one re-emailed — that changes nothing about how the club is billed."""
+    is_super = await _require_club_admin_or_super(db, current_user, club)
+    if not is_super:
+        raise HTTPException(
+            status_code=403,
+            detail="Invoicing is arranged by BetterCricket. Contact support@bettersports.com.au to change how your club pays.",
+        )
+
+
 @router.get("/invoice-billing")
 async def get_invoice_billing(
     club: Organisation = Depends(get_current_club),
@@ -606,7 +622,7 @@ async def set_billing_method(
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
-    await _require_club_admin_or_super(db, current_user, club)
+    await _require_super_for_invoicing(db, current_user, club)
     await _invoice_call(invoice_billing.set_billing_method(db, club, body.method, user=current_user))
     return await invoice_billing.overview(db, club)
 
@@ -618,13 +634,12 @@ async def request_invoice(
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
-    is_super = await _require_club_admin_or_super(db, current_user, club)
+    await _require_super_for_invoicing(db, current_user, club)
     if not club.invoice_billing_enabled:
         raise HTTPException(status_code=403, detail="Invoicing isn't available for this club.")
     if (club.billing_method or invoice_billing.METHOD_CARD) != invoice_billing.METHOD_INVOICE:
         raise HTTPException(status_code=409, detail="Switch the club to invoice billing first.")
-    return await _request_invoice(db, club, body, current_user,
-                                  applied_via="super_admin" if is_super else "self_serve")
+    return await _request_invoice(db, club, body, current_user, applied_via="super_admin")
 
 
 @router.post("/invoices/{invoice_id}/resend")
