@@ -54,6 +54,14 @@ no filter should be able to do. Diagnosed on the live database
   import's own audit rows — never a game somebody typed in, and only in a
   re-sourced season. Dry run by default. **Run it on the box after this
   deploys**, for the 32 already counted twice.
+- **AFTER THE FACT, A PAIR NEEDS A SHARED SCORE (v9.90.4).** The live dry run
+  proposed pairing an imported Pinjarra match to a synced "Pinjarra Junior
+  Cricket Club" fixture eight days later with 0 shared scores, through the
+  matcher's same-club-no-card rule. Every imported match here carries the
+  sheet's own card, so a zero-score pair can only be a cardless synced game,
+  which in a re-sourced season is usually one of the junior fixtures the
+  archive never tracked. The script now holds those back and prints them under
+  "held back, check by hand". The live matcher is unchanged.
 - **THE COMMIT'S WARNING SAID THE OPPOSITE OF WHAT IS NOW TRUE.** It warned that
   uncovered matches "are no longer counted"; they are, and it says so, naming
   separately the ones that carry no scorecard of ours and so add nothing.

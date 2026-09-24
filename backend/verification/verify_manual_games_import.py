@@ -1571,7 +1571,12 @@ async def main() -> None:
         LATE = (
             HAWKS_ONLY
             + _sl("LATE", "2011-02-05", "Kestrels", ("Held, Harry", 22), ("Craig Barlow", 8))
+            # A senior match the archive holds and CA does not, with a junior
+            # fixture against the same club's juniors synced eight days later
+            # carrying no scorecard of ours: the reported Pinjarra shape.
+            + _sl("PINJ", "2011-02-12", "Pinjarra", ("Craig Barlow", 17))
         )
+        PINJ_JR_ID = uuid.uuid4()
         async with Session() as session:
             await reset(session); await seed(session)
             session.add(Game(id=HAWKS_ID, grade_id=G_HELD,
@@ -1588,14 +1593,17 @@ async def main() -> None:
             out = await commit_manual_games(
                 req=GameResolveRequest(token=prev["token"], duplicate_mode="overwrite"),
                 current_user=u, club=c, db=session)
-            check("the import supersedes Hawks and brings Kestrels in as new",
-                  out.get("games_superseded") == 1 and out.get("games_created") == 1, str(out))
+            check("the import supersedes Hawks and brings Kestrels and Pinjarra in as new",
+                  out.get("games_superseded") == 1 and out.get("games_created") == 2, str(out))
             # now the sync lands the Kestrels twin, dated two days later
             session.add(Game(id=KESTRELS_ID, grade_id=G_HELD,
                              played_at=date(2011, 2, 7), opp_club_name="Kestrels"))
             await session.flush()
             session.add(BattingInnings(game_id=KESTRELS_ID, player_id=P_HELD, innings_number=1, runs=22))
             session.add(BattingInnings(game_id=KESTRELS_ID, player_id=P_FUZZY, innings_number=1, runs=8))
+            session.add(Game(id=PINJ_JR_ID, grade_id=G_HELD,
+                             played_at=date(2011, 2, 20),
+                             opp_club_name="Pinjarra Junior Cricket Club"))
             await session.commit()
         async with Session() as session:
             m, r, _w = await totals_for(session, P_HELD)
@@ -1609,6 +1617,12 @@ async def main() -> None:
                       str(res))
                 check("naming the two shared scores behind the pair",
                       res["pairs"][0]["shared_scores"] == 2, str(res))
+                held = res.get("held") or []
+                check("a cardless junior fixture of the same club days later is held back, "
+                      "never paired (the reported Pinjarra Junior case)",
+                      [h["game_id"] for h in held] == [str(PINJ_JR_ID)]
+                      and all(p["game_id"] != str(PINJ_JR_ID) for p in res["pairs"]),
+                      str(res))
             async with Session() as session:
                 paired = (await session.execute(text(
                     "SELECT superseded_by_game_id FROM manual_games "
@@ -1627,10 +1641,16 @@ async def main() -> None:
                 m, r, _w = await totals_for(session, P_HELD)
                 check("and the match is counted once again",
                       m == 3 and r == 20 + 40 + 22, f"{m}/{r}")
+                pj = (await session.execute(text(
+                    "SELECT superseded_by_game_id FROM manual_games "
+                    "WHERE organisation_id = :o AND opposition = 'Pinjarra'"),
+                    {"o": str(ORG)})).scalar()
+                check("apply leaves the held-back Pinjarra match unpaired", pj is None, str(pj))
             async with Session() as session:
                 res = await repair_org(session, ORG, apply=True)
-                check("a second run has nothing left to pair",
-                      res["candidates"] == 0 and res["paired"] == 0, str(res))
+                check("a second run pairs nothing more, and still holds Pinjarra back",
+                      res["candidates"] == 1 and res["paired"] == 0
+                      and len(res.get("held") or []) == 1, str(res))
         else:  # pragma: no cover - control run only
             check("the repair script is available", False, "; ".join(MISSING))
 

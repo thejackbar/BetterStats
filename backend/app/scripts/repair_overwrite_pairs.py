@@ -88,7 +88,7 @@ async def repair_org(db, org_id, *, apply: bool) -> dict:
         text(mp._CLUB_NAME_SQL), {"org": org})).scalar() or "")
     rows = (await db.execute(text(_CANDIDATES_SQL), {"org": org})).mappings().all()
     if not rows:
-        return {"candidates": 0, "paired": 0, "pairs": []}
+        return {"candidates": 0, "paired": 0, "pairs": [], "held": []}
     cards = await mp._cards(db, mp._IMPORTED_CARD_SQL, {"ids": [r["id"] for r in rows]})
     imported: list[mp.MatchRow] = []
     by_id: dict = {}
@@ -106,22 +106,34 @@ async def repair_org(db, org_id, *, apply: bool) -> dict:
                                   from_day=from_day, to_day=to_day,
                                   exclude_twinned=True)
     syn_by_id = {m.id: m for m in synced}
-    pairs = []
+    pairs, held = [], []
     for mg_id, (game_id, _prefer) in mp.assign(imported, synced).items():
         imp, syn, r = next(m for m in imported if m.id == mg_id), syn_by_id[game_id], by_id[mg_id]
-        pairs.append({
+        pair = {
             "manual_game_id": mg_id, "game_id": game_id,
             "season": r["season_name"],
             "import_date": imp.played_at, "synced_date": syn.played_at,
             "import_opp": imp.opposition, "synced_opp": syn.opposition,
             "shared_scores": len(imp.signature & syn.signature),
-        })
+        }
+        # AFTER THE FACT, A PAIR NEEDS A SHARED SCORE. Every imported match
+        # here carries the sheet's own card, so a pair found on the date and
+        # the club alone can only have come from a synced game with no card —
+        # which, in a re-sourced season, is typically one of the junior
+        # fixtures the archive never tracked ("Pinjarra" agreeing with
+        # "Pinjarra Junior Cricket Club" eight days apart). Pairing it would
+        # step a real match aside. Reported for a person to look at, never
+        # written.
+        if pair["shared_scores"] == 0:
+            held.append(pair)
+            continue
+        pairs.append(pair)
         if apply:
             await db.execute(text(_PAIR_SQL),
                              {"game": game_id, "mg": mg_id, "org": org})
     if apply:
         await db.commit()
-    return {"candidates": len(rows), "paired": len(pairs), "pairs": pairs}
+    return {"candidates": len(rows), "paired": len(pairs), "pairs": pairs, "held": held}
 
 
 async def main() -> None:
@@ -154,6 +166,11 @@ async def main() -> None:
             print(f"      {p['season']}: import {p['import_date']} v {p['import_opp'] or '?'}"
                   f"  <->  synced {p['synced_date']} v {p['synced_opp'] or '?'}"
                   f"  ({p['shared_scores']} shared scores)")
+        if res.get("held"):
+            print(f"    held back, no shared score — NOT paired, check by hand:")
+            for p in sorted(res["held"], key=lambda x: (x["season"], str(x["import_date"]))):
+                print(f"      {p['season']}: import {p['import_date']} v {p['import_opp'] or '?'}"
+                      f"  ?  synced {p['synced_date']} v {p['synced_opp'] or '?'}")
 
 
 if __name__ == "__main__":
