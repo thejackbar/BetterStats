@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../lib/api'
-import { BillingMethodCard, InvoiceQuoteSummary, OpenInvoicesCard, fmtDue } from './InvoiceBilling'
+import { BillingMethodCard, InvoicePreview, OpenInvoicesCard, fmtDue } from './InvoiceBilling'
 
 // Super Admin, on a club's behalf (migration 308): switch how the club pays,
 // raise an invoice for the modules it wants (bundle and code applied, emailed
@@ -18,18 +18,35 @@ export default function ClubInvoiceBillingModal({ club, onClose }) {
   const [appliedCode, setAppliedCode] = useState('')
   const [quote, setQuote] = useState(null)
   const [quoteError, setQuoteError] = useState('')
+  const [codeError, setCodeError] = useState('')
+  const [pricing, setPricing] = useState(false)
 
   const load = () =>
     api.superInvoiceOverview(club.id).then(setData).catch((e) => setError(e.message || 'Could not load billing'))
   useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // The invoice is priced LIVE as modules are ticked: every change asks the
+  // server for the same plan_invoice the real invoice is built from, so the
+  // preview is the invoice, not an estimate of it. A code the server refuses
+  // is reported on its own line and the preview is re-priced without it, so a
+  // mistyped code never blanks the rest of the invoice.
   useEffect(() => {
-    if (selected.size === 0) { setQuote(null); setQuoteError(''); return }
+    if (selected.size === 0) { setQuote(null); setQuoteError(''); setCodeError(''); setPricing(false); return }
     let cancelled = false
-    setQuoteError('')
-    api.superInvoiceQuote(club.id, [...selected], appliedCode)
-      .then((q) => { if (!cancelled) setQuote(q) })
-      .catch((e) => { if (!cancelled) { setQuote(null); setQuoteError(e.message || 'Could not price this') } })
+    setPricing(true)
+    const keys = [...selected]
+    const priced = (q, codeErr = '') => { if (!cancelled) { setQuote(q); setQuoteError(''); setCodeError(codeErr); setPricing(false) } }
+    const failed = (e) => { if (!cancelled) { setQuote(null); setQuoteError(e.message || 'Could not price this'); setPricing(false) } }
+    api.superInvoiceQuote(club.id, keys, appliedCode)
+      .then((q) => priced(q))
+      .catch((e) => {
+        if (cancelled) return
+        if (!appliedCode) return failed(e)
+        const why = e.message || 'That code cannot be used here'
+        api.superInvoiceQuote(club.id, keys, '')
+          .then((q) => priced(q, why))
+          .catch(failed)
+      })
     return () => { cancelled = true }
   }, [selected, appliedCode, club.id])
 
@@ -69,7 +86,7 @@ export default function ClubInvoiceBillingModal({ club, onClose }) {
   }
 
   const raise = () => run('raise', async () => {
-    const res = await api.superRequestInvoice(club.id, [...selected], appliedCode)
+    const res = await api.superRequestInvoice(club.id, [...selected], quote?.coupon ? appliedCode : '')
     reported(res)
     setSelected(new Set())
     setCode('')
@@ -109,7 +126,7 @@ export default function ClubInvoiceBillingModal({ club, onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-4 overflow-y-auto" onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} className="pb-card w-full max-w-2xl bg-pb-surface mt-10 mb-10 flex flex-col">
+      <div onClick={(e) => e.stopPropagation()} className="pb-card w-full max-w-4xl bg-pb-surface mt-10 mb-10 flex flex-col">
         <div className="p-5 pb-3 flex items-center justify-between gap-3">
           <h2 className="font-display font-bold text-lg text-pb-text min-w-0 truncate">{club.name} — invoicing</h2>
           <button onClick={onClose} className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text shrink-0">Close</button>
@@ -164,51 +181,74 @@ export default function ClubInvoiceBillingModal({ club, onClose }) {
                 {!modules.length ? (
                   <p className="text-[12px] text-pb-dim">Every module is already subscribed.</p>
                 ) : (
-                  <div className="grid gap-1 sm:grid-cols-2 mb-3">
-                    {modules.map((m) => (
-                      <label key={m.module} className="flex items-center gap-2 text-[13px] text-pb-text cursor-pointer">
-                        <input type="checkbox" checked={selected.has(m.module)} onChange={() => toggle(m.module)} />
-                        <span className="min-w-0 truncate">{m.name}</span>
-                        <span className="font-mono text-[10px] text-pb-dim uppercase">{m.status.replace('_', ' ')}</span>
-                      </label>
-                    ))}
-                  </div>
-                )}
-                {selected.size > 0 && (
-                  <>
-                    {quote?.kind !== 'addon' && (
-                      <div className="flex gap-2 mb-3">
+                  <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
+                    <div className="min-w-0">
+                      <p className="text-[12px] text-pb-dim mb-2">Pick the modules to invoice. The invoice beside updates as you go.</p>
+                      <div className="grid gap-1 mb-4">
+                        {modules.map((m) => (
+                          <label key={m.module} className="flex items-center gap-2 text-[13px] text-pb-text cursor-pointer">
+                            <input type="checkbox" checked={selected.has(m.module)} onChange={() => toggle(m.module)} />
+                            <span className="min-w-0 truncate">{m.name}</span>
+                            <span className="font-mono text-[10px] text-pb-dim uppercase">{m.status.replace('_', ' ')}</span>
+                          </label>
+                        ))}
+                      </div>
+                      <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1" htmlFor="invoice-coupon">Discount code</label>
+                      <div className="flex gap-2">
                         <input
+                          id="invoice-coupon"
+                          data-testid="invoice-coupon"
                           value={code}
+                          disabled={!!appliedCode || quote?.kind === 'addon'}
                           onChange={(e) => setCode(e.target.value)}
-                          placeholder="Discount code (optional)"
-                          className="flex-1 min-w-0 bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-pb-text text-[12px] font-mono focus:outline-none focus:border-pb-accent"
+                          onKeyDown={(e) => { if (e.key === 'Enter' && code.trim() && !appliedCode) { e.preventDefault(); setAppliedCode(code.trim()) } }}
+                          placeholder="Optional"
+                          className="flex-1 min-w-0 bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-pb-text text-[12px] font-mono uppercase focus:outline-none focus:border-pb-accent disabled:opacity-60"
                         />
                         <button
                           type="button"
-                          onClick={() => setAppliedCode(appliedCode ? '' : code.trim())}
-                          disabled={!appliedCode && !code.trim()}
+                          onClick={() => { if (appliedCode) { setAppliedCode(''); setCode(''); setCodeError('') } else setAppliedCode(code.trim()) }}
+                          disabled={(!appliedCode && !code.trim()) || quote?.kind === 'addon'}
                           className="font-mono text-[10px] tracking-wide2 px-2 py-1.5 rounded border pb-hairline text-pb-text disabled:opacity-50"
                         >
                           {appliedCode ? 'REMOVE' : 'APPLY'}
                         </button>
                       </div>
-                    )}
-                    {quoteError && <p className="font-mono text-[11px] text-pb-red mb-2">{quoteError}</p>}
-                    <InvoiceQuoteSummary quote={quote} />
+                      {quote?.kind === 'addon' ? (
+                        <p className="text-[11px] text-pb-dim mt-1">A code applies to a first subscription or a renewal, not to modules added part way through a year.</p>
+                      ) : appliedCode && selected.size === 0 ? (
+                        <p className="text-[11px] text-pb-dim mt-1">Checked as soon as a module is picked.</p>
+                      ) : codeError ? (
+                        <p className="font-mono text-[11px] text-pb-red mt-1" data-testid="invoice-coupon-error">{codeError}</p>
+                      ) : quote?.coupon ? (
+                        <p className="font-mono text-[11px] text-emerald-400 mt-1">{quote.coupon.code} applied.</p>
+                      ) : null}
+                    </div>
+                    <InvoicePreview
+                      club={club}
+                      admin={data.primary_admin}
+                      quote={quote}
+                      pricing={pricing}
+                      empty={selected.size === 0}
+                      error={quoteError}
+                    />
+                  </div>
+                )}
+                {selected.size > 0 && (
+                  <div className="mt-4 flex flex-wrap items-center gap-3">
                     <button
                       type="button"
                       onClick={raise}
-                      disabled={busy === 'raise' || !quote || !data.primary_admin?.email}
+                      disabled={busy === 'raise' || pricing || !quote || !data.primary_admin?.email}
                       className="font-mono text-[10px] tracking-wide2 px-3 py-1.5 rounded font-semibold disabled:opacity-50"
                       style={{ background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }}
                     >
                       {busy === 'raise' ? 'RAISING…' : `EMAIL INVOICE TO ${(data.primary_admin?.name || 'PRIMARY ADMIN').toUpperCase()}`}
                     </button>
                     {data.billing_method !== 'invoice' && (
-                      <p className="text-[11px] text-pb-dim mt-2">Raising an invoice moves this club to invoice billing.</p>
+                      <p className="text-[11px] text-pb-dim">Raising an invoice moves this club to invoice billing.</p>
                     )}
-                  </>
+                  </div>
                 )}
               </div>
               </>)}
