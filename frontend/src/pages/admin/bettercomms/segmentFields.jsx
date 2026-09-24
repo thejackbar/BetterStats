@@ -44,9 +44,25 @@ export const CLUB_FIELD_DEFS = {
     label: 'In the directory as', input: 'select', ops: IS_OP,
     options: [['player', 'A player'], ['member', 'A fee member'], ['import', 'Imported'], ['manual', 'Added manually']],
   },
-  role: { label: 'Player role', input: 'select', ops: IS_OP, optionsKey: 'roles' },
-  gender: { label: 'Gender', input: 'select', ops: IS_OP, optionsKey: 'genders' },
-  squad_team: { label: 'Squad / team', input: 'select', ops: IS_OP, optionsKey: 'teams' },
+  // ── What kind of member (the former List filters, now live rule fields) ──
+  // Each resolves through the same directory.list_people read the Directory's
+  // own filters use, so an Active rule and the retired List filter agree.
+  mem_membership_type: { label: 'Membership type', input: 'multi', ops: [['eq', 'is any of']], optionsKey: 'membership_types' },
+  mem_membership_tier: { label: 'Membership tier', input: 'multi', ops: [['eq', 'is any of']], optionsKey: 'membership_tiers' },
+  mem_club_role: { label: 'Club role', input: 'multi', ops: [['eq', 'is any of']], optionsKey: 'club_roles' },
+  mem_honour: { label: 'Honour', input: 'multi', ops: [['eq', 'is any of']], optionsKey: 'honours' },
+  mem_is_playing: {
+    label: 'Playing member', input: 'select', ops: IS_OP,
+    options: [['yes', 'yes'], ['no', 'no']],
+  },
+  mem_player_status: {
+    label: 'Player status', input: 'select', ops: IS_OP,
+    options: [['active', 'Active'], ['former', 'Former (inactive)']],
+  },
+  mem_gender: { label: 'Gender', input: 'multi', ops: [['eq', 'is any of']], optionsKey: 'genders' },
+  mem_squad: { label: 'Squad', input: 'multi', ops: [['eq', 'is any of']], optionsKey: 'squads' },
+  // ── Cricket data (reads the linked player) ──
+  role: { label: 'Playing role', input: 'select', ops: IS_OP, optionsKey: 'roles' },
   availability: {
     label: 'Availability', input: 'select', ops: IS_OP,
     options: [['available', 'available for an upcoming game'], ['not_set', 'no availability set']],
@@ -129,6 +145,29 @@ export const DIRECTORY_FIELD_DEFS = {
     label: 'Customer status', input: 'select', ops: IS_OP,
     options: [['none', 'not a customer'], ['trial', 'on a trial'], ['active', 'active customer'], ['lapsed', 'lapsed / paused']],
   },
+  // The DEFINITIVE paying-subscriber signal, distinct from Customer status
+  // above. Customer status reads the club org's subscription_status, which was
+  // ALSO set on clubs a super admin created only for an internal trial — so it
+  // is not proof of a real subscription. This reads whether the club carries a
+  // live BetterCricket Stripe subscription, which is created only by a completed
+  // checkout and cleared when the subscription is cancelled — so "yes" means the
+  // club is paying for at least one module right now.
+  is_subscriber: {
+    label: 'BetterCricket subscriber (Stripe)', input: 'select', ops: IS_OP, options: YESNO,
+  },
+  // Whether the club STARTED a trial, by how it began — a self-serve
+  // registration (/trial) or a super-admin set-up. onboarding_method records
+  // the origin permanently, so this catches a club that has since converted or
+  // lapsed too ("has already started" is a historical fact). Multi, so "either
+  // or both" is one rule; "is none of" excludes clubs that started a trial.
+  trial_kind: {
+    label: 'Started a trial', input: 'multi',
+    ops: [['eq', 'is any of'], ['not_in', 'is none of']],
+    options: [
+      ['self_serve_trial', 'Self-serve trial'],
+      ['super_admin_trial', 'Super-admin trial'],
+    ],
+  },
   // Where the club's own trial stands, read off its subscription rows. The same
   // definition resolves {{trial_days_left}} / {{trial_days_since_expiry}} /
   // {{trial_end_date}}, so the number the email prints is the number the
@@ -154,7 +193,10 @@ export const DIRECTORY_FIELD_DEFS = {
 
 export function newRule(defs) {
   const first = Object.keys(defs)[0]
-  return { field: first, op: defs[first].ops[0][0], value: '' }
+  // `conj` says how this condition joins to the one BEFORE it (ignored on the
+  // first). Default AND, so a segment reads as "all of these" until a row is
+  // switched to OR. Standard precedence — AND binds tighter than OR.
+  return { field: first, op: defs[first].ops[0][0], value: '', conj: 'and' }
 }
 
 // Resolve a field's dropdown options from the fetched club/directory options.
@@ -163,6 +205,11 @@ export function optionsFor(def, opts) {
   if (def.optionsKey === 'roles') return (opts.roles || []).map(r => [r, r])
   if (def.optionsKey === 'genders') return opts.genders || []
   if (def.optionsKey === 'teams') return (opts.teams || []).map(t => [t.id, t.name])
+  if (def.optionsKey === 'membership_types') return (opts.membership_types || []).map(t => [t.id, t.name])
+  if (def.optionsKey === 'membership_tiers') return (opts.membership_tiers || []).map(t => [t.id, t.name])
+  if (def.optionsKey === 'squads') return (opts.squads || []).map(t => [t.id, t.name])
+  if (def.optionsKey === 'club_roles') return opts.club_roles || []
+  if (def.optionsKey === 'honours') return opts.honours || []
   if (def.optionsKey === 'states') return (opts.states || []).map(s => [s, s])
   if (def.optionsKey === 'associations') return (opts.associations || []).map(a => [a, a])
   if (def.optionsKey === 'countries') return (opts.countries || []).map(c => [c, c])
@@ -316,7 +363,8 @@ export function RuleRow({ rule, defs, opts, onChange, onRemove, inputCls = 'px-2
       <select value={rule.field}
         onChange={e => {
           const nd = defs[e.target.value]
-          onChange({ field: e.target.value, op: nd.ops[0][0], value: '' })
+          // Reset op/value for the new field, but keep the AND/OR connector.
+          onChange({ ...rule, field: e.target.value, op: nd.ops[0][0], value: '' })
         }}
         className={inputCls}>
         {keys.map(k => <option key={k} value={k}>{defs[k].label}</option>)}

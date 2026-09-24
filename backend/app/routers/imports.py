@@ -316,11 +316,25 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
     # a grade-labelled group's "what GR already has" must be that grade's own
     # coverage, not the player's whole cross-grade history, or the preview
     # would show a residual the commit wouldn't actually produce.
+    # A sheet naming several teams is the players' whole book and is compared
+    # against their whole GR record (recon.is_team_labelled) — the same call
+    # the commit makes, or the preview would promise figures the commit won't
+    # write. The club's EARLIER uploads count too, since the commit reconciles
+    # every imported row the club holds, not just this sheet's.
+    prior_labels = (await db.execute(
+        select(ImportedStat.grade_label).where(ImportedStat.organisation_id == org_id).distinct()
+    )).scalars().all()
+    team_labelled = recon.is_team_labelled(
+        [recon._grade_key(g) for g in prior_labels]
+        + [recon._grade_key(it.get("grade_label"))
+           for its in list(items_by_player.values()) + list(new_items_by_name.values()) for it in its]
+    )
     items_by_player_grade: dict = {}
     for pid_str, items in items_by_player.items():
         for it in items:
-            grade = recon._grade_key(it.get("grade_label"))
+            grade = None if team_labelled else recon._grade_key(it.get("grade_label"))
             items_by_player_grade.setdefault((pid_str, grade), []).append(it)
+    year_by_season = await recon.season_years(db, org_id)
 
     ungraded_pids = [uuid.UUID(pid) for pid, grade in items_by_player_grade if grade is None]
     grade_labels = sorted({grade for _pid, grade in items_by_player_grade if grade is not None})
@@ -336,7 +350,8 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
         gr_pool = gr_by_grade[grade] if grade is not None else gr_by_player
         gr = gr_pool.get(uuid.UUID(pid_str), {"season_ids": set(), "totals": None})
         gr_tot = gr["totals"] if gr["totals"] is not None else recon._blank()
-        s = recon.summarize(club, gr_tot, import_seasons, gr["season_ids"])
+        covered = gr["season_ids"] if grade is not None else recon.covered_by_year(gr["season_ids"], year_by_season)
+        s = recon.summarize(club, gr_tot, import_seasons, covered)
         agg = preview_by_player.setdefault(pid_str, {
             "player_id": pid_str, "player_name": name_by_pid.get(pid_str), "new": False,
             "club_games": 0, "club_runs": 0, "gr_games": 0, "gr_runs": 0,

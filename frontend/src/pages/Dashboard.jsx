@@ -127,12 +127,12 @@ export default function Dashboard() {
   })
 
   const { org, seasons, grades, selectedSeason, setSelectedSeason, selectedGrade, setSelectedGrade, finalsOnly, setFinalsOnly, loading, error } = useClubData(orgId)
-  const gradeFilters = useGradeFilters(orgId)
+  const gradeFilters = useGradeFilters(orgId, { competitionFilter: true })
   const {
     gradeType, setGradeType, matchFormat, setMatchFormat,
     available: availableCategories, availableFormats, defaultCategories,
     categoriesParam, formatsParam, competitionsParam,
-    competition, setCompetition, availableCompetitions,
+    competition, setCompetition, availableCompetitions, showCompetitionFilter,
   } = gradeFilters
   const { games, loading: gamesLoading } = useRecentGames(orgId, {
     seasonId: selectedSeason,
@@ -262,7 +262,7 @@ export default function Dashboard() {
             availableCategories={availableCategories}
             availableFormats={availableFormats}
             defaultCategories={defaultCategories}
-            showCompetitionFilter
+            showCompetitionFilter={showCompetitionFilter}
             showGradeTypeFilter
             showMatchFormatFilter
             showGenderFilter={false}

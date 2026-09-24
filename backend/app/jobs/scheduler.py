@@ -499,6 +499,32 @@ async def snapshot_meta_ads():
             logger.error(f"Meta Ads snapshot failed: {e}")
 
 
+async def check_meta_token_health():
+    """Daily server-side heartbeat for the two Meta tokens. The sidebar badge
+    already warns a super admin who opens the app; this leaves a persistent log
+    line so an expiry is visible even to nobody watching the UI — the Aug 2026
+    token lapsed unnoticed for ten days. WARNING when a token is within the warn
+    window, ERROR once it's expired/invalid. Never raises."""
+    try:
+        from app.services import meta_ads
+        health = await meta_ads.token_health(force=True)
+    except Exception as e:
+        logger.error(f"Meta token health check failed to run: {e}")
+        return
+    for key in ("ads", "capi"):
+        t = health.get(key, {})
+        if not t.get("configured"):
+            continue
+        label = f"Meta {t.get('purpose', key)} token"
+        if t.get("valid") is False:
+            logger.error(f"{label} is INVALID/EXPIRED — regenerate it: {t.get('error')}")
+        elif t.get("days_left") is not None and t["days_left"] <= health["warn_within_days"]:
+            logger.warning(
+                f"{label} expires in {t['days_left']} day(s) ({t.get('expires_at')}) — "
+                "regenerate before it lapses (ideally as a never-expiring system-user token)."
+            )
+
+
 async def sweep_module_trials():
     """Refresh the held-modules cache for any club whose module trial has passed
     its end, so the synchronous gate drops it even where the per-module rows aren't
@@ -512,6 +538,38 @@ async def sweep_module_trials():
         except Exception as e:
             await session.rollback()
             logger.error(f"Module trial sweep failed: {e}")
+
+
+async def lapse_unpaid_invoice_periods():
+    """Pay by invoice (migration 308): pause every invoice-billed module whose
+    period ended unpaid. Runs just after midnight Perth, because a period ends
+    at the START of its renewal date and a club should not keep a paid module
+    for most of a day it has not paid for. Idempotent."""
+    from app.services import invoice_billing
+    async with async_session_maker() as session:
+        try:
+            affected = await invoice_billing.lapse_unpaid(session)
+            if affected:
+                logger.info(f"Invoice billing: lapsed unpaid periods for {len(affected)} club(s)")
+        except Exception as e:
+            await session.rollback()
+            logger.error(f"Invoice billing lapse sweep failed: {e}")
+
+
+async def issue_invoice_renewals():
+    """Pay by invoice (migration 308): raise and email the renewal invoice for
+    every club whose period ends within 14 days. Business hours, since it is an
+    email a person acts on. A period already carrying its renewal invoice is
+    skipped, so a missed day just catches up the next morning."""
+    from app.services import invoice_billing
+    async with async_session_maker() as session:
+        try:
+            stats = await invoice_billing.issue_due_renewals(session)
+            if stats.get("issued") or stats.get("failed"):
+                logger.info(f"Invoice billing renewals: {stats}")
+        except Exception as e:
+            await session.rollback()
+            logger.error(f"Invoice billing renewals failed: {e}")
 
 
 async def send_trial_lifecycle_nudges():
@@ -822,6 +880,30 @@ def start_scheduler():
         max_instances=1,
         coalesce=True,
     )
+    # Pay by invoice (migration 308) — lapse at the start of the renewal date,
+    # renewal invoices in business hours. Both PERTH, like every club-facing job.
+    scheduler.add_job(
+        lapse_unpaid_invoice_periods,
+        trigger="cron",
+        hour=0,
+        minute=15,
+        timezone=PERTH,
+        id="daily_invoice_lapse",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        issue_invoice_renewals,
+        trigger="cron",
+        hour=8,
+        minute=0,
+        timezone=PERTH,
+        id="daily_invoice_renewals",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
     # BetterMerch — pull Square canteen/bar stock + sales daily for connected clubs.
     scheduler.add_job(
         sync_all_square,
@@ -916,6 +998,20 @@ def start_scheduler():
         minute=5,
         timezone=PERTH,
         id="daily_meta_ads_snapshot",
+        replace_existing=True,
+    )
+    # Meta token health — once a day at 08:10 Perth, a persistent WARNING/ERROR
+    # log line when either the ads_read or CAPI token is expiring/expired, so a
+    # silent lapse (the Aug 2026 outage) doesn't sit unseen for days. The live
+    # sidebar badge covers a super admin who opens the app; this covers one who
+    # doesn't.
+    scheduler.add_job(
+        check_meta_token_health,
+        trigger="cron",
+        hour=8,
+        minute=10,
+        timezone=PERTH,
+        id="daily_meta_token_health",
         replace_existing=True,
     )
     # BetterFantasyCricket — advance lapsed draft clocks every 15 minutes.

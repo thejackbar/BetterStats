@@ -8,7 +8,7 @@ import uuid
 from datetime import date
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,6 +31,15 @@ async def _member_or_404(db: AsyncSession, club: Organisation, member_id: str) -
 @router.get("/directory")
 async def directory(_: User = _require, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
     return {"volunteers": await volunteers_service.directory(db, club.id)}
+
+
+@router.get("/members")
+async def search_members(q: Optional[str] = Query(None), limit: int = Query(40, ge=1, le=100),
+                         _: User = _require, club: Organisation = Depends(get_current_club),
+                         db: AsyncSession = Depends(get_db)):
+    """Search club members to add as a volunteer — each flagged with whether they
+    are already one. Distinct path from /members/{id}/…, so no route conflict."""
+    return await volunteers_service.search_members(db, club.id, q=q, limit=limit)
 
 
 class ProfileUpsert(BaseModel):

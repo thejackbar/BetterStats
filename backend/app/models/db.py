@@ -321,6 +321,12 @@ class Organisation(Base):
     # only in the menu bar, and turning this on for everyone would change every
     # existing club's public site without anyone asking for it.
     public_header_logo = Column(Boolean, nullable=False, server_default="false", default=False)
+    # Show the Competition filter row on the club's public stats pages. Off by
+    # default: a club that has grouped its grades into competitions still keeps
+    # the filter to itself until it opts in, and while it is on the "All" pill
+    # means the sum of every competition listed rather than Cricket Australia's
+    # own lifetime totals (frontend: useGradeFilters).
+    show_competition_filters = Column(Boolean, nullable=False, server_default="false", default=False)
     # Which grade categories count towards this club's stats by default — a
     # JSONB list of grade_labels.GRADE_CATEGORIES keys (migration 228). NULL
     # means no club preference, and the platform default applies: everything
@@ -389,6 +395,19 @@ class Organisation(Base):
     # it either way for this club regardless of the platform default. See
     # services/platform_settings.billing_checkout_enabled_for_org.
     billing_checkout_override = Column(Boolean, nullable=True)
+    # How this club pays for its modules (migration 308): 'card' is the Stripe
+    # Checkout + recurring Stripe Subscription flow; 'invoice' is BetterCricket's
+    # own annual invoicing — a one-off Stripe invoice emailed to the Primary Club
+    # Admin, and a renewal invoice 14 days before each period ends. See
+    # services/invoice_billing.py for why invoice mode is not a Stripe
+    # Subscription at all.
+    billing_method = Column(Text, nullable=False, server_default="card", default="card")
+    billing_method_changed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    billing_method_changed_by = Column(UUID(as_uuid=True), nullable=True)
+    # Whether invoice billing is OFFERED to this club (migration 308). Off by
+    # default, new clubs included; only a Super Admin turns it on (All Clubs).
+    # While it is off the club sees no invoicing option at all.
+    invoice_billing_enabled = Column(Boolean, nullable=False, server_default="false", default=False)
     # Per-club override of platform_settings.member_portal_enabled (migration 178)
     # — same NULL/True/False shape as billing_checkout_override above, so a
     # super admin can switch the member self-service portal on for one test
@@ -893,6 +912,13 @@ class OrgModuleSubscription(Base):
     trial_started_at = Column(TIMESTAMP(timezone=True), nullable=True)
     trial_ends_at = Column(TIMESTAMP(timezone=True), nullable=True)
     renewal_date = Column(Date, nullable=True)
+    # What is paying for this module (migration 308): 'invoice' when the
+    # current period was bought on a BetterCricket annual invoice, 'stripe'
+    # when a Stripe Subscription carries it, NULL for a trial or a module a
+    # super admin granted by hand. Only an 'invoice' row is renewed by the
+    # invoice job and lapsed when its period ends unpaid — a card-billed
+    # module's renewal belongs to Stripe, and a hand-granted one to nobody.
+    billing_source = Column(Text, nullable=True)
     started_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
@@ -981,6 +1007,26 @@ class BillingInvoice(Base):
     # •••• 4242", "PayTo (...0400)" — see stripe_client.describe_payment_method.
     payment_method_type = Column(Text, nullable=True)
     payment_method_summary = Column(Text, nullable=True)
+    # BetterCricket annual invoicing (migration 308). NULL on every invoice a
+    # Stripe Subscription raised. ``invoice_kind`` is 'initial' (first
+    # subscribe), 'addon' (modules added mid-period, prorated to the renewal)
+    # or 'renewal'. ``billing_keys`` is what paying it grants; the service
+    # period is the dates it pays for, NOT Stripe's period_start/period_end,
+    # which on a one-off invoice are just the moment it was raised.
+    billing_method = Column(Text, nullable=True)
+    invoice_kind = Column(Text, nullable=True)
+    invoice_number = Column(Text, nullable=True)
+    billing_keys = Column(JSONB, nullable=True)
+    service_start_date = Column(Date, nullable=True)
+    service_end_date = Column(Date, nullable=True)
+    due_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    amount_total_cents = Column(Integer, nullable=True)
+    pay_token = Column(Text, nullable=True)
+    sent_to_email = Column(Text, nullable=True)
+    emailed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    email_error = Column(Text, nullable=True)
+    issued_by_user_id = Column(UUID(as_uuid=True), nullable=True)
+    coupon_redemption_id = Column(UUID(as_uuid=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
@@ -1157,6 +1203,10 @@ class Season(Base):
     # wins and the effective views step the synced copy aside, so one
     # match is never counted from two sources.
     stats_source = Column(Text, nullable=True)
+    # Human-set: PlayHQ was wrong for this whole season and the club's import is
+    # the record. v_effective_player_season_stats then counts the import's own
+    # matches for it and steps CA's season summary aside (services/superseded_ddl).
+    import_authoritative = Column(Boolean, nullable=False, server_default="false")
     name = Column(Text, nullable=False)
     year = Column(Integer)
     synced_at = Column(TIMESTAMP(timezone=True))
@@ -2211,6 +2261,10 @@ class ManualGame(Base):
         UUID(as_uuid=True), ForeignKey("games.id", ondelete="SET NULL"),
         nullable=True)
     pair_prefers_import = Column(Boolean, nullable=False, server_default="false")
+    # A human set this pairing via an overwrite import (services/superseded_ddl).
+    # match_pairing.reconcile_org never touches a locked row, so a future sync
+    # cannot flip the club's correction back to the incorrect synced copy.
+    pairing_locked = Column(Boolean, nullable=False, server_default="false")
     created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
@@ -3756,8 +3810,30 @@ class MaintenanceLog(Base):
 # recurring task last year, and the year before." See the migration 181
 # docstring and services/club_diary.py for the full reasoning.
 
-DIARY_TASK_FREQUENCIES = ("annual", "quarterly", "monthly", "once")
+# Cadences. The first six are DATED — they generate one dated occurrence per
+# period, so they carry a due date and appear on the season plan / Gantt.
+# season_start / season_end pin to the club's diary_start_month (the month the
+# club's season begins), which is finally read by the backend for these two.
+# The last three are STANDING — a weekly / matchday / ongoing duty that recurs
+# with no single due date, so it deliberately generates NO occurrences (it would
+# flood the season plan) and shows only as a standing duty on the role and the
+# board. frequency is a plain TEXT column (no CHECK), so this list is the only
+# gate; widening it is a code change, not a migration.
+DIARY_TASK_FREQUENCIES = (
+    "annual", "quarterly", "monthly", "once", "season_start", "season_end",
+    "weekly", "matchday", "ongoing",
+)
+DIARY_STANDING_FREQUENCIES = ("weekly", "matchday", "ongoing")
 DIARY_TASK_STATUSES = ("pending", "in_progress", "done", "not_applicable")
+
+# Role Program handovers (migration 307) — the succession/onboarding checklist.
+ROLE_HANDOVER_STATUSES = ("in_progress", "completed", "cancelled")
+# The status of ONE element of a role being handed over. Deliberately about
+# understanding and acceptance (the club's stated goal), not job quality:
+# not started -> walked through -> understood & accepted, plus N/A for an
+# element that does not apply to this handover.
+ROLE_HANDOVER_ITEM_STATUSES = ("pending", "walked_through", "accepted", "na")
+ROLE_HANDOVER_ITEM_KINDS = ("responsibility", "duty", "area", "knowledge", "custom")
 
 
 class DiaryCategory(Base):
@@ -4001,6 +4077,67 @@ class DiaryTaskDependency(Base):
     definition_id = Column(UUID(as_uuid=True), ForeignKey("club_diary_task_definitions.id", ondelete="CASCADE"), nullable=False)
     depends_on_definition_id = Column(UUID(as_uuid=True), ForeignKey("club_diary_task_definitions.id", ondelete="CASCADE"), nullable=False)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+# ─── Role Program handovers (migration 307) — succession & onboarding ────────
+# The Role Program (what a role entails) is assembled on read from the role, its
+# Club Diary tasks and its roster areas — no storage. What IS stored: when a
+# role changes hands, the onboarding checklist a responsible person works so the
+# club can SEE whether the new volunteer has been walked through and has
+# understood and accepted each element (or exactly where the gaps are). DDL is
+# defined once in services/role_program_ddl.py, shared with the lifespan mirror.
+
+class RoleProgramHandover(Base):
+    """One person being onboarded into one role (or one role changing hands).
+    Keyed on club_roles — the one anchor for a volunteer role AND a committee
+    seat. ``role_title`` is a snapshot so an archived/renamed role never blanks a
+    past handover; incoming/outgoing names snapshot too, so a member row going
+    NULL leaves the record readable."""
+    __tablename__ = "role_program_handovers"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    role_id = Column(UUID(as_uuid=True), ForeignKey("club_roles.id", ondelete="SET NULL"), nullable=True)
+    role_title = Column(Text, nullable=False)
+    committee_position_id = Column(UUID(as_uuid=True), ForeignKey("committee_positions.id", ondelete="SET NULL"), nullable=True)
+    incoming_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    incoming_name = Column(Text, nullable=True)
+    outgoing_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    outgoing_name = Column(Text, nullable=True)
+    status = Column(Text, nullable=False, server_default="in_progress", default="in_progress")
+    started_on = Column(Date, nullable=False, server_default=func.current_date())
+    target_date = Column(Date, nullable=True)
+    completed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class RoleProgramHandoverItem(Base):
+    """One checklist line of a handover, snapshotted from a program element at
+    the moment it was seeded. ``source_definition_id`` is a SET-NULL link back to
+    the live Club Diary task (for a jump-to link); ``source_key`` is what a
+    reseed dedupes on — a custom knowledge item has none, so the partial unique
+    index never fires for it."""
+    __tablename__ = "role_program_handover_items"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    handover_id = Column(UUID(as_uuid=True), ForeignKey("role_program_handovers.id", ondelete="CASCADE"), nullable=False)
+    source_kind = Column(Text, nullable=False)
+    source_key = Column(Text, nullable=True)
+    source_definition_id = Column(UUID(as_uuid=True), ForeignKey("club_diary_task_definitions.id", ondelete="SET NULL"), nullable=True)
+    label = Column(Text, nullable=False)
+    detail = Column(Text, nullable=True)
+    cadence = Column(Text, nullable=True)
+    status = Column(Text, nullable=False, server_default="pending", default="pending")
+    target_date = Column(Date, nullable=True)
+    note = Column(Text, nullable=True)
+    sort_order = Column(Integer, nullable=False, server_default="0", default=0)
+    updated_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
 # ─── BetterMerch (BetterAdmin module) — club stock register ──────────────────
@@ -4472,7 +4609,13 @@ class WizardClubList(Base):
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    list_id = Column(UUID(as_uuid=True), nullable=False)
+    # The container this export created. Migration 251 created lists (`list_id`,
+    # no FK); since the Lists→Segments merge (304) a fresh export creates a
+    # SEGMENT and records `segment_id` instead, leaving `list_id` for the
+    # exports made before. `_exports_by_key` resolves the name off whichever is
+    # set.
+    list_id = Column(UUID(as_uuid=True), nullable=True)
+    segment_id = Column(UUID(as_uuid=True), nullable=True)
     list_name = Column(Text, nullable=True)
     # The normalised (lowercased, trimmed) wizard club name — the same key the
     # Meta Ads selected/searched tables group on.
@@ -4502,8 +4645,34 @@ class CommsSegment(Base):
     organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
     name = Column(Text, nullable=False)
     definition = Column(JSONB, nullable=False, server_default="{}", default=dict)
+    # Lists→Segments merge (migration 304). A segment now also carries a frozen
+    # hand-picked STATIC set (comms_segment_members); the audience is the UNION
+    # of the rule matches and that set. `source`/`origin` group an
+    # auto-generated segment (CRM / Wizard Clubs / Club Admin Users) the way
+    # they used to group an auto list; `legacy_list_id` maps a segment migrated
+    # from a former list back to it, so a historical `saved_list` campaign still
+    # resolves.
+    source = Column(Text, nullable=False, server_default="manual", default="manual")
+    origin = Column(Text, nullable=True)
+    legacy_list_id = Column(UUID(as_uuid=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class CommsSegmentMember(Base):
+    """One contact's membership of a segment's STATIC (hand-picked) set
+    (migration 304). Mirror of CommsListMember: cascaded to both the segment and
+    the contact, so a deleted contact drops out automatically. The frozen set a
+    segment unions with its live rule matches."""
+    __tablename__ = "comms_segment_members"
+    __table_args__ = (
+        UniqueConstraint("segment_id", "contact_id", name="uq_comms_segment_member"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    segment_id = Column(UUID(as_uuid=True), ForeignKey("comms_segments.id", ondelete="CASCADE"), nullable=False)
+    contact_id = Column(UUID(as_uuid=True), ForeignKey("comms_contacts.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
 class CommsTemplate(Base):

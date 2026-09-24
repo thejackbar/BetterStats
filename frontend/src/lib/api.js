@@ -649,6 +649,9 @@ export const api = {
 
   // Volunteer Management (core capability, not a paid module)
   volunteerDirectory: () => request('/club-admin/volunteers/directory'),
+  // Club members to add as a volunteer (each flagged is_volunteer already).
+  volunteerSearchMembers: (q, limit = 40) =>
+    request(`/club-admin/volunteers/members?limit=${limit}${q ? `&q=${encodeURIComponent(q)}` : ''}`),
   volunteerUpsertProfile: (data) =>
     request('/club-admin/volunteers/profiles', { method: 'POST', body: JSON.stringify(data) }),
   volunteerProfile: (memberId) => request(`/club-admin/volunteers/members/${memberId}/profile`),
@@ -963,6 +966,32 @@ export const api = {
   diaryGenerateSeason: (year) =>
     request(`/club-admin/club-diary/season/${year}/generate`, { method: 'POST' }),
   diarySeasonPlan: (year) => request(`/club-admin/club-diary/season/${year}`),
+
+  // Role Programs — what a role entails (assembled on read) + its measurable
+  // handover checklist. Duties are edited as Club Diary tasks tagged to the role.
+  rpProgram: (roleId) => request(`/club-admin/role-programs/roles/${roleId}/program`),
+  rpListHandovers: (opts = {}) => {
+    const p = new URLSearchParams()
+    if (opts.roleId) p.set('role_id', opts.roleId)
+    if (opts.status) p.set('status', opts.status)
+    const qs = p.toString()
+    return request(`/club-admin/role-programs/handovers${qs ? `?${qs}` : ''}`)
+  },
+  rpCreateHandover: (data) =>
+    request('/club-admin/role-programs/handovers', { method: 'POST', body: JSON.stringify(data) }),
+  rpHandover: (id) => request(`/club-admin/role-programs/handovers/${id}`),
+  rpUpdateHandover: (id, data) =>
+    request(`/club-admin/role-programs/handovers/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  rpReseedHandover: (id) =>
+    request(`/club-admin/role-programs/handovers/${id}/reseed`, { method: 'POST' }),
+  rpDeleteHandover: (id) =>
+    request(`/club-admin/role-programs/handovers/${id}`, { method: 'DELETE' }),
+  rpAddItem: (id, data) =>
+    request(`/club-admin/role-programs/handovers/${id}/items`, { method: 'POST', body: JSON.stringify(data) }),
+  rpUpdateItem: (id, itemId, data) =>
+    request(`/club-admin/role-programs/handovers/${id}/items/${itemId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  rpDeleteItem: (id, itemId) =>
+    request(`/club-admin/role-programs/handovers/${id}/items/${itemId}`, { method: 'DELETE' }),
 
   // Shared member/person picker across BetterClubManager (all org members).
   feeAllMembers: () => request('/club-admin/fees/all-members'),
@@ -1666,6 +1695,8 @@ export const api = {
       { method: 'PUT', body: JSON.stringify({ channels }) }),
   runNotificationScanNow: () =>
     request('/club-admin/notifications/settings/run-now', { method: 'POST' }),
+  sendNotificationTestEmail: () =>
+    request('/club-admin/notifications/settings/test-email', { method: 'POST' }),
   getNotificationFeed: ({ limit = 30, unreadOnly = false } = {}) =>
     request(`/club-admin/notifications/feed?limit=${limit}&unread_only=${unreadOnly ? 'true' : 'false'}`),
   markNotificationFeedRead: (notificationIds) =>
@@ -2031,6 +2062,9 @@ export const api = {
     request(`/club-admin/super/onboarding-requests/${id}`, { method: 'DELETE' }),
   // Meta Ads HQ dashboard (super admin) — BetterCricket's own campaign spend.
   metaAdsSummary: () => request('/club-admin/meta-ads/summary'),
+  // Live validity + expiry of both Meta tokens (ads_read + CAPI). Drives the
+  // HQ page's expiry chip and the sidebar's attention badge.
+  metaAdsTokenHealth: () => request('/club-admin/meta-ads/token-health'),
   metaAdsHistory: (days = 14) => request(`/club-admin/meta-ads/history?days=${days}`),
   metaAdsAdHistory: (adId, days = 30) => request(`/club-admin/meta-ads/ad-history/${adId}?days=${days}`),
   metaAdsRefresh: () => request('/club-admin/meta-ads/refresh', { method: 'POST' }),
@@ -2229,6 +2263,40 @@ export const api = {
       body: JSON.stringify({ module_keys: moduleKeys, coupon_code: couponCode || undefined }),
     }),
   billingListInvoices: () => request('/club-admin/billing/invoices'),
+  // Pay by invoice (migration 308) — routers/billing.py + services/invoice_billing.py.
+  // Invoicing is arranged by a Super Admin (the super* calls, by club id); a
+  // club reads its own overview and can have an open invoice re-emailed.
+  // billingSetMethod / billingRequestInvoice are kept for now but no screen
+  // calls them: the server refuses both for anyone but a Super Admin.
+  billingInvoiceOverview: () => request('/club-admin/billing/invoice-billing'),
+  billingSetMethod: (method) =>
+    request('/club-admin/billing/billing-method', { method: 'PUT', body: JSON.stringify({ method }) }),
+  billingRequestInvoice: (moduleKeys, couponCode) =>
+    request('/club-admin/billing/invoices/request', {
+      method: 'POST',
+      body: JSON.stringify({ module_keys: moduleKeys, coupon_code: couponCode || undefined }),
+    }),
+  billingResendInvoice: (invoiceId) =>
+    request(`/club-admin/billing/invoices/${invoiceId}/resend`, { method: 'POST' }),
+  superInvoiceOverview: (orgId) => request(`/club-admin/billing/super/clubs/${orgId}/invoice-billing`),
+  superSetBillingMethod: (orgId, method) =>
+    request(`/club-admin/billing/super/clubs/${orgId}/billing-method`, { method: 'PUT', body: JSON.stringify({ method }) }),
+  superInvoiceQuote: (orgId, moduleKeys, couponCode) =>
+    request(`/club-admin/billing/super/clubs/${orgId}/invoice-quote`, {
+      method: 'POST',
+      body: JSON.stringify({ module_keys: moduleKeys, coupon_code: couponCode || undefined }),
+    }),
+  superRequestInvoice: (orgId, moduleKeys, couponCode) =>
+    request(`/club-admin/billing/super/clubs/${orgId}/invoices`, {
+      method: 'POST',
+      body: JSON.stringify({ module_keys: moduleKeys, coupon_code: couponCode || undefined }),
+    }),
+  superIssueRenewalInvoice: (orgId) =>
+    request(`/club-admin/billing/super/clubs/${orgId}/renewal-invoice`, { method: 'POST' }),
+  superResendInvoice: (orgId, invoiceId) =>
+    request(`/club-admin/billing/super/clubs/${orgId}/invoices/${invoiceId}/resend`, { method: 'POST' }),
+  superVoidInvoice: (orgId, invoiceId) =>
+    request(`/club-admin/billing/super/clubs/${orgId}/invoices/${invoiceId}/void`, { method: 'POST' }),
   // Payment method management — routers/billing.py. Primary-admin self-serve
   // (current club) and Super Admin (any club by org_id) share the same
   // response shape ({default_payment_method_id, payment_methods}).
@@ -2985,17 +3053,23 @@ export const api = {
   bsSeedTeams: (body) => request('/teams/seed', { method: 'POST', body: body ? JSON.stringify(body) : undefined }),
   bsSeedCandidates: ({ seasons = 3 } = {}) => request(`/teams/seed-candidates?seasons=${seasons}`),
   bsResequenceTeams: () => request('/teams/resequence', { method: 'POST' }),
-  bsAutoAssignSuggest: ({ seasons = 2, onlyUnassigned = true } = {}) =>
-    request(`/teams/auto-assign-suggest?seasons=${seasons}&only_unassigned=${onlyUnassigned}`),
+  bsAutoAssignSuggest: ({ seasons = 2, onlyUnassigned = false, minShare = 0.2 } = {}) =>
+    request(`/teams/auto-assign-suggest?seasons=${seasons}&only_unassigned=${onlyUnassigned}&min_share=${minShare}`),
   bsTeamMembers: (id) => request(`/teams/${id}/members`),
   bsAddTeamMember: (id, playerId) =>
     request(`/teams/${id}/members`, { method: 'POST', body: JSON.stringify({ player_id: playerId }) }),
   bsRemoveTeamMember: (id, playerId) =>
     request(`/teams/${id}/members/${playerId}`, { method: 'DELETE' }),
-  // Assign one or many players to a single selection-pool squad (or null to
-  // unassign). Powers the Squads board's drag-to-reassign and bulk-add.
-  bsAssignSquad: (playerIds, squadTeamId) =>
-    request('/teams/squad-assign', { method: 'POST', body: JSON.stringify({ player_ids: playerIds, squad_team_id: squadTeamId ?? null }) }),
+  // Assign one or many players to selection-pool squads. A player can be in
+  // several squads, so `action` says what happens: 'set' (replace the whole
+  // set — the default), 'add' (keep the others), 'move' (from `from` to
+  // squadTeamId), 'remove' (drop `from`). Powers the Squads board's drag/move,
+  // per-squad add, card "＋" and auto-assign.
+  bsAssignSquad: (playerIds, squadTeamId, { action = 'set', from = null } = {}) =>
+    request('/teams/squad-assign', { method: 'POST', body: JSON.stringify({
+      player_ids: playerIds, squad_team_id: squadTeamId ?? null, action,
+      from_squad_team_id: from ?? null,
+    }) }),
 
   // ─── BetterSelect: Availability ─────────────────────────
   bsAvailabilityMatrix: () => request('/availability/matrix'),
@@ -3540,12 +3614,30 @@ export const api = {
   commsUpdateSegment: (id, name, definition) =>
     request(`/club-admin/comms/segments/${id}`, { method: 'PUT', body: JSON.stringify({ name, definition }) }),
   commsDeleteSegment: (id) => request(`/club-admin/comms/segments/${id}`, { method: 'DELETE' }),
-  commsPreviewSegment: (definition) =>
-    request('/club-admin/comms/segments/preview', { method: 'POST', body: JSON.stringify({ name: '', definition }) }),
-  commsResolveSegment: (definition) =>
-    request('/club-admin/comms/segments/resolve', { method: 'POST', body: JSON.stringify({ name: '', definition }) }),
+  // Copy a segment whole — its rules, its exclusions AND its frozen static set.
+  commsDuplicateSegment: (id) => request(`/club-admin/comms/segments/${id}/duplicate`, { method: 'POST' }),
+  // preview/resolve take the draft STATIC member set too, so the live count is
+  // the UNION of (rule matches) ∪ (hand-picked contacts).
+  commsPreviewSegment: (definition, staticIds = null) =>
+    request('/club-admin/comms/segments/preview', { method: 'POST', body: JSON.stringify({ name: '', definition, static_member_ids: staticIds }) }),
+  commsResolveSegment: (definition, staticIds = null) =>
+    request('/club-admin/comms/segments/resolve', { method: 'POST', body: JSON.stringify({ name: '', definition, static_member_ids: staticIds }) }),
   commsSegmentExportCsvUrl: (id) => `${BASE}/club-admin/comms/segments/${id}/export.csv`,
   commsSegmentOptions: () => request('/club-admin/comms/segments/options'),
+  // The UNION size of a saved segment (rules ∪ static set) — the rail figure.
+  commsSegmentSize: (id) => request(`/club-admin/comms/segments/${id}/size`),
+  // The frozen hand-picked (static) member set on a segment. Persist immediately.
+  commsSegmentMembers: (id) => request(`/club-admin/comms/segments/${id}/members`),
+  commsAddSegmentMembers: (id, contactIds) =>
+    request(`/club-admin/comms/segments/${id}/members`, { method: 'POST', body: JSON.stringify({ contact_ids: contactIds }) }),
+  commsRemoveSegmentMember: (id, contactId) =>
+    request(`/club-admin/comms/segments/${id}/members/${contactId}`, { method: 'DELETE' }),
+  commsRemoveSegmentMembers: (id, contactIds) =>
+    request(`/club-admin/comms/segments/${id}/members/remove`, { method: 'POST', body: JSON.stringify({ contact_ids: contactIds }) }),
+  // Turn a filtered BetterAdmin Directory selection into an auto static segment.
+  // Sends person keys, never emails — the server reads the addresses itself.
+  commsCreateSegmentFromDirectory: ({ name, keys }) =>
+    request('/club-admin/comms/segments/from-directory', { method: 'POST', body: JSON.stringify({ name, keys }) }),
   // Search for (and hydrate already-chosen) clubs/contacts for the
   // "is any of / is none of" segment rules. `ids` is answered whatever the
   // search term is, so a saved rule keeps rendering its chosen names.
@@ -3555,26 +3647,8 @@ export const api = {
     if (ids.length) p.set('ids', ids.join(','))
     return request(`/club-admin/comms/segments/entities?${p}`)
   },
-  // Static lists (Phase 2): curated sets of contacts.
-  commsListLists: () => request('/club-admin/comms/lists'),
-  commsCreateList: (name) => request('/club-admin/comms/lists', { method: 'POST', body: JSON.stringify({ name }) }),
-  // Turn a filtered BetterAdmin Directory selection into an auto-generated list.
-  // Sends person keys, never emails — the server reads the addresses from its
-  // own Directory data.
-  commsCreateListFromDirectory: ({ name, keys }) =>
-    request('/club-admin/comms/lists/from-directory', { method: 'POST', body: JSON.stringify({ name, keys }) }),
-  commsRenameList: (id, name) => request(`/club-admin/comms/lists/${id}`, { method: 'PUT', body: JSON.stringify({ name }) }),
-  commsDeleteList: (id) => request(`/club-admin/comms/lists/${id}`, { method: 'DELETE' }),
-  commsListMembers: (id) => request(`/club-admin/comms/lists/${id}/members`),
-  commsAddListMembers: (id, contactIds) =>
-    request(`/club-admin/comms/lists/${id}/members`, { method: 'POST', body: JSON.stringify({ contact_ids: contactIds }) }),
-  commsRemoveListMember: (id, contactId) =>
-    request(`/club-admin/comms/lists/${id}/members/${contactId}`, { method: 'DELETE' }),
-  commsRemoveListMembers: (id, contactIds) =>
-    request(`/club-admin/comms/lists/${id}/members/remove`, { method: 'POST', body: JSON.stringify({ contact_ids: contactIds }) }),
-  commsCopyListMembers: (contactIds, listIds) =>
-    request('/club-admin/comms/lists/members/copy', { method: 'POST', body: JSON.stringify({ contact_ids: contactIds, list_ids: listIds }) }),
-  commsListExportCsvUrl: (id) => `${BASE}/club-admin/comms/lists/${id}/export.csv`,
+  // (Lists→Segments merge: the old commsList* / commsCreateList* methods are
+  // gone. A "list" is now a static segment — see the segment methods above.)
   // Email templates (Phase 3).
   commsListTemplates: () => request('/club-admin/comms/templates'),
   commsGetTemplate: (id) => request(`/club-admin/comms/templates/${id}`),

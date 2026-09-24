@@ -40,6 +40,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 # module keeps only the Directory-specific reads/writes (the people list with
 # segments, and role assignment).
 from app.services.members import MEMBER_CATEGORIES  # noqa: F401  (re-exported for the router)
+from app.services.squad_membership import recompute_primary_squad
 
 # A membership type contributes a segment prefixed `type:`, so the club naming a
 # type "Volunteer" (every club that adopted the pre-248 starter set has one) can
@@ -122,7 +123,7 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
         SELECT fm.id, fm.full_name, fm.email, fm.mobile, fm.player_id, fm.member_category,
                fm.is_life_member, fm.life_member_since, fm.life_member_detail,
                fm.gender AS member_gender, fm.is_honorary, fm.honorary_expires_at, fm.archived_at,
-               fm.shirt_size, fm.pants_size,
+               fm.shirt_size, fm.pants_size, fm.notes,
                mt.id AS membership_type_id, mt.name AS membership_type_name, mt.is_playing AS membership_type_playing,
                p.id AS our_player_id, p.photo_url, p.email AS player_email, p.phone AS player_phone,
                p.status AS player_status, p.gender AS player_gender, p.shirt_number,
@@ -369,6 +370,11 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
             # number to hold, which is why it is None rather than "".
             "shirt_number": m["shirt_number"] if our_pid else None,
             "shirt_size": m["shirt_size"], "pants_size": m["pants_size"],
+            # A free-text general note about the person, on the shared spine.
+            # Multi-line: the column is Text and update_person never truncates
+            # it. Absent from the read-through player rows below, which have no
+            # member row to carry one — recording a note mints it.
+            "notes": m["notes"],
             "roles": roles_by.get(mid, []),
             "total_hours": hours_by.get(mid, 0.0),
             "quals_total": q.get("total", 0), "flagged": q.get("expiring", 0),
@@ -420,6 +426,8 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
             # no row on it yet. Recording one mints the row, the same way
             # ticking a membership type does.
             "shirt_number": p["shirt_number"], "shirt_size": None, "pants_size": None,
+            # No member row yet, so no note either — recording one mints it.
+            "notes": None,
             "roles": [], "total_hours": 0.0, "quals_total": 0, "flagged": 0, "segs": psegs,
         })
 
@@ -567,24 +575,23 @@ async def set_squad(db: AsyncSession, org_id, player_id, team_id) -> None:
     old_team_id = (await db.execute(text(
         "SELECT squad_team_id FROM players WHERE id = :pid AND organisation_id = :org"
     ), {"pid": player_id, "org": org_id})).scalar()
-    await db.execute(text(
-        "UPDATE players SET squad_team_id = :t WHERE id = :pid AND organisation_id = :org"
-    ), {"t": team_id, "pid": player_id, "org": org_id})
-    # Mirror into team_members, exactly as services/squad_membership.py does for
-    # every other squad write — done in raw SQL here to keep this module out of
-    # the ORM graph. Without it the Directory was the one squad write that left
-    # team_members stale, so the "Squad" filter on Availability and Selection
-    # disagreed with the Squads board about who is in a squad.
+    # team_members is authoritative and a player can be in several squads. The
+    # Directory's single-squad control moves the primary: drop the old primary
+    # membership, add the new, then recompute players.squad_team_id from what's
+    # left. Other squads (added on the board) are untouched. Raw SQL keeps this
+    # module out of the ORM graph; recompute_primary_squad is text()-only too.
     if old_team_id != team_id:
         if old_team_id:
             await db.execute(text(
-                "DELETE FROM team_members WHERE team_id = :t AND player_id = :pid"
-            ), {"t": old_team_id, "pid": player_id})
+                "DELETE FROM team_members WHERE team_id = :t AND player_id = :pid "
+                "AND organisation_id = :org"
+            ), {"t": old_team_id, "pid": player_id, "org": org_id})
         if team_id:
             await db.execute(text(
                 "INSERT INTO team_members (team_id, player_id, organisation_id) "
                 "VALUES (:t, :pid, :org) ON CONFLICT DO NOTHING"
             ), {"t": team_id, "pid": player_id, "org": org_id})
+        await recompute_primary_squad(db, org_id, player_id)
 
 
 async def set_fee_tier(db: AsyncSession, org_id, member_id, season_id, fee_schedule_id) -> None:

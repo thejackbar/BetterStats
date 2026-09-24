@@ -2,25 +2,28 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import BetterClubhouseLayout from '../../../components/admin/BetterClubhouseLayout'
 import {
-  Button, Note, Badge, Empty, Toast, SectionHeading, SearchInput,
-  TableWrap, TableHead, TableRow, Cell,
+  Button, Note, Badge, Empty, Toast, SearchInput,
 } from '../../../components/admin/ui'
 import { CLUB_FIELD_DEFS } from '../bettercomms/segmentFields'
-import { CrudPanes, DetailPane, SaveRow } from './crudShell'
-import { useSegments, RuleBuilder, SegmentListPane, SegmentTitleRow, CountBar, reachability } from './segmentEngine'
+import { CrudPanes, DetailPane } from './crudShell'
+import {
+  useSegments, RuleBuilder, SegmentListPane, SegmentTitleRow, SegmentRefPicker, segmentKind,
+  DefinitionSection,
+} from './segmentEngine'
+import {
+  StaticMembersProvider, SegmentTiles, StaticPicker, SegmentContactLists,
+} from './StaticMembers'
 import ScreenIntro, { useScreenIntro, INTROS } from './intro'
-import { money } from './data'
 
-// Segments — a group of people described by a rule, not by a roll call.
+// Segments — a group of people an email is addressed to. There is one concept
+// now, not two: a segment carries an ACTIVE part (a live rule, re-worked every
+// time you send, so someone who joins tomorrow is in it tomorrow) and a STATIC
+// part (a frozen roll call of contacts you picked by hand, which stays exactly
+// as picked). The old "Lists" feature is the static part, moved in here.
 //
-// A segment is a set of conditions that resolves at send time and is never
-// frozen: someone who joins tomorrow is in it tomorrow. That is the whole
-// difference from a List, which is people picked by hand and stays as picked.
-//
-// Both are things an email can be addressed to. The composer calls that slot
-// the AUDIENCE, and its dropdown offers the club's segments and its lists as
-// the two kinds of thing an audience can be. So: an email has one audience;
-// that audience is a segment or a list.
+// A segment can be either or both, and the final audience is the union of the
+// two. The composer calls that slot the AUDIENCE; an email has one audience,
+// and that audience is a segment.
 //
 // ⚠ Club scope only. This file imports CLUB_FIELD_DEFS and nothing else, and
 // it is the ONLY field set it can offer — `segmentEngine` takes `defs` as a
@@ -28,9 +31,6 @@ import { money } from './data'
 // (is_trialing, engagement_score, …) are sales telemetry and live in the other
 // mount, InternalSegments, reached only while acting as the outreach org. See
 // docs/design_handoff_betterclubhouse/PROJECT_RULES.md.
-
-const COLS = 'minmax(180px,1fr) 160px 110px 120px'
-const MIN_W = 700
 
 // The segments Today can ask for by name when an officer follows an action.
 // `audience` is still read as a fallback so a Today page served from a cached
@@ -73,11 +73,8 @@ export default function ClubhouseSegments() {
           emptyText="No segments yet. Start one and it counts as you build it."
         >
           <Note toneKey="calm">
-            A segment is a rule. For people picked by hand, use a list — both can be chosen as the audience
-            when you write an email:{' '}
-            <Link to="/admin/comms/contacts" className="underline" style={{ color: 'var(--pb-accent-ink)' }}>Contacts</Link>
-            {' · '}
-            <Link to="/admin/comms/lists" className="underline" style={{ color: 'var(--pb-accent-ink)' }}>Lists</Link>
+            A segment can be a live rule, a hand-picked set, or both. Edit a person's own details in{' '}
+            <Link to="/admin/comms/contacts" className="underline" style={{ color: 'var(--pb-accent-ink)' }}>Contacts</Link>.
           </Note>
           <Note title="Club scope only" toneKey="calm">
             These conditions read your own club's people — the directory, accounts, roster and email activity.
@@ -89,62 +86,56 @@ export default function ClubhouseSegments() {
           {!s.draft ? (
             <Empty>Pick a segment, or start a new one.</Empty>
           ) : (
-            <>
-              <SegmentTitleRow
-                draft={s.draft} setDraft={s.setDraft} busy={s.busy} total={s.total}
-                onDuplicate={s.duplicate} onEmail={s.emailThese}
-                placeholder="Name this segment"
-                blurb="Everyone who matches every condition below, worked out again each time you send."
-              />
+            <StaticMembersProvider
+              segmentId={s.draft.id}
+              memberIds={s.memberIds} inCount={s.total} outCount={s.outCount}
+              reachable={s.reachable}
+              onChanged={() => { s.reloadStaticMembers(s.draft.id); s.reload() }}
+            >
+              {(() => {
+                const kind = segmentKind(s.definition.rules.length, s.staticMembers.length)
+                return (
+                  <SegmentTitleRow
+                    draft={s.draft} setDraft={s.setDraft} busy={s.busy} total={s.total}
+                    onSave={() => s.save('Segment')}
+                    saveLabel={s.busy ? 'Saving…' : s.draft.id ? 'Save changes' : 'Save segment'}
+                    onDelete={() => s.remove(`Delete "${s.draft.name}"? Emails already sent to it are unaffected.`)}
+                    onDuplicate={s.duplicate} onEmail={s.emailThese}
+                    placeholder="Name this segment"
+                    blurb="A live rule, a hand-picked set, or both — the audience is everyone in either."
+                    actions={<Badge toneKey={kind.tone}>{kind.label}</Badge>}
+                  />
+                )
+              })()}
 
-              <div className="mt-6">
+              {s.error && <Note toneKey="block" className="mt-4">{s.error}</Note>}
+
+              {/* The two count tiles sit above the definition; each toggles its
+                  own contact list at the bottom of the pane. */}
+              <div className="mt-6"><SegmentTiles /></div>
+
+              {/* Three distinct definition areas: the live rule, the frozen
+                  hand-picked set, and the segments this one folds in. */}
+              <DefinitionSection title="Active rules (live)" className="mt-5">
                 <RuleBuilder defs={CLUB_FIELD_DEFS} rules={s.draft.rules} opts={s.opts}
                   setRules={fn => s.setDraft(d => ({ ...d, rules: typeof fn === 'function' ? fn(d.rules) : fn }))} />
-              </div>
+              </DefinitionSection>
 
-              <CountBar counting={s.counting} total={s.total} reachable={s.reachable} otherRoute={s.otherRoute} />
+              <DefinitionSection title="Static members (fixed)" className="mt-4">
+                <StaticPicker />
+              </DefinitionSection>
 
-              <SaveRow
-                onSave={() => s.save('Segment')} busy={s.busy} error={s.error}
-                saveLabel={s.busy ? 'Saving…' : s.draft.id ? 'Save changes' : 'Save segment'}
-                onDelete={s.draft.id
-                  ? () => s.remove(`Delete "${s.draft.name}"? Emails already sent to it are unaffected.`)
-                  : null}
-              />
+              <DefinitionSection title="Include or exclude other segments" className="mt-4">
+                <SegmentRefPicker
+                  segments={s.segments} currentId={s.draft.id} sizes={s.sizes}
+                  includes={s.draft.includes || []} excludes={s.draft.excludes || []}
+                  onChange={({ includes, excludes }) => s.setDraft(d => ({ ...d, includes, excludes }))}
+                />
+              </DefinitionSection>
 
-              <SectionHeading className="mt-8 mb-2.5">Who this is, right now</SectionHeading>
-              <TableWrap>
-                <TableHead cols={COLS} minWidth={MIN_W}>
-                  <Cell head first>Person</Cell>
-                  <Cell head>In the directory as</Cell>
-                  <Cell head num>Balance</Cell>
-                  <Cell head last>Reachable</Cell>
-                </TableHead>
-                {s.contacts.length === 0 ? (
-                  <div style={{ minWidth: MIN_W }}><Empty>Nobody matches these conditions yet.</Empty></div>
-                ) : s.contacts.slice(0, 50).map(c => {
-                  const r = reachability(c)
-                  return (
-                    <TableRow key={c.id || c.email} cols={COLS} minWidth={MIN_W}>
-                      <Cell first>
-                        <div className="truncate text-pb-text">{c.name || c.email}</div>
-                        {c.name && c.email && <div className="font-mono text-[9.5px] text-pb-faint truncate">{c.email}</div>}
-                      </Cell>
-                      <Cell className="text-pb-dim capitalize">{c.source || '—'}</Cell>
-                      <Cell num className={c.balance > 0 ? 'text-pb-amber' : 'text-pb-faintest'}>
-                        {c.balance == null ? '—' : money(c.balance)}
-                      </Cell>
-                      <Cell last><Badge toneKey={r.tone}>{r.label}</Badge></Cell>
-                    </TableRow>
-                  )
-                })}
-              </TableWrap>
-              {s.contacts.length > 50 && (
-                <div className="font-mono text-[10px] tracking-wide2 uppercase text-pb-faintest mt-2">
-                  Showing the first 50 of {s.total}
-                </div>
-              )}
-            </>
+              {/* The contact lists a tile reveals, below every definition area. */}
+              <SegmentContactLists />
+            </StaticMembersProvider>
           )}
         </DetailPane>
       </CrudPanes>

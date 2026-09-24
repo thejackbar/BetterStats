@@ -16,7 +16,7 @@ import {
   AnimatedNum, Sparkline, Label, Card, Btn, Kpi,
   ResultPill, PageHeader, PbSpinner, TabBar,
 } from '../lib/presskit'
-import { GradeTotalNote, MatchCoverageNote } from '../components/MatchCoverage'
+import { GradeTotalNote } from '../components/MatchCoverage'
 import { FilterReachDot, FilterReachNote } from '../components/FilterReach'
 import '../styles/honour-badge.css'
 import { countryFlagUrl } from '../data/countries'
@@ -1739,6 +1739,11 @@ function MatchesBySeasonGrade({ rows = [], seasonRows = [] }) {
 
 function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGrade, byPosition, seasonStats, bowlingByGrade, bowlingDismissals = [], bowlingByBatterPosition = [], battingInnings = [], bowlingSpells = [], teamBreakdown = { rows: [], season_rows: [], unattributed: 0 }, seasonLabel = null, captainStats, byVenue = [], byOpposition = [], careerBatting = null, careerBowling = null, careerFielding = null, matchCoverage = null, gradeScope = null, filterPick = null, filterScope = null }) {
   const [subTab, setSubTab] = useState('profile')
+  // The Competitions breakdown is shown only where the club has switched its
+  // public Competition surfaces on — the same flag that draws the filter row on
+  // the other stats pages, so the two never disagree about whether this club
+  // shows competitions.
+  const showCompetitionsTab = !!gradeScope?.show_competition_filters
 
   const hasBattingData = dismissals?.length || partnerships?.length || byGrade?.length || byPosition?.length || seasonStats?.some(s => (s.total_runs ?? 0) > 0)
   const hasBowlingData = bowlingByGrade?.length || bowlingDismissals?.length || bowlingByBatterPosition?.some(p => (p.wickets ?? 0) > 0) || seasonStats?.some(s => (s.total_wickets ?? 0) > 0)
@@ -1747,7 +1752,7 @@ function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGr
     <div className="space-y-6">
       {/* Sub-tab navigation */}
       <div className="flex overflow-x-auto pb-no-scrollbar border-b border-pb-hairline">
-        {ANALYSIS_SUBTABS.map(t => (
+        {ANALYSIS_SUBTABS.filter(t => t.key !== 'competitions' || showCompetitionsTab).map(t => (
           <button
             key={t.key}
             onClick={() => setSubTab(t.key)}
@@ -2095,7 +2100,7 @@ function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGr
         </div>
       )}
 
-      {subTab === 'competitions' && (
+      {subTab === 'competitions' && showCompetitionsTab && (
         <div className="space-y-3">
           {/* Same: filtering it to one competition leaves one row. */}
           <FilterReachNote pick={filterPick} reason="enumeration" shows="every competition" />
@@ -2790,9 +2795,8 @@ export default function PlayerProfile() {
   // hook no-ops on null and the pills simply aren't drawn until then.
   const [profileOrgId, setProfileOrgId] = useState(null)
   const {
-    available: availableCategories, availableFormats, availableCompetitions,
+    available: availableCategories, availableFormats,
     gradeType, setGradeType, matchFormat, setMatchFormat,
-    competition, setCompetition,
     categoriesParam: catParam, formatsParam: fmtParam,
     competitionsParam: compParam,
   } = useGradeFilters(profileOrgId)
@@ -2803,12 +2807,10 @@ export default function PlayerProfile() {
     competitions: compParam,
   })
   const gradeScope = data?.grade_scope
-  // Why the career total and the per-competition figures differ. Sent only
-  // when they genuinely do, so the note draws on nobody it has nothing to
-  // tell. `scopeActive` only changes the wording — the note itself shows
-  // either way, so nobody has to discover the gap by adding the rows up.
+  // Why the career total and the per-competition figures differ — read by the
+  // Competitions tab's own breakdown, which still explains the gap where it is
+  // drawn.
   const matchCoverage = data?.match_coverage
-  const scopeActive = !!gradeScope?.active
   // The raw selection, null where untouched. The reach notes and tab marks
   // fire on THIS, never on `gradeScope.active`: a club with a junior programme
   // has a default scope on every visit, and the default is already announced
@@ -3131,13 +3133,6 @@ export default function PlayerProfile() {
               setGradeType={setGradeType}
               matchFormat={matchFormat}
               setMatchFormat={setMatchFormat}
-              competition={competition}
-              setCompetition={setCompetition}
-              availableCompetitions={
-                availableCompetitions.length
-                  ? availableCompetitions
-                  : (gradeScope?.available_competitions || [])
-              }
               availableCategories={availableCategories.length ? availableCategories : (gradeScope?.available || [])}
               availableFormats={availableFormats}
             />
@@ -3163,13 +3158,6 @@ export default function PlayerProfile() {
                     </span>
                   </div>
                 </div>
-                {/* Said before anyone has to notice: with no filter this is
-                    Cricket Australia's season total, and anything filtered is
-                    counted from the scorecards we hold, so the competitions do
-                    not sum to it. Drawn on the unfiltered view too, which is
-                    the whole point — nobody should discover this themselves
-                    and read it as a mistake. */}
-                <MatchCoverageNote coverage={matchCoverage} filtered={scopeActive} />
               </div>
               {player.is_overseas && (
                 <div className="pb-card p-4 flex items-center gap-3" style={{ borderColor: 'color-mix(in srgb, var(--pb-amber) 30%, transparent)' }}>

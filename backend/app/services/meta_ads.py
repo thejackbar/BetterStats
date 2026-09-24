@@ -399,6 +399,116 @@ def _num(v: Any) -> float:
         return 0.0
 
 
+# ─── Token health ──────────────────────────────────────────────────────────
+# The Aug→Sep 2026 outage was a silent one: the ads_read token expired and the
+# HQ page kept showing the last good snapshot for ten days before anyone opened
+# it and saw the banner. And the CAPI token — which quietly stops sending
+# server-side conversions when it lapses — has NO surface at all. So both tokens
+# are checked proactively (a countdown, not a post-mortem) via Meta's own
+# debug_token, and "expiring within TOKEN_WARN_WITHIN_DAYS" lights the sidebar
+# badge so it's caught before the data goes stale. The real fix for recurrence
+# is a never-expiring system-user token; this makes the 60-day one visible.
+TOKEN_WARN_WITHIN_DAYS = 14
+
+# debug_token is a live Meta call and the badge fetch fires on every super-admin
+# page mount, so cache it briefly — an expiry date doesn't change minute to
+# minute. Busted after a successful /refresh so a just-fixed token confirms
+# straight away rather than waiting out the TTL.
+_TOKEN_HEALTH_TTL = timedelta(minutes=30)
+_token_health_cache: dict[str, Any] = {"at": None, "value": None}
+
+
+def bust_token_health_cache() -> None:
+    _token_health_cache["at"] = None
+    _token_health_cache["value"] = None
+
+
+async def _debug_token(token: str) -> dict:
+    """Ask Meta about one token, using the token itself as the caller (no app
+    secret needed). Returns validity + expiry. Best-effort — never raises; a
+    check that couldn't run reports ``checked=False``. An expired token used as
+    its own caller comes back as a top-level 190 error, which reads here as
+    ``valid=False`` (the actionable signal), so we don't get an expiry date for
+    one that's already dead — that's fine, "it's dead" is the whole message."""
+    out: dict[str, Any] = {
+        "configured": bool(token), "checked": False, "valid": None,
+        "expires_at": None, "days_left": None, "never": False,
+        "type": None, "scopes": [], "error": None,
+    }
+    if not token:
+        return out
+    url = f"https://graph.facebook.com/{settings.meta_api_version}/debug_token"
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            resp = await client.get(url, params={"input_token": token, "access_token": token})
+        body = resp.json() if resp.content else {}
+    except (httpx.HTTPError, ValueError) as e:
+        out["error"] = f"Could not reach Meta: {e}"
+        return out
+
+    out["checked"] = True
+    err = body.get("error") if isinstance(body, dict) else None
+    if resp.status_code != 200 or err:
+        out["valid"] = False
+        out["error"] = (err or {}).get("message") or f"HTTP {resp.status_code}"
+        return out
+
+    data = (body.get("data") or {}) if isinstance(body, dict) else {}
+    out["valid"] = bool(data.get("is_valid"))
+    out["type"] = data.get("type")
+    out["scopes"] = data.get("scopes") or []
+    if not out["valid"]:
+        out["error"] = (data.get("error") or {}).get("message") or "Token reports not valid."
+    exp = data.get("expires_at")
+    if exp == 0:
+        out["never"] = True  # 0 = never expires (a properly-issued system-user token)
+    elif exp:
+        dt = datetime.fromtimestamp(exp, tz=timezone.utc)
+        out["expires_at"] = dt.isoformat()
+        out["days_left"] = (dt - datetime.now(timezone.utc)).days
+    return out
+
+
+def _token_needs_attention(t: dict) -> bool:
+    """A configured token that is failing, or expiring within the warn window.
+    A blank token is NOT attention — an unset CAPI token is a deliberate
+    "server-side events off" state, and an unset ads token has its own big
+    empty-state on the page already."""
+    if not t["configured"] or not t["checked"]:
+        return False
+    if t["valid"] is False:
+        return True
+    return t["days_left"] is not None and t["days_left"] <= TOKEN_WARN_WITHIN_DAYS
+
+
+async def token_health(*, force: bool = False) -> dict:
+    """Health of both Meta tokens — the ads_read dashboard token
+    (settings.meta_access_token) and the CAPI write token
+    (settings.meta_capi_access_token). ``attention`` is the one boolean the
+    sidebar badge and the daily scheduler check read: True when either
+    configured token is invalid/expired or within the warn window. Cached for
+    _TOKEN_HEALTH_TTL. Never raises."""
+    now = datetime.now(timezone.utc)
+    cached = _token_health_cache["value"]
+    if not force and cached is not None and _token_health_cache["at"] \
+            and now - _token_health_cache["at"] < _TOKEN_HEALTH_TTL:
+        return cached
+
+    ads = await _debug_token(settings.meta_access_token)
+    ads["purpose"] = "ads_read"
+    capi = await _debug_token(settings.meta_capi_access_token)
+    capi["purpose"] = "capi"
+    result = {
+        "ads": ads,
+        "capi": capi,
+        "attention": _token_needs_attention(ads) or _token_needs_attention(capi),
+        "warn_within_days": TOKEN_WARN_WITHIN_DAYS,
+    }
+    _token_health_cache["at"] = now
+    _token_health_cache["value"] = result
+    return result
+
+
 def _action_value(actions: list | None, action_types: set[str]) -> float:
     if not actions:
         return 0.0
@@ -721,18 +831,30 @@ _SINCE_LOWER_BOUND = "GREATEST(NOW() - (:days * INTERVAL '1 day'), COALESCE(:sin
 # facebook/instagram traffic_source). Keeps the wizard funnel and the
 # selected-clubs table to Meta traffic only, so an organic or EDM signup that
 # reached /trial some other way never shows on the Meta Ads dashboard.
-def _meta_visitor_subquery(created_at_bound: str) -> str:
+#
+# Written as an EXISTS correlated on visitor_id — served by
+# idx_usage_events_visitor_created (visitor_id, created_at) — and NOT as
+# `visitor_id IN (SELECT ... FROM usage_events WHERE <window>)`. The IN form
+# built its whole set with a full seq scan of usage_events, the platform's
+# largest table (every API request and page view lands here), on every Meta
+# Ads HQ page load. That scan grew with the table until get_latest_summary
+# exceeded the browser/nginx timeout and the dashboard sat on "Loading…"
+# forever — the outer query it gates is always a SMALL set of self_serve_step
+# rows, so driving from those and probing each visitor's own rows makes the
+# cost scale with the selections shown rather than the whole table. The outer
+# query must alias its usage_events row as `ue`.
+def _meta_visitor_exists(created_at_bound: str, alias: str = "ue") -> str:
     return f"""
-        visitor_id IN (
-            SELECT DISTINCT visitor_id FROM usage_events
-            WHERE created_at >= {created_at_bound}
-              AND visitor_id IS NOT NULL
+        EXISTS (
+            SELECT 1 FROM usage_events mv
+            WHERE mv.visitor_id = {alias}.visitor_id
+              AND mv.created_at >= {created_at_bound}
               AND (
-                traffic_source IN ('facebook', 'instagram')
-                OR lower(COALESCE(NULLIF(utm_source, ''),
-                         substring(path from 'utm_source=([^&]+)')))
+                mv.traffic_source IN ('facebook', 'instagram')
+                OR lower(COALESCE(NULLIF(mv.utm_source, ''),
+                         substring(mv.path from 'utm_source=([^&]+)')))
                     IN ('fb', 'facebook', 'meta', 'ig', 'instagram')
-                OR path ~* 'fbclid=' OR path ~* 'igshid='
+                OR mv.path ~* 'fbclid=' OR mv.path ~* 'igshid='
               )
         )
 """
@@ -740,11 +862,11 @@ def _meta_visitor_subquery(created_at_bound: str) -> str:
 
 # Since-aware — for the funnel STAT counts (get_club_selected_count), which
 # reset with the counting-since cutoff.
-_META_VISITOR_SUBQUERY = _meta_visitor_subquery(_SINCE_LOWER_BOUND)
+_META_VISITOR_EXISTS = _meta_visitor_exists(_SINCE_LOWER_BOUND)
 # Plain days-only, unaffected by the cutoff — for the "Clubs selected"/"Clubs
 # searched" TABLES (get_selected_clubs/get_searched_clubs), which stay a full
 # follow-up/lead-management list regardless of the funnel reset.
-_META_VISITOR_SUBQUERY_PLAIN = _meta_visitor_subquery("NOW() - (:days * INTERVAL '1 day')")
+_META_VISITOR_EXISTS_PLAIN = _meta_visitor_exists("NOW() - (:days * INTERVAL '1 day')")
 
 
 async def get_club_selected_count(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS) -> int:
@@ -757,12 +879,12 @@ async def get_club_selected_count(db: AsyncSession, days: int = CAMPAIGN_LENGTH_
     numbers on either side of it in that funnel rather than including
     selections from organic/EDM/other traffic."""
     count = (await db.execute(text(f"""
-        SELECT COUNT(DISTINCT visitor_id) FROM usage_events
-        WHERE event_type = 'self_serve_step'
-          AND route = 'club_prepared'
-          AND created_at >= {_SINCE_LOWER_BOUND}
-          AND visitor_id IS NOT NULL
-          AND {_META_VISITOR_SUBQUERY}
+        SELECT COUNT(DISTINCT ue.visitor_id) FROM usage_events ue
+        WHERE ue.event_type = 'self_serve_step'
+          AND ue.route = 'club_prepared'
+          AND ue.created_at >= {_SINCE_LOWER_BOUND}
+          AND ue.visitor_id IS NOT NULL
+          AND {_META_VISITOR_EXISTS}
     """), {"days": days, "since": _since()})).scalar()
     return int(count or 0)
 
@@ -858,8 +980,8 @@ async def get_selected_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
                MIN(created_at)          AS first_at,
                MAX(created_at)          AS last_at,
                COUNT(DISTINCT visitor_id) AS visitors,
-               bool_or({_META_VISITOR_SUBQUERY_PLAIN}) AS via_meta
-        FROM usage_events
+               bool_or({_META_VISITOR_EXISTS_PLAIN}) AS via_meta
+        FROM usage_events ue
         WHERE event_type = 'self_serve_step'
           AND route = 'club_prepared'
           AND created_at >= NOW() - (:days * INTERVAL '1 day')
@@ -1010,11 +1132,11 @@ async def get_searched_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
                MAX(created_at)          AS last_at,
                COUNT(DISTINCT visitor_id) AS visitors,
                COUNT(*)                   AS searches,
-               bool_or({_META_VISITOR_SUBQUERY_PLAIN}) AS via_meta,
+               bool_or({_META_VISITOR_EXISTS_PLAIN}) AS via_meta,
                (array_agg(DISTINCT NULLIF(TRIM(metadata->>'search_query'), ''))
                   FILTER (WHERE NULLIF(TRIM(metadata->>'search_query'), '') IS NOT NULL)
                )[1:5] AS queries
-        FROM usage_events
+        FROM usage_events ue
         WHERE event_type = 'self_serve_step'
           AND route = 'club_searched'
           AND created_at >= NOW() - (:days * INTERVAL '1 day')
@@ -1405,9 +1527,30 @@ def _current_campaign_utm_contents() -> set[str]:
 
 
 # Same "was this click Meta at all" signal get_selected_clubs/get_searched_clubs/
-# _META_VISITOR_SUBQUERY already use elsewhere on this dashboard — the loosest
+# _META_VISITOR_EXISTS already use elsewhere on this dashboard — the loosest
 # (and last-resort) of _attribution_matches_campaign's three checks.
 _META_ATTRIBUTION_SOURCES = {"fb", "facebook", "meta", "ig", "instagram"}
+
+
+def _all_known_utm_contents() -> frozenset[str]:
+    """Every utm_content tag ANY campaign's ads use (AD_DESTINATIONS), across
+    all campaigns. A signup carrying one of these is tied to a specific
+    campaign, so — once it has failed the current-campaign checks — it must NOT
+    be swept in by the generic Meta-click fallback: it demonstrably belongs to
+    a different campaign. Case-sensitive, matching the current-campaign check."""
+    return frozenset(
+        meta["utm_content"] for meta in AD_DESTINATIONS.values() if meta.get("utm_content")
+    )
+
+
+def _all_known_utm_campaigns() -> frozenset[str]:
+    """Every utm_campaign tag ANY campaign's ads use (CAMPAIGN_UTM_CAMPAIGNS),
+    lowercased to match the current-campaign check. Same purpose as
+    _all_known_utm_contents: a recognised tag names a campaign, so it can't fall
+    through to the campaign-agnostic fallback."""
+    return frozenset(
+        name.lower() for names in CAMPAIGN_UTM_CAMPAIGNS.values() for name in names
+    )
 
 
 def _attribution_matches_campaign(attribution: dict | None) -> bool:
@@ -1420,13 +1563,23 @@ def _attribution_matches_campaign(attribution: dict | None) -> bool:
        campaign started running two destination taxonomies). More resilient
        than (1): doesn't need AD_DESTINATIONS kept in sync with every new ad;
     3. it otherwise carries a plain Meta click signal (a fb/ig/meta
-       utm_source, or a facebook/instagram click_source) — the loosest
-       check, but a genuine Meta-driven registration shouldn't silently
-       vanish from the count just because its UTM tags don't exactly match
-       a hand-maintained mapping. In practice only one campaign has ever
-       been live at a time, so "a Meta click happened" is a good enough
-       stand-in for "it was THIS campaign" when the more precise checks
-       above come up empty.
+       utm_source, or a facebook/instagram click_source) AND carries no UTM
+       tag that names a DIFFERENT known campaign — the loosest check, a safety
+       net so a genuine Meta-driven registration doesn't vanish from the count
+       just because its exact utm_content/utm_campaign isn't in the maps yet.
+
+       That last guard is what makes this campaign-SPECIFIC. Before it, the
+       Meta-click fallback fired for every Meta-sourced signup regardless of
+       which campaign it belonged to — so with more than one campaign in
+       history the tile read the all-time tracked total against WHICHEVER
+       campaign the dropdown had selected (spend/LPV filter by campaign_id, but
+       a signup carries only its UTM tags, so this is the equivalent filter).
+       A signup whose utm_content or utm_campaign is a recognised tag has
+       already been tested against THIS campaign in checks 1-2; if neither
+       fired, the tag names another campaign and the registration is not ours,
+       however it clicked in. Only a signup with no campaign-identifying tag at
+       all (or one tagged for a campaign not yet in the maps) reaches the
+       generic fallback.
     Used by get_registration_count() and the ad-signups report
     (routers/meta_ads.py) so the two can never disagree."""
     if not attribution:
@@ -1438,6 +1591,12 @@ def _attribution_matches_campaign(attribution: dict | None) -> bool:
     known = CAMPAIGN_UTM_CAMPAIGNS.get(_campaign_id()) or set()
     if utm_campaign and utm_campaign in {name.lower() for name in known}:
         return True
+    # The tag names a different known campaign → this registration is that
+    # campaign's, not the selected one. Don't let the generic fallback claim it.
+    if utm_content and utm_content in _all_known_utm_contents():
+        return False
+    if utm_campaign and utm_campaign in _all_known_utm_campaigns():
+        return False
     utm_source = (attribution.get("utm_source") or "").strip().lower()
     if utm_source in _META_ATTRIBUTION_SOURCES:
         return True

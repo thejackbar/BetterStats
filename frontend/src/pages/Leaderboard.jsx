@@ -434,8 +434,8 @@ export default function Leaderboard() {
     available: availableCategories, availableFormats, defaultCategories,
     gradeType, setGradeType, matchFormat, setMatchFormat,
     categoriesParam, formatsParam, competitionsParam,
-    competition, setCompetition, availableCompetitions,
-  } = useGradeFilters(orgId)
+    competition, setCompetition, availableCompetitions, showCompetitionFilter,
+  } = useGradeFilters(orgId, { competitionFilter: true })
 
   const [mainTab, setMainTab] = useState('batting')
   const [battingSort, setBattingSort] = useState('total_runs')
@@ -570,7 +570,7 @@ export default function Leaderboard() {
             availableCategories={availableCategories}
             availableFormats={availableFormats}
             defaultCategories={defaultCategories}
-            showCompetitionFilter
+            showCompetitionFilter={showCompetitionFilter}
             showGradeTypeFilter
             showMatchFormatFilter
           />

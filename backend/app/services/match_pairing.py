@@ -363,9 +363,16 @@ _SYNCED_SQL = """
       FROM games g
       LEFT JOIN grades gr ON gr.id = g.grade_id
       LEFT JOIN seasons s ON s.id = gr.season_id
-     WHERE s.organisation_id = :org
+     WHERE (s.organisation_id = :org
         OR g.home_org_id = :org
-        OR g.away_org_id = :org
+        OR g.away_org_id = :org)
+       -- A synced game a human has locked to an overwrite import is off the
+       -- table: the automatic matcher must not hand it to a CricketStatz match,
+       -- which would fight the unique index and break the whole pass, nor flip
+       -- the club's own correction back.
+       AND NOT EXISTS (SELECT 1 FROM manual_games lk
+                        WHERE lk.superseded_by_game_id = g.id
+                          AND lk.pairing_locked)
 """
 
 # OUR OWN BATTERS, NEVER THE OPPOSITION'S. A fixture between two synced clubs
@@ -395,6 +402,9 @@ _IMPORTED_SQL = """
       FROM manual_games mg
      WHERE mg.organisation_id = :org
        AND mg.cricketstatz_import_id IS NOT NULL
+       -- A locked pairing is a human's decision; the automatic matcher leaves
+       -- it exactly as it is rather than re-deriving it.
+       AND NOT mg.pairing_locked
 """
 
 _IMPORTED_CARD_SQL = """
@@ -487,6 +497,8 @@ async def reconcile_org(db: AsyncSession, org_id, *, season_ids=None,
           FROM manual_games
          WHERE organisation_id = :org
            AND cricketstatz_import_id IS NOT NULL
+           -- Never a locked row: it is not the matcher's to clear or re-derive.
+           AND NOT pairing_locked
     """
     cur_params = {"org": str(org_id)}
     if season_ids:

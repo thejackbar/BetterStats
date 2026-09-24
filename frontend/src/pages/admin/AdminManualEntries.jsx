@@ -7,6 +7,7 @@ import { formatSeason } from '../../lib/cricketFormat'
 import ManualGamesImportWizard from '../../components/admin/ManualGamesImportWizard'
 
 const INPUT_CLS = 'w-full bg-pb-surface2 border pb-hairline text-pb-text text-sm rounded px-3 py-2 focus:outline-none focus:border-pb-accent'
+const SMALL_INPUT = 'w-full bg-pb-surface2 border pb-hairline text-pb-text text-sm rounded px-2 py-1 focus:outline-none focus:border-pb-accent'
 const LABEL_CLS = 'font-mono text-[10px] text-pb-faint block mb-1'
 const BTN_PRIMARY = 'inline-flex items-center px-4 py-2 bg-pb-accent text-white text-sm font-semibold rounded hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed'
 const BTN_SECONDARY = 'inline-flex items-center px-3 py-1.5 border pb-hairline text-pb-text text-xs rounded hover:bg-pb-surface2'

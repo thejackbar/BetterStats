@@ -742,6 +742,52 @@ layers on all templates where each element except the background is a layer."*
   behind it. That is what the row says, so nobody is hunting for a stack that is
   not there.
 
+## A SHEET SPLIT BY TEAM IS NOT A SHEET SPLIT BY GRADE (v9.89.1, Sep 2026)
+
+Reported off The Basin's Import Stats review: Leigh Cook's sheet says 240 and
+the preview read ONLINE 135, RESIDUAL +0, FINAL 355. His profile had already
+gone to 433 from an earlier commit.
+
+- **THE SHEET AND THE ONLINE DATA AGREE SEASON FOR SEASON**, and checking the
+  real spreadsheet against his live grid is what named the cause. The sheet
+  labels rows by the club's own TEAMS (1XI / 2XI / 3XI / 4XI / 20/20). CA files
+  the same side under a different GRADE name most years ("Division 3",
+  "4 Norm Reeves Shield Reserve", "Community 1"...). Grade-scoped
+  reconciliation (migration 154) mapped each label to ONE grade name and
+  compared against that grade alone, so ONLINE read 135 of his ~256 and every
+  season spent under another name was emitted as a season delta on top.
+  `final = GR + emitted + residual` has no cap on `emitted`, so the "can never
+  exceed the club's total" promise on the review screen only held while the
+  season test was right.
+- **`import_reconcile.is_team_labelled` IS THE SWITCH**: an org whose imported
+  rows name two or more grade labels is reconciled per player against their
+  WHOLE GR record (the ungraded path), season by season. The labels are still
+  stored; pre-GR season deltas keep the team their row named
+  (`season_rows_by_grade`); the career residual carries no grade. A club that
+  uploaded ONE competition's book keeps the grade-scoped path unchanged. Both
+  the commit and the preview (`routers/imports.py::_resolve`) make the same
+  call, the preview reading the club's earlier uploads too since the commit
+  reconciles all of them. **Accepted cost**: a club uploading its 1sts and 2nds
+  as separate sheets is now read as its whole book, so a grade CA has that the
+  sheets omit is not topped up per grade.
+- **`covered_by_year`**: a season is covered when GR holds that YEAR under any
+  season row. An id-only test read a hand-made "2015/16" beside the synced
+  "Summer 2015/16" as missing (267 against 256 in the control run).
+- **THE EXPECTED RESULT IS THE ONLINE FIGURE, NOT THE SHEET'S**, whenever
+  online holds more: for Leigh that is 256 (2009/10's 11 games are online and
+  not in the sheet, plus five seasons one game apart). "GR wins per season" is
+  the documented rule; making the sheet win would be a different rule.
+- **Recovery needs no re-import**: `reconcile_imported_totals` rebuilds every
+  delta from `imported_stats`, and runs at the end of every sync;
+  `python -m app.scripts.reconcile_imports <org>` does it now.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_import_team_labels.py`, 17 checks through the
+  shipped `reconcile_imported_totals`, Leigh's real rows and his real online
+  seasons) **with a control run**: with the year widening removed, 5 fail and
+  his career reads 267. The fuller control (team switch off too) goes down the
+  grade path, which needs the lifespan views this harness does not build, so
+  that half was replayed through the pure functions instead.
+
 ## A FACET LISTED IN THE KIT AND MISSING FROM ONE FUNCTION (v9.73.1, Sep 2026)
 
 Reported off `/admin/comms/lists` as `a[r.key] is not iterable`, straight after
@@ -2022,6 +2068,35 @@ period before expiry left for the club to define**.
   away), and the AFL silo is untouched. `member_reminders` still emails the
   MEMBER about their own lapsing qualification through the member portal — a
   different audience from this, and deliberately left alone.
+
+### Certificate stages, grade milestones and a test email (v9.89.0, Sep 2026)
+
+- **A CERTIFICATE WAS ANNOUNCED ONCE AND NEVER AGAIN, LAPSE INCLUDED.** Now three
+  stages, each its own dedupe key: notice (the ORIGINAL unsuffixed key, so a
+  certificate already announced is not re-announced), `:final` (`final_days`,
+  0 = off) and `:lapsed` (severity `urgent`, via `emit(severity=...)`). Only the
+  CURRENT stage is raised. A pre-stage notice is read by its payload's
+  `days_remaining` so the stages it already covered are not repeated.
+- **Left out on purpose**: a certificate superseded by a newer record of the same
+  type for the same person (later expiry, or none), an archived member, a retired
+  type, and anything lapsed longer than `lapsed_days` ago. The old
+  `ORDER BY expires_at LIMIT 40` served forty certificates from years ago first.
+- **Grade milestones** (`milestone_scan.grade_milestones`): grade = name folded
+  through the club's active `grade_merge_logs`, label = the club's display
+  override, active players only, bound as a `uuid[]` (never a subquery). "Reached"
+  = crossed in the last `LOOKBACK_DAYS` by scorecard date. A player with a record
+  in only one grade is skipped, judged across ALL stats (a per-stat check dropped
+  a batter whose runs sat in one grade). Upcoming needs a game in that grade since
+  the active cutoff. Both events share one pass via `session.info`.
+- **`scan_org` used a bare rollback after a failing source**, which expired `org`
+  and crashed the rest of the club's scan with MissingGreenlet. `rollback_keeping`.
+- **Console is not a send in `dispatch_emails` either** (the sales-email rule): with
+  no provider the deliveries stay pending. `POST .../settings/test-email` sends the
+  caller alone a `[Test]` digest of the club's recent notifications, never touches
+  a delivery, 5 per 10 minutes. `my_last_email` on the settings payload reads the
+  delivery record.
+- **Verified**: `verify_notifications.py` 146 (control: 20 fail),
+  `verify_notifications_browser.mjs` 56 (control: 7 fail).
 
 ## Suggested duplicate grades: the discriminator rule (migration 294, v9.70.1, Sep 2026)
 
@@ -7274,6 +7349,67 @@ await_only() here`.
   **with a control run**: putting the old column name and the bare rollback
   back reproduces the reported greenlet error exactly.
 
+## AN IMPORT RESIDUAL IS CLASSIFIED BY ITS LABEL, NOT KEPT BLIND (v9.89.2, Sep 2026)
+
+Reported off The Basin: Nathan Freeling, a senior player whose only record for
+2006/07-2008/09 is a BetterImport residual under senior grade labels ("Division
+3/4/5"), read **18 matches / 376 runs under the JUNIORS filter — and the same
+under Women's and Masters**, on a player with no junior grades at all.
+
+- **THE CATEGORY FILTER IS EXCLUSION-BASED AND AN IMPORT RESIDUAL HAS NO
+  grade_id, SO IT SURVIVED EVERY PICK.** `GradeScope.clause`'s category branch is
+  `column IS NULL OR NOT (column = ANY(excluded_ids))` — correct for the DEFAULT
+  ("no juniors": a row we can't classify is probably senior, keep it) and wrong
+  for an EXPLICIT pick. An import residual carries `grade_id = NULL`, so
+  `grade_id IS NULL` is TRUE and it was kept under Juniors, Women's and Masters
+  alike. Nathan's three seasons exist ONLY as residuals (CA's per-grade data
+  starts 2009/10), so they were swept into every category. **This hit every
+  BetterImport club with pre-CA seasons**, not just him.
+- **THE RESIDUAL CARRIES A CLASSIFIABLE grade_label NOW, so it is no longer
+  genuinely unclassifiable.** Migration 252 put `grade_label` on the import
+  branch of `v_effective_player_season_stats`, and the team-labelled reconcile
+  (v9.89.1) writes a real per-grade label. So the row IS classifiable — the
+  filter was just looking at the NULL grade_id instead of the label.
+- **`resolve_scope` BUILDS `excluded_labels` THE SAME WAY IT BUILDS
+  `excluded_ids`.** One extra `SELECT DISTINCT grade_label FROM
+  import_effective_deltas`, only when a category filter is active, each label
+  classified with `categories_for_name` (its stored categories, else
+  `suggest_categories`) and `judged = cats if explicit else {primary}` — the
+  identical rule the grade walk applies. No per-row cost; empty for a club with
+  no imports, so those queries are byte-for-byte what they were.
+- **`clause(..., label_column=...)` IS A CASE, NOT A BLANKET KEEP.** grade_id
+  present -> judged by grade_id (unchanged, a season adjustment still filters by
+  its real grade); grade_label present -> judged by the label
+  (`NOT (label = ANY(excluded_labels))`, cast to `text[]` so an empty list is
+  safe); grade_label NULL -> KEPT, because a career-level lump with neither is
+  genuinely unclassifiable, the one case the old reasoning still holds for.
+- **THE FIVE RESIDUAL FILTER SITES ALL READ `pss` (the view with grade_label),
+  so all move together**: `_career_residuals` (the profile cards + MATCHES
+  stat), `_residual_totals_cte` (leaderboards), `_season_by_season_scoped` (the
+  season table) and StatLab's family + career/season residuals. The by-grade
+  grid is NOT one of them — it matches an import residual to a real grade row by
+  NAME (`_IMPORT_GRADE_MATCH`) and filters on that grade's `gr.id`, so it already
+  classified correctly.
+- **THE DEFAULT IS UNTOUCHED, WHICH IS THE HALF THAT COULD HAVE BROKEN.** Under a
+  club default that excludes junior, a senior label ("Division 3") is NOT in
+  `excluded_labels` (its category is what's wanted), so the senior residual is
+  still KEPT — a club's pre-CA senior seasons still show on the ordinary page.
+  Only an explicit non-matching pick drops them.
+- **No re-import, no migration** — it's a read-path scope change, so every
+  affected club corrects on the next page load.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_junior_residual_scope.py`, 24 checks through the
+  shipped `resolve_scope` / `_career_residuals` / `_season_by_season_scoped` /
+  `_residual_totals_cte` over the real view: the reported senior residual reading
+  0 under Juniors/Women's/Masters and its full 18/376 under Men's and the
+  junior-excluding club default, a genuine junior residual showing under Juniors
+  only, a label-less career lump kept under every category, a real-grade_id
+  residual still excluded by its id, the season table and leaderboard agreeing,
+  and another club's identical residual untouched) **with a control run**: 10 of
+  the 24 fail against the previous commit, reporting the customer's own **18/376**
+  under Juniors and the same under Women's and Masters. The control reports rather
+  than crashing — `excluded_labels` is read through `getattr`.
+
 ## Junior stats split off career stats (migration 228, v9.18.0, Aug 2026)
 
 An Under-14 season was landing inside a senior career average. `grades.category`
@@ -7746,6 +7882,284 @@ Reported from a phone: the Directory reads well, and the older full editors
   on each one's `<h1>` computed font, size and weight plus
   `documentElement.scrollWidth > clientWidth`. That check is worth repeating
   whenever a Clubhouse screen is added.
+
+## A role is a level between the area and the shift (migration 306, v9.82.0, Sep 2026)
+
+Reported off Setup → Areas & roles: an operational area paired ONE role with
+ONE gating qualification ("ROLE THAT COVERS IT"), and the reporter wanted a
+Match Day area to involve several — Umpires, Scorers, Team Managers, the roles a
+junior fixture needs — stating the hierarchy in their own words: Department →
+Operational Area → **Role** → Shift → Volunteer, each area holding many roles and
+each role many shifts.
+
+- **THE ROLE WAS A PROPERTY OF THE AREA, AND "EACH ROLE HAS MANY SHIFTS" CANNOT
+  BE SAID THAT WAY.** `roster_areas.required_role_id` is one column and a shift
+  knew nothing about roles — it only pointed at its area. So role becomes a
+  first-class level: an area holds a PALETTE of roles (`roster_area_roles`, each
+  role paired with the qualification that gates that one role), and every
+  shift/pattern carries one `role_id` drawn from that palette.
+- **THE QUALIFICATION IS PER ROLE, WHICH IS THE WHOLE POINT.** A Match Day
+  Umpire needs an accreditation while the Scorer beside it needs nothing, so the
+  gate lives on the palette ENTRY (`roster_area_roles.required_qualification_type_id`),
+  not on the area. `check_assignment` reads the block and the role warning off
+  the SHIFT (`shift.required_qualification_type_id`, `shift.role_id`), so a
+  person cleared for one role on a fixture is not blocked for another on the same
+  one.
+- **PAID VS VOLUNTEER MOVED FROM THE AREA TO THE SHIFT'S ROLE, so one area can
+  mix both.** `area_pay_kinds` is gone; `confirm_review` and `hours_summary`
+  derive `is_paid` per shift by joining `club_roles` → `club_role_types` on
+  `s.role_id` (`category == 'paid'`, `PAID_CATEGORY`). Worked-hours paid still
+  reads the already-stamped `volunteer_hours.is_paid` (the snapshot rule).
+  `role_shortages` buckets open shifts by `s.role_id` directly rather than
+  resolving through the area — simpler and more accurate, and a NULL `role_id`
+  is the `no_role_required` bucket.
+- **THE BACKFILL MAKES AN EXISTING CLUB BYTE-IDENTICAL.** Migration 306's three
+  idempotent statements carry every single-role area into a one-entry palette
+  and stamp its patterns' and shifts' `role_id` from `required_role_id`, so a
+  club that never touches this behaves exactly as before. `roster_areas`'
+  `required_role_id`/`required_qualification_type_id` are KEPT but deprecated —
+  read only by the backfill; a new area leaves them NULL and the palette is the
+  source of truth. `list_areas` still emits `required_role_id`/`_name` = the
+  first palette entry, so an un-refreshed client shows something.
+- **THE WHOLE ROSTER SUBSYSTEM IS RAW SQL, OUT OF THE ORM/ALEMBIC GRAPH**
+  (`services/roster.py` docstring), so `roster_area_roles` and the two `role_id`
+  columns are mirrored idempotently in `main.py`'s lifespan, byte-identical to
+  306's `STATEMENTS`, right after the migration-222 block. `role_id` on both
+  patterns and shifts is `ON DELETE SET NULL` (a shift outlives a deleted role
+  as general help); a palette entry with no role is meaningless, so
+  `roster_area_roles.role_id` is `NOT NULL ON DELETE CASCADE`.
+- **`seed_starter_areas` seeds each starter's role into the palette** and adds a
+  multi-role **Match Day** starter (Umpire+accreditation, Scorer, Team Manager) —
+  the reporter's own example, and the demonstration that the capability is
+  reachable from the Starter Pack. A starter role that does not resolve to a
+  `club_roles` row is skipped rather than seeding a dangling palette entry.
+- **NUMBERED 306, down_revision 305** (the local branch head; `origin/main` tops
+  at 304 — re-check `origin/main` at merge, per the house rule this file records
+  repeatedly).
+- **Verified against a real Postgres**
+  (`backend/verification/verify_roster_area_roles.py`, 45 checks through the
+  shipped service: migration/lifespan applied idempotently, the backfill carrying
+  a legacy single-role area into a palette with its patterns and shifts
+  inheriting the role, `_generate_shifts` copying `role_id`, a multi-role Match
+  Day area gating each shift by its OWN role's qualification — the Umpire shift
+  blocked without accreditation while the SAME person is NOT blocked for the
+  Scorer shift — paid derived from the shift's role in confirm and hours,
+  `role_shortages` bucketed by shift role, a role removed from the palette, and
+  cross-club scoping) **with a control run**: with the feature reverted, 12 of
+  the checks fail on exactly the per-role qualification and role-on-shift
+  behaviour.
+- **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN, hit in the harness itself.**
+  `caught(label, svc.create_area(...))` evaluated the call — with its new `roles`
+  keyword — BEFORE wrapping it, so the control died with a `TypeError` instead of
+  reporting. `caught` takes a no-arg factory now (`lambda:`), so an absent
+  parameter is a reported failure rather than the end of the run.
+- **Driven in Chromium**
+  (`frontend/verification/verify_roster_area_roles_browser.mjs`, 16 checks: the
+  palette editor growing to two role rows with row 2 refusing the role already
+  chosen in row 1, the EXACT `roles: [...]` payload on the wire — Umpire carrying
+  its accreditation, Scorer a null qualification — the area sub-line listing both
+  roles with their quals, the per-pattern role picker scoped to the palette and
+  its `role_id` on the wire, an open shift's chip showing its role on the weekly
+  grid, and the AddShift picker scoped to the chosen area) **with a control run**:
+  12 of the 16 fail against the previous commit, the old pattern and shift POSTs
+  carrying no `role_id` at all. Every new element is read through `seen`/`press`/
+  `pick`/`opts`, which report absence rather than throwing, so the control fails
+  each new check cleanly instead of dying on the first missing locator.
+- **NOTICED, NOT BUILT**: nothing migrates a shift's people when its role is
+  changed, and there is no per-role headcount target on an area (a shift's
+  headcount is still per pattern). Both are follow-ups, not part of making role a
+  first-class level.
+
+### The roster grid opens an area into its roles (v9.82.1, Sep 2026)
+
+Reported straight after v9.82.0 landed: Match Day now holds Umpire, Scorer, Turf
+Curator and Groundskeeper, but the ROSTER GRID's Areas view still drew Match Day
+as one row with every role's shifts mixed into the day cells. A shift is created
+and filled for a role, so the grid should read that way.
+
+- **FRONTEND ONLY, because the shift already carries its role.** `_shift_rows`
+  has returned `role_id`/`role_name` per shift and `list_areas` the `roles`
+  palette since v9.82.0, so the grid had everything it needed — the Areas view
+  just wasn't grouping by it. No migration, no service, no router change.
+- **THE GRID GROUPS THE SHIFTS THAT EXIST, NOT THE PALETTE.** A palette role with
+  no shift this week has nothing to display or assign, so it draws no row — the
+  grid shows shifts, and a per-role row is only meaningful where shifts sit.
+  `areaRoleGroups(a, areaShifts)` in `Roster.jsx` buckets the area's shifts by
+  `role_id` (null → a "General help" group, kept last), ordered by the palette's
+  `sort_order` first, then any role present but off-palette. A shift with no role
+  is the one bucket that isn't a palette role.
+- **ONE ROLE GROUP → THE ROW IS UNCHANGED.** A single-role area (or one with
+  shifts for one role this week) renders exactly the row it did before — no
+  header, no toggle, its role and qualification on the meta line. This is what
+  keeps a single-role club byte-identical, the same posture v9.82.0's backfill
+  took. Only two-or-more role groups draw the expanding header.
+- **A MULTI-ROLE AREA IS A HEADER THAT FOLDS ITS ROLES AWAY.** The header carries
+  the area total (filled/total, "N roles") and a toggle; each role is a sub-row
+  beneath it with only that role's shifts in its day cells and its own
+  filled/total and gating qualification. Collapsing leaves just the header.
+- **`areaDayCol(a, cellShifts, d)` IS THE ONE PLACE A SHIFT CHIP IS DRAWN ON THE
+  AREAS VIEW**, shared by the single-role row and every per-role sub-row, so they
+  select, drop and warn identically — a volunteer dragged onto a role's shift is
+  the same code path whichever row it lands in.
+- **COLLAPSE IS A PER-PERSON PREFERENCE**, `usePref('roster_areas_collapsed', {})`
+  keyed by area id, so a club with one area folded keeps the rest open and the
+  fold survives the browser closing. Default (empty map) is expanded — the
+  reported complaint was that the roles were hidden, so showing them is the
+  default and folding is the opt-in.
+- **Driven in Chromium** (`frontend/verification/verify_roster_role_grid_browser.mjs`,
+  16 checks: the multi-role header and its toggle, both role sub-rows shown by
+  default, the open Umpire shift landing in the Umpire sub-row and the assigned
+  Scorer shift in the Scorer sub-row, a single-role area staying a plain row with
+  no toggle, the toggle folding the sub-rows away and back, the fold surviving a
+  reload, no page errors and no overflow at 390px) **with a control run**: 12 of
+  the 16 fail against the previous commit, the 4 that pass in both being the
+  single-role-unchanged, no-errors and no-overflow guards.
+- **THE COLLAPSE CHECKS ARE CONTRASTS, NOT BARE ABSENCE.** "collapsing folds away
+  the sub-row" and "survives a reload" are gated on the sub-row having genuinely
+  been shown first (`wasExpanded`), or a build that never draws a sub-row would
+  pass them vacuously — the "a check that can't fail is not a check" trap, caught
+  by the control run passing them before they were tightened.
+
+### An open shift on an archived area read "undefined" (v9.82.4, Sep 2026)
+
+Reported off a live People-view roster: open-shift chips showed "undefined ×2" /
+"undefined ×8" as their description.
+
+- **THE CHIP NAMED A SHIFT BY LOOKING ITS AREA UP IN THE ACTIVE-AREAS SET, WHICH
+  MISSES AN ARCHIVED AREA.** `list_areas` returns `is_active = TRUE` areas only,
+  but `_generate_shifts` and `_shift_rows` don't filter active (the row still
+  exists — `delete_area` is a soft delete), so a week generated before an area
+  was archived keeps that area's shifts. The People-view chip's headline was
+  `areaById[shift.area_id].name`, and `areaById` is built from `list_areas` — so
+  an archived-area shift resolved to `{}` and rendered its name as `undefined`.
+  **React renders a bare `undefined` child as EMPTY; only the `count > 1` path
+  (`a.name + ' ×' + count` → string concat) produces the literal "undefined ×N"**
+  the screenshot showed — which is why the reproduction fixture needs a PAIR, not
+  a single, on the archived area.
+- **THE SHIFT CARRIES ITS OWN `area_name` NOW, off an UNFILTERED LEFT JOIN.**
+  `_shift_rows` LEFT JOINs `roster_areas` (not `list_areas`' active-only set), so
+  an archived area's name still travels on the shift. The frontend already
+  REFERENCED `x.area_name` in the section-search (`shiftHit`) — a field that was
+  intended but never populated, the tell that this was the gap. `areaLabel(shift)`
+  is the one robust namer: `shift.area_name || areaById[...]?.name || role_name ||
+  'Shift'`, never `undefined`.
+- **AND THE OPEN-SHIFTS ROW GROUPED BY AREA NAME + TIME, so two roles merged.**
+  A shift is FOR one role now, but the grouping keyed on the area name and hours
+  alone — so an Umpire slot and a Scorer slot at the same time in one Match Day
+  area collapsed into one "Match Day ×3" chip whose subtitle showed only the
+  representative role (the Scorer vanished). Keyed on `(area_id, role_id, start,
+  end)` now, so each role is its own chip and a same-role pair reads "×2".
+  Keying on the ids the shift already carries also stops every archived-area
+  shift lumping together under the old `undefined === undefined` name key.
+- **Verified against a real Postgres** (`verify_roster_area_roles.py` is 51 checks
+  now: every shift row carrying an `area_name`, a Match Day and a legacy shift
+  naming their areas, and — done last so it doesn't disturb the earlier sections
+  — an area archived after generation still naming its shift while `list_areas`
+  drops it) **with a control run**: with `area_name` reverted, 4 of the checks
+  fail. **Driven in Chromium** (`verify_roster_open_shift_labels_browser.mjs`, 11:
+  no chip reads "undefined", the archived area's real name shows, distinct roles
+  render as separate chips, and the same-role pair reads "Match Day ×2" not "×3")
+  **with a control run**: 5 of the 11 fail against the previous commit, the
+  captured text reading the reported "undefined ×2" beside a merged "Match Day
+  ×3".
+- **A HEADLINE CHECK THAT SUBSTRING-MATCHES THE ROLE CANNOT FAIL.** The first cut
+  asserted the archived chip showed "Grounds" while the role was "Groundskeeper"
+  — which `includes('Grounds')` passes on regardless, since React renders the
+  broken headline as empty rather than the string "undefined" at count 1. Fixed
+  by naming the archived area "Turf" (not a substring of its role) and using a
+  count-2 pair so the real "undefined ×2" bug reproduces.
+
+### And then a shift on that archived area could not be rostered (v9.82.5, Sep 2026)
+
+Reported one step on from the "undefined" labels: allocating the volunteer
+"Abbas, Aamir" (Role: Bar Staff) to a Bar Staff shift returned **"Can't roster
+Abbas, Aamir here. Unknown volunteer or area"**.
+
+- **THE ASSIGNMENT NEVER NEEDED THE AREA, AND THE GUARD THAT SAID IT DID IS WHAT
+  BROKE.** `assign` resolved the shift's area through `list_areas` (active-only)
+  and refused on `if not cand or not area`. But since migration 306 the role and
+  the qualification that gates it live on the SHIFT, and `check_assignment` reads
+  everything off the shift — the `area` argument was carried only to be ignored.
+  An archived area is not in `list_areas`, so the guard refused a fill that
+  needed nothing from the area. It is the same orphan the shift outlives that the
+  v9.82.4 note documents, hit on the write path this time.
+- **THE DEAD `area` PARAMETER IS REMOVED, NOT WORKED AROUND**, from
+  `check_assignment` / `_rank` / `assign` / `autofill` and the frontend's
+  `checkClient` / `dropVerdict` — a stale guard on a value nothing reads is worse
+  than none, and leaving it invites the same trap on the next reader. `assign`
+  now refuses only "Unknown volunteer" (a real state), and only when the
+  candidate itself does not resolve.
+- **THE "BEST FIT FOR THIS SHIFT" PANEL WAS GATED ON THE AREA BEING ACTIVE**
+  (`sel && selArea`), so an archived-area shift showed no fill controls at all —
+  the drag path was fixed by the backend change but the panel still hid. It is
+  gated on the shift alone now, named off the shift's own `area_name`, with the
+  edit-the-area link dropped since an archived area is not in the list to edit.
+- **Verified against a real Postgres** (`verify_roster_area_roles.py` is 54
+  checks now: with Match Day archived, an accredited umpire is rostered onto one
+  of its still-live Umpire shifts rather than refused, and the refusal is NOT the
+  stale "Unknown volunteer or area") **with a control run**: with the fix
+  reverted, 2 fail on exactly that. The `check_assignment` call in the harness
+  tolerates both the old and new arity so the control reaches the assign checks
+  (which use the unchanged `assign` signature) rather than crashing on the direct
+  call — a control run that crashes is not a control run.
+- **Driven in Chromium** (`verify_roster_open_shift_labels_browser.mjs` is 14:
+  selecting the archived-area open shift surfaces the Best fit panel, named off
+  its own `area_name`) **with a control run**: 2 fail against the previous commit,
+  the panel `null` where the area was insisted upon. The chip that carries the
+  `onClick` is the draggable root; the day-column div wrapping it starts with the
+  same text but has no handler, so the check targets `div[draggable]`.
+
+### A duplicate role named a role the list will not show (v9.82.3, Sep 2026)
+
+Reported off Areas & roles → Roles: adding "Bar Manager" was refused as already
+existing, with no Bar Manager anywhere in the list.
+
+- **THE ROLE WAS THERE, HIDDEN, AND THE SILENCE WAS THE BUG** — the same call this
+  file already records for a disabled Rediscover button and a figure that is
+  correctly zero. The committee starter pack (`STARTER_COMMITTEE_ROLES`) seeds
+  "Bar Manager" as a COMMITTEE role (`is_committee=True`), and the Roles list
+  filters those out (`!x.is_committee && x.role_type_category !== 'committee'`)
+  because they are managed as positions on the Committee screen. So a real,
+  active role existed and the tab that raised the error was the one place it
+  could never appear.
+- **THE UNIQUENESS CHECK SPANS EVERY ROLE, WHICH IS RIGHT — the reactivation-by-
+  `lower(title)` path and the many title lookups all assume one role per name.**
+  So the fix is not to scope the check to what the list shows (that would allow
+  two same-titled roles and break those assumptions); it is to make the refusal
+  SAY where the clashing role lives. `_role_clash_message(existing, existing_type,
+  *, caller_is_committee)` is the ONE definition, joining `club_role_types`: when
+  the existing active role is committee-hidden (its `is_committee` flag OR a
+  committee-category type — the same combined test the list applies) and the
+  caller's own role is not, it points at the Committee screen and asks for a
+  different name.
+- **THE RENAME PATH SHARES THE SAME HELPER, so the two cannot disagree.**
+  `update_role`'s rename-collision check (added on `main` the same week, whose own
+  comment already noted the committee-hidden case but kept the bare message) now
+  joins the type and calls `_role_clash_message` too — so renaming a visible role
+  ONTO a hidden committee role reads the same explanation, from the other
+  direction. `caller_is_committee` there is the role's effective `is_committee`
+  after the update (`fields.get("is_committee", r.is_committee)`).
+- **THE ADVICE IS ALWAYS-TRUE, NOT "RECLASSIFY IT".** The list hides a role when
+  `is_committee` OR the type category is committee, and the seeded committee role
+  has the FLAG set — so clearing only the type category would not surface it. A
+  distinct name always works, so that is what the message says; suggesting a
+  reclassification that would not actually list it is worse than saying nothing.
+- **A GENUINE VISIBLE DUPLICATE KEEPS THE PLAIN MESSAGE**, and a committee CALLER
+  clashing with a committee role keeps it too — it is not hidden from that
+  caller's own list. An archived clash still reactivates rather than erroring,
+  unchanged.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_role_create_committee_clash.py`, 10 checks through
+  the shipped `create_role` AND `update_role` over the ClubRole/ClubRoleType
+  tables: the reported case naming the Committee screen, the same when hidden by
+  the type category alone, the clash case-folded, a visible duplicate keeping the
+  bare message and never mentioning the Committee screen, an archived clash
+  reactivated, a committee create keeping the bare message, and the rename path
+  naming the Committee screen while a rename onto a visible duplicate keeps the
+  bare message) **with a control run**: with the committee-aware branch of
+  `_role_clash_message` neutered, 5 of the 10 fail — every create and rename check
+  that should name the Committee screen reports the customer's own bare
+  `A role called "Bar Manager" already exists`.
 
 ## Confirming the roster, a frozen first column, and the drags that never worked (migration 222, v9.10.0, Aug 2026)
 
@@ -13771,6 +14185,102 @@ special-casing). Typical use: flip one real or test club to Force ON, run a
 live checkout end to end, then flip the platform default on for everyone once
 satisfied (the per-club overrides can stay — they only matter when the
 platform default is off, or when someone still needs a specific club blocked).
+
+## Pay by invoice: BetterCricket runs the annual cycle (migration 308, v9.90.0, Sep 2026)
+
+Asked for by a club in a live trial that wanted to subscribe and be INVOICED,
+with a renewal invoice 14 days before each period ends, and no dependence on a
+Super Admin to do it for them. Then, mid-build: **invoicing is OFF for every club
+by default, new clubs included, and only a Super Admin can switch it on for a
+club from All Clubs.** Until then the club sees no invoicing option at all.
+
+- **IT IS NOT A STRIPE SUBSCRIPTION WITH `collection_method=send_invoice`, and
+  that is the whole design.** A subscription raises its renewal invoice ON the
+  renewal date and cannot raise it 14 days early, so "settle before the period
+  ends" is unreachable with one. `services/invoice_billing.py` runs the cycle and
+  asks Stripe for ONE-OFF invoices (`stripe_client.create_one_off_invoice`).
+  Stripe still numbers them, renders the PDF, works out GST (`automatic_tax`,
+  lines `tax_behavior=exclusive`) and hosts the payment page with whatever
+  payment methods the account offers.
+- **`auto_advance=False` and we never call Stripe's send.** BetterCricket emails
+  the invoice to the PRIMARY Club Admin (whoever asked) with our own pay link;
+  Stripe emailing the Customer's address as well would be a duplicate at best
+  and the wrong person at worst.
+- **Three switches, three meanings.** `organisations.invoice_billing_enabled`
+  (Super Admin only, default false) is whether the club is OFFERED it;
+  `organisations.billing_method` ('card' | 'invoice') is what the club chose;
+  `org_module_subscriptions.billing_source` ('invoice' | 'stripe' | NULL) is what
+  pays for each module's current period. **Only an 'invoice' row is ever renewed
+  or lapsed by the invoice job**, so a card module (Stripe owns its renewal) and
+  a hand-granted one (nobody does) can never be invoiced or cut off by
+  accident. Every card grant path stamps 'stripe' for the same reason.
+- **Switching the offer OFF moves an invoice club back to card** (in
+  `patch_club`): the paid period runs to its end, no renewal invoice is raised,
+  open invoices stay payable. The renewal job also filters on the offer.
+- **ONE PRICING DEFINITION.** `plan_invoice` is what the Account page previews
+  AND what the invoice carries: `billing_pricing.price_for` with the live bundle
+  schedule, a code via `apply_coupon_to_quote` (moved out of the router so both
+  paths share it). The discount reaches Stripe as ONE flat `amount_off` coupon
+  worked out by that maths, so the charge matches the preview exactly.
+- **KINDS.** `initial` (Core + selection, bundle, code; the year starts when the
+  trial on those modules ends, so paying early costs no trial, or on payment if
+  later); `addon` (no bundle and no code, prorated to the period's renewal date
+  so the club renews together); `renewal` (every module still on the period,
+  full price, a still-owed 'forever'/'repeating' code applied, never the bundle,
+  which is a once-only reward on the card flow too).
+- **DATES ARE PERTH.** A period is `[start, end)`: end = the renewal date, the
+  card flow's convention. A renewal is due at 11:59:59pm Perth the day before
+  (`due_by`); modules still on the period are PAUSED at the start of the renewal
+  date (job at 00:15 Perth). Paused, not removed: paying the open renewal
+  invoice late switches them back on for the rest of that period. Renewal
+  invoices go out at 08:00 Perth, 14 days ahead (`RENEWAL_NOTICE_DAYS`).
+- **PAYING IS WHAT GRANTS.** The `invoice.paid` webhook, routed off the
+  subscription path by `metadata.billing_method == 'invoice'`. A renewal date
+  only ever moves FORWARD, so a replayed old event cannot undo a later renewal;
+  a renewal paid after a module was cancelled does not switch it back on.
+- **A NEW FIRST OR ADD-ON INVOICE VOIDS THE PREVIOUS OPEN ONE** (and a new first
+  invoice also voids a renewal left open by a lapsed period), so a club can never
+  pay twice for one selection. One live renewal per period is enforced by a
+  partial unique index; the loser of a race voids its own Stripe invoice.
+- **COMMISSION.** A one-off invoice's `billing_reason` is 'manual', which the
+  ledger reads as "earns nothing", so `_upsert_invoice` takes an override:
+  initial → subscription_create, addon → subscription_update, renewal →
+  subscription_cycle. Same earnings as the same purchase by card.
+- **THE PAY LINK IS OURS** (`GET /public/billing/pay/{token}`, unauthenticated,
+  token-scoped): it asks STRIPE whether the invoice is still payable before
+  redirecting to its current hosted page, and lands on the Account page once
+  paid or voided, so a late webhook can never send somebody to pay twice.
+- **THE CONSOLE PROVIDER IS NOT A SEND** (the sales-email rule): with no email
+  provider the invoice is raised, `email_error` says it was not emailed, and the
+  Account page offers the pay link instead.
+- **INVOICING IS A SUPER ADMIN ARRANGEMENT, NEVER A CLUB'S CHOICE (v9.90.1).** A
+  club asks and BetterCricket sets it up. `_require_super_for_invoicing` refuses
+  the club-side `PUT /billing-method` and `POST /invoices/request` for every club
+  admin, primary included, and `cancel_own_module` refuses an invoice club. The
+  Account page shows an invoice club its status and open invoices (pay, PDF,
+  resend) with no module picker. A card club, the default, is untouched: it still
+  picks modules and checks out by card itself.
+- **Card checkout refuses an invoice club (409)**, and a club on a live card
+  subscription cannot switch to invoice, so nobody is billed twice.
+- **Deploy**: add `invoice.voided` and `invoice.marked_uncollectible` to the
+  Stripe webhook's subscribed events (invoice.paid / payment_failed are already
+  there). Payment methods on the hosted invoice page come from the Stripe
+  Dashboard's own settings.
+- **Verified against a real Postgres** (`backend/verification/verify_invoice_billing.py`,
+  94 checks through the shipped service, webhook routing and route bodies, with
+  Stripe and email stubbed: 308 over a populated table, the pricing incl. the
+  code after the bundle, the non-primary admin asking and the PRIMARY receiving,
+  replace-on-reissue, payment granting from the trial end, replay safety, the
+  add-on proration, the renewal at 14 days and not 15, the lapse on the renewal
+  date and not the day before, paying late, the card / hand-granted / switched
+  back / not-offered clubs left alone, the offer gate from both sides, and the
+  pay link) **with two control runs**: the previous commit REPORTS the feature
+  absent; with the lapse scope, the setting filter and replace-on-reissue
+  neutered, 5 fail. **Driven in Chromium** (`frontend/verification/verify_invoice_billing_browser.mjs`,
+  44) **with a control run**: 32 fail against the previous commit.
+- **NOTICED, NOT BUILT**: a BECS/PayTo payment made on the due day can take days
+  to confirm, so the modules may pause briefly and come back when it lands.
+  No reminder beyond the 14-day invoice; Resend is the manual nudge.
 
 ## BetterCricket-managed discount coupons (migration 156, Jul 2026)
 

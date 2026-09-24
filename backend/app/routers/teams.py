@@ -26,7 +26,14 @@ from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
 from app.models.db import Game, GameAppearance, Grade, Organisation, Player, Season, Team, TeamMember, User, get_db
 from app.routers.auth import get_current_club
 from app.routers.availability import months_ago
-from app.services.squad_membership import sync_squad_membership
+from app.services.squad_membership import (
+    add_squad_memberships,
+    clear_all_squad_memberships,
+    move_squad_membership,
+    recompute_primary_squad,
+    remove_squad_memberships,
+    set_squad_memberships,
+)
 
 router = APIRouter(prefix="/teams", tags=["teams"])
 
@@ -577,6 +584,8 @@ async def add_team_member(
         return {"status": "exists"}
     db.add(TeamMember(team_id=team.id, player_id=pid,
                       organisation_id=club.id, added_by=user.id))
+    # team_members is authoritative now; keep the derived primary squad in step.
+    await recompute_primary_squad(db, club.id, pid)
     await db.commit()
     return {"status": "added"}
 
@@ -590,9 +599,11 @@ async def remove_team_member(
     _user: User = Depends(require_cap(MANAGE_SELECTIONS)),
 ):
     team = await _get_owned_team(db, team_id, club.id)
-    tm = await db.get(TeamMember, {"team_id": team.id, "player_id": uuid.UUID(player_id)})
+    pid = uuid.UUID(player_id)
+    tm = await db.get(TeamMember, {"team_id": team.id, "player_id": pid})
     if tm:
         await db.delete(tm)
+        await recompute_primary_squad(db, club.id, pid)
         await db.commit()
 
 
@@ -603,7 +614,18 @@ async def remove_team_member(
 
 class SquadAssign(BaseModel):
     player_ids: list[str]
-    squad_team_id: Optional[str] = None  # None / "" → unassign
+    squad_team_id: Optional[str] = None       # target squad (None → unassign)
+    # A player can be in several squads. `action` says what a call does:
+    #   set    — replace the player's WHOLE squad set with squad_team_id
+    #            (None clears every squad). The legacy default.
+    #   add    — add squad_team_id, keeping every squad they are already in
+    #            (the per-squad "Add players" button, the card "+" control).
+    #   move   — remove from_squad_team_id and add squad_team_id, leaving every
+    #            OTHER squad alone (the board's drag from one column to another;
+    #            drag to Unassigned is move with no target).
+    #   remove — take the player out of from_squad_team_id (or squad_team_id).
+    action: str = "set"
+    from_squad_team_id: Optional[str] = None  # source squad for move / remove
 
 
 @router.post("/squad-assign")
@@ -613,17 +635,29 @@ async def squad_assign(
     club: Organisation = Depends(get_current_club),
     user: User = Depends(require_cap(MANAGE_SELECTIONS)),
 ):
-    """Set (or clear) the assigned squad for one or many players in one call.
+    """Assign one or many players to squads. A player can sit in several squads,
+    so `action` (set/add/move/remove) says whether this replaces their whole set,
+    adds one, moves between two, or removes one — see SquadAssign.
 
-    Powers both drag-to-reassign (one id) and bulk-add (many) on the Squads
-    board. squad_team_id=None unassigns. Skips ids that aren't this club's.
-
-    The assignment is mirrored into team_members so the "Squad" filter resolves
-    to the same set on every BetterSelect screen.
+    team_members is authoritative; players.squad_team_id (the primary squad) is
+    recomputed from it, so the "Squad" filter and every reader stay in step.
+    Skips ids that aren't this club's; a squad id that isn't owned 404s.
     """
+    action = (body.action or "set").lower()
+    if action not in ("set", "add", "move", "remove"):
+        raise HTTPException(status_code=400, detail="Unknown action")
+
     target = None
     if body.squad_team_id:
         target = await _get_owned_team(db, body.squad_team_id, club.id)  # 404 if not owned
+    source = None
+    if body.from_squad_team_id:
+        source = await _get_owned_team(db, body.from_squad_team_id, club.id)
+    target_id = target.id if target else None
+    source_id = source.id if source else None
+
+    if action == "add" and target_id is None:
+        raise HTTPException(status_code=400, detail="add needs a squad")
 
     updated = 0
     for raw in body.player_ids:
@@ -634,14 +668,21 @@ async def squad_assign(
         player = await db.get(Player, pid)
         if not player or player.organisation_id != club.id:
             continue
-        old_team_id = player.squad_team_id
-        new_team_id = target.id if target else None
-        player.squad_team_id = new_team_id
-        await sync_squad_membership(db, club.id, pid, old_team_id, new_team_id, user.id)
+        if action == "add":
+            await add_squad_memberships(db, club.id, pid, [target_id], user.id)
+        elif action == "move":
+            await move_squad_membership(db, club.id, pid, source_id, target_id, user.id)
+        elif action == "remove":
+            await remove_squad_memberships(db, club.id, pid, [source_id or target_id])
+        else:  # set — replace the whole set
+            if target_id is None:
+                await clear_all_squad_memberships(db, club.id, pid)
+            else:
+                await set_squad_memberships(db, club.id, pid, [target_id], user.id)
         updated += 1
     await db.commit()
-    return {"status": "ok", "updated": updated,
-            "squad_team_id": str(target.id) if target else None}
+    return {"status": "ok", "updated": updated, "action": action,
+            "squad_team_id": str(target_id) if target_id else None}
 
 
 def _later(a, b):
@@ -656,29 +697,40 @@ def _later(a, b):
 @router.get("/auto-assign-suggest")
 async def auto_assign_suggest(
     seasons: int = 2,
-    only_unassigned: bool = True,
+    only_unassigned: bool = False,
+    min_share: float = 0.2,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
     _user: User = Depends(require_cap(MANAGE_SELECTIONS)),
 ):
-    """Suggest a squad for each player from where they actually played most over
-    the last `seasons` seasons. Read-only — returns a preview; the caller applies
-    the accepted moves through POST /teams/squad-assign.
+    """Suggest the squad(s) a player belongs in from where they actually played
+    over the last `seasons` seasons. A player can straddle several teams, so this
+    can suggest MORE THAN ONE squad each — additive. Read-only; the caller applies
+    the accepted adds through POST /teams/squad-assign with action=add.
+
+    Which teams count is a RATIO: a team is suggested when it is at least
+    `min_share` (default 20%) of the player's games in the window — so 50 games
+    for the 1sts, 40 for the 2nds and 10 for the 3rds suggests the 1st and 2nd XI
+    squads and not the 3rd. The single top team is always suggested (even below
+    the threshold) so an active player who has spread across many teams still
+    lands somewhere. A squad the player is already in is never re-suggested.
 
     Matching mirrors how squads were seeded/auto-linked:
-      1. primary — the team name a player appeared for most maps to a squad by
-         name (lower(game_appearances.team_name) == lower(teams.name));
-      2. fallback — if that name has no squad (e.g. the squad was renamed), the
-         grade they played most in maps to the squad linked to a grade of the
-         same name (handles cross-season grade_id differences by grade NAME).
+      1. primary — the team name maps to a squad by name
+         (lower(game_appearances.team_name) == lower(teams.name));
+      2. fallback — if that name has no squad, the team's own dominant grade maps
+         to the squad linked to a grade of the same name.
 
-    `only_unassigned` (default True) restricts suggestions to players who have no
-    squad yet, so existing/manual assignments are never silently overwritten.
-    Players with no appearances in the window are left untouched; players whose
-    top team/grade matches no squad are returned under `unmatched`.
+    `only_unassigned` (default False) restricts to players in no squad yet.
+    Players with no appearances are left untouched; a player whose top team/grade
+    matches no squad is returned under `unmatched`.
     """
     await ensure_team_grades(db, club.id)  # make sure squads are grade-linked for the fallback
     seasons = max(1, min(int(seasons or 2), 60))
+    try:
+        min_share = max(0.0, min(float(min_share), 0.9))
+    except (TypeError, ValueError):
+        min_share = 0.2
 
     teams = (await db.execute(
         select(Team).where(Team.organisation_id == club.id)
@@ -736,22 +788,41 @@ async def auto_assign_suggest(
         .group_by(GameAppearance.player_id, func.lower(GameAppearance.team_name), func.lower(Grade.name))
     )).all()
 
-    # pid -> {team_name|grade_name -> [games, last_played]}
-    team_tot: dict = {}
-    grade_tot: dict = {}
+    # pid -> team_name -> {"games", "last", "grades": {grade_name: games}}. The
+    # grade breakdown is per TEAM so a team the club renamed can still fall back
+    # to the squad linked to the grade IT actually played in.
+    by_player: dict = {}
     for pid, tname, gname, games, last_played in rows:
-        if tname:
-            slot = team_tot.setdefault(pid, {}).setdefault(tname, [0, None])
-            slot[0] += int(games); slot[1] = _later(slot[1], last_played)
+        if not tname:
+            continue
+        slot = by_player.setdefault(pid, {}).setdefault(
+            tname, {"games": 0, "last": None, "grades": {}})
+        slot["games"] += int(games)
+        slot["last"] = _later(slot["last"], last_played)
         if gname:
-            slot = grade_tot.setdefault(pid, {}).setdefault(gname, [0, None])
-            slot[0] += int(games); slot[1] = _later(slot[1], last_played)
+            slot["grades"][gname] = slot["grades"].get(gname, 0) + int(games)
 
-    def _top(d):
-        # Most games, tie-break on most recent appearance.
-        if not d:
-            return None
-        return max(d.items(), key=lambda kv: (kv[1][0], (kv[1][1] or date.min)))
+    # A player's current squads (team_members is authoritative) — never suggest
+    # a squad they are already in.
+    member_ids: dict = {}
+    for pid, tid in (await db.execute(
+        text("SELECT player_id, team_id FROM team_members WHERE organisation_id = :org"),
+        {"org": club.id},
+    )).all():
+        member_ids.setdefault(pid, set()).add(tid)
+
+    def _squad_for(tname: str, grades: dict):
+        """Map a team the player appeared for to a squad: by name first, then by
+        the team's own dominant grade name."""
+        sq = by_lname.get(tname)
+        if sq:
+            return sq, "team_name"
+        if grades:
+            top_g = max(grades.items(), key=lambda kv: kv[1])[0]
+            sq = by_grade_name.get(top_g)
+            if sq:
+                return sq, "grade"
+        return None, None
 
     players = (await db.execute(
         select(Player).where(Player.organisation_id == club.id)
@@ -759,49 +830,65 @@ async def auto_assign_suggest(
 
     suggestions, unmatched = [], []
     for p in players:
-        if only_unassigned and p.squad_team_id is not None:
+        already = member_ids.get(p.id, set())
+        if only_unassigned and already:
             continue
         # Never suggest a squad for someone the club has marked inactive: the
-        # profile screen takes an inactive player OUT of their squad, so
+        # profile screen takes an inactive player OUT of their squads, so
         # auto-assign putting them back is the two halves disagreeing.
         if p.status == "inactive" or p.is_player is False:
             continue
-        top_team = _top(team_tot.get(p.id))
-        if not top_team:
+        teams_played = by_player.get(p.id)
+        if not teams_played:
             continue  # no appearances in the window — leave untouched
-        tname, (games, last_played) = top_team
-        target = by_lname.get(tname)
-        matched_by = "team_name"
-        if not target:
-            top_grade = _top(grade_tot.get(p.id))
-            if top_grade:
-                gname, (g_games, g_last) = top_grade
-                target = by_grade_name.get(gname)
-                if target:
-                    matched_by, games, last_played = "grade", g_games, g_last
-        if not target:
+        total = sum(t["games"] for t in teams_played.values())
+        if total <= 0:
+            continue
+        # Teams the player appeared for, most games first. The first that maps
+        # to a squad is the "top team" and is always suggested; the rest need
+        # to clear the share threshold.
+        ranked = sorted(
+            teams_played.items(),
+            key=lambda kv: (-kv[1]["games"], (kv[1]["last"] or date.min).isoformat()),
+        )
+        chosen: dict = {}   # squad_team_id -> suggestion (dedupes two names → one squad)
+        top_used = False
+        matched_any = False
+        for tname, info in ranked:
+            squad, matched_by = _squad_for(tname, info["grades"])
+            if not squad:
+                continue
+            matched_any = True
+            is_top = not top_used
+            top_used = True
+            share = info["games"] / total
+            if not is_top and share < min_share:
+                continue
+            if squad.id in already or squad.id in chosen:
+                continue
+            chosen[squad.id] = {
+                "player_id": str(p.id),
+                "player_name": p.display_name,
+                "team_id": str(squad.id),
+                "team_name": squad.name,
+                "team_sequence": squad.sequence or 0,
+                "games": info["games"],
+                "share": round(share, 3),
+                "matched_by": matched_by,
+                "last_played": info["last"].isoformat() if info["last"] else None,
+            }
+        if not matched_any:
+            # Their busiest team maps to no squad at all.
+            top_name, top_info = ranked[0]
             unmatched.append({
                 "player_id": str(p.id), "player_name": p.display_name,
-                "top_team_name": tname, "games": int(games),
+                "top_team_name": top_name, "games": top_info["games"],
             })
             continue
-        if target.id == p.squad_team_id:
-            continue  # already where they belong
-        cur = team_by_id.get(p.squad_team_id)
-        suggestions.append({
-            "player_id": str(p.id),
-            "player_name": p.display_name,
-            "current_team_id": str(p.squad_team_id) if p.squad_team_id else None,
-            "current_team_name": cur.name if cur else None,
-            "team_id": str(target.id),
-            "team_name": target.name,
-            "team_sequence": target.sequence or 0,
-            "games": int(games),
-            "matched_by": matched_by,
-            "last_played": last_played.isoformat() if last_played else None,
-        })
+        suggestions.extend(chosen.values())
 
-    suggestions.sort(key=lambda s: (s["team_sequence"], s["team_name"], -s["games"]))
+    suggestions.sort(key=lambda s: (s["team_sequence"], s["team_name"],
+                                    (s["player_name"] or "").lower()))
     unmatched.sort(key=lambda u: -u["games"])
     return {
         "seasons_considered": season_names,

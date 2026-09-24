@@ -224,7 +224,6 @@ const BetterSocialsHome = lazy(() => import('./pages/admin/BetterSocialsHome'))
 // one email open beside it. /admin/comms/:id is unchanged as a deep link.
 const CommsCampaigns = lazy(() => import('./pages/admin/bettercomms/CommsCampaigns'))
 const CommsContacts = lazy(() => import('./pages/admin/bettercomms/CommsContacts'))
-const CommsLists = lazy(() => import('./pages/admin/bettercomms/CommsLists'))
 const CommsTemplates = lazy(() => import('./pages/admin/bettercomms/CommsTemplates'))
 const CommsSettings = lazy(() => import('./pages/admin/bettercomms/CommsSettings'))
 
@@ -411,6 +410,7 @@ export default function App() {
           <Route path="/admin/clubhouse/directory" element={<ProtectedRoute><ClubManagerApp initialScreen="directory" /></ProtectedRoute>} />
           <Route path="/admin/clubhouse/roster" element={<ProtectedRoute><ClubManagerApp initialScreen="roster" /></ProtectedRoute>} />
           <Route path="/admin/clubhouse/areas-roles" element={<ProtectedRoute><ClubManagerApp initialScreen="setup" /></ProtectedRoute>} />
+          <Route path="/admin/clubhouse/role-programs" element={<ProtectedRoute><ClubManagerApp initialScreen="role_programs" /></ProtectedRoute>} />
           {/* BetterCricket's own directory, shown in place of the club Directory
               while a super admin is acting as the outreach org. requireRole is
               the real gate — the nav item only appears in internal mode, but a
@@ -594,7 +594,8 @@ export default function App() {
               the sidebar, since the person spine is the Directory. */}
           <Route path="/admin/comms" element={<ProtectedRoute requireModule="comms"><CommsCampaigns /></ProtectedRoute>} />
           <Route path="/admin/comms/contacts" element={<ProtectedRoute requireModule="comms"><CommsContacts /></ProtectedRoute>} />
-          <Route path="/admin/comms/lists" element={<ProtectedRoute requireModule="comms"><CommsLists /></ProtectedRoute>} />
+          {/* Lists merged into Segments — the old URL still lands somewhere useful. */}
+          <Route path="/admin/comms/lists" element={<Navigate to="/admin/comms/segments" replace />} />
           <Route path="/admin/comms/templates" element={<ProtectedRoute requireModule="comms"><CommsTemplates /></ProtectedRoute>} />
           <Route path="/admin/comms/settings" element={<ProtectedRoute requireModule="comms"><CommsSettings /></ProtectedRoute>} />
           <Route path="/admin/comms/:id" element={<ProtectedRoute requireModule="comms"><CommsCampaigns /></ProtectedRoute>} />

@@ -8,6 +8,7 @@ import ClubDiary from './screens/ClubDiary'
 import Facilities from './screens/Facilities'
 import Events from './screens/Events'
 import AreasRoles from './screens/AreasRoles'
+import RolePrograms from './screens/RolePrograms'
 import InternalDirectory from './screens/InternalDirectory'
 
 // The People and Club screens of BetterAdmin.
@@ -27,6 +28,7 @@ import InternalDirectory from './screens/InternalDirectory'
 const SCREENS = {
   overview: Today, roster: Roster, directory: Directory, committee: Committee,
   diary: ClubDiary, facilities: Facilities, events: Events, setup: AreasRoles,
+  role_programs: RolePrograms,
   // BetterCricket's own directory, reached only while acting as the outreach
   // org. A separate screen from `directory`, not a mode inside it — see the
   // scope rule in its own file header.
@@ -44,7 +46,7 @@ export default function ClubManagerApp({ initialScreen = 'overview' }) {
       openExpanded: false,
       w, panelOpen: w >= 1280, navOpen: false,
       // per-screen locals
-      diaryTab: 'plan', cadFilter: 'All', issuesOnly: false, diaryCollapsed: {},
+      diaryTab: 'overview', diaryUpTo: 'month', diaryCatFilter: 'All', diaryStatusFilter: 'All',
       dirQuery: '', dirSeg: 'All', dirRole: null, dirExpiring: false, dirSel: null,
       dirType: '', dirPlaying: 'all',
       facTab: 'availability', bookings: null, requests: null, returned: {},
@@ -53,7 +55,7 @@ export default function ClubManagerApp({ initialScreen = 'overview' }) {
       cteMeetingsView: 'meetings', cteMaView: 'actions', cteActionsView: 'list',
       ctePlansView: 'plans', cteTemplate: null,
       event: 'e3',
-      setupTab: 'roles',
+      setupTab: 'roles', rpQuery: '',
       // configurable rostering settings (would become real club settings)
       enforceQualifications: true, weeklyShiftCap: 0,
     }

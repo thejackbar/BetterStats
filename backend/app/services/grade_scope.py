@@ -203,8 +203,8 @@ class GradeScope:
 
     __slots__ = (
         "categories", "formats", "excluded_ids", "excluded_categories",
-        "format_fallback_ids", "param", "competitions", "competition_names",
-        "competition_extra_ids",
+        "excluded_labels", "format_fallback_ids", "param", "competitions",
+        "competition_names", "competition_extra_ids",
     )
 
     def __init__(
@@ -218,11 +218,20 @@ class GradeScope:
         competitions: Optional[Sequence] = None,
         competition_names: Sequence[str] = (),
         competition_extra_ids: Sequence = (),
+        excluded_labels: Sequence[str] = (),
     ):
         self.categories = tuple(categories)
         self.formats = tuple(formats) if formats is not None else None
         self.excluded_ids = list(excluded_ids)
         self.excluded_categories = tuple(excluded_categories)
+        # Import residual grade_labels (free text, e.g. "Division 3") whose
+        # category is out of scope. An import residual carries no grade_id, so
+        # the category exclusion above (keyed on grade_id) can never name it and
+        # keeps it under EVERY category pick — that is how a senior season
+        # imported before Cricket Australia's per-grade data reads as juniors,
+        # women's and masters all at once. Classified by its own label instead;
+        # see `resolve_scope` and the `label_column` branch of `clause`.
+        self.excluded_labels = tuple(excluded_labels)
         # Grades whose format is unambiguous, for a game whose own match_format
         # was never recorded. See :meth:`format_clause`.
         self.format_fallback_ids = list(format_fallback_ids)
@@ -268,6 +277,10 @@ class GradeScope:
         return self.category_active or self.format_active or self.competition_active
 
     @property
+    def _label_param(self) -> str:
+        return f"{self.param}_labels"
+
+    @property
     def _fmt_param(self) -> str:
         return f"{self.param}_formats"
 
@@ -289,6 +302,7 @@ class GradeScope:
         kind: str = "game",
         *,
         game_alias: Optional[str] = None,
+        label_column: Optional[str] = None,
     ) -> str:
         """A WHERE fragment (leading AND) narrowing to what is in scope.
 
@@ -324,7 +338,23 @@ class GradeScope:
         """
         out = self.competition_clause(column)
         if self.category_active:
-            out += f" AND ({column} IS NULL OR NOT ({column} = ANY(:{self.param})))"
+            if label_column is not None:
+                # A residual that carries a classifiable grade_label (an import
+                # row) is judged by that label, not by its NULL grade_id — the
+                # bare `column IS NULL OR ...` above keeps every import residual
+                # under every category pick, which is how a senior season
+                # imported before CA's per-grade data shows up under Juniors,
+                # Women's and Masters alike. A residual with a real grade_id (a
+                # season adjustment) is still judged by it; a truly label-less
+                # career lump is kept, since it genuinely cannot be classified.
+                out += (
+                    f" AND (CASE WHEN {column} IS NOT NULL"
+                    f" THEN NOT ({column} = ANY(:{self.param}))"
+                    f" WHEN {label_column} IS NULL THEN TRUE"
+                    f" ELSE NOT ({label_column} = ANY(CAST(:{self._label_param} AS text[]))) END)"
+                )
+            else:
+                out += f" AND ({column} IS NULL OR NOT ({column} = ANY(:{self.param})))"
         if not self.format_active:
             return out
         if kind == "game":
@@ -392,6 +422,7 @@ class GradeScope:
         """Add this scope's bind parameters to a params dict, in place."""
         if self.category_active:
             params[self.param] = self.excluded_ids
+            params[self._label_param] = list(self.excluded_labels)
         if self.format_active:
             params[self._fmt_param] = list(self.formats)
             if self.format_fallback_ids:
@@ -574,6 +605,32 @@ async def resolve_scope(
             fmts = formats_for_name(name_formats, name)
             if len(fmts) == 1 and (fmts & set(wanted_formats)):
                 fallback_ids.append(grade_id)
+
+    # A BetterImport (or hand-entered) season residual carries no grade_id, only
+    # a free-text grade_label ("Division 3"). The exclusion above is keyed on
+    # grade_id, so it can never name such a row and keeps it under every
+    # category — a senior season imported before Cricket Australia's per-grade
+    # data then reads as junior/women's/masters as well. Classify each distinct
+    # label exactly as a grade name is classified (its stored categories, else
+    # `suggest_categories`) and exclude the ones out of scope. Only when a
+    # category filter is active, and only the labels themselves — no per-row
+    # cost. See `GradeScope.clause`'s `label_column` branch.
+    excluded_labels: list[str] = []
+    if category_filter:
+        label_rows = await session.execute(
+            text(
+                "SELECT DISTINCT grade_label FROM import_effective_deltas"
+                " WHERE organisation_id = CAST(:org AS UUID)"
+                " AND grade_label IS NOT NULL"
+            ),
+            {"org": str(org_id)},
+        )
+        for (label,) in label_rows.fetchall():
+            cats = categories_for_name(name_categories, label)
+            judged = cats if explicit else {primary_category(cats)}
+            if not (judged & set(wanted)):
+                excluded_labels.append(label)
+
     return GradeScope(
         wanted,
         excluded_ids,
@@ -584,6 +641,7 @@ async def resolve_scope(
         competitions=comp_ids,
         competition_names=comp_names,
         competition_extra_ids=comp_grade_ids,
+        excluded_labels=excluded_labels,
     )
 
 
@@ -711,6 +769,26 @@ async def org_available_competitions(session: AsyncSession, org_id) -> list[dict
         return []
     from app.services.competitions import list_competitions
     return [c for c in await list_competitions(session, org_id) if c["grade_count"]]
+
+
+async def org_show_competition_filters(session: AsyncSession, org_id) -> bool:
+    """Whether the club has switched its public Competition surfaces on.
+
+    Off by default (migration 305). One switch for everything competition-based
+    on the public site: the filter pill row on every stats page AND the
+    Competitions breakdown tab on the player profile. It also decides what "All"
+    means on those pills — see useGradeFilters on the frontend.
+    """
+    if not org_id:
+        return False
+    val = await session.scalar(
+        text(
+            "SELECT COALESCE(show_competition_filters, false)"
+            " FROM organisations WHERE id = CAST(:id AS UUID)"
+        ),
+        {"id": str(org_id)},
+    )
+    return bool(val)
 
 
 async def org_available_formats(session: AsyncSession, org_id) -> list[str]:

@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import AdminLayout from '../../components/admin/AdminLayout'
 import { api } from '../../lib/api'
 import { moduleBrand } from '../../lib/moduleBrand'
+import { BillingMethodCard, OpenInvoicesCard } from '../../components/admin/InvoiceBilling'
 
 // Phase 19 (docs/self-serve-trial-onboarding-plan.md) — the club's own
 // self-serve plan status page. A trial (any club admin) and a cancellation
@@ -75,6 +76,10 @@ export default function AdminAccount() {
   const [paymentMethods, setPaymentMethods] = useState(null)
   const [pmBusy, setPmBusy] = useState('') // pm id currently being acted on, or 'add'
   const [pmError, setPmError] = useState('')
+  // Pay by invoice (migration 308) — services/invoice_billing.py's overview:
+  // how the club pays, who invoices go to, the period held and what is open.
+  const [invoiceOverview, setInvoiceOverview] = useState(null)
+  const [resendBusy, setResendBusy] = useState('')
 
   const load = () =>
     api.accountGetPlan().then(setPlan).catch((e) => setError(e.message || 'Could not load your plan'))
@@ -82,8 +87,28 @@ export default function AdminAccount() {
   const loadPaymentMethods = () =>
     api.billingListPaymentMethods().then(setPaymentMethods).catch(() => {})
 
+  const loadInvoiceOverview = () =>
+    api.billingInvoiceOverview().then(setInvoiceOverview).catch(() => {})
+  const loadInvoices = () => api.billingListInvoices().then(setInvoices).catch(() => {})
+
   useEffect(() => { load() }, [])
   useEffect(() => { loadPaymentMethods() }, [])
+  useEffect(() => { loadInvoiceOverview() }, [])
+
+  // Arriving from an invoice email's pay link once the invoice is already
+  // settled or cancelled (routers/public_billing.py sends them here).
+  useEffect(() => {
+    const state = searchParams.get('invoice')
+    if (!state) return
+    if (state === 'paid') setMsg("That invoice is paid. Thank you — it can take a moment for your modules to show as subscribed.")
+    else if (state === 'void') setMsg('That invoice was cancelled and no longer needs paying.')
+    else if (state === 'not-found') setError("We couldn't find that invoice. Any invoice still to pay is listed below.")
+    else setError("That invoice can't be paid online right now. Contact support@bettersports.com.au.")
+    const next = new URLSearchParams(searchParams)
+    next.delete('invoice')
+    setSearchParams(next, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Returning from a real Stripe Checkout Session — the redirect is UX only
   // (the webhook is what actually grants entitlement, see
@@ -138,7 +163,9 @@ export default function AdminAccount() {
     const param = searchParams.get('subscribe')
     if (!param) return
     if (!Array.isArray(plan?.modules) || !plan.modules.length) return  // wait for plan
-    if (!plan.is_primary_admin) { setSubscribeApplied(true); return }
+    // A club on invoice billing picks nothing here: a Super Admin raises its invoices.
+    const mayPick = plan.invoice_billing_enabled && plan.billing_method === 'invoice' ? false : plan.is_primary_admin
+    if (!mayPick) { setSubscribeApplied(true); return }
     const byModule = Object.fromEntries(plan.modules.map((r) => [r.module, r]))
     const next = new Set()
     let needCore = false
@@ -158,9 +185,7 @@ export default function AdminAccount() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plan, subscribeApplied])
 
-  useEffect(() => {
-    api.billingListInvoices().then(setInvoices).catch(() => {})
-  }, [])
+  useEffect(() => { loadInvoices() }, [])
 
   // Live invoice preview for the current selection — only once billing
   // checkout is actually switched on (the endpoint 403s otherwise).
@@ -216,6 +241,14 @@ export default function AdminAccount() {
       .catch(() => {})
   }, [])
 
+  // Invoicing is a Super Admin arrangement (All Clubs → Invoice this club): a
+  // club asks for it, and never chooses it or raises an invoice here. So a card
+  // club sees exactly the card flow it always did, and an invoice club sees how
+  // it pays and what it owes, with nothing to pick.
+  const invoiceMode = !!plan?.invoice_billing_enabled && plan?.billing_method === 'invoice'
+  const canSelect = invoiceMode ? false : !!plan?.is_primary_admin
+  const primaryName = invoiceOverview?.primary_admin?.name || primaryAdminName
+
   const rows = plan?.modules || []
   // BetterStats (Core) is a hard prerequisite: a club can't subscribe to any
   // add-on unless Core is also in trial or subscribed. coreLiveNow is whether
@@ -246,9 +279,10 @@ export default function AdminAccount() {
   // pointed at who can.
   const toggle = (row) => {
     if (!row.can_subscribe) return
-    if (!plan?.is_primary_admin) {
-      setBlockedMsg(
-        `Only your club's Primary Admin User can subscribe to modules. Please contact ${primaryAdminName || "your club's primary admin"}.`
+    if (!canSelect) {
+      setBlockedMsg(invoiceMode
+        ? 'Your club pays by invoice, which BetterCricket manages. Contact support@bettersports.com.au to add a module.'
+        : `Only your club's Primary Admin User can subscribe to modules. Please contact ${primaryAdminName || "your club's primary admin"}.`
       )
       return
     }
@@ -423,6 +457,22 @@ export default function AdminAccount() {
     }
   }
 
+  const resendInvoice = async (inv) => {
+    setResendBusy(inv.id)
+    setError('')
+    setMsg('')
+    try {
+      const res = await api.billingResendInvoice(inv.id)
+      if (res.ok) setMsg(`Invoice ${inv.invoice_number || ''} emailed again to ${res.to}.`)
+      else setError(`The invoice could not be emailed: ${res.error}`)
+      await loadInvoiceOverview()
+    } catch (e) {
+      setError(e.message || 'Could not resend the invoice')
+    } finally {
+      setResendBusy('')
+    }
+  }
+
   const hasSummary = selected.size > 0
 
   return (
@@ -453,6 +503,20 @@ export default function AdminAccount() {
           // layout doesn't fit smaller screens).
           <div className={hasSummary ? 'grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start' : ''}>
             <div>
+              {invoiceMode && invoiceOverview && (
+                <div className="mb-4">
+                  <BillingMethodCard overview={invoiceOverview} clubView />
+                </div>
+              )}
+              {invoiceOverview?.open_invoices?.length > 0 && (
+                <div className="mb-4">
+                  <OpenInvoicesCard
+                    invoices={invoiceOverview.open_invoices}
+                    onResend={plan.is_club_admin ? resendInvoice : null}
+                    busyId={resendBusy}
+                  />
+                </div>
+              )}
               <div className="space-y-3 mb-4">
               {rows.map((row) => {
                 const brand = moduleBrand(row.module)
@@ -462,8 +526,8 @@ export default function AdminAccount() {
                 // Never Trialed and Trial Expired all qualify. Keying on the
                 // status list here used to omit Trial Expired, so a lapsed-trial
                 // club saw no checkbox and couldn't subscribe.
-                const showCheckbox = row.can_subscribe
-                const showCancel = row.status === 'subscribed' && plan.is_primary_admin
+                const showCheckbox = row.can_subscribe && !invoiceMode
+                const showCancel = row.status === 'subscribed' && plan.is_primary_admin && !invoiceMode
                 const showStartTrial = row.status === 'never_trialed' && row.trial_eligible
                 const cancelling = cancelConfirm?.module === row.module
 
@@ -604,11 +668,18 @@ export default function AdminAccount() {
                       <div key={inv.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] py-1.5 border-b pb-hairline last:border-0">
                         <span className="text-pb-faint w-24 shrink-0">{fmtDate(inv.period_end || inv.created_at)}</span>
                         <span className="text-pb-text flex-1 min-w-[140px]">{modules || '—'}</span>
-                        <span className="text-pb-text w-20 shrink-0">${(inv.amount_paid / 100).toFixed(2)}</span>
+                        <span className="text-pb-text w-20 shrink-0">
+                          ${((inv.status === 'paid' ? inv.amount_paid : (inv.amount_total_cents ?? inv.amount_due ?? 0)) / 100).toFixed(2)}
+                        </span>
                         <span className={`w-16 shrink-0 uppercase ${inv.status === 'paid' ? 'text-emerald-400' : 'text-amber-300'}`}>
                           {inv.status}
                         </span>
                         <span className="text-pb-faint w-44 shrink-0">{inv.payment_method_summary || '—'}</span>
+                        {inv.pay_url && (
+                          <a href={inv.pay_url} target="_blank" rel="noreferrer" className="text-pb-accent-ink underline shrink-0">
+                            Pay
+                          </a>
+                        )}
                         {inv.hosted_invoice_url && (
                           <a
                             href={inv.hosted_invoice_url}

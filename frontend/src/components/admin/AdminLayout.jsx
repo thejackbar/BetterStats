@@ -11,6 +11,7 @@ import { CHANGELOG } from '../../data/changelog'
 import NotificationBell from '../NotificationBell'
 import NotificationModal from '../NotificationModal'
 import ClubSwitcher from './ClubSwitcher'
+import TrialBanner from './TrialBanner'
 import BrandLogo from '../BrandLogo'
 import { SUPER_OVERVIEW, SUPER_SECTIONS, SALES_MANAGEMENT_ITEMS, visibleSectionItems, sectionBadgeCount } from '../../lib/superNav'
 
@@ -96,6 +97,13 @@ export default function AdminLayout({ children }) {
     api.superListUnpauseRequests('pending')
       .then(d => { if (alive) setUnpauseReqCount(Array.isArray(d) ? d.length : 0) })
       .catch(() => {})
+    // Meta token health — lights the Reporting badge when the ads_read or CAPI
+    // token is expired/expiring, so a silent lapse is caught in the sidebar
+    // without opening the Meta Ads page (the Aug 2026 outage went unseen for
+    // ten days). Best-effort; a hiccup just leaves the badge dark.
+    api.metaAdsTokenHealth()
+      .then(d => { if (alive) setMetaTokenAlert(d?.attention ? 1 : 0) })
+      .catch(() => {})
     api.superGetGeneralSettings()
       .then(s => { if (alive) setSelfServeEnabled(!!s?.self_serve_registration_enabled) })
       .catch(() => {})
@@ -110,6 +118,9 @@ export default function AdminLayout({ children }) {
   const [commsReqCount, setCommsReqCount] = useState(0)
   // Pending unpause requests from password-protected trial-ended clubs (badge).
   const [unpauseReqCount, setUnpauseReqCount] = useState(0)
+  // 1 when a Meta token (ads_read or CAPI) is expired/expiring within the warn
+  // window — lights the Reporting section badge. See routers/meta_ads.py.
+  const [metaTokenAlert, setMetaTokenAlert] = useState(0)
   // Self-serve trial registration platform flag — off by default; hides the
   // internal-only menu item until a super admin turns it on (General Settings).
   const [selfServeEnabled, setSelfServeEnabled] = useState(false)
@@ -155,7 +166,7 @@ export default function AdminLayout({ children }) {
       ...section,
       items,
       hubTo: `/admin/super/hub/${section.key}`,
-      badge: sectionBadgeCount(section, { moduleReqCount, commsReqCount, unpauseReqCount }),
+      badge: sectionBadgeCount(section, { moduleReqCount, commsReqCount, unpauseReqCount, metaTokenAlert }),
     }
   }).filter(s => s.items.length > 0)
 
@@ -395,6 +406,10 @@ export default function AdminLayout({ children }) {
           </div>
         </div>
       </header>
+
+      {/* Trial-conversion bar — sits directly under the chrome header so a
+          trialling club always has a prominent way to subscribe. */}
+      <TrialBanner />
 
       {/* Acting-as banner — a persistent reminder that a Better staff member is
           scoped to a club other than their own, so changes land on the right

@@ -201,6 +201,28 @@ async def _get_or_create_type(session: AsyncSession, model, org_id, name: str):
 
 
 async def _update_type(session: AsyncSession, t, **fields):
+    # A rename that collides with another type of the same org hits the
+    # (org, name) unique constraint at commit, which is a 500 unless we refuse it
+    # here — mirroring _create_type. The SELECT runs BEFORE the setattr: a SELECT
+    # autoflushes, so setting the name first would flush the offending UPDATE and
+    # raise the IntegrityError before this check could produce a friendly error.
+    new_name = fields.get("name")
+    if new_name is not None:
+        new_name = new_name.strip()
+        if not new_name:
+            raise ValueError("Name is required")
+        if new_name.lower() != (t.name or "").lower():
+            model = type(t)
+            clash = (await session.execute(
+                select(model).where(
+                    model.organisation_id == t.organisation_id,
+                    func.lower(model.name) == new_name.lower(),
+                    model.id != t.id,
+                )
+            )).scalars().first()
+            if clash is not None:
+                raise ValueError(f'A type called "{new_name}" already exists')
+        fields["name"] = new_name
     for f in ("name", "description", "sort_order", "is_active", "category"):
         if f in fields and fields[f] is not None and hasattr(t, f):
             setattr(t, f, fields[f])
@@ -269,6 +291,25 @@ async def seed_starter_role_types(session, org_id) -> int:
     return n
 
 
+def _role_clash_message(title, existing: ClubRole, existing_type, *, caller_is_committee: bool) -> str:
+    """The refusal for a title clashing with an existing active role, shared by
+    create_role and update_role's rename check. The Roles list hides a role that
+    is committee-classified — its is_committee flag OR a committee-category type
+    (the same combined test the list applies) — because those are managed as
+    positions on the Committee screen. The uniqueness check spans every role, so
+    a clash with a hidden committee role otherwise names a role that appears
+    nowhere on this list. Say where it lives rather than leaving the admin
+    hunting for it. Only when the caller's own role is NOT committee, since a
+    committee role is not hidden from the caller's own list."""
+    hidden_as_committee = existing.is_committee or (
+        existing_type is not None and getattr(existing_type, "category", None) == "committee")
+    if hidden_as_committee and not caller_is_committee:
+        return (f'A role called "{title}" already exists as a committee role, so it is '
+                'managed as a position on the Committee screen rather than shown in this '
+                'list. Give this one a different name.')
+    return f'A role called "{title}" already exists'
+
+
 async def list_roles(session: AsyncSession, org_id, *, include_inactive: bool = False,
                      committee: Optional[bool] = None) -> list[dict]:
     stmt = (select(ClubRole, ClubRoleType)
@@ -288,17 +329,20 @@ async def create_role(session: AsyncSession, org_id, *, title: str, role_type_id
     title = (title or "").strip()
     if not title:
         raise ValueError("Title is required")
-    existing = (await session.execute(
-        select(ClubRole).where(ClubRole.organisation_id == org_id, func.lower(ClubRole.title) == title.lower())
-    )).scalars().first()
-    if existing is not None:
+    existing_row = (await session.execute(
+        select(ClubRole, ClubRoleType)
+        .outerjoin(ClubRoleType, ClubRoleType.id == ClubRole.role_type_id)
+        .where(ClubRole.organisation_id == org_id, func.lower(ClubRole.title) == title.lower())
+    )).first()
+    if existing_row is not None:
+        existing, existing_type = existing_row
         if not existing.is_active:
             existing.is_active = True
             if role_type_id is not None:
                 existing.role_type_id = role_type_id
             existing.is_committee = is_committee
             return existing
-        raise ValueError(f'A role called "{title}" already exists')
+        raise ValueError(_role_clash_message(title, existing, existing_type, caller_is_committee=is_committee))
     r = ClubRole(organisation_id=org_id, title=title[:200], role_type_id=role_type_id,
                  description=description, is_committee=is_committee)
     session.add(r)
@@ -307,6 +351,31 @@ async def create_role(session: AsyncSession, org_id, *, title: str, role_type_id
 
 
 async def update_role(session: AsyncSession, r: ClubRole, **fields) -> ClubRole:
+    # A rename that collides with another role of the same org (including a
+    # committee role that never shows in the Roles list) hits uq_club_roles_org_title
+    # at commit — a 500 unless refused here, mirroring create_role. The SELECT
+    # runs BEFORE the setattr to avoid autoflushing the offending UPDATE.
+    new_title = fields.get("title")
+    if new_title is not None:
+        new_title = new_title.strip()
+        if not new_title:
+            raise ValueError("Title is required")
+        if new_title.lower() != (r.title or "").lower():
+            clash_row = (await session.execute(
+                select(ClubRole, ClubRoleType)
+                .outerjoin(ClubRoleType, ClubRoleType.id == ClubRole.role_type_id)
+                .where(
+                    ClubRole.organisation_id == r.organisation_id,
+                    func.lower(ClubRole.title) == new_title.lower(),
+                    ClubRole.id != r.id,
+                )
+            )).first()
+            if clash_row is not None:
+                clash, clash_type = clash_row
+                raise ValueError(_role_clash_message(
+                    new_title, clash, clash_type,
+                    caller_is_committee=fields.get("is_committee", r.is_committee)))
+        fields["title"] = new_title
     for f in ("title", "description", "sort_order", "is_active", "is_committee"):
         if f in fields and fields[f] is not None:
             setattr(r, f, fields[f])
@@ -413,6 +482,25 @@ async def create_activity(session: AsyncSession, org_id, *, title: str, activity
 
 
 async def update_activity(session: AsyncSession, a: ClubActivity, **fields) -> ClubActivity:
+    # As with update_role: refuse a rename that collides with another activity of
+    # the same org here (SELECT before setattr) rather than letting
+    # uq_club_activities_org_title raise a 500 at commit.
+    new_title = fields.get("title")
+    if new_title is not None:
+        new_title = new_title.strip()
+        if not new_title:
+            raise ValueError("Title is required")
+        if new_title.lower() != (a.title or "").lower():
+            clash = (await session.execute(
+                select(ClubActivity).where(
+                    ClubActivity.organisation_id == a.organisation_id,
+                    func.lower(ClubActivity.title) == new_title.lower(),
+                    ClubActivity.id != a.id,
+                )
+            )).scalars().first()
+            if clash is not None:
+                raise ValueError(f'An activity called "{new_title}" already exists')
+        fields["title"] = new_title
     for f in ("title", "activity_type_id", "description", "sort_order", "is_active"):
         if f in fields and fields[f] is not None:
             setattr(a, f, fields[f])
