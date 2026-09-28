@@ -5,6 +5,7 @@ import { useClubData } from '../hooks/useClubData'
 import { useClubTheme } from '../hooks/useClubTheme'
 import { useAuth } from '../contexts/AuthContext'
 import { api } from '../lib/api'
+import { nameMatchesSearch } from '../lib/nameFormat'
 import Dropdown from '../components/Dropdown'
 import ClubInactive from './ClubInactive'
 import ClubPinGate from './ClubPinGate'
@@ -29,6 +30,67 @@ const TARGETS = [
   { key: 'team_innings_list', label: 'Team innings',     shape: 'list',      dim: 'team_innings' },
   { key: 'partnership_list', label: 'Partnerships',      shape: 'list',      dim: 'partnership' },
 ]
+
+// What each tab is, and which filters mean anything for it. The tabs used to
+// only swap the target underneath; the filter panel stayed identical, so half
+// of it did nothing on half of them (a dismissal on a bowling spell, a player
+// attribute on a match list, an opposition on a family career). Each entry is
+// read straight off what the backend query for that target actually applies:
+//   player  — the one-player picker (context.player_id)
+//   attrs   — player attributes and the captain/keeper flags (player-level)
+//   innings — dismissal and batting position (per-innings)
+//   match   — 'all' match filters, 'season_scope' (season + grade/match type),
+//             or 'scope' (grade/match type only — a family career has no games)
+const TARGET_GUIDE = {
+  player_career:     { blurb: 'One row per player, totalled across their whole career.', player: true,  attrs: true,  innings: true,  match: 'all' },
+  player_season:     { blurb: 'One row per player per season, so you can find the best single seasons.', player: true,  attrs: true,  innings: true,  match: 'all' },
+  player_grade:      { blurb: 'One row per player per grade, to compare how someone went in each grade.', player: true,  attrs: true,  innings: true,  match: 'all' },
+  family_career:     { blurb: 'One row per family, adding up every member\'s career.', player: false, attrs: false, innings: false, match: 'scope' },
+  family_season:     { blurb: 'One row per family per season.', player: false, attrs: false, innings: false, match: 'season_scope' },
+  family_grade:      { blurb: 'One row per family per grade.', player: false, attrs: true,  innings: true,  match: 'all' },
+  innings_list:      { blurb: 'Every individual batting innings, one row each.', player: true,  attrs: true,  innings: true,  match: 'all' },
+  spell_list:        { blurb: 'Every individual bowling spell, one row each.', player: true,  attrs: true,  innings: false, match: 'all' },
+  match_list:        { blurb: 'Every club match, with both teams\' totals and the margin.', player: true,  attrs: false, innings: false, match: 'all' },
+  team_innings_list: { blurb: 'Every team innings, ours and the opposition\'s.', player: false, attrs: false, innings: false, match: 'all' },
+  partnership_list:  { blurb: 'Every partnership, one row per stand.', player: true,  attrs: false, innings: false, match: 'all' },
+}
+const FULL_GUIDE = { player: false, attrs: true, innings: true, match: 'all' }
+// What the player picker's search box says for each target — the filter reads
+// differently on a list of matches than on a list of careers.
+const PLAYER_FILTER_HINT = {
+  match_list: 'Only the matches this player played in.',
+  partnership_list: 'Only stands this player was part of.',
+}
+
+const PLAYER_KEYS = ['player_id', 'player_name']
+const ATTR_KEYS = ['captain_only', 'keeper_only', 'gender', 'overseas', 'player_role',
+  'award_category', 'award_subcategory', 'award_name', 'office_bearer', 'family_id']
+const INNINGS_KEYS = ['dismissals', 'dismissal', 'position_min', 'position_max']
+const SCOPE_KEYS = ['categories', 'formats']
+const SEASON_KEYS = ['season_ids', 'season_id']
+
+// Drop the context a target cannot use, so switching tabs never leaves a
+// hidden filter scoping the results (or a chip naming one that does nothing).
+function pruneContext(ctx, guide) {
+  const out = { ...(ctx || {}) }
+  const drop = (keys) => keys.forEach(k => { delete out[k] })
+  if (!guide.player) drop(PLAYER_KEYS)
+  if (!guide.attrs) drop(ATTR_KEYS)
+  if (!guide.innings) drop(INNINGS_KEYS)
+  if (guide.match !== 'all') {
+    const keep = new Set([...SCOPE_KEYS, ...(guide.match === 'season_scope' ? SEASON_KEYS : []),
+      ...PLAYER_KEYS, ...ATTR_KEYS, ...INNINGS_KEYS])
+    Object.keys(out).forEach(k => { if (!keep.has(k)) delete out[k] })
+  }
+  return out
+}
+
+// Keep only the filter rows the new target has the field for.
+function pruneTree(node, valid) {
+  if (!node) return node
+  if (node.type === 'leaf') return (!node.field || valid.has(node.field)) ? node : null
+  return { ...node, clauses: (node.clauses || []).map(c => pruneTree(c, valid)).filter(Boolean) }
+}
 
 // Display labels for every metric. `label` is the full name shown in the
 // query builder (pickers, sort menus, filter chips). `short` is an optional
@@ -349,6 +411,9 @@ const CONTEXT_KEYS = [
   'first_n_matches','milestone_runs','on_this_day',
   'gender','overseas','player_role','award_category','award_subcategory','award_name','office_bearer',
   'family_id','categories','formats',
+  // player_name rides along only so a shared link can say who it is; the
+  // backend reads player_id and ignores the name.
+  'player_id','player_name',
 ]
 // Context keys whose value is a list. Carried through the URL as a repeated
 // param (?c_grade_names=1st+Grade&c_grade_names=3rd+Grade) rather than a
@@ -492,6 +557,7 @@ function summarizeContextChips(ctx, seasons, grades) {
     if (!picked.length) return
     push(listKey, listChipLabel(one, many, picked.map(labelOf || (v => v))), [listKey, singleKey])
   }
+  if (ctx.player_id) push('player_id', `Player: ${ctx.player_name || 'selected'}`, PLAYER_KEYS)
   // Labelled the way the picker labels it, so the chip reads back what was
   // ticked rather than the season's raw stored name.
   pushMulti('season_ids', 'season_id', 'Season', 'Seasons',
@@ -798,7 +864,97 @@ function PickerInput({ orgId, kind, value, placeholder, onChange }) {
   )
 }
 
-function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, target, activeDerived, orgId, gradeMeta }) {
+// The one-player filter. Searches the club's own public roster in the browser
+// (the same list the navbar search reads), and writes the player's id plus
+// their name — the name only so a shared link and the chip can say who it is.
+function PlayerPicker({ orgId, playerId, playerName, onChange, hint }) {
+  const [players, setPlayers] = useState([])
+  const [term, setTerm] = useState('')
+  const [open, setOpen] = useState(false)
+  const [highlight, setHighlight] = useState(0)
+  const wrapRef = useRef(null)
+  const inputRef = useRef(null)
+
+  useEffect(() => {
+    if (!orgId) return
+    let cancelled = false
+    api.listPlayers(orgId)
+      .then(rows => { if (!cancelled) setPlayers(Array.isArray(rows) ? rows : []) })
+      .catch(() => { if (!cancelled) setPlayers([]) })
+    return () => { cancelled = true }
+  }, [orgId])
+
+  const matches = useMemo(() => {
+    const q = term.trim()
+    if (!q) return []
+    return players.filter(p => nameMatchesSearch(p.display_name || p.name, q)).slice(0, 12)
+  }, [players, term])
+  useEffect(() => { setHighlight(0) }, [term])
+
+  const pick = (p) => {
+    onChange({ id: String(p.id), name: p.display_name || p.name })
+    setTerm(''); setOpen(false)
+  }
+
+  const onKeyDown = (e) => {
+    if (e.key === 'Escape') { setOpen(false); return }
+    if (!matches.length) return
+    if (e.key === 'ArrowDown') { e.preventDefault(); setHighlight(i => Math.min(i + 1, matches.length - 1)) }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setHighlight(i => Math.max(i - 1, 0)) }
+    else if (e.key === 'Enter') { e.preventDefault(); pick(matches[highlight]) }
+  }
+
+  return (
+    <div data-testid="statlab-player-picker">
+      <Label>Player</Label>
+      {playerId ? (
+        <div className={`mt-1 flex items-center gap-2 ${inputCls} ${activeFieldCls}`}>
+          <span className="flex-1 truncate text-pb-text" data-testid="statlab-player-chosen">{playerName || 'Selected player'}</span>
+          <button onClick={() => onChange(null)} className="text-pb-faint hover:text-pb-red text-xs px-1" title="All players" aria-label="Clear player">×</button>
+        </div>
+      ) : (
+        <div ref={wrapRef} className="relative mt-1">
+          <input
+            ref={inputRef}
+            className={inputCls}
+            placeholder="All players (type a name to pick one)"
+            value={term}
+            onChange={e => { setTerm(e.target.value); setOpen(true) }}
+            onFocus={() => setOpen(true)}
+            onKeyDown={onKeyDown}
+            aria-label="Search for a player"
+          />
+          <Dropdown
+            anchorRef={wrapRef}
+            open={open && term.trim().length > 0}
+            onClose={() => setOpen(false)}
+            maxHeight={260}
+            className="bg-pb-bg pb-card shadow-xl pb-scroll"
+          >
+            {matches.length === 0 && (
+              <div className="text-pb-faintest font-mono text-[10px] px-3 py-2">No player by that name.</div>
+            )}
+            {matches.map((p, i) => (
+              <button
+                key={p.id}
+                onMouseDown={(e) => { e.preventDefault(); pick(p) }}
+                onMouseEnter={() => setHighlight(i)}
+                className={`block w-full text-left px-3 py-1.5 text-xs ${i === highlight ? 'bg-pb-surface2 text-pb-text' : 'text-pb-dim'}`}
+              >
+                {p.display_name || p.name}
+              </button>
+            ))}
+          </Dropdown>
+        </div>
+      )}
+      <p className="text-[10.5px] text-pb-dim mt-1 leading-snug">
+        {hint || 'Pick one player, then add filters and a sort to look at them in detail.'}
+      </p>
+    </div>
+  )
+}
+
+function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, target, activeDerived, orgId, gradeMeta, guide = FULL_GUIDE }) {
   const set = (k, v) => onChange({ ...ctx, [k]: v })
   // Only the grade types and formats this club actually runs. A club with no
   // junior programme is never offered a Juniors tick box, which is also exactly
@@ -813,7 +969,9 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, targ
   const defaultCats = gradeMeta?.default || []
   const leftOut = availableCats.filter(c => !defaultCats.includes(c)).map(c => CATEGORY_LABELS[c] || c)
   const defaultScopeLabel = leftOut.length ? `Club default (no ${leftOut.join(', ')})` : 'All grade types'
-  const showInningsFilters = targetShape === 'list' || targetShape === 'aggregate'
+  const showInningsFilters = guide.innings
+  const allMatch = guide.match === 'all'
+  const showSeason = guide.match !== 'scope'
   // Family targets are themselves family-aggregations, so a "filter to one
   // family" dropdown is redundant (you'd just see one row). Hide it there.
   const isFamilyTarget = typeof target === 'string' && target.startsWith('family_')
@@ -824,7 +982,7 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, targ
   }, [orgId])
   return (
     <div className="flex flex-col gap-2.5">
-      <div>
+      {showSeason && <div>
         <Label>Season</Label>
         <div className="mt-1">
           <MultiCheckSelect
@@ -835,8 +993,8 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, targ
             searchPlaceholder="Search seasons…"
           />
         </div>
-      </div>
-      <div>
+      </div>}
+      {allMatch && <div>
         <Label>Grade</Label>
         <div className="mt-1">
           <MultiCheckSelect
@@ -847,7 +1005,7 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, targ
             searchPlaceholder="Search grades…"
           />
         </div>
-      </div>
+      </div>}
       {gradeTypeOptions.length > 0 && (
         <div>
           <Label>Grade type</Label>
@@ -874,6 +1032,7 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, targ
           </div>
         </div>
       )}
+      {allMatch && <>
       <div className="grid grid-cols-2 gap-1.5">
         <div>
           <Label>From</Label>
@@ -912,10 +1071,10 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, targ
       <div className="flex flex-wrap gap-2 pt-1">
         {[
           { k: 'finals_only',  label: 'Finals only' },
-          { k: 'captain_only', label: 'As captain' },
-          { k: 'keeper_only',  label: 'As keeper' },
+          { k: 'captain_only', label: 'As captain', attr: true },
+          { k: 'keeper_only',  label: 'As keeper', attr: true },
           { k: 'on_this_day',  label: 'On this day' },
-        ].map(({ k, label }) => (
+        ].filter(f => !f.attr || guide.attrs).map(({ k, label }) => (
           <label
             key={k}
             className={`flex items-center gap-1 text-xs px-2 py-1 rounded border transition cursor-pointer ${ctx[k] ? 'text-pb-accent border-pb-accent/60 bg-pb-accent/10' : 'text-pb-dim border-transparent'}`}
@@ -925,6 +1084,7 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, targ
           </label>
         ))}
       </div>
+      </>}
       {showInningsFilters && (
         <>
           <div>
@@ -971,7 +1131,7 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, targ
 
       {/* Player attribute filters — restrict the result set to players matching
           a profile attribute (gender, player role) or an Admin → Awards entry. */}
-      <div className="pt-2 mt-1 pb-hairline-t">
+      {guide.attrs && <div className="pt-2 mt-1 pb-hairline-t">
         <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-2">PLAYER ATTRIBUTES</div>
         <div className="flex flex-col gap-2">
           <div>
@@ -1024,7 +1184,7 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, targ
             </div>
           )}
         </div>
-      </div>
+      </div>}
     </div>
   )
 }
@@ -1464,7 +1624,14 @@ export default function StatLab() {
       sortDir: preset.sortDir,
       limit: DEFAULT_QUERY.limit,
       filterTree: flatToTree(preset.filters || []),
-      context: preset.context || {},
+      context: { ...(preset.context || {}) },
+    }
+    // A chosen player stays chosen: "pick a player, then look at them" means a
+    // preset applied afterwards is about THAT player, where the table can take one.
+    const cur = queryRef.current?.context || {}
+    if (cur.player_id && (TARGET_GUIDE[preset.target] || FULL_GUIDE).player) {
+      next.context.player_id = cur.player_id
+      next.context.player_name = cur.player_name
     }
     setQuery(next)
     setActivePreset(preset.label || null)
@@ -1487,6 +1654,38 @@ export default function StatLab() {
       await applyPreset(item)
     }
   }, [applyPreset, applyDerived])
+
+  // Picking a tab now does something: it switches the table, keeps the
+  // filters that still mean something for it (dropping the rest, so nothing
+  // hidden keeps scoping the results), snaps the sort to one the table has,
+  // and runs it straight away.
+  const selectTarget = useCallback(async (key) => {
+    const guide = TARGET_GUIDE[key] || FULL_GUIDE
+    const tmeta = schema?.targets?.[key] || {}
+    const valid = new Set(tmeta.metrics || [])
+    const cur = queryRef.current
+    const sortBy = valid.has(cur.sortBy) ? cur.sortBy : (tmeta.default_sort || [...valid][0] || cur.sortBy)
+    const next = {
+      ...cur,
+      target: key,
+      sortBy,
+      filterTree: pruneTree(cur.filterTree, valid) || emptyTree(),
+      context: pruneContext(cur.context, guide),
+    }
+    setQuery(next)
+    setActivePreset(null)
+    setOpenReport(null)
+    setShowCustomise(true)
+    if (reportSlug) navigate(`/${clubSlug}/statlab`, { replace: true })
+    await runQuery(next, null)
+  }, [schema, runQuery, reportSlug, navigate, clubSlug])
+
+  const setPlayer = useCallback((p) => {
+    setQuery(q => ({
+      ...q,
+      context: { ...(q.context || {}), player_id: p ? p.id : '', player_name: p ? p.name : '' },
+    }))
+  }, [])
 
   const changePage = useCallback((page) => {
     runQuery(undefined, undefined, page)
@@ -1640,16 +1839,45 @@ export default function StatLab() {
           ) : null}
         />
 
-        {/* Target tabs — informational on what data type results are showing */}
-        <div className="flex gap-1 pb-hairline-b mb-4 overflow-x-auto pb-no-scrollbar">
+        {/* Target tabs — what one row of the table is. Picking one runs it and
+            re-shapes the filter panel to the filters that apply. */}
+        <div className="flex gap-1 pb-hairline-b overflow-x-auto pb-no-scrollbar" role="tablist" aria-label="Table type">
           {TARGETS.map(t => (
-            <button key={t.key} onClick={() => { setQuery(q => ({ ...q, target: t.key })); setRows([]); setHasQueried(false); setActiveDerived(null); setActivePreset(null); setShowCustomise(true) }}
+            <button key={t.key} role="tab" aria-selected={query.target === t.key && !activeDerived} data-target={t.key} onClick={() => selectTarget(t.key)}
               className={`relative px-3.5 py-2.5 text-[11px] font-mono font-semibold tracking-wide3 whitespace-nowrap transition ${query.target === t.key && !activeDerived ? 'text-pb-text' : 'text-pb-faint hover:text-pb-dim'}`}>
               {t.label.toUpperCase()}
               {query.target === t.key && !activeDerived && <span className="absolute left-2 right-2 -bottom-px h-[2px]" style={{ background: 'var(--pb-accent)' }} />}
             </button>
           ))}
         </div>
+
+        {(() => {
+          if (activeDerived) return <div className="mb-4" />
+          const guide = TARGET_GUIDE[query.target] || FULL_GUIDE
+          const seen = new Set()
+          const starts = PRESET_GROUPS.flatMap(g => g.items)
+            .filter(i => i.type === 'preset' && i.target === query.target && !seen.has(i.label) && seen.add(i.label))
+            .slice(0, 6)
+          return (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 mt-3 mb-4" data-testid="statlab-target-guide">
+              <p className="text-[12.5px] text-pb-dim leading-snug">
+                <span className="text-pb-text font-semibold">{targetMeta.label}:</span> {guide.blurb}
+                {guide.player && <span className="text-pb-faint"> Pick a player below to see only theirs.</span>}
+              </p>
+              {starts.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="font-mono text-[10px] tracking-wide3 text-pb-faintest">TRY</span>
+                  {starts.map(item => (
+                    <button key={item.label} onClick={() => applyPreset(item)}
+                      className={`px-2 py-0.5 rounded-full border font-mono text-[10.5px] transition ${activePreset === item.label ? 'text-pb-accent border-pb-accent/60 bg-pb-accent/10' : 'text-pb-faint border-pb-hairline hover:text-pb-text hover:border-pb-hairline2'}`}>
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )
+        })()}
 
         <div className="grid grid-cols-1 xl:grid-cols-[320px_1fr] gap-5">
           {/* Left panel: REPORTS (primary) + SAVED REPORTS */}
@@ -1766,6 +1994,16 @@ export default function StatLab() {
               </div>
               {showCustomise && (
                 <div className="px-4 pb-4 pt-3 pb-hairline-t space-y-3">
+                  {/* One player first — everything below then narrows their rows. */}
+                  {!activeDerived && (TARGET_GUIDE[query.target] || FULL_GUIDE).player && (
+                    <PlayerPicker
+                      orgId={orgId}
+                      playerId={query.context?.player_id}
+                      playerName={query.context?.player_name}
+                      onChange={setPlayer}
+                      hint={PLAYER_FILTER_HINT[query.target]}
+                    />
+                  )}
                   {/* Sort + Direction + Limit on one row */}
                   <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] gap-2 items-end">
                     <div>
@@ -1811,6 +2049,7 @@ export default function StatLab() {
                         seasons={seasons}
                         grades={grades}
                         targetShape={targetMeta.shape}
+                        guide={activeDerived ? FULL_GUIDE : (TARGET_GUIDE[query.target] || FULL_GUIDE)}
                         target={query.target}
                         activeDerived={activeDerived}
                         orgId={orgId}

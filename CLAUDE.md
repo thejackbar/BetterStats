@@ -6258,6 +6258,33 @@ are what tells them apart. **The navbar's breakpoint moved from `md` to `lg`**:
 with a search box in the bar there is no room for six links at 768px, and
 splitting the two would have left that width with neither.
 
+## StatLab: one player, and tabs that reshape the filters (v9.96.0, Sep 2026)
+
+Asked for off the StatLab screen: a Player filter as the first thing in Build
+custom query, and the table-type tabs (Player career, Player season...) to do
+something, since they only swapped the target and left the filters identical.
+
+- **`context.player_id` IS DELIBERATELY NOT A `PLAYER_CONTEXT_FILTERS` ENTRY.**
+  Every entry there sets `needs_live`, which moves player_career onto the
+  per-innings path and counts the career from scorecards, so a player's
+  filtered row would read differently from the same row unfiltered.
+  `_with_player_filter` ANDs a restriction onto each target's FINAL WHERE
+  instead: the row the unfiltered table shows, alone. Match list reads "matches
+  he played in" (the four-source union), Partnerships "either batter". Not
+  applied to family targets, team innings or derived reports, and the UI hides
+  the picker there.
+- **`TARGET_GUIDE` (StatLab.jsx) is which filters mean anything per target**,
+  read off what each backend query actually applies (`ic`/`pc` usage). A tab
+  click runs the table, snaps the sort, and `pruneContext`/`pruneTree` DROP what
+  the new target cannot use rather than hiding it, so no hidden filter keeps
+  scoping results. Keep it in step when a target starts or stops honouring a
+  context filter.
+- **Verified**: `backend/verification/verify_statlab_player_filter.py` (17
+  checks, real Postgres, the filtered row equal to the unfiltered one on both
+  paths; control: 11 fail) and `frontend/verification/verify_statlab_player_browser.mjs`
+  (23; control: 16 fail). `verify_rate_coverage.py` gained a `__main__` guard so
+  it can be imported for its schema and seed.
+
 ## StatLab gets the platform's Grade Type / Match Type filters (v9.29.4, Aug 2026)
 
 StatLab was the last stats surface with no `GradeScope` (migration 259). Two
