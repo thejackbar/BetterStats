@@ -1,5 +1,53 @@
 # BetterStats — Claude Session Notes
 
+## The club page a prospect searched their way to asks them to start (v9.91.0, Sep 2026)
+
+Reported as the paid funnel's biggest leak: ad -> /trial -> search -> a club's
+dashboard -> nothing to press but ADMIN.
+
+- **THE CLUB ON THAT DASHBOARD IS ALREADY ON BETTERCRICKET, and that decided
+  the copy.** `/trial` only navigates to a club's page when the search result
+  is `already_registered`, and `/public/self-serve/prepare` and `/submit` both
+  409 that club. So the bar can never offer to set up the club on screen: it
+  names it ("This is X's real history on BetterCricket") and sells the
+  visitor's OWN club, and the wizard opens on a blank search. The animated
+  placeholder on `/trial` suggests typing "Applecross", which is one way a
+  prospect ends up on somebody else's club.
+- **PROSPECTS ONLY, NEVER A CLUB'S OWN MEMBERS AND NEVER ANYONE SIGNED IN.**
+  A prospect is a session that arrived from a Meta click (utm_source
+  meta/facebook/fb/instagram/ig, utm_medium paid_social, or an fbclid/igshid)
+  or that passed through `/trial`. A paying club's public site must not pitch
+  its own members. Dismissing it minimises to a Start free pill rather than
+  hiding it.
+- **THE CAMPAIGN PARAMS ARE READ OFF THE SESSION, NOT THE ADDRESS BAR.**
+  `visitor.rememberLandingParams()` runs in `main.jsx` before first render and
+  keeps the landing URL's utm_* and click ids in sessionStorage
+  (`bc:landingParams`). The old `isPaidVisitor` read `window.location.search`,
+  which is empty once the search has navigated client-side.
+  `metaPixel.buildFbcFromFbclid` falls back to that fbclid, stamped with the
+  click's own time, when the pixel has not set `_fbc`. The submit payload's
+  `attribution` was already first-touch from localStorage.
+- **THE BAR NO LONGER DRAWS ON /trial OR /demo**, which it had been doing for
+  paid traffic: `isPaidVisitor()` ran for any non-marketing path. Both pages
+  carry their own call to action.
+- **`lib/clubPath.publicClubSlug` is the one "is this a club page" rule**,
+  shared with FaviconManager, and gained the sections it had missed
+  (fixtures, lineups, premierships, honour-board).
+- **CompleteRegistration is unchanged and still fires only on
+  `status === 'completed'`**, `content_category: 'self_serve_trial'`, one
+  event id shared with the server's CAPI copy.
+- **Driven in Chromium** (`frontend/verification/verify_club_cta_browser.mjs`,
+  34 checks: the whole funnel with a real client-side hop, the bar naming the
+  club and inside the viewport at 1440 and 390, no pixel event on the click,
+  CompleteRegistration once on success and not on a failed submit, the UTMs,
+  fbclid and fbc on the submit payload after the hops, a direct visitor and a
+  signed-in one seeing nothing, the pill persisting) **with a control run**: 11
+  fail against the previous commit and it reports rather than crashing.
+- **NOT VERIFIED IN META EVENTS MANAGER.** Test Events needs a real
+  registration on the live site, which creates a real club. The browser suite
+  records what `fbq` is called with; Events Manager is the one place left to
+  look.
+
 ## A RE-SOURCED SEASON COUNTS PER MATCH, NOT PER SEASON (migration 309, v9.90.3, Sep 2026)
 
 Reported off Shoalwater Bay after their CSFW archive went in through the CSV

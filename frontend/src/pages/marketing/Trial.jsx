@@ -471,12 +471,23 @@ export default function Trial() {
                   )}
                 </div>
 
-                <p className="font-mono text-[11px] text-pb-faintest mt-5 text-center">
-                  Can&rsquo;t find your club?{' '}
-                  <button type="button" onClick={openWizardBlank} className="underline hover:text-pb-text">
-                    Set it up yourself
+                {/* The whole path for a club the search doesn't know, which is
+                    exactly the cold club the ads are aimed at, so it is a real
+                    button rather than a line of small print. Secondary to the
+                    search (outlined, not filled) so it doesn't compete with it. */}
+                <div className="mt-6 text-center">
+                  <p className="text-sm text-pb-dim mb-2">Can&rsquo;t find your club?</p>
+                  <button
+                    type="button"
+                    onClick={openWizardBlank}
+                    data-testid="trial-setup-yourself"
+                    className="inline-flex items-center justify-center gap-1 w-full sm:w-auto px-6 py-3 rounded-xl font-display font-semibold text-base border-2 text-pb-text bg-pb-surface hover:bg-pb-surface2 transition"
+                    style={{ borderColor: 'var(--pb-accent)' }}
+                  >
+                    Set up your club yourself <span aria-hidden="true">→</span>
                   </button>
-                </p>
+                  <p className="font-mono text-[11px] text-pb-dim mt-2">Free · No credit card</p>
+                </div>
               </div>
             ) : null}
           </div>

@@ -1,3 +1,5 @@
+import { getLandingParams } from './visitor'
+
 // Meta Pixel <-> Conversions API dedup helpers.
 //
 // The browser pixel and the backend's server-side Conversions API call both
@@ -22,16 +24,19 @@ export function getCookie(name) {
   }
 }
 
-// Meta's documented _fbc shape, built from the URL click id for the case where
-// the pixel hasn't set the _fbc cookie yet (e.g. this is the very first
-// pageview and the click just landed).
+// Meta's documented _fbc shape, built from the click id for the case where
+// the pixel hasn't set the _fbc cookie (blocked, or not loaded yet). The URL
+// is checked first; after a client-side hop (ad -> /trial -> a club's page)
+// the fbclid has left the address bar, so the one remembered for this session
+// is used instead, stamped with the time of the click rather than now.
 export function buildFbcFromFbclid() {
   try {
     const fbclid = new URLSearchParams(window.location.search).get('fbclid')
-    return fbclid ? `fb.1.${Date.now()}.${fbclid}` : null
-  } catch {
-    return null
-  }
+    if (fbclid) return `fb.1.${Date.now()}.${fbclid}`
+  } catch { /* fall through */ }
+  const landing = getLandingParams()
+  if (landing?.fbclid) return `fb.1.${landing.captured_at || Date.now()}.${landing.fbclid}`
+  return null
 }
 
 // The dedup + match-quality context to send alongside a Lead: an event_id for
