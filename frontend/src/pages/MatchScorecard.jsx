@@ -835,7 +835,11 @@ export default function MatchScorecard() {
     ...(game.bowling || []).map(r => r.innings_number || 1),
     ...(game.opp_batting || []).map(r => r.innings_number || 1),
     ...(game.opp_bowling || []).map(r => r.innings_number || 1),
-  ])].sort()
+    // Include innings that exist only as a recorded total (a hand-entered
+    // opposition innings with no itemised batters and no bowling rows of ours),
+    // else its score would never render.
+    ...Object.keys(game.innings_totals || {}).map(k => Number(k) || 1),
+  ])].sort((a, b) => a - b)
 
   const innings = inningsNums.map(num => ({
     num,

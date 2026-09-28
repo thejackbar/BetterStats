@@ -7,7 +7,7 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
-from app.models.db import Game, Grade, Season, Organisation, BattingInnings, BowlingSpell, FieldingStat, Player, ManualGame, ManualBattingInnings, ManualBowlingSpell, ManualFieldingStat, get_db
+from app.models.db import Game, Grade, Season, Organisation, BattingInnings, BowlingSpell, FieldingStat, Player, ManualGame, ManualBattingInnings, ManualBowlingSpell, ManualFieldingStat, ManualInnings, get_db
 from app.services import dismissal, grade_scope
 from app.services.aggregations import get_game_fall_of_wickets, get_game_partnerships
 from app.services.sync import _caught_by_keeper, _innings_keeper_names
@@ -544,6 +544,55 @@ def _manual_opp_from_payload(payload: dict, innings_totals: dict) -> tuple[list[
     return opp_batting, opp_bowling
 
 
+def _merge_manual_innings(rows, innings_totals: dict, our_name: Optional[str], opp_name: Optional[str]) -> None:
+    """Fold a hand-entered game's `manual_innings` rows into innings_totals.
+
+    Covers the three hand-entry additions (migration 310): the innings side
+    label, per-innings extras, and the opposition innings' own total. Disjoint
+    from `_manual_opp_from_payload` by construction — a photo upload has no
+    manual_innings rows and a hand-entered game has no extracted_payload — so
+    the two never both fire on one game.
+
+    The frontend renders an innings as `innings_totals.runs + extras`, so a
+    recorded FULL total is stored bat-only (total − extras) to keep the extras
+    from being counted twice; `wickets` is read directly when `runs` is set.
+    """
+    for mi in rows:
+        n = mi.innings_number or 1
+        meta = innings_totals.setdefault(n, {"runs": 0, "wickets": 0, "extras": 0, "team": None})
+
+        if mi.batting_side == "us" and our_name:
+            meta["batting_team"] = our_name
+        elif mi.batting_side == "opposition" and opp_name:
+            meta["batting_team"] = opp_name
+
+        # Extras: itemised parts win; else a single recorded total; else keep
+        # whatever the base loop derived from our bowlers' wides + no-balls.
+        itemised = [mi.byes, mi.leg_byes, mi.wides, mi.no_balls, mi.penalty]
+        if any(v is not None for v in itemised):
+            meta["extras"] = sum(v or 0 for v in itemised)
+            meta["extras_breakdown"] = {
+                "wides": mi.wides,
+                "no_balls": mi.no_balls,
+                "byes": mi.byes,
+                "leg_byes": mi.leg_byes,
+                "penalties": mi.penalty,
+            }
+        elif mi.extras_total is not None:
+            meta["extras"] = mi.extras_total
+
+        # A recorded innings total (the opposition side, whose batters can't be
+        # itemised here) is the FULL total. Store bat-only so runs + extras
+        # reconstructs it exactly.
+        if mi.total_runs is not None:
+            extras_now = meta.get("extras") or 0
+            meta["runs"] = max(0, mi.total_runs - extras_now)
+        if mi.total_wickets is not None:
+            meta["wickets"] = mi.total_wickets
+        if mi.overs is not None:
+            meta["overs"] = float(mi.overs)
+
+
 @router.get("/{game_id}/scorecard")
 async def get_scorecard(
     game_id: str,
@@ -607,6 +656,16 @@ async def get_scorecard(
         .where((FS.manual_game_id if is_manual else FS.game_id) == game.id)
     )
     fielding_rows = fielding_res.all()
+
+    # Per-innings meta for a hand-entered manual game (migration 310): the
+    # innings side label, its extras, and the opposition innings' own total.
+    manual_innings_rows = []
+    if is_manual:
+        manual_innings_rows = (await db.execute(
+            select(ManualInnings)
+            .where(ManualInnings.manual_game_id == game.id)
+            .order_by(ManualInnings.innings_number)
+        )).scalars().all()
 
     # Build innings summary map (totals per innings)
     innings_meta: dict[int, dict] = {}
@@ -1148,6 +1207,13 @@ async def get_scorecard(
     # tool it carries the opposition half in its stored payload, so render both sides.
     if is_manual and getattr(game, "extracted_payload", None):
         opp_batting, opp_bowling = _manual_opp_from_payload(game.extracted_payload, innings_totals)
+
+    # A hand-entered game records its innings side / extras / opposition totals
+    # in manual_innings instead (a photo upload has none, so these never clash).
+    if is_manual and manual_innings_rows:
+        _our_name = (org.name if org else None) or game.home_team or "Our team"
+        _opp_name = game.opposition or game.away_team or "Opposition"
+        _merge_manual_innings(manual_innings_rows, innings_totals, _our_name, _opp_name)
 
     # A `players` row can exist with an unusable name — a stale placeholder row
     # for a CA-redacted participant (see `_classify_unlinked_name`), created by
