@@ -15,6 +15,7 @@ from app.services.afl.aggregations import _resolve_canonical_grade, grade_sort_k
 from app.services.afl.season_groups import canonical_map
 from app.services import club_lock
 from app.services.afl.grade_scope import left_out_labels
+from app.services.afl.competitions import public_competitions
 from app.services.fonts import public_font_fields
 from app.services.club_history import (
     competitions_for_display, previous_names_for_display,
@@ -62,7 +63,7 @@ async def get_club(slug: str, request: Request, db: AsyncSession = Depends(get_d
     """), {"org": str(org.id)})
     raw_grades = await db.execute(text("""
         SELECT gr.id, gr.name, gr.display_name_override, gr.season_id, gr.category,
-               gr.display_order
+               gr.display_order, gr.competition_id
         FROM grades gr
         JOIN seasons s ON s.id = gr.season_id
         WHERE s.organisation_id = :org AND gr.is_public
@@ -89,6 +90,7 @@ async def get_club(slug: str, request: Request, db: AsyncSession = Depends(get_d
         slot = bucket.setdefault(canonical, {
             "id": row["id"], "name": canonical, "display_name_override": None,
             "category": None, "season_ids": [], "display_order": None,
+            "competition_ids": [],
         })
         if row["display_name_override"] and not slot["display_name_override"]:
             slot["display_name_override"] = row["display_name_override"]
@@ -107,6 +109,10 @@ async def get_club(slug: str, request: Request, db: AsyncSession = Depends(get_d
             sid = uuid.UUID(season_canon[str(sid)])
         if sid not in slot["season_ids"]:
             slot["season_ids"].append(sid)
+        # Which competitions this grade was played in, so the Competition
+        # filter can narrow the grade dropdown beside it.
+        if row["competition_id"] and str(row["competition_id"]) not in slot["competition_ids"]:
+            slot["competition_ids"].append(str(row["competition_id"]))
     grades = sorted(bucket.values(), key=grade_sort_key)
 
     return {
@@ -132,6 +138,10 @@ async def get_club(slug: str, request: Request, db: AsyncSession = Depends(get_d
         # Grade categories the club leaves out of its stats by default, so a
         # page can say why its figures are smaller than the whole history.
         "stats_left_out": await left_out_labels(db, org.id),
+        # The club's own groups of grades (Merge Grades -> Competitions), for
+        # the Competition filter on the leaderboard and records. Its own key
+        # because "competitions" above is the club's history list.
+        "stat_competitions": await public_competitions(db, org.id),
         "seasons": [dict(r._mapping) for r in seasons],
         "grades": grades,
         "public_show_bog_leaderboard": org.public_show_bog_leaderboard,

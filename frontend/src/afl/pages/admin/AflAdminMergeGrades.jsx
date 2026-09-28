@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { aflApi } from '../../aflApi'
 import { SectionTitle } from '../../components/bits'
+import CompetitionManager from '../../../components/admin/CompetitionManager'
 
 const GRADE_CATEGORIES = [
   ['senior', 'Senior'],
@@ -408,6 +409,16 @@ export default function AflAdminMergeGrades() {
         Label grades by type, choose which to share publicly, and merge grades that are
         really the same competition under different names.
       </p>
+
+      <CompetitionManager
+        intro={<>Which competition each grade was played in. The Competition filter on the
+          leaderboard and records lists these, so a club playing in more than one league can
+          read each on its own. &ldquo;Group my grades&rdquo; files every grade under the
+          competition its season is named for (&ldquo;VAFA 2026&rdquo; files under VAFA).</>}
+        emptyText={assoc => assoc.length
+          ? `Nothing grouped yet. Your season names point to ${assoc.length} ${assoc.length === 1 ? 'competition' : 'competitions'}.`
+          : 'No seasons yet. Once your first sync lands you can group your grades here.'}
+      />
 
       <MergeBuilder grades={grades} onMerged={refresh} />
 

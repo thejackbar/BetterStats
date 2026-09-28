@@ -3,7 +3,7 @@ import { useOutletContext } from 'react-router-dom'
 import clsx from 'clsx'
 import LoadingSpinner from '../../components/LoadingSpinner'
 import { aflApi } from '../aflApi'
-import { Select, PlayerCell, displayName, StatsScopeNote } from '../components/bits'
+import { Select, PlayerCell, displayName, StatsScopeNote, CompetitionSelect } from '../components/bits'
 import AllTimeGames from '../components/AllTimeGames'
 
 // `career: true` marks a board that is career-wide by definition and so takes
@@ -32,6 +32,7 @@ export default function Leaderboard() {
   const [stat, setStat] = useState('games')
   const [seasonId, setSeasonId] = useState(null)
   const [gradeId, setGradeId] = useState(null)
+  const [compId, setCompId] = useState(null)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const base = `/${club.slug}`
@@ -56,18 +57,19 @@ export default function Leaderboard() {
     // A season's full roster (every grade combined) can run well past 50 —
     // this is meant to be the whole list, not a top-N cut-off, so ask for
     // the backend's max rather than an arbitrary round number.
-    aflApi.getLeaderboard(club.id, { stat, season_id: seasonId, grade_id: gradeId, limit: 500 })
+    aflApi.getLeaderboard(club.id, { stat, season_id: seasonId, grade_id: gradeId, competition_id: compId, limit: 500 })
       .then(setData)
       .finally(() => setLoading(false))
-  }, [club.id, stat, seasonId, gradeId, isCareerBoard])
+  }, [club.id, stat, seasonId, gradeId, compId, isCareerBoard])
 
   const gradeOptions = (club.grades || [])
     .filter(g => !seasonId || (g.season_ids || []).includes(seasonId))
+    .filter(g => !compId || (g.competition_ids || []).includes(compId))
     .map(g => ({ value: g.id, label: g.display_name_override || g.name }))
 
   return (
     <div className="space-y-4">
-      <StatsScopeNote club={club} gradePicked={!!gradeId} />
+      <StatsScopeNote club={club} gradePicked={!!gradeId || !!compId} />
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-2xl font-bold">Leaderboard</h1>
         {isCareerBoard
@@ -76,6 +78,7 @@ export default function Leaderboard() {
             <div className="ml-auto flex flex-wrap gap-2">
               <Select value={seasonId} onChange={setSeasonId} placeholder="All seasons"
                       options={(club.seasons || []).map(x => ({ value: x.id, label: x.name }))} />
+              <CompetitionSelect club={club} value={compId} onChange={v => { setCompId(v); setGradeId(null) }} />
               <Select value={gradeId} onChange={setGradeId} placeholder="All grades" options={gradeOptions} />
             </div>
           )}

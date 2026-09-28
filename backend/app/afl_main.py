@@ -67,6 +67,7 @@ from app.routers.afl import (
     honours as afl_honours,
     admin_extras as afl_admin_extras,
     social as afl_social,
+    competitions as afl_competitions,
 )
 
 logger = logging.getLogger(__name__)
@@ -142,6 +143,17 @@ async def lifespan(app: FastAPI):
         from app.services.afl import cricket_schema_mirror
         mirrored = await cricket_schema_mirror.apply(conn)
         logger.info("afl_main: cricket schema mirror %s", mirrored)
+
+        # Competitions (migration 283's table and columns). create_all builds
+        # club_competitions from the ORM model, which carries no server default
+        # on id, and cricket's create_competition INSERT names no id — so the
+        # default is set here, then the shared DDL adds the case-folded unique
+        # name index and the grade indexes. Every statement is idempotent.
+        await conn.execute(text(
+            "ALTER TABLE club_competitions ALTER COLUMN id SET DEFAULT gen_random_uuid()"))
+        from app.services import competition_ddl
+        for stmt in competition_ddl.STATEMENTS:
+            await conn.execute(text(stmt))
 
         # Raw-SQL tables the shared code writes that live outside the ORM
         # metadata (created by cricket's lifespan there; mirrored here).
@@ -446,6 +458,7 @@ app.include_router(afl_imports.router)
 app.include_router(afl_result_imports.router)
 app.include_router(afl_award_imports.router)
 app.include_router(afl_seasons_admin.router)
+app.include_router(afl_competitions.router)
 app.include_router(afl_manual_entries.router)
 app.include_router(afl_lineups.router)
 app.include_router(afl_admin_extras.router)  # Activity Log, Milestones, Matches admin

@@ -2,21 +2,22 @@ import { useEffect, useState } from 'react'
 import { Link, useOutletContext } from 'react-router-dom'
 import LoadingSpinner from '../../components/LoadingSpinner'
 import { aflApi, scoreLine } from '../aflApi'
-import { SectionTitle, Select, PlayerCell, displayName, StatsScopeNote } from '../components/bits'
+import { SectionTitle, Select, PlayerCell, displayName, StatsScopeNote, CompetitionSelect } from '../components/bits'
 
 export default function Records() {
   const { club } = useOutletContext()
   const [gradeId, setGradeId] = useState(null)
+  const [compId, setCompId] = useState(null)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const base = `/${club.slug}`
 
   useEffect(() => {
     setLoading(true)
-    aflApi.getRecords(club.id, { grade_id: gradeId })
+    aflApi.getRecords(club.id, { grade_id: gradeId, competition_id: compId })
       .then(setData)
       .finally(() => setLoading(false))
-  }, [club.id, gradeId])
+  }, [club.id, gradeId, compId])
 
   if (loading && !data) return <div className="pt-16 flex justify-center"><LoadingSpinner /></div>
 
@@ -72,10 +73,13 @@ export default function Records() {
           <span className="w-1 rounded-full shrink-0" style={{ background: 'var(--pb-gradient)' }} />
           <h1 className="font-display text-3xl sm:text-4xl font-bold tracking-tight text-pb-text">Club records</h1>
         </div>
+        <CompetitionSelect club={club} value={compId} onChange={v => { setCompId(v); setGradeId(null) }} />
         <Select value={gradeId} onChange={setGradeId} placeholder="All grades"
-                options={(club.grades || []).map(g => ({ value: g.id, label: g.display_name_override || g.name }))} />
+                options={(club.grades || [])
+                  .filter(g => !compId || (g.competition_ids || []).includes(compId))
+                  .map(g => ({ value: g.id, label: g.display_name_override || g.name }))} />
       </div>
-      <StatsScopeNote club={club} gradePicked={!!gradeId} />
+      <StatsScopeNote club={club} gradePicked={!!gradeId || !!compId} />
       <div className="grid md:grid-cols-2 gap-4">
         {playerBoard('Most games', data?.most_games_career, 'games')}
         {playerBoard('Most goals', data?.most_goals_career, 'goals')}
