@@ -2759,6 +2759,27 @@ async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: u
     for mid, pid, mt, mv in exist_rows:
         existing.setdefault(pid, {})[(mt, mv)] = mid
 
+    # A threshold the career had ALREADY passed before the current season is a
+    # catch-up, not something that just happened: an imported history's 5,000
+    # runs, first counted now. It is written with no date ("reached, date
+    # unknown", which every milestone screen draws as a dash) rather than
+    # today's, because the notification scan announces anything dated in the
+    # last three weeks and a club would be emailed that a veteran "just
+    # reached" a milestone from the 1990s. A season with no year, and a career
+    # adjustment with no season, count as before.
+    before_rows = (await session.execute(text("""
+        SELECT pss.player_id::text AS pid,
+               COALESCE(SUM(pss.runs), 0) AS runs, COALESCE(SUM(pss.wickets), 0) AS wickets,
+               COALESCE(SUM(pss.matches), 0) AS matches, COALESCE(SUM(pss.catches), 0) AS catches
+        FROM v_effective_player_season_stats pss
+        LEFT JOIN seasons s ON s.id = pss.season_id
+        WHERE pss.player_id = ANY(CAST(:pids AS uuid[]))
+          AND COALESCE(s.year, 0) < COALESCE((
+                SELECT MAX(year) FROM seasons WHERE organisation_id = CAST(:org AS uuid)), 0)
+        GROUP BY pss.player_id
+    """), {"pids": ids, "org": str(org_id)})).mappings().all()
+    before = {r["pid"]: r for r in before_rows}
+
     today = date.today()
     remove_ids = []
     for pid in ids:
@@ -2771,10 +2792,12 @@ async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: u
                 if (mt, threshold) in have:
                     continue
                 report["added"].append((pid, mt, threshold))
+                historical = int((before.get(pid) or {}).get(mt) or 0) >= threshold
                 if not dry_run:
                     session.add(Milestone(
                         player_id=uuid.UUID(pid), milestone_type=mt, milestone_value=threshold,
-                        detail=detail_fmt[mt](threshold), achieved_at=today,
+                        detail=detail_fmt[mt](threshold),
+                        achieved_at=None if historical else today,
                     ))
             if reconcile:
                 for (smt, value), mid in have.items():

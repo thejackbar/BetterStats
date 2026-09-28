@@ -101,6 +101,16 @@ short of 200 catches on 201, and J Hind 18 from 3,000 "including junior games".
   911 against a 5,913 career). The writer now takes `max(profile figure, whole
   career)`, the whole career being the unscoped effective view, correct since
   309. The phantoms still go, because nothing reaches a 500 wickets on 478.
+  **A CATCH-UP ADD IS UNDATED.** A threshold the whole career had already
+  passed before the club's latest season is written with `achieved_at` NULL
+  ("reached, date unknown", a dash on every screen), because
+  `_src_milestone_achieved` announces anything dated in the last 21 days and a
+  club would otherwise be emailed that a veteran "just reached" 5,000 runs from
+  an imported history. Control run: the dated writer announces Hetel's 500
+  through 5,000 runs at once. `reconcile_milestones`' dry run now prints each
+  removal's recorded date and current figures; Shoalwater's was 101 dated
+  10 Sep (the double count), 4 dated 24 Sep, all wickets (the 037-shape
+  bowling fan-out), and 9 dated 2 Sep, none reached by any figure now.
   **Never run a reconcile's `--apply` off a dry run whose REMOVE list is
   dominated by juniors-turned-seniors; that is the scope talking, not a bug
   being fixed.**

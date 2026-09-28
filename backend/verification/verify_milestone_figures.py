@@ -384,6 +384,22 @@ async def main() -> None:
               (str(P_HIND), "runs", 3000) not in rows)
         check("Hetel's 5,000 runs is added",
               (str(P_HETEL), "runs", 5000) in rows and (str(P_HETEL), "runs", 5000) in rep["added"])
+        # 5,013 of his runs came before this season, so the 5,000 is history
+        # first counted now, not something he just did.
+        check("…with no date, since his career passed it before this season",
+              (str(P_HETEL), "runs", 5000) in rows and rows[(str(P_HETEL), "runs", 5000)] is None,
+              str(rows.get((str(P_HETEL), "runs", 5000))))
+        check("Hind's 2,000 runs, all scored this season, is dated today",
+              rows.get((str(P_HIND), "runs", 2000)) == date.today(),
+              str(rows.get((str(P_HIND), "runs", 2000))))
+        from app.services import notification_scan as _ns
+        async with Session() as s:
+            ach = await _ns._src_milestone_achieved(s, ORG, {})
+        keys = {i["dedupe_key"] for i in ach}
+        check("the undated catch-up is not announced as just reached",
+              f"milestone:{P_HETEL}:runs:5000" not in keys, str(sorted(keys)))
+        check("the one dated today is",
+              f"milestone:{P_HIND}:runs:2000" in keys, str(sorted(keys)))
         async with Session() as s:
             again = await _compute_milestones(s, EVERYONE, ORG, reconcile=True)
         check("a second run changes nothing", again == {"added": [], "removed": []}, str(again))
