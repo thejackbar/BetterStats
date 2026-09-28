@@ -49,6 +49,7 @@ function ClubEditor({ club, onClose, onSaved }) {
   const [form, setForm] = useState({
     name: club.name, short_name: club.short_name || '', slug: club.slug || '',
     primary_color: club.primary_color || '', accent_color: club.accent_color || '', is_active: club.is_active,
+    modules: { socials: !!club.modules?.socials, admin: !!club.modules?.admin },
   })
   const [admins, setAdmins] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -151,6 +152,22 @@ function ClubEditor({ club, onClose, onSaved }) {
             <input type="checkbox" checked={!!form.is_active} onChange={e => setForm(f => ({ ...f, is_active: e.target.checked }))} />
             Public site active
           </label>
+        </div>
+
+        <div>
+          <SectionTitle>Modules</SectionTitle>
+          <p className="text-xs text-pb-faint mb-2">
+            What this club's admins can open. BetterStats is always on.
+          </p>
+          {[['socials', 'BetterSocials', 'Social post designer and media library'],
+            ['admin', 'BetterAdmin', 'Accounts, emails, stock, directory, roster, committee and events']].map(([key, name, desc]) => (
+            <label key={key} className="flex items-start gap-2 text-sm text-pb-text py-1">
+              <input type="checkbox" className="mt-1" checked={!!form.modules[key]}
+                     onChange={e => setForm(f => ({ ...f, modules: { ...f.modules, [key]: e.target.checked } }))} />
+              <span><span className="font-semibold">{name}</span>
+                <span className="block text-xs text-pb-faint">{desc}</span></span>
+            </label>
+          ))}
         </div>
 
         <div>

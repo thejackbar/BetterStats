@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.modules import MODULE_COMMS, MODULE_CRM, MODULE_FEES, MODULE_MERCH, MODULE_SOCIALS
 from app.models.db import ClubMembership, Organisation, SyncRun, User, get_db
 from app.routers.afl.club_admin import _has_running_sync, _run_sync, _spawn
 from app.routers.auth import require_super_admin
@@ -24,6 +25,21 @@ from app.services.afl import sync as afl_sync
 from app.services.memberships import set_primary_admin
 
 router = APIRouter(prefix="/club-admin/super", tags=["afl-super-clubs"])
+
+# The add-on modules a football club can hold. AFL has no billing or module
+# marketplace, so a super admin switches them on here, per club, the same way
+# cricket's super admin sets ``module_overrides`` (the one entitlement source,
+# app/auth/modules.py). BetterAdmin is one switch covering its four entitlement
+# keys, exactly as cricket sells it as one module.
+AFL_MODULE_TOGGLES = {
+    "socials": (MODULE_SOCIALS,),
+    "admin": (MODULE_FEES, MODULE_COMMS, MODULE_MERCH, MODULE_CRM),
+}
+
+
+def _toggles_from_overrides(overrides) -> dict:
+    held = set(overrides or [])
+    return {k: all(m in held for m in keys) for k, keys in AFL_MODULE_TOGGLES.items()}
 
 
 async def _club_payload(db: AsyncSession, org: Organisation) -> dict:
@@ -51,6 +67,7 @@ async def _club_payload(db: AsyncSession, org: Organisation) -> dict:
         "primary_color": org.primary_color,
         "accent_color": org.accent_color,
         "logo_url": org.logo_url,
+        "modules": _toggles_from_overrides(org.module_overrides),
         "admin_name": (admin["display_name"] or admin["username"]) if admin else None,
         "admin_email": admin["email"] if admin else None,
         "last_sync_status": last_sync.status if last_sync else None,
@@ -107,6 +124,8 @@ class ClubPatch(BaseModel):
     primary_color: Optional[str] = None
     accent_color: Optional[str] = None
     is_active: Optional[bool] = None
+    # {"socials": bool, "admin": bool} — only the keys sent are changed.
+    modules: Optional[dict] = None
 
 
 @router.patch("/clubs/{club_id}")
@@ -117,7 +136,18 @@ async def patch_club(
     org = await db.get(Organisation, uuid.UUID(club_id))
     if not org:
         raise HTTPException(status_code=404, detail="Club not found")
-    for field, value in body.model_dump(exclude_unset=True).items():
+    fields = body.model_dump(exclude_unset=True)
+    toggles = fields.pop("modules", None)
+    if toggles:
+        held = set(org.module_overrides or [])
+        for key, on in toggles.items():
+            keys = AFL_MODULE_TOGGLES.get(key)
+            if keys is None:
+                raise HTTPException(status_code=422, detail=f"Unknown module {key!r}")
+            held = (held | set(keys)) if on else (held - set(keys))
+        # A fresh list, so SQLAlchemy sees the JSONB column change.
+        org.module_overrides = sorted(held)
+    for field, value in fields.items():
         if field == "slug" and value:
             value = value.strip().lower()
         setattr(org, field, value)
