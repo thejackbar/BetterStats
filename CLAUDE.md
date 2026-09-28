@@ -123,6 +123,12 @@ short of 200 catches on 201, and J Hind 18 from 3,000 "including junior games".
   no game at all, it is undated. `_compute_milestones` reports `dated`, and
   `reconcile_milestones` marks those additions and prints line-buffered so a run
   redirected to a file can be `tail -f`'d. Control run: 3 of 81 fail.
+  **That first cut made an all-clubs run take 3+ hours (v9.95.1)**: it joined
+  `v_effective_games` for EVERY player at every club. It now asks only about the
+  players with a candidate addition not already history by the season test, off
+  the base `games`/`manual_games` tables (a paired twin carries the same date),
+  the script sets `jit = off`, and an `all` run prints `[n/N] club: … (Ns)` per
+  club so a slow run cannot read as a stuck one.
 - **Verified against a real Postgres** (`verify_milestone_figures.py`, 72
   checks now; a control run with the profile-only writer fails the 3 new ones,
   removing Hetel's 1,000-5,000 runs; the original 66

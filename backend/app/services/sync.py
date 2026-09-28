@@ -2782,33 +2782,9 @@ async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: u
     """), {"pids": ids, "org": str(org_id)})).mappings().all()
     before = {r["pid"]: r for r in before_rows}
 
-    # "Before this season" alone is not enough in an off-season, when a club's
-    # newest season row is still last summer's: every threshold crossed during
-    # that summer would be dated today and announced as just reached, months
-    # after the game. So a threshold only counts as JUST reached when the
-    # player has actually played inside the notification window; anything else
-    # is history first counted now, and goes in undated. A player with no game
-    # at all (an imported career) is always history.
-    from app.services.notification_scan import LOOKBACK_DAYS
-    recent_from = date.today() - timedelta(days=LOOKBACK_DAYS)
-    last_played = {r[0]: r[1] for r in (await session.execute(text("""
-        SELECT x.pid, MAX(g.played_at)
-        FROM (
-            SELECT player_id::text AS pid, game_id FROM game_appearances
-             WHERE player_id = ANY(CAST(:pids AS uuid[]))
-            UNION
-            SELECT player_id::text, game_id FROM v_effective_batting_innings
-             WHERE player_id = ANY(CAST(:pids AS uuid[]))
-            UNION
-            SELECT player_id::text, game_id FROM v_effective_bowling_spells
-             WHERE player_id = ANY(CAST(:pids AS uuid[]))
-        ) x
-        JOIN v_effective_games g ON g.id = x.game_id
-        GROUP BY x.pid
-    """), {"pids": ids})).all()}
-
     today = date.today()
     remove_ids = []
+    pending: list[tuple[str, str, int, bool]] = []  # (pid, type, threshold, before-season)
     for pid in ids:
         totals = (figures.get(pid) or {}).get("totals") or {}
         career = whole.get(pid) or {}
@@ -2818,23 +2794,70 @@ async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: u
             for threshold in crossed_thresholds(mt, current):
                 if (mt, threshold) in have:
                     continue
-                report["added"].append((pid, mt, threshold))
-                played = last_played.get(pid)
-                historical = (int((before.get(pid) or {}).get(mt) or 0) >= threshold
-                              or played is None or played < recent_from)
-                if not historical:
-                    report["dated"].append((pid, mt, threshold))
-                if not dry_run:
-                    session.add(Milestone(
-                        player_id=uuid.UUID(pid), milestone_type=mt, milestone_value=threshold,
-                        detail=detail_fmt[mt](threshold),
-                        achieved_at=None if historical else today,
-                    ))
+                pending.append((pid, mt, threshold,
+                                int((before.get(pid) or {}).get(mt) or 0) >= threshold))
             if reconcile:
                 for (smt, value), mid in have.items():
                     if smt == mt and value > current:
                         report["removed"].append((pid, mt, value))
                         remove_ids.append(mid)
+
+    # "Before this season" alone is not enough in an off-season, when a club's
+    # newest season row is still last summer's: every threshold crossed during
+    # that summer would be dated today and announced as just reached, months
+    # after the game. So a threshold only counts as JUST reached when the
+    # player has actually played inside the notification window; anything else
+    # is history first counted now, and goes in undated. A player with no game
+    # at all (an imported career) is always history.
+    #
+    # Asked only for the players still in question, and read off the base
+    # tables rather than the effective views: the first cut joined
+    # v_effective_games for every player at the club, and a platform-wide
+    # reconcile went from about half an hour to several. A paired import and
+    # its synced twin carry the same date, so the pairing the views apply
+    # cannot change the answer to "played in the last three weeks".
+    from app.services.notification_scan import LOOKBACK_DAYS
+    recent_from = today - timedelta(days=LOOKBACK_DAYS)
+    ask = sorted({pid for pid, _, _, hist in pending if not hist})
+    last_played: dict = {}
+    if ask:
+        last_played = {r[0]: r[1] for r in (await session.execute(text("""
+            SELECT x.pid, MAX(x.d) FROM (
+                SELECT ga.player_id::text AS pid, g.played_at AS d
+                  FROM game_appearances ga JOIN games g ON g.id = ga.game_id
+                 WHERE ga.player_id = ANY(CAST(:pids AS uuid[]))
+                UNION ALL
+                SELECT bi.player_id::text, g.played_at
+                  FROM batting_innings bi JOIN games g ON g.id = bi.game_id
+                 WHERE bi.player_id = ANY(CAST(:pids AS uuid[]))
+                UNION ALL
+                SELECT bs.player_id::text, g.played_at
+                  FROM bowling_spells bs JOIN games g ON g.id = bs.game_id
+                 WHERE bs.player_id = ANY(CAST(:pids AS uuid[]))
+                UNION ALL
+                SELECT mb.player_id::text, mg.played_at
+                  FROM manual_batting_innings mb JOIN manual_games mg ON mg.id = mb.manual_game_id
+                 WHERE mb.player_id = ANY(CAST(:pids AS uuid[]))
+                UNION ALL
+                SELECT ms.player_id::text, mg.played_at
+                  FROM manual_bowling_spells ms JOIN manual_games mg ON mg.id = ms.manual_game_id
+                 WHERE ms.player_id = ANY(CAST(:pids AS uuid[]))
+            ) x
+            GROUP BY x.pid
+        """), {"pids": ask})).all()}
+
+    for pid, mt, threshold, hist in pending:
+        report["added"].append((pid, mt, threshold))
+        played = last_played.get(pid)
+        historical = hist or played is None or played < recent_from
+        if not historical:
+            report["dated"].append((pid, mt, threshold))
+        if not dry_run:
+            session.add(Milestone(
+                player_id=uuid.UUID(pid), milestone_type=mt, milestone_value=threshold,
+                detail=detail_fmt[mt](threshold),
+                achieved_at=None if historical else today,
+            ))
 
     if dry_run:
         await session.rollback()
