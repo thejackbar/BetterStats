@@ -275,12 +275,15 @@ async def _recompute_milestones(db: AsyncSession, org_id: uuid.UUID, player_ids)
     CA sync does, so re-run the same milestone-crossing check (500 runs, 50
     wickets, etc.) the sync job runs — otherwise a club with no CA sync (or a
     player whose history is entirely manual/imported) never mints these badges.
-    Safe to call with a superset of affected players: it only adds newly-
-    crossed thresholds, never removes anything.
+    Safe to call with a superset of affected players. Reconciles: the entry
+    has just been written, so every source the career is counted from is in
+    place, and a correction that takes a player back under a threshold takes
+    the stored milestone with it (a milestone row is derived output, never
+    something a person typed).
     """
     ids = sorted({pid for pid in player_ids if pid}, key=str)
     if ids:
-        await _compute_milestones(db, ids, org_id)
+        await _compute_milestones(db, ids, org_id, reconcile=True)
 
 
 def _extract_player_ids(rows) -> list:

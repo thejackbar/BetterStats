@@ -12,15 +12,16 @@ timeout at Hoxton Park Tigers, where the dashboard panel showed "No upcoming
 milestones" while the admin report listed 23 — the failure and an empty club
 render identically.
 
-So this is the one definition, lifted from the two fast copies verbatim:
+So this is the one definition. **Since v9.91.1 the FIGURES are the profile's**
+(``milestone_totals``): the base table left out every imported and
+hand-entered match, so Shoalwater Bay's Milestones page read 197 wickets for a
+bowler whose profile said 478. Only the active rule below is still read here:
 
 - **ACTIVE MEANS A SEASON ROW IN THE LAST THREE YEARS.** A player who has
   stopped turning out is not "two wickets away" in any useful sense, and
   every one of the three surfaces already agreed on that rule.
-- **THE CLUB'S OWN SEASONS ONLY.** The ``EXISTS`` guard is migration 060's
-  cross-club rule restated on the base table: CA reuses one participant GUID
-  across every club a person plays for, so a second club's season rows hang
-  off the same player id and would otherwise be summed into our career total.
+- **THE CLUB'S OWN SEASONS ONLY.** Activity is judged on this club's seasons:
+  CA reuses one participant GUID across every club a person plays for.
 - **NO ``HAVING runs > 0 OR wickets > 0``.** The dashboard's own copy carried
   one, which silently dropped anybody whose next milestone is a matches or
   catches one — most of Hoxton Park's 23.
@@ -37,6 +38,7 @@ import datetime
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services import milestone_totals
 from app.services.milestone_rules import crossed_thresholds, next_threshold, reach_window
 
 # Current year and the two before it. A season with no year at all is kept —
@@ -51,41 +53,64 @@ STAT_DEFS = (
     ("catches", "fielding", "total_catches"),
 )
 
-_TOTALS_SQL = text("""
-    WITH active_ids AS (
-        SELECT DISTINCT pss.player_id
-        FROM player_season_stats pss
-        JOIN seasons s ON s.id = pss.season_id
-        WHERE s.organisation_id = :org_id
-          AND (s.year IS NULL OR s.year >= :cutoff)
-    )
-    SELECT
-        p.id::text AS player_id,
-        COALESCE(p.display_name_override, p.name) AS player_name,
-        p.gender AS gender,
-        COALESCE(SUM(pss.runs), 0)    AS total_runs,
-        COALESCE(SUM(pss.wickets), 0) AS total_wickets,
-        COALESCE(SUM(pss.matches), 0) AS total_matches,
-        COALESCE(SUM(pss.catches), 0) AS total_catches
+# Who counts as active. The career FIGURES come from milestone_totals, which
+# is the profile's own definition; this only decides whose to read.
+_ACTIVE_SQL = text("""
+    SELECT p.id::text AS player_id,
+           COALESCE(p.display_name_override, p.name) AS player_name,
+           p.gender AS gender
     FROM players p
-    JOIN active_ids ai ON ai.player_id = p.id
-    JOIN player_season_stats pss ON pss.player_id = p.id
-        -- Only this org's seasons (shared cross-club GUID guard, migration 060)
-        AND EXISTS (
-            SELECT 1 FROM seasons s2
-            WHERE s2.id = pss.season_id AND s2.organisation_id = :org_id
-        )
     WHERE p.organisation_id = :org_id AND p.is_player = TRUE
-    GROUP BY p.id, COALESCE(p.display_name_override, p.name), p.gender
+      AND EXISTS (
+          SELECT 1 FROM player_season_stats pss
+          JOIN seasons s ON s.id = pss.season_id
+          WHERE pss.player_id = p.id AND s.organisation_id = :org_id
+            AND (s.year IS NULL OR s.year >= :cutoff)
+      )
     ORDER BY COALESCE(p.display_name_override, p.name)
 """)
 
+# The label a split figure is given where it is shown or emailed.
+SPLIT_LABELS = {
+    "with_junior": "including junior matches",
+    "without_junior": "excluding junior matches",
+}
+
 
 async def active_player_totals(session: AsyncSession, org_id: str) -> list[dict]:
-    """Career runs/wickets/matches/catches for the club's active players."""
+    """Career runs/wickets/matches/catches for the club's active players.
+
+    The figures are the ones each player's profile opens on
+    (``milestone_totals.profile_totals``). Until v9.91.1 this summed the base
+    ``player_season_stats`` table, which left out every imported and
+    hand-entered match and disagreed with the profile beside it.
+    """
     cutoff = datetime.date.today().year - ACTIVE_SEASON_YEARS
-    rows = await session.execute(_TOTALS_SQL, {"org_id": org_id, "cutoff": cutoff})
-    return [dict(r) for r in rows.mappings()]
+    people = [dict(r) for r in (await session.execute(
+        _ACTIVE_SQL, {"org_id": str(org_id), "cutoff": cutoff})).mappings()]
+    if not people:
+        return []
+    got = await milestone_totals.profile_totals(
+        session, org_id, [p["player_id"] for p in people])
+    for p in people:
+        t = got.get(p["player_id"]) or {}
+        totals = t.get("totals") or {}
+        for stat, _cat, col in STAT_DEFS:
+            p[col] = int(totals.get(stat) or 0)
+        if t.get("split"):
+            p["split"] = t["split"]
+            p["counts"] = t["counts"]
+    return people
+
+
+def _in_reach(stat: str, current: int):
+    target = next_threshold(stat, current)
+    if target is None:
+        return None
+    needed = target - current
+    if needed > reach_window(stat, target):
+        return None
+    return target, needed
 
 
 def upcoming_from_totals(rows: list[dict]) -> list[dict]:
@@ -93,28 +118,49 @@ def upcoming_from_totals(rows: list[dict]) -> list[dict]:
 
     Unsorted — the callers disagree about the order on purpose. The reports
     rank by how close a milestone is; the dashboard ranks by how big it is.
+
+    A player with both junior and open-age records carries ``junior_split``
+    (both figures for that stat) on every entry, so a page and an email can
+    name the figure the headline is not. Where the OTHER figure is itself in
+    reach of a threshold the headline is not, it gets its own entry, marked
+    ``variant`` and labelled by ``counts`` — the club sees both and decides
+    which one it marks, without a switch the email could never press.
     """
     out: list[dict] = []
     for r in rows:
+        split = r.get("split")
         for stat, category, col in STAT_DEFS:
             current = int(r[col] or 0)
-            target = next_threshold(stat, current)
-            if target is None:
-                continue
-            needed = target - current
-            if needed > reach_window(stat, target):
-                continue
-            out.append({
+            base = {
                 "player_id": r["player_id"],
                 "player_name": r["player_name"],
                 "gender": r["gender"],
                 "type": stat,
                 "category": category,
-                "current": current,
-                "target": target,
-                "needed": needed,
                 "detail": None,
-            })
+            }
+            extra = {}
+            if split:
+                w = int(split["with_junior"].get(stat) or 0)
+                wo = int(split["without_junior"].get(stat) or 0)
+                if w != wo:
+                    extra = {"junior_split": {"with_junior": w, "without_junior": wo},
+                             "counts": r.get("counts")}
+            hit = _in_reach(stat, current)
+            if hit:
+                out.append({**base, **extra, "current": current,
+                            "target": hit[0], "needed": hit[1]})
+            if not extra:
+                continue
+            for basis in ("with_junior", "without_junior"):
+                other = extra["junior_split"][basis]
+                if other == current:
+                    continue
+                o = _in_reach(stat, other)
+                if not o or (hit and o[0] == hit[0]):
+                    continue
+                out.append({**base, **extra, "current": other, "target": o[0],
+                            "needed": o[1], "counts": basis, "variant": True})
     return out
 
 

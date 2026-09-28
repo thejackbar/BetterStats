@@ -48,6 +48,50 @@ dashboard -> nothing to press but ADMIN.
   records what `fbq` is called with; Events Manager is the one place left to
   look.
 
+## A milestone is measured on the profile's figure, and a junior split is SHOWN (v9.93.0, Sep 2026)
+
+Reported off Shoalwater Bay's Milestones page: S Hetel 87 short of 6,000 with
+5,924 on his profile, A Godfrey 3 short of 200 wickets on 478, P Ritchie 2
+short of 200 catches on 201, and J Hind 18 from 3,000 "including junior games".
+
+- **THE SCAN SUMMED THE BASE `player_season_stats`, THE PROFILE READS THE VIEW.**
+  So every imported or hand-entered match was missing from the milestone and
+  present on the profile. `services/milestone_totals.profile_totals` is now the
+  ONE definition: the figures the profile opens on (club default grade
+  categories, auto-widened for a junior-only player), batched per scope group
+  with the ids bound as an array. The Milestones page, the dashboard, the admin
+  report, the player's own card and the notification all read it. The suite
+  asserts EQUALITY with `get_career_*` player by player under two club
+  defaults, not a mirrored query.
+- **NO SENIOR/JUNIOR SWITCH, BECAUSE THE EMAIL CANNOT PRESS ONE.** Asked for as
+  a toggle, then settled as "predict it and show both". A player with junior
+  AND open-age records carries `junior_split` (with / without their junior
+  matches) on every entry, `counts` names which the headline is, and a
+  milestone only the other figure is close to arrives as its own `variant`
+  entry. The notification's dedupe key carries the variant's basis and its body
+  gives both figures. **This reverses v9.64.0's "milestones are never
+  filtered"**: they now follow the profile's default, which is what the club
+  compares them against. A toggle can still be added later as a filter over
+  these fields without changing what an email says.
+- **"WITHOUT JUNIOR" IS JUDGED ON THE PRIMARY CATEGORY** (`resolve_scope(...,
+  judge_primary=True)`). An explicit all-but-junior pick is an inclusion and
+  keeps a Girls Under 16 grade on its women's half; that is junior cricket.
+- **THE STORED MILESTONES RECONCILE.** `sync._compute_milestones(reconcile=True)`
+  removes a threshold the current figure no longer reaches (the only writer of
+  `milestones` is this function, so it is our output, never a club's typing) and
+  a threshold still reached keeps its date. It runs at the END of the sync now,
+  after the scorecards and the import reconcile, because a scoped career counts
+  scorecards a Full Rebuild has just wiped; a run with `match_pull_failed` only
+  adds. `python -m app.scripts.reconcile_milestones <org|all> [--apply]` repairs
+  what September's double count minted. **Run it for Shoalwater after deploy.**
+- **Verified against a real Postgres** (`verify_milestone_figures.py`, 66
+  checks) **with a control run**: 45 fail against the previous build, reporting
+  the club's own "87", "3 short of 200" and "2 short of 200". Chromium
+  (`verify_milestone_split_browser.mjs`, 10; control fails 5). Neighbours
+  re-run: upcoming milestones 24, match coverage 66, junior residual 24,
+  notifications 146, manual games import 194, competitions 136, shared
+  fixtures 38.
+
 ## A RE-SOURCED SEASON COUNTS PER MATCH, NOT PER SEASON (migration 309, v9.90.3, Sep 2026)
 
 Reported off Shoalwater Bay after their CSFW archive went in through the CSV

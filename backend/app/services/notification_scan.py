@@ -113,6 +113,19 @@ async def _src_milestone_achieved(session: AsyncSession, org_id, config: dict) -
     return out
 
 
+def milestone_split_body(r: dict) -> str:
+    """"Currently on 2,982." plus, where a player has junior and open-age
+    records, the other figure with its label so the reader can judge which
+    one the club marks."""
+    body = f"Currently on {r['current']:,}."
+    split = r.get("junior_split")
+    if not split:
+        return body
+    w, wo = split["with_junior"], split["without_junior"]
+    return (f"{body} {w:,} including junior matches, "
+            f"{wo:,} excluding them.")
+
+
 async def _src_milestone_upcoming(session: AsyncSession, org_id, config: dict) -> list[dict]:
     # The one definition of "who is close to something" — the same helper the
     # dashboard, the Records page and the admin report read, so the notification
@@ -122,12 +135,21 @@ async def _src_milestone_upcoming(session: AsyncSession, org_id, config: dict) -
     out = []
     for r in rows[:MAX_PER_EVENT]:
         stat = _MILESTONE_STAT_LABELS.get(r["type"], r["type"])
+        # An email has no switch to press, so a player with junior and
+        # open-age records is told about with BOTH figures, and a milestone
+        # that only the other figure is close to arrives as its own item.
+        # The variant's basis is in its key: it is a different fact from the
+        # headline figure reaching the same threshold.
+        variant = f":{r['counts']}" if r.get("variant") else ""
+        qualifier = (f" ({milestone_scan.SPLIT_LABELS[r['counts']]})"
+                     if r.get("variant") and r.get("counts") in milestone_scan.SPLIT_LABELS
+                     else "")
         out.append({
             # The target is in the key, so the same player reaching the NEXT
             # threshold is a new fact and this one is announced exactly once.
-            "dedupe_key": f"milestone_upcoming:{r['player_id']}:{r['type']}:{r['target']}",
-            "title": f"{r['player_name']} is {r['needed']} from {r['target']:,} {stat}",
-            "body": f"Currently on {r['current']:,}.",
+            "dedupe_key": f"milestone_upcoming:{r['player_id']}:{r['type']}:{r['target']}{variant}",
+            "title": f"{r['player_name']} is {r['needed']} from {r['target']:,} {stat}{qualifier}",
+            "body": milestone_split_body(r),
             "link": f"/admin/milestones",
             "payload": r,
         })

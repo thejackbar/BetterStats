@@ -2891,6 +2891,9 @@ async def get_upcoming_milestones_for_org(
             "target": r["target"],
             "needed": r["needed"],
             "score": importance_score(r["target"], r["needed"]),
+            # Both figures for a player with junior and open-age records, so
+            # the panel can name the one the headline is not. Presence-aware.
+            **{k: r[k] for k in ("junior_split", "counts", "variant") if k in r},
         }
         for r in rows
     ]
