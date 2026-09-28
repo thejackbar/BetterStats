@@ -39,6 +39,7 @@ from app.models.db import (
     ManualFallOfWicket,
     ManualFieldingStat,
     ManualGame,
+    ManualInnings,
     ManualPartnership,
     ManualSeasonAdjustment,
     Organisation,
@@ -175,6 +176,32 @@ class ManualFieldingIn(BaseModel):
     stumpings: int = 0
 
 
+class ManualInningsIn(BaseModel):
+    """One innings of a hand-entered game: which side batted, its extras, and
+    the opposition innings' own total. Everything is optional — a game that
+    sends no innings rows renders exactly as it did before. Every extras/total
+    field defaults to None ("not recorded"), never 0, so a blank field is not
+    read as a recorded zero."""
+    innings_number: int = 1
+    # 'us' | 'opposition' | None. Anything else is normalised to None.
+    batting_side: Optional[str] = None
+    byes: Optional[int] = None
+    leg_byes: Optional[int] = None
+    wides: Optional[int] = None
+    no_balls: Optional[int] = None
+    penalty: Optional[int] = None
+    extras_total: Optional[int] = None
+    total_runs: Optional[int] = None
+    total_wickets: Optional[int] = None
+    overs: Optional[float] = None
+
+    @model_validator(mode="after")
+    def _clean_side(self):
+        if self.batting_side not in ("us", "opposition"):
+            self.batting_side = None
+        return self
+
+
 class ManualGameIn(BaseModel):
     # Optional since the season a game belongs to is derivable from its own
     # date: omit it and the server files the game under that season, creating
@@ -207,6 +234,10 @@ class ManualGameIn(BaseModel):
     batting_innings: list[ManualBattingIn] = Field(default_factory=list)
     bowling_spells: list[ManualBowlingIn] = Field(default_factory=list)
     fielding_stats: list[ManualFieldingIn] = Field(default_factory=list)
+    # Per-innings meta (migration 310): the innings side toggle, per-innings
+    # extras, and opposition innings totals. Empty for a game that records none,
+    # in which case the scorecard renders exactly as it did before.
+    innings: list[ManualInningsIn] = Field(default_factory=list)
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -1054,12 +1085,18 @@ async def get_manual_game(
         .join(Player, Player.id == ManualFieldingStat.player_id)
         .where(ManualFieldingStat.manual_game_id == gid)
     )).all()
+    innings = (await db.execute(
+        select(ManualInnings)
+        .where(ManualInnings.manual_game_id == gid)
+        .order_by(ManualInnings.innings_number)
+    )).scalars().all()
 
     return {
         **_row_to_dict(game),
         "batting_innings": [{**_row_to_dict(r), "player_name": _player_display_name(p)} for r, p in batting],
         "bowling_spells": [{**_row_to_dict(r), "player_name": _player_display_name(p)} for r, p in bowling],
         "fielding_stats": [{**_row_to_dict(r), "player_name": _player_display_name(p)} for r, p in fielding],
+        "innings": [_row_to_dict(r) for r in innings],
     }
 
 
@@ -1080,10 +1117,11 @@ async def _replace_game_children(
     for pid in all_player_ids:
         await _assert_player_in_org(db, pid, org_id)
 
-    # Wipe + reinsert all three child tables. Safe under same transaction.
+    # Wipe + reinsert all child tables. Safe under same transaction.
     await db.execute(sa_delete(ManualBattingInnings).where(ManualBattingInnings.manual_game_id == game_id))
     await db.execute(sa_delete(ManualBowlingSpell).where(ManualBowlingSpell.manual_game_id == game_id))
     await db.execute(sa_delete(ManualFieldingStat).where(ManualFieldingStat.manual_game_id == game_id))
+    await db.execute(sa_delete(ManualInnings).where(ManualInnings.manual_game_id == game_id))
 
     for x in data.batting_innings:
         db.add(ManualBattingInnings(
@@ -1122,6 +1160,26 @@ async def _replace_game_children(
             catches_wk=x.catches_wk,
             run_outs=x.run_outs,
             stumpings=x.stumpings,
+        ))
+    # De-dupe on innings_number (the unique key) so a form that somehow sends
+    # two rows for one innings can't hit the constraint — last one wins.
+    seen_innings: dict[int, ManualInningsIn] = {}
+    for x in data.innings:
+        seen_innings[x.innings_number] = x
+    for x in seen_innings.values():
+        db.add(ManualInnings(
+            manual_game_id=game_id,
+            innings_number=x.innings_number,
+            batting_side=x.batting_side,
+            byes=x.byes,
+            leg_byes=x.leg_byes,
+            wides=x.wides,
+            no_balls=x.no_balls,
+            penalty=x.penalty,
+            extras_total=x.extras_total,
+            total_runs=x.total_runs,
+            total_wickets=x.total_wickets,
+            overs=x.overs,
         ))
 
 

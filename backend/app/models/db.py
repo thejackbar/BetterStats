@@ -2275,6 +2275,46 @@ class ManualGame(Base):
     batting_innings = relationship("ManualBattingInnings", back_populates="manual_game", cascade="all, delete-orphan")
     bowling_spells = relationship("ManualBowlingSpell", back_populates="manual_game", cascade="all, delete-orphan")
     fielding_stats = relationship("ManualFieldingStat", back_populates="manual_game", cascade="all, delete-orphan")
+    innings = relationship("ManualInnings", back_populates="manual_game", cascade="all, delete-orphan")
+
+
+class ManualInnings(Base):
+    """Per-innings meta for a hand-entered manual game (migration 310).
+
+    One row per (game, innings_number): which side batted (so our bowling is
+    filed in the opposition's batting innings, not lumped into innings 1), the
+    innings' extras (byes/leg-byes/wides/no-balls/penalty, or a single total),
+    and the opposition innings' own total (runs/wickets/overs) — the opposition
+    can't be itemised as batting rows (those FK to our own players). Additive:
+    a game with no rows here renders exactly as before. Created in raw SQL by
+    services/manual_innings_ddl; mapped here so the ORM can read/write it.
+    """
+    __tablename__ = "manual_innings"
+    __table_args__ = (
+        UniqueConstraint("manual_game_id", "innings_number", name="uq_manual_innings_game_number"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    manual_game_id = Column(UUID(as_uuid=True), ForeignKey("manual_games.id", ondelete="CASCADE"), nullable=False)
+    innings_number = Column(Integer, server_default="1", nullable=False)
+    # 'us' | 'opposition' | NULL(unknown) — which side batted this innings.
+    batting_side = Column(Text, nullable=True)
+    # Itemised extras (any NULL = not recorded); extras_total is the fallback
+    # single figure when the card only gives a total.
+    byes = Column(Integer, nullable=True)
+    leg_byes = Column(Integer, nullable=True)
+    wides = Column(Integer, nullable=True)
+    no_balls = Column(Integer, nullable=True)
+    penalty = Column(Integer, nullable=True)
+    extras_total = Column(Integer, nullable=True)
+    # The innings' own total — chiefly for an opposition innings recorded as a
+    # lump because their batters aren't in our players table. Always the FULL
+    # total (extras included); the scorecard reader derives bat-only from it.
+    total_runs = Column(Integer, nullable=True)
+    total_wickets = Column(Integer, nullable=True)
+    overs = Column(Numeric(5, 1), nullable=True)
+
+    manual_game = relationship("ManualGame", back_populates="innings")
 
 
 class ManualBattingInnings(Base):
