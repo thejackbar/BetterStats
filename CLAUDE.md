@@ -43,6 +43,13 @@ dashboard -> nothing to press but ADMIN.
   fbclid and fbc on the submit payload after the hops, a direct visitor and a
   signed-in one seeing nothing, the pill persisting) **with a control run**: 11
   fail against the previous commit and it reports rather than crashing.
+- **THE WORDING FOLLOWS THE AD (v9.92.1).** The bar's button, the pill and
+  the /trial new-club modal read "Check out your club" and "Free · about 3
+  minutes · no card", the ad's own words; the 14-day trial framing is off the
+  bar because the ad never makes it. The /trial placeholder names NO real
+  club: "e.g. Applecross Cricket Club" sent prospects to type a registered
+  club and land on somebody else's page. Keep the bar in step with the ad when
+  the creative changes. Suite is 41 checks; the control fails the 8 new ones.
 - **NOT VERIFIED IN META EVENTS MANAGER.** Test Events needs a real
   registration on the live site, which creates a real club. The browser suite
   records what `fbq` is called with; Events Manager is the one place left to

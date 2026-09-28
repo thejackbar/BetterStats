@@ -2,7 +2,7 @@
 // network layer and `fbq` replaced by a recorder:
 //
 //   ad click -> /trial?utm..&fbclid -> search -> a club's dashboard (client-side
-//   navigation, so the query string has left the address bar) -> "Start free"
+//   navigation, so the query string has left the address bar) -> "Check out your club"
 //   -> the registration wizard -> a completed registration.
 //
 //   npx vite preview --port 5207 &
@@ -97,6 +97,32 @@ const fbqEvents = (page) => page.evaluate(() => window.__fbq.filter((a) => a[0] 
     const landing = await page.evaluate(() => JSON.parse(sessionStorage.getItem('bc:landingParams') || 'null'))
     ck('landing params kept for the session (utm + fbclid)', landing?.utm_campaign === 'BC_AU_Trials_CBO_Aug2026' && landing?.fbclid === 'IwAR0clubcta123', JSON.stringify(landing))
 
+    // The animated placeholder must never suggest a real club: sample it
+    // across a full cycle of its phrases.
+    const seen = new Set()
+    for (let i = 0; i < 24; i++) {
+      const t = await page.evaluate(() => document.querySelector('input[aria-label="Search for your club"]')?.parentElement?.textContent || '')
+      if (t) seen.add(t.trim())
+      await page.waitForTimeout(500)
+    }
+    const all = [...seen].join(' | ')
+    ck('/trial: the placeholder names no real club', seen.size > 3 && !/Applecross|Gosnells|Cricket Club/.test(all), all.slice(0, 200))
+
+    // A club not yet on BetterCricket: the modal says there is nothing to
+    // show yet and what setting it up brings in, in the ad's terms.
+    await page.getByLabel('Search for your club').fill('brand new')
+    const newRow = page.getByRole('button', { name: /Brand New Cricket Club/ }).first()
+    await newRow.waitFor().catch(() => {})
+    await newRow.click().catch(() => {})
+    const heading = await page.getByTestId('trial-not-yet-heading').textContent({ timeout: 4000 }).catch(() => '')
+    ck('/trial: a new club is told there is no page to show yet', /isn.t on BetterCricket yet, so there.s no club page/.test(heading || ''), heading)
+    const body = await page.getByTestId('trial-not-yet-body').textContent({ timeout: 2000 }).catch(() => '')
+    ck('/trial: and what setting it up brings in', /every season Cricket Australia holds/.test(body || ''), body)
+    const modalText = await page.locator('.fixed.inset-0').first().textContent().catch(() => '')
+    ck('/trial: the modal carries the ad\'s terms', /Free · about 3 minutes · no card/.test(modalText || ''), (modalText || '').slice(0, 200))
+    await page.getByRole('button', { name: 'Close' }).click().catch(() => {})
+    await page.getByLabel('Search for your club').fill('')
+
     await page.getByLabel('Search for your club').fill('applecross')
     await page.getByRole('button', { name: /Applecross Cricket Club/ }).first().click()
     await page.waitForURL(/\/applecross$/)
@@ -109,17 +135,20 @@ const fbqEvents = (page) => page.evaluate(() => window.__fbq.filter((a) => a[0] 
     const headline = await page.getByTestId('club-cta-headline').textContent().catch(() => '')
     ck('dashboard: the bar names the club being viewed', /Applecross Cricket Club.s real history on BetterCricket/.test(headline || ''), headline)
     const text = await bar.textContent().catch(() => '')
-    ck('dashboard: trial terms stated', /Free 14-day trial, no card/.test(text || ''), text)
+    ck('dashboard: the ad\'s terms stated', /Free · about 3 minutes · no card/.test(text || ''), text)
+    ck('dashboard: no trial-length framing the ad does not make', !/day trial/i.test(text || ''), text)
+    const startLabel = await page.getByTestId('club-cta-start').textContent().catch(() => '')
+    ck('dashboard: the button says what the ad said', /Check out your club/.test(startLabel || ''), startLabel)
     const box = await bar.boundingBox()
     const vh = page.viewportSize().height
     ck('dashboard: visible without scrolling', box && box.y >= 0 && box.y + box.height <= vh + 1, JSON.stringify(box))
     const startStyle = await page.getByTestId('club-cta-start').evaluate((el) => getComputedStyle(el).backgroundColor)
-    ck('dashboard: Start free is a filled primary button', startStyle === 'rgb(52, 211, 153)', startStyle)
+    ck('dashboard: the start button is a filled primary button', startStyle === 'rgb(52, 211, 153)', startStyle)
 
     const before = (await fbqEvents(page)).map((e) => e.name)
     await page.getByTestId('club-cta-start').click()
     await page.getByPlaceholder("Start typing your club's name…").waitFor()
-    ck('Start free opens the registration wizard', true)
+    ck('the start button opens the registration wizard', true)
     const afterClick = (await fbqEvents(page)).map((e) => e.name)
     ck('no CompleteRegistration on the click', !afterClick.includes('CompleteRegistration'), JSON.stringify(afterClick))
     ck('no other pixel event fired by the click itself', afterClick.length === before.length, JSON.stringify({ before, afterClick }))
@@ -232,7 +261,9 @@ const fbqEvents = (page) => page.evaluate(() => window.__fbq.filter((a) => a[0] 
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
     ck('390px: no horizontal overflow from the bar', overflow <= 0, String(overflow))
     await page.getByRole('button', { name: 'Minimise' }).click()
-    ck('minimising leaves a Start free pill', await page.getByTestId('club-cta-pill').count() === 1)
+    ck('minimising leaves a pill', await page.getByTestId('club-cta-pill').count() === 1)
+    const pillText = await page.getByTestId('club-cta-pill').textContent().catch(() => '')
+    ck('the pill carries the ad\'s wording', /Check out your club/.test(pillText || ''), pillText)
     await page.goto(`${BASE}/applecross/players`)
     await page.waitForTimeout(1500)
     ck('the pill persists across the club\'s pages', await page.getByTestId('club-cta-pill').count() === 1)

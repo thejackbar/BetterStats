@@ -200,10 +200,14 @@ function ClubActionModal({ club, onSetUp, onClose }) {
           </>
         ) : (
           <>
-            <p className="text-sm text-pb-dim mb-4">
-              {orgName(club)} isn&rsquo;t on BetterCricket yet. Set it up yourself now — it&rsquo;s
-              free and we never ask for a credit card — or ask us to reach out and we&rsquo;ll help
-              get you started.
+            <p className="text-sm text-pb-dim mb-2" data-testid="trial-not-yet-heading">
+              {orgName(club)} isn&rsquo;t on BetterCricket yet, so there&rsquo;s no club page to
+              show you here.
+            </p>
+            <p className="text-sm text-pb-dim mb-4" data-testid="trial-not-yet-body">
+              Set it up now and we&rsquo;ll bring in every season Cricket Australia holds for
+              your club in the background. Or ask us to reach out and we&rsquo;ll help get
+              you started.
             </p>
             <div className="space-y-2">
               <button
@@ -213,7 +217,7 @@ function ClubActionModal({ club, onSetUp, onClose }) {
               >
                 Set up my club
               </button>
-              <p className="text-center font-mono text-[10px] text-pb-faintest">Free · No credit card</p>
+              <p className="text-center font-mono text-[11px] text-pb-dim">Free · about 3 minutes · no card</p>
               <button
                 onClick={() => setMode('request')}
                 className="w-full px-4 py-2.5 rounded-lg font-display font-semibold text-sm border pb-hairline text-pb-text hover:bg-pb-surface2 transition"
@@ -396,7 +400,9 @@ export default function Trial() {
                     style={{ borderColor: 'var(--pb-accent)' }}
                   />
                   {/* Animated placeholder: shows the action (typing a club name)
-                      while the box is empty. pointer-events-none so taps still
+                      while the box is empty. It names no real club on purpose:
+                      an example club is one a prospect types in and lands on,
+                      which is somebody else's club rather than their own. pointer-events-none so taps still
                       land on the input; aria-hidden since the input is labelled. */}
                   {query === '' && (
                     <div
@@ -408,8 +414,7 @@ export default function Trial() {
                         className="text-pb-faint font-display font-semibold text-lg sm:text-2xl whitespace-nowrap"
                         text={[
                           'Search for your club…',
-                          'e.g. Applecross Cricket Club',
-                          'e.g. Gosnells Cricket Club',
+                          'Start with your suburb…',
                           'Type your club’s name…',
                         ]}
                         typingSpeed={70}

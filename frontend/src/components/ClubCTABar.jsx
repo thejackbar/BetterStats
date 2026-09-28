@@ -21,7 +21,7 @@ import { useSelfServeTrialGate } from '../hooks/useSelfServeTrialGate'
 //   club being viewed, shown ONLY to prospects — anyone this session who came
 //   from a paid Meta click or who passed through /trial — and never to anyone
 //   signed in. A club's own members reading their paying club's site must
-//   never be sold to. Dismissing it only minimises it to a "Start free" pill,
+//   never be sold to. Dismissing it only minimises it to a pill,
 //   because a visitor searching their way to a club is the funnel's
 //   highest-intent moment and the ask should stay one tap away.
 // - Never on /trial or /demo (conversion pages with their own call to
@@ -35,6 +35,11 @@ import { useSelfServeTrialGate } from '../hooks/useSelfServeTrialGate'
 // registration backend refuses that club (409, "talk to your admin"). So the
 // bar never offers to set up the club being viewed: it sells the visitor's
 // OWN club, and the wizard opens on a blank search.
+//
+// The wording matches the Meta ad a prospect clicked ("Check out your club",
+// "Free · about 3 minutes · no card"), so the ask on the club page reads as
+// the same offer rather than a new one. Keep the two in step when the ad
+// changes.
 
 const AD_VISITOR_KEY = 'bc:adVisitor'
 const VIA_TRIAL_KEY = 'bc:viaTrial'
@@ -185,14 +190,13 @@ export default function ClubCTABar() {
               boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
             }}
           >
-            Start free →
+            Check out your club →
           </button>
           {modals}
         </>
       )
     }
     const clubName = club?.name || club?.short_name || null
-    const days = defaultTrialDays || 14
     return (
       <>
         <div
@@ -208,10 +212,11 @@ export default function ClubCTABar() {
                   ? `This is ${clubName}’s real history on BetterCricket.`
                   : 'This is a real club’s history on BetterCricket.'}
               </strong>{' '}
-              Get your own club live for your committee. Free {days}-day trial, no card.
+              See your own club like this.{' '}
+              <span data-testid="club-cta-terms" style={{ whiteSpace: 'nowrap' }}>Free · about 3 minutes · no card</span>
             </span>
             <button type="button" data-testid="club-cta-start" onClick={start} style={PRIMARY_STYLE}>
-              Start free →
+              Check out your club →
             </button>
             <button
               type="button"
