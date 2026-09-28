@@ -500,8 +500,16 @@ async def resolve_scope(
     formats=None,
     competitions=None,
     param: str = "gs_excluded_grade_ids",
+    judge_primary: bool = False,
 ) -> GradeScope:
     """Turn a category and/or format selection into the grade ids it leaves out.
+
+    ``judge_primary`` reads an explicit selection the way the club DEFAULT is
+    read — on each grade's primary category — rather than as an inclusion that
+    matches any category. It is how the milestone scan asks "this career
+    without its junior matches": an explicit all-but-junior selection would
+    otherwise keep a Girls Under 16 grade on its women's half, which is junior
+    cricket by any reading.
 
     ``categories`` None falls back to the club's default. A selection covering
     every category (or an org with no grades outside it) yields an inactive
@@ -529,7 +537,7 @@ async def resolve_scope(
     # a Girls Under 16 grade stays out of a default that leaves junior out,
     # rather than sneaking back in on its women's half, while someone asking for
     # women's still finds it.
-    explicit = normalise_categories(categories) is not None
+    explicit = normalise_categories(categories) is not None and not judge_primary
     wanted = normalise_categories(categories)
     if wanted is None:
         wanted = await club_default_categories(session, org_id)

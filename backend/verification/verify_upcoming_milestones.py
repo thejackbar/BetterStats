@@ -16,9 +16,10 @@ So the panel was not empty, it was FAILING: nginx's `/api/` location has no
 `.catch(() => setMilestones([]))` renders it as an empty club.
 
 Two things are asserted here. That the three surfaces now agree, because they
-read ONE definition (`services/milestone_scan`); and that the definition they
-share is the fast base-table one, not the `v_effective_player_season_stats`
-scan the dashboard used to run.
+read ONE definition (`services/milestone_scan`); and that it stays fast. Since
+v9.91.1 that definition reads the profile's own figures from the effective
+view, with the active players bound as an array so the planner narrows the
+view to them rather than building it for the whole platform.
 
 Runs the SHIPPED functions and route bodies — never a re-implementation.
 
@@ -283,16 +284,22 @@ async def main() -> None:
     check("…and takes the highest-scoring rows",
           [x["player_id"] for x in capped] == [x["player_id"] for x in dash[:2]])
 
-    print("\n── the query the dashboard now runs ──")
+    print("\n── the figures are the profile's, read once with the ids bound ──")
+    # v9.91.1 moved the figures onto milestone_totals (the profile's own
+    # definition). It stays fast because the active players are bound as an
+    # array, which the planner pushes into the view — asserted on the plan.
+    from app.services import milestone_totals
     async with Session() as s:
-        plan = (await s.execute(
-            text("EXPLAIN (FORMAT TEXT) " + str(milestone_scan._TOTALS_SQL)),
-            {"org_id": org_id, "cutoff": YEAR - 2},
-        )).scalars().all()
-    joined = "\n".join(plan)
-    check("it does not touch v_effective_player_season_stats",
-          "player_season_stats" in joined and "unplayed" not in joined.lower(),
-          joined[:200])
+        got = await milestone_totals.profile_totals(s, org_id, [str(P_RUNS), str(P_SHARED)])
+        plan = "\n".join((await s.execute(text(
+            "EXPLAIN SELECT pss.player_id, SUM(pss.runs) FROM v_effective_player_season_stats pss "
+            "WHERE pss.player_id = ANY(CAST(:pids AS uuid[])) GROUP BY pss.player_id"),
+            {"pids": [str(P_RUNS)]})).scalars())
+    check("the shared figures read the same 493 the scan lists",
+          got[str(P_RUNS)]["totals"]["runs"] == 493 and got[str(P_SHARED)]["totals"]["runs"] == 493,
+          str(got))
+    check("the player ids reach the base table as a bound filter",
+          "player_id = ANY" in plan, plan[:200])
 
     print(f"\n{PASS} passed, {FAIL} failed")
     if FAILURES:

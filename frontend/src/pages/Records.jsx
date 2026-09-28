@@ -13,6 +13,7 @@ import { Label, Card, PageHeader, PbSpinner, TabBar } from '../lib/presskit'
 import { useNameFormat } from '../lib/nameFormat'
 import { fmtOvers, formatSeason } from '../lib/cricketFormat'
 import { normalizeGender } from '../lib/playerAttributes'
+import MilestoneSplitNote from '../components/MilestoneSplitNote'
 
 const ORDINALS = ['1st','2nd','3rd','4th','5th','6th','7th','8th','9th','10th']
 
@@ -1011,12 +1012,13 @@ function MilestonesTab({ data, loading, gradeName, fmt = n => n }) {
               </thead>
               <tbody>
                 {upcomingFiltered.map((item, i) => (
-                  <tr key={`${item.player_id}-${item.type}-${item.target}`} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                  <tr key={`${item.player_id}-${item.type}-${item.target}-${item.counts || ''}`} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
                     <td className="py-2.5 px-3"><PlayerLink id={item.player_id} name={item.player_name} fmt={fmt} /></td>
                     <td className="py-2.5 px-3 hidden sm:table-cell"><MilestoneCatBadge cat={item.category} /></td>
                     <td className="py-2.5 px-3 font-mono text-pb-dim">
                       {milestoneLabel(item, true)}
                       <span className="block text-pb-faintest text-[10px] mt-0.5">{item.current.toLocaleString()} / {item.target.toLocaleString()}</span>
+                      <MilestoneSplitNote m={item} className="mt-0.5" />
                     </td>
                     <td className="py-2.5 px-3 text-right"><MilestoneProgressBar current={item.current} target={item.target} /></td>
                     <td className="py-2.5 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{item.needed}</td>
