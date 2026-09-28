@@ -10,6 +10,25 @@ export default function AflAdminUsers() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const [invited, setInvited] = useState(null)
+  const [editing, setEditing] = useState(null) // { id, display_name, email, mobile_number }
+
+  // Only the fields that changed are sent: the endpoint treats a present
+  // field as a write, so re-sending an untouched email would re-validate it.
+  const saveEdit = async (u) => {
+    const body = {}
+    for (const k of ['display_name', 'email', 'mobile_number']) {
+      if ((editing[k] || '') !== (u[k] || '')) body[k] = editing[k] || ''
+    }
+    if (!Object.keys(body).length) { setEditing(null); return }
+    setBusy(true); setError(null)
+    try {
+      await aflApi.updateClubUser(u.id, body)
+      setEditing(null)
+      refresh()
+    } catch (err) {
+      setError(err.message)
+    } finally { setBusy(false) }
+  }
 
   const refresh = () => aflApi.listClubUsers().then(setUsers).catch(() => setUsers([]))
   useEffect(() => { refresh() }, [])
@@ -96,12 +115,38 @@ export default function AflAdminUsers() {
           </thead>
           <tbody>
             {users.map(u => (
+              editing?.id === u.id ? (
+              <tr key={u.id} className="pb-hairline-b last:border-0" data-testid="user-edit-row">
+                <td className="px-2 py-1.5" colSpan={5}>
+                  <div className="grid sm:grid-cols-3 gap-2 max-w-2xl">
+                    {[['display_name', 'Display name'], ['email', 'Email'], ['mobile_number', 'Mobile']].map(([k, ph]) => (
+                      <input key={k} placeholder={ph} aria-label={ph} value={editing[k] || ''}
+                        onChange={e => setEditing(ed => ({ ...ed, [k]: e.target.value }))}
+                        className="bg-pb-surface2 border border-pb-hairline rounded px-2 py-1.5 text-sm" />
+                    ))}
+                  </div>
+                  <div className="flex gap-2 mt-2">
+                    <button disabled={busy} onClick={() => saveEdit(u)}
+                      className="px-3 py-1.5 rounded text-xs font-semibold bg-[var(--pb-accent)] text-black disabled:opacity-50">
+                      {busy ? 'Saving…' : 'Save'}
+                    </button>
+                    <button disabled={busy} onClick={() => setEditing(null)}
+                      className="px-3 py-1.5 rounded text-xs text-pb-dim hover:text-pb-text">Cancel</button>
+                  </div>
+                </td>
+              </tr>
+              ) : (
               <tr key={u.id} className="pb-hairline-b last:border-0">
                 <td className="px-2 py-1.5 font-medium">{u.display_name || u.username}</td>
                 <td className="px-2 py-1.5 text-pb-faint">{u.username}</td>
                 <td className="px-2 py-1.5 text-pb-faint">{u.email || '—'}</td>
                 <td className="px-2 py-1.5 text-pb-faint">{u.last_login_at ? u.last_login_at.replace('T', ' ').slice(0, 16) : 'Never'}</td>
                 <td className="px-2 py-1.5 text-right whitespace-nowrap">
+                  <button disabled={busy}
+                    onClick={() => setEditing({ id: u.id, display_name: u.display_name || '', email: u.email || '', mobile_number: u.mobile_number || '' })}
+                    className="text-xs text-pb-dim hover:text-pb-text underline mr-3">
+                    Edit
+                  </button>
                   {u.email && (
                     <button disabled={busy} onClick={() => sendReset(u)} className="text-xs text-pb-dim hover:text-pb-text underline mr-3">
                       Reset password
@@ -114,6 +159,7 @@ export default function AflAdminUsers() {
                   )}
                 </td>
               </tr>
+              )
             ))}
           </tbody>
         </table>

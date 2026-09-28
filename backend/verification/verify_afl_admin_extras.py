@@ -155,6 +155,56 @@ async def main():
         page = await ax.list_games(season_id=None, source=None, q=None, limit=2, offset=2, _=None, club=club, db=db)
         check("paging keeps the whole total", (len(page["games"]), page["total"]), (2, 4))
 
+    print("\n── Club logo and the Settings permission ──")
+    import httpx
+    from app.afl_main import app
+    from app.models.db import ClubMembership
+    from app.routers.auth import COOKIE_NAME, create_session_token
+    u_admin, u_member, u_setter = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    async with async_session_maker() as db:
+        db.add_all([
+            User(id=u_admin, username="ladmin", email="la@x.io", password_hash="x"),
+            User(id=u_member, username="lmember", email="lm@x.io", password_hash="x"),
+            User(id=u_setter, username="lsetter", email="ls@x.io", password_hash="x"),
+        ])
+        await db.flush()
+        db.add_all([
+            ClubMembership(user_id=u_admin, club_id=org, role="club_admin", is_primary_admin=True),
+            ClubMembership(user_id=u_member, club_id=org, role="club_member", capabilities=["manage_players"]),
+            ClubMembership(user_id=u_setter, club_id=org, role="club_member", capabilities=["manage_settings"]),
+        ])
+        await db.execute(text("UPDATE organisations SET logo_url = 'https://cdn.playhq.com/crest.png' WHERE id = :o"), {"o": str(org)})
+        await db.commit()
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+
+    def client(u):
+        return httpx.AsyncClient(transport=transport, base_url="http://t",
+                                 cookies={COOKIE_NAME: create_session_token(str(u))})
+
+    png = bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8ffff3f0005fe02fea7d69ea40000000049454e44ae426082")
+    async with client(u_admin) as c:
+        r = await c.post("/club-admin/logo", files={"file": ("crest.png", png, "image/png")})
+        check("a club admin uploads a logo", r.status_code, 200)
+        url = (r.json() if r.status_code < 300 else {}).get("logo_url") or ""
+        check("  ... stored API-relative, not under /api (which is cricket's backend)",
+              url.startswith("images/organisations/"), True)
+        img = await c.get("/" + url.split("?")[0]) if url else None
+        check("  ... and the images router serves it", (img.status_code, img.content[:4]) if img else None, (200, png[:4]))
+        s = (await c.get("/club-admin/settings")).json()
+        check("  ... the settings read carries it", s.get("logo_url"), url)
+        r = await c.post("/club-admin/logo", files={"file": ("crest.exe", b"MZ", "application/octet-stream")})
+        check("a non-image is refused", r.status_code, 400)
+        r = await c.delete("/club-admin/logo")
+        check("removing it clears the column", (r.status_code, (await c.get("/club-admin/settings")).json().get("logo_url")), (200, None))
+    async with client(u_member) as c:
+        check("a member without the Settings permission cannot save settings",
+              (await c.patch("/club-admin/settings", json={"short_name": "X"})).status_code, 403)
+        check("  ... nor upload a logo",
+              (await c.post("/club-admin/logo", files={"file": ("c.png", png, "image/png")})).status_code, 403)
+    async with client(u_setter) as c:
+        check("a member holding the Settings permission can",
+              (await c.patch("/club-admin/settings", json={"short_name": "CUW"})).status_code, 200)
+
     print(f"\n{PASS} passed, {FAIL} failed")
     if FAIL:
         sys.exit(1)

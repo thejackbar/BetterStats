@@ -1,11 +1,95 @@
-import { useEffect, useState } from 'react'
-import { aflApi } from '../../aflApi'
+import { useEffect, useRef, useState } from 'react'
+import { aflApi, mediaUrl } from '../../aflApi'
 import { SectionTitle } from '../../components/bits'
 import { useToast } from '../../../contexts/ToastContext'
 import LoadingSpinner from '../../../components/LoadingSpinner'
+import ImageEditorModal from '../../../components/ImageEditorModal'
+import { validateImageFile } from '../../../lib/validation'
 import {
   BRAND, deriveDarkPalette, gradientCss, resolveTheme,
 } from '../../../lib/theme'
+
+/**
+ * The club crest: the navbar, the admin sidebar and every BetterSocials post
+ * draw it. A club that has never uploaded one shows the logo PlayHQ holds, and
+ * removing an upload hands it back to PlayHQ's on the next sync. Saves straight
+ * away, like a player photo, since it is its own multipart request.
+ */
+function LogoField({ logoUrl, onChanged }) {
+  const fileRef = useRef(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  const [editorSource, setEditorSource] = useState(null)
+  const uploaded = !!logoUrl && !/^(https?:)?\/\//.test(logoUrl)
+
+  const pick = (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    const problem = validateImageFile(file)
+    if (problem) { setError(problem); return }
+    setError(null)
+    setEditorSource(file)
+  }
+  const upload = async (file) => {
+    setBusy(true); setError(null)
+    try {
+      const res = await aflApi.adminUploadLogo(file)
+      onChanged(res.logo_url)
+    } catch (err) { setError(err.message) }
+    finally { setBusy(false); setEditorSource(null) }
+  }
+  const remove = async () => {
+    setBusy(true); setError(null)
+    try { await aflApi.adminDeleteLogo(); onChanged(null) }
+    catch (err) { setError(err.message) }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <div className="pb-card p-5" data-testid="logo-field">
+      <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Club logo</p>
+      <p className="text-sm text-pb-dim mb-4 leading-relaxed">
+        Shown in the navbar, the admin sidebar and on every BetterSocials post.
+        {!uploaded && logoUrl && ' This one comes from PlayHQ. Upload your own to replace it.'}
+      </p>
+      <div className="flex items-center gap-4">
+        {logoUrl
+          ? <img src={mediaUrl(logoUrl)} alt="" className="h-16 w-16 rounded object-contain bg-pb-surface2" />
+          : <div className="h-16 w-16 rounded bg-pb-surface2 border border-pb-hairline" />}
+        <div className="flex flex-col gap-1.5">
+          <div className="flex gap-2">
+            <button type="button" disabled={busy} onClick={() => fileRef.current?.click()}
+              className="px-3 py-1.5 rounded text-xs border border-pb-hairline text-pb-text hover:bg-pb-surface2 disabled:opacity-50">
+              {busy ? 'Saving…' : uploaded ? 'Replace' : 'Upload logo'}
+            </button>
+            {uploaded && (
+              <button type="button" disabled={busy} onClick={remove}
+                className="px-3 py-1.5 rounded text-xs text-pb-dim hover:text-[var(--pb-negative)] disabled:opacity-50">
+                Remove
+              </button>
+            )}
+          </div>
+          <span className="text-[11px] text-pb-faintest">JPG, PNG, WEBP or GIF.</span>
+        </div>
+      </div>
+      <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif"
+        className="hidden" onChange={pick} data-testid="logo-input" />
+      {error && <p className="text-xs text-[var(--pb-negative)] mt-1.5">{error}</p>}
+      <ImageEditorModal
+        open={!!editorSource}
+        source={editorSource}
+        title="Edit club logo"
+        aspect={1}
+        outputType="image/png"
+        outputName="club-logo.png"
+        maxOutputSize={800}
+        onCancel={() => setEditorSource(null)}
+        onApply={upload}
+      />
+    </div>
+  )
+}
 
 const HEX_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
 
@@ -285,6 +369,9 @@ export default function AflAdminSettings() {
   return (
     <div className="space-y-4 max-w-2xl">
       <SectionTitle>Settings</SectionTitle>
+
+      <LogoField logoUrl={settings.logo_url}
+        onChanged={url => setSettings(s => ({ ...s, logo_url: url }))} />
 
       <div className="pb-card p-5">
         <div className="flex items-center justify-between mb-1">

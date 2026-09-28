@@ -78,6 +78,16 @@ export const aflApi = {
       return res.json()
     })
   },
+  adminUploadLogo: (file) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return fetch(`${BASE}/club-admin/logo`, { method: 'POST', body: fd, credentials: 'include' })
+      .then(async (res) => {
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Upload failed')
+        return res.json()
+      })
+  },
+  adminDeleteLogo: () => request('/club-admin/logo', { method: 'DELETE' }),
   adminDeletePlayerPhoto: (id) => request(`/club-admin/players/${id}/photo`, { method: 'DELETE' }),
 
   // Admin — Import Players (CSV contact importer)

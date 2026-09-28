@@ -236,6 +236,17 @@ const DEFAULT_SCORECARD = {
 // The build's own API base — '/api' for cricket, '/afl/api' for the football
 // silo — the same rule lib/api.js follows.
 const BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.BASE_URL + 'api')
+// Where a stored football asset URL lives: absolute and data URLs as they are,
+// '/api/...' under this bundle's API base, and API-relative 'images/...'
+// (what football stores for an upload) prefixed with it.
+// A sponsor's logo, or null when it has none: asking the images endpoint for a
+// sponsor nobody uploaded a logo for is a 404 and a broken image on the post.
+const sponsorLogoUrl = (s) => (s?.logo_url ? `${BASE_URL}/images/sponsors/${s.id}/logo` : null)
+const footballAsset = (u) => {
+  if (!u || /^(https?:|data:|\/\/)/.test(u)) return u
+  if (u.startsWith('/api/')) return `${BASE_URL}${u.slice(4)}`
+  return u.startsWith('/') ? u : `${BASE_URL}/${u}`
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPERS
@@ -1317,7 +1328,7 @@ export default function AdminSocialPost() {
               sponsors: [0, 1].map(i => {
                 const s = sponsors[i]
                 if (!s) return m.meta.sponsors[i] || { url: null, name: '' }
-                return { url: `${BASE_URL}/images/sponsors/${s.id}/logo`, name: s.name }
+                return { url: sponsorLogoUrl(s), name: s.name }
               }),
             },
           }))
@@ -1976,7 +1987,12 @@ export default function AdminSocialPost() {
     fullName: settings.name || 'Club',
     short: deriveShort(settings.name || 'Club'),
     monogram: deriveShort(settings.name || 'Club').slice(0, 2),
-    logo: settings.logo_url ? `${BASE_URL}/images/organisations/${settings.id}/logo` : null,
+    // Football: a club's crest is usually PlayHQ's own URL (no bytes held), and
+    // an upload is stored API-relative, so resolve what is stored rather than
+    // assuming the images endpoint has something to serve.
+    logo: settings.logo_url
+      ? (IS_AFL ? footballAsset(settings.logo_url) : `${BASE_URL}/images/organisations/${settings.id}/logo`)
+      : null,
   } : { name: 'CLUB', fullName: 'Club', short: 'CLB', monogram: 'CL', logo: null }
 
   const oppData = {
@@ -2882,7 +2898,7 @@ export default function AdminSocialPost() {
       assets={mediaAssets} onUpload={uploadMedia} onUseAsset={useMediaAsset} onEditAsset={editLibraryAsset} onAddEmptyFrame={() => addBlock('image')}
       players={allPlayers} onAddPlayerPhoto={(pid) => addBlock('data', { kind: 'playerphoto', playerId: pid })}
       onAddBrandLockup={() => addBlock('brand')}
-      sponsors={adminSponsors.map((s) => ({ name: s.name, url: `${BASE_URL}/images/sponsors/${s.id}/logo` }))}
+      sponsors={adminSponsors.map((s) => ({ name: s.name, url: sponsorLogoUrl(s) }))}
       onAddSponsor={(sp) => addBlock('image', { src: sp.url, srcName: sp.name, fit: 'contain' })}
       club={{ name: settings?.name, logo_url: team.logo }}
     />
@@ -3159,8 +3175,8 @@ export default function AdminSocialPost() {
                 <div className="mt-3 pt-3 border-t pb-hairline">
                   <div className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faint mb-2">Sponsors</div>
                   <div className="flex gap-1.5 flex-wrap">
-                    {adminSponsors.map((s) => (
-                      <img key={s.id} src={`${BASE_URL}/images/sponsors/${s.id}/logo`} alt={s.name} title={s.name}
+                    {adminSponsors.filter(sponsorLogoUrl).map((s) => (
+                      <img key={s.id} src={sponsorLogoUrl(s)} alt={s.name} title={s.name}
                         className="h-8 max-w-[72px] object-contain rounded bg-pb-surface2 px-1" onError={(e) => { e.target.style.display = 'none' }} />
                     ))}
                   </div>
@@ -4282,8 +4298,8 @@ export default function AdminSocialPost() {
                     <p className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2 mb-1">Sponsor Logos</p>
                     {adminSponsors.length > 0 && (
                       <div className="mb-2 flex flex-wrap gap-2">
-                        {adminSponsors.map(sp => {
-                          const logoUrl = `${BASE_URL}/images/sponsors/${sp.id}/logo`
+                        {adminSponsors.filter(sponsorLogoUrl).map(sp => {
+                          const logoUrl = sponsorLogoUrl(sp)
                           return (
                             <button key={sp.id} title={sp.name}
                               onClick={() => {

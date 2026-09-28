@@ -9,7 +9,9 @@ import logging
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import (
     Organisation, SyncRun, User, async_session_maker, get_db,
 )
+from app.auth.capabilities import MANAGE_SETTINGS, require_cap
 from app.routers.auth import get_current_club, get_current_user, require_super_admin
 from app.services import club_history, theme_config as theme_config_service
 from app.services.afl import sync as afl_sync
@@ -209,6 +212,7 @@ async def get_settings(club: Organisation = Depends(get_current_club)):
 
 @router.patch("/settings")
 async def patch_settings(patch: SettingsPatch,
+                         current_user: User = Depends(require_cap(MANAGE_SETTINGS)),
                          club: Organisation = Depends(get_current_club),
                          db: AsyncSession = Depends(get_db)):
     data = patch.model_dump(exclude_unset=True)
@@ -235,6 +239,56 @@ async def patch_settings(patch: SettingsPatch,
         setattr(club, field, value)
     await db.commit()
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Club logo
+# ---------------------------------------------------------------------------
+#
+# Bytes go on the organisation row and are served by the shared images router,
+# as cricket's are. The stored URL is API-relative ("images/..."), NOT cricket's
+# "/api/images/...": the football app lives under /afl/, so an absolute /api
+# path would reach the cricket backend and 404. The frontend resolves it against
+# the bundle's own base (aflApi.mediaUrl), and a PlayHQ logo URL the sync wrote
+# passes through untouched. Removing an upload clears the column, so the next
+# sync fills the PlayHQ logo back in rather than leaving the club with none.
+
+LOGO_ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+LOGO_MAX_BYTES = 8 * 1024 * 1024
+_LOGO_MIME = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+              ".webp": "image/webp", ".gif": "image/gif"}
+
+
+@router.post("/logo")
+async def upload_logo(file: UploadFile = File(...),
+                      current_user: User = Depends(require_cap(MANAGE_SETTINGS)),
+                      club: Organisation = Depends(get_current_club),
+                      db: AsyncSession = Depends(get_db)):
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in LOGO_ALLOWED_EXTS:
+        raise HTTPException(400, "Image files only (jpg, png, webp, gif)")
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "Empty file")
+    if len(data) > LOGO_MAX_BYTES:
+        raise HTTPException(400, "Logo must be 8 MB or smaller")
+    club.logo_data = data
+    club.logo_mime = _LOGO_MIME.get(ext, "image/png")
+    # ?v= gets a replacement past the images router's long cache headers.
+    club.logo_url = f"images/organisations/{club.id}/logo?v={uuid.uuid4().hex[:8]}"
+    await db.commit()
+    return {"logo_url": club.logo_url}
+
+
+@router.delete("/logo")
+async def delete_logo(current_user: User = Depends(require_cap(MANAGE_SETTINGS)),
+                      club: Organisation = Depends(get_current_club),
+                      db: AsyncSession = Depends(get_db)):
+    club.logo_data = None
+    club.logo_mime = None
+    club.logo_url = None
+    await db.commit()
+    return {"status": "cleared"}
 
 
 class RegisterClubRequest(BaseModel):

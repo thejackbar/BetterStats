@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react'
-import { aflApi } from '../../aflApi'
+import { aflApi, mediaUrl } from '../../aflApi'
 import { SectionTitle } from '../../components/bits'
+
+// The sponsor router stores its logo as "/images/sponsors/...", a path on the
+// API server rather than the site, so it has to go under the bundle's API base:
+// served as-is it points at betterat.football/images, which nothing answers.
+const sponsorLogo = (u) => (u ? mediaUrl(u.replace(/^\//, '')) : u)
 
 export default function AflAdminSponsors() {
   const [sponsors, setSponsors] = useState(null)
@@ -8,6 +13,23 @@ export default function AflAdminSponsors() {
   const [url, setUrl] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
+  const [editing, setEditing] = useState(null) // { id, name, website_url }
+
+  const saveEdit = async () => {
+    if (!editing.name.trim()) { setError('A sponsor needs a name.'); return }
+    setBusy(true); setError(null)
+    try {
+      await aflApi.patchSponsor(editing.id, { name: editing.name.trim(), website_url: editing.website_url.trim() || null })
+      setEditing(null)
+      refresh()
+    } catch (err) { setError(err.message) } finally { setBusy(false) }
+  }
+
+  const removeLogo = async (s) => {
+    setBusy(true); setError(null)
+    try { await aflApi.deleteSponsorLogo(s.id); refresh() }
+    catch (err) { setError(err.message) } finally { setBusy(false) }
+  }
 
   const refresh = () => aflApi.listSponsors().then(setSponsors).catch(() => setSponsors([]))
   useEffect(() => { refresh() }, [])
@@ -95,17 +117,37 @@ export default function AflAdminSponsors() {
 
       <div className="space-y-2">
         {sponsors.map((s, idx) => (
-          <div key={s.id} className="pb-card p-3 flex items-center gap-3">
+          <div key={s.id} className="pb-card p-3 flex flex-wrap items-center gap-3">
             {s.logo_url
-              ? <img src={s.logo_url} alt="" className="h-10 w-10 rounded object-contain bg-pb-surface2" />
+              ? <img src={sponsorLogo(s.logo_url)} alt="" className="h-10 w-10 rounded object-contain bg-pb-surface2" />
               : <span className="h-10 w-10 rounded bg-pb-surface2 flex items-center justify-center text-pb-faint text-xs">No logo</span>}
+            {editing?.id === s.id ? (
+              <div className="flex-1 min-w-0 grid sm:grid-cols-2 gap-2" data-testid="sponsor-edit">
+                <input aria-label="Sponsor name" value={editing.name} onChange={e => setEditing(ed => ({ ...ed, name: e.target.value }))}
+                  className="bg-pb-surface2 border border-pb-hairline rounded px-2 py-1.5 text-sm" />
+                <input aria-label="Website URL" placeholder="Website URL (optional)" value={editing.website_url}
+                  onChange={e => setEditing(ed => ({ ...ed, website_url: e.target.value }))}
+                  className="bg-pb-surface2 border border-pb-hairline rounded px-2 py-1.5 text-sm" />
+                <div className="flex gap-2 sm:col-span-2">
+                  <button disabled={busy} onClick={saveEdit}
+                    className="px-3 py-1 rounded text-xs font-semibold bg-[var(--pb-accent)] text-black disabled:opacity-50">Save</button>
+                  <button disabled={busy} onClick={() => setEditing(null)} className="px-3 py-1 rounded text-xs text-pb-dim hover:text-pb-text">Cancel</button>
+                </div>
+              </div>
+            ) : (
             <div className="flex-1 min-w-0">
               <div className="font-medium truncate">{s.name}</div>
               {s.website_url && <a href={s.website_url} target="_blank" rel="noreferrer" className="text-xs text-pb-faint hover:text-pb-dim truncate block">{s.website_url}</a>}
             </div>
+            )}
             <div className="flex items-center gap-2 shrink-0">
               <button disabled={busy || idx === 0} onClick={() => move(idx, -1)} className="text-pb-faint hover:text-pb-text disabled:opacity-30">↑</button>
               <button disabled={busy || idx === sponsors.length - 1} onClick={() => move(idx, 1)} className="text-pb-faint hover:text-pb-text disabled:opacity-30">↓</button>
+              <button disabled={busy} onClick={() => setEditing({ id: s.id, name: s.name || '', website_url: s.website_url || '' })}
+                className="text-xs text-pb-dim hover:text-pb-text underline">Edit</button>
+              {s.logo_url && (
+                <button disabled={busy} onClick={() => removeLogo(s)} className="text-xs text-pb-dim hover:text-pb-text underline">Remove logo</button>
+              )}
               <label className="text-xs text-pb-dim hover:text-pb-text underline cursor-pointer">
                 Logo
                 <input type="file" accept="image/*" className="hidden"
