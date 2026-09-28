@@ -4356,6 +4356,14 @@ async def lifespan(app: FastAPI):
         for _stmt in _CRICKETSTATZ_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 310: per-innings meta for a hand-entered manual game —
+        # which side batted, the innings' extras, and the opposition innings'
+        # own total. Same one-copy rule: this and alembic's 310 both run
+        # services/manual_innings_ddl.STATEMENTS.
+        from app.services.manual_innings_ddl import STATEMENTS as _MANUAL_INNINGS_DDL
+        for _stmt in _MANUAL_INNINGS_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 293: a CricketStatz import and a Cricket Australia sync
         # complement each other, so their matches are UNIONED and the
         # duplicates removed per match — `manual_games.superseded_by_game_id`.
