@@ -48,8 +48,36 @@ import uuid
 
 from sqlalchemy import select
 
+from collections import Counter
+
+from sqlalchemy import text
+
 from app.models.db import Organisation, Player, async_session_maker
+from app.services import milestone_totals
 from app.services.sync import _compute_milestones
+
+
+async def _evidence(session, org_id, removed) -> dict:
+    """For each proposed removal: when it was recorded, and what the player's
+    figures are now (the profile's and the whole career's). A milestone minted
+    during September 2026's double count, above both figures, is a phantom; one
+    recorded years ago deserves a look before it is deleted."""
+    pids = sorted({pid for pid, _, _ in removed})
+    if not pids:
+        return {}
+    dates = {(str(p), t, v): d for p, t, v, d in (await session.execute(text(
+        "SELECT player_id, milestone_type, milestone_value, achieved_at FROM milestones"
+        " WHERE player_id = ANY(CAST(:p AS uuid[]))"), {"p": pids})).all()}
+    prof = await milestone_totals.profile_totals(session, org_id, pids, with_split=False)
+    whole = await milestone_totals.totals_under(session, org_id, pids, None)
+    out = {}
+    for pid, mt, value in removed:
+        out[(pid, mt, value)] = (
+            dates.get((pid, mt, value)),
+            int(((prof.get(pid) or {}).get("totals") or {}).get(mt) or 0),
+            int((whole.get(pid) or {}).get(mt) or 0),
+        )
+    return out
 
 
 async def _clubs(session, target: str) -> list[Organisation]:
@@ -83,15 +111,28 @@ async def run(target: str, apply: bool) -> int:
             if not names:
                 continue
             report = await _compute_milestones(
-                session, list(names), club_id, reconcile=True, dry_run=not apply)
-        added, removed = report["added"], report["removed"]
+                session, list(names), club_id, reconcile=True, dry_run=True)
+            added, removed = report["added"], report["removed"]
+            ev = await _evidence(session, club_id, removed)
+        if apply and (added or removed):
+            async with async_session_maker() as session:
+                report = await _compute_milestones(
+                    session, list(names), club_id, reconcile=True)
+            added, removed = report["added"], report["removed"]
         if not added and not removed:
             continue
         total_added += len(added)
         total_removed += len(removed)
         print(f"\n{name} ({slug})")
         for pid, mt, value in sorted(removed, key=lambda x: (names.get(x[0], ""), x[1], x[2])):
-            print(f"  REMOVE  {names.get(pid, pid):<32} {value:>6,} {mt}")
+            recorded, prof_v, whole_v = ev.get((pid, mt, value), (None, 0, 0))
+            print(f"  REMOVE  {names.get(pid, pid):<32} {value:>6,} {mt:<8}"
+                  f" recorded {str(recorded or '?'):<10}  now {max(prof_v, whole_v):,}"
+                  f" (profile {prof_v:,}, whole career {whole_v:,})")
+        when = Counter((ev.get(r, (None,))[0] or "unknown") for r in removed)
+        if when:
+            print("  Removals by the date they were recorded: "
+                  + ", ".join(f"{d}: {n}" for d, n in sorted(when.items(), key=lambda x: str(x[0]))))
         for pid, mt, value in sorted(added, key=lambda x: (names.get(x[0], ""), x[1], x[2])):
             print(f"  ADD     {names.get(pid, pid):<32} {value:>6,} {mt}")
 
