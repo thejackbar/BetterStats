@@ -88,6 +88,16 @@ export const aflApi = {
       })
   },
   adminDeleteLogo: () => request('/club-admin/logo', { method: 'DELETE' }),
+  adminUploadPlayerHero: (id, file) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return fetch(`${BASE}/club-admin/players/${id}/hero-photo`, { method: 'POST', body: fd, credentials: 'include' })
+      .then(async (res) => {
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Upload failed')
+        return res.json()
+      })
+  },
+  adminDeletePlayerHero: (id) => request(`/club-admin/players/${id}/hero-photo`, { method: 'DELETE' }),
   adminDeletePlayerPhoto: (id) => request(`/club-admin/players/${id}/photo`, { method: 'DELETE' }),
 
   // Admin — Import Players (CSV contact importer)

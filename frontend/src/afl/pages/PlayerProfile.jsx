@@ -9,6 +9,11 @@ import { aflApi, mediaUrl } from '../aflApi'
 import { SectionTitle, ResultPill } from '../components/bits'
 import { HonourBoard, HonourPills } from '../components/honours'
 
+const POSITION_LABELS = {
+  FB: 'Full back', HB: 'Half back', C: 'Centre', W: 'Wing', MID: 'Midfield',
+  RUCK: 'Ruck', HF: 'Half forward', FF: 'Full forward', UTIL: 'Utility',
+}
+
 // ── Charts — mirrors BetterStats (Core)'s player-profile chart language
 // (pages/PlayerProfile.jsx: recharts, CSS-var colours, a single shared
 // tooltip style) but kept to a single Y axis per chart throughout, rather
@@ -375,6 +380,13 @@ export default function PlayerProfile() {
               {c.first_year ? (c.first_year === c.last_year ? c.first_year : `${c.first_year} – ${c.last_year}`) : ''}
               {c.seasons ? ` · ${c.seasons} season${c.seasons > 1 ? 's' : ''}` : ''}
             </p>
+            {(data.shirt_number || data.positions?.length > 0) && (
+              <p className="text-sm text-pb-dim mt-1" data-testid="profile-number-positions">
+                {data.shirt_number && <span className="font-mono">#{data.shirt_number}</span>}
+                {data.shirt_number && data.positions?.length > 0 && ' · '}
+                {(data.positions || []).map(k => POSITION_LABELS[k] || k).join(', ')}
+              </p>
+            )}
             {/* What the club has recorded them for, biggest first — the same
                 pills, in the same colours, as the Honours board below. */}
             <HonourPills achievements={data.achievements} />

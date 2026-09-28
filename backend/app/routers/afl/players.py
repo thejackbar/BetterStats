@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import Player, get_db
 from app.services.afl import aggregations
 from app.services.afl.manual_stats import manual_branch
+from app.routers.afl.players_admin import AFL_POSITIONS
 
 router = APIRouter(prefix="/afl-players", tags=["afl-players"])
 
@@ -126,6 +127,10 @@ async def get_player(player_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
         "id": str(player.id),
         "name": player.display_name,
         "photo_url": player.photo_url,
+        # The club's own number and positions. The date of birth is not here
+        # on purpose: it is the club's record, not a public one.
+        "shirt_number": player.shirt_number,
+        "positions": [p for p in (player.skill_positions or []) if p in AFL_POSITIONS],
         "organisation_id": str(org_id),
         "career": totals[0] if totals else None,
         "seasons": seasons,
