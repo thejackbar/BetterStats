@@ -617,6 +617,14 @@ function ImportPanel({ kind, downloadFn, importFn, onImported }) {
   const handleTemplate = async () => {
     try {
       const res = await downloadFn()
+      // Never save the body of a failed response as a "template" — an error
+      // (e.g. a routing slip returning JSON) would otherwise download as a
+      // broken CSV with no hint anything went wrong. Surface it instead.
+      if (!res.ok) {
+        let msg = `Could not download the template (${res.status}).`
+        try { const j = await res.json(); if (j?.detail) msg = typeof j.detail === 'string' ? j.detail : msg } catch { /* not JSON */ }
+        throw new Error(msg)
+      }
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')

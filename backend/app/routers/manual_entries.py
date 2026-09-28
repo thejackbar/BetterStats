@@ -990,6 +990,42 @@ async def list_manual_games(
     return out
 
 
+# MUST stay ABOVE `/games/{game_id}` — FastAPI matches in registration order,
+# and `{game_id}` is a single path segment, so it happily captures the literal
+# "template.csv" and 422s with "Invalid manual game id". That is exactly what a
+# club downloaded instead of the template. Keep this route first. The example
+# rows and columns live in GAME_CSV_COLUMNS / the CSV-import section below;
+# module constants resolve at call time, so declaring the route here is fine.
+@router.get("/games/template.csv")
+async def games_template(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+):
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(GAME_CSV_COLUMNS)
+    # Example: one game with two players. Rows with the same game_key roll up
+    # into a single manual_game record; game-level fields are read from the
+    # FIRST row encountered for that key.
+    w.writerow([
+        "G1", "2010-11-13", "Bayswater", "Hyde Park", "Summer 2010/11", "1st Grade",
+        "false", "40-over", "Applecross", "Bayswater", "Applecross", "Won by 50 runs",
+        "Smith, John", 1, 1, 45, 60, 5, 1, "false", "false", "c Brown b Jones",
+        "8.2", 2, 25, 3, 0, 0, 1, 0, 0, 0,
+    ])
+    w.writerow([
+        "G1", "2010-11-13", "Bayswater", "Hyde Park", "Summer 2010/11", "1st Grade",
+        "false", "40-over", "Applecross", "Bayswater", "Applecross", "Won by 50 runs",
+        "Brown, Tom", 1, 2, 12, 20, 1, 0, "false", "false", "b Jones",
+        "", "", "", "", "", "", "", "", "", "",
+    ])
+    return StreamingResponse(
+        io.BytesIO(buf.getvalue().encode("utf-8-sig")),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="manual_games_template.csv"'},
+    )
+
+
 @router.get("/games/{game_id}")
 async def get_manual_game(
     game_id: str,
@@ -2328,34 +2364,10 @@ GAME_CSV_COLUMNS = [
 ]
 
 
-@router.get("/games/template.csv")
-async def games_template(
-    current_user: User = Depends(get_current_user),
-    club: Organisation = Depends(get_current_club),
-):
-    buf = io.StringIO()
-    w = csv.writer(buf)
-    w.writerow(GAME_CSV_COLUMNS)
-    # Example: one game with two players. Rows with the same game_key roll up
-    # into a single manual_game record; game-level fields are read from the
-    # FIRST row encountered for that key.
-    w.writerow([
-        "G1", "2010-11-13", "Bayswater", "Hyde Park", "Summer 2010/11", "1st Grade",
-        "false", "40-over", "Applecross", "Bayswater", "Applecross", "Won by 50 runs",
-        "Smith, John", 1, 1, 45, 60, 5, 1, "false", "false", "c Brown b Jones",
-        "8.2", 2, 25, 3, 0, 0, 1, 0, 0, 0,
-    ])
-    w.writerow([
-        "G1", "2010-11-13", "Bayswater", "Hyde Park", "Summer 2010/11", "1st Grade",
-        "false", "40-over", "Applecross", "Bayswater", "Applecross", "Won by 50 runs",
-        "Brown, Tom", 1, 2, 12, 20, 1, 0, "false", "false", "b Jones",
-        "", "", "", "", "", "", "", "", "", "",
-    ])
-    return StreamingResponse(
-        io.BytesIO(buf.getvalue().encode("utf-8-sig")),
-        media_type="text/csv",
-        headers={"Content-Disposition": 'attachment; filename="manual_games_template.csv"'},
-    )
+# NOTE: the GET /games/template.csv route that serves this template is declared
+# ABOVE GET /games/{game_id} on purpose (see the comment there). It reads
+# GAME_CSV_COLUMNS above at call time. Do not re-add it here, or the two
+# registrations will fight and the shadowed one wins.
 
 
 def _has_any_value(*vals) -> bool:
