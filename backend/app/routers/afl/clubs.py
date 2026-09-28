@@ -5,13 +5,17 @@ grade lists every other page's filters hang off.
 """
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from pydantic import BaseModel
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import Organisation, get_db
 from app.services.afl.aggregations import _resolve_canonical_grade, grade_sort_key
 from app.services.afl.season_groups import canonical_map
+from app.services import club_lock
+from app.services.afl.grade_scope import left_out_labels
+from app.services.fonts import public_font_fields
 from app.services.club_history import (
     competitions_for_display, previous_names_for_display,
 )
@@ -36,8 +40,14 @@ async def resolve_org(db: AsyncSession, slug_or_id: str) -> Organisation:
 
 
 @router.get("/{slug}")
-async def get_club(slug: str, db: AsyncSession = Depends(get_db)):
+async def get_club(slug: str, request: Request, db: AsyncSession = Depends(get_db)):
     org = await resolve_org(db, slug)
+    # Draft mode: the page exists and is reached, behind the club's 4-digit
+    # PIN. 423 with the lock payload, the shape the shared useClub hook and
+    # ClubPinGate read, and the same soft gate cricket keeps (the other public
+    # reads take an org id the browser only learns by getting past this).
+    if club_lock.is_locked_for_request(org, request):
+        raise HTTPException(status_code=423, detail=club_lock.lock_detail(org))
     seasons = await db.execute(text("""
         SELECT s.id, s.name, s.year,
                COUNT(gr.id) AS grade_count
@@ -115,9 +125,30 @@ async def get_club(slug: str, db: AsyncSession = Depends(get_db)):
         "previous_names": previous_names_for_display(org.previous_names),
         "competitions": competitions_for_display(org.competitions),
         "sport": "afl",
+        # Typography: font_config plus each uploaded font's URL. The URL is
+        # cricket's "/api/images/..." shape; the football app re-roots it
+        # under its own base before use.
+        **public_font_fields(org),
+        # Grade categories the club leaves out of its stats by default, so a
+        # page can say why its figures are smaller than the whole history.
+        "stats_left_out": await left_out_labels(db, org.id),
         "seasons": [dict(r._mapping) for r in seasons],
         "grades": grades,
         "public_show_bog_leaderboard": org.public_show_bog_leaderboard,
         "public_show_club_bf_leaderboard": org.public_show_club_bf_leaderboard,
         "public_show_comp_bf_leaderboard": org.public_show_comp_bf_leaderboard,
     }
+
+
+class UnlockBody(BaseModel):
+    pin: str = ""
+
+
+@router.post("/{slug}/unlock")
+async def unlock_club(slug: str, body: UnlockBody, request: Request, response: Response,
+                      db: AsyncSession = Depends(get_db)):
+    """Check the PIN and hand back the unlock cookie. Cricket's own route body,
+    so the rate limit, the lockout after repeated wrong guesses and the cookie
+    are the same on both sites."""
+    from app.routers.clubs import UnlockBody as _Body, unlock_club as _unlock
+    return await _unlock(slug, _Body(pin=body.pin), request, response, db=db)

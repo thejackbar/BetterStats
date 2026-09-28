@@ -5,6 +5,7 @@ organisation column of its own) and reads only synced data — no live PlayHQ
 calls on any public request path.
 """
 import uuid
+from app.services.afl import grade_scope as gs
 from app.services.afl.season_groups import canonical_map, season_group
 from typing import Optional
 
@@ -51,7 +52,8 @@ def grade_sort_key(row: dict):
 
 
 async def career_totals(db: AsyncSession, org_id: uuid.UUID,
-                        player_ids: Optional[list[uuid.UUID]] = None) -> list[dict]:
+                        player_ids: Optional[list[uuid.UUID]] = None,
+                        excluded: Optional[list] = None) -> list[dict]:
     """Career totals per player, combining the synced whole-season rollup
     (grade_id IS NULL so per-grade rows don't double count) with imported
     (Import Stats upload) rows — sync wins per season, imported only fills a
@@ -64,22 +66,28 @@ async def career_totals(db: AsyncSession, org_id: uuid.UUID,
     where_player_s = "AND s.player_id = ANY(:pids)" if player_ids else ""
     where_player_i = "AND i.player_id = ANY(:pids)" if player_ids else ""
     where_player_m = "AND m.player_id = ANY(:pids)" if player_ids else ""
+    # A club that leaves a grade category out of its stats (Settings) has its
+    # career figures summed from the per-grade rows it keeps; `excluded` is
+    # that list, and empty keeps the whole-season rollup exactly as before.
+    excluded = excluded or []
     manual = manual_branch(
         ["player_id", "season_id", "games", "goals", "behinds", "bog_count", "captain_games"],
-        where=where_player_m,
+        where=where_player_m + gs.other_rows("m", excluded),
     )
     params: dict = {"org": str(org_id)}
     if player_ids:
         params["pids"] = [str(p) for p in player_ids]
+    if excluded:
+        params["excl"] = excluded
     res = await db.execute(text(f"""
         WITH combined AS (
             SELECT s.player_id, s.season_id, s.games, s.goals, s.behinds, s.bog_count, s.captain_games
             FROM afl_player_season_stats s
-            WHERE s.organisation_id = :org AND s.grade_id IS NULL {where_player_s}
+            WHERE s.organisation_id = :org AND {gs.synced_rows("s", excluded)} {where_player_s}
             UNION ALL
             SELECT i.player_id, i.season_id, i.games_played AS games, i.goals, i.behinds, i.bog_count, i.captain_games
             FROM afl_imported_stats i
-            WHERE i.organisation_id = :org {where_player_i}
+            WHERE i.organisation_id = :org {where_player_i}{gs.other_rows("i", excluded)}
               AND NOT EXISTS (
                 SELECT 1 FROM afl_player_season_stats s2
                 WHERE s2.player_id = i.player_id AND s2.season_id = i.season_id

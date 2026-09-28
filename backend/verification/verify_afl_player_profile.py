@@ -107,7 +107,11 @@ async def main():
     print("\n── The public profile ──")
     await c.patch(f"/club-admin/players/{p1}", json={"date_of_birth": "2008-03-04", "shirt_number": "7", "positions": ["RUCK"]})
     pub = J(await c.get(f"/afl-players/{p1}"))
-    check("shows the shirt number and positions", (pub.get("shirt_number"), pub.get("positions")), ("7", ["RUCK"]))
+    check("shows the shirt number, and positions stay private until the club publishes them",
+          (pub.get("shirt_number"), pub.get("positions")), ("7", []))
+    await c.patch("/club-admin/settings", json={"public_show_role": True})
+    pub = J(await c.get(f"/afl-players/{p1}"))
+    check("  ... then shows the positions", pub.get("positions"), ["RUCK"])
     check("never the date of birth", "date_of_birth" in pub or "age" in pub, False)
 
     print("\n── Action photo ──")

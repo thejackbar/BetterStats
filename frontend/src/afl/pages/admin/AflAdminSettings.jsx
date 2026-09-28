@@ -5,6 +5,7 @@ import { useToast } from '../../../contexts/ToastContext'
 import LoadingSpinner from '../../../components/LoadingSpinner'
 import ImageEditorModal from '../../../components/ImageEditorModal'
 import { validateImageFile } from '../../../lib/validation'
+import { PrimaryAdminCard, TypographyPanel } from '../../../components/admin/settingsKit'
 import {
   BRAND, deriveDarkPalette, gradientCss, resolveTheme,
 } from '../../../lib/theme'
@@ -87,6 +88,121 @@ function LogoField({ logoUrl, onChanged }) {
         onCancel={() => setEditorSource(null)}
         onApply={upload}
       />
+    </div>
+  )
+}
+
+/**
+ * Draft mode: the public site stays reachable, behind a 4-digit PIN, while the
+ * club is setting it up. A visitor with the PIN gets through for 30 days on that
+ * browser. A lock BetterFootball placed on a lapsed trial is shown but is not
+ * the club's to lift.
+ */
+function DraftPanel({ settings, onSaved }) {
+  const toast = useToast()
+  const [pin, setPin] = useState('')
+  const [busy, setBusy] = useState(false)
+  const on = !!settings.password_protected
+  const trialLock = settings.password_protect_reason === 'trial_ended'
+
+  async function patch(body, done) {
+    setBusy(true)
+    try { await aflApi.patchAdminSettings(body); toast.success(done); setPin(''); onSaved() }
+    catch (e) { toast.error(e.message) } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="pb-card p-5" data-testid="draft-panel">
+      <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Draft mode</p>
+      <p className="text-sm text-pb-dim mb-4 leading-relaxed">
+        Keep your public site behind a 4-digit PIN while you get it ready. Anyone with the PIN
+        can still see it.
+      </p>
+      <p className="text-sm mb-3" data-testid="draft-status">
+        {on ? (trialLock ? 'Locked by BetterFootball because the trial has ended.' : 'On: visitors need the PIN.')
+            : 'Off: your site is public.'}
+        {settings.has_pin && !on && <span className="text-pb-faint"> A PIN is set.</span>}
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <input value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+          inputMode="numeric" placeholder={settings.has_pin ? 'New PIN' : '4-digit PIN'} aria-label="4-digit PIN"
+          className="w-28 bg-pb-surface2 border border-pb-hairline rounded px-2 py-1.5 text-sm font-mono" />
+        <button type="button" disabled={busy || pin.length !== 4} onClick={() => patch({ access_pin: pin }, 'PIN saved')}
+          className="px-3 py-1.5 rounded text-xs border border-pb-hairline text-pb-text hover:bg-pb-surface2 disabled:opacity-40">
+          Save PIN
+        </button>
+        {!trialLock && (on ? (
+          <button type="button" disabled={busy} onClick={() => patch({ password_protected: false }, 'Your site is public again')}
+            className="px-3 py-1.5 rounded text-xs font-semibold bg-[var(--pb-accent)] text-black disabled:opacity-40">
+            Make the site public
+          </button>
+        ) : (
+          <button type="button" disabled={busy || (!settings.has_pin && pin.length !== 4)}
+            onClick={() => {
+              if (!window.confirm('Put your public site behind the PIN? Visitors without it will see a PIN screen.')) return
+              patch(pin.length === 4 ? { access_pin: pin, password_protected: true } : { password_protected: true }, 'Draft mode is on')
+            }}
+            className="px-3 py-1.5 rounded text-xs font-semibold bg-[var(--pb-accent)] text-black disabled:opacity-40">
+            Turn on draft mode
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Which grade categories count in the club's stats by default: the public
+ * leaderboard, records, dashboard and each player's career figures. Everything
+ * counts until a box is unticked; picking a grade from a filter always shows
+ * that grade whatever is set here.
+ */
+const ALL_CATEGORIES = ['senior', 'colts', 'womens', 'masters', 'integrated']
+
+function StatsScopePanel({ settings, onSaved }) {
+  const toast = useToast()
+  const cats = settings.grade_categories || []
+  const all = cats.map(c => c.key)
+  const [keep, setKeep] = useState(all.filter(k => !settings.stats_grade_categories || settings.stats_grade_categories.includes(k)))
+  const [busy, setBusy] = useState(false)
+  if (cats.length < 2) return null
+  const saved = all.filter(k => !settings.stats_grade_categories || settings.stats_grade_categories.includes(k))
+  const dirty = JSON.stringify([...keep].sort()) !== JSON.stringify([...saved].sort())
+
+  async function save() {
+    if (!keep.length) { toast.error('Keep at least one category'); return }
+    setBusy(true)
+    try {
+      // Stored as everything except what was unticked here, so a category the
+      // club starts fielding next season is counted rather than silently left out.
+      const unticked = all.filter(k => !keep.includes(k))
+      const stored = unticked.length ? ALL_CATEGORIES.filter(k => !unticked.includes(k)) : null
+      await aflApi.patchAdminSettings({ stats_grade_categories: stored })
+      toast.success('Stats by grade saved'); onSaved()
+    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="pb-card p-5" data-testid="stats-scope">
+      <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Stats by grade</p>
+      <p className="text-sm text-pb-dim mb-3 leading-relaxed">
+        Which grades count in your club's leaderboard, records and players' career figures. Untick
+        Colts, say, to keep junior games out of senior careers. Anyone can still pick a colts grade
+        from a filter to see it on its own.
+      </p>
+      <div className="flex flex-wrap gap-4 mb-3">
+        {cats.map(c => (
+          <label key={c.key} className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={keep.includes(c.key)}
+              onChange={e => setKeep(k => e.target.checked ? [...k, c.key] : k.filter(x => x !== c.key))} />
+            {c.label}
+          </label>
+        ))}
+      </div>
+      <button type="button" disabled={busy || !dirty} onClick={save}
+        className="px-4 py-2 rounded font-semibold text-sm bg-[var(--pb-accent)] text-black disabled:opacity-40">
+        Save
+      </button>
     </div>
   )
 }
@@ -372,6 +488,9 @@ export default function AflAdminSettings() {
 
       <LogoField logoUrl={settings.logo_url}
         onChanged={url => setSettings(s => ({ ...s, logo_url: url }))} />
+      <PrimaryAdminCard />
+      <DraftPanel settings={settings} onSaved={load} />
+      <StatsScopePanel key={JSON.stringify(settings.stats_grade_categories)} settings={settings} onSaved={load} />
 
       <div className="pb-card p-5">
         <div className="flex items-center justify-between mb-1">
@@ -484,7 +603,18 @@ export default function AflAdminSettings() {
           disabled={saving}
           onChange={v => toggle('public_show_comp_bf_leaderboard', v)}
         />
+        <Toggle
+          label="Players' positions on their public profiles"
+          hint="Full back, midfield and so on, as set on each player. A jumper number always shows."
+          checked={!!settings.public_show_role}
+          disabled={saving}
+          onChange={v => toggle('public_show_role', v)}
+        />
       </div>
+
+      <TypographyPanel settings={settings}
+        save={font_config => aflApi.patchAdminSettings({ font_config })}
+        samples={{ display: settings.name || 'Your club', body: 'Season results, records and team lists.', mono: '14.8 (92) · 23 goals' }} />
     </div>
   )
 }

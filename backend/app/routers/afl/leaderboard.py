@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import get_db
 from app.services.afl.aggregations import matching_grade_ids
 from app.services.afl.manual_stats import manual_branch
+from app.services.afl import grade_scope as gs
 from app.services.afl.season_groups import season_group
 
 router = APIRouter(prefix="/afl-leaderboard", tags=["afl-leaderboard"])
@@ -41,6 +42,11 @@ async def leaderboard(org_id: uuid.UUID,
     if stat not in _STATS and stat not in _VOTE_STATS:
         raise HTTPException(status_code=422, detail=f"stat must be one of {sorted({*_STATS, *_VOTE_STATS})}")
     params: dict = {"org": str(org_id), "lim": limit}
+    # The club's own grade-category default applies only when no grade is
+    # picked: someone choosing the Colts from the filter means it.
+    excluded = [] if grade_id else await gs.excluded_grade_ids(db, org_id)
+    if excluded:
+        params["excl"] = excluded
 
     if stat in _VOTE_STATS:
         # Club/competition B&F votes never come from PlayHQ — it has no concept
@@ -60,10 +66,10 @@ async def leaderboard(org_id: uuid.UUID,
             clauses.append("i.grade_id = ANY(:grade)")
             manual_where += " AND m.grade_id = ANY(:grade)"
             params["grade"] = await matching_grade_ids(db, org_id, grade_id)
-        where = " AND ".join(clauses)
+        where = " AND ".join(clauses) + gs.other_rows("i", excluded)
         manual = manual_branch(
             ["player_id", "games", "goals", "behinds", "bog_count", col],
-            where=manual_where,
+            where=manual_where + gs.other_rows("m", excluded),
         )
         res = await db.execute(text(f"""
             WITH combined AS (
@@ -98,8 +104,9 @@ async def leaderboard(org_id: uuid.UUID,
         imported_grade_clause = "i.grade_id = ANY(:grade)"
         manual_clauses += " AND m.grade_id = ANY(:grade)"
     else:
-        synced_grade_clause = "s.grade_id IS NULL"
-        imported_grade_clause = "TRUE"
+        synced_grade_clause = gs.synced_rows("s", excluded)
+        imported_grade_clause = "TRUE" + gs.other_rows("i", excluded)
+        manual_clauses += gs.other_rows("m", excluded)
 
     season_clause_s = ""
     season_clause_i = ""

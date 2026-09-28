@@ -5,8 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import Player, get_db
+from app.models.db import Organisation, Player, get_db
 from app.services.afl import aggregations
+from app.services.afl import grade_scope as gs
 from app.services.afl.manual_stats import manual_branch
 from app.routers.afl.players_admin import AFL_POSITIONS
 
@@ -117,7 +118,9 @@ async def get_player(player_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     if player is None or player.organisation_id is None:
         raise HTTPException(status_code=404, detail="Player not found")
     org_id = player.organisation_id
-    totals = await aggregations.career_totals(db, org_id, [player_id])
+    org = await db.get(Organisation, org_id)
+    excluded = await gs.excluded_grade_ids(db, org_id)
+    totals = await aggregations.career_totals(db, org_id, [player_id], excluded=excluded)
     seasons = await aggregations.season_by_season(db, org_id, player_id)
     grades = await aggregations.grade_breakdown(db, org_id, player_id)
     games = await aggregations.player_game_log(db, org_id, player_id)
@@ -130,7 +133,10 @@ async def get_player(player_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
         # The club's own number and positions. The date of birth is not here
         # on purpose: it is the club's record, not a public one.
         "shirt_number": player.shirt_number,
-        "positions": [p for p in (player.skill_positions or []) if p in AFL_POSITIONS],
+        # Positions are the club's to publish (Settings, off by default, the
+        # same opt-in cricket keeps for a player's role).
+        "positions": ([p for p in (player.skill_positions or []) if p in AFL_POSITIONS]
+                      if org and org.public_show_role else []),
         "organisation_id": str(org_id),
         "career": totals[0] if totals else None,
         "seasons": seasons,

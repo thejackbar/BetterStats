@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import get_db
 from app.services.afl.aggregations import matching_grade_ids
+from app.services.afl import grade_scope as gs
 from app.services.afl.manual_stats import manual_branch
 
 router = APIRouter(prefix="/afl-records", tags=["afl-records"])
@@ -52,6 +53,16 @@ async def get_records(org_id: uuid.UUID,
     # than gated against either — see services/afl/manual_stats.py. The
     # season record below INNER JOINs seasons, which is what keeps a
     # career-only adjustment out of a per-season record without a clause.
+    if not grade_id:
+        # The club's grade-category default, only when no grade is picked.
+        excluded = await gs.excluded_grade_ids(db, org_id)
+        if excluded:
+            params["excl"] = excluded
+            grade_line = gs.game_rows("gr", excluded)
+            grade_pss = "AND " + gs.synced_rows("pss", excluded)
+            grade_i = gs.other_rows("i", excluded)
+            grade_m = gs.other_rows("m", excluded)
+
     manual_goals_season = manual_branch(["player_id", "goals", "season_id"], where=grade_m)
     manual_games = manual_branch(["player_id", "season_id", "games"], where=grade_m)
     manual_goals = manual_branch(["player_id", "season_id", "goals"], where=grade_m)

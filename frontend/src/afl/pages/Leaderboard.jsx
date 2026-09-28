@@ -3,7 +3,7 @@ import { useOutletContext } from 'react-router-dom'
 import clsx from 'clsx'
 import LoadingSpinner from '../../components/LoadingSpinner'
 import { aflApi } from '../aflApi'
-import { Select, PlayerCell, displayName } from '../components/bits'
+import { Select, PlayerCell, displayName, StatsScopeNote } from '../components/bits'
 import AllTimeGames from '../components/AllTimeGames'
 
 // `career: true` marks a board that is career-wide by definition and so takes
@@ -67,10 +67,11 @@ export default function Leaderboard() {
 
   return (
     <div className="space-y-4">
+      <StatsScopeNote club={club} gradePicked={!!gradeId} />
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-2xl font-bold">Leaderboard</h1>
         {isCareerBoard
-          ? <span className="ml-auto text-sm text-pb-faint">Every season, every grade</span>
+          ? <span className="ml-auto text-sm text-pb-faint">{club?.stats_left_out?.length ? 'Every season' : 'Every season, every grade'}</span>
           : (
             <div className="ml-auto flex flex-wrap gap-2">
               <Select value={seasonId} onChange={setSeasonId} placeholder="All seasons"

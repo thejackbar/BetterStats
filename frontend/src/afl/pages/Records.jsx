@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useOutletContext } from 'react-router-dom'
 import LoadingSpinner from '../../components/LoadingSpinner'
 import { aflApi, scoreLine } from '../aflApi'
-import { SectionTitle, Select, PlayerCell, displayName } from '../components/bits'
+import { SectionTitle, Select, PlayerCell, displayName, StatsScopeNote } from '../components/bits'
 
 export default function Records() {
   const { club } = useOutletContext()
@@ -75,6 +75,7 @@ export default function Records() {
         <Select value={gradeId} onChange={setGradeId} placeholder="All grades"
                 options={(club.grades || []).map(g => ({ value: g.id, label: g.display_name_override || g.name }))} />
       </div>
+      <StatsScopeNote club={club} gradePicked={!!gradeId} />
       <div className="grid md:grid-cols-2 gap-4">
         {playerBoard('Most games', data?.most_games_career, 'games')}
         {playerBoard('Most goals', data?.most_goals_career, 'goals')}

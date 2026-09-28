@@ -116,3 +116,20 @@ export function PlayerCell({ id, name, base, photoUrl }) {
   if (!id) return body
   return <Link to={`${base}/players/${id}`} className="hover:text-[var(--pb-accent)]">{body}</Link>
 }
+
+
+/**
+ * Says which grade categories the club leaves out of its stats by default
+ * (Settings, "Stats by grade"). Drawn only while no grade is picked, since a
+ * picked grade is always shown whatever the club default says.
+ */
+export function StatsScopeNote({ club, gradePicked }) {
+  const left = club?.stats_left_out || []
+  if (!left.length || gradePicked) return null
+  const list = left.length === 1 ? left[0] : `${left.slice(0, -1).join(', ')} and ${left[left.length - 1]}`
+  return (
+    <p className="text-xs text-pb-faint" data-testid="stats-scope-note">
+      {list} grades are left out of these figures (a club setting). Pick a grade to see it on its own.
+    </p>
+  )
+}
