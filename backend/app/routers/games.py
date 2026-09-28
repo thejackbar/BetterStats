@@ -487,8 +487,16 @@ def _manual_opp_from_payload(payload: dict, innings_totals: dict) -> tuple[list[
         if inn.get("batting_team"):
             meta["batting_team"] = inn["batting_team"]
         extras = inn.get("extras") or {}
-        if extras.get("total") is not None:
-            meta["extras"] = extras["total"]
+        # Effective extras: the recorded total, else the sum of the itemised
+        # parts — the same rule scorecard_ocr's reconcile and the hand-entry
+        # path (`_merge_manual_innings`) use, so the value subtracted below
+        # matches what the frontend renders in the extras row.
+        ex_total = extras.get("total")
+        if ex_total is None:
+            _parts = [extras.get(k) for k in ("byes", "leg_byes", "wides", "no_balls", "penalty")]
+            ex_total = sum(p or 0 for p in _parts) if any(p is not None for p in _parts) else None
+        if ex_total is not None:
+            meta["extras"] = ex_total
         # Extras breakdown + innings overs from the uploaded card. scorecard_ocr
         # stores byes/leg_byes/wides/no_balls/penalty per innings (note the
         # singular `penalty` key here — normalise it to the `penalties` the GR
@@ -508,7 +516,12 @@ def _manual_opp_from_payload(payload: dict, innings_totals: dict) -> tuple[list[
             # Opposition batted → their batters are the opp card; the bowling rows in
             # this innings are OURS (already in bowling_flat).
             if inn.get("total_runs") is not None:
-                meta["runs"] = inn["total_runs"]
+                # total_runs is the FULL innings total (bat runs + extras).
+                # Store bat-only so the frontend's `runs + extras` reconstructs
+                # it exactly rather than double-counting the extras (the v8.60.1
+                # contract; mirrors `_merge_manual_innings`).
+                extras_now = meta.get("extras") or 0
+                meta["runs"] = max(0, inn["total_runs"] - extras_now)
             if inn.get("total_wickets") is not None:
                 meta["wickets"] = inn["total_wickets"]
             for b in (inn.get("batting") or []):
