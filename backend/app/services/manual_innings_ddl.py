@@ -42,8 +42,23 @@ STATEMENTS = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS ix_manual_innings_game ON manual_innings(manual_game_id)",
+    # Migration 311: whether the source knew who batted first. NULL means it
+    # did (a hand-entered or photo-read card, which is numbered in batting
+    # order), so every existing game reads exactly as before. FALSE is a match
+    # imported from a scorebook that recorded both innings and never the order
+    # they were batted in, where the innings numbers are a convention and the
+    # match page must not label them "Innings 1" and "Innings 2" or work out a
+    # "won by N wickets" from them.
+    "ALTER TABLE manual_games ADD COLUMN IF NOT EXISTS innings_order_known BOOLEAN",
 ]
 
 DOWNGRADE = [
+    "ALTER TABLE manual_games DROP COLUMN IF EXISTS innings_order_known",
     "DROP TABLE IF EXISTS manual_innings",
+]
+
+# 311's own downgrade: the column alone. 310 owns the table, and copying 310's
+# downgrade here would drop every hand-entered innings over one column.
+DOWNGRADE_311 = [
+    "ALTER TABLE manual_games DROP COLUMN IF EXISTS innings_order_known",
 ]

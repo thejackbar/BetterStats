@@ -49,7 +49,7 @@ from app.models.db import (
     get_db,
 )
 from app.routers.auth import get_current_club, get_current_user
-from app.services import dismissal, game_import_staging, import_cleanup
+from app.services import dismissal, game_import_staging, import_cleanup, scorebook_innings
 from app.services import import_ingest as ingest
 from app.services.grade_labels import suggest_categories, suggest_category
 from app.services.season_resolve import (
@@ -1789,6 +1789,7 @@ async def delete_manual_game(
         "batting_innings": [_row_to_dict(r) for r in old_batting],
         "bowling_spells": [_row_to_dict(r) for r in old_bowling],
         "fielding_stats": [_row_to_dict(r) for r in old_fielding],
+        **(await _extra_children_snapshot(db, gid)),
     }
     affected_player_ids = _extract_player_ids(list(old_batting) + list(old_bowling) + list(old_fielding))
     summary = f"Deleted manual game ({game.played_at or 'date unknown'})"
@@ -1897,6 +1898,16 @@ async def _restore_manual_game(db: AsyncSession, snapshot: dict, org_id: uuid.UU
         if isinstance(rfields.get("player_id"), str):
             rfields["player_id"] = uuid.UUID(rfields["player_id"])
         db.add(ManualFieldingStat(**rfields))
+    # Absent from a snapshot taken before these were kept, which restores as
+    # before: a match with no innings rows.
+    for key, model, uuid_cols in _EXTRA_GAME_CHILDREN:
+        for r in children.get(key, []):
+            rfields = {k: v for k, v in r.items() if k != "id"}
+            rfields["manual_game_id"] = game_uuid
+            for col in uuid_cols:
+                if isinstance(rfields.get(col), str):
+                    rfields[col] = uuid.UUID(rfields[col])
+            db.add(model(**rfields))
 
 
 @router.post("/audit/{log_id}/undo")
@@ -2422,7 +2433,60 @@ GAME_CSV_COLUMNS = [
     "bowling_overs", "bowling_maidens", "bowling_runs", "bowling_wickets",
     "bowling_wides", "bowling_no_balls",
     "fielding_catches", "fielding_catches_wk", "fielding_run_outs", "fielding_stumpings",
+    # Everything below is optional, and a sheet without it imports exactly as
+    # before. They carry what a club's own scorebook holds beyond its players'
+    # figures: the opposition's innings, each innings' own total and extras,
+    # and the fall of wickets the partnerships are worked out from.
+    #
+    # opp_innings_number names the OPPOSITION's innings in the same leg as
+    # this row's innings_number. Our bowling on the row is filed under it,
+    # since that is the innings our bowlers bowled in; without it the bowling
+    # shares our batting innings and the match page draws our own bowlers as
+    # the attack against our own batters.
+    "opp_innings_number", "batting_order_known",
+    "innings_total", "innings_wickets", "innings_overs",
+    "innings_byes", "innings_leg_byes", "innings_wides", "innings_no_balls", "innings_penalty",
+    "opp_total", "opp_wickets", "opp_overs",
+    "opp_byes", "opp_leg_byes", "opp_wides", "opp_no_balls", "opp_penalty",
+    # On a batter's row: the wicket they fell at and the score when they did.
+    "fow_wicket", "fow_score",
 ]
+
+# The per-innings figures a sheet can carry, as (column suffix, ManualInnings
+# field). Read with an `innings_` prefix for our innings and `opp_` for theirs.
+_INNINGS_META_FIELDS = (
+    ("total", "total_runs"), ("wickets", "total_wickets"), ("overs", "overs"),
+    ("byes", "byes"), ("leg_byes", "leg_byes"), ("wides", "wides"),
+    ("no_balls", "no_balls"), ("penalty", "penalty"),
+)
+
+
+def _row_innings_meta(raw: dict, prefix: str) -> dict:
+    """The innings figures one row carries under `prefix`, blanks left out."""
+    out = {}
+    for suffix, field in _INNINGS_META_FIELDS:
+        v = (raw.get(prefix + suffix) or "").strip()
+        if not v:
+            continue
+        out[field] = _parse_float(v) if field == "overs" else _parse_int(v)
+    return out
+
+
+def _note_innings(meta: dict, number: int, side: str, figures: dict) -> None:
+    """Record that innings `number` was batted by `side`, filling in whichever
+    of its figures this row carries. The first value seen for a figure wins,
+    so a sheet repeating the innings total on every row of it is fine.
+
+    Refuses one innings number claimed by both sides: that is a sheet whose
+    opp_innings_number collides with one of our own innings, and filing both
+    under one number would put their total on our card.
+    """
+    entry = meta.setdefault(number, {"batting_side": side})
+    if entry["batting_side"] != side:
+        raise ValueError(
+            f"innings {number} is given as both our innings and the opposition's")
+    for field, value in figures.items():
+        entry.setdefault(field, value)
 
 
 # NOTE: the GET /games/template.csv route that serves this template is declared
@@ -2440,6 +2504,24 @@ def _has_any_value(*vals) -> bool:
 # One writer, two callers: the wizard's commit step and the strict single-shot
 # endpoint below it. Two copies is how the two start disagreeing about what a
 # scorecard row means.
+
+
+# The child tables of a manual game beyond its batting, bowling and fielding,
+# as (snapshot key, model, uuid columns). A snapshot that left them out would
+# restore a match with no innings totals, fall of wickets or partnerships.
+_EXTRA_GAME_CHILDREN = (
+    ("innings", ManualInnings, ()),
+    ("fall_of_wickets", ManualFallOfWicket, ("player_id",)),
+    ("partnerships", ManualPartnership, ("batter1_id", "batter2_id")),
+)
+
+
+async def _extra_children_snapshot(db: AsyncSession, gid: uuid.UUID) -> dict:
+    out = {}
+    for key, model, _ in _EXTRA_GAME_CHILDREN:
+        rows = (await db.execute(select(model).where(model.manual_game_id == gid))).scalars().all()
+        out[key] = [_row_to_dict(r) for r in rows]
+    return out
 
 
 async def _snapshot_manual_game(db: AsyncSession, gid: uuid.UUID, org_id: uuid.UUID):
@@ -2462,8 +2544,49 @@ async def _snapshot_manual_game(db: AsyncSession, gid: uuid.UUID, org_id: uuid.U
         "batting_innings": [_row_to_dict(r) for r in bat],
         "bowling_spells": [_row_to_dict(r) for r in bowl],
         "fielding_stats": [_row_to_dict(r) for r in fld],
+        **(await _extra_children_snapshot(db, gid)),
     }
     return snap
+
+
+def _add_scorebook_innings(db: AsyncSession, game_id: uuid.UUID, innings_meta: dict,
+                           batters_by_innings: dict, fow_by_innings: dict) -> None:
+    """Write an imported match's innings figures, fall of wickets and stands.
+
+    Nothing is written for a sheet that carried none of the optional columns,
+    so an import of an older sheet is byte-for-byte what it was.
+
+    Partnerships come from `scorebook_innings.derive_partnerships`, which
+    returns None for an innings whose figures do not reconcile. Such an innings
+    keeps its fall of wickets, which is true on its own, and gets no stands
+    rather than stands credited to the wrong pair.
+    """
+    for number, entry in sorted(innings_meta.items()):
+        figures = {k: v for k, v in entry.items() if k != "batting_side"}
+        db.add(ManualInnings(manual_game_id=game_id, innings_number=number,
+                             batting_side=entry["batting_side"], **figures))
+
+    for number, falls in fow_by_innings.items():
+        for f in sorted(falls, key=lambda f: f["wicket"]):
+            db.add(ManualFallOfWicket(
+                manual_game_id=game_id, innings_number=number,
+                wicket_number=f["wicket"], score_at_fall=f["score"],
+                player_id=f["player_id"], batter_name=f["name"],
+            ))
+        meta = innings_meta.get(number) or {}
+        stands = scorebook_innings.derive_partnerships(
+            batters_by_innings.get(number, []), falls,
+            innings_total=meta.get("total_runs"),
+            innings_wickets=meta.get("total_wickets"),
+        )
+        for st in stands or []:
+            db.add(ManualPartnership(
+                manual_game_id=game_id, innings_number=number,
+                wicket_number=st["wicket"], runs=st["runs"], balls=None,
+                batter1_id=st["batter1"]["player_id"], batter2_id=st["batter2"]["player_id"],
+                batter1_name=st["batter1"]["name"], batter2_name=st["batter2"]["name"],
+                batter1_runs=None, batter2_runs=None, is_club_innings=True,
+            ))
 
 
 async def _write_games(
@@ -2611,8 +2734,35 @@ async def _write_games(
                 # accumulated here and written once. Batting and bowling really
                 # are per innings and are written as they come.
                 fielding: dict = {}
+                # innings_number -> {batting_side, figures}; empty for a sheet
+                # that carries none of the optional innings columns, in which
+                # case no manual_innings row is written and the game reads as
+                # it always has.
+                innings_meta: dict = {}
+                # innings_number -> our batters and the wickets they fell at,
+                # for the fall of wickets and the partnerships.
+                batters_by_innings: dict = {}
+                fow_by_innings: dict = {}
+
+                order_known = (first.get("batting_order_known") or "").strip()
+                if order_known:
+                    game.innings_order_known = _parse_bool(order_known)
 
                 for row_num, raw in group:
+                    # Innings figures are read BEFORE the player check: a match
+                    # nobody was named for still has an opposition total.
+                    innings_number = _parse_int(raw.get("innings_number")) or 1
+                    opp_innings = _parse_int(raw.get("opp_innings_number"), nullable=True)
+                    ours = _row_innings_meta(raw, "innings_")
+                    theirs = _row_innings_meta(raw, "opp_")
+                    if opp_innings is not None or ours or theirs:
+                        _note_innings(innings_meta, innings_number, "us", ours)
+                        if opp_innings is not None:
+                            _note_innings(innings_meta, opp_innings, "opposition", theirs)
+                        elif theirs:
+                            raise ValueError(
+                                f"row {row_num}: opposition figures need opp_innings_number")
+
                     pname = (raw.get("player_name") or "").strip()
                     if not pname:
                         continue  # blank player rows are silently ignored
@@ -2621,8 +2771,6 @@ async def _write_games(
                         continue  # the admin said to leave this name out
                     if not player:
                         raise ValueError(f"row {row_num}: player not found: '{pname}'")
-                    innings_number = _parse_int(raw.get("innings_number")) or 1
-
                     bruns = raw.get("batting_runs")
                     bballs = raw.get("batting_balls")
                     if _has_any_value(bruns, bballs, raw.get("dismissal_type"),
@@ -2650,6 +2798,20 @@ async def _write_games(
                                      or dismissal.is_not_out(dismissal_type=raw.get("dismissal_type"))),
                             did_not_bat=_parse_bool(raw.get("did_not_bat")),
                         ))
+                        if not _parse_bool(raw.get("did_not_bat")):
+                            batters_by_innings.setdefault(innings_number, []).append({
+                                "position": _parse_int(raw.get("batting_position"), nullable=True),
+                                "player_id": player.id, "name": pname,
+                            })
+
+                    fow_wicket = _parse_int(raw.get("fow_wicket"), nullable=True)
+                    if fow_wicket is not None:
+                        fow_by_innings.setdefault(innings_number, []).append({
+                            "wicket": fow_wicket,
+                            "score": _parse_int(raw.get("fow_score"), nullable=True),
+                            "position": _parse_int(raw.get("batting_position"), nullable=True),
+                            "player_id": player.id, "name": pname,
+                        })
 
                     bovers = raw.get("bowling_overs")
                     bwkts = raw.get("bowling_wickets")
@@ -2658,7 +2820,10 @@ async def _write_games(
                         db.add(ManualBowlingSpell(
                             manual_game_id=game.id,
                             player_id=player.id,
-                            innings_number=innings_number,
+                            # Our bowlers bowled in the OPPOSITION's innings.
+                            # A sheet that does not say which one keeps the old
+                            # behaviour of sharing our batting innings.
+                            innings_number=opp_innings if opp_innings is not None else innings_number,
                             overs=_parse_float(bovers) if bovers not in (None, "") else None,
                             maidens=_parse_int(raw.get("bowling_maidens")),
                             runs=_parse_int(bownruns),
@@ -2682,6 +2847,8 @@ async def _write_games(
 
                 for pid, agg in fielding.items():
                     db.add(ManualFieldingStat(manual_game_id=game.id, player_id=pid, **agg))
+                _add_scorebook_innings(db, game.id, innings_meta,
+                                       batters_by_innings, fow_by_innings)
                 await db.flush()
         except Exception as e:
             errors.append({"row": first_row_num, "error": f"Game '{game_key}': {e}", "data": first})

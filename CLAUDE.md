@@ -1,5 +1,59 @@
 # BetterStats — Claude Session Notes
 
+## A scorebook import carries the opposition, the score and the stands (migration 311, v9.97.0, Sep 2026)
+
+Reported off Shoalwater Bay's CSFW archive: an imported fixture showed no
+opposition team, no opposition score and no partnerships, so none of those
+matches could appear in Highest Partnerships. Built rather than asking the club
+for more data; the fix is a re-import of the converted archive.
+
+- **THE ARCHIVE HAD IT ALL ALONG; THE CSV SHAPE COULD NOT CARRY IT.** CSFW's
+  `.AV` stores both innings blocks (total, wickets, overs, extras) and the fall
+  of wickets as (score, batting position out). The match CSV had columns for our
+  batting and bowling rows and nothing else, so the converter had nowhere to put
+  the rest. `GAME_CSV_COLUMNS` gained `opp_innings_number`,
+  `batting_order_known`, `innings_*` / `opp_*` figures and `fow_wicket` /
+  `fow_score`, written to the existing `manual_innings` (310),
+  `manual_fall_of_wickets` and `manual_partnerships` tables, which already flow
+  through the `v_effective_*` views to the match page and the record boards.
+- **READ BEFORE THE BLANK-PLAYER SKIP.** A match where nobody on our side is
+  named still carries the opposition's innings, so the innings meta is taken off
+  every row, and "nobody named" rows still carry it.
+- **OUR BOWLERS ARE FILED UNDER THE OPPOSITION'S INNINGS NUMBER.** They were
+  filed under our own innings, which is why they read as bowling at our batters.
+  A sheet giving opposition figures with no `opp_innings_number` is refused, as
+  is one innings given as both sides'.
+- **`innings_no` IS NOT BATTING ORDER, and the data proved it.** In 51 clear
+  chases the chasing winner carried innings_no 1 in 48. So the converter numbers
+  by leg (ours 2n-1, theirs 2n) and sends `batting_order_known=false`;
+  `manual_games.innings_order_known` (311) records it and the match page draws
+  "INNINGS" unnumbered, no winning margin, no HOME/AWAY for blank home/away
+  teams, and a note saying why. NULL (every existing game) reads as known, so no
+  other match changes.
+- **PARTNERSHIPS ARE DERIVED AND REFUSED WHEN THEY DO NOT RECONCILE.**
+  `services/scorebook_innings.derive_partnerships` walks the batting order
+  against the fall of wickets and returns None on a gap, a batter out who is not
+  at the crease, a score going backwards or a wicket count disagreeing. A stand
+  credited to the wrong pair sits on a record board under two names that never
+  batted together, which is worse than none. 889 of 917 innings derive, 8,011
+  stands; the other 28 keep their fall of wickets.
+- **Undo restores them.** `_EXTRA_GAME_CHILDREN` puts the three child tables in
+  the edit/delete snapshot, so an undone or restored game keeps them.
+- **Verified against a real Postgres** (`verify_scorebook_innings.py`, 43
+  checks through the shipped import route, `get_scorecard` and `get_records`:
+  the rule on its own, the reported match, a non-reconciling innings refused, an
+  older sheet importing unchanged, self-contradicting sheets refused, and the
+  snapshot round trip) **with a control run**: 28 fail against the previous
+  commit, the card reading "None v None" with no opposition innings. **Driven in
+  Chromium** (`verify_scorebook_import_browser.mjs`, 19, against the payload the
+  backend suite wrote) **with a control run**: 4 fail, reporting numbered
+  innings, HOME/AWAY and "won by 65 runs". Neighbours re-run: manual games
+  import 194, manual innings 20, manual scorecard 25, scorecard innings total
+  15, the converter's own 30.
+- **Recovery for Shoalwater**: undo the earlier CSFW import batch, re-import the
+  regenerated `manual_games_scorecards.csv`, then re-run `repair_overwrite_pairs`
+  and `reconcile_milestones` for the club.
+
 ## The club page a prospect searched their way to asks them to start (v9.91.0, Sep 2026)
 
 Reported as the paid funnel's biggest leak: ad -> /trial -> search -> a club's

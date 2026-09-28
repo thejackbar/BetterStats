@@ -780,7 +780,27 @@ about their own question.
 - **Run outs as a fielding credit.** Not in the format.
 - **The bowler or fielder credited with a wicket.** Not in the format, so
   partnerships and fall of wickets come across but "c Smith b Jones" cannot.
-- **Opposition players.** The program never stored them.
+- **Opposition players.** The program never stored them. Their innings TOTAL,
+  wickets, overs and extras do come across (v9.97.0), so a match shows both
+  teams and both scores.
+- **Which side batted first.** The per-innings `innings_no` looks like batting
+  order and is not: in 51 matches with an unambiguous chase, the side that won
+  by chasing carried innings_no 1 in 48 of them. The converter therefore numbers
+  our innings 2n-1 and theirs 2n by leg, sends `batting_order_known=false`, and
+  the match page shows the innings unnumbered with a note rather than a margin
+  worked out from an order nobody recorded.
+
+### Partnerships are derived, and refused where they do not reconcile
+
+The archive has no partnerships, only the score at each wicket and the batting
+position of the batter out. `services/scorebook_innings.derive_partnerships`
+walks the batting order against that fall of wickets (first two in open, the
+one out leaves, the next comes in) and adds the unbroken stand at the end when
+the innings total is known. Any innings whose figures do not reconcile (a gap
+in the order, a batter out who was not at the crease, a score going backwards,
+a wicket count disagreeing with the fall of wickets) gets NO partnerships and
+keeps its fall of wickets. Measured on Shoalwater Bay's archive: 889 of 917
+innings derive, 8,011 stands, 394 of them unbroken.
 
 ---
 

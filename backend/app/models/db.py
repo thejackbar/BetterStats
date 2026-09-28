@@ -2265,6 +2265,9 @@ class ManualGame(Base):
     # match_pairing.reconcile_org never touches a locked row, so a future sync
     # cannot flip the club's correction back to the incorrect synced copy.
     pairing_locked = Column(Boolean, nullable=False, server_default="false")
+    # Migration 311: FALSE when the source recorded both innings but not which
+    # was batted first (a CSFW scorebook import). NULL means known.
+    innings_order_known = Column(Boolean, nullable=True)
     created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)

@@ -1246,10 +1246,27 @@ async def get_scorecard(
             _row["player_name"] = "********"
             _row["is_redacted"] = True
 
+    # A match imported from a club's own scorebook often names its opposition
+    # and never says who was home. Rather than a header of two blank sides, name
+    # them from the club and the opposition, and say the home/away is unknown so
+    # the page does not label them HOME and AWAY.
+    home_team, away_team = game.home_team, game.away_team
+    home_away_known = True
+    if is_manual and not home_team and not away_team and getattr(game, "opposition", None):
+        home_team = (org.name if org else None) or "Our team"
+        away_team = game.opposition
+        home_away_known = False
+
     return {
         "id": str(game.id),
-        "home_team": game.home_team,
-        "away_team": game.away_team,
+        "home_team": home_team,
+        "away_team": away_team,
+        "home_away_known": home_away_known,
+        # False only for an imported match whose source recorded both innings
+        # and not the order they were batted in. The page then names each card
+        # by its team rather than "Innings 1" and draws no winning margin, since
+        # a margin in wickets depends on who batted last.
+        "innings_order_known": getattr(game, "innings_order_known", None) is not False,
         "played_at": game.played_at.isoformat() if game.played_at else None,
         "result": game.result,
         "winning_team": game.winning_team,

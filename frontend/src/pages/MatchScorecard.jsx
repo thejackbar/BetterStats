@@ -230,7 +230,13 @@ function MatchHeader({ game, innings }) {
     const rr = (runs != null && balls > 0) ? (runs / (balls / 6)).toFixed(2) : null
     return { ...inn, runs, wickets, oversStr, rr, battingTeam: t.batting_team || '', logoUrl: t.logo_url || null }
   })
-  const margin = marginText(game, inningsData)
+  // A margin in wickets depends on who batted last, so a match whose scorebook
+  // never recorded the batting order draws none rather than a guessed one.
+  const orderKnown = game.innings_order_known !== false
+  const margin = orderKnown ? marginText(game, inningsData) : null
+  // A match imported with no home or away side names the club and the
+  // opposition, and does not call either of them home.
+  const homeAwayKnown = game.home_away_known !== false
   const competition = [game.grade?.name, game.season?.name].filter(Boolean).join(' · ')
 
   // The header is deliberately home/away, NOT batting order — this is the
@@ -301,7 +307,7 @@ function MatchHeader({ game, innings }) {
         <div className="px-5 pt-3 font-mono text-[10px] tracking-wide3 text-pb-faint">{competition}</div>
       )}
       <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 sm:gap-4 px-2 sm:px-4 py-1">
-        <Side label="HOME" teamName={homeTeam} inns={homeInns} won={homeWon} align="left" />
+        <Side label={homeAwayKnown ? 'HOME' : ''} teamName={homeTeam} inns={homeInns} won={homeWon} align="left" />
         <div className="flex flex-col items-center justify-center gap-1.5 px-2 min-w-[90px] sm:min-w-[130px]">
           <ResultPill result={game.result || 'N/R'} />
           {margin && (
@@ -313,7 +319,7 @@ function MatchHeader({ game, innings }) {
             </div>
           )}
         </div>
-        <Side label="AWAY" teamName={awayTeam} inns={awayInns} won={awayWon} align="right" />
+        <Side label={homeAwayKnown ? 'AWAY' : ''} teamName={awayTeam} inns={awayInns} won={awayWon} align="right" />
       </div>
     </div>
   )
@@ -841,6 +847,7 @@ export default function MatchScorecard() {
     ...Object.keys(game.innings_totals || {}).map(k => Number(k) || 1),
   ])].sort((a, b) => a - b)
 
+  const orderKnown = game.innings_order_known !== false
   const innings = inningsNums.map(num => ({
     num,
     batting: [
@@ -865,9 +872,12 @@ export default function MatchScorecard() {
       total: t,
       battingTeam: t.batting_team || '',
       teamName: t.batting_team || `INNINGS ${i + 1}`,
-      label: `INNINGS ${i + 1}`,
+      // Numbered only when the order is known: "Innings 1" is a claim about
+      // who batted first that an imported scorebook cannot back.
+      label: orderKnown ? `INNINGS ${i + 1}` : 'INNINGS',
     }
   })
+  const orderKnownNote = !orderKnown && cards.length > 1
   // Which of the two sides each card belongs to, by the same rule the header
   // uses, so the WON badge is decided once for the match and a team's two
   // innings can never disagree about it.
@@ -886,6 +896,13 @@ export default function MatchScorecard() {
         </button>
 
         <MatchHeader game={game} innings={innings} />
+
+        {orderKnownNote && (
+          <p data-testid="innings-order-note" className="-mt-2 mb-4 text-[12px] text-pb-dim">
+            The scorebook this match came from records both innings but not which side batted first,
+            so the innings are shown club first.
+          </p>
+        )}
 
         {innings.length === 0 ? (
           <Card>
