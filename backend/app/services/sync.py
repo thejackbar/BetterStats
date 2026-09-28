@@ -2708,8 +2708,11 @@ async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: u
     it only ever ADDED: a total over-counted for a day in September 2026 minted
     "500 wickets" for a bowler on 478 and nothing ever took it back.
 
-    ``reconcile`` also REMOVES a stored threshold the player's current figure
-    no longer reaches. A milestone row is derived — this function is the only
+    A threshold counts as reached when the profile's figure OR the whole-career
+    figure (the effective view, every grade) reaches it; see the comment above
+    ``whole`` below for why the profile's alone is not enough.
+
+    ``reconcile`` also REMOVES a stored threshold neither figure reaches. A milestone row is derived — this function is the only
     thing that writes one — so removing a wrong one is correcting our own
     output, never a person's. It must only run once every source a career is
     counted from has landed, or a Full Rebuild's empty per-game tables would
@@ -2734,7 +2737,18 @@ async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: u
     if not ids:
         return report
 
+    # A threshold counts as REACHED when either figure reaches it: the one the
+    # profile opens on, or the whole career (the effective view, every grade).
+    # The profile's figure alone is not enough under a club default that leaves
+    # juniors out: a player who reached 50 matches with their junior games
+    # counted genuinely reached it, and the scoped figure (counted from the
+    # scorecards) can also sit below Cricket Australia's own career total. The
+    # first cut measured the profile figure only, and a dry run on Shoalwater
+    # Bay proposed removing 352 milestones, most of them real. The whole career
+    # is correct since migration 309, so the phantoms (a 500 wickets on 478)
+    # still go: neither figure reaches them.
     figures = await milestone_totals.profile_totals(session, org_id, ids, with_split=False)
+    whole = await milestone_totals.totals_under(session, org_id, ids, None)
     exist_rows = (await session.execute(
         text("SELECT id, player_id::text, milestone_type, milestone_value FROM milestones"
              " WHERE player_id = ANY(CAST(:pids AS uuid[]))"
@@ -2749,9 +2763,10 @@ async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: u
     remove_ids = []
     for pid in ids:
         totals = (figures.get(pid) or {}).get("totals") or {}
+        career = whole.get(pid) or {}
         have = existing.get(pid, {})
         for mt in ("runs", "wickets", "matches", "catches"):
-            current = int(totals.get(mt) or 0)
+            current = max(int(totals.get(mt) or 0), int(career.get(mt) or 0))
             for threshold in crossed_thresholds(mt, current):
                 if (mt, threshold) in have:
                     continue

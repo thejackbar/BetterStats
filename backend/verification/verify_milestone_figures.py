@@ -397,6 +397,41 @@ async def main() -> None:
         check("without reconcile nothing is removed (a failed match pull only adds)",
               add_only["removed"] == [])
 
+        # The case the first cut got wrong, found by a dry run on Shoalwater Bay
+        # proposing 352 removals: a club default that leaves juniors out. The
+        # profile's figure is then the senior scorecards alone, and a milestone
+        # reached with junior games, or on CA's own career total, is still real.
+        print("\n── the stored milestones under a default that leaves juniors out ──")
+        await set_default(list(grade_scope.DEFAULT_CATEGORIES))
+        async with Session() as s:
+            await s.execute(text("INSERT INTO milestones (player_id, milestone_type, milestone_value, "
+                                 "achieved_at) VALUES (:p, 'runs', 2500, :d)"),
+                            {"p": P_HIND, "d": date(2024, 6, 1)})
+            await s.commit()
+        async with Session() as s:
+            prof = await milestone_totals.profile_totals(s, ORG, [P_HIND, P_HETEL], with_split=False)
+        check("the default really does leave Hind's junior runs out (the case under test)",
+              prof[str(P_HIND)]["totals"]["runs"] == 2271, str(prof[str(P_HIND)]["totals"]))
+        async with Session() as s:
+            rep2 = await _compute_milestones(s, EVERYONE, ORG, reconcile=True)
+        async with Session() as s:
+            rows2 = {(str(p), t, v): d for p, t, v, d in (await s.execute(text(
+                "SELECT player_id, milestone_type, milestone_value, achieved_at FROM milestones"
+            ))).all()}
+        check("Hind's 2,500 runs, reached with his junior matches, stays",
+              rows2.get((str(P_HIND), "runs", 2500)) == date(2024, 6, 1), str(rep2["removed"]))
+        check("Hetel's 5,000 runs stays although his scoped figure is below it",
+              (str(P_HETEL), "runs", 5000) in rows2
+              and prof[str(P_HETEL)]["totals"]["runs"] < 5000,
+              f"scoped {prof[str(P_HETEL)]['totals']['runs']}")
+        check("the phantom 500 wickets still goes",
+              (str(P_GODFREY), "wickets", 500) not in rows2)
+        check("only the phantom was removed",
+              rep2["removed"] == [(str(P_GODFREY), "wickets", 500)], str(rep2["removed"]))
+        async with Session() as s:
+            again2 = await _compute_milestones(s, EVERYONE, ORG, reconcile=True)
+        check("a second run changes nothing", again2 == {"added": [], "removed": []}, str(again2))
+
     print("\n── wiring ──")
     src = Path("app/services/sync.py").read_text()
     tail = src.find("Recompute milestones against the figures the profile shows")

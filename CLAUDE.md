@@ -91,7 +91,22 @@ short of 200 catches on 201, and J Hind 18 from 3,000 "including junior games".
   scorecards a Full Rebuild has just wiped; a run with `match_pull_failed` only
   adds. `python -m app.scripts.reconcile_milestones <org|all> [--apply]` repairs
   what September's double count minted. **Run it for Shoalwater after deploy.**
-- **Verified against a real Postgres** (`verify_milestone_figures.py`, 66
+- **A STORED MILESTONE IS REACHED ON EITHER FIGURE, NOT THE PROFILE'S ALONE
+  (v9.93.1).** The first cut reconciled against the profile's figure only, and
+  its dry run on Shoalwater proposed removing **352** milestones against 67
+  added. Two real cases were being deleted: a player who reached 50 matches
+  WITH his junior games counted (the club default leaves them out), and a
+  veteran whose scoped figure is counted from scorecards and sits below Cricket
+  Australia's own career total (the control run reads Hetel's scoped runs as
+  911 against a 5,913 career). The writer now takes `max(profile figure, whole
+  career)`, the whole career being the unscoped effective view, correct since
+  309. The phantoms still go, because nothing reaches a 500 wickets on 478.
+  **Never run a reconcile's `--apply` off a dry run whose REMOVE list is
+  dominated by juniors-turned-seniors; that is the scope talking, not a bug
+  being fixed.**
+- **Verified against a real Postgres** (`verify_milestone_figures.py`, 72
+  checks now; a control run with the profile-only writer fails the 3 new ones,
+  removing Hetel's 1,000-5,000 runs; the original 66
   checks) **with a control run**: 45 fail against the previous build, reporting
   the club's own "87", "3 short of 200" and "2 short of 200". Chromium
   (`verify_milestone_split_browser.mjs`, 10; control fails 5). Neighbours

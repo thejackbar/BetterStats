@@ -11,9 +11,12 @@ bowler on 478, "9,000 runs" for a batter on 8,453.
 WHAT IT DOES
 ------------
 Runs the same writer a sync now runs (``sync._compute_milestones`` with
-``reconcile=True``): each player's figures are the ones their profile opens on
-(``milestone_totals.profile_totals``), a threshold they reach and have no row
-for is added, and a stored threshold they no longer reach is removed. A
+``reconcile=True``): a threshold counts as reached when either the figure the
+player's profile opens on (``milestone_totals.profile_totals``) or their whole
+career across every grade reaches it. One they reach and have no row for is
+added; a stored one that neither figure reaches is removed. (Measuring the
+profile's figure alone proposed removing 352 of Shoalwater Bay's milestones,
+most of them reached with junior matches or on Cricket Australia's own total.) A
 threshold still reached keeps its original date.
 
 A milestone row is derived output — the writer is the only thing that creates
