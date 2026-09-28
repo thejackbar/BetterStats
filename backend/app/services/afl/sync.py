@@ -173,7 +173,9 @@ async def _upsert_seasons(session: AsyncSession, org: Organisation,
                 )
                 session.add(row)
             else:
-                row.name = display
+                # The name is set once, when the season is first seen: a club
+                # that renamed it (Seasons admin) keeps its own, the rule
+                # cricket's sync already follows. The year still follows PlayHQ.
                 row.year = year
             row.synced_at = datetime.now(timezone.utc)
             out.append({

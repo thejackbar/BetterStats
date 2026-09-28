@@ -218,6 +218,10 @@ export const aflApi = {
   adminListSeasons: () => request('/club-admin/seasons'),
   adminRenameSeason: (id, body) => request(`/club-admin/seasons/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   adminDeleteSeason: (id) => request(`/club-admin/seasons/${id}`, { method: 'DELETE' }),
+  adminReorderSeasons: (items) => request('/club-admin/seasons/reorder', { method: 'PUT', body: JSON.stringify(items) }),
+  adminListSeasonMerges: () => request('/club-admin/seasons/merges'),
+  adminMergeSeasons: (body) => request('/club-admin/seasons/merges', { method: 'POST', body: JSON.stringify(body) }),
+  adminUndoSeasonMerge: (id) => request(`/club-admin/seasons/merges/${id}/undo`, { method: 'POST' }),
 
   // Admin — Manual stat entries (adjustments). Seasons come from the Import
   // Stats endpoints below: same club seasons, same create path, deliberately

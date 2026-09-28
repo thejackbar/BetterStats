@@ -95,7 +95,11 @@ async def get_records(org_id: uuid.UUID,
                s.name AS season_name, s.year
         FROM combined c
         JOIN players p ON p.id = c.player_id
-        JOIN seasons s ON s.id = c.season_id
+        -- A merged season counts as the one year it is: fold an alias onto
+        -- its canonical before grouping, or the record splits across them.
+        LEFT JOIN season_aliases sa ON sa.alias_season_id = c.season_id
+             AND sa.org_id = CAST(:org AS uuid) AND sa.undone_at IS NULL
+        JOIN seasons s ON s.id = COALESCE(sa.canonical_season_id, c.season_id)
         GROUP BY c.player_id, p.name, p.display_name_override, s.id, s.name, s.year
         HAVING SUM(c.goals) > 0
         ORDER BY goals DESC, s.year ASC

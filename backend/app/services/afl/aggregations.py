@@ -5,6 +5,7 @@ organisation column of its own) and reads only synced data — no live PlayHQ
 calls on any public request path.
 """
 import uuid
+from app.services.afl.season_groups import canonical_map, season_group
 from typing import Optional
 
 from sqlalchemy import text
@@ -168,6 +169,23 @@ async def season_by_season(db: AsyncSession, org_id: uuid.UUID,
     for r in rows:
         r["club_bf_votes"] = 0
         r["comp_bf_votes"] = 0
+    # Seasons the club merged read as one year: every row under an alias is
+    # moved onto its canonical season before anything below folds by season,
+    # so the table draws one line where it would have drawn two.
+    canon = await canonical_map(db, org_id)
+    season_meta = {}
+    if canon:
+        res_m = await db.execute(text(
+            "SELECT id, name, year FROM seasons WHERE organisation_id = :org"), {"org": str(org_id)})
+        season_meta = {str(r.id): (r.name, r.year) for r in res_m}
+
+    def _fold_season(r):
+        c = canon.get(str(r["season_id"])) if r.get("season_id") is not None else None
+        if c:
+            r["season_id"] = uuid.UUID(c)
+            r["season_name"], r["year"] = season_meta.get(c, (r["season_name"], r["year"]))
+    for r in rows:
+        _fold_season(r)
 
     # Club/competition B&F votes are read SEPARATELY, and deliberately not
     # through the sync-wins union above. PlayHQ has no concept of
@@ -204,6 +222,8 @@ async def season_by_season(db: AsyncSession, org_id: uuid.UUID,
             OR COALESCE(SUM(v.comp_bf_votes), 0) > 0
     """), {"org": str(org_id), "pid": str(player_id)})
     vote_rows = [dict(r._mapping) for r in vres]
+    for v in vote_rows:
+        _fold_season(v)
 
     # A manual adjustment entered against ONE grade of a season still belongs
     # in that season's whole-season line, and nothing downstream can put it
@@ -617,8 +637,8 @@ async def club_results_summary(db: AsyncSession, org_id: uuid.UUID,
     clauses = ["s.organisation_id = :org"]
     params: dict = {"org": str(org_id)}
     if season_id:
-        clauses.append("s.id = :season")
-        params["season"] = str(season_id)
+        clauses.append("s.id = ANY(:season)")
+        params["season"] = await season_group(db, org_id, season_id)
     if grade_ids:
         clauses.append("gr.id = ANY(:grades)")
         params["grades"] = list(grade_ids)
@@ -656,8 +676,8 @@ async def team_results_breakdown(db: AsyncSession, org_id: uuid.UUID,
     clauses = ["s.organisation_id = :org"]
     params: dict = {"org": str(org_id)}
     if season_id:
-        clauses.append("s.id = :season")
-        params["season"] = str(season_id)
+        clauses.append("s.id = ANY(:season)")
+        params["season"] = await season_group(db, org_id, season_id)
     if grade_ids:
         clauses.append("gr.id = ANY(:grades)")
         params["grades"] = list(grade_ids)

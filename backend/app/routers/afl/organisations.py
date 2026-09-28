@@ -10,6 +10,7 @@ from app.models.db import get_db
 from app.services.afl import aggregations
 from app.services.afl.manual_stats import manual_branch
 from app.services.afl.aggregations import matching_grade_ids
+from app.services.afl.season_groups import season_group
 
 router = APIRouter(prefix="/organisations", tags=["afl-organisations"])
 
@@ -39,8 +40,8 @@ async def get_results(org_id: uuid.UUID,
         clauses.append("d.status = 'FINAL'")
     params: dict = {"org": str(org_id), "lim": limit, "off": offset}
     if season_id:
-        clauses.append("s.id = :season")
-        params["season"] = str(season_id)
+        clauses.append("s.id = ANY(:season)")
+        params["season"] = await season_group(db, org_id, season_id)
     if grade_id:
         clauses.append("gr.id = ANY(:grade)")
         params["grade"] = await matching_grade_ids(db, org_id, grade_id)
@@ -123,10 +124,10 @@ async def get_summary(org_id: uuid.UUID,
     season_clause_i = ""
     season_clause_m = ""
     if season_id:
-        params["season"] = str(season_id)
-        season_clause_s = "AND s.season_id = :season"
-        season_clause_i = "AND i.season_id = :season"
-        season_clause_m = "AND m.season_id = :season"
+        params["season"] = await season_group(db, org_id, season_id)
+        season_clause_s = "AND s.season_id = ANY(:season)"
+        season_clause_i = "AND i.season_id = ANY(:season)"
+        season_clause_m = "AND m.season_id = ANY(:season)"
     manual = manual_branch(
         ["player_id", "season_id", "games", "goals", "bog_count"],
         where=season_clause_m,

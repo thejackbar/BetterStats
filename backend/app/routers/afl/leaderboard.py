@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import get_db
 from app.services.afl.aggregations import matching_grade_ids
 from app.services.afl.manual_stats import manual_branch
+from app.services.afl.season_groups import season_group
 
 router = APIRouter(prefix="/afl-leaderboard", tags=["afl-leaderboard"])
 
@@ -52,9 +53,9 @@ async def leaderboard(org_id: uuid.UUID,
         clauses = ["i.organisation_id = :org"]
         manual_where = ""
         if season_id:
-            clauses.append("i.season_id = :season")
-            manual_where += " AND m.season_id = :season"
-            params["season"] = str(season_id)
+            clauses.append("i.season_id = ANY(:season)")
+            manual_where += " AND m.season_id = ANY(:season)"
+            params["season"] = await season_group(db, org_id, season_id)
         if grade_id:
             clauses.append("i.grade_id = ANY(:grade)")
             manual_where += " AND m.grade_id = ANY(:grade)"
@@ -103,10 +104,10 @@ async def leaderboard(org_id: uuid.UUID,
     season_clause_s = ""
     season_clause_i = ""
     if season_id:
-        params["season"] = str(season_id)
-        season_clause_s = "AND s.season_id = :season"
-        season_clause_i = "AND i.season_id = :season"
-        manual_clauses += " AND m.season_id = :season"
+        params["season"] = await season_group(db, org_id, season_id)
+        season_clause_s = "AND s.season_id = ANY(:season)"
+        season_clause_i = "AND i.season_id = ANY(:season)"
+        manual_clauses += " AND m.season_id = ANY(:season)"
 
     # A manual adjustment is a delta, so it joins with no NOT EXISTS gate and
     # no grade_id IS NULL default — an adjustment has no whole-season twin to

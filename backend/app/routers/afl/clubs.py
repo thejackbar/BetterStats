@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import Organisation, get_db
 from app.services.afl.aggregations import _resolve_canonical_grade, grade_sort_key
+from app.services.afl.season_groups import canonical_map
 from app.services.club_history import (
     competitions_for_display, previous_names_for_display,
 )
@@ -43,8 +44,11 @@ async def get_club(slug: str, db: AsyncSession = Depends(get_db)):
         FROM seasons s
         LEFT JOIN grades gr ON gr.season_id = s.id
         WHERE s.organisation_id = :org
-        GROUP BY s.id, s.name, s.year
-        ORDER BY s.year DESC NULLS LAST, s.name DESC
+          -- A season merged into another is one year, not two options.
+          AND NOT EXISTS (SELECT 1 FROM season_aliases sa
+                          WHERE sa.alias_season_id = s.id AND sa.undone_at IS NULL)
+        GROUP BY s.id, s.name, s.year, s.display_order
+        ORDER BY s.display_order NULLS LAST, s.year DESC NULLS LAST, s.name DESC
     """), {"org": str(org.id)})
     raw_grades = await db.execute(text("""
         SELECT gr.id, gr.name, gr.display_name_override, gr.season_id, gr.category,
@@ -58,6 +62,7 @@ async def get_club(slug: str, db: AsyncSession = Depends(get_db)):
         "SELECT alias_name, canonical_name FROM grade_merge_logs WHERE org_id = :org AND undone_at IS NULL"
     ), {"org": str(org.id)})
     alias_to_canonical = {r["alias_name"]: r["canonical_name"] for r in logs.mappings().all()}
+    season_canon = await canonical_map(db, org.id)
 
     # Merging two grades (Merge Grades, admin) folds their raw rows into one
     # competition for stats purposes — the public grade filter must fold them
@@ -85,8 +90,13 @@ async def get_club(slug: str, db: AsyncSession = Depends(get_db)):
         if row["display_order"] is not None and (
                 slot["display_order"] is None or row["display_order"] < slot["display_order"]):
             slot["display_order"] = row["display_order"]
-        if row["season_id"] not in slot["season_ids"]:
-            slot["season_ids"].append(row["season_id"])
+        # A grade fielded in a merged-away season lists its canonical season,
+        # so picking the merged year still offers that grade.
+        sid = row["season_id"]
+        if str(sid) in season_canon:
+            sid = uuid.UUID(season_canon[str(sid)])
+        if sid not in slot["season_ids"]:
+            slot["season_ids"].append(sid)
     grades = sorted(bucket.values(), key=grade_sort_key)
 
     return {

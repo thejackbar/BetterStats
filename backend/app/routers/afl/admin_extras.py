@@ -25,6 +25,7 @@ from app.auth.capabilities import MANAGE_PLAYERS, MANAGE_USERS, require_cap
 from app.models.db import Organisation, User, get_db
 from app.routers.auth import get_current_club
 from app.services.afl import aggregations
+from app.services.afl.season_groups import season_group
 
 router = APIRouter(prefix="/club-admin", tags=["afl-admin-extras"])
 
@@ -91,8 +92,8 @@ async def list_games(
     clauses = ["s.organisation_id = :org"]
     params: dict = {"org": str(club.id), "lim": limit, "off": offset}
     if season_id:
-        clauses.append("s.id = :season")
-        params["season"] = str(season_id)
+        clauses.append("s.id = ANY(:season)")
+        params["season"] = await season_group(db, club.id, season_id)
     if source:
         clauses.append("COALESCE(d.source, 'playhq') = :source")
         params["source"] = source
