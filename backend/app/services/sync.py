@@ -3,7 +3,7 @@ import json
 import logging
 import re
 import uuid
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, timedelta
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -2720,7 +2720,9 @@ async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: u
     ``achieved_at``.
 
     ``dry_run`` reports without writing. Returns ``{"added": [...], "removed":
-    [...]}``, each item ``(player_id, type, value)``.
+    [...], "dated": [...]}``, each item ``(player_id, type, value)``; ``dated`` is
+    the additions written with today's date, which the notification scan will
+    announce. Every other addition is written undated.
     """
     from sqlalchemy import text
     from app.services import milestone_totals
@@ -2732,7 +2734,7 @@ async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: u
         "matches": lambda v: f"{v} career matches",
         "catches": lambda v: f"{v} career catches",
     }
-    report = {"added": [], "removed": []}
+    report = {"added": [], "removed": [], "dated": []}
     ids = [str(p) for p in player_ids if p]
     if not ids:
         return report
@@ -2780,6 +2782,31 @@ async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: u
     """), {"pids": ids, "org": str(org_id)})).mappings().all()
     before = {r["pid"]: r for r in before_rows}
 
+    # "Before this season" alone is not enough in an off-season, when a club's
+    # newest season row is still last summer's: every threshold crossed during
+    # that summer would be dated today and announced as just reached, months
+    # after the game. So a threshold only counts as JUST reached when the
+    # player has actually played inside the notification window; anything else
+    # is history first counted now, and goes in undated. A player with no game
+    # at all (an imported career) is always history.
+    from app.services.notification_scan import LOOKBACK_DAYS
+    recent_from = date.today() - timedelta(days=LOOKBACK_DAYS)
+    last_played = {r[0]: r[1] for r in (await session.execute(text("""
+        SELECT x.pid, MAX(g.played_at)
+        FROM (
+            SELECT player_id::text AS pid, game_id FROM game_appearances
+             WHERE player_id = ANY(CAST(:pids AS uuid[]))
+            UNION
+            SELECT player_id::text, game_id FROM v_effective_batting_innings
+             WHERE player_id = ANY(CAST(:pids AS uuid[]))
+            UNION
+            SELECT player_id::text, game_id FROM v_effective_bowling_spells
+             WHERE player_id = ANY(CAST(:pids AS uuid[]))
+        ) x
+        JOIN v_effective_games g ON g.id = x.game_id
+        GROUP BY x.pid
+    """), {"pids": ids})).all()}
+
     today = date.today()
     remove_ids = []
     for pid in ids:
@@ -2792,7 +2819,11 @@ async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: u
                 if (mt, threshold) in have:
                     continue
                 report["added"].append((pid, mt, threshold))
-                historical = int((before.get(pid) or {}).get(mt) or 0) >= threshold
+                played = last_played.get(pid)
+                historical = (int((before.get(pid) or {}).get(mt) or 0) >= threshold
+                              or played is None or played < recent_from)
+                if not historical:
+                    report["dated"].append((pid, mt, threshold))
                 if not dry_run:
                     session.add(Milestone(
                         player_id=uuid.UUID(pid), milestone_type=mt, milestone_value=threshold,

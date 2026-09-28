@@ -114,6 +114,15 @@ short of 200 catches on 201, and J Hind 18 from 3,000 "including junior games".
   **Never run a reconcile's `--apply` off a dry run whose REMOVE list is
   dominated by juniors-turned-seniors; that is the scope talking, not a bug
   being fixed.**
+- **"BEFORE THIS SEASON" IS NOT ENOUGH IN AN OFF-SEASON (v9.93.2).** A club's
+  newest season row is still last summer's until the new one syncs, so every
+  threshold crossed during that summer read as new and would have been dated
+  today and emailed as "just reached", months after the game. A threshold is
+  now dated only when the player has a game inside the notification window
+  (`notification_scan.LOOKBACK_DAYS`, 21 days); otherwise, and for a player with
+  no game at all, it is undated. `_compute_milestones` reports `dated`, and
+  `reconcile_milestones` marks those additions and prints line-buffered so a run
+  redirected to a file can be `tail -f`'d. Control run: 3 of 81 fail.
 - **Verified against a real Postgres** (`verify_milestone_figures.py`, 72
   checks now; a control run with the profile-only writer fails the 3 new ones,
   removing Hetel's 1,000-5,000 runs; the original 66
