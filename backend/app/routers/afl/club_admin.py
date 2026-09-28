@@ -180,6 +180,10 @@ class SettingsPatch(BaseModel):
     public_show_bog_leaderboard: Optional[bool] = None
     public_show_club_bf_leaderboard: Optional[bool] = None
     public_show_comp_bf_leaderboard: Optional[bool] = None
+    # BetterSocials' saved style: palette, fonts, saved designs and templates.
+    # Cleaned by cricket's own sanitizer, so the two sports can never disagree
+    # about what a saved design may hold.
+    socials_style: Optional[dict] = None
 
 
 @router.get("/settings")
@@ -198,6 +202,8 @@ async def get_settings(club: Organisation = Depends(get_current_club)):
         "public_show_bog_leaderboard": club.public_show_bog_leaderboard,
         "public_show_club_bf_leaderboard": club.public_show_club_bf_leaderboard,
         "public_show_comp_bf_leaderboard": club.public_show_comp_bf_leaderboard,
+        "socials_style": club.socials_style or None,
+        "social_brand_kit": club.social_brand_kit or None,
     }
 
 
@@ -221,6 +227,10 @@ async def patch_settings(patch: SettingsPatch,
         club.previous_names = club_history.clean_previous_names(data.pop("previous_names"))
     if "competitions" in data:
         club.competitions = club_history.clean_competitions(data.pop("competitions"))
+    if "socials_style" in data:
+        from app.routers.club_admin import _sanitize_socials_style
+        raw = data.pop("socials_style")
+        club.socials_style = _sanitize_socials_style(raw) if isinstance(raw, dict) else None
     for field, value in data.items():
         setattr(club, field, value)
     await db.commit()

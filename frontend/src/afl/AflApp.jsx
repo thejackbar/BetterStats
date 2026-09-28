@@ -6,7 +6,7 @@ import { ToastProvider } from '../contexts/ToastContext'
 import ErrorBoundary from '../components/ErrorBoundary'
 import ScrollToTop from '../components/ScrollToTop'
 import LoadingSpinner from '../components/LoadingSpinner'
-import { betterAdminRoutes } from './sharedModuleRoutes'
+import { betterAdminRoutes, betterSocialsRoutes } from './sharedModuleRoutes'
 import ClubLayout from './ClubLayout'
 import Dashboard from './pages/Dashboard'
 import Players from './pages/Players'
@@ -90,6 +90,7 @@ export default function AflApp() {
                 {/* BetterAdmin — the shared cricket screens, beside (not inside)
                     the football admin layout. */}
                 {betterAdminRoutes()}
+                {betterSocialsRoutes()}
                 <Route path="/:clubSlug" element={<ClubLayout />}>
                   <Route index element={<Dashboard />} />
                   <Route path="players" element={<Players />} />

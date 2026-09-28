@@ -66,6 +66,7 @@ from app.routers.afl import (
     lineups as afl_lineups,
     honours as afl_honours,
     admin_extras as afl_admin_extras,
+    social as afl_social,
 )
 
 logger = logging.getLogger(__name__)
@@ -481,6 +482,8 @@ app.include_router(families.router)
 # ─── BetterSocials (shared with cricket) ─────────────────────────────────────
 # Media library + brand kit; each route gates itself on the "socials" module.
 app.include_router(social_media.router)
+# The post designer's data imports, answered from football's own games.
+app.include_router(afl_social.router)
 app.include_router(afl_votes.router)
 # Unauthenticated by necessity — trust comes from the medal's link token, the
 # player's PIN and a signed cookie, not from a session (see its docstring).

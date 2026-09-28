@@ -52,6 +52,7 @@ const CommsCampaigns = lazy(() => import('../pages/admin/bettercomms/CommsCampai
 const CommsContacts = lazy(() => import('../pages/admin/bettercomms/CommsContacts'))
 const CommsTemplates = lazy(() => import('../pages/admin/bettercomms/CommsTemplates'))
 const CommsSettings = lazy(() => import('../pages/admin/bettercomms/CommsSettings'))
+const AdminSocialPost = lazy(() => import('../pages/admin/AdminSocialPost'))
 
 const P = (el, props = {}) => <ProtectedRoute {...props}>{el}</ProtectedRoute>
 const CM = screen => P(<ClubManagerApp initialScreen={screen} />)
@@ -115,5 +116,14 @@ export function betterAdminRoutes() {
     <Route key="c-t" path="/admin/comms/templates" element={P(<CommsTemplates />, { requireModule: 'comms' })} />,
     <Route key="c-set" path="/admin/comms/settings" element={P(<CommsSettings />, { requireModule: 'comms' })} />,
     <Route key="c-id" path="/admin/comms/:id" element={P(<CommsCampaigns />, { requireModule: 'comms' })} />,
+  ]
+}
+
+// BetterSocials is the post designer itself: it draws its own full-screen shell,
+// so it has no module sidebar and no hub page of its own in the football app.
+export function betterSocialsRoutes() {
+  return [
+    <Route key="sp" path="/admin/social-post" element={P(<AdminSocialPost />, { requireModule: 'socials' })} />,
+    <Route key="bs" path="/admin/bettersocials" element={<Navigate to="/admin/social-post" replace />} />,
   ]
 }

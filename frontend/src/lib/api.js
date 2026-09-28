@@ -6,6 +6,18 @@ const BASE = import.meta.env.VITE_API_URL || (import.meta.env.BASE_URL + 'api')
 // Shown while the backend is briefly unavailable (e.g. during a deploy, when
 // nginx can't reach the backend and would otherwise surface a raw
 // "Bad Gateway"/"Service Unavailable"). Keep this friendly and reassuring.
+// A few endpoints hand back an absolute "/api/..." URL for the browser to load
+// (a media-library image, say). That is right for cricket, served at the root,
+// and wrong for a silo built under a prefix: the football app lives at /afl/,
+// where "/api" is the cricket backend. This re-roots such a URL on the build's
+// own API base, and leaves anything else (an https URL, a data: URL, an already
+// prefixed path) exactly as it was. On cricket BASE is "/api", so it is a no-op.
+export function rebaseApiUrl(url) {
+  if (typeof url !== 'string' || !url.startsWith('/api/') || BASE === '/api') return url
+  return `${BASE}${url.slice(4)}`
+}
+const rebaseAsset = a => (a && typeof a === 'object' ? { ...a, url: rebaseApiUrl(a.url) } : a)
+
 const BACKEND_DOWN_MESSAGE = 'System refreshing. Please wait a moment…'
 
 // A gateway/unavailable status means the backend is down, not a real app error.
@@ -183,7 +195,8 @@ export const api = {
   // BetterSocials — media library. `kind` is undefined for the ordinary Photos
   // pool, or 'background' for the small reusable post-background library —
   // same table, same upload endpoint, just tagged differently on the way in.
-  listSocialMedia: (kind) => request(`/admin/social/media${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`),
+  listSocialMedia: (kind) => request(`/admin/social/media${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`)
+    .then(rows => (Array.isArray(rows) ? rows.map(rebaseAsset) : rows)),
   uploadSocialMedia: (file, kind) => {
     const form = new FormData()
     form.append('file', file)
@@ -194,7 +207,7 @@ export const api = {
           const e = await r.json().catch(() => ({}))
           throw new Error(typeof e.detail === 'string' ? e.detail : `HTTP ${r.status}`)
         }
-        return r.json()
+        return r.json().then(rebaseAsset)
       })
   },
   deleteSocialMedia: (id) => request(`/admin/social/media/${id}`, { method: 'DELETE' }),

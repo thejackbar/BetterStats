@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import { clearAttribution } from '../lib/visitor'
 import { coreLiveFromPlan } from '../lib/modules'
+import { IS_AFL } from '../lib/sport'
 
 // Base-path aware API root ('/api' for cricket; '/afl/api' under a silo's
 // path prefix). Mirrors lib/api.js's BASE.
@@ -46,7 +47,9 @@ export function AuthProvider({ children }) {
   useEffect(() => { fetchMe() }, [fetchMe])
 
   useEffect(() => {
-    if (!user || user.role === 'super_admin' || !user.club_id) { setAccountPlan(null); return }
+    // BetterFootball has no per-module account plan endpoint; its Core gate
+    // is the /auth/me payload alone.
+    if (IS_AFL || !user || user.role === 'super_admin' || !user.club_id) { setAccountPlan(null); return }
     let alive = true
     fetch(API_BASE + '/club-admin/account/plan', { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : null))

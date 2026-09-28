@@ -11,6 +11,7 @@ import { aspectOf, pick, share, grow } from './postAspect'
 import { LayerRoot } from './postLayers'
 import brandBlack from '../assets/bettercricket-black.svg'
 import brandWhite from '../assets/bettercricket-white.svg'
+import { IS_AFL, PLATFORM_NAME } from '../lib/sport'
 
 // The BetterCricket credit mark used in every template's footer — the real
 // brand logo (black on a light footer, white on a dark one), no wordmark text.
@@ -25,7 +26,17 @@ function _isLight(hex) {
 export function CreditMark({ ink = '#ffffff', h = 46, style = {} }) {
   // `ink` is the footer's text colour, which already contrasts the background —
   // so the logo matches it: a light ink (dark post) → white logo, dark ink → black.
-  return <img src={_isLight(ink) ? brandWhite : brandBlack} alt="BetterCricket" style={{ height: h, width: 'auto', display: 'block', opacity: 0.92, ...style }} />
+  if (IS_AFL) {
+    // There is no BetterFootball wordmark file, so the football build draws the
+    // name in type at the same height the logo would take, in the footer's ink.
+    return (
+      <span style={{ display: 'block', fontFamily: "'Barlow Condensed', 'Arial Narrow', sans-serif", fontWeight: 800,
+        fontSize: Math.round(h * 0.5), lineHeight: 1, letterSpacing: 0.5, color: ink, opacity: 0.92, whiteSpace: 'nowrap', ...style }}>
+        Better<span style={{ fontWeight: 500 }}>Football</span>
+      </span>
+    )
+  }
+  return <img src={_isLight(ink) ? brandWhite : brandBlack} alt={PLATFORM_NAME} style={{ height: h, width: 'auto', display: 'block', opacity: 0.92, ...style }} />
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1796,7 +1807,7 @@ export function C3_ManOfMatch({ width = 1080, height = 1080, motm, team, opponen
       <div style={{ position: 'absolute', right: 60, top: 90, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 320, lineHeight: 0.8, color: palette.accent, opacity: 0.18, letterSpacing: -8, userSelect: 'none' }}>★</div>
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '32px 40px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', zIndex: 3 }}>
         <div>
-          <div style={{ display: 'inline-block', padding: '6px 14px', background: palette.accent, color: palette.primary, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 18, letterSpacing: 3 }}>★ MAN OF THE MATCH</div>
+          <div style={{ display: 'inline-block', padding: '6px 14px', background: palette.accent, color: palette.primary, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 18, letterSpacing: 3 }}>{IS_AFL ? '★ BEST ON GROUND' : '★ MAN OF THE MATCH'}</div>
           <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 32, letterSpacing: 1.5, marginTop: 14, color: palette.ink }}>{team.name} <span style={{ color: palette.accent }}>v</span> {opponent.name}</div>
           <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 1.5, color: palette.ink, opacity: 0.7, marginTop: 6 }}>{match.competition} · {match.round} · {match.date}</div>
         </div>
