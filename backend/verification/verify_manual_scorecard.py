@@ -264,9 +264,16 @@ async def main() -> int:
         check("each innings names the side that batted",
               totals[1].get("batting_team") == OPP_TEAM and totals[2].get("batting_team") == OUR_TEAM,
               str({k: v.get("batting_team") for k, v in totals.items()}))
+        # The card records the opposition's FULL total (118) plus its extras (9).
+        # `runs` means the BATTERS' runs and the frontend adds extras on top, so
+        # it is stored bat-only (118 − 9 = 109); asserting runs == 118 would be
+        # asserting the double-count the photo-path fix exists to avoid.
         check("the opposition total comes from the card, not from summing our rows",
-              totals[1]["runs"] == 118 and totals[1]["wickets"] == 10,
+              (totals[1]["runs"] or 0) + (totals[1]["extras"] or 0) == 118
+              and totals[1]["wickets"] == 10,
               str(totals[1]))
+        check("the opposition runs are stored bat-only, extras not double-counted",
+              totals[1]["runs"] == 109, str(totals[1]))
         check("our own total sums our batters", totals[2]["runs"] == 95, str(totals[2]))
         check("extras are carried per innings",
               totals[1]["extras"] == 9 and totals[2]["extras"] == 7,
