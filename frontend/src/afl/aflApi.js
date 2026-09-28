@@ -199,6 +199,11 @@ export const aflApi = {
     body: JSON.stringify({ player_id: playerId, season_ids: seasonIds, new_name: newName }),
   }),
 
+  // Admin — Activity Log, Milestones, Matches (routers/afl/admin_extras.py)
+  adminActivityLog: (limit = 200) => request(`/club-admin/activity-log${qs({ limit })}`),
+  adminMilestones: (days = 60) => request(`/club-admin/milestones${qs({ days })}`),
+  adminListGames: (params) => request(`/club-admin/games${qs(params)}`),
+
   // Admin — Seasons (list / rename / delete)
   adminListSeasons: () => request('/club-admin/seasons'),
   adminRenameSeason: (id, body) => request(`/club-admin/seasons/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),

@@ -12,6 +12,7 @@ import ClubSwitcher from './components/ClubSwitcher'
 
 const NAV = [
   { heading: 'Club Data' },
+  { to: '/admin/games', label: 'Matches' },
   { to: '/admin/players', label: 'Players' },
   { to: '/admin/players/import', label: 'Import Players' },
   { heading: 'Data Import' },
@@ -29,8 +30,10 @@ const NAV = [
   { heading: 'Records & Content' },
   { to: '/admin/award-definitions', label: 'Award Types' },
   { to: '/admin/awards', label: 'Awards' },
+  { to: '/admin/milestones', label: 'Milestones' },
   { to: '/admin/sponsors', label: 'Sponsors' },
   { heading: 'Account' },
+  { to: '/admin/activity', label: 'Activity Log' },
   { to: '/admin/users', label: 'Users' },
   { to: '/admin/settings', label: 'Settings' },
 ]

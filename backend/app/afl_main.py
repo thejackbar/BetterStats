@@ -55,6 +55,7 @@ from app.routers.afl import (
     public_votes as afl_public_votes,
     lineups as afl_lineups,
     honours as afl_honours,
+    admin_extras as afl_admin_extras,
 )
 
 logger = logging.getLogger(__name__)
@@ -429,6 +430,7 @@ app.include_router(afl_award_imports.router)
 app.include_router(afl_seasons_admin.router)
 app.include_router(afl_manual_entries.router)
 app.include_router(afl_lineups.router)
+app.include_router(afl_admin_extras.router)  # Activity Log, Milestones, Matches admin
 app.include_router(afl_votes.router)
 # Unauthenticated by necessity — trust comes from the medal's link token, the
 # player's PIN and a signed cookie, not from a session (see its docstring).

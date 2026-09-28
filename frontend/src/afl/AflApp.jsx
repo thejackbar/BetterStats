@@ -37,6 +37,9 @@ import AflAdminSettings from './pages/admin/AflAdminSettings'
 import AflAdminVotes from './pages/admin/AflAdminVotes'
 import AflAdminSuperUsers from './pages/admin/AflAdminSuperUsers'
 import AflAdminSuperClubs from './pages/admin/AflAdminSuperClubs'
+import AflAdminActivity from './pages/admin/AflAdminActivity'
+import AflAdminMilestones from './pages/admin/AflAdminMilestones'
+import AflAdminGames from './pages/admin/AflAdminGames'
 
 /**
  * BetterStats AFL — the bs-afl-frontend app tree, mounted by App.jsx when the
@@ -60,6 +63,9 @@ export default function AflApp() {
                 <Route path="/admin" element={<AflAdminLayout />}>
                   <Route index element={<AflAdminSync />} />
                   <Route path="players" element={<AflAdminPlayers />} />
+                  <Route path="games" element={<AflAdminGames />} />
+                  <Route path="milestones" element={<AflAdminMilestones />} />
+                  <Route path="activity" element={<AflAdminActivity />} />
                   <Route path="players/import" element={<AflAdminPlayerImport />} />
                   <Route path="import" element={<AflAdminImport />} />
                   <Route path="import-results" element={<AflAdminResultsImport />} />

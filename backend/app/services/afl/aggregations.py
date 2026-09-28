@@ -804,3 +804,76 @@ async def upcoming_milestones(db: AsyncSession, org_id: uuid.UUID, limit: int = 
 
     upcoming.sort(key=lambda x: x["score"], reverse=True)
     return upcoming[:limit]
+
+
+async def recently_reached_milestones(db: AsyncSession, org_id: uuid.UUID,
+                                      days: int = 60) -> list[dict]:
+    """Milestones crossed by games played in the last ``days`` days.
+
+    A milestone is a lifetime tally, so "reached" is measured on the whole
+    career (synced + imported + manual, the same combined figure the in-reach
+    list and the profile use), and the crossing is found by taking away what the
+    player did in the window. A threshold between the two figures was reached
+    inside it. Only synced game lines carry a date, so an imported season or a
+    hand-entered correction can never read as a recent milestone — it counts
+    towards the career either side of the window, never inside it.
+    """
+    manual = manual_branch(["player_id", "season_id", "games", "goals"])
+    career_res = await db.execute(text(f"""
+        WITH combined AS (
+            SELECT s.player_id, s.games, s.goals
+            FROM afl_player_season_stats s
+            WHERE s.organisation_id = :org AND s.grade_id IS NULL
+            UNION ALL
+            SELECT i.player_id, i.games_played AS games, i.goals
+            FROM afl_imported_stats i
+            WHERE i.organisation_id = :org
+              AND NOT EXISTS (
+                SELECT 1 FROM afl_player_season_stats s2
+                WHERE s2.player_id = i.player_id AND s2.season_id = i.season_id
+                  AND s2.grade_id IS NULL AND s2.games > 0
+              )
+            UNION ALL
+            SELECT m.player_id, m.games, m.goals FROM ({manual}) m
+        )
+        SELECT p.id AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+               COALESCE(SUM(c.games), 0) AS games, COALESCE(SUM(c.goals), 0) AS goals
+        FROM players p JOIN combined c ON c.player_id = p.id
+        WHERE p.organisation_id = :org
+        GROUP BY p.id, p.name, p.display_name_override
+    """), {"org": str(org_id)})
+    career = {str(r.player_id): dict(r._mapping) for r in career_res}
+
+    # Only OUR side's lines: the opposition's team list sits on the same game.
+    recent_res = await db.execute(text("""
+        SELECT l.player_id, COUNT(DISTINCT l.game_id) AS games,
+               COALESCE(SUM(l.goals), 0) AS goals, MAX(g.played_at) AS last_played
+        FROM afl_player_game_lines l
+        JOIN games g ON g.id = l.game_id
+        JOIN afl_game_details d ON d.game_id = g.id
+        JOIN players p ON p.id = l.player_id AND p.organisation_id = :org
+        WHERE l.side = d.our_side
+          AND d.status = 'FINAL'
+          AND g.played_at >= NOW() - (:days * INTERVAL '1 day')
+        GROUP BY l.player_id
+    """), {"org": str(org_id), "days": days})
+
+    out = []
+    for r in recent_res:
+        pid = str(r.player_id)
+        c = career.get(pid)
+        if not c:
+            continue
+        for stat in ("games", "goals"):
+            now = int(c[stat] or 0)
+            before = now - int(getattr(r, stat) or 0)
+            target = milestone_rules.next_threshold(stat, before)
+            while target is not None and target <= now:
+                out.append({
+                    "player_id": pid, "name": c["name"], "type": stat,
+                    "target": target, "current": now,
+                    "reached_by": r.last_played.isoformat() if r.last_played else None,
+                })
+                target = milestone_rules.next_threshold(stat, target)
+    out.sort(key=lambda x: (x["reached_by"] or ""), reverse=True)
+    return out
