@@ -1,9 +1,12 @@
+import { Suspense } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from '../contexts/AuthContext'
 import { ThemeProvider } from '../contexts/ThemeContext'
 import { ToastProvider } from '../contexts/ToastContext'
 import ErrorBoundary from '../components/ErrorBoundary'
 import ScrollToTop from '../components/ScrollToTop'
+import LoadingSpinner from '../components/LoadingSpinner'
+import { betterAdminRoutes } from './sharedModuleRoutes'
 import ClubLayout from './ClubLayout'
 import Dashboard from './pages/Dashboard'
 import Players from './pages/Players'
@@ -55,6 +58,7 @@ export default function AflApp() {
           <AuthProvider>
             <ScrollToTop />
             <div className="min-h-screen bg-pb-bg">
+              <Suspense fallback={<div className="pt-24 flex justify-center"><LoadingSpinner /></div>}>
               <Routes>
                 <Route path="/login" element={<AflLogin />} />
                 {/* Standalone, outside the club layout: a voter follows this
@@ -83,6 +87,9 @@ export default function AflApp() {
                   <Route path="super/users" element={<AflAdminSuperUsers />} />
                   <Route path="super/clubs" element={<AflAdminSuperClubs />} />
                 </Route>
+                {/* BetterAdmin — the shared cricket screens, beside (not inside)
+                    the football admin layout. */}
+                {betterAdminRoutes()}
                 <Route path="/:clubSlug" element={<ClubLayout />}>
                   <Route index element={<Dashboard />} />
                   <Route path="players" element={<Players />} />
@@ -99,6 +106,7 @@ export default function AflApp() {
                 <Route path="/" element={<Navigate to="/login" replace />} />
                 <Route path="*" element={<Navigate to="/login" replace />} />
               </Routes>
+              </Suspense>
             </div>
           </AuthProvider>
         </ToastProvider>
