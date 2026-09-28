@@ -30,6 +30,16 @@ from app.config.settings import settings
 from app.models.db import Base, engine
 import app.models.afl  # noqa: F401 — register the AFL tables on the shared Base
 from app.routers import auth, images
+# Shared modules, one implementation for both sports (see
+# services/afl/cricket_schema_mirror.py for how their schema reaches this DB).
+from app.routers import (
+    fees, comms, public_comms, merch, public_merch_store, public_square, public_xero,
+    crm, directory, roster, committee, volunteers, qualifications, events, assets,
+    club_diary, roles_activities, role_programs, facility_requests, families,
+    stripe_connect, public_stripe_connect, social_media,
+)
+from app.auth.modules import require_module
+from fastapi import Depends
 from app.routers.afl import (
     clubs as afl_clubs,
     organisations as afl_organisations,
@@ -124,6 +134,13 @@ async def lifespan(app: FastAPI):
             logger.info("pgcrypto extension not created (fine on Postgres 13+)")
         await conn.run_sync(Base.metadata.create_all)
         await _sync_missing_columns(conn)
+        # BetterAdmin and BetterSocials are the cricket implementation mounted
+        # here, and much of their schema lives only in cricket's raw-SQL
+        # lifespan. Replay its additive DDL so every shared router finds its
+        # tables; the football-only DDL below still runs after it.
+        from app.services.afl import cricket_schema_mirror
+        mirrored = await cricket_schema_mirror.apply(conn)
+        logger.info("afl_main: cricket schema mirror %s", mirrored)
 
         # Raw-SQL tables the shared code writes that live outside the ORM
         # metadata (created by cricket's lifespan there; mirrored here).
@@ -431,6 +448,39 @@ app.include_router(afl_seasons_admin.router)
 app.include_router(afl_manual_entries.router)
 app.include_router(afl_lineups.router)
 app.include_router(afl_admin_extras.router)  # Activity Log, Milestones, Matches admin
+
+# ─── BetterAdmin (shared with cricket) ───────────────────────────────────────
+# Gated exactly as cricket gates them. A football club holds these through
+# module_overrides, switched on per club from Better HQ → All Clubs.
+app.include_router(fees.router, dependencies=[Depends(require_module("fees"))])
+app.include_router(comms.router, dependencies=[Depends(require_module("comms"))])
+app.include_router(merch.router, dependencies=[Depends(require_module("merch"))])
+app.include_router(crm.router, dependencies=[Depends(require_module("crm"))])
+app.include_router(public_merch_store.router)
+app.include_router(public_comms.router)
+app.include_router(public_square.router)
+app.include_router(public_xero.router)
+app.include_router(stripe_connect.router)
+app.include_router(public_stripe_connect.router)
+# Core club-management screens (capability-gated inside each router, the same
+# as cricket, where they are not a paid module either).
+app.include_router(directory.router)
+app.include_router(roster.router)
+app.include_router(committee.router)
+app.include_router(volunteers.router)
+app.include_router(qualifications.router)
+app.include_router(events.router)
+app.include_router(events.public_router)
+app.include_router(assets.router)
+app.include_router(club_diary.router)
+app.include_router(roles_activities.router)
+app.include_router(role_programs.router)
+app.include_router(facility_requests.router)
+app.include_router(families.router)
+
+# ─── BetterSocials (shared with cricket) ─────────────────────────────────────
+# Media library + brand kit; each route gates itself on the "socials" module.
+app.include_router(social_media.router)
 app.include_router(afl_votes.router)
 # Unauthenticated by necessity — trust comes from the medal's link token, the
 # player's PIN and a signed cookie, not from a session (see its docstring).

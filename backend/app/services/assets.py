@@ -104,7 +104,7 @@ async def delete_facility(session: AsyncSession, f: Facility) -> None:
 # ─── Facility bookings ────────────────────────────────────────────────────────
 
 async def list_bookings(session: AsyncSession, org_id, *, facility_id=None, upcoming_only: bool = False) -> list[FacilityBooking]:
-    from datetime import date, timedeltatime, timezone
+    from datetime import datetime, timezone
     stmt = select(FacilityBooking).where(FacilityBooking.organisation_id == org_id)
     if facility_id:
         stmt = stmt.where(FacilityBooking.facility_id == facility_id)
