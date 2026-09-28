@@ -101,7 +101,7 @@ async def run(target: str, apply: bool) -> int:
         print(f"No club found for {target!r}")
         return 1
 
-    total_added = total_removed = 0
+    total_added = total_removed = total_dated = 0
     for club_id, name, slug in club_refs:
         async with async_session_maker() as session:
             rows = (await session.execute(
@@ -113,16 +113,19 @@ async def run(target: str, apply: bool) -> int:
             report = await _compute_milestones(
                 session, list(names), club_id, reconcile=True, dry_run=True)
             added, removed = report["added"], report["removed"]
+            dated = set(report.get("dated") or [])
             ev = await _evidence(session, club_id, removed)
         if apply and (added or removed):
             async with async_session_maker() as session:
                 report = await _compute_milestones(
                     session, list(names), club_id, reconcile=True)
             added, removed = report["added"], report["removed"]
+            dated = set(report.get("dated") or [])
         if not added and not removed:
             continue
         total_added += len(added)
         total_removed += len(removed)
+        total_dated += len(dated)
         print(f"\n{name} ({slug})")
         for pid, mt, value in sorted(removed, key=lambda x: (names.get(x[0], ""), x[1], x[2])):
             recorded, prof_v, whole_v = ev.get((pid, mt, value), (None, 0, 0))
@@ -134,16 +137,23 @@ async def run(target: str, apply: bool) -> int:
             print("  Removals by the date they were recorded: "
                   + ", ".join(f"{d}: {n}" for d, n in sorted(when.items(), key=lambda x: str(x[0]))))
         for pid, mt, value in sorted(added, key=lambda x: (names.get(x[0], ""), x[1], x[2])):
-            print(f"  ADD     {names.get(pid, pid):<32} {value:>6,} {mt}")
+            mark = "  dated today, will be announced" if (pid, mt, value) in dated else ""
+            print(f"  ADD     {names.get(pid, pid):<32} {value:>6,} {mt:<8}{mark}")
+        if added:
+            print(f"  Additions dated today (announced as just reached): {len(dated)} of {len(added)}")
 
     verb = "" if apply else "would be "
-    print(f"\n{total_removed} milestone(s) {verb}removed, {total_added} {verb}added.")
+    print(f"\n{total_removed} milestone(s) {verb}removed, {total_added} {verb}added"
+          f" ({total_dated} dated today, the rest undated).")
     if not apply:
         print("DRY RUN — nothing changed. Re-run with --apply to write it.")
     return 0
 
 
 def main() -> None:
+    # Line-buffered, so a run redirected to a file can be followed with
+    # `tail -f` rather than sitting empty until the last club is done.
+    sys.stdout.reconfigure(line_buffering=True)
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     if not args:
         print(__doc__)

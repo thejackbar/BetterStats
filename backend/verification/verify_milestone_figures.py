@@ -38,7 +38,7 @@ import inspect
 import os
 import sys
 import uuid
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -91,6 +91,7 @@ P_HIND = uuid.uuid4()      # 2,271 senior + 711 junior = 2,982
 P_JUNIOR = uuid.uuid4()    # junior-only, 480 runs
 P_GIRL = uuid.uuid4()      # Girls U16 100 + Women's 395 = 495
 P_DORMANT = uuid.uuid4()   # last played 2015
+P_QUIET = uuid.uuid4()     # 1,100 runs this season, last game months ago
 EVERYONE = [P_HETEL, P_GODFREY, P_RITCHIE, P_HIND, P_JUNIOR, P_GIRL, P_DORMANT]
 
 
@@ -139,7 +140,7 @@ async def seed() -> None:
         for pid, name in ((P_HETEL, "Hetel, S"), (P_GODFREY, "Godfrey, A"),
                           (P_RITCHIE, "Ritchie, P"), (P_HIND, "Hind, J"),
                           (P_JUNIOR, "Young, K"), (P_GIRL, "Smith, G"),
-                          (P_DORMANT, "Gone, D")):
+                          (P_DORMANT, "Gone, D"), (P_QUIET, "Quiet, Q")):
             await ex("INSERT INTO players (id, organisation_id, name, is_player, status) "
                      "VALUES (:i, :o, :n, true, 'active')", i=pid, o=ORG, n=name)
 
@@ -158,6 +159,7 @@ async def seed() -> None:
         await pss(P_HIND, S_NOW, matches=20, runs=2982, batting_innings=20)
         await pss(P_JUNIOR, S_NOW, matches=8, runs=480, batting_innings=8)
         await pss(P_GIRL, S_NOW, matches=10, runs=495, batting_innings=10)
+        await pss(P_QUIET, S_NOW, matches=12, runs=1100, batting_innings=12)
         await pss(P_DORMANT, S_OLD, matches=40, runs=499, batting_innings=40)
 
         # Synced scorecards for this season, one game per grade.
@@ -167,7 +169,11 @@ async def seed() -> None:
             games[gid] = g
             await ex("INSERT INTO games (id, grade_id, played_at, home_team, away_team) "
                      "VALUES (:i, :g, :d, 'Us', 'Them')",
-                     i=g, g=gid, d=date(YEAR, 1, 10))
+                     i=g, g=gid,
+                     # The senior game was played last week, so a threshold it
+                     # takes a player past is JUST reached; the others months ago.
+                     d=(date.today() - timedelta(days=5) if gid == GR_SENIOR
+                        else date.today() - timedelta(days=200)))
 
         async def bat(pid, gid, runs, inn=1):
             await ex("INSERT INTO batting_innings (game_id, player_id, innings_number, runs, "
@@ -191,6 +197,8 @@ async def seed() -> None:
         for pid in (P_GODFREY, P_RITCHIE):
             await ex("INSERT INTO game_appearances (game_id, player_id) VALUES (:g, :p) "
                      "ON CONFLICT DO NOTHING", g=games[GR_SENIOR], p=pid)
+        await ex("INSERT INTO game_appearances (game_id, player_id) VALUES (:g, :p) "
+                 "ON CONFLICT DO NOTHING", g=games[GR_WOMENS], p=P_QUIET)
 
         # One imported (manual) match in 2015 — the `manual_game` branch.
         mg = uuid.uuid4()
@@ -400,9 +408,31 @@ async def main() -> None:
               f"milestone:{P_HETEL}:runs:5000" not in keys, str(sorted(keys)))
         check("the one dated today is",
               f"milestone:{P_HIND}:runs:2000" in keys, str(sorted(keys)))
+        # Crossed THIS season, but the player has not played for months (the
+        # club's newest season row is last summer's, as it is all off-season).
+        # "Before this season" says new; it is not, and must not be announced.
+        async with Session() as s:
+            q = await _compute_milestones(s, [P_QUIET], ORG, reconcile=True)
+        async with Session() as s:
+            qd = {(str(p), t, v): d for p, t, v, d in (await s.execute(text(
+                "SELECT player_id, milestone_type, milestone_value, achieved_at FROM milestones "
+                "WHERE player_id = :p"), {"p": P_QUIET})).all()}
+        check("a threshold crossed this season by a player who has not played for months is added",
+              (str(P_QUIET), "runs", 1000) in qd, str(q))
+        check("…undated, because he has not played inside the notification window",
+              qd.get((str(P_QUIET), "runs", 1000), "missing") is None,
+              str(qd.get((str(P_QUIET), "runs", 1000), "missing")))
+        check("…and the writer reports none of his additions as dated",
+              not (q.get("dated") or []), str(q.get("dated")))
+        check("the writer reports Hind's 2,000 as dated today",
+              (str(P_HIND), "runs", 2000) in (rep.get("dated") or []), str(rep.get("dated")))
+        async with Session() as s:
+            ach_q = await _ns._src_milestone_achieved(s, ORG, {})
+        check("…and his 1,000 runs is not announced",
+              f"milestone:{P_QUIET}:runs:1000" not in {i["dedupe_key"] for i in ach_q})
         async with Session() as s:
             again = await _compute_milestones(s, EVERYONE, ORG, reconcile=True)
-        check("a second run changes nothing", again == {"added": [], "removed": []}, str(again))
+        check("a second run changes nothing", (again["added"], again["removed"]) == ([], []), str(again))
         async with Session() as s:
             await s.execute(text("INSERT INTO milestones (player_id, milestone_type, milestone_value, "
                                  "achieved_at) VALUES (:p, 'wickets', 500, :d)"),
@@ -446,7 +476,7 @@ async def main() -> None:
               rep2["removed"] == [(str(P_GODFREY), "wickets", 500)], str(rep2["removed"]))
         async with Session() as s:
             again2 = await _compute_milestones(s, EVERYONE, ORG, reconcile=True)
-        check("a second run changes nothing", again2 == {"added": [], "removed": []}, str(again2))
+        check("a second run changes nothing", (again2["added"], again2["removed"]) == ([], []), str(again2))
 
     print("\n── wiring ──")
     src = Path("app/services/sync.py").read_text()
