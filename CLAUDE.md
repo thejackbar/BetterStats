@@ -9431,6 +9431,72 @@ same source. Full architecture + product decisions:
   field whiteboard — FF/HF/C/HB/FB + Followers, 12–18 on field, up to 20
   bench); then the other modules, each with an AFL review before enabling.
 
+## BetterFootball runs the BetterStats admin, BetterAdmin and BetterSocials (v9.94.0 / v9.95.0, Sep 2026)
+
+Asked for in two steps: port BetterSocials and BetterAdmin to the football app
+and fill the BetterStats admin gaps, then "port across the remaining BetterStats
+Admin gaps and push everything to main".
+
+- **THE CRICKET ROUTERS ARE MOUNTED, NOT COPIED.** BetterAdmin (fees, comms,
+  merch, CRM, directory, roster, committee, events, facilities, diary) and
+  BetterSocials run on `afl_main.py` as cricket's own routers.
+  `services/afl/cricket_schema_mirror.apply` replays cricket's additive raw-SQL
+  DDL into the football database so those routers find their tables; football's
+  own DDL runs after it. A per-club module switch decides which a club gets.
+- **WHERE A SHARED ROUTE WOULD READ CRICKET DATA, A FOOTBALL ONE READS FOOTBALL
+  DATA.** BetterSocials pulls fixtures, results, best on ground and team lists
+  from `afl_*` tables and scores the football way (12.8 (80), margins in
+  points); posts that only mean something for cricket are not offered. BetterFees
+  counts a football game from `afl_player_game_lines` (our side only, per
+  `afl_game_details.our_side`) because nothing on football writes
+  `game_appearances`; the helper keys on that table EXISTING, so cricket's
+  recompute is byte-for-byte what it was. The football sync runs the recompute
+  after its rollup, the step cricket's scheduler takes.
+- **FOOTBALL SERVES THE SAME PATHS CRICKET'S ADMIN CALLS**, which is what lets a
+  shared component run on either: `/admin/competitions*`,
+  `/club-admin/seasons/merges*`, the settings PATCH. Cricket route bodies are
+  reused by importing them lazily inside a football wrapper and calling them with
+  explicit keyword dependencies.
+- **A FOOTBALL SEASON IS ONE COMPETITION'S SEASON** ("VAFA 2026"), so one year
+  can arrive as two rows. Season merges reuse cricket's `season_aliases`, and
+  every football filter expands a picked season to its merge group with
+  `services/afl/season_groups.season_group`, bound as `= ANY(:season)`. The sync
+  no longer overwrites an existing season's name.
+- **COMPETITIONS ARE SEEDED FROM THE SEASON NAME, NOT AN ASSOCIATION.** Cricket
+  seeds one per CA association; PlayHQ football carries no association but its
+  season already names the competition, so `services/afl/competitions` strips the
+  year ("VAFA 2026" -> "VAFA"). `CompetitionManager` is now a shared component
+  (`components/admin/CompetitionManager.jsx`) both sports mount; football answers
+  `/admin/competitions/grouping` with nothing to do. **A picked competition is an
+  INCLUSION like a picked grade**: it replaces the grade-type default rather than
+  stacking on it, and an id that is not this club's fails closed to nothing.
+  `create_all` gives `club_competitions.id` no default, so the football lifespan
+  sets `gen_random_uuid()` before running `competition_ddl`.
+- **STATS BY GRADE ON FOOTBALL** (`services/afl/grade_scope.py`) sums the per-grade
+  season rows it keeps when a category is left out, and only when nothing is
+  picked. `stats_left_out` on the club payload names only categories the club
+  actually fields, and the public note disappears the moment a grade or
+  competition is picked.
+- **Player profile fields**: date of birth (admin only, never public), jumper
+  number (text, "07" kept), positions (FB..UTIL, public only with
+  `public_show_role`) and an action photo. **Settings**: draft mode behind a
+  4-digit PIN (the shared `ClubPinGate`, a 423 from `/clubs/{slug}`), typography
+  (`settingsKit.jsx`, shared with cricket), primary admin transfer. The trial-ended
+  unpause queue was NOT ported; it is a Super Admin sales flow.
+- **A FOOTBALL URL IS API-RELATIVE.** Images are stored as `images/...` and drawn
+  through `aflApi.mediaUrl`; a cricket `/api/...` URL (a font, a logo from a shared
+  helper) must go through `rebaseApiUrl` or it resolves against the cricket API.
+- **Verified against a real Postgres** through the real AFL boot path and HTTP
+  stack (`backend/verification/verify_afl_*.py`: competitions 37, fee match days 8,
+  seasons 21, settings 41, player profile 21, admin extras 28, social 27, shared
+  modules 28, manual entries 75), each **with a control run** that reports rather
+  than crashes, and **driven in Chromium** against the football production build
+  (`frontend/verification/verify_afl_*_browser.mjs`: admin gaps 33, BetterAdmin
+  132, socials 23, admin edits 20).
+- **NOTICED, NOT BUILT**: the Directory's squad filter reads BetterSelect `teams`,
+  which football does not have, so it simply does not draw there. Milestones are
+  not scoped by the grade-type default (career facts, as on cricket).
+
 ## Password-protected "Draft" pages + trial-ended unpause requests (v9.0.0, Aug 2026)
 
 A third public-page state alongside `is_active`'s Active/Inactive: the page exists
