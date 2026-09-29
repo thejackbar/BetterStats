@@ -88,6 +88,9 @@ function ModuleTile({ mod, entitled, planRow, pendingKind, coreLive, canSubscrib
   // a module that's already been trialled (or is mid-cancellation) has
   // nothing to offer here, so showing the button would just fail silently.
   const trialEligible = !planRow || planRow.trial_eligible
+  // An add-on's trial is held back while BetterStats itself isn't live — it would
+  // do nothing and still use the trial up — so say why instead of just hiding it.
+  const needsCoreFirst = planRow?.trial_blocked_reason === 'core_not_live'
   return (
     <div className="pb-card p-5 opacity-75" style={{ ...brandVars, borderStyle: 'dashed' }}>
       <div className="flex items-center justify-between gap-4">
@@ -136,6 +139,13 @@ function ModuleTile({ mod, entitled, planRow, pendingKind, coreLive, canSubscrib
           </>
         )}
       </div>
+      {needsCoreFirst && !pendingKind && (
+        <p className="font-mono text-[10px] text-pb-faint mt-2">
+          {planRow.core_trial_eligible
+            ? 'Start your BetterStats trial first, then you can trial this module.'
+            : 'Subscribe to BetterStats first, then you can use this module.'}
+        </p>
+      )}
       {error && <p className="font-mono text-[10px] text-pb-red mt-2">{error}</p>}
     </div>
   )

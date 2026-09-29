@@ -3193,6 +3193,30 @@ def _validate_module(module_key: str) -> None:
         raise HTTPException(status_code=422, detail=f"Unknown module: {module_key}")
 
 
+def _core_needed_message(org, module_key: str, *, own_club: bool) -> str | None:
+    """Why an ADD-ON trial can't start right now, or None when it can.
+
+    Every add-on is switched off while BetterStats (Core) isn't live
+    (``org_entitled_modules``), so a trial started then would do nothing and would
+    still use up the club's one trial of that module. Core itself is never blocked
+    here. The message names the way out: a fresh Core trial when Core is still
+    eligible for one, else a Core subscription. ``own_club`` picks the wording for
+    the club's own admin versus a super admin acting on somebody else's club."""
+    from app.auth.modules import (
+        MODULE_CORE, BILLABLE_MODULE_NAMES, account_plan_status, org_core_live,
+    )
+    if module_key == MODULE_CORE or org_core_live(org):
+        return None
+    core = next((r for r in account_plan_status(org) if r["module"] == MODULE_CORE), None)
+    name = BILLABLE_MODULE_NAMES.get(module_key, module_key)
+    if core and core.get("trial_eligible"):
+        fix = "start a BetterStats trial" if own_club else "start a new BetterStats trial (or reset it first)"
+    else:
+        fix = "subscribe to BetterStats" if own_club else "restore BetterStats (subscribe, or Reset it to make it eligible for a new trial)"
+    return (f"{name} can't run until BetterStats is live, so its trial hasn't been started "
+            f"(it would use up the trial with nothing to show for it). First {fix}.")
+
+
 class TrialStart(BaseModel):
     # All optional: start defaults to now, end to start + days, days to the club's
     # Club General Settings default_trial_days.
@@ -3213,6 +3237,9 @@ async def start_module_trial(
     end = start + the club's default trial length unless overridden."""
     _validate_module(module_key)
     org = await _load_club_with_subs(db, club_id)
+    blocked = _core_needed_message(org, module_key, own_club=False)
+    if blocked:
+        raise HTTPException(status_code=409, detail=blocked)
     if body.days is not None and body.days <= 0:
         raise HTTPException(status_code=422, detail="days must be a positive integer")
     if body.start and body.end and body.end <= body.start:
@@ -3553,6 +3580,8 @@ async def start_own_module_trial(
 
     from app.auth.modules import account_plan_status
     row = next((r for r in account_plan_status(club) if r["module"] == module_key), None)
+    if row is not None and row.get("trial_blocked_reason") == "core_not_live":
+        raise HTTPException(status_code=409, detail=_core_needed_message(club, module_key, own_club=True))
     if row is None or not row["trial_eligible"]:
         raise HTTPException(status_code=409, detail="This module isn't eligible for a trial")
 
@@ -3886,6 +3915,9 @@ async def approve_module_request(
     if req.kind == "trial":
         if body.start and body.end and body.end <= body.start:
             raise HTTPException(status_code=422, detail="Trial end must be after the start")
+        blocked = _core_needed_message(org, req.module_key, own_club=False)
+        if blocked:
+            raise HTTPException(status_code=409, detail=blocked)
         from app.services import platform_settings as ps
         days = body.days or await ps.get_default_trial_days(db)
         subs = mod_subs.start_trial_billing(
