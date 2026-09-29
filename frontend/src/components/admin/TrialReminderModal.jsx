@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
-import { trialStatus } from '../../lib/trialStatus'
+import { trialStatus, moduleList } from '../../lib/trialStatus'
 
 /* An on-screen reminder that pops up as a club's trial winds down, so a
    trialling club doesn't have to know to go looking for the subscribe page.
@@ -133,10 +133,20 @@ export default function TrialReminderModal() {
         </h3>
 
         <p className="text-sm text-pb-dim leading-relaxed">
-          Your BetterCricket trial {whenPhrase}.{' '}
-          {expired
-            ? "Subscribe to restore full access to your club's stats and tools."
-            : 'Subscribe now to keep your access running without a break.'}
+          {status.paying ? (
+            <>
+              Your trial of {moduleList(status.names)} {whenPhrase}. Your subscription
+              carries on as it is; add {status.names.length === 1 ? 'it' : 'them'} to
+              your plan if you want to keep using {status.names.length === 1 ? 'it' : 'them'}.
+            </>
+          ) : (
+            <>
+              Your BetterCricket trial {whenPhrase}.{' '}
+              {expired
+                ? "Subscribe to restore full access to your club's stats and tools."
+                : 'Subscribe now to keep your access running without a break.'}
+            </>
+          )}
         </p>
 
         <button
@@ -144,7 +154,7 @@ export default function TrialReminderModal() {
           className="w-full rounded-lg py-3 text-white font-semibold text-sm shadow-sm"
           style={{ background: 'var(--pb-accent)' }}
         >
-          {expired ? 'Subscribe now' : 'Convert your trial'} &rarr;
+          {status.paying ? 'Add to plan' : expired ? 'Subscribe now' : 'Convert your trial'} &rarr;
         </button>
 
         <p className="text-xs text-pb-faint leading-relaxed">

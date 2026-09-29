@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
-import { trialStatus } from '../../lib/trialStatus'
+import { trialStatus, moduleList } from '../../lib/trialStatus'
 
 // A prominent trial-conversion bar. Rendered by AdminLayout and ModuleLayout
 // directly under the sticky chrome header (not at the very top of the page),
@@ -21,7 +21,7 @@ export default function TrialBanner() {
   const status = trialStatus(user)
   if (!status) return null
 
-  const { daysLeft, expired, subscribePath } = status
+  const { daysLeft, expired, subscribePath, paying, names } = status
 
   let whenPhrase
   if (daysLeft <= 0) whenPhrase = 'today'
@@ -32,7 +32,13 @@ export default function TrialBanner() {
   // module's own name — a club is trialling BetterCricket, and naming one
   // module while several are winding down reads as confusing. daysLeft is
   // still the soonest expiry, so the countdown is the earliest one to act on.
-  const explainer = expired ? (
+  // A club already paying for BetterStats (or anything else) keeps its stats
+  // whatever happens to a module trial, so it is told what the trial IS
+  // (named modules) and never warned about losing access. trialStatus() has
+  // already dropped its expired trials, so this only ever runs on live ones.
+  const explainer = paying ? (
+    <>Your trial of {moduleList(names)} ends {whenPhrase}. Add {names.length === 1 ? 'it' : 'them'} to your plan to keep using {names.length === 1 ? 'it' : 'them'}.</>
+  ) : expired ? (
     <>Your BetterCricket trial has ended. Subscribe now to restore full access to your club's stats and tools.</>
   ) : (
     <>Ready to keep going? Subscribe before your BetterCricket trial ends {whenPhrase} so you don't lose access.</>
@@ -70,7 +76,7 @@ export default function TrialBanner() {
           className="rounded-md px-4 py-1.5 font-semibold text-sm shadow-sm hover:opacity-90 shrink-0"
           style={{ background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }}
         >
-          Subscribe now
+          {paying ? 'Add to plan' : 'Subscribe now'}
         </button>
 
         <a
