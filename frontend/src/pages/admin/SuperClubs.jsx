@@ -1607,14 +1607,16 @@ export default function SuperClubs() {
                           const brand = moduleBrand(key).accent
                           return (
                             <div key={key} className="flex flex-wrap items-center gap-2 bg-pb-surface2/40 border pb-hairline rounded px-2.5 py-1.5">
-                              {/* Core is the base — it can't be removed; disable it via its
-                                  status (Cancelled / Paused), not by un-granting. Core's button is
-                                  permanently disabled, so dim only while busy (not for Core itself). */}
-                              <button type="button" disabled={busy || isCore}
-                                onClick={() => { if (isCore) return; granted ? removeModule(club.id, key) : grantModule(club.id, key) }}
+                              {/* Core can't be un-granted with the chip (disable it via its status —
+                                  Cancelled / Paused — or Reset), but once Reset has removed its row
+                                  the chip has to be able to grant it again: that IS how a fresh
+                                  BetterStats trial gets started. Locking it unconditionally left a
+                                  reset club with no way back in. */}
+                              <button type="button" disabled={busy || (isCore && granted)}
+                                onClick={() => { if (isCore && granted) return; granted ? removeModule(club.id, key) : grantModule(club.id, key) }}
                                 className={`font-mono text-[11px] px-2.5 py-1 rounded border transition-colors w-48 shrink-0 text-left whitespace-nowrap ${busy ? 'opacity-50' : ''} ${granted ? '' : 'border-pb-hairline text-pb-faint bg-pb-surface2'}`}
                                 style={granted ? { color: brand, borderColor: `color-mix(in srgb, ${brand} 50%, transparent)`, backgroundColor: `color-mix(in srgb, ${brand} 12%, transparent)` } : {}}
-                                title={isCore ? 'BetterStats is the base — set status to disable' : (granted ? 'Click to remove' : 'Click to grant')}>
+                                title={isCore && granted ? 'BetterStats is the base — set status to disable' : (granted ? 'Click to remove' : (isCore ? 'Click to start a BetterStats trial' : 'Click to start a trial'))}>
                                 {granted ? '✓ ' : '+ '}{tog.label}
                               </button>
                               {granted && (
