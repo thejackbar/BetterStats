@@ -86,6 +86,12 @@ DIR_YESNO_FIELDS = {"exported", "emailed", "opened", "clicked", "enquired"}
 # directions: pick Won to reach the clubs that bought, pick the other to reach
 # everyone else.
 DIR_DEAL_FIELDS = {"deal_won"}
+# Whether the contact's club has a marketing teaser snapshot, and what state it
+# is in (services/club_teaser.py). A contact-level rule like club_is: it reads the
+# contact's own marketing_club_id, so it needs no MarketingClub join and a contact
+# with no directory club simply has no snapshot.
+DIR_TEASER_FIELDS = {"teaser_snapshot"}
+TEASER_STATES = ("ok", "empty", "junior_only", "error", "none")
 # Naming a club or a person outright, rather than describing them. Both are
 # ORDINARY RULES and are ANDed with everything else like any other, so "is any
 # of" NARROWS the audience to those clubs/people — it does not add them on top
@@ -99,7 +105,7 @@ DIR_DEAL_FIELDS = {"deal_won"}
 DIR_PICK_FIELDS = {"club_is", "contact_is"}
 # Multi-value (the rule value is a list of keys; match = ANY).
 DIR_MULTI_FIELDS = {"is_trialing", "requested_trial", "had_demo", "visited_page",
-                    "primary_admin"}
+                    "primary_admin", "teaser_snapshot"}
 DIR_CLUB_FIELDS = {"club_state", "association", "country", "directory_status", "customer_status",
                    "is_subscriber", "trial_kind", "is_trialing", "requested_trial", "had_demo",
                    "visited_page", "primary_admin"} | DIR_DEAL_FIELDS
@@ -117,7 +123,7 @@ DIR_TRIAL_FIELDS = {"trial_status", "trial_days_left", "trial_days_since_expiry"
 # — mirrors the Club Directory's own engagement-score filter).
 DIR_METRIC_FIELDS = {"page_views", "distinct_visitors", "engagement_score"}
 DIRECTORY_FIELDS = (DIR_YESNO_FIELDS | DIR_CLUB_FIELDS | DIR_METRIC_FIELDS
-                    | DIR_TRIAL_FIELDS | DIR_PICK_FIELDS)
+                    | DIR_TRIAL_FIELDS | DIR_PICK_FIELDS | DIR_TEASER_FIELDS)
 # Directory fields that need the linked MarketingClub joined in (visited_page
 # correlates a usage_events row on marketing_clubs.utm_code; the trial/demo
 # fields read marketing_clubs columns; the metric fields read/join off it too).
@@ -263,6 +269,27 @@ def _primary_admin_clause(val):
         parts.append(and_(onboarded, ~has_admin))
     if "not_onboarded" in states:
         parts.append(MarketingClub.existing_org_id.is_(None))
+    return or_(*parts) if len(parts) > 1 else parts[0]
+
+
+def _teaser_clause(val):
+    """The contact's club has a teaser snapshot in any of the picked states.
+
+    ``none`` means no snapshot row at all. Unrecognised values are dropped, and
+    a selection with none left drops the rule, like the other multi-selects.
+    """
+    states = [s for s in _vocab_list(val) if s in TEASER_STATES]
+    if not states:
+        return None
+    from sqlalchemy import table as _table, column as _column
+    t = _table("club_teaser_snapshots", _column("marketing_club_id"), _column("status"))
+    real = [s for s in states if s != "none"]
+    parts = []
+    if real:
+        parts.append(exists().where(t.c.marketing_club_id == CommsContact.marketing_club_id,
+                                    t.c.status.in_(real)))
+    if "none" in states:
+        parts.append(~exists().where(t.c.marketing_club_id == CommsContact.marketing_club_id))
     return or_(*parts) if len(parts) > 1 else parts[0]
 
 
@@ -539,6 +566,8 @@ def _directory_condition(rule: dict, cust, visits=None, trials=None):
         return None
     if field == "primary_admin":
         return _primary_admin_clause(val)
+    if field == "teaser_snapshot":
+        return _teaser_clause(val)
     if field == "had_demo":
         states = [s for s in _as_list(val) if s in _DEMO_STATUSES]
         return MarketingClub.demo_status.in_(states) if states else None

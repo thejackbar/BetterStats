@@ -325,8 +325,31 @@ renderer and the match/lineup layer are NOT built yet.
   `trial_modules` (a club already in a sales trial has done a trial;
   `--include-trialists` overrides). Never-pulled first, then clubs with an
   emailable contact, then longest overdue.
-- **OUTBOUND TRAFFIC IS OFF UNTIL SOMEBODY SETS IT.** The nightly job (03:30
-  Perth) reads `club_teaser_nightly_limit` (General Settings key, unset = 0 =
+- **THE PULL RUNS BY DAY, NEVER OVERNIGHT (asked for directly).** Steady
+  traffic in working hours is less conspicuous than a burst at 3am, so the job
+  is `cron hour=8-21 minute=*/20` Perth (the id stays `nightly_club_teasers`,
+  the setting `club_teaser_nightly_limit` keeps its name and now means clubs
+  PER RUN). Small runs, so the directory fills gradually.
+- **WHO GETS A SNAPSHOT FOLLOWS THE DIRECTORY'S OWN TYPE FILTERS.**
+  `club_teaser.type_filtered_ids` reads `club_directory._filter_conditions`, so
+  "Juniors" means one thing on both screens. Default `DEFAULT_TYPE_MODES`
+  excludes junior, carnival, school, rep and cricket_au; the setting
+  `club_teaser_type_modes` overrides it (`{}` = no filtering), the script takes
+  `--type key=include|exclude` and `--no-type-filter`. Ids are resolved in
+  Python and bound as a uuid array. **A NULL test result counts as "does not
+  match"**: the Directory's own cricket_au exclude drops a club with no generic
+  email (NULL LIKE is NULL, and NOT NULL is NULL), which here would have removed
+  every club with a blank field, so each condition is coalesced.
+- **SEGMENTS KNOW WHICH CLUBS HAVE A SNAPSHOT.** Internal Segments has a
+  `teaser_snapshot` multi-select (ready / empty / junior_only / error / none),
+  a contact-level rule on `comms_contacts.marketing_club_id` like `club_is`
+  (no MarketingClub join, so a contact with no club reads as `none`). Directory
+  scope only, fails closed in a club build like every other directory field.
+- **`--sample N` IS THE FIRST LIVE CHECK**: N clubs one at a time with a line
+  each for status and CA calls; dry run unless `--apply`. Read `api_calls` off
+  it before scaling. `run_batch` returns a per-club `detail` list for this.
+- **OUTBOUND TRAFFIC IS OFF UNTIL SOMEBODY SETS IT.** The job (was: nightly at
+  03:30 Perth) reads `club_teaser_nightly_limit` (General Settings key, unset = 0 =
   off) and honours the same Stop switch as every other unattended crawl
   (`marketing_crawl_control`), asked between clubs. The initial fill of the
   directory is `python -m app.scripts.pull_club_teasers all --limit N --apply`

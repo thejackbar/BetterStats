@@ -383,6 +383,44 @@ async def main() -> None:
     async with Session() as s_:
         check("the limit is honoured", len(await ct.due_clubs(s_, 1)) == 1)
 
+    # ---------------- the Directory's type filters ----------------
+    junior = await mk("Northside Junior CC")
+    school = await mk("Hillcrest School Cricket")
+    carn = await mk("Echuca Carnival XI")
+    rep = await mk("Metro Representative Cricket")
+    plain = await mk("Plain Suburban CC")
+    async with Session() as s_:
+        tn = [c["name"] for c in await ct.due_clubs(s_, 100, type_modes=ct.DEFAULT_TYPE_MODES)]
+        no_filter = [c["name"] for c in await ct.due_clubs(s_, 100)]
+        only_jr = [c["name"] for c in await ct.due_clubs(s_, 100, type_modes={"junior": "include"})]
+        junk = [c["name"] for c in await ct.due_clubs(s_, 100, type_modes={"nonsense": "exclude", "junior": "bogus"})]
+    check("the default type filters leave out juniors, schools, carnivals and rep orgs",
+          not ({"Northside Junior CC", "Hillcrest School Cricket", "Echuca Carnival XI",
+                "Metro Representative Cricket"} & set(tn)) and "Plain Suburban CC" in tn, str(tn))
+    check("with no type filter they are all targets again",
+          {"Northside Junior CC", "Hillcrest School Cricket", "Plain Suburban CC"} <= set(no_filter))
+    check("include narrows to just that type", only_jr == ["Northside Junior CC"], str(only_jr))
+    check("unknown keys and modes are ignored, not treated as a filter", set(junk) == set(no_filter))
+    check("excluded clubs stay out under any filter", "Excluded CC" not in no_filter and "Excluded CC" not in tn)
+    dry_t = await ct.run_batch(100, session_maker=Session, api_factory=FakeAPI, dry_run=True,
+                               type_modes=ct.DEFAULT_TYPE_MODES)
+    check("a dry run reports per-club detail for the sample", len(dry_t["detail"]) == dry_t["due"]
+          and all("name" in d for d in dry_t["detail"]))
+    async with Session() as s_:
+        await s_.execute(text("DELETE FROM marketing_clubs WHERE id = ANY(CAST(:ids AS uuid[]))"),
+                         {"ids": [c["id"] for c in (junior, school, carn, rep, plain)]})
+        await s_.commit()
+
+    # ---------------- the segment field ----------------
+    from app.services import comms_segments as cs
+    check("the segment field exists and is directory-only",
+          "teaser_snapshot" in cs.DIRECTORY_FIELDS and "teaser_snapshot" in cs.DIR_MULTI_FIELDS)
+    check("an all-unknown selection drops the rule rather than widening it silently",
+          cs._teaser_clause(["bogus"]) is None and cs._teaser_clause([]) is None)
+    sql = str(cs._teaser_clause(["OK", "none"]).compile(compile_kwargs={"literal_binds": True}))
+    check("states are matched case-insensitively and 'none' means no snapshot row",
+          "club_teaser_snapshots" in sql and "NOT (EXISTS" in sql.upper().replace("  ", " "), sql)
+
     # ---------------- the batch ----------------
     worlds = {}
     def factory():
@@ -419,8 +457,13 @@ async def main() -> None:
 
     # ---------------- wiring ----------------
     import app.jobs.scheduler as sched
-    check("the nightly job exists and is registered", hasattr(sched, "pull_club_teasers")
-          and "nightly_club_teasers" in Path(sched.__file__).read_text())
+    sched_src = Path(sched.__file__).read_text()
+    check("the pull job exists and is registered", hasattr(sched, "pull_club_teasers")
+          and "nightly_club_teasers" in sched_src)
+    reg = sched_src[sched_src.index("pull_club_teasers,\n        trigger"):][:260]
+    check("the pull runs in the daytime and evening, never overnight",
+          'hour="8-21"' in reg and "hour=3" not in reg, reg)
+    check("the job applies the Directory type filters", "get_club_teaser_type_modes" in sched_src)
     ps_src = (Path(__file__).resolve().parent.parent / "app/services/platform_settings.py").read_text()
     check("the nightly limit is a General Settings key that defaults to OFF",
           '"club_teaser_nightly_limit"' in ps_src and "UNSET MEANS 0" in ps_src)

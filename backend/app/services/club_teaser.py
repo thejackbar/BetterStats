@@ -477,14 +477,61 @@ _TARGET_WHERE = """mc.kind = 'club' AND NOT mc.excluded AND NOT mc.not_intereste
                    AND mc.grassroots_guid ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'"""
 
 
+# The Club Directory's own type filters, applied as the default for who gets a
+# snapshot: juniors, carnivals, schools, rep teams and governing-body orgs are
+# not who the campaign is for. Same keys and same definitions as the Directory
+# (club_directory.filter_mode_conditions), so "Juniors" means one thing on both.
+# Each value is 'exclude' or 'include'; a key left out is not filtered on.
+DEFAULT_TYPE_MODES = {"junior": "exclude", "carnival": "exclude", "school": "exclude",
+                      "rep": "exclude", "cricket_au": "exclude"}
+
+
+def clean_type_modes(modes: Optional[dict]) -> dict:
+    """Only known directory filter keys with a valid mode survive."""
+    from app.services.club_directory import FILTER_MODE_KEYS
+    out = {}
+    for k, v in (modes or {}).items():
+        k, v = str(k).strip().lower(), str(v or "").strip().lower()
+        if k in FILTER_MODE_KEYS and v in ("include", "exclude"):
+            out[k] = v
+    return out
+
+
+async def type_filtered_ids(session: AsyncSession, modes: Optional[dict]) -> Optional[list[str]]:
+    """Ids of the directory clubs that pass the type filters, or None when no
+    filter is on. Resolved through the Directory's own conditions and bound as
+    an array (about 7,000 ids at most), never pasted into the SQL."""
+    from sqlalchemy import select, func, true, false
+    from app.models.db import MarketingClub
+    from app.services.club_directory import _filter_conditions
+    # A NULL test result (a club with no generic email has nothing for the
+    # Cricket Australia domain test to read) must count as "does not match":
+    # kept by an exclude, dropped by an include. Left as NULL it would drop the
+    # club from BOTH, which for an exclude quietly removes every club with a
+    # blank field from the campaign.
+    conds = []
+    for key, mode in clean_type_modes(modes).items():
+        exclude_cond, include_cond = _filter_conditions(key)
+        conds.append(func.coalesce(exclude_cond, true()) if mode == "exclude"
+                     else func.coalesce(include_cond, false()))
+    if not conds:
+        return None
+    rows = (await session.execute(select(MarketingClub.id).where(*conds))).scalars().all()
+    return [str(r) for r in rows]
+
+
 async def due_clubs(session: AsyncSession, limit: int, *, now: Optional[datetime] = None,
-                    include_trialists: bool = False, club_id: Optional[str] = None) -> list[dict]:
+                    include_trialists: bool = False, club_id: Optional[str] = None,
+                    type_modes: Optional[dict] = None) -> list[dict]:
     """Clubs whose snapshot is missing or due, never-pulled first, then clubs
     with an emailable contact (the ones a campaign will actually reach), then
-    the longest overdue."""
+    the longest overdue. ``type_modes`` is the Directory type filter."""
     now = now or datetime.now(timezone.utc)
     trial = "" if include_trialists else "AND jsonb_array_length(COALESCE(mc.trial_modules, '[]'::jsonb)) = 0"
     only = "AND mc.id = CAST(:club AS uuid)" if club_id else ""
+    allowed = await type_filtered_ids(session, type_modes)
+    if allowed is not None:
+        only += " AND mc.id = ANY(CAST(:allowed AS uuid[]))"
     rows = (await session.execute(text(f"""
         SELECT {_CLUB_COLS}
         FROM marketing_clubs mc
@@ -497,7 +544,8 @@ async def due_clubs(session: AsyncSession, limit: int, *, now: Optional[datetime
                             AND COALESCE(c.email, '') <> '') DESC,
                  t.next_pull_at ASC NULLS FIRST
         LIMIT :limit
-    """), {"now": now, "limit": limit, **({"club": club_id} if club_id else {})})).mappings().all()
+    """), {"now": now, "limit": limit, **({"club": club_id} if club_id else {}),
+           **({"allowed": allowed} if allowed is not None else {})})).mappings().all()
     return [dict(r) for r in rows]
 
 
@@ -563,7 +611,7 @@ async def run_batch(limit: int, *, session_maker=None, api_factory: Callable[[],
                     should_stop: Optional[Callable[[AsyncSession], Awaitable[bool]]] = None,
                     club_concurrency: int = 2, pause_seconds: float = 0.0,
                     include_trialists: bool = False, club_id: Optional[str] = None,
-                    dry_run: bool = False) -> dict:
+                    dry_run: bool = False, type_modes: Optional[dict] = None) -> dict:
     """Pull every due club up to ``limit``. Each club runs on its own session
     with its own call counter, so one failure or stall touches nobody else, and
     ``should_stop`` is asked between clubs so the operator's Stop switch halts
@@ -571,9 +619,13 @@ async def run_batch(limit: int, *, session_maker=None, api_factory: Callable[[],
     from app.models.db import async_session_maker
     session_maker = session_maker or async_session_maker
     async with session_maker() as s:
-        todo = await due_clubs(s, limit, include_trialists=include_trialists, club_id=club_id)
+        todo = await due_clubs(s, limit, include_trialists=include_trialists, club_id=club_id,
+                               type_modes=type_modes)
     summary = {"due": len(todo), "ok": 0, "empty": 0, "junior_only": 0, "error": 0,
-               "changed": 0, "calls": 0, "stopped": False, "dry_run": dry_run}
+               "changed": 0, "calls": 0, "stopped": False, "dry_run": dry_run,
+               "detail": [{"name": c["name"], "state": c["state"], "status": None, "calls": 0}
+                          for c in todo]}
+    by_id = {str(c["id"]): d for c, d in zip(todo, summary["detail"])}
     if dry_run or not todo:
         return summary
     sem = asyncio.Semaphore(club_concurrency)
@@ -594,6 +646,9 @@ async def run_batch(limit: int, *, session_maker=None, api_factory: Callable[[],
             summary[saved["status"]] = summary.get(saved["status"], 0) + 1
             summary["changed"] += 1 if saved["changed"] else 0
             summary["calls"] += saved["calls"]
+            row = by_id.get(str(club["id"]))
+            if row is not None:
+                row.update(status=saved["status"], calls=saved["calls"], error=result.get("error"))
             if pause_seconds:
                 await asyncio.sleep(pause_seconds)
 

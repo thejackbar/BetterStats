@@ -128,6 +128,16 @@ export const DIRECTORY_FIELD_DEFS = {
       ['not_onboarded', 'Club is not on the platform'],
     ],
   },
+  // Whether the contact's club has a teaser snapshot (the pre-built dashboard
+  // used in campaign emails and the landing page), and what state it is in.
+  teaser_snapshot: {
+    label: 'Club has a teaser snapshot', input: 'multi', ops: [['eq', 'is any of']],
+    options: [
+      ['ok', 'Snapshot ready'], ['empty', 'Pulled, no stats found'],
+      ['junior_only', 'Junior-only club (no snapshot)'], ['error', 'Last pull failed'],
+      ['none', 'No snapshot yet'],
+    ],
+  },
   // Naming a club or a person outright, rather than describing them. Both are
   // ORDINARY rules and are ANDed with the others, so "is any of" NARROWS the
   // audience to what is picked — it does not add those people on top of what the

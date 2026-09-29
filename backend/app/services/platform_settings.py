@@ -233,6 +233,19 @@ async def get_club_teaser_nightly_limit(db: AsyncSession) -> int:
         return 0
 
 
+async def get_club_teaser_type_modes(db: AsyncSession) -> dict:
+    """Which Club Directory type filters decide who gets a teaser snapshot.
+    Stored as ``club_teaser_type_modes`` ({"junior": "exclude", ...}); unset
+    means the default (juniors, carnivals, schools, rep orgs and governing-body
+    orgs left out). A stored ``{}`` means no type filtering at all."""
+    from app.services import club_teaser
+    settings = await get_settings(db)
+    raw = settings.get("club_teaser_type_modes")
+    if isinstance(raw, dict):
+        return club_teaser.clean_type_modes(raw)
+    return dict(club_teaser.DEFAULT_TYPE_MODES)
+
+
 async def get_crm_incremental_sweep_seconds(db: AsyncSession) -> int:
     """Tier 2 cadence: how often (seconds) the incremental pipeline-card sweep
     runs, clamped to [MIN, MAX], falling back to the default when unset/invalid."""
