@@ -669,6 +669,13 @@ function ImportPanel({ kind, downloadFn, importFn, onImported }) {
           <p className="text-[11px] text-pb-faintest">
             Download the template, fill it in (Excel / Sheets), save as CSV, then upload here.
           </p>
+          {kind === 'manual_games' && (
+            <p className="text-[11px] text-pb-faintest">
+              The template also takes each innings&apos; sundries and total, and the opposition&apos;s
+              total, so their batters needn&apos;t be listed. Set opp_innings_number and your bowling
+              is filed against their innings.
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <button className={BTN_SECONDARY} onClick={handleTemplate}>Download template</button>

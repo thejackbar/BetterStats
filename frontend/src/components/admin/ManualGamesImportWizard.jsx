@@ -247,6 +247,13 @@ export default function ManualGamesImportWizard({ onDone }) {
           hold yet are created as part of the import — you say which, before anything
           is written, and Audit &amp; Undo takes the whole thing back.
         </p>
+        <p className="text-sm text-pb-dim mb-3">
+          Sundries and totals go in the innings columns: innings_total, innings_byes and so on
+          for your side, opp_total, opp_byes and so on for theirs (or innings_extras /
+          opp_extras for a single sundries figure). Set opp_innings_number to the innings the
+          opposition batted, and each player&apos;s bowling is filed against it. The template
+          has a worked example.
+        </p>
         <div className="flex flex-wrap items-center gap-3">
           <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={pickFile}
                  className="text-sm text-pb-dim file:mr-3 file:px-3 file:py-1.5 file:rounded file:border-0 file:bg-pb-surface2 file:text-pb-text file:text-xs" />

@@ -1036,23 +1036,53 @@ async def games_template(
     club: Organisation = Depends(get_current_club),
 ):
     buf = io.StringIO()
-    w = csv.writer(buf)
-    w.writerow(GAME_CSV_COLUMNS)
-    # Example: one game with two players. Rows with the same game_key roll up
-    # into a single manual_game record; game-level fields are read from the
-    # FIRST row encountered for that key.
-    w.writerow([
-        "G1", "2010-11-13", "Bayswater", "Hyde Park", "Summer 2010/11", "1st Grade",
-        "false", "40-over", "Applecross", "Bayswater", "Applecross", "Won by 50 runs",
-        "Smith, John", 1, 1, 45, 60, 5, 1, "false", "false", "c Brown b Jones",
-        "8.2", 2, 25, 3, 0, 0, 1, 0, 0, 0,
-    ])
-    w.writerow([
-        "G1", "2010-11-13", "Bayswater", "Hyde Park", "Summer 2010/11", "1st Grade",
-        "false", "40-over", "Applecross", "Bayswater", "Applecross", "Won by 50 runs",
-        "Brown, Tom", 1, 2, 12, 20, 1, 0, "false", "false", "b Jones",
-        "", "", "", "", "", "", "", "", "", "",
-    ])
+    w = csv.DictWriter(buf, fieldnames=GAME_CSV_COLUMNS, restval="")
+    w.writeheader()
+    # One worked match. Rows sharing a game_key roll up into one match, and
+    # the match columns are read from the FIRST row of that key.
+    #
+    # Built from dicts keyed on the column name, never positional lists: the
+    # positional example drifted a column when batting_caught_behind was added
+    # and went on drifting as the innings columns arrived, so the template a
+    # club downloaded had its bowling overs under caught-behind and none of the
+    # innings or opposition columns filled in to copy from.
+    #
+    # It models what clubs get wrong: our bowling belongs to the innings the
+    # OPPOSITION batted. Each player's row names our innings (innings_number)
+    # and theirs (opp_innings_number); batting files under the first, bowling
+    # under the second. The innings figures ride on any row of the innings —
+    # here the first — and the first value seen for each one wins.
+    ours = club.name or "Our Club"
+    match = {
+        "game_key": "G1", "played_at": "2010-11-13", "opposition": "Bayswater",
+        "venue": "Hyde Park", "season_name": "Summer 2010/11", "grade_name": "1st Grade",
+        "is_final": "false", "match_format": "40-over", "home_team": ours,
+        "away_team": "Bayswater", "winning_team": ours, "result": "Won by 70 runs",
+    }
+    rows = [
+        {**match, "player_name": "Smith, John", "innings_number": 1, "opp_innings_number": 2,
+         "batting_position": 1, "batting_runs": 45, "batting_balls": 60, "batting_fours": 5,
+         "batting_sixes": 1, "batting_not_out": "false", "did_not_bat": "false",
+         "dismissal_type": "c Brown b Jones", "batting_caught_behind": "false",
+         "fow_wicket": 1, "fow_score": 60,
+         "bowling_overs": "8.2", "bowling_maidens": 2, "bowling_runs": 25,
+         "bowling_wickets": 3, "bowling_wides": 1, "bowling_no_balls": 0,
+         "fielding_catches": 1,
+         # Our innings: its full total including sundries, and the sundries.
+         "innings_total": 67, "innings_wickets": 1, "innings_overs": 40,
+         "innings_byes": 4, "innings_leg_byes": 2, "innings_wides": 3,
+         "innings_no_balls": 1, "innings_penalty": 0,
+         # Their innings, as a total: their batters are not listed. A book
+         # that only has one sundries figure uses opp_extras / innings_extras.
+         "opp_total": 137, "opp_wickets": 10, "opp_overs": "38.4", "opp_extras": 9},
+        {**match, "player_name": "Brown, Tom", "innings_number": 1, "opp_innings_number": 2,
+         "batting_position": 2, "batting_runs": 12, "batting_balls": 20, "batting_fours": 1,
+         "batting_sixes": 0, "batting_not_out": "true", "did_not_bat": "false",
+         "bowling_overs": 10, "bowling_maidens": 0, "bowling_runs": 40,
+         "bowling_wickets": 2, "bowling_wides": 2, "bowling_no_balls": 1},
+    ]
+    for r in rows:
+        w.writerow(r)
     return StreamingResponse(
         io.BytesIO(buf.getvalue().encode("utf-8-sig")),
         media_type="text/csv",
@@ -1705,6 +1735,9 @@ async def update_manual_game(
         "batting_innings": [_row_to_dict(r) for r in old_batting],
         "bowling_spells": [_row_to_dict(r) for r in old_bowling],
         "fielding_stats": [_row_to_dict(r) for r in old_fielding],
+        # Delete and the overwrite import already keep these; an edit did not,
+        # so undoing one left the game with the edited innings figures.
+        **(await _extra_children_snapshot(db, gid)),
     }
     # Extracted now (plain UUIDs, not ORM-bound) — _replace_game_children below
     # deletes these rows, and the objects are expired after the final commit.
@@ -1862,6 +1895,24 @@ async def _restore_aggregate(
     db.add(model_cls(**fields))
 
 
+def _restore_extra_children(db: AsyncSession, game_uuid: uuid.UUID, children: dict) -> None:
+    """Put a snapshot's innings, fall of wickets and partnerships back.
+
+    Absent from a snapshot taken before these were kept, which restores as
+    before: a match with no innings rows. Shared by the delete/overwrite
+    restore and the edit undo, so the two cannot disagree about what a
+    game's children are.
+    """
+    for key, model, uuid_cols in _EXTRA_GAME_CHILDREN:
+        for r in children.get(key, []):
+            rfields = {k: v for k, v in r.items() if k != "id"}
+            rfields["manual_game_id"] = game_uuid
+            for col in uuid_cols:
+                if isinstance(rfields.get(col), str):
+                    rfields[col] = uuid.UUID(rfields[col])
+            db.add(model(**rfields))
+
+
 async def _restore_manual_game(db: AsyncSession, snapshot: dict, org_id: uuid.UUID):
     if snapshot.get("organisation_id") != str(org_id):
         raise HTTPException(status_code=403, detail="Audit row belongs to a different org")
@@ -1898,16 +1949,7 @@ async def _restore_manual_game(db: AsyncSession, snapshot: dict, org_id: uuid.UU
         if isinstance(rfields.get("player_id"), str):
             rfields["player_id"] = uuid.UUID(rfields["player_id"])
         db.add(ManualFieldingStat(**rfields))
-    # Absent from a snapshot taken before these were kept, which restores as
-    # before: a match with no innings rows.
-    for key, model, uuid_cols in _EXTRA_GAME_CHILDREN:
-        for r in children.get(key, []):
-            rfields = {k: v for k, v in r.items() if k != "id"}
-            rfields["manual_game_id"] = game_uuid
-            for col in uuid_cols:
-                if isinstance(rfields.get(col), str):
-                    rfields[col] = uuid.UUID(rfields[col])
-            db.add(model(**rfields))
+    _restore_extra_children(db, game_uuid, children)
 
 
 @router.post("/audit/{log_id}/undo")
@@ -2138,6 +2180,15 @@ async def undo_edit(
             await db.execute(sa_delete(ManualBattingInnings).where(ManualBattingInnings.manual_game_id == row.id))
             await db.execute(sa_delete(ManualBowlingSpell).where(ManualBowlingSpell.manual_game_id == row.id))
             await db.execute(sa_delete(ManualFieldingStat).where(ManualFieldingStat.manual_game_id == row.id))
+            # The innings figures, fall of wickets and partnerships too, but
+            # ONLY a table the snapshot actually holds. An edit logged before
+            # these were snapshotted carries none of the keys, and replacing
+            # "nothing recorded" with nothing would delete a scorebook import's
+            # fall of wickets that the edit never touched.
+            for key, model, _cols in _EXTRA_GAME_CHILDREN:
+                if key in children:
+                    await db.execute(sa_delete(model).where(model.manual_game_id == row.id))
+            _restore_extra_children(db, row.id, children)
             for r in children.get("batting_innings", []):
                 rfields = {k: v for k, v in r.items() if k != "id"}
                 rfields["manual_game_id"] = row.id
@@ -2446,8 +2497,13 @@ GAME_CSV_COLUMNS = [
     "opp_innings_number", "batting_order_known",
     "innings_total", "innings_wickets", "innings_overs",
     "innings_byes", "innings_leg_byes", "innings_wides", "innings_no_balls", "innings_penalty",
+    # A single sundries figure, for a book that never broke them down — the
+    # "Or total" box on the hand-entry form. Itemised figures win when both
+    # are given, the rule games.py's _merge_manual_innings already applies.
+    "innings_extras",
     "opp_total", "opp_wickets", "opp_overs",
     "opp_byes", "opp_leg_byes", "opp_wides", "opp_no_balls", "opp_penalty",
+    "opp_extras",
     # On a batter's row: the wicket they fell at and the score when they did.
     "fow_wicket", "fow_score",
 ]
@@ -2457,7 +2513,7 @@ GAME_CSV_COLUMNS = [
 _INNINGS_META_FIELDS = (
     ("total", "total_runs"), ("wickets", "total_wickets"), ("overs", "overs"),
     ("byes", "byes"), ("leg_byes", "leg_byes"), ("wides", "wides"),
-    ("no_balls", "no_balls"), ("penalty", "penalty"),
+    ("no_balls", "no_balls"), ("penalty", "penalty"), ("extras", "extras_total"),
 )
 
 

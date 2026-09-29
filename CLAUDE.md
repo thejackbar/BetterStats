@@ -114,6 +114,35 @@ for more data; the fix is a re-import of the converted archive.
   regenerated `manual_games_scorecards.csv`, then re-run `repair_overwrite_pairs`
   and `reconcile_milestones` for the club.
 
+### The template a club downloads, a single sundries figure, edit undo (v9.98.2)
+
+Asked off Hamilton Veterans' support thread: should the CSV carry every
+sundry a club has? It already did, itemised, through the columns above. A
+second scheme was written for this before `origin/main` was re-checked and
+found to have shipped these; it was thrown away rather than shipped beside
+them. **Fetch `origin/main` before building on an import format.**
+
+- **THE TEMPLATE'S EXAMPLE WAS POSITIONAL AND HAD DRIFTED.** 32 values against
+  53 columns, one column out from `batting_caught_behind` onwards, and not one
+  innings or `opp_*` column filled. Imported as-is, it filed the example's
+  bowlers in innings 1 against their own batters, which is the reported bug.
+  It is built from dicts keyed on the column name now, uses the downloading
+  club's name, and models `opp_innings_number` for bowling.
+- **`innings_extras` / `opp_extras` → `manual_innings.extras_total`**, the CSV
+  twin of the hand-entry form's "Or total". Itemised figures still win, per
+  `_merge_manual_innings`.
+- **UNDOING AN EDIT NOW RESTORES THE INNINGS FIGURES**; delete and overwrite
+  already did. `_restore_extra_children` is the one restore loop. **It only
+  replaces a child table the snapshot holds**: an edit logged before these
+  were snapshotted has no keys, and reading that as "there were none" would
+  delete a scorebook import's fall of wickets the edit never touched.
+- **Verified** (`verify_csv_innings_import.py`, 31: the template imported end
+  to end and its scorecard to the run, the single figure both sides, itemised
+  winning, and all three undos) **with three controls**: the previous commit
+  fails 26; the edit snapshot alone removed fails 1; the key guard alone
+  removed fails 1. Neighbours: manual games import 194, scorebook innings 47,
+  manual innings 20, manual scorecard 25, template route 4.
+
 ## The club page a prospect searched their way to asks them to start (v9.91.0, Sep 2026)
 
 Reported as the paid funnel's biggest leak: ad -> /trial -> search -> a club's
