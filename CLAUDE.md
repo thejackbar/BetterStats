@@ -1,5 +1,44 @@
 # BetterStats — Claude Session Notes
 
+## BetterCricket's messages on the club admin dashboard (migration 312, v9.99.0, Oct 2026)
+
+Asked for: a super admin sends a one-line message visible only on the Club
+Admin Dashboard, to all clubs, chosen clubs or chosen users, with a choice of
+how long it lasts (a time period, until cleared, until seen once, and so on),
+and it has to work on every device.
+
+- **`admin_broadcasts` + `admin_broadcast_receipts`**, DDL once in
+  `services/admin_broadcast_ddl.py` (alembic 312 and the lifespan both run it).
+  Router `routers/admin_broadcasts.py`. Screen `SuperBroadcasts.jsx` at
+  `/admin/super/broadcasts` (Better HQ > Comms > Dashboard Messages); banner
+  `components/admin/AdminBroadcastBanner.jsx`, mounted ABOVE the Welcome
+  heading in `AdminDashboard.jsx` and nowhere else.
+- **Audience** is `all` | `clubs` (org_ids) | `users` (user_ids), and for the
+  first two `audience_roles` narrows it: `all_admins` (club_admin AND
+  club_member, the admin-app users), `club_admins`, `primary`. A named-user list
+  is never narrowed by role. Archived clubs are never in the reach count, and
+  the composer refuses an archived club or a user who is not a club admin.
+- **Persistence** is `until_cleared` (no close button) | `dismissible` |
+  `view_once_user` | `view_once_club`, and `expires_at` stops ANY of them. A
+  super admin can always clear, restore, reset views or delete.
+- **VIEW-ONCE RUNS ON A RECEIPT THE BROWSER POSTS AFTER DRAWING**, not on the
+  GET. The GET computes what shows from receipts written on an EARLIER view, so
+  the view that shows it is the one view. `/seen` only records ids the user can
+  see right now, so a browser cannot plant a receipt.
+- **STAFF SEE A PREVIEW AND WRITE NOTHING.** A super admin or sales user acting
+  as a club gets every live message aimed at it (including a named-user one for
+  someone at that club), marked `preview`, and `/seen` and `/dismiss` store
+  nothing — a staff glance must not use up a club's view-once message.
+- **Verified against a real Postgres** (`verify_admin_broadcasts.py`, 56 checks
+  through the shipped route bodies) **with a control run** (view-once and the
+  primary filter neutered: 3 fail), and **in Chromium**
+  (`verify_admin_broadcasts_browser.mjs`, 80: above the heading at 1440/768/390,
+  the most urgent first, the close target at least 36px, a long URL wrapping,
+  the seen and dismiss calls, the preview writing nothing, and the composer's
+  payload and reach) **with a control run** (banner unmounted: 5 fail).
+- **Noticed, not fixed**: the dashboard's module tiles already overflow 7px at
+  768px (an ADD-ON/SOON label), with or without a message.
+
 ## An importer pre-selects "Steve" for the club's "Steven" (v9.97.2, Sep 2026)
 
 Reported off Shoalwater Bay's re-import: the archive writes "Salter, Steve",
