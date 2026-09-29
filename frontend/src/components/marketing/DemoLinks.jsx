@@ -30,13 +30,13 @@ export function WatchDemoLink({ placement, children = 'Watch the full demo', cla
 
 // The poster with a play button over it. Decorative: the link around it is
 // what carries the name.
-export function DemoPoster({ className = '' }) {
+export function DemoPoster({ className = '', eager = false }) {
   return (
     <div className={`relative rounded-xl overflow-hidden border pb-hairline bg-black aspect-video ${className}`}>
       <img
         src={DEMO.poster}
         alt=""
-        loading="lazy"
+        loading={eager ? 'eager' : 'lazy'}
         decoding="async"
         className="absolute inset-0 w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity"
       />

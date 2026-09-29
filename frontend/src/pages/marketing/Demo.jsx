@@ -14,7 +14,9 @@ import { getAttribution, getVisitorId } from '../../lib/visitor'
 import { getMetaEventContext } from '../../lib/metaPixel'
 import {
   WEBINAR, WEBINAR_ICS_URL, WEBINAR_RECORDING_EMBED_URL, googleCalendarUrl, webinarState,
+  trackDemoClick,
 } from '../../data/webinar'
+import { DemoPoster } from '../../components/marketing/DemoLinks'
 
 // The webinar registration page — the destination for a paid Meta campaign
 // whose ad set optimises for the `CompleteRegistration` pixel event.
@@ -187,6 +189,14 @@ function SuccessState({ state, recordingPending, watchUrl }) {
 // link before the recording existed, and now that it does, sending people off
 // to StreamYard to watch a video that plays right here is friction for nothing.
 function RecordingState() {
+  // The StreamYard embed draws its own thumbnail, which is set in StreamYard
+  // and is not the poster the rest of the site uses. So the player sits behind
+  // our poster and only loads once somebody presses play: the page shows the
+  // same frame the home page and /videos show, and a visitor who never presses
+  // play never pulls StreamYard's player in at all.
+  const [playing, setPlaying] = useState(false)
+  const embedSrc = WEBINAR_RECORDING_EMBED_URL
+    + (WEBINAR_RECORDING_EMBED_URL.includes('?') ? '&' : '?') + 'autoplay=1'
   return (
     <div className="text-left" data-testid="demo-recording">
       {/* 16:9, sized with padding-bottom rather than an aspect class so the box
@@ -195,15 +205,26 @@ function RecordingState() {
         className="rounded-xl overflow-hidden border pb-hairline bg-black"
         style={{ position: 'relative', width: '100%', paddingBottom: '56.25%' }}
       >
-        <iframe
-          src={WEBINAR_RECORDING_EMBED_URL}
-          title="BetterCricket live demo recording"
-          data-testid="demo-recording-frame"
-          allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-          allowFullScreen
-          loading="lazy"
-          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0 }}
-        />
+        {playing ? (
+          <iframe
+            src={embedSrc}
+            title="BetterCricket live demo recording"
+            data-testid="demo-recording-frame"
+            allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+            allowFullScreen
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0 }}
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => { trackDemoClick('demo_page_play'); setPlaying(true) }}
+            aria-label="Play the BetterCricket demo recording"
+            data-testid="demo-recording-poster"
+            className="group absolute inset-0 w-full h-full"
+          >
+            <DemoPoster eager className="absolute inset-0 !rounded-none !border-0 w-full h-full" />
+          </button>
+        )}
       </div>
 
       <div className="pb-card p-6 mt-4 bg-pb-surface">
