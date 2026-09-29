@@ -157,8 +157,8 @@ export const DEMO = {
   title: 'Full platform demo',
   length: '60 min',
   recordedLabel: WEBINAR.recordedLabel,
-  // A still of the product until a frame from the recording is supplied.
-  poster: '/marketing/feature-leaderboard.jpg',
+  // A frame from the recording itself.
+  poster: '/marketing/demo-poster.webp',
 }
 
 // Which placement a demo click came from, so the analytics can say which of

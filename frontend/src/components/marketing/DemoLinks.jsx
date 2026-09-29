@@ -38,9 +38,9 @@ export function DemoPoster({ className = '' }) {
         alt=""
         loading="lazy"
         decoding="async"
-        className="absolute inset-0 w-full h-full object-cover opacity-70 group-hover:opacity-85 transition-opacity"
+        className="absolute inset-0 w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity"
       />
-      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
+      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
       <span className="absolute inset-0 flex items-center justify-center">
         <span className="w-16 h-16 rounded-full bg-accent text-[var(--pb-on-accent,#08110b)] flex items-center justify-center shadow-lg group-hover:scale-105 transition-transform">
           <PlayIcon className="w-7 h-7 ml-1" />
