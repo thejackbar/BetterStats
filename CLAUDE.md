@@ -1,5 +1,54 @@
 # BetterStats — Claude Session Notes
 
+## An importer pre-selects "Steve" for the club's "Steven" (v9.97.2, Sep 2026)
+
+Reported off Shoalwater Bay's re-import: the archive writes "Salter, Steve",
+"Staines, Ken", "Cribbs, Rod"; the synced roster holds Steven, Kenneth,
+Rodney. The matcher offered each as a close match (or, for Chris against
+Christopher at 0.80, as no match at all), and "Create all as new players" swept
+them into second records, each holding half a career, which the milestone
+reconcile then read as milestones to delete.
+
+- **A SEPARATE STEP, NOT A CHANGE TO `match_players`.** Twelve callers use it
+  (CricketStatz, awards, the scorecard reader, AFL); only the two stats
+  importers opt in, through `import_ingest.short_form_suggestions` and
+  `apply_short_form_suggestions`. Every other caller's output is byte-for-byte
+  what it was.
+- **`import_ingest.is_short_form` IS THE ONE RULE**, and Merge Duplicates'
+  `admin._first_name_link` now calls it, so the importer and the name-variant
+  merge pairs cannot disagree about what a short form is: same surname, one
+  first name a prefix of the other, at least 3 letters, middles compatible.
+  A nickname that is not a prefix (Bob/Robert) is never claimed.
+- **PRE-SELECTED, NEVER SILENT** (status `suggested`, with a note naming both
+  careers). Refused outright where two club players fit, or where another name
+  on the SAME SHEET reaches that player (a sheet naming both "Steve" and
+  "Steven" is telling us they are two people).
+- **CAREERS MORE THAN `MAX_CAREER_GAP_YEARS` (5) APART ARE OFFERED, NOT
+  CHOSEN** (`import_reconcile.career_years`, every source on the effective
+  view, ids bound as an array). A 1990s Greg and a 2023 Gregory is the shape
+  of a son under his father's name. An undated career does not block.
+  **Overlap does not block either**, deliberately: an archive and CA cover the
+  same seasons for the same person all the time, so an overlap cannot tell a
+  father and son apart. That residual risk is why it is pre-selected on
+  screen rather than written.
+- **Run BEFORE the overrides**, so a person's own answer always wins, and
+  "Create all" only ever reached rows with no player_id, so a suggested row is
+  untouched by it with no frontend logic of its own.
+- **Measured on real rosters before building**: Shoalwater's 350 archive names
+  find exactly the 10 real pairs (Fletcher Greg/Gregory, 23 years apart, is
+  offered not chosen); Applecross's 1,633 players hold only 2 same-surname
+  pairs the rule could even reach.
+- **Verified against a real Postgres** (`verify_short_form_match.py`, 39
+  checks through both importers' shipped route bodies, incl. the reported
+  Create-all-then-import ending on the club's own record with no second
+  Salter) **with a control run**: 12 fail with the pre-selection off, the
+  import minting "Salter, Steve". **Driven in Chromium**
+  (`verify_short_form_match_browser.mjs`, 11; control: 3 fail). Neighbours:
+  manual games import 194, CricketStatz 305, team labels 17.
+- **Shoalwater still holds seven such pairs from the re-import** (Boddy,
+  Fletcher, Hankey, Johnson, Marwood, Spinks, Trigg). They need Merge
+  Duplicates; Fletcher Greg / Gregory is the one to check before merging.
+
 ## A scorebook import carries the opposition, the score and the stands (migration 311, v9.97.0, Sep 2026)
 
 Reported off Shoalwater Bay's CSFW archive: an imported fixture showed no

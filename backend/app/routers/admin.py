@@ -29,7 +29,7 @@ from app.services.grade_labels import (
 # The historical-import matcher already knows how to split a name into its parts
 # and decide whether two sets of middle initials could belong to one person.
 # Reused rather than copied so the two never disagree about what a name is.
-from app.services.import_ingest import _name_parts, _middles_compatible
+from app.services.import_ingest import _name_parts, _middles_compatible, is_short_form
 from app.services.player_aliases import seed_alias_on_rename
 from app.services import merge_carry
 from app.services import grade_duplicates
@@ -96,7 +96,6 @@ async def get_player_info(player_id: str, org_id: str, db: AsyncSession = Depend
 FUZZY_MERGE_THRESHOLD = 0.90
 MAX_FUZZY_PAIRS = 500
 MAX_VARIANT_PAIRS = 300
-MIN_SHORT_FORM_LEN = 3
 
 
 def _name_keys(p: Player) -> list[str]:
@@ -171,8 +170,9 @@ def _first_name_link(f1: str, f2: str):
         return (0.9, "same first name, middle initial differs")
     if len(f1) == 1 or len(f2) == 1:
         return (0.7, "one record has only an initial")
-    short, long_ = (f1, f2) if len(f1) < len(f2) else (f2, f1)
-    if len(short) >= MIN_SHORT_FORM_LEN and long_.startswith(short):
+    # One rule for "short form", shared with the importers' pre-selection
+    # (import_ingest.is_short_form), so the two screens cannot disagree.
+    if is_short_form(f1, f2):
         return (0.8, "short form of the same first name")
     return None
 

@@ -561,6 +561,146 @@ def match_players(names: list, players: list, fuzzy_threshold: float = 0.84) -> 
     return out
 
 
+# ── short forms of a first name ──────────────────────────────────────────────
+#
+# "Salter, Steve" in a club's archive and "Salter, Steven" on its synced roster
+# are one person, and the rules above cannot say so: the first names differ, so
+# the first+last tier misses, and full-string similarity scores the pair
+# anywhere from 0.80 to 0.96 depending on how much the long form adds ("Chris"
+# against "Christopher" falls under the fuzzy threshold altogether). A club
+# importing a decade of history then has every one of those people minted as a
+# second record, each holding half a career.
+#
+# So a short form is proposed as a SUGGESTION, pre-selected on the review
+# screen and never written silently. It is kept deliberately narrow, because a
+# surname plus a shortened first name is also exactly the shape of a father and
+# son:
+#   - the surname matches exactly and one first name is a genuine prefix of the
+#     other, at least MIN_SHORT_FORM_LEN letters long. A nickname that is not a
+#     prefix ("Bob"/"Robert") is never claimed; that needs a hand-kept list, and
+#     every entry on it is a guess;
+#   - exactly one of the club's players fits;
+#   - no other name on the same sheet reaches that player. A sheet that holds
+#     "Salter, Steve" AND "Salter, Steven" is telling us they are two people;
+#   - where both careers are known, they are no more than MAX_CAREER_GAP_YEARS
+#     apart. A 1990s "Greg" and a 2023 "Gregory" are left as a close match to
+#     check rather than pre-selected, since twenty years apart is how a son
+#     turns up under his father's name.
+#
+# This is the same prefix rule Merge Duplicates' "name variant" pairs use
+# (routers/admin._first_name_link), so the two screens agree on what a short
+# form is.
+
+MIN_SHORT_FORM_LEN = 3
+MAX_CAREER_GAP_YEARS = 5
+
+
+def is_short_form(f1: str, f2: str) -> bool:
+    """True when two DIFFERENT first names are one a prefix of the other, the
+    shorter at least ``MIN_SHORT_FORM_LEN`` letters ("steve"/"steven")."""
+    if not f1 or not f2 or f1 == f2:
+        return False
+    short, long_ = (f1, f2) if len(f1) < len(f2) else (f2, f1)
+    return len(short) >= MIN_SHORT_FORM_LEN and long_.startswith(short)
+
+
+def short_form_suggestions(names: list, players: list, matches: dict) -> dict:
+    """name -> {"player_id", "name"} for every unresolved sheet name that is a
+    short (or long) form of exactly one club player's first name, with the same
+    surname. Pure: ``matches`` is ``match_players``' output, read not written.
+
+    Deliberately a separate step from ``match_players`` so its many other
+    callers (CricketStatz, awards, the scorecard reader) are untouched; only the
+    two stats importers opt in, via ``apply_short_form_suggestions``.
+    """
+    by_last: dict = {}
+    for pid, pname in players:
+        parts = _name_parts(_normalise_name(pname))
+        if parts and len(parts[0]) >= MIN_SHORT_FORM_LEN:
+            by_last.setdefault(parts[1], []).append((str(pid), pname, parts))
+
+    # Every roster player a firmer match on this sheet already claims.
+    reach: dict = {}
+    for m in matches.values():
+        pid = m.get("player_id")
+        if pid:
+            reach[str(pid)] = reach.get(str(pid), 0) + 1
+
+    proposals: dict = {}
+    for name in names:
+        m = matches.get(name) or {}
+        if m.get("player_id") or m.get("status") == "ambiguous":
+            continue
+        parts = _name_parts(_normalise_name(name))
+        if not parts:
+            continue
+        hits = [(pid, pn) for pid, pn, rp in by_last.get(parts[1], [])
+                if is_short_form(parts[0], rp[0]) and _middles_compatible(parts[2], rp[2])]
+        if len({pid for pid, _ in hits}) == 1:
+            proposals[name] = hits[0]
+            reach[hits[0][0]] = reach.get(hits[0][0], 0) + 1
+
+    return {n: {"player_id": pid, "name": pn}
+            for n, (pid, pn) in proposals.items() if reach.get(pid) == 1}
+
+
+def career_gap(a, b):
+    """Whole years between two (first, last) careers, 0 where they overlap or
+    touch, None where either side is unknown."""
+    if not a or not b or None in a or None in b:
+        return None
+    return max(0, max(a[0], b[0]) - min(a[1], b[1]))
+
+
+def _span(first, last) -> str:
+    if first is None:
+        return ""
+    return str(first) if first == last else f"{first}-{last}"
+
+
+def apply_short_form_suggestions(matches: dict, suggestions: dict, overrides: dict,
+                                 sheet_years: dict, player_years: dict) -> None:
+    """Pre-select each suggestion on ``matches`` in place, unless the person
+    has already answered for that name or the two careers are too far apart.
+
+    ``sheet_years`` / ``player_years`` map a sheet name / a player id to a
+    (first, last) season start year pair. A career nobody can date does not
+    block the suggestion: the rule above is what makes it one, and the review
+    screen still shows it as something to check.
+
+    Run BEFORE the caller applies its overrides, so a person's own answer
+    always wins.
+    """
+    answered = {n for n, v in (overrides or {}).items() if v is not None}
+    for name, sug in suggestions.items():
+        m = matches.get(name)
+        if m is None:
+            continue
+        pid, pname = sug["player_id"], sug["name"]
+        cands = [c for c in (m.get("candidates") or []) if str(c.get("player_id")) != pid]
+        top = next((c for c in (m.get("candidates") or []) if str(c.get("player_id")) == pid), None)
+        m["candidates"] = [top or {"player_id": pid, "name": pname,
+                                   "confidence": m.get("confidence") or 0.8}] + cands
+        s_yrs, p_yrs = sheet_years.get(name), player_years.get(pid)
+        gap = career_gap(s_yrs, p_yrs)
+        if gap is not None and gap > MAX_CAREER_GAP_YEARS:
+            m.update(status="fuzzy", auto_status="fuzzy",
+                     note=(f"Could be {pname}, but the careers are {gap} years apart "
+                           f"({_span(*s_yrs)} here, {_span(*p_yrs)} on the club's record). "
+                           "That is often a father and son, so check before matching."))
+            continue
+        spans = ""
+        if s_yrs and s_yrs[0] is not None and p_yrs and p_yrs[0] is not None:
+            spans = f" (played {_span(*s_yrs)} here, {_span(*p_yrs)} on the club's record)"
+        note = (f"Suggested: {pname}. The first names are a short and a full form of one name"
+                f"{spans}. Change it if these are two different people.")
+        if name in answered:
+            m["note"] = note
+            continue
+        m.update(player_id=pid, matched_name=pname, status="suggested",
+                 auto_status="suggested", note=note)
+
+
 _PRIOR_RE = re.compile(
     r"prior|adjust|career|to\s*date|^total|various|all\s+seasons|earlier|historical|pre[\s-]|misc|life\s*time|overall",
     re.I,

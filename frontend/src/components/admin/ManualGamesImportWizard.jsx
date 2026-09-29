@@ -22,6 +22,7 @@ const TONE = {
   manual: 'text-pb-positive',
   matched: 'text-pb-positive',
   fuzzy: 'text-amber-400',
+  suggested: 'text-amber-400',
   new: 'text-pb-accent-ink',
   skip: 'text-pb-dim',
   ambiguous: 'text-red-400',
@@ -32,7 +33,7 @@ const TONE = {
 // Every state is a word as well as a colour — a verdict told apart by colour
 // alone is unreadable for a good share of readers.
 const WORD = {
-  exact: 'MATCHED', manual: 'CHOSEN', matched: 'MATCHED', fuzzy: 'CHECK THIS',
+  exact: 'MATCHED', manual: 'CHOSEN', matched: 'MATCHED', fuzzy: 'CHECK THIS', suggested: 'SUGGESTED, CHECK THIS',
   new: 'WILL BE CREATED', skip: 'LEFT OUT', ambiguous: 'TWO PLAYERS SHARE THIS NAME',
   none: 'NEEDS AN ANSWER', ungraded: 'NO GRADE',
 }
@@ -398,7 +399,8 @@ export default function ManualGamesImportWizard({ onDone }) {
                 </p>
               </div>
               {unmatchedCount > 0 && (
-                <button className={`${BTN_SECONDARY} ml-auto`} onClick={createAllUnmatched} disabled={!!busy}>
+                <button className={`${BTN_SECONDARY} ml-auto`} onClick={createAllUnmatched} disabled={!!busy}
+                  title="Only names with nothing chosen yet. A suggested match stays as it is.">
                   Create all {unmatchedCount} as new players
                 </button>
               )}
@@ -426,6 +428,9 @@ export default function ManualGamesImportWizard({ onDone }) {
                     )}
                     <option value="__skip__">Leave them out</option>
                   </select>
+                  {p.note && (
+                    <span className="basis-full text-[11px] text-amber-400" data-testid="player-match-note">{p.note}</span>
+                  )}
                 </div>
               ))}
             </div>

@@ -3338,8 +3338,27 @@ async def _resolve_games(
     grade_names = sorted({(g.display_name_override or g.name or "").strip()
                           for g in grades if (g.display_name_override or g.name)})
     gmatch = ingest.match_grades(grade_labels, grade_names)
-    pmatch = ingest.match_players(
-        names, [(p.id, (p.display_name_override or p.name or "")) for p in players])
+    roster = [(p.id, (p.display_name_override or p.name or "")) for p in players]
+    pmatch = ingest.match_players(names, roster)
+    # "Salter, Steve" in an archive is "Salter, Steven" on the synced roster:
+    # proposed and pre-selected, never written silently (import_ingest's note
+    # on short forms says why each guard is there).
+    suggestions = ingest.short_form_suggestions(names, roster, pmatch)
+    if suggestions:
+        from app.services import import_reconcile as recon
+        years_by_name: dict = {}
+        for group in by_game.values():
+            year = _season_label_year((group[0][1].get("season_name") or "").strip())
+            if not year:
+                continue
+            for _n, raw in group:
+                nm = (raw.get("player_name") or "").strip()
+                if nm in suggestions:
+                    years_by_name.setdefault(nm, set()).add(year)
+        ingest.apply_short_form_suggestions(
+            pmatch, suggestions, req.player_overrides,
+            {n: (min(v), max(v)) for n, v in years_by_name.items()},
+            await recon.career_years(db, club.id, [s["player_id"] for s in suggestions.values()]))
 
     # A season or grade the club does not hold is proposed for creation rather
     # than left unresolved: there is no identity question to get wrong, and the

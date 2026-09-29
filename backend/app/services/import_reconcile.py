@@ -489,6 +489,37 @@ async def season_years(session, org_uuid) -> dict:
     return {s.id: season_of(s) for s in rows}
 
 
+async def career_years(session, org_uuid, pids) -> dict:
+    """{player id (str): (first, last) season start year} across every source a
+    profile reads (``v_effective_player_season_stats``: synced, imported,
+    hand-entered). Used to tell a short-form name match that could be the same
+    person from one twenty years away that is probably a son.
+
+    The player ids are bound as an array, never a subquery (the record book's
+    note on why a bound list reaches the index and ``= ANY (SELECT ...)`` does
+    not).
+    """
+    from sqlalchemy import text
+    from app.services.season_resolve import season_start_year
+
+    ids = [str(p) for p in (pids or []) if p]
+    if not ids:
+        return {}
+    rows = (await session.execute(text("""
+        SELECT DISTINCT e.player_id, s.name, s.year
+          FROM v_effective_player_season_stats e
+          JOIN seasons s ON s.id = e.season_id
+         WHERE e.player_id = ANY(CAST(:ids AS UUID[]))
+           AND s.organisation_id = :org
+    """), {"ids": ids, "org": str(org_uuid)})).all()
+    years: dict = {}
+    for pid, name, yr in rows:
+        y = season_start_year(name or "") or yr
+        if y:
+            years.setdefault(str(pid), []).append(y)
+    return {pid: (min(v), max(v)) for pid, v in years.items()}
+
+
 # ── column maps between the stored tables and the canonical metric dict ───────
 
 # imported_stats (truth) column  →  canonical metric key
