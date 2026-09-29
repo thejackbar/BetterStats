@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { CHANGELOG } from '../data/changelog'
 import { api } from '../lib/api'
+import MilestoneSplitNote from './MilestoneSplitNote'
 
 const KIND_LABELS = {
   org_full: 'Sync Now',
@@ -148,6 +149,7 @@ function UpcomingMilestoneRow({ milestone }) {
         <p className="text-sm text-pb-text">
           {milestone.name} — {milestone.needed} {label} from {(milestone.target || 0).toLocaleString()}
         </p>
+        <MilestoneSplitNote m={milestone} className="mt-0.5" />
         <div className="mt-1.5 h-1 w-full rounded-full overflow-hidden" style={{ background: 'var(--pb-surface2)' }}>
           <div className="h-full rounded-full" style={{ width: `${pct}%`, background: 'var(--pb-accent)' }} />
         </div>

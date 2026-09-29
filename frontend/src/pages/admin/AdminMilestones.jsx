@@ -4,6 +4,7 @@ import { api } from '../../lib/api'
 import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import { useClub } from '../../hooks/useClub'
 import { normalizeGender } from '../../lib/playerAttributes'
+import MilestoneSplitNote from '../../components/MilestoneSplitNote'
 
 const CAT_LABELS = {
   batting: 'BATTING',
@@ -247,7 +248,7 @@ export default function AdminMilestones() {
                       </thead>
                       <tbody>
                         {upcomingFiltered.map((item, i) => (
-                          <tr key={`${item.player_id}-${item.type}-${item.detail}-${item.target}`}
+                          <tr key={`${item.player_id}-${item.type}-${item.detail}-${item.target}-${item.counts || ''}`}
                             className={`${i > 0 ? 'pb-hairline-t' : ''} hover:bg-pb-surface2 transition-colors`}>
                             <td className="px-4 py-3">
                               {slug ? (
@@ -270,6 +271,7 @@ export default function AdminMilestones() {
                               {item.detail && (
                                 <span className="block text-pb-faintest font-mono text-[10px] mt-0.5">{item.detail}</span>
                               )}
+                              <MilestoneSplitNote m={item} className="mt-0.5" />
                             </td>
                             <td className="px-4 py-3 text-right">
                               <div className="flex justify-end">

@@ -10,6 +10,8 @@ from app.models.db import get_db
 from app.services.afl import aggregations
 from app.services.afl.manual_stats import manual_branch
 from app.services.afl.aggregations import matching_grade_ids
+from app.services.afl import grade_scope as gs
+from app.services.afl.season_groups import season_group
 
 router = APIRouter(prefix="/organisations", tags=["afl-organisations"])
 
@@ -39,8 +41,8 @@ async def get_results(org_id: uuid.UUID,
         clauses.append("d.status = 'FINAL'")
     params: dict = {"org": str(org_id), "lim": limit, "off": offset}
     if season_id:
-        clauses.append("s.id = :season")
-        params["season"] = str(season_id)
+        clauses.append("s.id = ANY(:season)")
+        params["season"] = await season_group(db, org_id, season_id)
     if grade_id:
         clauses.append("gr.id = ANY(:grade)")
         params["grade"] = await matching_grade_ids(db, org_id, grade_id)
@@ -123,13 +125,16 @@ async def get_summary(org_id: uuid.UUID,
     season_clause_i = ""
     season_clause_m = ""
     if season_id:
-        params["season"] = str(season_id)
-        season_clause_s = "AND s.season_id = :season"
-        season_clause_i = "AND i.season_id = :season"
-        season_clause_m = "AND m.season_id = :season"
+        params["season"] = await season_group(db, org_id, season_id)
+        season_clause_s = "AND s.season_id = ANY(:season)"
+        season_clause_i = "AND i.season_id = ANY(:season)"
+        season_clause_m = "AND m.season_id = ANY(:season)"
+    excluded = await gs.excluded_grade_ids(db, org_id)
+    if excluded:
+        params["excl"] = excluded
     manual = manual_branch(
         ["player_id", "season_id", "games", "goals", "bog_count"],
-        where=season_clause_m,
+        where=season_clause_m + gs.other_rows("m", excluded),
     )
 
     _TOP_COLS = {"goals": "goals", "games": "games"}
@@ -152,11 +157,11 @@ async def get_summary(org_id: uuid.UUID,
             WITH combined AS (
                 SELECT s.player_id, s.season_id, s.games, s.goals, s.bog_count
                 FROM afl_player_season_stats s
-                WHERE s.organisation_id = :org AND s.grade_id IS NULL {season_clause_s}
+                WHERE s.organisation_id = :org AND {gs.synced_rows("s", excluded)} {season_clause_s}
                 UNION ALL
                 SELECT i.player_id, i.season_id, i.games_played AS games, i.goals, i.bog_count
                 FROM afl_imported_stats i
-                WHERE i.organisation_id = :org {season_clause_i}
+                WHERE i.organisation_id = :org {season_clause_i}{gs.other_rows("i", excluded)}
                   AND NOT EXISTS (
                     SELECT 1 FROM afl_player_season_stats s2
                     WHERE s2.player_id = i.player_id AND s2.season_id = i.season_id

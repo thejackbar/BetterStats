@@ -5,6 +5,8 @@ organisation column of its own) and reads only synced data — no live PlayHQ
 calls on any public request path.
 """
 import uuid
+from app.services.afl import grade_scope as gs
+from app.services.afl.season_groups import canonical_map, season_group
 from typing import Optional
 
 from sqlalchemy import text
@@ -50,7 +52,8 @@ def grade_sort_key(row: dict):
 
 
 async def career_totals(db: AsyncSession, org_id: uuid.UUID,
-                        player_ids: Optional[list[uuid.UUID]] = None) -> list[dict]:
+                        player_ids: Optional[list[uuid.UUID]] = None,
+                        excluded: Optional[list] = None) -> list[dict]:
     """Career totals per player, combining the synced whole-season rollup
     (grade_id IS NULL so per-grade rows don't double count) with imported
     (Import Stats upload) rows — sync wins per season, imported only fills a
@@ -63,22 +66,28 @@ async def career_totals(db: AsyncSession, org_id: uuid.UUID,
     where_player_s = "AND s.player_id = ANY(:pids)" if player_ids else ""
     where_player_i = "AND i.player_id = ANY(:pids)" if player_ids else ""
     where_player_m = "AND m.player_id = ANY(:pids)" if player_ids else ""
+    # A club that leaves a grade category out of its stats (Settings) has its
+    # career figures summed from the per-grade rows it keeps; `excluded` is
+    # that list, and empty keeps the whole-season rollup exactly as before.
+    excluded = excluded or []
     manual = manual_branch(
         ["player_id", "season_id", "games", "goals", "behinds", "bog_count", "captain_games"],
-        where=where_player_m,
+        where=where_player_m + gs.other_rows("m", excluded),
     )
     params: dict = {"org": str(org_id)}
     if player_ids:
         params["pids"] = [str(p) for p in player_ids]
+    if excluded:
+        params["excl"] = excluded
     res = await db.execute(text(f"""
         WITH combined AS (
             SELECT s.player_id, s.season_id, s.games, s.goals, s.behinds, s.bog_count, s.captain_games
             FROM afl_player_season_stats s
-            WHERE s.organisation_id = :org AND s.grade_id IS NULL {where_player_s}
+            WHERE s.organisation_id = :org AND {gs.synced_rows("s", excluded)} {where_player_s}
             UNION ALL
             SELECT i.player_id, i.season_id, i.games_played AS games, i.goals, i.behinds, i.bog_count, i.captain_games
             FROM afl_imported_stats i
-            WHERE i.organisation_id = :org {where_player_i}
+            WHERE i.organisation_id = :org {where_player_i}{gs.other_rows("i", excluded)}
               AND NOT EXISTS (
                 SELECT 1 FROM afl_player_season_stats s2
                 WHERE s2.player_id = i.player_id AND s2.season_id = i.season_id
@@ -168,6 +177,23 @@ async def season_by_season(db: AsyncSession, org_id: uuid.UUID,
     for r in rows:
         r["club_bf_votes"] = 0
         r["comp_bf_votes"] = 0
+    # Seasons the club merged read as one year: every row under an alias is
+    # moved onto its canonical season before anything below folds by season,
+    # so the table draws one line where it would have drawn two.
+    canon = await canonical_map(db, org_id)
+    season_meta = {}
+    if canon:
+        res_m = await db.execute(text(
+            "SELECT id, name, year FROM seasons WHERE organisation_id = :org"), {"org": str(org_id)})
+        season_meta = {str(r.id): (r.name, r.year) for r in res_m}
+
+    def _fold_season(r):
+        c = canon.get(str(r["season_id"])) if r.get("season_id") is not None else None
+        if c:
+            r["season_id"] = uuid.UUID(c)
+            r["season_name"], r["year"] = season_meta.get(c, (r["season_name"], r["year"]))
+    for r in rows:
+        _fold_season(r)
 
     # Club/competition B&F votes are read SEPARATELY, and deliberately not
     # through the sync-wins union above. PlayHQ has no concept of
@@ -204,6 +230,8 @@ async def season_by_season(db: AsyncSession, org_id: uuid.UUID,
             OR COALESCE(SUM(v.comp_bf_votes), 0) > 0
     """), {"org": str(org_id), "pid": str(player_id)})
     vote_rows = [dict(r._mapping) for r in vres]
+    for v in vote_rows:
+        _fold_season(v)
 
     # A manual adjustment entered against ONE grade of a season still belongs
     # in that season's whole-season line, and nothing downstream can put it
@@ -617,8 +645,8 @@ async def club_results_summary(db: AsyncSession, org_id: uuid.UUID,
     clauses = ["s.organisation_id = :org"]
     params: dict = {"org": str(org_id)}
     if season_id:
-        clauses.append("s.id = :season")
-        params["season"] = str(season_id)
+        clauses.append("s.id = ANY(:season)")
+        params["season"] = await season_group(db, org_id, season_id)
     if grade_ids:
         clauses.append("gr.id = ANY(:grades)")
         params["grades"] = list(grade_ids)
@@ -656,8 +684,8 @@ async def team_results_breakdown(db: AsyncSession, org_id: uuid.UUID,
     clauses = ["s.organisation_id = :org"]
     params: dict = {"org": str(org_id)}
     if season_id:
-        clauses.append("s.id = :season")
-        params["season"] = str(season_id)
+        clauses.append("s.id = ANY(:season)")
+        params["season"] = await season_group(db, org_id, season_id)
     if grade_ids:
         clauses.append("gr.id = ANY(:grades)")
         params["grades"] = list(grade_ids)
@@ -804,3 +832,76 @@ async def upcoming_milestones(db: AsyncSession, org_id: uuid.UUID, limit: int = 
 
     upcoming.sort(key=lambda x: x["score"], reverse=True)
     return upcoming[:limit]
+
+
+async def recently_reached_milestones(db: AsyncSession, org_id: uuid.UUID,
+                                      days: int = 60) -> list[dict]:
+    """Milestones crossed by games played in the last ``days`` days.
+
+    A milestone is a lifetime tally, so "reached" is measured on the whole
+    career (synced + imported + manual, the same combined figure the in-reach
+    list and the profile use), and the crossing is found by taking away what the
+    player did in the window. A threshold between the two figures was reached
+    inside it. Only synced game lines carry a date, so an imported season or a
+    hand-entered correction can never read as a recent milestone — it counts
+    towards the career either side of the window, never inside it.
+    """
+    manual = manual_branch(["player_id", "season_id", "games", "goals"])
+    career_res = await db.execute(text(f"""
+        WITH combined AS (
+            SELECT s.player_id, s.games, s.goals
+            FROM afl_player_season_stats s
+            WHERE s.organisation_id = :org AND s.grade_id IS NULL
+            UNION ALL
+            SELECT i.player_id, i.games_played AS games, i.goals
+            FROM afl_imported_stats i
+            WHERE i.organisation_id = :org
+              AND NOT EXISTS (
+                SELECT 1 FROM afl_player_season_stats s2
+                WHERE s2.player_id = i.player_id AND s2.season_id = i.season_id
+                  AND s2.grade_id IS NULL AND s2.games > 0
+              )
+            UNION ALL
+            SELECT m.player_id, m.games, m.goals FROM ({manual}) m
+        )
+        SELECT p.id AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+               COALESCE(SUM(c.games), 0) AS games, COALESCE(SUM(c.goals), 0) AS goals
+        FROM players p JOIN combined c ON c.player_id = p.id
+        WHERE p.organisation_id = :org
+        GROUP BY p.id, p.name, p.display_name_override
+    """), {"org": str(org_id)})
+    career = {str(r.player_id): dict(r._mapping) for r in career_res}
+
+    # Only OUR side's lines: the opposition's team list sits on the same game.
+    recent_res = await db.execute(text("""
+        SELECT l.player_id, COUNT(DISTINCT l.game_id) AS games,
+               COALESCE(SUM(l.goals), 0) AS goals, MAX(g.played_at) AS last_played
+        FROM afl_player_game_lines l
+        JOIN games g ON g.id = l.game_id
+        JOIN afl_game_details d ON d.game_id = g.id
+        JOIN players p ON p.id = l.player_id AND p.organisation_id = :org
+        WHERE l.side = d.our_side
+          AND d.status = 'FINAL'
+          AND g.played_at >= NOW() - (:days * INTERVAL '1 day')
+        GROUP BY l.player_id
+    """), {"org": str(org_id), "days": days})
+
+    out = []
+    for r in recent_res:
+        pid = str(r.player_id)
+        c = career.get(pid)
+        if not c:
+            continue
+        for stat in ("games", "goals"):
+            now = int(c[stat] or 0)
+            before = now - int(getattr(r, stat) or 0)
+            target = milestone_rules.next_threshold(stat, before)
+            while target is not None and target <= now:
+                out.append({
+                    "player_id": pid, "name": c["name"], "type": stat,
+                    "target": target, "current": now,
+                    "reached_by": r.last_played.isoformat() if r.last_played else None,
+                })
+                target = milestone_rules.next_threshold(stat, target)
+    out.sort(key=lambda x: (x["reached_by"] or ""), reverse=True)
+    return out

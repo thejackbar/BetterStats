@@ -1,9 +1,12 @@
+import { Suspense } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from '../contexts/AuthContext'
 import { ThemeProvider } from '../contexts/ThemeContext'
 import { ToastProvider } from '../contexts/ToastContext'
 import ErrorBoundary from '../components/ErrorBoundary'
 import ScrollToTop from '../components/ScrollToTop'
+import LoadingSpinner from '../components/LoadingSpinner'
+import { betterAdminRoutes, betterSocialsRoutes } from './sharedModuleRoutes'
 import ClubLayout from './ClubLayout'
 import Dashboard from './pages/Dashboard'
 import Players from './pages/Players'
@@ -37,6 +40,9 @@ import AflAdminSettings from './pages/admin/AflAdminSettings'
 import AflAdminVotes from './pages/admin/AflAdminVotes'
 import AflAdminSuperUsers from './pages/admin/AflAdminSuperUsers'
 import AflAdminSuperClubs from './pages/admin/AflAdminSuperClubs'
+import AflAdminActivity from './pages/admin/AflAdminActivity'
+import AflAdminMilestones from './pages/admin/AflAdminMilestones'
+import AflAdminGames from './pages/admin/AflAdminGames'
 
 /**
  * BetterStats AFL — the bs-afl-frontend app tree, mounted by App.jsx when the
@@ -52,6 +58,7 @@ export default function AflApp() {
           <AuthProvider>
             <ScrollToTop />
             <div className="min-h-screen bg-pb-bg">
+              <Suspense fallback={<div className="pt-24 flex justify-center"><LoadingSpinner /></div>}>
               <Routes>
                 <Route path="/login" element={<AflLogin />} />
                 {/* Standalone, outside the club layout: a voter follows this
@@ -60,6 +67,9 @@ export default function AflApp() {
                 <Route path="/admin" element={<AflAdminLayout />}>
                   <Route index element={<AflAdminSync />} />
                   <Route path="players" element={<AflAdminPlayers />} />
+                  <Route path="games" element={<AflAdminGames />} />
+                  <Route path="milestones" element={<AflAdminMilestones />} />
+                  <Route path="activity" element={<AflAdminActivity />} />
                   <Route path="players/import" element={<AflAdminPlayerImport />} />
                   <Route path="import" element={<AflAdminImport />} />
                   <Route path="import-results" element={<AflAdminResultsImport />} />
@@ -77,6 +87,10 @@ export default function AflApp() {
                   <Route path="super/users" element={<AflAdminSuperUsers />} />
                   <Route path="super/clubs" element={<AflAdminSuperClubs />} />
                 </Route>
+                {/* BetterAdmin — the shared cricket screens, beside (not inside)
+                    the football admin layout. */}
+                {betterAdminRoutes()}
+                {betterSocialsRoutes()}
                 <Route path="/:clubSlug" element={<ClubLayout />}>
                   <Route index element={<Dashboard />} />
                   <Route path="players" element={<Players />} />
@@ -93,6 +107,7 @@ export default function AflApp() {
                 <Route path="/" element={<Navigate to="/login" replace />} />
                 <Route path="*" element={<Navigate to="/login" replace />} />
               </Routes>
+              </Suspense>
             </div>
           </AuthProvider>
         </ToastProvider>

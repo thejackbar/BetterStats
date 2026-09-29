@@ -3,7 +3,7 @@ import json
 import logging
 import re
 import uuid
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, timedelta
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1186,25 +1186,10 @@ async def _sync_organisation_impl(
         # function at all — the scheduler records an idle run instead — so an
         # off-season club would never be grouped if this were the trigger.
 
-        # Recompute milestones. _compute_milestones runs a query per player, so
-        # a full run over an established club is a loop over ~1,500 of them —
-        # fine once a week, wasteful twice a week for a club where only this
-        # weekend's squad could possibly have moved. An incremental run
-        # therefore recomputes only the players whose season aggregates it just
-        # rewrote, which is exactly the set whose career totals can have
-        # changed; everyone else's stored milestones are still correct.
-        if run_id:
-            _progress(stats, "Milestones", 41)
-            await update_sync_run(run_id, stats)
-        if incremental:
-            milestone_pids = sorted(touched_player_ids)
-        else:
-            all_pids_res = await session.execute(
-                select(Player.id).where(Player.organisation_id == org_id)
-            )
-            milestone_pids = [r[0] for r in all_pids_res]
-        if milestone_pids:
-            await _compute_milestones(session, milestone_pids, org_id)
+        # Milestones are recomputed at the END of the run, not here: under a
+        # club's grade default a career is counted from the scorecards, which
+        # the game-level pass below has not pulled yet (and a Full Rebuild has
+        # just wiped). See the milestone block after the import reconcile.
 
         # Grassroots /scores/* — game-level scorecards for all seasons.
         # The PlayHQ Partner game-level sync was removed (May 2026) — see git history
@@ -1285,6 +1270,32 @@ async def _sync_organisation_impl(
             except Exception as e:
                 import traceback as _tb4
                 logger.error(f"Import reconcile failed for {org_id_str}: {e}\n{_tb4.format_exc()}")
+
+        # Recompute milestones against the figures the profile shows, now that
+        # every source a career is counted from has landed. An incremental run
+        # recomputes only the players whose season aggregates it just rewrote,
+        # which is exactly the set whose totals can have moved. A run whose
+        # match pull failed only ADDS: its scorecards are short, and a figure
+        # that is short must not take back a milestone a player really reached.
+        try:
+            if run_id:
+                _progress(stats, "Milestones", 99)
+                await update_sync_run(run_id, stats)
+            async with async_session_maker() as ms_session:
+                if incremental:
+                    milestone_pids = sorted(touched_player_ids)
+                else:
+                    milestone_pids = [r[0] for r in await ms_session.execute(
+                        select(Player.id).where(Player.organisation_id == org_id))]
+                if milestone_pids:
+                    ms_report = await _compute_milestones(
+                        ms_session, milestone_pids, org_id,
+                        reconcile=not stats.get("match_pull_failed"))
+                    stats["milestones_added"] = len(ms_report["added"])
+                    stats["milestones_removed"] = len(ms_report["removed"])
+        except Exception as e:
+            import traceback as _tb5
+            logger.error(f"Milestone recompute failed for {org_id_str}: {e}\n{_tb5.format_exc()}")
 
         logger.info(f"Sync complete: {stats}")
 
@@ -2686,8 +2697,35 @@ async def sync_grassroots_game_level_data(
     return stats
 
 
-async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: uuid.UUID):
+async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: uuid.UUID,
+                              *, reconcile: bool = False, dry_run: bool = False) -> dict:
+    """Bring the stored career milestones into line with the player's figures.
+
+    The figures are the ones the player's own profile opens on
+    (``milestone_totals.profile_totals``), the same ones the Milestones page and
+    the notifications measure against. Before v9.91.1 this read the effective
+    view unfiltered while the profile applied the club's grade default, and
+    it only ever ADDED: a total over-counted for a day in September 2026 minted
+    "500 wickets" for a bowler on 478 and nothing ever took it back.
+
+    A threshold counts as reached when the profile's figure OR the whole-career
+    figure (the effective view, every grade) reaches it; see the comment above
+    ``whole`` below for why the profile's alone is not enough.
+
+    ``reconcile`` also REMOVES a stored threshold neither figure reaches. A milestone row is derived — this function is the only
+    thing that writes one — so removing a wrong one is correcting our own
+    output, never a person's. It must only run once every source a career is
+    counted from has landed, or a Full Rebuild's empty per-game tables would
+    read as a career of nothing. A threshold still reached keeps its original
+    ``achieved_at``.
+
+    ``dry_run`` reports without writing. Returns ``{"added": [...], "removed":
+    [...], "dated": [...]}``, each item ``(player_id, type, value)``; ``dated`` is
+    the additions written with today's date, which the notification scan will
+    announce. Every other addition is written undated.
+    """
     from sqlalchemy import text
+    from app.services import milestone_totals
     from app.services.milestone_rules import crossed_thresholds
 
     detail_fmt = {
@@ -2696,65 +2734,139 @@ async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: u
         "matches": lambda v: f"{v} career matches",
         "catches": lambda v: f"{v} career catches",
     }
+    report = {"added": [], "removed": [], "dated": []}
+    ids = [str(p) for p in player_ids if p]
+    if not ids:
+        return report
 
-    for pid in player_ids:
-        pid_str = str(pid)
+    # A threshold counts as REACHED when either figure reaches it: the one the
+    # profile opens on, or the whole career (the effective view, every grade).
+    # The profile's figure alone is not enough under a club default that leaves
+    # juniors out: a player who reached 50 matches with their junior games
+    # counted genuinely reached it, and the scoped figure (counted from the
+    # scorecards) can also sit below Cricket Australia's own career total. The
+    # first cut measured the profile figure only, and a dry run on Shoalwater
+    # Bay proposed removing 352 milestones, most of them real. The whole career
+    # is correct since migration 309, so the phantoms (a 500 wickets on 478)
+    # still go: neither figure reaches them.
+    figures = await milestone_totals.profile_totals(session, org_id, ids, with_split=False)
+    whole = await milestone_totals.totals_under(session, org_id, ids, None)
+    exist_rows = (await session.execute(
+        text("SELECT id, player_id::text, milestone_type, milestone_value FROM milestones"
+             " WHERE player_id = ANY(CAST(:pids AS uuid[]))"
+             " AND milestone_type IN ('runs', 'wickets', 'matches', 'catches')"),
+        {"pids": ids},
+    )).all()
+    existing: dict[str, dict] = {}
+    for mid, pid, mt, mv in exist_rows:
+        existing.setdefault(pid, {})[(mt, mv)] = mid
 
-        # Read the same v_effective_player_season_stats view every other career-
-        # totals surface reads (records, leaderboards, profiles) — not the raw
-        # synced-only player_season_stats table. Historical data entered via
-        # manual games/adjustments or the BetterImport CSV/XLSX tool never runs
-        # through this org's PlayHQ/Grassroots sync job (the only caller of this
-        # function), so reading the raw table meant a club's imported/manual
-        # career history could never cross a milestone threshold. Season-scoped
-        # rows still filter to this org's own seasons (a CA participant GUID is
-        # shared across clubs, so a dual-club player can have rows under another
-        # club's seasons; counting them all would mint inflated career
-        # milestones — mirrors the v_effective view guard, migration 060).
-        # Career-level rows (manual_career_adjustments, BetterImport's prior-
-        # seasons bucket) carry a NULL season_id and already belong to one org
-        # by construction, so they're kept without a seasons join — same pattern
-        # aggregations.get_upcoming_milestones_for_org uses.
-        totals_res = await session.execute(
-            text("""
-                SELECT
-                    COALESCE(SUM(pss.runs), 0)    AS runs,
-                    COALESCE(SUM(pss.wickets), 0) AS wickets,
-                    COALESCE(SUM(pss.matches), 0) AS matches,
-                    COALESCE(SUM(pss.catches), 0) AS catches
-                FROM v_effective_player_season_stats pss
-                LEFT JOIN seasons s ON s.id = pss.season_id
-                WHERE pss.player_id = :pid
-                  AND (pss.season_id IS NULL OR s.organisation_id = :org_id)
-            """),
-            {"pid": pid_str, "org_id": str(org_id)}
-        )
-        totals = dict(totals_res.mappings().first() or {})
+    # A threshold the career had ALREADY passed before the current season is a
+    # catch-up, not something that just happened: an imported history's 5,000
+    # runs, first counted now. It is written with no date ("reached, date
+    # unknown", which every milestone screen draws as a dash) rather than
+    # today's, because the notification scan announces anything dated in the
+    # last three weeks and a club would be emailed that a veteran "just
+    # reached" a milestone from the 1990s. A season with no year, and a career
+    # adjustment with no season, count as before.
+    before_rows = (await session.execute(text("""
+        SELECT pss.player_id::text AS pid,
+               COALESCE(SUM(pss.runs), 0) AS runs, COALESCE(SUM(pss.wickets), 0) AS wickets,
+               COALESCE(SUM(pss.matches), 0) AS matches, COALESCE(SUM(pss.catches), 0) AS catches
+        FROM v_effective_player_season_stats pss
+        LEFT JOIN seasons s ON s.id = pss.season_id
+        WHERE pss.player_id = ANY(CAST(:pids AS uuid[]))
+          AND COALESCE(s.year, 0) < COALESCE((
+                SELECT MAX(year) FROM seasons WHERE organisation_id = CAST(:org AS uuid)), 0)
+        GROUP BY pss.player_id
+    """), {"pids": ids, "org": str(org_id)})).mappings().all()
+    before = {r["pid"]: r for r in before_rows}
 
-        exist_res = await session.execute(
-            text("SELECT milestone_type, milestone_value FROM milestones WHERE player_id=:pid"),
-            {"pid": pid_str}
-        )
-        existing = {(r[0], r[1]) for r in exist_res.fetchall()}
-
-        new_milestones = []
-        today = date.today()
-
+    today = date.today()
+    remove_ids = []
+    pending: list[tuple[str, str, int, bool]] = []  # (pid, type, threshold, before-season)
+    for pid in ids:
+        totals = (figures.get(pid) or {}).get("totals") or {}
+        career = whole.get(pid) or {}
+        have = existing.get(pid, {})
         for mt in ("runs", "wickets", "matches", "catches"):
-            current = int(totals.get(mt) or 0)
+            current = max(int(totals.get(mt) or 0), int(career.get(mt) or 0))
             for threshold in crossed_thresholds(mt, current):
-                if (mt, threshold) in existing:
+                if (mt, threshold) in have:
                     continue
-                new_milestones.append(Milestone(
-                    player_id=pid, milestone_type=mt, milestone_value=threshold,
-                    detail=detail_fmt[mt](threshold), achieved_at=today,
-                ))
+                pending.append((pid, mt, threshold,
+                                int((before.get(pid) or {}).get(mt) or 0) >= threshold))
+            if reconcile:
+                for (smt, value), mid in have.items():
+                    if smt == mt and value > current:
+                        report["removed"].append((pid, mt, value))
+                        remove_ids.append(mid)
 
-        for m in new_milestones:
-            session.add(m)
+    # "Before this season" alone is not enough in an off-season, when a club's
+    # newest season row is still last summer's: every threshold crossed during
+    # that summer would be dated today and announced as just reached, months
+    # after the game. So a threshold only counts as JUST reached when the
+    # player has actually played inside the notification window; anything else
+    # is history first counted now, and goes in undated. A player with no game
+    # at all (an imported career) is always history.
+    #
+    # Asked only for the players still in question, and read off the base
+    # tables rather than the effective views: the first cut joined
+    # v_effective_games for every player at the club, and a platform-wide
+    # reconcile went from about half an hour to several. A paired import and
+    # its synced twin carry the same date, so the pairing the views apply
+    # cannot change the answer to "played in the last three weeks".
+    from app.services.notification_scan import LOOKBACK_DAYS
+    recent_from = today - timedelta(days=LOOKBACK_DAYS)
+    ask = sorted({pid for pid, _, _, hist in pending if not hist})
+    last_played: dict = {}
+    if ask:
+        last_played = {r[0]: r[1] for r in (await session.execute(text("""
+            SELECT x.pid, MAX(x.d) FROM (
+                SELECT ga.player_id::text AS pid, g.played_at AS d
+                  FROM game_appearances ga JOIN games g ON g.id = ga.game_id
+                 WHERE ga.player_id = ANY(CAST(:pids AS uuid[]))
+                UNION ALL
+                SELECT bi.player_id::text, g.played_at
+                  FROM batting_innings bi JOIN games g ON g.id = bi.game_id
+                 WHERE bi.player_id = ANY(CAST(:pids AS uuid[]))
+                UNION ALL
+                SELECT bs.player_id::text, g.played_at
+                  FROM bowling_spells bs JOIN games g ON g.id = bs.game_id
+                 WHERE bs.player_id = ANY(CAST(:pids AS uuid[]))
+                UNION ALL
+                SELECT mb.player_id::text, mg.played_at
+                  FROM manual_batting_innings mb JOIN manual_games mg ON mg.id = mb.manual_game_id
+                 WHERE mb.player_id = ANY(CAST(:pids AS uuid[]))
+                UNION ALL
+                SELECT ms.player_id::text, mg.played_at
+                  FROM manual_bowling_spells ms JOIN manual_games mg ON mg.id = ms.manual_game_id
+                 WHERE ms.player_id = ANY(CAST(:pids AS uuid[]))
+            ) x
+            GROUP BY x.pid
+        """), {"pids": ask})).all()}
 
-    if player_ids:
-        await session.commit()
+    for pid, mt, threshold, hist in pending:
+        report["added"].append((pid, mt, threshold))
+        played = last_played.get(pid)
+        historical = hist or played is None or played < recent_from
+        if not historical:
+            report["dated"].append((pid, mt, threshold))
+        if not dry_run:
+            session.add(Milestone(
+                player_id=uuid.UUID(pid), milestone_type=mt, milestone_value=threshold,
+                detail=detail_fmt[mt](threshold),
+                achieved_at=None if historical else today,
+            ))
+
+    if dry_run:
+        await session.rollback()
+        return report
+    if remove_ids:
+        await session.execute(text("DELETE FROM milestones WHERE id = ANY(:ids)"),
+                              {"ids": remove_ids})
+    await session.commit()
+    return report
 
 
 async def deep_sync_player(

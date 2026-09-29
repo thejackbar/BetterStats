@@ -21,8 +21,11 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import get_db
-from app.services.afl.aggregations import matching_grade_ids
+from app.services.afl.aggregations import matching_grade_ids  # noqa: F401
+from app.services.afl import competitions as afl_comp
 from app.services.afl.manual_stats import manual_branch
+from app.services.afl import grade_scope as gs
+from app.services.afl.season_groups import season_group
 
 router = APIRouter(prefix="/afl-leaderboard", tags=["afl-leaderboard"])
 
@@ -35,11 +38,21 @@ async def leaderboard(org_id: uuid.UUID,
                       stat: str = Query("goals"),
                       season_id: Optional[uuid.UUID] = None,
                       grade_id: Optional[uuid.UUID] = None,
+                      competition_id: Optional[str] = None,
                       limit: int = Query(200, le=500),
                       db: AsyncSession = Depends(get_db)):
     if stat not in _STATS and stat not in _VOTE_STATS:
         raise HTTPException(status_code=422, detail=f"stat must be one of {sorted({*_STATS, *_VOTE_STATS})}")
     params: dict = {"org": str(org_id), "lim": limit}
+    # The club's own grade-category default applies only when no grade is
+    # picked: someone choosing the Colts from the filter means it.
+    # A competition is the same kind of explicit pick, so it replaces the
+    # default too. grade_ids is None when neither was picked.
+    grade_ids = await afl_comp.resolve_grade_filter(db, org_id, grade_id, competition_id)
+    picked = grade_ids is not None
+    excluded = [] if picked else await gs.excluded_grade_ids(db, org_id)
+    if excluded:
+        params["excl"] = excluded
 
     if stat in _VOTE_STATS:
         # Club/competition B&F votes never come from PlayHQ — it has no concept
@@ -52,17 +65,17 @@ async def leaderboard(org_id: uuid.UUID,
         clauses = ["i.organisation_id = :org"]
         manual_where = ""
         if season_id:
-            clauses.append("i.season_id = :season")
-            manual_where += " AND m.season_id = :season"
-            params["season"] = str(season_id)
-        if grade_id:
+            clauses.append("i.season_id = ANY(:season)")
+            manual_where += " AND m.season_id = ANY(:season)"
+            params["season"] = await season_group(db, org_id, season_id)
+        if picked:
             clauses.append("i.grade_id = ANY(:grade)")
             manual_where += " AND m.grade_id = ANY(:grade)"
-            params["grade"] = await matching_grade_ids(db, org_id, grade_id)
-        where = " AND ".join(clauses)
+            params["grade"] = grade_ids
+        where = " AND ".join(clauses) + gs.other_rows("i", excluded)
         manual = manual_branch(
             ["player_id", "games", "goals", "behinds", "bog_count", col],
-            where=manual_where,
+            where=manual_where + gs.other_rows("m", excluded),
         )
         res = await db.execute(text(f"""
             WITH combined AS (
@@ -91,22 +104,23 @@ async def leaderboard(org_id: uuid.UUID,
     value_col = _STATS[stat]
 
     manual_clauses = ""
-    if grade_id:
-        params["grade"] = await matching_grade_ids(db, org_id, grade_id)
+    if picked:
+        params["grade"] = grade_ids
         synced_grade_clause = "s.grade_id = ANY(:grade)"
         imported_grade_clause = "i.grade_id = ANY(:grade)"
         manual_clauses += " AND m.grade_id = ANY(:grade)"
     else:
-        synced_grade_clause = "s.grade_id IS NULL"
-        imported_grade_clause = "TRUE"
+        synced_grade_clause = gs.synced_rows("s", excluded)
+        imported_grade_clause = "TRUE" + gs.other_rows("i", excluded)
+        manual_clauses += gs.other_rows("m", excluded)
 
     season_clause_s = ""
     season_clause_i = ""
     if season_id:
-        params["season"] = str(season_id)
-        season_clause_s = "AND s.season_id = :season"
-        season_clause_i = "AND i.season_id = :season"
-        manual_clauses += " AND m.season_id = :season"
+        params["season"] = await season_group(db, org_id, season_id)
+        season_clause_s = "AND s.season_id = ANY(:season)"
+        season_clause_i = "AND i.season_id = ANY(:season)"
+        manual_clauses += " AND m.season_id = ANY(:season)"
 
     # A manual adjustment is a delta, so it joins with no NOT EXISTS gate and
     # no grade_id IS NULL default — an adjustment has no whole-season twin to

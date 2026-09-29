@@ -20,6 +20,7 @@
 //     · icon — a bundled 3D "thiings" glyph used as a faded watermark when no
 //       photo is supplied (auto-picked per preset, override in the editor).
 import { AutoFitText, BrandLockup, ClubLogo, GrainSVG, Halftone, Stripes } from './cricket-templates'
+import { IS_AFL, PLATFORM_NAME } from '../lib/sport'
 import { aspectOf, pick, share } from './postAspect'
 import { LayerRoot } from './postLayers'
 
@@ -100,7 +101,7 @@ function Watermark({ sponsor, color = 'rgba(255,255,255,0.42)' }) {
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <BSMark />
-        <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color }}>Made with BetterCricket</span>
+        <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color }}>Made with {PLATFORM_NAME}</span>
       </div>
       {sponsor ? <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color }}>{sponsor}</div> : null}
     </div>
@@ -298,7 +299,7 @@ export function EVT_Ticket({ team, event = {}, width = 1080, height = 1080, pale
 
         <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
           <BSMark size={18} color={P.accent} />
-          <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: a(ink, 0.5) }}>Made with BetterCricket{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
+          <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: a(ink, 0.5) }}>Made with {PLATFORM_NAME}{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
         </div>
       </div>
     </LayerRoot>
@@ -322,7 +323,7 @@ export function EVT_Scoreboard({ team, event = {}, width = 1080, height = 1080, 
     <LayerRoot style={{ ...FRAME(width, height), background: P.primary, color: '#fff' }}>
       <div style={{ position: 'absolute', inset: 0, backgroundImage: `radial-gradient(${a(P.accent, 0.1)} 1.4px, transparent 1.6px)`, backgroundSize: '24px 24px' }} />
       <div style={{ position: 'absolute', left: -160, bottom: -160, width: 560, height: 560, borderRadius: '50%', background: `radial-gradient(circle, ${a(P.accent, 0.16)}, transparent 68%)` }} />
-      <img src={motif?.icon || icoBat} alt="" style={{ position: 'absolute', right: 54, top: 64, width: 150, height: 150, objectFit: 'contain', opacity: 0.5 }} />
+      <img src={motif?.icon || (IS_AFL ? icoStar : icoBat)} alt="" style={{ position: 'absolute', right: 54, top: 64, width: 150, height: 150, objectFit: 'contain', opacity: 0.5 }} />
 
       <div style={{ position: 'absolute', top: 60, left: 64, right: 230, display: 'flex', alignItems: 'center', gap: 16 }}>
         <BrandLockup team={team} palette={P} size={96} nameColor="#fff" nameSize={32} />
@@ -447,7 +448,7 @@ export function EVT_Gazette({ team, event = {}, width = 1080, height = 1080, pal
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             {event.sponsor ? <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: faint }}>{event.sponsor}</span> : null}
             <span style={{ color: line }}>|</span>
-            <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: faint }}>Made with BetterCricket</span>
+            <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: faint }}>Made with {PLATFORM_NAME}</span>
           </div>
         </div>
       </div>
@@ -519,7 +520,7 @@ export function EVT_Sticker({ team, event = {}, width = 1080, height = 1080, pal
 
       <div style={{ position: 'absolute', bottom: 30, left: 72, display: 'flex', alignItems: 'center', gap: 9 }}>
         <BSMark size={18} />
-        <span style={{ fontWeight: 500, fontSize: 13, letterSpacing: 1, color: a(ink, 0.5) }}>Made with BetterCricket{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
+        <span style={{ fontWeight: 500, fontSize: 13, letterSpacing: 1, color: a(ink, 0.5) }}>Made with {PLATFORM_NAME}{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
       </div>
     </LayerRoot>
   )
@@ -646,7 +647,7 @@ export function EVT_Swiss({ team, event = {}, width = 1080, height = 1080, palet
           <span style={{ fontSize: 16, fontWeight: 500, color: ink }}>{event.cta}</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <BSMark size={17} color={P.accent} />
-            <span style={{ fontSize: 13, fontWeight: 500, letterSpacing: 1, color: faint }}>Made with BetterCricket{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
+            <span style={{ fontSize: 13, fontWeight: 500, letterSpacing: 1, color: faint }}>Made with {PLATFORM_NAME}{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
           </div>
         </div>
       </div>
@@ -708,7 +709,7 @@ export function EVT_Crest({ team, event = {}, width = 1080, height = 1080, palet
           {(event.cta || event.price) ? <div style={{ marginTop: 28, fontFamily: MONO, fontSize: 15, letterSpacing: 3, textTransform: 'uppercase', color: cream, border: `1px solid ${P.accent}`, borderRadius: 2, padding: '11px 28px' }}>{[event.cta, event.price].filter(Boolean).join(' · ')}</div> : null}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 26 }}>
             <BSMark size={17} />
-            <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: a(cream, 0.72) }}>Made with BetterCricket{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
+            <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: a(cream, 0.72) }}>Made with {PLATFORM_NAME}{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
           </div>
         </div>
       </div>
@@ -766,7 +767,7 @@ export function EVT_Chalkboard({ team, event = {}, width = 1080, height = 1080, 
             {event.cta ? <div style={{ fontFamily: HAND, fontWeight: 700, fontSize: 46, color: P.accent, border: `3px solid ${P.accent}`, borderRadius: '60% 58% 62% 56%', padding: '8px 34px', transform: 'rotate(-2deg)', lineHeight: 1 }}>{event.cta}</div> : <span />}
             <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
               <BSMark size={18} />
-              <span style={{ fontWeight: 500, fontSize: 13, letterSpacing: 1, color: chalk2 }}>BetterCricket{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
+              <span style={{ fontWeight: 500, fontSize: 13, letterSpacing: 1, color: chalk2 }}>{PLATFORM_NAME}{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
             </div>
           </div>
         </div>
@@ -830,7 +831,7 @@ export function EVT_Polaroid({ team, event = {}, width = 1080, height = 1080, pa
 
         <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 9 }}>
           <BSMark size={18} color="#be185d" />
-          <span style={{ fontWeight: 500, fontSize: 13, letterSpacing: 1, color: a(ink, 0.5) }}>{team.name} · Made with BetterCricket{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
+          <span style={{ fontWeight: 500, fontSize: 13, letterSpacing: 1, color: a(ink, 0.5) }}>{team.name} · Made with {PLATFORM_NAME}{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
         </div>
       </div>
     </LayerRoot>
@@ -862,7 +863,7 @@ export const EVENT_TEMPLATES = [
 // Music / Quiz etc. have no literal glyph, so they map to the nearest mark and
 // lean on an uploaded background photo for the themed look.
 // ─────────────────────────────────────────────────────────────────────────────
-export const EVENT_MOTIFS = [
+const ALL_EVENT_MOTIFS = [
   { key: 'trophy',    label: 'Trophy',     icon: icoTrophy },
   { key: 'medal',     label: 'Medal',      icon: icoMedal },
   { key: 'handshake', label: 'Handshake',  icon: icoHandshake },
@@ -874,13 +875,15 @@ export const EVENT_MOTIFS = [
   { key: 'necktie',   label: 'Black tie',  icon: icoNecktie },
   { key: 'ribbon',    label: 'Ribbon',     icon: icoRibbon },
 ]
+// The football build has no use for a cricket bat as a watermark.
+export const EVENT_MOTIFS = IS_AFL ? ALL_EVENT_MOTIFS.filter(m => m.key !== 'bat') : ALL_EVENT_MOTIFS
 const motifIcon = (key) => (EVENT_MOTIFS.find((m) => m.key === key) || EVENT_MOTIFS[0]).icon
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PRESETS — one-click event facts. Selecting a preset fills the `event` object
 // and picks a sensible default template + motif; everything stays editable.
 // ─────────────────────────────────────────────────────────────────────────────
-export const EVENT_PRESETS = [
+const ALL_EVENT_PRESETS = [
   {
     key: 'auction', label: 'Auction Night', template: 'EV2', motif: 'handshake', photoLabel: 'Auction / lots photo',
     event: { kicker: 'Annual Fundraiser', title: 'Auction Night', subtitle: 'Bid on signed gear, mystery lots & big-ticket experiences. Every dollar backs the club.', date: 'Sat 9 Aug', time: '6:30 PM', venue: 'Function Room', price: '$40', cta: 'Book your table', sponsor: '' },
@@ -918,6 +921,23 @@ export const EVENT_PRESETS = [
     event: { kicker: 'Save the Date', title: 'Club Notice', subtitle: 'Your headline goes here. One template, any announcement — clean and unmistakable.', date: 'Date', time: 'Time', venue: 'Venue', price: 'Free', cta: 'Details to follow.', sponsor: 'Your sponsor here' },
   },
 ]
+
+// The football build keeps every preset and rewrites the few words that are
+// cricket's own (an XI, a first-grade side, cricket chat), so a club posting a
+// footy social night isn't handed cricket copy to correct.
+const AFL_PRESET_EVENT = {
+  curry: { subtitle: 'A night of spice, cold beers & footy chat. All members & families welcome.' },
+  selections: { kicker: 'Round 1 · 2026', subtitle: 'Senior side named for the season opener. Full team list below.', price: 'SENIORS', venue: 'Home Ground' },
+  presentation: { subtitle: "Celebrating the season's finest: the best & fairest, life memberships & a few tall tales." },
+  launch: { kicker: 'Round 1 · 2026', subtitle: 'New season, new jumpers. Meet the squads and kick off the campaign.', venue: 'Home Ground' },
+}
+export const EVENT_PRESETS = IS_AFL
+  ? ALL_EVENT_PRESETS.map(p => ({
+      ...p,
+      motif: p.motif === 'bat' ? 'star' : p.motif,
+      event: { ...p.event, ...(AFL_PRESET_EVENT[p.key] || {}) },
+    }))
+  : ALL_EVENT_PRESETS
 
 export const DEFAULT_EVENT = { ...EVENT_PRESETS[2].event }
 export const DEFAULT_EVENT_MOTIF = { key: 'star', icon: motifIcon('star'), imageUrl: null, opacity: 0.85, label: 'Add a photo' }

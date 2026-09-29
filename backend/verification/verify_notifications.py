@@ -42,6 +42,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _view_ddl import view_statements  # noqa: E402
 os.environ.setdefault("SECRET_KEY", "verify-secret-key-for-tests-only")
 
 from sqlalchemy import text
@@ -150,6 +151,26 @@ async def build_schema() -> None:
             for _ in range(3):     # applied three times, as a live boot does
                 for stmt in nddl.STATEMENTS:
                     await conn.execute(text(stmt))
+        # The grade milestone scan reads the per-innings views and the club's
+        # grade merges, the same way the Records page does. grade_merge_logs is
+        # lifespan raw SQL, invisible to create_all, so it is copied here column
+        # for column; the views come straight out of the migrations.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS grade_merge_logs (
+                id SERIAL PRIMARY KEY, merged_at TIMESTAMPTZ DEFAULT NOW(),
+                org_id UUID NOT NULL, canonical_name TEXT NOT NULL,
+                alias_name TEXT NOT NULL, undone_at TIMESTAMPTZ)
+        """))
+        json_cols = (await conn.execute(text(
+            "SELECT table_name, column_name FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND data_type = 'json'"))).all()
+        for tbl, col in json_cols:
+            await conn.execute(text(
+                f'ALTER TABLE "{tbl}" ALTER COLUMN "{col}" TYPE jsonb '
+                f'USING "{col}"::text::jsonb'))
+        for name, sql in view_statements():
+            await conn.execute(text(f"DROP VIEW IF EXISTS {name} CASCADE"))
+            await conn.execute(text(sql.replace("OR REPLACE ", "")))
 
 
 async def seed() -> None:
@@ -823,6 +844,383 @@ async def check_routes():
               str(len(empty["events"])))
 
 
+# ─── Certification stages (v9.83.0) ──────────────────────────────────────────
+
+Q_FINAL = uuid.uuid4()        # 5 days out — inside the final-reminder window
+Q_ANCIENT = uuid.uuid4()      # lapsed 400 days ago — somebody long gone
+Q_OLD = uuid.uuid4()          # lapsed 5 days ago but RENEWED by a newer record
+Q_NEW = uuid.uuid4()          # the renewal
+Q_ARCHIVED = uuid.uuid4()     # belongs to somebody archived from the Directory
+Q_RETIRED = uuid.uuid4()      # a certificate type the club has retired
+Q_LEGACY = uuid.uuid4()       # already told it had lapsed, before stages existed
+M_GONE = uuid.uuid4()
+QT_COACH = uuid.uuid4()
+QT_OLDTYPE = uuid.uuid4()
+QT_UMPIRE = uuid.uuid4()      # own types, so no other fixture reads as their renewal
+QT_SCORER = uuid.uuid4()
+
+
+async def qual_rows(s) -> dict[str, dict]:
+    rows = (await s.execute(text("""
+        SELECT dedupe_key, title, body, severity, payload FROM notifications
+        WHERE organisation_id = :org AND event_key = 'qualification_expiring'
+    """), {"org": str(ORG)})).mappings().all()
+    return {r["dedupe_key"]: dict(r) for r in rows}
+
+
+async def check_certification_stages():
+    print("\n── certification stages ────────────────────────────────────────")
+    today = date.today()
+    async with Session() as s:
+        await reset_notifications(s)
+        await s.execute(text("""
+            INSERT INTO fee_members (id, organisation_id, full_name, email, archived_at)
+            VALUES (:id, :org, 'Gone Volunteer', 'gone@club.test', NOW())
+        """), {"id": str(M_GONE), "org": str(ORG)})
+        await s.execute(text("""
+            INSERT INTO qualification_types (id, organisation_id, name, is_active)
+            VALUES (:a, :org, 'Coaching accreditation', true),
+                   (:b, :org, 'Old scheme', false),
+                   (:c, :org, 'Umpire accreditation', true),
+                   (:d, :org, 'Scorer accreditation', true)
+        """), {"a": str(QT_COACH), "b": str(QT_OLDTYPE), "c": str(QT_UMPIRE),
+               "d": str(QT_SCORER), "org": str(ORG)})
+        for qid, member, qt, expires in (
+            (Q_FINAL, M_VOL, QT_COACH, today + timedelta(days=5)),
+            (Q_ANCIENT, M_VOL, QT_UMPIRE, today - timedelta(days=400)),
+            (Q_OLD, M_VOL, QT_COACH, today - timedelta(days=5)),
+            (Q_ARCHIVED, M_GONE, QT_WWCC, today - timedelta(days=3)),
+            (Q_RETIRED, M_VOL, QT_OLDTYPE, today + timedelta(days=10)),
+            (Q_LEGACY, M_GONE, QT_SCORER, today - timedelta(days=2)),
+        ):
+            await s.execute(text("""
+                INSERT INTO member_qualifications
+                    (id, organisation_id, member_id, qualification_type_id, obtained_at, expires_at)
+                VALUES (:id, :org, :m, :qt, :o, :e)
+            """), {"id": str(qid), "org": str(ORG), "m": str(member), "qt": str(qt),
+                   "o": today - timedelta(days=800), "e": expires})
+        # Q_LEGACY's person is archived, so move it onto the live volunteer to
+        # test the legacy rule on its own.
+        await s.execute(text("UPDATE member_qualifications SET member_id = :m WHERE id = :id"),
+                        {"m": str(M_VOL), "id": str(Q_LEGACY)})
+        # A notice written the old way: the unsuffixed key, days_remaining < 0,
+        # no stage — the club has already been told this one lapsed.
+        exp = (today - timedelta(days=2)).isoformat()
+        await s.execute(text("""
+            INSERT INTO notifications (organisation_id, event_key, dedupe_key, severity, title, payload)
+            VALUES (:org, 'qualification_expiring', :k, 'warning', 'old notice',
+                    CAST(:p AS jsonb))
+        """), {"org": str(ORG), "k": f"qualification:{Q_LEGACY}:{exp}",
+               "p": '{"days_remaining": -1}'})
+        await s.commit()
+
+        await scan.scan_org(s, await org(s, ORG))
+        await s.commit()
+        got = await qual_rows(s)
+        keys = set(got)
+        k_soon = next((k for k in keys if str(Q_SOON) in k), "")
+        check("a certificate inside the notice period keeps its original key",
+              k_soon and not k_soon.endswith((":final", ":lapsed")), str(sorted(keys)))
+        k_final = next((k for k in keys if str(Q_FINAL) in k), "")
+        check("one inside the final-reminder window is raised as the final reminder",
+              k_final.endswith(":final"), k_final)
+        check("the final reminder says a renewal has not been recorded",
+              k_final and "Final reminder" in got[k_final]["body"], str(got.get(k_final)))
+        k_lapsed = next((k for k in keys if str(Q_LAPSED) in k), "")
+        check("a lapsed certificate is raised as lapsed", k_lapsed.endswith(":lapsed"), k_lapsed)
+        check("a lapsed certificate is raised as urgent, not as a warning",
+              k_lapsed and got[k_lapsed]["severity"] == "urgent", str(got.get(k_lapsed)))
+        check("an upcoming one stays a warning",
+              k_soon and got[k_soon]["severity"] == "warning", str(got.get(k_soon)))
+        check("a certificate that lapsed long ago is not raised",
+              not any(str(Q_ANCIENT) in k for k in keys), str(sorted(keys)))
+        check("a certificate renewed by a newer record is not chased",
+              not any(str(Q_OLD) in k for k in keys), str(sorted(keys)))
+        check("a certificate belonging to an archived person is not raised",
+              not any(str(Q_ARCHIVED) in k for k in keys), str(sorted(keys)))
+        check("a certificate of a retired type is not raised",
+              not any(str(Q_RETIRED) in k for k in keys), str(sorted(keys)))
+        check("one already announced as lapsed before stages existed is not re-announced",
+              not any(str(Q_LEGACY) in k and k.endswith(":lapsed") for k in keys),
+              str(sorted(k for k in keys if str(Q_LEGACY) in k)))
+        check("every new notice records its stage",
+              all((r["payload"] or {}).get("stage") for k, r in got.items() if "old notice" != r["title"]),
+              str([r["payload"] for r in got.values()]))
+
+        # The same certificate walking through its stages: one notice each.
+        await s.execute(text("UPDATE member_qualifications SET expires_at = :d WHERE id = :id"),
+                        {"d": today + timedelta(days=50), "id": str(Q_FINAL)})
+        await s.commit()
+        await scan.scan_org(s, await org(s, ORG)); await s.commit()
+        await s.execute(text("UPDATE member_qualifications SET expires_at = :d WHERE id = :id"),
+                        {"d": today + timedelta(days=50), "id": str(Q_FINAL)})
+        before = {k for k in await qual_rows(s) if str(Q_FINAL) in k}
+        exp50 = (today + timedelta(days=50)).isoformat()
+        check("a certificate 50 days out gets its notice", f"qualification:{Q_FINAL}:{exp50}" in before,
+              str(sorted(before)))
+        # Time passes, without the expiry changing: simulate by moving "today".
+        real_date = scan.date
+
+        class _Later(date):
+            @classmethod
+            def today(cls):
+                return real_date.today() + timedelta(days=40)
+        scan.date = _Later
+        try:
+            await scan.scan_org(s, await org(s, ORG)); await s.commit()
+            mid = {k for k in await qual_rows(s) if str(Q_FINAL) in k}
+            check("ten days out the same certificate gets a final reminder",
+                  f"qualification:{Q_FINAL}:{exp50}:final" in mid, str(sorted(mid)))
+
+            class _Lapsed(date):
+                @classmethod
+                def today(cls):
+                    return real_date.today() + timedelta(days=52)
+            scan.date = _Lapsed
+            await scan.scan_org(s, await org(s, ORG)); await s.commit()
+            end = {k for k in await qual_rows(s) if str(Q_FINAL) in k and exp50 in k}
+            check("and once it lapses, a lapsed notice",
+                  f"qualification:{Q_FINAL}:{exp50}:lapsed" in end, str(sorted(end)))
+            check("three notices over its life, and no more",
+                  len(end) == 3, str(sorted(end)))
+            await scan.scan_org(s, await org(s, ORG)); await s.commit()
+            again = {k for k in await qual_rows(s) if str(Q_FINAL) in k and exp50 in k}
+            check("a second scan the same day raises nothing new", again == end, str(sorted(again)))
+        finally:
+            scan.date = real_date
+
+        # Final reminder switched off: the close one reads as an ordinary notice.
+        await reset_notifications(s)
+        await s.execute(text("UPDATE member_qualifications SET expires_at = :d WHERE id = :id"),
+                        {"d": today + timedelta(days=5), "id": str(Q_FINAL)})
+        await notif.save_rule(s, ORG, "qualification_expiring", config={"final_days": 0})
+        await s.commit()
+        await scan.scan_org(s, await org(s, ORG)); await s.commit()
+        k = next((k for k in await qual_rows(s) if str(Q_FINAL) in k), "")
+        check("with no final reminder set, a close certificate is an ordinary notice",
+              k and not k.endswith(":final"), k)
+
+        # The lapsed window is the club's.
+        await reset_notifications(s)
+        await notif.save_rule(s, ORG, "qualification_expiring", config={"lapsed_days": 1000})
+        await s.commit()
+        await scan.scan_org(s, await org(s, ORG)); await s.commit()
+        got = await qual_rows(s)
+        check("a wider lapsed window reaches the long-lapsed certificate",
+              any(str(Q_ANCIENT) in k for k in got), str(sorted(got)))
+        ordered = await scan._src_qualification_expiring(
+            s, ORG, (await notif.club_rules(s, ORG))["qualification_expiring"]["config"])
+        rank = getattr(scan, "_QUAL_STAGE_RANK", None)
+        stages = [i["payload"].get("stage") for i in ordered]
+        check("lapsed certificates come first, so a cap never buries them",
+              rank is not None and None not in stages
+              and stages == sorted(stages, key=lambda x: rank[x]), str(stages))
+
+        await reset_notifications(s)
+        await s.execute(text("DELETE FROM member_qualifications WHERE id = ANY(CAST(:ids AS uuid[]))"),
+                        {"ids": [str(x) for x in (Q_FINAL, Q_ANCIENT, Q_OLD, Q_ARCHIVED, Q_RETIRED, Q_LEGACY)]})
+        await s.commit()
+
+
+# ─── Grade milestones (v9.83.0) ──────────────────────────────────────────────
+
+P_TWO_GRADES = uuid.uuid4()   # plays 1st Grade and 2nd Grade
+P_ONE_GRADE = uuid.uuid4()    # has only ever played 1st Grade
+P_LONG_AGO = uuid.uuid4()     # crossed 50 in 3rd Grade years ago
+P_LEFT_GRADE = uuid.uuid4()   # near a 2nd Grade milestone, last played it in 2015
+
+
+async def check_grade_milestones():
+    print("\n── grade milestones ────────────────────────────────────────────")
+    today = date.today()
+    async with Session() as s:
+        await reset_notifications(s)
+        grades = {}
+        for gname, override in (("1st Grade", "1st XI"), ("First Grade", None),
+                                ("2nd Grade", None), ("3rd Grade", None)):
+            gid = uuid.uuid4()
+            grades[gname] = gid
+            await s.execute(text("""
+                INSERT INTO grades (id, season_id, name, display_name_override)
+                VALUES (:id, :s, :n, :o)
+            """), {"id": str(gid), "s": str(SEASON), "n": gname, "o": override})
+        # "First Grade" is CA's older spelling, merged into "1st Grade".
+        await s.execute(text("""
+            INSERT INTO grade_merge_logs (org_id, canonical_name, alias_name)
+            VALUES (:org, '1st Grade', 'First Grade')
+        """), {"org": str(ORG)})
+        for pid, name in ((P_TWO_GRADES, "Two Grades"), (P_ONE_GRADE, "One Grade"),
+                          (P_LONG_AGO, "Long Ago"), (P_LEFT_GRADE, "Left Grade")):
+            await s.execute(text("""
+                INSERT INTO players (id, organisation_id, name, is_player, status)
+                VALUES (:id, :org, :n, true, 'active')
+            """), {"id": str(pid), "org": str(ORG), "n": name})
+            await s.execute(text("""
+                INSERT INTO player_season_stats (player_id, season_id, matches, runs, source)
+                VALUES (:p, :s, 5, 0, 'api')
+            """), {"p": str(pid), "s": str(SEASON)})
+
+        async def games(pid, grade, n, *, when, runs=0):
+            for i in range(n):
+                gid = uuid.uuid4()
+                await s.execute(text("""
+                    INSERT INTO games (id, grade_id, played_at, home_team, away_team)
+                    VALUES (:id, :g, :d, 'Us', 'Them')
+                """), {"id": str(gid), "g": str(grades[grade]), "d": when - timedelta(days=i)})
+                await s.execute(text("""
+                    INSERT INTO game_appearances (game_id, player_id) VALUES (:g, :p)
+                """), {"g": str(gid), "p": str(pid)})
+                if runs:
+                    await s.execute(text("""
+                        INSERT INTO batting_innings (game_id, player_id, innings_number, runs)
+                        VALUES (:g, :p, 1, :r)
+                    """), {"g": str(gid), "p": str(pid), "r": runs})
+
+        long_ago = date(2019, 1, 1)
+        recent = today - timedelta(days=3)
+        # 40 old games in 1st Grade + 8 under the merged spelling + 2 this week:
+        # 50 only if the merge is folded in, and only crossed this week.
+        await games(P_TWO_GRADES, "1st Grade", 40, when=long_ago)
+        await games(P_TWO_GRADES, "First Grade", 8, when=long_ago - timedelta(days=100))
+        await games(P_TWO_GRADES, "1st Grade", 2, when=recent)
+        # 2nd Grade: 24 innings of 20 = 480 runs, the last one this week — 20
+        # from 500, inside the 50-run window.
+        await games(P_TWO_GRADES, "2nd Grade", 23, when=long_ago, runs=20)
+        await games(P_TWO_GRADES, "2nd Grade", 1, when=recent, runs=20)
+        # Only ever 1st Grade — the grade total IS the career.
+        await games(P_ONE_GRADE, "1st Grade", 48, when=long_ago)
+        await games(P_ONE_GRADE, "1st Grade", 2, when=recent)
+        # Crossed 50 in 3rd Grade years ago, still playing elsewhere.
+        await games(P_LONG_AGO, "3rd Grade", 60, when=long_ago)
+        await games(P_LONG_AGO, "2nd Grade", 2, when=recent)
+        # 480 runs in 2nd Grade but last played it in 2015.
+        await games(P_LEFT_GRADE, "2nd Grade", 24, when=date(2015, 3, 1), runs=20)
+        await games(P_LEFT_GRADE, "1st Grade", 3, when=recent)
+        await s.commit()
+
+        await scan.scan_org(s, await org(s, ORG))
+        await s.commit()
+        ach = await emitted(s, ORG, "grade_milestone_achieved")
+        up = await emitted(s, ORG, "grade_milestone_upcoming")
+        two = [a for a in ach if str(P_TWO_GRADES) in a["dedupe_key"]]
+        check("50 matches in a grade, reached this week, is announced",
+              any(":grade_matches:1st grade:50" in a["dedupe_key"] for a in two), str(ach))
+        check("it counts the merged-away spelling as the same grade",
+              len(two) == 1, str(two))
+        check("it reads the grade the way the club names it",
+              two and "in 1st XI" in two[0]["title"], str(two))
+        check("a player who has only played one grade is not told twice",
+              not any(str(P_ONE_GRADE) in a["dedupe_key"] for a in ach + up), str(ach + up))
+        check("a grade milestone crossed years ago is not announced",
+              not any(str(P_LONG_AGO) in a["dedupe_key"] and "3rd grade" in a["dedupe_key"]
+                      for a in ach), str(ach))
+        near = [u for u in up if str(P_TWO_GRADES) in u["dedupe_key"]]
+        check("a player 20 from 500 runs in a grade they still play is coming up",
+              any(":grade_runs:2nd grade:500" in u["dedupe_key"] for u in near), str(up))
+        check("the upcoming notice says how far and in which grade",
+              near and "is 20 from 500 runs in 2nd Grade" in near[0]["title"], str(near))
+        check("a grade the player has stopped playing is not counted down",
+              not any(str(P_LEFT_GRADE) in u["dedupe_key"] for u in up), str(up))
+
+        await scan.scan_org(s, await org(s, ORG)); await s.commit()
+        again = await emitted(s, ORG, "grade_milestone_achieved") + await emitted(s, ORG, "grade_milestone_upcoming")
+        check("a second scan announces nothing twice", len(again) == len(ach) + len(up),
+              f"{len(again)} vs {len(ach) + len(up)}")
+
+        await reset_notifications(s)
+        if ev.get_event("grade_milestone_achieved") is None:
+            check("switching the grade events off switches them off", False, "no such event")
+            return
+        await notif.save_rule(s, ORG, "grade_milestone_achieved", enabled=False)
+        await s.commit()
+        await scan.scan_org(s, await org(s, ORG)); await s.commit()
+        check("switching the grade events off switches them off",
+              not await emitted(s, ORG, "grade_milestone_achieved"))
+        await reset_notifications(s)
+
+
+# ─── Testing the email (v9.83.0) ─────────────────────────────────────────────
+
+class _Console:
+    name = "console"
+
+    async def send(self, msg):  # pragma: no cover - must not be reached
+        raise AssertionError("a test email must not be sent through console")
+
+
+async def check_test_email():
+    print("\n── testing the email ───────────────────────────────────────────")
+    from app.models.db import Organisation, User
+    from app.routers.notifications import get_notification_settings
+    try:
+        from app.routers.notifications import send_notification_test_email
+    except ImportError as exc:
+        check("a test-email route exists", False, str(exc))
+        return
+    if not hasattr(scan, "send_test_email"):
+        check("a test-email service exists", False)
+        return
+    async with Session() as s:
+        await reset_notifications(s)
+        club = await s.get(Organisation, ORG)
+        user = await s.get(User, PRIMARY)
+        await scan.scan_org(s, club); await s.commit()
+        pending_before = [d for d in await deliveries(s, user_id=PRIMARY, channel="email")]
+
+        STUB.sent.clear(); STUB.fail_with = None
+        r = await send_notification_test_email(current_user=user, club=club, db=s)
+        check("a test email is sent to the person who asked", r["ok"] and r["to"] == "primary@club.test", str(r))
+        check("exactly one message, to them alone",
+              [m.to_email for m in STUB.sent] == ["primary@club.test"], str([m.to_email for m in STUB.sent]))
+        check("it is marked as a test", STUB.sent and STUB.sent[0].subject.startswith("[Test]"),
+              STUB.sent[0].subject if STUB.sent else "")
+        check("it carries the club's real recent notifications",
+              r["items"] > 0 and STUB.sent and "reached" in STUB.sent[0].html, str(r))
+        check("it reports the provider's message id", bool(r["message_id"]), str(r))
+        after = await deliveries(s, user_id=PRIMARY, channel="email")
+        check("it leaves the real digest's deliveries exactly as they were",
+              sorted(d["status"] for d in after) == sorted(d["status"] for d in pending_before)
+              and all(d["status"] == "pending" for d in after), str(after))
+
+        STUB.sent.clear(); STUB.fail_with = "550 mailbox unavailable"
+        r = await send_notification_test_email(current_user=user, club=club, db=s)
+        check("a refusal is reported with the provider's reason",
+              r["ok"] is False and "550" in (r["error"] or ""), str(r))
+        STUB.fail_with = None
+
+        no_email = await s.get(User, NO_EMAIL)
+        r = await scan.send_test_email(s, club, no_email)
+        check("an account with no address is told so, and nothing is sent",
+              r["ok"] is False and "no email address" in (r["error"] or ""), str(r))
+
+        real = email_service.get_email_provider
+        email_service.get_email_provider = lambda: _Console()  # noqa: E731
+        try:
+            r = await scan.send_test_email(s, club, user)
+            check("with no provider connected it says so rather than claiming a send",
+                  r["ok"] is False and r["live"] is False and "No email provider" in (r["error"] or ""),
+                  str(r))
+            stats = await scan.dispatch_emails(s, club); await s.commit()
+            check("the daily digest does not mark anything sent through console",
+                  stats.get("not_live") is True and stats["deliveries_sent"] == 0, str(stats))
+            still = await deliveries(s, user_id=PRIMARY, channel="email")
+            check("so the deliveries are still waiting for a real provider",
+                  still and all(d["status"] == "pending" for d in still), str(still))
+        finally:
+            email_service.get_email_provider = real
+
+        STUB.sent.clear()
+        await scan.dispatch_emails(s, club); await s.commit()
+        payload = await get_notification_settings(current_user=user, club=club, db=s)
+        last = payload.get("my_last_email") or {}
+        check("the settings screen reports the last email and that it went",
+              last.get("status") == "sent" and last.get("sent_at"), str(last))
+        other = await s.get(User, OTHER_ADMIN)
+        payload = await get_notification_settings(current_user=other, club=await s.get(Organisation, OTHER), db=s)
+        check("another club's admin sees none of this club's emails",
+              payload.get("my_last_email") is None, str(payload.get("my_last_email")))
+
+
 async def main() -> int:
     if not HAVE:
         print("Configurable notifications are not present in this build:")
@@ -846,6 +1244,9 @@ async def main() -> int:
     await check_digest_failure_and_frequency()
     await check_feed()
     await check_routes()
+    await check_certification_stages()
+    await check_grade_milestones()
+    await check_test_email()
 
     print(f"\n{PASS} passed, {FAIL} failed")
     for f in FAILURES:

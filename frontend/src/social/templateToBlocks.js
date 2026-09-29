@@ -5,6 +5,7 @@
 // post's current content. Returns null for templates without a recreation
 // (the caller falls back to overlay-on-top editing for those).
 import { newBlankItem } from './blank-template'
+import { IS_AFL } from '../lib/sport'
 
 const T = (text, o = {}) => ({ ...newBlankItem('text'), text: text || '', bold: true, uppercase: true, ...o })
 const BODY = (text, o = {}) => ({ ...newBlankItem('text'), text: text || '', bold: false, uppercase: false, fontFamily: "'Inter', sans-serif", lineHeight: 1.2, ...o })
@@ -51,7 +52,7 @@ export function templateToBlocks(templateId, ctx = {}) {
     const statBlocks = stats.map((s, i) => T(`${s.value}  ${s.label}`, { x: 70 + (i % 2) * 470, y: 760 + Math.floor(i / 2) * 110, w: 440, fontSize: 56, color: i === 0 ? 'accent' : 'ink' }))
     return [
       BR({ x: 760, y: 56, size: 130, layout: 'stack', align: 'right' }),
-      T('★ MAN OF THE MATCH', { x: 70, y: 70, w: 640, fontSize: 30, color: 'accent' }),
+      T(IS_AFL ? '★ BEST ON GROUND' : '★ MAN OF THE MATCH', { x: 70, y: 70, w: 640, fontSize: 30, color: 'accent' }),
       T(p.first || 'PLAYER', { x: 70, y: 470, w: 940, fontSize: 44, color: 'ink' }),
       T(p.last || 'NAME', { x: 70, y: 530, w: 960, fontSize: 124, color: 'ink' }),
       p.role ? BODY(String(p.role).toUpperCase(), { x: 74, y: 690, w: 700, fontSize: 26, color: 'accent', fontFamily: "'JetBrains Mono', monospace" }) : null,

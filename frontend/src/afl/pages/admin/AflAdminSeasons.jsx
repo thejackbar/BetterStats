@@ -9,7 +9,7 @@ import LoadingSpinner from '../../../components/LoadingSpinner'
 // the leaderboard's season filter). This is just list + rename + a safe
 // delete for a season that turned out to be a mistake and has nothing
 // recorded against it yet.
-function SeasonRow({ season, onSaved, onDeleted }) {
+function SeasonRow({ season, onSaved, onDeleted, onMove, first, last, mergedInto }) {
   const toast = useToast()
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(season.name || '')
@@ -70,11 +70,26 @@ function SeasonRow({ season, onSaved, onDeleted }) {
 
   return (
     <tr className="pb-hairline-t align-middle">
-      <td className="py-2 pr-2 text-pb-text">{season.name}</td>
+      <td className="py-2 pr-2 text-pb-text">
+        {season.name}
+        {mergedInto && (
+          <span className="ml-2 font-mono text-[9px] tracking-wide2 border rounded px-1.5 py-0.5 text-pb-faint border-pb-hairline" data-testid="merged-badge">
+            MERGED INTO {mergedInto.toUpperCase()}
+          </span>
+        )}
+      </td>
       <td className="py-2 pr-2 font-mono text-[11px] text-pb-faint">{season.year || '—'}</td>
       <td className="py-2 pr-2 text-right font-mono text-[10px] text-pb-faint">{season.grades}</td>
       <td className="py-2 pr-2 text-right font-mono text-[10px] text-pb-faint">{season.synced_games + season.imported_games + (season.adjustment_games || 0)}</td>
       <td className="py-2 pr-2 text-right whitespace-nowrap">
+        {!mergedInto && (
+          <span className="mr-3 inline-flex gap-1">
+            <button aria-label={`Move ${season.name} up`} disabled={first} onClick={() => onMove(-1)}
+              className="text-pb-faint hover:text-pb-text disabled:opacity-30">↑</button>
+            <button aria-label={`Move ${season.name} down`} disabled={last} onClick={() => onMove(1)}
+              className="text-pb-faint hover:text-pb-text disabled:opacity-30">↓</button>
+          </span>
+        )}
         {season.synced && (
           <span className="font-mono text-[9px] tracking-wide2 border rounded px-1.5 py-0.5 text-green-300 border-green-300/30 mr-2">SYNCED</span>
         )}
@@ -182,19 +197,106 @@ function LinkGradePanel({ seasons, onLinked }) {
   )
 }
 
+// A football season is one competition's season ("VAFA 2026", "VAFA Juniors
+// 2026"), so one playing year can arrive as several. Merging reads them as one
+// year everywhere: the season picker, the profile's season table and the
+// season records. Nothing is rewritten, so undoing puts them straight back.
+function MergePanel({ seasons, onChanged }) {
+  const toast = useToast()
+  const [merges, setMerges] = useState([])
+  const [keep, setKeep] = useState('')
+  const [fold, setFold] = useState('')
+  const [busy, setBusy] = useState(false)
+  const loadMerges = () => aflApi.adminListSeasonMerges().then(setMerges).catch(() => setMerges([]))
+  useEffect(() => { loadMerges() }, [])
+  const live = seasons.filter(s => !s.alias_of)
+
+  async function merge() {
+    if (!keep || !fold || keep === fold) { toast.error('Pick two different seasons'); return }
+    setBusy(true)
+    try {
+      await aflApi.adminMergeSeasons({ canonical_season_id: keep, alias_season_id: fold })
+      toast.success('Seasons merged')
+      setFold('')
+      loadMerges(); onChanged()
+    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+  }
+  async function undo(m) {
+    setBusy(true)
+    try { await aflApi.adminUndoSeasonMerge(m.id); loadMerges(); onChanged() }
+    catch (e) { toast.error(e.message) } finally { setBusy(false) }
+  }
+  const active = merges.filter(m => !m.undone)
+
+  return (
+    <div className="pb-card p-4 space-y-3" data-testid="season-merge">
+      <div>
+        <h3 className="text-sm font-semibold text-pb-text">Merge seasons</h3>
+        <p className="text-[12px] text-pb-dim mt-0.5 max-w-2xl">
+          PlayHQ gives each competition its own season, so one year can show up more than
+          once. Merge them and they read as one season across the site. Nothing is deleted,
+          and a merge can be undone.
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <select aria-label="Season to keep" value={keep} onChange={e => setKeep(e.target.value)}
+          className="bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-[12px] text-pb-text">
+          <option value="">Keep…</option>
+          {live.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+        <span className="text-[12px] text-pb-faint">and fold in</span>
+        <select aria-label="Season to merge in" value={fold} onChange={e => setFold(e.target.value)}
+          className="bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-[12px] text-pb-text">
+          <option value="">Merge in…</option>
+          {live.filter(s => s.id !== keep).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+        <button onClick={merge} disabled={busy || !keep || !fold}
+          className="font-mono text-[10px] tracking-wide2 font-semibold rounded px-2.5 py-1.5 text-black bg-[var(--pb-accent)] disabled:opacity-50">
+          MERGE
+        </button>
+      </div>
+      {active.length > 0 && (
+        <ul className="text-[12px] space-y-1">
+          {active.map(m => (
+            <li key={m.id} className="flex items-center gap-2">
+              <span className="text-pb-dim">{m.alias_name} → {m.canonical_name}</span>
+              <button onClick={() => undo(m)} disabled={busy}
+                className="font-mono text-[10px] text-pb-faint hover:text-pb-text underline">Undo</button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 export default function AflAdminSeasons() {
   const toast = useToast()
   const [seasons, setSeasons] = useState(null)
 
   const load = () => aflApi.adminListSeasons().then(setSeasons).catch(e => toast.error(e.message))
   useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  const byId = Object.fromEntries((seasons || []).map(s => [s.id, s]))
+
+  // Order is written for every season at once, so a club that has never
+  // ordered anything gets a complete order the first time it moves one.
+  async function move(i, dir) {
+    const next = [...seasons]
+    const j = i + dir
+    if (j < 0 || j >= next.length) return
+    ;[next[i], next[j]] = [next[j], next[i]]
+    setSeasons(next)
+    try { await aflApi.adminReorderSeasons(next.map((s, k) => ({ id: s.id, display_order: k }))) }
+    catch (e) { toast.error(e.message); load() }
+  }
 
   return (
     <div className="space-y-4 max-w-4xl">
       <SectionTitle>Seasons</SectionTitle>
       <p className="text-sm text-pb-dim max-w-2xl -mt-2">
         Every season your club holds — synced from PlayHQ or created by hand (via Import
-        Stats, or here). Rename any of them; a season with no grades or games recorded
+        Stats, or here). Rename any of them, set the order the season picker shows them in, and
+        merge a year PlayHQ split across competitions. A season with nothing recorded
         against it yet can also be deleted.
       </p>
 
@@ -214,8 +316,11 @@ export default function AflAdminSeasons() {
                 </tr>
               </thead>
               <tbody>
-                {seasons.map(s => (
-                  <SeasonRow key={s.id} season={s} onSaved={load} onDeleted={load} />
+                {seasons.map((s, i) => (
+                  <SeasonRow key={s.id} season={s} onSaved={load} onDeleted={load}
+                    mergedInto={s.alias_of ? (byId[s.alias_of]?.name || 'another season') : null}
+                    first={i === 0} last={i === seasons.length - 1}
+                    onMove={dir => move(i, dir)} />
                 ))}
                 {seasons.length === 0 && (
                   <tr><td colSpan={5} className="py-4 text-center text-pb-dim text-[12px]">No seasons yet.</td></tr>
@@ -224,6 +329,7 @@ export default function AflAdminSeasons() {
             </table>
           </div>
 
+          {seasons.length > 1 && <MergePanel seasons={seasons} onChanged={load} />}
           {seasons.length > 0 && <LinkGradePanel seasons={seasons} onLinked={load} />}
         </>
       )}

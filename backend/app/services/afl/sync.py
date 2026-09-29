@@ -173,7 +173,9 @@ async def _upsert_seasons(session: AsyncSession, org: Organisation,
                 )
                 session.add(row)
             else:
-                row.name = display
+                # The name is set once, when the season is first seen: a club
+                # that renamed it (Seasons admin) keeps its own, the rule
+                # cricket's sync already follows. The year still follows PlayHQ.
                 row.year = year
             row.synced_at = datetime.now(timezone.utc)
             out.append({
@@ -787,6 +789,16 @@ async def sync_organisation(org_id: uuid.UUID,
             await update_sync_run(run_id, stats)
             stats["season_stat_rows"] = await _rollup_season_stats(session, org_pk)
             await session.commit()
+
+        # BetterFees match days, the step cricket's scheduler takes after its
+        # sync: a club collecting match fees is charged for the games that
+        # just landed. Best-effort on its own session, so a fees hiccup can
+        # never turn a good sync into a failed one.
+        try:
+            from app.services.fees import recompute_fee_match_days
+            await recompute_fee_match_days(org_pk)
+        except Exception:  # noqa: BLE001
+            logger.warning("fee match-day recompute failed for org %s", org_pk, exc_info=True)
 
         _progress(stats, "Done", 100)
         if owns_run:

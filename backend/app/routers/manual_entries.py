@@ -19,7 +19,7 @@ import io
 import json
 import re
 import uuid
-from datetime import datetime, timezone, date as date_cls
+from datetime import datetime, timedelta, timezone, date as date_cls
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
@@ -39,6 +39,7 @@ from app.models.db import (
     ManualFallOfWicket,
     ManualFieldingStat,
     ManualGame,
+    ManualInnings,
     ManualPartnership,
     ManualSeasonAdjustment,
     Organisation,
@@ -48,7 +49,7 @@ from app.models.db import (
     get_db,
 )
 from app.routers.auth import get_current_club, get_current_user
-from app.services import dismissal, game_import_staging, import_cleanup
+from app.services import dismissal, game_import_staging, import_cleanup, scorebook_innings
 from app.services import import_ingest as ingest
 from app.services.grade_labels import suggest_categories, suggest_category
 from app.services.season_resolve import (
@@ -175,6 +176,32 @@ class ManualFieldingIn(BaseModel):
     stumpings: int = 0
 
 
+class ManualInningsIn(BaseModel):
+    """One innings of a hand-entered game: which side batted, its extras, and
+    the opposition innings' own total. Everything is optional — a game that
+    sends no innings rows renders exactly as it did before. Every extras/total
+    field defaults to None ("not recorded"), never 0, so a blank field is not
+    read as a recorded zero."""
+    innings_number: int = 1
+    # 'us' | 'opposition' | None. Anything else is normalised to None.
+    batting_side: Optional[str] = None
+    byes: Optional[int] = None
+    leg_byes: Optional[int] = None
+    wides: Optional[int] = None
+    no_balls: Optional[int] = None
+    penalty: Optional[int] = None
+    extras_total: Optional[int] = None
+    total_runs: Optional[int] = None
+    total_wickets: Optional[int] = None
+    overs: Optional[float] = None
+
+    @model_validator(mode="after")
+    def _clean_side(self):
+        if self.batting_side not in ("us", "opposition"):
+            self.batting_side = None
+        return self
+
+
 class ManualGameIn(BaseModel):
     # Optional since the season a game belongs to is derivable from its own
     # date: omit it and the server files the game under that season, creating
@@ -207,6 +234,10 @@ class ManualGameIn(BaseModel):
     batting_innings: list[ManualBattingIn] = Field(default_factory=list)
     bowling_spells: list[ManualBowlingIn] = Field(default_factory=list)
     fielding_stats: list[ManualFieldingIn] = Field(default_factory=list)
+    # Per-innings meta (migration 310): the innings side toggle, per-innings
+    # extras, and opposition innings totals. Empty for a game that records none,
+    # in which case the scorecard renders exactly as it did before.
+    innings: list[ManualInningsIn] = Field(default_factory=list)
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -275,12 +306,15 @@ async def _recompute_milestones(db: AsyncSession, org_id: uuid.UUID, player_ids)
     CA sync does, so re-run the same milestone-crossing check (500 runs, 50
     wickets, etc.) the sync job runs — otherwise a club with no CA sync (or a
     player whose history is entirely manual/imported) never mints these badges.
-    Safe to call with a superset of affected players: it only adds newly-
-    crossed thresholds, never removes anything.
+    Safe to call with a superset of affected players. Reconciles: the entry
+    has just been written, so every source the career is counted from is in
+    place, and a correction that takes a player back under a threshold takes
+    the stored milestone with it (a milestone row is derived output, never
+    something a person typed).
     """
     ids = sorted({pid for pid in player_ids if pid}, key=str)
     if ids:
-        await _compute_milestones(db, ids, org_id)
+        await _compute_milestones(db, ids, org_id, reconcile=True)
 
 
 def _extract_player_ids(rows) -> list:
@@ -990,6 +1024,42 @@ async def list_manual_games(
     return out
 
 
+# MUST stay ABOVE `/games/{game_id}` — FastAPI matches in registration order,
+# and `{game_id}` is a single path segment, so it happily captures the literal
+# "template.csv" and 422s with "Invalid manual game id". That is exactly what a
+# club downloaded instead of the template. Keep this route first. The example
+# rows and columns live in GAME_CSV_COLUMNS / the CSV-import section below;
+# module constants resolve at call time, so declaring the route here is fine.
+@router.get("/games/template.csv")
+async def games_template(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+):
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(GAME_CSV_COLUMNS)
+    # Example: one game with two players. Rows with the same game_key roll up
+    # into a single manual_game record; game-level fields are read from the
+    # FIRST row encountered for that key.
+    w.writerow([
+        "G1", "2010-11-13", "Bayswater", "Hyde Park", "Summer 2010/11", "1st Grade",
+        "false", "40-over", "Applecross", "Bayswater", "Applecross", "Won by 50 runs",
+        "Smith, John", 1, 1, 45, 60, 5, 1, "false", "false", "c Brown b Jones",
+        "8.2", 2, 25, 3, 0, 0, 1, 0, 0, 0,
+    ])
+    w.writerow([
+        "G1", "2010-11-13", "Bayswater", "Hyde Park", "Summer 2010/11", "1st Grade",
+        "false", "40-over", "Applecross", "Bayswater", "Applecross", "Won by 50 runs",
+        "Brown, Tom", 1, 2, 12, 20, 1, 0, "false", "false", "b Jones",
+        "", "", "", "", "", "", "", "", "", "",
+    ])
+    return StreamingResponse(
+        io.BytesIO(buf.getvalue().encode("utf-8-sig")),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="manual_games_template.csv"'},
+    )
+
+
 @router.get("/games/{game_id}")
 async def get_manual_game(
     game_id: str,
@@ -1018,12 +1088,18 @@ async def get_manual_game(
         .join(Player, Player.id == ManualFieldingStat.player_id)
         .where(ManualFieldingStat.manual_game_id == gid)
     )).all()
+    innings = (await db.execute(
+        select(ManualInnings)
+        .where(ManualInnings.manual_game_id == gid)
+        .order_by(ManualInnings.innings_number)
+    )).scalars().all()
 
     return {
         **_row_to_dict(game),
         "batting_innings": [{**_row_to_dict(r), "player_name": _player_display_name(p)} for r, p in batting],
         "bowling_spells": [{**_row_to_dict(r), "player_name": _player_display_name(p)} for r, p in bowling],
         "fielding_stats": [{**_row_to_dict(r), "player_name": _player_display_name(p)} for r, p in fielding],
+        "innings": [_row_to_dict(r) for r in innings],
     }
 
 
@@ -1044,10 +1120,11 @@ async def _replace_game_children(
     for pid in all_player_ids:
         await _assert_player_in_org(db, pid, org_id)
 
-    # Wipe + reinsert all three child tables. Safe under same transaction.
+    # Wipe + reinsert all child tables. Safe under same transaction.
     await db.execute(sa_delete(ManualBattingInnings).where(ManualBattingInnings.manual_game_id == game_id))
     await db.execute(sa_delete(ManualBowlingSpell).where(ManualBowlingSpell.manual_game_id == game_id))
     await db.execute(sa_delete(ManualFieldingStat).where(ManualFieldingStat.manual_game_id == game_id))
+    await db.execute(sa_delete(ManualInnings).where(ManualInnings.manual_game_id == game_id))
 
     for x in data.batting_innings:
         db.add(ManualBattingInnings(
@@ -1086,6 +1163,26 @@ async def _replace_game_children(
             catches_wk=x.catches_wk,
             run_outs=x.run_outs,
             stumpings=x.stumpings,
+        ))
+    # De-dupe on innings_number (the unique key) so a form that somehow sends
+    # two rows for one innings can't hit the constraint — last one wins.
+    seen_innings: dict[int, ManualInningsIn] = {}
+    for x in data.innings:
+        seen_innings[x.innings_number] = x
+    for x in seen_innings.values():
+        db.add(ManualInnings(
+            manual_game_id=game_id,
+            innings_number=x.innings_number,
+            batting_side=x.batting_side,
+            byes=x.byes,
+            leg_byes=x.leg_byes,
+            wides=x.wides,
+            no_balls=x.no_balls,
+            penalty=x.penalty,
+            extras_total=x.extras_total,
+            total_runs=x.total_runs,
+            total_wickets=x.total_wickets,
+            overs=x.overs,
         ))
 
 
@@ -1692,6 +1789,7 @@ async def delete_manual_game(
         "batting_innings": [_row_to_dict(r) for r in old_batting],
         "bowling_spells": [_row_to_dict(r) for r in old_bowling],
         "fielding_stats": [_row_to_dict(r) for r in old_fielding],
+        **(await _extra_children_snapshot(db, gid)),
     }
     affected_player_ids = _extract_player_ids(list(old_batting) + list(old_bowling) + list(old_fielding))
     summary = f"Deleted manual game ({game.played_at or 'date unknown'})"
@@ -1800,6 +1898,16 @@ async def _restore_manual_game(db: AsyncSession, snapshot: dict, org_id: uuid.UU
         if isinstance(rfields.get("player_id"), str):
             rfields["player_id"] = uuid.UUID(rfields["player_id"])
         db.add(ManualFieldingStat(**rfields))
+    # Absent from a snapshot taken before these were kept, which restores as
+    # before: a match with no innings rows.
+    for key, model, uuid_cols in _EXTRA_GAME_CHILDREN:
+        for r in children.get(key, []):
+            rfields = {k: v for k, v in r.items() if k != "id"}
+            rfields["manual_game_id"] = game_uuid
+            for col in uuid_cols:
+                if isinstance(rfields.get(col), str):
+                    rfields[col] = uuid.UUID(rfields[col])
+            db.add(model(**rfields))
 
 
 @router.post("/audit/{log_id}/undo")
@@ -2325,37 +2433,66 @@ GAME_CSV_COLUMNS = [
     "bowling_overs", "bowling_maidens", "bowling_runs", "bowling_wickets",
     "bowling_wides", "bowling_no_balls",
     "fielding_catches", "fielding_catches_wk", "fielding_run_outs", "fielding_stumpings",
+    # Everything below is optional, and a sheet without it imports exactly as
+    # before. They carry what a club's own scorebook holds beyond its players'
+    # figures: the opposition's innings, each innings' own total and extras,
+    # and the fall of wickets the partnerships are worked out from.
+    #
+    # opp_innings_number names the OPPOSITION's innings in the same leg as
+    # this row's innings_number. Our bowling on the row is filed under it,
+    # since that is the innings our bowlers bowled in; without it the bowling
+    # shares our batting innings and the match page draws our own bowlers as
+    # the attack against our own batters.
+    "opp_innings_number", "batting_order_known",
+    "innings_total", "innings_wickets", "innings_overs",
+    "innings_byes", "innings_leg_byes", "innings_wides", "innings_no_balls", "innings_penalty",
+    "opp_total", "opp_wickets", "opp_overs",
+    "opp_byes", "opp_leg_byes", "opp_wides", "opp_no_balls", "opp_penalty",
+    # On a batter's row: the wicket they fell at and the score when they did.
+    "fow_wicket", "fow_score",
 ]
 
+# The per-innings figures a sheet can carry, as (column suffix, ManualInnings
+# field). Read with an `innings_` prefix for our innings and `opp_` for theirs.
+_INNINGS_META_FIELDS = (
+    ("total", "total_runs"), ("wickets", "total_wickets"), ("overs", "overs"),
+    ("byes", "byes"), ("leg_byes", "leg_byes"), ("wides", "wides"),
+    ("no_balls", "no_balls"), ("penalty", "penalty"),
+)
 
-@router.get("/games/template.csv")
-async def games_template(
-    current_user: User = Depends(get_current_user),
-    club: Organisation = Depends(get_current_club),
-):
-    buf = io.StringIO()
-    w = csv.writer(buf)
-    w.writerow(GAME_CSV_COLUMNS)
-    # Example: one game with two players. Rows with the same game_key roll up
-    # into a single manual_game record; game-level fields are read from the
-    # FIRST row encountered for that key.
-    w.writerow([
-        "G1", "2010-11-13", "Bayswater", "Hyde Park", "Summer 2010/11", "1st Grade",
-        "false", "40-over", "Applecross", "Bayswater", "Applecross", "Won by 50 runs",
-        "Smith, John", 1, 1, 45, 60, 5, 1, "false", "false", "c Brown b Jones",
-        "8.2", 2, 25, 3, 0, 0, 1, 0, 0, 0,
-    ])
-    w.writerow([
-        "G1", "2010-11-13", "Bayswater", "Hyde Park", "Summer 2010/11", "1st Grade",
-        "false", "40-over", "Applecross", "Bayswater", "Applecross", "Won by 50 runs",
-        "Brown, Tom", 1, 2, 12, 20, 1, 0, "false", "false", "b Jones",
-        "", "", "", "", "", "", "", "", "", "",
-    ])
-    return StreamingResponse(
-        io.BytesIO(buf.getvalue().encode("utf-8-sig")),
-        media_type="text/csv",
-        headers={"Content-Disposition": 'attachment; filename="manual_games_template.csv"'},
-    )
+
+def _row_innings_meta(raw: dict, prefix: str) -> dict:
+    """The innings figures one row carries under `prefix`, blanks left out."""
+    out = {}
+    for suffix, field in _INNINGS_META_FIELDS:
+        v = (raw.get(prefix + suffix) or "").strip()
+        if not v:
+            continue
+        out[field] = _parse_float(v) if field == "overs" else _parse_int(v)
+    return out
+
+
+def _note_innings(meta: dict, number: int, side: str, figures: dict) -> None:
+    """Record that innings `number` was batted by `side`, filling in whichever
+    of its figures this row carries. The first value seen for a figure wins,
+    so a sheet repeating the innings total on every row of it is fine.
+
+    Refuses one innings number claimed by both sides: that is a sheet whose
+    opp_innings_number collides with one of our own innings, and filing both
+    under one number would put their total on our card.
+    """
+    entry = meta.setdefault(number, {"batting_side": side})
+    if entry["batting_side"] != side:
+        raise ValueError(
+            f"innings {number} is given as both our innings and the opposition's")
+    for field, value in figures.items():
+        entry.setdefault(field, value)
+
+
+# NOTE: the GET /games/template.csv route that serves this template is declared
+# ABOVE GET /games/{game_id} on purpose (see the comment there). It reads
+# GAME_CSV_COLUMNS above at call time. Do not re-add it here, or the two
+# registrations will fight and the shadowed one wins.
 
 
 def _has_any_value(*vals) -> bool:
@@ -2367,6 +2504,24 @@ def _has_any_value(*vals) -> bool:
 # One writer, two callers: the wizard's commit step and the strict single-shot
 # endpoint below it. Two copies is how the two start disagreeing about what a
 # scorecard row means.
+
+
+# The child tables of a manual game beyond its batting, bowling and fielding,
+# as (snapshot key, model, uuid columns). A snapshot that left them out would
+# restore a match with no innings totals, fall of wickets or partnerships.
+_EXTRA_GAME_CHILDREN = (
+    ("innings", ManualInnings, ()),
+    ("fall_of_wickets", ManualFallOfWicket, ("player_id",)),
+    ("partnerships", ManualPartnership, ("batter1_id", "batter2_id")),
+)
+
+
+async def _extra_children_snapshot(db: AsyncSession, gid: uuid.UUID) -> dict:
+    out = {}
+    for key, model, _ in _EXTRA_GAME_CHILDREN:
+        rows = (await db.execute(select(model).where(model.manual_game_id == gid))).scalars().all()
+        out[key] = [_row_to_dict(r) for r in rows]
+    return out
 
 
 async def _snapshot_manual_game(db: AsyncSession, gid: uuid.UUID, org_id: uuid.UUID):
@@ -2389,8 +2544,49 @@ async def _snapshot_manual_game(db: AsyncSession, gid: uuid.UUID, org_id: uuid.U
         "batting_innings": [_row_to_dict(r) for r in bat],
         "bowling_spells": [_row_to_dict(r) for r in bowl],
         "fielding_stats": [_row_to_dict(r) for r in fld],
+        **(await _extra_children_snapshot(db, gid)),
     }
     return snap
+
+
+def _add_scorebook_innings(db: AsyncSession, game_id: uuid.UUID, innings_meta: dict,
+                           batters_by_innings: dict, fow_by_innings: dict) -> None:
+    """Write an imported match's innings figures, fall of wickets and stands.
+
+    Nothing is written for a sheet that carried none of the optional columns,
+    so an import of an older sheet is byte-for-byte what it was.
+
+    Partnerships come from `scorebook_innings.derive_partnerships`, which
+    returns None for an innings whose figures do not reconcile. Such an innings
+    keeps its fall of wickets, which is true on its own, and gets no stands
+    rather than stands credited to the wrong pair.
+    """
+    for number, entry in sorted(innings_meta.items()):
+        figures = {k: v for k, v in entry.items() if k != "batting_side"}
+        db.add(ManualInnings(manual_game_id=game_id, innings_number=number,
+                             batting_side=entry["batting_side"], **figures))
+
+    for number, falls in fow_by_innings.items():
+        for f in sorted(falls, key=lambda f: f["wicket"]):
+            db.add(ManualFallOfWicket(
+                manual_game_id=game_id, innings_number=number,
+                wicket_number=f["wicket"], score_at_fall=f["score"],
+                player_id=f["player_id"], batter_name=f["name"],
+            ))
+        meta = innings_meta.get(number) or {}
+        stands = scorebook_innings.derive_partnerships(
+            batters_by_innings.get(number, []), falls,
+            innings_total=meta.get("total_runs"),
+            innings_wickets=meta.get("total_wickets"),
+        )
+        for st in stands or []:
+            db.add(ManualPartnership(
+                manual_game_id=game_id, innings_number=number,
+                wicket_number=st["wicket"], runs=st["runs"], balls=None,
+                batter1_id=st["batter1"]["player_id"], batter2_id=st["batter2"]["player_id"],
+                batter1_name=st["batter1"]["name"], batter2_name=st["batter2"]["name"],
+                batter1_runs=None, batter2_runs=None, is_club_innings=True,
+            ))
 
 
 async def _write_games(
@@ -2518,6 +2714,16 @@ async def _write_games(
                     game.superseded_by_game_id = uuid.UUID(dup["id"])
                     game.pair_prefers_import = True
                     game.pairing_locked = True
+                elif overwrite_manual and dup.get("paired_to"):
+                    # The manual match being replaced was itself the stand-in
+                    # for a synced game (an earlier overwrite import, or a
+                    # CricketStatz pairing). The replacement inherits the pair
+                    # exactly as it was — dropping it would bring the synced
+                    # copy back beside the sheet's version and count the match
+                    # twice, which a re-import of the same file must never do.
+                    game.superseded_by_game_id = uuid.UUID(dup["paired_to"])
+                    game.pair_prefers_import = bool(dup.get("pair_prefers_import"))
+                    game.pairing_locked = bool(dup.get("pairing_locked"))
                 db.add(game)
                 await db.flush()
                 game_id = str(game.id)
@@ -2528,8 +2734,35 @@ async def _write_games(
                 # accumulated here and written once. Batting and bowling really
                 # are per innings and are written as they come.
                 fielding: dict = {}
+                # innings_number -> {batting_side, figures}; empty for a sheet
+                # that carries none of the optional innings columns, in which
+                # case no manual_innings row is written and the game reads as
+                # it always has.
+                innings_meta: dict = {}
+                # innings_number -> our batters and the wickets they fell at,
+                # for the fall of wickets and the partnerships.
+                batters_by_innings: dict = {}
+                fow_by_innings: dict = {}
+
+                order_known = (first.get("batting_order_known") or "").strip()
+                if order_known:
+                    game.innings_order_known = _parse_bool(order_known)
 
                 for row_num, raw in group:
+                    # Innings figures are read BEFORE the player check: a match
+                    # nobody was named for still has an opposition total.
+                    innings_number = _parse_int(raw.get("innings_number")) or 1
+                    opp_innings = _parse_int(raw.get("opp_innings_number"), nullable=True)
+                    ours = _row_innings_meta(raw, "innings_")
+                    theirs = _row_innings_meta(raw, "opp_")
+                    if opp_innings is not None or ours or theirs:
+                        _note_innings(innings_meta, innings_number, "us", ours)
+                        if opp_innings is not None:
+                            _note_innings(innings_meta, opp_innings, "opposition", theirs)
+                        elif theirs:
+                            raise ValueError(
+                                f"row {row_num}: opposition figures need opp_innings_number")
+
                     pname = (raw.get("player_name") or "").strip()
                     if not pname:
                         continue  # blank player rows are silently ignored
@@ -2538,8 +2771,6 @@ async def _write_games(
                         continue  # the admin said to leave this name out
                     if not player:
                         raise ValueError(f"row {row_num}: player not found: '{pname}'")
-                    innings_number = _parse_int(raw.get("innings_number")) or 1
-
                     bruns = raw.get("batting_runs")
                     bballs = raw.get("batting_balls")
                     if _has_any_value(bruns, bballs, raw.get("dismissal_type"),
@@ -2567,6 +2798,20 @@ async def _write_games(
                                      or dismissal.is_not_out(dismissal_type=raw.get("dismissal_type"))),
                             did_not_bat=_parse_bool(raw.get("did_not_bat")),
                         ))
+                        if not _parse_bool(raw.get("did_not_bat")):
+                            batters_by_innings.setdefault(innings_number, []).append({
+                                "position": _parse_int(raw.get("batting_position"), nullable=True),
+                                "player_id": player.id, "name": pname,
+                            })
+
+                    fow_wicket = _parse_int(raw.get("fow_wicket"), nullable=True)
+                    if fow_wicket is not None:
+                        fow_by_innings.setdefault(innings_number, []).append({
+                            "wicket": fow_wicket,
+                            "score": _parse_int(raw.get("fow_score"), nullable=True),
+                            "position": _parse_int(raw.get("batting_position"), nullable=True),
+                            "player_id": player.id, "name": pname,
+                        })
 
                     bovers = raw.get("bowling_overs")
                     bwkts = raw.get("bowling_wickets")
@@ -2575,7 +2820,10 @@ async def _write_games(
                         db.add(ManualBowlingSpell(
                             manual_game_id=game.id,
                             player_id=player.id,
-                            innings_number=innings_number,
+                            # Our bowlers bowled in the OPPOSITION's innings.
+                            # A sheet that does not say which one keeps the old
+                            # behaviour of sharing our batting innings.
+                            innings_number=opp_innings if opp_innings is not None else innings_number,
                             overs=_parse_float(bovers) if bovers not in (None, "") else None,
                             maidens=_parse_int(raw.get("bowling_maidens")),
                             runs=_parse_int(bownruns),
@@ -2599,6 +2847,8 @@ async def _write_games(
 
                 for pid, agg in fielding.items():
                     db.add(ManualFieldingStat(manual_game_id=game.id, player_id=pid, **agg))
+                _add_scorebook_innings(db, game.id, innings_meta,
+                                       batters_by_innings, fow_by_innings)
                 await db.flush()
         except Exception as e:
             errors.append({"row": first_row_num, "error": f"Game '{game_key}': {e}", "data": first})
@@ -2856,12 +3106,26 @@ def _season_label_year(label: str) -> Optional[int]:
 # default) or overwrite the existing MANUAL one; a synced game is never the CSV
 # import's to touch (a different table the sync owns) — see `_write_games`.
 #
-# Identity is (date, opposition), the same signal check_scorecard_duplicate
+# Identity is (date, opposition) first, the same signal check_scorecard_duplicate
 # uses: played_at is the strong half, the opposition tokens disambiguate a club
 # that played several matches on one day. A sheet game with no date, or none we
 # can read, or no opposition, cannot be matched confidently and is always
 # imported as new — guessing would either discard a real match or overwrite the
 # wrong one.
+#
+# THAT RULE ALONE LEFT 32 OF ONE CLUB'S MATCHES COUNTED TWICE, measured on the
+# live database after an overwrite import (ops/diagnostics/csv_import_unpaired.sql):
+# 19 were fixtures the OTHER club synced first, so they sat in that club's
+# season and the index — read off `v_effective_games.organisation_id` — never
+# saw them; 11 were opponents the two sources spell with no word in common
+# ("Rockingham Hornets Cricket Club" against "Hillman"); 2 were two-day matches
+# each source dates by a different day. So a sheet match the date-and-opponent
+# rule leaves unmatched gets a SECOND look through `match_pairing`, the
+# scorecard matcher the CricketStatz import already runs: three batters with
+# the same scores is not a coincidence whatever the opponent is called, and a
+# week's difference in the date is ordinary for a two-day game. A synced game
+# is a candidate there whether the club's own season holds it or the other
+# side of the fixture does.
 
 def _opp_tokens(*vals) -> set:
     text = " ".join((v or "").lower() for v in vals)
@@ -2869,18 +3133,37 @@ def _opp_tokens(*vals) -> set:
 
 
 async def _existing_game_index(db: AsyncSession, org_id: uuid.UUID) -> dict:
-    """played_at -> [ {id, source, tokens} ] for every game the club holds."""
+    """played_at -> [ {id, source, tokens, ...} ] for every game that is the club's.
+
+    Ours is the season's org OR either side of the fixture, the rule
+    `club_grades.club_game_sql` keeps everywhere else: a match between two
+    synced clubs is one `games` row owned by whoever synced it first, and a
+    club re-importing its own history has to be able to recognise the half of
+    its fixtures that live under the other club's season.
+
+    A manual game carries its pairing columns too, so an overwrite that
+    replaces a locked stand-in can carry the pair onto the replacement rather
+    than dropping it and bringing the synced copy back into the count.
+    """
     rows = (await db.execute(_t("""
         SELECT g.id::text AS id, g.played_at, g.source,
-               g.opp_club_name, g.home_team, g.away_team
+               g.opp_club_name, g.home_team, g.away_team,
+               pm.superseded_by_game_id::text AS paired_to,
+               pm.pair_prefers_import, pm.pairing_locked
         FROM v_effective_games g
-        WHERE g.organisation_id = :org AND g.played_at IS NOT NULL
+        LEFT JOIN manual_games pm ON g.source = 'manual' AND pm.id = g.id
+        WHERE (g.organisation_id = :org
+               OR g.home_org_id = :org OR g.away_org_id = :org)
+          AND g.played_at IS NOT NULL
     """), {"org": str(org_id)})).mappings().all()
     index: dict = {}
     for r in rows:
         index.setdefault(r["played_at"], []).append({
             "id": r["id"], "source": r["source"],
             "tokens": _opp_tokens(r["opp_club_name"], r["home_team"], r["away_team"]),
+            "paired_to": r["paired_to"],
+            "pair_prefers_import": bool(r["pair_prefers_import"]),
+            "pairing_locked": bool(r["pairing_locked"]),
         })
     return index
 
@@ -2906,8 +3189,99 @@ def _match_existing(index: dict, played_at: str, opp_vals: tuple, consumed: set)
             continue
         if toks & ex["tokens"]:
             consumed.add(ex["id"])
-            return {"id": ex["id"], "source": ex["source"]}
+            return {"id": ex["id"], "source": ex["source"], "matched_on": "date",
+                    "paired_to": ex.get("paired_to"),
+                    "pair_prefers_import": ex.get("pair_prefers_import", False),
+                    "pairing_locked": ex.get("pairing_locked", False)}
     return None
+
+
+def _sheet_signature(group: list, pmatch: dict) -> frozenset:
+    """(player_id, runs) for every batted innings on a sheet match whose
+    player already resolves to a record — the same shape `match_pairing` reads
+    off a scorecard. A player still to be created has no id to compare and is
+    left out, which only ever makes the match harder to pair, never wrong."""
+    sig: set = set()
+    for _row_num, raw in group:
+        pname = (raw.get("player_name") or "").strip()
+        m = pmatch.get(pname) or {}
+        pid = m.get("player_id")
+        if not pid or _parse_bool(raw.get("did_not_bat")):
+            continue
+        runs = _parse_int(raw.get("batting_runs"), nullable=True)
+        if runs is None:
+            continue
+        sig.add((str(pid), runs))
+    return frozenset(sig)
+
+
+async def _match_unmatched_by_scores(
+    db: AsyncSession, club: Organisation, by_game: dict, pmatch: dict,
+    existing_by_game: dict, consumed: set,
+) -> int:
+    """The second look: pair the sheet matches the date-and-opponent rule
+    left unmatched against the club's synced games on their scorecards.
+
+    Runs `match_pairing.assign` over the still-unmatched sheet matches and the
+    synced games nothing has claimed — the CricketStatz matcher's own rules,
+    not a second copy of them — so a two-day match dated a week apart, an
+    opponent the two sources spell differently, and a fixture the other club
+    synced first all resolve the way they already do for that import. Only
+    SYNCED games are candidates here: a manual duplicate is a re-import of the
+    same sheet, and the exact date-and-opponent rule is the right one for it.
+
+    Returns how many were matched this way, and writes them into
+    `existing_by_game` marked `matched_on: 'scores'`.
+    """
+    from app.services import match_pairing as mp
+
+    pending: list = []
+    for game_key, group in by_game.items():
+        if game_key in existing_by_game:
+            continue
+        first = group[0][1]
+        played_at = None
+        raw_date = (first.get("played_at") or "").strip()
+        if raw_date:
+            try:
+                played_at = date_cls.fromisoformat(raw_date)
+            except Exception:
+                played_at = None
+        sig = _sheet_signature(group, pmatch)
+        if played_at is None and not sig:
+            continue  # nothing to compare on either axis
+        pending.append((game_key, group, played_at, sig))
+    if not pending:
+        return 0
+
+    club_tokens = mp.team_tokens(club.name or "")
+    sheet_rows: list = []
+    for game_key, group, played_at, sig in pending:
+        first = group[0][1]
+        ours, opp = mp.split_sides(first.get("home_team") or "",
+                                   first.get("away_team") or "",
+                                   first.get("opposition") or "", club_tokens)
+        sheet_rows.append(mp.MatchRow(game_key, played_at, opp, sig, ours))
+
+    dates = [r.played_at for r in sheet_rows if r.played_at is not None]
+    from_day = to_day = None
+    if dates:
+        span = timedelta(days=mp.WINDOW_DAYS)
+        from_day, to_day = min(dates) - span, max(dates) + span
+    synced = [m for m in await mp.load_synced(
+                  db, club.id, club_tokens=club_tokens,
+                  from_day=from_day, to_day=to_day, exclude_twinned=True)
+              if m.id not in consumed]
+    if not synced:
+        return 0
+
+    matched = 0
+    for game_key, (syn_id, _prefer) in mp.assign(sheet_rows, synced).items():
+        existing_by_game[game_key] = {"id": syn_id, "source": "api",
+                                      "matched_on": "scores"}
+        consumed.add(syn_id)
+        matched += 1
+    return matched
 
 
 async def _resolve_games(
@@ -2964,8 +3338,27 @@ async def _resolve_games(
     grade_names = sorted({(g.display_name_override or g.name or "").strip()
                           for g in grades if (g.display_name_override or g.name)})
     gmatch = ingest.match_grades(grade_labels, grade_names)
-    pmatch = ingest.match_players(
-        names, [(p.id, (p.display_name_override or p.name or "")) for p in players])
+    roster = [(p.id, (p.display_name_override or p.name or "")) for p in players]
+    pmatch = ingest.match_players(names, roster)
+    # "Salter, Steve" in an archive is "Salter, Steven" on the synced roster:
+    # proposed and pre-selected, never written silently (import_ingest's note
+    # on short forms says why each guard is there).
+    suggestions = ingest.short_form_suggestions(names, roster, pmatch)
+    if suggestions:
+        from app.services import import_reconcile as recon
+        years_by_name: dict = {}
+        for group in by_game.values():
+            year = _season_label_year((group[0][1].get("season_name") or "").strip())
+            if not year:
+                continue
+            for _n, raw in group:
+                nm = (raw.get("player_name") or "").strip()
+                if nm in suggestions:
+                    years_by_name.setdefault(nm, set()).add(year)
+        ingest.apply_short_form_suggestions(
+            pmatch, suggestions, req.player_overrides,
+            {n: (min(v), max(v)) for n, v in years_by_name.items()},
+            await recon.career_years(db, club.id, [s["player_id"] for s in suggestions.values()]))
 
     # A season or grade the club does not hold is proposed for creation rather
     # than left unresolved: there is no identity question to get wrong, and the
@@ -3064,6 +3457,9 @@ async def _resolve_games(
             dup_manual += 1
         else:
             dup_synced += 1
+    dup_scores = await _match_unmatched_by_scores(
+        db, club, by_game, pmatch, existing_by_game, consumed)
+    dup_synced += dup_scores
 
     warnings = []
     if unresolved:
@@ -3109,6 +3505,10 @@ async def _resolve_games(
             "total": dup_manual + dup_synced,
             "manual": dup_manual,
             "synced": dup_synced,
+            # The subset of `synced` the date-and-opponent rule missed and the
+            # scorecard matcher found — a two-day match dated a week apart, an
+            # opponent spelt differently, a fixture the other club synced first.
+            "matched_on_scores": dup_scores,
         },
         "_plan": {"by_game": by_game, "smatch": smatch, "gmatch": gmatch,
                   "pmatch": pmatch, "grade_pairs": {k: sorted(v) for k, v in grade_pairs.items()},
@@ -3337,25 +3737,41 @@ async def commit_manual_games(
                              .where(Season.id.in_(newly))
                              .values(import_authoritative=True))
 
-    # Surface a season we are now sourcing from the import that STILL holds
-    # synced matches the file did not cover — their scores drop out of the
-    # season totals (CA's summary is stepped aside), so say so rather than let
-    # it read as data quietly going missing.
+    # Say how much of a re-sourced season the file did NOT cover. Those synced
+    # matches still count — from Cricket Australia's own scorecards, since the
+    # season's totals are now built per match rather than from CA's summary —
+    # so this is information, not a warning that figures have gone missing.
+    # The one thing that genuinely drops out is a synced match CA holds no
+    # scorecard of ours for; that is named separately so it does not read as
+    # a fault in the import.
     warnings: list[str] = []
     if auth_ids:
-        uncovered = (await db.execute(_t("""
-            SELECT COUNT(*) FROM games g
+        uncovered, no_card = (await db.execute(_t("""
+            SELECT COUNT(*),
+                   COUNT(*) FILTER (WHERE NOT EXISTS (
+                       SELECT 1 FROM batting_innings bi
+                        JOIN players p ON p.id = bi.player_id
+                                      AND p.organisation_id = :org
+                       WHERE bi.game_id = g.id))
+              FROM games g
               JOIN grades gr ON gr.id = g.grade_id
              WHERE gr.season_id = ANY(CAST(:seasons AS UUID[]))
                AND NOT EXISTS (SELECT 1 FROM manual_games lk
                                 WHERE lk.superseded_by_game_id = g.id
-                                  AND lk.pairing_locked)
-        """), {"seasons": [str(s) for s in auth_ids]})).scalar() or 0
+                                  AND lk.pair_prefers_import)
+        """), {"seasons": [str(s) for s in auth_ids],
+                "org": str(club.id)})).one()
+        uncovered = uncovered or 0
+        no_card = no_card or 0
         if uncovered:
-            warnings.append(
-                f"{uncovered} Cricket Australia match(es) in the re-sourced season(s) "
-                "were not in your file. Their scores are no longer counted in those "
-                "seasons' totals — check the file holds every match for those seasons.")
+            msg = (f"{uncovered} Cricket Australia match(es) in the re-sourced "
+                   "season(s) were not in your file. They still count, from "
+                   "Cricket Australia's own scorecards.")
+            if no_card:
+                msg += (f" {no_card} of them carry no scorecard of your club's "
+                        "players, so they add nothing to the totals until one "
+                        "is synced or imported.")
+            warnings.append(msg)
 
     parts = [f"{games_new} games"]
     if overwritten:

@@ -112,3 +112,55 @@ def price_for_addon(selected_keys) -> dict:
         mods = mods + [FANTASY]
     subtotal = sum(m["price"] for m in mods)
     return {"line_items": [dict(m) for m in mods], "subtotal": subtotal, "discount": 0, "total": subtotal}
+
+
+def apply_coupon_to_quote(quote: dict, coupon) -> dict:
+    """Folds a validated discount-coupon into a new_subscription price_for()
+    quote — pure local math for the preview (no Stripe call, matching /quote's
+    existing no-Stripe-call design); the real Checkout Session's own discounts
+    array is Stripe's own authoritative number at actual checkout. A
+    non-stackable coupon REPLACES the bundle discount rather than combining
+    with it, mirroring stripe_client.create_checkout_session's own rule.
+
+    A STACKING coupon is calculated on top of the bundle discount, not
+    alongside it — mirrors Stripe's own behaviour: create_checkout_session
+    passes both coupons in a `discounts` list (bundle first, then the
+    stacking coupon), and Stripe applies multiple discounts sequentially in
+    that order, so the real checkout already charges bundle-then-coupon.
+    Computing the coupon off the raw pre-bundle subtotal here would show a
+    preview total that doesn't match what Stripe actually charges. The
+    bundle discount itself is a flat dollar amount across the whole
+    selection, not itemised per module, so when a coupon is scoped to only
+    some modules its share of the bundle discount is allocated
+    proportionally to its slice of the full subtotal."""
+    covered = set(coupon.module_keys) if coupon.module_keys else {li["key"] for li in quote["line_items"]}
+    covered_subtotal = sum(li["price"] for li in quote["line_items"] if li["key"] in covered)
+
+    if not coupon.stackable_with_bundle and quote["discount"] > 0:
+        # Replaces the bundle discount outright — computed against the plain
+        # covered subtotal, since there's no bundle reduction left in play.
+        if coupon.discount_type == "percent":
+            coupon_off = round(covered_subtotal * float(coupon.discount_value) / 100, 2)
+        else:
+            coupon_off = min(float(coupon.discount_value), covered_subtotal)
+        quote["discount"] = 0
+        quote["total"] = quote["subtotal"] - coupon_off
+    else:
+        bundle_share = (
+            quote["discount"] * covered_subtotal / quote["subtotal"] if quote["subtotal"] else 0
+        )
+        covered_after_bundle = covered_subtotal - bundle_share
+        if coupon.discount_type == "percent":
+            coupon_off = round(covered_after_bundle * float(coupon.discount_value) / 100, 2)
+        else:
+            coupon_off = min(float(coupon.discount_value), covered_after_bundle)
+        quote["total"] = round(quote["total"] - coupon_off, 2)
+    quote["coupon"] = {
+        "code": coupon.code,
+        "display_name": coupon.display_name,
+        "discount_type": coupon.discount_type,
+        "discount_value": float(coupon.discount_value),
+        "amount_off": coupon_off,
+        "stackable_with_bundle": coupon.stackable_with_bundle,
+    }
+    return quote

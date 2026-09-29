@@ -116,3 +116,34 @@ export function PlayerCell({ id, name, base, photoUrl }) {
   if (!id) return body
   return <Link to={`${base}/players/${id}`} className="hover:text-[var(--pb-accent)]">{body}</Link>
 }
+
+
+/**
+ * Says which grade categories the club leaves out of its stats by default
+ * (Settings, "Stats by grade"). Drawn only while no grade is picked, since a
+ * picked grade is always shown whatever the club default says.
+ */
+// The Competition filter: the club's own groups of grades (Merge Grades ->
+// Competitions). Drawn only when the club has two or more, since a control
+// that can only ever answer "everything" is worse than none.
+export function CompetitionSelect({ club, value, onChange }) {
+  const comps = club?.stat_competitions || []
+  if (comps.length < 2) return null
+  return (
+    <span data-testid="competition-filter">
+      <Select value={value} onChange={onChange} placeholder="All competitions"
+              options={comps.map(c => ({ value: c.id, label: c.name }))} />
+    </span>
+  )
+}
+
+export function StatsScopeNote({ club, gradePicked }) {
+  const left = club?.stats_left_out || []
+  if (!left.length || gradePicked) return null
+  const list = left.length === 1 ? left[0] : `${left.slice(0, -1).join(', ')} and ${left[left.length - 1]}`
+  return (
+    <p className="text-xs text-pb-faint" data-testid="stats-scope-note">
+      {list} grades are left out of these figures (a club setting). Pick a grade to see it on its own.
+    </p>
+  )
+}

@@ -45,6 +45,7 @@ import PostPreviewModal from '../../components/admin/socialpost/PostPreviewModal
 import { templateToBlocks, CUSTOM_EDITABLE } from '../../social/templateToBlocks'
 import { POST_SIZES, DEFAULT_POST_SIZE, postSizeOf, PostFrame } from '../../social/postSizes'
 import { resolveClubFonts, fontWeightFor, buildFontFaceCss } from '../../lib/theme'
+import { IS_AFL } from '../../lib/sport'
 
 // Stable initial value for the (empty) Custom Edit overlay layer.
 const EMPTY_LAYER = () => []
@@ -52,7 +53,7 @@ const EMPTY_LAYER = () => []
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE REGISTRY
 // ─────────────────────────────────────────────────────────────────────────────
-const TEMPLATES = [
+const ALL_TEMPLATES = [
   { id: 'T1', name: 'Hero List',       component: T1_HeroList,        desc: 'Big player + name list',          maxPlayers: 13 },
   { id: 'T2', name: 'Card Grid',       component: T2_CardGrid,        desc: '4×3 trading card grid',           maxPlayers: 12 },
   { id: 'T3', name: 'Side Numbered',   component: T3_SideNumbered,    desc: 'Side photo + numbered XI',        maxPlayers: 11 },
@@ -98,6 +99,11 @@ const TEMPLATES = [
   // Freeform WYSIWYG canvas — add/move/resize your own text & images.
   { id: 'BL1', name: 'Blank Canvas', component: BlankCanvas, desc: 'Freeform — add your own text & images', maxPlayers: 0, kind: 'blank' },
 ]
+// The football build drops the layouts that only mean anything with cricket
+// data: the batting order, the results wrap's batting/bowling leaders, and
+// every layout of the three hidden post types (toss, scorecard, final score).
+const AFL_HIDDEN_TEMPLATES = new Set(['T4', 'RR7', 'C2', 'C4', 'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6', 'SC1', 'SC2', 'SC3'])
+const TEMPLATES = IS_AFL ? ALL_TEMPLATES.filter(t => !AFL_HIDDEN_TEMPLATES.has(t.id)) : ALL_TEMPLATES
 
 // The lineup templates that crop the hero photo into a fixed box, and the shape
 // of that box — the framing control previews the same crop the post will make.
@@ -121,18 +127,24 @@ const TAB_MAP = {
   EV7: 'events', EV8: 'events', EV9: 'events', EV10: 'events', EV11: 'events',
   BL1: 'blank',
 }
+// The football build (lib/sport.js) leaves out the three post types that are
+// cricket through and through: the toss, the full scorecard and the single
+// Final Score layouts (overs, run rates, batting and bowling columns). Every
+// other type takes football data as it is; fixtures, results, lineups and the
+// player spotlight are fed from the football backend's own /admin/social/*.
+const AFL_HIDDEN_TABS = new Set(['toss', 'scorecard', 'result'])
 const TABS = [
   { key: 'lineup',       label: 'Lineup' },
   { key: 'fixtures',     label: 'Fixtures' },
   { key: 'result',       label: 'Final Score' },
   { key: 'results',      label: 'Results' },
-  { key: 'motm',         label: 'Player of Match' },
+  { key: 'motm',         label: IS_AFL ? 'Best on Ground' : 'Player of Match' },
   { key: 'announcement', label: 'Announcement' },
   { key: 'toss',         label: 'Toss' },
   { key: 'scorecard',    label: 'Scorecard' },
   { key: 'events',       label: 'Events' },
   { key: 'blank',        label: 'Blank' },
-]
+].filter(t => !IS_AFL || !AFL_HIDDEN_TABS.has(t.key))
 const TAB_FIRST = {
   lineup: 'T1', fixtures: 'FX1', announcement: 'C1', toss: 'C2', motm: 'C3',
   result: 'C4', results: 'RR1', scorecard: 'SC1', events: 'EV1', blank: 'BL1',
@@ -154,6 +166,12 @@ const SOURCE_HELP = {
   fixtures: 'Pull this round\'s fixtures for every grade straight from the fixtures feed.',
   results: 'Pull the latest round\'s results for every grade straight from the results feed.',
   motm: 'Paste the match link and we\'ll work out the player of the match from the scorecard. You choose which of their batting, bowling and fielding stats go on the post.',
+}
+if (IS_AFL) {
+  SOURCE_HELP.lineup = 'Pick a recent game below to pull the side your club named on PlayHQ, with the captain and the match details. Or add players yourself in Content.'
+  SOURCE_HELP.motm = 'Pick a recent game below and we\'ll rank your side by PlayHQ\'s best-on-ground votes, then goals. You choose whether their goals and behinds go on the post.'
+  SOURCE_HELP.fixtures = 'Pull your upcoming games for every grade from the fixtures BetterFootball has synced.'
+  SOURCE_HELP.results = 'Pull your latest results for every grade from the games BetterFootball has synced.'
 }
 
 
@@ -215,7 +233,20 @@ const DEFAULT_SCORECARD = {
   away: { ...DEFAULT_TEAM('AWAY TEAM', 'AWY', '#cc1f2c'), headerInk: '#0a0a0a' },
 }
 
-const BASE_URL = import.meta.env.VITE_API_URL || '/api'
+// The build's own API base — '/api' for cricket, '/afl/api' for the football
+// silo — the same rule lib/api.js follows.
+const BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.BASE_URL + 'api')
+// Where a stored football asset URL lives: absolute and data URLs as they are,
+// '/api/...' under this bundle's API base, and API-relative 'images/...'
+// (what football stores for an upload) prefixed with it.
+// A sponsor's logo, or null when it has none: asking the images endpoint for a
+// sponsor nobody uploaded a logo for is a 404 and a broken image on the post.
+const sponsorLogoUrl = (s) => (s?.logo_url ? `${BASE_URL}/images/sponsors/${s.id}/logo` : null)
+const footballAsset = (u) => {
+  if (!u || /^(https?:|data:|\/\/)/.test(u)) return u
+  if (u.startsWith('/api/')) return `${BASE_URL}${u.slice(4)}`
+  return u.startsWith('/') ? u : `${BASE_URL}/${u}`
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPERS
@@ -752,6 +783,12 @@ function useRowDrag(setRows) {
 function potmPlayerLabel(p) {
   const name = p.short || [p.first ? `${p.first[0]}.` : '', (p.last || '').toUpperCase()].filter(Boolean).join(' ') || 'Player'
   const bits = [name]
+  if (p.football) {
+    const f = p.football
+    if (f.bog_ranking) bits.push(`BOG #${f.bog_ranking}`)
+    bits.push(`${f.goals || 0}.${f.behinds || 0}`)
+    return bits.join(' · ')
+  }
   if (p.batting) bits.push(`${p.batting.r}${p.batting.notOut ? '*' : ''} (${p.batting.b})`)
   if (p.bowling) bits.push(`${p.bowling.w}/${p.bowling.r}`)
   if (p.fielding && (p.fielding.catches || p.fielding.stumpings)) {
@@ -761,7 +798,9 @@ function potmPlayerLabel(p) {
 }
 
 // Helper line under every match-link box — the playhq.com id-namespace gotcha.
-const LINK_HELP = "Use the link from play.cricket.com.au. A playhq.com link uses a different match ID, but we'll help you find your match if you paste one."
+const LINK_HELP = IS_AFL
+  ? "Paste a BetterFootball match link, or just press Fetch to pick from your recent games."
+  : "Use the link from play.cricket.com.au. A playhq.com link uses a different match ID, but we'll help you find your match if you paste one."
 
 const NO_RECENT_MATCHES = "We couldn't find any completed matches for your club this season to match that link against."
 
@@ -833,7 +872,9 @@ export default function AdminSocialPost() {
   // Play.Cricket-published team lists for the same lineup source step — an
   // admin can pull from either, per post (see loadLineupFromPlayCricket).
   const [pcFixtures, setPcFixtures] = useState(null)
-  const [lineupSourceKind, setLineupSourceKind] = useState('betterselect')
+  // Football has no BetterSelect, so its only lineup source is the published
+  // team list the football backend serves on the same /lineups path.
+  const [lineupSourceKind, setLineupSourceKind] = useState(IS_AFL ? 'playcricket' : 'betterselect')
   // Once the admin has manually picked a source, stop auto-defaulting it.
   const lineupSourceTouched = useRef(false)
   // Hidden file input the inspector's "Replace" drives; remembers which image
@@ -1287,7 +1328,7 @@ export default function AdminSocialPost() {
               sponsors: [0, 1].map(i => {
                 const s = sponsors[i]
                 if (!s) return m.meta.sponsors[i] || { url: null, name: '' }
-                return { url: `${BASE_URL}/images/sponsors/${s.id}/logo`, name: s.name }
+                return { url: sponsorLogoUrl(s), name: s.name }
               }),
             },
           }))
@@ -1505,6 +1546,15 @@ export default function AdminSocialPost() {
     const pl = data?.players?.[playerIdx]
     if (!pl) return
     const stats = []
+    // A football player of the match carries one stat block (the football
+    // backend's /admin/social/potm): goals, behinds and PlayHQ's best-on-ground
+    // ranking. The batting/bowling/fielding toggles below have nothing to act on.
+    if (pl.football) {
+      const f = pl.football
+      stats.push({ label: 'Goals', value: String(f.goals || 0) })
+      stats.push({ label: 'Behinds', value: String(f.behinds || 0) })
+      if (f.bog_ranking) stats.push({ label: 'Best on ground', value: `#${f.bog_ranking}` })
+    }
     if (include.bat && pl.batting) {
       const b = pl.batting
       stats.push({ label: 'Runs', value: `${b.r}${b.notOut ? '*' : ''} (${b.b})` })
@@ -1522,13 +1572,13 @@ export default function AdminSocialPost() {
     setMotm(m => ({ ...m, playerIdx: 0, stats: stats.slice(0, 4), summary: m.summary }))
 
     const rosterPlayer = pl.pid ? playerForPid(pl.pid) : null
-    const role = pl.batting && pl.bowling ? 'AR' : pl.bowling ? 'BOWL' : 'BAT'
+    const role = IS_AFL ? '' : pl.batting && pl.bowling ? 'AR' : pl.bowling ? 'BOWL' : 'BAT'
     // Comma form splits reliably whatever the club's name-format setting is.
     const fallbackName = pl.first && pl.last ? `${pl.last}, ${pl.first}` : (pl.last || pl.first || pl.short || 'Player')
     const player = rosterPlayer || { id: pl.pid || `potm_${playerIdx}`, display_name: fallbackName }
     setSelectedPlayers([{
       player,
-      role: rosterPlayer?.player_role && ['BAT', 'BOWL', 'AR', 'WK'].includes(rosterPlayer.player_role) ? rosterPlayer.player_role : role,
+      role: !IS_AFL && rosterPlayer?.player_role && ['BAT', 'BOWL', 'AR', 'WK'].includes(rosterPlayer.player_role) ? rosterPlayer.player_role : role,
       captain: false, viceCaptain: false, keeper: false,
     }])
 
@@ -1907,7 +1957,7 @@ export default function AdminSocialPost() {
 
   // Load BetterSelect fixtures the first time the lineup data step is opened.
   useEffect(() => {
-    if (tool === 'source' && activeTab === 'lineup' && sourceFixtures === null) {
+    if (tool === 'source' && activeTab === 'lineup' && sourceFixtures === null && !IS_AFL) {
       api.bsSelectionOverview().then((d) => setSourceFixtures(d.fixtures || [])).catch(() => setSourceFixtures([]))
     }
   }, [tool, activeTab, sourceFixtures])
@@ -1937,7 +1987,12 @@ export default function AdminSocialPost() {
     fullName: settings.name || 'Club',
     short: deriveShort(settings.name || 'Club'),
     monogram: deriveShort(settings.name || 'Club').slice(0, 2),
-    logo: settings.logo_url ? `${BASE_URL}/images/organisations/${settings.id}/logo` : null,
+    // Football: a club's crest is usually PlayHQ's own URL (no bytes held), and
+    // an upload is stored API-relative, so resolve what is stored rather than
+    // assuming the images endpoint has something to serve.
+    logo: settings.logo_url
+      ? (IS_AFL ? footballAsset(settings.logo_url) : `${BASE_URL}/images/organisations/${settings.id}/logo`)
+      : null,
   } : { name: 'CLUB', fullName: 'Club', short: 'CLB', monogram: 'CL', logo: null }
 
   const oppData = {
@@ -2628,7 +2683,7 @@ export default function AdminSocialPost() {
       const fallback = { id: p.participant_id, display_name: p.name }
       return {
         player: player || fallback,
-        role: p.is_wicket_keeper ? 'WK' : (player?.player_role || 'BAT'),
+        role: IS_AFL ? '' : p.is_wicket_keeper ? 'WK' : (player?.player_role || 'BAT'),
         captain: !!p.is_captain,
         viceCaptain: false,
         keeper: !!p.is_wicket_keeper,
@@ -2764,7 +2819,7 @@ export default function AdminSocialPost() {
       </button>
       <button onClick={saveCurrentTemplate} title="Save this post as a reusable template"
         className="px-3 h-8 rounded-md border pb-hairline2 font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text hover:border-pb-accent transition-colors">SAVE AS TEMPLATE</button>
-      {!((isBlankTab && pages.count > 1) || roundPagesOn || scSplitOn) && (
+      {!IS_AFL && !((isBlankTab && pages.count > 1) || roundPagesOn || scSplitOn) && (
         <button onClick={handleSaveToClubRoom} disabled={savingToClubRoom} title="Add this post to the Club Room Mode TV slideshow"
           className="px-3 h-8 rounded-md border pb-hairline2 font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-60">
           {savingToClubRoom ? 'SAVING…' : clubRoomSaved ? '✓ SAVED' : 'SAVE TO CLUB ROOM'}
@@ -2843,7 +2898,7 @@ export default function AdminSocialPost() {
       assets={mediaAssets} onUpload={uploadMedia} onUseAsset={useMediaAsset} onEditAsset={editLibraryAsset} onAddEmptyFrame={() => addBlock('image')}
       players={allPlayers} onAddPlayerPhoto={(pid) => addBlock('data', { kind: 'playerphoto', playerId: pid })}
       onAddBrandLockup={() => addBlock('brand')}
-      sponsors={adminSponsors.map((s) => ({ name: s.name, url: `${BASE_URL}/images/sponsors/${s.id}/logo` }))}
+      sponsors={adminSponsors.map((s) => ({ name: s.name, url: sponsorLogoUrl(s) }))}
       onAddSponsor={(sp) => addBlock('image', { src: sp.url, srcName: sp.name, fit: 'contain' })}
       club={{ name: settings?.name, logo_url: team.logo }}
     />
@@ -2859,7 +2914,7 @@ export default function AdminSocialPost() {
         <input type="text" value={potmUrlInput}
           onChange={(e) => { setPotmUrlInput(e.target.value); setPotmUrlStatus(null); setPotmPicks(null) }}
           onKeyDown={(e) => e.key === 'Enter' && handlePotmImport()}
-          placeholder="Match link from play.cricket.com.au, or a match ID"
+          placeholder={IS_AFL ? 'Optional: a BetterFootball match link' : 'Match link from play.cricket.com.au, or a match ID'}
           className="flex-1 min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1.5 text-xs text-pb-text font-mono placeholder:text-pb-faintest" />
         <button onClick={handlePotmImport} disabled={potmUrlStatus === 'loading'}
           className="px-3 py-1.5 rounded text-xs font-mono tracking-wide2 shrink-0 disabled:opacity-50"
@@ -2870,7 +2925,7 @@ export default function AdminSocialPost() {
       <p className="text-pb-faintest text-[10px] mt-1.5 leading-relaxed">{LINK_HELP}</p>
       {potmUrlStatus && potmUrlStatus !== 'loading' && (
         <p className={`font-mono text-[9px] mt-1.5 ${potmUrlStatus === 'ok' ? 'text-green-400' : 'text-red-400'}`}>
-          {potmUrlStatus === 'ok' ? '✓ Player of the match worked out from the scorecard' : `✗ ${potmUrlStatus}`}
+          {potmUrlStatus === 'ok' ? (IS_AFL ? '✓ Your side ranked by best-on-ground votes' : '✓ Player of the match worked out from the scorecard') : `✗ ${potmUrlStatus}`}
         </p>
       )}
       <MatchPickList picks={potmPicks} onPick={loadPotmMatch} onDismiss={() => setPotmPicks(null)} />
@@ -2882,7 +2937,7 @@ export default function AdminSocialPost() {
               {potmPlayers.map((p, i) => <option key={i} value={i}>{potmPlayerLabel(p)}</option>)}
             </select>
           </Field>
-          <div className="flex gap-4 flex-wrap">
+          {!IS_AFL && <div className="flex gap-4 flex-wrap">
             {[['bat', 'Batting', 'batting'], ['bowl', 'Bowling', 'bowling'], ['field', 'Fielding', 'fielding']].map(([key, label, block]) => (
               <label key={key} className={`flex items-center gap-1.5 text-xs font-mono ${potmSel?.[block] ? 'text-pb-text cursor-pointer' : 'text-pb-faintest'}`}>
                 <input type="checkbox" checked={!!potmImport.include[key]} disabled={!potmSel?.[block]}
@@ -2890,7 +2945,7 @@ export default function AdminSocialPost() {
                 {label}
               </label>
             ))}
-          </div>
+          </div>}
         </div>
       )}
     </div>
@@ -2942,7 +2997,7 @@ export default function AdminSocialPost() {
 
                 {activeTab === 'lineup' && (
                   <div className="pb-card p-4 flex flex-col gap-2">
-                    <div className="flex gap-0.5 p-[3px] rounded-lg bg-pb-surface2 border pb-hairline">
+                    {!IS_AFL && <div className="flex gap-0.5 p-[3px] rounded-lg bg-pb-surface2 border pb-hairline">
                       {[{ key: 'betterselect', label: 'BetterSelect' }, { key: 'playcricket', label: 'Play.Cricket' }].map((s) => (
                         <button key={s.key}
                           onClick={() => { lineupSourceTouched.current = true; setLineupSourceKind(s.key) }}
@@ -2950,7 +3005,7 @@ export default function AdminSocialPost() {
                             lineupSourceKind === s.key ? 'bg-pb-surface text-pb-text' : 'text-pb-faint hover:text-pb-dim'
                           }`}>{s.label}</button>
                       ))}
-                    </div>
+                    </div>}
 
                     {lineupSourceKind === 'betterselect' && (<>
                       {sourceFixtures === null && <div className="text-pb-faintest text-[10px] font-mono">Loading your teams…</div>}
@@ -2974,7 +3029,9 @@ export default function AdminSocialPost() {
                     {lineupSourceKind === 'playcricket' && (<>
                       {pcFixtures === null && <div className="text-pb-faintest text-[10px] font-mono">Loading published team lists…</div>}
                       {Array.isArray(pcFixtures) && pcFixtures.length === 0 && (
-                        <div className="text-pb-faintest text-[11px] leading-relaxed">No fixtures found on Play.Cricket yet. Try BetterSelect, or add players yourself in Content.</div>
+                        <div className="text-pb-faintest text-[11px] leading-relaxed">{IS_AFL
+                          ? 'No team lists synced yet. A side appears here once its game has been played and synced, or add players yourself in Content.'
+                          : 'No fixtures found on Play.Cricket yet. Try BetterSelect, or add players yourself in Content.'}</div>
                       )}
                       {Array.isArray(pcFixtures) && pcFixtures.length > 0 && (
                         <div className="flex flex-col gap-1.5 max-h-[280px] overflow-y-auto">
@@ -2992,7 +3049,7 @@ export default function AdminSocialPost() {
                           })}
                         </div>
                       )}
-                      <button onClick={() => navigate(`/${settings?.slug || ''}/lineups`)} className="self-start mt-1 font-mono text-[10px] text-pb-faint hover:text-pb-text">View Lineups page →</button>
+                      <button onClick={() => navigate(`/${settings?.slug || ''}/${IS_AFL ? 'team-lists' : 'lineups'}`)} className="self-start mt-1 font-mono text-[10px] text-pb-faint hover:text-pb-text">{IS_AFL ? 'View Team Lists page →' : 'View Lineups page →'}</button>
                     </>)}
 
                     {lineupLoad === 'loading' && <div className="text-pb-faint text-[10px] font-mono">Loading XI…</div>}
@@ -3118,8 +3175,8 @@ export default function AdminSocialPost() {
                 <div className="mt-3 pt-3 border-t pb-hairline">
                   <div className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faint mb-2">Sponsors</div>
                   <div className="flex gap-1.5 flex-wrap">
-                    {adminSponsors.map((s) => (
-                      <img key={s.id} src={`${BASE_URL}/images/sponsors/${s.id}/logo`} alt={s.name} title={s.name}
+                    {adminSponsors.filter(sponsorLogoUrl).map((s) => (
+                      <img key={s.id} src={sponsorLogoUrl(s)} alt={s.name} title={s.name}
                         className="h-8 max-w-[72px] object-contain rounded bg-pb-surface2 px-1" onError={(e) => { e.target.style.display = 'none' }} />
                     ))}
                   </div>
@@ -4241,8 +4298,8 @@ export default function AdminSocialPost() {
                     <p className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2 mb-1">Sponsor Logos</p>
                     {adminSponsors.length > 0 && (
                       <div className="mb-2 flex flex-wrap gap-2">
-                        {adminSponsors.map(sp => {
-                          const logoUrl = `${BASE_URL}/images/sponsors/${sp.id}/logo`
+                        {adminSponsors.filter(sponsorLogoUrl).map(sp => {
+                          const logoUrl = sponsorLogoUrl(sp)
                           return (
                             <button key={sp.id} title={sp.name}
                               onClick={() => {

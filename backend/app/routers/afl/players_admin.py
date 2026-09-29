@@ -11,6 +11,7 @@ Unlike cricket, there is deliberately no DELETE — cricket doesn't offer one
 either (a player can be linked to synced game lines), only create + edit.
 """
 import uuid
+from datetime import date
 from pathlib import Path
 from typing import Optional
 
@@ -23,6 +24,35 @@ from app.auth.capabilities import MANAGE_PLAYERS, require_cap
 from app.models.db import Organisation, Player, User, get_db
 from app.routers.auth import get_current_club, get_current_user
 from app.services.afl.manual_stats import manual_branch
+from app.services.player_age import age_on, dob_error
+from app.services.player_kit import clean_shirt_number
+
+# Football's own playing positions. players.skill_positions is the shared
+# column (cricket keeps BAT/BOWL/WK there); a football club's list is drawn from
+# this vocabulary, and anything else sent is dropped rather than stored.
+AFL_POSITIONS = ("FB", "HB", "C", "W", "MID", "RUCK", "HF", "FF", "UTIL")
+
+
+def _clean_positions(raw) -> list[str]:
+    seen: list[str] = []
+    for v in raw or []:
+        k = str(v).strip().upper()
+        if k in AFL_POSITIONS and k not in seen:
+            seen.append(k)
+    return seen
+
+
+def _profile_fields(p: Player) -> dict:
+    """The profile fields the admin screens read. The date of birth is the
+    club's own record and never reaches a public page; the age is derived on
+    read so it is never stale."""
+    return {
+        "date_of_birth": p.date_of_birth.isoformat() if p.date_of_birth else None,
+        "age": age_on(p.date_of_birth),
+        "shirt_number": p.shirt_number,
+        "positions": _clean_positions(p.skill_positions),
+        "hero_photo_url": p.hero_photo_url,
+    }
 
 router = APIRouter(prefix="/club-admin", tags=["afl-players-admin"])
 
@@ -131,6 +161,7 @@ async def list_players(
             "comp_bf_votes": votes.get(str(p.id), {}).get("comp_bf_votes", 0),
             "has_imported_stats": str(p.id) in imported,
             "last_played": last_played.get(str(p.id)),
+            **_profile_fields(p),
         }
         for p in players
     ]
@@ -157,6 +188,7 @@ async def get_player(
         "email": player.email,
         "phone": player.phone,
         "status": player.status,
+        **_profile_fields(player),
     }
 
 
@@ -205,6 +237,10 @@ class PlayerPatch(BaseModel):
     email: Optional[str] = None
     phone: Optional[str] = None
     status: Optional[str] = None
+    # A present null clears these; an absent key leaves them alone.
+    date_of_birth: Optional[date] = None
+    shirt_number: Optional[str] = None
+    positions: Optional[list[str]] = None
 
 
 @router.patch("/players/{player_id}")
@@ -237,9 +273,20 @@ async def patch_player(
         player.phone = data.phone.strip() or None
     if data.status is not None:
         player.status = data.status.strip() or "active"
+    sent = data.model_fields_set
+    if "date_of_birth" in sent:
+        problem = dob_error(data.date_of_birth)
+        if problem:
+            raise HTTPException(status_code=422, detail=problem)
+        player.date_of_birth = data.date_of_birth
+    if "shirt_number" in sent:
+        player.shirt_number = clean_shirt_number(data.shirt_number)
+    if "positions" in sent:
+        player.skill_positions = _clean_positions(data.positions)
 
     await db.commit()
     return {
+        **_profile_fields(player),
         "id": str(player.id), "display_name": player.display_name,
         "playhq_id": player.playhq_id, "gender": player.gender,
         "email": player.email, "phone": player.phone, "status": player.status,
@@ -324,5 +371,48 @@ async def delete_player_photo(
     player.photo_data = None
     player.photo_mime = None
     player.photo_url = None
+    await db.commit()
+    return {"status": "cleared"}
+
+
+# The action shot: the photo a match-day post puts in its big hero slot, kept
+# apart from the headshot because a cut-out and a head-and-shoulders crop are
+# different photographs. Stored API-relative for the same reason as the photo.
+
+@router.post("/players/{player_id}/hero-photo")
+async def upload_player_hero_photo(
+    player_id: str,
+    file: UploadFile = File(...),
+    current_user: User = Depends(require_cap(MANAGE_PLAYERS)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    player = await _own_player(db, club, player_id)
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in PHOTO_ALLOWED_EXTS:
+        raise HTTPException(status_code=400, detail="Image files only (jpg, png, webp, gif)")
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if len(data) > PHOTO_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="Photo must be 8 MB or smaller")
+    player.hero_photo_data = data
+    player.hero_photo_mime = _PHOTO_MIME.get(ext, "image/png")
+    player.hero_photo_url = f"images/players/{player.id}/hero-photo?v={uuid.uuid4().hex[:8]}"
+    await db.commit()
+    return {"hero_photo_url": player.hero_photo_url}
+
+
+@router.delete("/players/{player_id}/hero-photo")
+async def delete_player_hero_photo(
+    player_id: str,
+    current_user: User = Depends(require_cap(MANAGE_PLAYERS)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    player = await _own_player(db, club, player_id)
+    player.hero_photo_data = None
+    player.hero_photo_mime = None
+    player.hero_photo_url = None
     await db.commit()
     return {"status": "cleared"}

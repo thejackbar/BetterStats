@@ -24,7 +24,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import get_db
-from app.services.afl.aggregations import matching_grade_ids
+from app.services.afl.aggregations import matching_grade_ids  # noqa: F401
+from app.services.afl import competitions as afl_comp
+from app.services.afl import grade_scope as gs
 from app.services.afl.manual_stats import manual_branch
 
 router = APIRouter(prefix="/afl-records", tags=["afl-records"])
@@ -33,16 +35,18 @@ router = APIRouter(prefix="/afl-records", tags=["afl-records"])
 @router.get("/{org_id}")
 async def get_records(org_id: uuid.UUID,
                       grade_id: Optional[uuid.UUID] = None,
+                      competition_id: Optional[str] = None,
                       db: AsyncSession = Depends(get_db)):
     params: dict = {"org": str(org_id)}
     grade_line = ""
     grade_pss = "AND pss.grade_id IS NULL"
     grade_i = ""
     grade_m = ""
-    if grade_id:
-        # Every grade_id (any season) merged into/with this one — so a
-        # merged grade's games count under whichever name you filter by.
-        params["grade"] = await matching_grade_ids(db, org_id, grade_id)
+    # Every grade_id (any season) merged into/with the picked grade, narrowed
+    # to the picked competition's seasons of it when both are given.
+    grade_ids = await afl_comp.resolve_grade_filter(db, org_id, grade_id, competition_id)
+    if grade_ids is not None:
+        params["grade"] = grade_ids
         grade_line = "AND gr.id = ANY(:grade)"
         grade_pss = "AND pss.grade_id = ANY(:grade)"
         grade_i = "AND i.grade_id = ANY(:grade)"
@@ -52,6 +56,16 @@ async def get_records(org_id: uuid.UUID,
     # than gated against either — see services/afl/manual_stats.py. The
     # season record below INNER JOINs seasons, which is what keeps a
     # career-only adjustment out of a per-season record without a clause.
+    if grade_ids is None:
+        # The club's grade-category default, only when nothing is picked.
+        excluded = await gs.excluded_grade_ids(db, org_id)
+        if excluded:
+            params["excl"] = excluded
+            grade_line = gs.game_rows("gr", excluded)
+            grade_pss = "AND " + gs.synced_rows("pss", excluded)
+            grade_i = gs.other_rows("i", excluded)
+            grade_m = gs.other_rows("m", excluded)
+
     manual_goals_season = manual_branch(["player_id", "goals", "season_id"], where=grade_m)
     manual_games = manual_branch(["player_id", "season_id", "games"], where=grade_m)
     manual_goals = manual_branch(["player_id", "season_id", "goals"], where=grade_m)
@@ -95,7 +109,11 @@ async def get_records(org_id: uuid.UUID,
                s.name AS season_name, s.year
         FROM combined c
         JOIN players p ON p.id = c.player_id
-        JOIN seasons s ON s.id = c.season_id
+        -- A merged season counts as the one year it is: fold an alias onto
+        -- its canonical before grouping, or the record splits across them.
+        LEFT JOIN season_aliases sa ON sa.alias_season_id = c.season_id
+             AND sa.org_id = CAST(:org AS uuid) AND sa.undone_at IS NULL
+        JOIN seasons s ON s.id = COALESCE(sa.canonical_season_id, c.season_id)
         GROUP BY c.player_id, p.name, p.display_name_override, s.id, s.name, s.year
         HAVING SUM(c.goals) > 0
         ORDER BY goals DESC, s.year ASC

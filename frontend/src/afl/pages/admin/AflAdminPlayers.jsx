@@ -126,6 +126,76 @@ function PhotoField({ player, onChanged }) {
   )
 }
 
+// The action shot a match-day post puts in its big hero slot. A different
+// photograph from the headshot above (a full-length cut-out, not a head and
+// shoulders crop), so it has its own upload. Saves straight away, like the photo.
+function HeroField({ player }) {
+  const fileRef = useRef(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  const [url, setUrl] = useState(player.hero_photo_url || null)
+  const [editorSource, setEditorSource] = useState(null)
+  const pick = (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    const problem = validateImageFile(file)
+    if (problem) { setError(problem); return }
+    setError(null); setEditorSource(file)
+  }
+  const upload = async (file) => {
+    setBusy(true); setError(null)
+    try { const res = await aflApi.adminUploadPlayerHero(player.id, file); setUrl(res.hero_photo_url) }
+    catch (err) { setError(err.message) }
+    finally { setBusy(false); setEditorSource(null) }
+  }
+  const remove = async () => {
+    setBusy(true); setError(null)
+    try { await aflApi.adminDeletePlayerHero(player.id); setUrl(null) }
+    catch (err) { setError(err.message) } finally { setBusy(false) }
+  }
+  return (
+    <div data-testid="hero-field">
+      <span className="block text-xs text-pb-faint mb-1.5">Action photo (for posts)</span>
+      <div className="flex items-center gap-3">
+        {url
+          ? <img src={mediaUrl(url)} alt="" className="h-16 w-12 rounded object-cover bg-pb-surface2" />
+          : <div className="h-16 w-12 rounded bg-pb-surface2 border border-pb-hairline" />}
+        <div className="flex gap-2">
+          <button type="button" disabled={busy} onClick={() => fileRef.current?.click()}
+            className="px-3 py-1.5 rounded text-xs border border-pb-hairline text-pb-text hover:bg-pb-surface2 disabled:opacity-50">
+            {busy ? 'Saving…' : url ? 'Replace' : 'Upload action photo'}
+          </button>
+          {url && (
+            <button type="button" disabled={busy} onClick={remove}
+              className="px-3 py-1.5 rounded text-xs text-pb-dim hover:text-[var(--pb-negative)] disabled:opacity-50">Remove</button>
+          )}
+        </div>
+      </div>
+      <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif"
+        className="hidden" onChange={pick} data-testid="hero-input" />
+      {error && <p className="text-xs text-[var(--pb-negative)] mt-1.5">{error}</p>}
+      <ImageEditorModal open={!!editorSource} source={editorSource} title="Edit action photo"
+        outputType="image/png" outputName={`player-${player.id}-hero.png`} maxOutputSize={1400}
+        onCancel={() => setEditorSource(null)} onApply={upload} />
+    </div>
+  )
+}
+
+const POSITIONS = [
+  ['FB', 'Full back'], ['HB', 'Half back'], ['C', 'Centre'], ['W', 'Wing'], ['MID', 'Midfield'],
+  ['RUCK', 'Ruck'], ['HF', 'Half forward'], ['FF', 'Full forward'], ['UTIL', 'Utility'],
+]
+
+function ageOn(dob) {
+  if (!dob) return null
+  const [y, m, d] = dob.split('-').map(Number)
+  const now = new Date()
+  let age = now.getFullYear() - y
+  if (now.getMonth() + 1 < m || (now.getMonth() + 1 === m && now.getDate() < d)) age--
+  return age >= 0 && age <= 120 ? age : null
+}
+
 function EditDrawer({ player, onClose, onSaved, onPhotoChanged }) {
   const [form, setForm] = useState({
     display_name_override: player.display_name_override || '',
@@ -134,6 +204,9 @@ function EditDrawer({ player, onClose, onSaved, onPhotoChanged }) {
     email: player.email || '',
     phone: player.phone || '',
     status: player.status || 'active',
+    date_of_birth: player.date_of_birth || '',
+    shirt_number: player.shirt_number || '',
+    positions: player.positions || [],
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
@@ -142,7 +215,9 @@ function EditDrawer({ player, onClose, onSaved, onPhotoChanged }) {
     setSaving(true)
     setError(null)
     try {
-      await aflApi.adminPatchPlayer(player.id, form)
+      // A blank date clears it (null), rather than sending '' the server would
+      // refuse as a date.
+      await aflApi.adminPatchPlayer(player.id, { ...form, date_of_birth: form.date_of_birth || null })
       onSaved()
     } catch (err) {
       setError(err.message)
@@ -157,6 +232,36 @@ function EditDrawer({ player, onClose, onSaved, onPhotoChanged }) {
         <SectionTitle>Edit {player.display_name}</SectionTitle>
         {error && <p className="text-sm text-[var(--pb-negative)]">{error}</p>}
         <PhotoField player={player} onChanged={onPhotoChanged} />
+        <HeroField player={player} />
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block text-xs text-pb-faint">
+            <span className="flex justify-between">Date of birth
+              {ageOn(form.date_of_birth) != null && <span data-testid="player-age">Age {ageOn(form.date_of_birth)}</span>}
+            </span>
+            <input type="date" value={form.date_of_birth} onChange={e => setForm(f => ({ ...f, date_of_birth: e.target.value }))}
+                   className="mt-1 w-full bg-pb-surface2 border border-pb-hairline rounded px-2 py-1.5 text-sm" />
+          </label>
+          <label className="block text-xs text-pb-faint">Shirt number
+            <input value={form.shirt_number} maxLength={4} onChange={e => setForm(f => ({ ...f, shirt_number: e.target.value }))}
+                   className="mt-1 w-full bg-pb-surface2 border border-pb-hairline rounded px-2 py-1.5 text-sm" />
+          </label>
+        </div>
+        <p className="text-[11px] text-pb-faintest -mt-1">The date of birth is only ever shown here, never on the public site.</p>
+        <div>
+          <span className="block text-xs text-pb-faint mb-1.5">Positions</span>
+          <div className="flex flex-wrap gap-1.5">
+            {POSITIONS.map(([k, label]) => {
+              const on = form.positions.includes(k)
+              return (
+                <button type="button" key={k} aria-pressed={on} title={label}
+                  onClick={() => setForm(f => ({ ...f, positions: on ? f.positions.filter(x => x !== k) : [...f.positions, k] }))}
+                  className={`px-2 py-1 rounded text-[11px] font-mono border ${on ? 'border-[var(--pb-accent)] text-pb-text bg-pb-surface2' : 'border-pb-hairline text-pb-faint'}`}>
+                  {label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
         <label className="block text-xs text-pb-faint">Display name override
           <input value={form.display_name_override} onChange={e => setForm(f => ({ ...f, display_name_override: e.target.value }))}
                  className="mt-1 w-full bg-pb-surface2 border border-pb-hairline rounded px-2 py-1.5 text-sm" />

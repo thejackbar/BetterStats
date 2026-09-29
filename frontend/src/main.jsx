@@ -4,6 +4,12 @@ import { BrowserRouter } from 'react-router-dom'
 import App from './App'
 import './index.css'
 import './styles/theme.css'
+import { rememberLandingParams } from './lib/visitor'
+
+// Before anything renders or navigates: keep the landing URL's utm_* and click
+// ids for this session, so paid attribution survives the client-side hops of
+// the ad funnel (ad -> /trial -> search -> a club's dashboard -> signup).
+rememberLandingParams()
 
 // A lazy import() can fail with "Failed to fetch dynamically imported module"
 // when a deploy swaps the content-hashed chunk filenames out from under an open

@@ -130,6 +130,72 @@ function EventCard({ event, channels, canManage, onRule, onPreference, busy }) {
   )
 }
 
+const LAST_STATUS = {
+  sent: 'Sent',
+  pending: 'Waiting for the next daily email',
+  failed: 'Not delivered',
+}
+
+function whenText(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return d.toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })
+}
+
+/** "Did it actually go?" answered on the screen, not in a server log.
+ *
+ * The test sends one copy of the digest to the person pressing it, and only to
+ * them, so it cannot be used to email the rest of the club. It never marks the
+ * real daily email as sent. The last-email line reads the delivery record, which
+ * is the same row the daily job writes, so the two cannot disagree.
+ */
+function TestEmail({ data, busy }) {
+  const [sending, setSending] = useState(false)
+  const [result, setResult] = useState(null)
+  const last = data.my_last_email
+
+  const send = async () => {
+    setSending(true)
+    setResult(null)
+    try {
+      setResult(await api.sendNotificationTestEmail())
+    } catch (e) {
+      setResult({ ok: false, error: e?.message || 'The test email could not be sent.' })
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <div className="mt-3 pt-3 border-t pb-hairline" data-testid="notif-test-email">
+      <Button variant="soft" onClick={send}
+        disabled={busy || sending || !data.my_email || !data.email_provider_live}>
+        {sending ? 'Sending…' : 'Send me a test email'}
+      </Button>
+      <p className="text-[11.5px] text-pb-dim mt-2 leading-[1.5]">
+        Sends you one copy of the notification email now, with the club's most recent
+        notifications in it. It only goes to you, and the daily email still goes out
+        as normal.
+      </p>
+      {result && (
+        <p data-testid="notif-test-result"
+          className={`text-[12px] mt-2 leading-[1.5] ${result.ok ? 'text-pb-positive' : 'text-pb-red'}`}>
+          {result.ok
+            ? `Sent to ${result.to}. If it has not arrived in a few minutes, check the spam folder.`
+            : result.error}
+        </p>
+      )}
+      <p className="text-[12px] text-pb-dim mt-2" data-testid="notif-last-email">
+        {last
+          ? <>Last notification email: <span className="text-pb-text">{LAST_STATUS[last.status] || last.status}</span>
+              {last.sent_at ? ` on ${whenText(last.sent_at)}` : ''}
+              {last.error ? ` (${last.error})` : ''}</>
+          : 'No notification email has been due to you at this club yet.'}
+      </p>
+    </div>
+  )
+}
+
 export default function AdminNotifications() {
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
@@ -289,6 +355,7 @@ export default function AdminNotifications() {
                 : <p className="text-[11.5px] text-pb-faintest mt-2">
                     Your account has no email address, so nothing can be emailed to you.
                   </p>}
+              <TestEmail data={data} busy={busy} />
             </div>
           </section>
 

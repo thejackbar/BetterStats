@@ -1,11 +1,211 @@
-import { useEffect, useState } from 'react'
-import { aflApi } from '../../aflApi'
+import { useEffect, useRef, useState } from 'react'
+import { aflApi, mediaUrl } from '../../aflApi'
 import { SectionTitle } from '../../components/bits'
 import { useToast } from '../../../contexts/ToastContext'
 import LoadingSpinner from '../../../components/LoadingSpinner'
+import ImageEditorModal from '../../../components/ImageEditorModal'
+import { validateImageFile } from '../../../lib/validation'
+import { PrimaryAdminCard, TypographyPanel } from '../../../components/admin/settingsKit'
 import {
   BRAND, deriveDarkPalette, gradientCss, resolveTheme,
 } from '../../../lib/theme'
+
+/**
+ * The club crest: the navbar, the admin sidebar and every BetterSocials post
+ * draw it. A club that has never uploaded one shows the logo PlayHQ holds, and
+ * removing an upload hands it back to PlayHQ's on the next sync. Saves straight
+ * away, like a player photo, since it is its own multipart request.
+ */
+function LogoField({ logoUrl, onChanged }) {
+  const fileRef = useRef(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  const [editorSource, setEditorSource] = useState(null)
+  const uploaded = !!logoUrl && !/^(https?:)?\/\//.test(logoUrl)
+
+  const pick = (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    const problem = validateImageFile(file)
+    if (problem) { setError(problem); return }
+    setError(null)
+    setEditorSource(file)
+  }
+  const upload = async (file) => {
+    setBusy(true); setError(null)
+    try {
+      const res = await aflApi.adminUploadLogo(file)
+      onChanged(res.logo_url)
+    } catch (err) { setError(err.message) }
+    finally { setBusy(false); setEditorSource(null) }
+  }
+  const remove = async () => {
+    setBusy(true); setError(null)
+    try { await aflApi.adminDeleteLogo(); onChanged(null) }
+    catch (err) { setError(err.message) }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <div className="pb-card p-5" data-testid="logo-field">
+      <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Club logo</p>
+      <p className="text-sm text-pb-dim mb-4 leading-relaxed">
+        Shown in the navbar, the admin sidebar and on every BetterSocials post.
+        {!uploaded && logoUrl && ' This one comes from PlayHQ. Upload your own to replace it.'}
+      </p>
+      <div className="flex items-center gap-4">
+        {logoUrl
+          ? <img src={mediaUrl(logoUrl)} alt="" className="h-16 w-16 rounded object-contain bg-pb-surface2" />
+          : <div className="h-16 w-16 rounded bg-pb-surface2 border border-pb-hairline" />}
+        <div className="flex flex-col gap-1.5">
+          <div className="flex gap-2">
+            <button type="button" disabled={busy} onClick={() => fileRef.current?.click()}
+              className="px-3 py-1.5 rounded text-xs border border-pb-hairline text-pb-text hover:bg-pb-surface2 disabled:opacity-50">
+              {busy ? 'Saving…' : uploaded ? 'Replace' : 'Upload logo'}
+            </button>
+            {uploaded && (
+              <button type="button" disabled={busy} onClick={remove}
+                className="px-3 py-1.5 rounded text-xs text-pb-dim hover:text-[var(--pb-negative)] disabled:opacity-50">
+                Remove
+              </button>
+            )}
+          </div>
+          <span className="text-[11px] text-pb-faintest">JPG, PNG, WEBP or GIF.</span>
+        </div>
+      </div>
+      <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif"
+        className="hidden" onChange={pick} data-testid="logo-input" />
+      {error && <p className="text-xs text-[var(--pb-negative)] mt-1.5">{error}</p>}
+      <ImageEditorModal
+        open={!!editorSource}
+        source={editorSource}
+        title="Edit club logo"
+        aspect={1}
+        outputType="image/png"
+        outputName="club-logo.png"
+        maxOutputSize={800}
+        onCancel={() => setEditorSource(null)}
+        onApply={upload}
+      />
+    </div>
+  )
+}
+
+/**
+ * Draft mode: the public site stays reachable, behind a 4-digit PIN, while the
+ * club is setting it up. A visitor with the PIN gets through for 30 days on that
+ * browser. A lock BetterFootball placed on a lapsed trial is shown but is not
+ * the club's to lift.
+ */
+function DraftPanel({ settings, onSaved }) {
+  const toast = useToast()
+  const [pin, setPin] = useState('')
+  const [busy, setBusy] = useState(false)
+  const on = !!settings.password_protected
+  const trialLock = settings.password_protect_reason === 'trial_ended'
+
+  async function patch(body, done) {
+    setBusy(true)
+    try { await aflApi.patchAdminSettings(body); toast.success(done); setPin(''); onSaved() }
+    catch (e) { toast.error(e.message) } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="pb-card p-5" data-testid="draft-panel">
+      <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Draft mode</p>
+      <p className="text-sm text-pb-dim mb-4 leading-relaxed">
+        Keep your public site behind a 4-digit PIN while you get it ready. Anyone with the PIN
+        can still see it.
+      </p>
+      <p className="text-sm mb-3" data-testid="draft-status">
+        {on ? (trialLock ? 'Locked by BetterFootball because the trial has ended.' : 'On: visitors need the PIN.')
+            : 'Off: your site is public.'}
+        {settings.has_pin && !on && <span className="text-pb-faint"> A PIN is set.</span>}
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <input value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+          inputMode="numeric" placeholder={settings.has_pin ? 'New PIN' : '4-digit PIN'} aria-label="4-digit PIN"
+          className="w-28 bg-pb-surface2 border border-pb-hairline rounded px-2 py-1.5 text-sm font-mono" />
+        <button type="button" disabled={busy || pin.length !== 4} onClick={() => patch({ access_pin: pin }, 'PIN saved')}
+          className="px-3 py-1.5 rounded text-xs border border-pb-hairline text-pb-text hover:bg-pb-surface2 disabled:opacity-40">
+          Save PIN
+        </button>
+        {!trialLock && (on ? (
+          <button type="button" disabled={busy} onClick={() => patch({ password_protected: false }, 'Your site is public again')}
+            className="px-3 py-1.5 rounded text-xs font-semibold bg-[var(--pb-accent)] text-black disabled:opacity-40">
+            Make the site public
+          </button>
+        ) : (
+          <button type="button" disabled={busy || (!settings.has_pin && pin.length !== 4)}
+            onClick={() => {
+              if (!window.confirm('Put your public site behind the PIN? Visitors without it will see a PIN screen.')) return
+              patch(pin.length === 4 ? { access_pin: pin, password_protected: true } : { password_protected: true }, 'Draft mode is on')
+            }}
+            className="px-3 py-1.5 rounded text-xs font-semibold bg-[var(--pb-accent)] text-black disabled:opacity-40">
+            Turn on draft mode
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Which grade categories count in the club's stats by default: the public
+ * leaderboard, records, dashboard and each player's career figures. Everything
+ * counts until a box is unticked; picking a grade from a filter always shows
+ * that grade whatever is set here.
+ */
+const ALL_CATEGORIES = ['senior', 'colts', 'womens', 'masters', 'integrated']
+
+function StatsScopePanel({ settings, onSaved }) {
+  const toast = useToast()
+  const cats = settings.grade_categories || []
+  const all = cats.map(c => c.key)
+  const [keep, setKeep] = useState(all.filter(k => !settings.stats_grade_categories || settings.stats_grade_categories.includes(k)))
+  const [busy, setBusy] = useState(false)
+  if (cats.length < 2) return null
+  const saved = all.filter(k => !settings.stats_grade_categories || settings.stats_grade_categories.includes(k))
+  const dirty = JSON.stringify([...keep].sort()) !== JSON.stringify([...saved].sort())
+
+  async function save() {
+    if (!keep.length) { toast.error('Keep at least one category'); return }
+    setBusy(true)
+    try {
+      // Stored as everything except what was unticked here, so a category the
+      // club starts fielding next season is counted rather than silently left out.
+      const unticked = all.filter(k => !keep.includes(k))
+      const stored = unticked.length ? ALL_CATEGORIES.filter(k => !unticked.includes(k)) : null
+      await aflApi.patchAdminSettings({ stats_grade_categories: stored })
+      toast.success('Stats by grade saved'); onSaved()
+    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="pb-card p-5" data-testid="stats-scope">
+      <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Stats by grade</p>
+      <p className="text-sm text-pb-dim mb-3 leading-relaxed">
+        Which grades count in your club's leaderboard, records and players' career figures. Untick
+        Colts, say, to keep junior games out of senior careers. Anyone can still pick a colts grade
+        from a filter to see it on its own.
+      </p>
+      <div className="flex flex-wrap gap-4 mb-3">
+        {cats.map(c => (
+          <label key={c.key} className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={keep.includes(c.key)}
+              onChange={e => setKeep(k => e.target.checked ? [...k, c.key] : k.filter(x => x !== c.key))} />
+            {c.label}
+          </label>
+        ))}
+      </div>
+      <button type="button" disabled={busy || !dirty} onClick={save}
+        className="px-4 py-2 rounded font-semibold text-sm bg-[var(--pb-accent)] text-black disabled:opacity-40">
+        Save
+      </button>
+    </div>
+  )
+}
 
 const HEX_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
 
@@ -286,6 +486,12 @@ export default function AflAdminSettings() {
     <div className="space-y-4 max-w-2xl">
       <SectionTitle>Settings</SectionTitle>
 
+      <LogoField logoUrl={settings.logo_url}
+        onChanged={url => setSettings(s => ({ ...s, logo_url: url }))} />
+      <PrimaryAdminCard />
+      <DraftPanel settings={settings} onSaved={load} />
+      <StatsScopePanel key={JSON.stringify(settings.stats_grade_categories)} settings={settings} onSaved={load} />
+
       <div className="pb-card p-5">
         <div className="flex items-center justify-between mb-1">
           <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">Branding &amp; theme</p>
@@ -397,7 +603,18 @@ export default function AflAdminSettings() {
           disabled={saving}
           onChange={v => toggle('public_show_comp_bf_leaderboard', v)}
         />
+        <Toggle
+          label="Players' positions on their public profiles"
+          hint="Full back, midfield and so on, as set on each player. A jumper number always shows."
+          checked={!!settings.public_show_role}
+          disabled={saving}
+          onChange={v => toggle('public_show_role', v)}
+        />
       </div>
+
+      <TypographyPanel settings={settings}
+        save={font_config => aflApi.patchAdminSettings({ font_config })}
+        samples={{ display: settings.name || 'Your club', body: 'Season results, records and team lists.', mono: '14.8 (92) · 23 goals' }} />
     </div>
   )
 }

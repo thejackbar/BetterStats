@@ -13,7 +13,8 @@ Deploy note: register this endpoint in the Stripe dashboard (Developers →
 Webhooks) as https://betterat.cricket/api/public/stripe/webhook (nginx strips
 the /api prefix, so it resolves at /public/stripe/webhook here) — subscribed
 to at least checkout.session.completed, invoice.paid, invoice.payment_failed,
-customer.subscription.deleted.
+customer.subscription.deleted, and — for pay by invoice (migration 308) —
+invoice.voided and invoice.marked_uncollectible.
 """
 from __future__ import annotations
 
@@ -36,6 +37,10 @@ _HANDLERS = {
     "invoice.paid": stripe_billing.handle_invoice_paid,
     "invoice.payment_failed": stripe_billing.handle_invoice_payment_failed,
     "customer.subscription.deleted": stripe_billing.handle_subscription_deleted,
+    # Pay by invoice (migration 308) — a BetterCricket-raised invoice that is
+    # voided or written off stops offering its pay link.
+    "invoice.voided": stripe_billing.handle_invoice_voided,
+    "invoice.marked_uncollectible": stripe_billing.handle_invoice_voided,
 }
 
 

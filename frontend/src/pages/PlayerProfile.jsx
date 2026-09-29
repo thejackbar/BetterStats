@@ -29,6 +29,7 @@ import {
   LineChart, Line, PieChart, Pie, Cell,
   Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
 } from 'recharts'
+import MilestoneSplitNote from '../components/MilestoneSplitNote'
 
 const MAIN_TABS = [
   { key: 'batting',       label: 'BATTING' },
@@ -2389,6 +2390,7 @@ function UpcomingCard({ items }) {
               <div className="h-full" style={{ width: `${pct}%`, background: 'var(--pb-accent)' }} />
             </div>
             <div className="font-mono text-[10.5px] text-pb-faint tracking-wide2 mt-1.5">{pct}% · {m.needed?.toLocaleString()} to go</div>
+            <MilestoneSplitNote m={m} className="mt-1" />
           </div>
         )
       })}

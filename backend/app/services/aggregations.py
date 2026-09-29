@@ -9,6 +9,13 @@ from app.services.club_grades import club_game_sql
 from app.services.grade_scope import GradeScope
 from app.services.game_status import NOT_PLAYED_SQL_LIST, appearance_counts_as_match
 from app.services import rate_coverage as rc
+from app.services.game_sides import sides_sql
+
+# The two sides of a game on a player's innings history. A scorebook import
+# leaves home/away blank, so the pair is named from the club and the
+# opposition (services/game_sides). `s` is the seasons alias every one of
+# these queries already joins.
+_SIDES = sides_sql("g", "SELECT o.name FROM organisations o WHERE o.id = s.organisation_id")
 
 # "Does this roster appearance count as a match played" — one definition,
 # interpolated into every query below that counts matches off
@@ -137,7 +144,7 @@ def _residual_totals_cte(scope: GradeScope, season_ids, params: dict) -> str:
                 COALESCE(SUM(pss.run_outs), 0) AS total_run_outs,
                 COALESCE(SUM(pss.stumpings), 0) AS total_stumpings
             FROM v_effective_player_season_stats pss
-            WHERE pss.source = ANY(:residual_sources){season_clause}{scope.clause("pss.grade_id", "aggregate")}
+            WHERE pss.source = ANY(:residual_sources){season_clause}{scope.clause("pss.grade_id", "aggregate", label_column="pss.grade_label")}
             GROUP BY pss.player_id
         )
     """
@@ -168,7 +175,7 @@ async def _career_residuals(
     season_clause = " AND pss.season_id = ANY(:sids)" if season_ids else ""
     if season_ids:
         params["sids"] = season_ids
-    scope_clause = scope.clause("pss.grade_id", "aggregate") if _scoped(scope) else ""
+    scope_clause = scope.clause("pss.grade_id", "aggregate", label_column="pss.grade_label") if _scoped(scope) else ""
     if _scoped(scope):
         scope.bind(params)
     res = await session.execute(
@@ -1337,8 +1344,7 @@ async def get_player_batting_innings(
                 bi.batting_position,
                 bi.innings_number,
                 g.id::text AS game_id,
-                g.home_team,
-                g.away_team,
+                {_SIDES},
                 g.played_at::text,
                 g.result,
                 COALESCE(gr.display_name_override, gr.name) AS grade_name,
@@ -1393,8 +1399,7 @@ async def get_player_bowling_spells(
                 bs.economy,
                 bs.innings_number,
                 g.id::text AS game_id,
-                g.home_team,
-                g.away_team,
+                {_SIDES},
                 g.played_at::text,
                 g.result,
                 COALESCE(gr.display_name_override, gr.name) AS grade_name,
@@ -2331,7 +2336,7 @@ async def _season_by_season_scoped(
     scope.bind(params)
     clause = (scope.clause("g.grade_id")
               + await _club_game_clause(session, player_id, params))
-    resid_clause = scope.clause("pss.grade_id", "aggregate")
+    resid_clause = scope.clause("pss.grade_id", "aggregate", label_column="pss.grade_label")
     fold = _SEASON_FOLD_CTE.rstrip() + ",\n"
     res = await session.execute(
         text(f"""
@@ -2891,6 +2896,9 @@ async def get_upcoming_milestones_for_org(
             "target": r["target"],
             "needed": r["needed"],
             "score": importance_score(r["target"], r["needed"]),
+            # Both figures for a player with junior and open-age records, so
+            # the panel can name the one the headline is not. Presence-aware.
+            **{k: r[k] for k in ("junior_split", "counts", "variant") if k in r},
         }
         for r in rows
     ]

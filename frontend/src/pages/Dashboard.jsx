@@ -18,6 +18,7 @@ import {
   ResultPill, Kpi, PageHeader, PbSpinner,
 } from '../lib/presskit'
 import { fmt2, fmtCount } from '../lib/cricketFormat'
+import MilestoneSplitNote from '../components/MilestoneSplitNote'
 
 const SPONSOR_IMAGE = import.meta.env.VITE_SPONSOR_IMAGE || ''
 const SPONSOR_URL = import.meta.env.VITE_SPONSOR_URL || ''
@@ -50,6 +51,7 @@ function MilestoneRow({ m }) {
           <div className="min-w-0">
             <span className="text-pb-text text-[13px] font-semibold truncate block">{m.name}</span>
             {milestoneLabel && <span className="font-mono text-[10px] text-pb-faint tracking-wide2">{milestoneLabel}</span>}
+            <MilestoneSplitNote m={m} />
           </div>
         </div>
         <span className="font-mono text-[11px] text-pb-dim ml-2 whitespace-nowrap">

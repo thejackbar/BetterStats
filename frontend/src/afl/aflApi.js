@@ -78,6 +78,26 @@ export const aflApi = {
       return res.json()
     })
   },
+  adminUploadLogo: (file) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return fetch(`${BASE}/club-admin/logo`, { method: 'POST', body: fd, credentials: 'include' })
+      .then(async (res) => {
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Upload failed')
+        return res.json()
+      })
+  },
+  adminDeleteLogo: () => request('/club-admin/logo', { method: 'DELETE' }),
+  adminUploadPlayerHero: (id, file) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return fetch(`${BASE}/club-admin/players/${id}/hero-photo`, { method: 'POST', body: fd, credentials: 'include' })
+      .then(async (res) => {
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Upload failed')
+        return res.json()
+      })
+  },
+  adminDeletePlayerHero: (id) => request(`/club-admin/players/${id}/hero-photo`, { method: 'DELETE' }),
   adminDeletePlayerPhoto: (id) => request(`/club-admin/players/${id}/photo`, { method: 'DELETE' }),
 
   // Admin — Import Players (CSV contact importer)
@@ -199,10 +219,19 @@ export const aflApi = {
     body: JSON.stringify({ player_id: playerId, season_ids: seasonIds, new_name: newName }),
   }),
 
+  // Admin — Activity Log, Milestones, Matches (routers/afl/admin_extras.py)
+  adminActivityLog: (limit = 200) => request(`/club-admin/activity-log${qs({ limit })}`),
+  adminMilestones: (days = 60) => request(`/club-admin/milestones${qs({ days })}`),
+  adminListGames: (params) => request(`/club-admin/games${qs(params)}`),
+
   // Admin — Seasons (list / rename / delete)
   adminListSeasons: () => request('/club-admin/seasons'),
   adminRenameSeason: (id, body) => request(`/club-admin/seasons/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   adminDeleteSeason: (id) => request(`/club-admin/seasons/${id}`, { method: 'DELETE' }),
+  adminReorderSeasons: (items) => request('/club-admin/seasons/reorder', { method: 'PUT', body: JSON.stringify(items) }),
+  adminListSeasonMerges: () => request('/club-admin/seasons/merges'),
+  adminMergeSeasons: (body) => request('/club-admin/seasons/merges', { method: 'POST', body: JSON.stringify(body) }),
+  adminUndoSeasonMerge: (id) => request(`/club-admin/seasons/merges/${id}/undo`, { method: 'POST' }),
 
   // Admin — Manual stat entries (adjustments). Seasons come from the Import
   // Stats endpoints below: same club seasons, same create path, deliberately

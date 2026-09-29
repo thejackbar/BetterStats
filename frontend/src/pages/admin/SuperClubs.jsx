@@ -5,6 +5,7 @@ import { moduleBrand } from '../../lib/moduleBrand'
 import AdminLayout from '../../components/admin/AdminLayout'
 import Dropdown from '../../components/Dropdown'
 import ClubPaymentMethodsModal from '../../components/admin/ClubPaymentMethodsModal'
+import ClubInvoiceBillingModal from '../../components/admin/ClubInvoiceBillingModal'
 
 const INPUT_CLS = 'w-full bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
 
@@ -118,6 +119,7 @@ export default function SuperClubs() {
   })
   const [moduleBusy, setModuleBusy] = useState('')
   const [pmModalClub, setPmModalClub] = useState(null) // club object | null
+  const [invoiceModalClub, setInvoiceModalClub] = useState(null) // club object | null — pay by invoice
   // In-progress "Renews" date edits per module key, before blur — keeps the native
   // date input's own mid-typing state from being clobbered by an autosave+reload
   // on every keystroke (see setModuleRenewal).
@@ -394,6 +396,7 @@ export default function SuperClubs() {
       subscription_status: club.subscription_status || 'active',
       renewal_date: club.renewal_date || '',
       billing_cycle: club.billing_cycle || '',
+      invoice_billing_enabled: !!club.invoice_billing_enabled,
       billing_checkout_override:
         club.billing_checkout_override === true ? 'true'
         : club.billing_checkout_override === false ? 'false'
@@ -1538,6 +1541,13 @@ export default function SuperClubs() {
                         Billing
                       </button>
                       <button
+                        onClick={() => setInvoiceModalClub(club)}
+                        className="font-mono text-[10px] text-pb-faint hover:text-pb-text transition-colors"
+                        title="Invoice this club: switch it to pay by invoice, raise and email an invoice, send its renewal"
+                      >
+                        Invoice
+                      </button>
+                      <button
                         onClick={() => { setConfirmDelete(club.id); setArchiveConfirmText(''); setEditId(null) }}
                         className="font-mono text-[10px] text-pb-red/80 hover:text-pb-red transition-colors"
                       >
@@ -1746,6 +1756,19 @@ export default function SuperClubs() {
                       </p>
                     </div>
                     <div>
+                      <label className="font-mono text-[10px] text-pb-faint block mb-1">Pay by invoice (this club)</label>
+                      <label className="flex items-center gap-2 text-[12px] text-pb-text cursor-pointer">
+                        <input type="checkbox" checked={!!editForm.invoice_billing_enabled}
+                          onChange={e => setEditForm(f => ({ ...f, invoice_billing_enabled: e.target.checked }))} />
+                        Offer this club the option to be invoiced
+                      </label>
+                      <p className="font-mono text-[10px] text-pb-faintest mt-1">
+                        Off by default. Clubs subscribe by card through Stripe unless this is on. Switching it off
+                        for a club that pays by invoice moves it back to card. Raise and send invoices from the
+                        club's Invoice button.
+                      </p>
+                    </div>
+                    <div>
                       <label className="font-mono text-[10px] text-pb-faint block mb-1">Member portal (this club)</label>
                       <select value={editForm.member_portal_override}
                         onChange={e => setEditForm(f => ({ ...f, member_portal_override: e.target.value }))}
@@ -1875,6 +1898,9 @@ export default function SuperClubs() {
       </div>
       {pmModalClub && (
         <ClubPaymentMethodsModal club={pmModalClub} onClose={() => setPmModalClub(null)} />
+      )}
+      {invoiceModalClub && (
+        <ClubInvoiceBillingModal club={invoiceModalClub} onClose={() => setInvoiceModalClub(null)} />
       )}
     </AdminLayout>
   )

@@ -10,6 +10,11 @@ import ModuleLockup from '../ModuleLockup'
 import ModuleSwitcher from './ModuleSwitcher'
 import BookmarkButton from './BookmarkButton'
 import TrialBanner from './TrialBanner'
+import { IS_AFL } from '../../lib/sport'
+
+// The football app has no bookmarks service and no trial/billing, so the two
+// pieces of platform chrome that read them render nothing there.
+const Bookmark = IS_AFL ? () => null : BookmarkButton
 
 // Generic chrome for a Better module surface (BetterAdmin, BetterSocials, …)
 // — a focused sidebar with just that module's tools, separate from the main
@@ -215,7 +220,7 @@ export default function ModuleLayout({
         {/* The header (below) carries this normally, right beside the title —
             far more visible than buried in this footer. `hideHeader` screens
             skip that header entirely, so this is their only way to reach it. */}
-        {hideHeader && <BookmarkButton pageLabel={bookmarkLabel} drop="up" />}
+        {hideHeader && <Bookmark pageLabel={bookmarkLabel} drop="up" />}
         <button
           onClick={async () => { await logout(); navigate('/login') }}
           title="Log out" aria-label="Log out"
@@ -292,7 +297,7 @@ export default function ModuleLayout({
             {!twoRow && filters}
             <div className={`ml-auto flex items-center gap-[26px] ${tabs ? 'flex-1 basis-0 justify-end' : ''}`}>
               {stats}
-              {!twoRow && <BookmarkButton pageLabel={bookmarkLabel} variant="bar" />}
+              {!twoRow && <Bookmark pageLabel={bookmarkLabel} variant="bar" />}
               {!twoRow && actions && <div className="flex items-center gap-2">{actions}</div>}
             </div>
           </div>
@@ -311,7 +316,7 @@ export default function ModuleLayout({
             <div className="flex items-end gap-3.5">
               <div className="flex items-center gap-2 flex-wrap min-w-0 flex-1">{filters}</div>
               <div className="flex items-center gap-[26px] shrink-0">
-                <BookmarkButton pageLabel={bookmarkLabel} variant="bar" />
+                <Bookmark pageLabel={bookmarkLabel} variant="bar" />
                 {actions && <div className="flex items-center gap-2 flex-wrap justify-end">{actions}</div>}
               </div>
             </div>
@@ -321,7 +326,7 @@ export default function ModuleLayout({
         {/* Trial-conversion bar — directly under the module header, full width
             of the main column, so a trialling club can subscribe from any
             module surface too. */}
-        <TrialBanner />
+        {!IS_AFL && <TrialBanner />}
         {bare
           ? <div className="flex-1 min-w-0 min-h-0 flex flex-col">{children}</div>
           : <main className="flex-1 p-5 md:px-6 md:py-[22px] max-w-[1400px] w-full">{children}</main>}

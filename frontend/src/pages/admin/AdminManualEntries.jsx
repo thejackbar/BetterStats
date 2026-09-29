@@ -618,6 +618,14 @@ function ImportPanel({ kind, downloadFn, importFn, onImported }) {
   const handleTemplate = async () => {
     try {
       const res = await downloadFn()
+      // Never save the body of a failed response as a "template" — an error
+      // (e.g. a routing slip returning JSON) would otherwise download as a
+      // broken CSV with no hint anything went wrong. Surface it instead.
+      if (!res.ok) {
+        let msg = `Could not download the template (${res.status}).`
+        try { const j = await res.json(); if (j?.detail) msg = typeof j.detail === 'string' ? j.detail : msg } catch { /* not JSON */ }
+        throw new Error(msg)
+      }
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -1069,15 +1077,23 @@ function emptyBowlingRow() {
 function emptyFieldingRow() {
   return { player_id: '', catches: 0, catches_wk: 0, run_outs: 0, stumpings: 0 }
 }
+function emptyInningsRow(n = 1) {
+  return {
+    innings_number: n, batting_side: n % 2 === 1 ? 'us' : 'opposition',
+    byes: '', leg_byes: '', wides: '', no_balls: '', penalty: '', extras_total: '',
+    total_runs: '', total_wickets: '', overs: '',
+  }
+}
 
 const EMPTY_GAME_FORM = {
   season_id: '', grade_id: '', played_at: '', home_team: '', away_team: '', opposition: '',
   venue: '', result: '', winning_team: '', is_final: false, match_format: '', notes: '',
-  batting_innings: [], bowling_spells: [], fielding_stats: [],
+  batting_innings: [], bowling_spells: [], fielding_stats: [], innings: [],
 }
 
 const GAME_FORM_SECTIONS = [
   { key: 'match', label: 'Match Info' },
+  { key: 'innings', label: 'Innings' },
   { key: 'batting', label: 'Batting' },
   { key: 'bowling', label: 'Bowling' },
   { key: 'fielding', label: 'Fielding' },
@@ -1125,9 +1141,21 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
       is_final: !!form.is_final,
       match_format: form.match_format || null,
       notes: form.notes || null,
-      batting_innings: sanitize(form.batting_innings, r => ({ ...r, runs: r.runs || 0, fours: r.fours || 0, sixes: r.sixes || 0 })),
-      bowling_spells: sanitize(form.bowling_spells, r => ({ ...r, overs: r.overs || 0, runs: r.runs || 0, wickets: r.wickets || 0 })),
+      batting_innings: sanitize(form.batting_innings, r => ({ ...r, innings_number: Number(r.innings_number) || 1, runs: r.runs || 0, fours: r.fours || 0, sixes: r.sixes || 0 })),
+      bowling_spells: sanitize(form.bowling_spells, r => ({ ...r, innings_number: Number(r.innings_number) || 1, overs: r.overs || 0, runs: r.runs || 0, wickets: r.wickets || 0 })),
       fielding_stats: sanitize(form.fielding_stats, r => r),
+      // Keep only innings rows carrying something to store — a bare side label
+      // with no extras and no total is nothing the scorecard needs a row for.
+      innings: (form.innings || [])
+        .map(r => {
+          const out = { ...r, innings_number: Number(r.innings_number) || 1 }
+          if (out.batting_side !== 'us' && out.batting_side !== 'opposition') out.batting_side = null
+          for (const k of ['byes', 'leg_byes', 'wides', 'no_balls', 'penalty', 'extras_total', 'total_runs', 'total_wickets', 'overs']) {
+            out[k] = (out[k] === '' || out[k] == null) ? null : Number(out[k])
+          }
+          return out
+        })
+        .filter(r => r.batting_side || ['byes', 'leg_byes', 'wides', 'no_balls', 'penalty', 'extras_total', 'total_runs', 'total_wickets', 'overs'].some(k => r[k] != null)),
     }
   }
 
@@ -1164,6 +1192,13 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
         batting_innings: (full.batting_innings || []).map(r => ({ ...r, batting_position: r.batting_position || '' })),
         bowling_spells: (full.bowling_spells || []),
         fielding_stats: (full.fielding_stats || []),
+        innings: (full.innings || []).map(r => {
+          const out = { ...r }
+          for (const k of ['byes', 'leg_byes', 'wides', 'no_balls', 'penalty', 'extras_total', 'total_runs', 'total_wickets', 'overs']) {
+            out[k] = out[k] == null ? '' : out[k]
+          }
+          return out
+        }),
       })
       window.scrollTo({ top: 0, behavior: 'smooth' })
     } catch (e) { setErr(e.message) }
@@ -1219,6 +1254,7 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
         <div className="flex flex-wrap gap-1 mb-3 border-b pb-hairline">
           {GAME_FORM_SECTIONS.map(s => {
             const count = s.key === 'match' ? null
+              : s.key === 'innings' ? (form.innings || []).length
               : s.key === 'batting' ? (form.batting_innings || []).length
               : s.key === 'bowling' ? (form.bowling_spells || []).length
               : (form.fielding_stats || []).length
@@ -1309,6 +1345,63 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
         </div>
         </>}
 
+        {/* Innings */}
+        {formSection === 'innings' && <div className="mt-5">
+          <div className="flex items-center justify-between mb-2">
+            <h4 className="text-sm font-semibold text-pb-text">Innings</h4>
+            <button
+              className={BTN_SECONDARY}
+              onClick={() => addChild('innings', () => emptyInningsRow((form.innings || []).length + 1))}
+            >+ Add innings</button>
+          </div>
+          <p className="text-xs text-pb-faint mb-3">
+            Say which side batted each innings, so our bowling is filed against the opposition's
+            batting rather than lumped in with ours. Record extras here (byes, leg-byes, wides,
+            no-balls, penalties — or a single total), and enter the opposition's total for an
+            innings you're not itemising batter by batter. All optional.
+          </p>
+          {(form.innings || []).length === 0 && (
+            <p className="text-xs text-pb-faintest mb-3">
+              No innings recorded yet — the scorecard still works from the batting and bowling rows below.
+            </p>
+          )}
+          {(form.innings || []).map((row, idx) => (
+            <div key={idx} className="border pb-hairline rounded-md p-3 mb-3">
+              <div className="grid grid-cols-12 gap-2 items-end mb-2">
+                <div className="col-span-2"><NumberField label="Innings #" value={row.innings_number} onChange={v => updateChild('innings', idx, 'innings_number', v)} /></div>
+                <div className="col-span-4">
+                  <label className={LABEL_CLS}>Who batted</label>
+                  <select value={row.batting_side || ''} onChange={e => updateChild('innings', idx, 'batting_side', e.target.value)} className={INPUT_CLS}>
+                    <option value="us">Our innings</option>
+                    <option value="opposition">Opposition innings</option>
+                    <option value="">Not sure</option>
+                  </select>
+                </div>
+                <div className="col-span-6 pb-1 text-right">
+                  <button className="text-red-300 text-[11px] hover:underline" onClick={() => removeChild('innings', idx)}>Remove innings</button>
+                </div>
+              </div>
+              <div className="text-[10px] font-mono text-pb-faintest uppercase tracking-wide mt-1 mb-1">Extras</div>
+              <div className="grid grid-cols-12 gap-2 items-end mb-2">
+                <div className="col-span-2"><NumberField label="Byes" value={row.byes} onChange={v => updateChild('innings', idx, 'byes', v)} /></div>
+                <div className="col-span-2"><NumberField label="Leg byes" value={row.leg_byes} onChange={v => updateChild('innings', idx, 'leg_byes', v)} /></div>
+                <div className="col-span-2"><NumberField label="Wides" value={row.wides} onChange={v => updateChild('innings', idx, 'wides', v)} /></div>
+                <div className="col-span-2"><NumberField label="No-balls" value={row.no_balls} onChange={v => updateChild('innings', idx, 'no_balls', v)} /></div>
+                <div className="col-span-2"><NumberField label="Penalty" value={row.penalty} onChange={v => updateChild('innings', idx, 'penalty', v)} /></div>
+                <div className="col-span-2"><NumberField label="Or total" value={row.extras_total} onChange={v => updateChild('innings', idx, 'extras_total', v)} /></div>
+              </div>
+              {row.batting_side === 'opposition' && <>
+                <div className="text-[10px] font-mono text-pb-faintest uppercase tracking-wide mt-1 mb-1">Opposition total (if not itemised)</div>
+                <div className="grid grid-cols-12 gap-2 items-end">
+                  <div className="col-span-3"><NumberField label="Runs" value={row.total_runs} onChange={v => updateChild('innings', idx, 'total_runs', v)} /></div>
+                  <div className="col-span-3"><NumberField label="Wickets" value={row.total_wickets} onChange={v => updateChild('innings', idx, 'total_wickets', v)} /></div>
+                  <div className="col-span-3"><NumberField label="Overs" value={row.overs} onChange={v => updateChild('innings', idx, 'overs', v)} allowDecimal /></div>
+                </div>
+              </>}
+            </div>
+          ))}
+        </div>}
+
         {/* Batting */}
         {formSection === 'batting' && <div className="mt-5">
           <div className="flex items-center justify-between mb-2">
@@ -1317,9 +1410,10 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
           </div>
           {(form.batting_innings || []).map((row, idx) => (
             <div key={idx} className="grid grid-cols-12 gap-2 items-end mb-2">
-              <div className="col-span-4">
+              <div className="col-span-3">
                 <PlayerPicker players={players} value={row.player_id} onChange={v => updateChild('batting_innings', idx, 'player_id', v)} />
               </div>
+              <div className="col-span-1"><NumberField label="Inn" value={row.innings_number} onChange={v => updateChild('batting_innings', idx, 'innings_number', v)} /></div>
               <div className="col-span-1"><NumberField label="Pos" value={row.batting_position} onChange={v => updateChild('batting_innings', idx, 'batting_position', v)} /></div>
               <div className="col-span-1"><NumberField label="Runs" value={row.runs} onChange={v => updateChild('batting_innings', idx, 'runs', v)} /></div>
               <div className="col-span-1"><NumberField label="Balls" value={row.balls} onChange={v => updateChild('batting_innings', idx, 'balls', v)} /></div>
@@ -1352,9 +1446,10 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
           </div>
           {(form.bowling_spells || []).map((row, idx) => (
             <div key={idx} className="grid grid-cols-12 gap-2 items-end mb-2">
-              <div className="col-span-4">
+              <div className="col-span-3">
                 <PlayerPicker players={players} value={row.player_id} onChange={v => updateChild('bowling_spells', idx, 'player_id', v)} />
               </div>
+              <div className="col-span-1"><NumberField label="Inn" value={row.innings_number} onChange={v => updateChild('bowling_spells', idx, 'innings_number', v)} /></div>
               <div className="col-span-1"><NumberField label="Overs" value={row.overs} onChange={v => updateChild('bowling_spells', idx, 'overs', v)} allowDecimal /></div>
               <div className="col-span-1"><NumberField label="M" value={row.maidens} onChange={v => updateChild('bowling_spells', idx, 'maidens', v)} /></div>
               <div className="col-span-1"><NumberField label="Runs" value={row.runs} onChange={v => updateChild('bowling_spells', idx, 'runs', v)} /></div>

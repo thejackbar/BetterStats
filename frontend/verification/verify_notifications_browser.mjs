@@ -78,7 +78,8 @@ const EVENTS = () => [
 
 const browser = await chromium.launch(existsSync(EXECUTABLE) ? { executablePath: EXECUTABLE } : {})
 
-async function openSettings({ width = 1440, canManage = true, providerLive = true, alerts = [] } = {}) {
+async function openSettings({ width = 1440, canManage = true, providerLive = true, alerts = [],
+                              testResult = null, lastEmail = null } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: 1800 } })
   const page = await ctx.newPage()
   const errors = []
@@ -133,6 +134,10 @@ async function openSettings({ width = 1440, canManage = true, providerLive = tru
         return json({ ok: true })
       }
       if (/run-now$/.test(path)) return json({ emitted: 3, events_run: 4, sources_failed: 0 })
+      if (/settings\/test-email$/.test(path)) {
+        return json(testResult || { ok: true, to: 'jack@club.test', provider: 'ses', live: true,
+                                    message_id: 'm-1', error: null, items: 4 })
+      }
       if (/notifications\/feed\/read$/.test(path)) return json({ marked_read: 2, unread: 0 })
       return json({ ok: true })
     }
@@ -154,6 +159,7 @@ async function openSettings({ width = 1440, canManage = true, providerLive = tru
         my_blanket_optout: { ...state.blanket },
         my_email: 'jack@club.test',
         email_provider_live: providerLive,
+        my_last_email: lastEmail,
       })
     }
     if (/\/notifications\/count$/.test(path)) {
@@ -362,6 +368,52 @@ const lastCall = (calls, re) => [...calls].reverse().find(c => re.test(c.path))
   const { page, ctx } = await openSettings({ providerLive: false })
   ck('a club is told when email is not actually connected',
     (await page.locator('text=Email is not connected yet').count()) > 0)
+  await ctx.close()
+}
+
+// ── testing the email ───────────────────────────────────────────────────────
+{
+  const { page, ctx, calls, errors } = await openSettings({
+    lastEmail: { status: 'sent', sent_at: '2026-09-22T00:45:00Z', raised_at: null, error: null, title: 'x' },
+  })
+  const btn = page.locator('button', { hasText: 'Send me a test email' })
+  ck('the screen offers a test email', (await btn.count()) === 1)
+  ck('it says the last notification email went',
+    /Last notification email:\s*Sent on/.test(
+      (await page.locator('[data-testid="notif-last-email"]').innerText().catch(() => '')) || ''))
+  calls.length = 0
+  if (await btn.count()) await btn.click()
+  await page.waitForTimeout(700)
+  ck('pressing it posts to the test endpoint and nothing else',
+    calls.length === 1 && /settings\/test-email$/.test(calls[0].path), JSON.stringify(calls))
+  ck('and says where it went',
+    /Sent to jack@club\.test/.test(
+      (await page.locator('[data-testid="notif-test-result"]').innerText().catch(() => '')) || ''))
+  ck('no page errors around the test email', errors.length === 0, errors.join(' | '))
+  await ctx.close()
+}
+{
+  const { page, ctx } = await openSettings({
+    testResult: { ok: false, to: 'jack@club.test', provider: 'ses', live: true,
+                  message_id: null, error: '550 mailbox unavailable', items: 1 },
+    lastEmail: { status: 'failed', sent_at: null, raised_at: null, error: 'Throttled', title: 'x' },
+  })
+  const btn = page.locator('button', { hasText: 'Send me a test email' })
+  if (await btn.count()) await btn.click()
+  await page.waitForTimeout(700)
+  ck("a refused test email shows the provider's reason",
+    /550 mailbox unavailable/.test(
+      (await page.locator('[data-testid="notif-test-result"]').innerText().catch(() => '')) || ''))
+  ck('a failed daily email says so, with its reason',
+    /Not delivered.*Throttled/.test(
+      (await page.locator('[data-testid="notif-last-email"]').innerText().catch(() => '')) || ''))
+  await ctx.close()
+}
+{
+  const { page, ctx } = await openSettings({ providerLive: false })
+  const btn = page.locator('button', { hasText: 'Send me a test email' })
+  ck('with no email provider the test button cannot be pressed',
+    (await btn.count()) === 1 && await btn.isDisabled())
   await ctx.close()
 }
 

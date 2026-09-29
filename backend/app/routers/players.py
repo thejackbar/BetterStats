@@ -38,6 +38,7 @@ from app.services.milestone_rules import (
     crossed_thresholds, is_displayable, next_threshold, reach_window,
 )
 from app.services import iq_teammates
+from app.services import milestone_totals
 from app.services import grade_scope
 from app.services.player_aliases import normalise_name_key, seed_alias_on_rename
 from app.services.player_age import age_on, dob_error, visible_age
@@ -617,45 +618,26 @@ async def get_player_upcoming_milestones(player_id: str, db: AsyncSession = Depe
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
 
-    # Scope the career totals to the player's own organisation's seasons. A CA
-    # participant GUID is shared across clubs, so a dual-club player can have
-    # player_season_stats rows attached under another club's seasons; summing
-    # them all would over-count (see migration 060). This query reads the base
-    # table, so it applies the same guard the v_effective view does.
-    org_clause = " AND s.organisation_id = :org_id" if player.organisation_id else ""
-    agg_params = {"pid": player_id}
-    if player.organisation_id:
-        agg_params["org_id"] = str(player.organisation_id)
-    agg_res = await db.execute(
-        text(f"""
-            SELECT
-                COALESCE(SUM(pss.runs), 0)    AS total_runs,
-                COALESCE(SUM(pss.wickets), 0) AS total_wickets,
-                COALESCE(SUM(pss.matches), 0) AS total_matches,
-                COALESCE(SUM(pss.catches), 0) AS total_catches
-            FROM player_season_stats pss
-            JOIN seasons s ON s.id = pss.season_id
-            WHERE pss.player_id = :pid{org_clause}
-        """),
-        agg_params
-    )
-    agg = dict(agg_res.mappings().first() or {})
-    totals = {
-        "runs":    int(agg.get("total_runs")    or 0),
-        "wickets": int(agg.get("total_wickets") or 0),
-        "matches": int(agg.get("total_matches") or 0),
-        "catches": int(agg.get("total_catches") or 0),
-    }
-
+    # The figures the profile itself opens on, from the one definition the
+    # club's Milestones page and the notifications read. This used to sum the
+    # base player_season_stats table, which left out every imported and
+    # hand-entered match — a milestone card reading 197 wickets on a profile
+    # whose header says 478. See services/milestone_totals.py.
+    from app.services import milestone_scan
     upcoming = []
-    for mt, current in totals.items():
-        target = next_threshold(mt, current)
-        if target is None:
-            continue
-        needed = target - current
-        if needed > reach_window(mt, target):
-            continue
-        upcoming.append({"type": mt, "current": current, "target": target, "needed": needed})
+    if player.organisation_id:
+        got = await milestone_totals.profile_totals(db, player.organisation_id, [str(player.id)])
+        t = got.get(str(player.id)) or {}
+        row = {
+            "player_id": str(player.id), "player_name": player.display_name,
+            "gender": player.gender, "split": t.get("split"), "counts": t.get("counts"),
+        }
+        for stat, _cat, col in milestone_scan.STAT_DEFS:
+            row[col] = int((t.get("totals") or {}).get(stat) or 0)
+        for m in milestone_scan.upcoming_from_totals([row]):
+            upcoming.append({k: m[k] for k in (
+                "type", "current", "target", "needed", "junior_split", "counts", "variant",
+            ) if k in m})
 
     # Per-grade match milestones — uses the same merge-aware breakdown the
     # Team tab does so canonical/merged grade names line up.

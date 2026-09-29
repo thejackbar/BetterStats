@@ -6,6 +6,18 @@ const BASE = import.meta.env.VITE_API_URL || (import.meta.env.BASE_URL + 'api')
 // Shown while the backend is briefly unavailable (e.g. during a deploy, when
 // nginx can't reach the backend and would otherwise surface a raw
 // "Bad Gateway"/"Service Unavailable"). Keep this friendly and reassuring.
+// A few endpoints hand back an absolute "/api/..." URL for the browser to load
+// (a media-library image, say). That is right for cricket, served at the root,
+// and wrong for a silo built under a prefix: the football app lives at /afl/,
+// where "/api" is the cricket backend. This re-roots such a URL on the build's
+// own API base, and leaves anything else (an https URL, a data: URL, an already
+// prefixed path) exactly as it was. On cricket BASE is "/api", so it is a no-op.
+export function rebaseApiUrl(url) {
+  if (typeof url !== 'string' || !url.startsWith('/api/') || BASE === '/api') return url
+  return `${BASE}${url.slice(4)}`
+}
+const rebaseAsset = a => (a && typeof a === 'object' ? { ...a, url: rebaseApiUrl(a.url) } : a)
+
 const BACKEND_DOWN_MESSAGE = 'System refreshing. Please wait a moment…'
 
 // A gateway/unavailable status means the backend is down, not a real app error.
@@ -183,7 +195,8 @@ export const api = {
   // BetterSocials — media library. `kind` is undefined for the ordinary Photos
   // pool, or 'background' for the small reusable post-background library —
   // same table, same upload endpoint, just tagged differently on the way in.
-  listSocialMedia: (kind) => request(`/admin/social/media${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`),
+  listSocialMedia: (kind) => request(`/admin/social/media${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`)
+    .then(rows => (Array.isArray(rows) ? rows.map(rebaseAsset) : rows)),
   uploadSocialMedia: (file, kind) => {
     const form = new FormData()
     form.append('file', file)
@@ -194,7 +207,7 @@ export const api = {
           const e = await r.json().catch(() => ({}))
           throw new Error(typeof e.detail === 'string' ? e.detail : `HTTP ${r.status}`)
         }
-        return r.json()
+        return r.json().then(rebaseAsset)
       })
   },
   deleteSocialMedia: (id) => request(`/admin/social/media/${id}`, { method: 'DELETE' }),
@@ -1695,6 +1708,8 @@ export const api = {
       { method: 'PUT', body: JSON.stringify({ channels }) }),
   runNotificationScanNow: () =>
     request('/club-admin/notifications/settings/run-now', { method: 'POST' }),
+  sendNotificationTestEmail: () =>
+    request('/club-admin/notifications/settings/test-email', { method: 'POST' }),
   getNotificationFeed: ({ limit = 30, unreadOnly = false } = {}) =>
     request(`/club-admin/notifications/feed?limit=${limit}&unread_only=${unreadOnly ? 'true' : 'false'}`),
   markNotificationFeedRead: (notificationIds) =>
@@ -2261,6 +2276,40 @@ export const api = {
       body: JSON.stringify({ module_keys: moduleKeys, coupon_code: couponCode || undefined }),
     }),
   billingListInvoices: () => request('/club-admin/billing/invoices'),
+  // Pay by invoice (migration 308) — routers/billing.py + services/invoice_billing.py.
+  // Invoicing is arranged by a Super Admin (the super* calls, by club id); a
+  // club reads its own overview and can have an open invoice re-emailed.
+  // billingSetMethod / billingRequestInvoice are kept for now but no screen
+  // calls them: the server refuses both for anyone but a Super Admin.
+  billingInvoiceOverview: () => request('/club-admin/billing/invoice-billing'),
+  billingSetMethod: (method) =>
+    request('/club-admin/billing/billing-method', { method: 'PUT', body: JSON.stringify({ method }) }),
+  billingRequestInvoice: (moduleKeys, couponCode) =>
+    request('/club-admin/billing/invoices/request', {
+      method: 'POST',
+      body: JSON.stringify({ module_keys: moduleKeys, coupon_code: couponCode || undefined }),
+    }),
+  billingResendInvoice: (invoiceId) =>
+    request(`/club-admin/billing/invoices/${invoiceId}/resend`, { method: 'POST' }),
+  superInvoiceOverview: (orgId) => request(`/club-admin/billing/super/clubs/${orgId}/invoice-billing`),
+  superSetBillingMethod: (orgId, method) =>
+    request(`/club-admin/billing/super/clubs/${orgId}/billing-method`, { method: 'PUT', body: JSON.stringify({ method }) }),
+  superInvoiceQuote: (orgId, moduleKeys, couponCode) =>
+    request(`/club-admin/billing/super/clubs/${orgId}/invoice-quote`, {
+      method: 'POST',
+      body: JSON.stringify({ module_keys: moduleKeys, coupon_code: couponCode || undefined }),
+    }),
+  superRequestInvoice: (orgId, moduleKeys, couponCode) =>
+    request(`/club-admin/billing/super/clubs/${orgId}/invoices`, {
+      method: 'POST',
+      body: JSON.stringify({ module_keys: moduleKeys, coupon_code: couponCode || undefined }),
+    }),
+  superIssueRenewalInvoice: (orgId) =>
+    request(`/club-admin/billing/super/clubs/${orgId}/renewal-invoice`, { method: 'POST' }),
+  superResendInvoice: (orgId, invoiceId) =>
+    request(`/club-admin/billing/super/clubs/${orgId}/invoices/${invoiceId}/resend`, { method: 'POST' }),
+  superVoidInvoice: (orgId, invoiceId) =>
+    request(`/club-admin/billing/super/clubs/${orgId}/invoices/${invoiceId}/void`, { method: 'POST' }),
   // Payment method management — routers/billing.py. Primary-admin self-serve
   // (current club) and Super Admin (any club by org_id) share the same
   // response shape ({default_payment_method_id, payment_methods}).

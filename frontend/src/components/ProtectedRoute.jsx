@@ -2,6 +2,7 @@ import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import TrialReminderModal from './admin/TrialReminderModal'
 import SetupReturnBar from './admin/SetupReturnBar'
+import { IS_AFL } from '../lib/sport'
 
 export default function ProtectedRoute({ children, requireRole, requireModule, requireCore, requireActivePlan }) {
   const { user, hasModule, coreLive } = useAuth()
@@ -73,6 +74,10 @@ export default function ProtectedRoute({ children, requireRole, requireModule, r
     const allExpired = user.role !== 'super_admin' && !coreLive && !anyModule
     if (allExpired) return <Navigate to="/admin" replace />
   }
+
+  // The football app has no trials to remind about and no setup wizard to
+  // return to, so neither overlay is drawn there.
+  if (IS_AFL) return children
 
   return (
     <>

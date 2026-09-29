@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.capabilities import MANAGE_MANUAL_ENTRIES, require_cap
+from app.auth.capabilities import MANAGE_MANUAL_ENTRIES, MANAGE_MERGES, require_cap
 from app.models.db import Organisation, Season, User, get_db
 from app.routers.auth import get_current_club
 from app.services.audit_log import log_activity
@@ -38,6 +38,9 @@ async def list_seasons(
     # inflate every SUM.
     rows = await db.execute(text("""
         SELECT s.id, s.name, s.year, (s.grassroots_id IS NOT NULL) AS synced,
+               s.display_order,
+               (SELECT sa.canonical_season_id FROM season_aliases sa
+                WHERE sa.alias_season_id = s.id AND sa.undone_at IS NULL LIMIT 1) AS alias_of,
                (SELECT COUNT(*) FROM grades gr WHERE gr.season_id = s.id) AS grades,
                COALESCE((SELECT SUM(pss.games) FROM afl_player_season_stats pss
                          WHERE pss.season_id = s.id AND pss.grade_id IS NULL), 0) AS synced_games,
@@ -49,9 +52,72 @@ async def list_seasons(
                 WHERE m.season_id = s.id) AS adjustments
         FROM seasons s
         WHERE s.organisation_id = :org
-        ORDER BY s.year DESC NULLS LAST, s.name
+        ORDER BY s.display_order NULLS LAST, s.year DESC NULLS LAST, s.name
     """), {"org": str(club.id)})
     return [dict(r._mapping) for r in rows]
+
+
+class SeasonOrderItem(BaseModel):
+    id: str
+    display_order: int
+
+
+@router.put("/reorder")
+async def reorder_seasons(
+    items: list[SeasonOrderItem],
+    current_user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """The club's own reading order for the season picker. A foreign or junk
+    id is skipped rather than failing the whole order."""
+    for item in items:
+        try:
+            season = await db.get(Season, uuid.UUID(item.id))
+        except ValueError:
+            continue
+        if season and season.organisation_id == club.id:
+            season.display_order = item.display_order
+    await db.commit()
+    return {"ok": True}
+
+
+# Season merges reuse cricket's own route bodies: the season_aliases table, the
+# chain-flattening and the cycle guard are identical, and two copies of "what
+# a merge is" is how the sports start disagreeing about one.
+
+@router.get("/merges")
+async def list_season_merges(current_user: User = Depends(require_cap(MANAGE_MERGES)),
+                             club: Organisation = Depends(get_current_club),
+                             db: AsyncSession = Depends(get_db)):
+    from app.routers.club_admin import list_season_merges as _list
+    return await _list(current_user=current_user, club=club, db=db)
+
+
+class SeasonMergeBody(BaseModel):
+    canonical_season_id: str
+    alias_season_id: str
+
+
+@router.post("/merges")
+async def merge_seasons(body: SeasonMergeBody,
+                        current_user: User = Depends(require_cap(MANAGE_MERGES)),
+                        club: Organisation = Depends(get_current_club),
+                        db: AsyncSession = Depends(get_db)):
+    from app.routers.club_admin import SeasonMergeRequest, create_season_merge
+    return await create_season_merge(
+        SeasonMergeRequest(canonical_season_id=body.canonical_season_id,
+                           alias_season_id=body.alias_season_id),
+        current_user=current_user, club=club, db=db)
+
+
+@router.post("/merges/{merge_id}/undo")
+async def undo_season_merge(merge_id: int,
+                            current_user: User = Depends(require_cap(MANAGE_MERGES)),
+                            club: Organisation = Depends(get_current_club),
+                            db: AsyncSession = Depends(get_db)):
+    from app.routers.club_admin import undo_season_merge as _undo
+    return await _undo(merge_id, current_user=current_user, club=club, db=db)
 
 
 class SeasonPatch(BaseModel):

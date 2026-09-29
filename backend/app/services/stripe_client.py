@@ -829,3 +829,143 @@ async def attach_discount_to_subscription(subscription_id: str, coupon_id: str) 
         subscription_id,
         discounts=[{"coupon": cid} for cid in all_ids],
     )
+
+
+# ─── BetterCricket annual invoicing (migration 308) ────────────────────────
+# A club on invoice billing is NOT on a Stripe Subscription. A subscription can
+# only raise its renewal invoice ON the renewal date, and invoice billing has to
+# send it 14 days before and have it settled by then — so services/
+# invoice_billing.py runs the annual cycle itself and asks Stripe for one-off
+# invoices. Stripe still owns what it is good at: the invoice number, the PDF,
+# GST (automatic_tax), and the hosted page where the club pays with whatever
+# payment methods the account has switched on.
+
+async def ensure_customer_for_org(org, *, email: str | None, address: dict | None) -> str:
+    """A Stripe Customer id that resolves for the key the app is running on.
+
+    Reuses the club's own Customer when it has one (the same one Checkout would
+    use, so a club moving between card and invoice keeps one billing identity
+    and one payment history), and mints a fresh one when the id is missing or
+    belongs to the other Stripe mode — the trap _customer_exists documents. The
+    CALLER persists the id onto the org; this function never touches the
+    database."""
+    _require_configured()
+    customer_id = getattr(org, "stripe_customer_id", None)
+    if customer_id and await _customer_exists(customer_id):
+        if address:
+            try:
+                await stripe.Customer.modify_async(customer_id, address=address)
+            except stripe.error.StripeError:
+                logger.warning("Could not backfill address on Stripe customer %s", customer_id)
+        return customer_id
+    return await _ensure_customer(
+        org_id=str(org.id), club_name=org.name, email=email, address=address,
+    )
+
+
+async def ensure_invoice_discount_coupon(db: AsyncSession, *, bundle_dollars: float,
+                                         coupon_code: str | None, coupon_dollars: float) -> str | None:
+    """The ONE Stripe Coupon an invoice's discount is expressed as, or None.
+
+    Always a flat amount_off: the figure is worked out by billing_pricing's own
+    quote maths (a scoped coupon's share, a coupon stacked on the bundle), so
+    what the invoice charges is exactly what the Account page previewed. Using
+    the coupon's own percent/applies_to object instead would let Stripe
+    recompute it differently. A pure bundle discount reuses the cached bundle
+    coupon; anything carrying a code is minted fresh, named after both parts,
+    the same as a stacked Checkout discount."""
+    total = round(bundle_dollars + coupon_dollars, 2)
+    if total <= 0:
+        return None
+    if not coupon_code:
+        return await _ensure_bundle_coupon(db, bundle_dollars)
+    _require_configured()
+    if bundle_dollars > 0:
+        name = _combined_coupon_name(bundle_dollars, coupon_code, coupon_dollars)
+    else:
+        name = _clamp_coupon_name(f"{coupon_code} ${coupon_dollars:.2f}")
+    coupon = await stripe.Coupon.create_async(
+        amount_off=round(total * 100), currency=settings.stripe_currency, duration="once", name=name,
+    )
+    return coupon["id"]
+
+
+async def create_one_off_invoice(*, customer_id: str, lines: list[dict], due_at: datetime,
+                                 metadata: dict, coupon_id: str | None = None,
+                                 description: str | None = None, footer: str | None = None,
+                                 idempotency_key: str | None = None) -> dict:
+    """Creates, fills and FINALISES a send_invoice invoice, and returns it.
+
+    ``lines`` are ``{"description", "amount_cents", "period": (start_ts, end_ts)}``
+    — a plain amount rather than a Price, so there is no Product to keep in step
+    and the same call works on every API version. GST is added on top
+    (``tax_behavior=exclusive``, the same rule Checkout's line items follow),
+    which is why the total is only known once Stripe has finalised it.
+
+    ``auto_advance=False`` on purpose: Stripe would otherwise email the invoice
+    itself and chase it on its own schedule. BetterCricket sends the email (to
+    the Primary Club Admin, with our own pay link) and the reminder, so Stripe
+    sending a second copy to the Customer's address would be a duplicate at
+    best and the wrong person at worst.
+
+    ``idempotency_key`` makes a retried renewal run hand back the same invoice
+    rather than raising a second one. Each follow-on call derives its own key
+    from it, so a run that died between two steps resumes rather than
+    repeating."""
+    _require_configured()
+
+    def _key(suffix: str) -> dict:
+        return {"idempotency_key": f"{idempotency_key}:{suffix}"} if idempotency_key else {}
+
+    params: dict = {
+        "customer": customer_id,
+        "collection_method": "send_invoice",
+        "due_date": int(due_at.timestamp()),
+        "auto_advance": False,
+        "automatic_tax": {"enabled": True},
+        # Only the lines added below — never a stray pending item left on the
+        # Customer by something else.
+        "pending_invoice_items_behavior": "exclude",
+        "metadata": metadata,
+    }
+    if description:
+        params["description"] = description
+    if footer:
+        params["footer"] = footer
+    if coupon_id:
+        params["discounts"] = [{"coupon": coupon_id}]
+    invoice = await stripe.Invoice.create_async(**params, **_key("invoice"))
+    if invoice.get("status") != "draft":
+        # A retried run whose invoice was already finalised last time.
+        return invoice
+    for i, line in enumerate(lines):
+        item = {
+            "customer": customer_id,
+            "invoice": invoice["id"],
+            "amount": int(line["amount_cents"]),
+            "currency": settings.stripe_currency,
+            "description": line["description"],
+            "tax_behavior": "exclusive",
+            "metadata": {k: v for k, v in (line.get("metadata") or {}).items()},
+        }
+        if line.get("period"):
+            start, end = line["period"]
+            item["period"] = {"start": int(start), "end": int(end)}
+        await stripe.InvoiceItem.create_async(**item, **_key(f"line{i}"))
+    return await stripe.Invoice.finalize_invoice_async(invoice["id"], auto_advance=False)
+
+
+async def void_invoice(invoice_id: str) -> dict | None:
+    """Voids an open invoice so it can no longer be paid. A draft is deleted
+    instead (Stripe refuses to void a draft), and one already paid or voided is
+    left alone and returned as it is — the caller is only ever trying to make
+    sure an invoice nobody should pay can't be."""
+    _require_configured()
+    invoice = await stripe.Invoice.retrieve_async(invoice_id)
+    status = invoice.get("status")
+    if status == "open":
+        return await stripe.Invoice.void_invoice_async(invoice_id)
+    if status == "draft":
+        await stripe.Invoice.delete_async(invoice_id)
+        return None
+    return invoice

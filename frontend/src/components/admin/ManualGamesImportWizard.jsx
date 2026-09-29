@@ -22,6 +22,7 @@ const TONE = {
   manual: 'text-pb-positive',
   matched: 'text-pb-positive',
   fuzzy: 'text-amber-400',
+  suggested: 'text-amber-400',
   new: 'text-pb-accent-ink',
   skip: 'text-pb-dim',
   ambiguous: 'text-red-400',
@@ -32,7 +33,7 @@ const TONE = {
 // Every state is a word as well as a colour — a verdict told apart by colour
 // alone is unreadable for a good share of readers.
 const WORD = {
-  exact: 'MATCHED', manual: 'CHOSEN', matched: 'MATCHED', fuzzy: 'CHECK THIS',
+  exact: 'MATCHED', manual: 'CHOSEN', matched: 'MATCHED', fuzzy: 'CHECK THIS', suggested: 'SUGGESTED, CHECK THIS',
   new: 'WILL BE CREATED', skip: 'LEFT OUT', ambiguous: 'TWO PLAYERS SHARE THIS NAME',
   none: 'NEEDS AN ANSWER', ungraded: 'NO GRADE',
 }
@@ -67,8 +68,9 @@ function SheetNote({ sheet }) {
 // The projection under each option is worked out from the review's own
 // duplicate split, so changing the choice costs no server round trip.
 function DuplicatePolicy({ dupMode, setDupMode, duplicates }) {
-  const dup = duplicates || { total: 0, manual: 0, synced: 0 }
+  const dup = duplicates || { total: 0, manual: 0, synced: 0, matched_on_scores: 0 }
   const none = !dup.total
+  const byScores = dup.matched_on_scores || 0
 
   let projection
   if (none) {
@@ -98,7 +100,11 @@ function DuplicatePolicy({ dupMode, setDupMode, duplicates }) {
         <h3 className="text-sm font-semibold text-pb-text">Matches already in BetterCricket</h3>
         <p className="text-[11px] text-pb-dim mt-0.5">
           A match is recognised as one you already have when it shares a date and opponent with an
-          existing record — a match with no date or opponent in the sheet is always brought in as new.
+          existing record, or when its scorecard matches a Cricket Australia match nearby (the same
+          batters with the same scores, even if the opponent is spelt differently or a two-day game
+          is dated a week apart). A match with no date, opponent or scores in the sheet is always
+          brought in as new.
+          {byScores > 0 && ` ${byScores} of these ${byScores === 1 ? 'was' : 'were'} matched on the scorecard rather than the date.`}
         </p>
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
@@ -281,7 +287,8 @@ export default function ManualGamesImportWizard({ onDone }) {
           {result.seasons_import_sourced > 0 && (
             <p className="text-xs text-pb-dim mt-3">
               {result.seasons_import_sourced} season{result.seasons_import_sourced === 1 ? '' : 's'} now count your
-              import instead of Cricket Australia’s figures. A later sync will not change that back.
+              import for the matches it holds. A Cricket Australia match your file did not cover still counts
+              from its own scorecard, so nothing drops out. A later sync will not change that back.
             </p>
           )}
           {result.games_ignored_synced > 0 && (
@@ -392,7 +399,8 @@ export default function ManualGamesImportWizard({ onDone }) {
                 </p>
               </div>
               {unmatchedCount > 0 && (
-                <button className={`${BTN_SECONDARY} ml-auto`} onClick={createAllUnmatched} disabled={!!busy}>
+                <button className={`${BTN_SECONDARY} ml-auto`} onClick={createAllUnmatched} disabled={!!busy}
+                  title="Only names with nothing chosen yet. A suggested match stays as it is.">
                   Create all {unmatchedCount} as new players
                 </button>
               )}
@@ -420,6 +428,9 @@ export default function ManualGamesImportWizard({ onDone }) {
                     )}
                     <option value="__skip__">Leave them out</option>
                   </select>
+                  {p.note && (
+                    <span className="basis-full text-[11px] text-amber-400" data-testid="player-match-note">{p.note}</span>
+                  )}
                 </div>
               ))}
             </div>

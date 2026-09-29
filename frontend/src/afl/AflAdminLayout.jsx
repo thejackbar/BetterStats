@@ -12,6 +12,7 @@ import ClubSwitcher from './components/ClubSwitcher'
 
 const NAV = [
   { heading: 'Club Data' },
+  { to: '/admin/games', label: 'Matches' },
   { to: '/admin/players', label: 'Players' },
   { to: '/admin/players/import', label: 'Import Players' },
   { heading: 'Data Import' },
@@ -29,10 +30,20 @@ const NAV = [
   { heading: 'Records & Content' },
   { to: '/admin/award-definitions', label: 'Award Types' },
   { to: '/admin/awards', label: 'Awards' },
+  { to: '/admin/milestones', label: 'Milestones' },
   { to: '/admin/sponsors', label: 'Sponsors' },
   { heading: 'Account' },
+  { to: '/admin/activity', label: 'Activity Log' },
   { to: '/admin/users', label: 'Users' },
   { to: '/admin/settings', label: 'Settings' },
+]
+
+// The add-on modules, shown only to a club that holds them (switched on per club
+// from Better HQ → All Clubs). Each opens its own module surface, with its own
+// sidebar, exactly as it does in cricket.
+const MODULE_NAV = [
+  { to: '/admin/clubhouse', label: 'BetterAdmin', modules: ['fees', 'comms', 'merch', 'crm'], external: true },
+  { to: '/admin/bettersocials', label: 'BetterSocials', modules: ['socials'], external: true },
 ]
 
 const SUPER_NAV = [
@@ -47,7 +58,7 @@ export default function AflAdminLayout() {
   // object or `null` once /auth/me resolves. Checking a nonexistent `loading`
   // field here would silently always read false, firing the "not logged in"
   // redirect on every fresh page load before the auth check even completed.
-  const { user, logout, switchClub } = useAuth()
+  const { user, logout, switchClub, hasModule } = useAuth()
   const navigate = useNavigate()
   const [settings, setSettings] = useState(null)
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -64,7 +75,12 @@ export default function AflAdminLayout() {
   if (!user) return null
 
   const isSuper = user.role === 'super_admin'
-  const items = isSuper ? [...NAV, ...SUPER_NAV] : NAV
+  const modules = MODULE_NAV.filter(m => m.modules.some(k => hasModule(k)))
+  const items = [
+    ...NAV,
+    ...(modules.length ? [{ heading: 'Modules' }, ...modules] : []),
+    ...(isSuper ? SUPER_NAV : []),
+  ]
 
   const NavItems = ({ onNavigate }) => (
     <>

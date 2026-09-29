@@ -2,6 +2,7 @@ import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { dashboardTiles } from '../../lib/modules'
 import { moduleBrand } from '../../lib/moduleBrand'
+import { IS_AFL } from '../../lib/sport'
 
 // Quick module switcher — one pill per Better module the club can reach, each in
 // that module's own brand colour with its logo, the current module highlighted.
@@ -18,6 +19,14 @@ import { moduleBrand } from '../../lib/moduleBrand'
 // its own tile in the list, so this one is just "home". It keeps the Core green
 // mark as the house brand.
 const CORE = { key: 'stats', name: 'Dashboard', to: '/admin', title: 'Admin dashboard' }
+
+// The football app has two add-on modules and none of cricket's other tiles, so
+// its switcher is its own short list. The hub for each is the screen that app
+// mounts for it.
+const AFL_TILES = [
+  { key: 'socials', name: 'BetterSocials', to: '/admin/bettersocials', paths: ['/admin/bettersocials', '/admin/social-post'], modules: ['socials'] },
+  { key: 'admin', name: 'BetterAdmin', to: '/admin/clubhouse', paths: ['/admin/clubhouse', '/admin/fees', '/admin/comms', '/admin/merch', '/admin/committee', '/admin/events', '/admin/assets', '/admin/club-diary'], modules: ['fees', 'comms', 'merch', 'crm'] },
+]
 
 const suffixOf = name => (name.startsWith('Better') ? name.slice('Better'.length) : name)
 
@@ -68,20 +77,22 @@ export default function ModuleSwitcher({ className = '', wrap = false, compact =
 
   // Same entitlement rule the admin sidebar uses: built modules the club holds,
   // plus always-open umbrellas (BetterSocials carries the Core website).
-  const tiles = dashboardTiles().filter(mod =>
-    mod.built && (mod.alwaysOpen || (mod.isGroup ? mod.members.some(m => hasModule(m.key)) : hasModule(mod.key)))
-  )
+  const tiles = IS_AFL
+    ? AFL_TILES.filter(t => t.modules.some(m => hasModule(m)))
+    : dashboardTiles().filter(mod =>
+      mod.built && (mod.alwaysOpen || (mod.isGroup ? mod.members.some(m => hasModule(m.key)) : hasModule(mod.key)))
+    )
 
   return (
     <div className={`items-center gap-1 ${wrap ? 'flex-wrap' : 'overflow-x-auto pb-no-scrollbar'} ${className}`}>
-      <Pill to={CORE.to} brand={moduleBrand(CORE.key)} label={suffixOf(CORE.name)}
-        active={pathname === '/admin'} title={CORE.title} onNavigate={onNavigate} forceLabel={wrap} compact={compact} />
+      <Pill to={CORE.to} brand={moduleBrand(CORE.key)} label={IS_AFL ? 'Football' : suffixOf(CORE.name)}
+        active={pathname === '/admin'} title={IS_AFL ? 'BetterFootball admin' : CORE.title} onNavigate={onNavigate} forceLabel={wrap} compact={compact} />
       {tiles.length > 0 && !compact && (
         <span aria-hidden className="shrink-0" style={{ width: 1, height: 18, margin: '0 3px', background: 'var(--pb-hairline2)' }} />
       )}
       {tiles.map(tile => (
         <Pill key={tile.key} to={tile.to} brand={moduleBrand(tile.key)}
-          label={suffixOf(tile.name)} active={pathIsActive(pathname, tilePaths(tile))}
+          label={suffixOf(tile.name)} active={pathIsActive(pathname, tile.paths || tilePaths(tile))}
           title={tile.name} onNavigate={onNavigate} forceLabel={wrap} compact={compact} />
       ))}
     </div>

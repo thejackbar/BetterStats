@@ -1,5 +1,406 @@
 # BetterStats — Claude Session Notes
 
+## An importer pre-selects "Steve" for the club's "Steven" (v9.97.2, Sep 2026)
+
+Reported off Shoalwater Bay's re-import: the archive writes "Salter, Steve",
+"Staines, Ken", "Cribbs, Rod"; the synced roster holds Steven, Kenneth,
+Rodney. The matcher offered each as a close match (or, for Chris against
+Christopher at 0.80, as no match at all), and "Create all as new players" swept
+them into second records, each holding half a career, which the milestone
+reconcile then read as milestones to delete.
+
+- **A SEPARATE STEP, NOT A CHANGE TO `match_players`.** Twelve callers use it
+  (CricketStatz, awards, the scorecard reader, AFL); only the two stats
+  importers opt in, through `import_ingest.short_form_suggestions` and
+  `apply_short_form_suggestions`. Every other caller's output is byte-for-byte
+  what it was.
+- **`import_ingest.is_short_form` IS THE ONE RULE**, and Merge Duplicates'
+  `admin._first_name_link` now calls it, so the importer and the name-variant
+  merge pairs cannot disagree about what a short form is: same surname, one
+  first name a prefix of the other, at least 3 letters, middles compatible.
+  A nickname that is not a prefix (Bob/Robert) is never claimed.
+- **PRE-SELECTED, NEVER SILENT** (status `suggested`, with a note naming both
+  careers). Refused outright where two club players fit, or where another name
+  on the SAME SHEET reaches that player (a sheet naming both "Steve" and
+  "Steven" is telling us they are two people).
+- **CAREERS MORE THAN `MAX_CAREER_GAP_YEARS` (5) APART ARE OFFERED, NOT
+  CHOSEN** (`import_reconcile.career_years`, every source on the effective
+  view, ids bound as an array). A 1990s Greg and a 2023 Gregory is the shape
+  of a son under his father's name. An undated career does not block.
+  **Overlap does not block either**, deliberately: an archive and CA cover the
+  same seasons for the same person all the time, so an overlap cannot tell a
+  father and son apart. That residual risk is why it is pre-selected on
+  screen rather than written.
+- **Run BEFORE the overrides**, so a person's own answer always wins, and
+  "Create all" only ever reached rows with no player_id, so a suggested row is
+  untouched by it with no frontend logic of its own.
+- **Measured on real rosters before building**: Shoalwater's 350 archive names
+  find exactly the 10 real pairs (Fletcher Greg/Gregory, 23 years apart, is
+  offered not chosen); Applecross's 1,633 players hold only 2 same-surname
+  pairs the rule could even reach.
+- **Verified against a real Postgres** (`verify_short_form_match.py`, 39
+  checks through both importers' shipped route bodies, incl. the reported
+  Create-all-then-import ending on the club's own record with no second
+  Salter) **with a control run**: 12 fail with the pre-selection off, the
+  import minting "Salter, Steve". **Driven in Chromium**
+  (`verify_short_form_match_browser.mjs`, 11; control: 3 fail). Neighbours:
+  manual games import 194, CricketStatz 305, team labels 17.
+- **Shoalwater still holds seven such pairs from the re-import** (Boddy,
+  Fletcher, Hankey, Johnson, Marwood, Spinks, Trigg). They need Merge
+  Duplicates; Fletcher Greg / Gregory is the one to check before merging.
+
+## A scorebook import carries the opposition, the score and the stands (migration 311, v9.97.0, Sep 2026)
+
+Reported off Shoalwater Bay's CSFW archive: an imported fixture showed no
+opposition team, no opposition score and no partnerships, so none of those
+matches could appear in Highest Partnerships. Built rather than asking the club
+for more data; the fix is a re-import of the converted archive.
+
+- **THE ARCHIVE HAD IT ALL ALONG; THE CSV SHAPE COULD NOT CARRY IT.** CSFW's
+  `.AV` stores both innings blocks (total, wickets, overs, extras) and the fall
+  of wickets as (score, batting position out). The match CSV had columns for our
+  batting and bowling rows and nothing else, so the converter had nowhere to put
+  the rest. `GAME_CSV_COLUMNS` gained `opp_innings_number`,
+  `batting_order_known`, `innings_*` / `opp_*` figures and `fow_wicket` /
+  `fow_score`, written to the existing `manual_innings` (310),
+  `manual_fall_of_wickets` and `manual_partnerships` tables, which already flow
+  through the `v_effective_*` views to the match page and the record boards.
+- **READ BEFORE THE BLANK-PLAYER SKIP.** A match where nobody on our side is
+  named still carries the opposition's innings, so the innings meta is taken off
+  every row, and "nobody named" rows still carry it.
+- **OUR BOWLERS ARE FILED UNDER THE OPPOSITION'S INNINGS NUMBER.** They were
+  filed under our own innings, which is why they read as bowling at our batters.
+  A sheet giving opposition figures with no `opp_innings_number` is refused, as
+  is one innings given as both sides'.
+- **`innings_no` IS NOT BATTING ORDER, and the data proved it.** In 51 clear
+  chases the chasing winner carried innings_no 1 in 48. So the converter numbers
+  by leg (ours 2n-1, theirs 2n) and sends `batting_order_known=false`;
+  `manual_games.innings_order_known` (311) records it and the match page draws
+  "INNINGS" unnumbered, no winning margin, no HOME/AWAY for blank home/away
+  teams, and a note saying why. NULL (every existing game) reads as known, so no
+  other match changes.
+- **PARTNERSHIPS ARE DERIVED AND REFUSED WHEN THEY DO NOT RECONCILE.**
+  `services/scorebook_innings.derive_partnerships` walks the batting order
+  against the fall of wickets and returns None on a gap, a batter out who is not
+  at the crease, a score going backwards or a wicket count disagreeing. A stand
+  credited to the wrong pair sits on a record board under two names that never
+  batted together, which is worse than none. 889 of 917 innings derive, 8,011
+  stands; the other 28 keep their fall of wickets.
+- **Undo restores them.** `_EXTRA_GAME_CHILDREN` puts the three child tables in
+  the edit/delete snapshot, so an undone or restored game keeps them.
+- **THE MATCH PAGE NAMING THE OPPOSITION WAS NOT ENOUGH (v9.97.1).** The
+  Games page, the Team pages and the innings tables on a player's profile read
+  `home_team`/`away_team` straight off `v_effective_games`, and a scorebook
+  import leaves both blank, so every imported match still listed as "— vs —"
+  there. `services/game_sides.sides_sql` is the one rule: a blank pair on a
+  manual game with an opposition is named from the club and its opposition,
+  with `home_away_known=false` on the row. Used by `get_org_results` and the
+  two innings-history queries in `aggregations`; `_fetch_manual_games_as_list`
+  applies it in Python. Found by auditing every reader of the two columns, not
+  by the report, which was about the match page. Suite is 47; a control with
+  the readers reverted fails 4, reporting `home_team: None`.
+- **Verified against a real Postgres** (`verify_scorebook_innings.py`, 43
+  checks through the shipped import route, `get_scorecard` and `get_records`:
+  the rule on its own, the reported match, a non-reconciling innings refused, an
+  older sheet importing unchanged, self-contradicting sheets refused, and the
+  snapshot round trip) **with a control run**: 28 fail against the previous
+  commit, the card reading "None v None" with no opposition innings. **Driven in
+  Chromium** (`verify_scorebook_import_browser.mjs`, 19, against the payload the
+  backend suite wrote) **with a control run**: 4 fail, reporting numbered
+  innings, HOME/AWAY and "won by 65 runs". Neighbours re-run: manual games
+  import 194, manual innings 20, manual scorecard 25, scorecard innings total
+  15, the converter's own 30.
+- **Recovery for Shoalwater**: undo the earlier CSFW import batch, re-import the
+  regenerated `manual_games_scorecards.csv`, then re-run `repair_overwrite_pairs`
+  and `reconcile_milestones` for the club.
+
+## The club page a prospect searched their way to asks them to start (v9.91.0, Sep 2026)
+
+Reported as the paid funnel's biggest leak: ad -> /trial -> search -> a club's
+dashboard -> nothing to press but ADMIN.
+
+- **THE CLUB ON THAT DASHBOARD IS ALREADY ON BETTERCRICKET, and that decided
+  the copy.** `/trial` only navigates to a club's page when the search result
+  is `already_registered`, and `/public/self-serve/prepare` and `/submit` both
+  409 that club. So the bar can never offer to set up the club on screen: it
+  names it ("This is X's real history on BetterCricket") and sells the
+  visitor's OWN club, and the wizard opens on a blank search. The animated
+  placeholder on `/trial` suggests typing "Applecross", which is one way a
+  prospect ends up on somebody else's club.
+- **PROSPECTS ONLY, NEVER A CLUB'S OWN MEMBERS AND NEVER ANYONE SIGNED IN.**
+  A prospect is a session that arrived from a Meta click (utm_source
+  meta/facebook/fb/instagram/ig, utm_medium paid_social, or an fbclid/igshid)
+  or that passed through `/trial`. A paying club's public site must not pitch
+  its own members. Dismissing it minimises to a Start free pill rather than
+  hiding it.
+- **THE CAMPAIGN PARAMS ARE READ OFF THE SESSION, NOT THE ADDRESS BAR.**
+  `visitor.rememberLandingParams()` runs in `main.jsx` before first render and
+  keeps the landing URL's utm_* and click ids in sessionStorage
+  (`bc:landingParams`). The old `isPaidVisitor` read `window.location.search`,
+  which is empty once the search has navigated client-side.
+  `metaPixel.buildFbcFromFbclid` falls back to that fbclid, stamped with the
+  click's own time, when the pixel has not set `_fbc`. The submit payload's
+  `attribution` was already first-touch from localStorage.
+- **THE BAR NO LONGER DRAWS ON /trial OR /demo**, which it had been doing for
+  paid traffic: `isPaidVisitor()` ran for any non-marketing path. Both pages
+  carry their own call to action.
+- **`lib/clubPath.publicClubSlug` is the one "is this a club page" rule**,
+  shared with FaviconManager, and gained the sections it had missed
+  (fixtures, lineups, premierships, honour-board).
+- **CompleteRegistration is unchanged and still fires only on
+  `status === 'completed'`**, `content_category: 'self_serve_trial'`, one
+  event id shared with the server's CAPI copy.
+- **Driven in Chromium** (`frontend/verification/verify_club_cta_browser.mjs`,
+  34 checks: the whole funnel with a real client-side hop, the bar naming the
+  club and inside the viewport at 1440 and 390, no pixel event on the click,
+  CompleteRegistration once on success and not on a failed submit, the UTMs,
+  fbclid and fbc on the submit payload after the hops, a direct visitor and a
+  signed-in one seeing nothing, the pill persisting) **with a control run**: 11
+  fail against the previous commit and it reports rather than crashing.
+- **THE WORDING FOLLOWS THE AD (v9.92.1).** The bar's button, the pill and
+  the /trial new-club modal read "Check out your club" and "Free · about 3
+  minutes · no card", the ad's own words; the 14-day trial framing is off the
+  bar because the ad never makes it. The /trial placeholder names NO real
+  club: "e.g. Applecross Cricket Club" sent prospects to type a registered
+  club and land on somebody else's page. Keep the bar in step with the ad when
+  the creative changes. Suite is 41 checks; the control fails the 8 new ones.
+- **NOT VERIFIED IN META EVENTS MANAGER.** Test Events needs a real
+  registration on the live site, which creates a real club. The browser suite
+  records what `fbq` is called with; Events Manager is the one place left to
+  look.
+
+## A milestone is measured on the profile's figure, and a junior split is SHOWN (v9.93.0, Sep 2026)
+
+Reported off Shoalwater Bay's Milestones page: S Hetel 87 short of 6,000 with
+5,924 on his profile, A Godfrey 3 short of 200 wickets on 478, P Ritchie 2
+short of 200 catches on 201, and J Hind 18 from 3,000 "including junior games".
+
+- **THE SCAN SUMMED THE BASE `player_season_stats`, THE PROFILE READS THE VIEW.**
+  So every imported or hand-entered match was missing from the milestone and
+  present on the profile. `services/milestone_totals.profile_totals` is now the
+  ONE definition: the figures the profile opens on (club default grade
+  categories, auto-widened for a junior-only player), batched per scope group
+  with the ids bound as an array. The Milestones page, the dashboard, the admin
+  report, the player's own card and the notification all read it. The suite
+  asserts EQUALITY with `get_career_*` player by player under two club
+  defaults, not a mirrored query.
+- **NO SENIOR/JUNIOR SWITCH, BECAUSE THE EMAIL CANNOT PRESS ONE.** Asked for as
+  a toggle, then settled as "predict it and show both". A player with junior
+  AND open-age records carries `junior_split` (with / without their junior
+  matches) on every entry, `counts` names which the headline is, and a
+  milestone only the other figure is close to arrives as its own `variant`
+  entry. The notification's dedupe key carries the variant's basis and its body
+  gives both figures. **This reverses v9.64.0's "milestones are never
+  filtered"**: they now follow the profile's default, which is what the club
+  compares them against. A toggle can still be added later as a filter over
+  these fields without changing what an email says.
+- **"WITHOUT JUNIOR" IS JUDGED ON THE PRIMARY CATEGORY** (`resolve_scope(...,
+  judge_primary=True)`). An explicit all-but-junior pick is an inclusion and
+  keeps a Girls Under 16 grade on its women's half; that is junior cricket.
+- **THE STORED MILESTONES RECONCILE.** `sync._compute_milestones(reconcile=True)`
+  removes a threshold the current figure no longer reaches (the only writer of
+  `milestones` is this function, so it is our output, never a club's typing) and
+  a threshold still reached keeps its date. It runs at the END of the sync now,
+  after the scorecards and the import reconcile, because a scoped career counts
+  scorecards a Full Rebuild has just wiped; a run with `match_pull_failed` only
+  adds. `python -m app.scripts.reconcile_milestones <org|all> [--apply]` repairs
+  what September's double count minted. **Run it for Shoalwater after deploy.**
+- **A STORED MILESTONE IS REACHED ON EITHER FIGURE, NOT THE PROFILE'S ALONE
+  (v9.93.1).** The first cut reconciled against the profile's figure only, and
+  its dry run on Shoalwater proposed removing **352** milestones against 67
+  added. Two real cases were being deleted: a player who reached 50 matches
+  WITH his junior games counted (the club default leaves them out), and a
+  veteran whose scoped figure is counted from scorecards and sits below Cricket
+  Australia's own career total (the control run reads Hetel's scoped runs as
+  911 against a 5,913 career). The writer now takes `max(profile figure, whole
+  career)`, the whole career being the unscoped effective view, correct since
+  309. The phantoms still go, because nothing reaches a 500 wickets on 478.
+  **A CATCH-UP ADD IS UNDATED.** A threshold the whole career had already
+  passed before the club's latest season is written with `achieved_at` NULL
+  ("reached, date unknown", a dash on every screen), because
+  `_src_milestone_achieved` announces anything dated in the last 21 days and a
+  club would otherwise be emailed that a veteran "just reached" 5,000 runs from
+  an imported history. Control run: the dated writer announces Hetel's 500
+  through 5,000 runs at once. `reconcile_milestones`' dry run now prints each
+  removal's recorded date and current figures; Shoalwater's was 101 dated
+  10 Sep (the double count), 4 dated 24 Sep, all wickets (the 037-shape
+  bowling fan-out), and 9 dated 2 Sep, none reached by any figure now.
+  **Never run a reconcile's `--apply` off a dry run whose REMOVE list is
+  dominated by juniors-turned-seniors; that is the scope talking, not a bug
+  being fixed.**
+- **"BEFORE THIS SEASON" IS NOT ENOUGH IN AN OFF-SEASON (v9.93.2).** A club's
+  newest season row is still last summer's until the new one syncs, so every
+  threshold crossed during that summer read as new and would have been dated
+  today and emailed as "just reached", months after the game. A threshold is
+  now dated only when the player has a game inside the notification window
+  (`notification_scan.LOOKBACK_DAYS`, 21 days); otherwise, and for a player with
+  no game at all, it is undated. `_compute_milestones` reports `dated`, and
+  `reconcile_milestones` marks those additions and prints line-buffered so a run
+  redirected to a file can be `tail -f`'d. Control run: 3 of 81 fail.
+  **That first cut made an all-clubs run take 3+ hours (v9.95.1)**: it joined
+  `v_effective_games` for EVERY player at every club. It now asks only about the
+  players with a candidate addition not already history by the season test, off
+  the base `games`/`manual_games` tables (a paired twin carries the same date),
+  the script sets `jit = off`, and an `all` run prints `[n/N] club: … (Ns)` per
+  club so a slow run cannot read as a stuck one.
+- **Verified against a real Postgres** (`verify_milestone_figures.py`, 72
+  checks now; a control run with the profile-only writer fails the 3 new ones,
+  removing Hetel's 1,000-5,000 runs; the original 66
+  checks) **with a control run**: 45 fail against the previous build, reporting
+  the club's own "87", "3 short of 200" and "2 short of 200". Chromium
+  (`verify_milestone_split_browser.mjs`, 10; control fails 5). Neighbours
+  re-run: upcoming milestones 24, match coverage 66, junior residual 24,
+  notifications 146, manual games import 194, competitions 136, shared
+  fixtures 38.
+
+## A RE-SOURCED SEASON COUNTS PER MATCH, NOT PER SEASON (migration 309, v9.90.3, Sep 2026)
+
+Reported off Shoalwater Bay after their CSFW archive went in through the CSV
+import's OVERWRITE mode: on most players "All" read LOWER than "Men's", which
+no filter should be able to do. Diagnosed on the live database
+(`ops/diagnostics/csv_import_unpaired.sql`) before a line was changed.
+
+- **THE PAGE WAS NOT DOUBLE-COUNTING "ALL". IT WAS DROPPING MATCHES FROM IT.**
+  An overwrite import marks each season it touches `import_authoritative`,
+  which stepped the WHOLE season's Cricket Australia summary aside in
+  `v_effective_player_season_stats`. So every synced match the file did not
+  hold — 83 junior-grade games the archive never tracked, and 32 senior
+  matches the matcher missed — vanished from "All", while "Men's" (an explicit
+  scope, so read from the per-innings views) kept them. Two definitions of one
+  season, and a filter that raises a total is the tell.
+- **A SEASON TOTAL HAS NO PER-MATCH GRANULARITY, so the only way to replace
+  SOME of a season is to count the whole season from scorecards.** The new
+  `api_scorecard` branch rolls up every synced game in a re-sourced season that
+  has no preferred imported twin, from `batting_innings` / `bowling_spells` /
+  `fielding_stats` / `game_appearances` — the four sources `_scoped_games_played`
+  already unions — org-scoped through `players`. The import's own rollup counts
+  the matches the file held; the two are disjoint by construction. The "and,
+  not or" rule the pairing already keeps, applied at the aggregate level.
+- **EACH TABLE IS AGGREGATED ON ITS OWN BEFORE THE THREE ARE JOINED.** The
+  manual rollup beside it LEFT JOINs batting, bowling and fielding rows side by
+  side on one `(player, game)` key, which multiplies a player who batted twice
+  and bowled twice in one match into four rows and doubles every sum. Noticed,
+  NOT fixed there — it is migration 037's shape and its own change.
+- **A FIXTURE THE OTHER CLUB SYNCED FIRST IS KEYED ONTO OUR OWN SEASON** for
+  the same real season, CA season guid first and year second, through a
+  `LATERAL ... LIMIT 1` so a year with two season rows cannot count it twice.
+  It is filed on THEIR grade id, which the by-grade grid already resolves by
+  name.
+- **THE MATCHER HAD THREE REAL GAPS, and the diagnostic named them with
+  counts**: `_existing_game_index` read `v_effective_games.organisation_id`,
+  so a fixture the OTHER club synced first was never a candidate (19); an
+  opponent the two sources spell with no shared word never matched (11:
+  "Rockingham Hornets Cricket Club" against "Hillman"); and a two-day match
+  each source dates differently never matched (2). The index is now the club's
+  season OR either side of the fixture, and a sheet match the date rule leaves
+  unmatched gets a SECOND LOOK through `match_pairing.assign` — the CricketStatz
+  matcher's own rules, never a second copy — on a `(player_id, runs)`
+  signature built from the sheet's resolved players. `match_pairing.load_synced`
+  is the one query all three readers of the synced side now share.
+- **RE-IMPORTING THE SAME FILE USED TO UNPAIR EVERYTHING.** An overwrite of a
+  manual duplicate deleted the old row and wrote a fresh one with no pairing,
+  so the synced copy came straight back beside the sheet's version. The
+  replacement inherits the old row's pair now, exactly as it was.
+- **`python -m app.scripts.repair_overwrite_pairs <org|all> [--apply]`** is the
+  same second look run after the fact, over what an earlier import left
+  unpaired. Only matches an IMPORT created are candidates — read off the
+  import's own audit rows — never a game somebody typed in, and only in a
+  re-sourced season. Dry run by default. **Run it on the box after this
+  deploys**, for the 32 already counted twice.
+- **AFTER THE FACT, A PAIR NEEDS A SHARED SCORE (v9.90.4).** The live dry run
+  proposed pairing an imported Pinjarra match to a synced "Pinjarra Junior
+  Cricket Club" fixture eight days later with 0 shared scores, through the
+  matcher's same-club-no-card rule. Every imported match here carries the
+  sheet's own card, so a zero-score pair can only be a cardless synced game,
+  which in a re-sourced season is usually one of the junior fixtures the
+  archive never tracked. The script now holds those back and prints them under
+  "held back, check by hand". The live matcher is unchanged.
+- **A MATERIALISED CTE IS A WALL THE PLAYER'S ID CANNOT PASS (v9.90.4).**
+  Reported as "the player page takes much longer to load now": once a club
+  leaves juniors out by default, every profile read is scoped and reads
+  `v_effective_player_season_stats` several times over. Both rollup branches
+  (`manual_game`, `api_scorecard`) were `WITH` chains whose CTEs are
+  referenced more than once, so Postgres MATERIALISED them and the outer
+  `WHERE player_id = X` never reached inside: every single-player read rolled
+  up every re-sourced season on the platform, then threw it away. `EXPLAIN`
+  showed `CTE auth_games` / `CTE ours` / `CTE counts_here` with unfiltered
+  scans of `batting_innings` and friends. Every player-dependent CTE in both
+  branches is `NOT MATERIALIZED` now; the same EXPLAIN shows a
+  `player_id = X` filter on every per-innings scan, which the suite asserts
+  by reading the plan. **No index was needed**: the wall, not the tables.
+- **BUT `auth_games` STAYS MATERIALISED, and the first deploy without that
+  took the page from slow to 45 SECONDS (measured live on `/stats`).** It
+  does not depend on the player, so inlining buys no pushdown and costs one
+  evaluation per reference: four arms of `player_games` times four readers
+  of `ours` is sixteen scans per view read, and its shared-fixture arm was
+  a scan of every game on the platform with a LATERAL per row. It is
+  `AS MATERIALIZED` (once per read, small) and that arm is driven FROM the
+  re-sourced seasons through the indexed `home_org_id`/`away_org_id`, with
+  `DISTINCT ON (g.id)` keeping the one-season-per-game rule. **Inline a CTE
+  only when there is a predicate to push into it.**
+- **THE VIEW WAS NOT THE 6 SECONDS. `player_categories` WAS, and it was
+  found by timing endpoints, not by reading.** After the view fix every
+  profile endpoint still took ~6s, INCLUDING ones that never read the
+  season-stats view (dismissals, by-position) and on Applecross, which has
+  no import at all; the same endpoint with an explicit `?categories=` took
+  1.1s. The one thing a club-default read does that an explicit one does
+  not is the auto-widen probe, and `player_categories` asked "does this
+  player have a row in one of your games" as a correlated EXISTS over
+  `v_effective_games` for EVERY grade row the club holds — hundreds of
+  subplans per call, thirteen calls per page. It starts from the player's
+  own rows now (indexed on player_id), collects their grades, and names
+  them: zero SubPlans in the plan. **When every endpoint on a page is
+  uniformly slow, look for the thing they all call, not the thing that
+  changed.**
+- **THE 037-SHAPE FAN-OUT IS FIXED, not only noticed.** The `manual_game`
+  rollup LEFT JOINed batting, bowling and fielding side by side on one
+  (player, game) key; a player who batted twice and bowled once in a two-day
+  imported match read 2 bowling innings, 4 wickets and 2 catches. It is now
+  the `api_scorecard` shape: each table aggregated on its own, then joined.
+- **STATLAB COUNTED A MATCH FROM `game_appearances` ALONE, and an imported
+  match never has one.** So on a grade-filtered summary every innings of a
+  club's archive counted while the match did not, and five A-grade players
+  read "a lot more innings than games played" (Guest, Rob in the suite: 2
+  innings, 0 matches). The `appear` CTE unions the four sources
+  `_scoped_games_played` unions now, the called-off rule kept on the roster
+  arm alone. Two innings per two-day match is still the correct gap.
+- **THE STAGE WAS WRONG FOR EVERY CLUB, NOT ONE.** The view is applied by the
+  lifespan on every boot, and the matcher and re-import fixes live in the
+  importer, so a deploy fixes every club. What is per club is the after-the-
+  fact repair of pairs an EARLIER import left unpaired: only Shoalwater Bay
+  had `repair_overwrite_pairs` run. `python -m app.scripts.repair_overwrite_pairs
+  all` (dry run) lists every club with a re-sourced season; run it with
+  `--apply` after reading the held-back list.
+- **Verified** (`verify_manual_games_import.py` is 194 checks: the one spell
+  reading 1 and 2 rather than 2 and 4, the catch not doubled, a plan with no
+  CTE Scan and the id on every scan, and StatLab reading 1 match for the
+  imported two-day match) **with a control run**: 6 fail against the
+  previous commit, reporting `(2, 4, 2)`, `matches: 0` beside 2 innings, and
+  `Seq Scan on batting_innings ... rows=590` with no filter. StatLab's live
+  path needs the lifespan-only `grade_merge_logs`, copied into the harness.
+- **THE COMMIT'S WARNING SAID THE OPPOSITE OF WHAT IS NOW TRUE.** It warned that
+  uncovered matches "are no longer counted"; they are, and it says so, naming
+  separately the ones that carry no scorecard of ours and so add nothing.
+- **Verified against a real Postgres** (`verify_manual_games_import.py` is 185
+  checks: the uncovered games counted from their scorecards including the
+  bowling, the aggregate view agreeing with the per-innings views TO THE RUN,
+  the other club's fixture under our season on their grade with their batter's
+  99 never ours, all three miss shapes paired, a same-day match sharing no
+  score NOT paired, a re-import keeping every pair, and the repair script's dry
+  run writing nothing then apply pairing it once) **with a control run**: 19
+  fail against the previous commit, reporting `aggregate 1/20 vs scorecards
+  3/110` and the three misses as `{'total': 0}`; the script is REPORTED absent
+  rather than crashing the run. Neighbours re-run: match coverage 66,
+  cricketstatz import 305.
+- **THE SUITES SHARE ONE DATABASE AND THEIR STUB TABLES COLLIDE, hit again.**
+  `verify_cricketstatz_import.py` died on `player_achievements.org_id` because
+  the manual-games suite had left its own four-column stub of that table
+  behind. Not the change; it passes on a fresh database. Run a suite whose
+  stubs differ on its own database.
+- **THE JUNIOR GAMES ARE RIGHT TO STAY LIVE.** They were never in the archive,
+  the Men's filter leaves them out anyway, and they are exactly what "All"
+  should hold beyond "Men's". Nothing here touches them.
+
 ## ONE CAMPAIGN, TWO PRODUCTS, ONE PIXEL EVENT (v9.72.0, Sep 2026)
 
 The Meta ad account was restructured 8-9 Sep 2026 and `BC_AU_Trials_CBO_Aug2026`
@@ -741,6 +1142,52 @@ layers on all templates where each element except the background is a layer."*
   to the two positions it replaces: a block goes in front of the whole poster or
   behind it. That is what the row says, so nobody is hunting for a stack that is
   not there.
+
+## A SHEET SPLIT BY TEAM IS NOT A SHEET SPLIT BY GRADE (v9.89.1, Sep 2026)
+
+Reported off The Basin's Import Stats review: Leigh Cook's sheet says 240 and
+the preview read ONLINE 135, RESIDUAL +0, FINAL 355. His profile had already
+gone to 433 from an earlier commit.
+
+- **THE SHEET AND THE ONLINE DATA AGREE SEASON FOR SEASON**, and checking the
+  real spreadsheet against his live grid is what named the cause. The sheet
+  labels rows by the club's own TEAMS (1XI / 2XI / 3XI / 4XI / 20/20). CA files
+  the same side under a different GRADE name most years ("Division 3",
+  "4 Norm Reeves Shield Reserve", "Community 1"...). Grade-scoped
+  reconciliation (migration 154) mapped each label to ONE grade name and
+  compared against that grade alone, so ONLINE read 135 of his ~256 and every
+  season spent under another name was emitted as a season delta on top.
+  `final = GR + emitted + residual` has no cap on `emitted`, so the "can never
+  exceed the club's total" promise on the review screen only held while the
+  season test was right.
+- **`import_reconcile.is_team_labelled` IS THE SWITCH**: an org whose imported
+  rows name two or more grade labels is reconciled per player against their
+  WHOLE GR record (the ungraded path), season by season. The labels are still
+  stored; pre-GR season deltas keep the team their row named
+  (`season_rows_by_grade`); the career residual carries no grade. A club that
+  uploaded ONE competition's book keeps the grade-scoped path unchanged. Both
+  the commit and the preview (`routers/imports.py::_resolve`) make the same
+  call, the preview reading the club's earlier uploads too since the commit
+  reconciles all of them. **Accepted cost**: a club uploading its 1sts and 2nds
+  as separate sheets is now read as its whole book, so a grade CA has that the
+  sheets omit is not topped up per grade.
+- **`covered_by_year`**: a season is covered when GR holds that YEAR under any
+  season row. An id-only test read a hand-made "2015/16" beside the synced
+  "Summer 2015/16" as missing (267 against 256 in the control run).
+- **THE EXPECTED RESULT IS THE ONLINE FIGURE, NOT THE SHEET'S**, whenever
+  online holds more: for Leigh that is 256 (2009/10's 11 games are online and
+  not in the sheet, plus five seasons one game apart). "GR wins per season" is
+  the documented rule; making the sheet win would be a different rule.
+- **Recovery needs no re-import**: `reconcile_imported_totals` rebuilds every
+  delta from `imported_stats`, and runs at the end of every sync;
+  `python -m app.scripts.reconcile_imports <org>` does it now.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_import_team_labels.py`, 17 checks through the
+  shipped `reconcile_imported_totals`, Leigh's real rows and his real online
+  seasons) **with a control run**: with the year widening removed, 5 fail and
+  his career reads 267. The fuller control (team switch off too) goes down the
+  grade path, which needs the lifespan views this harness does not build, so
+  that half was replayed through the pure functions instead.
 
 ## A FACET LISTED IN THE KIT AND MISSING FROM ONE FUNCTION (v9.73.1, Sep 2026)
 
@@ -2022,6 +2469,35 @@ period before expiry left for the club to define**.
   away), and the AFL silo is untouched. `member_reminders` still emails the
   MEMBER about their own lapsing qualification through the member portal — a
   different audience from this, and deliberately left alone.
+
+### Certificate stages, grade milestones and a test email (v9.89.0, Sep 2026)
+
+- **A CERTIFICATE WAS ANNOUNCED ONCE AND NEVER AGAIN, LAPSE INCLUDED.** Now three
+  stages, each its own dedupe key: notice (the ORIGINAL unsuffixed key, so a
+  certificate already announced is not re-announced), `:final` (`final_days`,
+  0 = off) and `:lapsed` (severity `urgent`, via `emit(severity=...)`). Only the
+  CURRENT stage is raised. A pre-stage notice is read by its payload's
+  `days_remaining` so the stages it already covered are not repeated.
+- **Left out on purpose**: a certificate superseded by a newer record of the same
+  type for the same person (later expiry, or none), an archived member, a retired
+  type, and anything lapsed longer than `lapsed_days` ago. The old
+  `ORDER BY expires_at LIMIT 40` served forty certificates from years ago first.
+- **Grade milestones** (`milestone_scan.grade_milestones`): grade = name folded
+  through the club's active `grade_merge_logs`, label = the club's display
+  override, active players only, bound as a `uuid[]` (never a subquery). "Reached"
+  = crossed in the last `LOOKBACK_DAYS` by scorecard date. A player with a record
+  in only one grade is skipped, judged across ALL stats (a per-stat check dropped
+  a batter whose runs sat in one grade). Upcoming needs a game in that grade since
+  the active cutoff. Both events share one pass via `session.info`.
+- **`scan_org` used a bare rollback after a failing source**, which expired `org`
+  and crashed the rest of the club's scan with MissingGreenlet. `rollback_keeping`.
+- **Console is not a send in `dispatch_emails` either** (the sales-email rule): with
+  no provider the deliveries stay pending. `POST .../settings/test-email` sends the
+  caller alone a `[Test]` digest of the club's recent notifications, never touches
+  a delivery, 5 per 10 minutes. `my_last_email` on the settings payload reads the
+  delivery record.
+- **Verified**: `verify_notifications.py` 146 (control: 20 fail),
+  `verify_notifications_browser.mjs` 56 (control: 7 fail).
 
 ## Suggested duplicate grades: the discriminator rule (migration 294, v9.70.1, Sep 2026)
 
@@ -5896,6 +6372,33 @@ are what tells them apart. **The navbar's breakpoint moved from `md` to `lg`**:
 with a search box in the bar there is no room for six links at 768px, and
 splitting the two would have left that width with neither.
 
+## StatLab: one player, and tabs that reshape the filters (v9.96.0, Sep 2026)
+
+Asked for off the StatLab screen: a Player filter as the first thing in Build
+custom query, and the table-type tabs (Player career, Player season...) to do
+something, since they only swapped the target and left the filters identical.
+
+- **`context.player_id` IS DELIBERATELY NOT A `PLAYER_CONTEXT_FILTERS` ENTRY.**
+  Every entry there sets `needs_live`, which moves player_career onto the
+  per-innings path and counts the career from scorecards, so a player's
+  filtered row would read differently from the same row unfiltered.
+  `_with_player_filter` ANDs a restriction onto each target's FINAL WHERE
+  instead: the row the unfiltered table shows, alone. Match list reads "matches
+  he played in" (the four-source union), Partnerships "either batter". Not
+  applied to family targets, team innings or derived reports, and the UI hides
+  the picker there.
+- **`TARGET_GUIDE` (StatLab.jsx) is which filters mean anything per target**,
+  read off what each backend query actually applies (`ic`/`pc` usage). A tab
+  click runs the table, snaps the sort, and `pruneContext`/`pruneTree` DROP what
+  the new target cannot use rather than hiding it, so no hidden filter keeps
+  scoping results. Keep it in step when a target starts or stops honouring a
+  context filter.
+- **Verified**: `backend/verification/verify_statlab_player_filter.py` (17
+  checks, real Postgres, the filtered row equal to the unfiltered one on both
+  paths; control: 11 fail) and `frontend/verification/verify_statlab_player_browser.mjs`
+  (23; control: 16 fail). `verify_rate_coverage.py` gained a `__main__` guard so
+  it can be imported for its schema and seed.
+
 ## StatLab gets the platform's Grade Type / Match Type filters (v9.29.4, Aug 2026)
 
 StatLab was the last stats surface with no `GradeScope` (migration 259). Two
@@ -7273,6 +7776,67 @@ await_only() here`.
   club still readable afterwards — plus 11 on the query and the rollback rule,
   **with a control run**: putting the old column name and the bare rollback
   back reproduces the reported greenlet error exactly.
+
+## AN IMPORT RESIDUAL IS CLASSIFIED BY ITS LABEL, NOT KEPT BLIND (v9.89.2, Sep 2026)
+
+Reported off The Basin: Nathan Freeling, a senior player whose only record for
+2006/07-2008/09 is a BetterImport residual under senior grade labels ("Division
+3/4/5"), read **18 matches / 376 runs under the JUNIORS filter — and the same
+under Women's and Masters**, on a player with no junior grades at all.
+
+- **THE CATEGORY FILTER IS EXCLUSION-BASED AND AN IMPORT RESIDUAL HAS NO
+  grade_id, SO IT SURVIVED EVERY PICK.** `GradeScope.clause`'s category branch is
+  `column IS NULL OR NOT (column = ANY(excluded_ids))` — correct for the DEFAULT
+  ("no juniors": a row we can't classify is probably senior, keep it) and wrong
+  for an EXPLICIT pick. An import residual carries `grade_id = NULL`, so
+  `grade_id IS NULL` is TRUE and it was kept under Juniors, Women's and Masters
+  alike. Nathan's three seasons exist ONLY as residuals (CA's per-grade data
+  starts 2009/10), so they were swept into every category. **This hit every
+  BetterImport club with pre-CA seasons**, not just him.
+- **THE RESIDUAL CARRIES A CLASSIFIABLE grade_label NOW, so it is no longer
+  genuinely unclassifiable.** Migration 252 put `grade_label` on the import
+  branch of `v_effective_player_season_stats`, and the team-labelled reconcile
+  (v9.89.1) writes a real per-grade label. So the row IS classifiable — the
+  filter was just looking at the NULL grade_id instead of the label.
+- **`resolve_scope` BUILDS `excluded_labels` THE SAME WAY IT BUILDS
+  `excluded_ids`.** One extra `SELECT DISTINCT grade_label FROM
+  import_effective_deltas`, only when a category filter is active, each label
+  classified with `categories_for_name` (its stored categories, else
+  `suggest_categories`) and `judged = cats if explicit else {primary}` — the
+  identical rule the grade walk applies. No per-row cost; empty for a club with
+  no imports, so those queries are byte-for-byte what they were.
+- **`clause(..., label_column=...)` IS A CASE, NOT A BLANKET KEEP.** grade_id
+  present -> judged by grade_id (unchanged, a season adjustment still filters by
+  its real grade); grade_label present -> judged by the label
+  (`NOT (label = ANY(excluded_labels))`, cast to `text[]` so an empty list is
+  safe); grade_label NULL -> KEPT, because a career-level lump with neither is
+  genuinely unclassifiable, the one case the old reasoning still holds for.
+- **THE FIVE RESIDUAL FILTER SITES ALL READ `pss` (the view with grade_label),
+  so all move together**: `_career_residuals` (the profile cards + MATCHES
+  stat), `_residual_totals_cte` (leaderboards), `_season_by_season_scoped` (the
+  season table) and StatLab's family + career/season residuals. The by-grade
+  grid is NOT one of them — it matches an import residual to a real grade row by
+  NAME (`_IMPORT_GRADE_MATCH`) and filters on that grade's `gr.id`, so it already
+  classified correctly.
+- **THE DEFAULT IS UNTOUCHED, WHICH IS THE HALF THAT COULD HAVE BROKEN.** Under a
+  club default that excludes junior, a senior label ("Division 3") is NOT in
+  `excluded_labels` (its category is what's wanted), so the senior residual is
+  still KEPT — a club's pre-CA senior seasons still show on the ordinary page.
+  Only an explicit non-matching pick drops them.
+- **No re-import, no migration** — it's a read-path scope change, so every
+  affected club corrects on the next page load.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_junior_residual_scope.py`, 24 checks through the
+  shipped `resolve_scope` / `_career_residuals` / `_season_by_season_scoped` /
+  `_residual_totals_cte` over the real view: the reported senior residual reading
+  0 under Juniors/Women's/Masters and its full 18/376 under Men's and the
+  junior-excluding club default, a genuine junior residual showing under Juniors
+  only, a label-less career lump kept under every category, a real-grade_id
+  residual still excluded by its id, the season table and leaderboard agreeing,
+  and another club's identical residual untouched) **with a control run**: 10 of
+  the 24 fail against the previous commit, reporting the customer's own **18/376**
+  under Juniors and the same under Women's and Masters. The control reports rather
+  than crashing — `excluded_labels` is read through `getattr`.
 
 ## Junior stats split off career stats (migration 228, v9.18.0, Aug 2026)
 
@@ -9022,6 +9586,72 @@ same source. Full architecture + product decisions:
   betterat.football; weekly sync scheduler; BetterSelect AFL (drag-and-drop
   field whiteboard — FF/HF/C/HB/FB + Followers, 12–18 on field, up to 20
   bench); then the other modules, each with an AFL review before enabling.
+
+## BetterFootball runs the BetterStats admin, BetterAdmin and BetterSocials (v9.94.0 / v9.95.0, Sep 2026)
+
+Asked for in two steps: port BetterSocials and BetterAdmin to the football app
+and fill the BetterStats admin gaps, then "port across the remaining BetterStats
+Admin gaps and push everything to main".
+
+- **THE CRICKET ROUTERS ARE MOUNTED, NOT COPIED.** BetterAdmin (fees, comms,
+  merch, CRM, directory, roster, committee, events, facilities, diary) and
+  BetterSocials run on `afl_main.py` as cricket's own routers.
+  `services/afl/cricket_schema_mirror.apply` replays cricket's additive raw-SQL
+  DDL into the football database so those routers find their tables; football's
+  own DDL runs after it. A per-club module switch decides which a club gets.
+- **WHERE A SHARED ROUTE WOULD READ CRICKET DATA, A FOOTBALL ONE READS FOOTBALL
+  DATA.** BetterSocials pulls fixtures, results, best on ground and team lists
+  from `afl_*` tables and scores the football way (12.8 (80), margins in
+  points); posts that only mean something for cricket are not offered. BetterFees
+  counts a football game from `afl_player_game_lines` (our side only, per
+  `afl_game_details.our_side`) because nothing on football writes
+  `game_appearances`; the helper keys on that table EXISTING, so cricket's
+  recompute is byte-for-byte what it was. The football sync runs the recompute
+  after its rollup, the step cricket's scheduler takes.
+- **FOOTBALL SERVES THE SAME PATHS CRICKET'S ADMIN CALLS**, which is what lets a
+  shared component run on either: `/admin/competitions*`,
+  `/club-admin/seasons/merges*`, the settings PATCH. Cricket route bodies are
+  reused by importing them lazily inside a football wrapper and calling them with
+  explicit keyword dependencies.
+- **A FOOTBALL SEASON IS ONE COMPETITION'S SEASON** ("VAFA 2026"), so one year
+  can arrive as two rows. Season merges reuse cricket's `season_aliases`, and
+  every football filter expands a picked season to its merge group with
+  `services/afl/season_groups.season_group`, bound as `= ANY(:season)`. The sync
+  no longer overwrites an existing season's name.
+- **COMPETITIONS ARE SEEDED FROM THE SEASON NAME, NOT AN ASSOCIATION.** Cricket
+  seeds one per CA association; PlayHQ football carries no association but its
+  season already names the competition, so `services/afl/competitions` strips the
+  year ("VAFA 2026" -> "VAFA"). `CompetitionManager` is now a shared component
+  (`components/admin/CompetitionManager.jsx`) both sports mount; football answers
+  `/admin/competitions/grouping` with nothing to do. **A picked competition is an
+  INCLUSION like a picked grade**: it replaces the grade-type default rather than
+  stacking on it, and an id that is not this club's fails closed to nothing.
+  `create_all` gives `club_competitions.id` no default, so the football lifespan
+  sets `gen_random_uuid()` before running `competition_ddl`.
+- **STATS BY GRADE ON FOOTBALL** (`services/afl/grade_scope.py`) sums the per-grade
+  season rows it keeps when a category is left out, and only when nothing is
+  picked. `stats_left_out` on the club payload names only categories the club
+  actually fields, and the public note disappears the moment a grade or
+  competition is picked.
+- **Player profile fields**: date of birth (admin only, never public), jumper
+  number (text, "07" kept), positions (FB..UTIL, public only with
+  `public_show_role`) and an action photo. **Settings**: draft mode behind a
+  4-digit PIN (the shared `ClubPinGate`, a 423 from `/clubs/{slug}`), typography
+  (`settingsKit.jsx`, shared with cricket), primary admin transfer. The trial-ended
+  unpause queue was NOT ported; it is a Super Admin sales flow.
+- **A FOOTBALL URL IS API-RELATIVE.** Images are stored as `images/...` and drawn
+  through `aflApi.mediaUrl`; a cricket `/api/...` URL (a font, a logo from a shared
+  helper) must go through `rebaseApiUrl` or it resolves against the cricket API.
+- **Verified against a real Postgres** through the real AFL boot path and HTTP
+  stack (`backend/verification/verify_afl_*.py`: competitions 37, fee match days 8,
+  seasons 21, settings 41, player profile 21, admin extras 28, social 27, shared
+  modules 28, manual entries 75), each **with a control run** that reports rather
+  than crashes, and **driven in Chromium** against the football production build
+  (`frontend/verification/verify_afl_*_browser.mjs`: admin gaps 33, BetterAdmin
+  132, socials 23, admin edits 20).
+- **NOTICED, NOT BUILT**: the Directory's squad filter reads BetterSelect `teams`,
+  which football does not have, so it simply does not draw there. Milestones are
+  not scoped by the grade-type default (career facts, as on cricket).
 
 ## Password-protected "Draft" pages + trial-ended unpause requests (v9.0.0, Aug 2026)
 
@@ -14049,6 +14679,102 @@ special-casing). Typical use: flip one real or test club to Force ON, run a
 live checkout end to end, then flip the platform default on for everyone once
 satisfied (the per-club overrides can stay — they only matter when the
 platform default is off, or when someone still needs a specific club blocked).
+
+## Pay by invoice: BetterCricket runs the annual cycle (migration 308, v9.90.0, Sep 2026)
+
+Asked for by a club in a live trial that wanted to subscribe and be INVOICED,
+with a renewal invoice 14 days before each period ends, and no dependence on a
+Super Admin to do it for them. Then, mid-build: **invoicing is OFF for every club
+by default, new clubs included, and only a Super Admin can switch it on for a
+club from All Clubs.** Until then the club sees no invoicing option at all.
+
+- **IT IS NOT A STRIPE SUBSCRIPTION WITH `collection_method=send_invoice`, and
+  that is the whole design.** A subscription raises its renewal invoice ON the
+  renewal date and cannot raise it 14 days early, so "settle before the period
+  ends" is unreachable with one. `services/invoice_billing.py` runs the cycle and
+  asks Stripe for ONE-OFF invoices (`stripe_client.create_one_off_invoice`).
+  Stripe still numbers them, renders the PDF, works out GST (`automatic_tax`,
+  lines `tax_behavior=exclusive`) and hosts the payment page with whatever
+  payment methods the account offers.
+- **`auto_advance=False` and we never call Stripe's send.** BetterCricket emails
+  the invoice to the PRIMARY Club Admin (whoever asked) with our own pay link;
+  Stripe emailing the Customer's address as well would be a duplicate at best
+  and the wrong person at worst.
+- **Three switches, three meanings.** `organisations.invoice_billing_enabled`
+  (Super Admin only, default false) is whether the club is OFFERED it;
+  `organisations.billing_method` ('card' | 'invoice') is what the club chose;
+  `org_module_subscriptions.billing_source` ('invoice' | 'stripe' | NULL) is what
+  pays for each module's current period. **Only an 'invoice' row is ever renewed
+  or lapsed by the invoice job**, so a card module (Stripe owns its renewal) and
+  a hand-granted one (nobody does) can never be invoiced or cut off by
+  accident. Every card grant path stamps 'stripe' for the same reason.
+- **Switching the offer OFF moves an invoice club back to card** (in
+  `patch_club`): the paid period runs to its end, no renewal invoice is raised,
+  open invoices stay payable. The renewal job also filters on the offer.
+- **ONE PRICING DEFINITION.** `plan_invoice` is what the Account page previews
+  AND what the invoice carries: `billing_pricing.price_for` with the live bundle
+  schedule, a code via `apply_coupon_to_quote` (moved out of the router so both
+  paths share it). The discount reaches Stripe as ONE flat `amount_off` coupon
+  worked out by that maths, so the charge matches the preview exactly.
+- **KINDS.** `initial` (Core + selection, bundle, code; the year starts when the
+  trial on those modules ends, so paying early costs no trial, or on payment if
+  later); `addon` (no bundle and no code, prorated to the period's renewal date
+  so the club renews together); `renewal` (every module still on the period,
+  full price, a still-owed 'forever'/'repeating' code applied, never the bundle,
+  which is a once-only reward on the card flow too).
+- **DATES ARE PERTH.** A period is `[start, end)`: end = the renewal date, the
+  card flow's convention. A renewal is due at 11:59:59pm Perth the day before
+  (`due_by`); modules still on the period are PAUSED at the start of the renewal
+  date (job at 00:15 Perth). Paused, not removed: paying the open renewal
+  invoice late switches them back on for the rest of that period. Renewal
+  invoices go out at 08:00 Perth, 14 days ahead (`RENEWAL_NOTICE_DAYS`).
+- **PAYING IS WHAT GRANTS.** The `invoice.paid` webhook, routed off the
+  subscription path by `metadata.billing_method == 'invoice'`. A renewal date
+  only ever moves FORWARD, so a replayed old event cannot undo a later renewal;
+  a renewal paid after a module was cancelled does not switch it back on.
+- **A NEW FIRST OR ADD-ON INVOICE VOIDS THE PREVIOUS OPEN ONE** (and a new first
+  invoice also voids a renewal left open by a lapsed period), so a club can never
+  pay twice for one selection. One live renewal per period is enforced by a
+  partial unique index; the loser of a race voids its own Stripe invoice.
+- **COMMISSION.** A one-off invoice's `billing_reason` is 'manual', which the
+  ledger reads as "earns nothing", so `_upsert_invoice` takes an override:
+  initial → subscription_create, addon → subscription_update, renewal →
+  subscription_cycle. Same earnings as the same purchase by card.
+- **THE PAY LINK IS OURS** (`GET /public/billing/pay/{token}`, unauthenticated,
+  token-scoped): it asks STRIPE whether the invoice is still payable before
+  redirecting to its current hosted page, and lands on the Account page once
+  paid or voided, so a late webhook can never send somebody to pay twice.
+- **THE CONSOLE PROVIDER IS NOT A SEND** (the sales-email rule): with no email
+  provider the invoice is raised, `email_error` says it was not emailed, and the
+  Account page offers the pay link instead.
+- **INVOICING IS A SUPER ADMIN ARRANGEMENT, NEVER A CLUB'S CHOICE (v9.90.1).** A
+  club asks and BetterCricket sets it up. `_require_super_for_invoicing` refuses
+  the club-side `PUT /billing-method` and `POST /invoices/request` for every club
+  admin, primary included, and `cancel_own_module` refuses an invoice club. The
+  Account page shows an invoice club its status and open invoices (pay, PDF,
+  resend) with no module picker. A card club, the default, is untouched: it still
+  picks modules and checks out by card itself.
+- **Card checkout refuses an invoice club (409)**, and a club on a live card
+  subscription cannot switch to invoice, so nobody is billed twice.
+- **Deploy**: add `invoice.voided` and `invoice.marked_uncollectible` to the
+  Stripe webhook's subscribed events (invoice.paid / payment_failed are already
+  there). Payment methods on the hosted invoice page come from the Stripe
+  Dashboard's own settings.
+- **Verified against a real Postgres** (`backend/verification/verify_invoice_billing.py`,
+  94 checks through the shipped service, webhook routing and route bodies, with
+  Stripe and email stubbed: 308 over a populated table, the pricing incl. the
+  code after the bundle, the non-primary admin asking and the PRIMARY receiving,
+  replace-on-reissue, payment granting from the trial end, replay safety, the
+  add-on proration, the renewal at 14 days and not 15, the lapse on the renewal
+  date and not the day before, paying late, the card / hand-granted / switched
+  back / not-offered clubs left alone, the offer gate from both sides, and the
+  pay link) **with two control runs**: the previous commit REPORTS the feature
+  absent; with the lapse scope, the setting filter and replace-on-reissue
+  neutered, 5 fail. **Driven in Chromium** (`frontend/verification/verify_invoice_billing_browser.mjs`,
+  44) **with a control run**: 32 fail against the previous commit.
+- **NOTICED, NOT BUILT**: a BECS/PayTo payment made on the due day can take days
+  to confirm, so the modules may pause briefly and come back when it lands.
+  No reminder beyond the 14-day invoice; Resend is the manual nudge.
 
 ## BetterCricket-managed discount coupons (migration 156, Jul 2026)
 

@@ -274,7 +274,9 @@ function ElementBlock({ item, palette }) {
 const DISPLAY_FONT = "var(--social-display-font, 'Anton', sans-serif)"
 const MONO_FONT = "'JetBrains Mono', monospace"
 
-const BASE_URL = import.meta.env.VITE_API_URL || '/api'
+// The build's own API base — '/api' for cricket, '/afl/api' for the football
+// silo — the same rule lib/api.js follows.
+const BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.BASE_URL + 'api')
 // Same headshot URL the lineup templates use (playerToTemplatePlayer builds
 // `headshot` from it) — no new server endpoint needed.
 const headshotUrl = (p) => (p?.photo_url ? `${BASE_URL}/images/players/${p.id}/photo` : null)

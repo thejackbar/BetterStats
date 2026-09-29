@@ -178,6 +178,21 @@ def set_status_billing(org, billing_key: str, status: str, *, renewal_date=..., 
     ]
 
 
+def set_billing_source(org, billing_key: str, source: str | None, *, now=None) -> None:
+    """Record what pays for a billable module's current period (migration 308)
+    across all its entitlement keys: 'invoice' (BetterCricket annual invoice),
+    'stripe' (a Stripe Subscription) or None. Only an 'invoice' row is renewed
+    or lapsed by services/invoice_billing.py, so every path that grants a paid
+    module stamps it — otherwise a module that moved from invoice to card
+    would go on being invoiced."""
+    now = now or _now()
+    for ek in expand_billing_module(billing_key):
+        sub = _find(org, ek)
+        if sub is not None:
+            sub.billing_source = source
+            sub.updated_at = now
+
+
 def set_trial_end_billing(org, billing_key: str, trial_ends_at, *, now=None) -> None:
     now = now or _now()
     for ek in expand_billing_module(billing_key):

@@ -523,6 +523,7 @@ async def get_notification_settings(
         "my_blanket_optout": prefs.get(ev.ALL_EVENTS, {}),
         "my_email": (current_user.email or "").strip() or None,
         "email_provider_live": email_service.get_email_provider().name != "console",
+        "my_last_email": await notification_scan.last_email_delivery(db, club.id, current_user.id),
     }
 
 
@@ -642,3 +643,22 @@ async def run_notification_scan_now(
     result = await notification_scan.scan_org(db, club)
     await db.commit()
     return result
+
+
+@router.post("/notifications/settings/test-email")
+async def send_notification_test_email(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Email the person pressing it a copy of the digest, straight away.
+
+    Open to anybody who can see the settings screen, because it only ever goes
+    to their OWN address — there is no way to point it at somebody else, so it
+    cannot be used to email a club's other admins. Rate-limited all the same,
+    since every press is a real send.
+    """
+    from app.services import rate_limit
+    rate_limit.enforce(f"notif-test-email:{current_user.id}", 5, 600,
+                       "That is a few test emails in a row. Try again in a few minutes.")
+    return await notification_scan.send_test_email(db, club, current_user)

@@ -25,7 +25,7 @@ from sqlalchemy.orm import selectinload
 
 from app.auth.modules import BILLABLE_MODULES, STATUS_ACTIVE, STATUS_PAST_DUE
 from app.models.db import BillingInvoice, ModuleActionRequest, Organisation
-from app.services import discount_coupons, module_subscriptions, sales_commissions, stripe_client
+from app.services import discount_coupons, invoice_billing, module_subscriptions, sales_commissions, stripe_client
 from app.services.stripe_client import epoch_to_date, epoch_to_datetime
 
 logger = logging.getLogger(__name__)
@@ -163,6 +163,7 @@ async def handle_checkout_completed(db: AsyncSession, session: dict) -> None:
     now = datetime.now(timezone.utc)
     for key in billing_keys:
         module_subscriptions.set_status_billing(org, key, STATUS_ACTIVE, renewal_date=renewal_date, now=now)
+        module_subscriptions.set_billing_source(org, key, "stripe", now=now)
         await _record_action(db, org, key, "subscribe", "Paid via Stripe Checkout", now)
 
     # A discount-coupon redeemed alongside this signup (see
@@ -188,7 +189,13 @@ async def handle_invoice_paid(db: AsyncSession, invoice: dict) -> None:
     Rolls each subscribed module's renewal_date forward, reactivates a module
     that had gone past_due, and records the invoice for the club's own Billing
     history (idempotent on stripe_invoice_id — a replayed event just re-upserts
-    the same row)."""
+    the same row).
+
+    An invoice BetterCricket raised itself (pay by invoice, no subscription
+    behind it) is handed to services/invoice_billing.py instead."""
+    if invoice_billing.is_invoice_billing(invoice):
+        await invoice_billing.handle_invoice_event(db, invoice, "invoice.paid")
+        return
     subscription_id = _invoice_subscription_id(invoice)
     org, sub = await _resolve_org_for_subscription(db, subscription_id)
     if org is None:
@@ -209,6 +216,7 @@ async def handle_invoice_paid(db: AsyncSession, invoice: dict) -> None:
     now = datetime.now(timezone.utc)
     for key in billing_keys:
         module_subscriptions.set_status_billing(org, key, STATUS_ACTIVE, renewal_date=renewal_date, now=now)
+        module_subscriptions.set_billing_source(org, key, "stripe", now=now)
     await _upsert_invoice(db, org, invoice, now, sub=sub)
     try:
         await db.commit()
@@ -240,7 +248,14 @@ async def handle_invoice_payment_failed(db: AsyncSession, invoice: dict) -> None
     auth/modules.py — past_due still keeps them live) rather than cutting the
     club off immediately, giving them a chance to update their card before
     Stripe's own dunning schedule gives up and fires
-    customer.subscription.deleted."""
+    customer.subscription.deleted.
+
+    A failed payment on a BetterCricket-raised invoice changes no module: it
+    is recorded, the invoice stays open and payable, and the period's own end
+    is what decides whether anything lapses."""
+    if invoice_billing.is_invoice_billing(invoice):
+        await invoice_billing.handle_invoice_event(db, invoice, "invoice.payment_failed")
+        return
     subscription_id = _invoice_subscription_id(invoice)
     org, sub = await _resolve_org_for_subscription(db, subscription_id)
     if org is None:
@@ -261,6 +276,15 @@ async def handle_invoice_payment_failed(db: AsyncSession, invoice: dict) -> None
     await _upsert_invoice(db, org, invoice, now, sub=sub)
     await db.commit()
     _sync_crm(org.id)
+
+
+async def handle_invoice_voided(db: AsyncSession, invoice: dict) -> None:
+    """invoice.voided / invoice.marked_uncollectible — only BetterCricket-raised
+    invoices care: the row stops offering a pay link and a discount code held
+    for it is handed back. A subscription's own invoices are left to the
+    subscription events."""
+    if invoice_billing.is_invoice_billing(invoice):
+        await invoice_billing.handle_invoice_event(db, invoice, "invoice.voided")
 
 
 async def handle_subscription_deleted(db: AsyncSession, subscription: dict) -> None:
@@ -327,7 +351,7 @@ async def sweep_dangling_stripe_subscriptions(db: AsyncSession) -> list[str]:
 
 
 async def _upsert_invoice(db: AsyncSession, org: Organisation, invoice: dict, now: datetime,
-                           sub: dict | None = None) -> None:
+                           sub: dict | None = None, billing_reason: str | None = None) -> None:
     """Records ONE Stripe invoice event for the club's Billing History.
     line_items is read straight off Stripe's own invoice lines, not
     recomputed from our pricing tables — a renewal invoice bills every
@@ -344,7 +368,14 @@ async def _upsert_invoice(db: AsyncSession, org: Organisation, invoice: dict, no
     when total_discount_amounts shows it actually had a discount applied —
     the bundle discount and a duration=once coupon only ever apply to the
     first invoice, and the subscription's metadata still mentioning them
-    doesn't mean a later renewal invoice got them too."""
+    doesn't mean a later renewal invoice got them too.
+
+    ``billing_reason`` overrides Stripe's own for an invoice BetterCricket
+    raised itself (services/invoice_billing.py): a one-off invoice always says
+    'manual', and the commission ledger needs to know whether it was a first
+    subscribe, an add-on or a renewal. Such a row also keeps OUR line items and
+    discount split — they were written when the invoice was raised, and
+    Stripe's lines can only show one combined discount."""
     stripe_invoice_id = invoice.get("id")
     if not stripe_invoice_id:
         return
@@ -367,10 +398,12 @@ async def _upsert_invoice(db: AsyncSession, org: Organisation, invoice: dict, no
     # from a renewal for sales commission (migration 278) — plus what was paid
     # net of GST. Recorded for every invoice, paid or not; whether it earns
     # anything is decided by record_payment_commission below.
-    row.billing_reason = invoice.get("billing_reason")
+    row.billing_reason = billing_reason or invoice.get("billing_reason")
+    if billing_reason is not None or (invoice.get("metadata") or {}).get("billing_method") == "invoice":
+        row.amount_total_cents = invoice.get("total")
     row.amount_ex_tax_cents = sales_commissions.invoice_ex_tax_cents(invoice)
     lines = (invoice.get("lines") or {}).get("data") or []
-    if lines:
+    if lines and row.billing_method != "invoice":
         row.line_items = [
             {"name": ln.get("description") or "", "price": (ln.get("amount") or 0) / 100}
             for ln in lines

@@ -26,6 +26,7 @@ import asyncio
 import inspect
 import io
 import os
+import re
 import sys
 import uuid
 from datetime import date
@@ -41,9 +42,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from _view_ddl import view_statements
 from app.services.superseded_ddl import STATEMENTS as SUPERSEDED_DDL
 from app.models.db import (
-    Base, Game, Grade, ManualBattingInnings, ManualBowlingSpell, ManualEditLog,
-    ManualFieldingStat, ManualGame, Organisation, Player, PlayerSeasonStats,
-    Season, User,
+    Base, BattingInnings, BowlingSpell, Game, Grade, ManualBattingInnings,
+    ManualBowlingSpell, ManualEditLog, ManualFieldingStat, ManualGame,
+    Organisation, Player, PlayerSeasonStats, Season, User,
 )
 from app.services import match_pairing
 
@@ -67,6 +68,20 @@ from app.routers.manual_entries import (
     GAME_CSV_COLUMNS, _MAX_GAME_UPLOAD_BYTES, import_manual_games, list_audit,
     undo_edit,
 )
+
+try:
+    from app.scripts.repair_overwrite_pairs import repair_org
+    HAVE_REPAIR = True
+except ImportError as exc:  # pragma: no cover - control run only
+    HAVE_REPAIR = False
+    repair_org = None
+    MISSING.append(str(exc))
+
+try:
+    from app.services import statlab
+except ImportError as exc:  # pragma: no cover - control run only
+    statlab = None
+    MISSING.append(str(exc))
 
 try:
     from app.services import game_import_staging
@@ -272,6 +287,18 @@ async def main() -> None:
                 player_id UUID,
                 organisation_id UUID,
                 season TEXT
+            )
+        """))
+        # StatLab's live path reads the grade-merge log, another lifespan-only
+        # raw-SQL table; copied column for column from main.py.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS grade_merge_logs (
+                id SERIAL PRIMARY KEY,
+                merged_at TIMESTAMPTZ DEFAULT NOW(),
+                org_id UUID NOT NULL,
+                canonical_name TEXT NOT NULL,
+                alias_name TEXT NOT NULL,
+                undone_at TIMESTAMPTZ
             )
         """))
         # Migration 302's staging table, likewise invisible to create_all.
@@ -1297,6 +1324,419 @@ async def main() -> None:
                 {"r": str(rival.id)})).scalar()
             check("the competing CricketStatz import is left unpaired to it",
                   rival_pair is None, str(rival_pair))
+
+        print("\n-- A RE-SOURCED SEASON COUNTS PER MATCH: what the file left out still counts --")
+        # Reported live, off an overwrite import of a club's whole archive: a
+        # player's "All" read LOWER than their "Men's". Re-sourcing stepped the
+        # WHOLE season's CA summary aside, so every synced match the file did
+        # not hold (junior grades the archive never tracked, fixtures the other
+        # club synced first) dropped out of the totals — while the per-innings
+        # views, which every filtered read uses, kept them. Now a synced game
+        # with no preferred imported twin is rolled up from its own scorecard,
+        # so the season is the union of both sources, counted once, per match.
+        HAWKS_ID = uuid.uuid4()
+        EAGLES_ID = uuid.uuid4()
+        S_OTHER = uuid.uuid4()
+        G_OTHER = uuid.uuid4()
+        SHARED_ID = uuid.uuid4()
+
+        async def seed_partly_covered(session):
+            """CA's summary (5/200), a Hawks game the file WILL hold (30), an
+            Eagles game it will NOT (40 and a bowling spell), and a fixture the
+            OTHER club synced first — under their season, ours by away_org_id —
+            with our batter's 50 beside their batter's 99."""
+            session.add(PlayerSeasonStats(
+                player_id=P_HELD, season_id=S_HELD, matches=5, runs=200))
+            session.add(Game(id=HAWKS_ID, grade_id=G_HELD,
+                             played_at=date(2010, 12, 4), opp_club_name="Hawks"))
+            session.add(Game(id=EAGLES_ID, grade_id=G_HELD,
+                             played_at=date(2010, 12, 11), opp_club_name="Eagles"))
+            session.add(Season(id=S_OTHER, organisation_id=OTHER,
+                               name="Summer 2010/11", year=2010))
+            session.add(Grade(id=G_OTHER, season_id=S_OTHER, name="1st Grade"))
+            session.add(Game(id=SHARED_ID, grade_id=G_OTHER,
+                             played_at=date(2011, 1, 15),
+                             home_team="Somebody Else", away_team="Shoalwater Bay",
+                             opp_club_name="Shoalwater Bay",
+                             home_org_id=OTHER, away_org_id=ORG))
+            await session.flush()
+            session.add_all([
+                BattingInnings(game_id=HAWKS_ID, player_id=P_HELD, innings_number=1, runs=30),
+                BattingInnings(game_id=EAGLES_ID, player_id=P_HELD, innings_number=1, runs=40),
+                BowlingSpell(game_id=EAGLES_ID, player_id=P_HELD, innings_number=1,
+                             overs=4, runs=20, wickets=2),
+                BattingInnings(game_id=SHARED_ID, player_id=P_HELD, innings_number=1, runs=50),
+                BattingInnings(game_id=SHARED_ID, player_id=P_OTHER, innings_number=1, runs=99),
+            ])
+            await session.commit()
+
+        async def totals_for(session, player_id):
+            return (await session.execute(text(
+                "SELECT COALESCE(SUM(matches), 0), COALESCE(SUM(runs), 0), "
+                "       COALESCE(SUM(wickets), 0) "
+                "FROM v_effective_player_season_stats "
+                "WHERE player_id = :p AND season_id = :s"),
+                {"p": str(player_id), "s": str(S_HELD)})).one()
+
+        async def scorecard_runs(session, player_id):
+            """What every FILTERED read counts: the per-innings views."""
+            return (await session.execute(text(
+                "SELECT COUNT(DISTINCT bi.game_id), COALESCE(SUM(bi.runs), 0) "
+                "FROM v_effective_batting_innings bi "
+                "JOIN v_effective_games g ON g.id = bi.game_id "
+                "WHERE bi.player_id = :p "
+                "  AND g.played_at BETWEEN DATE '2010-07-01' AND DATE '2011-06-30'"),
+                {"p": str(player_id)})).one()
+
+        async with Session() as session:
+            await reset(session); await seed(session)
+            await seed_partly_covered(session)
+            c = await club(session); u = await user(session)
+            prev = await preview(file=FakeUpload(csv_text(HAWKS_ONLY)),
+                                 current_user=u, club=c, db=session)
+            out = await commit_manual_games(
+                req=GameResolveRequest(token=prev["token"], duplicate_mode="overwrite"),
+                current_user=u, club=c, db=session)
+            check("the Hawks match is superseded and the season re-sourced",
+                  out.get("games_superseded") == 1 and out.get("seasons_import_sourced") == 1,
+                  str(out))
+            check("the result says the uncovered matches STILL count",
+                  any("still count" in w for w in (out.get("warnings") or [])),
+                  str(out.get("warnings")))
+        async with Session() as session:
+            m, r, w = await totals_for(session, P_HELD)
+            check("the season totals are the import's Hawks match PLUS the two "
+                  "synced games the file left out: 3 matches, 20+40+50 runs",
+                  m == 3 and r == 110, f"{m}/{r}")
+            check("and the bowling from the uncovered Eagles game counts too",
+                  w == 2, str(w))
+            gm, gr_ = await scorecard_runs(session, P_HELD)
+            check("which is exactly what the per-innings views count — All equals Men's",
+                  (gm, gr_) == (m, r), f"aggregate {m}/{r} vs scorecards {gm}/{gr_}")
+            src = (await session.execute(text(
+                "SELECT source, grade_id::text, runs FROM v_effective_player_season_stats "
+                "WHERE player_id = :p AND season_id = :s ORDER BY source, runs"),
+                {"p": str(P_HELD), "s": str(S_HELD)})).all()
+            sources = {row[0] for row in src}
+            check("CA's own 5/200 summary is stepped aside (no 'api' row)",
+                  "api" not in sources, str(src))
+            check("the uncovered games come from the new 'api_scorecard' branch",
+                  "api_scorecard" in sources, str(src))
+            check("the other club's fixture is filed under OUR season, on THEIR grade",
+                  any(row[0] == "api_scorecard" and row[1] == str(G_OTHER) and row[2] == 50
+                      for row in src), str(src))
+            theirs = (await session.execute(text(
+                "SELECT COALESCE(SUM(runs), 0) FROM v_effective_player_season_stats "
+                "WHERE player_id = :p"), {"p": str(P_OTHER)})).scalar()
+            check("their batter's 99 on the shared fixture never counts as ours",
+                  theirs == 0, str(theirs))
+            hidden = (await session.execute(text(
+                "SELECT COUNT(*) FROM v_effective_games WHERE id = :g AND source = 'api'"),
+                {"g": str(HAWKS_ID)})).scalar()
+            check("the superseded Hawks game has stepped aside on read",
+                  hidden == 0, str(hidden))
+            live = (await session.execute(text(
+                "SELECT COUNT(*) FROM v_effective_games "
+                "WHERE id IN (:a, :b) AND source = 'api'"),
+                {"a": str(EAGLES_ID), "b": str(SHARED_ID)})).scalar()
+            check("and the two uncovered games are still live, never dropped",
+                  live == 2, str(live))
+        async with Session() as session:
+            from app.services import superseded_ddl as sdl
+            async with engine.begin() as conn:
+                found = await sdl.verify(conn)
+            check("the boot check still sees every effective view's source clause",
+                  all(found.values()), str(found))
+
+        print("\n-- THE SECOND LOOK: a match the date-and-opponent rule misses is paired on its scorecard --")
+        # Measured on the live database after the reported import: 32 matches
+        # counted twice, all three shapes below. Each pairs now through the
+        # CricketStatz matcher's own rules rather than a second copy of them.
+        ROCK_ID = uuid.uuid4()
+        FALCONS_ID = uuid.uuid4()
+
+        async def seed_second_look(session):
+            session.add(Season(id=S_OTHER, organisation_id=OTHER,
+                               name="Summer 2010/11", year=2010))
+            session.add(Grade(id=G_OTHER, season_id=S_OTHER, name="1st Grade"))
+            session.add_all([
+                # (a) the OTHER club synced first: under their season, ours by away_org_id
+                Game(id=SHARED_ID, grade_id=G_OTHER, played_at=date(2011, 1, 15),
+                     home_team="Somebody Else", away_team="Shoalwater Bay",
+                     opp_club_name="Shoalwater Bay", home_org_id=OTHER, away_org_id=ORG),
+                # (b) a two-day match CA dates by its first day
+                Game(id=HAWKS_ID, grade_id=G_HELD, played_at=date(2010, 12, 4),
+                     opp_club_name="Hawks"),
+                # (c) an opponent the two sources spell with no word in common
+                Game(id=ROCK_ID, grade_id=G_HELD, played_at=date(2011, 1, 8),
+                     opp_club_name="Rockingham Hornets Cricket Club"),
+                # (d) a genuinely different match on a day the sheet also has one
+                Game(id=FALCONS_ID, grade_id=G_HELD, played_at=date(2011, 1, 22),
+                     opp_club_name="Falcons"),
+            ])
+            await session.flush()
+            session.add_all([
+                BattingInnings(game_id=SHARED_ID, player_id=P_HELD, innings_number=1, runs=33),
+                BattingInnings(game_id=SHARED_ID, player_id=P_FUZZY, innings_number=1, runs=12),
+                BattingInnings(game_id=SHARED_ID, player_id=P_SYNCED, innings_number=1, runs=7),
+                BattingInnings(game_id=SHARED_ID, player_id=P_OTHER, innings_number=1, runs=99),
+                BattingInnings(game_id=HAWKS_ID, player_id=P_HELD, innings_number=1, runs=30),
+                BattingInnings(game_id=HAWKS_ID, player_id=P_FUZZY, innings_number=1, runs=15),
+                BattingInnings(game_id=ROCK_ID, player_id=P_HELD, innings_number=1, runs=44),
+                BattingInnings(game_id=ROCK_ID, player_id=P_FUZZY, innings_number=1, runs=9),
+                BattingInnings(game_id=FALCONS_ID, player_id=P_HELD, innings_number=1, runs=60),
+            ])
+            await session.commit()
+
+        def _sl(key, day, opp, *innings):
+            rows = []
+            for name, runs in innings:
+                rows.append(game_row(game_key=key, played_at=day, opposition=opp,
+                                     season_name="Summer 2010/11", grade_name="1st Grade",
+                                     player_name=name, innings_number="1",
+                                     batting_runs=str(runs), did_not_bat="false"))
+            return rows
+        SECOND_LOOK = (
+            _sl("AWAY", "2011-01-15", "Rivals", ("Held, Harry", 33), ("Craig Barlow", 12), ("Synced, Sid", 7))
+            + _sl("TWO_DAY", "2010-12-06", "Hawks", ("Held, Harry", 30), ("Craig Barlow", 15))
+            + _sl("SPELLING", "2011-01-08", "Hillman", ("Held, Harry", 44), ("Craig Barlow", 9))
+            + _sl("NOTOURS", "2011-01-22", "Bayswater", ("Held, Harry", 5))
+        )
+
+        async with Session() as session:
+            await reset(session); await seed(session)
+            await seed_second_look(session)
+            c = await club(session); u = await user(session)
+            prev = await preview(file=FakeUpload(csv_text(SECOND_LOOK)),
+                                 current_user=u, club=c, db=session)
+            res = await resolve_manual_games(
+                req=GameResolveRequest(token=prev["token"]),
+                current_user=u, club=c, db=session)
+            dups = res.get("duplicates") or {}
+            check("the review recognises all three as matches already synced",
+                  dups.get("synced") == 3 and dups.get("manual") == 0, str(dups))
+            check("and says they were matched on the scorecard, not the date",
+                  dups.get("matched_on_scores") == 3, str(dups))
+            out = await commit_manual_games(
+                req=GameResolveRequest(token=prev["token"], duplicate_mode="overwrite"),
+                current_user=u, club=c, db=session)
+            check("overwrite supersedes the three and brings the fourth in as new",
+                  out.get("games_superseded") == 3 and out.get("games_created") == 1, str(out))
+        async with Session() as session:
+            pairs = dict((await session.execute(text(
+                "SELECT opposition, superseded_by_game_id::text FROM manual_games "
+                "WHERE organisation_id = :o AND pair_prefers_import AND pairing_locked"),
+                {"o": str(ORG)})).all())
+            check("the fixture the OTHER club synced first is paired to its game",
+                  pairs.get("Rivals") == str(SHARED_ID), str(pairs))
+            check("the two-day match dated two days apart is paired to its game",
+                  pairs.get("Hawks") == str(HAWKS_ID), str(pairs))
+            check("the opponent spelt with no shared word is paired to its game",
+                  pairs.get("Hillman") == str(ROCK_ID), str(pairs))
+            unpaired = (await session.execute(text(
+                "SELECT superseded_by_game_id FROM manual_games "
+                "WHERE organisation_id = :o AND opposition = 'Bayswater'"),
+                {"o": str(ORG)})).scalar()
+            check("a different match on the same day, sharing no score, is NOT paired",
+                  unpaired is None, str(unpaired))
+            m, r, _w = await totals_for(session, P_HELD)
+            check("the totals count each match once: 4 imported + the unpaired Falcons game",
+                  m == 5 and r == 33 + 30 + 44 + 5 + 60, f"{m}/{r}")
+            gm, gr_ = await scorecard_runs(session, P_HELD)
+            check("and agree with the per-innings views to the run",
+                  (gm, gr_) == (m, r), f"aggregate {m}/{r} vs scorecards {gm}/{gr_}")
+
+        print("\n-- RE-IMPORTING THE SAME FILE KEEPS EVERY PAIR --")
+        # A re-run of an overwrite import replaces each manual match in place.
+        # The replacement used to be written with no pairing at all, so the
+        # synced copy came straight back beside the sheet's version.
+        async with Session() as session:
+            c = await club(session); u = await user(session)
+            prev = await preview(file=FakeUpload(csv_text(SECOND_LOOK)),
+                                 current_user=u, club=c, db=session)
+            res = await resolve_manual_games(
+                req=GameResolveRequest(token=prev["token"]),
+                current_user=u, club=c, db=session)
+            dups = res.get("duplicates") or {}
+            check("the second time round every match reads as a manual duplicate",
+                  dups.get("manual") == 4 and dups.get("synced") == 0, str(dups))
+            out = await commit_manual_games(
+                req=GameResolveRequest(token=prev["token"], duplicate_mode="overwrite"),
+                current_user=u, club=c, db=session)
+            check("and overwrite replaces all four in place",
+                  out.get("games_overwritten") == 4 and out.get("games_superseded") == 0, str(out))
+        async with Session() as session:
+            still = (await session.execute(text(
+                "SELECT COUNT(*) FROM manual_games WHERE organisation_id = :o "
+                "AND superseded_by_game_id IS NOT NULL AND pair_prefers_import AND pairing_locked"),
+                {"o": str(ORG)})).scalar()
+            check("the three replacements inherit their pairs, locked and preferred",
+                  still == 3, str(still))
+            back = (await session.execute(text(
+                "SELECT COUNT(*) FROM v_effective_games WHERE source = 'api' "
+                "AND id IN (:a, :b, :c)"),
+                {"a": str(SHARED_ID), "b": str(HAWKS_ID), "c": str(ROCK_ID)})).scalar()
+            check("so none of the synced copies comes back into the count",
+                  back == 0, str(back))
+            m, r, _w = await totals_for(session, P_HELD)
+            check("and the totals are unchanged by the re-import",
+                  m == 5 and r == 172, f"{m}/{r}")
+
+        print("\n-- THE REPAIR SCRIPT: the sync lands AFTER the import, and the pair is caught up --")
+        # The reported club's own state: an import that left a match unpaired
+        # beside its synced twin. Built the realistic way — the twin is synced
+        # after the import ran — and repaired through the shipped script.
+        KESTRELS_ID = uuid.uuid4()
+        LATE = (
+            HAWKS_ONLY
+            + _sl("LATE", "2011-02-05", "Kestrels", ("Held, Harry", 22), ("Craig Barlow", 8))
+            # A senior match the archive holds and CA does not, with a junior
+            # fixture against the same club's juniors synced eight days later
+            # carrying no scorecard of ours: the reported Pinjarra shape.
+            + _sl("PINJ", "2011-02-12", "Pinjarra", ("Craig Barlow", 17))
+        )
+        PINJ_JR_ID = uuid.uuid4()
+        async with Session() as session:
+            await reset(session); await seed(session)
+            session.add(Game(id=HAWKS_ID, grade_id=G_HELD,
+                             played_at=date(2010, 12, 4), opp_club_name="Hawks"))
+            session.add(Game(id=EAGLES_ID, grade_id=G_HELD,
+                             played_at=date(2010, 12, 11), opp_club_name="Eagles"))
+            await session.flush()
+            session.add(BattingInnings(game_id=HAWKS_ID, player_id=P_HELD, innings_number=1, runs=30))
+            session.add(BattingInnings(game_id=EAGLES_ID, player_id=P_HELD, innings_number=1, runs=40))
+            await session.commit()
+            c = await club(session); u = await user(session)
+            prev = await preview(file=FakeUpload(csv_text(LATE)),
+                                 current_user=u, club=c, db=session)
+            out = await commit_manual_games(
+                req=GameResolveRequest(token=prev["token"], duplicate_mode="overwrite"),
+                current_user=u, club=c, db=session)
+            check("the import supersedes Hawks and brings Kestrels and Pinjarra in as new",
+                  out.get("games_superseded") == 1 and out.get("games_created") == 2, str(out))
+            # now the sync lands the Kestrels twin, dated two days later
+            session.add(Game(id=KESTRELS_ID, grade_id=G_HELD,
+                             played_at=date(2011, 2, 7), opp_club_name="Kestrels"))
+            await session.flush()
+            session.add(BattingInnings(game_id=KESTRELS_ID, player_id=P_HELD, innings_number=1, runs=22))
+            session.add(BattingInnings(game_id=KESTRELS_ID, player_id=P_FUZZY, innings_number=1, runs=8))
+            session.add(Game(id=PINJ_JR_ID, grade_id=G_HELD,
+                             played_at=date(2011, 2, 20),
+                             opp_club_name="Pinjarra Junior Cricket Club"))
+            await session.commit()
+        async with Session() as session:
+            m, r, _w = await totals_for(session, P_HELD)
+            check("until it is paired the club counts Kestrels twice (the reported state)",
+                  m == 4 and r == 20 + 40 + 22 + 22, f"{m}/{r}")
+        if HAVE_REPAIR:
+            async with Session() as session:
+                res = await repair_org(session, ORG, apply=False)
+                check("the dry run finds the one unpaired imported match and its twin",
+                      res["paired"] == 1 and res["pairs"][0]["game_id"] == str(KESTRELS_ID),
+                      str(res))
+                check("naming the two shared scores behind the pair",
+                      res["pairs"][0]["shared_scores"] == 2, str(res))
+                held = res.get("held") or []
+                check("a cardless junior fixture of the same club days later is held back, "
+                      "never paired (the reported Pinjarra Junior case)",
+                      [h["game_id"] for h in held] == [str(PINJ_JR_ID)]
+                      and all(p["game_id"] != str(PINJ_JR_ID) for p in res["pairs"]),
+                      str(res))
+            async with Session() as session:
+                paired = (await session.execute(text(
+                    "SELECT superseded_by_game_id FROM manual_games "
+                    "WHERE organisation_id = :o AND opposition = 'Kestrels'"),
+                    {"o": str(ORG)})).scalar()
+                check("and writes nothing", paired is None, str(paired))
+            async with Session() as session:
+                res = await repair_org(session, ORG, apply=True)
+            async with Session() as session:
+                row = (await session.execute(text(
+                    "SELECT superseded_by_game_id::text, pair_prefers_import, pairing_locked "
+                    "FROM manual_games WHERE organisation_id = :o AND opposition = 'Kestrels'"),
+                    {"o": str(ORG)})).one()
+                check("apply pairs it exactly as the import would have: locked, import preferred",
+                      row[0] == str(KESTRELS_ID) and row[1] and row[2], str(tuple(row)))
+                m, r, _w = await totals_for(session, P_HELD)
+                check("and the match is counted once again",
+                      m == 3 and r == 20 + 40 + 22, f"{m}/{r}")
+                pj = (await session.execute(text(
+                    "SELECT superseded_by_game_id FROM manual_games "
+                    "WHERE organisation_id = :o AND opposition = 'Pinjarra'"),
+                    {"o": str(ORG)})).scalar()
+                check("apply leaves the held-back Pinjarra match unpaired", pj is None, str(pj))
+            async with Session() as session:
+                res = await repair_org(session, ORG, apply=True)
+                check("a second run pairs nothing more, and still holds Pinjarra back",
+                      res["candidates"] == 1 and res["paired"] == 0
+                      and len(res.get("held") or []) == 1, str(res))
+        else:  # pragma: no cover - control run only
+            check("the repair script is available", False, "; ".join(MISSING))
+
+        print("\n-- THE ROLLUP COUNTS EACH INNINGS ONCE, AND A PLAYER'S READ STAYS CHEAP --")
+        # Guest, Rob bats in both innings of the two-day Mandurah match and
+        # bowls in one. Migration 037's rollup LEFT JOINed the three tables
+        # side by side on (player, game), so his one spell rode on both
+        # batting rows: 2 bowling innings, 4 wickets, 2 catches. Each table
+        # is aggregated on its own now.
+        async with Session() as session:
+            await reset(session); await seed(session)
+            c = await club(session); u = await user(session)
+            prev = await preview(file=FakeUpload(csv_text(SHEET)),
+                                 current_user=u, club=c, db=session)
+            await commit_manual_games(
+                req=GameResolveRequest(token=prev["token"],
+                                       player_overrides={"Guest, Rob": "__new__",
+                                                         "Appleby, Rick": "__new__"}),
+                current_user=u, club=c, db=session)
+        async with Session() as session:
+            rob = (await session.execute(
+                select(Player.id).where(Player.organisation_id == ORG,
+                                        Player.name == "Guest, Rob"))).scalar()
+            row = (await session.execute(text(
+                "SELECT matches, batting_innings, runs, bowling_innings, wickets, catches "
+                "FROM v_effective_player_season_stats WHERE player_id = :p"),
+                {"p": str(rob)})).one() if rob else None
+            check("a two-innings match is 1 match, 2 innings, 19+4 runs",
+                  row is not None and tuple(row[:3]) == (1, 2, 23), str(row))
+            check("and the ONE spell in it is 1 bowling innings and 2 wickets, not 2 and 4",
+                  row is not None and (row[3], row[4]) == (1, 2), str(row))
+            check("and the one catch is 1, not doubled", row is not None and row[5] == 1, str(row))
+            plan = "\n".join((await session.execute(text(
+                "EXPLAIN SELECT SUM(runs) FROM v_effective_player_season_stats "
+                "WHERE player_id = :p"), {"p": str(rob or P_HELD)})).scalars().all())
+            ctes = sorted({m.strip() for m in re.findall(r"^\s*CTE \w+", plan, re.M)})
+            check("a single player's read materialises ONLY the player-independent "
+                  "auth_games (the id reaches every other scan)",
+                  ctes == ["CTE auth_games"], str(ctes) or plan[:400])
+            lines = plan.split("\n")
+            scans = [i for i, l in enumerate(lines)
+                     if re.search(r"Scan on (batting_innings|bowling_spells|fielding_stats|"
+                                  r"manual_batting_innings|manual_bowling_spells|manual_fielding_stats)", l)]
+            unfiltered = [lines[i].strip() for i in scans
+                          if not any("player_id" in lines[j] for j in range(i + 1, min(i + 3, len(lines))))]
+            check("every per-innings scan in that plan carries the player's id",
+                  bool(scans) and not unfiltered, "; ".join(unfiltered) or f"{len(scans)} scans")
+            if statlab is not None:
+                try:
+                    rows = await statlab.query_player_career(
+                        session, org_id=str(ORG), sort_by="runs", sort_dir="desc", limit=50,
+                        metric_filters=None, filter_tree=None,
+                        context={"grade_name": "Grade 2"})
+                except Exception as exc:  # pragma: no cover - reported, never fatal
+                    await session.rollback()
+                    rows = []
+                    check("StatLab's live path answers", False, repr(exc)[:300])
+                got = {r.get("player_name"): r for r in rows}
+                g = got.get("Guest, Rob") or {}
+                check("StatLab with a grade picked counts the imported match as played: "
+                      "1 match, 2 innings, not 0 matches",
+                      g.get("matches") == 1 and g.get("batting_innings") == 2, str(g))
+                a = got.get("Appleby, Rick") or {}
+                check("and a batter who only batted in it is 1 match too",
+                      a.get("matches") == 1, str(a))
+            else:  # pragma: no cover - control run only
+                check("StatLab is importable", False, "; ".join(MISSING))
 
         print("\n-- THE UPLOAD CAP IS THE ONE nginx CARRIES --")
         check("the app's cap is 64 MB, matching the client_max_body_size on "

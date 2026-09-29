@@ -132,6 +132,27 @@ EVENT_TYPES: tuple[EventType, ...] = (
         ),
         category="stats",
     ),
+    EventType(
+        key="grade_milestone_achieved",
+        label="A grade milestone was reached",
+        description=(
+            "A player has passed a milestone within one grade: 50 matches in "
+            "1st Grade, 1,000 runs in B Grade, and so on. Sent once per milestone, "
+            "when the scorecard carrying it lands. A player who has only ever "
+            "played one grade is left out, since their grade total is their "
+            "career total and that is already announced."
+        ),
+        category="stats",
+    ),
+    EventType(
+        key="grade_milestone_upcoming",
+        label="A grade milestone is coming up",
+        description=(
+            "A player still turning out in a grade is within reach of their next "
+            "milestone in it. Announced once per milestone."
+        ),
+        category="stats",
+    ),
     # ── People and compliance ───────────────────────────────────────────────
     EventType(
         key="qualification_expiring",
@@ -139,8 +160,11 @@ EVENT_TYPES: tuple[EventType, ...] = (
         description=(
             "A volunteer's or official's Working With Children check, RSA, first "
             "aid certificate or coaching accreditation is close to its expiry "
-            "date — or has already passed it. One notice per certificate, so a "
-            "renewal is chased rather than nagged."
+            "date, or has already passed it. Up to three notices per "
+            "certificate: when it enters the notice period, a final reminder "
+            "close to the date, and the day it lapses. A certificate that has "
+            "been renewed, or belongs to someone no longer at the club, is not "
+            "raised."
         ),
         category="people",
         severity="warning",
@@ -155,6 +179,26 @@ EVENT_TYPES: tuple[EventType, ...] = (
                     "deliberately generous."
                 ),
                 default=60, minimum=1, maximum=365,
+            ),
+            ConfigField(
+                key="final_days",
+                label="Final reminder",
+                hint=(
+                    "A second notice this close to the expiry date, for a renewal "
+                    "that has not happened yet. Set to 0 for no final reminder."
+                ),
+                default=14, minimum=0, maximum=180,
+            ),
+            ConfigField(
+                key="lapsed_days",
+                label="Lapsed certificates",
+                hint=(
+                    "How long after a certificate lapses it is still worth raising. "
+                    "Older ones are usually people who have moved on, and a first "
+                    "check of the club's records should not bury this week's "
+                    "renewals under them."
+                ),
+                default=90, minimum=1, maximum=3650,
             ),
         ),
     ),

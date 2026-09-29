@@ -18,7 +18,7 @@ from decimal import Decimal
 from difflib import SequenceMatcher
 from typing import Optional
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
 
 from app.models.db import (
     async_session_maker,
@@ -321,6 +321,32 @@ async def member_financial_snapshot(session, organisation_id, member_id, season_
     }
 
 
+async def _football_appearances(session, game_ids) -> list:
+    """Who played in these games on BetterFootball, where nothing writes
+    ``game_appearances``: the match record is ``afl_player_game_lines``.
+
+    Only a football database has that table, so on BetterCricket this is one
+    catalogue lookup that answers "no" and returns nothing. Lines are stored
+    for BOTH sides of a game, so only the side ``afl_game_details.our_side``
+    names is read; the caller's org filter on the player is kept as well.
+    """
+    exists = (await session.execute(
+        text("SELECT to_regclass('afl_player_game_lines') IS NOT NULL")
+    )).scalar()
+    if not exists or not game_ids:
+        return []
+    rows = await session.execute(text("""
+        SELECT DISTINCT l.game_id, l.player_id
+          FROM afl_player_game_lines l
+          JOIN afl_game_details d ON d.game_id = l.game_id
+         WHERE l.game_id = ANY(:ids)
+           AND l.side = d.our_side
+           AND l.player_id IS NOT NULL
+    """), {"ids": list(game_ids)})
+    from types import SimpleNamespace
+    return [SimpleNamespace(game_id=r[0], player_id=r[1]) for r in rows.fetchall()]
+
+
 async def recompute_fee_match_days(organisation_id: str, season_id: str | None = None) -> dict:
     """Rebuild auto-derived match-day rows for one season.
 
@@ -389,6 +415,10 @@ async def recompute_fee_match_days(organisation_id: str, season_id: str | None =
                 select(GameAppearance).where(GameAppearance.game_id.in_(game_ids))
             )
         ).scalars().all()
+        # One row per (game, player) whichever table it came from, or a game
+        # read from both would be charged twice.
+        appearances = list({(a.game_id, a.player_id): a for a in (
+            list(appearances) + await _football_appearances(session, game_ids))}.values())
 
         appearing_ids = {a.player_id for a in appearances}
         players = {

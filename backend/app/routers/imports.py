@@ -240,6 +240,22 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
     seasons = await _org_seasons(db, org_id)
     grade_options = await _org_grade_options(db, org_id) if grade_col else []
     pmatch = ingest.match_players(names, players)
+    # A short form of a club player's first name ("Steve" for "Steven") is
+    # proposed and pre-selected, never written silently — import_ingest's note
+    # on short forms says why each guard is there.
+    suggestions = ingest.short_form_suggestions(names, players, pmatch)
+    if suggestions:
+        years_by_name: dict = {}
+        if season_col:
+            for r in req.rows:
+                nm = row_name(r)
+                if nm in suggestions:
+                    years_by_name.setdefault(nm, set()).update(
+                        ingest._season_years(str(r.get(season_col, ""))))
+        ingest.apply_short_form_suggestions(
+            pmatch, suggestions, req.player_overrides,
+            {n: (min(v), max(v)) for n, v in years_by_name.items() if v},
+            await recon.career_years(db, org_id, [s["player_id"] for s in suggestions.values()]))
     _apply_player_overrides(pmatch, req.player_overrides)
     smatch = ingest.match_seasons(labels, seasons) if season_col else {}
     _apply_season_overrides(smatch, req.season_overrides)
@@ -253,7 +269,7 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
     games_col = _col(req.mapping, "games_played")
     sheet_runs_col = _col(req.mapping, "batting_runs")
     sheet_wkts_col = _col(req.mapping, "bowling_wickets")
-    need_sheet = {n for n, m in pmatch.items() if m.get("status") in ("fuzzy", "ambiguous", "none")}
+    need_sheet = {n for n, m in pmatch.items() if m.get("status") in ("fuzzy", "ambiguous", "none", "suggested")}
     sheet_by_name: dict = {}
 
     is_season = req.granularity == "season" and bool(season_col)
@@ -316,11 +332,25 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
     # a grade-labelled group's "what GR already has" must be that grade's own
     # coverage, not the player's whole cross-grade history, or the preview
     # would show a residual the commit wouldn't actually produce.
+    # A sheet naming several teams is the players' whole book and is compared
+    # against their whole GR record (recon.is_team_labelled) — the same call
+    # the commit makes, or the preview would promise figures the commit won't
+    # write. The club's EARLIER uploads count too, since the commit reconciles
+    # every imported row the club holds, not just this sheet's.
+    prior_labels = (await db.execute(
+        select(ImportedStat.grade_label).where(ImportedStat.organisation_id == org_id).distinct()
+    )).scalars().all()
+    team_labelled = recon.is_team_labelled(
+        [recon._grade_key(g) for g in prior_labels]
+        + [recon._grade_key(it.get("grade_label"))
+           for its in list(items_by_player.values()) + list(new_items_by_name.values()) for it in its]
+    )
     items_by_player_grade: dict = {}
     for pid_str, items in items_by_player.items():
         for it in items:
-            grade = recon._grade_key(it.get("grade_label"))
+            grade = None if team_labelled else recon._grade_key(it.get("grade_label"))
             items_by_player_grade.setdefault((pid_str, grade), []).append(it)
+    year_by_season = await recon.season_years(db, org_id)
 
     ungraded_pids = [uuid.UUID(pid) for pid, grade in items_by_player_grade if grade is None]
     grade_labels = sorted({grade for _pid, grade in items_by_player_grade if grade is not None})
@@ -336,7 +366,8 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
         gr_pool = gr_by_grade[grade] if grade is not None else gr_by_player
         gr = gr_pool.get(uuid.UUID(pid_str), {"season_ids": set(), "totals": None})
         gr_tot = gr["totals"] if gr["totals"] is not None else recon._blank()
-        s = recon.summarize(club, gr_tot, import_seasons, gr["season_ids"])
+        covered = gr["season_ids"] if grade is not None else recon.covered_by_year(gr["season_ids"], year_by_season)
+        s = recon.summarize(club, gr_tot, import_seasons, covered)
         agg = preview_by_player.setdefault(pid_str, {
             "player_id": pid_str, "player_name": name_by_pid.get(pid_str), "new": False,
             "club_games": 0, "club_runs": 0, "gr_games": 0, "gr_runs": 0,

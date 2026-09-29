@@ -7,7 +7,7 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
-from app.models.db import Game, Grade, Season, Organisation, BattingInnings, BowlingSpell, FieldingStat, Player, ManualGame, ManualBattingInnings, ManualBowlingSpell, ManualFieldingStat, get_db
+from app.models.db import Game, Grade, Season, Organisation, BattingInnings, BowlingSpell, FieldingStat, Player, ManualGame, ManualBattingInnings, ManualBowlingSpell, ManualFieldingStat, ManualInnings, get_db
 from app.services import dismissal, grade_scope
 from app.services.aggregations import get_game_fall_of_wickets, get_game_partnerships
 from app.services.sync import _caught_by_keeper, _innings_keeper_names
@@ -55,13 +55,25 @@ async def _fetch_manual_games_as_list(
     if finals_only:
         q = q.where(ManualGame.is_final.is_(True))
     rows = await db.execute(q)
+    rows = rows.all()
+    # A scorebook import names its opposition and leaves home/away blank
+    # (the book never recorded which was which), so a blank pair is named
+    # from the club and its opposition rather than listed as nothing at all.
+    # Same rule get_org_results and get_scorecard apply.
+    org_name = None
+    if any(not g.home_team and not g.away_team and g.opposition for g, _, _ in rows):
+        org_name = await db.scalar(select(Organisation.name).where(Organisation.id == org_id))
     out = []
-    for game, grade, season in rows.all():
+    for game, grade, season in rows:
+        home, away, known = game.home_team, game.away_team, True
+        if not home and not away and game.opposition:
+            home, away, known = (org_name or "Our team"), game.opposition, False
         out.append({
             "id": str(game.id),
             "played_at": game.played_at.isoformat() if game.played_at else None,
-            "home_team": game.home_team,
-            "away_team": game.away_team,
+            "home_team": home,
+            "away_team": away,
+            "home_away_known": known,
             "result": game.result,
             "winning_team": game.winning_team,
             "grade": ({"id": str(grade.id), "name": grade.display_name, "raw_name": grade.name}
@@ -487,8 +499,16 @@ def _manual_opp_from_payload(payload: dict, innings_totals: dict) -> tuple[list[
         if inn.get("batting_team"):
             meta["batting_team"] = inn["batting_team"]
         extras = inn.get("extras") or {}
-        if extras.get("total") is not None:
-            meta["extras"] = extras["total"]
+        # Effective extras: the recorded total, else the sum of the itemised
+        # parts — the same rule scorecard_ocr's reconcile and the hand-entry
+        # path (`_merge_manual_innings`) use, so the value subtracted below
+        # matches what the frontend renders in the extras row.
+        ex_total = extras.get("total")
+        if ex_total is None:
+            _parts = [extras.get(k) for k in ("byes", "leg_byes", "wides", "no_balls", "penalty")]
+            ex_total = sum(p or 0 for p in _parts) if any(p is not None for p in _parts) else None
+        if ex_total is not None:
+            meta["extras"] = ex_total
         # Extras breakdown + innings overs from the uploaded card. scorecard_ocr
         # stores byes/leg_byes/wides/no_balls/penalty per innings (note the
         # singular `penalty` key here — normalise it to the `penalties` the GR
@@ -508,7 +528,12 @@ def _manual_opp_from_payload(payload: dict, innings_totals: dict) -> tuple[list[
             # Opposition batted → their batters are the opp card; the bowling rows in
             # this innings are OURS (already in bowling_flat).
             if inn.get("total_runs") is not None:
-                meta["runs"] = inn["total_runs"]
+                # total_runs is the FULL innings total (bat runs + extras).
+                # Store bat-only so the frontend's `runs + extras` reconstructs
+                # it exactly rather than double-counting the extras (the v8.60.1
+                # contract; mirrors `_merge_manual_innings`).
+                extras_now = meta.get("extras") or 0
+                meta["runs"] = max(0, inn["total_runs"] - extras_now)
             if inn.get("total_wickets") is not None:
                 meta["wickets"] = inn["total_wickets"]
             for b in (inn.get("batting") or []):
@@ -542,6 +567,55 @@ def _manual_opp_from_payload(payload: dict, innings_totals: dict) -> tuple[list[
                     "economy": None,
                 })
     return opp_batting, opp_bowling
+
+
+def _merge_manual_innings(rows, innings_totals: dict, our_name: Optional[str], opp_name: Optional[str]) -> None:
+    """Fold a hand-entered game's `manual_innings` rows into innings_totals.
+
+    Covers the three hand-entry additions (migration 310): the innings side
+    label, per-innings extras, and the opposition innings' own total. Disjoint
+    from `_manual_opp_from_payload` by construction — a photo upload has no
+    manual_innings rows and a hand-entered game has no extracted_payload — so
+    the two never both fire on one game.
+
+    The frontend renders an innings as `innings_totals.runs + extras`, so a
+    recorded FULL total is stored bat-only (total − extras) to keep the extras
+    from being counted twice; `wickets` is read directly when `runs` is set.
+    """
+    for mi in rows:
+        n = mi.innings_number or 1
+        meta = innings_totals.setdefault(n, {"runs": 0, "wickets": 0, "extras": 0, "team": None})
+
+        if mi.batting_side == "us" and our_name:
+            meta["batting_team"] = our_name
+        elif mi.batting_side == "opposition" and opp_name:
+            meta["batting_team"] = opp_name
+
+        # Extras: itemised parts win; else a single recorded total; else keep
+        # whatever the base loop derived from our bowlers' wides + no-balls.
+        itemised = [mi.byes, mi.leg_byes, mi.wides, mi.no_balls, mi.penalty]
+        if any(v is not None for v in itemised):
+            meta["extras"] = sum(v or 0 for v in itemised)
+            meta["extras_breakdown"] = {
+                "wides": mi.wides,
+                "no_balls": mi.no_balls,
+                "byes": mi.byes,
+                "leg_byes": mi.leg_byes,
+                "penalties": mi.penalty,
+            }
+        elif mi.extras_total is not None:
+            meta["extras"] = mi.extras_total
+
+        # A recorded innings total (the opposition side, whose batters can't be
+        # itemised here) is the FULL total. Store bat-only so runs + extras
+        # reconstructs it exactly.
+        if mi.total_runs is not None:
+            extras_now = meta.get("extras") or 0
+            meta["runs"] = max(0, mi.total_runs - extras_now)
+        if mi.total_wickets is not None:
+            meta["wickets"] = mi.total_wickets
+        if mi.overs is not None:
+            meta["overs"] = float(mi.overs)
 
 
 @router.get("/{game_id}/scorecard")
@@ -607,6 +681,16 @@ async def get_scorecard(
         .where((FS.manual_game_id if is_manual else FS.game_id) == game.id)
     )
     fielding_rows = fielding_res.all()
+
+    # Per-innings meta for a hand-entered manual game (migration 310): the
+    # innings side label, its extras, and the opposition innings' own total.
+    manual_innings_rows = []
+    if is_manual:
+        manual_innings_rows = (await db.execute(
+            select(ManualInnings)
+            .where(ManualInnings.manual_game_id == game.id)
+            .order_by(ManualInnings.innings_number)
+        )).scalars().all()
 
     # Build innings summary map (totals per innings)
     innings_meta: dict[int, dict] = {}
@@ -1149,6 +1233,13 @@ async def get_scorecard(
     if is_manual and getattr(game, "extracted_payload", None):
         opp_batting, opp_bowling = _manual_opp_from_payload(game.extracted_payload, innings_totals)
 
+    # A hand-entered game records its innings side / extras / opposition totals
+    # in manual_innings instead (a photo upload has none, so these never clash).
+    if is_manual and manual_innings_rows:
+        _our_name = (org.name if org else None) or game.home_team or "Our team"
+        _opp_name = game.opposition or game.away_team or "Opposition"
+        _merge_manual_innings(manual_innings_rows, innings_totals, _our_name, _opp_name)
+
     # A `players` row can exist with an unusable name — a stale placeholder row
     # for a CA-redacted participant (see `_classify_unlinked_name`), created by
     # an earlier sync bug rather than by a real registration. Whatever created
@@ -1167,10 +1258,27 @@ async def get_scorecard(
             _row["player_name"] = "********"
             _row["is_redacted"] = True
 
+    # A match imported from a club's own scorebook often names its opposition
+    # and never says who was home. Rather than a header of two blank sides, name
+    # them from the club and the opposition, and say the home/away is unknown so
+    # the page does not label them HOME and AWAY.
+    home_team, away_team = game.home_team, game.away_team
+    home_away_known = True
+    if is_manual and not home_team and not away_team and getattr(game, "opposition", None):
+        home_team = (org.name if org else None) or "Our team"
+        away_team = game.opposition
+        home_away_known = False
+
     return {
         "id": str(game.id),
-        "home_team": game.home_team,
-        "away_team": game.away_team,
+        "home_team": home_team,
+        "away_team": away_team,
+        "home_away_known": home_away_known,
+        # False only for an imported match whose source recorded both innings
+        # and not the order they were batted in. The page then names each card
+        # by its team rather than "Innings 1" and draws no winning margin, since
+        # a margin in wickets depends on who batted last.
+        "innings_order_known": getattr(game, "innings_order_known", None) is not False,
         "played_at": game.played_at.isoformat() if game.played_at else None,
         "result": game.result,
         "winning_team": game.winning_team,

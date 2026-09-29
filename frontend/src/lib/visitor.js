@@ -14,6 +14,7 @@
 const VISITOR_KEY = 'bs_visitor_id'
 const ATTR_KEY = 'bs_attr'
 const LINK_CODE_KEY = 'bs_link_code'
+const LANDING_KEY = 'bc:landingParams'
 
 function uuid() {
   try {
@@ -170,4 +171,37 @@ export function clearAttribution() {
     sessionStorage.removeItem(LINK_CODE_KEY)
     localStorage.removeItem(ATTR_KEY)
   } catch (_) { /* ignore */ }
+}
+
+// The landing URL's campaign params (utm_* and any ad click id), kept for the
+// rest of the browser SESSION. getAttribution() above is first-touch across
+// every visit (localStorage); this is "the click that started THIS visit",
+// which is what survives the paid funnel's client-side hops (ad -> /trial ->
+// search -> a club's dashboard -> the signup modal) once the query string has
+// gone from the address bar. Written once per session, at the first URL that
+// carries a signal, and never overwritten by a later untagged page.
+const LANDING_PARAM_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'utm_id', 'fbclid', 'gclid', 'igshid']
+
+export function rememberLandingParams() {
+  try {
+    if (sessionStorage.getItem(LANDING_KEY)) return
+    const params = new URLSearchParams(window.location.search || '')
+    const found = {}
+    for (const k of LANDING_PARAM_KEYS) {
+      const v = params.get(k)
+      if (v) found[k] = v.slice(0, 300)
+    }
+    if (!Object.keys(found).length) return
+    found.captured_at = Date.now()
+    found.landing_path = window.location.pathname || '/'
+    sessionStorage.setItem(LANDING_KEY, JSON.stringify(found))
+  } catch (_) { /* storage blocked: the address bar is all we have */ }
+}
+
+export function getLandingParams() {
+  try {
+    return JSON.parse(sessionStorage.getItem(LANDING_KEY) || 'null')
+  } catch (_) {
+    return null
+  }
 }

@@ -66,15 +66,21 @@ def _ctx_scope(ctx: dict):
     return scope if scope is not None and getattr(scope, "active", False) else None
 
 
-def _scope_clause_for_join(scope, column: str, params: dict) -> str:
+def _scope_clause_for_join(scope, column: str, params: dict,
+                           label_column: str | None = None) -> str:
     """An aggregate-kind scope condition (leading AND), bound into `params`.
 
     For the two family targets, which sum `player_season_stats` directly and so
     have no game to read a format from. Returns "" when there is no scope.
+
+    `label_column` is the residual's `grade_label` (an import row has one where
+    it has no grade_id), so a category filter judges it by that label instead
+    of keeping every import residual under every category — passed only where
+    the column read is `v_effective_player_season_stats`, never a games alias.
     """
     if not scope:
         return ""
-    clause = scope.clause(column, "aggregate")
+    clause = scope.clause(column, "aggregate", label_column=label_column)
     if clause:
         scope.bind(params)
     return clause
@@ -369,6 +375,44 @@ _RESIDUAL_PLAYER_FILTERS = {
 }
 
 
+# ─── One player ────────────────────────────────────────────────────────────────
+#
+# `player_id` narrows a table to one player. It is deliberately NOT a
+# PLAYER_CONTEXT_FILTERS entry: every entry there switches player_career onto
+# the live per-innings path (needs_live), which counts a career from the
+# scorecards and so reads differently from the same player's row on the
+# unfiltered table. A player filter must never change the player's figures,
+# only which rows are listed, so it is applied as a plain restriction on the
+# finished rows instead — the same row the unfiltered table shows, alone.
+
+def _context_player_id(context: dict | None) -> str | None:
+    return _coerce_value("uuid", (context or {}).get("player_id"))
+
+
+def _with_player_filter(where_sql: str, context: dict | None, params: dict, clause: str) -> str:
+    """AND a one-player restriction onto a target's final WHERE. `clause` is
+    written against the finished rows and binds :ctx_player_id (text)."""
+    pid = _context_player_id(context)
+    if not pid:
+        return where_sql
+    params["ctx_player_id"] = pid
+    return f"{where_sql} AND ({clause})" if where_sql else f"WHERE ({clause})"
+
+
+_PLAYER_ROW_CLAUSE = "player_id = :ctx_player_id"
+_PARTNERSHIP_PLAYER_CLAUSE = "(batter1_id = :ctx_player_id OR batter2_id = :ctx_player_id)"
+# A match "this player played in": any of the four sources that put a player
+# on a scorecard, the same union _scoped_games_played reads. Manual games carry
+# no game_appearances row, which is why the scorecard tables are unioned in.
+_MATCH_PLAYER_CLAUSE = (
+    "game_id IN ("
+    "SELECT ga.game_id::text FROM game_appearances ga WHERE ga.player_id = CAST(:ctx_player_id AS UUID) "
+    "UNION SELECT bi.game_id::text FROM v_effective_batting_innings bi WHERE bi.player_id = CAST(:ctx_player_id AS UUID) "
+    "UNION SELECT bs.game_id::text FROM v_effective_bowling_spells bs WHERE bs.player_id = CAST(:ctx_player_id AS UUID) "
+    "UNION SELECT fs.game_id::text FROM v_effective_fielding_stats fs WHERE fs.player_id = CAST(:ctx_player_id AS UUID))"
+)
+
+
 def _residual_disqualified(context: dict, ic: list[str]) -> bool:
     """True when a filter is active that a residual (no-per-game-data) row
     simply cannot be tested against — see the block comment above."""
@@ -546,7 +590,7 @@ def _residual_scope_clause(context: dict, params: dict, prefix: str) -> str:
     # category-only scope still keeps residuals, per _RESIDUAL_SOURCES.
     scope = _ctx_scope(context)
     if scope:
-        frag = _scope_fragment(scope.clause("pss.grade_id", "aggregate"))
+        frag = _scope_fragment(scope.clause("pss.grade_id", "aggregate", label_column="pss.grade_label"))
         if frag:
             clauses.append(frag)
             scope.bind(params)
@@ -1174,8 +1218,9 @@ def _player_agg_innings_cte(
     universe = _game_universe_sql(ctx_clauses)
     innings_extra = (" AND " + " AND ".join(innings_clauses)) if innings_clauses else ""
     player_extra = (" AND " + " AND ".join(player_clauses)) if player_clauses else ""
-    # The alias is `gap` in the appear CTE below, which is the row this tests.
-    played_clause = appearance_counts_as_match("gap")
+    # The roster arm of the appear CTE below is aliased `gap0`, and that
+    # arm is the only one the called-off rule applies to.
+    played_clause_roster = appearance_counts_as_match("gap0")
     # gap LEFT JOIN exposes this player's per-game appearance row so the
     # captain_only / keeper_only filters can apply at the right scope.
     return f"""
@@ -1250,20 +1295,48 @@ def _player_agg_innings_cte(
             GROUP BY {group_cols}
         ),
         appear AS (
-            -- This CTE is the ONLY source of StatLab's `matches`, so the
-            -- called-off rule has to live here as well as in
-            -- v_effective_player_season_stats. Without it a washout a player
-            -- was named in counts here while the same player's season row on
-            -- every other screen has it netted off, and StatLab reads as
-            -- broken. See services/game_status.py.
+            -- This CTE is the ONLY source of StatLab's `matches`, so it has to
+            -- count a match wherever the player has ANY row in it — a batting
+            -- innings, a bowling spell, a fielding row, or a bare roster
+            -- appearance — the same four sources the profile's own MATCHES
+            -- figure unions (aggregations._scoped_games_played). It used to
+            -- read `game_appearances` alone, and an imported match (a club's
+            -- own archive, a CricketStatz history) never has one of those:
+            -- every one of its innings counted here while the match itself
+            -- did not, so a player with a long imported career read far more
+            -- innings than matches. Reported off an A-grade summary as five
+            -- players "with a lot more innings than games played".
+            --
+            -- The called-off rule (services/game_status.py) lives on the
+            -- roster arm only: a game somebody recorded something in was
+            -- played, whatever its status says. `gap` is joined on every arm
+            -- so the captain_only / keeper_only filters apply to each.
             SELECT
                 {select_cols}
                 COUNT(DISTINCT gu.game_id) AS matches
-            FROM game_universe gu
-            JOIN game_appearances gap ON gap.game_id = gu.game_id
-            JOIN players p ON p.id = gap.player_id
+            FROM (
+                SELECT gu.game_id, bi.player_id
+                FROM game_universe gu
+                JOIN v_effective_batting_innings bi ON bi.game_id = gu.game_id
+                UNION
+                SELECT gu.game_id, bs.player_id
+                FROM game_universe gu
+                JOIN v_effective_bowling_spells bs ON bs.game_id = gu.game_id
+                UNION
+                SELECT gu.game_id, fs.player_id
+                FROM game_universe gu
+                JOIN v_effective_fielding_stats fs ON fs.game_id = gu.game_id
+                WHERE fs.player_id IS NOT NULL
+                UNION
+                SELECT gu.game_id, gap0.player_id
+                FROM game_universe gu
+                JOIN game_appearances gap0 ON gap0.game_id = gu.game_id
+                WHERE {played_clause_roster}
+            ) pg
+            JOIN game_universe gu ON gu.game_id = pg.game_id
+            JOIN players p ON p.id = pg.player_id
+            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id {player_extra}
-              AND {played_clause}
             GROUP BY {group_cols}
         )
     """
@@ -1288,6 +1361,7 @@ async def query_player_career(
     metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, metrics)
     params = {"org_id": org_id, "limit": limit, **mp, **ip, **pp, **metric_params}
     where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
+    where_sql = _with_player_filter(where_sql, context, params, _PLAYER_ROW_CLAUSE)
     needs_live = used_ctx or bool(ic) or bool(pc)
 
     if needs_live:
@@ -1489,6 +1563,7 @@ async def query_player_season(
     metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, metrics)
     params = {"org_id": org_id, "limit": limit, **mp, **ip, **pp, **metric_params}
     where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
+    where_sql = _with_player_filter(where_sql, context, params, _PLAYER_ROW_CLAUSE)
     needs_live = used_ctx or bool(ic) or bool(pc)
 
     if needs_live:
@@ -1716,6 +1791,7 @@ async def query_player_grade(
     metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, PLAYER_AGG_METRICS)
     params = {"org_id": org_id, "limit": limit, **mp, **ip, **pp, **metric_params}
     where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
+    where_sql = _with_player_filter(where_sql, context, params, _PLAYER_ROW_CLAUSE)
 
     cte = _player_agg_innings_cte(
         mc, ic, pc,
@@ -1956,7 +2032,7 @@ async def query_family_career(
     # season total. In the join condition, not the WHERE — a family whose every
     # row is out of scope should still list, at zero, rather than disappear.
     scope = _ctx_scope(context)
-    scope_clause = _scope_clause_for_join(scope, "pss.grade_id", params)
+    scope_clause = _scope_clause_for_join(scope, "pss.grade_id", params, "pss.grade_label")
     covered = _family_covered_ctes(scope, params, by_season=False)
     sql = f"""
         WITH {covered},
@@ -2011,7 +2087,7 @@ async def query_family_season(
 
     season_filter = _pss_season_filter(context, params, "ctx_fs_")
     # Same aggregate-only scope as family_career above — see its note.
-    scope_clause = _scope_clause_for_join(_ctx_scope(context), "pss.grade_id", params)
+    scope_clause = _scope_clause_for_join(_ctx_scope(context), "pss.grade_id", params, "pss.grade_label")
     where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
 
     select_cols = _family_agg_select_cols()
@@ -2206,6 +2282,7 @@ async def query_innings_list(
     metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, INNINGS_METRICS)
     params = {"org_id": org_id, "limit": limit, **mp, **ip, **pp, **metric_params}
     where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
+    where_sql = _with_player_filter(where_sql, context, params, _PLAYER_ROW_CLAUSE)
     innings_extra = (" AND " + " AND ".join(ic)) if ic else ""
     player_extra = (" AND " + " AND ".join(pc)) if pc else ""
 
@@ -2277,6 +2354,7 @@ async def query_spell_list(
     metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, SPELL_METRICS)
     params = {"org_id": org_id, "limit": limit, **mp, **pp, **metric_params}
     where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
+    where_sql = _with_player_filter(where_sql, context, params, _PLAYER_ROW_CLAUSE)
     player_extra = (" AND " + " AND ".join(pc)) if pc else ""
 
     universe = _game_universe_sql(mc)
@@ -2343,6 +2421,7 @@ async def query_match_list(
     metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, MATCH_METRICS)
     params = {"org_id": org_id, "limit": limit, **mp, **pp, **metric_params}
     where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
+    where_sql = _with_player_filter(where_sql, context, params, _MATCH_PLAYER_CLAUSE)
 
     universe = _game_universe_sql(mc)
     sql = f"""
@@ -2589,6 +2668,7 @@ async def query_partnership_list(
     metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, PARTNERSHIP_METRICS)
     params = {"org_id": org_id, "limit": limit, **mp, **pp, **metric_params}
     where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
+    where_sql = _with_player_filter(where_sql, context, params, _PARTNERSHIP_PLAYER_CLAUSE)
 
     universe = _game_universe_sql(mc)
     sql = f"""
@@ -4822,7 +4902,7 @@ async def derived_most_minutes_in_season(
     # targets this one can only answer the aggregate-kind scope: a category
     # exclusion lands on the rows carrying a grade, and a match type empties it
     # rather than filing a season total under a format it can't know.
-    scope_clause = _scope_clause_for_join(_ctx_scope(context), "pss.grade_id", params)
+    scope_clause = _scope_clause_for_join(_ctx_scope(context), "pss.grade_id", params, "pss.grade_label")
     sql = f"""
         SELECT
             p.id::text                                   AS player_id,
