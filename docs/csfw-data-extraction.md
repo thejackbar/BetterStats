@@ -882,11 +882,12 @@ that changed, and what it taught:
   which reads as broken data. It compares date and opponent now, which is the
   fixture's real identity, and the team number is left out because the only
   thing that could translate it is the map this conversion derives.
-- **Verification:** `tools/verify_shoalwater_conversion.py <folder>`, 30 checks
+- **Verification:** `tools/verify_shoalwater_conversion.py [folder]` (defaults to
+  the tracked `data/shoalwater-av-2026-09`), 30 checks
   over the derived grade map, the match types, the format column (against the
   app's own `format_from_match_type` rather than a retyped list), the club's
   own 914-match count and the no-scorebook side. Run it with a control: against
-  the pre-rename archive 11 fail, naming the unmapped team indexes, the three
+  the pre-rename archive (`data/shoalwater-av`, gitignored) 11 fail, naming the unmapped team indexes, the three
   retired match-type codes and the B grade two-day match.
 - **A check that crashes on a missing file is not a control run**, hit again -
   the C2 text reports do not exist in the older archive, so the reader returns

@@ -46,8 +46,10 @@ from _view_ddl import view_statements
 from app.models.db import (
     Base, Grade, ManualBowlingSpell, ManualGame, Organisation, Player, Season, User,
 )
-from app.routers.games import get_scorecard
+from app.routers.games import get_scorecard, list_games
+from app.services.aggregations import get_player_batting_innings
 from app.routers.manual_entries import GAME_CSV_COLUMNS, import_manual_games
+from app.routers.organisations import get_org_results
 from app.routers.records import get_records
 from app.services.competition_ddl import STATEMENTS as COMP_DDL
 from app.services.superseded_ddl import STATEMENTS as SUPERSEDED_DDL
@@ -374,6 +376,36 @@ async def main() -> None:
           {r.get("innings_number") for r in card.get("bowling") or []} == {2})
     check("the partnerships show on the match page", len(card.get("partnerships") or []) == 3)
     check("and the fall of wickets", len(card.get("fall_of_wickets") or []) == 2)
+
+    print("\n-- THE GAMES LIST NAMES BOTH SIDES TOO --")
+    # The match page naming the opposition is not enough on its own: the Games
+    # page and the Team pages read team names off the results list, and the
+    # scorebook leaves home/away blank, so without this every imported match
+    # listed as nothing versus nothing.
+    async with Session() as s:
+        res = await get_org_results(str(ORG), season_id=None, grade_id=None, finals_only=False,
+                                    categories=None, formats=None, competitions=None, db=s)
+        lst = await list_games(str(ORG), season_id=None, grade_id=None, limit=50,
+                               finals_only=None, categories=None, formats=None,
+                               competitions=None, db=s)
+    rrow = next((r for r in res if (r.get("played_at") or "").startswith("1999-11-06")), {})
+    check("the results list names the club and its opposition",
+          (rrow.get("home_team"), rrow.get("away_team")) == ("Shoalwater Bay", "Rockingham"),
+          str(rrow)[:200])
+    check("and says the order is not a recorded home/away",
+          rrow.get("home_away_known") is False, str(rrow.get("home_away_known")))
+    games = lst.get("games") if isinstance(lst, dict) else lst
+    lrow = next((r for r in (games or []) if (r.get("played_at") or "").startswith("1999-11-06")), {})
+    check("so does the games list",
+          (lrow.get("home_team"), lrow.get("away_team")) == ("Shoalwater Bay", "Rockingham")
+          and lrow.get("home_away_known") is False, str(lrow)[:200])
+
+    async with Session() as s:
+        hist = await get_player_batting_innings(s, str(PIDS[NAMES[0]]))
+    hrow = next((r for r in (hist or []) if (r.get("played_at") or "").startswith("1999-11-06")), {})
+    check("and the player's own innings history",
+          (hrow.get("home_team"), hrow.get("away_team")) == ("Shoalwater Bay", "Rockingham"),
+          str({k: hrow.get(k) for k in ("home_team", "away_team", "played_at")}))
 
     print("\n-- THE CLUB'S RECORDS --")
     async with Session() as s:

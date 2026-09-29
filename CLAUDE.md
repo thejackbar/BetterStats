@@ -39,6 +39,17 @@ for more data; the fix is a re-import of the converted archive.
   stands; the other 28 keep their fall of wickets.
 - **Undo restores them.** `_EXTRA_GAME_CHILDREN` puts the three child tables in
   the edit/delete snapshot, so an undone or restored game keeps them.
+- **THE MATCH PAGE NAMING THE OPPOSITION WAS NOT ENOUGH (v9.97.1).** The
+  Games page, the Team pages and the innings tables on a player's profile read
+  `home_team`/`away_team` straight off `v_effective_games`, and a scorebook
+  import leaves both blank, so every imported match still listed as "— vs —"
+  there. `services/game_sides.sides_sql` is the one rule: a blank pair on a
+  manual game with an opposition is named from the club and its opposition,
+  with `home_away_known=false` on the row. Used by `get_org_results` and the
+  two innings-history queries in `aggregations`; `_fetch_manual_games_as_list`
+  applies it in Python. Found by auditing every reader of the two columns, not
+  by the report, which was about the match page. Suite is 47; a control with
+  the readers reverted fails 4, reporting `home_team: None`.
 - **Verified against a real Postgres** (`verify_scorebook_innings.py`, 43
   checks through the shipped import route, `get_scorecard` and `get_records`:
   the rule on its own, the reported match, a non-reconciling innings refused, an

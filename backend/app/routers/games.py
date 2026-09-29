@@ -55,13 +55,25 @@ async def _fetch_manual_games_as_list(
     if finals_only:
         q = q.where(ManualGame.is_final.is_(True))
     rows = await db.execute(q)
+    rows = rows.all()
+    # A scorebook import names its opposition and leaves home/away blank
+    # (the book never recorded which was which), so a blank pair is named
+    # from the club and its opposition rather than listed as nothing at all.
+    # Same rule get_org_results and get_scorecard apply.
+    org_name = None
+    if any(not g.home_team and not g.away_team and g.opposition for g, _, _ in rows):
+        org_name = await db.scalar(select(Organisation.name).where(Organisation.id == org_id))
     out = []
-    for game, grade, season in rows.all():
+    for game, grade, season in rows:
+        home, away, known = game.home_team, game.away_team, True
+        if not home and not away and game.opposition:
+            home, away, known = (org_name or "Our team"), game.opposition, False
         out.append({
             "id": str(game.id),
             "played_at": game.played_at.isoformat() if game.played_at else None,
-            "home_team": game.home_team,
-            "away_team": game.away_team,
+            "home_team": home,
+            "away_team": away,
+            "home_away_known": known,
             "result": game.result,
             "winning_team": game.winning_team,
             "grade": ({"id": str(grade.id), "name": grade.display_name, "raw_name": grade.name}
