@@ -32,6 +32,32 @@ scheduler = AsyncIOScheduler()
 GROUP_CLUBS_PER_RUN = 40
 
 
+async def pull_club_teasers():
+    """Nightly pull of marketing teaser snapshots for clubs that have not
+    registered (see services/club_teaser.py).
+
+    OFF UNLESS A SUPER ADMIN SETS ``club_teaser_nightly_limit``: this is
+    outbound traffic to Cricket Australia across thousands of clubs, so it is
+    never something a deploy switches on. The operator's Stop switch
+    (``marketing_crawl_control``) halts it between clubs, the same way it halts
+    every other unattended crawl. The initial fill of the whole directory is
+    ``python -m app.scripts.pull_club_teasers all``, so this job is the
+    trickle: new clubs and snapshots that have come due.
+    """
+    from app.services import club_directory, club_teaser, platform_settings as ps
+
+    try:
+        async with async_session_maker() as session:
+            limit = await ps.get_club_teaser_nightly_limit(session)
+        if limit <= 0:
+            return
+        summary = await club_teaser.run_batch(
+            limit, should_stop=club_directory.is_crawl_paused, pause_seconds=0.5)
+        logger.info("Club teaser pull: %s", summary)
+    except Exception:  # noqa: BLE001 - a marketing pass must never break the scheduler
+        logger.exception("Club teaser pull failed")
+
+
 async def group_all_organisations():
     """Fill in the missing grade associations and group them, club by club.
 
@@ -848,6 +874,17 @@ def start_scheduler():
         minute=30,
         timezone=PERTH,
         id="nightly_competition_grouping",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        pull_club_teasers,
+        trigger="cron",
+        hour=3,
+        minute=30,
+        timezone=PERTH,
+        id="nightly_club_teasers",
         replace_existing=True,
         max_instances=1,
         coalesce=True,

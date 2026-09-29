@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 # The whitelist of keys the General Settings UI can set, with validators. Add to this
 # as new settings are introduced.
-_INT_KEYS = {"default_trial_days", "direct_enquiry_hot_days",
+_INT_KEYS = {"default_trial_days", "direct_enquiry_hot_days", "club_teaser_nightly_limit",
              "crm_incremental_sweep_seconds", "crm_global_sweep_minutes",
              "crm_event_stale_hours"}
 
@@ -219,6 +219,18 @@ async def get_direct_enquiry_hot_days(db: AsyncSession) -> int:
         return days if days > 0 else DEFAULT_DIRECT_ENQUIRY_HOT_DAYS
     except (TypeError, ValueError):
         return DEFAULT_DIRECT_ENQUIRY_HOT_DAYS
+
+
+async def get_club_teaser_nightly_limit(db: AsyncSession) -> int:
+    """How many clubs the nightly teaser-snapshot pass may pull from Cricket
+    Australia. UNSET MEANS 0, WHICH MEANS OFF: it is outbound traffic at scale
+    to a third party, so nobody gets it by deploying. Set it from General
+    Settings (or pull by hand with ``app.scripts.pull_club_teasers``)."""
+    settings = await get_settings(db)
+    try:
+        return max(0, int(settings.get("club_teaser_nightly_limit")))
+    except (TypeError, ValueError):
+        return 0
 
 
 async def get_crm_incremental_sweep_seconds(db: AsyncSession) -> int:

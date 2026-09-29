@@ -2541,6 +2541,7 @@ async def get_general_settings(
     return {
         "default_trial_days": await ps.get_default_trial_days(db),
         "direct_enquiry_hot_days": await ps.get_direct_enquiry_hot_days(db),
+        "club_teaser_nightly_limit": await ps.get_club_teaser_nightly_limit(db),
         "self_serve_registration_enabled": await ps.get_self_serve_registration_enabled(db),
         "onboarding_wizard_enabled": await ps.get_onboarding_wizard_enabled(db),
         "trial_nudges_enabled": await ps.get_trial_nudges_enabled(db),
@@ -2557,6 +2558,7 @@ async def get_general_settings(
 class GeneralSettingsUpdate(BaseModel):
     default_trial_days: Optional[int] = None
     direct_enquiry_hot_days: Optional[int] = None
+    club_teaser_nightly_limit: Optional[int] = None
     self_serve_registration_enabled: Optional[bool] = None
     onboarding_wizard_enabled: Optional[bool] = None
     trial_nudges_enabled: Optional[bool] = None
@@ -2620,6 +2622,7 @@ async def patch_general_settings(
     return {
         "default_trial_days": await ps.get_default_trial_days(db),
         "direct_enquiry_hot_days": await ps.get_direct_enquiry_hot_days(db),
+        "club_teaser_nightly_limit": await ps.get_club_teaser_nightly_limit(db),
         "self_serve_registration_enabled": await ps.get_self_serve_registration_enabled(db),
         "onboarding_wizard_enabled": await ps.get_onboarding_wizard_enabled(db),
         "trial_nudges_enabled": await ps.get_trial_nudges_enabled(db),

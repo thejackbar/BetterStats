@@ -282,6 +282,72 @@ short of 200 catches on 201, and J Hind 18 from 3,000 "including junior games".
   notifications 146, manual games import 194, competitions 136, shared
   fixtures 38.
 
+## A teaser snapshot of a club that has not registered (migration 312, Sep 2026)
+
+Asked for as the data half of a marketing campaign: show a prospect their own
+club's dashboard (email image, landing page, the Meta click-through) before
+they have a trial. Pull and re-pull only; the preview page, the email image
+renderer and the match/lineup layer are NOT built yet.
+
+- **IT IS NOT THE SYNC.** The onboarding sync pulls every scorecard a club ever
+  played (thousands of calls). A teaser needs one season, and CA already serves
+  it pre-computed: seasons (1), batting/bowling/fielding for ONE season, teams
+  (1) and one ladder per senior grade. ~15-30 calls a club. Nothing writes
+  `organisations` / `players` / `games`: an unclaimed club must not reach the
+  public site, the sync scheduler or the duplicate checks. The snapshot is one
+  JSON row per Club Directory club (`club_teaser_snapshots`,
+  `services/club_teaser.py`); a claim runs the normal sync and leaves it as
+  history.
+- **JUNIORS ARE DECIDED PER GRADE.** The season aggregate has no grade on a row,
+  so a club with junior grades has stats fetched grade by grade for the SENIOR
+  grades only and merged (`merge_rows`); a junior-only club is `junior_only` and
+  gets no snapshot. A marketing page must not name children, and CA redacts
+  many of their names (`********`, also dropped).
+- **THE NEWEST SEASON OFTEN HAS NO STATS YET** (September). Seasons are probed
+  newest-first, at most `MAX_SEASON_PROBES`, and the first with batting rows is
+  used; `season_pending` marks that a newer one is on the way, which puts the
+  club on the weekly cadence so the new season is noticed within a week.
+- **OUR ROW IN A LADDER IS FOUND BY `owningOrganisation.id`, not by team name.**
+  Reuses `iq._ladder_rows`.
+- **`version` MOVES ONLY WHEN THE CONTENT DOES** (`data_hash`). The email image
+  is rendered by Chromium and stored on the HDD (`/mnt/media`, outside the
+  backup, like the videos), so a weekly re-pull that found nothing must not
+  invalidate it. `image_version` is reserved for that renderer.
+- **THE TOKEN IS MADE ONCE AND NEVER ROTATED BY A REFRESH.** A link already sent
+  in an email has to keep working.
+- **WHEN TO LOOK AGAIN IS DECIDED WHEN THE PULL IS WRITTEN** (`next_pull_at`,
+  indexed): in play 7 days, off season 45, empty 14, junior-only 90, errors
+  1/3/7/14/30 then flat, plus a stable per-club jitter (up to +20%) so a
+  directory seeded in one week does not come due in one week for ever. A failed
+  pull keeps the last good snapshot and only backs off.
+- **WHO IS TARGETED**: `marketing_clubs` kind club, not excluded, not
+  `not_interested`, no `existing_org_id`, a real CA guid (not `manual:`), and no
+  `trial_modules` (a club already in a sales trial has done a trial;
+  `--include-trialists` overrides). Never-pulled first, then clubs with an
+  emailable contact, then longest overdue.
+- **OUTBOUND TRAFFIC IS OFF UNTIL SOMEBODY SETS IT.** The nightly job (03:30
+  Perth) reads `club_teaser_nightly_limit` (General Settings key, unset = 0 =
+  off) and honours the same Stop switch as every other unattended crawl
+  (`marketing_crawl_control`), asked between clubs. The initial fill of the
+  directory is `python -m app.scripts.pull_club_teasers all --limit N --apply`
+  (dry run by default). At ~25 calls a club, 3,500 clubs is ~90k calls.
+- **NOT BUILT**: the `/preview/{token}` page (one click handler that opens the
+  claim prompt for everything), the PNG renderer and its HDD folder, the
+  `{{teaser_url}}` / `{{teaser_image_url}}` merge variables, the match, lineup
+  and scorecard layer (needs a Thursday/Friday refresh once the season starts),
+  and a General Settings input for `club_teaser_nightly_limit`.
+- **Verified against a real Postgres** (`backend/verification/verify_club_teaser.py`,
+  67 checks with a scripted stand-in for CA, so no live call: the DDL three
+  times, the builder, both junior paths, redaction, season probing, ladders,
+  persistence, version-only-on-change, token stability, failure backoff,
+  target selection, the batch runner incl. one club failing and the Stop
+  switch) **with control runs**: service absent is REPORTED; with the change
+  detection and the junior filter neutered, 6 fail. **NOT run against live
+  Cricket Australia**: the real payload shapes for `startDate` on seasons and
+  `statistics` on stat rows are taken from what `sync.py` reads. Dry-run 20
+  directory clubs first and read `api_calls` off the rows before scaling up.
+- **NUMBERED 312 after merging `origin/main`**, which had reached 311.
+
 ## A RE-SOURCED SEASON COUNTS PER MATCH, NOT PER SEASON (migration 309, v9.90.3, Sep 2026)
 
 Reported off Shoalwater Bay after their CSFW archive went in through the CSV

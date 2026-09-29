@@ -4400,6 +4400,12 @@ async def lifespan(app: FastAPI):
                 "services/superseded_ddl.STATEMENTS is applied to this "
                 "database.", _view)
 
+        # Migration 312: club teaser snapshots (marketing previews of a club
+        # that has not registered). Same one-copy rule as the others.
+        from app.services.club_teaser_ddl import STATEMENTS as _TEASER_DDL
+        for _stmt in _TEASER_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 288: configurable club notifications — the switches a club
         # sets, each admin's own opt-out, and the record of what was raised and
         # who was told. Same one-copy rule — this list and alembic's 288 both
