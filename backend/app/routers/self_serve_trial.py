@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.modules import BILLABLE_MODULES, MODULE_CORE
 from app.models.db import (
-    ClubMembership, DiscountCouponRedemption, ModuleActionRequest, Organisation,
+    ClubMembership, OrgModuleSubscription, DiscountCouponRedemption, ModuleActionRequest, Organisation,
     SelfServeAcknowledgement, SelfServeIdempotencyKey, User, get_db,
 )
 from app.routers.auth import require_super_admin
@@ -90,6 +90,36 @@ def _duplicate_club_message(name: str, admin_label: str | None, slug: str | None
     )
 
 
+async def _reclaimable_existing(db: AsyncSession, existing):
+    """``existing`` when a registered club must still be treated as taken, else
+    None. A club a Super Admin has Reset (BetterStats never trialled, nothing
+    paid) with nobody administering it and no Stripe subscription is open to
+    be registered again, so its public page is not the answer. Anything with an
+    admin, a paid module or a subscription stays protected: registering onto
+    that row would hand a stranger somebody else's club."""
+    if existing is None:
+        return None
+    from app.auth.modules import MODULE_CORE, PAID_STATUSES, expand_billing_module
+    if existing.stripe_subscription_id:
+        return existing
+    has_admin = (await db.execute(
+        select(ClubMembership.id).where(
+            ClubMembership.club_id == existing.id, ClubMembership.role == "club_admin",
+        ).limit(1)
+    )).first()
+    if has_admin:
+        return existing
+    rows = (await db.execute(
+        select(OrgModuleSubscription).where(OrgModuleSubscription.organisation_id == existing.id)
+    )).scalars().all()
+    core_keys = set(expand_billing_module(MODULE_CORE))
+    if any(r.status in PAID_STATUSES for r in rows):
+        return existing
+    if any(r.module_key in core_keys and r.trial_started_at is not None for r in rows):
+        return existing
+    return None
+
+
 async def _primary_admin_label(db: AsyncSession, club_id) -> str | None:
     """First name + last-initial for the club's Primary Club Admin (falling
     back to the longest-standing club admin if no primary is set), so the
@@ -148,7 +178,8 @@ async def search_clubs(q: str = "", db: AsyncSession = Depends(get_db)):
     out = []
     for org in results:
         org_id = _parse_uuid(str(org.get("id") or ""))
-        existing = await find_matching_organisation(db, org_id, org.get("name") or "", include_archived=False)
+        existing = await _reclaimable_existing(
+            db, await find_matching_organisation(db, org_id, org.get("name") or "", include_archived=False))
         admin_label = await _primary_admin_label(db, existing.id) if existing else None
         out.append({
             **org,
@@ -259,7 +290,8 @@ async def prepare_club(data: PrepareClubRequest, db: AsyncSession = Depends(get_
         raise HTTPException(status_code=422, detail="Invalid club id — pick a club from the search results")
 
     name = (data.name or "").strip()
-    existing = await find_matching_organisation(db, org_id, name, include_archived=False)
+    existing = await _reclaimable_existing(
+        db, await find_matching_organisation(db, org_id, name, include_archived=False))
     if existing:
         admin_label = await _primary_admin_label(db, existing.id)
         raise HTTPException(status_code=409, detail={
@@ -569,7 +601,8 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
     org_id = _parse_uuid(data.org_id)
     if not org_id:
         raise HTTPException(status_code=422, detail="Invalid club id — pick a club from the search results")
-    dup = await find_matching_organisation(db, org_id, data.name, include_archived=False)
+    dup = await _reclaimable_existing(
+        db, await find_matching_organisation(db, org_id, data.name, include_archived=False))
     if dup:
         admin_label = await _primary_admin_label(db, dup.id)
         raise HTTPException(status_code=409, detail={
