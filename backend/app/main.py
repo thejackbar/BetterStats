@@ -4372,6 +4372,13 @@ async def lifespan(app: FastAPI):
         for _stmt in _ADMIN_BROADCAST_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 313: BetterSocials saved templates, one row each. Same
+        # one-copy rule: this and alembic's 313 both run
+        # services/social_template_ddl.STATEMENTS.
+        from app.services.social_template_ddl import STATEMENTS as _SOCIAL_TEMPLATE_DDL
+        for _stmt in _SOCIAL_TEMPLATE_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 293: a CricketStatz import and a Cricket Australia sync
         # complement each other, so their matches are UNIONED and the
         # duplicates removed per match — `manual_games.superseded_by_game_id`.

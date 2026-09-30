@@ -211,6 +211,15 @@ export const api = {
       })
   },
   deleteSocialMedia: (id) => request(`/admin/social/media/${id}`, { method: 'DELETE' }),
+  // BetterSocials — saved templates, one server row each. Saving a key that
+  // exists updates it in place; import only adds keys the club does not hold.
+  listSocialTemplates: () => request('/admin/social/templates'),
+  saveSocialTemplate: (key, tpl) =>
+    request(`/admin/social/templates/${encodeURIComponent(key)}`, { method: 'PUT', body: JSON.stringify(tpl) }),
+  deleteSocialTemplate: (key) =>
+    request(`/admin/social/templates/${encodeURIComponent(key)}`, { method: 'DELETE' }),
+  importSocialTemplates: (templates) =>
+    request('/admin/social/templates/import', { method: 'POST', body: JSON.stringify({ templates }) }),
   // BetterSocials — brand kit
   getSocialBrandKit: () => request('/admin/social/brand-kit'),
   saveSocialBrandKit: (kit) =>
