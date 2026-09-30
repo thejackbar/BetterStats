@@ -16,6 +16,7 @@ from typing import Optional
 from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config.settings import settings
 from app.models.db import QualificationType, MemberQualification, FeeMember, QualificationRole, ClubRole
 
 # (name, description, validity_months) — validity is a sensible DEFAULT the
@@ -28,6 +29,19 @@ STARTER_TYPES = [
     ("Umpire Accreditation", "Panel/club umpire accreditation.", 12),
     ("Scorer Accreditation", "Club or association scorer accreditation.", None),
 ]
+
+# Football's own set: the same compliance basics, with football's coaching and
+# umpiring accreditations and the trainer's sports first aid it asks of every
+# side. A football database never runs the cricket list.
+if settings.sport == "afl":
+    STARTER_TYPES = [
+        ("Working With Children Check", "State-based child safety clearance.", 60),
+        ("First Aid", "Current first aid certificate.", 36),
+        ("RSA", "Responsible Service of Alcohol certificate.", None),
+        ("Coach Accreditation", "Football coaching accreditation (any level).", None),
+        ("Umpire Accreditation", "Field, boundary or goal umpire accreditation.", 12),
+        ("Sports Trainer", "Level 1 sports trainer or equivalent, for match day.", 36),
+    ]
 
 
 def _type_dict(t: QualificationType) -> dict:

@@ -1,3 +1,4 @@
+import { IS_AFL, PLATFORM_NAME } from '../../../lib/sport'
 import { useState, useEffect } from 'react'
 import { api } from '../../../lib/api'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
@@ -80,7 +81,7 @@ export default function CommsSettings() {
       setReqReason('')
       const fresh = await api.commsGetLimits()
       setLimits(fresh)
-      setMsg({ kind: 'ok', text: 'Request sent to BetterCricket. We\'ll review your sending and lift the limit if all looks healthy.' })
+      setMsg({ kind: 'ok', text: `Request sent to ${PLATFORM_NAME}. We'll review your sending and lift the limit if all looks healthy.` })
     } catch (e) { setMsg({ kind: 'error', text: e.message }) }
     finally { setReqBusy(false) }
   }
@@ -214,9 +215,9 @@ export default function CommsSettings() {
               )}
               <div className="text-pb-faintest text-xs leading-relaxed mb-3">
                 {limits.tier === 'sandbox'
-                  ? `New clubs start with a ${limits.daily_cap}-a-day limit while your sending settles in. Once you've sent cleanly, ask BetterCricket to lift it.`
+                  ? `New clubs start with a ${limits.daily_cap}-a-day limit while your sending settles in. Once you've sent cleanly, ask ${PLATFORM_NAME} to lift it.`
                   : limits.tier === 'suspended'
-                    ? 'Sending is paused because too many emails bounced or were marked as spam. Contact BetterCricket to review and restore it.'
+                    ? `Sending is paused because too many emails bounced or were marked as spam. Contact ${PLATFORM_NAME} to review and restore it.`
                     : 'Anything over the daily limit sends automatically the next day, so nothing is lost.'}
               </div>
 
@@ -228,7 +229,7 @@ export default function CommsSettings() {
                 <div className="border-t pb-hairline-t pt-3">
                   <div className="text-xs text-pb-text font-medium mb-1">Request an upgrade to Production</div>
                   <div className="text-pb-faintest text-xs mb-2 leading-relaxed">
-                    You're on the Sandbox limit ({limits.daily_cap}/day). Ask BetterCricket to move you to
+                    You're on the Sandbox limit ({limits.daily_cap}/day). Ask {PLATFORM_NAME} to move you to
                     the Production limit once your sending has settled in. A note about your club helps us review it.
                   </div>
                   <textarea value={reqReason} onChange={e => setReqReason(e.target.value)} rows={2}
@@ -365,7 +366,7 @@ export default function CommsSettings() {
             contact or postal line here so recipients know who it's from.
           </div>
           <textarea value={footer} onChange={e => setFooter(e.target.value)} rows={3}
-            placeholder={`${s.from_name} Cricket Club\nABN 00 000 000 000 · PO Box 1, Suburb WA 6000`}
+            placeholder={`${s.from_name}${IS_AFL ? ' Football Club' : ' Cricket Club'}\nABN 00 000 000 000 · PO Box 1, Suburb WA 6000`}
             className={INPUT_CLS} />
         </div>
 

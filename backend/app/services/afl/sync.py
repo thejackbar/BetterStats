@@ -800,6 +800,17 @@ async def sync_organisation(org_id: uuid.UUID,
         except Exception:  # noqa: BLE001
             logger.warning("fee match-day recompute failed for org %s", org_pk, exc_info=True)
 
+        # BetterSelect: turn the games still to come into fixtures, so the
+        # selection board and the availability link see this week's draw.
+        # Best-effort for the same reason as the fees step.
+        try:
+            from app.services.afl.select import sync_fixtures
+            async with async_session_maker() as fx_session:
+                stats["fixtures"] = (await sync_fixtures(fx_session, org_pk)).get("fixtures", 0)
+                await fx_session.commit()
+        except Exception:  # noqa: BLE001
+            logger.warning("fixture sync failed for org %s", org_pk, exc_info=True)
+
         _progress(stats, "Done", 100)
         if owns_run:
             await finish_sync_run(run_id, stats)

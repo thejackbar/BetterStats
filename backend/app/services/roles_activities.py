@@ -17,6 +17,7 @@ from typing import Optional
 from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config.settings import settings
 from app.models.db import (
     ClubRoleType, ClubRole, ClubActivityType, ClubActivity,
 )
@@ -88,6 +89,36 @@ STARTER_COMMITTEE_ROLES = [
     ("Sponsorship Manager", "Sponsor relationships and obligations."),
     ("Social Media Officer", "Club social media and website content."),
 ]
+
+# Football names the same roles for its own game: field, boundary and goal
+# umpires rather than umpires and scorers, a runner and a water carrier, the
+# timekeeper, and the portfolio vice presidents by football rather than cricket.
+if settings.sport == "afl":
+    STARTER_ROLE_TYPES = [
+        (n, "Formal match roles — field, boundary and goal umpires, and the timekeeper.") if n == "Official"
+        else (n, "Ground, lights and facility upkeep.") if n == "Ground Staff" else (n, d)
+        for n, d in STARTER_ROLE_TYPES
+    ]
+    STARTER_ROLES = [
+        ("Head Coach", "Coach"), ("Assistant Coach", "Coach"), ("Junior Coach", "Coach"),
+        ("Groundskeeper", "Ground Staff"), ("Canteen Manager", "Food & Beverage"),
+        ("Bar Steward", "Food & Beverage"), ("Goal Umpire", "Official"),
+        ("Boundary Umpire", "Official"), ("Timekeeper", "Official"),
+        ("Team Manager", "Other"), ("Runner", "Other"), ("Water Carrier", "Other"),
+        ("Sports Trainer", "Other"), ("Photographer", "Other"),
+    ]
+    _OFFICE_BEARER_TITLES = {
+        "president", "vice president", "treasurer", "secretary",
+        "vice president - men's football", "vice president - women's football",
+        "vice president - junior football", "operations",
+    }
+    STARTER_COMMITTEE_ROLES = [
+        (t.replace("Cricket", "Football"), d.replace("cricket", "football")) if "Cricket" in t
+        else (t, "Ground preparation, lights and maintenance liaison.") if t == "Grounds Manager"
+        else (t, "Club kit, footballs, training equipment.") if t == "Equipment Manager"
+        else (t, d)
+        for t, d in STARTER_COMMITTEE_ROLES
+    ]
 
 STARTER_ACTIVITY_TYPES = [
     ("Committee & Administration", "Meetings, paperwork, governance."),

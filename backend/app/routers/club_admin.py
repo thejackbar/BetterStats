@@ -3347,9 +3347,17 @@ async def remove_module_subscription(
     org = await _load_club_with_subs(db, club_id)
     if not mod_subs.remove_billing(org, module_key):
         raise HTTPException(status_code=404, detail="Module not held by this club")
-    from app.auth.modules import MODULE_CORE as _CORE
+    from app.auth.modules import MODULE_CORE as _CORE, STATUS_CANCELLED
     if module_key == _CORE:
-        _cascade_core_to_addons(org, now=_datetime.now(_timezone.utc), remove=True)
+        now = _datetime.now(_timezone.utc)
+        _cascade_core_to_addons(org, now=now, remove=True)
+        # A club with NO Core row is read as a legacy club and fails open
+        # (org_core_live), which switched its public site and every tool back
+        # on the moment Core was reset. Leave a Core row with no trial history
+        # instead: it reads as never trialled (so the club is eligible for a
+        # fresh trial, from its own admin or through self-serve) while Core
+        # stays not-live until that trial actually starts.
+        mod_subs.upsert_subscription(org, _CORE, status=STATUS_CANCELLED, now=now)
     await db.commit()
     await db.refresh(org, attribute_names=["module_subscriptions"])
     return _club_payload(org)

@@ -69,8 +69,18 @@ const PNG = Buffer.from(
   'base64',
 )
 
-async function openEditor(query = '?type=lineup') {
+// `opts.store` stands in for the club's saved-template table, so a reload really
+// round-trips: { templates: [], fail: false (writes 500), failGet: false }.
+// `opts.settings` overrides the club settings; `opts.localTemplates` seeds this
+// browser's own copy before the page loads; `opts.start` opens the Start screen.
+async function openEditor(query = '?type=lineup', opts = {}) {
+  const store = opts.store || { templates: [], fail: false, failGet: false }
+  const SETTINGS_NOW = opts.settings || SETTINGS
   const ctx = await browser.newContext({ viewport: { width: 1600, height: 1000 } })
+  if (opts.localTemplates) {
+    await ctx.addInitScript(([k, v]) => { if (!localStorage.getItem(k)) localStorage.setItem(k, v) },
+      ['bs_social_templates', JSON.stringify(opts.localTemplates)])
+  }
   const page = await ctx.newPage()
   const errors = []
   const writes = []
@@ -82,7 +92,27 @@ async function openEditor(query = '?type=lineup') {
   await page.route('**/api/**', async (route) => {
     const url = route.request().url()
     const method = route.request().method()
-    if (method !== 'GET') writes.push({ url, method })
+    if (method !== 'GET') writes.push({ url, method, body: route.request().postData() })
+    if (/\/admin\/social\/templates/.test(url)) {
+      const oops = (status) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify({ detail: 'Server unavailable' }) })
+      const key = decodeURIComponent((/\/templates\/([^/?]+)$/.exec(url) || [])[1] || '')
+      if (method === 'GET') return store.failGet ? oops(503) : route.fulfill(json(store.templates))
+      if (store.fail) return oops(500)
+      if (/\/templates\/import/.test(url)) {
+        const added = []
+        for (const t of JSON.parse(route.request().postData()).templates) {
+          if (!store.templates.some((x) => x.key === t.key)) { store.templates.push({ ...t, updated_at: new Date().toISOString() }); added.push(t.key) }
+        }
+        return route.fulfill(json({ added, skipped: [] }))
+      }
+      if (method === 'PUT') {
+        const saved = { ...JSON.parse(route.request().postData()), key, updated_at: new Date().toISOString() }
+        const at = store.templates.findIndex((x) => x.key === key)
+        if (at >= 0) store.templates[at] = saved; else store.templates.unshift(saved)
+        return route.fulfill(json(saved))
+      }
+      if (method === 'DELETE') { store.templates = store.templates.filter((x) => x.key !== key); return route.fulfill(json({ status: 'deleted' })) }
+    }
     if (/\/social\/media\/[^/]+\/file/.test(url)) return route.fulfill({ status: 200, contentType: 'image/png', body: PNG })
     if (/\/images\/players\/[^/]+\/photo/.test(url)) return route.fulfill({ status: 200, contentType: 'image/png', body: PNG })
     if (/\/auth\/me/.test(url)) return route.fulfill(json({
@@ -91,7 +121,7 @@ async function openEditor(query = '?type=lineup') {
     }))
     if (/\/admin\/social\/media\?kind=background/.test(url)) return route.fulfill(json([]))
     if (/\/admin\/social\/media/.test(url)) return route.fulfill(json(MEDIA))
-    if (/\/club-admin\/settings/.test(url)) return route.fulfill(json(SETTINGS))
+    if (/\/club-admin\/settings/.test(url)) return route.fulfill(json(SETTINGS_NOW))
     if (/\/club-admin\/players/.test(url)) return route.fulfill(json(PLAYERS))
     if (/sponsors/.test(url)) return route.fulfill(json([]))
     if (/selection\/overview/.test(url)) return route.fulfill(json({ fixtures: [] }))
@@ -105,8 +135,9 @@ async function openEditor(query = '?type=lineup') {
   // waiting on anything this change ADDS would make a control run die here and
   // say nothing about the forty checks below. networkidle never settles on this
   // app (HeartbeatBeacon), so it is never used.
-  await page.getByRole('button', { name: /DOWNLOAD PNG|SLIDES/ }).first().waitFor({ timeout: 25000 })
-  return { ctx, page, errors, writes }
+  if (opts.start) await page.getByTestId('start-templates').waitFor({ timeout: 25000 })
+  else await page.getByRole('button', { name: /DOWNLOAD PNG|SLIDES/ }).first().waitFor({ timeout: 25000 })
+  return { ctx, page, errors, writes, store }
 }
 
 // Reads that report absence instead of throwing.
@@ -540,16 +571,24 @@ async function pickSize(page, label) {
   ck('no page errors reading the explanations', errors.length === 0, errors.slice(0, 2).join(' | '))
 }
 
-// ── 7. Saving says where it went ───────────────────────────────────────────
+// ── 7. Saving names the template and says where it went ────────────────────
 {
-  const { ctx, page, errors } = await openEditor()
+  const { ctx, page, errors, store, writes } = await openEditor()
 
   await press(page.getByRole('button', { name: 'SAVE AS TEMPLATE' }))
-  await page.waitForTimeout(300)
+  await page.waitForTimeout(200)
+  ck('the header button asks for a name instead of saving as "Template 1"',
+    await seen(page.getByTestId('save-template-dialog')))
+  await page.getByTestId('save-template-name').fill('Match day').catch(() => {})
+  await press(page.getByTestId('save-template-new'))
+  await page.waitForTimeout(500)
   const tplNote = await textOf(page.getByTestId('saved-note'))
-  ck('saving a template says where it went', /Your templates/i.test(tplNote), tplNote.slice(0, 90))
-  ck('and that it is on this browser only', /this browser/i.test(tplNote), tplNote.slice(0, 90))
-
+  ck('saving a template says where it went', /My templates/i.test(tplNote), tplNote.slice(0, 120))
+  ck('and that the whole club can use it', /club/i.test(tplNote) && !/this browser/i.test(tplNote), tplNote.slice(0, 120))
+  ck('it reached the club\'s server, under its own name',
+    store.templates.length === 1 && store.templates[0].name === 'Match day', JSON.stringify(store.templates.map((t) => t.name)))
+  ck('the Style blob is not asked to carry it any more',
+    !writes.some((w) => /club-admin\/settings/.test(w.url) && /"templates"/.test(w.body || '')))
   ck('no page errors while saving', errors.length === 0, errors.slice(0, 2).join(' | '))
   await ctx.close()
 }
@@ -777,6 +816,171 @@ async function pickSize(page, label) {
     (await countLayers()) === drawn - 1, `${drawn} -> ${await countLayers()}`)
 
   ck('no page errors saving and re-applying a template', errors.length === 0, errors.slice(0, 2).join(' | '))
+  await ctx.close()
+}
+
+// ── 7f. A second event must not eat the first ──────────────────────────────
+// Reported: a season launch poster saved as a template, then a Halloween poster
+// started on the same layout, and the launch one was gone. Two causes: a template
+// kept only the layout (never the wording, motif or photo), and "save" defaulted
+// to updating the template you started from. Driven through a real reload.
+{
+  const store = { templates: [], fail: false, failGet: false }
+  const { ctx, page, errors } = await openEditor('?type=events', { store })
+  const dialogs = []
+  page.on('dialog', (d) => { dialogs.push(d.message()); d.dismiss().catch(() => {}) })
+  const title = page.getByPlaceholder('e.g. Wine & Cheese Night')
+  const titleNow = async () => { try { return await title.first().inputValue() } catch { return null } }
+  const saveNew = async (name) => {
+    await press(page.getByTestId('save-as-template'))
+    await page.waitForTimeout(150)
+    await page.getByTestId('save-template-name').fill(name).catch(() => {})
+    await press(page.getByTestId('save-template-new'))
+    await page.waitForTimeout(500)
+  }
+  const openDesign = async () => { await press(page.getByRole('button', { name: 'Design', exact: true })); await page.waitForTimeout(250) }
+  const openContent = async () => { await press(page.getByRole('button', { name: 'Content', exact: true })); await page.waitForTimeout(250) }
+
+  await title.first().fill('SEASON LAUNCH').catch(() => {})
+  await saveNew('Season launch')
+  const launch = () => store.templates.find((t) => t.name === 'Season launch')
+  ck('the template keeps the event\'s own wording, not only the layout',
+    launch()?.event?.facts?.title === 'SEASON LAUNCH', JSON.stringify(launch()?.event || null).slice(0, 100))
+
+  await title.first().fill('HALLOWEEN').catch(() => {})
+  await press(page.getByTestId('save-as-template'))
+  await page.waitForTimeout(200)
+  const hint = await textOf(page.getByTestId('save-template-hint'))
+  ck('starting another event, the dialog says which template it came from', /Season launch/.test(hint), hint.slice(0, 120))
+  ck('and offers Update as a separate, deliberate choice', await seen(page.getByTestId('save-template-update')))
+  await page.getByTestId('save-template-name').fill('Halloween').catch(() => {})
+  await press(page.getByTestId('save-template-new'))
+  await page.waitForTimeout(500)
+  ck('Save as new adds a second template', store.templates.length === 2, String(store.templates.length))
+  ck('and leaves the season launch one exactly as it was', launch()?.event?.facts?.title === 'SEASON LAUNCH')
+
+  await press(page.getByTestId('templates-menu-button'))
+  await page.waitForTimeout(200)
+  ck('the header menu lists both', (await page.getByTestId('template-row').count()) === 2)
+  await page.keyboard.press('Escape')
+
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByRole('button', { name: /DOWNLOAD PNG|SLIDES/ }).first().waitFor({ timeout: 25000 })
+  await page.waitForTimeout(600)
+  await openDesign()
+  ck('after a reload the Design panel still lists both', (await page.locator('[data-testid="your-templates"] [data-testid="template-row"]').count()) === 2)
+  await press(page.locator('[data-testid="your-templates"]').getByRole('button', { name: /Season launch/ }))
+  await page.waitForTimeout(500)
+  await openContent()
+  ck('applying the season launch template brings its wording back', (await titleNow()) === 'SEASON LAUNCH', String(await titleNow()))
+  ck('and nothing was asked, since the poster before it was saved too', dialogs.length === 0, dialogs.join(' | ').slice(0, 100))
+
+  // Improving a template is still possible, on purpose.
+  await title.first().fill('SEASON LAUNCH 2027').catch(() => {})
+  await press(page.getByTestId('save-as-template'))
+  await page.waitForTimeout(200)
+  await press(page.getByTestId('save-template-update'))
+  await page.waitForTimeout(500)
+  ck('Update replaces the template in place, without adding another',
+    store.templates.length === 2 && launch()?.event?.facts?.title === 'SEASON LAUNCH 2027', `${store.templates.length} ${launch()?.event?.facts?.title}`)
+
+  // Opening a template over work that is saved nowhere asks first.
+  await title.first().fill('UNSAVED IDEA').catch(() => {})
+  await openDesign()
+  await press(page.locator('[data-testid="your-templates"]').getByRole('button', { name: /Halloween/ }))
+  await page.waitForTimeout(400)
+  await openContent()
+  ck('opening a template over unsaved wording asks first', dialogs.length === 1 && /not saved as a template/.test(dialogs[0]), dialogs.join(' | ').slice(0, 120))
+  ck('and Cancel leaves the wording alone', (await titleNow()) === 'UNSAVED IDEA', String(await titleNow()))
+
+  ck('no page errors through the whole round trip', errors.length === 0, errors.slice(0, 2).join(' | '))
+  await ctx.close()
+}
+
+// ── 7g. A save the server refuses is kept, said out loud, and retried ───────
+{
+  const store = { templates: [], fail: true, failGet: false }
+  const { ctx, page, errors } = await openEditor('?type=lineup', { store })
+  await press(page.getByTestId('save-as-template'))
+  await page.waitForTimeout(150)
+  await page.getByTestId('save-template-name').fill('Offline one').catch(() => {})
+  await press(page.getByTestId('save-template-new'))
+  await page.waitForTimeout(600)
+  const err = await textOf(page.getByTestId('save-template-error'))
+  ck('a refused save says so in the dialog, with the reason', /couldn't save it to your club/i.test(err) && /Server unavailable/.test(err), err.slice(0, 140))
+  const note = await textOf(page.getByTestId('saved-note'))
+  ck('and the banner says it is only on this browser so far', /only saved on this browser/i.test(note), note.slice(0, 120))
+  ck('nothing reached the server', store.templates.length === 0)
+  const cached = await page.evaluate(() => JSON.parse(localStorage.getItem('bs_social_templates') || '[]'))
+  ck('this browser kept it, marked as not yet synced', cached.length === 1 && cached[0].unsynced === true, JSON.stringify(cached.map((t) => [t.name, t.unsynced])))
+
+  store.fail = false
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByRole('button', { name: /DOWNLOAD PNG|SLIDES/ }).first().waitFor({ timeout: 25000 })
+  await page.waitForTimeout(900)
+  ck('the next visit sends it', store.templates.length === 1 && store.templates[0].name === 'Offline one', JSON.stringify(store.templates.map((t) => t.name)))
+  const after = await page.evaluate(() => JSON.parse(localStorage.getItem('bs_social_templates') || '[]'))
+  ck('and it is no longer marked unsynced', after.length === 1 && !after[0].unsynced)
+
+  // A server that cannot be reached must not wipe what this browser holds.
+  store.failGet = true
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByRole('button', { name: /DOWNLOAD PNG|SLIDES/ }).first().waitFor({ timeout: 25000 })
+  await page.waitForTimeout(600)
+  await press(page.getByRole('button', { name: 'Design', exact: true }))
+  await page.waitForTimeout(250)
+  ck('an unreachable server leaves this browser\'s list in place',
+    (await page.locator('[data-testid="your-templates"] [data-testid="template-row"]').count()) === 1)
+  const sync = await textOf(page.getByTestId('template-sync'))
+  ck('and says the list may be out of date', /Couldn't reach the server/.test(sync), sync.slice(0, 100))
+  // Chromium logs the 500 and 503 this block deliberately provokes; those are
+  // the test's own doing, not a fault in the page.
+  const real = errors.filter((e) => !/status of 5\d\d/.test(e))
+  ck('no page errors through the failure', real.length === 0, real.slice(0, 2).join(' | '))
+  await ctx.close()
+}
+
+// ── 7h. Older templates are carried across once, and not overwritten ─────────
+{
+  const store = { templates: [{ key: 'tpl_server', name: 'Edited on the server', templateId: 'T1', updated_at: new Date().toISOString() }], fail: false, failGet: false }
+  const legacy = { key: 'tpl_legacyblob', name: 'From the old style blob', templateId: 'T1' }
+  const local = [
+    { key: 'tpl_server', name: 'Stale local copy', templateId: 'T1' },
+    { key: 'tpl_localonly', name: 'Only on this browser', templateId: 'T1' },
+  ]
+  const { ctx, page, errors, writes } = await openEditor('?type=lineup', {
+    store, localTemplates: local, settings: { ...SETTINGS, socials_style: { palette: 'club', templates: [legacy] } },
+  })
+  await page.waitForTimeout(900)
+  const names = store.templates.map((t) => t.name).sort()
+  ck('templates only this browser had are sent up', names.includes('Only on this browser'), names.join(', '))
+  ck('so are the ones that rode in the old Style blob', names.includes('From the old style blob'), names.join(', '))
+  ck('one the server already has is not overwritten by a stale copy',
+    store.templates.find((t) => t.key === 'tpl_server')?.name === 'Edited on the server')
+  const cleanup = writes.find((w) => w.method === 'PATCH' && /club-admin\/settings/.test(w.url))
+  ck('the old blob stops carrying them once they are across', !!cleanup && !/"templates"/.test(cleanup.body || ''), cleanup?.body || 'no settings write')
+  await press(page.getByRole('button', { name: 'Design', exact: true }))
+  await page.waitForTimeout(250)
+  ck('all three show in the Design panel', (await page.locator('[data-testid="your-templates"] [data-testid="template-row"]').count()) === 3)
+  ck('no page errors migrating', errors.length === 0, errors.slice(0, 2).join(' | '))
+  await ctx.close()
+}
+
+// ── 7i. The start screen shows every saved template, not the first five ──────
+{
+  const many = Array.from({ length: 8 }, (_, i) => ({
+    key: `tpl_many${i}`, name: `Saved ${i + 1}`, templateId: 'T1', updated_at: new Date().toISOString(),
+  }))
+  const store = { templates: many, fail: false, failGet: false }
+  const { ctx, page, errors } = await openEditor('', { store, start: true })
+  await page.waitForTimeout(300)
+  ck('all eight are on the start screen', (await page.getByTestId('start-template').count()) === 8, String(await page.getByTestId('start-template').count()))
+  const heading = await textOf(page.getByTestId('start-templates'))
+  ck('with a count in the heading', /Your saved templates \(8\)/.test(heading), heading.slice(0, 60))
+  await press(page.getByTestId('start-template').nth(2))
+  await page.waitForTimeout(600)
+  ck('opening one goes into the editor on that template', /template=tpl_many/.test(page.url()) && await seen(page.getByRole('button', { name: /DOWNLOAD PNG|SLIDES/ })), page.url())
+  ck('no page errors on the start screen', errors.length === 0, errors.slice(0, 2).join(' | '))
   await ctx.close()
 }
 

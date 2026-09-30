@@ -49,7 +49,7 @@ from app.models.db import (
     get_db,
 )
 from app.routers.auth import get_current_club, get_current_user
-from app.services import dismissal, game_import_staging, import_cleanup, scorebook_innings
+from app.services import dismissal, game_import_staging, import_cleanup, manual_game_check, manual_result, scorebook_innings
 from app.services import import_ingest as ingest
 from app.services.grade_labels import suggest_categories, suggest_category
 from app.services.season_resolve import (
@@ -1067,6 +1067,9 @@ async def games_template(
          "fow_wicket": 1, "fow_score": 60,
          "bowling_overs": "8.2", "bowling_maidens": 2, "bowling_runs": 25,
          "bowling_wickets": 3, "bowling_wides": 1, "bowling_no_balls": 0,
+         # The order they bowled in, which is rarely the batting order: Brown
+         # opened the bowling, Smith came on second.
+         "bowling_order": 2,
          "fielding_catches": 1,
          # Our innings: its full total including sundries, and the sundries.
          "innings_total": 67, "innings_wickets": 1, "innings_overs": 40,
@@ -1079,7 +1082,8 @@ async def games_template(
          "batting_position": 2, "batting_runs": 12, "batting_balls": 20, "batting_fours": 1,
          "batting_sixes": 0, "batting_not_out": "true", "did_not_bat": "false",
          "bowling_overs": 10, "bowling_maidens": 0, "bowling_runs": 40,
-         "bowling_wickets": 2, "bowling_wides": 2, "bowling_no_balls": 1},
+         "bowling_wickets": 2, "bowling_wides": 2, "bowling_no_balls": 1,
+         "bowling_order": 1},
     ]
     for r in rows:
         w.writerow(r)
@@ -1112,6 +1116,9 @@ async def get_manual_game(
         select(ManualBowlingSpell, Player)
         .join(Player, Player.id == ManualBowlingSpell.player_id)
         .where(ManualBowlingSpell.manual_game_id == gid)
+        # Recorded order is bowling order; the edit form re-saves in the order
+        # it is given, so reading it any other way reshuffles the attack.
+        .order_by(ManualBowlingSpell.innings_number, ManualBowlingSpell.id)
     )).all()
     fielding = (await db.execute(
         select(ManualFieldingStat, Player)
@@ -1200,6 +1207,12 @@ async def _replace_game_children(
     for x in data.innings:
         seen_innings[x.innings_number] = x
     for x in seen_innings.values():
+        # Our own innings is totalled from its batters. The form has no box for
+        # our total (only the opposition's, whose batters cannot be itemised),
+        # so one arriving on our innings is a leftover from an innings that was
+        # the opposition's a moment earlier, and stored it would override the
+        # batters and give both sides the same score.
+        ours = x.batting_side == "us"
         db.add(ManualInnings(
             manual_game_id=game_id,
             innings_number=x.innings_number,
@@ -1210,9 +1223,9 @@ async def _replace_game_children(
             no_balls=x.no_balls,
             penalty=x.penalty,
             extras_total=x.extras_total,
-            total_runs=x.total_runs,
-            total_wickets=x.total_wickets,
-            overs=x.overs,
+            total_runs=None if ours else x.total_runs,
+            total_wickets=None if ours else x.total_wickets,
+            overs=None if ours else x.overs,
         ))
 
 
@@ -1651,6 +1664,20 @@ async def _resolve_game_season(
     return season.id, None
 
 
+@router.post("/games/check")
+async def check_manual_game(
+    data: ManualGameIn,
+    current_user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
+):
+    """What in a game being typed in does not add up.
+
+    Warnings only. Saving is never refused for any of them: a club entering a
+    game from a scorebook often lacks a figure, and a partial record is better
+    than none. Reads the form's payload alone and writes nothing.
+    """
+    return {"warnings": manual_game_check.check_game(data.model_dump())}
+
+
 @router.post("/games")
 async def create_manual_game(
     data: ManualGameIn,
@@ -1684,6 +1711,11 @@ async def create_manual_game(
     await _replace_game_fow_partnerships(db, game.id, data.extracted_payload)
     await _replace_game_bowler_wickets(db, game.id, club.id, data.extracted_payload)
     await db.flush()
+    # A winner that contradicts both the result line and the scores is
+    # corrected to what those two agree on (services/manual_result).
+    settled = await manual_result.settle_manual_game(db, game, club)
+    if settled:
+        await db.flush()
     summary = (
         f"Added manual game ({data.played_at or 'date unknown'})"
         + (f" vs {data.opposition}" if data.opposition else "")
@@ -1705,7 +1737,10 @@ async def create_manual_game(
     await _recompute_milestones(db, club.id, _extract_player_ids(
         data.batting_innings + data.bowling_spells + data.fielding_stats
     ))
-    return _row_to_dict(game)
+    out = _row_to_dict(game)
+    if settled:
+        out["winner_corrected"] = manual_result.describe(settled)
+    return out
 
 
 @router.patch("/games/{game_id}")
@@ -1727,6 +1762,7 @@ async def update_manual_game(
     )).scalars().all()
     old_bowling = (await db.execute(
         select(ManualBowlingSpell).where(ManualBowlingSpell.manual_game_id == gid)
+        .order_by(ManualBowlingSpell.id)
     )).scalars().all()
     old_fielding = (await db.execute(
         select(ManualFieldingStat).where(ManualFieldingStat.manual_game_id == gid)
@@ -1772,6 +1808,9 @@ async def update_manual_game(
         await _replace_game_fow_partnerships(db, gid, data.extracted_payload)
         await _replace_game_bowler_wickets(db, gid, club.id, data.extracted_payload)
     await db.flush()
+    settled = await manual_result.settle_manual_game(db, game, club)
+    if settled:
+        await db.flush()
     after = _row_to_dict(game)
     after["children"] = data.model_dump()
     summary = (
@@ -1794,6 +1833,8 @@ async def update_manual_game(
         db, club.id,
         old_player_ids + _extract_player_ids(data.batting_innings + data.bowling_spells + data.fielding_stats)
     )
+    if settled:
+        return {**after, "winner_corrected": manual_result.describe(settled)}
     return after
 
 
@@ -1814,6 +1855,7 @@ async def delete_manual_game(
     )).scalars().all()
     old_bowling = (await db.execute(
         select(ManualBowlingSpell).where(ManualBowlingSpell.manual_game_id == gid)
+        .order_by(ManualBowlingSpell.id)
     )).scalars().all()
     old_fielding = (await db.execute(
         select(ManualFieldingStat).where(ManualFieldingStat.manual_game_id == gid)
@@ -2482,7 +2524,7 @@ GAME_CSV_COLUMNS = [
     "batting_runs", "batting_balls", "batting_fours", "batting_sixes",
     "batting_not_out", "did_not_bat", "dismissal_type", "batting_caught_behind",
     "bowling_overs", "bowling_maidens", "bowling_runs", "bowling_wickets",
-    "bowling_wides", "bowling_no_balls",
+    "bowling_wides", "bowling_no_balls", "bowling_order",
     "fielding_catches", "fielding_catches_wk", "fielding_run_outs", "fielding_stumpings",
     # Everything below is optional, and a sheet without it imports exactly as
     # before. They carry what a club's own scorebook holds beyond its players'
@@ -2694,6 +2736,7 @@ async def _write_games(
     authoritative_season_ids: set = set()
     ignored = 0
     ignored_synced = 0
+    winners_corrected: list[dict] = []
 
     for game_key, group in by_game.items():
         dup = existing_by_game.get(game_key)
@@ -2714,6 +2757,7 @@ async def _write_games(
         supersede_synced = bool(dup) and dup["source"] != "manual"
 
         first_row_num, first = group[0]
+        settled = None
         game_player_ids: set = set()
         game_id = None
         snapshot = None
@@ -2799,6 +2843,7 @@ async def _write_games(
                 # for the fall of wickets and the partnerships.
                 batters_by_innings: dict = {}
                 fow_by_innings: dict = {}
+                pending_spells: list = []
 
                 order_known = (first.get("batting_order_known") or "").strip()
                 if order_known:
@@ -2873,19 +2918,27 @@ async def _write_games(
                     bwkts = raw.get("bowling_wickets")
                     bownruns = raw.get("bowling_runs")
                     if _has_any_value(bovers, bwkts, bownruns):
-                        db.add(ManualBowlingSpell(
-                            manual_game_id=game.id,
-                            player_id=player.id,
-                            # Our bowlers bowled in the OPPOSITION's innings.
-                            # A sheet that does not say which one keeps the old
-                            # behaviour of sharing our batting innings.
-                            innings_number=opp_innings if opp_innings is not None else innings_number,
-                            overs=_parse_float(bovers) if bovers not in (None, "") else None,
-                            maidens=_parse_int(raw.get("bowling_maidens")),
-                            runs=_parse_int(bownruns),
-                            wickets=_parse_int(bwkts),
-                            wides=_parse_int(raw.get("bowling_wides")),
-                            no_balls=_parse_int(raw.get("bowling_no_balls")),
+                        # Held back and written once the whole match is read,
+                        # in bowling_order: the match page lists an innings'
+                        # bowlers in the order their spells were written, and
+                        # a sheet's rows follow the batting order.
+                        pending_spells.append((
+                            _parse_int(raw.get("bowling_order"), nullable=True),
+                            len(pending_spells),
+                            ManualBowlingSpell(
+                                manual_game_id=game.id,
+                                player_id=player.id,
+                                # Our bowlers bowled in the OPPOSITION's innings.
+                                # A sheet that does not say which one keeps the old
+                                # behaviour of sharing our batting innings.
+                                innings_number=opp_innings if opp_innings is not None else innings_number,
+                                overs=_parse_float(bovers) if bovers not in (None, "") else None,
+                                maidens=_parse_int(raw.get("bowling_maidens")),
+                                runs=_parse_int(bownruns),
+                                wickets=_parse_int(bwkts),
+                                wides=_parse_int(raw.get("bowling_wides")),
+                                no_balls=_parse_int(raw.get("bowling_no_balls")),
+                            ),
                         ))
 
                     fcatch = raw.get("fielding_catches")
@@ -2901,17 +2954,30 @@ async def _write_games(
                         agg["stumpings"] += _parse_int(fstump) or 0
                     game_player_ids.add(player.id)
 
+                # A sheet naming no bowling_order keeps its own row order;
+                # where some rows name one, they come first, in that order.
+                pending_spells.sort(key=lambda t: (t[0] is None, t[0] or 0, t[1]))
+                for _order, _idx, spell in pending_spells:
+                    db.add(spell)
                 for pid, agg in fielding.items():
                     db.add(ManualFieldingStat(manual_game_id=game.id, player_id=pid, **agg))
                 _add_scorebook_innings(db, game.id, innings_meta,
                                        batters_by_innings, fow_by_innings)
                 await db.flush()
+                # A sheet whose winner contradicts both its own result line and
+                # its own scores is corrected to what those two agree on, and
+                # the import says so (services/manual_result).
+                settled = await manual_result.settle_manual_game(db, game, club)
+                if settled:
+                    await db.flush()
         except Exception as e:
             errors.append({"row": first_row_num, "error": f"Game '{game_key}': {e}", "data": first})
             continue
 
         created_game_ids.append(game_id)
         affected_player_ids |= game_player_ids
+        if settled:
+            winners_corrected.append(settled)
         if snapshot is not None:
             # The savepoint held, so the old game really is gone — record its
             # snapshot for undo, and count the players it took down so their
@@ -2937,6 +3003,7 @@ async def _write_games(
         "ignored_synced": ignored_synced,
         "errors": errors,
         "player_ids": affected_player_ids,
+        "winners_corrected": winners_corrected,
     }
 
 
@@ -3828,6 +3895,9 @@ async def commit_manual_games(
                         "players, so they add nothing to the totals until one "
                         "is synced or imported.")
             warnings.append(msg)
+
+    for change in written.get("winners_corrected") or []:
+        warnings.append(manual_result.describe(change))
 
     parts = [f"{games_new} games"]
     if overwritten:

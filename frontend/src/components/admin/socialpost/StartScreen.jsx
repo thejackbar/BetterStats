@@ -6,13 +6,16 @@
 //   types         [{ key, label, count, icon }]   one per post type
 //   club          { name, subtitle, logo }
 //   moduleLogo    the BetterSocials mark
-//   savedTemplates[{ key, name, templateId }]
+//   savedTemplates[{ key, name, templateId, updated_at }]
+//   layoutLabel(t)             the base layout's name for a saved template
+//   syncState                  { state } — whether the list is the club's server copy
 //   lastType      { key, label } | null           the post you had open last
 //   onPick(typeKey)            open the editor on this type
 //   onResume()                 reopen the last post you were working on
 //   onApplyTemplate(tpl)       apply a saved template + open the editor
 //   onExit()                   leave to the admin app
 import { Icon } from '../../../pages/admin/betterselect/ui'
+import { TemplateSyncNote, timeAgo } from './SavedTemplates'
 
 function TypeCard({ type, onClick }) {
   return (
@@ -29,7 +32,7 @@ function TypeCard({ type, onClick }) {
 }
 
 export default function StartScreen({
-  types = [], club = {}, moduleLogo, savedTemplates = [], lastType,
+  types = [], club = {}, moduleLogo, savedTemplates = [], layoutLabel = () => '', syncState, lastType,
   onPick, onResume, onApplyTemplate, onExit,
 }) {
   return (
@@ -63,15 +66,34 @@ export default function StartScreen({
         {types.map((t) => <TypeCard key={t.key} type={t} onClick={() => onPick(t.key)} />)}
       </div>
 
+      {/* Saved templates — every one, not the first few */}
+      <div className="w-full max-w-[1120px] flex flex-col gap-2.5" data-testid="start-templates">
+        <div className="flex items-baseline justify-between gap-4 flex-wrap">
+          <span className="text-[15px] font-semibold">Your saved templates{savedTemplates.length ? ` (${savedTemplates.length})` : ''}</span>
+          <TemplateSyncNote state={syncState} />
+        </div>
+        {savedTemplates.length === 0 && (
+          <span className="font-mono text-[10px] text-pb-faint">Nothing saved yet. Build a post in the editor and press Save as template to keep it for next time.</span>
+        )}
+        {savedTemplates.length > 0 && (
+          <div className="grid gap-2.5 max-h-[300px] overflow-y-auto pr-1" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
+            {savedTemplates.map((t) => (
+              <button key={t.key} onClick={() => onApplyTemplate(t)} data-testid="start-template"
+                className="text-left px-3 py-2.5 rounded-[9px] border pb-hairline bg-pb-surface hover:border-pb-accent transition-colors">
+                <span className="block text-[12px] font-semibold text-pb-text truncate">{t.name}</span>
+                <span className="block font-mono text-[9px] text-pb-faint mt-0.5 truncate">
+                  {[layoutLabel(t), t.unsynced ? 'not synced yet' : timeAgo(t.updated_at)].filter(Boolean).join(' · ')}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Footer — resume where you left off */}
       <div className="w-full max-w-[1120px] pt-5 border-t pb-hairline flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap min-w-0">
           <span className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faint">Pick up where you left off</span>
-          {savedTemplates.slice(0, 5).map((t) => (
-            <button key={t.key} onClick={() => onApplyTemplate(t)}
-              className="px-2.5 py-1 rounded-md border pb-hairline bg-pb-surface text-[11px] text-pb-dim hover:border-pb-accent hover:text-pb-text transition-colors truncate max-w-[160px]">{t.name}</button>
-          ))}
-          {savedTemplates.length === 0 && <span className="font-mono text-[9px] text-pb-faintest">No saved templates yet</span>}
         </div>
         <button onClick={onResume}
           className="flex items-center gap-1.5 px-4 h-[34px] rounded-md font-mono text-[10px] tracking-wide2 uppercase"

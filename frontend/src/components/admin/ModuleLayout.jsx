@@ -10,7 +10,7 @@ import ModuleLockup from '../ModuleLockup'
 import ModuleSwitcher from './ModuleSwitcher'
 import BookmarkButton from './BookmarkButton'
 import TrialBanner from './TrialBanner'
-import { IS_AFL } from '../../lib/sport'
+import { IS_AFL, PLATFORM_NAME } from '../../lib/sport'
 
 // The football app has no bookmarks service and no trial/billing, so the two
 // pieces of platform chrome that read them render nothing there.
@@ -182,7 +182,7 @@ export default function ModuleLayout({
               style={{ background: TINT.chip, color: 'var(--pb-accent-ink)' }}
             >{(club?.name || 'B')[0]}</span>}
         <div className="min-w-0">
-          <div className="font-display font-bold text-sm leading-[1.2] truncate" title={club?.name || ''}>{club?.name || 'BetterCricket'}</div>
+          <div className="font-display font-bold text-sm leading-[1.2] truncate" title={club?.name || ''}>{club?.name || PLATFORM_NAME}</div>
           {/* Acting on BetterCricket's own outreach org rather than a club. The
               season line is meaningless there, and the mode has to be obvious
               from any screen — sending a club campaign while you thought you

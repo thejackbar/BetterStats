@@ -11,6 +11,7 @@ import MediaLibraryPanel from '../../components/admin/socialpost/MediaLibraryPan
 import HeroFocusControl from '../../components/admin/socialpost/HeroFocusControl'
 import { TOOL_TITLE } from '../../components/admin/socialpost/ToolRail'
 import StartScreen from '../../components/admin/socialpost/StartScreen'
+import { SaveTemplateDialog, TemplatesMenu, TemplateSyncNote, timeAgo } from '../../components/admin/socialpost/SavedTemplates'
 import MobileQuickPost from '../../components/admin/socialpost/MobileQuickPost'
 import TextPanel from '../../components/admin/socialpost/panels/TextPanel'
 import ShapesPanel from '../../components/admin/socialpost/panels/ShapesPanel'
@@ -56,9 +57,9 @@ const EMPTY_LAYER = () => []
 const ALL_TEMPLATES = [
   { id: 'T1', name: 'Hero List',       component: T1_HeroList,        desc: 'Big player + name list',          maxPlayers: 13 },
   { id: 'T2', name: 'Card Grid',       component: T2_CardGrid,        desc: '4×3 trading card grid',           maxPlayers: 12 },
-  { id: 'T3', name: 'Side Numbered',   component: T3_SideNumbered,    desc: 'Side photo + numbered XI',        maxPlayers: 11 },
+  { id: 'T3', name: 'Side Numbered',   component: T3_SideNumbered,    desc: IS_AFL ? 'Side photo + numbered team' : 'Side photo + numbered XI',        maxPlayers: 11 },
   { id: 'T4', name: 'Batting Order',   component: T4_BattingOrder,    desc: 'Tactical batting order',          maxPlayers: 13 },
-  { id: 'T5', name: 'Brutalist',       component: T5_Brutalist,       desc: 'Typography-forward XI',           maxPlayers: 11 },
+  { id: 'T5', name: 'Brutalist',       component: T5_Brutalist,       desc: IS_AFL ? 'Typography-forward team list' : 'Typography-forward XI',           maxPlayers: 11 },
   { id: 'T6', name: 'Diagonal Poster', component: T6_Diagonal,        desc: 'Diagonal poster, match-day hype', maxPlayers: 11 },
   { id: 'T7', name: 'Milestone',       component: T7_CaptainSpotlight, desc: 'Milestone achievement showcase',  maxPlayers: 13 },
   { id: 'T8', name: 'Mosaic',          component: T8_Mosaic,          desc: 'Asymmetric photo mosaic',         maxPlayers: 11 },
@@ -281,13 +282,19 @@ function deriveShort(name) {
   return name.split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 3)
 }
 
-function playerToTemplatePlayer(p, { captain = false, viceCaptain = false, keeper = false, role = 'BAT' } = {}, nameFormat = 'last_first', swap = false) {
+// A football side is named by position, not as batters and bowlers.
+const ROLE_OPTIONS = IS_AFL ? ['', 'FB', 'HB', 'C', 'W', 'MID', 'RUCK', 'HF', 'FF', 'UTIL'] : ['BAT', 'BOWL', 'AR', 'WK']
+const ROLE_LONG = IS_AFL
+  ? { FB: 'Full Back', HB: 'Half Back', C: 'Centre', W: 'Wing', MID: 'Midfield', RUCK: 'Ruck', HF: 'Half Forward', FF: 'Full Forward', UTIL: 'Utility' }
+  : { BAT: 'Batter', BOWL: 'Bowler', AR: 'All-Rounder', WK: 'Wicket-Keeper' }
+
+function playerToTemplatePlayer(p, { captain = false, viceCaptain = false, keeper = false, role = IS_AFL ? '' : 'BAT' } = {}, nameFormat = 'last_first', swap = false) {
   const raw = splitName(p.display_name || p.name, nameFormat)
   const first = swap ? raw.last : raw.first
   const last  = swap ? raw.first.toUpperCase() : raw.last
   return {
     first, last, role,
-    roleLong: { BAT: 'Batter', BOWL: 'Bowler', AR: 'All-Rounder', WK: 'Wicket-Keeper' }[role] || role,
+    roleLong: ROLE_LONG[role] || role,
     captain, viceCaptain, keeper,
     headshot: p.photo_url ? `${BASE_URL}/images/players/${p.id}/photo` : null,
     // The action shot, when the club has one. Only the big hero slot reaches
@@ -440,9 +447,9 @@ function SelectedPlayerRow({ sp, idx, onUpdate, onRemove, onMoveUp, onMoveDown, 
         onChange={e => onUpdate({ role: e.target.value })}
         className="font-mono text-[10px] bg-pb-surface2 border pb-hairline rounded px-1 py-0.5 text-pb-text"
       >
-        {['BAT', 'BOWL', 'AR', 'WK'].map(r => <option key={r} value={r}>{r}</option>)}
+        {ROLE_OPTIONS.map(r => <option key={r} value={r}>{r || 'Position'}</option>)}
       </select>
-      {['captain', 'viceCaptain', 'keeper'].map(field => {
+      {(IS_AFL ? ['captain', 'viceCaptain'] : ['captain', 'viceCaptain', 'keeper']).map(field => {
         const labels = { captain: 'C', viceCaptain: 'VC', keeper: 'WK' }
         const active = sp[field]
         return (
@@ -515,7 +522,8 @@ function TextInput({ value, onChange, placeholder }) {
 // the roundup post (the per-row mono + grade carry the detail).
 function cleanClubName(n) {
   return (n || '')
-    .replace(/\s+(district\s+|junior\s+)?cricket\s+club$/i, '')
+    .replace(/\s+(district\s+|junior\s+)?(cricket|football|amateur\s+football)\s+club$/i, '')
+    .replace(/\s+(a?fc|jfc)$/i, '')
     .replace(/\s+c\.?c\.?$/i, '')
     .trim()
 }
@@ -552,7 +560,7 @@ function clubTokens(name) {
     .toLowerCase()
     .replace(/[^a-z0-9 ]/g, ' ')
     .split(/\s+/)
-    .filter((w) => w.length > 2 && !['cricket', 'club', 'the', 'district', 'junior', 'colts'].includes(w))
+    .filter((w) => w.length > 2 && !['cricket', 'football', 'club', 'the', 'district', 'junior', 'colts', 'afc', 'fc'].includes(w))
 }
 
 // Top 3 batters (most runs, fewer balls breaks ties), shaped for a performer row.
@@ -850,8 +858,32 @@ function MatchPickList({ picks, onPick, onDismiss }) {
 // before any style has ever been stored server-side.
 const DEFAULT_STYLE_JSON = JSON.stringify({
   palette: 'club', dark: true, font: 'barlow', bg: 'none',
-  bg_colors: {}, palettes: [], designs: [], templates: [],
+  bg_colors: {}, palettes: [], designs: [],
 })
+
+// Saved templates live in their own table now (one row each), not in the Style
+// blob. The browser keeps a copy so the editor opens with them before the
+// network answers, and so a template that could not be sent is not lost.
+const TEMPLATES_CACHE_KEY = 'bs_social_templates'
+const ACTIVE_TEMPLATE_KEY = 'bs_social_active_template'
+const readTemplateCache = () => {
+  try {
+    const list = JSON.parse(localStorage.getItem(TEMPLATES_CACHE_KEY) || '[]')
+    return Array.isArray(list) ? list.filter((t) => t && typeof t.key === 'string') : []
+  } catch { return [] }
+}
+const writeTemplateCache = (list) => {
+  try { localStorage.setItem(TEMPLATES_CACHE_KEY, JSON.stringify(list)) } catch { /* quota: the server copy is the real one */ }
+}
+// Key order is not stable across a round trip through the server's JSON
+// storage, so "is this the same work" compares with the keys sorted.
+const stable = (v) => {
+  if (Array.isArray(v)) return `[${v.map(stable).join(',')}]`
+  if (v && typeof v === 'object') return `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${stable(v[k])}`).join(',')}}`
+  return JSON.stringify(v ?? null)
+}
+// Two block lists are "the same work" when everything but the random ids agrees.
+const blocksSig = (items) => stable((items || []).map(({ id, ...rest }) => rest))
 
 export default function AdminSocialPost() {
   const location = useLocation()
@@ -1029,14 +1061,26 @@ export default function AdminSocialPost() {
 
   // Saved Templates — a reusable starting point saved from ANY tab: the base
   // template + the full Style (palette/bg/font/dark) and, for the Blank Canvas,
-  // its whole block layout. Shown in the collapsible Templates section under
-  // "Custom". Persists to localStorage and rides the same server socials_style
-  // sync as palettes/designs so it survives browser changes and other admins.
-  const [savedTemplates, setSavedTemplates] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('bs_social_templates') || '[]') } catch { return [] }
-  })
+  // its whole block layout. One server row each (migration 313), so saving,
+  // updating and deleting one never touches the others and two admins cannot
+  // overwrite each other. This browser keeps a copy so the editor opens with
+  // them at once and a save that could not be sent is not lost.
+  const [savedTemplates, setSavedTemplates] = useState(readTemplateCache)
+  const templatesRef = useRef(savedTemplates)
   const [saveTemplateName, setSaveTemplateName] = useState('')
   const [templatesOpen, setTemplatesOpen] = useState(true)
+  // loading | ok | offline | partial — whether the list on screen is the club's
+  // server copy or only this browser's.
+  const [templateSync, setTemplateSync] = useState({ state: 'loading' })
+  // The saved template the editor is working from, so saving can update it
+  // rather than add another beside it. Only counts while its layout is open.
+  const [activeTemplateKey, setActiveTemplateKey] = useState(() => {
+    try { return localStorage.getItem(ACTIVE_TEMPLATE_KEY) || null } catch { return null }
+  })
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false)
+  const [savingTemplate, setSavingTemplate] = useState(false)
+  const [templateError, setTemplateError] = useState(null)
+  const templateUrlApplied = useRef(false)
 
   const [heroImage, setHeroImage] = useState({ blobUrl: null })
   // Where the hero photo sits inside the template's crop window, and how far
@@ -1166,38 +1210,151 @@ export default function AdminSocialPost() {
   // demand and cached by id (keeps saved templates live — config only).
   const [playerStatsCache, setPlayerStatsCache] = useState({})
 
-  // Save the current post as a reusable Template (works on every tab). Captures
-  // the base template + Style; on the Blank Canvas it also captures the block
-  // layout (blob-URL images are dropped since they don't survive a reload).
-  const stripBlobImages = (list) => (list || []).map((it) => (it.type === 'image' && typeof it.src === 'string' && it.src.startsWith('blob:') ? { ...it, src: null } : it))
-  const saveCurrentTemplate = () => {
-    const name = saveTemplateName.trim() || `Template ${savedTemplates.length + 1}`
-    const blankTab = templateId === 'BL1'
-    const usingOverlay = customEdit && !blankTab
-    const srcItems = blankTab ? canvas.items : usingOverlay ? overlay.items : null
-    const tpl = {
-      key: `tpl_${Date.now().toString(36)}`,
-      name, templateId, custom: usingOverlay,
-      style: { palette: paletteKey, dark: darkMode, font: fontKey, bg: bgStyle, bgColors, customBg, customAccent },
-      blank: srcItems ? stripBlobImages(srcItems) : null,
-      // The stacking order goes with the design. Without it a template saved
-      // with a photo tucked behind the headline comes back with the photo on
-      // top, which is the whole thing somebody was saving.
-      layers: blankTab ? null : tlayers.serialise(),
-    }
-    const next = [...savedTemplates, tpl]
+  // ── Saved templates ───────────────────────────────────────────────────────
+  // Every change to the list goes through here, so the ref every async step
+  // reads, the React state and this browser's copy cannot drift apart.
+  const setTemplatesList = (fn) => {
+    const next = fn(templatesRef.current)
+    templatesRef.current = next
     setSavedTemplates(next)
-    localStorage.setItem('bs_social_templates', JSON.stringify(next))
-    setSaveTemplateName('')
-    // Templates land under Design → Your templates, and — being localStorage —
-    // on THIS browser only. Both worth saying, since neither is visible from
-    // the button that just saved it.
-    setSavedNote({ text: `Saved as “${name}” — Design → Your templates, on this browser`, tool: 'design' })
-    setTimeout(() => setSavedNote(null), 8000)
+    writeTemplateCache(next)
   }
-  const applyTemplate = (tpl) => {
+  const rememberActiveTemplate = (key) => {
+    setActiveTemplateKey(key)
+    try { if (key) localStorage.setItem(ACTIVE_TEMPLATE_KEY, key); else localStorage.removeItem(ACTIVE_TEMPLATE_KEY) } catch { /* fine */ }
+  }
+  const flashNote = (note, ms = 8000) => {
+    setSavedNote(note)
+    setTimeout(() => setSavedNote((cur) => (cur === note ? null : cur)), ms)
+  }
+  const layoutLabel = (t) => {
+    const base = TEMPLATES.find((x) => x.id === t.templateId)
+    return `${t.custom ? 'Edited ' : ''}${base?.name || t.templateId}`
+  }
+
+  // A picture added from disk is a blob: URL, which dies with the tab. Saving a
+  // template used to drop every one of them, so a template came back with empty
+  // picture frames. They go into the club's media library instead and the
+  // template keeps the library address. Reused per session, so saving the same
+  // post twice does not upload the same picture twice.
+  const blobUploads = useRef(new Map())
+  const persistBlobUrl = async (src, name) => {
+    if (!src || typeof src !== 'string' || !src.startsWith('blob:')) return src || null
+    if (!blobUploads.current.has(src)) {
+      try {
+        const blob = await (await fetch(src)).blob()
+        const ext = (blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg')
+        const file = new File([blob], name || `template-picture.${ext}`, { type: blob.type || 'image/png' })
+        const asset = await api.uploadSocialMedia(file)
+        blobUploads.current.set(src, asset?.url || null)
+      } catch { blobUploads.current.set(src, null) }
+    }
+    return blobUploads.current.get(src)
+  }
+  const persistBlobImages = async (list) => {
+    let lost = 0
+    const out = []
+    for (const it of list || []) {
+      if (!(it.type === 'image' && typeof it.src === 'string' && it.src.startsWith('blob:'))) { out.push(it); continue }
+      const url = await persistBlobUrl(it.src, it.srcName)
+      if (!url) lost += 1
+      out.push({ ...it, src: url })
+    }
+    return { items: out, lost }
+  }
+
+  // Save the current post as a reusable Template (works on every tab). Captures
+  // the base template + Style; on the Blank Canvas / Custom Edit it also
+  // captures the block layout. `updateKey` overwrites that template in place.
+  const saveCurrentTemplate = async ({ name, updateKey } = {}) => {
+    if (savingTemplate) return
+    setSavingTemplate(true)
+    setTemplateError(null)
+    try {
+      const existing = updateKey ? templatesRef.current.find((t) => t.key === updateKey) : null
+      const key = existing ? existing.key : `tpl_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
+      const finalName = (name || '').trim() || existing?.name || `Template ${templatesRef.current.length + 1}`
+      const blankTab = templateId === 'BL1'
+      const usingOverlay = customEdit && !blankTab
+      const srcItems = blankTab ? canvas.items : usingOverlay ? overlay.items : null
+      const { items, lost: blocksLost } = srcItems ? await persistBlobImages(srcItems) : { items: null, lost: 0 }
+      // An event poster IS its content: the title, date, details, motif and
+      // photo. A template that kept only the layout came back empty, so the
+      // season launch poster was gone the moment somebody started another
+      // event on the same layout.
+      let eventContent = null
+      let lost = blocksLost
+      if (activeTab === 'events') {
+        const bg = await persistBlobUrl(eventBg)
+        if (eventBg && !bg) lost += 1
+        eventContent = { facts: event, preset: eventPreset, motif: eventMotifKey, bg, bgOpacity: eventBgOpacity }
+      }
+      const tpl = {
+        key, name: finalName, templateId, custom: usingOverlay,
+        style: { palette: paletteKey, dark: darkMode, font: fontKey, bg: bgStyle, bgColors, customBg, customAccent },
+        blank: items,
+        event: eventContent,
+        // The stacking order goes with the design. Without it a template saved
+        // with a photo tucked behind the headline comes back with the photo on
+        // top, which is the whole thing somebody was saving.
+        layers: blankTab ? null : tlayers.serialise(),
+      }
+      // Local first, marked unsynced: nothing is lost if the network is.
+      setTemplatesList((l) => [{ ...tpl, updated_at: new Date().toISOString(), unsynced: true }, ...l.filter((t) => t.key !== key)])
+      rememberActiveTemplate(key)
+      const pictureNote = lost ? ` ${lost} picture${lost === 1 ? '' : 's'} could not be kept, so ${lost === 1 ? 'that frame' : 'those frames'} will be empty.` : ''
+      try {
+        const saved = await api.saveSocialTemplate(key, tpl)
+        const keep = saved && typeof saved === 'object' && saved.key === key ? saved : { ...tpl, updated_at: new Date().toISOString() }
+        setTemplatesList((l) => l.map((t) => (t.key === key ? { ...keep, unsynced: undefined } : t)))
+        setTemplateSync((cur) => (cur.state === 'offline' ? { state: 'partial' } : cur.state === 'loading' ? { state: 'ok' } : cur))
+        setSaveTemplateName('')
+        setSaveDialogOpen(false)
+        flashNote({
+          text: `${existing ? 'Updated' : 'Saved as'} “${finalName}”. Find it under My templates, in Design, and on the start screen. Your whole club can use it.${pictureNote}`,
+          tool: 'design',
+        })
+      } catch (e) {
+        // Stay open with the reason, and keep the local copy to retry.
+        setTemplateError(`Kept on this browser, but couldn't save it to your club: ${e?.message || 'no answer from the server'}. It will retry next time you open BetterPosts.`)
+        setTemplateSync({ state: 'partial', message: e?.message })
+        flashNote({ warn: true, text: `“${finalName}” is only saved on this browser so far (${e?.message || 'no answer from the server'}). It will retry next time.${pictureNote}`, tool: 'design' }, 15000)
+      }
+    } finally {
+      setSavingTemplate(false)
+    }
+  }
+
+  // Opening a template swaps the blocks on the canvas for its own, and layout
+  // changes clear undo, so work that is not saved anywhere would be gone for
+  // good. Ask first, but only when something would genuinely be lost.
+  const wouldLoseWork = (tpl) => {
+    const saved = templatesRef.current
+    // Blocks on the canvas (or the Custom Edit layer) that no template holds.
+    const cur = tpl.custom ? overlay.items : tpl.blank ? canvas.items : null
+    if (cur && cur.length) {
+      const sig = blocksSig(cur)
+      const known = saved.some((t) => t.blank && blocksSig(t.blank) === sig)
+        || sig === blocksSig(tpl.blank)
+        || (!tpl.custom && sig === blocksSig(defaultBlankItems()))
+      if (!known) return true
+    }
+    // Event wording that no template or preset holds: the title, date and
+    // details somebody typed for the poster they are on.
+    if (tpl.event?.facts) {
+      const sig = stable(event)
+      const known = [DEFAULT_EVENT, ...EVENT_PRESETS.map((p) => p.event), ...saved.map((t) => t.event?.facts)]
+        .some((k) => k && stable(k) === sig)
+      if (!known) return true
+    }
+    return false
+  }
+  const applyTemplate = (tpl, { confirm = true } = {}) => {
     if (!tpl) return
+    if (confirm && wouldLoseWork(tpl)
+      && !window.confirm(`Open “${tpl.name}”? It replaces what you are working on now, and that is not saved as a template. Press Cancel, then Save as template, to keep it first.`)) return
     setTemplateId(tpl.templateId)
+    rememberActiveTemplate(tpl.key)
     const st = tpl.style || {}
     if (st.palette) setPaletteKey(st.palette)
     if (typeof st.dark === 'boolean') setDarkMode(st.dark)
@@ -1206,6 +1363,13 @@ export default function AdminSocialPost() {
     if (st.bgColors) setBgColors(st.bgColors)
     if (st.customBg) setCustomBg(st.customBg)
     if (st.customAccent) setCustomAccent(st.customAccent)
+    if (tpl.event && typeof tpl.event === 'object') {
+      if (tpl.event.facts && typeof tpl.event.facts === 'object') setEvent({ ...DEFAULT_EVENT, ...tpl.event.facts })
+      if (tpl.event.preset) setEventPreset(tpl.event.preset)
+      if (tpl.event.motif) setEventMotifKey(tpl.event.motif)
+      setEventBg(tpl.event.bg || null)
+      if (typeof tpl.event.bgOpacity === 'number') setEventBgOpacity(tpl.event.bgOpacity)
+    }
     const clone = (list) => (list || []).map((it) => ({ ...it }))
     if (tpl.custom) {
       setCustomEdit(true)
@@ -1224,10 +1388,86 @@ export default function AdminSocialPost() {
     setCustomEdit(true)
   }
   const stopCustomEdit = () => setCustomEdit(false)
-  const deleteTemplate = (key) => {
-    const next = savedTemplates.filter((t) => t.key !== key)
-    setSavedTemplates(next)
-    localStorage.setItem('bs_social_templates', JSON.stringify(next))
+  const deleteTemplate = async (key) => {
+    const t = templatesRef.current.find((x) => x.key === key)
+    if (!t) return
+    if (!window.confirm(`Delete the template “${t.name}”? It is removed for everyone at your club.`)) return
+    setTemplatesList((l) => l.filter((x) => x.key !== key))
+    if (activeTemplateKey === key) rememberActiveTemplate(null)
+    try {
+      await api.deleteSocialTemplate(key)
+    } catch (e) {
+      setTemplatesList((l) => [t, ...l])
+      flashNote({ warn: true, text: `Couldn't delete “${t.name}” (${e?.message || 'no answer from the server'}). It is still saved.`, tool: 'design' }, 12000)
+    }
+  }
+
+  // Bring this browser and the club's server copy together. Runs once, when the
+  // settings arrive. The server's list is the truth; anything that only this
+  // browser holds goes up first, so nothing a person saved is ever replaced by
+  // a shorter list.
+  const syncTemplates = async (club) => {
+    let remote
+    try {
+      remote = await api.listSocialTemplates()
+    } catch (e) {
+      setTemplateSync({ state: 'offline', message: e?.message })
+      return
+    }
+    remote = Array.isArray(remote) ? remote : []
+    const local = readTemplateCache()
+    const legacy = Array.isArray(club?.socials_style?.templates) ? club.socials_style.templates : []
+    const flag = `bs_social_tpl_migrated_${club?.id || 'club'}`
+    let migrated = false
+    try { migrated = localStorage.getItem(flag) === '1' } catch { /* treat as not yet */ }
+    const stillPending = new Map()
+    let failed = 0
+
+    // 1. Saves and edits that never reached the server.
+    for (const t of local.filter((x) => x.unsynced)) {
+      const { unsynced, ...clean } = t
+      try { await api.saveSocialTemplate(t.key, clean) } catch { failed += 1; stillPending.set(t.key, t) }
+    }
+    // 2. Once per browser: templates saved before they had a table of their
+    //    own, from this browser's copy and from the Style blob.
+    let importedLegacy = false
+    if (!migrated) {
+      const known = new Set(remote.map((t) => t.key))
+      const seen = new Set()
+      const older = []
+      for (const t of [...local.filter((x) => !x.unsynced), ...legacy]) {
+        if (!t || typeof t.key !== 'string' || seen.has(t.key)) continue
+        seen.add(t.key)
+        if (!known.has(t.key)) { const { unsynced, ...clean } = t; older.push(clean) }
+      }
+      if (older.length) {
+        try { await api.importSocialTemplates(older); importedLegacy = true } catch { failed += 1 }
+      }
+      if (!failed) { try { localStorage.setItem(flag, '1') } catch { /* fine */ } }
+    }
+    let list = remote
+    try { const again = await api.listSocialTemplates(); if (Array.isArray(again)) list = again } catch { /* keep the first read */ }
+    // A local edit that could not be sent still shows, newest wins.
+    list = [...stillPending.values(), ...list.filter((t) => !stillPending.has(t.key))]
+    setTemplatesList(() => list)
+    setTemplateSync(failed ? { state: 'partial' } : { state: 'ok' })
+
+    // The Style blob stops being a second home for templates once they are safely across.
+    if (legacy.length && !failed && (importedLegacy || migrated)) {
+      const { templates: _drop, ...rest } = club.socials_style
+      api.adminPatchSettings({ socials_style: rest }).catch(() => { /* needs the Settings permission; harmless if not */ })
+    }
+
+    // A link to one saved template opens it, unless it is the one already open
+    // here (a refresh), whose blocks resume from their own autosave.
+    const urlKey = new URLSearchParams(window.location.search).get('template')
+    if (urlKey && !templateUrlApplied.current) {
+      templateUrlApplied.current = true
+      const t = list.find((x) => x.key === urlKey)
+      let openHere = null
+      try { openHere = localStorage.getItem(ACTIVE_TEMPLATE_KEY) } catch { /* fine */ }
+      if (t && openHere !== t.key) applyTemplate(t, { confirm: false })
+    }
   }
 
   const onPickPreset = (key) => {
@@ -1273,7 +1513,7 @@ export default function AdminSocialPost() {
   const styleSaveTimer = useRef(null)
   const styleSnapshot = JSON.stringify({
     palette: paletteKey, dark: darkMode, font: fontKey, bg: bgStyle,
-    bg_colors: bgColors, palettes: savedPalettes, designs: savedDesigns, templates: savedTemplates,
+    bg_colors: bgColors, palettes: savedPalettes, designs: savedDesigns,
   })
   useEffect(() => {
     if (!settings) return undefined
@@ -1292,6 +1532,8 @@ export default function AdminSocialPost() {
     Promise.all([api.adminGetSettings(), api.adminListPlayers(), api.adminListSponsors()])
       .then(([s, p, sp]) => {
         setSettings(s)
+        // Saved templates come from their own table, not from the settings.
+        syncTemplates(s)
         // Apply the club's stored style (server wins over this browser's
         // localStorage). Normalised into the same snapshot shape the save
         // effect builds, so the ref comparison suppresses a save-back.
@@ -1305,7 +1547,6 @@ export default function AdminSocialPost() {
             bg_colors: st.bg_colors && typeof st.bg_colors === 'object' ? st.bg_colors : {},
             palettes: Array.isArray(st.palettes) ? st.palettes : [],
             designs: Array.isArray(st.designs) ? st.designs : [],
-            templates: Array.isArray(st.templates) ? st.templates : [],
           }
           setPaletteKey(applied.palette)
           setDarkMode(applied.dark)
@@ -1314,7 +1555,6 @@ export default function AdminSocialPost() {
           setBgColors(applied.bg_colors)
           setSavedPalettes(applied.palettes)
           setSavedDesigns(applied.designs)
-          setSavedTemplates(applied.templates)
           styleServerRef.current = JSON.stringify(applied)
         }
         setAllPlayers(p)
@@ -1334,7 +1574,7 @@ export default function AdminSocialPost() {
           }))
         }
       })
-      .catch(() => {})
+      .catch(() => { setTemplateSync((cur) => (cur.state === 'loading' ? { state: 'offline' } : cur)) })
       .finally(() => setLoading(false))
   }, [])
 
@@ -1842,7 +2082,9 @@ export default function AdminSocialPost() {
   // Player management
   const addPlayer = useCallback(p => {
     if (selectedPlayers.find(sp => sp.player.id === p.id)) return
-    const role = p.player_role && ['BAT','BOWL','AR','WK'].includes(p.player_role) ? p.player_role : 'BAT'
+    const role = IS_AFL
+      ? ((p.skill_positions || [])[0] || '')
+      : p.player_role && ['BAT','BOWL','AR','WK'].includes(p.player_role) ? p.player_role : 'BAT'
     setSelectedPlayers(prev => [...prev, { player: p, role, captain: false, viceCaptain: false, keeper: false }])
   }, [selectedPlayers])
 
@@ -2617,6 +2859,8 @@ export default function AdminSocialPost() {
         club={{ name: settings?.name, subtitle: settings?.home_ground || settings?.home_venue || '', logo: team.logo }}
         moduleLogo={moduleBrand('socials').logo}
         savedTemplates={savedTemplates}
+        layoutLabel={layoutLabel}
+        syncState={templateSync}
         lastType={lastType ? { key: lastType.key, label: lastType.label } : null}
         onPick={openType}
         onResume={() => navigate(`/admin/social-post?type=${activeTab}`)}
@@ -2764,6 +3008,18 @@ export default function AdminSocialPost() {
   // for every use of the picture.
   const editLibraryAsset = (asset) => { if (asset?.url) setEditor({ key: 'libraryimg', source: asset.url, assetName: asset.name }) }
 
+  // The saved template this post came from, while its layout is still open.
+  const activeTemplate = savedTemplates.find((t) => t.key === activeTemplateKey && t.templateId === templateId) || null
+  const openSaveDialog = () => { setTemplateError(null); setSaveDialogOpen(true) }
+  // Save as new is the default and never touches the template you started
+  // from; updating it is a separate, explicit choice.
+  const onSaveDialog = ({ name, asNew }) => {
+    const typed = (name || '').trim()
+    if (!asNew && activeTemplate) return saveCurrentTemplate({ name: typed, updateKey: activeTemplate.key })
+    const clash = activeTemplate && typed.toLowerCase() === activeTemplate.name.toLowerCase()
+    return saveCurrentTemplate({ name: clash ? `${typed} (copy)` : typed })
+  }
+
   const clubName = settings?.name || 'Club'
   const headerLeft = (
     <>
@@ -2817,7 +3073,9 @@ export default function AdminSocialPost() {
         className="px-3 h-8 rounded-md border pb-hairline2 font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text hover:border-pb-accent transition-colors">
         ◉ PREVIEW{postPages.length > 1 ? ` (${postPages.length})` : ''}
       </button>
-      <button onClick={saveCurrentTemplate} title="Save this post as a reusable template"
+      <TemplatesMenu templates={savedTemplates} activeKey={activeTemplate?.key} layoutLabel={layoutLabel}
+        syncState={templateSync} onApply={applyTemplate} onDelete={deleteTemplate} />
+      <button onClick={openSaveDialog} title="Save this post as a reusable template" data-testid="save-as-template"
         className="px-3 h-8 rounded-md border pb-hairline2 font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text hover:border-pb-accent transition-colors">SAVE AS TEMPLATE</button>
       {!IS_AFL && !((isBlankTab && pages.count > 1) || roundPagesOn || scSplitOn) && (
         <button onClick={handleSaveToClubRoom} disabled={savingToClubRoom} title="Add this post to the Club Room Mode TV slideshow"
@@ -2954,6 +3212,9 @@ export default function AdminSocialPost() {
   return (
     <>
       <SocialBackgroundDefs />
+      <SaveTemplateDialog open={saveDialogOpen} defaultName={`Template ${savedTemplates.length + 1}`}
+        activeName={activeTemplate?.name} saving={savingTemplate} error={templateError}
+        onSave={onSaveDialog} onClose={() => setSaveDialogOpen(false)} />
       <input ref={blankImgInputRef} type="file" accept="image/png,image/webp,image/jpeg" className="sr-only"
         onChange={(e) => { const f = e.target.files?.[0]; if (f && pendingImgItem.current) setEditor({ key: 'blankimg', itemId: pendingImgItem.current, source: f }); e.target.value = '' }} />
       <PostEditorShell
@@ -2969,7 +3230,7 @@ export default function AdminSocialPost() {
         notice={savedNote ? (
           <div data-testid="saved-note" className="shrink-0 flex items-center gap-3 px-3.5 py-2 border-b pb-hairline"
             style={{ background: 'color-mix(in srgb, var(--pb-accent) 10%, var(--pb-surface))' }}>
-            <span className="font-mono text-[10px] tracking-wide2 uppercase" style={{ color: 'var(--pb-accent)' }}>Saved</span>
+            <span className="font-mono text-[10px] tracking-wide2 uppercase" style={{ color: savedNote.warn ? 'var(--pb-red)' : 'var(--pb-accent)' }}>{savedNote.warn ? 'Heads up' : 'Saved'}</span>
             <span className="text-[12px] text-pb-text">{savedNote.text}</span>
             {savedNote.to && (
               <button onClick={() => navigate(savedNote.to)} data-testid="saved-note-link"
@@ -3052,7 +3313,7 @@ export default function AdminSocialPost() {
                       <button onClick={() => navigate(`/${settings?.slug || ''}/${IS_AFL ? 'team-lists' : 'lineups'}`)} className="self-start mt-1 font-mono text-[10px] text-pb-faint hover:text-pb-text">{IS_AFL ? 'View Team Lists page →' : 'View Lineups page →'}</button>
                     </>)}
 
-                    {lineupLoad === 'loading' && <div className="text-pb-faint text-[10px] font-mono">Loading XI…</div>}
+                    {lineupLoad === 'loading' && <div className="text-pb-faint text-[10px] font-mono">{IS_AFL ? 'Loading side…' : 'Loading XI…'}</div>}
                     {typeof lineupLoad === 'string' && lineupLoad.startsWith('ok:') && <div className="text-green-400 text-[10px] font-mono">✓ {lineupLoad.slice(3)} players loaded — head to Content or Design</div>}
                     {typeof lineupLoad === 'string' && lineupLoad.startsWith('err:') && <div className="text-pb-red text-[10px] font-mono">✗ {lineupLoad.slice(4)}</div>}
                   </div>
@@ -3522,6 +3783,43 @@ export default function AdminSocialPost() {
               </button>
               {templatesOpen && (
                 <div className="mt-3 flex flex-col gap-4">
+                  <div className="flex flex-col gap-1.5" data-testid="your-templates">
+                    <div className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2">Your templates ({savedTemplates.length})</div>
+                    <TemplateSyncNote state={templateSync} />
+                    {savedTemplates.length === 0 && (
+                      <div className="text-pb-faintest text-[10px] font-mono">No saved templates yet. Build a post, then save it below.</div>
+                    )}
+                    {savedTemplates.length > 0 && (
+                      <div className="flex flex-col gap-1 max-h-[260px] overflow-y-auto">
+                        {savedTemplates.map(t => (
+                          <div key={t.key} data-testid="template-row"
+                            className={`flex items-center rounded border transition-colors ${activeTemplate?.key === t.key ? 'bg-pb-surface2' : 'border-transparent bg-pb-surface hover:bg-pb-surface2'}`}
+                            style={activeTemplate?.key === t.key ? { borderColor: 'var(--pb-accent)' } : undefined}>
+                            <button onClick={() => applyTemplate(t)} className="flex-1 min-w-0 text-left px-2.5 py-2">
+                              <div className="font-medium text-pb-text text-xs leading-tight truncate">{t.name}</div>
+                              <div className="font-mono text-[9px] text-pb-faintest mt-0.5 truncate">{[layoutLabel(t), t.unsynced ? 'not synced yet' : timeAgo(t.updated_at)].filter(Boolean).join(' · ')}</div>
+                            </button>
+                            <button onClick={() => deleteTemplate(t.key)} title="Delete template" aria-label={`Delete ${t.name}`} className="w-7 h-7 shrink-0 text-pb-faintest hover:text-red-400 text-xs">✕</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex gap-2 mt-1">
+                      <input value={saveTemplateName} onChange={e => setSaveTemplateName(e.target.value)} placeholder="Template name..."
+                        className="flex-1 min-w-0 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-[11px] font-mono text-pb-text" />
+                      <button onClick={() => onSaveDialog({ name: saveTemplateName, asNew: true })} disabled={savingTemplate}
+                        className="px-3 py-1 rounded text-[11px] font-mono border pb-hairline text-pb-text hover:border-pb-text transition-colors whitespace-nowrap disabled:opacity-50">
+                        {savingTemplate ? 'Saving…' : 'Save current'}
+                      </button>
+                    </div>
+                    {activeTemplate && (
+                      <button onClick={() => saveCurrentTemplate({ name: saveTemplateName || activeTemplate.name, updateKey: activeTemplate.key })} disabled={savingTemplate}
+                        data-testid="update-template"
+                        className="self-start px-3 py-1 rounded text-[11px] font-mono border pb-hairline text-pb-dim hover:border-pb-text hover:text-pb-text transition-colors disabled:opacity-50">
+                        Update “{activeTemplate.name}” with what is on screen
+                      </button>
+                    )}
+                  </div>
                   {!isBlankTab && (
                     <div className="flex flex-col gap-1 self-start">
                       <button
@@ -3563,34 +3861,6 @@ export default function AdminSocialPost() {
                     </div>
                   )}
 
-                  <div className="flex flex-col gap-1.5">
-                    <div className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2">Custom</div>
-                    {savedTemplates.length === 0 && (
-                      <div className="text-pb-faintest text-[10px] font-mono">No saved templates yet — build a post, then save it below.</div>
-                    )}
-                    {savedTemplates.length > 0 && (
-                      <div className="grid grid-cols-2 gap-2">
-                        {savedTemplates.map(t => (
-                          <div key={t.key}
-                            className={`relative p-2.5 rounded border transition-colors ${templateId === t.templateId ? 'bg-pb-surface2' : 'border-transparent bg-pb-surface hover:bg-pb-surface2'}`}>
-                            <button onClick={() => applyTemplate(t)} className="text-left w-full pr-4">
-                              <div className="font-medium text-pb-text text-xs leading-tight truncate">{t.name}</div>
-                              <div className="font-mono text-[9px] text-pb-faintest mt-0.5">{t.custom ? 'edit' : ''}{t.custom ? ' · ' : ''}{t.templateId}{t.blank ? ` · ${t.blank.length}` : ''}</div>
-                            </button>
-                            <button onClick={() => deleteTemplate(t.key)} title="Delete template" className="absolute top-1.5 right-1.5 text-pb-faintest hover:text-red-400 text-xs">✕</button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    <div className="flex gap-2 mt-1">
-                      <input value={saveTemplateName} onChange={e => setSaveTemplateName(e.target.value)} placeholder="Template name..."
-                        className="flex-1 min-w-0 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-[11px] font-mono text-pb-text" />
-                      <button onClick={saveCurrentTemplate}
-                        className="px-3 py-1 rounded text-[11px] font-mono border pb-hairline text-pb-text hover:border-pb-text transition-colors whitespace-nowrap">
-                        Save current
-                      </button>
-                    </div>
-                  </div>
                 </div>
               )}
             </section>
@@ -3610,8 +3880,8 @@ export default function AdminSocialPost() {
               <section className="pb-card p-4">
                 <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Match Info</h2>
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="col-span-2"><Field label="Headline (lineup posts)"><TextInput value={headline} onChange={setHeadline} placeholder="SQUAD · e.g. Applecross 6th XI" /></Field></div>
-                  <Field label="Competition"><TextInput value={match.competition} onChange={v => patchMatch({ competition: v })} placeholder="PREMIER T20" /></Field>
+                  <div className="col-span-2"><Field label="Headline (lineup posts)"><TextInput value={headline} onChange={setHeadline} placeholder={IS_AFL ? 'SQUAD · e.g. Reserves' : 'SQUAD · e.g. Applecross 6th XI'} /></Field></div>
+                  <Field label="Competition"><TextInput value={match.competition} onChange={v => patchMatch({ competition: v })} placeholder={IS_AFL ? 'PREMIER C' : 'PREMIER T20'} /></Field>
                   <Field label="Round"><TextInput value={match.round} onChange={v => patchMatch({ round: v })} placeholder="ROUND 7" /></Field>
                   <Field label="Venue"><TextInput value={match.venue} onChange={v => patchMatch({ venue: v })} placeholder="Heathcote Reserve" /></Field>
                   <Field label="Date"><TextInput value={match.date} onChange={v => patchMatch({ date: v })} placeholder="SAT 30 MAY" /></Field>
@@ -3818,7 +4088,7 @@ export default function AdminSocialPost() {
                   <Field label="Value (big number)"><TextInput value={milestone.value} onChange={v => setMilestone(m => ({ ...m, value: v }))} placeholder="200" /></Field>
                   <Field label="Unit"><TextInput value={milestone.unit} onChange={v => setMilestone(m => ({ ...m, unit: v }))} placeholder="GAMES" /></Field>
                   <div className="col-span-2"><Field label="Reason (eyebrow)"><TextInput value={milestone.reason} onChange={v => setMilestone(m => ({ ...m, reason: v }))} placeholder="200TH GAME FOR THE CLUB" /></Field></div>
-                  <div className="col-span-2"><Field label="Detail line"><TextInput value={milestone.detail} onChange={v => setMilestone(m => ({ ...m, detail: v }))} placeholder="15 seasons · 4,872 runs" /></Field></div>
+                  <div className="col-span-2"><Field label="Detail line"><TextInput value={milestone.detail} onChange={v => setMilestone(m => ({ ...m, detail: v }))} placeholder={IS_AFL ? '15 seasons · 312 goals' : '15 seasons · 4,872 runs'} /></Field></div>
                   {selectedPlayers.length > 0 && (
                     <div className="col-span-2">
                       <Field label="Featured Player">
@@ -4109,7 +4379,7 @@ export default function AdminSocialPost() {
                           <span draggable onDragStart={fxDrag.onDragStart(i)} onDragEnd={fxDrag.onDragEnd} title="Drag to reorder"
                             className="cursor-grab select-none font-mono text-[10px] leading-none text-pb-faintest hover:text-pb-text text-center">⋮⋮</span>
                           <RowReorder onUp={() => moveRow(setFixtures, i, -1)} onDown={() => moveRow(setFixtures, i, 1)} isFirst={i === 0} isLast={i === fixtures.length - 1} />
-                          <input value={f.grade} onChange={e => set({ grade: e.target.value })} placeholder="Grade · 1ST XI"
+                          <input value={f.grade} onChange={e => set({ grade: e.target.value })} placeholder={IS_AFL ? 'Grade · SENIORS' : 'Grade · 1ST XI'}
                             className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
                           <select value={f.ha} onChange={e => set({ ha: e.target.value })}
                             className="bg-pb-surface border pb-hairline rounded px-1 py-1 text-xs text-pb-text">
@@ -4175,7 +4445,7 @@ export default function AdminSocialPost() {
                           <span draggable onDragStart={rrDrag.onDragStart(i)} onDragEnd={rrDrag.onDragEnd} title="Drag to reorder"
                             className="cursor-grab select-none font-mono text-[10px] leading-none text-pb-faintest hover:text-pb-text text-center">⋮⋮</span>
                           <RowReorder onUp={() => moveRow(setResults, i, -1)} onDown={() => moveRow(setResults, i, 1)} isFirst={i === 0} isLast={i === results.length - 1} />
-                          <input value={r.grade} onChange={e => set({ grade: e.target.value })} placeholder="Grade · 1ST XI"
+                          <input value={r.grade} onChange={e => set({ grade: e.target.value })} placeholder={IS_AFL ? 'Grade · SENIORS' : 'Grade · 1ST XI'}
                             className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
                           <select value={r.outcome} onChange={e => set({ outcome: e.target.value })}
                             className="bg-pb-surface border pb-hairline rounded px-1 py-1 text-xs text-pb-text">

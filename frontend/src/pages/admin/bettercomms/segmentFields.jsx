@@ -1,3 +1,4 @@
+import { IS_AFL } from '../../../lib/sport'
 import { useState, useEffect, useRef } from 'react'
 import { api } from '../../../lib/api'
 
@@ -31,7 +32,7 @@ const MODULE_OPTS = [
 // fields read the linked player, so they narrow to the playing squad
 // automatically. Fields with an `optionsKey` pull their dropdown values from
 // /segments/options (the club's real roles / teams), so we never guess vocab.
-export const CLUB_FIELD_DEFS = {
+const ALL_CLUB_FIELD_DEFS = {
   tag: { label: 'Has tag', input: 'text', ops: [['has', 'is']] },
   // The one condition that reads the ledger rather than the roster. Resolved
   // server-side from the same fees calculation the Accounts screen runs, so
@@ -75,6 +76,15 @@ export const CLUB_FIELD_DEFS = {
   hundreds_this_season: { label: 'Hundreds this season', input: 'number', ops: STAT_OPS },
   five_wickets_this_season: { label: '5-wicket hauls this season', input: 'number', ops: STAT_OPS },
 }
+
+// Football keeps no runs, wickets, fifties or hundreds, and a football player
+// has positions rather than a batting or bowling role, so those conditions
+// would only ever match nobody. They are not offered there.
+const CRICKET_ONLY = new Set(['role', 'matches_this_season', 'runs_this_season', 'wickets_this_season',
+  'catches_this_season', 'fifties_this_season', 'hundreds_this_season', 'five_wickets_this_season'])
+export const CLUB_FIELD_DEFS = IS_AFL
+  ? Object.fromEntries(Object.entries(ALL_CLUB_FIELD_DEFS).filter(([k]) => !CRICKET_ONLY.has(k)))
+  : ALL_CLUB_FIELD_DEFS
 
 // ── Super Admin scope — NEVER import this from a club-facing screen ──────────
 // A prospect club / its officer and what they have done. Each reads telemetry

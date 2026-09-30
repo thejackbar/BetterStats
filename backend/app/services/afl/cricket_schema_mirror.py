@@ -70,6 +70,9 @@ SHARED_DDL_MODULES = (
     ("app.services.pillar_plan_ddl", "PILLAR_PLAN_CLAIM_SQL"),
     ("app.services.plan_tree_ddl", "PLAN_TREE_SQL"),
     ("app.services.invoice_billing_ddl", "STATEMENTS"),
+    # BetterSocials is mounted on the football app too, so its saved templates
+    # need their table there.
+    ("app.services.social_template_ddl", "STATEMENTS"),
 )
 
 

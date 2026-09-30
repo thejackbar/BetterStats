@@ -1,3 +1,4 @@
+import { IS_AFL } from '../../lib/sport'
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useSearchParams, Link } from 'react-router-dom'
 import { api } from '../../lib/api'
@@ -13,7 +14,9 @@ const STATUS_OPTIONS = [
   ['awaiting_documents', 'Awaiting Documents'], ['awaiting_payment', 'Awaiting Payment'],
   ['active', 'Active'], ['suspended', 'Suspended'], ['expired', 'Expired'], ['archived', 'Archived'],
 ]
-const FORMAT_LABEL = { two_day: 'Two Day', one_day: 'One Day', t20: 'T20', women: "Women's" }
+const FORMAT_LABEL = IS_AFL
+  ? { two_day: 'Game', one_day: 'Game', t20: 'Game', women: "Women's" }
+  : { two_day: 'Two Day', one_day: 'One Day', t20: 'T20', women: "Women's" }
 const inp = 'w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
 
 const SECTION_LABEL = { membership: 'Membership', tier: 'Membership Tier', contact: 'Contact & Notes' }

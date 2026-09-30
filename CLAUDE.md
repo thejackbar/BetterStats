@@ -1,5 +1,163 @@
 # BetterStats — Claude Session Notes
 
+## A game that does not add up is warned about, never refused (v9.99.2, Sep 2026)
+
+Reported off Hamilton Veterans' 23 Oct 2011 game: Portland and Mt Gambier both
+read 142/7 in 40 overs. Asked whether the opposition total had been forgotten
+and copied across; it had not.
+
+- **THE OPPOSITION TOTAL WAS ENTERED AND RIGHT. OUR INNINGS CARRIED A COPY.**
+  `_merge_manual_innings` lets a recorded `total_runs` replace the batters' sum
+  on any innings, and the form draws the total boxes only when "Who batted" is
+  Opposition. Type a total while an innings is Opposition, flip it to Our
+  innings, and the boxes vanish while the values stay and are saved. Both rows
+  then held 142/7/40 and the card totalled 125/8 nowhere.
+- **THE FIX IS AT THE SOURCE, NOT IN THE MERGE.** A scorebook CSV import
+  legitimately records OUR total (`innings_total`), so the merge still honours
+  one. The hand-entry path stops storing it instead: `_replace_game_children`
+  nulls total/wickets/overs on any innings whose side is "us", the form clears
+  them when the side is flipped (`setInningsSide`) and never sends them
+  (`buildPayload`).
+- **WARNINGS ONLY.** A club entering a scorebook often lacks a figure, so
+  nothing here can refuse a save. `services/manual_game_check.check_game` is
+  the one definition, read by `POST /manual-entries/games/check` (writes
+  nothing) which the form calls, debounced, and shows in an amber box and again
+  in the save confirm. A failed check draws nothing and does not stop a save.
+  It reports: an opposition innings with no total (skipped for a photo upload,
+  which carries their whole card), our bowlers' runs plus byes, leg byes and
+  penalties not reaching their total (or exceeding it when extras are not
+  itemised), overs not matching, an innings set to the wrong side for the rows
+  under it, and a result line that disagrees with the totals (one innings each
+  only).
+- **`scripts/fix_stray_innings_totals <org|all> [--apply]`** repairs stored
+  games, on a narrow signature: our innings carries the SAME runs, wickets and
+  overs as the opposition's, our batters are listed, and batters plus extras do
+  not already equal it. A legitimate total and a tie are left alone. It only
+  NULLs the three columns and writes an audit entry with before and after, so
+  the Audit tab can undo it.
+- **Verified** (`verify_manual_game_check.py`, 36 through the shipped writer,
+  scorecard, route and script against a real Postgres; control with the writer
+  change neutered fails 3, reporting Portland at 142/7) and in Chromium
+  (`verify_manual_game_check_browser.mjs`, 24; control fails 11). Neighbours:
+  manual innings 20, winner 25, side names 24, CSV innings 31.
+- **Noticed, not fixed**: `settle_manual_game` reads the same totals, so a stray
+  copy could have flipped a winner. It reads correctly once the copy is gone.
+
+
+## BetterSelect on BetterFootball: a ground, a bench and football's rules (v9.100.0, Sep 2026)
+
+Asked for as "port across BetterSelect and make everything football": 18 on the
+ground and up to 10 on the bench, players classified by position rather than as
+batters and bowlers, fixtures from PlayHQ, AFL-compliant selection rules.
+
+- **FOOTBALL'S OWN MODULE, NOT CRICKET'S SCREENS.** Cricket's selection pool,
+  availability matrix and rules engine all read cricket per-innings tables
+  (`game_appearances`, batting, bowling) and cricket rule kinds (bowling
+  workload, overseas, nets), so none of them could be mounted. Football has
+  `services/afl/select.py`, `services/afl/select_rules.py`,
+  `routers/afl/select.py` (`/afl-select/*`, behind `require_module("select")`,
+  writes on `MANAGE_SELECTIONS`) and five screens under
+  `frontend/src/afl/pages/admin/select/`. The sport-neutral SHARED tables are
+  reused as they are: `fixtures`, `teams`, `team_members`, `player_availability`,
+  `player_availability_periods`.
+- **A SIDE IS A FIELD, SO THE TEAM SHEET IS ITS OWN TABLE** (`afl_lineup_slots`:
+  slot = a field position, `INT` bench or `EMG` emergency; captain and
+  vice-captain). `fixture_lineups` is an ordered batting list and is not
+  touched. Six lines (B, HB, C, HF, F, Followers); a smaller side drops
+  positions in a fixed order (`_DROP_ORDER`: wings, then ruck rover...) so a
+  16-a-side junior grade is played without wings.
+- **FIXTURES ARE THE GAMES THE SYNC ALREADY HOLDS.** The football sync writes
+  every game on the draw into `games` whether played or not. `sync_fixtures`
+  (end of every sync, and the Update from PlayHQ button) upserts a `fixtures`
+  row keyed on the GAME'S OWN ID, so a side picked for a fixture is the side
+  for that game. A fixture is never deleted by a sync.
+- **FORM IS OUR SIDE ONLY** — `afl_player_game_lines` carries both teams, so
+  every read joins `l.side = d.our_side`. The control run (join removed) reads
+  the opposition's line as ours: 4 games for 3, a best on ground that isn't his.
+- **"HIGHER SIDE" IS THE SQUADS ORDER.** `grade_ranks` maps a grade to the
+  `teams.sequence` of the side that plays in it, directly or by the `afl_teams`
+  name PlayHQ filed under that grade in any season. Seeding orders reserves
+  before "Premier": a grade called "Premier C Reserves" is a reserves grade.
+- **THE RULES** (`RULE_KINDS`): team_size (info; default 18/10/3), age (as at
+  1 January of the season by default, the AFL community basis), finals
+  qualification (home-and-away games, in this grade / this grade or higher /
+  club), higher_grade_limit, concussion (21 days by default, counted from a
+  dated `incident` entry, a `permit` is the medical clearance), registration,
+  fees, custom. Silence where the data can't answer, as cricket keeps.
+- **THE PLAYER'S OWN LINK IS CRICKET'S** (`public_availability` mounted on
+  football, `PublicAvailability` at `/avail/:token` in the football app). Its
+  dormancy rule (`availability.dormant_player_ids`) now also reads football's
+  match record when `afl_player_game_lines` exists; without that every football
+  player read as never-played and nobody was ever dormant.
+- **Verified against a real Postgres** (`verify_afl_select.py`, 73 checks
+  through the HTTP stack: module gate, sides seeded and ordered, fixtures keyed
+  on the game, squads filed, availability and periods, the ground, save and
+  refusals, the clash, the team sheet, every rule, the player's link) **with a
+  control run**: our-side scoping and football dormancy removed, 4 fail. Driven
+  in Chromium (`verify_afl_select_browser.mjs`, 54, seeded by
+  `seed_afl_select_browser.py`) **with a control run**: 42 of the 54 fail
+  against the previous build, reported rather than crashed.
+- **THE SWEEP OF WHAT WAS PORTED EARLIER.** The shared services that seed a club's
+  starter data were cricket-only: qualifications, role types and roles, committee
+  titles ("Vice President - Men's Football"), starter facilities and gear, the
+  club diary's months, the roster's Match Day roles (goal and boundary umpire,
+  timekeeper, team manager) and the "Football Operations" department. Each reads
+  `settings.sport`, so cricket is byte-for-byte unchanged. On the frontend:
+  BetterSocials offers football positions in place of batter/bowler/keeper, strips
+  "Football Club"/FC/AFC/JFC off an opposition name, and hides the scorecard
+  post; fee formats read as football ones; the Xero and Square callback URLs
+  carry the `/afl/` base; a club segment on a cricket-only field is not offered;
+  "nets" is not a facility type; copy that named BetterCricket reads
+  `PLATFORM_NAME`.
+- **THE EARLIER BROWSER SUITES NEED THEIR OWN FIXTURE.** They assert on named data
+  (a "Rivals" opponent, a club holding every BetterAdmin module), so run against
+  the Select seed they fail for the fixture, not the code. With the club given
+  the modules BetterAdmin is 132/132; `seed_afl_socials_browser.py` rebuilds the
+  Socials fixture and that suite is 23/23. Every backend football suite re-run
+  green (select 73, social 27, shared modules 28, settings 41, admin extras 28,
+  competitions 37, seasons 21, fee match days 8, manual entries 75, profile 21).
+- **NOTICED, NOT BUILT**: football votes could offer the picked side as an
+  eligibility source on game night (they read the synced team list); nothing
+  pushes a side back to PlayHQ.
+## BetterCricket's messages on the club admin dashboard (migration 312, v9.99.0, Oct 2026)
+
+Asked for: a super admin sends a one-line message visible only on the Club
+Admin Dashboard, to all clubs, chosen clubs or chosen users, with a choice of
+how long it lasts (a time period, until cleared, until seen once, and so on),
+and it has to work on every device.
+
+- **`admin_broadcasts` + `admin_broadcast_receipts`**, DDL once in
+  `services/admin_broadcast_ddl.py` (alembic 312 and the lifespan both run it).
+  Router `routers/admin_broadcasts.py`. Screen `SuperBroadcasts.jsx` at
+  `/admin/super/broadcasts` (Better HQ > Comms > Dashboard Messages); banner
+  `components/admin/AdminBroadcastBanner.jsx`, mounted ABOVE the Welcome
+  heading in `AdminDashboard.jsx` and nowhere else.
+- **Audience** is `all` | `clubs` (org_ids) | `users` (user_ids), and for the
+  first two `audience_roles` narrows it: `all_admins` (club_admin AND
+  club_member, the admin-app users), `club_admins`, `primary`. A named-user list
+  is never narrowed by role. Archived clubs are never in the reach count, and
+  the composer refuses an archived club or a user who is not a club admin.
+- **Persistence** is `until_cleared` (no close button) | `dismissible` |
+  `view_once_user` | `view_once_club`, and `expires_at` stops ANY of them. A
+  super admin can always clear, restore, reset views or delete.
+- **VIEW-ONCE RUNS ON A RECEIPT THE BROWSER POSTS AFTER DRAWING**, not on the
+  GET. The GET computes what shows from receipts written on an EARLIER view, so
+  the view that shows it is the one view. `/seen` only records ids the user can
+  see right now, so a browser cannot plant a receipt.
+- **STAFF SEE A PREVIEW AND WRITE NOTHING.** A super admin or sales user acting
+  as a club gets every live message aimed at it (including a named-user one for
+  someone at that club), marked `preview`, and `/seen` and `/dismiss` store
+  nothing — a staff glance must not use up a club's view-once message.
+- **Verified against a real Postgres** (`verify_admin_broadcasts.py`, 56 checks
+  through the shipped route bodies) **with a control run** (view-once and the
+  primary filter neutered: 3 fail), and **in Chromium**
+  (`verify_admin_broadcasts_browser.mjs`, 80: above the heading at 1440/768/390,
+  the most urgent first, the close target at least 36px, a long URL wrapping,
+  the seen and dismiss calls, the preview writing nothing, and the composer's
+  payload and reach) **with a control run** (banner unmounted: 5 fail).
+- **Noticed, not fixed**: the dashboard's module tiles already overflow 7px at
+  768px (an ADD-ON/SOON label), with or without a message.
+
 ## An importer pre-selects "Steve" for the club's "Steven" (v9.97.2, Sep 2026)
 
 Reported off Shoalwater Bay's re-import: the archive writes "Salter, Steve",
@@ -142,6 +300,72 @@ them. **Fetch `origin/main` before building on an import format.**
   fails 26; the edit snapshot alone removed fails 1; the key guard alone
   removed fails 1. Neighbours: manual games import 194, scorebook innings 47,
   manual innings 20, manual scorecard 25, template route 4.
+
+### Our innings is named for the team the match says, not the club (v9.98.6)
+
+Reported by Hamilton Veterans, who play as "Portland Over 60s": on entered
+games the header drew each side's score under the other side's name, and the
+cards called our side "Hamilton Veterans Cricket Club".
+
+- **THE STORED DATA WAS RIGHT; ONLY THE PAGE WAS WRONG.** Every innings, total
+  and batting side read correctly off the live payload. `get_scorecard` labelled
+  our innings with `org.name`, a name the match's home/away does not use, so the
+  header could not place it and fell back to "innings 1 is home".
+- **"60s" WAS READ AS A CLUB WORD.** `distinctiveTeamWords` kept "60s", so
+  "Mt Gambier Over 60s" scored as a partial match for "Portland Over 60s" and the
+  header swapped the scores even when Portland batted first. `AGE_TOKEN`
+  (`/^[uo]?\d+s?$/`) is generic now.
+- **`games._manual_side_names` is the one rule**: ours is whichever of home/away
+  is not the opposition (punctuation-insensitive), else the side sharing a
+  non-generic word with the club's name, else a single named side that is not
+  the opposition, else the club's name as before.
+- **The header judges both sides against both teams** (`sidesSwapped`); a tie no
+  longer means "innings 1 is home". `splitSides` files by exact normalised name
+  first, and with only one side seen it needs every distinctive word shared, or
+  both innings of a match between two "Over 60s" sides land on one side (the
+  control run shows exactly that).
+- **The team cards stay in batting order** under a home/away header, per the
+  v8.79.2 instruction. The club's feedback also asked for the cards to sit under
+  their header columns; that reverses a deliberate call and was raised, not built.
+- **`bowling_order` on the match CSV.** Spells are held and written in that
+  order, and every read of manual spells orders by `id` (the scorecard, the edit
+  form, the edit and delete snapshots), so a later edit or undo keeps it. No
+  migration: insertion order is the order.
+- **Games page "All seasons" defaulted again on every null season** and snapped
+  back to the newest. Defaults once now (`seasonDefaulted` ref).
+- **Verified** (`backend/verification/verify_manual_side_names.py`, 24 through
+  the shipped routes against a real Postgres; control: 12 fail) and in Chromium
+  (`frontend/verification/verify_manual_scorecard_sides_browser.mjs`, 56, over
+  the club's six real payloads with the club name and with the team name, plus
+  the live Games page; control: 17 fail, reporting the reported 20 Mar and 5 Feb
+  swaps and 2026/27 coming back). Neighbours: CSV innings 31, scorebook 47,
+  manual innings 20, manual scorecard 25, games import 194, template 4, innings
+  total 15, scorecard innings 28, scorebook browser 19.
+
+### A recorded winner the result and the scores both contradict (v9.98.7)
+
+Reported off Hamilton Veterans' 7 Feb 2012 CSV game: winning_team Portland,
+result "Lost by 7 Runs", scores Portland 159 v Vic Country 166. The importer
+copies `winning_team` verbatim and every screen reads it, so one wrong field
+beat two right ones.
+
+- **`services/manual_result.py` is the one rule**, applied by the CSV import,
+  the hand-entry create/update and `python -m app.scripts.settle_manual_winners
+  <org|all> [--apply]` (dry run by default). The winner changes only when the
+  result line opens with Won/Lost (a line naming a team is not read), the
+  recorded winner names the other side, it is one innings each, and the scores
+  agree with the result line. A tie, a missing total or a rain-rule result
+  where the lower score won is left as entered.
+- **Cheap on a big import**: scores are worked out (via the shipped
+  `get_scorecard`) only for a game whose winner and result line already
+  disagree. The import lists each change in its warnings.
+- **Card layout stays as it is**: header home/away, team cards in batting
+  order. That is the standard (Wisden and Cricinfo list the fixture home v
+  away, then the innings in the order they were batted).
+- **Verified** (`verify_manual_winner.py`, 25) **with a control run**: 7 fail,
+  the winner staying Portland. Neighbours: side names 24, CSV innings 31,
+  scorebook 47, manual innings 20, manual scorecard 25, games import 194.
+- **Run the script for Hamilton after deploying.**
 
 ## The club page a prospect searched their way to asks them to start (v9.91.0, Sep 2026)
 

@@ -15,6 +15,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.config.settings import settings
 from app.auth.modules import require_module
 from app.routers import instructional_videos
+from app.routers import admin_broadcasts
 from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, cricketstatz, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, public_net_checkin, net_manager, website, comms, public_comms, public_ses, public_contact, public_webinar, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, public_billing, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
     stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
     club_diary, social_media, votes, public_votes, roles_activities, club_room, roster, facility_requests, directory, \
@@ -4364,6 +4365,20 @@ async def lifespan(app: FastAPI):
         for _stmt in _MANUAL_INNINGS_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 312: super-admin messages on the club admin dashboard.
+        # Same one-copy rule: this and alembic's 312 both run
+        # services/admin_broadcast_ddl.STATEMENTS.
+        from app.services.admin_broadcast_ddl import STATEMENTS as _ADMIN_BROADCAST_DDL
+        for _stmt in _ADMIN_BROADCAST_DDL:
+            await conn.execute(text(_stmt))
+
+        # Migration 313: BetterSocials saved templates, one row each. Same
+        # one-copy rule: this and alembic's 313 both run
+        # services/social_template_ddl.STATEMENTS.
+        from app.services.social_template_ddl import STATEMENTS as _SOCIAL_TEMPLATE_DDL
+        for _stmt in _SOCIAL_TEMPLATE_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 293: a CricketStatz import and a Cricket Australia sync
         # complement each other, so their matches are UNIONED and the
         # duplicates removed per match — `manual_games.superseded_by_game_id`.
@@ -6230,6 +6245,7 @@ app.include_router(sales_workspace.router)  # Sales Workspace — calling lens o
 app.include_router(sales_commissions.router)  # Sales Commissions — forecast + earned commission per rep (super-admin only)
 app.include_router(usage.router)
 app.include_router(login_attempts.router)
+app.include_router(admin_broadcasts.router)  # Super-admin messages on the club admin dashboard
 app.include_router(meta_ads.router)  # Meta Ads HQ dashboard (super-admin) — BetterCricket's own ad spend
 app.include_router(self_serve_trial.router)  # Self-serve club trial registration (internal, flag-gated — see docs/self-serve-trial-onboarding-plan.md)
 app.include_router(public_self_serve.router)  # Public self-serve trial registration (unauthenticated, same flag — the /trial ad-campaign landing page)
