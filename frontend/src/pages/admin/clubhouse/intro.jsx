@@ -1,3 +1,4 @@
+import { PLATFORM_NAME } from '../../../lib/sport'
 import { useState, useEffect, useCallback } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../../../contexts/AuthContext'
@@ -161,7 +162,7 @@ export const INTROS = {
       'Use a list for a group that will not change on its own — the committee, the sponsors, one team.',
       'For a group better described by a rule, use a segment instead. A list is the roll call; a segment is the rule.',
       'When you write an email you choose its audience, and that audience is one of your lists or one of your segments.',
-      'Lists other BetterCricket tools built for you sit in their own section and behave like any other list.',
+      `Lists other ${PLATFORM_NAME} tools built for you sit in their own section and behave like any other list.`,
     ],
   },
   templates: {

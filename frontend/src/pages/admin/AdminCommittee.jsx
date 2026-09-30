@@ -1,3 +1,4 @@
+import { IS_AFL } from '../../lib/sport'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
@@ -307,7 +308,7 @@ function NewTaskForm({ onCreated }) {
   return (
     <div className="pb-card p-4 mb-4">
       <div className="flex flex-col sm:flex-row gap-2">
-        <input className={`${inp} flex-1`} placeholder="Task title (e.g. Book turf wickets)" value={form.title}
+        <input className={`${inp} flex-1`} placeholder={IS_AFL ? 'Task title (e.g. Book the umpires)' : 'Task title (e.g. Book turf wickets)'} value={form.title}
           onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
         <select className={`${inp} sm:w-40`} value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}>
           {CATEGORIES.map(c => <option key={c} value={c}>{label(c)}</option>)}

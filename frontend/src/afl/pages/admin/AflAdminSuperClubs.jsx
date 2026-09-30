@@ -49,7 +49,7 @@ function ClubEditor({ club, onClose, onSaved }) {
   const [form, setForm] = useState({
     name: club.name, short_name: club.short_name || '', slug: club.slug || '',
     primary_color: club.primary_color || '', accent_color: club.accent_color || '', is_active: club.is_active,
-    modules: { socials: !!club.modules?.socials, admin: !!club.modules?.admin },
+    modules: { socials: !!club.modules?.socials, select: !!club.modules?.select, admin: !!club.modules?.admin },
   })
   const [admins, setAdmins] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -160,6 +160,7 @@ function ClubEditor({ club, onClose, onSaved }) {
             What this club's admins can open. BetterStats is always on.
           </p>
           {[['socials', 'BetterSocials', 'Social post designer and media library'],
+            ['select', 'BetterSelect', 'Squads, availability, the field and bench, and selection rules'],
             ['admin', 'BetterAdmin', 'Accounts, emails, stock, directory, roster, committee and events']].map(([key, name, desc]) => (
             <label key={key} className="flex items-start gap-2 text-sm text-pb-text py-1">
               <input type="checkbox" className="mt-1" checked={!!form.modules[key]}

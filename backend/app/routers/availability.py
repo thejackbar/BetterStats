@@ -62,7 +62,25 @@ async def dormant_player_ids(db: AsyncSession, club: Organisation) -> set[uuid.U
         ),
         {"org": club.id},
     )
-    return {pid for pid, lp in lp_res.fetchall() if lp and lp < cutoff}
+    last = {pid: lp for pid, lp in lp_res.fetchall()}
+    # Football writes no game_appearances: who played is afl_player_game_lines,
+    # our side only. The table exists only in a football database, so the
+    # cricket read above is all a cricket club ever runs.
+    if (await db.execute(text("SELECT to_regclass('afl_player_game_lines')"))).scalar():
+        fb = await db.execute(
+            text(
+                "SELECT l.player_id, MAX(g.played_at) FROM afl_player_game_lines l "
+                "JOIN afl_game_details d ON d.game_id = l.game_id AND l.side = d.our_side "
+                "JOIN games g ON g.id = l.game_id "
+                "JOIN players p ON p.id = l.player_id "
+                "WHERE p.organisation_id = :org AND l.played GROUP BY l.player_id"
+            ),
+            {"org": club.id},
+        )
+        for pid, lp in fb.fetchall():
+            if lp and (last.get(pid) is None or lp > last[pid]):
+                last[pid] = lp
+    return {pid for pid, lp in last.items() if lp and lp < cutoff}
 
 
 async def club_player_roster(db: AsyncSession, club: Organisation) -> list[Player]:

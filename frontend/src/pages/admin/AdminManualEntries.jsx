@@ -1160,11 +1160,34 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
           for (const k of ['byes', 'leg_byes', 'wides', 'no_balls', 'penalty', 'extras_total', 'total_runs', 'total_wickets', 'overs']) {
             out[k] = (out[k] === '' || out[k] == null) ? null : Number(out[k])
           }
+          // The form only offers a total for the opposition's innings. Ours is
+          // its batters plus extras, so never send one that is left over.
+          if (out.batting_side !== 'opposition') { out.total_runs = null; out.total_wickets = null; out.overs = null }
           return out
         })
         .filter(r => r.batting_side || ['byes', 'leg_byes', 'wides', 'no_balls', 'penalty', 'extras_total', 'total_runs', 'total_wickets', 'overs'].some(k => r[k] != null)),
     }
   }
+
+  // What in the game so far does not add up. Warnings only: a club entering a
+  // game from a scorebook often lacks a figure, and none of this ever stops a
+  // save. The server holds the one definition (services/manual_game_check).
+  const [checks, setChecks] = useState([])
+  const checkSeq = useRef(0)
+  useEffect(() => {
+    const has = (form.batting_innings || []).length || (form.bowling_spells || []).length || (form.innings || []).length
+    if (!has) { setChecks([]); return undefined }
+    const seq = ++checkSeq.current
+    const t = setTimeout(async () => {
+      try {
+        const r = await api.adminCheckManualGame(buildPayload())
+        // A slow answer for an earlier edit must not overwrite a newer one.
+        if (seq === checkSeq.current) setChecks(r?.warnings || [])
+      } catch { /* a failed check is not a reason to say anything */ }
+    }, 600)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form])
 
   const handleSubmit = () => {
     setErr(null)
@@ -1175,7 +1198,10 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
     }
     onPending({
       title: editingId ? 'Update manual game?' : 'Save manual game?',
-      body: 'A manual game appears in stats aggregations like any other match. Every change is logged and reversible from the Audit tab.',
+      body: 'A manual game appears in stats aggregations like any other match. Every change is logged and reversible from the Audit tab.'
+        + (checks.length
+          ? `\n\nThings that do not add up yet (you can still save):\n${checks.map(c => `• ${c.text}`).join('\n')}`
+          : ''),
       confirmLabel: editingId ? 'Update' : 'Save',
       action: async () => {
         try {
@@ -1228,6 +1254,16 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
     const arr = [...(form[collection] || [])]
     arr[idx] = { ...arr[idx], [key]: value }
     setForm({ ...form, [collection]: arr })
+  }
+  // Flipping who batted must not leave the previous side's total behind: the
+  // total boxes are only drawn for the opposition, so a leftover on our innings
+  // is invisible and would give both sides the same score.
+  const setInningsSide = (idx, side) => {
+    const arr = [...(form.innings || [])]
+    const row = { ...arr[idx], batting_side: side }
+    if (side !== 'opposition') { row.total_runs = ''; row.total_wickets = ''; row.overs = '' }
+    arr[idx] = row
+    setForm({ ...form, innings: arr })
   }
   const addChild = (collection, blankFn) => setForm({ ...form, [collection]: [...(form[collection] || []), blankFn()] })
   const removeChild = (collection, idx) => {
@@ -1378,7 +1414,7 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
                 <div className="col-span-2"><NumberField label="Innings #" value={row.innings_number} onChange={v => updateChild('innings', idx, 'innings_number', v)} /></div>
                 <div className="col-span-4">
                   <label className={LABEL_CLS}>Who batted</label>
-                  <select value={row.batting_side || ''} onChange={e => updateChild('innings', idx, 'batting_side', e.target.value)} className={INPUT_CLS}>
+                  <select value={row.batting_side || ''} onChange={e => setInningsSide(idx, e.target.value)} className={INPUT_CLS}>
                     <option value="us">Our innings</option>
                     <option value="opposition">Opposition innings</option>
                     <option value="">Not sure</option>
@@ -1491,6 +1527,19 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
             </div>
           ))}
         </div>}
+
+        {checks.length > 0 && (
+          <div data-testid="game-checks" className="mt-4 rounded-md border px-3 py-2.5 text-[12px]"
+            style={{ borderColor: 'rgba(245,158,11,0.4)', background: 'rgba(245,158,11,0.08)' }}>
+            <div className="font-semibold text-pb-text mb-1">
+              {checks.length === 1 ? 'One thing does not add up' : `${checks.length} things do not add up`}
+              <span className="font-normal text-pb-dim"> — fix what you can. You can still save without knowing the answer.</span>
+            </div>
+            <ul className="list-disc pl-4 space-y-1 text-pb-dim">
+              {checks.map((c, i) => <li key={i}>{c.text}</li>)}
+            </ul>
+          </div>
+        )}
 
         {err && <p className="text-sm text-red-400 mt-3">{err}</p>}
 

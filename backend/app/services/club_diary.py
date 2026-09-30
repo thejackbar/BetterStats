@@ -21,6 +21,7 @@ from typing import Optional
 from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config.settings import settings
 from app.models.db import (
     DiaryCategory, DiaryTaskDefinition, DiaryTaskOccurrence, DiaryTaskDependency, ClubRole,
     Organisation, DIARY_TASK_FREQUENCIES, DIARY_STANDING_FREQUENCIES,
@@ -82,6 +83,22 @@ STARTER_DIARY_TASKS = [
     ("Ground lease / facility agreement review", "Compliance", "annual", 11,
      "Review the ground lease or facility-use agreement with the council/land owner."),
 ]
+
+# Football plays through the winter, so its year turns in the spring: the AGM
+# after the grand final, the pre-season in the new year.
+if settings.sport == "afl":
+    _AFL_DIARY = {
+        "Annual General Meeting": (11, "Hold the AGM after the season — committee elections, annual reports, motions."),
+        "Working With Children Check audit": (2, None),
+        "Affiliation fees — league/association": (2, "Pay the club's annual affiliation fees to the league."),
+        "Pre-season ground preparation": (2, "Oval renovation, goal-post pads and line marking ahead of the new season."),
+        "End-of-season equipment service": (10, "Service the mower and scoreboard, audit footballs and training gear for replacement."),
+        "Public liability insurance renewal": (2, None),
+    }
+    STARTER_DIARY_TASKS = [
+        (t, c, f, _AFL_DIARY.get(t, (m, None))[0] if f == "annual" else m, _AFL_DIARY.get(t, (None, None))[1] or d)
+        for t, c, f, m, d in STARTER_DIARY_TASKS
+    ]
 
 
 def _num(v):

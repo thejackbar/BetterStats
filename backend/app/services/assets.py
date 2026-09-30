@@ -20,6 +20,7 @@ from typing import Optional
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config.settings import settings
 from app.models.db import Facility, FacilityBooking, ClubAsset, MaintenanceLog
 
 
@@ -311,6 +312,27 @@ STARTER_ASSETS = [
     {"name": "Scoring tablet", "category": "tech"},
     {"name": "Covers (roll-on)", "category": "grounds"},
 ]
+
+# A football club's grounds and gear: an oval with lights and a coaches' box,
+# and the footballs, tackle bags and goal-post pads it trains and plays with.
+if settings.sport == "afl":
+    STARTER_FACILITIES = [
+        {"name": "Main Oval", "facility_type": "ground", "description": "Match oval"},
+        {"name": "Training Oval", "facility_type": "ground", "description": "Lit for night training"},
+        {"name": "Change Rooms", "facility_type": "clubhouse", "description": "Home and away rooms"},
+        {"name": "Clubrooms", "facility_type": "clubhouse", "description": "Bar + social space"},
+        {"name": "Coaches' Box", "facility_type": "other", "description": "Match day, beside the interchange"},
+    ]
+    STARTER_ASSETS = [
+        {"name": "Match footballs", "category": "equipment"},
+        {"name": "Training footballs", "category": "equipment"},
+        {"name": "Tackle bags", "category": "equipment"},
+        {"name": "Goal post pads", "category": "grounds"},
+        {"name": "Line marker", "category": "grounds"},
+        {"name": "Interchange bench", "category": "grounds"},
+        {"name": "Scoreboard controller", "category": "tech"},
+        {"name": "Trainer's kit", "category": "kit"},
+    ]
 
 
 async def seed_starter_facilities(session: AsyncSession, org_id) -> int:

@@ -13,6 +13,7 @@ import uuid
 from datetime import date, datetime, timedelta
 from typing import Optional
 
+from app.config.settings import settings
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -197,8 +198,10 @@ async def reorder_areas(db: AsyncSession, org_id, area_ids) -> None:
 
 
 # ── departments (a managed catalogue that feeds the area form's dropdown) ─────
+_OPERATIONS = "Football Operations" if settings.sport == "afl" else "Cricket Operations"
+
 STARTER_DEPARTMENTS = [
-    "Cricket Operations", "Food & Beverage", "Grounds & Facilities",
+    _OPERATIONS, "Food & Beverage", "Grounds & Facilities",
     "Committee & Administration", "Coaching & Development", "Events & Fundraising",
 ]
 
@@ -583,15 +586,25 @@ STARTER_AREAS = [
     {"name": "Kitchen", "department": "Food & Beverage", "color": "#f97316",
      "roles": [("Canteen", "Food Handling")],
      "patterns": [[3, 18, 20, 2, "Canteen"], [5, 18, 20, 1, "Canteen"], [6, 16, 20, 1, "Canteen"]]},
-    {"name": "Match Day", "department": "Cricket Operations", "color": "#3b82f6",
+    {"name": "Match Day", "department": _OPERATIONS, "color": "#3b82f6",
      "roles": [("Umpire", "Umpire Accreditation"), ("Scorer", None), ("Team Manager", None)],
      "patterns": [[5, 12, 18.5, 2, "Umpire"], [6, 12, 18.5, 2, "Umpire"],
                   [5, 12, 18.5, 2, "Scorer"], [6, 12, 18.5, 2, "Scorer"],
                   [5, 11, 18.5, 1, "Team Manager"], [6, 11, 18.5, 1, "Team Manager"]]},
-    {"name": "Groundsman", "department": "Cricket Operations", "color": "#16c784",
+    {"name": "Groundsman", "department": _OPERATIONS, "color": "#16c784",
      "roles": [("Groundsman", None)],
      "patterns": [[0, 12, 15, 1, "Groundsman"], [5, 9, 10, 1, "Groundsman"], [6, 9, 10, 1, "Groundsman"]]},
 ]
+
+
+# Football's match day is umpires of three kinds, a timekeeper and a team
+# manager, and its training is at night under lights.
+if settings.sport == "afl":
+    for _a in STARTER_AREAS:
+        if _a["name"] == "Match Day":
+            _a["roles"] = [("Goal Umpire", None), ("Boundary Umpire", None), ("Timekeeper", None), ("Team Manager", None)]
+            _a["patterns"] = [[5, 11, 17, 2, "Goal Umpire"], [5, 11, 17, 2, "Boundary Umpire"],
+                              [5, 11, 17, 1, "Timekeeper"], [5, 10, 17, 1, "Team Manager"]]
 
 
 async def seed_starter_areas(db: AsyncSession, org_id) -> int:

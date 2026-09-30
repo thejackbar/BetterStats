@@ -1,5 +1,124 @@
 # BetterStats — Claude Session Notes
 
+## A game that does not add up is warned about, never refused (v9.99.2, Sep 2026)
+
+Reported off Hamilton Veterans' 23 Oct 2011 game: Portland and Mt Gambier both
+read 142/7 in 40 overs. Asked whether the opposition total had been forgotten
+and copied across; it had not.
+
+- **THE OPPOSITION TOTAL WAS ENTERED AND RIGHT. OUR INNINGS CARRIED A COPY.**
+  `_merge_manual_innings` lets a recorded `total_runs` replace the batters' sum
+  on any innings, and the form draws the total boxes only when "Who batted" is
+  Opposition. Type a total while an innings is Opposition, flip it to Our
+  innings, and the boxes vanish while the values stay and are saved. Both rows
+  then held 142/7/40 and the card totalled 125/8 nowhere.
+- **THE FIX IS AT THE SOURCE, NOT IN THE MERGE.** A scorebook CSV import
+  legitimately records OUR total (`innings_total`), so the merge still honours
+  one. The hand-entry path stops storing it instead: `_replace_game_children`
+  nulls total/wickets/overs on any innings whose side is "us", the form clears
+  them when the side is flipped (`setInningsSide`) and never sends them
+  (`buildPayload`).
+- **WARNINGS ONLY.** A club entering a scorebook often lacks a figure, so
+  nothing here can refuse a save. `services/manual_game_check.check_game` is
+  the one definition, read by `POST /manual-entries/games/check` (writes
+  nothing) which the form calls, debounced, and shows in an amber box and again
+  in the save confirm. A failed check draws nothing and does not stop a save.
+  It reports: an opposition innings with no total (skipped for a photo upload,
+  which carries their whole card), our bowlers' runs plus byes, leg byes and
+  penalties not reaching their total (or exceeding it when extras are not
+  itemised), overs not matching, an innings set to the wrong side for the rows
+  under it, and a result line that disagrees with the totals (one innings each
+  only).
+- **`scripts/fix_stray_innings_totals <org|all> [--apply]`** repairs stored
+  games, on a narrow signature: our innings carries the SAME runs, wickets and
+  overs as the opposition's, our batters are listed, and batters plus extras do
+  not already equal it. A legitimate total and a tie are left alone. It only
+  NULLs the three columns and writes an audit entry with before and after, so
+  the Audit tab can undo it.
+- **Verified** (`verify_manual_game_check.py`, 36 through the shipped writer,
+  scorecard, route and script against a real Postgres; control with the writer
+  change neutered fails 3, reporting Portland at 142/7) and in Chromium
+  (`verify_manual_game_check_browser.mjs`, 24; control fails 11). Neighbours:
+  manual innings 20, winner 25, side names 24, CSV innings 31.
+- **Noticed, not fixed**: `settle_manual_game` reads the same totals, so a stray
+  copy could have flipped a winner. It reads correctly once the copy is gone.
+
+
+## BetterSelect on BetterFootball: a ground, a bench and football's rules (v9.100.0, Sep 2026)
+
+Asked for as "port across BetterSelect and make everything football": 18 on the
+ground and up to 10 on the bench, players classified by position rather than as
+batters and bowlers, fixtures from PlayHQ, AFL-compliant selection rules.
+
+- **FOOTBALL'S OWN MODULE, NOT CRICKET'S SCREENS.** Cricket's selection pool,
+  availability matrix and rules engine all read cricket per-innings tables
+  (`game_appearances`, batting, bowling) and cricket rule kinds (bowling
+  workload, overseas, nets), so none of them could be mounted. Football has
+  `services/afl/select.py`, `services/afl/select_rules.py`,
+  `routers/afl/select.py` (`/afl-select/*`, behind `require_module("select")`,
+  writes on `MANAGE_SELECTIONS`) and five screens under
+  `frontend/src/afl/pages/admin/select/`. The sport-neutral SHARED tables are
+  reused as they are: `fixtures`, `teams`, `team_members`, `player_availability`,
+  `player_availability_periods`.
+- **A SIDE IS A FIELD, SO THE TEAM SHEET IS ITS OWN TABLE** (`afl_lineup_slots`:
+  slot = a field position, `INT` bench or `EMG` emergency; captain and
+  vice-captain). `fixture_lineups` is an ordered batting list and is not
+  touched. Six lines (B, HB, C, HF, F, Followers); a smaller side drops
+  positions in a fixed order (`_DROP_ORDER`: wings, then ruck rover...) so a
+  16-a-side junior grade is played without wings.
+- **FIXTURES ARE THE GAMES THE SYNC ALREADY HOLDS.** The football sync writes
+  every game on the draw into `games` whether played or not. `sync_fixtures`
+  (end of every sync, and the Update from PlayHQ button) upserts a `fixtures`
+  row keyed on the GAME'S OWN ID, so a side picked for a fixture is the side
+  for that game. A fixture is never deleted by a sync.
+- **FORM IS OUR SIDE ONLY** — `afl_player_game_lines` carries both teams, so
+  every read joins `l.side = d.our_side`. The control run (join removed) reads
+  the opposition's line as ours: 4 games for 3, a best on ground that isn't his.
+- **"HIGHER SIDE" IS THE SQUADS ORDER.** `grade_ranks` maps a grade to the
+  `teams.sequence` of the side that plays in it, directly or by the `afl_teams`
+  name PlayHQ filed under that grade in any season. Seeding orders reserves
+  before "Premier": a grade called "Premier C Reserves" is a reserves grade.
+- **THE RULES** (`RULE_KINDS`): team_size (info; default 18/10/3), age (as at
+  1 January of the season by default, the AFL community basis), finals
+  qualification (home-and-away games, in this grade / this grade or higher /
+  club), higher_grade_limit, concussion (21 days by default, counted from a
+  dated `incident` entry, a `permit` is the medical clearance), registration,
+  fees, custom. Silence where the data can't answer, as cricket keeps.
+- **THE PLAYER'S OWN LINK IS CRICKET'S** (`public_availability` mounted on
+  football, `PublicAvailability` at `/avail/:token` in the football app). Its
+  dormancy rule (`availability.dormant_player_ids`) now also reads football's
+  match record when `afl_player_game_lines` exists; without that every football
+  player read as never-played and nobody was ever dormant.
+- **Verified against a real Postgres** (`verify_afl_select.py`, 73 checks
+  through the HTTP stack: module gate, sides seeded and ordered, fixtures keyed
+  on the game, squads filed, availability and periods, the ground, save and
+  refusals, the clash, the team sheet, every rule, the player's link) **with a
+  control run**: our-side scoping and football dormancy removed, 4 fail. Driven
+  in Chromium (`verify_afl_select_browser.mjs`, 54, seeded by
+  `seed_afl_select_browser.py`) **with a control run**: 42 of the 54 fail
+  against the previous build, reported rather than crashed.
+- **THE SWEEP OF WHAT WAS PORTED EARLIER.** The shared services that seed a club's
+  starter data were cricket-only: qualifications, role types and roles, committee
+  titles ("Vice President - Men's Football"), starter facilities and gear, the
+  club diary's months, the roster's Match Day roles (goal and boundary umpire,
+  timekeeper, team manager) and the "Football Operations" department. Each reads
+  `settings.sport`, so cricket is byte-for-byte unchanged. On the frontend:
+  BetterSocials offers football positions in place of batter/bowler/keeper, strips
+  "Football Club"/FC/AFC/JFC off an opposition name, and hides the scorecard
+  post; fee formats read as football ones; the Xero and Square callback URLs
+  carry the `/afl/` base; a club segment on a cricket-only field is not offered;
+  "nets" is not a facility type; copy that named BetterCricket reads
+  `PLATFORM_NAME`.
+- **THE EARLIER BROWSER SUITES NEED THEIR OWN FIXTURE.** They assert on named data
+  (a "Rivals" opponent, a club holding every BetterAdmin module), so run against
+  the Select seed they fail for the fixture, not the code. With the club given
+  the modules BetterAdmin is 132/132; `seed_afl_socials_browser.py` rebuilds the
+  Socials fixture and that suite is 23/23. Every backend football suite re-run
+  green (select 73, social 27, shared modules 28, settings 41, admin extras 28,
+  competitions 37, seasons 21, fee match days 8, manual entries 75, profile 21).
+- **NOTICED, NOT BUILT**: football votes could offer the picked side as an
+  eligibility source on game night (they read the synced team list); nothing
+  pushes a side back to PlayHQ.
 ## BetterCricket's messages on the club admin dashboard (migration 312, v9.99.0, Oct 2026)
 
 Asked for: a super admin sends a one-line message visible only on the Club

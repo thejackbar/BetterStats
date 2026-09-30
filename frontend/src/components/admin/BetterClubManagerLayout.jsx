@@ -1,3 +1,4 @@
+import { IS_AFL } from '../../lib/sport'
 import { CAP } from '../../lib/capabilities'
 import BetterClubhouseLayout from './BetterClubhouseLayout'
 
@@ -26,7 +27,7 @@ export const GROUPS = [
     desc: 'Events, facilities and the running club diary.',
     items: [
       { to: '/admin/events', label: 'Events', icon: 'timer', cap: CAP.MANAGE_COMMITTEE, desc: 'Club events and the calendar.' },
-      { to: '/admin/assets', label: 'Assets & Facilities', icon: 'settings', cap: CAP.MANAGE_ASSETS, desc: 'Grounds, nets and club gear.' },
+      { to: '/admin/assets', label: 'Assets & Facilities', icon: 'settings', cap: CAP.MANAGE_ASSETS, desc: IS_AFL ? 'Grounds, rooms and club gear.' : 'Grounds, nets and club gear.' },
       { to: '/admin/club-diary', label: 'Club Diary', icon: 'list', cap: CAP.MANAGE_CLUB_DIARY, desc: 'The running club diary.' },
     ],
   },

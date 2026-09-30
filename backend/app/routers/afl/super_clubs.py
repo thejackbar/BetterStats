@@ -17,7 +17,9 @@ from pydantic import BaseModel
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.modules import MODULE_COMMS, MODULE_CRM, MODULE_FEES, MODULE_MERCH, MODULE_SOCIALS
+from app.auth.modules import (
+    MODULE_COMMS, MODULE_CRM, MODULE_FEES, MODULE_MERCH, MODULE_SELECT, MODULE_SOCIALS,
+)
 from app.models.db import ClubMembership, Organisation, SyncRun, User, get_db
 from app.routers.afl.club_admin import _has_running_sync, _run_sync, _spawn
 from app.routers.auth import require_super_admin
@@ -33,6 +35,7 @@ router = APIRouter(prefix="/club-admin/super", tags=["afl-super-clubs"])
 # keys, exactly as cricket sells it as one module.
 AFL_MODULE_TOGGLES = {
     "socials": (MODULE_SOCIALS,),
+    "select": (MODULE_SELECT,),
     "admin": (MODULE_FEES, MODULE_COMMS, MODULE_MERCH, MODULE_CRM),
 }
 

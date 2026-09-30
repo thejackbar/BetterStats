@@ -1,3 +1,4 @@
+import { IS_AFL } from '../../../../../lib/sport'
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../../../../../lib/api'
@@ -181,7 +182,7 @@ export default function Facilities({ st, patch, narrow }) {
           {shownFacilities.length === 0 ? (
             <div style={{ padding: 24, fontSize: 13.5, color: C.dim, maxWidth: '46rem' }}>
               {q ? `No facility or booking matches “${q}”.`
-                 : 'No facilities set up yet. Add your grounds, nets and clubrooms in the Assets & Facilities admin and their bookings will show here.'}
+                 : `No facilities set up yet. Add your grounds, ${IS_AFL ? 'change rooms' : 'nets'} and clubrooms in the Assets & Facilities admin and their bookings will show here.`}
             </div>
           ) : (
             <div style={{ minWidth: 1100 }}>
@@ -274,7 +275,7 @@ export default function Facilities({ st, patch, narrow }) {
         <div className="pb-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20, maxWidth: '56rem' }}>
           <div style={cap}>FACILITIES</div>
           <EntityManager
-            describe="Your grounds, nets and rooms — bookings and the availability grid read from these."
+            describe={IS_AFL ? "Your grounds and rooms. Bookings and the availability grid read from these." : "Your grounds, nets and rooms — bookings and the availability grid read from these."}
             load={() => api.assetsListFacilities().then(r => (r?.facilities || r || []).filter(f => f.is_active !== false))}
             fields={[{ key: 'name', label: 'Facility name', type: 'text', required: true, span: 2 }, { key: 'facility_type', label: 'Kind', type: 'text' }, { key: 'key_location', label: 'Key location', type: 'text' }, { key: 'description', label: 'Description', type: 'text', span: 2 }]}
             onCreate={v => api.assetsCreateFacility(v)} onUpdate={(id, v) => api.assetsUpdateFacility(id, v)} onDelete={id => api.assetsDeleteFacility(id)}

@@ -1,3 +1,4 @@
+import { PLATFORM_NAME } from '../../../lib/sport'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../../lib/api'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
@@ -313,7 +314,7 @@ export default function CommsContacts() {
                 <span className="font-mono text-[9px] uppercase tracking-wide2 text-pb-faintest">{c.source}</span>
                 {c.bounced && <span className="font-mono text-[9px] uppercase text-pb-red border border-pb-red/40 rounded px-1.5 py-0.5">bounced</span>}
                 {c.complained && <span className="font-mono text-[9px] uppercase text-pb-red border border-pb-red/40 rounded px-1.5 py-0.5">complaint</span>}
-                {c.excluded && <span className="font-mono text-[9px] uppercase text-pb-red border border-pb-red/40 rounded px-1.5 py-0.5" title="Excluded from outreach by BetterCricket">excluded</span>}
+                {c.excluded && <span className="font-mono text-[9px] uppercase text-pb-red border border-pb-red/40 rounded px-1.5 py-0.5" title={`Excluded from outreach by ${PLATFORM_NAME}`}>excluded</span>}
                 {c.suppressed && !c.bounced && !c.complained && !c.excluded && <span className="font-mono text-[9px] uppercase text-pb-red border border-pb-red/40 rounded px-1.5 py-0.5" title="Globally suppressed">supp</span>}
                 <button onClick={() => toggleSub(c)} disabled={busy === `t${c.id}`}
                   title={c.subscribed ? undefined : (unsubscribedTitle(c) || undefined)}

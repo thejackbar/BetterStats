@@ -175,7 +175,7 @@ export default function AdminFeesXero() {
                 <li>Click <b className="text-pb-text">New app</b> and choose <b className="text-pb-text">Web app</b> (not "Custom connection" — that's pinned to one Xero organisation, and this needs to work for every club).</li>
                 <li>
                   Set the redirect URI to:
-                  <div className="mt-1"><code className="text-pb-text bg-pb-hairline/40 px-2 py-1 rounded text-[11.5px] break-all">https://betterat.cricket/api/public/xero/callback</code></div>
+                  <div className="mt-1"><code className="text-pb-text bg-pb-hairline/40 px-2 py-1 rounded text-[11.5px] break-all">{`${window.location.origin}${import.meta.env.BASE_URL}api/public/xero/callback`}</code></div>
                 </li>
                 <li>Open <b className="text-pb-text">Configuration</b> and copy the <b className="text-pb-text">Client ID</b>; generate and copy the <b className="text-pb-text">Client Secret</b>.</li>
                 <li>

@@ -1,3 +1,4 @@
+import { IS_AFL } from '../../../lib/sport'
 import { useState, useEffect } from 'react'
 import BetterClubhouseLayout from '../../../components/admin/BetterClubhouseLayout'
 import { Button, FilterPill, Caption, SectionHeading, Select } from '../../../components/admin/ui'
@@ -119,8 +120,9 @@ function DiaryYearPanel() {
       <Caption>The club's</Caption>
       <SectionHeading className="mt-2">When the Club Diary year starts</SectionHeading>
       <p className="text-[13.5px] text-pb-dim mt-2 leading-[1.65]" style={{ maxWidth: '56ch', textWrap: 'pretty' }}>
-        The diary lays a year out from this month. July suits a club that plans around the
-        cricket season; January suits one that runs to the calendar.
+        {IS_AFL
+          ? 'The diary lays a year out from this month. November suits a club that plans from the end of one football season to the next; January suits one that runs to the calendar.'
+          : 'The diary lays a year out from this month. July suits a club that plans around the cricket season; January suits one that runs to the calendar.'}
       </p>
       <div className="flex items-center gap-2 mt-4 flex-wrap">
         <Select value={month ?? 7} disabled={!canEdit || month === null}
