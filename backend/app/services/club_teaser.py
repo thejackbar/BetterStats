@@ -40,6 +40,7 @@ import json
 import logging
 import re
 import secrets
+import time
 import zlib
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, Optional
@@ -623,7 +624,8 @@ async def run_batch(limit: int, *, session_maker=None, api_factory: Callable[[],
                                type_modes=type_modes)
     summary = {"due": len(todo), "ok": 0, "empty": 0, "junior_only": 0, "error": 0,
                "changed": 0, "calls": 0, "stopped": False, "dry_run": dry_run,
-               "detail": [{"name": c["name"], "state": c["state"], "status": None, "calls": 0}
+               "detail": [{"name": c["name"], "state": c["state"], "status": None, "calls": 0,
+                           "secs": 0.0}
                           for c in todo]}
     by_id = {str(c["id"]): d for c, d in zip(todo, summary["detail"])}
     if dry_run or not todo:
@@ -640,15 +642,18 @@ async def run_batch(limit: int, *, session_maker=None, api_factory: Callable[[],
                         summary["stopped"] = True
                         return
             api = api_factory()
+            started = time.monotonic()
             result = await pull_club(api, club["guid"], club)
             async with session_maker() as s:
                 saved = await save_result(s, club, result)
+            secs = time.monotonic() - started
             summary[saved["status"]] = summary.get(saved["status"], 0) + 1
             summary["changed"] += 1 if saved["changed"] else 0
             summary["calls"] += saved["calls"]
             row = by_id.get(str(club["id"]))
             if row is not None:
-                row.update(status=saved["status"], calls=saved["calls"], error=result.get("error"))
+                row.update(status=saved["status"], calls=saved["calls"], secs=round(secs, 3),
+                           error=result.get("error"))
             if pause_seconds:
                 await asyncio.sleep(pause_seconds)
 

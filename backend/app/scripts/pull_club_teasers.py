@@ -21,14 +21,21 @@ turns it off.
 with a per-club line showing status and Cricket Australia calls. Dry-run
 unless ``--apply`` is also given.
 
+``--apply`` ends with a work report so a small run can be extrapolated: wall
+clock, clubs a minute, calls a second, a breakdown by outcome (ok, empty,
+junior_only, error) with calls and seconds per club, and a projection for every
+club still due, at the batch sizes the scheduled job might use. A dry run counts
+what is due and makes no calls, so it has nothing to time.
+
 This is also how the directory is filled the first time (about 20-30 Cricket
 Australia calls a club); the daytime job is only the trickle after that.
 """
 import argparse
 import asyncio
 import logging
+import time
 
-from app.services import club_directory, club_teaser, platform_settings
+from app.services import club_directory, club_teaser, club_teaser_report, platform_settings
 
 
 async def main(argv=None) -> int:
@@ -60,11 +67,23 @@ async def main(argv=None) -> int:
     if a.sample is not None:
         limit, concurrency = a.sample, 1
 
+    club_id = None if a.target == "all" else a.target
+    from app.models.db import async_session_maker
+    async with async_session_maker() as s:
+        # Everything still due, not just this run's slice: it is what the
+        # projection extrapolates to.
+        total_due = len(await club_teaser.due_clubs(
+            s, 1_000_000, include_trialists=a.include_trialists, club_id=club_id,
+            type_modes=modes))
+        configured = await platform_settings.get_club_teaser_nightly_limit(s)
+    print(f"clubs due in total: {total_due}")
+
+    started = time.monotonic()
     summary = await club_teaser.run_batch(
         limit, should_stop=club_directory.is_crawl_paused, pause_seconds=a.pause,
         club_concurrency=concurrency, include_trialists=a.include_trialists,
-        club_id=None if a.target == "all" else a.target, dry_run=not a.apply,
-        type_modes=modes)
+        club_id=club_id, dry_run=not a.apply, type_modes=modes)
+    elapsed = time.monotonic() - started
     detail = summary.pop("detail", [])
     for k, v in summary.items():
         print(f"{k:12} {v}")
@@ -73,12 +92,20 @@ async def main(argv=None) -> int:
         for d in detail[: (a.sample or 20)]:
             print(f"  {d['name'][:44]:44} {d.get('state') or '':4} "
                   f"{d.get('status') or '-':12} {d.get('calls', 0):3} calls"
+                  + (f" {d['secs']:5.1f}s" if d.get("secs") else "")
                   + (f"  {d['error']}" if d.get("error") else ""))
     if not a.apply:
-        print("\nDry run: nothing pulled. Re-run with --apply.")
-    done = sum(summary.get(k, 0) for k in ("ok", "empty", "junior_only", "error"))
-    if summary.get("calls") and done:
-        print(f"\n~{summary['calls'] / done:.0f} calls per club")
+        print("\nDry run: nothing pulled, so nothing to time. Re-run with --apply.")
+    else:
+        # Concurrency here is what THIS run used; the projection re-divides by
+        # what the scheduled job uses, from per-club latency.
+        print(f"(this run: {concurrency} club(s) at a time, {a.pause}s pause after each)")
+        for line in club_teaser_report.report_lines(
+                detail, elapsed, total_due=max(0, total_due - len(club_teaser_report.done_rows(detail))),
+                pause_seconds=a.pause, configured_limit=configured):
+            print(line)
+    if summary.get("stopped"):
+        print("\nStopped by the operator Stop switch before the batch finished.")
     return 0
 
 

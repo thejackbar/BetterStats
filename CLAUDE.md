@@ -357,6 +357,17 @@ renderer and the match/lineup layer are NOT built yet.
   (`marketing_crawl_control`), asked between clubs. The initial fill of the
   directory is `python -m app.scripts.pull_club_teasers all --limit N --apply`
   (dry run by default). At ~25 calls a club, 3,500 clubs is ~90k calls.
+- **`--apply` ENDS WITH A WORK REPORT SO A SMALL RUN CAN BE EXTRAPOLATED.**
+  `services/club_teaser_report.py` (stdlib only) turns the per-club rows
+  (`run_batch` now records `secs` per club) into wall clock, clubs a minute,
+  calls a second, a per-outcome table (ok / empty / junior_only / error, with
+  calls and seconds per club) and a projection for every club still due. The
+  projection is per-club LATENCY times clubs divided by the scheduled job's
+  concurrency of 2, not the sample's own throughput (`--sample` runs one at a
+  time), and it tabulates batch sizes 3/5/10/20 (plus the configured one) with
+  the run length against the tightest 5 minute gap: a longer run loses the slot
+  behind it. Under 20 clubs it says the sample is too small to trust. A dry run
+  makes no calls, so it prints only the due count.
 - **NOT BUILT**: the `/preview/{token}` page (one click handler that opens the
   claim prompt for everything), the PNG renderer and its HDD folder, the
   `{{teaser_url}}` / `{{teaser_image_url}}` merge variables, the match, lineup

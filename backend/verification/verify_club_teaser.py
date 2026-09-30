@@ -438,6 +438,26 @@ async def main() -> None:
 
     sm = await ct.run_batch(100, session_maker=Session, api_factory=mixed, club_concurrency=1)
     check("one club failing does not stop the others", sm["error"] == 1 and sm["ok"] == 2 and sm["due"] == 3, str(sm))
+    from app.services import club_teaser_report as rep
+    timed = [d for d in sm["detail"] if d.get("status")]
+    check("each pulled club carries the seconds it took, for the work report",
+          len(timed) == 3 and all(isinstance(d.get("secs"), float) and d["secs"] >= 0 for d in timed),
+          str(sm["detail"]))
+    check("the work report counts what was pulled and projects the rest",
+          any("clubs pulled   3" in ln for ln in rep.report_lines(sm["detail"], 12.0, total_due=300))
+          and any("projection for 300" in ln for ln in rep.report_lines(sm["detail"], 12.0, total_due=300)))
+    fake = [{"name": f"c{i}", "status": "ok", "calls": 20, "secs": 8.0} for i in range(6)]
+    pr = rep.projection(fake, 100, pause_seconds=0.5)
+    row5 = {r["limit"]: r for r in pr["table"]}[5]
+    check("the projection is per-club latency times clubs, split by the scheduled concurrency",
+          pr["calls"] == 2000 and abs(pr["serial_secs"] - 850) < 1e-9
+          and abs(pr["scheduled_secs"] - 425) < 1e-9 and row5["runs"] == 20
+          and abs(row5["run_secs"] - 25.5) < 1e-9, str(pr))
+    check("a run longer than the tightest 5 minute gap is flagged as losing slots",
+          not {r["limit"]: r for r in rep.projection(fake, 3500, pause_seconds=40)["table"]}[20]["fits"])
+    check("a dry run, with nothing pulled, reports nothing to time",
+          rep.report_lines([{"name": "x", "status": None, "calls": 0, "secs": 0.0}], 1.0, total_due=5)[0]
+          .startswith("work done: nothing pulled"))
     sm2 = await ct.run_batch(100, session_maker=Session, api_factory=factory, club_concurrency=1)
     check("a second run pulls only what is left (the failed club is backed off, not retried tonight)", sm2["due"] == 0, str(sm2))
 
@@ -470,6 +490,7 @@ async def main() -> None:
           '"club_teaser_nightly_limit"' in ps_src and "UNSET MEANS 0" in ps_src)
     script = (Path(__file__).resolve().parent.parent / "app/scripts/pull_club_teasers.py").read_text()
     check("the operator script is a dry run unless told to apply", "dry_run=not a.apply" in script)
+    check("the script prints the work report after an apply", "report_lines(" in script and "time.monotonic()" in script)
     check("the script and the job both honour the Stop switch", "is_crawl_paused" in script
           and "is_crawl_paused" in Path(sched.__file__).read_text())
 
