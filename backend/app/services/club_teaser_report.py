@@ -127,3 +127,111 @@ def report_lines(detail: list[dict], elapsed: float, *, total_due: int,
                      "statuses (junior_only and empty clubs cost far less) moves it. "
                      f"Pull {SMALL_SAMPLE}+ before trusting it.")
     return lines
+
+
+# ---------------------------------------------------------------------------
+# Is a snapshot enough to build the campaign on?
+# ---------------------------------------------------------------------------
+# What "your club's season so far" needs: the club named and placed, a season
+# with matches played, a record, a ladder position, and enough named players in
+# each of batting and bowling that the piece has someone to talk about. These
+# are the questions a person would ask reading one, written down so twenty
+# snapshots can be read in a minute rather than opened one at a time.
+MIN_BATTERS = 3
+MIN_BOWLERS = 3
+STALE_AFTER_YEARS = 1
+
+
+def review_snapshot(snap: Optional[dict], *, this_year: int) -> dict:
+    """``{"ready": bool, "missing": [...], "warnings": [...], "summary": {...}}``.
+
+    ``missing`` are gaps that stop a campaign piece being built (the piece has
+    nothing to say); ``warnings`` are figures worth a look before it goes out.
+    A club with no snapshot is not ready and says why.
+    """
+    if not snap:
+        return {"ready": False, "missing": ["no snapshot"], "warnings": [], "summary": {}}
+    missing: list[str] = []
+    warnings: list[str] = []
+    club = snap.get("club") or {}
+    season = snap.get("season") or {}
+    totals = snap.get("totals") or {}
+    ladders = snap.get("ladders") or []
+    bat, bowl = snap.get("batting") or [], snap.get("bowling") or []
+    field, recs = snap.get("fielding") or [], snap.get("records") or []
+
+    if not club.get("name"):
+        missing.append("club name")
+    if not (club.get("state") or club.get("suburb")):
+        warnings.append("no state or suburb to place the club")
+    if not club.get("logo_url"):
+        warnings.append("no club logo")
+    if not season.get("name"):
+        missing.append("season")
+    if not totals.get("matches"):
+        missing.append("matches played (no ladder rows for the season)")
+    if not ladders:
+        missing.append("ladder position")
+    if len(bat) < MIN_BATTERS:
+        missing.append(f"top batters (have {len(bat)}, want {MIN_BATTERS})")
+    if len(bowl) < MIN_BOWLERS:
+        missing.append(f"top bowlers (have {len(bowl)}, want {MIN_BOWLERS})")
+    if not field:
+        warnings.append("no fielding leaders")
+    if not recs:
+        warnings.append("no season records")
+
+    for label, rows in (("batting", bat), ("bowling", bowl), ("fielding", field)):
+        if any("*" in str(r.get("name") or "") for r in rows):
+            warnings.append(f"a redacted name got into {label}")
+    for r in bat:
+        hs = r.get("high_score")
+        try:
+            if hs is not None and int(hs) > int(r.get("runs") or 0):
+                warnings.append(f"{r.get('name')}: high score {hs} is above total runs {r.get('runs')}")
+        except (TypeError, ValueError):
+            pass
+        if r.get("innings") and r.get("runs") and r["runs"] / max(r["innings"], 1) > 200:
+            warnings.append(f"{r.get('name')}: {r['runs']} runs in {r['innings']} innings looks wrong")
+    year = season.get("year")
+    if year and this_year - int(year) > STALE_AFTER_YEARS:
+        warnings.append(f"latest season with stats is {year}, so the piece would be about an old season")
+    if totals.get("wins") is not None and totals.get("matches") \
+            and (totals["wins"] or 0) + (totals.get("losses") or 0) > totals["matches"]:
+        warnings.append("wins plus losses exceed matches played")
+
+    return {"ready": not missing, "missing": missing, "warnings": warnings,
+            "summary": {"season": season.get("name"), "year": year, "matches": totals.get("matches"),
+                        "wins": totals.get("wins"), "losses": totals.get("losses"),
+                        "win_rate": totals.get("win_rate"), "grades": len(ladders),
+                        "batters": len(bat), "bowlers": len(bowl), "fielders": len(field),
+                        "records": len(recs)}}
+
+
+def teaser_lines(snap: dict) -> list[str]:
+    """The snapshot read back as the facts a campaign piece would use, one per
+    line, so a person can check them against the club's own page."""
+    club, season, totals = snap.get("club") or {}, snap.get("season") or {}, snap.get("totals") or {}
+    out = [f"{club.get('name')} ({club.get('suburb') or ''} {club.get('state') or ''}".rstrip() + ")"
+           + (f", {club['association']}" if club.get("association") else "")]
+    out.append(f"  {season.get('name')}: {totals.get('matches')} played, {totals.get('wins')} won, "
+               f"{totals.get('losses')} lost, {totals.get('draws')} drawn"
+               + (f", win rate {totals['win_rate']}%" if totals.get("win_rate") is not None else ""))
+    if totals.get("matches_vs_prev_pct") is not None and (totals.get("prev") or {}).get("season"):
+        out.append(f"  {totals['matches_vs_prev_pct']:+d}% matches on {totals['prev']['season']}")
+    for lad in snap.get("ladders") or []:
+        out.append(f"  ladder: {lad.get('grade') or lad.get('name') or '?'} "
+                   f"{lad.get('rank')} of {lad.get('teams')} "
+                   f"(P{lad.get('played')} W{lad.get('won')} L{lad.get('lost')} pts {lad.get('points')})")
+    for b in (snap.get("batting") or [])[:3]:
+        out.append(f"  bat: {b['name']} {b['runs']} runs @ {b.get('average')}, HS {b.get('high_score')}"
+                   f"{'*' if b.get('hs_not_out') else ''}, {b.get('fifties')}x50 {b.get('hundreds')}x100")
+    for b in (snap.get("bowling") or [])[:3]:
+        out.append(f"  bowl: {b['name']} {b['wickets']} wkts @ {b.get('average')}, best {b.get('best')}, "
+                   f"econ {b.get('economy')}")
+    for f in (snap.get("fielding") or [])[:2]:
+        out.append(f"  field: {f['name']} {f['catches']} catches, {f['run_outs']} run outs, "
+                   f"{f['stumpings']} stumpings")
+    for r in snap.get("records") or []:
+        out.append(f"  record: {r.get('label')} {r.get('value')} ({r.get('player')})")
+    return out

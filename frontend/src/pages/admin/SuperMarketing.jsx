@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
 import ClubLocationMap from '../../components/admin/ClubLocationMap'
+import TeaserCrawlPanel from '../../components/admin/TeaserCrawlPanel'
 
 // PlayHQ stores the abbreviated state on the club (e.g. "WA", "NSW"), so the
 // filter value must be the abbreviation, not the full name.
@@ -1288,6 +1289,9 @@ export default function SuperMarketing() {
           )}
           <button className={BTN} onClick={() => { loadStats(); loadClubs() }}>Refresh</button>
         </div>
+
+        {/* Club teaser crawl — its own rate and hours; the Stop switch above also stops it. */}
+        <TeaserCrawlPanel />
 
         {/* Committee sync — separate from the crawl controls above, because these
             two RECONCILE the directory against PlayHQ rather than extend it. */}

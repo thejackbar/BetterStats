@@ -1492,6 +1492,7 @@ export const api = {
   mktSetClubSales: (clubId, body) =>
     request(`/club-admin/marketing/clubs/${clubId}/sales`,
       { method: 'PATCH', body: JSON.stringify(body) }),
+  mktTeaserStatus: () => request('/club-admin/marketing/teaser/status'),
   mktCrawlControl: (paused) =>
     request('/club-admin/marketing/crawl/control', { method: 'POST', body: JSON.stringify({ paused }) }),
   mktCrawl: (limit) =>

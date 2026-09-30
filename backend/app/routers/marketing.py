@@ -49,6 +49,38 @@ async def crawl_control(body: CrawlControlBody, db: AsyncSession = Depends(get_d
     return await cd.set_crawl_paused(db, body.paused)
 
 
+@router.get("/teaser/status")
+async def teaser_status(db: AsyncSession = Depends(get_db), _=Depends(require_super_admin)):
+    """The club teaser crawl as the Club Directory panel shows it: the rate and
+    hours it runs on (read from General Settings, which the panel writes through
+    the existing PATCH), whether it is working right now and why not if it is
+    not, and how far through the directory it is. Read-only."""
+    from app.services import club_teaser as ct
+    from app.services import platform_settings as ps
+    rate = await ps.get_club_teaser_rate(db)
+    start, end = await ps.get_club_teaser_window(db)
+    modes = await ps.get_club_teaser_type_modes(db)
+    stopped = await cd.is_crawl_paused(db)
+    now = datetime.now(timezone.utc)
+    progress = await ct.teaser_progress(db, now=now, type_modes=modes)
+    in_hours = ct.in_window(now, start, end)
+    if rate <= 0:
+        state = "off"
+    elif stopped:
+        state = "stopped"
+    elif not in_hours:
+        state = "outside_hours"
+    elif progress["due"] == 0:
+        state = "idle"
+    else:
+        state = "running"
+    return {"state": state, "rate": rate, "window_start": start, "window_end": end,
+            "stopped": stopped, "in_hours": in_hours,
+            "max_rate": ps.TEASER_MAX_RATE, "min_rate": ps._FLOAT_KEYS["club_teaser_calls_per_second"][0],
+            "progress": progress,
+            "estimate": ct.crawl_estimate(progress["due"], progress["avg_calls"], rate, start, end)}
+
+
 # The tri-state directory filters (off / include / exclude). Same keys front to
 # back (SuperMarketing.jsx sends them, club_directory.filter_mode_conditions reads
 # them).
