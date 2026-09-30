@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 os.environ.setdefault("SECRET_KEY", "verify-secret-key-for-tests-only")
 
 from sqlalchemy import text
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.models.db import Base
@@ -36,6 +37,17 @@ except ImportError as exc:  # pragma: no cover - control run only
     MISSING.append(str(exc))
 
 DB = os.environ["DATABASE_URL"]
+
+# THESE SUITES ARE DESTRUCTIVE. They create tables, delete from marketing_clubs,
+# drop club_teaser_snapshots and reset platform_settings. Refuse anything that
+# is not plainly a throwaway verification database, so a mistyped
+# DATABASE_URL (or running inside the app container without overriding it)
+# cannot reach real data.
+_db_name = make_url(DB).database or ""
+if "verify" not in _db_name.lower():
+    print(f"REFUSING to run: database {_db_name!r} is not a verification database "
+          "(its name must contain 'verify'). These checks delete and drop tables.")
+    sys.exit(2)
 engine = create_async_engine(DB, echo=False)
 Session = async_sessionmaker(engine, expire_on_commit=False)
 
