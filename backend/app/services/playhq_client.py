@@ -74,12 +74,16 @@ async def get_organisation(org_id: str) -> Optional[dict]:
             raise
 
 
+_MAX_SEASON_PAGES = 20
+
+
 async def get_seasons(org_id: str) -> list:
     all_seasons: list = []
+    seen: set = set()
     offset = 1
     limit = 100
     async with httpx.AsyncClient() as client:
-        while True:
+        for _ in range(_MAX_SEASON_PAGES):
             try:
                 r = await client.get(
                     f"{BASE_URL}/fixturesladders/organisations/{org_id}/seasons",
@@ -91,7 +95,16 @@ async def get_seasons(org_id: str) -> list:
                 batch = data.get("data", data.get("seasons", data if isinstance(data, list) else []))
                 if not batch:
                     break
-                all_seasons.extend(batch)
+                # This endpoint ignores offset AND limit: it answers with the
+                # club's whole history every time (119 seasons for a long-lived
+                # club), so a full page of 100+ never meant "there is more" and
+                # the loop re-read the same page for ever. A page that adds
+                # nothing new is the end.
+                fresh = [s for s in batch if not isinstance(s, dict) or s.get("id") not in seen]
+                if not fresh:
+                    break
+                seen.update(s.get("id") for s in fresh if isinstance(s, dict))
+                all_seasons.extend(fresh)
                 if len(batch) < limit:
                     break
                 offset += limit
