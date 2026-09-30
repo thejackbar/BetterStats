@@ -2,6 +2,8 @@ import logging
 import asyncio
 from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.combining import OrTrigger
+from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
 
@@ -36,9 +38,11 @@ async def pull_club_teasers():
     """Small daytime pulls of marketing teaser snapshots for clubs that have not
     registered (see services/club_teaser.py).
 
-    Runs every 20 minutes between 08:00 and 21:59 Perth, never overnight:
-    steady traffic in working hours is less conspicuous to the upstream than a
-    burst at 3am. Each run is small, so the directory fills gradually.
+    Runs in Perth time, never overnight: every 10 minutes 06:00 to 09:00, every
+    5 minutes 09:01 to 20:59, every 10 minutes 21:00 to 21:59. Steady traffic
+    in waking hours is less conspicuous to the upstream than a burst at 3am,
+    and the busiest stretch is the middle of the day. Each run is small, so the
+    directory fills gradually.
 
     OFF UNLESS A SUPER ADMIN SETS ``club_teaser_nightly_limit`` (the setting
     keeps its old name; it now means clubs per run). This is outbound traffic
@@ -885,12 +889,15 @@ def start_scheduler():
         max_instances=1,
         coalesce=True,
     )
+    # Two cron fields cannot say "every 10 minutes here, every 5 there", so the
+    # job has an OrTrigger of two. 09:00 is on the 5-minute grid, so it lands in
+    # the second; nothing fires twice.
     scheduler.add_job(
         pull_club_teasers,
-        trigger="cron",
-        hour="8-21",
-        minute="*/20",
-        timezone=PERTH,
+        trigger=OrTrigger([
+            CronTrigger(hour="6-8,21", minute="*/10", timezone=PERTH),
+            CronTrigger(hour="9-20", minute="*/5", timezone=PERTH),
+        ]),
         id="nightly_club_teasers",
         replace_existing=True,
         max_instances=1,

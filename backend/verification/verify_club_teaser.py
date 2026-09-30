@@ -460,9 +460,10 @@ async def main() -> None:
     sched_src = Path(sched.__file__).read_text()
     check("the pull job exists and is registered", hasattr(sched, "pull_club_teasers")
           and "nightly_club_teasers" in sched_src)
-    reg = sched_src[sched_src.index("pull_club_teasers,\n        trigger"):][:260]
-    check("the pull runs in the daytime and evening, never overnight",
-          'hour="8-21"' in reg and "hour=3" not in reg, reg)
+    reg = sched_src[sched_src.index("pull_club_teasers,\n        trigger"):][:400]
+    check("the pull runs 06:00-21:59 Perth at 10 and 5 minute steps, never overnight",
+          'hour="6-8,21", minute="*/10"' in reg and 'hour="9-20", minute="*/5"' in reg
+          and "hour=3" not in reg, reg)
     check("the job applies the Directory type filters", "get_club_teaser_type_modes" in sched_src)
     ps_src = (Path(__file__).resolve().parent.parent / "app/services/platform_settings.py").read_text()
     check("the nightly limit is a General Settings key that defaults to OFF",

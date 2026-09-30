@@ -327,7 +327,10 @@ renderer and the match/lineup layer are NOT built yet.
   emailable contact, then longest overdue.
 - **THE PULL RUNS BY DAY, NEVER OVERNIGHT (asked for directly).** Steady
   traffic in working hours is less conspicuous than a burst at 3am, so the job
-  is `cron hour=8-21 minute=*/20` Perth (the id stays `nightly_club_teasers`,
+  is an `OrTrigger` in Perth time, every 10 minutes 06:00-09:00 and 21:00-21:59
+  and every 5 minutes 09:01-20:59 (`hour="6-8,21" minute="*/10"` plus
+  `hour="9-20" minute="*/5"`; 09:00 sits on the 5-minute grid so nothing fires
+  twice). The id stays `nightly_club_teasers`,
   the setting `club_teaser_nightly_limit` keeps its name and now means clubs
   PER RUN). Small runs, so the directory fills gradually.
 - **WHO GETS A SNAPSHOT FOLLOWS THE DIRECTORY'S OWN TYPE FILTERS.**
