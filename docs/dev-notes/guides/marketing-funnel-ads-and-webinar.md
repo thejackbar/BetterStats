@@ -1,12 +1,12 @@
 # Guide: Marketing funnel, Meta ads reporting, webinar registration and self-serve attribution
 
 **Read this before**:
-- Touching `services/meta_ads.py`, `routers/meta_ads.py`, `meta_capi.py`, `SuperMetaAds.jsx` (Meta Ads HQ), campaign spend, cost per result, funnels or "counting since".
-- Touching `/trial`, `/demo`, `Trial.jsx`, `SelfServeTrialModal`, `routers/public_self_serve.py`, `lib/visitor.js`, `metaPixel`, `ClubCTABar`, `lib/marketingPaths.js`, `lib/clubPath.js`.
-- Touching the webinar: `services/webinar.py`, `webinar_ddl.py`, `streamyard.py`, `data/webinar.js`, `webinar_registrations`, reminders, `.ics`.
+- Touching `services/meta_ads.py`, `routers/meta_ads.py`, `meta_capi.py`, `SuperMetaAds.jsx`, campaign spend, cost per result, funnels, "counting since".
+- Touching `/trial`, `/demo`, `SelfServeTrialModal`, `routers/public_self_serve.py`, `lib/visitor.js`, `metaPixel`, `ClubCTABar`, `lib/marketingPaths.js`.
+- Touching the webinar: `services/webinar.py`, `streamyard.py`, `data/webinar.js`, `webinar_registrations`, reminders, `.ics`.
 - Touching `wizard_club_lists.py`, Wizard Clubs page, `club_searched` / `club_prepared` beacons.
 - Touching `usage_events`, `routers/usage.py`, `usePageView.js`, session duration, `page_exit`, visitor journeys.
-- Symptoms: pixel event on the wrong page or twice; inflated cost per signup; "Club selected" above "Started registering"; one visitor split over several club rows; an uncounted registration; a disabled button with no reason.
+- Symptoms: pixel on the wrong page or twice; inflated cost per signup; "Club selected" above "Started registering"; one visitor over several club rows; an uncounted registration.
 
 **Archive** (verbatim, do not load whole): `docs/dev-notes/archive/marketing-funnel-ads-and-webinar.md`. Grep hints: `ClubCTABar`, `ONE PIXEL EVENT`, `ad_daily`, `CANNOT FIRE ON STREAMYARD`, `push_registration`, `Rediscover`, `search beacon`, `Wizard Clubs`, `public_self_serve`, `counting since`, `CAMPAIGN_PLANS`, `time_on_page_ms`.
 
@@ -51,50 +51,49 @@
 **Self-serve public trial (v8.72.0, migration 161)**
 30. `public_self_serve.py` re-registers internal handlers via `add_api_route`; hand-wraps status, verify-email, prepare, submit. The router 404s while `self_serve_registration_enabled` is off; `/trial` redirects to `/`.
 31. Guardrails: per-IP `rate_limit.enforce`, honeypot `website` (non-empty gives fake success), min fill time (`form_started_at` under 4s gives 422), generic provider errors. OTP email is the gate; no CAPTCHA.
-32. Submit mints the session cookie, returns `redirect: "/admin"`, client sets `bs_pending_fresh_login`. `organisations.signup_source` (`self_serve_ad` / `self_serve_organic`, NULL non-public) and `signup_attribution` JSONB are written best-effort AFTER commit. New tags must be added to `_ATTRIBUTION_KEYS` (`utm_term` was dropped until v9.71.1).
+32. Submit mints the session cookie, returns `redirect: "/admin"`. `organisations.signup_source` (`self_serve_ad` / `self_serve_organic`) and `signup_attribution` JSONB are written best-effort AFTER commit. New tags go in `_ATTRIBUTION_KEYS` (`utm_term` was dropped until v9.71.1).
 33. `prepare` fires a server Lead; `submit` fires CompleteRegistration (browser plus CAPI, one event id), GA4 `sign_up`. Modal prop is `publicMode`, not `public`.
-34. `GET /club-admin/meta-ads/ad-signups` reads the CACHED `marketing_clubs.engagement_score`, never a live score per row.
-35. Launch is config: flag on, real `email_provider` (default `console` never sends OTP), SPF/DKIM/DMARC; rate limiter is in-memory.
+34. `/club-admin/meta-ads/ad-signups` reads the CACHED `marketing_clubs.engagement_score`, never a live score.
+35. Launch needs a real `email_provider` (default `console` never sends OTP) and the flag on.
 
 **Club page call to action (v9.91.0, v9.92.1)**
-36. The bar is for PROSPECTS only: a session from a Meta click (utm_source meta/facebook/fb/instagram/ig, medium paid_social, or fbclid/igshid) or that passed `/trial`. Never a club's members, never signed-in users. Dismiss minimises to a pill. The club shown is already registered, so copy sells the visitor's OWN club.
+36. The bar is for PROSPECTS only: a session from a Meta click (utm_source meta/facebook/fb/instagram/ig, medium paid_social, fbclid/igshid) or that passed `/trial`. Never a club's members or signed-in users. Dismiss minimises to a pill. The club shown is already registered, so copy sells the visitor's OWN club.
 37. Read campaign params from the session (`visitor.rememberLandingParams()` in `main.jsx`, `bc:landingParams`), not the address bar. The bar must not draw on `/trial` or `/demo`. `lib/clubPath.publicClubSlug` is the one "is a club page" rule. CompleteRegistration fires only on `status === 'completed'`.
-38. (merged into 37)
 39. Wording follows the ad ("Check out your club", "Free · about 3 minutes · no card"); `/trial` placeholder names no real club.
 
 **Webinar registration (migration 296 on)**
-40. A pixel cannot fire on a third-party domain: register on our page, RENDER success (never redirect; it races the beacon). Order: persist, then fire; never on load, click or validation failure.
+40. A pixel cannot fire on a third-party domain: register on our page and RENDER success (a redirect races the beacon). Persist, then fire; never on load, click or validation failure.
 41. Fire only when the server says `created` (fold on `(event_key, lower(email))`). A resubmission claims nothing; a broken backend still hands over the link and fires nothing. Campaign columns, phone and name halves are COALESCEd (fill, never overwrite).
 42. `services/webinar.EVENT` and mirror `frontend/src/data/webinar.js` drive the page (suite asserts they agree). Past switch is the event's END; server `is_past` beats the local clock. `/demo` is resolved per request (`webinar.page_meta`, `webinarState`), not in `MARKETING_PAGES`.
-43. Recording link is a setting (`webinar_recording_url`, url-validated, `''` clears). `.ics` is an endpoint (CRLF, UTC). The StreamYard link is NOT in the JS bundle (`GET /public/webinar`; grep `frontend/dist`).
+43. Recording link is a setting (`webinar_recording_url`, `''` clears). `.ics` is an endpoint (CRLF, UTC). The StreamYard link is NOT in the JS bundle (`GET /public/webinar`; grep `frontend/dist`).
 44. Phone is OPTIONAL (8 to 15 digits when typed), stored as typed, not `admin_identity.mobile_valid`.
-45. First and last name are separate fields (migration 301). `name` stays authoritative; halves stored only when BOTH given (`resolve_name`); a surname is never invented. `streamyard.resolve_push_name` is the one rule; stubs must CALL it.
+45. First and last name are separate fields (migration 301). `name` stays authoritative; halves are stored only when BOTH given (`resolve_name`); a surname is never invented. `streamyard.resolve_push_name` is the one rule; stubs must CALL it.
 46. Webinar registrations are not `club_onboarding_requests` and push no Hot lead to any CRM (per direct instruction).
-47. `demo` and `trial` must be in all FOUR top-level-slug lists (`og_preview.RESERVED_ROOT_SEGMENTS`, `FaviconManager.RESERVED_ROOTS`, `SponsorFooter.RESERVED_ROOT_SEGMENTS`, `lib/marketingPaths.MARKETING_PATHS`), but NOT in the `MARKETING_PATHS` behaviours they do not want: `OWN_NAV_PATHS` / `rendersOwnMarketingNav` suppresses the club Navbar alone (`MARKETING_PATHS` also forces dark theme and shows `ClubCTABar`).
+47. `demo` and `trial` must be in all FOUR top-level-slug lists (`og_preview.RESERVED_ROOT_SEGMENTS`, `FaviconManager.RESERVED_ROOTS`, `SponsorFooter.RESERVED_ROOT_SEGMENTS`, `lib/marketingPaths.MARKETING_PATHS`) but only `OWN_NAV_PATHS` / `rendersOwnMarketingNav` behaviour (suppress club Navbar); `MARKETING_PATHS` also forces dark theme and shows `ClubCTABar`.
 48. Reminder (migration 299): `send_reminders` window is `REMINDER_LEAD_HOURS` (3) before start to end, hourly via `webinar_upkeep`. Registrants inside the window are not reminded. `reminder_sent_at` is the CLAIM; a refusal hands it back with `reminder_error`. `POST /club-admin/super/webinar-reminders` refuses outside the window.
 49. StreamYard push (migration 300): `push_registration` posts to `oa-api.streamyard.com/api/public/webinars/{id}/registrations`. Field ids are FETCHED (`_field_map`, 10 min cache), never hardcoded; broadcast id parsed from `EVENT.watch_url`. Idempotent on email, no overwrite; pushed rows skip before any request. A mononym is skipped with a recorded reason (blank surname is a 400). Best-effort, own session, never raises. `sync_streamyard` (hourly catch-up, `POST /club-admin/super/webinar-streamyard-sync`) reports `reasons`; "NOT SENT" shows the reason on the row.
 50. Only the name is editable (`PATCH /super/webinar-registrations/{id}`); email is the fold and idempotency key.
 51. Removing StreamYard's second form is their registration toggle, not code (CORS refuses our origin; registration binds to the creating session; reminder `?token=` is not the registration id). Turning it off loses their registrant list and attendee report.
 
 **Club Directory Rediscover (misfiled here, see Flags)**
-52. A disabled button must say why: one reason string drives disable, tooltip and a note. Gate on the `paused` BOOLEAN (operator Stop), not `state == 'paused'` (runner break).
+52. A disabled button must say why: one reason string drives disable, tooltip and note. Gate on the `paused` BOOLEAN (operator Stop), not `state == 'paused'` (runner break).
 53. Stop means the UNATTENDED crawler. `discover_clubs(should_stop=...)` defaults to `is_crawl_paused`; only `rediscover_all` passes its own cancel (`POST /rediscover/stop`, cleared at run start). A halted run reports `stopped: True`; `{"skipped": "stopped"}` is not a finished run. Server reports `stale` (12 h) so screen and POST agree.
-54. `enrich_associations` refreshes stale ones (`marketing_clubs.associations_fetched_at`, migration 298, stamped only on SUCCESS, backfilled from `COALESCE(last_crawled_at, first_seen_at)`), never-fetched first. `frontier_remaining` stays never-fetched only. An empty refresh clears `association_name`/`association_guid`.
+54. `enrich_associations` refreshes stale ones (`marketing_clubs.associations_fetched_at`, migration 298, stamped only on SUCCESS), never-fetched first; `frontier_remaining` stays never-fetched only. An empty refresh clears `association_name`/`association_guid`.
 
 **Usage tracking (migration 165)**
-55. Dwell is a `page_exit` event (`usePageView.js`: `sendBeacon` on `pagehide`, `visibilitychange` hidden, route change) writing `usage_events.time_on_page_ms` via `POST /usage/event/exit`, clamped 24 h. Sessions are computed on read: `page_view`s grouped on a gap of 30 min or more; duration is first to last PLUS the final page's dwell (else bounces read 0).
+55. Dwell is a `page_exit` event (`usePageView.js`: `sendBeacon` on `pagehide`, `visibilitychange` hidden, route change) writing `usage_events.time_on_page_ms` via `POST /usage/event/exit`, clamped 24 h. Sessions are computed on read (`page_view`s on a gap of 30 min or more); duration is first to last PLUS the final page's dwell (else bounces read 0).
 56. `GET /club-admin/usage/journey?visitor_id=` is the only per-visitor view. `comms._apply_utm` checks each UTM key independently; `usePageView` sends the CURRENT URL's UTM (`visitor.getCurrentUtm()`) over first-touch.
 
 ## Traps and failure signatures
 
-- Wrong webinar state on a bad-clock device: server `is_past` must win. Recording advertised pre-event: title/`og:title` were hardcoded (crawlers skip `usePageMeta`).
+- Wrong webinar state on a bad-clock device: server `is_past` wins. Recording advertised pre-event: hardcoded title/`og:title` (crawlers skip `usePageMeta`).
 - Two logo lockups on `/demo` or `/trial`: four-lists trap (rule 47). Inflated cost per signup: divisor included the other stream (rule 2). Chart marker missing, no error: Fragment (rule 14).
 - Phantom club rows ("Warn" as "Warners Bay"): rule 24. "More selected than searched": rules 19, 23. "Last updated" stuck: rule 16. StreamYard "0 pushed, 2 skipped": mononyms, not a fault.
 - Harness: `addInitScript` cannot stub `gtag` (read `window.dataLayer`); `networkidle` never settles; `click({force:true})` on a disabled button hangs; CSS-`uppercase` reads transformed; `.every()` on an empty array is vacuous.
 
 ## How to verify a change here
 
-- Backend (real Postgres, shipped route bodies): `backend/verification/verify_meta_ads_streams.py` (control with feature absent REPORTS missing parts; window and guards neutered: since-spend reads lifetime, a partial window prints a cost), `verify_webinar.py` (DDL three times, mirror agreement, resubmission and bot guards, reminder edges, name halves), `verify_streamyard_skip_reporting.py`.
+- Backend (real Postgres, shipped route bodies): `backend/verification/verify_meta_ads_streams.py` (control with feature absent REPORTS missing parts; neutered window and guards: since-spend reads lifetime, partial window prints a cost), `verify_webinar.py` (DDL three times, mirror agreement, resubmission and bot guards, reminder edges, name halves), `verify_streamyard_skip_reporting.py`.
 - Browser: `frontend/verification/verify_meta_ads_streams_browser.mjs`, `verify_webinar_browser.mjs`, `verify_club_cta_browser.mjs`. Meta Events Manager Test Events is NOT covered.
 - Never call live StreamYard in a suite (no public DELETE); stub `push_registration`. Earlier probes left four test registrations (`bc-it-a@` and similar) to delete by hand.
 - Control runs must REPORT, not crash: `.get`, presence-safe helpers (`textOf()`, `seen()`, `reachedSuccess()`), gate whole blocks. Diff PASS lists of run and control (`comm -12`) to find checks that cannot fail.
@@ -117,12 +116,12 @@
 - [FLAG-MKT-1] Archive says `CAMPAIGN_UTM_NAMES` became a set | code now `CAMPAIGN_UTM_CAMPAIGNS` (`meta_ads.py:190`, used by `sales_workspace.py:718`) | ONE CAMPAIGN, TWO PRODUCTS (L789-994) | keep rule, use new name.
 - [FLAG-MKT-2] Archive names `_META_VISITOR_SUBQUERY` (and `_PLAIN`) | code has `_META_VISITOR_EXISTS = _meta_visitor_exists(_SINCE_LOWER_BOUND)` | L15458-15509 | verify names.
 - [FLAG-MKT-3] Phone "REQUIRED" then optional; StreamYard link "in the JS bundle" then removed | both reversed in v9.71.3; `EVENT.watch_url` is server side (`webinar.py:73`) | webinar section (L1827-2032) | rules 43, 44 are current.
-- [FLAG-MKT-5] Two sub-notes carry v9.71.5 (298 gate, 299 reminder), and 300 says v9.71.6 | version labels collided at merge (archive notes renumbering) | L2179-2582 | trust migration numbers 296, 298, 299, 300, 301, not versions.
-- [FLAG-MKT-6] v9.71.4, migration 298 gate and association refresh are Club Directory rules nested under the webinar section | not webinar code | L2117-2281 | move to the club directory guide; kept here as rules 52 to 54.
+- [FLAG-MKT-5] Two sub-notes carry v9.71.5 and 300 says v9.71.6 | labels collided at merge | L2179-2582 | trust migration numbers (296, 298 to 301), not versions.
+- [FLAG-MKT-6] v9.71.4, migration 298 gate and association refresh are Club Directory rules nested under the webinar section | not webinar code | L2117-2281 | move to the club directory guide (kept as rules 52 to 54).
 - [FLAG-MKT-7] Wizard Clubs v9.23.0 searched table versus v9.23.1 | later changes it (`resolved_searched_clubs`) | L7437-7573 | later wins, read both.
-- [FLAG-MKT-8] Self-serve says Twenty must be configured for the Hot-100 Lead | Twenty retired in v9.71.0 (CRM guide) | L15249-15329 | verify `push_self_serve_registration` before relying.
+- [FLAG-MKT-8] Self-serve says Twenty must be configured for the Hot-100 Lead | Twenty retired in v9.71.0 | L15249-15329 | verify `push_self_serve_registration`.
 - [FLAG-MKT-9] Suites cited for wizard clubs, search beacon, self-serve, usage | none found in `backend/verification` or `frontend/verification` | L7437-7573, L15249-15559 | verify or retire.
-- [FLAG-MKT-10] Webinar date (Mon 21 Sep 2026) is a hardcoded constant | today is 30 Sep 2026, so the page should be post-event | webinar section | verify `EVENT` and `webinar_recording_url`.
+- [FLAG-MKT-10] Webinar date (Mon 21 Sep 2026) is a hardcoded constant | today is 30 Sep 2026 | webinar section | verify `EVENT` and `webinar_recording_url`.
 
 ## Section coverage
 
