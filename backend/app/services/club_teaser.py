@@ -591,6 +591,64 @@ async def due_clubs(session: AsyncSession, limit: int, *, now: Optional[datetime
     return [dict(r) for r in rows]
 
 
+def crawl_estimate(due: int, avg_calls: float, rate: float, start_hour: int, end_hour: int) -> Optional[dict]:
+    """How long the clubs still due take at ``rate`` calls a second, in hours
+    of crawling and in days of the daily window. None when there is nothing to
+    say: crawl off, nothing due, or no pulled club yet to read a calls-a-club
+    figure off (a guess there would be quoted back at us)."""
+    if rate <= 0 or due <= 0 or avg_calls <= 0:
+        return None
+    window = max(end_hour - start_hour, 0)
+    if window <= 0:
+        return None
+    calls = due * avg_calls
+    hours = calls / rate / 3600.0
+    return {"calls": round(calls), "hours": round(hours, 1),
+            "window_hours": window, "days": round(hours / window, 1),
+            "rate_to_finish_in_one_window": round(calls / (window * 3600.0), 2)}
+
+
+async def teaser_progress(session: AsyncSession, *, now: Optional[datetime] = None,
+                          type_modes: Optional[dict] = None) -> dict:
+    """What the crawl has done and what is left, for the Club Directory panel.
+    ``due`` is the same test ``due_clubs`` applies (asserted equal by the
+    suite), so the number on screen is the number the worker will work through.
+    One aggregate over the target set, plus the last hour's calls, which is the
+    rate actually being achieved rather than the one that was asked for."""
+    now = now or datetime.now(timezone.utc)
+    allowed = await type_filtered_ids(session, type_modes)
+    only = " AND mc.id = ANY(CAST(:allowed AS uuid[]))" if allowed is not None else ""
+    params: dict = {"now": now, "hour_ago": now - timedelta(hours=1)}
+    if allowed is not None:
+        params["allowed"] = allowed
+    row = (await session.execute(text(f"""
+        SELECT COUNT(*) AS targets,
+               COUNT(t.id) AS with_snapshot,
+               COUNT(*) FILTER (WHERE t.id IS NULL) AS never_pulled,
+               COUNT(*) FILTER (WHERE t.id IS NULL OR t.next_pull_at IS NULL
+                                   OR t.next_pull_at <= :now) AS due,
+               COUNT(*) FILTER (WHERE t.status = 'ok') AS ok,
+               COUNT(*) FILTER (WHERE t.status = 'empty') AS empty,
+               COUNT(*) FILTER (WHERE t.status = 'junior_only') AS junior_only,
+               COUNT(*) FILTER (WHERE t.status = 'error') AS error,
+               AVG(t.api_calls) FILTER (WHERE t.status IN ('ok', 'empty', 'junior_only')
+                                          AND t.api_calls > 0) AS avg_calls,
+               MAX(t.pulled_at) AS last_pulled_at,
+               COUNT(*) FILTER (WHERE t.pulled_at > :hour_ago) AS clubs_last_hour,
+               COALESCE(SUM(t.api_calls) FILTER (WHERE t.pulled_at > :hour_ago), 0) AS calls_last_hour
+        FROM marketing_clubs mc
+        LEFT JOIN club_teaser_snapshots t ON t.marketing_club_id = mc.id
+        WHERE {_TARGET_WHERE} AND jsonb_array_length(COALESCE(mc.trial_modules, '[]'::jsonb)) = 0
+              {only}
+    """), params)).mappings().one()
+    out = {k: int(row[k] or 0) for k in ("targets", "with_snapshot", "never_pulled", "due", "ok",
+                                         "empty", "junior_only", "error", "clubs_last_hour",
+                                         "calls_last_hour")}
+    out["avg_calls"] = round(float(row["avg_calls"] or 0), 1)
+    out["last_pulled_at"] = row["last_pulled_at"].isoformat() if row["last_pulled_at"] else None
+    return out
+
+
 async def save_result(session: AsyncSession, club: dict, result: dict, *,
                       now: Optional[datetime] = None) -> dict:
     """Write one pull. A snapshot's ``version`` moves only when its content
