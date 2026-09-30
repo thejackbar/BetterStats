@@ -797,3 +797,23 @@ user account.
   hook needs its own look at what happens when the club's records arrive later.
 
 <!-- END original CLAUDE.md L16912-16979 -->
+
+<!-- ADDED AFTER THE SPLIT: verbatim from CLAUDE.md on origin/main (commits 1713803 and db9bb25, v9.100.1). Outside the BEGIN/END markers, so not part of the byte-identical check. -->
+## The seasons feed ignores paging, and a full page is not "more" (v9.100.1, Sep 2026)
+
+The second live `pull_club_teasers all --sample 20 --apply` never finished: one
+club's `fixturesladders/organisations/{guid}/seasons` was requested at offset
+1, 101, 201 ... past 39,000, every call `200 OK`, until the operator killed it.
+
+- **THE ENDPOINT IGNORES BOTH `offset` AND `limit`.** It answers with the club's
+  whole history every time; `offset=1`, `101` and `5001` return the same 119
+  ids. `get_seasons` ended only on a short page (`len(batch) < limit`), so any
+  club with 100 or more seasons looped for ever. The normal sync, `auto_sync`
+  and `iq_scout` call the same function, so they were exposed too.
+- **A PAGE THAT ADDS NO NEW ID IS THE END**, and the loop is capped at
+  `_MAX_SEASON_PAGES` (20) as a backstop. Live check: 119 seasons in 2 calls; a
+  stub that really pages (250 seasons) still returns all 250.
+- **Same trap as the `links.next` note above**: never trust "the page was full"
+  as proof there is another. Dedupe on id.
+
+<!-- END ADDED AFTER THE SPLIT -->

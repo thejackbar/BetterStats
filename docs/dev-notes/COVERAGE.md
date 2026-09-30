@@ -291,3 +291,11 @@ Preamble (line 1, the document title) is replaced by the new `CLAUDE.md` title.
 | `docs/iq-nav-consolidation-proposal.md:10` | throughout its history — see any note in `CLAUDE.md` about "URLs are | 'URLs are unchanged' navigation notes | `guides/club-directory-onboarding-and-admin-shell.md` |  |
 | `docs/meta-ad-campaign-self-serve.md:208` | CLAUDE.md) or codes land in spam. **Do not spend a dollar before a real | Self-serve, Meta ads and email-deliverability notes | `guides/marketing-funnel-ads-and-webinar.md` |  |
 | `docs/onboarding-runbook.md:71` | (backfill aggregates) from that club's `/admin/sync` page. See `CLAUDE.md` → | Self-serve, Meta ads and email-deliverability notes | `guides/marketing-funnel-ads-and-webinar.md` |  |
+
+## Added after the split
+
+`origin/main` gained one release note in `CLAUDE.md` while this split was in progress. It was carried over rather than dropped in the merge.
+
+| Section | Source | Archive (verbatim) | Guide (rules) | Where captured |
+|---|---|---|---|---|
+| The seasons feed ignores paging, and a full page is not "more" (v9.100.1, Sep 2026) | `CLAUDE.md` on `origin/main`, commits 1713803 and db9bb25 | `archive/club-directory-onboarding-and-admin-shell.md` (end of file, outside the `BEGIN`/`END` markers, so it is not part of the byte-identical check against the original) | `guides/data-sources-and-sync.md`, `guides/club-directory-onboarding-and-admin-shell.md` | data-sources rule 45, directory rule 46 |

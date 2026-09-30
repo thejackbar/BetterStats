@@ -71,6 +71,9 @@
 43. REJECTED: one shared club key for all English clubs (breaches the host agreement, single point of failure, UK-GDPR-unlawful incl. children's data).
 44. Plan: Phase 1 per-club BYO token (`playcricket_api_token` + `playcricket_site_id` on org, token-authed `playcricket_scores_client`), Phase 2 partner access. Low traffic, minimise PII.
 
+**Added after the split (v9.100.1)**
+45. The Cricket Australia seasons feed (`fixturesladders/organisations/{org}/seasons`) ignores both `offset` and `limit` and returns the club's whole history every call, so "the page was full" never means there is another page. `playhq_client.get_seasons` ends when a page adds no new id and is capped by `_MAX_SEASON_PAGES` (20). The normal sync, `auto_sync`, `iq_scout` and the teaser pull all call it. Never trust a full page as proof of more, and dedupe paged results on id (same trap as the `links.next` note). Archive: grep `seasons feed ignores paging` in `archive/club-directory-onboarding-and-admin-shell.md`.
+
 ## Traps and failure signatures
 
 - Two-day grades all billed as One Day: `match_format` had no writer. Rules 18 to 21.

@@ -78,6 +78,9 @@
 44. Audience `all|clubs|users`; `audience_roles` (`all_admins` = club_admin AND club_member, `club_admins`, `primary`) narrows the first two; a named-user list is never narrowed. Archived clubs never counted; composer refuses an archived club or non-club-admin user. Persistence `until_cleared` (no close) | `dismissible` | `view_once_user` | `view_once_club`; `expires_at` stops any.
 45. View-once runs on a receipt the browser posts AFTER drawing, not on the GET; `/seen` records only ids the user can currently see. Staff acting as a club see every live message aimed at it, marked `preview`; `/seen` and `/dismiss` store nothing (must not use up a view-once).
 
+**Added after the split (v9.100.1)**
+46. Teaser pulls read seasons through `get_seasons`, which is bounded by page-adds-no-new-id and `_MAX_SEASON_PAGES`; a live `pull_club_teasers all --sample 20 --apply` once never finished because the feed ignores paging. Details in `guides/data-sources-and-sync.md` (the v9.100.1 rule).
+
 ## Traps and failure signatures
 - Every club `empty`, all 204: wrong guid namespace (rule 1). Real cost is ~15 to 80 calls a club; re-read `api_calls` off a fresh `--sample`.
 - Rep's typed contact vanishes after Rediscover: stored `source='api'` (14). Unsubscribed officer re-emailed: row deleted instead of `former_at` (13). Directory emptied: absent `contacts` read as `[]` (15).
