@@ -22,15 +22,15 @@
 4. A Full Rebuild deletes from `games`, never `manual_games`.
 5. Season and grade deletes refuse while a manual game or adjustment points at them (`_season_in_use`, `_grade_in_use`, `routers/manual_entries.py`). Both FKs cascade, so these are the only guard.
 6. De-duplicating is not deleting: drop the removed record's row only for an innings the keeper already holds, never one only it had. Match unique keys with `IS NOT DISTINCT FROM`, not `=` (a season adjustment with no grade has a NULL key part).
-7. Enforced by `verify_merge_carry.py`: every `DELETE FROM manual_*` and `sa_delete(Manual*)` must be on `ALLOWED_DELETES` with a stated reason, and every manual table with a `players.id` FK must be on `CARRIED`. A new delete must be justified there.
+7. Enforced by `verify_merge_carry.py`: every `DELETE FROM manual_*` / `sa_delete(Manual*)` must be on `ALLOWED_DELETES` with a reason, and every manual table with a `players.id` FK on `CARRIED`.
 8. Recovery for a lost CricketStatz career: re-run the import (deterministic ids, upsert) onto the kept record. Hand-typed history has no recovery path.
 
 **B. A fixture belongs to both clubs**
 
 9. A CA match between two clubs that both sync is ONE `games` row. Its `grade_id`, so `season_id`, points at whichever club synced first. That club does not own it. Both clubs' scorecards hang off it and both clubs' stats must count and classify it.
 10. Never decide "is this game ours" with `seasons.organisation_id`. Use `services/club_grades.club_game_sql`: `v_effective_games.organisation_id` is us OR we are `home_org_id`/`away_org_id` (migration 167, indexed). `aggregations._OURS_GAMES` and `records._OURS_GAMES` are that string; `aggregations._club_game_clause` is the player-scoped sibling (mirrors `iq_trends._ours_clause`). Use the shared string, not a hand-rolled OR (measured slower).
-11. Never decide "what kind of grade is this" from a `grades` row your own club owns. `club_grade_rows` enumerates the club's grades PLUS every grade its own games sit in, resolved to the club's answer by NAME through `grade_merge_logs`.
-12. A category filter is an exclusion, so it is only as good as its enumeration: widen the enumeration, never relax the exclusion. A grade it cannot name is kept.
+11. Never classify a grade from a `grades` row your own club owns. `club_grade_rows` enumerates the club's grades PLUS every grade its games sit in, resolved to the club's answer by NAME through `grade_merge_logs`.
+12. A category filter is an exclusion, only as good as its enumeration: widen the enumeration, never relax the exclusion.
 13. A merged-away spelling must read as the grade kept: `grade_labels._apply_alias_fold` registers the canonical's answer under the alias in all three name maps.
 14. A foreign grade's competition resolves to OUR answer (`club_grade_competitions`), never its own `competition_id`. The association fallback is only for a name we have never held.
 15. `resolve_season_filter(..., include_shared=True)` reaches the other club's row for the same real season (CA season GUID, then year, then name). Opt-in: use it only where the read is ALSO guarded by the club's own players or the ownership predicate.
@@ -41,11 +41,11 @@
 17. `games -> grades -> seasons -> organisation_id` says the game is in our competition, nothing about whose player a row is. Any read of the seven per-game tables that attributes rows to our side must ALSO scope `players.organisation_id`.
 18. `is_club_innings` is set per club, so a shared game carries BOTH clubs' partnerships as TRUE. `game_id = X AND is_club_innings` is not a club filter.
 19. Partnerships: scope ONE batter (same innings, same club). Scoping both drops a stand with a teammate whose `players` row sits under another club. Exception: `_combinations` scopes both. `bowler_wickets`: scope the bowler, not the fielder.
-20. Check CTEs, not only `JOIN players`: `_captaincy`'s `scores` CTE summed the opposition's runs with no join at all.
+20. Check CTEs too: `_captaincy`'s `scores` CTE summed the opposition's runs with no join.
 21. Left unscoped on purpose (verified safe): `aggregations.get_player_partnerships`, `iq_trends.bowler_deep_dive` (anchored on `:pid`), `yearbooks._generate_narrative_core`, StatLab partnership/`_bowler_fielder_combo` helpers (one side scoped), `iq_team._team_fielding` combo query and `_batting_pairs`.
 22. Season-aggregate reads are a different shape: read `v_effective_player_season_stats` (migration 060 emits a row only when `player.organisation_id IS NULL OR player.org = season.org`) or join `seasons s` and filter `s.organisation_id`. Never sum `player_season_stats` filtered only by `players.organisation_id`.
 23. Member-to-player read-throughs join `p.organisation_id = fm.organisation_id` and use the scoped result (`directory.list_people` reads `our_player_id`, never `fm.player_id`). An unresolved link must not tag a Player nor carry a `player_id`.
-24. Enrolment loads the appearing players org-scoped FIRST, then filters appearances (`fees.recompute_fee_match_days`). The old comment "only our club's players have rows" was false.
+24. Enrolment loads the appearing players org-scoped FIRST, then filters appearances (`fees.recompute_fee_match_days`); "only our club's players have rows" is false.
 25. Migration 223: composite FK `fee_members (organisation_id, player_id)` to `players (organisation_id, id)`, NOT VALID (enforced on new writes). Still filter on read.
 
 **D. Per-club identity (players, grades, seasons)**
@@ -75,14 +75,14 @@
 **G. Club delete and archive**
 
 41. Club "delete" is a soft archive: `organisations.archived_at` (migration 143), `POST /club-admin/super/clubs/{id}/archive` and `.../restore`. Archiving does NOT touch `is_active`. The club list hides archived unless `?include_archived=true`. Hard `DELETE` (`delete_club`) returns 409 unless already archived.
-42. The live schema can drift from the ORM: `partnerships.game_id` was not `ON DELETE CASCADE` live, so the club delete rolled back silently. Migration 142 fixes nine tables (`batting_innings`, `bowling_spells`, `fielding_stats`, `bowler_wickets`, `game_appearances`, `fall_of_wickets`, `partnerships`, `milestones`, `fee_match_days`): `NOT VALID` then `VALIDATE CONSTRAINT`, checking `pg_constraint.confdeltype` first. Do not trust ORM `ondelete` for pre-Alembic tables.
+42. The live schema can drift from the ORM: `partnerships.game_id` was not `ON DELETE CASCADE` live, so the club delete rolled back silently. Migration 142 fixes nine per-game and per-player stat tables (incl. `partnerships`, `milestones`, `fee_match_days`): `NOT VALID` then `VALIDATE CONSTRAINT`, checking `pg_constraint.confdeltype` first. Do not trust ORM `ondelete` on pre-Alembic tables.
 43. `sync.find_matching_organisation(..., include_archived=True)` by default (so `upsert_organisation` reuses an archived row). Self-serve `search`, `/prepare`, `/submit` pass `include_archived=False`, and `/submit` clears `archived_at` on reuse.
 
 ## Traps and failure signatures
 
 - Season "2025/26" twice, rows sum to the header: shared fixture filed under the first club's season, not double counting (rule 30).
 - Players M 106 vs profile 150; Juniors returns senior matches (rules 10 to 12, 15). Board 61 vs grid 60 (rules 31, 32).
-- Opponents in Directory/fees with real contact details (rules 23 to 25). Opposition's best stand in our match review (rule 18).
+- Opponents in Directory/fees with contact details (rules 23 to 25). Opposition's best stand in our review (rule 18).
 - Career doubled (7 became 63; 86 = 56 + 30): global `session.get` or overlapping-season merge (rules 26, 29). Second club shows only unique grades (rule 26). Cutover: Sync Now mints per-club rows and moves aggregate seasons; game-level rows re-attach only on a Full Rebuild.
 - Club delete "did nothing": rule 42. Archived club "already registered": rule 43.
 - Audit noise: match a per-game table only after `FROM`/`JOIN` (`st.batting_innings` is a COLUMN on `player_season_stats`).
@@ -91,23 +91,23 @@
 ## How to verify a change here
 
 Repeatable audits (re-run when adding a per-game read):
-- Player scoping: extract every triple-quoted SQL block, keep those with a per-game table after `FROM`/`JOIN` AND a `JOIN players <alias>`, flag any alias with no `<alias>.organisation_id` in the block. Read CTEs too.
-- "Ours" function audit: read whole function bodies for `:pid` plus a per-game table and no org reference (grepping SQL text flags correct code whose filter arrives via an interpolated `extra`). Found 13 in `aggregations.py`, plus `player_formats` and `get_player_captain_stats`.
-- Season-org audit: flag per-game SQL blocks testing a seasons alias' `organisation_id` without `home_org_id` (89 reported).
+- Player scoping: extract every triple-quoted SQL block with a per-game table after `FROM`/`JOIN` AND a `JOIN players <alias>`; flag any alias with no `<alias>.organisation_id` in the block. Read CTEs too.
+- "Ours" function audit: read whole function bodies for `:pid` plus a per-game table and no org reference (grepping SQL text flags correct code whose filter arrives via an interpolated `extra`). Found 13 in `aggregations.py` plus `player_formats`, `get_player_captain_stats`.
+- Season-org audit: flag per-game SQL blocks testing a seasons alias' `organisation_id` without `home_org_id`.
 - CARRIED audit: walk every `ForeignKey("players.id")` in `models/db.py` against the merge body (reported 41 unmerged).
 
 Suites (`backend/verification/`, real Postgres, shipped route bodies, control run must fail):
 - `verify_merge_carry.py`: old merge leaves the keeper 2 of 7 innings; breaking an `ALLOWED_DELETES` entry or dropping a table off `CARRIED` must fail; row count must fall by exactly the genuine duplicates.
-- `verify_shared_fixture_stats.py`: control fails on Juniors returning senior runs and boards reading 3 vs profile 7.
-- `verify_player_season_fold.py`: control fails on 2 rows for 2025/26; bundle checks must still pass.
-- `verify_association_backfill.py`: neutered phases fail, `commit` ignored fails, ambiguity guard removed shows a side picked. Deadlock cannot be reproduced single-threaded; the suite pins the structural fix.
+- `verify_shared_fixture_stats.py`: control fails on Juniors returning senior runs.
+- `verify_player_season_fold.py`: control fails on 2 rows for 2025/26.
+- `verify_association_backfill.py`: neutered phases fail, `commit` ignored fails, ambiguity guard removed shows a side picked. Deadlock is not reproducible single-threaded; the suite pins the fix structurally.
 - `verify_match_coverage.py` and the competitions suite for the grouping trigger. Member leak: two clubs, one shared fixture.
 - Harness: ORM-built tables, views from the migrations; smoke-execute every patched read scoped and unscoped (caught "missing FROM-clause entry for table g" in captain by-season CTEs, which need no clause).
 
 ## Operator commands and scripts
 
 - `python -m app.scripts.purge_foreign_members [<org_id>|all] [--apply] [--delete]`: clears member rows pointing at other clubs' players. Dry run by default; archives unless `--delete`. Rows with a payment, role, qualification, committee term, hours, family link or roster shift are reported and left alone. Once clean: `ALTER TABLE fee_members VALIDATE CONSTRAINT fk_fee_members_player_same_org`.
-- `python -m app.scripts.backfill_all_associations [--apply] [--no-api] [--org <id-or-slug>] [--concurrency N]`: groups every club's grades into competitions. Dry run by default; `--no-api` is SQL only.
+- `python -m app.scripts.backfill_all_associations [--apply] [--no-api] [--org <id-or-slug>] [--concurrency N]`: groups every club's grades into competitions. Dry run by default.
 - `python -m app.scripts.inspect_association_sources`: read-only; do the association id spaces agree, and how many Directory clubs play in one association.
 
 ## Open follow-ups
@@ -115,15 +115,15 @@ Suites (`backend/verification/`, real Postgres, shipped route bodies, control ru
 - `seasons.organisation_id` shape remains in the yearbook generator, fantasy engine and several admin tools (none club-facing stats).
 - Grade-scoped, finals-only and captain-only board branches still count their own rows, not `_matches_played_cte`.
 - Career size for a player at two synced clubs (scoped vs unscoped path) is a product decision.
-- Players, Accounts, Directory and Comms Lists legitimately show different counts until the Clubhouse "join the data" step.
+- Players, Accounts, Directory and Comms Lists show different counts until the Clubhouse "join the data" step.
 - Season-alias/migration-season dedup (to merge overlapping legacy and per-club players) is unbuilt.
-- The second club gets no row of its own for a both-synced match (shared `games.id`): known limitation.
+- A both-synced match gives the second club no row of its own (shared `games.id`): known limitation.
 
 ## Flags: conflicting, superseded or possibly obsolete guidance
 
 - [FLAG-XCLUB-1] v7.32.1 calls `WHERE s.organisation_id = :org` "already correct" (yearbooks, iq_trends, iq_selection) | v9.62.0 says never use it for a per-game "ours" test and lists yearbook/fantasy as still having it | they differ by read shape (season-aggregate vs per-game) | "Cross-Club Player Over-Count Fix"; "A FIXTURE BELONGS TO BOTH CLUBS" | keep both, read by shape.
 - [FLAG-XCLUB-2] v9.53.10 and v9.53.11 list the career header and season table counting every game as "noticed, not fixed" | v9.53.12 applied `_club_game_clause` to every player read and asserts they agree | superseded | "seasons drawn two and three times over" (v9.53.10, v9.53.11, v9.53.12 sub-rows) | retire.
-- [FLAG-XCLUB-3] The nine tables in migration 142, the 02:30 Perth time and the five-pass bound come from the archive | `GROUP_CLUBS_PER_RUN = 40` and migrations 060, 062, 067, 142, 143, 167, 169, 223 confirmed in code; the other values not re-checked | "Super Admin Club Delete"; "Grouping is a job" | verify before relying.
+- [FLAG-XCLUB-3] The nine tables in 142, the 02:30 Perth time and the five-pass bound come from the archive | `GROUP_CLUBS_PER_RUN = 40` and migrations 060, 062, 067, 142, 143, 167, 169, 223 exist; the rest not re-checked | "Super Admin Club Delete"; "Grouping is a job" | verify.
 - [FLAG-XCLUB-4] `services/org_merge.py` mentions `_resolve_org_grade`/`_resolve_org_player` | not in this archive | may carry more per-club id rules | verify if merging organisations.
 
 ## Section coverage
@@ -139,7 +139,7 @@ Suites (`backend/verification/`, real Postgres, shipped route bodies, control ru
 |   sub: The association is already in our own database (v9.62.3) | rules extracted | Rules 35 to 38 |
 |   sub: A live dry run needs the real cost (v9.62.4) | rules extracted | Rule 40 |
 |   sub: The Club Directory closes what the sync alone cannot (v9.62.5) | rules extracted | Rules 36, 37 |
-|   sub: A live run at concurrency deadlocked (v9.62.6) | rules extracted | Rule 40 |
+|   sub: A live run at concurrency deadlocked (v9.62.6) | rules extracted | Rule 39 |
 |   sub: The grade leaderboard and the profile under it (v9.53.13) | rules extracted | Rule 32 |
 |   sub: One rule for "this game is ours", on every player read (v9.53.12) | rules extracted | Rules 10, 17 |
 |   sub: The same year counted twice, and another club's matches with it (v9.53.11) | rules extracted | Rule 31 |

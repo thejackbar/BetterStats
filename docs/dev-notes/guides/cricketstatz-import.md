@@ -23,7 +23,7 @@
 8. Commit one match at a time and clear ALL caches (season, grade, roster) on rollback, or a dangling cached id fails every later match in the season (one bad card cost 97 good ones).
 9. The record book goes to `cricketstatz_records` generically (one live copy per club per mode). Never blend it into our computed records.
 10. An expired subscription answers `Error: Subscription expired`; `unwrap` raises a typed `CricketStatzError` so it is not read as "no matches". Their database is deleted 12 months after expiry.
-11. The client identifies itself, concurrency 3, delay between requests, 30-minute cache, scorecards not cached. Their `robots.txt` disallows `/ss/`; proceeding was a data-portability call, so never enumerate club ids or sweep the site.
+11. The client identifies itself, concurrency 3, delays, 30-minute cache, scorecards uncached. Their `robots.txt` disallows `/ss/`; proceeding was a data-portability call, so never enumerate club ids or sweep the site.
 12. Create grades classified: write `category` AND `categories` (`suggest_category`/`suggest_categories`) and `grassroots_id=None` on season and grade, or imported juniors sit in senior careers.
 
 **Player matching and merging**
@@ -42,7 +42,7 @@
 23. Matching is seconds of CPU: `asyncio.to_thread` (`assign`), never inline. Hold the boot task in `main._BACKGROUND_TASKS`. Bind card queries to loaded game ids (`= ANY(CAST(:ids AS UUID[]))`); a players-only bind scanned the platform.
 24. Aggregate level differs from per-innings: `player_season_stats` is a season total with no row to drop, so a paired imported match is not counted from the import there (v9.70.6). See Flag 4.
 25. `player_season_grade_stats` (CA per-grade) is a third table the views do not cover. CA's "NMCA - Jika Shield" and CricketStatz's "A-GRADE" never share a cell, so `max(held, claimed)` sums them. Count CA in full and pair imported scorecards away before the grid's `held` side.
-26. `seasons.stats_source` is retired: kept, read by nothing (only `superseded_years`, for a note). Do not reintroduce a per-season source marker. Undo removes imported rows and their pairs (synced games return); it also clears leftover markers on seasons it emptied (`seasons_handed_back`).
+26. `seasons.stats_source` is retired: kept, read by nothing (only `superseded_years`, for a note). Undo removes imported rows and their pairs (synced games return); it also clears leftover markers on seasons it emptied (`seasons_handed_back`).
 
 **Effective views: database must equal code**
 27. `services/superseded_ddl.STATEMENTS` owns all eight views. Change them HERE or the change lasts to the next boot (it also owns migration 291's `caught_behind` on batting). Start from the newest definition (`CREATE OR REPLACE VIEW` cannot drop columns; an older one once took the API down), qualify columns, LEFT JOIN, primary-key joins only, downgrade drops views first.
@@ -58,12 +58,12 @@
 
 ## Traps and failure signatures
 
-- **Doubled records (270 listed twice, 14,966 vs 10,444)**: same cricket from CA and CricketStatz. Fix is per-match pairing, not season skipping or marking.
-- **171 games in a season (85 + 86)**: pairing never ran or failed silently. Read the boot and nightly per-club log lines; run `pair_imported_matches`; check the views.
+- **Doubled records (270 listed twice)**: same cricket from both sources. Fix is per-match pairing, not season skipping or marking.
+- **171 games in a season (85 + 86)**: pairing never ran or failed silently. Read the per-club boot and nightly log lines; run `pair_imported_matches`.
 - **6 of 86 paired**: matcher compared our own club name (rule 19).
 - **Career header double, list right, shared seasons exactly 2.000x**: aggregate view counts the import, or the database view is a pre-pairing definition. Split by the view's `source` column, then `pg_get_viewdef`.
 - **Two of eight views stale on a live system**: an older same-column definition replaced them silently (our own 266 mirror). A 169-era one fails loudly (`cannot drop columns from view`). `grep v_effective_games app/main.py` finds one comment because the SQL is in the migration module: search for what executes.
-- **A guard column that makes overwrite fail loudly took the site down** (v9.70.11): the writer was our own boot. Know who trips a guard first.
+- **A guard column making overwrites fail loudly crash-looped boot** (v9.70.11): the writer was our own. Know who trips a guard first.
 - **`resolve_season` returns a `Season`, not an id**: a raw `UPDATE ... WHERE id = :s` bound a repr, was swallowed as a note, wrote zero matches.
 - **Passes `py_compile` and `vite build` but fails**: raw-DDL columns not mapped on the ORM model.
 - **`games.raw_payload` is `JSON` on the ORM, `JSONB` in migrated databases**: a `create_all` harness cannot union it with the view's `NULL::jsonb`.
@@ -81,7 +81,7 @@
 - `python -m app.scripts.merge_cricketstatz_duplicates <org|all> [--apply]`: merge club record with import duplicate via `_merge_players_core`, keeping the club's record. Dry run by default.
 - `python -m app.scripts.backfill_boundary_counts <org|all> --apply`: null impossible counts, no network. Dry run by default.
 - `python -m app.scripts.inspect_player_aggregate <player> [year]`: read-only per-branch split and `pg_get_viewdef`. Lives in `app/scripts` because `ops/` is not in the backend image.
-- Endpoints: `POST /pairing/rebuild`, `POST /notes`. Database log: `log_statement = 'ddl'` (reload) plus `%h`/`%a` in `log_line_prefix` names a rewriting process.
+- Endpoints: `POST /pairing/rebuild`, `POST /notes`. DB log: `log_statement = 'ddl'` (reload) plus `%h`/`%a` in `log_line_prefix` names a rewriting process.
 
 ## Open follow-ups
 
@@ -90,7 +90,7 @@
 - Nothing flags boundary counts nulled; nothing detects seasons held twice from before pairing.
 - The outside process that once overwrote two views was never named beyond our 266 mirror.
 - `iq_team`, `iq_trends`, `import_reconcile` still read `player_season_grade_stats` unfiltered.
-- `v_effective_batting_innings.id` is not unique across sources (both SERIAL).
+- `v_effective_batting_innings.id` is not unique across sources.
 - Merge still does not carry `net_attendance`, `team_members`, `family_members`, availability, `fixture_lineups`, `fee_members`, `comms_contacts`, `merch_movements`, fantasy tables.
 
 ## Flags: conflicting, superseded or possibly obsolete guidance

@@ -7,12 +7,11 @@
 - Any Clubhouse screen: Directory, Roster, Accounts, Payments, Stock, Facilities, Events, Club Diary, Today, Audiences.
 - `services/roster.py`, `roster_area_roles`, `volunteer_hours`, Areas & roles, `services/roles_activities.py`.
 - Fees: `services/fees.py`, `fee_member_seasons`, rollover, Accounts save panels, membership tier.
-- `services/directory.py`, `membership_types`, Families; `services/merch.py`, `services/assets.py`, `club_assets`, Square sync.
-- Symptoms: "Could not load facilities", picker empties itself, "undefined ×2" shift chip, tier reset to "Needs tier", pale border on a button row.
+- `services/directory.py`, Families, `services/merch.py`, `services/assets.py`, `club_assets`, Square sync.
 
-**Archive** (full history, verbatim, do not load whole): `docs/dev-notes/archive/clubhouse-people-roster-fees.md`. Grep hints: `house control`, `pb-hairline`, `ONE asset register`, `resetting to the newest season`, `inside a <label>`, `PlayHQ registration checkbox`, `absent key is not a clear`, `season rollover: undo`, `Families is a BetterStats`, `three type axes`, `Directory is the reference`, `role is a level`, `Confirming the roster`, `Roster shift CRUD`, `four sub-modules merged`, `open to club admins`, `Match-Fee Auto-Allocation`, `club stock register`, `Square POS`.
+**Archive** (full history, verbatim, do not load whole): `docs/dev-notes/archive/clubhouse-people-roster-fees.md`. Grep hints: `house control`, `ONE asset register`, `newest season`, `inside a <label>`, `PlayHQ registration`, `absent key is not a clear`, `rollover: undo`, `Families is a BetterStats`, `three type axes`, `Directory is the reference`, `role is a level`, `Confirming the roster`, `Roster shift CRUD`, `four sub-modules`, `open to club admins`, `Match-Fee`, `stock register`, `Square POS`.
 
-**Related guides**: comms/segments (scope rule, Audiences); committee (meeting room, minutes); BetterSelect (`usePref` twin, header overflow); billing/Stripe (`billing_pricing.py`); verification conventions (control runs).
+**Related guides**: comms/segments (scope rule); committee (minutes); BetterSelect (`usePref` twin); billing/Stripe; verification conventions.
 
 ## Standing rules
 
@@ -27,7 +26,7 @@
 8. Set input widths INLINE: `INPUT_CLS` carries `w-full` and which width class wins is Tailwind emit order.
 9. A composite widget (picker, chip multiselect, segmented control) never sits in a `<label>`: `Field` renders a label that forwards a click to whatever control it holds. Pass `composite` (renders `role="group"`). Picker rows and clear buttons in `clubmanager/pickers.jsx` also `preventDefault()` in `choose()` as a net.
 10. Never declare a component inside a render (`const Header = () => ...`): new element type each render kills the caret. Use a plain function and call it (`{header()}`). A `const` the header reads must be declared above every `header(...)` call, including ones in early returns (temporal dead zone; Roster's `publish`).
-11. `usePref(key, fallback)` is per user, per browser, read in the state initialiser (not an effect). Counts come from one fetch: `pages/admin/clubhouse/data.js` `useClubhouseData` (60s cache) plus `deriveCounts`; do not denormalise. Screen intros (`clubhouse/intro.jsx`): `always|once|never`, per person, default `once`, decided at mount; deep links pass `state: { skipIntro: true }`.
+11. `usePref(key, fallback)` is per user, per browser, read in the state initialiser (not an effect). Counts come from one fetch (`clubhouse/data.js` `useClubhouseData` plus `deriveCounts`); do not denormalise. Screen intros (`clubhouse/intro.jsx`): `always|once|never`, per person, default `once`, decided at mount; deep links pass `state: { skipIntro: true }`.
 12. The indigo `#6366F1` is retired; `MODULE_BRAND.clubmanager` aliases `admin`. `BetterFeesLayout` and the other old layouts are thin wrappers over `BetterClubhouseLayout`; new screens use it directly.
 13. Load lists with `rows(res, ...keys)` (always an array), never `r?.items || r || []`.
 
@@ -53,8 +52,8 @@
 26. The roster subsystem is raw SQL outside ORM/alembic: mirror every DDL change idempotently in `main.py`'s lifespan, byte-identical to the migration. `volunteer_hours.roster_shift_id` has no FK on purpose.
 27. A shift outlives an archived area (`delete_area` is soft; `list_areas` is active only). Never look a shift's area up in the active set: `_shift_rows` LEFT JOINs `roster_areas` and carries `area_name`; `areaLabel(shift)` never returns `undefined`. `assign`/`check_assignment` take no `area`; `assign` refuses only "Unknown volunteer". Fill panel gates on the shift alone.
 28. Open-shift chips group by `(area_id, role_id, start, end)`, never name plus hours. Roster grid Areas view groups shifts by role (`areaRoleGroups`, null role is "General help" last, only roles with shifts draw); one group leaves the row byte-identical; `areaDayCol` is the one chip renderer; collapse is `usePref('roster_areas_collapsed', {})`, default expanded.
-29. Confirm roster: `roster_shifts.worked_hours` NULL is not checked, `0` is did not turn up. Confirming reconciles via `uq_volunteer_hours_shift` (upsert, deletes posted row for a shift since unassigned or zeroed). Unconfirming leaves posted hours. `hours_summary` keeps rostered and worked separate. Availability is Monday=0 indexes read tolerantly (`day_index()`).
-30. Roster drags: a shift drops only in its own day column; a blocked person still accepts the drop and the server returns the sentence; open chips are drop targets in People view. Frozen first column is `position: sticky` on the grid item; its opaque background must not be overridden by a row tint.
+29. Confirm roster: `roster_shifts.worked_hours` NULL is not checked, `0` is did not turn up. Confirming reconciles via `uq_volunteer_hours_shift` (upsert, deletes posted row for a shift since unassigned or zeroed). Unconfirming leaves posted hours. `hours_summary` keeps rostered and worked apart.
+30. Roster drags: a shift drops only in its own day column; a blocked person still accepts the drop and the server returns the sentence; open chips are drop targets in People view. Frozen first column is `position: sticky` on the grid item; keep its background opaque (no row tint).
 31. Role titles are unique across all roles; the Roles list hides committee roles (`is_committee` or committee type). `_role_clash_message` (`services/roles_activities.py`) is the one definition for `create_role` and `update_role`: a hidden committee clash names the Committee screen and asks for a different name (never "reclassify", the flag alone hides it). Archived clash reactivates.
 32. `organisations.diary_start_month` (1-12, default 7) drives the Club Diary season plan; edited in Settings (`DiaryYearPanel`).
 
@@ -67,15 +66,15 @@
 ## Traps and failure signatures
 - "Could not load facilities.": wrong response key (rule 13). Picker empties after choosing, Edge/Safari only: rule 9. Caret leaves the search box after one character: rule 10 (`fill()` cannot catch it). Pale `#e5e7eb` border: rule 4. Tier reset or a panel's edits lost: rules 20, 21.
 - Shift chip "undefined ×2" or "Unknown volunteer or area": archived area (rule 27); React renders a bare `undefined` child empty, only string concat prints it. Role add refused with none visible: rule 31. Roles merged into one chip: rule 28.
-- Infinite `/fees/all-members` calls: an effect lists `toast` as a dependency and its `catch` raises a toast.
+- Infinite `/fees/all-members` calls: an effect depends on `toast` and its `catch` raises a toast.
 - Unrelated PATCH 500 in a stubbed-lifespan harness: `audit_logs` missing (aborted transaction poisons the commit); create the lifespan-only tables (`player_achievements`, `org_award_definitions`, `audit_logs`) by hand.
 - A stub returning `{seasons: [...]}` where the router returns a bare array breaks Accounts/Payments and corrupts overflow baselines.
-- Measure the rendered page before theorising about design gaps (heading 24px vs 19px, non-wrapping tabs, mono body copy, not the typeface).
+- Measure the rendered page before theorising about design gaps (it was heading size, not the typeface).
 
 ## How to verify a change here
 - Backend, real Postgres (`backend/verification/`): `verify_roster_area_roles.py` (control with feature reverted fails per-role qualification and role-on-shift; includes archived-area cases), `verify_role_create_committee_clash.py` (control neuters the committee branch of `_role_clash_message`), `verify_member_fees_form_save.py` (control fails the tier reset; expire the session after raw UPDATEs).
 - Browser (`frontend/verification/`): `verify_clubhouse_buttons_browser.mjs`, `verify_member_fees_save_browser.mjs`, `verify_roster_area_roles_browser.mjs`, `verify_roster_role_grid_browser.mjs`, `verify_roster_open_shift_labels_browser.mjs` (target `div[draggable]`), other `verify_roster_*_browser.mjs`.
-- Assert layout from real boxes and computed style, not class names. Gate absence and collapse checks on the thing having been shown first. Control runs must report, not crash (`.get`, no-arg factories, presence-tolerant helpers).
+- Assert layout from real boxes and computed style. Gate absence checks on the thing having been shown first. Control runs must report, not crash.
 - `text=UNSAVED` matches ancestors (use `data-testid`). HTML5 drag tests: dispatch `DragEvent`s, `dragstart` and `drop` in separate `evaluate` calls.
 - Re-run a 390px `<h1>` and `scrollWidth` pass over all Clubhouse screens when adding one (Accounts, Payments, Stock overflow pre-existing). Suites share one database; stub tables can collide.
 
@@ -83,20 +82,20 @@
 - None in the archive. Migrations 221, 222, 235, 279, 306 via alembic plus the lifespan mirror. Square deploy: server `.env` `SQUARE_APP_ID`, `SQUARE_APP_SECRET` (never commit), `SQUARE_ENVIRONMENT=production|sandbox`, optional `SQUARE_API_VERSION`; register redirect `https://betterat.cricket/api/public/square/callback`; box must reach `connect.squareup.com`.
 
 ## Open follow-ups
-- Joining the data (handoff step 4): Fees members, Comms contacts and the ClubManager directory are still three person lists; fee and merch balances are separate.
+- Joining the data (handoff step 4): Fees members, Comms contacts and ClubManager directory are still three person lists.
 - BetterAdmin logo mark not made (lockup reuses `betteradmin.svg`).
 - No route-leave guard for an UNSAVED Accounts panel.
 - Roster: no migration of a shift's people when its role changes; no per-role headcount target.
-- `border pb-hairline` typo unswept; Square tokens stored plain (encrypt at rest); no asset depreciation or accounting fields.
+- `pb-hairline` typo unswept; Square tokens stored plain; no asset depreciation fields.
 
 ## Flags: conflicting, superseded or possibly obsolete guidance
-- [FLAG-CLUB-1] Merge section says the module is BetterClubhouse and `BILLABLE_MODULE_NAMES[admin]` reads "BetterClubhouse". | Reversed in v9.40.0; code has `MODULE_ADMIN: "BetterAdmin"` with a comment "briefly BetterClubhouse". Only code names keep Clubhouse. | BetterAdmin to BetterClubhouse merge, L9341-9486 | keep structure, retire naming.
-- [FLAG-CLUB-2] "Two things deliberately still say BetterAdmin" (marketing site, `billing_pricing.py`). | Now the whole app says BetterAdmin; Stripe Product names keep their creation-time name per the `modules.py` comment. | same, L9341-9486 | retire; verify Stripe dashboard.
-- [FLAG-CLUB-3] Merch section: "BetterAdmin toggle covers fees+comms+merch", Equipment as a Merch page. | Code group is fees, comms, merch, crm; Equipment moved to core `club_assets` (279), merch_assets routes deleted. | L12891-12984 vs L5310-5391 | verify, retire Equipment detail.
+- [FLAG-CLUB-1] Merge section calls the module BetterClubhouse. | Reversed in v9.40.0; `modules.py` has `"BetterAdmin"` (comment: "briefly BetterClubhouse"). | BetterAdmin to BetterClubhouse merge, L9341-9486 | keep structure, retire naming.
+- [FLAG-CLUB-2] "Two things deliberately still say BetterAdmin" (marketing, `billing_pricing.py`). | Now everything says BetterAdmin; Stripe Product names keep their creation-time name. | same, L9341-9486 | retire; verify Stripe dashboard.
+- [FLAG-CLUB-3] Merch: "toggle covers fees+comms+merch", Equipment as a Merch page. | Group is fees, comms, merch, crm; Equipment moved to `club_assets` (279). | L12891-12984 vs L5310-5391 | verify, retire Equipment detail.
 - [FLAG-CLUB-4] Directory search "above the filter buttons (v9.51.0)" vs "below the buttons that narrow the list (v9.52.1)". | Conflicting wording; later text wins. | L8536-8589 vs L5134-5309 | verify on live Directory.
-- [FLAG-CLUB-5] Paid via `roster.area_pay_kinds`. | Superseded by 306; function gone from `services/roster.py`. Snapshot rule still holds. | L9218-9282, superseded by L8699-8976 | retire resolver.
-- [FLAG-CLUB-6] Nav `super` flag "open to club admins since v9.6.1". | `super` and role gates removed; capability per item is the rule. | L9341-9486, L9647-9671 | retire.
-- [FLAG-CLUB-7] Draft minutes (`claude-haiku-4-5`, 10/hour/club, 503 without a key). | Route and model exist; limit and 503 not re-checked; committee guide owns it. | L9218-9282 | verify.
+- [FLAG-CLUB-5] Paid via `roster.area_pay_kinds`. | Superseded by 306; function gone. Snapshot rule holds. | L9218-9282, superseded by L8699-8976 | retire resolver.
+- [FLAG-CLUB-6] Nav `super` flag in the merge section. | Removed in v9.6.1; capability per item is the rule. | L9341-9486, L9647-9671 | retire.
+- [FLAG-CLUB-7] Draft minutes (`claude-haiku-4-5`, 10/hour/club, 503 without key). | Route and model exist; limit and 503 not re-checked. | L9218-9282 | verify.
 
 ## Section coverage
 | Original section (heading, original CLAUDE.md line range) | Disposition | Where captured |

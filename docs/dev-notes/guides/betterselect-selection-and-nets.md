@@ -3,9 +3,9 @@
 **Read this before**:
 - `frontend/src/pages/admin/betterselect/*` (AdminSelection, NetSession, Squads board, `dragOrder.js`, `selectionMeta.js`, `ui.jsx`), `routers/net_manager.py`, `routers/public_net_checkin.py`, `routers/availability.py`, `routers/public_availability.py`.
 - `services/selection_rules.py`, `selection_pool.py`, `player_age.py`, `player_kit.py`, `profile_import.py`.
-- Squad membership (`players.squad_team_id`, `team_members`), marking a player inactive, `services/directory.py::set_squad`.
-- Nets live session, batting order, padding up, priority, check-in QR/NFC link, guests, ending a session, `net_attendance`, `net_sessions.version`.
-- Self-service availability link (`/avail/:token`, `bs_avail` cookie, last-4-of-phone PIN).
+- Squad membership (`squad_team_id`, `team_members`), marking a player inactive, `directory.set_squad`.
+- Nets live session, batting order, padding up, priority, check-in QR/NFC link, guests, `net_attendance`.
+- Self-service availability link (`/avail/:token`, `bs_avail`).
 - Association rules (age, overseas, workload, finals), date of birth, `select_show_age`, shirt number / shirt size / pants size.
 - Symptoms: two devices showing different nets sessions, a player missing at the nets door, Selection header toggle painted over, a 402 naming "admin".
 
@@ -19,14 +19,14 @@
 1. Unassigned is a working list: active, still-around, unsquadded players. Everyone else is FILED, not hidden: `Potential fill-ins` (played before, not lately) and `Not yet played`. Cards in any pool must still drag into a squad.
 2. "Still around" uses the club's `dormancy_months` from the availability-matrix payload, the same definition the matrix and `selection_pool` use. No second window.
 3. The fill-in reach offers only windows wider than the dormancy boundary (24 months: 3/5/10/any; 12: 2/3/5/10/any); a control that can only answer "nobody" is worse than none.
-4. Marking a player inactive clears their squad in the same write (`routers/players.py::update_player_profile` and the profile importer), only when the request actually sets the status. Reactivating does not re-file. `auto_assign_suggest` and Bulk add skip inactive players. Board shows "N inactive not shown" plus `Show inactive players`.
+4. Marking a player inactive clears their squad in the same write (`update_player_profile`, profile importer), only when the request sets the status. Reactivating does not re-file. `auto_assign_suggest` and Bulk add skip inactive players. Board shows "N inactive not shown" plus `Show inactive players`.
 5. Every squad write must mirror into `team_members` (`directory.set_squad` once did not). Raw SQL there, by that module's posture.
 
 **Nets live session (multi-device)**
 6. Never reintroduce a full-replace attendance write. Every change is a small discrete write (check in, remove, batted, reorder, rotate, clock) that bumps `net_sessions.version`. Screens poll `GET /sessions/{id}/live?since=`; a match returns `{version, server_time, unchanged: true}`.
 7. Bump the version in SQL (`_touch` assigns `version = version + 1`), never `s.version + 1` in Python, or simultaneous taps leave the version unmoved.
 8. The clock is an absolute deadline (`live_state.ends_at`); devices count down against `server_time`. A passed deadline reads as stopped before anyone writes it (`_timer_payload`).
-9. Rotate must not repeat: `RotateBody.turn_seq` is the turn the sender saw, older turns are ignored. Auto-roll is server side inside the idempotent `expire` action, which refuses a deadline not yet passed.
+9. Rotate must not repeat: `RotateBody.turn_seq` is the turn the sender saw; older turns are ignored. Auto-roll is server side inside the idempotent `expire` action, which refuses a deadline not yet passed.
 10. Duplicate check-in is a no-op at two levels (app read, `IntegrityError` on the partial unique). Capture `club_id` before the flush: `club.id` after `db.rollback()` is a lazy load (MissingGreenlet). After `check_in_person` returns None touch no lazy attribute.
 11. `reorder_queue` appends ids the sender did not know, so a stale reorder drops no one. `_renumber` re-lays `position` 0..n-1 after every mutation (waiting first, then batted). Sending someone back goes to the END.
 12. `ended` is read off the server payload. Ending stops the clock in the same write (`update_session`) and closes the QR link (`live_sessions` returns active only). Nothing is destroyed; Reopen restores.
@@ -43,9 +43,9 @@
 21. Glyphs: pad = PAIR of pads, filled, strap as an EVEN-ODD hole; bat = two diagonal strokes. Judge at 16/22/40/72px.
 
 **Nets roster, `bats`, check-in link, guests**
-22. `GET /nets/roster` returns every `is_player` player tagged `dormant`/`inactive`; the screen groups, never filters. Keep `active_self_service_players` byte-for-byte (composed of `availability.dormant_player_ids` + `club_player_roster`; the public link and phone coverage read it).
+22. `GET /nets/roster` returns every `is_player` player tagged `dormant`/`inactive`; the screen groups, never filters. Keep `active_self_service_players` unchanged (built from `dormant_player_ids` + `club_player_roster`; the public link reads it).
 23. `net_attendance.bats` separates turning up from batting. `_waiting()` is the one queue definition (`_rotate` reads it). Returning goes to the BACK. `check_in_person` (single writer, admin and public) takes `bats`/`note`; a repeat check-in must not rewrite state.
-24. QR and NFC are one link, one token (`organisations.net_checkin_token`, mirrors `availability_link_token`). Scanning joins EVERY live session (`net_manager.live_sessions`: active, dated within a day either side of today, no club timezone).
+24. QR and NFC are one link, one token (`organisations.net_checkin_token`). Scanning joins EVERY live session (`net_manager.live_sessions`: active, dated within a day either side of today, no club timezone).
 25. A newcomer is a GUEST (`player_id` NULL + `guest_name`), never a player. Typed details go to `net_checkin_registrations` (`pending`). Approving is the one place a player is created and it CONVERTS the guest row (keep the real row and drop the guest if both exist). Dismissing leaves attendance alone. No `previous_club` column.
 26. Two switches: `net_checkin_require_pin` (default true) and `net_checkin_allow_registration`.
 27. `net_attendance.source` ('admin'|'self') drives the arrival alert (pre-272 rows read 'admin'). Only `self` pops up, chimes and vibrates; a screen opening mid-session seeds its seen set silently. iOS ignores `navigator.vibrate`. `touch_session` (= `_touch`) must run on a self check-in or the poll sees nothing.
@@ -53,19 +53,19 @@
 29. Guests to players: `GET /nets/guests` groups by `_guest_key` (case and outer whitespace only, not fuzzy) and leaves out anyone with a PENDING registration; `POST /nets/guests/promote` moves the WHOLE history, collapses clashes, settles the registration, resolves the key server side. Gate: `require_any_cap` of `MANAGE_SELECTIONS` or `MANAGE_PLAYERS`. `UnrosteredGuests` renders nothing when empty and never calls the endpoint for a club without BetterSelect (402).
 
 **Self-service availability**
-30. Unauthenticated router, NOT under `require_module`: resolves the club from `availability_link_token`, checks `org_has_module(club,"select")` and the enabled flag itself (else 404). PIN = last-4 of `Player.phone`; cookie `bs_avail` (~30 days); lockout 5 wrong / 15 min per (token, player, IP) via `rate_limit.FailureTracker`; unknown player counts as a failure (no roster enumeration).
+30. Unauthenticated router, NOT under `require_module`: resolves the club from `availability_link_token`, checks `org_has_module(club,"select")` and the enabled flag itself (else 404). PIN = last-4 of `Player.phone`; cookie `bs_avail` (~30 days); lockout 5 wrong / 15 min per (token, player, IP) via `rate_limit.FailureTracker`; unknown player counts as a failure.
 31. Self answers are `player_availability` rows with `source='self'`, `recorded_by` NULL; an admin override re-stamps `'admin'`. Admin endpoints `GET/POST /availability/self-service`, `POST .../regenerate` (`MANAGE_SELECTIONS`).
 
 **Association rules**
 32. One table `selection_rules` (`kind`, `scope`, `config`); `services/selection_rules.py` is the only reader/writer. Kinds: `age`, `overseas`, `bowling_workload`, `finals_qualification`, `grade_cap`, `fees`, `training`, `registration`, `rest`, `custom`. No table per kind.
 33. Age is measured on a setting: `age_basis` (month, day, which END of the season gives the year) or `fixed_date` (does not move with the season). Cutoff resolves against the SEASON. `season_start_month` (default 7) is the fallback. Operators per end: `min_op` gte/gt, `max_op` lt/lte (none reads gte/lt). `_min_phrase`/`_max_phrase` are the one wording. Ladder runs to 23.
 34. Rules name grades, never ids. Names match sponsor-stripped and case-folded, and the fixture grade is folded through `grade_alias_map`. Empty scope means EVERY fixture. The scope picker (`club_grades`) mirrors Manage Grades (aliases folded, `display_order`, `recent` flag).
-35. Severity is the club's: `warn` or `block`; `bowling_workload` is forced `info`. A block removes the player from auto-fill (`autofill_eligible`) and the board opens eligible-only (once per fixture). Warnings stay visible. `selection_rule_players` is the per-RULE permit, not a `players` flag.
-36. Silence where data cannot answer (no DOB, no fees module and no override, no registration row, no nets session, no squad seniority): never a breach.
+35. Severity is the club's: `warn` or `block`; `bowling_workload` is forced `info`. A block removes the player from auto-fill (`autofill_eligible`) and the board opens eligible-only (once per fixture); warnings stay visible. `selection_rule_players` is the per-RULE permit.
+36. Silence where data cannot answer (no DOB, fees module or override, registration row, nets session, squad seniority): never a breach.
 37. Overseas cap depends on who else is picked: the browser counts it live from a payload definition, the SAVE re-counts. Never let the browser's count decide.
-38. `assemble_selection` resolves fees and training FIRST and passes the maps to the engine (`_flag_maps`); `rule_context`/`club_rule_context` give the save path and fixture-less screens the same answer.
+38. `assemble_selection` resolves fees and training FIRST and passes the maps to the engine (`_flag_maps`); `rule_context`/`club_rule_context` give the save path the same answer.
 39. Qualifying games count scorecards AND named XIs, deduped on the DATE. `_FIXTURE_ONLY_KINDS` (`finals_qualification`, `grade_cap`, `rest`, `overseas`) are not answered on the matrix or roster.
-40. An age rule moves the card's age to the competition's date (`visible_age(dob, club, as_of=age_at)`); the club display gate still applies server side.
+40. An age rule moves the card's age to the competition's date (`visible_age(dob, club, as_of=age_at)`); the display gate still applies.
 41. Screens draw nothing when the club has no rules (`flags.rules`/`rules.active`). Fees and training notes can be switched off (`show_fees`/`show_training` in `selection_rules_config`): value WITHHELD, not hidden; a fees or training RULE still flags.
 42. Starter is only the CA Junior Cricket Policy bowling ladder, skip-don't-replace; no invented numbers. Settings live on the rules screen (`MANAGE_SELECTIONS`, not `MANAGE_SETTINGS`).
 
@@ -97,24 +97,23 @@
 
 ## How to verify a change here
 - Backend (real Postgres, shipped route bodies): `backend/verification/verify_net_batting_order.py`, `verify_net_checkin.py`, `verify_player_kit.py` (control with number resolution and size writes neutered fails the importer checks), `verify_multi_squad.py`.
-- Browser (`frontend/verification/`): `verify_net_batting_order_browser.mjs` (real pointer events plus synthetic touch, `touch-action` read from computed style), `verify_net_admin_browser.mjs`, `verify_net_alert_browser.mjs`, `verify_net_checkin_browser.mjs`, `verify_guest_promotion_browser.mjs`, `verify_squads_pools_browser.mjs`, `verify_minutes_letterhead_browser.mjs`, `verify_minutes_download_browser.mjs` (must pass unchanged).
+- Browser (`frontend/verification/`): `verify_net_batting_order_browser.mjs` (pointer and synthetic touch, `touch-action` read from computed style), `verify_net_admin_browser.mjs`, `verify_net_alert_browser.mjs`, `verify_net_checkin_browser.mjs`, `verify_guest_promotion_browser.mjs`, `verify_squads_pools_browser.mjs`, `verify_minutes_letterhead_browser.mjs`, `verify_minutes_download_browser.mjs` (must pass unchanged).
 - Race two real DB sessions for the version bump and duplicate check-in.
-- A control run that crashes is not a control run: read new keys via `.get`, import shipped code through a guarded `load()`, bail reporting what is absent. Pair set with clear, and entitled with non-entitled payloads.
-- Gotchas: Playwright `**` glob does not cross a `?` (route the live poll by regex or the catch-all hands `{}` and crashes the page); routes match most-recently-registered first; `NAMES.map(att)` passes `(value, index)`; no hardcoded indexes after a drag; `unzip` glob-matches `[Content_Types].xml`; lifespan raw-SQL tables need their CREATE plus every later ALTER (match to the closing double quote); suites share one database; stubs must match real response shapes.
+- A control run that crashes is not a control run: read new keys via `.get`, guard imports, report what is absent. Pair set with clear, entitled with non-entitled.
+- Gotchas: Playwright `**` glob does not cross a `?` (route the live poll by regex or the catch-all hands `{}` and crashes the page); routes match most-recently-registered first; `NAMES.map(att)` passes `(value, index)`; `unzip` glob-matches `[Content_Types].xml`; lifespan raw-SQL tables need their CREATE plus every later ALTER; suites share one database; stubs must match real response shapes.
 
 ## Operator commands and scripts
 none. Migrations 268, 269, 271, 272, 273, 284, 289 are mirrored idempotently in the lifespan.
 
 ## Open follow-ups
 - Squads header action cluster overflows 319px at 390px (shared `ModuleLayout`).
-- Nets `adopt` takes any payload; a malformed one from a server mid-deploy takes the screen down.
-- Session-register CSV carries neither padding up nor priority.
-- Nothing writes fixture availability from the nets.
+- Nets `adopt` takes any payload; a malformed one mid-deploy takes the screen down.
+- Session CSV lacks padding up and priority. Nothing writes fixture availability from the nets.
 - No Web Push, no bowling-overs count against actual junior spells.
 - Sponsor prominence and venue naming rights: `docs/sponsor-prominence-and-venue-naming-rights.md`, not built.
 
 ## Flags: conflicting, superseded or possibly obsolete guidance
-- [FLAG-BSN-1] Archive cites Postgres suites for selection rules, age maths, live session, nets roster, guests and squads pools | `backend/verification` holds only `verify_net_batting_order.py`, `verify_net_checkin.py`, `verify_player_kit.py`, `verify_multi_squad.py` for this area | several sections | verify before citing others as runnable.
+- [FLAG-BSN-1] Archive cites Postgres suites for rules, age maths, live session, roster, guests, squads pools | `backend/verification` has only `verify_net_batting_order.py`, `verify_net_checkin.py`, `verify_player_kit.py`, `verify_multi_squad.py` here | several sections | verify before citing others.
 - [FLAG-BSN-2] Kit section notes `require_module("admin")` names the module "admin", then says `module_display_name` fixed it | `auth/modules.py:431` defines it | L12119-12320 | keep later (fixed).
 - [FLAG-BSN-3] Squads section says AFL has no BetterSelect squad board | football later got its own select module (`betterfootball-afl` archive) | L4592-4665 | verify.
 
@@ -125,19 +124,19 @@ none. Migrations 268, 269, 271, 272, 273, 284, 289 are mirrored idempotently in 
 | Batting order is dragged, two flags (migration 284), L4752-4881 | rules extracted | Rules 15 to 21, Traps, How to verify |
 | Nets check-in list was hiding players (migration 273), L4882-4951 | rules extracted | Rules 22, 23, 55 |
 | A player checks themselves in at the nets (migration 272), L4952-5133 | rules extracted | Rules 24 to 28 |
-| &nbsp;&nbsp;sub: Turning a nets guest into a player (v9.42.1) | rules extracted | Rule 29 |
-| &nbsp;&nbsp;sub: Ending the night (v9.42.3) | rules extracted | Rule 12 |
+|   sub: Turning a nets guest into a player (v9.42.1) | rules extracted | Rule 29 |
+|   sub: Ending the night (v9.42.3) | rules extracted | Rule 12 |
 | Association's rules written down once (migration 271), L5961-6122 | rules extracted | Rules 32 to 42 |
-| &nbsp;&nbsp;sub: What the first round of use changed (v9.41.2) | rules extracted | Rules 33 to 35, 41 |
+|   sub: What the first round of use changed (v9.41.2) | rules extracted | Rules 33 to 35, 41 |
 | A player's date of birth (migration 269), L6191-6345 | rules extracted | Rules 43 to 46, 54 |
-| &nbsp;&nbsp;sub: Profile importer (v9.37.1) | rules extracted | Rules 47, 48 |
-| &nbsp;&nbsp;sub: `min-w-0` flex group overlaps siblings | rules extracted | Rule 54, Traps |
+|   sub: Profile importer (v9.37.1) | rules extracted | Rules 47, 48 |
+|   sub: `min-w-0` flex group overlaps siblings | rules extracted | Rule 54, Traps |
 | A net session is run from several devices (migration 268), L6346-6449 | rules extracted | Rules 6 to 14 |
-| &nbsp;&nbsp;sub: Live session moved onto the server | rules extracted | Rules 6 to 11 |
-| &nbsp;&nbsp;sub: The lists a club can take away | rules extracted | Rule 14 |
-| &nbsp;&nbsp;sub: The tally opens into the dates | rules extracted | Rule 13 |
-| &nbsp;&nbsp;sub: Verification | history only (check counts) | How to verify |
+|   sub: Live session moved onto the server | rules extracted | Rules 6 to 11 |
+|   sub: The lists a club can take away | rules extracted | Rule 14 |
+|   sub: The tally opens into the dates | rules extracted | Rule 13 |
+|   sub: Verification | history only (check counts) | How to verify |
 | Three kit fields (migration 289), L12119-12320 | rules extracted | Rules 49 to 53, 55, FLAG-BSN-2 |
-| &nbsp;&nbsp;sub: Minutes letterhead (v9.69.0) | rules extracted | Rule 56 |
-| &nbsp;&nbsp;sub: Sponsors: written up, not built | rules extracted (pointer) | Open follow-ups |
+|   sub: Minutes letterhead (v9.69.0) | rules extracted | Rule 56 |
+|   sub: Sponsors: written up, not built | rules extracted (pointer) | Open follow-ups |
 | Self-service player availability (v8.1), L12985-13037 | rules extracted | Rules 30, 31 |
