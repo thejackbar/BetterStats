@@ -42,8 +42,10 @@ import re
 import secrets
 import time
 import zlib
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, Optional
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -78,14 +80,28 @@ _UUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4
 # budget, so the figure is stored beside each snapshot.
 # ---------------------------------------------------------------------------
 class LiveAPI:
-    def __init__(self, concurrency: int = 4):
+    """``pacer`` is shared by every club a crawl is working on, so the crawl has
+    ONE rate however many clubs run at once. Each club still gets its own
+    instance (and its own ``calls`` counter), which is what the work report and
+    ``club_teaser_snapshots.api_calls`` read.
+
+    A "call" here is one method below. A stats call can page (100 rows a page),
+    so the requests on the wire can exceed the calls paced by a little; the
+    ``calls`` figures quoted in this module's notes count the same way."""
+
+    _pacer = None  # class default: an instance built without __init__ is simply unpaced
+
+    def __init__(self, concurrency: int = 4, pacer=None):
         from app.services import grassroots_scores_client as gr, playhq_client as ph
         self._ph, self._gr = ph, gr
         self._sem = asyncio.Semaphore(concurrency)
+        self._pacer = pacer
         self.calls = 0
 
     async def _run(self, coro_fn, *a, **kw):
         async with self._sem:
+            if self._pacer is not None:
+                await self._pacer.wait()
             self.calls += 1
             return await coro_fn(*a, **kw)
 
@@ -684,3 +700,152 @@ async def run_batch(limit: int, *, session_maker=None, api_factory: Callable[[],
 
     await asyncio.gather(*[one(c) for c in todo])
     return summary
+
+
+# ---------------------------------------------------------------------------
+# The paced crawl: one long-running worker, one rate
+# ---------------------------------------------------------------------------
+# This replaced a cron job that fired a small batch every 5 or 10 minutes: a
+# burst, then nothing, then another burst. The worker below never stops
+# looking for work; what it limits is HOW FAST it calls out. Every call, from
+# every club being worked, goes through one ``CallPacer``, so the upstream sees
+# a steady trickle that wobbles a little (services/call_pacer.py) at the rate
+# the operator set, inside the hours the operator set (Perth time).
+#
+# It is OFF UNTIL A SUPER ADMIN SETS ``club_teaser_calls_per_second``: this is
+# outbound traffic at scale to a third party, so nobody gets it by deploying.
+# The operator's Stop switch (``marketing_crawl_control``) halts it between
+# clubs, as it does every other unattended crawl. It assumes ONE API process:
+# like every job in this app it runs in-process, and a second process would
+# run a second crawl at the same rate.
+PERTH = ZoneInfo("Australia/Perth")
+CYCLE_BATCH = 10               # clubs per cycle: a setting change lands within a couple of minutes
+CYCLE_CLUB_CONCURRENCY = 2     # clubs in flight at once; the rate is the pacer's, not this
+IDLE_SECONDS = 300             # nothing is due: look again in five minutes
+OFF_SECONDS = 60               # switched off or stopped: read the settings again in a minute
+OUTSIDE_POLL_SECONDS = 300     # outside the hours: never sleep longer, so a widened window is noticed
+ERROR_SECONDS = 60             # a cycle raised: try again in a minute, never hot-loop
+TROUBLE_SECONDS = 900          # a whole cycle of errors: leave the upstream alone for a quarter hour
+TROUBLE_MIN_CLUBS = 3
+
+
+@dataclass(frozen=True)
+class PacedConfig:
+    rate: float          # calls a second on average; 0 = off
+    start_hour: int      # Perth, inclusive
+    end_hour: int        # Perth, exclusive (24 = midnight)
+    type_modes: dict
+
+
+def in_window(now: datetime, start_hour: int, end_hour: int) -> bool:
+    return start_hour <= now.astimezone(PERTH).hour < end_hour
+
+
+def seconds_until_open(now: datetime, start_hour: int, end_hour: int) -> float:
+    """0 inside the hours, else the wait until they next open (Perth)."""
+    if in_window(now, start_hour, end_hour):
+        return 0.0
+    local = now.astimezone(PERTH)
+    opens = local.replace(hour=start_hour, minute=0, second=0, microsecond=0)
+    if local >= opens:
+        opens += timedelta(days=1)
+    return (opens - local).total_seconds()
+
+
+async def load_config(session_maker=None) -> PacedConfig:
+    from app.models.db import async_session_maker
+    from app.services import platform_settings as ps
+    session_maker = session_maker or async_session_maker
+    async with session_maker() as s:
+        rate = await ps.get_club_teaser_rate(s)
+        start, end = await ps.get_club_teaser_window(s)
+        modes = await ps.get_club_teaser_type_modes(s)
+    return PacedConfig(rate, start, end, modes)
+
+
+async def paced_cycle(pacer, *, session_maker=None, config_fn=None, api_factory=None,
+                      is_paused=None, now_fn=None, batch: int = CYCLE_BATCH,
+                      club_concurrency: int = CYCLE_CLUB_CONCURRENCY) -> dict:
+    """One pass of the crawl: read the settings, and if the crawl is on and
+    inside its hours pull the next few due clubs through ``pacer``.
+
+    Returns ``{status, wait, summary?}``. ``status`` is off | outside_window |
+    stopped | idle | trouble | worked, and ``wait`` is how long the caller
+    should sleep before the next pass (0 = straight away, which is how it stays
+    continuous while there is work)."""
+    from app.models.db import async_session_maker
+    session_maker = session_maker or async_session_maker
+    if is_paused is None:
+        from app.services import club_directory
+        is_paused = club_directory.is_crawl_paused
+    now_fn = now_fn or (lambda: datetime.now(timezone.utc))
+
+    cfg = await (config_fn() if config_fn else load_config(session_maker))
+    if cfg.rate <= 0:
+        return {"status": "off", "wait": OFF_SECONDS}
+
+    def closed_wait() -> float:
+        return max(1.0, min(seconds_until_open(now_fn(), cfg.start_hour, cfg.end_hour),
+                            OUTSIDE_POLL_SECONDS))
+
+    if not in_window(now_fn(), cfg.start_hour, cfg.end_hour):
+        return {"status": "outside_window", "wait": closed_wait()}
+    async with session_maker() as s:
+        if await is_paused(s):
+            return {"status": "stopped", "wait": OFF_SECONDS}
+
+    pacer.set_rate(cfg.rate)
+    closed = {"hit": False}
+
+    async def guard(session) -> bool:
+        # Asked between clubs. A club in flight finishes (about half a minute
+        # of calls), so the hours are honoured to within that.
+        if not in_window(now_fn(), cfg.start_hour, cfg.end_hour):
+            closed["hit"] = True
+            return True
+        return bool(await is_paused(session))
+
+    summary = await run_batch(
+        batch, session_maker=session_maker, api_factory=api_factory or (lambda: LiveAPI(pacer=pacer)),
+        should_stop=guard, club_concurrency=club_concurrency, type_modes=cfg.type_modes)
+    summary.pop("detail", None)
+    if summary["due"] == 0:
+        return {"status": "idle", "wait": IDLE_SECONDS, "summary": summary}
+    if summary["stopped"]:
+        if closed["hit"]:
+            return {"status": "outside_window", "wait": closed_wait(), "summary": summary}
+        return {"status": "stopped", "wait": OFF_SECONDS, "summary": summary}
+    if (summary["error"] >= TROUBLE_MIN_CLUBS
+            and summary["ok"] + summary["empty"] + summary["junior_only"] == 0):
+        return {"status": "trouble", "wait": TROUBLE_SECONDS, "summary": summary}
+    return {"status": "worked", "wait": 0, "summary": summary}
+
+
+async def run_forever(*, pacer=None, session_maker=None, config_fn=None, api_factory=None,
+                      is_paused=None, now_fn=None, sleep=asyncio.sleep,
+                      batch: int = CYCLE_BATCH, club_concurrency: int = CYCLE_CLUB_CONCURRENCY,
+                      max_cycles: Optional[int] = None) -> None:
+    """The crawl. Runs for the life of the process (``max_cycles`` is for the
+    tests). A cycle that raises is logged and retried after a pause, never
+    allowed to end the loop or spin."""
+    from app.services.call_pacer import CallPacer
+    pacer = pacer or CallPacer(1.0)
+    last, cycles = None, 0
+    while max_cycles is None or cycles < max_cycles:
+        cycles += 1
+        try:
+            out = await paced_cycle(pacer, session_maker=session_maker, config_fn=config_fn,
+                                    api_factory=api_factory, is_paused=is_paused, now_fn=now_fn,
+                                    batch=batch, club_concurrency=club_concurrency)
+        except Exception:  # noqa: BLE001 - a marketing crawl must never take the app down
+            logger.exception("Club teaser crawl cycle failed")
+            out = {"status": "error", "wait": ERROR_SECONDS}
+        if out["status"] != last:
+            logger.info("Club teaser crawl: %s", out["status"])
+            last = out["status"]
+        s = out.get("summary")
+        if s and out["status"] in ("worked", "trouble"):
+            logger.info("Club teaser crawl: %d club(s), %d call(s): %d ok, %d empty, %d junior_only, %d error",
+                        s["due"], s["calls"], s["ok"], s["empty"], s["junior_only"], s["error"])
+        if out["wait"]:
+            await sleep(out["wait"])

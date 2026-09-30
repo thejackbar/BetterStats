@@ -2,7 +2,6 @@ import logging
 import asyncio
 from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.combining import OrTrigger
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
@@ -32,41 +31,6 @@ scheduler = AsyncIOScheduler()
 # is CA's own is skipped BEFORE any call is made, so a settled platform costs
 # nothing here. The cap is only a bound on a burst.
 GROUP_CLUBS_PER_RUN = 40
-
-
-async def pull_club_teasers():
-    """Small daytime pulls of marketing teaser snapshots for clubs that have not
-    registered (see services/club_teaser.py).
-
-    Runs in Perth time, never overnight: every 10 minutes 06:00 to 09:00, every
-    5 minutes 09:01 to 20:59, every 10 minutes 21:00 to 21:59. Steady traffic
-    in waking hours is less conspicuous to the upstream than a burst at 3am,
-    and the busiest stretch is the middle of the day. Each run is small, so the
-    directory fills gradually.
-
-    OFF UNLESS A SUPER ADMIN SETS ``club_teaser_nightly_limit`` (the setting
-    keeps its old name; it now means clubs per run). This is outbound traffic
-    to Cricket Australia across thousands of clubs, so it is never something a
-    deploy switches on. The operator's Stop switch (``marketing_crawl_control``)
-    halts it between clubs, the same way it halts every other unattended crawl.
-    Who is eligible follows the Club Directory type filters, set by
-    ``club_teaser_type_modes``.
-    """
-    from app.services import club_directory, club_teaser, platform_settings as ps
-
-    try:
-        async with async_session_maker() as session:
-            limit = await ps.get_club_teaser_nightly_limit(session)
-            modes = await ps.get_club_teaser_type_modes(session)
-        if limit <= 0:
-            return
-        summary = await club_teaser.run_batch(
-            limit, should_stop=club_directory.is_crawl_paused, pause_seconds=0.5,
-            type_modes=modes)
-        summary.pop("detail", None)
-        logger.info("Club teaser pull: %s", summary)
-    except Exception:  # noqa: BLE001 - a marketing pass must never break the scheduler
-        logger.exception("Club teaser pull failed")
 
 
 async def group_all_organisations():
@@ -889,20 +853,10 @@ def start_scheduler():
         max_instances=1,
         coalesce=True,
     )
-    # Two cron fields cannot say "every 10 minutes here, every 5 there", so the
-    # job has an OrTrigger of two. 09:00 is on the 5-minute grid, so it lands in
-    # the second; nothing fires twice.
-    scheduler.add_job(
-        pull_club_teasers,
-        trigger=OrTrigger([
-            CronTrigger(hour="6-8,21", minute="*/10", timezone=PERTH),
-            CronTrigger(hour="9-20", minute="*/5", timezone=PERTH),
-        ]),
-        id="nightly_club_teasers",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-    )
+    # The club teaser crawl is NOT a scheduled job any more. It is a worker that
+    # runs for the life of the process (club_teaser.run_forever, started from
+    # main.py's lifespan) and paces its own calls, so the upstream sees a steady
+    # trickle rather than a burst every few minutes.
     # Re-derive the CricketStatz match pairing for the clubs that hold an
     # import. The pass runs as an import goes and after a full sync; this is
     # the retry, so a boot that never reached it cannot leave a club counting

@@ -6053,6 +6053,20 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_resume_interrupted_syncs(_to_resume))
 
     start_scheduler()
+    # The club teaser crawl: one worker for the life of the process that paces
+    # its own calls (see club_teaser.run_forever). It does nothing until a super
+    # admin sets club_teaser_calls_per_second, so starting it is always safe.
+    # Held in _BACKGROUND_TASKS, not just created, or it is eligible for garbage
+    # collection the first time it awaits. A failure to start it is logged and
+    # never blocks boot.
+    _teaser_task = None
+    try:
+        from app.services import club_teaser as _club_teaser
+        _teaser_task = asyncio.create_task(_club_teaser.run_forever(), name="club_teaser_crawl")
+        _BACKGROUND_TASKS.add(_teaser_task)
+        _teaser_task.add_done_callback(_BACKGROUND_TASKS.discard)
+    except Exception:
+        logger.exception("could not start the club teaser crawl")
     # Apply the super-admin-set CRM sweep cadences (Tier 2 / Tier 3) to the
     # just-started scheduler — the jobs were registered with the defaults, this
     # reconciles them to the persisted values so a restart keeps a custom cadence.
@@ -6068,6 +6082,8 @@ async def lifespan(app: FastAPI):
         logger.exception("could not apply persisted CRM sweep intervals")
     logger.info("BetterStats API started")
     yield
+    if _teaser_task is not None:
+        _teaser_task.cancel()
     stop_scheduler()
     logger.info("BetterStats API stopped")
 

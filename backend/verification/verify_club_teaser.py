@@ -498,14 +498,16 @@ async def main() -> None:
           any("clubs pulled   3" in ln for ln in rep.report_lines(sm["detail"], 12.0, total_due=300))
           and any("projection for 300" in ln for ln in rep.report_lines(sm["detail"], 12.0, total_due=300)))
     fake = [{"name": f"c{i}", "status": "ok", "calls": 20, "secs": 8.0} for i in range(6)]
-    pr = rep.projection(fake, 100, pause_seconds=0.5)
-    row5 = {r["limit"]: r for r in pr["table"]}[5]
-    check("the projection is per-club latency times clubs, split by the scheduled concurrency",
-          pr["calls"] == 2000 and abs(pr["serial_secs"] - 850) < 1e-9
-          and abs(pr["scheduled_secs"] - 425) < 1e-9 and row5["runs"] == 20
-          and abs(row5["run_secs"] - 25.5) < 1e-9, str(pr))
-    check("a run longer than the tightest 5 minute gap is flagged as losing slots",
-          not {r["limit"]: r for r in rep.projection(fake, 3500, pause_seconds=40)["table"]}[20]["fits"])
+    pr = rep.projection(fake, 100, rate=2.0, window_hours=17.0)
+    check("the projection is calls a club times clubs, then divided by the paced rate",
+          pr["calls"] == 2000 and abs(pr["serial_secs"] - 800) < 1e-9
+          and abs(pr["paced"]["secs"] - 1000) < 1e-9, str(pr))
+    check("the projection names the rate that finishes inside one window",
+          abs(pr["rate_for_one_window"] - 2000 / (17 * 3600)) < 1e-9, str(pr))
+    check("with no rate set the report says the crawl is off rather than inventing a duration",
+          rep.projection(fake, 100)["paced"] is None
+          and any("off until club_teaser_calls_per_second" in ln
+                  for ln in rep.report_lines([{**d, "status": "ok"} for d in fake], 30.0, total_due=100)))
     check("a dry run, with nothing pulled, reports nothing to time",
           rep.report_lines([{"name": "x", "status": None, "calls": 0, "secs": 0.0}], 1.0, total_due=5)[0]
           .startswith("work done: nothing pulled"))
@@ -527,23 +529,16 @@ async def main() -> None:
     check("a settled directory has nothing due", sq["due"] == 0, str(sq))
 
     # ---------------- wiring ----------------
-    import app.jobs.scheduler as sched
-    sched_src = Path(sched.__file__).read_text()
-    check("the pull job exists and is registered", hasattr(sched, "pull_club_teasers")
-          and "nightly_club_teasers" in sched_src)
-    reg = sched_src[sched_src.index("pull_club_teasers,\n        trigger"):][:400]
-    check("the pull runs 06:00-21:59 Perth at 10 and 5 minute steps, never overnight",
-          'hour="6-8,21", minute="*/10"' in reg and 'hour="9-20", minute="*/5"' in reg
-          and "hour=3" not in reg, reg)
-    check("the job applies the Directory type filters", "get_club_teaser_type_modes" in sched_src)
+    ct_src = Path(ct.__file__).read_text()
+    check("the crawl applies the Directory type filters", "get_club_teaser_type_modes" in ct_src)
     ps_src = (Path(__file__).resolve().parent.parent / "app/services/platform_settings.py").read_text()
-    check("the nightly limit is a General Settings key that defaults to OFF",
-          '"club_teaser_nightly_limit"' in ps_src and "UNSET MEANS 0" in ps_src)
+    check("the crawl rate is a General Settings key that defaults to OFF",
+          '"club_teaser_calls_per_second"' in ps_src and "UNSET MEANS 0" in ps_src)
     script = (Path(__file__).resolve().parent.parent / "app/scripts/pull_club_teasers.py").read_text()
     check("the operator script is a dry run unless told to apply", "dry_run=not a.apply" in script)
     check("the script prints the work report after an apply", "report_lines(" in script and "time.monotonic()" in script)
-    check("the script and the job both honour the Stop switch", "is_crawl_paused" in script
-          and "is_crawl_paused" in Path(sched.__file__).read_text())
+    check("the script and the crawl both honour the Stop switch", "is_crawl_paused" in script
+          and "is_crawl_paused" in ct_src)
 
     async with engine.begin() as c:
         for s in DOWNGRADE: await c.execute(text(s))
