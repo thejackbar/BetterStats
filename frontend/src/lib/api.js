@@ -2386,6 +2386,23 @@ export const api = {
   superGetCommsRates: () => request('/club-admin/super/comms/rates'),
   superUpdateCommsRates: (body = {}) =>
     request('/club-admin/super/comms/rates', { method: 'PATCH', body: JSON.stringify(body) }),
+  // Super-admin messages on the club admin dashboard (routers/admin_broadcasts.py).
+  getAdminBroadcasts: () => request('/club-admin/broadcasts'),
+  markAdminBroadcastsSeen: (ids) =>
+    request('/club-admin/broadcasts/seen', { method: 'POST', body: JSON.stringify({ ids }) }),
+  dismissAdminBroadcast: (id) =>
+    request(`/club-admin/broadcasts/${id}/dismiss`, { method: 'POST' }),
+  superListBroadcasts: () => request('/club-admin/super/broadcasts'),
+  superBroadcastAudience: () => request('/club-admin/super/broadcasts/audience'),
+  superCreateBroadcast: (data) =>
+    request('/club-admin/super/broadcasts', { method: 'POST', body: JSON.stringify(data) }),
+  superUpdateBroadcast: (id, data) =>
+    request(`/club-admin/super/broadcasts/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  superClearBroadcast: (id) => request(`/club-admin/super/broadcasts/${id}/clear`, { method: 'POST' }),
+  superRestoreBroadcast: (id) => request(`/club-admin/super/broadcasts/${id}/restore`, { method: 'POST' }),
+  superResetBroadcastViews: (id) => request(`/club-admin/super/broadcasts/${id}/reset-views`, { method: 'POST' }),
+  superDeleteBroadcast: (id) => request(`/club-admin/super/broadcasts/${id}`, { method: 'DELETE' }),
+  superBroadcastRecipients: (id) => request(`/club-admin/super/broadcasts/${id}/recipients`),
   superListUsers: () => request('/club-admin/super/users'),
   superCreateUser: (data) =>
     request('/club-admin/super/users', { method: 'POST', body: JSON.stringify(data) }),
