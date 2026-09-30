@@ -89,6 +89,22 @@ class LiveAPI:
             self.calls += 1
             return await coro_fn(*a, **kw)
 
+    async def resolve_org(self, club: dict, directory_guid: str) -> Optional[str]:
+        """The Cricket Australia ``organisationGuid`` for a directory club.
+
+        ``marketing_clubs.grassroots_guid`` holds PlayHQ's own search guid (the
+        ``playHQId`` namespace), and the fixturesladders / participants APIs
+        answer 204 for it: the first live sample read 20 of 20 clubs as empty
+        for exactly that reason. The name search returns both ids side by side,
+        so the club is found by its own name and confirmed on the id the
+        directory already holds; a name alone is never trusted."""
+        want = (directory_guid or "").lower()
+        for o in await self._run(self._ph.search_organisations, club.get("name") or ""):
+            ca = o.get("organisationGuid") or o.get("id")
+            if ca and want in {str(o.get("playHQId") or "").lower(), str(ca).lower()}:
+                return str(ca)
+        return None
+
     async def seasons(self, org: str) -> list:
         return await self._run(self._ph.get_seasons, org)
 
@@ -394,6 +410,15 @@ async def pull_club(api, org_guid: str, club: Optional[dict] = None, *,
     result: dict[str, Any] = {"status": "error", "snapshot": None, "season_year": None,
                               "season_start": None, "season_pending": False, "error": None}
     try:
+        # A live API maps the directory's guid onto the one CA answers to. A
+        # club CA's search cannot place is reported as empty (re-looked-at on
+        # the empty cadence), never guessed by name.
+        resolve = getattr(api, "resolve_org", None)
+        if resolve:
+            org_guid = await resolve(club, org_guid)
+            if not org_guid:
+                result["status"] = "empty"
+                return result
         seasons = order_seasons(await api.seasons(org_guid))
         if not seasons:
             result["status"] = "empty"

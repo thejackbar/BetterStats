@@ -1,5 +1,34 @@
 # BetterStats — Claude Session Notes
 
+## The teaser pull was handing CA the wrong kind of id (Sep 2026)
+
+The first live `pull_club_teasers all --sample 20 --apply` read 20 of 20 clubs
+as `empty`, one call each, every call a `204 No Content` on
+`fixturesladders/organisations/{guid}/seasons`.
+
+- **`marketing_clubs.grassroots_guid` IS PLAYHQ'S SEARCH GUID (the `playHQId`
+  namespace), NOT THE CA `organisationGuid`.** The seasons and participants APIs
+  only answer to the second and return 204 for the first, whatever the paging
+  (offset 0, 1 and none were all tried). The CA search returns both ids side by
+  side: Traralgon West is `organisationGuid 0dce4bf0-...` and `playHQId
+  fdfccdd0-...`, and the directory held the second. This is the namespace split
+  `playhq_client.search_organisations` already warns about.
+- **`LiveAPI.resolve_org` FINDS THE CLUB BY NAME AND CONFIRMS IT ON THE ID.** One
+  extra call per club. A name hit whose `playHQId` (or `organisationGuid`) is not
+  the directory's own guid is refused, because two clubs can share a name. A club
+  CA's search cannot place is `empty` after that one call and makes no data call.
+  `pull_club` only resolves when the API has `resolve_org`, so scripted APIs in
+  the suite are unchanged.
+- **The snapshot row still keys on the directory guid** (`org_guid`); only the
+  calls to CA use the resolved one.
+- **Live check** through the shipped `LiveAPI`: Traralgon West 35 calls / 77
+  matches, Kaniva 15 / 16, Applecross 78 / 132, a made-up club empty after 1.
+  Expect ~15-80 calls a club now, not the ~25 assumed, and re-read `api_calls`
+  off a fresh `--sample` before scaling.
+- **Verified** (`verify_club_teaser.py`, 92 checks, real Postgres) **with a control
+  run**: reverted, the resolved-guid, one-call and unplaceable-club checks fail
+  and the run then stops on the missing `resolve_org`.
+
 ## A game that does not add up is warned about, never refused (v9.99.2, Sep 2026)
 
 Reported off Hamilton Veterans' 23 Oct 2011 game: Portland and Mt Gambier both

@@ -250,6 +250,57 @@ async def main() -> None:
     check("no junior-only fetch was made for a club with no junior grades",
           all(a[2] is None for a in api.log if a[0] in ("bat", "bowl", "field") and a[1] == S_CUR))
 
+    # the directory holds PlayHQ's guid, which CA's seasons API answers 204 for:
+    # the first live sample read 20 of 20 clubs as empty for exactly this.
+    DIR_GUID, CA_GUID = g(), g()
+
+    class ResolvingAPI(FakeAPI):
+        def __init__(self, world, ca_only=True):
+            super().__init__(world)
+            self.ca_only, self.asked = ca_only, []
+
+        async def resolve_org(self, club, directory_guid):
+            self._hit("resolve"); return await self._resolve(club, directory_guid)
+
+        async def _resolve(self, club, directory_guid):
+            return CA_GUID if directory_guid == DIR_GUID else None
+
+        async def seasons(self, org):
+            self.asked.append(org)
+            if self.ca_only and org != CA_GUID:
+                self._hit("seasons"); return []        # CA's 204 for a PlayHQ id
+            return await super().seasons(org)
+
+    ra = ResolvingAPI(world_plain())
+    rr = await ct.pull_club(ra, DIR_GUID, {"name": "Resolved CC"})
+    check("a directory guid is resolved to the CA guid before any CA call",
+          rr["status"] == "ok" and ra.asked and all(o == CA_GUID for o in ra.asked), f"{rr['status']} {ra.asked}")
+    check("the resolve step is one call", ra.log[0] == ("resolve",) and ra.log.count(("resolve",)) == 1, str(ra.log[:2]))
+    ra2 = ResolvingAPI(world_plain())
+    rn = await ct.pull_club(ra2, g(), {"name": "Unplaceable CC"})
+    check("a club CA cannot place is empty after one call and no CA data call is made",
+          rn["status"] == "empty" and ra2.calls == 1 and not ra2.asked, f"{rn['status']} {ra2.calls} {ra2.asked}")
+    plain = FakeAPI(world_plain())
+    check("an API with no resolver is used as before",
+          (await ct.pull_club(plain, g(), {"name": "x"}))["status"] == "ok")
+
+    # the real resolver: matched on the directory's own id, never on the name alone
+    live = ct.LiveAPI.__new__(ct.LiveAPI)
+    live.calls, live._sem = 0, asyncio.Semaphore(1)
+    hits = [{"name": "Other CC", "organisationGuid": "ca-other", "playHQId": "ph-other"},
+            {"name": "Kaniva CC", "organisationGuid": "CA-KANIVA", "playHQId": "PH-KANIVA"}]
+    class PH:
+        @staticmethod
+        async def search_organisations(q): return hits
+    live._ph = PH
+    check("the live resolver matches the directory guid on playHQId, case-insensitively",
+          await live.resolve_org({"name": "Kaniva CC"}, "ph-kaniva") == "CA-KANIVA")
+    check("and on the CA guid itself, for a row that already holds it",
+          await live.resolve_org({"name": "Kaniva CC"}, "ca-kaniva") == "CA-KANIVA")
+    check("a name match with a different id is refused",
+          await live.resolve_org({"name": "Kaniva CC"}, "ph-somebody-else") is None)
+    check("the lookup is counted as a call", live.calls == 3, str(live.calls))
+
     # juniors
     wj = world_plain()
     wj["teams"][S_CUR] = [team(G_A, "A Grade"), team(G_U14, "Under 14")]
