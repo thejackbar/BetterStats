@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, Navigate, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import MarketingNav from '../../components/MarketingNav'
 import MarketingFooter from '../../components/marketing/MarketingFooter'
 import Reveal from '../../components/marketing/Reveal'
@@ -244,6 +244,7 @@ export default function Trial() {
   })
 
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
 
   const [status, setStatus] = useState(null)   // null = loading, false = unavailable
   const [wizardOpen, setWizardOpen] = useState(false)
@@ -285,6 +286,42 @@ export default function Trial() {
   }, [])
 
   const available = !!status?.enabled
+
+  // Arriving from a club's teaser page (/preview/:token -> /trial?teaser=...):
+  // open the wizard on THAT club so the visitor does not search for the club
+  // they were just shown. The teaser carries CA's own organisation id; the
+  // wizard wants a club search result, so look the club up by name and take the
+  // hit whose id matches. A club already on BetterCricket goes to its own site,
+  // and one we cannot place is put in the search box for the visitor to pick.
+  const teaserToken = searchParams.get('teaser')
+  const teaserHandled = useRef(false)
+  useEffect(() => {
+    if (!teaserToken || teaserHandled.current || !status) return undefined
+    teaserHandled.current = true
+    // No `alive` guard: the ref above makes this run once, and StrictMode's
+    // mount/unmount/mount would otherwise cancel the only run there is.
+    ;(async () => {
+      try {
+        const t = await api.publicTeaser(teaserToken)
+        if (t?.registered?.slug) { navigate(`/${t.registered.slug}`, { replace: true }); return }
+        const name = t?.claim?.name || t?.club?.name || ''
+        const want = String(t?.claim?.ca_org_id || '').toLowerCase()
+        const found = name ? await api.publicSelfServeSearch(name) : []
+        const list = Array.isArray(found) ? found : []
+        const hit = (want && list.find((c) => String(c.id || '').toLowerCase() === want))
+          || (list.length === 1 ? list[0] : null)
+        if (hit && hit.already_registered && hit.already_registered_slug) {
+          navigate(`/${hit.already_registered_slug}`, { replace: true })
+        } else if (hit && status.enabled) {
+          setWizardClub(hit)
+          setWizardOpen(true)
+        } else if (name) {
+          setQuery(name)
+        }
+      } catch { /* an old or bad link: the page is still a working trial page */ }
+    })()
+    return undefined
+  }, [teaserToken, status])
   // The webinar promo's copy and link, from the one date constant. Computed
   // here rather than inline so both of its states read from one place.
   const webinar = webinarState()

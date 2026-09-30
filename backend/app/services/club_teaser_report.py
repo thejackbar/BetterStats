@@ -138,6 +138,8 @@ def report_lines(detail: list[dict], elapsed: float, *, total_due: int,
 # are the questions a person would ask reading one, written down so twenty
 # snapshots can be read in a minute rather than opened one at a time.
 MIN_BATTERS = 3
+# Mirrors club_teaser.MIN_SEASON_MATCHES (this module imports only the standard library).
+MIN_SEASON_MATCHES = 6
 MIN_BOWLERS = 3
 STALE_AFTER_YEARS = 1
 
@@ -170,6 +172,8 @@ def review_snapshot(snap: Optional[dict], *, this_year: int) -> dict:
         missing.append("season")
     if not totals.get("matches"):
         missing.append("matches played (no ladder rows for the season)")
+    elif totals["matches"] < MIN_SEASON_MATCHES:
+        missing.append(f"a season with enough matches (have {totals['matches']}, want {MIN_SEASON_MATCHES})")
     if not ladders:
         missing.append("ladder position")
     if len(bat) < MIN_BATTERS:
@@ -215,7 +219,7 @@ def teaser_lines(snap: dict) -> list[str]:
     out = [f"{club.get('name')} ({club.get('suburb') or ''} {club.get('state') or ''}".rstrip() + ")"
            + (f", {club['association']}" if club.get("association") else "")]
     out.append(f"  {season.get('name')}: {totals.get('matches')} played, {totals.get('wins')} won, "
-               f"{totals.get('losses')} lost, {totals.get('draws')} drawn"
+               f"{totals.get('losses')} lost"
                + (f", win rate {totals['win_rate']}%" if totals.get("win_rate") is not None else ""))
     if totals.get("matches_vs_prev_pct") is not None and (totals.get("prev") or {}).get("season"):
         out.append(f"  {totals['matches_vs_prev_pct']:+d}% matches on {totals['prev']['season']}")

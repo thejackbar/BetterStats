@@ -19,7 +19,7 @@ import uuid
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.content import blog as blog_content
 from app.services import instructional_videos as video_svc
@@ -188,7 +188,7 @@ RESERVED_ROOT_SEGMENTS = {
     "games", "match", "scorecards", "players",
     "features", "pricing", "compare", "about", "contact", "faq",
     "terms", "privacy", "blog", "videos", "overview", "modules",
-    "trial", "demo",
+    "trial", "demo", "preview",
 }
 
 
@@ -213,6 +213,8 @@ def _parse_route(path: str):
         return {"type": "blog", "slug": segments[1]}
     if segments[0] == "videos" and len(segments) == 2:
         return {"type": "video", "slug": segments[1]}
+    if segments[0] == "preview" and len(segments) == 2:
+        return {"type": "teaser", "token": segments[1]}
     if len(segments) >= 2 and segments[1] in CLUB_SECTIONS:
         return {"type": "club", "slug": segments[0]}
     if len(segments) == 1 and segments[0] not in RESERVED_ROOT_SEGMENTS:
@@ -331,6 +333,7 @@ def _html(
     image_alt: str | None = None,
     og_type: str = "website",
     body_extra: str = "",
+    noindex: bool = False,
 ) -> str:
     if image:
         img_tags = f"""
@@ -359,12 +362,13 @@ def _html(
         encoded = json.dumps(jsonld, separators=(",", ":")).replace("</", "<\\/")
         jsonld_tag = f'\n  <script type="application/ld+json">{encoded}</script>'
 
+    robots_tag = '\n  <meta name="robots" content="noindex, nofollow" />' if noindex else ""
     return f"""<!DOCTYPE html>
 <html lang="en-AU">
 <head>
   <meta charset="UTF-8" />
   <title>{_esc(title)}</title>
-  <meta name="description" content="{_esc(description)}" />
+  <meta name="description" content="{_esc(description)}" />{robots_tag}
   <link rel="canonical" href="{_esc(url)}" />
   <meta property="og:site_name" content="{SITE_NAME}" />
   <meta property="og:type" content="{_esc(og_type)}" />
@@ -680,6 +684,31 @@ async def _club_html(slug: str, page_url: str, base: str, db: AsyncSession) -> s
     )
 
 
+async def _teaser_html(token: str, page_url: str, base: str, db: AsyncSession) -> str | None:
+    """Share card for a club's teaser page. Not indexed: the page is one
+    prospect's own introduction, reached by a link we sent them. An unknown or
+    unsuitable token gets the ordinary branded card, which says nothing about
+    whether the token exists."""
+    from app.services import club_teaser
+    if not re.match(r"^[A-Za-z0-9_-]{8,64}$", token or ""):
+        return None
+    snap = await db.scalar(text(
+        "SELECT snapshot FROM club_teaser_snapshots WHERE token = :t AND status = 'ok'"), {"t": token})
+    if not snap:
+        return None
+    view = club_teaser.presentation(snap)
+    name = view["club"].get("name") or "Your club"
+    hero = view.get("hero")
+    season = view["season"].get("name") or "this season"
+    if hero:
+        description = f"{hero['player']}: {hero['value']} {hero['unit']} in {season}. Your club's season, from Cricket Australia's public figures."
+    else:
+        description = f"Your club's {season}, from Cricket Australia's public figures."
+    title = f"{name}: your {season} | {SITE_NAME}"
+    return _html(title, description, _abs_url(OG_COVER, base), page_url, image_alt=title,
+                 body_extra=f"<p>{_esc(description)}</p>", noindex=True)
+
+
 @router.get("", response_class=HTMLResponse)
 async def og_preview(
     request: Request,
@@ -699,6 +728,8 @@ async def og_preview(
         html = await _video_html(route["slug"], page_url, base, db)
     elif route and route["type"] == "club":
         html = await _club_html(route["slug"], page_url, base, db)
+    elif route and route["type"] == "teaser":
+        html = await _teaser_html(route["token"], page_url, base, db)
 
     # Homepage, marketing pages and any unrecognised route fall back to a
     # branded card with the wide cover image.

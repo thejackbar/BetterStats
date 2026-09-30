@@ -210,8 +210,8 @@ async def main() -> None:
     check("a ladder we are not on gives no row", ct.our_ladder_row(ladder(ORG, [(1, "X", g(), 1, 1, 0)]), ORG) is None
           and ct.our_ladder_row(None, ORG) is None)
     t = ct.ladder_totals([{"played": 20, "won": 12, "lost": 6}, {"played": 18, "won": 10, "lost": 7}])
-    check("ladder totals: 38 played, 22 won, 13 lost, 3 draws, 58%",
-          (t["matches"], t["wins"], t["losses"], t["draws"], t["win_rate"]) == (38, 22, 13, 3, 58), str(t))
+    check("ladder totals: 38 played, 22 won, 13 lost, 58%, and no draws figure (the remainder is abandoned or tied games)",
+          (t["matches"], t["wins"], t["losses"], t.get("draws", "absent"), t["win_rate"]) == (38, 22, 13, "absent", 58), str(t))
     h1 = ct.content_hash({"a": 1, "b": [1, 2]}); h2 = ct.content_hash({"b": [1, 2], "a": 1})
     check("the content hash ignores key order and moves with content",
           h1 == h2 and h1 != ct.content_hash({"a": 2, "b": [1, 2]}))

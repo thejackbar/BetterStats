@@ -262,6 +262,7 @@ const AdminWebsite = lazy(() => import('./pages/admin/website/AdminWebsite'))
 // Public, login-free self-service availability (BetterSelect magic link + PIN)
 const PublicAvailability = lazy(() => import('./pages/PublicAvailability'))
 const PublicVoting = lazy(() => import('./pages/PublicVoting'))
+const TeaserPreview = lazy(() => import('./pages/marketing/TeaserPreview'))
 // Public, login-free net check-in — the QR code on the fence and the NFC tag
 // beside it hold this same URL.
 const PublicNetCheckIn = lazy(() => import('./pages/PublicNetCheckIn'))
@@ -382,6 +383,7 @@ export default function App() {
           {/* Public self-service availability (no login — magic link + PIN) */}
           <Route path="/avail/:token" element={<PublicAvailability />} />
           <Route path="/vote/:token" element={<PublicVoting />} />
+          <Route path="/preview/:token" element={<TeaserPreview />} />
           {/* Public net check-in (no login — QR code / NFC tag + optional PIN) */}
           <Route path="/nets-checkin/:token" element={<PublicNetCheckIn />} />
           <Route path="/room/:token" element={<PublicClubRoom />} />

@@ -151,8 +151,9 @@ async def main() -> None:
 
         async def snap(cid, status, calls, pulled_ago, next_in):
             await s.execute(text("""INSERT INTO club_teaser_snapshots
-                (marketing_club_id, org_guid, token, status, api_calls, pulled_at, next_pull_at)
-                VALUES (CAST(:c AS uuid), :g, :t, :st, :calls, :pulled, :nxt)"""),
+                (marketing_club_id, org_guid, token, status, api_calls, pulled_at, next_pull_at, snapshot)
+                VALUES (CAST(:c AS uuid), :g, :t, :st, :calls, :pulled, :nxt,
+                        CASE WHEN :st = 'ok' THEN CAST('{"schema": 2}' AS jsonb) END)"""),
                 {"c": cid, "g": g(), "t": g(), "st": status, "calls": calls,
                  "pulled": now - pulled_ago, "nxt": now + next_in})
         await snap(ids[0], "ok", 30, timedelta(minutes=10), timedelta(days=7))
@@ -230,8 +231,8 @@ async def main() -> None:
         await set_paused(s, False)
         await ps.update_settings(s, {"club_teaser_calls_per_second": 2})
         await s.execute(text("UPDATE club_teaser_snapshots SET next_pull_at = now() + interval '30 days'"))
-        await s.execute(text("""INSERT INTO club_teaser_snapshots (marketing_club_id, org_guid, token, status, next_pull_at)
-            SELECT id, 'x', md5(id::text), 'ok', now() + interval '30 days' FROM marketing_clubs mc
+        await s.execute(text("""INSERT INTO club_teaser_snapshots (marketing_club_id, org_guid, token, status, next_pull_at, snapshot)
+            SELECT id, 'x', md5(id::text), 'ok', now() + interval '30 days', CAST('{"schema": 2}' AS jsonb) FROM marketing_clubs mc
             WHERE NOT EXISTS (SELECT 1 FROM club_teaser_snapshots t WHERE t.marketing_club_id = mc.id)"""))
         await s.commit()
         st = await call_status(s, 12)

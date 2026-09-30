@@ -2199,6 +2199,12 @@ export const api = {
   // Fire-and-forget step-transition beacon for the registration funnel
   // breakdown on the Meta Ads dashboard — callers should not await/block on
   // this (see trackFunnelStep in SelfServeTrialModal.jsx).
+  // A prospect club's teaser page (/preview/:token). Unauthenticated; the token is the credential.
+  publicTeaser: (token) => request(`/public/teaser/${encodeURIComponent(token)}`),
+  publicTeaserEvent: (token, kind, section = null, visitorId = null) =>
+    request(`/public/teaser/${encodeURIComponent(token)}/event`, {
+      method: 'POST', body: JSON.stringify({ kind, section, visitor_id: visitorId }),
+    }),
   publicSelfServeTrackStep: (step, visitorId, club = null) =>
     request('/public/self-serve/track-step', {
       method: 'POST',

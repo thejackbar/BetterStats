@@ -922,3 +922,18 @@ pulled inside one Perth day, 05:00 to 22:00.
 - **`--apply` ENDS WITH A WORK REPORT SO A SMALL RUN CAN BE EXTRAPOLATED.** **CORRECTED in v9.100.2: the projection is in calls and the rate that finishes inside one window; the batch-size table against a 5 minute gap is gone.**
 
 <!-- END AMENDED AFTER THE SPLIT -->
+
+## The club teaser page and the snapshot fixes (v9.100.3, Sep 2026)
+
+Built straight after the first live pull of 20 clubs (19 ok, 1 junior only), read back with `inspect_club_teasers`. The audit script called all 19 READY, which was too generous, so the data was fixed before any page was built on it.
+
+- **WHAT THE 20 CLUBS SHOWED.** "Drawn" was played minus won minus lost (Flemington read 10 drawn, mostly washouts). Two clubs had one match in a season that had just started (Flagstaff Hill, Willowdale's 2026/27) and still read READY. The headline mixed every team (Flemington's 61 played included a women's social T20). No club had a logo. Some records were poor (11-40, 4-12), which is not a hook for an ad to that club.
+- **FIXES.** Schema 2: no `draws`; `MIN_SEASON_MATCHES` (6) with one fallback to the next older season that has stats; `grade_short` on ladder rows; `club.ca_org_id`. The review script now names a thin season as a gap.
+- **WHAT A PAGE LEADS WITH IS DERIVED ON READ.** `club_teaser.presentation`: an individual first (a batter's runs / 15 against a bowler's wickets), the season record only at a 45% win rate or better over at least 6 matches, ladders only where the club is in the top half. A club at the foot of its ladder is never shown the foot of its ladder as the hook.
+- **THE PAGE.** `/preview/:token` is public, dark, mobile first, noindex. Every tile is a button and all of them open one claim sheet; rows 4 and 5 of a list are dimmed, as an honest preview of what claiming unlocks. Claim goes to `/trial?teaser=<token>` and the wizard opens on the club through the existing `initialClub` seed. The teaser carries CA's own organisation id because the directory guid is a different namespace and the wizard's search returns CA ids.
+- **EVENTS.** `view` once per load, `tile` with the section, `claim_open`, `claim_go`, all written to `usage_events` with the club id, so a view or a tap can be traced to the club and (later) fed to its engagement score. Not yet wired into the score.
+- **SNAPSHOTS AGE OUT BY SCHEMA.** An `ok` snapshot whose `schema` is below `SCHEMA_VERSION` is due regardless of `next_pull_at`, so a shape change re-pulls the whole set without touching the cadence rules. `teaser_progress.due` copies `due_clubs`; the suite asserts the two counts agree.
+- **Verified.** `verify_club_teaser_page.py` 48 against a real Postgres (control against the previous code reports the feature missing), the browser suite 50 (control fails 23; every section is wrapped so a control run reports rather than crashes), and the three earlier teaser suites unchanged (91, 86, 49). Screenshots read from the real page at 390 and 1200.
+- **GOTCHAS FOUND ON THE WAY.** Tailwind cannot put an opacity on `pb-accent` (a CSS var), so the page uses the fixed brand `accent`. `innerText` returns the CSS-uppercase label. An effect with an `alive` flag and a run-once ref is cancelled by StrictMode's mount, unmount, mount, so the hand-off has neither. A fixed bottom bar appears mid-page in a full-page screenshot and is not a layout fault.
+- **NOT BUILT.** The image renderer (slice 3: Chromium, stored under `/mnt/media`, `image_version`), `{{teaser_url}}` and `{{teaser_image_url}}` merge variables and an email template, per-club Meta creative (geo-targeted ads for a chosen set of clubs), and feeding page views into the engagement score.
+

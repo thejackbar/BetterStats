@@ -31,5 +31,8 @@ export function isMarketingPath(pathname) {
 export const OWN_NAV_PATHS = ['/trial', '/demo']
 
 export function rendersOwnMarketingNav(pathname) {
-  return OWN_NAV_PATHS.includes(pathname)
+  // /preview/:token is a prospect club's teaser page. It draws its own header
+  // and its own call to action, so it wants what /trial and /demo want: no club
+  // Navbar and no CTA bar.
+  return OWN_NAV_PATHS.includes(pathname) || pathname.startsWith('/preview/')
 }

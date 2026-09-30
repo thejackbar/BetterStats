@@ -52,7 +52,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 1
+# 2: draws removed (played - won - lost is abandoned/tied/no-result, not draws),
+#    a club is built on the last season with a real number of matches, ladder
+#    rows carry a short grade name, and the club carries CA's own org id.
+SCHEMA_VERSION = 2
+MIN_SEASON_MATCHES = 6
 
 # Seasons probed newest-first for one that actually has stats. In September the
 # newest season usually exists with teams and no scorecards yet.
@@ -358,8 +362,10 @@ def ladder_totals(entries: list[dict]) -> dict:
     played = sum(e["played"] for e in entries)
     won = sum(e["won"] for e in entries)
     lost = sum(e["lost"] for e in entries)
+    # No "draws": played minus won minus lost is also abandoned, tied and
+    # no-result games (Flemington's 10 "drawn" were mostly washouts), and a
+    # piece of marketing must not state a figure the data cannot back.
     return {"matches": played, "wins": won, "losses": lost,
-            "draws": max(0, played - won - lost),
             "win_rate": round(100 * won / played) if played else None}
 
 
@@ -404,14 +410,45 @@ async def _stats_for(api, org: str, season: str, grades: Optional[list[str]]):
     return tuple(out)
 
 
+_DIVISIONISH = re.compile(r"\d|grade|div|reserve|colts|open|social|women|men|u\d", re.I)
+
+
+def short_grade(name: str, limit: int = 40) -> str:
+    """A grade name a card can hold. "O60 Div 1 - Geoff Dymock Shield" becomes
+    "O60 Div 1" (the part before the dash names the division); a name whose
+    leading part says nothing ("North East - Georgie McElligott Shield
+    Women's Social T20") is kept whole and clipped."""
+    name = re.sub(r"\s+", " ", (name or "").strip())
+    head, sep, _ = name.partition(" - ")
+    if sep and head and _DIVISIONISH.search(head):
+        name = head.strip()
+    return name if len(name) <= limit else name[: limit - 1].rstrip() + "…"
+
+
 async def _season_ladders(api, org: str, season_id: str, grades: list[dict]) -> list[dict]:
     got = await asyncio.gather(*[api.ladder(g["id"]) for g in grades[:MAX_LADDER_GRADES]])
     out = []
     for g, raw in zip(grades, got):
         row = our_ladder_row(raw, org)
         if row:
-            out.append({"grade": g["name"], **row})
+            out.append({"grade": g["name"], "grade_short": short_grade(g["name"]), **row})
     return out
+
+
+async def _build_season(api, org_guid: str, season: dict) -> dict:
+    """Everything one season contributes: its grades, the season's stats and
+    our ladder rows, or ``kind='junior_only'`` when every grade is junior."""
+    teams = await api.teams(org_guid, season["id"])
+    grades = grades_from_teams(teams)
+    junior = [g for g in grades if is_junior_grade(g["name"])]
+    senior = [g for g in grades if g not in junior]
+    if junior and not senior:
+        return {"kind": "junior_only"}
+    bat, bowl, field = await _stats_for(api, org_guid, season["id"],
+                                        [g["id"] for g in senior] if junior else None)
+    ladders = await _season_ladders(api, org_guid, season["id"], senior or grades)
+    return {"kind": "ok", "grades": grades, "bat": bat, "bowl": bowl, "field": field,
+            "ladders": ladders, "totals": ladder_totals(ladders)}
 
 
 async def pull_club(api, org_guid: str, club: Optional[dict] = None, *,
@@ -449,21 +486,28 @@ async def pull_club(api, org_guid: str, club: Optional[dict] = None, *,
             result["status"] = "empty"
             return result
 
-        teams = await api.teams(org_guid, chosen["id"])
-        grades = grades_from_teams(teams)
-        junior = [g for g in grades if is_junior_grade(g["name"])]
-        senior = [g for g in grades if g not in junior]
-        if junior and not senior:
+        built = await _build_season(api, org_guid, chosen)
+        # A season that has only just started has a batting row or two and one
+        # ladder game, which reads as "1 match played" in a piece about the
+        # club. Use the next older season with stats instead when this one is
+        # that thin; the club then reads as season_pending, so the newer one is
+        # noticed within a week. Only ONE older season is tried, and only when
+        # it really is fuller.
+        if built["kind"] == "ok" and built["totals"]["matches"] < MIN_SEASON_MATCHES:
+            for j in range(chosen_idx + 1, min(len(seasons), MAX_SEASON_PROBES)):
+                older = seasons[j]
+                if await api.batting(org_guid, older["id"]):
+                    b2 = await _build_season(api, org_guid, older)
+                    if b2["kind"] == "ok" and b2["totals"]["matches"] >= MIN_SEASON_MATCHES:
+                        chosen, chosen_idx, built = older, j, b2
+                    break
+        if built["kind"] == "junior_only":
             result["status"] = "junior_only"
             result["season_year"] = season_year(chosen)
             result["season_start"] = season_start(chosen)
             return result
-
-        bat, bowl, field = await _stats_for(api, org_guid, chosen["id"],
-                                            [g["id"] for g in senior] if junior else None)
-        ladder_grades = senior or grades
-        ladders = await _season_ladders(api, org_guid, chosen["id"], ladder_grades)
-        totals = ladder_totals(ladders)
+        grades, bat, bowl, field = built["grades"], built["bat"], built["bowl"], built["field"]
+        ladders, totals = built["ladders"], built["totals"]
 
         prev = None
         for s in seasons[chosen_idx + 1: chosen_idx + 3]:
@@ -480,8 +524,12 @@ async def pull_club(api, org_guid: str, club: Optional[dict] = None, *,
         starts = [d for d in (season_start(s) for s in seasons) if d]
         snapshot = {
             "schema": SCHEMA_VERSION,
-            "club": {k: club.get(k) for k in ("name", "short_name", "suburb", "state",
-                                              "association", "logo_url")},
+            "club": {**{k: club.get(k) for k in ("name", "short_name", "suburb", "state",
+                                                 "association", "logo_url")},
+                     # CA's own organisation id (the one the trial wizard's club
+                     # search returns), so a claim can open on the right club.
+                     # The directory's guid is a different namespace.
+                     "ca_org_id": org_guid},
             "season": {"id": chosen["id"], "name": chosen.get("name"),
                        "year": season_year(chosen),
                        "start": season_start(chosen).isoformat() if season_start(chosen) else None},
@@ -579,14 +627,15 @@ async def due_clubs(session: AsyncSession, limit: int, *, now: Optional[datetime
         FROM marketing_clubs mc
         LEFT JOIN club_teaser_snapshots t ON t.marketing_club_id = mc.id
         WHERE {_TARGET_WHERE} {trial} {only}
-          AND (t.id IS NULL OR t.next_pull_at IS NULL OR t.next_pull_at <= :now)
+          AND (t.id IS NULL OR t.next_pull_at IS NULL OR t.next_pull_at <= :now
+               OR (t.status = 'ok' AND COALESCE((t.snapshot->>'schema')::int, 0) < :schema))
         ORDER BY (t.id IS NULL) DESC,
                  EXISTS (SELECT 1 FROM marketing_club_contacts c
                           WHERE c.marketing_club_id = mc.id AND c.subscribed
                             AND COALESCE(c.email, '') <> '') DESC,
                  t.next_pull_at ASC NULLS FIRST
         LIMIT :limit
-    """), {"now": now, "limit": limit, **({"club": club_id} if club_id else {}),
+    """), {"now": now, "limit": limit, "schema": SCHEMA_VERSION, **({"club": club_id} if club_id else {}),
            **({"allowed": allowed} if allowed is not None else {})})).mappings().all()
     return [dict(r) for r in rows]
 
@@ -618,7 +667,7 @@ async def teaser_progress(session: AsyncSession, *, now: Optional[datetime] = No
     now = now or datetime.now(timezone.utc)
     allowed = await type_filtered_ids(session, type_modes)
     only = " AND mc.id = ANY(CAST(:allowed AS uuid[]))" if allowed is not None else ""
-    params: dict = {"now": now, "hour_ago": now - timedelta(hours=1)}
+    params: dict = {"now": now, "hour_ago": now - timedelta(hours=1), "schema": SCHEMA_VERSION}
     if allowed is not None:
         params["allowed"] = allowed
     row = (await session.execute(text(f"""
@@ -626,7 +675,8 @@ async def teaser_progress(session: AsyncSession, *, now: Optional[datetime] = No
                COUNT(t.id) AS with_snapshot,
                COUNT(*) FILTER (WHERE t.id IS NULL) AS never_pulled,
                COUNT(*) FILTER (WHERE t.id IS NULL OR t.next_pull_at IS NULL
-                                   OR t.next_pull_at <= :now) AS due,
+                                   OR t.next_pull_at <= :now
+                                   OR (t.status = 'ok' AND COALESCE((t.snapshot->>'schema')::int, 0) < :schema)) AS due,
                COUNT(*) FILTER (WHERE t.status = 'ok') AS ok,
                COUNT(*) FILTER (WHERE t.status = 'empty') AS empty,
                COUNT(*) FILTER (WHERE t.status = 'junior_only') AS junior_only,
@@ -647,6 +697,102 @@ async def teaser_progress(session: AsyncSession, *, now: Optional[datetime] = No
     out["avg_calls"] = round(float(row["avg_calls"] or 0), 1)
     out["last_pulled_at"] = row["last_pulled_at"].isoformat() if row["last_pulled_at"] else None
     return out
+
+
+# ---------------------------------------------------------------------------
+# What a page or an image leads with
+# ---------------------------------------------------------------------------
+# Derived on read, never stored: the rules below can change tomorrow and every
+# existing snapshot then reads the new way with no re-pull. The snapshot stays
+# plain data.
+#
+# The lead is an INDIVIDUAL fact (a batter's runs, a bowler's wickets) because
+# that is always something to be proud of, whatever the club's ladder looks
+# like: a prospect at the foot of the ladder is not shown the foot of the
+# ladder as the hook. The season record and the ladder are shown only where
+# they flatter (a win rate near half or better; a grade in the top half of its
+# ladder), so nothing on the page reads as a slight.
+FLATTERING_WIN_RATE = 45
+HERO_RUNS_PER_POINT = 15      # 15 runs weighs the same as 1 wicket when picking the lead
+MAX_LADDERS_SHOWN = 4
+
+
+def ordinal(n) -> str:
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        return "-"
+    if 10 <= n % 100 <= 20:
+        return f"{n}th"
+    return f"{n}{ {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th') }"
+
+
+def _hero(snap: dict) -> Optional[dict]:
+    bat, bowl = snap.get("batting") or [], snap.get("bowling") or []
+    b = bat[0] if bat else None
+    w = bowl[0] if bowl else None
+    if not b and not w:
+        return None
+    bat_score = (b["runs"] / HERO_RUNS_PER_POINT) if b else -1
+    bowl_score = w["wickets"] if w else -1
+    if b and bat_score >= bowl_score:
+        hs = f"{b.get('high_score')}{'*' if b.get('hs_not_out') else ''}" if b.get("high_score") is not None else None
+        bits = [f"average {b['average']}"] if b.get("average") is not None else []
+        if hs:
+            bits.append(f"highest score {hs}")
+        if b.get("hundreds"):
+            bits.append(f"{b['hundreds']} hundred{'s' if b['hundreds'] != 1 else ''}")
+        elif b.get("fifties"):
+            bits.append(f"{b['fifties']} fifties")
+        return {"kind": "runs", "player": b["name"], "value": b["runs"], "unit": "runs",
+                "detail": ", ".join(bits)}
+    bits = [f"average {w['average']}"] if w.get("average") is not None else []
+    if w.get("best"):
+        bits.append(f"best {w['best']}")
+    if w.get("economy") is not None:
+        bits.append(f"economy {w['economy']}")
+    return {"kind": "wickets", "player": w["name"], "value": w["wickets"], "unit": "wickets",
+            "detail": ", ".join(bits)}
+
+
+def presentation(snap: dict) -> dict:
+    """The parts of a snapshot a page or image is built from, chosen by the
+    rules above. ``lead`` is the grade the club plays the most games in (its
+    main side); ``ladders_shown`` only the ones in the top half."""
+    club = snap.get("club") or {}
+    totals = snap.get("totals") or {}
+    ladders = [l for l in (snap.get("ladders") or []) if l.get("rank")]
+    lead = None
+    if ladders:
+        lead_row = sorted(ladders, key=lambda l: (-(l.get("played") or 0), l.get("rank") or 99))[0]
+        lead = {"grade": lead_row.get("grade_short") or lead_row.get("grade"),
+                "rank": lead_row.get("rank"), "teams": lead_row.get("teams"),
+                "played": lead_row.get("played"), "won": lead_row.get("won"),
+                "lost": lead_row.get("lost"), "points": lead_row.get("points")}
+    shown = [
+        {"grade": l.get("grade_short") or l.get("grade"), "rank": l["rank"], "teams": l.get("teams"),
+         "place": ordinal(l["rank"]), "played": l.get("played"), "won": l.get("won"),
+         "lost": l.get("lost"), "points": l.get("points")}
+        for l in ladders
+        if l.get("teams") and int(l["rank"]) <= (int(l["teams"]) + 1) // 2
+    ]
+    shown.sort(key=lambda l: (l["rank"], -(l.get("played") or 0)))
+    matches = totals.get("matches") or 0
+    return {
+        "club": {"name": club.get("name"), "suburb": club.get("suburb"), "state": club.get("state"),
+                 "association": club.get("association"), "logo_url": club.get("logo_url")},
+        "season": {"name": (snap.get("season") or {}).get("name"), "year": (snap.get("season") or {}).get("year")},
+        "hero": _hero(snap),
+        "lead": lead,
+        "teams": len(ladders),
+        "matches": matches,
+        "record": ({"played": matches, "won": totals.get("wins"), "lost": totals.get("losses"),
+                    "win_rate": totals.get("win_rate")}
+                   if matches >= MIN_SEASON_MATCHES and (totals.get("win_rate") or 0) >= FLATTERING_WIN_RATE
+                   else None),
+        "ladders_shown": shown[:MAX_LADDERS_SHOWN],
+        "history": snap.get("history") or {},
+    }
 
 
 async def save_result(session: AsyncSession, club: dict, result: dict, *,
