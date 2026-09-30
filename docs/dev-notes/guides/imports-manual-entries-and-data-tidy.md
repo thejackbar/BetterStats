@@ -15,35 +15,35 @@
 
 **Manual games and the scorebook CSV**
 1. A hand-entered innings stores no total, wickets or overs when its side is "us": `_replace_game_children` nulls them, the form clears them in `setInningsSide` and omits them in `buildPayload`. Why: `_merge_manual_innings` lets a recorded `total_runs` replace the batters' sum, so a stray copy shows the opposition total twice. The CSV legitimately records OUR total (`innings_total`), so the merge still honours one. Fix at the source, not in the merge.
-2. A game that does not add up is warned about, never refused. `manual_game_check.check_game` is the one definition, behind `POST /manual-entries/games/check` (writes nothing). A failed check draws nothing and never blocks a save.
+2. A game that does not add up is warned about, never refused. `manual_game_check.check_game` is the one definition, behind `POST /manual-entries/games/check` (writes nothing); a failed check never blocks a save.
 3. The CSV carries opposition and innings figures and fall of wickets (`opp_innings_number`, `batting_order_known`, `innings_*`, `opp_*`, `fow_wicket`, `fow_score`, `innings_extras`, `opp_extras`, `bowling_order`). Read innings meta off every row BEFORE the blank-player skip. Our bowlers are filed under the OPPOSITION's innings number. Opposition figures without `opp_innings_number`, or one innings given as both sides', are refused.
 4. `innings_no` is not batting order (converter numbers by leg, ours 2n-1, theirs 2n, sends `batting_order_known=false`). `manual_games.innings_order_known` records it; NULL reads as known. When false the page shows "INNINGS" unnumbered, no margin, no HOME/AWAY for blank teams, and says why.
-5. `scorebook_innings.derive_partnerships` returns None (refuse) on a gap, a batter out who is not at the crease, a score going backwards or a wicket-count mismatch. A stand on a record board under the wrong pair is worse than none.
+5. `scorebook_innings.derive_partnerships` returns None (refuse) on a gap, a batter out who is not at the crease, a score going backwards or a wicket-count mismatch. A wrongly paired stand on a record board is worse than none.
 6. `_EXTRA_GAME_CHILDREN` snapshots fall of wickets, partnerships and innings figures. `_restore_extra_children` replaces only a child table the snapshot holds. Why: an edit logged earlier has no keys, and "absent means none" would delete a scorebook import's fall of wickets.
 7. Imported matches leave `home_team`/`away_team` blank. Every reader must go through `game_sides.sides_sql` (Python twin in `_fetch_manual_games_as_list`), which names a blank pair from the club and opposition with `home_away_known=false`.
 8. The CSV template is built from dicts keyed on column name, never positional (a drifted example filed bowlers against their own batters). Fetch `origin/main` before building on an import format.
-9. `manual_result.py` is the one winner rule (CSV import, hand-entry, `settle_manual_winners`). It changes the winner only when the result line opens Won/Lost, the recorded winner names the other side, it is one innings each and the scores agree. Ties, missing totals and rain-rule results are left. Scores are computed (via `get_scorecard`) only for games whose winner and result line already disagree.
+9. `manual_result.py` is the one winner rule (CSV import, hand-entry, `settle_manual_winners`). It changes the winner only when the result line opens Won/Lost, the recorded winner names the other side, it is one innings each and the scores agree. Scores are computed (`get_scorecard`) only for games whose winner and result line already disagree.
 10. Our innings is named for the match's team, not the club: `games._manual_side_names` (whichever of home/away is not the opposition, punctuation-insensitive; else the side sharing a non-generic word with the club; else the single named non-opposition side; else the club name). Frontend: `AGE_TOKEN` (`/^[uo]?\d+s?$/`) keeps "60s"/"U14" generic, `sidesSwapped` judges both sides against both teams, `splitSides` files by exact normalised name first.
-11. Header stays home/away, team cards stay in batting order (Wisden/Cricinfo convention, earlier owner instruction). A club asked for cards under their header columns: raised, not built.
-12. Manual spells keep insertion order: every read orders by `id` (scorecard, edit form, snapshots), so `bowling_order` and undo survive. No migration.
+11. Header stays home/away, team cards stay in batting order (owner instruction, v8.79.2). A club asked for cards under their header columns: raised, not built.
+12. Manual spells keep insertion order: every read orders by `id` (scorecard, edit form, snapshots), so `bowling_order` and undo survive.
 
 **Seasons and grades on manual games**
 13. `manual_games.season_id` is NOT NULL but optional on the wire: omitted, `_resolve_game_season` files the game under the season its date falls in and creates it (and the grade via `grade_name`, writing BOTH `category` and `categories`). An explicit season wins. The club year starts in JULY; the rule lives in `season_resolve.py` (`canonical_name`, `season_start_year`, imported by `cleanup_seasons`). Read a season's year off its NAME first, then `year` (can be NULL); prefer the canonical name, then a synced season.
-14. `GET /manual-entries/seasons/for-date` is read-only on purpose (it runs before anyone decides to import). A season/date mismatch is said aloud, never refused.
+14. `GET /manual-entries/seasons/for-date` is read-only on purpose (runs before anyone decides to import). A season/date mismatch is said aloud, never refused.
 15. A manual game may lack `grade_id` but always has `season_id` and `organisation_id`. Read the view's own columns from `v_effective_games`, never join through `grade_id`, and never test ownership with a bare `g.source = 'manual'` (cross-club leak). `list_games`' `api_games` sub-query is `source='api'` only.
-16. `PATCH /club-admin/seasons/{id}` edits name/year on ANY season (sync never overwrites a name). Delete is manual-only and empty-only; `_season_in_use` must include `player_season_stats` and `imported_stats` (both cascade). The list returns `synced` (`grassroots_id IS NOT NULL`), not `synced_at`.
-17. `cleanup_seasons` writes only manual seasons (`grassroots_id IS NULL`), MERGES duplicates via `season_aliases` (undoable, chain re-pointed single-hop), renames a lone manual season to "Summer YYYY/YY" with `year`, and refuses to guess with several synced seasons and none plain-named, or a name with no "YYYY/YY".
+16. `PATCH /club-admin/seasons/{id}` edits name/year on ANY season (sync never overwrites a name). Delete is manual-only and empty-only; `_season_in_use` must cover `player_season_stats` and `imported_stats` (both cascade). The list returns `synced` (`grassroots_id IS NOT NULL`), not `synced_at`.
+17. `cleanup_seasons` writes only manual seasons (`grassroots_id IS NULL`), MERGES duplicates via `season_aliases` (undoable, single-hop chain), renames a lone manual season to "Summer YYYY/YY" with `year`, and refuses to guess with several synced seasons and none plain-named.
 
 **Large sheets**
 18. The sheet is parsed once and staged (`manual_game_import_staging`, `game_import_staging.py`, migration 302, 1 hour TTL). Resolve and commit send a token; `rows` stays accepted as the direct-caller fallback (`_rows_for` prefers the token). Why: the wizard re-posted every row on each resolve (145 MB).
-19. Staging is a table, never the media volume: deleted at commit, never backed up. Scope club AND user in the WHERE clause so wrong, expired and unknown tokens look identical. Expiry is enforced on read; the preview-time sweep only tidies. The token is spent in the games' transaction (rollback keeps it retryable, landing spends it).
+19. Staging is a table, never the media volume: deleted at commit, never backed up. Scope club AND user in the WHERE clause so wrong, expired and unknown tokens look identical. Expiry is enforced on read (the sweep only tidies). The token is spent in the games' transaction.
 20. `_MAX_GAME_UPLOAD_BYTES` and the nginx `client_max_body_size` on the preview location move together (nginx refuses first). Resolve and commit have their own locations for the TIMEOUT (writes take 68 to 124 s, past nginx's 60 s default: browser 504 while the job finishes). Use exact `location =`; a trailing-slash prefix 301s `POST /games/import` and drops the body. Single-shot `POST /games/import` stays on ordinary `/api/` limits (no app-level cap). The preview's `rows` reply is capped at 8 MB; the token key is always returned.
 
 **Pairing and season totals (re-sourced seasons, migration 309)**
 21. A season total has no per-match granularity. An overwrite import marks the season `import_authoritative`, and the `api_scorecard` branch of `v_effective_player_season_stats` counts every synced game with no preferred imported twin from scorecards (`batting_innings`, `bowling_spells`, `fielding_stats`, `game_appearances`, org-scoped via `players`). The import's rollup counts the file's matches; the two are disjoint ("and, not or"). Aggregate each table on its own, THEN join (a LEFT JOIN of batting, bowling and fielding on one key multiplies rows). A fixture the other club synced first is keyed onto our season (guid, then year, `LATERAL ... LIMIT 1`).
 22. Matcher: `_existing_game_index` covers the club's season OR either side of the fixture; unmatched sheet matches get a second look via `match_pairing.assign` on a `(player_id, runs)` signature (never a second copy of the rules); `match_pairing.load_synced` is the one synced-side query. A re-import inherits the old row's pair or the synced copy returns. `repair_overwrite_pairs` holds back pairs with 0 shared scores (a cardless synced game is usually a junior fixture the archive never tracked).
 23. CTEs: a `WITH` CTE referenced more than once is MATERIALIZED and blocks `player_id = X` pushdown, so player-dependent CTEs are `NOT MATERIALIZED`. `auth_games` does not depend on the player and stays `AS MATERIALIZED` (inlining cost 45 s on `/stats`). StatLab's `appear` CTE unions the four match sources (imported matches have no `game_appearances`).
-24. A sync or full rebuild never deletes manual games (see `cross-club-and-data-safety`).
+24. Sync and full rebuild never delete manual games (`cross-club-and-data-safety`).
 
 **Team-labelled sheets and name matching**
 25. `import_reconcile.is_team_labelled` (two or more grade labels) reconciles per player against the WHOLE GR record, season by season; labels stay stored, pre-GR deltas keep their team (`season_rows_by_grade`), the residual carries no grade. Commit and preview (`routers/imports.py::_resolve`) must make the same call (preview reads earlier uploads too). `covered_by_year`: covered when GR holds that YEAR under any season row. Result is the ONLINE figure when online holds more. Accepted cost: separate 1st/2nd sheets read as one book. No re-import needed: `reconcile_imported_totals` rebuilds at every sync.
@@ -57,25 +57,21 @@
 **Undo and scorecard reader**
 30. `players.import_batch_id` (234) marks players the import minted (`ON DELETE SET NULL`); a re-import moves it forward only where non-NULL. `import_cleanup.deletable_players` is the one rule (undo endpoints and script): delete only with none of ~40 `BLOCKING_REFS`, no profile data, no `grassroots_id`/`playhq_id`. Derived rows do not block. Check emptiness AFTER `db.flush()`.
 31. Reader: it transcribes faithfully; the ONE allowed deviation is inferring a blank result (`result_inferred`, flagged). `reconcile()` returns `[{kind, text}]`: `card_error` (card's own figures disagree, fix-or-keep) versus `misread`. Nothing auto-corrects. Unticked "This card tracks" columns import as NULL not 0 (migration 184; pydantic defaults stay `Optional[int] = 0`, only explicit null means unrecorded). Pre-1980 8-ball overs use `match.balls_per_over`; DB overs stay as written. Read EVERY occurrence of a name (bowling analysis is authority for bowlers, batting order for batters; never merge players sharing only a surname). Roster matching: `import_ingest.match_players`, auto-fill exact or one candidate at 0.9+. Run `scorecard_eval` before and after any prompt, schema or model change (`docs/scorecard-reader-eval.md`); uploads never teach the model.
-32. Jump-back edit replays `extracted_payload` through the upload review UI (photo uploads only); save is `PATCH /games/{id}`; a fresh read clears `editingId`. `check_scorecard_duplicate` takes `exclude_id`. Delete and restore use the one audit trail (`/admin/manual-entries#audit`).
+32. Jump-back edit replays `extracted_payload` through the upload review UI (photo uploads only); save is `PATCH /games/{id}`. `check_scorecard_duplicate` takes `exclude_id`. Delete and restore use the one audit trail (`/admin/manual-entries#audit`).
 
 ## Traps and failure signatures
 
-- Same total on both innings (142/7/40 twice): rule 1. "All" lower than "Men's": rules 21, 22.
-- "— vs —" or `home_team: None`: reader bypassed `sides_sql` (rule 7). Scores under the wrong team name: rule 10.
-- Bowlers bowl at their own batters: rules 3, 8. Undo of an edit wipes fall of wickets: rule 6.
-- Player page 6 s or 45 s slow after a rollup change: CTE wall (rule 23), or `player_categories` correlated EXISTS per grade row. Look for what every endpoint on the page calls, not what changed.
-- Import 504 while the job finishes, 413, or a vanished POST body: nginx timeout, cap or 301 (rule 20).
-- "Salter, Steve" beside "Steven": rule 26. Missed Brad K Mant: rule 27. One Day Grade 2 offered into Grade 4: rule 28.
-- 1974 card under "Summer 1999/00": rule 13. Card invisible under every season: rule 15. Season deleted with history: rule 16. Undo leaves surname-only players: rule 30.
-- Harness: suites share one database and stub tables collide (`player_achievements.org_id`), run on a fresh one. StatLab path needs lifespan-only `grade_merge_logs`; views need `_view_ddl.py`. Two migrations with one revision id break Alembic: check `origin/main` at merge.
+- Same total on both innings (142/7/40 twice): rule 1. "All" lower than "Men's": rules 21, 22. "— vs —" or `home_team: None`: rule 7. Scores under the wrong team name: rule 10. Bowlers bowl at their own batters: rules 3, 8.
+- Player page 6 s or 45 s slow after a rollup change: CTE wall (rule 23), or `player_categories` running a correlated EXISTS per grade row. Look for what every endpoint on the page calls, not what changed.
+- Import 504 while the job finishes, 413, or a vanished POST body: rule 20.
+- "Salter, Steve" beside "Steven": rule 26. Brad K Mant missed: rule 27. One Day Grade 2 offered into Grade 4: rule 28. 1974 card under "Summer 1999/00": rule 13. Card invisible under every season: rule 15.
+- Harness: suites share one database and stub tables collide (`player_achievements.org_id`), so run on a fresh one. StatLab path needs lifespan-only `grade_merge_logs`; views need `_view_ddl.py`. Two migrations with one revision id break Alembic: check `origin/main` at merge.
 
 ## How to verify a change here
 
-Real Postgres, shipped route bodies, and a control run that REPORTS rather than crashes (`.get` on new keys, wrap commit calls). A check against an empty fixture or a crashed control proves nothing.
-- `backend/verification/`: `verify_manual_game_check.py` (control reports 142/7), `verify_scorebook_innings.py` (control: "None v None"), `verify_csv_innings_import.py`, `verify_manual_side_names.py`, `verify_manual_winner.py`, `verify_manual_games_import.py` (staging, pairing, aggregate equals per-innings views, plan has no CTE Scan), `verify_import_team_labels.py`, `verify_junior_residual_scope.py`, `verify_short_form_match.py`, `verify_grade_duplicates.py` (control: SequenceMatcher 0.90), `verify_season_resolve.py`. Browser twins sit in `frontend/verification/` (`*_browser.mjs`).
-- Diagnose live data before code: `ops/diagnostics/csv_import_unpaired.sql`. Playwright: wait on the form's own field, not `text=Season`.
-- After a rollup or view change re-run manual games import, cricketstatz import, match coverage, club records, competitions, rate coverage.
+Real Postgres, shipped route bodies, and a control run that REPORTS rather than crashes (`.get` on new keys, wrap commit calls). A check on an empty fixture or a crashed control proves nothing.
+- `backend/verification/`: `verify_manual_game_check.py` (control reports 142/7), `verify_scorebook_innings.py` (control "None v None"), `verify_csv_innings_import.py`, `verify_manual_side_names.py`, `verify_manual_winner.py`, `verify_manual_games_import.py`, `verify_import_team_labels.py`, `verify_junior_residual_scope.py`, `verify_short_form_match.py`, `verify_grade_duplicates.py`, `verify_season_resolve.py`. Browser twins: `frontend/verification/*_browser.mjs`.
+- Diagnose live data first: `ops/diagnostics/csv_import_unpaired.sql`. Playwright: wait on the form's own field, not `text=Season`.
 
 ## Operator commands and scripts
 
@@ -111,12 +107,12 @@ All dry run by default; `--apply` acts.
 | A game that does not add up is warned about, never refused (v9.99.2) (L32-75) | rules extracted | Rules 1, 2; Operator; Follow-ups 1 |
 | An importer pre-selects "Steve" for the club's "Steven" (v9.97.2) (L190-238) | rules extracted | Rule 26; Traps; Follow-ups 2 |
 | A scorebook import carries the opposition, the score and the stands (migration 311, v9.97.0) (L239-398) | rules extracted | Rules 3 to 7, 12; Operator (recovery) |
-|   v9.97.1 opposition named on other readers | rules extracted | Rule 7 |
-|   Template, single sundries figure, edit undo (v9.98.2) | rules extracted | Rules 6, 8 |
-|   Our innings named for the match's team (v9.98.6) | rules extracted | Rules 10, 11, 12; Flag 6 |
-|   Recorded winner contradicted (v9.98.7) | rules extracted | Rule 9; Operator |
+| (sub) v9.97.1 opposition named on other readers | rules extracted | Rule 7 |
+| (sub) Template, single sundries figure, edit undo (v9.98.2) | rules extracted | Rules 6, 8 |
+| (sub) Our innings named for the match's team (v9.98.6) | rules extracted | Rules 10, 11, 12; Flag 6 |
+| (sub) Recorded winner contradicted (v9.98.7) | rules extracted | Rule 9; Operator |
 | A RE-SOURCED SEASON COUNTS PER MATCH (migration 309, v9.90.3) (L641-788) | rules extracted | Rules 21, 22, 24; Flags 2, 3 |
-|   v9.90.4 follow-ups (score guard, CTE wall, fan-out, StatLab) | rules extracted | Rules 21 to 23 |
+| (sub) v9.90.4 follow-ups (score guard, CTE wall, fan-out, StatLab) | rules extracted | Rules 21 to 23 |
 | A SHEET SPLIT BY TEAM IS NOT A SHEET SPLIT BY GRADE (v9.89.1) (L1531-1576) | rules extracted | Rule 25; Operator |
 | Suggested duplicate grades: the discriminator rule (migration 294, v9.70.1) (L2887-2995) | rules extracted | Rules 28, 29; Follow-ups 4 |
 | A duplicate whose first name is shortened is invisible to edit distance (v9.26.1) (L6940-7000) | rules extracted | Rule 27; Follow-ups 5 |
@@ -128,6 +124,6 @@ All dry run by default; `--apply` acts.
 | Uploaded scorecard missing from the public Games page (migration 169, v8.76.1) (L15560-15609) | rules extracted | Rule 15; Flag 4 |
 | Uploaded scorecards log, edit/undo from the upload page (v8.76.2) (L15610-15645) | rules extracted | Rule 32 |
 | Scorecard reader, multi-format, PDFs, fielding column, eval set (v8.80.0) (L15646-15737) | rules extracted | Rule 31; Operator; Flag 5 |
-|   v8.80.1 tracked-fields toggles, roster matching | rules extracted | Rule 31 |
-|   v8.80.2 name cross-referencing | rules extracted | Rule 31 |
-|   v8.80.3 card-error versus misread | rules extracted | Rule 31 |
+| (sub) v8.80.1 tracked-fields toggles, roster matching | rules extracted | Rule 31 |
+| (sub) v8.80.2 name cross-referencing | rules extracted | Rule 31 |
+| (sub) v8.80.3 card-error versus misread | rules extracted | Rule 31 |

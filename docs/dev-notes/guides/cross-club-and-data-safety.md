@@ -17,8 +17,8 @@
 **A. Hand-entered work is never deleted (owner's standing rule)**
 
 1. A manual game, its innings and a hand-typed correction are the club's own work. A function may ADD to and MOVE them. It may remove or replace only what it wrote itself, never what a person wrote. There is no upstream to re-pull them from.
-2. A merge MOVES a record, never deletes one. `_merge_players_core` once reached no `manual_*` table and each is `ON DELETE CASCADE` on `players.id`, so the merge destroyed the removed player's manual and imported career. `services/merge_carry.CARRIED` is the list (shared with the undo via `merge_logs.carried_row_ids`). A table recording what a player DID belongs on it.
-3. An import replaces only what that import wrote. `cricketstatz_import.import_match` matches on `cricketstatz_match_id`. `hand_edited_games` reads `manual_edit_logs` (the import writes none): an un-undone row means a person edited it, so the import skips the match and says so. An undone edit does not count.
+2. A merge MOVES a record, never deletes one. `_merge_players_core` once reached no `manual_*` table, each `ON DELETE CASCADE` on `players.id`, so it destroyed the removed player's manual and imported career. `services/merge_carry.CARRIED` is the list (shared with the undo via `merge_logs.carried_row_ids`); a table recording what a player DID belongs on it.
+3. An import replaces only what it wrote (`cricketstatz_import.import_match`, matched on `cricketstatz_match_id`). `hand_edited_games` reads `manual_edit_logs` (the import writes none): an un-undone row means a person edited it, so the import skips the match and says so.
 4. A Full Rebuild deletes from `games`, never `manual_games`.
 5. Season and grade deletes refuse while a manual game or adjustment points at them (`_season_in_use`, `_grade_in_use`, `routers/manual_entries.py`). Both FKs cascade, so these are the only guard.
 6. De-duplicating is not deleting: drop the removed record's row only for an innings the keeper already holds, never one only it had. Match unique keys with `IS NOT DISTINCT FROM`, not `=` (a season adjustment with no grade has a NULL key part).
@@ -33,14 +33,14 @@
 12. A category filter is an exclusion, only as good as its enumeration: widen the enumeration, never relax the exclusion.
 13. A merged-away spelling must read as the grade kept: `grade_labels._apply_alias_fold` registers the canonical's answer under the alias in all three name maps.
 14. A foreign grade's competition resolves to OUR answer (`club_grade_competitions`), never its own `competition_id`. The association fallback is only for a name we have never held.
-15. `resolve_season_filter(..., include_shared=True)` reaches the other club's row for the same real season (CA season GUID, then year, then name). Opt-in: use it only where the read is ALSO guarded by the club's own players or the ownership predicate.
+15. `resolve_season_filter(..., include_shared=True)` reaches the other club's row for the same season (CA season GUID, then year, then name). Opt-in: only where the read is ALSO guarded by the club's own players or the ownership predicate.
 16. When a board and a profile disagree because of this, bring the boards up to the profile, never the reverse.
 
 **C. Scope the PLAYER, not just the game**
 
 17. `games -> grades -> seasons -> organisation_id` says the game is in our competition, nothing about whose player a row is. Any read of the seven per-game tables that attributes rows to our side must ALSO scope `players.organisation_id`.
-18. `is_club_innings` is set per club, so a shared game carries BOTH clubs' partnerships as TRUE. `game_id = X AND is_club_innings` is not a club filter.
-19. Partnerships: scope ONE batter (same innings, same club). Scoping both drops a stand with a teammate whose `players` row sits under another club. Exception: `_combinations` scopes both. `bowler_wickets`: scope the bowler, not the fielder.
+18. `is_club_innings` is set per club, so a shared game carries BOTH clubs' partnerships as TRUE: not a club filter.
+19. Partnerships: scope ONE batter (same innings, same club); scoping both drops a stand with a teammate whose `players` row is under another club (exception: `_combinations` scopes both). `bowler_wickets`: scope the bowler, not the fielder.
 20. Check CTEs too: `_captaincy`'s `scores` CTE summed the opposition's runs with no join.
 21. Left unscoped on purpose (verified safe): `aggregations.get_player_partnerships`, `iq_trends.bowler_deep_dive` (anchored on `:pid`), `yearbooks._generate_narrative_core`, StatLab partnership/`_bowler_fielder_combo` helpers (one side scoped), `iq_team._team_fielding` combo query and `_batting_pairs`.
 22. Season-aggregate reads are a different shape: read `v_effective_player_season_stats` (migration 060 emits a row only when `player.organisation_id IS NULL OR player.org = season.org`) or join `seasons s` and filter `s.organisation_id`. Never sum `player_season_stats` filtered only by `players.organisation_id`.
@@ -55,12 +55,12 @@
 28. `undo_merge` must set `grassroots_id` (= `id::text`) on the re-created player, or the next sync mints a duplicate.
 29. Do NOT merge a legacy-GUID duplicate into a per-club record when their seasons overlap: MyCricket and PlayHQ give different season GUIDs to one real season, `merge_players` dedupes by raw `season_id`, and the career reads 86 = 56 + 30. Recovery is undo-merge. Safe only for disjoint registrations.
 30. Fold, never drop. `_SEASON_FOLD_CTE` folds seasons onto the viewing club's row for that year, then through active merges (org-filtering games leaves the table below the header). The historical bundle (`_HISTORICAL_BUNDLE_MATCH_CAP`) stays unfolded. Key season rows by `season_id`, not name.
-31. `get_player_team_breakdown` is its own pass: `_canonical_season` folds alias, then own-club year row, then merges. Scope BOTH the scorecard side and CA's `player_season_grade_stats` side by season org (one side only breaks the `max(held, claimed)` self-heal). A per-grade manual correction is applied to the cell last, clamped at zero, and excluded from `season_aggregate` (else counted twice).
+31. `get_player_team_breakdown` is its own pass: `_canonical_season` folds alias, then own-club year row, then merges. Scope BOTH the scorecard side and CA's `player_season_grade_stats` side by season org (one side breaks the `max(held, claimed)` self-heal). A per-grade manual correction is applied last, clamped at zero, and excluded from `season_aggregate` (else counted twice).
 32. The grade leaderboard `use_psgs_path` sums `player_season_grade_stats` scoped by `seasons.organisation_id`, with `max(held, claimed)` (`grade_games` floor, `grade_scoped_games` narrowing first), so it equals the profile grid.
 
 **E. One definition of matches played**
 
-33. M is matches PLAYED, INN is innings. `_matches_played_cte` is the one definition (batting, bowling, fielding and bare `game_appearances`, same four as `_scoped_games_played`), narrowing games FIRST, LEFT JOINed for the number only (never the qualification, or a batting board fills with non-batters). `records.most_matches` `use_game_level` has the fourth arm too.
+33. M is matches PLAYED, INN is innings. `_matches_played_cte` is the one definition (batting, bowling, fielding and bare `game_appearances`, as `_scoped_games_played`), narrowing games FIRST, LEFT JOINed for the number only (never the qualification, or a batting board fills with non-batters). `records.most_matches` has the fourth arm too.
 
 **F. Association backfill and competition grouping**
 
@@ -80,13 +80,13 @@
 
 ## Traps and failure signatures
 
-- Season "2025/26" twice, rows sum to the header: shared fixture filed under the first club's season, not double counting (rule 30).
+- Season "2025/26" twice, rows sum to the header: fixture filed under the first club's season (rule 30).
 - Players M 106 vs profile 150; Juniors returns senior matches (rules 10 to 12, 15). Board 61 vs grid 60 (rules 31, 32).
 - Opponents in Directory/fees with contact details (rules 23 to 25). Opposition's best stand in our review (rule 18).
-- Career doubled (7 became 63; 86 = 56 + 30): global `session.get` or overlapping-season merge (rules 26, 29). Second club shows only unique grades (rule 26). Cutover: Sync Now mints per-club rows and moves aggregate seasons; game-level rows re-attach only on a Full Rebuild.
+- Career doubled (7 became 63; 86 = 56 + 30) or second club shows only unique grades: rules 26, 29. Cutover: Sync Now mints per-club rows and moves aggregate seasons; game-level rows re-attach only on a Full Rebuild.
 - Club delete "did nothing": rule 42. Archived club "already registered": rule 43.
 - Audit noise: match a per-game table only after `FROM`/`JOIN` (`st.batting_innings` is a COLUMN on `player_season_stats`).
-- A check reading zero is not a pass: fixtures need a `result`, a `game_appearances` row and a `match_format`. A check reading one row of a split season can pass on the bug (use `grade_total()`).
+- A check reading zero is not a pass: fixtures need a `result`, a `game_appearances` row and a `match_format`. Reading one row of a split season can pass on the bug (use `grade_total()`).
 
 ## How to verify a change here
 
@@ -112,11 +112,11 @@ Suites (`backend/verification/`, real Postgres, shipped route bodies, control ru
 
 ## Open follow-ups
 
-- `seasons.organisation_id` shape remains in the yearbook generator, fantasy engine and several admin tools (none club-facing stats).
+- `seasons.organisation_id` shape remains in the yearbook generator, fantasy engine and some admin tools.
 - Grade-scoped, finals-only and captain-only board branches still count their own rows, not `_matches_played_cte`.
 - Career size for a player at two synced clubs (scoped vs unscoped path) is a product decision.
 - Players, Accounts, Directory and Comms Lists show different counts until the Clubhouse "join the data" step.
-- Season-alias/migration-season dedup (to merge overlapping legacy and per-club players) is unbuilt.
+- Season-alias dedup (to merge overlapping legacy and per-club players) is unbuilt.
 - A both-synced match gives the second club no row of its own (shared `games.id`): known limitation.
 
 ## Flags: conflicting, superseded or possibly obsolete guidance

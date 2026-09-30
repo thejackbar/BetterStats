@@ -22,11 +22,11 @@
 5. `meta_capi.send_complete_registration_event` defaults are the trial's (category, value 399). Other callers (`public_webinar.py`) must name their own event or Meta sees webinar signups as A$399 trials.
 6. Each stream also carries a figure measured from the last deliberate change (`stream_totals_since` over `level='ad_daily'` on or after `_last_change_date()`). Label all-time figures as all time.
 7. Add deliberate changes as `CAMPAIGN_ANNOTATIONS` rows (`{date, label, detail}`); pacing never crosses one. One day after a change the insight correctly says nothing.
-8. Spend is settled, results are not. Pacing excludes only today; the 7-day attribution window applies to conversion insights only. Within the window a since-cost is a ceiling: mark provisional, never alert off it.
-9. A partial window withholds the cost and says why (`ad_daily` kept `CAMPAIGN_LENGTH_DAYS + 5`).
+8. Spend is settled, results are not. Pacing excludes only today; the 7-day attribution window applies to conversion insights only, so a since-cost inside it is a provisional ceiling: never alert off it.
+9. A partial window withholds the cost and says why (`ad_daily` kept `CAMPAIGN_LENGTH_DAYS + 5`; short spend understates cost).
 10. `get_registration_count_since` shares `_attribution_matches_campaign` with the lifetime count; the lifetime count is never windowed.
-11. A signup with no timestamp (orgs have no `created_at`; use earliest `self_serve_idempotency_keys`) is reported as `undated_trial_results`, never guessed. The manual leads adjustment is lifetime only.
-12. `CAMPAIGN_UTM_*` is a SET per campaign (two taxonomies on one campaign). Unrecognised utm tags are dropped, so a missing entry reads as "new ads produced nothing". After any rename in `meta_ads.py`, sweep every `ImportFrom` and `meta_ads.<attr>` in `app/`: a lazy import inside a function survives `py_compile` and `vite build`.
+11. A signup with no timestamp (orgs have no `created_at`; use earliest `self_serve_idempotency_keys`) is `undated_trial_results`, never guessed. The manual leads adjustment is lifetime only.
+12. `CAMPAIGN_UTM_*` is a SET per campaign. Unrecognised utm tags are dropped, so a missing entry reads as "new ads produced nothing". After any rename in `meta_ads.py` sweep every `ImportFrom` and `meta_ads.<attr>` in `app/`: a lazy import inside a function survives `py_compile` and `vite build`.
 13. Untagged webinar registrations are reported beside cost per result, never absorbed (cost reads high, the safe direction).
 14. Recharts drops a `ReferenceLine` wrapped in a Fragment: `chartMarkers()` returns an array. `ReferenceArea` draws a `<path>`, not `<rect>`.
 
@@ -34,22 +34,22 @@
 15. Funnel has a "Club selected" stage (`get_club_selected_count`: distinct Meta visitors who fired `club_prepared`), our count not Meta's.
 16. `meta_ad_snapshots.updated_at` is set on INSERT and `DO UPDATE` in `upsert_snapshot`; "Last updated" reads it.
 17. Budget and length are per campaign: add to `CAMPAIGN_PLANS`; `_campaign_plan()` falls back to `CAMPAIGN_BUDGET_AUD` / `CAMPAIGN_LENGTH_DAYS`.
-18. "Counting since" (`platform_settings.meta_ads_counting_since`) resets on-site funnel STAT counts and Meta insights (`_date_range_params()`). It NEVER windows the "Free trial registrations" KPI. DB windows use `_SINCE_LOWER_BOUND` (`GREATEST`), so it only narrows. Meta numbers come from stored snapshots: changing it needs `run_snapshot()`.
+18. "Counting since" (`platform_settings.meta_ads_counting_since`) resets on-site funnel STAT counts and Meta insights (`_date_range_params()`), via `_SINCE_LOWER_BOUND` (only narrows). It NEVER windows the "Free trial registrations" KPI. Meta numbers come from stored snapshots: a change needs `run_snapshot()`.
 19. Clubs selected / Clubs searched TABLES are NOT windowed by the cutoff (follow-up list). Default 365 days, max 730 (`TABLE_DAYS_DEFAULT`/`TABLE_DAYS_MAX`).
 20. The cutoff is seeded once in the lifespan, guarded by `meta_ads_counting_since_seeded`, so clearing it is not undone at restart.
 21. Meta `campaign["leads"]` is Lead actions only (`_LEAD_ACTION_TYPES`); never sum `complete_registration` in.
-22. `_attribution_matches_campaign` accepts `utm_content`, then `utm_campaign`, then a plain fb/ig/meta `utm_source` or `click_source`. Null attribution: use the KPI's manual +/- with a note.
+22. `_attribution_matches_campaign` accepts `utm_content`, then `utm_campaign`, then a plain fb/ig/meta `utm_source` or `click_source`. Null attribution: use the KPI manual +/- with a note.
 23. `/track-step` rate limit is keyed by `visitor_id` (IP only as fallback): IP keying starved beacons behind Facebook in-app proxies and CGNAT. Only `/search` needs an IP cap.
 
 **Search beacons and Wizard Clubs (v9.23.0, v9.23.1, migration 251)**
-24. A `club_searched` top match is what the engine ranked, not what the person wanted. The Wizard Clubs page collapses consecutive queries into a run (`_same_typing_run`, prefix either way, `_SEARCH_RUN_GAP` 30 min) and resolves to the clicked club, else the club matched by the LONGEST query. This is on the Wizard Clubs page ONLY, per direct instruction: `meta_ads.get_searched_clubs` stays raw. The resolver never writes back.
+24. A `club_searched` top match is what the engine ranked, not what the person wanted. The Wizard Clubs page collapses consecutive queries into a run (`_same_typing_run`, prefix either way, `_SEARCH_RUN_GAP` 30 min) and resolves to the clicked club, else the club matched by the LONGEST query. This is on that page ONLY, per direct instruction: `meta_ads.get_searched_clubs` stays raw. The resolver never writes back.
 25. `result_count` on the beacon is NULL for older ones; regex-match before `::int`. `_query_identifies`: club name must START with the query, 4+ chars. `_query_is_ambiguous` demotes a query prefixing several surfaced clubs. Unresolved searches report as `search:<query>`, never a club; `_improve_guesses` upgrades only on exactly one confident club, drops on two. Query rows are never directory-matched or exported.
 27. `merged_wizard_clubs` folds selected and searched on stripped lowercase name (`both`). Directory match: CA guid first (`club_prepared` captures it), name second.
-28. "Emailed" is DERIVED (sent campaign audience `list_id`, `comms_recipients`, `comms_contacts.marketing_club_id`, `status='sent'`, lists this page made). Compare `list_id` as TEXT. `wizard_club_lists.list_id` has no FK on purpose (row reports `deleted: true`).
+28. "Emailed" is DERIVED (sent campaign audience `list_id`, `comms_recipients`, `comms_contacts.marketing_club_id`, `status='sent'`, lists this page made). Compare `list_id` as TEXT. `wizard_club_lists.list_id` has no FK on purpose.
 29. Export follows Directory rules: never `excluded` or unsubscribed, linked to the directory club, existing address reused and not un-suppressed. Generic mailbox gets `first_name = "Committee Members"`. Browser sends club KEYS never emails.
 
 **Self-serve public trial (v8.72.0, migration 161)**
-30. `public_self_serve.py` re-registers internal handlers via `add_api_route`; hand-wraps status, verify-email send/check, prepare, submit. Whole router 404s while `self_serve_registration_enabled` is off; `/trial` redirects to `/`.
+30. `public_self_serve.py` re-registers internal handlers via `add_api_route`; hand-wraps status, verify-email, prepare, submit. The router 404s while `self_serve_registration_enabled` is off; `/trial` redirects to `/`.
 31. Guardrails: per-IP `rate_limit.enforce`, honeypot `website` (non-empty gives fake success), min fill time (`form_started_at` under 4s gives 422), generic provider errors. OTP email is the gate; no CAPTCHA.
 32. Submit mints the session cookie, returns `redirect: "/admin"`, client sets `bs_pending_fresh_login`. `organisations.signup_source` (`self_serve_ad` / `self_serve_organic`, NULL non-public) and `signup_attribution` JSONB are written best-effort AFTER commit. New tags must be added to `_ATTRIBUTION_KEYS` (`utm_term` was dropped until v9.71.1).
 33. `prepare` fires a server Lead; `submit` fires CompleteRegistration (browser plus CAPI, one event id), GA4 `sign_up`. Modal prop is `publicMode`, not `public`.
@@ -64,7 +64,7 @@
 
 **Webinar registration (migration 296 on)**
 40. A pixel cannot fire on a third-party domain: register on our page, RENDER success (never redirect; it races the beacon). Order: persist, then fire; never on load, click or validation failure.
-41. Fire only when the server says `created` (fold on `(event_key, lower(email))`). A resubmission claims nothing. Broken backend still hands over the link and fires nothing. Campaign columns, phone and name halves are COALESCEd (fill, never overwrite).
+41. Fire only when the server says `created` (fold on `(event_key, lower(email))`). A resubmission claims nothing; a broken backend still hands over the link and fires nothing. Campaign columns, phone and name halves are COALESCEd (fill, never overwrite).
 42. `services/webinar.EVENT` and mirror `frontend/src/data/webinar.js` drive the page (suite asserts they agree). Past switch is the event's END; server `is_past` beats the local clock. `/demo` is resolved per request (`webinar.page_meta`, `webinarState`), not in `MARKETING_PAGES`.
 43. Recording link is a setting (`webinar_recording_url`, url-validated, `''` clears). `.ics` is an endpoint (CRLF, UTC). The StreamYard link is NOT in the JS bundle (`GET /public/webinar`; grep `frontend/dist`).
 44. Phone is OPTIONAL (8 to 15 digits when typed), stored as typed, deliberately not `admin_identity.mobile_valid`. Label says optional.
@@ -72,7 +72,7 @@
 46. Not `club_onboarding_requests`, and no Hot lead push to any CRM (per direct instruction).
 47. `demo` and `trial` must be in all FOUR top-level-slug lists (`og_preview.RESERVED_ROOT_SEGMENTS`, `FaviconManager.RESERVED_ROOTS`, `SponsorFooter.RESERVED_ROOT_SEGMENTS`, `lib/marketingPaths.MARKETING_PATHS`), but NOT in the `MARKETING_PATHS` behaviours they do not want: `OWN_NAV_PATHS` / `rendersOwnMarketingNav` suppresses the club Navbar alone (`MARKETING_PATHS` also forces dark theme and shows `ClubCTABar`).
 48. Reminder (migration 299): `send_reminders` window is `REMINDER_LEAD_HOURS` (3) before start to end, hourly via `webinar_upkeep`. Registrants inside the window are not reminded. `reminder_sent_at` is the CLAIM; a refusal hands it back with `reminder_error`. `POST /club-admin/super/webinar-reminders` refuses outside the window.
-49. StreamYard push (migration 300): `push_registration` to `oa-api.streamyard.com/api/public/webinars/{id}/registrations`. Field ids are FETCHED (`_field_map`, cached 10 min), never hardcoded. Broadcast id parsed from `EVENT.watch_url` (`webinar_id_from`). API is idempotent on email, no overwrite; a pushed row is skipped before any request. Mononym: skipped with a recorded reason (blank surname is a 400). Best-effort, own session, never raises. `sync_streamyard` (hourly catch-up, `POST /club-admin/super/webinar-streamyard-sync`) reports `reasons`; "NOT SENT" shows the reason on the row, not on hover.
+49. StreamYard push (migration 300): `push_registration` posts to `oa-api.streamyard.com/api/public/webinars/{id}/registrations`. Field ids are FETCHED (`_field_map`, 10 min cache), never hardcoded; broadcast id parsed from `EVENT.watch_url`. Idempotent on email, no overwrite; pushed rows skip before any request. A mononym is skipped with a recorded reason (blank surname is a 400). Best-effort, own session, never raises. `sync_streamyard` (hourly catch-up, `POST /club-admin/super/webinar-streamyard-sync`) reports `reasons`; "NOT SENT" shows the reason on the row.
 50. Only the name is editable (`PATCH /super/webinar-registrations/{id}`); email is the fold and idempotency key. "Add surname" only where a single-word name blocks.
 51. Removing StreamYard's second form is their registration toggle, not code (CORS refuses our origin; registration binds to the creating session; reminder `?token=` is not the registration id). Turning it off loses their registrant list and attendee report.
 
@@ -87,7 +87,7 @@
 
 ## Traps and failure signatures
 
-- Wrong webinar state on a bad-clock device: server `is_past` must win. Advertised recording pre-event: title and `og:title` were hardcoded (crawlers never run `usePageMeta`).
+- Wrong webinar state on a bad-clock device: server `is_past` must win. Recording advertised pre-event: title/`og:title` were hardcoded (crawlers skip `usePageMeta`).
 - Two logo lockups on `/demo` or `/trial`: four-lists trap (rule 47). Inflated cost per signup: divisor included the other stream (rule 2). Chart marker missing, no error: Fragment (rule 14).
 - Phantom club rows ("Warn" as "Warners Bay"): rule 24. "More selected than searched": rules 19, 23. "Last updated" stuck: rule 16. StreamYard "0 pushed, 2 skipped": mononyms, not a fault.
 - Harness: `addInitScript` cannot stub `gtag` (read `window.dataLayer`; `fbq` is stubbable); `networkidle` never settles (HeartbeatBeacon); `click({force:true})` on a disabled button hangs; `\d` in a JS template passed to `page.evaluate` is `d`; CSS-`uppercase` reads transformed; `.every()` on an empty array is vacuous.
@@ -116,8 +116,8 @@
 
 - [FLAG-MKT-1] Archive says `CAMPAIGN_UTM_NAMES` became a set | code now `CAMPAIGN_UTM_CAMPAIGNS` (`meta_ads.py:190`, used by `sales_workspace.py:718`) | ONE CAMPAIGN, TWO PRODUCTS (L789-994) | keep rule, use new name.
 - [FLAG-MKT-2] Archive names `_META_VISITOR_SUBQUERY`, `_META_VISITOR_SUBQUERY_PLAIN`, `_meta_visitor_subquery(bound)` | code shows `_META_VISITOR_EXISTS = _meta_visitor_exists(_SINCE_LOWER_BOUND)` | Meta Ads HQ follow-up (L15458-15509) | verify current names.
-- [FLAG-MKT-3] Phone "REQUIRED" then optional | archive reverses it in v9.71.3 | webinar section (L1827-2032) | rule 44 is current.
-- [FLAG-MKT-4] StreamYard link "in the JS bundle" then removed | superseded v9.71.3; `EVENT.watch_url` still server side (`webinar.py:73`) | same | keep rule 43.
+- [FLAG-MKT-3] Phone "REQUIRED" then optional; StreamYard link "in the JS bundle" then removed | both reversed in v9.71.3; `EVENT.watch_url` is server side (`webinar.py:73`) | webinar section (L1827-2032) | rules 43, 44 are current.
+- [FLAG-MKT-4] (merged into FLAG-MKT-3) | | | none
 - [FLAG-MKT-5] Two sub-notes carry v9.71.5 (298 gate, 299 reminder), and 300 says v9.71.6 | version labels collided at merge (archive notes renumbering) | L2179-2582 | trust migration numbers 296, 298, 299, 300, 301, not versions.
 - [FLAG-MKT-6] v9.71.4, migration 298 gate and association refresh are Club Directory rules nested under the webinar section | not webinar code | L2117-2281 | move to the club directory guide; kept here as rules 52 to 54.
 - [FLAG-MKT-7] Wizard Clubs v9.23.0 searched table versus v9.23.1 | later changes it (`resolved_searched_clubs`) | L7437-7573 | later wins, read both.
@@ -132,18 +132,18 @@
 | The club page a prospect searched their way to asks them to start (v9.91.0), L399-453 | rules extracted | Rules 36 to 39 |
 | ONE CAMPAIGN, TWO PRODUCTS, ONE PIXEL EVENT (v9.72.0), L789-994 | rules extracted | Rules 1 to 5, 12 to 14; Flag 1 |
 | sub: The trial's cost was still a lifetime average (v9.72.1), L907-994 | rules extracted | Rules 6 to 11 |
-| THE CONVERSION CANNOT FIRE ON STREAMYARD'S DOMAIN (migration 296, v9.71.1), L1827-2582 | rules extracted | Rules 40 to 47; Traps; Flags 3, 4, 10 |
+| THE CONVERSION CANNOT FIRE ON STREAMYARD'S DOMAIN (migration 296, v9.71.1), L1827-2582 | rules extracted | Rules 40 to 47; Flags 3, 4, 10 |
 | sub: What a review of the live page found (v9.71.3), L2032-2116 | rules extracted | Rules 42 to 44, 47; Traps |
-| sub: A disabled button that does not say why reads as broken (v9.71.4), L2117-2178 | rules extracted (misfiled: Club Directory) | Rule 52; Flag 6 |
-| sub: And then the gate itself was wrong (migration 298, v9.71.5), L2179-2280 | rules extracted (misfiled: Club Directory) | Rules 53, 54; Flags 5, 6 |
+| sub: A disabled button that does not say why reads as broken (v9.71.4), L2117-2178 | rules extracted (misfiled, Club Directory) | Rule 52; Flag 6 |
+| sub: And then the gate itself was wrong (migration 298, v9.71.5), L2179-2280 | rules extracted (misfiled, Club Directory) | Rules 53, 54; Flags 5, 6 |
 | sub: One form, two lists: pushing the registrant into StreamYard (migration 300, v9.71.6), L2281-2382 | rules extracted | Rules 49, 51; Verify |
-| sub: A skip that does not say why reads as a broken button (v9.73.2), L2383-2435 | rules extracted | Rules 49, 50; Traps |
+| sub: A skip that does not say why reads as a broken button (v9.73.2), L2383-2435 | rules extracted | Rules 49, 50 |
 | sub: The form asked for one name where theirs needs two (migration 301, v9.73.3), L2436-2498 | rules extracted | Rule 45 |
 | sub: The second form is StreamYard's, and the reminder that replaces it (migration 299, v9.71.5), L2499-2582 | rules extracted | Rules 48, 51; Flag 5 |
-| A search beacon's top match is NOT the club they wanted (v9.23.1), L7437-7506 | rules extracted | Rules 24 to 26; Flag 7 |
+| A search beacon's top match is NOT the club they wanted (v9.23.1), L7437-7506 | rules extracted | Rules 24, 25; Flag 7 |
 | Clubs Searched or Selected in the Wizard (migration 251, v9.23.0), L7507-7573 | rules extracted | Rules 27 to 29; Flag 7 |
 | Public self-serve trial signup + ad attribution (v8.72.0), L15249-15329 | rules extracted | Rules 30 to 35; Flags 8, 9 |
-| Meta Ads HQ, Club Selected stage, stale last updated, undercounted registrations, per-campaign pacing (migration 200), L15330-15509 | rules extracted | Rules 15 to 17 |
+| Meta Ads HQ, Club Selected stage, stale "last updated", undercounted registrations, per-campaign pacing (migration 200), L15330-15509 | rules extracted | Rules 15 to 17 |
 | sub: Counting-since cutoff + broader registration matching (migration 201), L15386-15457 | rules extracted | Rules 18, 20, 22; Flag 2 |
-| sub: The cutoff over-applied to the lead tables, a conflated Meta leads figure, and a shared-IP rate-limit bug, L15458-15509 | rules extracted | Rules 19, 21, 23 |
+| sub: The cutoff over-applied to the lead tables, conflated Meta "leads", shared-IP rate-limit bug, L15458-15509 | rules extracted | Rules 19, 21, 23 |
 | Usage tracking, session duration, time on page, visitor journeys (migration 165, v8.75.0), L15510-15559 | rules extracted | Rules 55, 56 |
