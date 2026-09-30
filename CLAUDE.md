@@ -29,6 +29,23 @@ as `empty`, one call each, every call a `204 No Content` on
   run**: reverted, the resolved-guid, one-call and unplaceable-club checks fail
   and the run then stops on the missing `resolve_org`.
 
+## The seasons feed ignores paging, and a full page is not "more" (v9.100.1, Sep 2026)
+
+The second live `pull_club_teasers all --sample 20 --apply` never finished: one
+club's `fixturesladders/organisations/{guid}/seasons` was requested at offset
+1, 101, 201 ... past 39,000, every call `200 OK`, until the operator killed it.
+
+- **THE ENDPOINT IGNORES BOTH `offset` AND `limit`.** It answers with the club's
+  whole history every time; `offset=1`, `101` and `5001` return the same 119
+  ids. `get_seasons` ended only on a short page (`len(batch) < limit`), so any
+  club with 100 or more seasons looped for ever. The normal sync, `auto_sync`
+  and `iq_scout` call the same function, so they were exposed too.
+- **A PAGE THAT ADDS NO NEW ID IS THE END**, and the loop is capped at
+  `_MAX_SEASON_PAGES` (20) as a backstop. Live check: 119 seasons in 2 calls; a
+  stub that really pages (250 seasons) still returns all 250.
+- **Same trap as the `links.next` note above**: never trust "the page was full"
+  as proof there is another. Dedupe on id.
+
 ## A game that does not add up is warned about, never refused (v9.99.2, Sep 2026)
 
 Reported off Hamilton Veterans' 23 Oct 2011 game: Portland and Mt Gambier both
