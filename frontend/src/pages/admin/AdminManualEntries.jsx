@@ -673,7 +673,7 @@ function ImportPanel({ kind, downloadFn, importFn, onImported }) {
             <p className="text-[11px] text-pb-faintest">
               The template also takes each innings&apos; sundries and total, and the opposition&apos;s
               total, so their batters needn&apos;t be listed. Set opp_innings_number and your bowling
-              is filed against their innings.
+              is filed against their innings, and bowling_order for the order your bowlers came on.
             </p>
           )}
         </div>

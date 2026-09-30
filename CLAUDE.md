@@ -143,6 +143,47 @@ them. **Fetch `origin/main` before building on an import format.**
   removed fails 1. Neighbours: manual games import 194, scorebook innings 47,
   manual innings 20, manual scorecard 25, template route 4.
 
+### Our innings is named for the team the match says, not the club (v9.98.6)
+
+Reported by Hamilton Veterans, who play as "Portland Over 60s": on entered
+games the header drew each side's score under the other side's name, and the
+cards called our side "Hamilton Veterans Cricket Club".
+
+- **THE STORED DATA WAS RIGHT; ONLY THE PAGE WAS WRONG.** Every innings, total
+  and batting side read correctly off the live payload. `get_scorecard` labelled
+  our innings with `org.name`, a name the match's home/away does not use, so the
+  header could not place it and fell back to "innings 1 is home".
+- **"60s" WAS READ AS A CLUB WORD.** `distinctiveTeamWords` kept "60s", so
+  "Mt Gambier Over 60s" scored as a partial match for "Portland Over 60s" and the
+  header swapped the scores even when Portland batted first. `AGE_TOKEN`
+  (`/^[uo]?\d+s?$/`) is generic now.
+- **`games._manual_side_names` is the one rule**: ours is whichever of home/away
+  is not the opposition (punctuation-insensitive), else the side sharing a
+  non-generic word with the club's name, else a single named side that is not
+  the opposition, else the club's name as before.
+- **The header judges both sides against both teams** (`sidesSwapped`); a tie no
+  longer means "innings 1 is home". `splitSides` files by exact normalised name
+  first, and with only one side seen it needs every distinctive word shared, or
+  both innings of a match between two "Over 60s" sides land on one side (the
+  control run shows exactly that).
+- **The team cards stay in batting order** under a home/away header, per the
+  v8.79.2 instruction. The club's feedback also asked for the cards to sit under
+  their header columns; that reverses a deliberate call and was raised, not built.
+- **`bowling_order` on the match CSV.** Spells are held and written in that
+  order, and every read of manual spells orders by `id` (the scorecard, the edit
+  form, the edit and delete snapshots), so a later edit or undo keeps it. No
+  migration: insertion order is the order.
+- **Games page "All seasons" defaulted again on every null season** and snapped
+  back to the newest. Defaults once now (`seasonDefaulted` ref).
+- **Verified** (`backend/verification/verify_manual_side_names.py`, 24 through
+  the shipped routes against a real Postgres; control: 12 fail) and in Chromium
+  (`frontend/verification/verify_manual_scorecard_sides_browser.mjs`, 56, over
+  the club's six real payloads with the club name and with the team name, plus
+  the live Games page; control: 17 fail, reporting the reported 20 Mar and 5 Feb
+  swaps and 2026/27 coming back). Neighbours: CSV innings 31, scorebook 47,
+  manual innings 20, manual scorecard 25, games import 194, template 4, innings
+  total 15, scorecard innings 28, scorebook browser 19.
+
 ## The club page a prospect searched their way to asks them to start (v9.91.0, Sep 2026)
 
 Reported as the paid funnel's biggest leak: ad -> /trial -> search -> a club's

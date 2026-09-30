@@ -98,8 +98,14 @@ function normaliseTeamName(s) {
 function distinctiveTeamWords(s) {
   return normaliseTeamName(s)
     .split(' ')
-    .filter(w => w && !/^\d+$/.test(w) && !GENERIC_TEAM_WORDS.has(w))
+    .filter(w => w && !AGE_TOKEN.test(w) && !GENERIC_TEAM_WORDS.has(w))
 }
+
+// A number, or an age band: "60s", "o60", "u14". Every side in an Over 60s or
+// Under 14s competition carries it, so it says nothing about which club a name
+// belongs to. Left distinctive, "Mt Gambier Over 60s" and "Portland Over 60s"
+// read as the same club and the header filed one side's score under the other.
+const AGE_TOKEN = /^[uo]?\d+s?$/
 
 // How strongly two team-name strings look like the same club. 0 = no evidence.
 // Word-level, never String.includes(), which would give false positives:
@@ -135,6 +141,7 @@ function winnerSide(winner, teamA, teamB) {
 function splitSides(inningsData) {
   const a = [], b = []
   const nameA = inningsData[0]?.battingTeam || ''
+  const same = (x, y) => !!x && !!y && normaliseTeamName(x) === normaliseTeamName(y)
   for (const inn of inningsData) {
     // No name recorded → fall back to alternating, which is right for the
     // ordinary case and no worse than guessing for anything else.
@@ -142,11 +149,39 @@ function splitSides(inningsData) {
       (inningsData.indexOf(inn) % 2 === 0 ? a : b).push(inn)
       continue
     }
-    const sameAsA = teamMatchScore(inn.battingTeam, nameA)
     const other = b[0]?.battingTeam
-    ;(sameAsA >= (other ? teamMatchScore(inn.battingTeam, other) : 0) && sameAsA > 0 ? a : b).push(inn)
+    // The same name, spelled the same way, is the same side. That settles
+    // almost every card, since both names come off the one match record.
+    if (same(inn.battingTeam, nameA)) { a.push(inn); continue }
+    if (same(inn.battingTeam, other)) { b.push(inn); continue }
+    // Spelled differently: judge the two sides against each other. With only
+    // one side seen so far a single shared word is not enough to call it the
+    // same team, or every innings of a match between two "Over 60s" sides
+    // lands on one side.
+    const sameAsA = teamMatchScore(inn.battingTeam, nameA)
+    if (other) {
+      (sameAsA > teamMatchScore(inn.battingTeam, other) ? a : b).push(inn)
+    } else {
+      const words = distinctiveTeamWords(inn.battingTeam)
+      const aWords = new Set(distinctiveTeamWords(nameA))
+      const allShared = words.length > 0 && words.every(w => aWords.has(w))
+      ;(allShared ? a : b).push(inn)
+    }
   }
   return { a, b, nameA, nameB: b[0]?.battingTeam || '' }
+}
+
+// Whether the side that batted first is the AWAY team. Both sides are judged
+// against both teams, so a name that fits neither (the club's own name on a
+// side the match calls "Portland Over 60s") is placed by the other one fitting.
+// Judging only "does side B look more like the home team than side A" read a
+// tie as "side A is home", which put the away side's score under the home
+// team whenever the away side batted first.
+function sidesSwapped(nameA, nameB, homeTeam, awayTeam) {
+  const fit = teamMatchScore
+  const asIs = fit(nameA, homeTeam) + fit(nameB, awayTeam)
+  const swapped = fit(nameA, awayTeam) + fit(nameB, homeTeam)
+  return swapped > asIs
 }
 
 function sideRuns(side) {
@@ -254,8 +289,7 @@ function MatchHeader({ game, innings }) {
   const awayTeam = game.away_team || ''
   const { a: sideA, b: sideB } = splitSides(inningsData)
   let homeInns = sideA, awayInns = sideB
-  if (sideB.length && homeTeam &&
-      teamMatchScore(sideB[0]?.battingTeam, homeTeam) > teamMatchScore(sideA[0]?.battingTeam, homeTeam)) {
+  if (sideB.length && (homeTeam || awayTeam) && sidesSwapped(sideA[0]?.battingTeam, sideB[0]?.battingTeam, homeTeam, awayTeam)) {
     homeInns = sideB
     awayInns = sideA
   }

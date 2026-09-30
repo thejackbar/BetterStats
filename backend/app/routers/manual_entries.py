@@ -1067,6 +1067,9 @@ async def games_template(
          "fow_wicket": 1, "fow_score": 60,
          "bowling_overs": "8.2", "bowling_maidens": 2, "bowling_runs": 25,
          "bowling_wickets": 3, "bowling_wides": 1, "bowling_no_balls": 0,
+         # The order they bowled in, which is rarely the batting order: Brown
+         # opened the bowling, Smith came on second.
+         "bowling_order": 2,
          "fielding_catches": 1,
          # Our innings: its full total including sundries, and the sundries.
          "innings_total": 67, "innings_wickets": 1, "innings_overs": 40,
@@ -1079,7 +1082,8 @@ async def games_template(
          "batting_position": 2, "batting_runs": 12, "batting_balls": 20, "batting_fours": 1,
          "batting_sixes": 0, "batting_not_out": "true", "did_not_bat": "false",
          "bowling_overs": 10, "bowling_maidens": 0, "bowling_runs": 40,
-         "bowling_wickets": 2, "bowling_wides": 2, "bowling_no_balls": 1},
+         "bowling_wickets": 2, "bowling_wides": 2, "bowling_no_balls": 1,
+         "bowling_order": 1},
     ]
     for r in rows:
         w.writerow(r)
@@ -1112,6 +1116,9 @@ async def get_manual_game(
         select(ManualBowlingSpell, Player)
         .join(Player, Player.id == ManualBowlingSpell.player_id)
         .where(ManualBowlingSpell.manual_game_id == gid)
+        # Recorded order is bowling order; the edit form re-saves in the order
+        # it is given, so reading it any other way reshuffles the attack.
+        .order_by(ManualBowlingSpell.innings_number, ManualBowlingSpell.id)
     )).all()
     fielding = (await db.execute(
         select(ManualFieldingStat, Player)
@@ -1727,6 +1734,7 @@ async def update_manual_game(
     )).scalars().all()
     old_bowling = (await db.execute(
         select(ManualBowlingSpell).where(ManualBowlingSpell.manual_game_id == gid)
+        .order_by(ManualBowlingSpell.id)
     )).scalars().all()
     old_fielding = (await db.execute(
         select(ManualFieldingStat).where(ManualFieldingStat.manual_game_id == gid)
@@ -1814,6 +1822,7 @@ async def delete_manual_game(
     )).scalars().all()
     old_bowling = (await db.execute(
         select(ManualBowlingSpell).where(ManualBowlingSpell.manual_game_id == gid)
+        .order_by(ManualBowlingSpell.id)
     )).scalars().all()
     old_fielding = (await db.execute(
         select(ManualFieldingStat).where(ManualFieldingStat.manual_game_id == gid)
@@ -2482,7 +2491,7 @@ GAME_CSV_COLUMNS = [
     "batting_runs", "batting_balls", "batting_fours", "batting_sixes",
     "batting_not_out", "did_not_bat", "dismissal_type", "batting_caught_behind",
     "bowling_overs", "bowling_maidens", "bowling_runs", "bowling_wickets",
-    "bowling_wides", "bowling_no_balls",
+    "bowling_wides", "bowling_no_balls", "bowling_order",
     "fielding_catches", "fielding_catches_wk", "fielding_run_outs", "fielding_stumpings",
     # Everything below is optional, and a sheet without it imports exactly as
     # before. They carry what a club's own scorebook holds beyond its players'
@@ -2799,6 +2808,7 @@ async def _write_games(
                 # for the fall of wickets and the partnerships.
                 batters_by_innings: dict = {}
                 fow_by_innings: dict = {}
+                pending_spells: list = []
 
                 order_known = (first.get("batting_order_known") or "").strip()
                 if order_known:
@@ -2873,19 +2883,27 @@ async def _write_games(
                     bwkts = raw.get("bowling_wickets")
                     bownruns = raw.get("bowling_runs")
                     if _has_any_value(bovers, bwkts, bownruns):
-                        db.add(ManualBowlingSpell(
-                            manual_game_id=game.id,
-                            player_id=player.id,
-                            # Our bowlers bowled in the OPPOSITION's innings.
-                            # A sheet that does not say which one keeps the old
-                            # behaviour of sharing our batting innings.
-                            innings_number=opp_innings if opp_innings is not None else innings_number,
-                            overs=_parse_float(bovers) if bovers not in (None, "") else None,
-                            maidens=_parse_int(raw.get("bowling_maidens")),
-                            runs=_parse_int(bownruns),
-                            wickets=_parse_int(bwkts),
-                            wides=_parse_int(raw.get("bowling_wides")),
-                            no_balls=_parse_int(raw.get("bowling_no_balls")),
+                        # Held back and written once the whole match is read,
+                        # in bowling_order: the match page lists an innings'
+                        # bowlers in the order their spells were written, and
+                        # a sheet's rows follow the batting order.
+                        pending_spells.append((
+                            _parse_int(raw.get("bowling_order"), nullable=True),
+                            len(pending_spells),
+                            ManualBowlingSpell(
+                                manual_game_id=game.id,
+                                player_id=player.id,
+                                # Our bowlers bowled in the OPPOSITION's innings.
+                                # A sheet that does not say which one keeps the old
+                                # behaviour of sharing our batting innings.
+                                innings_number=opp_innings if opp_innings is not None else innings_number,
+                                overs=_parse_float(bovers) if bovers not in (None, "") else None,
+                                maidens=_parse_int(raw.get("bowling_maidens")),
+                                runs=_parse_int(bownruns),
+                                wickets=_parse_int(bwkts),
+                                wides=_parse_int(raw.get("bowling_wides")),
+                                no_balls=_parse_int(raw.get("bowling_no_balls")),
+                            ),
                         ))
 
                     fcatch = raw.get("fielding_catches")
@@ -2901,6 +2919,11 @@ async def _write_games(
                         agg["stumpings"] += _parse_int(fstump) or 0
                     game_player_ids.add(player.id)
 
+                # A sheet naming no bowling_order keeps its own row order;
+                # where some rows name one, they come first, in that order.
+                pending_spells.sort(key=lambda t: (t[0] is None, t[0] or 0, t[1]))
+                for _order, _idx, spell in pending_spells:
+                    db.add(spell)
                 for pid, agg in fielding.items():
                     db.add(ManualFieldingStat(manual_game_id=game.id, player_id=pid, **agg))
                 _add_scorebook_innings(db, game.id, innings_meta,

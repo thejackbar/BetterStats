@@ -251,8 +251,11 @@ export default function ManualGamesImportWizard({ onDone }) {
           Sundries and totals go in the innings columns: innings_total, innings_byes and so on
           for your side, opp_total, opp_byes and so on for theirs (or innings_extras /
           opp_extras for a single sundries figure). Set opp_innings_number to the innings the
-          opposition batted, and each player&apos;s bowling is filed against it. The template
-          has a worked example.
+          opposition batted, and each player&apos;s bowling is filed against it. Number
+          bowling_order 1, 2, 3 in the order your bowlers came on and the match page lists
+          them that way. The home_team or away_team that is your side should be the name
+          your team played under (Portland Over 60s, say), with the other one matching the
+          opposition column. The template has a worked example.
         </p>
         <div className="flex flex-wrap items-center gap-3">
           <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={pickFile}
