@@ -4415,7 +4415,7 @@ async def lifespan(app: FastAPI):
                 "services/superseded_ddl.STATEMENTS is applied to this "
                 "database.", _view)
 
-        # Migration 312: club teaser snapshots (marketing previews of a club
+        # Migration 314: club teaser snapshots (marketing previews of a club
         # that has not registered). Same one-copy rule as the others.
         from app.services.club_teaser_ddl import STATEMENTS as _TEASER_DDL
         for _stmt in _TEASER_DDL:

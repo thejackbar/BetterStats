@@ -8,15 +8,15 @@ they have registered. Owns no organisation, player or game rows.
 Runs services/club_teaser_ddl.STATEMENTS, the same list main.py's lifespan
 runs. Every statement is idempotent.
 
-Revision ID: 312
-Revises: 311
+Revision ID: 314
+Revises: 313
 """
 from alembic import op
 
 from app.services.club_teaser_ddl import STATEMENTS, DOWNGRADE
 
-revision = "312"
-down_revision = "311"
+revision = "314"
+down_revision = "313"
 branch_labels = None
 depends_on = None
 

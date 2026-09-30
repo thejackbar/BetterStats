@@ -1,4 +1,4 @@
-"""Club teaser snapshots (migration 312, services/club_teaser.py).
+"""Club teaser snapshots (migration 314, services/club_teaser.py).
 
 Runs the SHIPPED builder, persistence, selection and batch runner against a
 real Postgres, with a scripted stand-in for Cricket Australia so no live call
@@ -172,7 +172,7 @@ async def main() -> None:
     check("the table carries version, hash, token and the re-pull date",
           {"version", "data_hash", "token", "next_pull_at", "image_version"} <= cols, str(cols))
     main_src = (Path(__file__).resolve().parent.parent / "app" / "main.py").read_text()
-    alembic_src = (Path(__file__).resolve().parent.parent / "alembic/versions/312_club_teaser_snapshots.py").read_text()
+    alembic_src = (Path(__file__).resolve().parent.parent / "alembic/versions/314_club_teaser_snapshots.py").read_text()
     check("alembic and the lifespan run the same statement list",
           "club_teaser_ddl import STATEMENTS" in main_src and "club_teaser_ddl import STATEMENTS" in alembic_src)
 

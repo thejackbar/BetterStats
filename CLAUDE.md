@@ -506,7 +506,7 @@ short of 200 catches on 201, and J Hind 18 from 3,000 "including junior games".
   notifications 146, manual games import 194, competitions 136, shared
   fixtures 38.
 
-## A teaser snapshot of a club that has not registered (migration 312, Sep 2026)
+## A teaser snapshot of a club that has not registered (migration 314, Sep 2026)
 
 Asked for as the data half of a marketing campaign: show a prospect their own
 club's dashboard (email image, landing page, the Meta click-through) before

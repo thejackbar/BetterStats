@@ -1,4 +1,4 @@
-"""The DDL behind club teaser snapshots (migration 312), in ONE place.
+"""The DDL behind club teaser snapshots (migration 314), in ONE place.
 
 alembic and ``main.py``'s lifespan both run this list, in this order, so they
 cannot drift (the ``vote_medal_ddl`` rule). Every statement is idempotent.
