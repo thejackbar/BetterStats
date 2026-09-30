@@ -400,3 +400,77 @@ class AflManualAdjustment(Base):
     created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+# ─── BetterSelect ────────────────────────────────────────────────────────────
+#
+# Football's team selection sits on the SHARED BetterSelect tables where the
+# idea is sport-neutral (fixtures, teams, team_members, player_availability,
+# player_availability_periods) and on these three where it is not. A cricket XI
+# is an ordered list; a football side is a field of named positions plus an
+# interchange bench and emergencies, so the team sheet gets its own table
+# rather than a column bolted onto ``fixture_lineups``. The rules get their own
+# tables too: cricket's vocabulary (bowling workloads, overseas caps, nets
+# sessions) has no football meaning, and football's (a concussion stand-down,
+# a cap on games played in a higher side) has none in cricket.
+
+class AflLineupSlot(Base):
+    """One player named for a fixture, and where.
+
+    ``slot`` is a field position (``FB``, ``CHB``, ``RUCK``...), ``INT`` for the
+    interchange bench or ``EMG`` for an emergency. ``sort_order`` orders the
+    bench and the emergencies; a field slot is its own order. One player, one
+    slot per fixture — the primary key says so.
+    """
+    __tablename__ = "afl_lineup_slots"
+    __table_args__ = (Index("ix_afl_lineup_slots_org", "organisation_id"),)
+
+    fixture_id = Column(UUID(as_uuid=True), ForeignKey("fixtures.id", ondelete="CASCADE"), primary_key=True)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), primary_key=True)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    slot = Column(Text, nullable=False)
+    sort_order = Column(Integer, nullable=False, default=0, server_default="0")
+    is_captain = Column(Boolean, nullable=False, default=False, server_default="false")
+    is_vice_captain = Column(Boolean, nullable=False, default=False, server_default="false")
+    selected_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
+class AflSelectionRule(Base):
+    """A league or club rule the selection board checks a side against.
+
+    ``kind`` is one of ``services/afl/select_rules.RULE_KINDS``; ``config`` is
+    that kind's settings and ``scope`` the grades it covers (empty = every
+    grade). Severity is the club's: ``warn`` asks before saving, ``block``
+    refuses the save.
+    """
+    __tablename__ = "afl_selection_rules"
+    __table_args__ = (Index("ix_afl_selection_rules_org", "organisation_id"),)
+
+    id = Column(UUID(as_uuid=True), primary_key=True)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    kind = Column(Text, nullable=False)
+    name = Column(Text, nullable=True)
+    severity = Column(Text, nullable=False, default="warn", server_default="warn")
+    scope = Column(JSONB, nullable=False, default=dict, server_default="{}")
+    config = Column(JSONB, nullable=False, default=dict, server_default="{}")
+    enabled = Column(Boolean, nullable=False, default=True, server_default="true")
+    sort_order = Column(Integer, nullable=False, default=0, server_default="0")
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
+class AflSelectionRulePlayer(Base):
+    """A person-level answer to a rule: a ``permit`` (the league cleared them),
+    a ``block`` (the club says no), or an ``incident`` dated for a rule that
+    runs from one — a concussion's stand-down counts from ``incident_date``."""
+    __tablename__ = "afl_selection_rule_players"
+    __table_args__ = (Index("ix_afl_rule_players_rule", "rule_id"),)
+
+    id = Column(UUID(as_uuid=True), primary_key=True)
+    rule_id = Column(UUID(as_uuid=True), ForeignKey("afl_selection_rules.id", ondelete="CASCADE"), nullable=False)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    mode = Column(Text, nullable=False)          # permit | block | incident
+    incident_date = Column(Date, nullable=True)
+    note = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())

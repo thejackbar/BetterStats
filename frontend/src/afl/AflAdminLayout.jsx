@@ -46,6 +46,17 @@ const MODULE_NAV = [
   { to: '/admin/bettersocials', label: 'BetterSocials', modules: ['socials'], external: true },
 ]
 
+// BetterSelect lives inside the football admin rather than on a surface of its
+// own: it is football's own screens, not the shared cricket module chrome.
+const SELECT_NAV = [
+  { heading: 'BetterSelect' },
+  { to: '/admin/select/selection', label: 'Selection' },
+  { to: '/admin/select/fixtures', label: 'Fixtures' },
+  { to: '/admin/select/availability', label: 'Availability' },
+  { to: '/admin/select/squads', label: 'Squads' },
+  { to: '/admin/select/rules', label: 'Selection rules' },
+]
+
 const SUPER_NAV = [
   { heading: 'Better HQ' },
   { to: '/admin/super/clubs', label: 'All Clubs' },
@@ -77,6 +88,7 @@ export default function AflAdminLayout() {
   const isSuper = user.role === 'super_admin'
   const modules = MODULE_NAV.filter(m => m.modules.some(k => hasModule(k)))
   const items = [
+    ...(hasModule('select') ? SELECT_NAV : []),
     ...NAV,
     ...(modules.length ? [{ heading: 'Modules' }, ...modules] : []),
     ...(isSuper ? SUPER_NAV : []),

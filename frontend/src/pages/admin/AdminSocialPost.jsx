@@ -56,9 +56,9 @@ const EMPTY_LAYER = () => []
 const ALL_TEMPLATES = [
   { id: 'T1', name: 'Hero List',       component: T1_HeroList,        desc: 'Big player + name list',          maxPlayers: 13 },
   { id: 'T2', name: 'Card Grid',       component: T2_CardGrid,        desc: '4×3 trading card grid',           maxPlayers: 12 },
-  { id: 'T3', name: 'Side Numbered',   component: T3_SideNumbered,    desc: 'Side photo + numbered XI',        maxPlayers: 11 },
+  { id: 'T3', name: 'Side Numbered',   component: T3_SideNumbered,    desc: IS_AFL ? 'Side photo + numbered team' : 'Side photo + numbered XI',        maxPlayers: 11 },
   { id: 'T4', name: 'Batting Order',   component: T4_BattingOrder,    desc: 'Tactical batting order',          maxPlayers: 13 },
-  { id: 'T5', name: 'Brutalist',       component: T5_Brutalist,       desc: 'Typography-forward XI',           maxPlayers: 11 },
+  { id: 'T5', name: 'Brutalist',       component: T5_Brutalist,       desc: IS_AFL ? 'Typography-forward team list' : 'Typography-forward XI',           maxPlayers: 11 },
   { id: 'T6', name: 'Diagonal Poster', component: T6_Diagonal,        desc: 'Diagonal poster, match-day hype', maxPlayers: 11 },
   { id: 'T7', name: 'Milestone',       component: T7_CaptainSpotlight, desc: 'Milestone achievement showcase',  maxPlayers: 13 },
   { id: 'T8', name: 'Mosaic',          component: T8_Mosaic,          desc: 'Asymmetric photo mosaic',         maxPlayers: 11 },
@@ -281,13 +281,19 @@ function deriveShort(name) {
   return name.split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 3)
 }
 
-function playerToTemplatePlayer(p, { captain = false, viceCaptain = false, keeper = false, role = 'BAT' } = {}, nameFormat = 'last_first', swap = false) {
+// A football side is named by position, not as batters and bowlers.
+const ROLE_OPTIONS = IS_AFL ? ['', 'FB', 'HB', 'C', 'W', 'MID', 'RUCK', 'HF', 'FF', 'UTIL'] : ['BAT', 'BOWL', 'AR', 'WK']
+const ROLE_LONG = IS_AFL
+  ? { FB: 'Full Back', HB: 'Half Back', C: 'Centre', W: 'Wing', MID: 'Midfield', RUCK: 'Ruck', HF: 'Half Forward', FF: 'Full Forward', UTIL: 'Utility' }
+  : { BAT: 'Batter', BOWL: 'Bowler', AR: 'All-Rounder', WK: 'Wicket-Keeper' }
+
+function playerToTemplatePlayer(p, { captain = false, viceCaptain = false, keeper = false, role = IS_AFL ? '' : 'BAT' } = {}, nameFormat = 'last_first', swap = false) {
   const raw = splitName(p.display_name || p.name, nameFormat)
   const first = swap ? raw.last : raw.first
   const last  = swap ? raw.first.toUpperCase() : raw.last
   return {
     first, last, role,
-    roleLong: { BAT: 'Batter', BOWL: 'Bowler', AR: 'All-Rounder', WK: 'Wicket-Keeper' }[role] || role,
+    roleLong: ROLE_LONG[role] || role,
     captain, viceCaptain, keeper,
     headshot: p.photo_url ? `${BASE_URL}/images/players/${p.id}/photo` : null,
     // The action shot, when the club has one. Only the big hero slot reaches
@@ -440,9 +446,9 @@ function SelectedPlayerRow({ sp, idx, onUpdate, onRemove, onMoveUp, onMoveDown, 
         onChange={e => onUpdate({ role: e.target.value })}
         className="font-mono text-[10px] bg-pb-surface2 border pb-hairline rounded px-1 py-0.5 text-pb-text"
       >
-        {['BAT', 'BOWL', 'AR', 'WK'].map(r => <option key={r} value={r}>{r}</option>)}
+        {ROLE_OPTIONS.map(r => <option key={r} value={r}>{r || 'Position'}</option>)}
       </select>
-      {['captain', 'viceCaptain', 'keeper'].map(field => {
+      {(IS_AFL ? ['captain', 'viceCaptain'] : ['captain', 'viceCaptain', 'keeper']).map(field => {
         const labels = { captain: 'C', viceCaptain: 'VC', keeper: 'WK' }
         const active = sp[field]
         return (
@@ -515,7 +521,8 @@ function TextInput({ value, onChange, placeholder }) {
 // the roundup post (the per-row mono + grade carry the detail).
 function cleanClubName(n) {
   return (n || '')
-    .replace(/\s+(district\s+|junior\s+)?cricket\s+club$/i, '')
+    .replace(/\s+(district\s+|junior\s+)?(cricket|football|amateur\s+football)\s+club$/i, '')
+    .replace(/\s+(a?fc|jfc)$/i, '')
     .replace(/\s+c\.?c\.?$/i, '')
     .trim()
 }
@@ -552,7 +559,7 @@ function clubTokens(name) {
     .toLowerCase()
     .replace(/[^a-z0-9 ]/g, ' ')
     .split(/\s+/)
-    .filter((w) => w.length > 2 && !['cricket', 'club', 'the', 'district', 'junior', 'colts'].includes(w))
+    .filter((w) => w.length > 2 && !['cricket', 'football', 'club', 'the', 'district', 'junior', 'colts', 'afc', 'fc'].includes(w))
 }
 
 // Top 3 batters (most runs, fewer balls breaks ties), shaped for a performer row.
@@ -1842,7 +1849,9 @@ export default function AdminSocialPost() {
   // Player management
   const addPlayer = useCallback(p => {
     if (selectedPlayers.find(sp => sp.player.id === p.id)) return
-    const role = p.player_role && ['BAT','BOWL','AR','WK'].includes(p.player_role) ? p.player_role : 'BAT'
+    const role = IS_AFL
+      ? ((p.skill_positions || [])[0] || '')
+      : p.player_role && ['BAT','BOWL','AR','WK'].includes(p.player_role) ? p.player_role : 'BAT'
     setSelectedPlayers(prev => [...prev, { player: p, role, captain: false, viceCaptain: false, keeper: false }])
   }, [selectedPlayers])
 
@@ -3052,7 +3061,7 @@ export default function AdminSocialPost() {
                       <button onClick={() => navigate(`/${settings?.slug || ''}/${IS_AFL ? 'team-lists' : 'lineups'}`)} className="self-start mt-1 font-mono text-[10px] text-pb-faint hover:text-pb-text">{IS_AFL ? 'View Team Lists page →' : 'View Lineups page →'}</button>
                     </>)}
 
-                    {lineupLoad === 'loading' && <div className="text-pb-faint text-[10px] font-mono">Loading XI…</div>}
+                    {lineupLoad === 'loading' && <div className="text-pb-faint text-[10px] font-mono">{IS_AFL ? 'Loading side…' : 'Loading XI…'}</div>}
                     {typeof lineupLoad === 'string' && lineupLoad.startsWith('ok:') && <div className="text-green-400 text-[10px] font-mono">✓ {lineupLoad.slice(3)} players loaded — head to Content or Design</div>}
                     {typeof lineupLoad === 'string' && lineupLoad.startsWith('err:') && <div className="text-pb-red text-[10px] font-mono">✗ {lineupLoad.slice(4)}</div>}
                   </div>
@@ -3610,8 +3619,8 @@ export default function AdminSocialPost() {
               <section className="pb-card p-4">
                 <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Match Info</h2>
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="col-span-2"><Field label="Headline (lineup posts)"><TextInput value={headline} onChange={setHeadline} placeholder="SQUAD · e.g. Applecross 6th XI" /></Field></div>
-                  <Field label="Competition"><TextInput value={match.competition} onChange={v => patchMatch({ competition: v })} placeholder="PREMIER T20" /></Field>
+                  <div className="col-span-2"><Field label="Headline (lineup posts)"><TextInput value={headline} onChange={setHeadline} placeholder={IS_AFL ? 'SQUAD · e.g. Reserves' : 'SQUAD · e.g. Applecross 6th XI'} /></Field></div>
+                  <Field label="Competition"><TextInput value={match.competition} onChange={v => patchMatch({ competition: v })} placeholder={IS_AFL ? 'PREMIER C' : 'PREMIER T20'} /></Field>
                   <Field label="Round"><TextInput value={match.round} onChange={v => patchMatch({ round: v })} placeholder="ROUND 7" /></Field>
                   <Field label="Venue"><TextInput value={match.venue} onChange={v => patchMatch({ venue: v })} placeholder="Heathcote Reserve" /></Field>
                   <Field label="Date"><TextInput value={match.date} onChange={v => patchMatch({ date: v })} placeholder="SAT 30 MAY" /></Field>
@@ -3818,7 +3827,7 @@ export default function AdminSocialPost() {
                   <Field label="Value (big number)"><TextInput value={milestone.value} onChange={v => setMilestone(m => ({ ...m, value: v }))} placeholder="200" /></Field>
                   <Field label="Unit"><TextInput value={milestone.unit} onChange={v => setMilestone(m => ({ ...m, unit: v }))} placeholder="GAMES" /></Field>
                   <div className="col-span-2"><Field label="Reason (eyebrow)"><TextInput value={milestone.reason} onChange={v => setMilestone(m => ({ ...m, reason: v }))} placeholder="200TH GAME FOR THE CLUB" /></Field></div>
-                  <div className="col-span-2"><Field label="Detail line"><TextInput value={milestone.detail} onChange={v => setMilestone(m => ({ ...m, detail: v }))} placeholder="15 seasons · 4,872 runs" /></Field></div>
+                  <div className="col-span-2"><Field label="Detail line"><TextInput value={milestone.detail} onChange={v => setMilestone(m => ({ ...m, detail: v }))} placeholder={IS_AFL ? '15 seasons · 312 goals' : '15 seasons · 4,872 runs'} /></Field></div>
                   {selectedPlayers.length > 0 && (
                     <div className="col-span-2">
                       <Field label="Featured Player">
@@ -4109,7 +4118,7 @@ export default function AdminSocialPost() {
                           <span draggable onDragStart={fxDrag.onDragStart(i)} onDragEnd={fxDrag.onDragEnd} title="Drag to reorder"
                             className="cursor-grab select-none font-mono text-[10px] leading-none text-pb-faintest hover:text-pb-text text-center">⋮⋮</span>
                           <RowReorder onUp={() => moveRow(setFixtures, i, -1)} onDown={() => moveRow(setFixtures, i, 1)} isFirst={i === 0} isLast={i === fixtures.length - 1} />
-                          <input value={f.grade} onChange={e => set({ grade: e.target.value })} placeholder="Grade · 1ST XI"
+                          <input value={f.grade} onChange={e => set({ grade: e.target.value })} placeholder={IS_AFL ? 'Grade · SENIORS' : 'Grade · 1ST XI'}
                             className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
                           <select value={f.ha} onChange={e => set({ ha: e.target.value })}
                             className="bg-pb-surface border pb-hairline rounded px-1 py-1 text-xs text-pb-text">
@@ -4175,7 +4184,7 @@ export default function AdminSocialPost() {
                           <span draggable onDragStart={rrDrag.onDragStart(i)} onDragEnd={rrDrag.onDragEnd} title="Drag to reorder"
                             className="cursor-grab select-none font-mono text-[10px] leading-none text-pb-faintest hover:text-pb-text text-center">⋮⋮</span>
                           <RowReorder onUp={() => moveRow(setResults, i, -1)} onDown={() => moveRow(setResults, i, 1)} isFirst={i === 0} isLast={i === results.length - 1} />
-                          <input value={r.grade} onChange={e => set({ grade: e.target.value })} placeholder="Grade · 1ST XI"
+                          <input value={r.grade} onChange={e => set({ grade: e.target.value })} placeholder={IS_AFL ? 'Grade · SENIORS' : 'Grade · 1ST XI'}
                             className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
                           <select value={r.outcome} onChange={e => set({ outcome: e.target.value })}
                             className="bg-pb-surface border pb-hairline rounded px-1 py-1 text-xs text-pb-text">

@@ -1,3 +1,4 @@
+import { IS_AFL } from '../../lib/sport'
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
@@ -14,7 +15,13 @@ const PAYMENT_TYPES = [
   { value: 'left_club', label: 'Left Club' },
 ]
 
-const FORMAT_OPTIONS = [
+// Football has one kind of game, so a grade is either charged per game, charged
+// at the women's rate, or left out.
+const FORMAT_OPTIONS = IS_AFL ? [
+  { value: '', label: 'Charged per game' },
+  { value: 'women', label: "Women's" },
+  { value: 'exclude', label: 'Exclude from fees' },
+] : [
   { value: '', label: 'Auto (from match format)' },
   { value: 'two_day', label: 'Two Day (2 days)' },
   { value: 'one_day', label: 'One Day' },
@@ -275,11 +282,19 @@ export default function AdminFeeSchedule() {
 
             <div className="mt-10">
               <Caption screen className="mb-2">Grade formats</Caption>
+              {IS_AFL ? (
+                <p className="text-pb-dim text-sm mb-4 leading-relaxed">
+                  How each grade counts towards match days. Every game counts as one; tag a women's grade as
+                  <span className="text-pb-text"> Women's</span> to charge it at that rate, or set
+                  <span className="text-pb-text"> Exclude</span> to drop a grade from fees. Recompute after changing these.
+                </p>
+              ) : (
               <p className="text-pb-dim text-sm mb-4 leading-relaxed">
                 How each grade counts towards match days. Leave on <span className="text-pb-text">Auto</span> to use the synced
                 grade type; tag women's (PSWL) grades as <span className="text-pb-text">Women's</span> since they arrive as plain
                 One Day / T20, or set <span className="text-pb-text">Exclude</span> to drop a grade from fees. Recompute after changing these.
               </p>
+              )}
               <GradeFormatList seasonId={seasonId} />
             </div>
           </>

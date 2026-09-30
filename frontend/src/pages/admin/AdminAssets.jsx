@@ -7,11 +7,14 @@ import { PbSpinner } from '../../lib/presskit'
 import Calendar from '../../components/admin/clubmanager/Calendar'
 import DateTimePicker from '../../components/admin/crm/DateTimePicker'
 import { PersonPicker } from '../../components/admin/clubmanager/pickers'
+import { IS_AFL } from '../../lib/sport'
 
 // One input look for the whole module — the same class the shared kit's
 // TextInput/Select wear, so a hand-built control here matches a kit one.
 const inp = INPUT_CLS
+// Football grounds have no practice nets, so the type is not offered there.
 const FACILITY_TYPES = ['ground', 'clubhouse', 'nets', 'scoreboard', 'canteen', 'storage', 'other']
+  .filter(t => !(IS_AFL && t === 'nets'))
 const ASSET_CATEGORIES = ['equipment', 'technology', 'furniture', 'ground_maintenance', 'safety', 'other']
 const ASSET_CONDITIONS = ['excellent', 'good', 'fair', 'poor', 'unserviceable']
 const ASSET_STATUSES = ['in_service', 'in_repair', 'retired', 'disposed']

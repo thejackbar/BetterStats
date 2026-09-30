@@ -1,3 +1,4 @@
+import { IS_AFL } from '../../../lib/sport'
 // Shared bits for the BetterMerch surface — kept local so the module is
 // self-contained, reusing the house Icon + spinner.
 import { Icon } from '../betterselect/ui'
@@ -8,7 +9,7 @@ export const money = (n) =>
 
 export const CATEGORIES = [
   { key: 'apparel', label: 'Apparel', blurb: 'Playing kit, training gear, caps' },
-  { key: 'equipment', label: 'Equipment', blurb: 'Balls, bats, stumps, machines' },
+  { key: 'equipment', label: 'Equipment', blurb: IS_AFL ? 'Footballs, tackle bags, cones, goal pads' : 'Balls, bats, stumps, machines' },
   { key: 'food_drink', label: 'Food & Drink', blurb: 'Canteen and bar stock' },
 ]
 

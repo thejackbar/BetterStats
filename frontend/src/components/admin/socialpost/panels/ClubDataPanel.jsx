@@ -1,3 +1,4 @@
+import { IS_AFL } from '../../../../lib/sport'
 // Club-data panel — live blocks that pull the club's own numbers onto the
 // canvas, grouped into "from a player profile" and "from the club". Adds a data
 // block via onAdd('data', { kind }). The player kinds all read one playerId,
@@ -37,7 +38,7 @@ export default function ClubDataPanel({ onAdd }) {
         </div>
       ))}
       <p className="text-pb-faintest text-[10px] leading-relaxed">
-        Live data — fixtures, results and scorecards come from those tabs; pick the player for a player block on the canvas.
+        {IS_AFL ? 'Live data: fixtures and results come from those tabs;' : 'Live data — fixtures, results and scorecards come from those tabs;'} pick the player for a player block on the canvas.
       </p>
     </div>
   )

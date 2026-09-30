@@ -1,3 +1,4 @@
+import { IS_AFL } from '../../../../../lib/sport'
 import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../../../../../lib/api'
@@ -116,7 +117,7 @@ export default function AreasRoles({ st, patch, narrow }) {
               addLabel="Add role" emptyText="No general roles yet." query={q} />
           ) : (
             <EntityManager key="role-types"
-              describe="Role types classify your roles. A Committee type feeds committee positions (not the Roles list); an Official type is a formal scorecard role (umpire/scorer); Volunteer / Paid / Third party / Other are everyday roles. Pick a type when adding a role."
+              describe={`Role types classify your roles. A Committee type feeds committee positions (not the Roles list); an Official type is a formal match role (${IS_AFL ? 'field, boundary or goal umpire, timekeeper' : 'umpire/scorer'}); Volunteer / Paid / Third party / Other are everyday roles. Pick a type when adding a role.`}
               load={() => api.raRoleTypes().then(r => r?.types || r || [])}
               fields={[
                 { key: 'name', label: 'Type name', type: 'text', required: true, span: 2 },
@@ -193,7 +194,7 @@ export default function AreasRoles({ st, patch, narrow }) {
             </>
           ) : (
             <EntityManager key="departments"
-              describe="Departments group your operational areas (Food & Beverage, Cricket Operations…). Pick one when adding an area. The Operational Areas Starter Pack seeds these for you."
+              describe={`Departments group your operational areas (Food & Beverage, ${IS_AFL ? 'Football' : 'Cricket'} Operations…). Pick one when adding an area. The Operational Areas Starter Pack seeds these for you.`}
               load={() => api.rosterDepartments().then(r => r?.departments || r || [])}
               fields={[{ key: 'name', label: 'Department name', type: 'text', required: true, span: 2 }]}
               onCreate={v => api.rosterCreateDepartment(v)} onUpdate={(id, v) => api.rosterUpdateDepartment(id, v)} onDelete={id => api.rosterDeleteDepartment(id)}
