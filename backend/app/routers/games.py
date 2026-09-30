@@ -806,7 +806,8 @@ async def get_scorecard(
 
     fielding_flat = []
     for fs, p in fielding_rows:
-        if (fs.catches or 0) + (fs.run_outs or 0) + (fs.stumpings or 0) <= 0:
+        if ((fs.catches or 0) + (fs.catches_wk or 0)
+                + (fs.run_outs or 0) + (fs.stumpings or 0)) <= 0:
             continue
         if fs.player_id:
             fielding_flat.append({
