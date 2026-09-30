@@ -1,3 +1,4 @@
+import { PLATFORM_NAME } from '../../../lib/sport'
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { api } from '../../../lib/api'
 import { Button, Caption, SectionHeading, Note, Badge, Empty, FilterPill, INPUT_CLS } from '../../../components/admin/ui'
@@ -18,7 +19,7 @@ import { RecordTitleRow, CountBar, SaveRow } from '../clubhouse/crudShell'
 // sent-email summary with its recipient drill-down are all still here.
 
 const REQUEST_TEMPLATE_EMAIL = 'support@bettersports.com.au'
-const REQUEST_TEMPLATE_BODY = `Hi BetterCricket team,
+const REQUEST_TEMPLATE_BODY = `Hi ${PLATFORM_NAME} team,
 
 I've come across an email template I'd like to see added to BetterComms.
 

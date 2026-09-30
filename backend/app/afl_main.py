@@ -502,6 +502,16 @@ app.include_router(afl_votes.router)
 # player's PIN and a signed cookie, not from a session (see its docstring).
 app.include_router(afl_public_votes.router)
 
+# ─── BetterSelect (football's own) ───────────────────────────────────────────
+# Squads, PlayHQ fixtures, availability, the field and bench, and the league's
+# selection rules. The player's own availability link is cricket's router: it
+# reads the shared fixtures table the football fixture sync fills, and its
+# dormancy rule reads football's match record too.
+from app.routers.afl import select as afl_select  # noqa: E402
+from app.routers import public_availability  # noqa: E402
+app.include_router(afl_select.router, dependencies=[Depends(require_module("select"))])
+app.include_router(public_availability.router)
+
 
 @app.get("/health")
 async def health():

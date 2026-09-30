@@ -1,3 +1,4 @@
+import { IS_AFL } from '../lib/sport'
 // ─────────────────────────────────────────────────────────────────────────────
 // BLANK CANVAS — freeform, WYSIWYG post builder
 //
@@ -71,7 +72,7 @@ export const BLANK_DATA = [
   { kind: 'results', name: 'Results', group: 'club' },
   { kind: 'record', name: 'W-L-D record', group: 'club' },
   { kind: 'scorecard', name: 'Scorecard', group: 'club' },
-]
+].filter(d => !(IS_AFL && d.kind === 'scorecard'))
 
 // Clip-path polygons for the fill-only decorative shapes (scale with w/h).
 const CLIP_SHAPES = {

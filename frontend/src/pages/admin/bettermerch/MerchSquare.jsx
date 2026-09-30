@@ -109,7 +109,7 @@ export default function MerchSquare() {
                 <li>Open the <b className="text-pb-text">Credentials</b> tab and copy the <b className="text-pb-text">Production Application ID</b> and <b className="text-pb-text">Application Secret</b>.</li>
                 <li>
                   Open the <b className="text-pb-text">OAuth</b> tab and add this as an Authorized Redirect URL:
-                  <div className="mt-1"><code className="text-pb-text bg-pb-hairline/40 px-2 py-1 rounded text-[11.5px] break-all">https://betterat.cricket/api/public/square/callback</code></div>
+                  <div className="mt-1"><code className="text-pb-text bg-pb-hairline/40 px-2 py-1 rounded text-[11.5px] break-all">{`${window.location.origin}${import.meta.env.BASE_URL}api/public/square/callback`}</code></div>
                 </li>
                 <li>
                   Add these to the server's <code className="text-pb-text">.env</code> and redeploy the backend:

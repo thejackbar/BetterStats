@@ -1,3 +1,4 @@
+import { IS_AFL } from '../../../lib/sport'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../../lib/api'
 import { useToast } from '../../../contexts/ToastContext'
@@ -1719,7 +1720,7 @@ function ObjectiveForm({ objective, plans, pillars, positions, planId, pillarId,
   return (
     <div className="pb-card p-4 space-y-2">
       <div className={cap}>{objective ? 'EDIT OBJECTIVE' : 'NEW OBJECTIVE'}</div>
-      <input className={inp} placeholder="Objective (e.g. Upgrade the practice nets)"
+      <input className={inp} placeholder={IS_AFL ? 'Objective (e.g. Upgrade the training lights)' : 'Objective (e.g. Upgrade the practice nets)'}
         value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
       <textarea rows={2} className={inp} placeholder="What success looks like (optional)"
         value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />

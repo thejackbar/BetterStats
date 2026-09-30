@@ -43,6 +43,12 @@ import AflAdminSuperClubs from './pages/admin/AflAdminSuperClubs'
 import AflAdminActivity from './pages/admin/AflAdminActivity'
 import AflAdminMilestones from './pages/admin/AflAdminMilestones'
 import AflAdminGames from './pages/admin/AflAdminGames'
+import AflSelectSquads from './pages/admin/select/AflSelectSquads'
+import AflSelectFixtures from './pages/admin/select/AflSelectFixtures'
+import AflSelectAvailability from './pages/admin/select/AflSelectAvailability'
+import AflSelectSelection from './pages/admin/select/AflSelectSelection'
+import AflSelectRules from './pages/admin/select/AflSelectRules'
+import PublicAvailability from '../pages/PublicAvailability'
 
 /**
  * BetterStats AFL — the bs-afl-frontend app tree, mounted by App.jsx when the
@@ -64,6 +70,9 @@ export default function AflApp() {
                 {/* Standalone, outside the club layout: a voter follows this
                     link with no account and no club chrome. */}
                 <Route path="/vote/:token" element={<AflPublicVoting />} />
+                {/* A player's own availability link: cricket's page, reading the
+                    shared self-service router the football backend mounts. */}
+                <Route path="/avail/:token" element={<PublicAvailability />} />
                 <Route path="/admin" element={<AflAdminLayout />}>
                   <Route index element={<AflAdminSync />} />
                   <Route path="players" element={<AflAdminPlayers />} />
@@ -83,6 +92,12 @@ export default function AflApp() {
                   <Route path="sponsors" element={<AflAdminSponsors />} />
                   <Route path="users" element={<AflAdminUsers />} />
                   <Route path="votes" element={<AflAdminVotes />} />
+                  <Route path="select" element={<Navigate to="/admin/select/selection" replace />} />
+                  <Route path="select/squads" element={<AflSelectSquads />} />
+                  <Route path="select/fixtures" element={<AflSelectFixtures />} />
+                  <Route path="select/availability" element={<AflSelectAvailability />} />
+                  <Route path="select/selection" element={<AflSelectSelection />} />
+                  <Route path="select/rules" element={<AflSelectRules />} />
                   <Route path="settings" element={<AflAdminSettings />} />
                   <Route path="super/users" element={<AflAdminSuperUsers />} />
                   <Route path="super/clubs" element={<AflAdminSuperClubs />} />

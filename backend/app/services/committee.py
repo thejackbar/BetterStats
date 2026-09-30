@@ -16,6 +16,7 @@ from sqlalchemy import select, func, delete
 from sqlalchemy.orm import defer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config.settings import settings
 from app.models.db import (
     CommitteePosition, CommitteeTerm, CommitteeTask, CommitteeDocument, ClubEvent,
     AgendaTemplate, CommitteeMeeting, MeetingAttendance, MeetingAgendaItem, MeetingMotion,
@@ -33,8 +34,8 @@ STARTER_POSITIONS = [
     ("Senior Coordinator", "Senior teams — registrations, grading, team management."),
     ("Selection Chair", "Chairs the selection panel across grades."),
     ("Coach Coordinator", "Coaching appointments, accreditation, development."),
-    ("Grounds Manager", "Ground/wicket preparation and maintenance liaison."),
-    ("Equipment Manager", "Club kit, balls, training equipment."),
+    ("Grounds Manager", "Ground preparation and maintenance liaison." if settings.sport == "afl" else "Ground/wicket preparation and maintenance liaison."),
+    ("Equipment Manager", "Club kit, footballs, training equipment." if settings.sport == "afl" else "Club kit, balls, training equipment."),
     ("Bar Manager", "Bar operations, licensing compliance, RSA rostering."),
     ("Volunteer Coordinator", "Recruits and rosters club volunteers."),
     ("Sponsorship Manager", "Sponsor relationships and obligations."),
@@ -675,7 +676,7 @@ STARTER_AGENDA_TEMPLATES = [
         ("Annual reports", "President's report", "The club's on-field and off-field season."),
         ("Annual reports", "Treasurer's report & financial statements", "Profit and loss and balance sheet for the financial year."),
         ("Annual reports", "Registrar / Secretary report", "Registration numbers, team nominations, association updates."),
-        ("Annual reports", "Junior & coaching coordinator report", "Junior development, Blast programs, coaching."),
+        ("Annual reports", "Junior & coaching coordinator report", "Junior development, Auskick, coaching." if settings.sport == "afl" else "Junior development, Blast programs, coaching."),
         ("Elections and appointments", "Declaration of all positions vacant", "The current committee steps down."),
         ("Elections and appointments", "Election of executive committee", "President, Vice-President, Secretary, Treasurer."),
         ("Elections and appointments", "Election of general committee", "Registrar, junior coordinator, social coordinator, gear steward."),
@@ -693,7 +694,7 @@ STARTER_AGENDA_TEMPLATES = [
         ("Opening formalities", "Business arising / action list", "Work through the actions still open."),
         ("Reports", "President's report", None),
         ("Reports", "Treasurer's report", "Accounts, outstanding fees, budget against actual."),
-        ("Reports", "Cricket operations / registrar report", "Registrations, teams, selection, association matters."),
+        ("Reports", "Football operations / registrar report" if settings.sport == "afl" else "Cricket operations / registrar report", "Registrations, teams, selection, association matters."),
         ("Reports", "Junior coordinator report", None),
         ("General business", "Grounds & facilities", None),
         ("General business", "Sponsorship & fundraising", None),
@@ -1590,8 +1591,10 @@ STARTER_PILLARS = [
      "Secure three new local sponsors"),
     ("Volunteers & governance", "Committee workload, compliance and club administration.",
      "Every coach and team manager holds a current WWCC"),
-    ("Facilities & community", "Grounds, nets, equipment and the club's place locally.",
-     "Improve the training nets"),
+    ("Facilities & community",
+     "Grounds, lights, equipment and the club's place locally." if settings.sport == "afl"
+     else "Grounds, nets, equipment and the club's place locally.",
+     "Upgrade the training lights" if settings.sport == "afl" else "Improve the training nets"),
 ]
 
 
