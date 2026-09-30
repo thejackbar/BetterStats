@@ -61,7 +61,7 @@ function Bug({ ink }) {
 // `h` is the canvas height, so the strip keeps a share of a taller post rather
 // than staying the 50px slot it was drawn at — a sponsor's logo shrinking to a
 // hairline is the one part of these posts a club would notice.
-function SponsorFooter({ palette, sponsors = [], showBug = true, h = 1080 }) {
+export function SponsorFooter({ palette, sponsors = [], showBug = true, h = 1080 }) {
   const { ink } = palette
   const slots = (sponsors && sponsors.length) ? sponsors : [{}, {}]
   const slotH = grow(h, 50, 0.09)

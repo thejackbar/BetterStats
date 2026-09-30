@@ -2034,6 +2034,25 @@ async def get_social_potm(match_id: str, db: AsyncSession = Depends(get_db), clu
         raise HTTPException(500, f"Player of the match error: {exc}") from exc
 
 
+@router.get("/social/totw", dependencies=[Depends(require_module("socials"))])
+async def get_social_totw(q: str = "", db: AsyncSession = Depends(get_db), club=Depends(get_current_club)):
+    """Team-of-the-week pool for the BetterSocials post: every completed club
+    match in one round, each performance scored with the same points as the
+    player of the match, pooled across grades and ranked best first.
+
+    ``q`` (optional) is a pasted match link/ID naming the round; with none it is
+    the club's latest match-day and the games within a weekend of it. The post
+    takes the top 6 to 14 off the front of the list."""
+    from app.services.social_rounds import social_totw
+    try:
+        return await social_totw(db, club, q)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.exception("social totw failed for %s", getattr(club, "id", "?"))
+        raise HTTPException(500, f"Team of the week error: {exc}") from exc
+
+
 async def _get_social_scorecard_inner(match_id: str, db: AsyncSession, club=None):
     raw = await get_match_scorecard(match_id)
     if raw is None:

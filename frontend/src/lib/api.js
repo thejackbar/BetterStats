@@ -191,6 +191,7 @@ export const api = {
   getSocialFixtures: (q) => request(`/admin/social/fixtures${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   getSocialResults: (q) => request(`/admin/social/results${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   getSocialPotm: (matchId) => request(`/admin/social/potm/${matchId}`),
+  getSocialTotw: (q) => request(`/admin/social/totw${q ? `?q=${encodeURIComponent(q)}` : ''}`),
 
   // BetterSocials — media library. `kind` is undefined for the ordinary Photos
   // pool, or 'background' for the small reusable post-background library —

@@ -31,6 +31,7 @@ import {
   ResultsList, ResultsListLeaders, ResultsScoreboard, ResultsRecord, ResultsHeadline, ResultsBoard, ResultsSplit,
   DEFAULT_FIXTURES, DEFAULT_RESULTS,
 } from '../../social/round-templates'
+import { TeamOfWeekGrid, TeamOfWeekBoard, TOTW_MIN, TOTW_MAX, TOTW_DEFAULT } from '../../social/totw-templates'
 import { exportNodeToPng } from '../../social/exportImage'
 import { SocialBackground, SocialBackgroundDefs, SOCIAL_BACKGROUNDS, GRADIENT_ANGLES, DEFAULT_COLORS as BG_DEFAULT_COLORS } from '../../social/SocialBackgrounds'
 import { EVENT_TEMPLATES, EVENT_PRESETS, DEFAULT_EVENT, resolveMotif, eventPaletteFor } from '../../social/event-templates'
@@ -91,6 +92,9 @@ const ALL_TEMPLATES = [
   { id: 'RR4', name: 'Headline',       component: ResultsHeadline,    desc: 'Feature result + others',         maxPlayers: 0, kind: 'results' },
   { id: 'RR5', name: 'Board',          component: ResultsBoard,       desc: 'Results table',                   maxPlayers: 0, kind: 'results' },
   { id: 'RR6', name: 'Win/Loss Split', component: ResultsSplit,       desc: 'Wins vs losses columns',          maxPlayers: 0, kind: 'results' },
+  // Team of the week — the round's best performers across every grade, 6 to 14 of them.
+  { id: 'TW1', name: 'Team Sheet',     component: TeamOfWeekGrid,     desc: 'Photo cards, any team size',      maxPlayers: TOTW_MAX, kind: 'totw' },
+  { id: 'TW2', name: 'Ranked Board',   component: TeamOfWeekBoard,    desc: 'One row per player, best first',  maxPlayers: TOTW_MAX, kind: 'totw' },
   { id: 'SC1', name: 'Broadcast',      component: SC1_Broadcast,      desc: 'TV-style full scorecard',         maxPlayers: 0, isScorecard: true },
   { id: 'SC2', name: 'Brutalist',      component: SC2_Brutalist,      desc: 'Bold type, heavy rules',          maxPlayers: 0, isScorecard: true },
   { id: 'SC3', name: 'Dashboard',      component: SC3_Dashboard,      desc: 'Soft cards, app-style',           maxPlayers: 0, isScorecard: true },
@@ -103,7 +107,7 @@ const ALL_TEMPLATES = [
 // The football build drops the layouts that only mean anything with cricket
 // data: the batting order, the results wrap's batting/bowling leaders, and
 // every layout of the three hidden post types (toss, scorecard, final score).
-const AFL_HIDDEN_TEMPLATES = new Set(['T4', 'RR7', 'C2', 'C4', 'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6', 'SC1', 'SC2', 'SC3'])
+const AFL_HIDDEN_TEMPLATES = new Set(['T4', 'RR7', 'C2', 'C4', 'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6', 'SC1', 'SC2', 'SC3', 'TW1', 'TW2'])
 const TEMPLATES = IS_AFL ? ALL_TEMPLATES.filter(t => !AFL_HIDDEN_TEMPLATES.has(t.id)) : ALL_TEMPLATES
 
 // The lineup templates that crop the hero photo into a fixed box, and the shape
@@ -123,6 +127,7 @@ const TAB_MAP = {
   C1: 'announcement', C2: 'toss', C3: 'motm',
   C4: 'result', RS1: 'result', RS2: 'result', RS3: 'result', RS4: 'result', RS5: 'result', RS6: 'result',
   RR1: 'results', RR2: 'results', RR3: 'results', RR4: 'results', RR5: 'results', RR6: 'results', RR7: 'results',
+  TW1: 'totw', TW2: 'totw',
   SC1: 'scorecard', SC2: 'scorecard', SC3: 'scorecard',
   EV1: 'events', EV2: 'events', EV3: 'events', EV4: 'events', EV5: 'events', EV6: 'events',
   EV7: 'events', EV8: 'events', EV9: 'events', EV10: 'events', EV11: 'events',
@@ -133,13 +138,14 @@ const TAB_MAP = {
 // Final Score layouts (overs, run rates, batting and bowling columns). Every
 // other type takes football data as it is; fixtures, results, lineups and the
 // player spotlight are fed from the football backend's own /admin/social/*.
-const AFL_HIDDEN_TABS = new Set(['toss', 'scorecard', 'result'])
+const AFL_HIDDEN_TABS = new Set(['toss', 'scorecard', 'result', 'totw'])
 const TABS = [
   { key: 'lineup',       label: 'Lineup' },
   { key: 'fixtures',     label: 'Fixtures' },
   { key: 'result',       label: 'Final Score' },
   { key: 'results',      label: 'Results' },
   { key: 'motm',         label: IS_AFL ? 'Best on Ground' : 'Player of Match' },
+  { key: 'totw',         label: 'Team of the Week' },
   { key: 'announcement', label: 'Announcement' },
   { key: 'toss',         label: 'Toss' },
   { key: 'scorecard',    label: 'Scorecard' },
@@ -147,19 +153,19 @@ const TABS = [
   { key: 'blank',        label: 'Blank' },
 ].filter(t => !IS_AFL || !AFL_HIDDEN_TABS.has(t.key))
 const TAB_FIRST = {
-  lineup: 'T1', fixtures: 'FX1', announcement: 'C1', toss: 'C2', motm: 'C3',
+  lineup: 'T1', fixtures: 'FX1', announcement: 'C1', toss: 'C2', motm: 'C3', totw: 'TW1',
   result: 'C4', results: 'RR1', scorecard: 'SC1', events: 'EV1', blank: 'BL1',
 }
 // Icon per post type (from the app's own kit) for the post-type bar and the
 // Start-screen cards.
 const TAB_ICON = {
   lineup: 'teams', fixtures: 'fixtures', result: 'ladders', results: 'list',
-  motm: 'player', announcement: 'share', toss: 'bolt', scorecard: 'sheet',
+  motm: 'player', totw: 'teams', announcement: 'share', toss: 'bolt', scorecard: 'sheet',
   events: 'availability', blank: 'plus',
 }
 // Post types that pull from external data (BetterSelect / a match link / a round
 // import). These open on the "Get your data" step so the source is collected first.
-const DATA_TABS = ['lineup', 'fixtures', 'results', 'result', 'scorecard', 'motm']
+const DATA_TABS = ['lineup', 'fixtures', 'results', 'result', 'scorecard', 'motm', 'totw']
 const SOURCE_HELP = {
   lineup: 'Pick a saved BetterSelect XI or a Play.Cricket published team list below to pull the players, captain, keeper and match details — or add players yourself in Content.',
   result: 'Paste the match link and we\'ll pull the scores, the top batters and bowlers for both sides, the result and the player of the match.',
@@ -167,6 +173,7 @@ const SOURCE_HELP = {
   fixtures: 'Pull this round\'s fixtures for every grade straight from the fixtures feed.',
   results: 'Pull the latest round\'s results for every grade straight from the results feed.',
   motm: 'Paste the match link and we\'ll work out the player of the match from the scorecard. You choose which of their batting, bowling and fielding stats go on the post.',
+  totw: 'Pull the latest round, or paste any match link from the round you want. Every grade\'s scorecard is scored the same way as the player of the match, and the best performers become the team. Choose 6 to 14 players.',
 }
 if (IS_AFL) {
   SOURCE_HELP.lineup = 'Pick a recent game below to pull the side your club named on PlayHQ, with the captain and the match details. Or add players yourself in Content.'
@@ -288,7 +295,7 @@ const ROLE_LONG = IS_AFL
   ? { FB: 'Full Back', HB: 'Half Back', C: 'Centre', W: 'Wing', MID: 'Midfield', RUCK: 'Ruck', HF: 'Half Forward', FF: 'Full Forward', UTIL: 'Utility' }
   : { BAT: 'Batter', BOWL: 'Bowler', AR: 'All-Rounder', WK: 'Wicket-Keeper' }
 
-function playerToTemplatePlayer(p, { captain = false, viceCaptain = false, keeper = false, role = IS_AFL ? '' : 'BAT' } = {}, nameFormat = 'last_first', swap = false) {
+function playerToTemplatePlayer(p, { captain = false, viceCaptain = false, keeper = false, role = IS_AFL ? '' : 'BAT', totw = null } = {}, nameFormat = 'last_first', swap = false) {
   const raw = splitName(p.display_name || p.name, nameFormat)
   const first = swap ? raw.last : raw.first
   const last  = swap ? raw.first.toUpperCase() : raw.last
@@ -303,7 +310,29 @@ function playerToTemplatePlayer(p, { captain = false, viceCaptain = false, keepe
     hero: p.hero_photo_url ? `${BASE_URL}/images/players/${p.id}/hero-photo` : null,
     _id: p.id,
     _name: p.display_name || p.name,
+    // Team of the week only: what this player did in the round (stat line,
+    // grade, opponent, points). Every other post leaves it null.
+    totw,
   }
+}
+
+// The one-line performance under a name on a team-of-the-week post. Only what
+// happened: a batter's 0 next to a five-for is noise, so a zero block is left
+// out. A player whose only contribution WAS a duck or a wicketless spell gets
+// that line rather than a blank one.
+function totwLine(pl) {
+  const { batting: bat, bowling: bowl, fielding: fld } = pl || {}
+  const parts = []
+  if (bat && bat.r > 0) parts.push(`${bat.r}${bat.notOut ? '*' : ''} (${bat.b})`)
+  if (bowl && bowl.w > 0) parts.push(`${bowl.w}/${bowl.r}`)
+  if (fld) {
+    if (fld.catches > 0) parts.push(`${fld.catches} ct`)
+    if (fld.stumpings > 0) parts.push(`${fld.stumpings} st`)
+    if (fld.run_outs > 0) parts.push(`${fld.run_outs} ro`)
+  }
+  if (!parts.length && bat) parts.push(`${bat.r}${bat.notOut ? '*' : ''} (${bat.b})`)
+  if (!parts.length && bowl) parts.push(`${bowl.w}/${bowl.r}`)
+  return parts.join(' · ')
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -737,6 +766,70 @@ function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick, onF
   )
 }
 
+// Team of the week — pull the round (latest, or the one a pasted match link
+// names) and set how many of its best performers go on the post.
+function TotwImportBox({ status, notice, data, onPull, onFetchLink }) {
+  const [link, setLink] = useState('')
+  const fetchLink = () => { const q = link.trim(); if (q) onFetchLink(q) }
+  return (
+    <div className="mb-4 p-3 rounded border pb-hairline bg-pb-surface2">
+      <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-2">Auto-fill from a round</p>
+      <button onClick={onPull} disabled={status === 'loading'}
+        className="px-3 py-1.5 rounded text-xs font-mono tracking-wide2 shrink-0 disabled:opacity-50"
+        style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>
+        {status === 'loading' ? 'Loading…' : 'Pull latest round'}
+      </button>
+      <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mt-3 mb-1.5">…or paste any match link from that round</p>
+      <div className="flex gap-2">
+        <input value={link} onChange={e => setLink(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && fetchLink()}
+          placeholder="Match link from play.cricket.com.au"
+          className="flex-1 min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1.5 text-xs text-pb-text font-mono placeholder:text-pb-faintest" />
+        <button onClick={fetchLink} disabled={status === 'loading'}
+          className="px-3 py-1.5 rounded text-xs font-mono tracking-wide2 shrink-0 disabled:opacity-50"
+          style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>Fetch</button>
+      </div>
+      {notice?.kind === 'playhq' && (
+        <div className="mt-2 p-2.5 rounded border border-amber-400/50 bg-amber-400/10">
+          <p className="font-mono text-[9px] text-amber-400 leading-relaxed">{notice.message}</p>
+          <p className="font-mono text-[9px] text-amber-400/80 mt-1 leading-relaxed">Open your match on play.cricket.com.au and copy the address from there.</p>
+        </div>
+      )}
+      {status === 'ok' && data && (
+        <p className="font-mono text-[9px] mt-1.5 text-green-400">
+          ✓ {data.players.length} performers from {data.matches} {data.matches === 1 ? 'match' : 'matches'} · {[data.round, data.label].filter(Boolean).join(' · ')}
+        </p>
+      )}
+      {status && status !== 'loading' && status !== 'ok' && (
+        <p className="font-mono text-[9px] mt-1.5 text-pb-faint">✗ {status}</p>
+      )}
+      <p className="text-pb-faintest text-[10px] mt-2 leading-relaxed">
+        Points are the same as the player of the match: 1 a run, 20 a wicket, 2 a maiden, 8 an outfield catch, stumping or run out, 4 a keeper catch. A player who played in two grades counts once, on their better day.
+      </p>
+    </div>
+  )
+}
+
+// How many players the team has, 6 to 14. Reads and writes the selected list
+// itself, so a player added or removed by hand moves the number too.
+function TotwSizeStepper({ count, poolSize, onChange }) {
+  const canGrow = count < TOTW_MAX && (poolSize == null || count < poolSize)
+  const btn = 'w-8 h-8 rounded border pb-hairline font-mono text-base text-pb-text disabled:opacity-30'
+  return (
+    <div data-testid="totw-size">
+      <div className="flex items-center gap-3">
+        <button className={btn} disabled={count <= TOTW_MIN} onClick={() => onChange(count - 1)} aria-label="Fewer players">−</button>
+        <span className="font-mono text-sm text-pb-text w-8 text-center" data-testid="totw-count">{count}</span>
+        <button className={btn} disabled={!canGrow} onClick={() => onChange(count + 1)} aria-label="More players">+</button>
+        <span className="font-mono text-[10px] text-pb-faint">of {TOTW_MIN} to {TOTW_MAX}{poolSize != null ? ` · ${poolSize} ranked` : ''}</span>
+      </div>
+      {count < TOTW_MIN && (
+        <p className="font-mono text-[9px] mt-1.5 text-amber-400">A team of the week is at least {TOTW_MIN} players.{poolSize != null && poolSize < TOTW_MIN ? ` Only ${poolSize} played that round.` : ''}</p>
+      )}
+    </div>
+  )
+}
+
 // Split rows into n contiguous chunks with sizes as even as possible
 // (11 rows over 2 pages → 6 + 5). Used to spread a roundup across a carousel.
 function chunkEven(rows, n) {
@@ -1141,6 +1234,15 @@ export default function AdminSocialPost() {
   const [potmUrlStatus, setPotmUrlStatus] = useState(null)
   const [potmPicks, setPotmPicks] = useState(null)
   const [potmImport, setPotmImport] = useState({ status: null, data: null, playerIdx: 0, include: { bat: true, bowl: true, field: true } })
+  // Team of the week: the round's ranked pool (data) behind the players on the
+  // post. The team itself lives in selectedPlayers, so add/remove/reorder work
+  // exactly as they do on a lineup.
+  const [totwImport, setTotwImport] = useState({ status: null, data: null, notice: null })
+  const [totwOpts, setTotwOpts] = useState({ showPoints: false })
+  // How far down the ranking the team has reached (a pool index). Growing the
+  // team continues from here, so a player taken off by hand is not fetched
+  // straight back on by the next +.
+  const totwCursor = useRef(-1)
   // Fixtures / results roundups — one post, all grades. Seeded with sample rows
   // so a fresh tab previews well; users edit/add/remove.
   const [fixtures, setFixtures] = useState(() => DEFAULT_FIXTURES.map((f) => ({ ...f })))
@@ -1879,6 +1981,82 @@ export default function AdminSocialPost() {
     applyPotm(potmImport.data, potmImport.playerIdx, include)
   }
 
+  // ── Team of the week import ─────────────────────────────────────────────────
+  // One ranked performer from the round's pool -> a slot in the selected list:
+  // the roster record when the scorecard participant resolves to one (so the
+  // photo comes with it), else a minimal live-name entry, the same shape the
+  // player-of-the-match import builds. The stat line rides along on the slot.
+  const totwSelection = useCallback((pl, i) => {
+    const rosterPlayer = pl.pid ? playerForPid(pl.pid) : null
+    const fallbackName = pl.first && pl.last ? `${pl.last}, ${pl.first}` : (pl.last || pl.first || pl.short || 'Player')
+    const player = rosterPlayer || { id: pl.pid || `totw_${pl.guid || i}`, display_name: fallbackName }
+    const derived = pl.batting && pl.bowling ? 'AR' : pl.bowling ? 'BOWL' : 'BAT'
+    const role = rosterPlayer?.player_role && ['BAT', 'BOWL', 'AR', 'WK'].includes(rosterPlayer.player_role) ? rosterPlayer.player_role : derived
+    return {
+      player, role, captain: false, viceCaptain: false, keeper: false,
+      totw: { line: totwLine(pl), grade: pl.grade || '', opp: pl.opp || '', points: pl.points },
+    }
+  }, [playerForPid])
+
+  const applyTotw = useCallback((data, size) => {
+    const pool = data?.players || []
+    const n = Math.max(TOTW_MIN, Math.min(TOTW_MAX, size))
+    totwCursor.current = Math.min(n, pool.length) - 1
+    setSelectedPlayers(pool.slice(0, n).map(totwSelection))
+    setMatch(m => ({ ...m, round: data.round || m.round, date: data.label || m.date, season: data.season || m.season }))
+  }, [totwSelection])
+
+  // A pasted link names the round; none means the club's latest match-day.
+  // A playhq.com link cannot (different id namespace) and comes back kind
+  // 'playhq' for the amber correction, same as the roundups.
+  const loadTotw = useCallback(async (q) => {
+    setTotwImport(s => ({ ...s, status: 'loading', notice: null }))
+    try {
+      const data = await api.getSocialTotw(q || '')
+      if (data.kind === 'round' && data.players?.length) {
+        setTotwImport({ status: 'ok', data, notice: null })
+        applyTotw(data, TOTW_DEFAULT)
+        return
+      }
+      if (data.kind === 'playhq') {
+        setTotwImport(s => ({ ...s, status: null, notice: { kind: 'playhq', message: data.message } }))
+        return
+      }
+      setTotwImport(s => ({ ...s, status: data.message || 'Could not read that link', notice: null }))
+    } catch (e) {
+      setTotwImport(s => ({ ...s, status: e?.message || 'failed', notice: null }))
+    }
+  }, [applyTotw])
+
+  // Resize the team. Growing continues down the ranking from where the team
+  // reached; shrinking drops from the bottom of the order and pulls that point
+  // back up. Either way a player swapped in by hand stays, and one taken off by
+  // hand is not re-added, which a rebuild from the ranking would do.
+  const changeTotwSize = (size) => {
+    const n = Math.max(TOTW_MIN, Math.min(TOTW_MAX, size))
+    const pool = totwImport.data?.players || []
+    const prev = selectedPlayers
+    if (n <= prev.length) {
+      const next = prev.slice(0, n)
+      const keep = new Set(next.map(sp => String(sp.player.id)))
+      let cursor = -1
+      pool.forEach((pl, i) => { if (keep.has(String(totwSelection(pl, i).player.id))) cursor = i })
+      totwCursor.current = cursor
+      setSelectedPlayers(next)
+      return
+    }
+    const have = new Set(prev.map(sp => String(sp.player.id)))
+    const add = []
+    let cursor = totwCursor.current
+    for (let i = cursor + 1; i < pool.length && prev.length + add.length < n; i++) {
+      cursor = i
+      const sp = totwSelection(pool[i], i)
+      if (!have.has(String(sp.player.id))) { add.push(sp); have.add(String(sp.player.id)) }
+    }
+    totwCursor.current = cursor
+    setSelectedPlayers([...prev, ...add])
+  }
+
   // ── Play.cricket fixtures / results round import ────────────────────────────
   const applyFxDate = useCallback((d, season) => {
     if (!d) return
@@ -2551,6 +2729,12 @@ export default function AdminSocialPost() {
     extraProps.club = clubMark
     extraProps.sponsors = scorecardMatch.meta.sponsors
   }
+  if (tmpl.kind === 'totw') {
+    // The competition stays as typed: a team of the week spans grades, so the
+    // 'COMPETITION' placeholder the other posts fall back to would print on it.
+    extraProps.totw = { round: matchData.round, date: matchData.date, comp: match.competition, showPoints: totwOpts.showPoints }
+    extraProps.sponsors = scorecardMatch.meta.sponsors
+  }
   if (tmpl.kind === 'singleresult') {
     const mapPerf = (arr) => (arr || []).map((p) => ({ n: p.last, l: p.line })).filter((p) => p.n || p.l)
     // POTM photo: an uploaded hero image wins, else the matched player's profile
@@ -2628,6 +2812,9 @@ export default function AdminSocialPost() {
     setPotmUrlStatus(null)
     setPotmPicks(null)
     setPotmImport({ status: null, data: null, playerIdx: 0, include: { bat: true, bowl: true, field: true } })
+    setTotwImport({ status: null, data: null, notice: null })
+    setTotwOpts({ showPoints: false })
+    totwCursor.current = -1
     setFixtures(DEFAULT_FIXTURES.map((f) => ({ ...f })))
     setResults(DEFAULT_RESULTS.map((r) => ({ ...r })))
     setRoundPages({ fixtures: { count: 1, idx: 0 }, results: { count: 1, idx: 0 } })
@@ -2777,7 +2964,7 @@ export default function AdminSocialPost() {
 
   // ─── Controls ────────────────────────────────────────────────────────────────
   const showMatchInfo = !['scorecard', 'events', 'blank'].includes(activeTab)
-  const showOpponent  = !['scorecard', 'fixtures', 'results', 'events', 'blank'].includes(activeTab)
+  const showOpponent  = !['scorecard', 'fixtures', 'results', 'totw', 'events', 'blank'].includes(activeTab)
   const showPlayers   = activeTab !== 'scorecard' && activeTab !== 'blank' && tmpl.maxPlayers > 0
   const showHeroImage = HERO_SLOT_TEMPLATES.includes(templateId)
   const HERO_SLOT_LAYOUT_NAMES = HERO_SLOT_TEMPLATES
@@ -2810,7 +2997,7 @@ export default function AdminSocialPost() {
       { label: 'Headline', value: announcement.headline, onChange: (v) => setAnnouncement((a) => ({ ...a, headline: v })) },
       { label: 'Subheadline', value: announcement.subheadline, onChange: (v) => setAnnouncement((a) => ({ ...a, subheadline: v })) },
     ]
-    else if (activeTab === 'fixtures' || activeTab === 'results') mFields = [
+    else if (activeTab === 'fixtures' || activeTab === 'results' || activeTab === 'totw') mFields = [
       { label: 'Round', value: match.round, onChange: (v) => patchMatch({ round: v }), placeholder: 'ROUND 7' },
       { label: 'Date', value: match.date, onChange: (v) => patchMatch({ date: v }), placeholder: 'SAT 30 MAY' },
     ]
@@ -3371,6 +3558,14 @@ export default function AdminSocialPost() {
                     <div className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faint mb-2">Paste the match link</div>
                     {potmImportControls}
                     <p className="text-pb-faintest text-[10px] mt-2 leading-relaxed">You can still edit the player and every stat after.</p>
+                  </div>
+                )}
+
+                {activeTab === 'totw' && (
+                  <div className="pb-card p-4">
+                    <TotwImportBox status={totwImport.status} notice={totwImport.notice} data={totwImport.data}
+                      onPull={() => loadTotw('')} onFetchLink={loadTotw} />
+                    <TotwSizeStepper count={selectedPlayers.length} poolSize={totwImport.data?.players?.length ?? null} onChange={changeTotwSize} />
                   </div>
                 )}
 
@@ -4143,6 +4338,38 @@ export default function AdminSocialPost() {
                     </select>
                   </Field>
                 </div>
+              </section>
+            )}
+
+            {/* Team of the week */}
+            {activeTab === 'totw' && (
+              <section className="pb-card p-4" data-testid="totw-section">
+                <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Team of the Week</h2>
+                <TotwImportBox status={totwImport.status} notice={totwImport.notice} data={totwImport.data}
+                  onPull={() => loadTotw('')} onFetchLink={loadTotw} />
+                <Field label="Team size">
+                  <TotwSizeStepper count={selectedPlayers.length} poolSize={totwImport.data?.players?.length ?? null} onChange={changeTotwSize} />
+                </Field>
+                <label className="flex items-center gap-2 mt-3 text-xs font-mono text-pb-text cursor-pointer">
+                  <input type="checkbox" checked={totwOpts.showPoints} onChange={(e) => setTotwOpts(o => ({ ...o, showPoints: e.target.checked }))} />
+                  Show points on the post
+                </label>
+                {selectedPlayers.length > 0 && (
+                  <div className="mt-4">
+                    <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Stat lines</label>
+                    <div className="flex flex-col gap-1.5">
+                      {selectedPlayers.map((sp, i) => (
+                        <div key={sp.player.id} className="flex items-center gap-2">
+                          <span className="font-mono text-[10px] text-pb-faintest w-5 shrink-0">{String(i + 1).padStart(2, '0')}</span>
+                          <span className="text-xs text-pb-dim w-24 shrink-0 truncate">{sp.player._name || sp.player.display_name || sp.player.name}</span>
+                          <input value={sp.totw?.line || ''} placeholder="87 (54) · 2/22"
+                            onChange={(e) => updatePlayer(i, { totw: { ...(sp.totw || {}), line: e.target.value } })}
+                            className="flex-1 min-w-0 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-xs text-pb-text font-mono placeholder:text-pb-faintest" />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </section>
             )}
 

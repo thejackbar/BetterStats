@@ -73,6 +73,10 @@
 48. A new top-level marketing route is a club slug until four lists know it: `og_preview.RESERVED_ROOT_SEGMENTS`, `FaviconManager.RESERVED_ROOTS`, `SponsorFooter.RESERVED_ROOT_SEGMENTS`, `lib/marketingPaths.MARKETING_PATHS`. Missing the last stacks the club Navbar over `MarketingNav`. Symptom: `/api/clubs/<route>` 404 on every visit.
 49. A sixth top-level nav link overflows at 820px; `Videos` carries `wide` (`hidden lg:block`).
 
+**Team of the week (v9.101.0, `social/totw-templates.jsx`, `social_rounds.social_totw`, `GET /admin/social/totw`)**
+50. The team lives in `selectedPlayers` (each slot carries `totw: {line, grade, opp, points}`), so add, remove and reorder are the lineup's own. The stepper reads `selectedPlayers.length` and never rebuilds from the ranking: growing appends the next ranked players not already picked, shrinking drops from the end, so a hand swap survives. Size is 6 to 14, default 11 (`TOTW_MIN/MAX/DEFAULT`).
+51. Scoring is `_rank_our_side`, the one function behind both the player of the match and the team of the week; change points there and both move. The pool is one entry per player (their better performance, not a sum, so the pick does not go to whoever played most). A layout that takes a variable count sizes cards and rows from the count; root children that are not `div`s must spread `style` to take a z-index, so masthead and footer are plain functions returning a `div`.
+
 ## Traps and failure signatures
 - Geometry checks pass but a layout reads wrong (black bands, clumped story names). Judge from real screenshots.
 - Hero layouts show a crest, not the cut-out: harness roster stubbed `photo_url: null`. Stubs must cover every conditional's data (give players a photo and a route for it).
@@ -87,7 +91,7 @@
 
 ## How to verify a change here
 - `frontend/verification/verify_post_designer_browser.mjs` (base URL as `argv[2]`): canvas and export node move together, layout fills the FULL canvas, scorecard keeps 1920x1080, design measurements unchanged at 1080, layer stack read off the OFF-SCREEN EXPORT NODE, saved template through a real reload, no overflow at 390px. Control against the previous commit must fail the reflow, portrait-design and layer sections (framed=true, empty layer list, every z 0, no Send to back).
-- Backend: `backend/verification/verify_instructional_videos.py` (real Postgres, shipped route bodies). `verify_videos_browser.mjs` with `canManage` forced true must fail the gate checks (signed-out and `club_admin` see no controls).
+- Backend: `backend/verification/verify_instructional_videos.py` (real Postgres, shipped route bodies). `backend/verification/verify_social_totw.py` (team of the week; the control run on the previous commit fails only the two `exists` checks, and its POTM and results digest must match byte for byte). `frontend/verification/verify_totw_browser.mjs` sweeps sizes 6 to 14 on both layouts at all three post sizes for overlap and overflow. `verify_videos_browser.mjs` with `canManage` forced true must fail the gate checks (signed-out and `club_admin` see no controls).
 - Harness: address the frame by `data-post-frame`. `backgroundColor` cannot see a gradient: measure BEFORE and AFTER. `display: contents` wrappers have no size: probe through them, and read a `null` as "my selector missed". Keep units consistent in one return object. CSS `uppercase` text returns uppercased from `innerText`.
 - Find checks that cannot fail: `comm -12 <(grep ^PASS run.log|sort) <(grep ^PASS control.log|sort)`; anything naming the new feature is a guard or passing for the wrong reason, so make it a contrast gated on the action having landed.
 - Control runs must report, not crash: anchor on the export button, read new elements through `textOf`/`seen`/`press`.
