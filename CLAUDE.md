@@ -184,6 +184,31 @@ cards called our side "Hamilton Veterans Cricket Club".
   manual innings 20, manual scorecard 25, games import 194, template 4, innings
   total 15, scorecard innings 28, scorebook browser 19.
 
+### A recorded winner the result and the scores both contradict (v9.98.7)
+
+Reported off Hamilton Veterans' 7 Feb 2012 CSV game: winning_team Portland,
+result "Lost by 7 Runs", scores Portland 159 v Vic Country 166. The importer
+copies `winning_team` verbatim and every screen reads it, so one wrong field
+beat two right ones.
+
+- **`services/manual_result.py` is the one rule**, applied by the CSV import,
+  the hand-entry create/update and `python -m app.scripts.settle_manual_winners
+  <org|all> [--apply]` (dry run by default). The winner changes only when the
+  result line opens with Won/Lost (a line naming a team is not read), the
+  recorded winner names the other side, it is one innings each, and the scores
+  agree with the result line. A tie, a missing total or a rain-rule result
+  where the lower score won is left as entered.
+- **Cheap on a big import**: scores are worked out (via the shipped
+  `get_scorecard`) only for a game whose winner and result line already
+  disagree. The import lists each change in its warnings.
+- **Card layout stays as it is**: header home/away, team cards in batting
+  order. That is the standard (Wisden and Cricinfo list the fixture home v
+  away, then the innings in the order they were batted).
+- **Verified** (`verify_manual_winner.py`, 25) **with a control run**: 7 fail,
+  the winner staying Portland. Neighbours: side names 24, CSV innings 31,
+  scorebook 47, manual innings 20, manual scorecard 25, games import 194.
+- **Run the script for Hamilton after deploying.**
+
 ## The club page a prospect searched their way to asks them to start (v9.91.0, Sep 2026)
 
 Reported as the paid funnel's biggest leak: ad -> /trial -> search -> a club's

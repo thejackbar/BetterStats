@@ -49,7 +49,7 @@ from app.models.db import (
     get_db,
 )
 from app.routers.auth import get_current_club, get_current_user
-from app.services import dismissal, game_import_staging, import_cleanup, scorebook_innings
+from app.services import dismissal, game_import_staging, import_cleanup, manual_result, scorebook_innings
 from app.services import import_ingest as ingest
 from app.services.grade_labels import suggest_categories, suggest_category
 from app.services.season_resolve import (
@@ -1691,6 +1691,11 @@ async def create_manual_game(
     await _replace_game_fow_partnerships(db, game.id, data.extracted_payload)
     await _replace_game_bowler_wickets(db, game.id, club.id, data.extracted_payload)
     await db.flush()
+    # A winner that contradicts both the result line and the scores is
+    # corrected to what those two agree on (services/manual_result).
+    settled = await manual_result.settle_manual_game(db, game, club)
+    if settled:
+        await db.flush()
     summary = (
         f"Added manual game ({data.played_at or 'date unknown'})"
         + (f" vs {data.opposition}" if data.opposition else "")
@@ -1712,7 +1717,10 @@ async def create_manual_game(
     await _recompute_milestones(db, club.id, _extract_player_ids(
         data.batting_innings + data.bowling_spells + data.fielding_stats
     ))
-    return _row_to_dict(game)
+    out = _row_to_dict(game)
+    if settled:
+        out["winner_corrected"] = manual_result.describe(settled)
+    return out
 
 
 @router.patch("/games/{game_id}")
@@ -1780,6 +1788,9 @@ async def update_manual_game(
         await _replace_game_fow_partnerships(db, gid, data.extracted_payload)
         await _replace_game_bowler_wickets(db, gid, club.id, data.extracted_payload)
     await db.flush()
+    settled = await manual_result.settle_manual_game(db, game, club)
+    if settled:
+        await db.flush()
     after = _row_to_dict(game)
     after["children"] = data.model_dump()
     summary = (
@@ -1802,6 +1813,8 @@ async def update_manual_game(
         db, club.id,
         old_player_ids + _extract_player_ids(data.batting_innings + data.bowling_spells + data.fielding_stats)
     )
+    if settled:
+        return {**after, "winner_corrected": manual_result.describe(settled)}
     return after
 
 
@@ -2703,6 +2716,7 @@ async def _write_games(
     authoritative_season_ids: set = set()
     ignored = 0
     ignored_synced = 0
+    winners_corrected: list[dict] = []
 
     for game_key, group in by_game.items():
         dup = existing_by_game.get(game_key)
@@ -2723,6 +2737,7 @@ async def _write_games(
         supersede_synced = bool(dup) and dup["source"] != "manual"
 
         first_row_num, first = group[0]
+        settled = None
         game_player_ids: set = set()
         game_id = None
         snapshot = None
@@ -2929,12 +2944,20 @@ async def _write_games(
                 _add_scorebook_innings(db, game.id, innings_meta,
                                        batters_by_innings, fow_by_innings)
                 await db.flush()
+                # A sheet whose winner contradicts both its own result line and
+                # its own scores is corrected to what those two agree on, and
+                # the import says so (services/manual_result).
+                settled = await manual_result.settle_manual_game(db, game, club)
+                if settled:
+                    await db.flush()
         except Exception as e:
             errors.append({"row": first_row_num, "error": f"Game '{game_key}': {e}", "data": first})
             continue
 
         created_game_ids.append(game_id)
         affected_player_ids |= game_player_ids
+        if settled:
+            winners_corrected.append(settled)
         if snapshot is not None:
             # The savepoint held, so the old game really is gone — record its
             # snapshot for undo, and count the players it took down so their
@@ -2960,6 +2983,7 @@ async def _write_games(
         "ignored_synced": ignored_synced,
         "errors": errors,
         "player_ids": affected_player_ids,
+        "winners_corrected": winners_corrected,
     }
 
 
@@ -3851,6 +3875,9 @@ async def commit_manual_games(
                         "players, so they add nothing to the totals until one "
                         "is synced or imported.")
             warnings.append(msg)
+
+    for change in written.get("winners_corrected") or []:
+        warnings.append(manual_result.describe(change))
 
     parts = [f"{games_new} games"]
     if overwritten:
