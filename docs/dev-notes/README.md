@@ -11,7 +11,7 @@ Nothing in this folder is loaded automatically. Do not `@`-import any file from 
 | `../../CLAUDE.md` | Universal rules and the "read this before working on that" index | Loaded every session |
 | `guides/<topic>.md` | The distilled standing rules, traps, verification habits, operator commands, open follow-ups and flags for one area. Ends with a coverage table for its archive. | Before you change that area |
 | `archive/<topic>.md` | The original release write-ups for that area, verbatim, in their original order. Each section is wrapped in `BEGIN` and `END` comments giving its line range in the untouched original. | When you need the reasoning, measurements or history behind a rule. Grep it, do not read it whole. |
-| `archive/CLAUDE.original-2026-09-30.md` | Byte-for-byte copy of `CLAUDE.md` as it stood before the split (1,234,024 bytes, 17,096 lines, sha256 `b5f64986edb497190c55217bcb2508e65b459ca99fe72da38c8368cca089d09b`) | Only to settle a doubt about the split |
+| `archive/CLAUDE.original-2026-09-30.md` | Byte-for-byte copy of `CLAUDE.md` as it stood before the split (1,235,853 bytes, 17,125 lines, sha256 `b5f64986edb497190c55217bcb2508e65b459ca99fe72da38c8368cca089d09b`) | Only to settle a doubt about the split |
 | `COVERAGE.md` | Checklist mapping every one of the 166 original sections to its archive file and guide, and mapping every code comment that says "see CLAUDE.md" to its new home | To find where an old section went |
 | `FLAGS.md` | Conflicting, superseded or possibly obsolete guidance found during the split, with a recommended action | Before trusting an old rule that looks odd |
 

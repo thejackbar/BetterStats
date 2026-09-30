@@ -13,7 +13,7 @@
 
 **Archive** (full history, verbatim, do not load whole): `docs/dev-notes/archive/club-directory-onboarding-and-admin-shell.md`. Grep hints: `playHQId`, `admin_broadcasts`, `next_pull_at`, `former_at`, `_onboard_club_core`, `password_protected`, `CORE_TILES`, `bs_setup_return`, `safeAccent2`, `migrate_fields`, `backfill_admin_mobiles`.
 
-**Related guides**: comms/segments (Segments `teaser_snapshot`, directory scope rule, `comms_contacts.role`); billing and trials (`start_trial_billing`, module entitlement); CRM/sales (`sync_super_admin_trial_deal`); public site/theme (`theme_config`); migrations and lifespan mirror (check `origin/main` before numbering a migration).
+**Related guides**: `marketing-funnel-ads-and-webinar` (its rules 52 to 54 hold the Rediscover gating, the separate cancel and the association refresh: those notes were nested inside the webinar section of the old file, so read them together with the committee Rediscover rules below); comms/segments (Segments `teaser_snapshot`, directory scope rule, `comms_contacts.role`); billing and trials (`start_trial_billing`, module entitlement); CRM/sales (`sync_super_admin_trial_deal`); public site/theme (`theme_config`); migrations and lifespan mirror (check `origin/main` before numbering a migration).
 
 ## Standing rules
 
