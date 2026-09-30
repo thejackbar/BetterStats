@@ -92,6 +92,7 @@ function StatusBadge({ status }) {
     manual: ['CHOSEN', 'text-green-300 border-green-300/30'],
     matched: ['MATCHED', 'text-green-300 border-green-300/30'],
     fuzzy: ['REVIEW', 'text-pb-amber border-pb-amber/30'],
+    suggested: ['SUGGESTED', 'text-pb-amber border-pb-amber/30'],
     none: ['NO MATCH', 'text-pb-red/70 border-pb-red/30'],
     ambiguous: ['MERGE FIRST', 'text-pb-red/70 border-pb-red/30'],
     new: ['NEW PLAYER', 'text-pb-accent border-pb-accent/40'],
@@ -940,7 +941,7 @@ function MatchTable({ title, subtitle, rows, kind, allOptions, valueFor, onChang
                   <tr key={(label || '') + i} className="pb-hairline-t align-middle">
                     <td className="py-2 pr-2 text-pb-text">
                       {label}
-                      {r.note && <div className="text-[10px] text-pb-red/60 mt-0.5">{r.note}</div>}
+                      {r.note && <div className={`text-[10px] mt-0.5 ${r.status === 'suggested' || r.status === 'fuzzy' ? 'text-pb-amber' : 'text-pb-red/60'}`}>{r.note}</div>}
                     </td>
                     <td className="py-2 pr-2"><StatusBadge status={r.status} /></td>
                     <td className="py-2 pr-2">
@@ -991,7 +992,7 @@ function PlayerMatch({ rows, allPlayers, overrides, setOverride, setOverridesBul
     rows.forEach(r => {
       const st = r.status
       if (['exact', 'manual', 'matched'].includes(st)) matched.push(r)
-      else if (['fuzzy', 'ambiguous'].includes(st)) close.push(r)
+      else if (['fuzzy', 'ambiguous', 'suggested'].includes(st)) close.push(r)
       else nomatch.push(r) // none, new, skip
     })
     return { matched, close, nomatch }

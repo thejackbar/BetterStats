@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import BrandLogo from '../BrandLogo'
 import { MODULES_MARKETING } from '../../data/modules-marketing'
+import { WatchDemoLink } from './DemoLinks'
 
 export default function MarketingFooter() {
   return (
@@ -17,6 +18,7 @@ export default function MarketingFooter() {
             <p className="text-pb-dim text-sm leading-relaxed max-w-sm mb-6">
               Everything an Australian cricket club runs on, in one place: stats and history, weekend selection, social posts, the back office and match prep.
             </p>
+            <WatchDemoLink placement="footer_brand" className="mb-5">Watch the demo</WatchDemoLink>
             <div className="flex gap-4 text-sm text-pb-dim">
               <a href="https://x.com/betterstatsau" target="_blank" rel="noopener noreferrer me" className="hover:text-pb-text transition-colors">Twitter</a>
               <a href="https://www.facebook.com/profile.php?id=61590372751599" target="_blank" rel="noopener noreferrer me" className="hover:text-pb-text transition-colors">Facebook</a>
@@ -41,6 +43,7 @@ export default function MarketingFooter() {
               <li><Link to="/pricing" className="text-sm text-pb-dim hover:text-pb-text">Pricing</Link></li>
               <li><Link to="/compare" className="text-sm text-pb-dim hover:text-pb-text">Compare</Link></li>
               <li><Link to="/blog" className="text-sm text-pb-dim hover:text-pb-text">Blog</Link></li>
+              <li><Link to="/demo" className="text-sm text-pb-dim hover:text-pb-text">Platform demo</Link></li>
               <li><Link to="/videos" className="text-sm text-pb-dim hover:text-pb-text">Videos</Link></li>
             </ul>
           </div>

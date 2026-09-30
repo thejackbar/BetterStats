@@ -65,6 +65,8 @@ _CTX_KEYS_TEXT = {
     "gender", "player_role", "overseas",
     "award_category", "award_subcategory", "award_name", "office_bearer",
     "family_id",
+    # One player: narrows the finished rows, never the figures on them.
+    "player_id",
 }
 _CTX_KEYS_INT = {
     "min_year", "max_year", "position_min", "position_max",

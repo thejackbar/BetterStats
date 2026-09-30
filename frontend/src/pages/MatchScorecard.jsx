@@ -98,8 +98,14 @@ function normaliseTeamName(s) {
 function distinctiveTeamWords(s) {
   return normaliseTeamName(s)
     .split(' ')
-    .filter(w => w && !/^\d+$/.test(w) && !GENERIC_TEAM_WORDS.has(w))
+    .filter(w => w && !AGE_TOKEN.test(w) && !GENERIC_TEAM_WORDS.has(w))
 }
+
+// A number, or an age band: "60s", "o60", "u14". Every side in an Over 60s or
+// Under 14s competition carries it, so it says nothing about which club a name
+// belongs to. Left distinctive, "Mt Gambier Over 60s" and "Portland Over 60s"
+// read as the same club and the header filed one side's score under the other.
+const AGE_TOKEN = /^[uo]?\d+s?$/
 
 // How strongly two team-name strings look like the same club. 0 = no evidence.
 // Word-level, never String.includes(), which would give false positives:
@@ -135,6 +141,7 @@ function winnerSide(winner, teamA, teamB) {
 function splitSides(inningsData) {
   const a = [], b = []
   const nameA = inningsData[0]?.battingTeam || ''
+  const same = (x, y) => !!x && !!y && normaliseTeamName(x) === normaliseTeamName(y)
   for (const inn of inningsData) {
     // No name recorded → fall back to alternating, which is right for the
     // ordinary case and no worse than guessing for anything else.
@@ -142,11 +149,39 @@ function splitSides(inningsData) {
       (inningsData.indexOf(inn) % 2 === 0 ? a : b).push(inn)
       continue
     }
-    const sameAsA = teamMatchScore(inn.battingTeam, nameA)
     const other = b[0]?.battingTeam
-    ;(sameAsA >= (other ? teamMatchScore(inn.battingTeam, other) : 0) && sameAsA > 0 ? a : b).push(inn)
+    // The same name, spelled the same way, is the same side. That settles
+    // almost every card, since both names come off the one match record.
+    if (same(inn.battingTeam, nameA)) { a.push(inn); continue }
+    if (same(inn.battingTeam, other)) { b.push(inn); continue }
+    // Spelled differently: judge the two sides against each other. With only
+    // one side seen so far a single shared word is not enough to call it the
+    // same team, or every innings of a match between two "Over 60s" sides
+    // lands on one side.
+    const sameAsA = teamMatchScore(inn.battingTeam, nameA)
+    if (other) {
+      (sameAsA > teamMatchScore(inn.battingTeam, other) ? a : b).push(inn)
+    } else {
+      const words = distinctiveTeamWords(inn.battingTeam)
+      const aWords = new Set(distinctiveTeamWords(nameA))
+      const allShared = words.length > 0 && words.every(w => aWords.has(w))
+      ;(allShared ? a : b).push(inn)
+    }
   }
   return { a, b, nameA, nameB: b[0]?.battingTeam || '' }
+}
+
+// Whether the side that batted first is the AWAY team. Both sides are judged
+// against both teams, so a name that fits neither (the club's own name on a
+// side the match calls "Portland Over 60s") is placed by the other one fitting.
+// Judging only "does side B look more like the home team than side A" read a
+// tie as "side A is home", which put the away side's score under the home
+// team whenever the away side batted first.
+function sidesSwapped(nameA, nameB, homeTeam, awayTeam) {
+  const fit = teamMatchScore
+  const asIs = fit(nameA, homeTeam) + fit(nameB, awayTeam)
+  const swapped = fit(nameA, awayTeam) + fit(nameB, homeTeam)
+  return swapped > asIs
 }
 
 function sideRuns(side) {
@@ -211,6 +246,8 @@ function WinnerTag() {
   )
 }
 
+const RESULT_CODES = new Set(['WIN', 'LOSS', 'DRAW', 'TIE', 'NO_RESULT', 'N/R'])
+
 function MatchHeader({ game, innings }) {
   const dateStr = game.played_at
     ? new Date(game.played_at).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
@@ -230,7 +267,13 @@ function MatchHeader({ game, innings }) {
     const rr = (runs != null && balls > 0) ? (runs / (balls / 6)).toFixed(2) : null
     return { ...inn, runs, wickets, oversStr, rr, battingTeam: t.batting_team || '', logoUrl: t.logo_url || null }
   })
-  const margin = marginText(game, inningsData)
+  // A margin in wickets depends on who batted last, so a match whose scorebook
+  // never recorded the batting order draws none rather than a guessed one.
+  const orderKnown = game.innings_order_known !== false
+  const margin = orderKnown ? marginText(game, inningsData) : null
+  // A match imported with no home or away side names the club and the
+  // opposition, and does not call either of them home.
+  const homeAwayKnown = game.home_away_known !== false
   const competition = [game.grade?.name, game.season?.name].filter(Boolean).join(' · ')
 
   // The header is deliberately home/away, NOT batting order — this is the
@@ -248,13 +291,17 @@ function MatchHeader({ game, innings }) {
   const awayTeam = game.away_team || ''
   const { a: sideA, b: sideB } = splitSides(inningsData)
   let homeInns = sideA, awayInns = sideB
-  if (sideB.length && homeTeam &&
-      teamMatchScore(sideB[0]?.battingTeam, homeTeam) > teamMatchScore(sideA[0]?.battingTeam, homeTeam)) {
+  if (sideB.length && (homeTeam || awayTeam) && sidesSwapped(sideA[0]?.battingTeam, sideB[0]?.battingTeam, homeTeam, awayTeam)) {
     homeInns = sideB
     awayInns = sideA
   }
   const winner = (game.winning_team || '').trim()
   const side = winnerSide(winner, homeTeam, awayTeam)
+  // A hand-entered result is the club's own sentence ("Lost By 30 Runs"),
+  // written from their side. In the neutral centre of the header it sat right
+  // beside an unnamed "won by 30 runs" and read as a contradiction, so when
+  // the winner and margin are known the header names the winner instead.
+  const sentenceResult = !!game.result && !RESULT_CODES.has(game.result)
   const homeWon = side === 'a'
   const awayWon = side === 'b'
 
@@ -301,19 +348,25 @@ function MatchHeader({ game, innings }) {
         <div className="px-5 pt-3 font-mono text-[10px] tracking-wide3 text-pb-faint">{competition}</div>
       )}
       <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 sm:gap-4 px-2 sm:px-4 py-1">
-        <Side label="HOME" teamName={homeTeam} inns={homeInns} won={homeWon} align="left" />
+        <Side label={homeAwayKnown ? 'HOME' : ''} teamName={homeTeam} inns={homeInns} won={homeWon} align="left" />
         <div className="flex flex-col items-center justify-center gap-1.5 px-2 min-w-[90px] sm:min-w-[130px]">
-          <ResultPill result={game.result || 'N/R'} />
-          {margin && (
+          {!sentenceResult && <ResultPill result={game.result || 'N/R'} />}
+          {margin && winner ? (
+            <div className="font-mono text-[10px] text-pb-dim text-center leading-snug" data-testid="match-margin">
+              <span className="text-pb-text font-bold">{winner}</span> {margin}
+            </div>
+          ) : sentenceResult ? (
+            <ResultPill result={game.result} />
+          ) : margin ? (
             <div className="font-mono text-[10px] text-pb-faint text-center leading-snug">{margin}</div>
-          )}
+          ) : null}
           {(dateStr || venue) && (
             <div className="font-mono text-[9px] tracking-wide2 text-pb-faintest text-center mt-1">
               {dateStr}{venue ? <><br />{venue}</> : ''}
             </div>
           )}
         </div>
-        <Side label="AWAY" teamName={awayTeam} inns={awayInns} won={awayWon} align="right" />
+        <Side label={homeAwayKnown ? 'AWAY' : ''} teamName={awayTeam} inns={awayInns} won={awayWon} align="right" />
       </div>
     </div>
   )
@@ -841,6 +894,7 @@ export default function MatchScorecard() {
     ...Object.keys(game.innings_totals || {}).map(k => Number(k) || 1),
   ])].sort((a, b) => a - b)
 
+  const orderKnown = game.innings_order_known !== false
   const innings = inningsNums.map(num => ({
     num,
     batting: [
@@ -865,9 +919,12 @@ export default function MatchScorecard() {
       total: t,
       battingTeam: t.batting_team || '',
       teamName: t.batting_team || `INNINGS ${i + 1}`,
-      label: `INNINGS ${i + 1}`,
+      // Numbered only when the order is known: "Innings 1" is a claim about
+      // who batted first that an imported scorebook cannot back.
+      label: orderKnown ? `INNINGS ${i + 1}` : 'INNINGS',
     }
   })
+  const orderKnownNote = !orderKnown && cards.length > 1
   // Which of the two sides each card belongs to, by the same rule the header
   // uses, so the WON badge is decided once for the match and a team's two
   // innings can never disagree about it.
@@ -886,6 +943,13 @@ export default function MatchScorecard() {
         </button>
 
         <MatchHeader game={game} innings={innings} />
+
+        {orderKnownNote && (
+          <p data-testid="innings-order-note" className="-mt-2 mb-4 text-[12px] text-pb-dim">
+            The scorebook this match came from records both innings but not which side batted first,
+            so the innings are shown club first.
+          </p>
+        )}
 
         {innings.length === 0 ? (
           <Card>

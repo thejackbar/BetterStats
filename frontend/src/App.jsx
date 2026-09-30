@@ -184,6 +184,7 @@ const SuperModuleRequests = lazy(() => import('./pages/admin/SuperModuleRequests
 const SuperCommsLimits = lazy(() => import('./pages/admin/SuperCommsLimits'))
 const SuperMarketing = lazy(() => import('./pages/admin/SuperMarketing'))
 const SuperAnnounce = lazy(() => import('./pages/admin/SuperAnnounce'))
+const SuperBroadcasts = lazy(() => import('./pages/admin/SuperBroadcasts'))
 const KlubproMigration = lazy(() => import('./pages/admin/klubpro/KlubproMigration'))
 const BetterSelectHome = lazy(() => import('./pages/admin/betterselect/BetterSelectHome'))
 const BsPlayers = lazy(() => import('./pages/admin/betterselect/BetterSelectPlayers'))
@@ -551,6 +552,7 @@ export default function App() {
               Kept live so an existing bookmark still lands. */}
           <Route path="/admin/super/directory-audiences" element={<Navigate to="/admin/comms/segments" replace />} />
           <Route path="/admin/super/announce" element={<ProtectedRoute requireRole="super_admin"><SuperAnnounce /></ProtectedRoute>} />
+          <Route path="/admin/super/broadcasts" element={<ProtectedRoute requireRole="super_admin"><SuperBroadcasts /></ProtectedRoute>} />
           <Route path="/admin/super/migration" element={<ProtectedRoute requireRole="super_admin"><KlubproMigration /></ProtectedRoute>} />
 
           {/* BetterSelect module */}

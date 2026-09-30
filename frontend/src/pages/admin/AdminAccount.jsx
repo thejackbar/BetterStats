@@ -582,6 +582,14 @@ export default function AdminAccount() {
                       )}
                     </div>
 
+                    {row.trial_blocked_reason === 'core_not_live' && (
+                      <p className="mt-2 pl-8 font-mono text-[10px] text-pb-faint">
+                        {row.core_trial_eligible
+                          ? 'Start your BetterStats trial first, then you can trial this module.'
+                          : 'Subscribe to BetterStats first, then you can use this module.'}
+                      </p>
+                    )}
+
                     {cancelling && (
                       <div className="mt-3 pt-3 border-t pb-hairline space-y-2">
                         <p className="font-mono text-[11px] text-pb-red">

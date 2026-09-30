@@ -375,6 +375,44 @@ _RESIDUAL_PLAYER_FILTERS = {
 }
 
 
+# ─── One player ────────────────────────────────────────────────────────────────
+#
+# `player_id` narrows a table to one player. It is deliberately NOT a
+# PLAYER_CONTEXT_FILTERS entry: every entry there switches player_career onto
+# the live per-innings path (needs_live), which counts a career from the
+# scorecards and so reads differently from the same player's row on the
+# unfiltered table. A player filter must never change the player's figures,
+# only which rows are listed, so it is applied as a plain restriction on the
+# finished rows instead — the same row the unfiltered table shows, alone.
+
+def _context_player_id(context: dict | None) -> str | None:
+    return _coerce_value("uuid", (context or {}).get("player_id"))
+
+
+def _with_player_filter(where_sql: str, context: dict | None, params: dict, clause: str) -> str:
+    """AND a one-player restriction onto a target's final WHERE. `clause` is
+    written against the finished rows and binds :ctx_player_id (text)."""
+    pid = _context_player_id(context)
+    if not pid:
+        return where_sql
+    params["ctx_player_id"] = pid
+    return f"{where_sql} AND ({clause})" if where_sql else f"WHERE ({clause})"
+
+
+_PLAYER_ROW_CLAUSE = "player_id = :ctx_player_id"
+_PARTNERSHIP_PLAYER_CLAUSE = "(batter1_id = :ctx_player_id OR batter2_id = :ctx_player_id)"
+# A match "this player played in": any of the four sources that put a player
+# on a scorecard, the same union _scoped_games_played reads. Manual games carry
+# no game_appearances row, which is why the scorecard tables are unioned in.
+_MATCH_PLAYER_CLAUSE = (
+    "game_id IN ("
+    "SELECT ga.game_id::text FROM game_appearances ga WHERE ga.player_id = CAST(:ctx_player_id AS UUID) "
+    "UNION SELECT bi.game_id::text FROM v_effective_batting_innings bi WHERE bi.player_id = CAST(:ctx_player_id AS UUID) "
+    "UNION SELECT bs.game_id::text FROM v_effective_bowling_spells bs WHERE bs.player_id = CAST(:ctx_player_id AS UUID) "
+    "UNION SELECT fs.game_id::text FROM v_effective_fielding_stats fs WHERE fs.player_id = CAST(:ctx_player_id AS UUID))"
+)
+
+
 def _residual_disqualified(context: dict, ic: list[str]) -> bool:
     """True when a filter is active that a residual (no-per-game-data) row
     simply cannot be tested against — see the block comment above."""
@@ -1323,6 +1361,7 @@ async def query_player_career(
     metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, metrics)
     params = {"org_id": org_id, "limit": limit, **mp, **ip, **pp, **metric_params}
     where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
+    where_sql = _with_player_filter(where_sql, context, params, _PLAYER_ROW_CLAUSE)
     needs_live = used_ctx or bool(ic) or bool(pc)
 
     if needs_live:
@@ -1524,6 +1563,7 @@ async def query_player_season(
     metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, metrics)
     params = {"org_id": org_id, "limit": limit, **mp, **ip, **pp, **metric_params}
     where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
+    where_sql = _with_player_filter(where_sql, context, params, _PLAYER_ROW_CLAUSE)
     needs_live = used_ctx or bool(ic) or bool(pc)
 
     if needs_live:
@@ -1751,6 +1791,7 @@ async def query_player_grade(
     metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, PLAYER_AGG_METRICS)
     params = {"org_id": org_id, "limit": limit, **mp, **ip, **pp, **metric_params}
     where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
+    where_sql = _with_player_filter(where_sql, context, params, _PLAYER_ROW_CLAUSE)
 
     cte = _player_agg_innings_cte(
         mc, ic, pc,
@@ -2241,6 +2282,7 @@ async def query_innings_list(
     metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, INNINGS_METRICS)
     params = {"org_id": org_id, "limit": limit, **mp, **ip, **pp, **metric_params}
     where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
+    where_sql = _with_player_filter(where_sql, context, params, _PLAYER_ROW_CLAUSE)
     innings_extra = (" AND " + " AND ".join(ic)) if ic else ""
     player_extra = (" AND " + " AND ".join(pc)) if pc else ""
 
@@ -2312,6 +2354,7 @@ async def query_spell_list(
     metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, SPELL_METRICS)
     params = {"org_id": org_id, "limit": limit, **mp, **pp, **metric_params}
     where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
+    where_sql = _with_player_filter(where_sql, context, params, _PLAYER_ROW_CLAUSE)
     player_extra = (" AND " + " AND ".join(pc)) if pc else ""
 
     universe = _game_universe_sql(mc)
@@ -2378,6 +2421,7 @@ async def query_match_list(
     metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, MATCH_METRICS)
     params = {"org_id": org_id, "limit": limit, **mp, **pp, **metric_params}
     where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
+    where_sql = _with_player_filter(where_sql, context, params, _MATCH_PLAYER_CLAUSE)
 
     universe = _game_universe_sql(mc)
     sql = f"""
@@ -2624,6 +2668,7 @@ async def query_partnership_list(
     metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, PARTNERSHIP_METRICS)
     params = {"org_id": org_id, "limit": limit, **mp, **pp, **metric_params}
     where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
+    where_sql = _with_player_filter(where_sql, context, params, _PARTNERSHIP_PLAYER_CLAUSE)
 
     universe = _game_universe_sql(mc)
     sql = f"""

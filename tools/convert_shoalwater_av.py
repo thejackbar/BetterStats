@@ -1187,7 +1187,55 @@ GAME_CSV_COLUMNS = [
     "bowling_overs", "bowling_maidens", "bowling_runs", "bowling_wickets",
     "bowling_wides", "bowling_no_balls",
     "fielding_catches", "fielding_catches_wk", "fielding_run_outs", "fielding_stumpings",
+    # The importer's optional innings columns (see GAME_CSV_COLUMNS in
+    # backend/app/routers/manual_entries.py for what each means).
+    "opp_innings_number", "batting_order_known",
+    "innings_total", "innings_wickets", "innings_overs",
+    "innings_byes", "innings_leg_byes", "innings_wides", "innings_no_balls", "innings_penalty",
+    "opp_total", "opp_wickets", "opp_overs",
+    "opp_byes", "opp_leg_byes", "opp_wides", "opp_no_balls", "opp_penalty",
+    "fow_wicket", "fow_score",
 ]
+
+
+def _blank(v):
+    return "" if v is None else v
+
+
+def innings_columns(leg: dict, n: int) -> dict:
+    """The innings figures for leg `n` of a match, in the importer's columns.
+
+    OUR INNINGS IS 2n-1 AND THEIRS IS 2n, and that is a convention, not the
+    batting order. The file's per-innings "innings number" is NOT who batted
+    first: of 51 matches where the winner plainly chased (won by six runs or
+    fewer with wickets in hand), the winner's own innings number reads 1 in 48
+    of them. Nothing else in the file records the order either, so every match
+    goes in club first and says so (`batting_order_known` false), and the match
+    page names each innings by its team rather than calling one of them "1st".
+
+    Our bowling goes in THEIR innings, which is the one our bowlers bowled in.
+    """
+    us, them = leg["us"], leg["them"]
+    out = {"batting_order_known": "false"}
+    if us["played"]:
+        out.update({
+            "innings_total": us["total"], "innings_wickets": _blank(us["wickets"]),
+            "innings_overs": _blank(us["overs"]),
+            "innings_byes": _blank(us["byes"]), "innings_leg_byes": _blank(us["leg_byes"]),
+            "innings_wides": _blank(us["wides"]), "innings_no_balls": _blank(us["no_balls"]),
+            "innings_penalty": _blank(us["penalty"]),
+        })
+    if them["played"] or any(b["bowled"] for b in leg["blocks"]):
+        out["opp_innings_number"] = 2 * n
+    if them["played"]:
+        out.update({
+            "opp_total": them["total"], "opp_wickets": _blank(them["wickets"]),
+            "opp_overs": _blank(them["overs"]),
+            "opp_byes": _blank(them["byes"]), "opp_leg_byes": _blank(them["leg_byes"]),
+            "opp_wides": _blank(them["wides"]), "opp_no_balls": _blank(them["no_balls"]),
+            "opp_penalty": _blank(them["penalty"]),
+        })
+    return out
 
 
 def build_game_rows(seasons: list, club: str,
@@ -1218,14 +1266,18 @@ def build_game_rows(seasons: list, club: str,
             # but it is not a win, a loss or a draw.
             result = IMPORT_RESULTS.get(played[0]["result_code"], "")
             winner = club if result == "WIN" else opponent if result == "LOSS" else ""
-            # A two-day match's two legs are our first and second innings, but
-            # both records routinely store innings number 1 - so the stored
-            # number is only usable when the legs actually disagree about it.
-            stored = [l["us"]["innings_no"] for l in played]
-            distinct = len(set(stored)) == len(stored) and all(stored)
+            # A two-day match's two legs are our first and second innings. The
+            # file's stored innings number is not usable for this (see
+            # `innings_columns`), so leg n is our innings 2n-1 and theirs 2n.
             before = len(rows)
             for n, l in enumerate(played, 1):
-                innings = l["us"]["innings_no"] if distinct else n
+                innings = 2 * n - 1
+                inn_cols = innings_columns(l, n)
+                # Which batter fell at each wicket, keyed on batting position:
+                # the file stores the position of the batter out, and the row
+                # for that position carries the wicket and the score.
+                fell = {w["batter_position"]: w for w in l["fow"]
+                        if w["batter_position"] is not None}
                 for b in l["blocks"]:
                     name = s["players"].get(b["player_id"], {}).get("name")
                     if not name:
@@ -1287,6 +1339,11 @@ def build_game_rows(seasons: list, club: str,
                         "fielding_catches_wk": b["wk_catches"] or "",
                         "fielding_run_outs": "",                   # not in the format
                         "fielding_stumpings": b["stumpings"] or "",
+                        **inn_cols,
+                        "fow_wicket": fell[b["position"]]["wicket"]
+                                      if b["position"] in fell else "",
+                        "fow_score": fell[b["position"]]["score"]
+                                     if b["position"] in fell else "",
                     })
             # A MATCH WITH NOBODY NAMED IS STILL A MATCH. Twelve of these are
             # forfeits, washouts and no-play draws where the club recorded the
@@ -1308,6 +1365,8 @@ def build_game_rows(seasons: list, club: str,
                     # empty template rather than from the one above.
                     "is_final": "true" if type_code in FINALS_TYPES else "",
                     "match_format": fmt,
+                    # The scores are still worth having where nobody was named.
+                    **(innings_columns(played[0], 1) if played else {}),
                 })
                 rows.append(blank)
     return rows

@@ -9,6 +9,13 @@ from app.services.club_grades import club_game_sql
 from app.services.grade_scope import GradeScope
 from app.services.game_status import NOT_PLAYED_SQL_LIST, appearance_counts_as_match
 from app.services import rate_coverage as rc
+from app.services.game_sides import sides_sql
+
+# The two sides of a game on a player's innings history. A scorebook import
+# leaves home/away blank, so the pair is named from the club and the
+# opposition (services/game_sides). `s` is the seasons alias every one of
+# these queries already joins.
+_SIDES = sides_sql("g", "SELECT o.name FROM organisations o WHERE o.id = s.organisation_id")
 
 # "Does this roster appearance count as a match played" — one definition,
 # interpolated into every query below that counts matches off
@@ -1337,8 +1344,7 @@ async def get_player_batting_innings(
                 bi.batting_position,
                 bi.innings_number,
                 g.id::text AS game_id,
-                g.home_team,
-                g.away_team,
+                {_SIDES},
                 g.played_at::text,
                 g.result,
                 COALESCE(gr.display_name_override, gr.name) AS grade_name,
@@ -1393,8 +1399,7 @@ async def get_player_bowling_spells(
                 bs.economy,
                 bs.innings_number,
                 g.id::text AS game_id,
-                g.home_team,
-                g.away_team,
+                {_SIDES},
                 g.played_at::text,
                 g.result,
                 COALESCE(gr.display_name_override, gr.name) AS grade_name,

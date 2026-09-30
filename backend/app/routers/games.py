@@ -1,3 +1,4 @@
+import re
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import false, select, text
@@ -55,13 +56,25 @@ async def _fetch_manual_games_as_list(
     if finals_only:
         q = q.where(ManualGame.is_final.is_(True))
     rows = await db.execute(q)
+    rows = rows.all()
+    # A scorebook import names its opposition and leaves home/away blank
+    # (the book never recorded which was which), so a blank pair is named
+    # from the club and its opposition rather than listed as nothing at all.
+    # Same rule get_org_results and get_scorecard apply.
+    org_name = None
+    if any(not g.home_team and not g.away_team and g.opposition for g, _, _ in rows):
+        org_name = await db.scalar(select(Organisation.name).where(Organisation.id == org_id))
     out = []
-    for game, grade, season in rows.all():
+    for game, grade, season in rows:
+        home, away, known = game.home_team, game.away_team, True
+        if not home and not away and game.opposition:
+            home, away, known = (org_name or "Our team"), game.opposition, False
         out.append({
             "id": str(game.id),
             "played_at": game.played_at.isoformat() if game.played_at else None,
-            "home_team": game.home_team,
-            "away_team": game.away_team,
+            "home_team": home,
+            "away_team": away,
+            "home_away_known": known,
             "result": game.result,
             "winning_team": game.winning_team,
             "grade": ({"id": str(grade.id), "name": grade.display_name, "raw_name": grade.name}
@@ -606,6 +619,59 @@ def _merge_manual_innings(rows, innings_totals: dict, our_name: Optional[str], o
             meta["overs"] = float(mi.overs)
 
 
+def _team_key(name: Optional[str]) -> str:
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", (name or "").lower()).split())
+
+
+def _manual_side_names(game, org) -> tuple[str, str]:
+    """The names a hand-entered game's two sides are shown under: ours, theirs.
+
+    A club often plays under a team name that is not the club's own
+    ("Portland Over 60s" at Hamilton Veterans Cricket Club), and the match
+    records that name as its home or away side. Our innings is labelled with
+    the side the MATCH calls ours, never the club's name: the page places each
+    innings under a home/away team by matching these names, so a label the
+    match does not use cannot be placed and the header filed our score under
+    the opposition's heading.
+
+    Ours is whichever of home/away is not the opposition. Where the opposition
+    field matches neither (a different spelling), the side sharing a word with
+    the club's own name is ours; failing that, the club's name is used as
+    before.
+    """
+    home = (game.home_team or "").strip()
+    away = (game.away_team or "").strip()
+    opp = (getattr(game, "opposition", None) or "").strip()
+    club = ((org.name if org else None) or "").strip()
+
+    ours = theirs = None
+    if opp and home and away:
+        if _team_key(opp) == _team_key(away):
+            ours, theirs = home, away
+        elif _team_key(opp) == _team_key(home):
+            ours, theirs = away, home
+    if ours is None and home and away and club:
+        club_words = set(_team_key(club).split()) - _GENERIC_SIDE_WORDS
+        h = len(club_words & set(_team_key(home).split()))
+        a = len(club_words & set(_team_key(away).split()))
+        if h != a:
+            ours, theirs = (home, away) if h > a else (away, home)
+    if ours is None and opp and (home or away) and not (home and away):
+        single = home or away
+        if _team_key(single) != _team_key(opp):
+            ours, theirs = single, opp
+    return (ours or club or home or "Our team"), (theirs or opp or away or "Opposition")
+
+
+# Words every club in a competition shares, so sharing one says nothing about
+# which side is ours. The mirror of MatchScorecard.jsx's GENERIC_TEAM_WORDS.
+_GENERIC_SIDE_WORDS = {
+    "the", "and", "of", "cc", "cricket", "club", "team", "association", "senior",
+    "seniors", "junior", "juniors", "men", "mens", "women", "womens", "grade",
+    "division", "over", "under", "veterans", "vets", "masters", "xi",
+}
+
+
 @router.get("/{game_id}/scorecard")
 async def get_scorecard(
     game_id: str,
@@ -659,7 +725,10 @@ async def get_scorecard(
         select(BS, Player)
         .outerjoin(Player, Player.id == BS.player_id)
         .where((BS.manual_game_id if is_manual else BS.game_id) == game.id)
-        .order_by(BS.innings_number)
+        # Within an innings, the order the spells were recorded in: the
+        # hand-entry form and a CSV import both write bowlers in the order they
+        # bowled (the CSV by its bowling_order column), so the id is that order.
+        .order_by(BS.innings_number, BS.id)
     )
     bowling_rows = bowling_res.all()
 
@@ -1224,8 +1293,7 @@ async def get_scorecard(
     # A hand-entered game records its innings side / extras / opposition totals
     # in manual_innings instead (a photo upload has none, so these never clash).
     if is_manual and manual_innings_rows:
-        _our_name = (org.name if org else None) or game.home_team or "Our team"
-        _opp_name = game.opposition or game.away_team or "Opposition"
+        _our_name, _opp_name = _manual_side_names(game, org)
         _merge_manual_innings(manual_innings_rows, innings_totals, _our_name, _opp_name)
 
     # A `players` row can exist with an unusable name — a stale placeholder row
@@ -1246,10 +1314,27 @@ async def get_scorecard(
             _row["player_name"] = "********"
             _row["is_redacted"] = True
 
+    # A match imported from a club's own scorebook often names its opposition
+    # and never says who was home. Rather than a header of two blank sides, name
+    # them from the club and the opposition, and say the home/away is unknown so
+    # the page does not label them HOME and AWAY.
+    home_team, away_team = game.home_team, game.away_team
+    home_away_known = True
+    if is_manual and not home_team and not away_team and getattr(game, "opposition", None):
+        home_team = (org.name if org else None) or "Our team"
+        away_team = game.opposition
+        home_away_known = False
+
     return {
         "id": str(game.id),
-        "home_team": game.home_team,
-        "away_team": game.away_team,
+        "home_team": home_team,
+        "away_team": away_team,
+        "home_away_known": home_away_known,
+        # False only for an imported match whose source recorded both innings
+        # and not the order they were batted in. The page then names each card
+        # by its team rather than "Innings 1" and draws no winning margin, since
+        # a margin in wickets depends on who batted last.
+        "innings_order_known": getattr(game, "innings_order_known", None) is not False,
         "played_at": game.played_at.isoformat() if game.played_at else None,
         "result": game.result,
         "winning_team": game.winning_team,

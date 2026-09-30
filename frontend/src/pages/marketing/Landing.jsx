@@ -9,6 +9,7 @@ import ScreenshotOrMock from '../../components/marketing/ScreenshotOrMock'
 import DotField from '../../components/marketing/DotField'
 import SelfServeTrialModal from '../../components/admin/SelfServeTrialModal'
 import TrustedByStrip from '../../components/marketing/TrustedByStrip'
+import { DemoBand, WatchDemoLink } from '../../components/marketing/DemoLinks'
 import {
   MockHeritageCard,
   MockLeaderboard,
@@ -89,7 +90,8 @@ function Hero({ onCta }) {
             <a href="#showcase" className="cta-secondary">See it in action</a>
           </div>
 
-          <div className="mb-7">
+          <div className="mb-7 flex flex-col sm:flex-row sm:items-center gap-x-6 gap-y-2 items-center">
+            <WatchDemoLink placement="hero">Watch the full demo</WatchDemoLink>
             <Link to="/overview" className="text-sm text-accent font-medium hover:underline inline-flex items-center gap-1">
               See everything BetterCricket does →
             </Link>
@@ -521,7 +523,10 @@ function FinalCTA({ onCta }) {
               <button type="button" onClick={onCta} className="cta-primary">Request club access →</button>
               <Link to="/pricing" className="cta-secondary">See pricing</Link>
             </div>
-            <p className="text-xs text-pb-faint">From $399/yr · One Core, your modules · Flat rate per club</p>
+            <p className="text-xs text-pb-faint mb-4">From $399/yr · One Core, your modules · Flat rate per club</p>
+            <p className="text-sm text-pb-dim">
+              Not ready yet? <WatchDemoLink placement="final_cta">Watch the full demo first</WatchDemoLink>
+            </p>
           </div>
         </div>
       </div>
@@ -547,6 +552,7 @@ export default function Landing() {
         <ValueProps />
         <StatBanner />
         <Showcase />
+        <DemoBand />
         <Features />
         <ModulesTeaser />
         <Comparison3Way />

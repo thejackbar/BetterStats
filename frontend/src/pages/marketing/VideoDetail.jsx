@@ -9,6 +9,7 @@ import { useSelfServeTrialGate } from '../../hooks/useSelfServeTrialGate'
 import { VideoEditorModal } from '../../components/marketing/VideoManager'
 import { useVideos } from '../../hooks/useVideos'
 import { videoModuleCta } from '../../lib/videoModule'
+import { WatchDemoLink } from '../../components/marketing/DemoLinks'
 
 const SITE = 'https://betterat.cricket'
 
@@ -208,6 +209,12 @@ export default function VideoDetail() {
         {video.description && (
           <p className="mt-10 text-pb-dim leading-relaxed whitespace-pre-line">{video.description}</p>
         )}
+
+        <p className="mt-6 text-sm text-pb-dim" data-testid="video-demo-line">
+          This video covers one part of BetterCricket.{' '}
+          <WatchDemoLink placement="video_detail">Watch the full demo</WatchDemoLink>{' '}
+          to see how it all fits together.
+        </p>
 
         {/* CTA — follows the module the video is filed under. A selection
             walkthrough that ends by pitching BetterStats sends an interested

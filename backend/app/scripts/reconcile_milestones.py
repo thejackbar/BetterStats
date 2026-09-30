@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import time
 import uuid
 
 from sqlalchemy import select
@@ -102,8 +103,13 @@ async def run(target: str, apply: bool) -> int:
         return 1
 
     total_added = total_removed = total_dated = 0
-    for club_id, name, slug in club_refs:
+    many = len(club_refs) > 1
+    for n, (club_id, name, slug) in enumerate(club_refs, 1):
+        started = time.monotonic()
         async with async_session_maker() as session:
+            # A reconcile reads the effective views many times over; JIT
+            # compiling each of those plans costs more than running them.
+            await session.execute(text("SET jit = off"))
             rows = (await session.execute(
                 select(Player.id, Player.display_name_override, Player.name)
                 .where(Player.organisation_id == club_id))).all()
@@ -117,10 +123,16 @@ async def run(target: str, apply: bool) -> int:
             ev = await _evidence(session, club_id, removed)
         if apply and (added or removed):
             async with async_session_maker() as session:
+                await session.execute(text("SET jit = off"))
                 report = await _compute_milestones(
                     session, list(names), club_id, reconcile=True)
             added, removed = report["added"], report["removed"]
             dated = set(report.get("dated") or [])
+        if many:
+            # A club with nothing to change prints nothing else, so without this
+            # a long run looks exactly like a stuck one.
+            print(f"[{n}/{len(club_refs)}] {name}: {len(removed)} to remove,"
+                  f" {len(added)} to add ({time.monotonic() - started:.1f}s)")
         if not added and not removed:
             continue
         total_added += len(added)

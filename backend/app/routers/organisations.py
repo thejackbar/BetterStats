@@ -11,6 +11,7 @@ from app.models.db import Organisation, Season, Grade, User, ClubMembership, Mar
 from app.services import playhq_client
 from app.services import fonts as font_service
 from app.services import grade_scope
+from app.services import game_sides
 from app.services import player_visibility
 from app.services.sync import sync_organisation, upsert_organisation
 from app.services.aggregations import get_upcoming_milestones_for_org, get_recently_achieved_milestones_for_org, get_club_summary
@@ -826,8 +827,17 @@ async def get_org_results(
     # stored — falling back to the raw g.result when winning_team is NULL
     # (a symmetric draw/tie/no-result, or a row where home_org_id/
     # away_org_id can't place either side, e.g. not yet backfilled).
-    query = """
-        SELECT g.id, g.played_at, g.home_team, g.away_team,
+    # A match imported from a club's own scorebook names its opposition and
+    # leaves home/away blank, because the scorebook never recorded which was
+    # which. The list still has to name both sides, so a blank pair on a
+    # manual game falls back to the club and its opposition, and
+    # home_away_known says the order is not a claim. Same rule the match page
+    # (games.get_scorecard) applies, so the list and the page agree.
+    sides = game_sides.sides_sql(
+        "g", "SELECT o.name FROM organisations o WHERE o.id = CAST(:org_id AS UUID)")
+    query = f"""
+        SELECT g.id, g.played_at,
+               {sides},
                CASE
                    WHEN g.winning_team IS NULL THEN g.result
                    WHEN g.home_org_id = CAST(:org_id AS UUID) AND g.winning_team = g.home_team THEN 'WIN'
@@ -893,6 +903,9 @@ async def get_org_results(
             "played_at": r.played_at.isoformat() if r.played_at else None,
             "home_team": r.home_team,
             "away_team": r.away_team,
+            # False for a scorebook import whose sides are named from the
+            # club and its opposition rather than a recorded home/away.
+            "home_away_known": bool(r.home_away_known),
             "result": r.result,
             "winning_team": r.winning_team,
             "grade_name": r.grade_name,

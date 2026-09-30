@@ -127,9 +127,15 @@ export default function GamesPage() {
   const [searchParams] = useSearchParams()
   const urlGradeApplied = useRef(false)
 
-  // Default season — honour ?season= if valid, else most recent.
+  // Default season — honour ?season= if valid, else most recent. ONCE: after
+  // that a null season is the visitor choosing "All seasons", and defaulting
+  // again on every null is what snapped that choice straight back to the
+  // newest season.
+  const seasonDefaulted = useRef(false)
   useEffect(() => {
-    if (seasons.length > 0 && selectedSeason == null) {
+    if (seasonDefaulted.current || seasons.length === 0) return
+    seasonDefaulted.current = true
+    if (selectedSeason == null) {
       const fromUrl = searchParams.get('season')
       setSelectedSeason(fromUrl && seasons.some(s => s.id === fromUrl) ? fromUrl : seasons[0].id)
     }

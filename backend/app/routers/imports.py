@@ -240,6 +240,22 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
     seasons = await _org_seasons(db, org_id)
     grade_options = await _org_grade_options(db, org_id) if grade_col else []
     pmatch = ingest.match_players(names, players)
+    # A short form of a club player's first name ("Steve" for "Steven") is
+    # proposed and pre-selected, never written silently — import_ingest's note
+    # on short forms says why each guard is there.
+    suggestions = ingest.short_form_suggestions(names, players, pmatch)
+    if suggestions:
+        years_by_name: dict = {}
+        if season_col:
+            for r in req.rows:
+                nm = row_name(r)
+                if nm in suggestions:
+                    years_by_name.setdefault(nm, set()).update(
+                        ingest._season_years(str(r.get(season_col, ""))))
+        ingest.apply_short_form_suggestions(
+            pmatch, suggestions, req.player_overrides,
+            {n: (min(v), max(v)) for n, v in years_by_name.items() if v},
+            await recon.career_years(db, org_id, [s["player_id"] for s in suggestions.values()]))
     _apply_player_overrides(pmatch, req.player_overrides)
     smatch = ingest.match_seasons(labels, seasons) if season_col else {}
     _apply_season_overrides(smatch, req.season_overrides)
@@ -253,7 +269,7 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
     games_col = _col(req.mapping, "games_played")
     sheet_runs_col = _col(req.mapping, "batting_runs")
     sheet_wkts_col = _col(req.mapping, "bowling_wickets")
-    need_sheet = {n for n, m in pmatch.items() if m.get("status") in ("fuzzy", "ambiguous", "none")}
+    need_sheet = {n for n, m in pmatch.items() if m.get("status") in ("fuzzy", "ambiguous", "none", "suggested")}
     sheet_by_name: dict = {}
 
     is_season = req.granularity == "season" and bool(season_col)

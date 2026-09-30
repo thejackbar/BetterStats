@@ -22,6 +22,7 @@ const TONE = {
   manual: 'text-pb-positive',
   matched: 'text-pb-positive',
   fuzzy: 'text-amber-400',
+  suggested: 'text-amber-400',
   new: 'text-pb-accent-ink',
   skip: 'text-pb-dim',
   ambiguous: 'text-red-400',
@@ -32,7 +33,7 @@ const TONE = {
 // Every state is a word as well as a colour — a verdict told apart by colour
 // alone is unreadable for a good share of readers.
 const WORD = {
-  exact: 'MATCHED', manual: 'CHOSEN', matched: 'MATCHED', fuzzy: 'CHECK THIS',
+  exact: 'MATCHED', manual: 'CHOSEN', matched: 'MATCHED', fuzzy: 'CHECK THIS', suggested: 'SUGGESTED, CHECK THIS',
   new: 'WILL BE CREATED', skip: 'LEFT OUT', ambiguous: 'TWO PLAYERS SHARE THIS NAME',
   none: 'NEEDS AN ANSWER', ungraded: 'NO GRADE',
 }
@@ -246,6 +247,16 @@ export default function ManualGamesImportWizard({ onDone }) {
           hold yet are created as part of the import — you say which, before anything
           is written, and Audit &amp; Undo takes the whole thing back.
         </p>
+        <p className="text-sm text-pb-dim mb-3">
+          Sundries and totals go in the innings columns: innings_total, innings_byes and so on
+          for your side, opp_total, opp_byes and so on for theirs (or innings_extras /
+          opp_extras for a single sundries figure). Set opp_innings_number to the innings the
+          opposition batted, and each player&apos;s bowling is filed against it. Number
+          bowling_order 1, 2, 3 in the order your bowlers came on and the match page lists
+          them that way. The home_team or away_team that is your side should be the name
+          your team played under (Portland Over 60s, say), with the other one matching the
+          opposition column. The template has a worked example.
+        </p>
         <div className="flex flex-wrap items-center gap-3">
           <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={pickFile}
                  className="text-sm text-pb-dim file:mr-3 file:px-3 file:py-1.5 file:rounded file:border-0 file:bg-pb-surface2 file:text-pb-text file:text-xs" />
@@ -398,7 +409,8 @@ export default function ManualGamesImportWizard({ onDone }) {
                 </p>
               </div>
               {unmatchedCount > 0 && (
-                <button className={`${BTN_SECONDARY} ml-auto`} onClick={createAllUnmatched} disabled={!!busy}>
+                <button className={`${BTN_SECONDARY} ml-auto`} onClick={createAllUnmatched} disabled={!!busy}
+                  title="Only names with nothing chosen yet. A suggested match stays as it is.">
                   Create all {unmatchedCount} as new players
                 </button>
               )}
@@ -426,6 +438,9 @@ export default function ManualGamesImportWizard({ onDone }) {
                     )}
                     <option value="__skip__">Leave them out</option>
                   </select>
+                  {p.note && (
+                    <span className="basis-full text-[11px] text-amber-400" data-testid="player-match-note">{p.note}</span>
+                  )}
                 </div>
               ))}
             </div>

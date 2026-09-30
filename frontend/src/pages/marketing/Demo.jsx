@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom'
 import MarketingNav from '../../components/MarketingNav'
 import MarketingFooter from '../../components/marketing/MarketingFooter'
 import TrustedByStrip from '../../components/marketing/TrustedByStrip'
+import VideoThumb from '../../components/marketing/VideoThumb'
+import { useVideos } from '../../hooks/useVideos'
 import { api } from '../../lib/api'
 import { SUPPORT_EMAIL } from '../../data/marketing'
 import { usePageMeta } from '../../hooks/usePageMeta'
@@ -12,7 +14,9 @@ import { getAttribution, getVisitorId } from '../../lib/visitor'
 import { getMetaEventContext } from '../../lib/metaPixel'
 import {
   WEBINAR, WEBINAR_ICS_URL, WEBINAR_RECORDING_EMBED_URL, googleCalendarUrl, webinarState,
+  trackDemoClick,
 } from '../../data/webinar'
+import { DemoPoster } from '../../components/marketing/DemoLinks'
 
 // The webinar registration page — the destination for a paid Meta campaign
 // whose ad set optimises for the `CompleteRegistration` pixel event.
@@ -185,6 +189,14 @@ function SuccessState({ state, recordingPending, watchUrl }) {
 // link before the recording existed, and now that it does, sending people off
 // to StreamYard to watch a video that plays right here is friction for nothing.
 function RecordingState() {
+  // The StreamYard embed draws its own thumbnail, which is set in StreamYard
+  // and is not the poster the rest of the site uses. So the player sits behind
+  // our poster and only loads once somebody presses play: the page shows the
+  // same frame the home page and /videos show, and a visitor who never presses
+  // play never pulls StreamYard's player in at all.
+  const [playing, setPlaying] = useState(false)
+  const embedSrc = WEBINAR_RECORDING_EMBED_URL
+    + (WEBINAR_RECORDING_EMBED_URL.includes('?') ? '&' : '?') + 'autoplay=1'
   return (
     <div className="text-left" data-testid="demo-recording">
       {/* 16:9, sized with padding-bottom rather than an aspect class so the box
@@ -193,15 +205,26 @@ function RecordingState() {
         className="rounded-xl overflow-hidden border pb-hairline bg-black"
         style={{ position: 'relative', width: '100%', paddingBottom: '56.25%' }}
       >
-        <iframe
-          src={WEBINAR_RECORDING_EMBED_URL}
-          title="BetterCricket live demo recording"
-          data-testid="demo-recording-frame"
-          allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-          allowFullScreen
-          loading="lazy"
-          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0 }}
-        />
+        {playing ? (
+          <iframe
+            src={embedSrc}
+            title="BetterCricket live demo recording"
+            data-testid="demo-recording-frame"
+            allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+            allowFullScreen
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0 }}
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => { trackDemoClick('demo_page_play'); setPlaying(true) }}
+            aria-label="Play the BetterCricket demo recording"
+            data-testid="demo-recording-poster"
+            className="group absolute inset-0 w-full h-full"
+          >
+            <DemoPoster eager className="absolute inset-0 !rounded-none !border-0 w-full h-full" />
+          </button>
+        )}
       </div>
 
       <div className="pb-card p-6 mt-4 bg-pb-surface">
@@ -549,6 +572,42 @@ function RegistrationForm({ state, onSuccess }) {
   )
 }
 
+// Once the recording is up, the how-to library is the natural next step: the
+// demo shows how it all fits together, these go deeper one job at a time. Read
+// live from the library, so a video added later appears here with no edit.
+// Draws nothing while the library is empty or has not loaded.
+function GoDeeper() {
+  const { videos } = useVideos()
+  if (!videos.length) return null
+  const shown = videos.slice(0, 4)
+  return (
+    <div className="mt-12" data-testid="demo-go-deeper">
+      <div className="flex items-baseline justify-between gap-4 mb-5">
+        <h2 className="font-display font-bold text-2xl">Go deeper, one module at a time</h2>
+        <Link to="/videos" className="text-sm text-accent font-medium hover:underline whitespace-nowrap">
+          See all videos →
+        </Link>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+        {shown.map((v) => (
+          <Link key={v.id} to={`/videos/${v.slug}`} className="group block">
+            <VideoThumb poster={v.poster} title={v.title} />
+            <div className="pt-3">
+              {v.module_label && (
+                <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">{v.module_label}</p>
+              )}
+              <div className="flex items-baseline gap-3">
+                <p className="font-display font-semibold text-base leading-snug group-hover:text-accent transition-colors">{v.title}</p>
+                {v.duration && <span className="ml-auto shrink-0 font-mono text-[11px] text-pb-faint tabular-nums">{v.duration}</span>}
+              </div>
+            </div>
+          </Link>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function Demo() {
   // The StreamYard link and the recording link are the two things the page
   // can't know for itself, so they come from the server. Everything else — the
@@ -670,6 +729,8 @@ export default function Demo() {
                 </div>
               ))}
             </div>
+
+            {state.past && <GoDeeper />}
 
             {/* One screenshot, reusing an existing site asset — lazy and
                 explicitly sized so it can't shift the layout or drag LCP. */}

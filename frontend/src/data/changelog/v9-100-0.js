@@ -1,7 +1,7 @@
 export default {
   version: 'v9.100.0',
   date: '2026-09-30',
-  sortKey: '2026-09-30T12:00:00Z',
+  sortKey: '2026-10-07T09:00:00Z',
   title: 'BetterSelect comes to BetterFootball',
   items: [
     'Pick your side on a football ground: eighteen named positions in six lines, an interchange bench of up to ten and your emergencies. Tap a player, then tap where they play. It works the same on a phone at training as at a desk.',

@@ -8,6 +8,9 @@
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
+// Mirrors auth/modules.py PAID_STATUSES: genuinely paying, not a trial.
+const PAID = new Set(['active', 'past_due'])
+
 // The subscribe flow lives at /admin/account; the ?subscribe= deep link
 // pre-ticks the named module checkboxes for the primary admin (and auto-adds
 // core when an add-on needs it), so we hand it the modules actually on trial.
@@ -29,7 +32,18 @@ export function trialStatus(user) {
   if (user.role === 'super_admin' && !user.acting_as_club) return null
 
   const mods = user.entitlements?.billing_modules || []
-  const trials = mods.filter((m) => m.status === 'trial' && m.trial_ends_at)
+  // A club already paying for something (typically BetterStats after a
+  // self-serve trial of every module) has NOT lost access when the other
+  // modules' trials run out: it chose not to add them. An expired trial row
+  // stays status 'trial' with a past end (module_subscriptions
+  // .sweep_expired_trials keeps it as a record), so without this every such
+  // club would be told its trial had ended and it should "restore full
+  // access", which is false. For a paying club only a trial still RUNNING is
+  // worth a nudge, and it is worded as adding a module, not keeping access.
+  const paying = mods.some((m) => PAID.has(m.status) && m.live)
+  const trials = mods.filter(
+    (m) => m.status === 'trial' && m.trial_ends_at && (!paying || m.live)
+  )
   if (!trials.length) return null
 
   const soonest = trials.reduce((a, b) =>
@@ -41,9 +55,11 @@ export function trialStatus(user) {
   const daysLeft = Math.ceil(
     (new Date(soonest.trial_ends_at).getTime() - Date.now()) / DAY_MS
   )
-  const expired = daysLeft < 0 || !soonest.live
+  const expired = !paying && (daysLeft < 0 || !soonest.live)
 
   return {
+    paying,
+    names: trials.map((t) => t.name).filter(Boolean),
     trials,
     soonest,
     daysLeft,
@@ -51,4 +67,12 @@ export function trialStatus(user) {
     others: trials.length - 1,
     subscribePath: subscribePath(trials),
   }
+}
+
+// "BetterSelect", "BetterSelect and BetterIQ", "BetterSelect, BetterIQ and
+// BetterSocials": the modules a paying club is still trialling, by name.
+export function moduleList(names) {
+  const n = (names || []).filter(Boolean)
+  if (n.length <= 1) return n[0] || 'your trial modules'
+  return `${n.slice(0, -1).join(', ')} and ${n[n.length - 1]}`
 }

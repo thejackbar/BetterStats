@@ -6,6 +6,7 @@ import { dashboardTiles, statusLabel, statusIsLive, MODULE_TOGGLES } from '../..
 import { moduleBrand } from '../../lib/moduleBrand'
 import AdminLayout from '../../components/admin/AdminLayout'
 import SyncRunCard from '../../components/admin/SyncRunCard'
+import AdminBroadcastBanner from '../../components/admin/AdminBroadcastBanner'
 import { formatSeason } from '../../lib/cricketFormat'
 
 const fmtDate = (d) =>
@@ -88,6 +89,9 @@ function ModuleTile({ mod, entitled, planRow, pendingKind, coreLive, canSubscrib
   // a module that's already been trialled (or is mid-cancellation) has
   // nothing to offer here, so showing the button would just fail silently.
   const trialEligible = !planRow || planRow.trial_eligible
+  // An add-on's trial is held back while BetterStats itself isn't live — it would
+  // do nothing and still use the trial up — so say why instead of just hiding it.
+  const needsCoreFirst = planRow?.trial_blocked_reason === 'core_not_live'
   return (
     <div className="pb-card p-5 opacity-75" style={{ ...brandVars, borderStyle: 'dashed' }}>
       <div className="flex items-center justify-between gap-4">
@@ -136,6 +140,13 @@ function ModuleTile({ mod, entitled, planRow, pendingKind, coreLive, canSubscrib
           </>
         )}
       </div>
+      {needsCoreFirst && !pendingKind && (
+        <p className="font-mono text-[10px] text-pb-faint mt-2">
+          {planRow.core_trial_eligible
+            ? 'Start your BetterStats trial first, then you can trial this module.'
+            : 'Subscribe to BetterStats first, then you can use this module.'}
+        </p>
+      )}
       {error && <p className="font-mono text-[10px] text-pb-red mt-2">{error}</p>}
     </div>
   )
@@ -319,6 +330,8 @@ export default function AdminDashboard() {
   return (
     <AdminLayout>
       <div className="max-w-3xl">
+        {/* Messages from BetterCricket's own staff, first thing on the page. */}
+        <AdminBroadcastBanner />
         <h1 className="font-display font-bold text-2xl text-pb-text mb-1">
           Welcome{user?.display_name ? `, ${user.display_name}` : ''}
         </h1>

@@ -339,12 +339,23 @@ def account_plan_status(org, now: datetime | None = None) -> list[dict]:
     so a paid module that skipped a trial doesn't dangle a pointless "start
     trial" offer). ``can_subscribe`` is simply "not already a real paying
     subscription" — available during a trial too, so a club can convert
-    early."""
+    early.
+
+    An ADD-ON's trial is only offered while BetterStats (Core) is live
+    (``org_core_live``): ``org_entitled_modules`` switches every add-on off
+    whenever Core has lapsed, so a trial started then would do nothing AND use up
+    the club's one trial of that module. Such a row reports
+    ``trial_eligible: False`` with ``trial_blocked_reason: "core_not_live"``, and
+    ``core_trial_eligible`` says whether the way out is a fresh Core trial or a
+    Core subscription."""
     subs = _loaded_subscriptions(org)
     if subs is None:
         return []
     now = now or _now()
     by_key = {s.module_key: s for s in subs}
+    core_live = org_core_live(org, now)
+    core_rows = [by_key[m] for m in expand_billing_module(MODULE_CORE) if m in by_key]
+    core_trial_eligible = not any(s.trial_started_at is not None for s in core_rows)
     out = []
     for billing_key in BILLABLE_MODULES:
         member_rows = [by_key[m] for m in expand_billing_module(billing_key) if m in by_key]
@@ -366,13 +377,17 @@ def account_plan_status(org, now: datetime | None = None) -> list[dict]:
         else:  # STATUS_TRIAL
             status = STATUS_TRIAL_EXPIRED if sub_is_trial_expired(best, now) else STATUS_TRIAL
 
+        never_used = not ever_trialled and status != STATUS_SUBSCRIBED
+        blocked = "core_not_live" if (never_used and billing_key != MODULE_CORE and not core_live) else None
         out.append({
             "module": billing_key,
             "name": BILLABLE_MODULE_NAMES.get(billing_key, billing_key),
             "status": status,
             "renewal_date": best.renewal_date.isoformat() if best and best.renewal_date else None,
             "trial_ends_at": trial_ends_at.isoformat() if trial_ends_at else None,
-            "trial_eligible": not ever_trialled and status != STATUS_SUBSCRIBED,
+            "trial_eligible": never_used and blocked is None,
+            "trial_blocked_reason": blocked,
+            "core_trial_eligible": core_trial_eligible if blocked else None,
             "can_subscribe": status != STATUS_SUBSCRIBED,
         })
     return out

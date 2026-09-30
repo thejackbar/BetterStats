@@ -75,6 +75,253 @@ batters and bowlers, fixtures from PlayHQ, AFL-compliant selection rules.
 - **NOTICED, NOT BUILT**: football votes could offer the picked side as an
   eligibility source on game night (they read the synced team list); nothing
   pushes a side back to PlayHQ.
+## BetterCricket's messages on the club admin dashboard (migration 312, v9.99.0, Oct 2026)
+
+Asked for: a super admin sends a one-line message visible only on the Club
+Admin Dashboard, to all clubs, chosen clubs or chosen users, with a choice of
+how long it lasts (a time period, until cleared, until seen once, and so on),
+and it has to work on every device.
+
+- **`admin_broadcasts` + `admin_broadcast_receipts`**, DDL once in
+  `services/admin_broadcast_ddl.py` (alembic 312 and the lifespan both run it).
+  Router `routers/admin_broadcasts.py`. Screen `SuperBroadcasts.jsx` at
+  `/admin/super/broadcasts` (Better HQ > Comms > Dashboard Messages); banner
+  `components/admin/AdminBroadcastBanner.jsx`, mounted ABOVE the Welcome
+  heading in `AdminDashboard.jsx` and nowhere else.
+- **Audience** is `all` | `clubs` (org_ids) | `users` (user_ids), and for the
+  first two `audience_roles` narrows it: `all_admins` (club_admin AND
+  club_member, the admin-app users), `club_admins`, `primary`. A named-user list
+  is never narrowed by role. Archived clubs are never in the reach count, and
+  the composer refuses an archived club or a user who is not a club admin.
+- **Persistence** is `until_cleared` (no close button) | `dismissible` |
+  `view_once_user` | `view_once_club`, and `expires_at` stops ANY of them. A
+  super admin can always clear, restore, reset views or delete.
+- **VIEW-ONCE RUNS ON A RECEIPT THE BROWSER POSTS AFTER DRAWING**, not on the
+  GET. The GET computes what shows from receipts written on an EARLIER view, so
+  the view that shows it is the one view. `/seen` only records ids the user can
+  see right now, so a browser cannot plant a receipt.
+- **STAFF SEE A PREVIEW AND WRITE NOTHING.** A super admin or sales user acting
+  as a club gets every live message aimed at it (including a named-user one for
+  someone at that club), marked `preview`, and `/seen` and `/dismiss` store
+  nothing — a staff glance must not use up a club's view-once message.
+- **Verified against a real Postgres** (`verify_admin_broadcasts.py`, 56 checks
+  through the shipped route bodies) **with a control run** (view-once and the
+  primary filter neutered: 3 fail), and **in Chromium**
+  (`verify_admin_broadcasts_browser.mjs`, 80: above the heading at 1440/768/390,
+  the most urgent first, the close target at least 36px, a long URL wrapping,
+  the seen and dismiss calls, the preview writing nothing, and the composer's
+  payload and reach) **with a control run** (banner unmounted: 5 fail).
+- **Noticed, not fixed**: the dashboard's module tiles already overflow 7px at
+  768px (an ADD-ON/SOON label), with or without a message.
+
+## An importer pre-selects "Steve" for the club's "Steven" (v9.97.2, Sep 2026)
+
+Reported off Shoalwater Bay's re-import: the archive writes "Salter, Steve",
+"Staines, Ken", "Cribbs, Rod"; the synced roster holds Steven, Kenneth,
+Rodney. The matcher offered each as a close match (or, for Chris against
+Christopher at 0.80, as no match at all), and "Create all as new players" swept
+them into second records, each holding half a career, which the milestone
+reconcile then read as milestones to delete.
+
+- **A SEPARATE STEP, NOT A CHANGE TO `match_players`.** Twelve callers use it
+  (CricketStatz, awards, the scorecard reader, AFL); only the two stats
+  importers opt in, through `import_ingest.short_form_suggestions` and
+  `apply_short_form_suggestions`. Every other caller's output is byte-for-byte
+  what it was.
+- **`import_ingest.is_short_form` IS THE ONE RULE**, and Merge Duplicates'
+  `admin._first_name_link` now calls it, so the importer and the name-variant
+  merge pairs cannot disagree about what a short form is: same surname, one
+  first name a prefix of the other, at least 3 letters, middles compatible.
+  A nickname that is not a prefix (Bob/Robert) is never claimed.
+- **PRE-SELECTED, NEVER SILENT** (status `suggested`, with a note naming both
+  careers). Refused outright where two club players fit, or where another name
+  on the SAME SHEET reaches that player (a sheet naming both "Steve" and
+  "Steven" is telling us they are two people).
+- **CAREERS MORE THAN `MAX_CAREER_GAP_YEARS` (5) APART ARE OFFERED, NOT
+  CHOSEN** (`import_reconcile.career_years`, every source on the effective
+  view, ids bound as an array). A 1990s Greg and a 2023 Gregory is the shape
+  of a son under his father's name. An undated career does not block.
+  **Overlap does not block either**, deliberately: an archive and CA cover the
+  same seasons for the same person all the time, so an overlap cannot tell a
+  father and son apart. That residual risk is why it is pre-selected on
+  screen rather than written.
+- **Run BEFORE the overrides**, so a person's own answer always wins, and
+  "Create all" only ever reached rows with no player_id, so a suggested row is
+  untouched by it with no frontend logic of its own.
+- **Measured on real rosters before building**: Shoalwater's 350 archive names
+  find exactly the 10 real pairs (Fletcher Greg/Gregory, 23 years apart, is
+  offered not chosen); Applecross's 1,633 players hold only 2 same-surname
+  pairs the rule could even reach.
+- **Verified against a real Postgres** (`verify_short_form_match.py`, 39
+  checks through both importers' shipped route bodies, incl. the reported
+  Create-all-then-import ending on the club's own record with no second
+  Salter) **with a control run**: 12 fail with the pre-selection off, the
+  import minting "Salter, Steve". **Driven in Chromium**
+  (`verify_short_form_match_browser.mjs`, 11; control: 3 fail). Neighbours:
+  manual games import 194, CricketStatz 305, team labels 17.
+- **Shoalwater still holds seven such pairs from the re-import** (Boddy,
+  Fletcher, Hankey, Johnson, Marwood, Spinks, Trigg). They need Merge
+  Duplicates; Fletcher Greg / Gregory is the one to check before merging.
+
+## A scorebook import carries the opposition, the score and the stands (migration 311, v9.97.0, Sep 2026)
+
+Reported off Shoalwater Bay's CSFW archive: an imported fixture showed no
+opposition team, no opposition score and no partnerships, so none of those
+matches could appear in Highest Partnerships. Built rather than asking the club
+for more data; the fix is a re-import of the converted archive.
+
+- **THE ARCHIVE HAD IT ALL ALONG; THE CSV SHAPE COULD NOT CARRY IT.** CSFW's
+  `.AV` stores both innings blocks (total, wickets, overs, extras) and the fall
+  of wickets as (score, batting position out). The match CSV had columns for our
+  batting and bowling rows and nothing else, so the converter had nowhere to put
+  the rest. `GAME_CSV_COLUMNS` gained `opp_innings_number`,
+  `batting_order_known`, `innings_*` / `opp_*` figures and `fow_wicket` /
+  `fow_score`, written to the existing `manual_innings` (310),
+  `manual_fall_of_wickets` and `manual_partnerships` tables, which already flow
+  through the `v_effective_*` views to the match page and the record boards.
+- **READ BEFORE THE BLANK-PLAYER SKIP.** A match where nobody on our side is
+  named still carries the opposition's innings, so the innings meta is taken off
+  every row, and "nobody named" rows still carry it.
+- **OUR BOWLERS ARE FILED UNDER THE OPPOSITION'S INNINGS NUMBER.** They were
+  filed under our own innings, which is why they read as bowling at our batters.
+  A sheet giving opposition figures with no `opp_innings_number` is refused, as
+  is one innings given as both sides'.
+- **`innings_no` IS NOT BATTING ORDER, and the data proved it.** In 51 clear
+  chases the chasing winner carried innings_no 1 in 48. So the converter numbers
+  by leg (ours 2n-1, theirs 2n) and sends `batting_order_known=false`;
+  `manual_games.innings_order_known` (311) records it and the match page draws
+  "INNINGS" unnumbered, no winning margin, no HOME/AWAY for blank home/away
+  teams, and a note saying why. NULL (every existing game) reads as known, so no
+  other match changes.
+- **PARTNERSHIPS ARE DERIVED AND REFUSED WHEN THEY DO NOT RECONCILE.**
+  `services/scorebook_innings.derive_partnerships` walks the batting order
+  against the fall of wickets and returns None on a gap, a batter out who is not
+  at the crease, a score going backwards or a wicket count disagreeing. A stand
+  credited to the wrong pair sits on a record board under two names that never
+  batted together, which is worse than none. 889 of 917 innings derive, 8,011
+  stands; the other 28 keep their fall of wickets.
+- **Undo restores them.** `_EXTRA_GAME_CHILDREN` puts the three child tables in
+  the edit/delete snapshot, so an undone or restored game keeps them.
+- **THE MATCH PAGE NAMING THE OPPOSITION WAS NOT ENOUGH (v9.97.1).** The
+  Games page, the Team pages and the innings tables on a player's profile read
+  `home_team`/`away_team` straight off `v_effective_games`, and a scorebook
+  import leaves both blank, so every imported match still listed as "— vs —"
+  there. `services/game_sides.sides_sql` is the one rule: a blank pair on a
+  manual game with an opposition is named from the club and its opposition,
+  with `home_away_known=false` on the row. Used by `get_org_results` and the
+  two innings-history queries in `aggregations`; `_fetch_manual_games_as_list`
+  applies it in Python. Found by auditing every reader of the two columns, not
+  by the report, which was about the match page. Suite is 47; a control with
+  the readers reverted fails 4, reporting `home_team: None`.
+- **Verified against a real Postgres** (`verify_scorebook_innings.py`, 43
+  checks through the shipped import route, `get_scorecard` and `get_records`:
+  the rule on its own, the reported match, a non-reconciling innings refused, an
+  older sheet importing unchanged, self-contradicting sheets refused, and the
+  snapshot round trip) **with a control run**: 28 fail against the previous
+  commit, the card reading "None v None" with no opposition innings. **Driven in
+  Chromium** (`verify_scorebook_import_browser.mjs`, 19, against the payload the
+  backend suite wrote) **with a control run**: 4 fail, reporting numbered
+  innings, HOME/AWAY and "won by 65 runs". Neighbours re-run: manual games
+  import 194, manual innings 20, manual scorecard 25, scorecard innings total
+  15, the converter's own 30.
+- **Recovery for Shoalwater**: undo the earlier CSFW import batch, re-import the
+  regenerated `manual_games_scorecards.csv`, then re-run `repair_overwrite_pairs`
+  and `reconcile_milestones` for the club.
+
+### The template a club downloads, a single sundries figure, edit undo (v9.98.2)
+
+Asked off Hamilton Veterans' support thread: should the CSV carry every
+sundry a club has? It already did, itemised, through the columns above. A
+second scheme was written for this before `origin/main` was re-checked and
+found to have shipped these; it was thrown away rather than shipped beside
+them. **Fetch `origin/main` before building on an import format.**
+
+- **THE TEMPLATE'S EXAMPLE WAS POSITIONAL AND HAD DRIFTED.** 32 values against
+  53 columns, one column out from `batting_caught_behind` onwards, and not one
+  innings or `opp_*` column filled. Imported as-is, it filed the example's
+  bowlers in innings 1 against their own batters, which is the reported bug.
+  It is built from dicts keyed on the column name now, uses the downloading
+  club's name, and models `opp_innings_number` for bowling.
+- **`innings_extras` / `opp_extras` → `manual_innings.extras_total`**, the CSV
+  twin of the hand-entry form's "Or total". Itemised figures still win, per
+  `_merge_manual_innings`.
+- **UNDOING AN EDIT NOW RESTORES THE INNINGS FIGURES**; delete and overwrite
+  already did. `_restore_extra_children` is the one restore loop. **It only
+  replaces a child table the snapshot holds**: an edit logged before these
+  were snapshotted has no keys, and reading that as "there were none" would
+  delete a scorebook import's fall of wickets the edit never touched.
+- **Verified** (`verify_csv_innings_import.py`, 31: the template imported end
+  to end and its scorecard to the run, the single figure both sides, itemised
+  winning, and all three undos) **with three controls**: the previous commit
+  fails 26; the edit snapshot alone removed fails 1; the key guard alone
+  removed fails 1. Neighbours: manual games import 194, scorebook innings 47,
+  manual innings 20, manual scorecard 25, template route 4.
+
+### Our innings is named for the team the match says, not the club (v9.98.6)
+
+Reported by Hamilton Veterans, who play as "Portland Over 60s": on entered
+games the header drew each side's score under the other side's name, and the
+cards called our side "Hamilton Veterans Cricket Club".
+
+- **THE STORED DATA WAS RIGHT; ONLY THE PAGE WAS WRONG.** Every innings, total
+  and batting side read correctly off the live payload. `get_scorecard` labelled
+  our innings with `org.name`, a name the match's home/away does not use, so the
+  header could not place it and fell back to "innings 1 is home".
+- **"60s" WAS READ AS A CLUB WORD.** `distinctiveTeamWords` kept "60s", so
+  "Mt Gambier Over 60s" scored as a partial match for "Portland Over 60s" and the
+  header swapped the scores even when Portland batted first. `AGE_TOKEN`
+  (`/^[uo]?\d+s?$/`) is generic now.
+- **`games._manual_side_names` is the one rule**: ours is whichever of home/away
+  is not the opposition (punctuation-insensitive), else the side sharing a
+  non-generic word with the club's name, else a single named side that is not
+  the opposition, else the club's name as before.
+- **The header judges both sides against both teams** (`sidesSwapped`); a tie no
+  longer means "innings 1 is home". `splitSides` files by exact normalised name
+  first, and with only one side seen it needs every distinctive word shared, or
+  both innings of a match between two "Over 60s" sides land on one side (the
+  control run shows exactly that).
+- **The team cards stay in batting order** under a home/away header, per the
+  v8.79.2 instruction. The club's feedback also asked for the cards to sit under
+  their header columns; that reverses a deliberate call and was raised, not built.
+- **`bowling_order` on the match CSV.** Spells are held and written in that
+  order, and every read of manual spells orders by `id` (the scorecard, the edit
+  form, the edit and delete snapshots), so a later edit or undo keeps it. No
+  migration: insertion order is the order.
+- **Games page "All seasons" defaulted again on every null season** and snapped
+  back to the newest. Defaults once now (`seasonDefaulted` ref).
+- **Verified** (`backend/verification/verify_manual_side_names.py`, 24 through
+  the shipped routes against a real Postgres; control: 12 fail) and in Chromium
+  (`frontend/verification/verify_manual_scorecard_sides_browser.mjs`, 56, over
+  the club's six real payloads with the club name and with the team name, plus
+  the live Games page; control: 17 fail, reporting the reported 20 Mar and 5 Feb
+  swaps and 2026/27 coming back). Neighbours: CSV innings 31, scorebook 47,
+  manual innings 20, manual scorecard 25, games import 194, template 4, innings
+  total 15, scorecard innings 28, scorebook browser 19.
+
+### A recorded winner the result and the scores both contradict (v9.98.7)
+
+Reported off Hamilton Veterans' 7 Feb 2012 CSV game: winning_team Portland,
+result "Lost by 7 Runs", scores Portland 159 v Vic Country 166. The importer
+copies `winning_team` verbatim and every screen reads it, so one wrong field
+beat two right ones.
+
+- **`services/manual_result.py` is the one rule**, applied by the CSV import,
+  the hand-entry create/update and `python -m app.scripts.settle_manual_winners
+  <org|all> [--apply]` (dry run by default). The winner changes only when the
+  result line opens with Won/Lost (a line naming a team is not read), the
+  recorded winner names the other side, it is one innings each, and the scores
+  agree with the result line. A tie, a missing total or a rain-rule result
+  where the lower score won is left as entered.
+- **Cheap on a big import**: scores are worked out (via the shipped
+  `get_scorecard`) only for a game whose winner and result line already
+  disagree. The import lists each change in its warnings.
+- **Card layout stays as it is**: header home/away, team cards in batting
+  order. That is the standard (Wisden and Cricinfo list the fixture home v
+  away, then the innings in the order they were batted).
+- **Verified** (`verify_manual_winner.py`, 25) **with a control run**: 7 fail,
+  the winner staying Portland. Neighbours: side names 24, CSV innings 31,
+  scorebook 47, manual innings 20, manual scorecard 25, games import 194.
+- **Run the script for Hamilton after deploying.**
 
 ## The club page a prospect searched their way to asks them to start (v9.91.0, Sep 2026)
 
@@ -199,6 +446,12 @@ short of 200 catches on 201, and J Hind 18 from 3,000 "including junior games".
   no game at all, it is undated. `_compute_milestones` reports `dated`, and
   `reconcile_milestones` marks those additions and prints line-buffered so a run
   redirected to a file can be `tail -f`'d. Control run: 3 of 81 fail.
+  **That first cut made an all-clubs run take 3+ hours (v9.95.1)**: it joined
+  `v_effective_games` for EVERY player at every club. It now asks only about the
+  players with a candidate addition not already history by the season test, off
+  the base `games`/`manual_games` tables (a paired twin carries the same date),
+  the script sets `jit = off`, and an `all` run prints `[n/N] club: … (Ns)` per
+  club so a slow run cannot read as a stuck one.
 - **Verified against a real Postgres** (`verify_milestone_figures.py`, 72
   checks now; a control run with the profile-only writer fails the 3 new ones,
   removing Hetel's 1,000-5,000 runs; the original 66
@@ -6327,6 +6580,33 @@ because a football club has several people with the same name and the numbers
 are what tells them apart. **The navbar's breakpoint moved from `md` to `lg`**:
 with a search box in the bar there is no room for six links at 768px, and
 splitting the two would have left that width with neither.
+
+## StatLab: one player, and tabs that reshape the filters (v9.96.0, Sep 2026)
+
+Asked for off the StatLab screen: a Player filter as the first thing in Build
+custom query, and the table-type tabs (Player career, Player season...) to do
+something, since they only swapped the target and left the filters identical.
+
+- **`context.player_id` IS DELIBERATELY NOT A `PLAYER_CONTEXT_FILTERS` ENTRY.**
+  Every entry there sets `needs_live`, which moves player_career onto the
+  per-innings path and counts the career from scorecards, so a player's
+  filtered row would read differently from the same row unfiltered.
+  `_with_player_filter` ANDs a restriction onto each target's FINAL WHERE
+  instead: the row the unfiltered table shows, alone. Match list reads "matches
+  he played in" (the four-source union), Partnerships "either batter". Not
+  applied to family targets, team innings or derived reports, and the UI hides
+  the picker there.
+- **`TARGET_GUIDE` (StatLab.jsx) is which filters mean anything per target**,
+  read off what each backend query actually applies (`ic`/`pc` usage). A tab
+  click runs the table, snaps the sort, and `pruneContext`/`pruneTree` DROP what
+  the new target cannot use rather than hiding it, so no hidden filter keeps
+  scoping results. Keep it in step when a target starts or stops honouring a
+  context filter.
+- **Verified**: `backend/verification/verify_statlab_player_filter.py` (17
+  checks, real Postgres, the filtered row equal to the unfiltered one on both
+  paths; control: 11 fail) and `frontend/verification/verify_statlab_player_browser.mjs`
+  (23; control: 16 fail). `verify_rate_coverage.py` gained a `__main__` guard so
+  it can be imported for its schema and seed.
 
 ## StatLab gets the platform's Grade Type / Match Type filters (v9.29.4, Aug 2026)
 

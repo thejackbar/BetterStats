@@ -56,7 +56,7 @@ spec = importlib.util.spec_from_file_location(
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
 
-src = Path(sys.argv[1] if len(sys.argv) > 1 else HERE.parent / "data/shoalwater-av")
+src = Path(sys.argv[1] if len(sys.argv) > 1 else HERE.parent / "data/shoalwater-av-2026-09")
 files = sorted(p for p in src.iterdir() if p.suffix.lower() == ".av")
 seasons = [m.parse_file(p) for p in files]
 print(f"{len(files)} files, {len(seasons)} seasons, from {src}\n")
