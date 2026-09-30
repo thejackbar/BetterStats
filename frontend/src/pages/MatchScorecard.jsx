@@ -612,6 +612,77 @@ function TeamCard({ label, teamName, opponentName, won = false, batting = [], bo
   )
 }
 
+// A fielding line is a per-player TALLY, not a per-wicket record. A scorebook
+// (and the archive imports built from one) says how many catches a player took
+// in the match, never which batter each one dismissed, so the dismissal text on
+// the card reads a bare "c". This is where those catches are read from.
+//
+// `catches` is meant to include keeper catches, but an imported row can carry
+// its keeper catches in `catches_wk` alone, so the larger of the two is the
+// total taken. Only the columns somebody actually has a figure in are drawn.
+function FieldingSection({ fielding = [], fmtName = n => n }) {
+  const rows = fielding
+    .map(f => {
+      const wk = f.catches_wk || 0
+      return {
+        ...f,
+        wk,
+        total: Math.max(f.catches || 0, wk),
+        st: f.stumpings || 0,
+        ro: f.run_outs || 0,
+      }
+    })
+    .filter(f => f.total + f.st + f.ro > 0)
+    .sort((a, b) => (b.total + b.st + b.ro) - (a.total + a.st + a.ro)
+      || String(a.player_name || '').localeCompare(String(b.player_name || '')))
+  if (!rows.length) return null
+  const cols = [
+    { key: 'total', label: 'CATCHES' },
+    { key: 'wk', label: 'CT (WK)' },
+    { key: 'st', label: 'STUMPINGS' },
+    { key: 'ro', label: 'RUN OUTS' },
+  ].filter(c => rows.some(r => r[c.key] > 0))
+  return (
+    <div data-testid="fielding-section" className="pb-card overflow-hidden mt-4">
+      <div className="px-5 py-3 pb-hairline-b">
+        <p className="font-mono text-[10px] tracking-wide3 text-pb-faint">FIELDING</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="font-mono text-[10px] tracking-wide2 text-pb-faint">
+              <th className="text-left font-normal px-5 py-2">PLAYER</th>
+              {cols.map(c => (
+                <th key={c.key} className="text-right font-normal px-4 py-2">{c.label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={`${r.player_id || r.player_name}-${i}`} className="pb-hairline-t">
+                <td className="px-5 py-2 text-pb-text">
+                  {r.player_id ? (
+                    <Link to={`/players/${r.player_id}`} className="hover:text-pb-accent transition-colors">
+                      {fmtName(r.player_name || '')}
+                    </Link>
+                  ) : (
+                    <span>{fmtName(r.player_name || '')}</span>
+                  )}
+                </td>
+                {cols.map(c => (
+                  <td key={c.key} className="px-4 py-2 text-right font-mono pb-num text-pb-text">
+                    {r[c.key] > 0 ? r[c.key] : <span className="text-pb-faintest">—</span>}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 function FallOfWicketsSection({ fow = [], fmtName = n => n }) {
   if (!fow.length) return null
   const byInnings = fow.reduce((acc, f) => {
@@ -980,6 +1051,7 @@ export default function MatchScorecard() {
           </div>
         )}
 
+        <FieldingSection fielding={game.fielding ?? []} fmtName={fmtName} />
         <FallOfWicketsSection fow={game.fall_of_wickets ?? []} fmtName={fmtName} />
         <PartnershipsSection partnerships={game.partnerships ?? []} fmtName={fmtName} />
       </main>

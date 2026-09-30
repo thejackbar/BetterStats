@@ -813,6 +813,7 @@ async def get_scorecard(
                 "player_id": str(fs.player_id),
                 "player_name": p.display_name if p else None,
                 "catches": fs.catches,
+                "catches_wk": fs.catches_wk,
                 "run_outs": fs.run_outs,
                 "stumpings": fs.stumpings,
             })
@@ -822,6 +823,7 @@ async def get_scorecard(
                 "player_id": None,
                 "player_name": _disp_name,
                 "catches": fs.catches,
+                "catches_wk": fs.catches_wk,
                 "run_outs": fs.run_outs,
                 "stumpings": fs.stumpings,
                 "is_fill_in": _is_fi,
