@@ -7,7 +7,7 @@
 - Nets live session, batting order, padding up, priority, check-in QR/NFC link, guests, ending a session, `net_attendance`, `net_sessions.version`.
 - Self-service availability link (`/avail/:token`, `bs_avail` cookie, last-4-of-phone PIN).
 - Association rules (age, overseas, workload, finals), date of birth, `select_show_age`, shirt number / shirt size / pants size.
-- Symptoms: two devices showing different nets sessions, a player missing from the nets door list, Selection header toggle painted over, a date input clipping its year, a 402 naming "admin" or "BetterClubhouse".
+- Symptoms: two devices showing different nets sessions, a player missing at the nets door, Selection header toggle painted over, a 402 naming "admin".
 
 **Archive** (full history, verbatim, do not load whole): `docs/dev-notes/archive/betterselect-selection-and-nets.md`. Grep hints: `three pools`, `pointer events`, `padding up`, `turning up isn't batting`, `net_checkin_token`, `Ending the night`, `age_basis`, `selection_rule_players`, `visible_age`, `VALUE_FIELDS`, `min-w-0`, `full-replace`, `turn_seq`, `shirt_number`, `ADMIN_MODULE_KEYS`, `availability_link_token`.
 
@@ -40,7 +40,7 @@
 18. Priority records a fact and moves nobody; ticking always asks. The reason goes into the existing `note` (pre-filled, never overwritten). It survives a turn and a spell out.
 19. "Bat next" is front of the line for the NEXT turn, not the list: while a turn runs the top `nets` names are in, and inserting above them swaps a batter mid-knock and marks a non-batter as batted. `netsBusy` covers turn-over-not-rotated. Dragging is exempt.
 20. Every state is a word as well as a tint (`NET n`, `PADDING UP`, `PRIORITY`); pills always drawn, only the LEFT EDGE takes precedence (net, padding up, priority). Text and grip at `--pb-dim`, never `--pb-faintest`. Row actions wrap onto their own line at 390px.
-21. Glyphs: pad = PAIR of pads, filled, strap cut as an EVEN-ODD hole (a single pad is a blob at 16px; the band stops it reading as pause). Bat = two diagonal strokes (upright blades read as bottles). Judge glyphs side by side at 16/22/40/72px.
+21. Glyphs: pad = PAIR of pads, filled, strap as an EVEN-ODD hole (a single pad is a blob at 16px). Bat = two diagonal strokes (upright blades read as bottles). Judge at 16/22/40/72px.
 
 **Nets roster, `bats`, check-in link, guests**
 22. `GET /nets/roster` returns every `is_player` player tagged `dormant`/`inactive`; the screen groups, never filters. Keep `active_self_service_players` byte-for-byte (composed of `availability.dormant_player_ids` + `club_player_roster`; the public link and phone coverage read it).
@@ -90,27 +90,21 @@
 56. Minutes letterhead (see committee guide): colours from `theme_config`, not `primary_color`/`accent_color`; band is two stacked shaded paragraphs, never a table; crest converted to JPEG in the browser on a white-filled canvas, `clubLogoJpeg` returns null not throws; `header` is its own `docBlocks` argument; PDF image objects numbered LAST.
 
 ## Traps and failure signatures
-- Second device's check-in vanishes or two devices differ: full-replace write (6).
+- Second device's check-in vanishes or two devices differ: full-replace write (6). Arrival never appears: `touch_session` not called (27).
 - Player missing at the door but active in Admin: dormancy-filtered roster (22).
-- Arrival never appears on the iPad: `touch_session` not called (27).
-- Order snaps back mid-drag, drag never starts, or row oscillates: poll not held, `touch-action` missing, thresholds re-measured (15).
-- Batter swapped out mid-knock: "bat next" above the top `nets` (19).
+- Order snaps back, drag never starts, or row oscillates: poll not held, `touch-action` missing, thresholds re-measured (15). Batter swapped mid-knock: "bat next" (19).
 - Squad filter disagrees with board: missing `team_members` mirror (5).
-- Rule stops applying at rollover: keyed on grade ids (34). Rule flags everyone: missing data treated as breach (36).
-- Adult's age on a card: sent and hidden client side (43). "Every player" unsettable: `is not None` (44).
-- Kit sizes missing for a paying club, or a 402 naming "admin"/"BetterClubhouse": `org_has_module("admin")`, name source (50, 53). Shirt "07" reads 7: integer column (51).
-- Importer silently misses a new profile column (47).
-- Header toggle painted over (`elementFromPoint` returns a module icon) or 390px overflow: `min-w-0` on group or `shrink-0` cluster (54).
-- React unknown DOM prop warnings: `SquadColumn` once spread `onCardDragStart`/`onCardDragEnd` onto a `<div>` (fixed).
-- Minutes PDF page blank with no error: image XObject missing from `/Resources` (56).
+- Rule stops at rollover: grade ids (34). Rule flags everyone: missing data as breach (36).
+- Adult's age on a card (43). "Every player" unsettable (44).
+- Kit sizes missing for a paying club, or 402 naming "admin"/"BetterClubhouse" (50, 53). Shirt "07" reads 7 (51). Importer misses a new column (47).
+- Header toggle painted over (`elementFromPoint` returns a module icon) or 390px overflow (54). Minutes PDF page blank with no error (56).
 
 ## How to verify a change here
 - Backend (real Postgres, shipped route bodies): `backend/verification/verify_net_batting_order.py` (control against previous commit fails 20), `verify_net_checkin.py`, `verify_player_kit.py` (control with number resolution and size writes neutered fails on the importer checks), `verify_multi_squad.py`.
 - Browser (`frontend/verification/`): `verify_net_batting_order_browser.mjs` (real pointer events plus synthetic touch, `touch-action` read from computed style), `verify_net_admin_browser.mjs`, `verify_net_alert_browser.mjs`, `verify_net_checkin_browser.mjs`, `verify_guest_promotion_browser.mjs`, `verify_squads_pools_browser.mjs`, `verify_minutes_letterhead_browser.mjs`, `verify_minutes_download_browser.mjs` (must pass unchanged).
-- Race two real DB sessions for the version bump and duplicate check-in (three parallel taps land once).
+- Race two real DB sessions for the version bump and duplicate check-in.
 - A control run that crashes is not a control run: read new keys via `.get`, import shipped code through a guarded `load()`, bail reporting what is absent. Pair set with clear, and entitled with non-entitled payloads.
-- Gotchas: Playwright `**` glob does not cross a `?` (route the live poll by regex or the catch-all hands `{}` and crashes the page); routes match most-recently-registered first; `NAMES.map(att)` passes `(value, index)`; do not hardcode indexes after a drag; scope "does not name them" checks tightly; `unzip` glob-matches `[Content_Types].xml`; lifespan raw-SQL tables need their CREATE plus every later ALTER (match the ALTER to its closing double quote); suites share one database; stubs must match real response shapes.
-- Measure layout (`elementFromPoint`, `scrollWidth` at 1440/1024/390), do not eyeball.
+- Gotchas: Playwright `**` glob does not cross a `?` (route the live poll by regex or the catch-all hands `{}` and crashes the page); routes match most-recently-registered first; `NAMES.map(att)` passes `(value, index)`; no hardcoded indexes after a drag; `unzip` glob-matches `[Content_Types].xml`; lifespan raw-SQL tables need their CREATE plus every later ALTER (match to the closing double quote); suites share one database; stubs must match real response shapes.
 
 ## Operator commands and scripts
 none. Migrations 268, 269, 271, 272, 273, 284, 289 are mirrored idempotently in the lifespan.
@@ -127,28 +121,27 @@ none. Migrations 268, 269, 271, 272, 273, 284, 289 are mirrored idempotently in 
 - [FLAG-BSN-1] Archive cites Postgres suites for selection rules, age maths, live session, nets roster, guests and squads pools | `backend/verification` holds only `verify_net_batting_order.py`, `verify_net_checkin.py`, `verify_player_kit.py`, `verify_multi_squad.py` for this area | several sections | verify before citing others as runnable.
 - [FLAG-BSN-2] Kit section says `require_module("admin")` names the module "admin" (noticed, not fixed) then says `module_display_name` fixed it | `auth/modules.py:431` defines it | Three kit fields, L12119-12320 | keep the later statement (fixed).
 - [FLAG-BSN-3] Squads section says AFL has no BetterSelect squad board | football later got its own select module (see `betterfootball-afl` archive) | Squads board, L4592-4665 | verify; true only at v9.46.0.
-- [FLAG-BSN-4] Cross-references to "vote-medals note", "MissingGreenlet trap", "Clubhouse kit usePref" point at other archives | not checked here | nets and DOB sections | verify by grep if needed.
 
 ## Section coverage
 | Original section (heading, original CLAUDE.md line range) | Disposition | Where captured |
 |---|---|---|
-| Squads board's unassigned side is three pools (v9.46.0), L4592-4665 | rules extracted | Rules 1 to 5, Traps, follow-ups, FLAG-BSN-3 |
-| Batting order is dragged, two flags (migration 284, v9.63.0), L4752-4881 | rules extracted | Rules 15 to 21, Traps, How to verify |
-| Nets check-in list was hiding players (migration 273, v9.42.2), L4882-4951 | rules extracted | Rules 22, 23, 55 |
-| A player checks themselves in at the nets (migration 272, v9.42.0), L4952-5133 | rules extracted | Rules 24 to 28 |
+| Squads board's unassigned side is three pools (v9.46.0), L4592-4665 | rules extracted | Rules 1 to 5, follow-ups, FLAG-BSN-3 |
+| Batting order is dragged, two flags (migration 284), L4752-4881 | rules extracted | Rules 15 to 21, Traps, How to verify |
+| Nets check-in list was hiding players (migration 273), L4882-4951 | rules extracted | Rules 22, 23, 55 |
+| A player checks themselves in at the nets (migration 272), L4952-5133 | rules extracted | Rules 24 to 28 |
 | &nbsp;&nbsp;sub: Turning a nets guest into a player (v9.42.1) | rules extracted | Rule 29 |
 | &nbsp;&nbsp;sub: Ending the night (v9.42.3) | rules extracted | Rule 12 |
-| Association's rules written down once (migration 271, v9.39.0), L5961-6122 | rules extracted | Rules 32 to 42 |
+| Association's rules written down once (migration 271), L5961-6122 | rules extracted | Rules 32 to 42 |
 | &nbsp;&nbsp;sub: What the first round of use changed (v9.41.2) | rules extracted | Rules 33 to 35, 41 |
-| A player's date of birth (migration 269, v9.37.0), L6191-6345 | rules extracted | Rules 43 to 46, 54 |
-| &nbsp;&nbsp;sub: Profile importer only knew its born-with fields (v9.37.1) | rules extracted | Rules 47, 48 |
+| A player's date of birth (migration 269), L6191-6345 | rules extracted | Rules 43 to 46, 54 |
+| &nbsp;&nbsp;sub: Profile importer (v9.37.1) | rules extracted | Rules 47, 48 |
 | &nbsp;&nbsp;sub: `min-w-0` flex group overlaps siblings | rules extracted | Rule 54, Traps |
-| A net session is run from several devices (migration 268, v9.36.0), L6346-6449 | rules extracted | Rules 6 to 14 |
+| A net session is run from several devices (migration 268), L6346-6449 | rules extracted | Rules 6 to 14 |
 | &nbsp;&nbsp;sub: Live session moved onto the server | rules extracted | Rules 6 to 11 |
 | &nbsp;&nbsp;sub: The lists a club can take away | rules extracted | Rule 14 |
 | &nbsp;&nbsp;sub: The tally opens into the dates | rules extracted | Rule 13 |
-| &nbsp;&nbsp;sub: Verification | history only (check counts; race method kept) | How to verify |
-| Three kit fields (migration 289, v9.69.1), L12119-12320 | rules extracted | Rules 49 to 53, 55, FLAG-BSN-2 |
-| &nbsp;&nbsp;sub: Minutes on the club's letterhead (v9.69.0) | rules extracted | Rule 56, Traps |
+| &nbsp;&nbsp;sub: Verification | history only (check counts) | How to verify |
+| Three kit fields (migration 289), L12119-12320 | rules extracted | Rules 49 to 53, 55, FLAG-BSN-2 |
+| &nbsp;&nbsp;sub: Minutes letterhead (v9.69.0) | rules extracted | Rule 56 |
 | &nbsp;&nbsp;sub: Sponsors: written up, not built | rules extracted (pointer) | Open follow-ups |
 | Self-service player availability (v8.1), L12985-13037 | rules extracted | Rules 30, 31 |

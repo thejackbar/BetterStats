@@ -92,9 +92,8 @@
 
 - Backend suites in `backend/verification/`: `verify_twenty_retirement.py` (sweep, script uses the shared sweep, thirteen real route bodies answer, subscription-hook call sites structural; controls against the pre-retirement commit and one missing the three helpers), `verify_deal_card_notes.py`, `verify_sales_activity_all_time.py`.
 - Browser suites in `frontend/verification/`: `verify_workspace_deeplink_browser.mjs`, `verify_interest_pills_browser.mjs`, `verify_deal_card_notes_browser.mjs`, `verify_sales_performance_browser.mjs`, each with a control run against the previous commit. The archive also names commission, interest, stage-breakdown and sales-email backend suites that were not all found by name: grep `backend/verification/` before citing.
-- Walk EVERY cell of both Sales Performance tables (each rep, totals, each stage, total and bracketed figure, both windows, all four metrics), not a sample.
-- A control run that crashes is not a control run: report a missing engine and return; wrap each button press.
-- A check that matches more than it means is not a check (read `recalc()` via `inspect.getsource`, not the whole script).
+- Walk EVERY cell of both Sales Performance tables (all reps, totals, stages, both figures, windows, metrics), not a sample.
+- A control run that crashes is not a control run: report a missing engine and return; wrap each press.
 - Stubs must MUTATE on write and keep server order (`occurred_at DESC`). Tighten every check until it fails on the broken code.
 
 ## Operator commands and scripts
@@ -102,7 +101,7 @@
 - `python -m app.scripts.recalc_engagement`: rescore the directory via the shared sweep.
 - `python -m app.scripts.repair_deal_values`: re-price OPEN deals with the old ratcheted value. Dry run by default. Skips WON, LOST and no-module deals.
 - `python -m app.scripts.backfill_invoice_commission`: re-read pre-278 invoices from Stripe and stamp via the webhook function, at the rep's CURRENT rate (the old rate was never recorded).
-- Server config, not code: `email_provider` must not be `console`; `bettersports.com.au` needs SPF/DKIM/DMARC.
+- Server config: `email_provider` must not be `console`; SPF/DKIM/DMARC for `bettersports.com.au`.
 
 ## Open follow-ups
 
@@ -126,7 +125,7 @@
 |---|---|---|
 | Twenty is retired; the engagement score, the CRM and Sales Management are not (L1631-1770) | rules extracted | Rules 1 to 9; Traps 1 to 7; FLAG-7 |
 | Sales Commissions: forecast on the open book, earned on the won one (L3894-4428) | rules extracted, partly superseded by its own 278 sub-section | Rules 10 to 44; FLAG-1 to 3 |
-| - What the first look at the real data changed (v9.49.1) | rules extracted | Rules 12, 24, 32; repair_deal_values |
+| - First look at real data (v9.49.1) | rules extracted | Rules 12, 24, 32 |
 | - Picking a module pill scrolled the page (v9.52.2.1) | rules extracted | Rule 35 |
 | - A `?club=` deep link opened the wrong club (v9.49.3) | rules extracted | Rule 33 |
 | - The deep link landed, but the queue never moved (v9.49.6, v9.49.8) | rules extracted | Rules 13, 34 |
@@ -140,6 +139,5 @@
 | Sales Performance: where the clubs sit, and who actually rang them (L4528-4591) | rules extracted | Rules 46, 47, 50, 51 |
 | Three voicemail follow-ups: offer the trial, then extend it (L10168-10209) | rules extracted | Rule 44 |
 | Marketing Club Directory: Twenty sync fixes (L13889-14029) | superseded by Twenty is retired (v9.71.0); lessons kept | Rule 9; Traps 5; FLAG-4, 5 |
-| - Background-task pattern on the two Refresh buttons | superseded (routes removed) | Traps 5 |
 | - Enquiry and trial pushes at forced Hot 100 | superseded (push removed) | FLAG-4, 5 |
 | - The forced Hot 100 did not stick | rules extracted (live) | Rule 9 |

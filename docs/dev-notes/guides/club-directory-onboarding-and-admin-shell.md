@@ -9,7 +9,7 @@
 - Draft (PIN) pages, the 423 response, `club_lock.py`, `ClubPinGate`, unpause requests.
 - KlubPro migration tooling (`routers/klubpro_migration.py`, `/admin/super/migration`).
 - Super admin messages on the club dashboard (`admin_broadcasts`, `AdminBroadcastBanner`).
-- Symptoms: teaser pull returns every club `empty` with 204s; departed officer still listed; unsubscribed officer emailed again; a rep's typed contact vanished; KlubPro "approved but data not pulled across".
+- Symptoms: teaser pull returns every club `empty` with 204s; departed officer still listed; opted-out officer re-emailed.
 
 **Archive** (full history, verbatim, do not load whole): `docs/dev-notes/archive/club-directory-onboarding-and-admin-shell.md`. Grep hints: `playHQId`, `admin_broadcasts`, `next_pull_at`, `type_filtered_ids`, `former_at`, `_onboard_club_core`, `password_protected`, `CORE_TILES`, `bs_setup_return`, `safeAccent2`, `migrate_fields`, `backfill_admin_mobiles`.
 
@@ -53,17 +53,17 @@
 27. The `onboarding_wizard_enabled` flag gates nothing now (General Settings toggle inert). Auto-open is conservative: (a) new club, no successful full sync, not dismissed; (b) one-shot reopen-after-sync when stored progress exists; (c) rule 23. Super admins are never auto-navigated.
 28. `_sync_ready` accepts `org_full` OR `org_hard_refresh`; "Tidy your data" locks until a successful full pull.
 29. Branding step edits `theme_config` (accent/accent2), NOT legacy `primary_color`/`accent_color`. Paint club colour pairs with `var(--pb-gradient)` or `--pb-accent-2-safe`, never raw `--pb-accent-2` (`theme.js::safeAccent2` guards near-black/white per theme).
-30. Link-out steps stamp `sessionStorage.bs_setup_return`; `SetupReturnBar` (bottom-centre, in `ProtectedRoute` beside `TrialBanner`) returns. Vital steps (full_rebuild, merge_players, merge_grades) confirm consequences before skip. `SetupProgressReminder` (bottom-right toast) fires every 5th bare `/admin` landing while steps remain, regardless of `dismissed_at`; counted in `localStorage['bs_setup_reminder_visits_<user.id>']`.
+30. Link-out steps stamp `sessionStorage.bs_setup_return`; `SetupReturnBar` (bottom-centre, in `ProtectedRoute` beside `TrialBanner`) returns. Vital steps (full_rebuild, merge_players, merge_grades) confirm before skip. `SetupProgressReminder` (bottom-right toast) fires every 5th bare `/admin` landing while steps remain, regardless of `dismissed_at`; counted in `localStorage['bs_setup_reminder_visits_<user.id>']`.
 31. Sidebar sections and Better HQ links stay alphabetical by label. IQ pre-warm (`services/iq_prewarm.py`): one dossier at a time, at most 40 opponents, 5 min each.
 
 **Admin shell**
 32. `AdminLayout` is chrome only (Dashboard, Setup Wizard, tiles, Account, Better HQ). Each product is a `ModuleLayout` surface. Never add Core tools to `AdminLayout` `NAV_SECTIONS`.
-33. To add a tool: put the page under the right module layout and add it to that layout's `GROUPS` `items` (`to/label/icon/cap/desc`); sidebar, group page and counts derive from it. Group `key`s (`data/ingest/tidy/records`) drive `:group` URLs: rename labels, never keys.
-34. `CORE_TILES` (BetterStats) is in `lib/modules.js` outside `MODULE_INFO` (entitlement/billing); `alwaysOpen` keeps it entitled. Use `HubCard` for any menu card. `ModuleLayout` `nav` supports `{ heading }`; an empty heading is dropped. Tool URLs did not move; `/admin/yearbook` stays standalone.
+33. To add a tool: put the page under the right module layout and add it to that layout's `GROUPS` `items` (`to/label/icon/cap/desc`); sidebar, group page and counts derive from it. Group `key`s drive `:group` URLs: rename labels, never keys.
+34. `CORE_TILES` (BetterStats) is in `lib/modules.js` outside `MODULE_INFO` (entitlement/billing); `alwaysOpen` keeps it entitled. Use `HubCard` for any menu card. Tool URLs did not move; `/admin/yearbook` stays standalone.
 
 **Draft (PIN) pages**
 35. Migration 205: `organisations.password_protected`, `.password_protect_reason` (`'draft'|'trial_ended'`), `.access_pin_hash` (bcrypt), audit columns; table `club_unpause_requests`. Independent of `is_active`; the gate checks `password_protected` FIRST.
-36. `services/club_lock.py` (modelled on `bs_avail`): cookie `bs_lock` (signed JWT, HttpOnly, 30 days). `GET /{slug}` raises 423 (not 403) with `lock_detail`, ahead of `_public_blocked`. `POST /{slug}/unlock` is rate-limited with lockout. `POST /{slug}/request-unpause` only for `trial_ended`; emails `cricket@bettersports.com.au` deliberately, `reply_to` the requester. Same check duplicated in `ladders.py` and `website.py`.
+36. `services/club_lock.py` (modelled on `bs_avail`): cookie `bs_lock` (signed JWT, HttpOnly, 30 days). `GET /{slug}` raises 423 (not 403) with `lock_detail`, ahead of `_public_blocked`. `POST /{slug}/unlock` is rate-limited with lockout. `POST /{slug}/request-unpause` only for `trial_ended`; emails `cricket@bettersports.com.au` deliberately, `reply_to` the requester.
 37. A club enables Draft itself only while `subscription_status` is `trial` or `active` (off always allowed), always reason `'draft'`; `'trial_ended'` is Super Admin only. Frontend: `useClub.js` `locked` on 423; `ClubPinGate` is checked before `inactive`/`notFound` in the 12 public pages. It is a soft gate: only `GET /clubs/{slug}`, ladders and website are gated server-side.
 
 **KlubPro migration (super admin)**
@@ -82,34 +82,33 @@
 - Every club `empty`, all 204: wrong guid namespace (rule 1). Real cost is ~15 to 80 calls a club; re-read `api_calls` off a fresh `--sample`.
 - Rep's typed contact vanishes after Rediscover: stored `source='api'` (14). Unsubscribed officer re-emailed: row deleted instead of `former_at` (13). Directory emptied: absent `contacts` read as `[]` (15).
 - Type filter drops clubs with blank fields: NULL logic (8). Email image invalidated weekly: `version` bumped without a content change (5).
-- Staff-created club's admin never sees the wizard: `onboarding_method` unset (23). "Tidy your data" locked after Full Rebuild: `org_hard_refresh` (28). Dead-looking accent: raw `--pb-accent-2` (29).
-- KlubPro "approved but data not pulled across": Import never run. Re-matching a rejected KP player errors unless the KP id is freed. A club imported before value normalisation (Murdoch) needs a re-Import.
+- Staff-created club's admin never sees the wizard: `onboarding_method` unset (23). "Tidy your data" locked after Full Rebuild (28). Dead-looking accent (29).
+- KlubPro "approved but data not pulled across": Import never run. A club imported before value normalisation (Murdoch) needs a re-Import.
 
 ## How to verify a change here
 - `backend/verification/verify_club_teaser.py` (real Postgres, scripted CA, no live call). Controls: reverted resolved-guid/one-call/unplaceable checks fail; change detection and junior filter neutered fail; service-absent must REPORT not crash. Never run against live CA: `--sample 20` first.
-- `verify_committee_rediscover.py`: seed the pre-293 table in RAW SQL (ORM model already has the columns). Control: prune, retick, role refresh neutered fails.
-- `verify_admin_mobile_backfill.py` (control: org scoping, mobile check, ambiguity refusal neutered; the leak fails).
+- `verify_committee_rediscover.py`: seed the pre-293 table in RAW SQL (the ORM has the columns). Control: prune, retick, role refresh neutered fails.
+- `verify_admin_mobile_backfill.py` (control: org scoping, mobile check, ambiguity refusal neutered).
 - `verify_admin_broadcasts.py` (control: view-once and primary filter neutered) and `frontend/verification/verify_admin_broadcasts_browser.mjs` (control: banner unmounted).
 - New Club flow suite: archive names no file; grep `verification/` for `onboarding_method`.
 
 ## Operator commands and scripts
 - `python -m app.scripts.pull_club_teasers all --limit N --apply` (dry run by default). `--sample N` runs clubs one at a time with status and call counts. Also `--include-trialists`, `--type key=include|exclude`, `--no-type-filter`. `--apply` ends with the work report (`club_teaser_report.py`; under 20 clubs it warns the sample is too small).
-- `python -m app.scripts.backfill_admin_mobiles [<org|all>] [--apply] [--email-only]` (dry run by default, no network, safe platform-wide).
+- `python -m app.scripts.backfill_admin_mobiles [<org|all>] [--apply] [--email-only]` (dry run by default, no network).
 - Set General Settings `club_teaser_nightly_limit` to switch the scheduled pull on (no UI input yet).
 - KlubPro deploy: set `KLUBPRO_DATABASE_URL` (never commit) and share a Docker network with `klubpro-postgres`. See `docs/klubpro-migration.md`, `docs/marketing-club-directory.md`.
 
 ## Open follow-ups
-- Teaser: `/preview/{token}` page, PNG renderer, `{{teaser_url}}`/`{{teaser_image_url}}` merge variables, match/lineup layer, a settings input for the limit.
+- Teaser: `/preview/{token}` page, PNG renderer, `{{teaser_url}}` merge variables, match/lineup layer, limit setting input.
 - No `role` Segment field (only a Lists/Segments facet). Nothing prunes `former_at` contacts (deliberate); nightly discovery is still additive.
 - Club-admin mobile not filled at account creation.
 
 ## Flags: conflicting, superseded or possibly obsolete guidance
 - [FLAG-CDOAS-1] Teaser section says "NUMBERED 312 after merging origin/main" | code has `312_admin_broadcasts.py` and `314_club_teaser_snapshots.py`, heading says 314 | teaser section (L538-640) | retire the 312 remark.
-- [FLAG-CDOAS-2] Teaser section says ~25 calls a club (~90k calls) and "nightly at 03:30" | first section measured ~15 to 80; scheduler runs by day | L538-640 vs L3-31 | trust the latter, re-measure.
+- [FLAG-CDOAS-2] Teaser section says ~25 calls a club and "nightly at 03:30" | first section measured ~15 to 80; scheduler runs by day | L538-640 vs L3-31 | trust the latter.
 - [FLAG-CDOAS-3] New Club section reuses Twenty `push_self_serve_registration` | Twenty retired, function no longer in `app/` | L8465-8535 | retire that bullet, keep the "no false self-serve stage" lesson.
 - [FLAG-CDOAS-4] Admin navigation says BetterClubManager routes are super-admin gated, "Coming soon" | text itself says superseded in v9.6.1 (capability-gated for club admins) | L10101-10167 | verify against `App.jsx`.
-- [FLAG-CDOAS-5] Draft section emails `cricket@bettersports.com.au` while the platform support address is `support@bettersports.com.au` | deliberate per section, mailbox may have changed | L10041-10100 | verify.
-- [FLAG-CDOAS-6] Wizard "28 steps in 7 groups" | snapshot count | L12574-12665 | verify against `GROUPS`.
+- [FLAG-CDOAS-5] Draft section emails `cricket@bettersports.com.au`, platform support is `support@bettersports.com.au` | deliberate, may be stale | L10041-10100 | verify.
 
 ## Section coverage
 | Original section (heading, original CLAUDE.md line range) | Disposition | Where captured |
@@ -121,7 +120,7 @@
 | Super Admin New Club = the self-serve registration (L8465-8535) | rules extracted (Twenty part superseded) | Standing 20 to 24; Flag 3 |
 | Password-protected "Draft" pages + trial-ended unpause requests (L10041-10100) | rules extracted | Standing 35 to 37; Flag 5 |
 | Admin navigation, module surfaces (L10101-10167) | rules extracted (BetterClubManager gating superseded v9.6.1) | Standing 32 to 34; Flag 4 |
-| Club Setup Wizard (L12574-12665) | rules extracted | Standing 26 to 31; Flag 6 |
+| Club Setup Wizard (L12574-12665) | rules extracted | Standing 26 to 31 |
 | . Periodic setup reminder (v8.70.3) | rules extracted | Standing 30 |
 | . Secondary accent, luminance-guarded (v8.70.2) | rules extracted | Standing 29 |
 | KlubPro to BetterStats Migration Tooling (L13719-13843) | rules extracted | Standing 38 to 42; Traps 4; Operator |

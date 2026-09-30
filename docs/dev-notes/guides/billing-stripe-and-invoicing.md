@@ -2,7 +2,7 @@
 
 **Read this before** (money is involved: read the flags and gates carefully):
 - Editing `backend/app/services/billing_pricing.py`, `stripe_client.py`, `stripe_billing.py`, `invoice_billing.py`, `invoice_billing_ddl.py`, `discount_coupons.py`, or `routers/billing.py`, `routers/public_stripe.py`.
-- `frontend/src/data/pricing.js`, `AdminAccount.jsx` (SUBSCRIBE, price summary, add-on preview), `SuperClubs.jsx` (General Settings billing toggles, per-club override, invoicing switch), `SuperCoupons.jsx`.
+- `frontend/src/data/pricing.js`, `AdminAccount.jsx`, `SuperClubs.jsx` (billing toggles, per-club override, invoicing switch), `SuperCoupons.jsx`.
 - Anything touching `platform_settings.billing_checkout_enabled`, `organisations.billing_checkout_override`, `invoice_billing_enabled`, `billing_method`, `org_module_subscriptions.billing_source`.
 
 **Archive** (full history, verbatim, do not load whole): `docs/dev-notes/archive/billing-stripe-and-invoicing.md`. Grep hints: `feature-flagged while it's built`, `Stripe Checkout — recurring`, `already-live subscription`, `Promotion codes + other payment`, `Bundle discount is now config`, `once` not `forever`, `belongs to ONE mode`, `still applying the bundle discount`, `GST via Stripe Tax`, `Per-club override`, `Pay by invoice`, `managed discount coupons`.
@@ -26,7 +26,7 @@
 **Checkout, add-ons, entitlement**
 10. One club, one Stripe Subscription, never a second. `/checkout-session` branches on `club.stripe_subscription_id`: unset gives a Checkout Session (Core plus selection, bundle, redirect); set gives an add-on to the existing subscription (no Core, no bundle, prorated to the renewal date by Stripe, charged immediately server-side, no redirect).
 11. `/quote` mirrors the branch: `mode` is `new_subscription` (pure local maths, no Stripe call, so the page says "Plus GST, calculated on Stripe's secure checkout page") or `add_to_existing` (a real `Invoice.create_preview`, `proration_behavior=always_invoice`, so its total already includes GST).
-12. Add-ons must not get the bundle discount, per direct instruction. A `duration=once` coupon is only consumed by a regular invoice, so it can still sit on the subscription and discount the add-on proration. Hence `preview_add_modules` passes `discounts=""` (the literal empty string; an empty list is a no-op and still inherits) and `add_modules_to_subscription` calls `Subscription.delete_discount_async` first (errors swallowed).
+12. Add-ons must not get the bundle discount, per direct instruction. A `duration=once` coupon is only consumed by a regular invoice, so it can still sit on the subscription and discount the add-on proration. Hence `preview_add_modules` passes `discounts=""` (literal empty string; an empty list still inherits) and `add_modules_to_subscription` calls `Subscription.delete_discount_async` first (errors swallowed).
 13. Add-on and preview items need a real Stripe Product id (`price_data.product`), unlike Checkout inline `product_data`. `stripe_client._ensure_product` creates each module's Product once and caches it in `stripe_products` (migration 152).
 14. After an add-on, set `Subscription.metadata.billing_keys` to the union of old and new keys, or renewals stop refreshing the new module's `renewal_date`.
 15. Entitlement lives only in `org_module_subscriptions` (migration 118), written by the same `module_subscriptions.set_status_billing`/`remove_billing` the super-admin approve flow uses. No Stripe-only entitlement path.
@@ -53,7 +53,7 @@
 **Pay by invoice (migration 308, `services/invoice_billing.py`)**
 34. Not a Stripe subscription with `collection_method=send_invoice` (that raises the renewal ON the renewal date, so 14 days early is unreachable). We run the cycle and ask Stripe for one-off invoices (`stripe_client.create_one_off_invoice`). Stripe numbers, renders the PDF, computes GST and hosts the payment page.
 35. `auto_advance=False`; never call Stripe's send. BetterCricket emails the PRIMARY Club Admin with our own pay link (Stripe emailing the Customer would duplicate).
-36. Three switches: `organisations.invoice_billing_enabled` (Super Admin only, default false, new clubs included) is whether the club is offered it; `organisations.billing_method` ('card' | 'invoice') is what is chosen; `org_module_subscriptions.billing_source` ('invoice' | 'stripe' | NULL) says what pays each module's period. Only 'invoice' rows are renewed or lapsed by the invoice job. Every card grant path stamps 'stripe' (`set_billing_source`).
+36. Three switches: `organisations.invoice_billing_enabled` (Super Admin only, default false) is whether the club is offered it; `organisations.billing_method` ('card' | 'invoice') is what is chosen; `org_module_subscriptions.billing_source` ('invoice' | 'stripe' | NULL) says what pays each module's period. Only 'invoice' rows are renewed or lapsed by the invoice job. Card grants stamp 'stripe' (`set_billing_source`).
 37. Invoicing is a Super Admin arrangement, never a club's choice: `_require_super_for_invoicing` refuses club-side `PUT /billing-method` and `POST /invoices/request` for every club admin including primary; `cancel_own_module` refuses an invoice club. A club admin can still view, pay and resend.
 38. Switching the offer OFF (`patch_club`) moves the club back to card: paid period runs out, no renewal invoice raised (renewal job also filters on the offer), open invoices stay payable.
 39. Card checkout refuses an invoice club (409, `routers/billing.py`), and a club on a live card subscription cannot switch to invoice. Nobody is billed twice.
@@ -68,7 +68,7 @@
 48. DDL lives once in `services/invoice_billing_ddl.py`, run by alembic 308 and the lifespan mirror.
 
 ## Traps and failure signatures
-- `No such coupon: ...; a similar object exists in test mode, but a live mode key was used` (or "No such customer"): cached Stripe id from the other mode. Cause: cache keyed on id alone. Rule 31 to 33.
+- `No such coupon: ...; a similar object exists in test mode, but a live mode key was used` (or "No such customer"): cached Stripe id from the other mode. Rules 31 to 33.
 - Renewals carry the bundle discount, or two identical checkouts leave two Coupon objects: `forever` duration, coupon minted per attempt. Rule 24.
 - Checkout charges no GST: `automatic_tax` not requested, or no active AU GST registration in Stripe (Settings, Tax, Registrations): tax then calculates $0. Not fixable in code.
 - A first invoice never appears in Billing History though entitlement was granted: `invoice.paid` beat `checkout.session.completed`. Rule 20.

@@ -4,7 +4,7 @@
 - Editing `frontend/src/social/` (`*-templates.jsx`, `postSizes.jsx`, `postAspect.js`, `postLayers.jsx`, `useBlankLayer.js`, `templateToBlocks.js`) or `AdminSocialPost.jsx`; adding a template; changing post sizes, the Layers panel, Preview, Save as template or Save to Club Room.
 - Changing club typography or theme: `lib/theme.js` (`buildThemeCss`, `onAccentInk`), `services/fonts.py`, `settingsKit.jsx`, `--pb-on-accent`, `--pb-weight-*`, `public_header_logo`.
 - Touching `/videos`: `routers/instructional_videos.py`, `services/instructional_videos.py`, `lib/videoModule.js`, nginx `/_internal_videos/`.
-- Symptoms: smeared or too-dark club font, unreadable text on an accent button, exported PNG a different shape from the preview, Layers rows reading `Ni`, every video 404s, `HEAD` 405, a new route firing `/api/clubs/<slug>`.
+- Symptoms: smeared club font, unreadable text on an accent button, exported PNG shaped unlike the preview, Layers rows reading `Ni`, videos 404, `HEAD` 405, a new route firing `/api/clubs/<slug>`.
 
 **Archive** (full history, verbatim, do not load whole): `docs/dev-notes/archive/betterposts-socials-and-media.md`. Grep hints: `4:5`, `postPages`, `templateToBlocks`, `share(`, `postAspect`, `roundScale`, `LayerRoot`, `displayName`, `font-synthesis`, `on-accent`, `public_header_logo`, `X-Accel-Redirect`, `Range: bytes=0-`, `mkstemp`, `MARKETING_PATHS`, `video_accel_location`, `videoModule`.
 
@@ -64,14 +64,14 @@
 39. Video file lives on the media volume (`/mnt/media/bettercricket/internal/videos`, explicit host path, never a named volume); poster is a column (~100KB). Cap 512MB. Files are DELIBERATELY outside the regular backup (per direct instruction; `ops/backup/backup.sh` says so). So: `file_present` on every payload, page says "not on the server", download link withdrawn, super admin sees a re-upload count, `orphaned_files()` finds leftovers.
 40. The X-Accel hand-off is opt-in (`video_accel_location`, default empty). nginx opens the file, so the directory must be mounted into the FRONTEND container too. Missing mount signature: every video 404s with `Server: openresty` and the app's `cache-control` attached, while `GET /public/videos` says `file_present: true`.
 41. Never return a whole video in one response. Every 206 is clamped to `CHUNK_BYTES` (2MB), because Chrome opens with `Range: bytes=0-`. A short 206 is legal. A download with no Range header must be the full file (`FileResponse`), never a 206 (`curl -O` truncation).
-42. Both public file routes are `api_route(..., methods=["GET","HEAD"])`: FastAPI does not add HEAD to a GET route (405 on `curl -sI`; players and uptime checks probe with HEAD). HEAD answers the WHOLE file's size and no body.
+42. Both public file routes are `api_route(..., methods=["GET","HEAD"])` (FastAPI adds no HEAD; 405 on `curl -sI`). HEAD answers the WHOLE file's size, no body.
 43. Stored filename is `<row uuid>.<ext>`; `_SAFE_FILENAME` refuses anything else on the way out (uploaded name is for the download header only). Upload streams to disk (`_check_size` seeks, never `len()`), temp file in the same dir then `os.replace`. `mkstemp` is 0600 and `os.replace` keeps it: chmod 0644 before rename (host copy-back, nginx workers). A failed insert deletes its file.
 44. Slug is derived once and never moves on retitle; duplicate title gets `-2`. `update_video` writes only PRESENT fields; api.js omits a null rather than sending it empty.
 45. Thumbnail is captured in the browser (canvas at ~1.5s, JPEG posted with the upload), best-effort, no ffmpeg. nginx caps `/api/` at 20m; the 512m raise is on a longer-prefix location for `/api/club-admin/super/videos` only, with `proxy_request_buffering off`. Do not raise it globally.
 46. Server is the gate: every write is `require_super_admin`; `useVideos.canManage` only decides what is drawn.
 47. The CTA follows the video's module (`lib/videoModule.js`): BetterStats keeps `/features`, others `/modules/{slug}`; unknown or empty gets the generic pitch, never a guess. The module field is a picker (it decides a destination); matching ignores case and spacing; an unknown stored value stays as its own option.
 48. A new top-level marketing route is a club slug until four lists know it: `og_preview.RESERVED_ROOT_SEGMENTS`, `FaviconManager.RESERVED_ROOTS`, `SponsorFooter.RESERVED_ROOT_SEGMENTS`, `lib/marketingPaths.MARKETING_PATHS`. Missing the last stacks the club Navbar over `MarketingNav`. Symptom: `/api/clubs/<route>` 404 on every visit.
-49. A sixth top-level nav link overflows at 820px: `Videos` carries `wide` (`hidden lg:block`). Measure new links at 768/820/1024.
+49. A sixth top-level nav link overflows at 820px; `Videos` carries `wide` (`hidden lg:block`).
 
 ## Traps and failure signatures
 - Geometry checks pass but a layout reads wrong (black bands, clumped story names). Judge from real screenshots.
@@ -88,7 +88,7 @@
 ## How to verify a change here
 - `frontend/verification/verify_post_designer_browser.mjs` (base URL as `argv[2]`): canvas and export node move together, layout fills the FULL canvas, scorecard keeps 1920x1080, design measurements unchanged at 1080, layer stack read off the OFF-SCREEN EXPORT NODE, saved template through a real reload, no overflow at 390px. Control against the previous commit must fail the reflow, portrait-design and layer sections (framed=true, empty layer list, every z 0, no Send to back).
 - Backend: `backend/verification/verify_instructional_videos.py` (real Postgres, shipped route bodies). `verify_videos_browser.mjs` with `canManage` forced true must fail the gate checks (signed-out and `club_admin` see no controls).
-- Harness: address the frame by `data-post-frame` (a scale-transform selector matched a transform inside a template). `backgroundColor` cannot see a gradient: measure BEFORE and AFTER. `display: contents` wrappers have no size: probe through them, and read a `null` as "my selector missed". Keep units consistent in one return object. Do not assume fixture size (T4 needs more than two players). CSS `uppercase` text returns uppercased from `innerText`.
+- Harness: address the frame by `data-post-frame`. `backgroundColor` cannot see a gradient: measure BEFORE and AFTER. `display: contents` wrappers have no size: probe through them, and read a `null` as "my selector missed". Keep units consistent in one return object. CSS `uppercase` text returns uppercased from `innerText`.
 - Find checks that cannot fail: `comm -12 <(grep ^PASS run.log|sort) <(grep ^PASS control.log|sort)`; anything naming the new feature is a guard or passing for the wrong reason, so make it a contrast gated on the action having landed.
 - Control runs must report, not crash: anchor on the export button, read new elements through `textOf`/`seen`/`press`.
 - Fonts: check on the club's real site (`VITE_PROXY_TARGET=https://betterat.cricket/api`). Videos: diagnose from response headers and directory modes.
@@ -111,15 +111,14 @@
 - [FLAG-POSTS-2] Fit/Fill picker and `data-post-frame` checks | superseded by v9.74.0; `postSizes.jsx` still exports `PostFrame`/`frameTransform(mode='fit')` for scorecards | same, L995-1085 | verify suite no longer asserts the picker
 - [FLAG-POSTS-3] `behind` flag, `setBehind`, `pb-template-seethrough` | retired by v9.76.0; grep of `frontend/src` finds none of them | "Every template reflows..." L1086-1200 | retire (rule 26)
 - [FLAG-POSTS-4] Videos section names `MARKETING_PATHS` as the Navbar-suppress list; other archives record a later split into `OWN_NAV_PATHS` (`MARKETING_PATHS` also forces dark theme and `ClubCTABar`) | `lib/marketingPaths.js` lists `/videos` in `MARKETING_PATHS` | "Instructional videos" L10210-10378 | verify before adding any route
-- [FLAG-POSTS-5] Migration and version numbers (226, 280) | numbering has moved on | sections 5 and 6 | keep as history
 
 ## Section coverage
 | Original section (heading, original CLAUDE.md line range) | Disposition | Where captured |
 |---|---|---|
-| A FIXED LAYOUT CANNOT RE-LAY ITSELF OUT AT 4:5 (v9.73.0), L995-1085 | rules extracted (fit/fill part superseded by v9.74.0) | Standing rules 1 to 5, 28 to 31; Traps (CSS uppercase, control crash); Verify; Open follow-ups; FLAG-POSTS-1, 2 |
-| Every template reflows, and a block can go BEHIND the layout (v9.74.0), L1086-1200 | rules extracted; behind-flag design superseded by "Every element of a layout is a layer" | Rules 6, 7, 9, 15; Traps (harness stub, vite build, dist rebuild, file://, pkill); Verify; FLAG-POSTS-3 |
-| A portrait design per template, not a square one stretched (v9.75.0), L1201-1354 | rules extracted | Rules 6 to 14, 15; Traps (vite build tail, `.map` comment); Verify (`SIZES=square`, units, fixture) |
-| Every element of a layout is a layer (v9.76.0), L1355-1530 | rules extracted (supersedes v9.74.0 behind flag) | Rules 16 to 27; Traps (mangled names, render-time reset, pkill, hung shoot); Verify (pass-set comm, argv[2]) |
+| A FIXED LAYOUT CANNOT RE-LAY ITSELF OUT AT 4:5 (v9.73.0), L995-1085 | rules extracted (fit/fill part superseded by v9.74.0) | Rules 1 to 5, 28 to 31; Verify; Open follow-ups; FLAG-POSTS-1, 2 |
+| Every template reflows, and a block can go BEHIND the layout (v9.74.0), L1086-1200 | rules extracted; behind-flag design superseded by "Every element of a layout is a layer" | Rules 6, 7, 9, 15; Traps; Verify; FLAG-POSTS-3 |
+| A portrait design per template, not a square one stretched (v9.75.0), L1201-1354 | rules extracted | Rules 6 to 15; Traps (vite build, `.map` comment); Verify |
+| Every element of a layout is a layer (v9.76.0), L1355-1530 | rules extracted (supersedes v9.74.0 behind flag) | Rules 16 to 27; Traps; Verify |
 | A club font with no bold, and ink on a dark accent (migration 226, v9.14.0), L8406-8464 | rules extracted | Rules 32 to 37; Verify (fonts) |
 | Instructional videos, managed from the site (migration 280, v9.54.0), L10210-10378 | rules extracted | Rules 38 to 49; Traps (VIDEO_STORAGE_DIR); Operator commands; Open follow-ups; FLAG-POSTS-4 |
 | indented: call to action follows the video's module (v9.54.1) | rules extracted | Rule 47 |

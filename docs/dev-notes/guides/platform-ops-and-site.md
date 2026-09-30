@@ -27,8 +27,8 @@
 
 **Domain, brand, contact**
 10. The canonical public domain is `https://betterat.cricket` (no `www`). Keep every new public URL reference there: `usePageMeta.js` (`BASE_URL`), `frontend/index.html`, `frontend/public/{llms.txt,robots.txt,sitemap.xml,site.webmanifest}`, `routers/seo.py` and `og_preview.py` (`SITE`), `settings.public_base_url`, the `deploy.sh` health check, `tools/sync_watch.py`.
-11. The brand is one word, "BetterCricket", in all copy, titles, OG cards, metadata and the `BRAND` constant in `frontend/src/data/marketing.js`. Module names stay camelCase (BetterStats, BetterSelect, BetterSocials, BetterAdmin, BetterIQ). BetterStats is the Core module. The trading company is BetterSports.
-12. One contact address everywhere: `support@bettersports.com.au`. It is the default reply-to (`settings.email_reply_to`, from-name "BetterCricket") and the public contact address (`SUPPORT_EMAIL` in `marketing.js`, plus hardcoded copies in `index.html` JSON-LD, `llms.txt`, `og_preview.py`, `self_serve_trial.py` and the marketing and login pages). `email_from_address` is a separate sending address. Change all copies together.
+11. The brand is one word, "BetterCricket", in all copy, titles, OG cards, metadata and the `BRAND` constant in `marketing.js`. Module names stay camelCase (BetterStats is Core). The trading company is BetterSports.
+12. One contact address everywhere: `support@bettersports.com.au`. It is the default reply-to (`settings.email_reply_to`) and the public contact address (`SUPPORT_EMAIL` in `marketing.js`, plus hardcoded copies in `index.html`, `llms.txt`, `og_preview.py`, `self_serve_trial.py` and the marketing pages). `email_from_address` is a separate sending address. Change all copies together.
 13. `email_provider` defaults to `console`: nothing sends until a provider is set. `bettersports.com.au` still needs SPF, DKIM and DMARC.
 14. Social cards for marketing routes are server-rendered by `og_preview.py` (`MARKETING_PAGES`) because crawlers do not run JS. Keep that map in step with marketing routes.
 
@@ -58,22 +58,21 @@
 ## Traps and failure signatures
 
 - **Site up, months-old marketing page, every club page blank (`/applecross` empty), looks like total data loss.** Cause: a deploy or restart without `COMPOSE_PROJECT_NAME` forked a second betterstats project. The real 370 MB DB sat in volume `docker_betterstats_pgdata`; the systemd stack came up on the empty `bltbox_docker_app_betterstats_pgdata` and stole the hardcoded `betterstats-*` names. Nothing was lost. Fix: clone the real volume into the live one: `docker run --rm -v docker_betterstats_pgdata:/from:ro -v bltbox_docker_app_betterstats_pgdata:/to postgres:15 bash -c 'find /to -mindepth 1 -delete; cp -a /from/. /to/; rm -f /to/postmaster.pid'`.
-- **Every cricket data call returns another app's 404s.** Cause: deployed frontend `nginx.conf` proxied `/api` to bare `backend`, which on `docker-shared-net` is ProLog's API. The repo now uses `betterstats-backend`; the running image predated it.
-- **Club pages 404 even after the proxy fix.** Cause: stale frontend/backend pair predating `/clubs/{slug}`. Deploy a matched pair of current code.
+- **Every cricket data call returns another app's 404s.** Cause: the deployed `nginx.conf` proxied `/api` to bare `backend` (ProLog's API on `docker-shared-net`). If club pages still 404 after that, the frontend/backend pair is stale (pre `/clubs/{slug}`): deploy a matched pair.
 - **Diagnose the compose split in this order:** (1) `docker compose ls -a`: are there TWO projects with betterstats (`docker` vs `bltbox_docker_app`)? (2) `docker volume ls | grep pgdata`, then `docker run --rm -v <vol>:/v postgres:15 du -sh /v`: which pgdata volume holds the data (the big one)? (3) `curl -s https://betterstats.cricket/api/openapi.json | head`: is `/api` answered by the title "BetterStats API" or another app? (4) `docker exec betterstats-frontend grep -rn proxy_pass /etc/nginx/`: does `/api` point at `betterstats-backend`?
 - **`/admin` dies with "Failed to fetch dynamically imported module: .../assets/AdminDashboard-H0O_EwuY.js", intermittent 502 on that chunk.** Not a stale or corrupt asset and not a cache. After the frontend was recreated it got a new Docker IP, and NPM could not resolve `betterstats-frontend`: NPM error log `betterstats-frontend could not be resolved (2: Server failure)` (DNS SERVFAIL). NPM resolves per worker, so some workers had a good result (200) and some a cached SERVFAIL (502). That per-worker split made it look like one bad URL.
 - **Misleading signals (do not repeat the chase):** `?v=2` gave 200 while the bare URL gave 502 (per-worker DNS luck, not a URL cache); the file in the container was byte-perfect and served 200 via `docker compose exec betterstats-frontend wget -qO- localhost/assets/<chunk>`; no NPM cache object existed, so purging did nothing.
 - **The tell is in the NPM error logs, not the app logs:** `docker compose exec <npm-service> sh -c 'grep -RhiE "could not be resolved|betterstats-frontend" /data/logs/*error*.log | tail'`. Per-host access logs are `/data/logs/proxy-host-*_access.log` (`[Sent-to betterstats-frontend]`).
-- **Fix that worked:** restart NPM so all workers re-resolve: `docker compose restart "$(docker compose ps --services | grep -iE 'proxy|npm|manager' | head -1)"`. A graceful `nginx -s reload` did NOT clear it during the incident (`deploy.sh` still tries reload first, then restarts if unhealthy).
+- **Fix that worked:** `docker compose restart "$(docker compose ps --services | grep -iE 'proxy|npm|manager' | head -1)"`. A graceful `nginx -s reload` did NOT clear it (`deploy.sh` tries reload, then restarts if unhealthy).
 - **If the NPM outage recurs:** (1) NPM error log for `could not be resolved`; (2) confirm the containers share a network: `docker compose exec <npm> getent hosts betterstats-frontend`; (3) if the name resolves from NPM but the site still 502s, it is stale per-worker resolver state: restart the proxy service via `docker compose restart`.
-- **Prevention that shipped:** `deploy.sh` refreshes NPM after recreating the frontend, health-checks `https://betterat.cricket/` three times and restarts the proxy service only if non-200. The frontend also reloads once on a chunk-load failure (`vite:preloadError` in `main.jsx`, and a chunk-aware `ErrorBoundary`), so a transient 502 or stale chunk is a silent retry instead of "Something went wrong".
+- **Prevention that shipped:** `deploy.sh` refreshes NPM after recreating the frontend, health-checks `https://betterat.cricket/` three times and restarts the proxy only if non-200. The frontend reloads once on a chunk-load failure (`vite:preloadError` in `main.jsx`, chunk-aware `ErrorBoundary`).
 - **A shared link shows the old or generic card.** SPA `usePageMeta` tags never reach crawlers; the card comes from `og_preview.py`. A blog post missing from `blog.py` falls to the homepage card. Re-scrape after deploy.
 - **Contact store and `/api`.** It assumes `betterat.cricket` routes `/api` to `betterstats-backend`. If the marketing domain is ever served without that proxy, point the form at the absolute backend URL. Meanwhile Formspree still emails.
 
 ## How to verify a change here
 
-- Deploy changes: read the `deploy.sh` output. Step 5 hits `https://betterat.cricket/api/openapi.json` and requires the body to contain "BetterStats" (about 15 tries at 5 s), which catches both a backend that fails to boot (alembic error, crash loop) and a crossed `/api` proxy. Step 4 alone only proves the frontend, which serves static files even when the API is dead.
-- After a deploy that changed a slow-starting backend, look for `Application startup complete.` in `docker compose logs --tail=10 betterstats-backend`.
+- Deploys: read the `deploy.sh` output. Step 5 requires `https://betterat.cricket/api/openapi.json` to contain "BetterStats" (about 15 tries at 5 s): it catches a backend that fails to boot (alembic error, crash loop) and a crossed `/api` proxy. Step 4 only proves the frontend, which serves static files even when the API is dead.
+- Slow boots: look for `Application startup complete.` in `docker compose logs --tail=10 betterstats-backend`.
 - Blog or OG changes: `curl` the `/blog/{slug}` URL and read the raw HTML a crawler gets.
 - Contact form and club-search: the archive cites a real-Postgres run (resolution priority, guid upgrade and collision guard, migration 224 twice on a populated table, junk `clubSource`) and a browser drive, but names no suite file. Look in `backend/verification/` first.
 
@@ -107,17 +106,17 @@
 
 | Original section (heading, original CLAUDE.md line range) | Disposition | Where captured |
 |---|---|---|
-| Writing Voice, L12321-12333 | rules extracted | Standing rule 25 |
-| Server Deploy Command, L12334-12355 | rules extracted | Standing rules 1 to 9, Operator commands, FLAG-OPS-2, 3, 4 |
-| June 2026 Production Outage, compose project split, L12356-12372 | rules extracted | Traps bullets 1 to 4 (with full diagnosis order), rules 3 and 8 |
-| June 2026 Admin Outage #2, NPM can't resolve betterstats-frontend, L12373-12392 | rules extracted | Traps bullets 5 to 10, rule 9, FLAG-OPS-2 |
-| Public Domain, L12393-12402 | rules extracted | Standing rules 10 to 14, Open follow-ups, FLAG-OPS-6 |
-| Blog post social-share cards, L12403-12429 | rules extracted | Standing rule 15, Traps bullet 10 |
-| Marketing Contact form to club onboarding requests, L12430-12510 | rules extracted | Standing rules 16 to 20, Traps bullet 11, FLAG-OPS-8 |
-| .. Club name is a search, not a text box (migration 224, v9.12.2), inside L12430-12510 | rules extracted | Standing rules 17 to 20, Open follow-ups |
-| Public Marketing Pricing, modular model, L12511-12539 | rules extracted | Standing rule 21, Open follow-ups, FLAG-OPS-7 |
-| Modular entitlements, tiers retired (v8.12), L12540-12564 | rules extracted | Standing rules 22 and 23, FLAG-OPS-5 |
-| Version Numbers, L12565-12573 | rules extracted | Standing rule 24 |
+| Writing Voice, L12321-12333 | rules extracted | Rule 25 |
+| Server Deploy Command, L12334-12355 | rules extracted | Rules 1 to 9, Operator commands, FLAG-OPS-2, 3, 4 |
+| June 2026 Production Outage, compose project split, L12356-12372 | rules extracted | Traps 1 to 3, rules 3 and 8 |
+| June 2026 Admin Outage #2, NPM can't resolve betterstats-frontend, L12373-12392 | rules extracted | Traps 4 to 9, rule 9, FLAG-OPS-2 |
+| Public Domain, L12393-12402 | rules extracted | Rules 10 to 14, Open follow-ups, FLAG-OPS-6 |
+| Blog post social-share cards, L12403-12429 | rules extracted | Rule 15, Trap 10 |
+| Marketing Contact form to club onboarding requests, L12430-12510 | rules extracted | Rules 16 to 20, Trap 11, FLAG-OPS-8 |
+| .. Club name is a search, not a text box (migration 224, v9.12.2) | rules extracted | Rules 17 to 20, Open follow-ups |
+| Public Marketing Pricing, modular model, L12511-12539 | rules extracted | Rule 21, FLAG-OPS-7 |
+| Modular entitlements, tiers retired (v8.12), L12540-12564 | rules extracted | Rules 22, 23, FLAG-OPS-5 |
+| Version Numbers, L12565-12573 | rules extracted | Rule 24 |
 | Branch, L12696-12700 | history only (stale branch note) | FLAG-OPS-1 |
-| Architecture, L12701-12707 | rules extracted | Standing rule 26 (Backend and Frontend stack lines are baseline, not rules) |
-| Key Notes, L12812-12819 | rules extracted | Standing rules 27 to 31 |
+| Architecture, L12701-12707 | rules extracted | Rule 26 |
+| Key Notes, L12812-12819 | rules extracted | Rules 27 to 31 |
