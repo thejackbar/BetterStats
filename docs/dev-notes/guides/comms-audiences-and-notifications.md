@@ -10,7 +10,7 @@
 
 **Archive** (full history, verbatim, do not load whole): `docs/dev-notes/archive/comms-audiences-and-notifications.md`. Grep hints: `facetOptionsFrom`, `A club decides what it is told about`, `Certificate stages`, `One CRUD shape`, `HTML / Design / Preview`, `Notification Centre`, `Naming a club or a contact`, `nobody at the club ever ran`, `How many clubs an audience reaches`, `Every club admin, on one internal list`, `trial, as an audience`, `Comms has no sync step`.
 
-**Related guides**: none confirmed (check `docs/dev-notes/guides/` for CRM, clubhouse/fees, accounts/onboarding and verification-harness guides). 
+**Related guides**: none confirmed (check `docs/dev-notes/guides/` for CRM, accounts/onboarding and verification-harness guides).
 
 ## Standing rules
 
@@ -55,10 +55,10 @@
 **Comms record screens and editor**
 
 24. Build Comms-style screens from `crudShell.jsx` (`CrudPanes`, `RecordListPane`, `DetailPane`, `RecordTitleRow`, `CountBar`, `SaveRow`, `reachability`), not a fifth layout.
-25. Emails is one screen on two URLs (`/admin/comms`, `/admin/comms/:id`, both `CommsCampaigns`; `CommsCompose` exports `EmailDetail`). Keep URLs stable. Composer is `lazy()`. Deleting a SENT email lives on the email. Subject is the title row, so `TextInput` forwards its ref.
+25. Emails is one screen on two URLs (`/admin/comms`, `/admin/comms/:id`, both `CommsCampaigns`; `CommsCompose` exports `EmailDetail`). Keep URLs stable. Composer is `lazy()`. Deleting a SENT email lives on the email. Subject is the title row (`TextInput` forwards its ref).
 26. A selection effect may only LOAD a draft, never clear one (clearing wipes a fresh "New list"/"New template"). `EmailEditorTabs` seeds its design iframe once, so bump `editorKey` when HTML is replaced wholesale.
 27. Facet shapes are DERIVED from `FACETS` (`emptyFilters`, `facetOptionsFrom`, matcher), never a second hand-written list, mirroring `emptyModes`.
-28. Design mode edits the REAL DOM (`designMode = 'on'`, `execCommand`, `serializeIframeDocument`), not a schema (rich-text libraries rewrite table-based email markup). Fragment vs full doc is auto-detected (`isFullHtmlDoc` in `lib/htmlEmailFormat.js`, mirrors backend `_is_full_doc`); a fragment is wrapped only for the editing surface (`wrapFragmentForEditing`) and only its inner content is read back, so the backend club shell and mandatory footer still apply. Tidying (`tidyHtml`, js-beautify) is client-side only.
+28. Design mode edits the REAL DOM (`designMode = 'on'`, `execCommand`, `serializeIframeDocument`), not a schema (rich-text libraries rewrite table email markup). Fragment vs full doc is auto-detected (`isFullHtmlDoc` in `lib/htmlEmailFormat.js`, mirrors backend `_is_full_doc`); a fragment is wrapped only for the editing surface (`wrapFragmentForEditing`) and only its inner content is read back, so the backend club shell and mandatory footer still apply. Tidying (`tidyHtml`, js-beautify) is client-side only.
 29. `ref.flush()` on `EmailEditorTabs` is mandatory before every Save, Test and Send; use its return value, not `html`/`body` state (not landed yet). A 400ms live sync keeps Send enablement and unknown-`{{variable}}` warnings current.
 
 **Club notifications (migration 288, v9.69.0, v9.89.0)**
@@ -66,12 +66,12 @@
 30. Catalogue is CODE, choices are DATA: a new event needs an `EventType` in `notification_events.EVENT_TYPES` AND a source in `notification_scan.SOURCES` (suite asserts they match). A club with no rows behaves as the registry declares, so defaults change with no backfill.
 31. Notice period is per event (`EventType.config_fields`), server-side bounds CLAMP. `clean_config` direction is load-bearing: SAVE passes the club's current config as base, READ passes nothing (falls to registry default). Backwards resets a club's setting on next save. An already-lapsed certificate is raised whatever the notice period.
 32. Dedupe key names the FACT, never the run. Certificate key carries its expiry DATE (renewal is a new fact). Sources re-report everything; the unique index on `(organisation_id, dedupe_key)` decides what is new (read-then-write would race a manual scan against the nightly). Sole exception: low stock puts the ISO week in the key.
-33. Certificate stages: notice (ORIGINAL unsuffixed key), `:final` (`final_days`, 0 = off), `:lapsed` (severity `urgent` via `emit(severity=...)`). Only the CURRENT stage raised; a pre-stage notice is read by payload `days_remaining`. Excluded: superseded certificates, archived members, retired types, lapsed longer than `lapsed_days`.
+33. Certificate stages: notice (ORIGINAL unsuffixed key), `:final` (`final_days`, 0 = off), `:lapsed` (severity `urgent` via `emit(severity=...)`). Only the CURRENT stage raised; a pre-stage notice is read by payload `days_remaining`. Excluded: superseded, archived-member, retired-type and long-lapsed (`lapsed_days`) certificates.
 34. `notifications.channel_allowed` is the whole subscription decision (kill switch, channel switch, event switch, per-event channel, person opt-out, plus module gate and recipient capability). Each fails closed alone. One copy only. An opt-out silences and never switches on; `event_key = '*'` (`ALL_EVENTS`) is the whole-club floor. Capability filters who is TOLD, never who may configure their own inbox.
 35. Recipients: `club_admin` AND `club_member` (allowlist members such as the volunteer coordinator with `MANAGE_QUALIFICATIONS`). Do NOT reuse `admin_contact_list.admin_rows`. A `super_admin` or `sales` membership is never a recipient.
 36. One digest per recipient. Mark sent only when the provider accepts; record a refusal on the row and retry. Console provider is NOT a send (deliveries stay pending). First run capped (`MAX_PER_EVENT` = 40, `LOOKBACK_DAYS` = 21 in `notification_scan.py`). `sync_completed` defaults to the bell, not the inbox, and is not raised when nothing came in. A channel is TEXT (`notification_events.CHANNELS`); absent from `default_channels` means OFF.
 37. Bell and modal were two separate `role === 'super_admin'` gates in `AdminLayout`; both lifted (endpoints are club-scoped via `get_current_club`). Lifting one leaves a bell that opens nothing. Login auto-open stays staff-only.
-38. `services/session_safety.rollback_keeping` is the ONE "rollback but keep instances readable". A bare `rollback()` expires loaded instances; the next attribute read raises MissingGreenlet far from the cause (`scan_org` crashed this way).
+38. `services/session_safety.rollback_keeping` is the ONE "rollback but keep instances readable". A bare `rollback()` expires loaded instances; the next attribute read raises MissingGreenlet far from the cause.
 39. Grade milestones (`milestone_scan.grade_milestones`): name folded through active `grade_merge_logs`, active players only, ids bound as `uuid[]` (never a subquery). One-grade players skipped, judged across ALL stats.
 40. `POST .../settings/test-email`: self-only `[Test]` digest, touches no delivery, 5 per 10 minutes.
 
@@ -104,9 +104,8 @@
 ## Open follow-ups
 
 - Nothing asserts a key added to `FACETS`, `MODE_FILTERS` or the engagement filter reaches every consumer (only `FACETS` covered).
-- Nothing prunes old notifications (retention is a person's decision). No per-event digest frequency. No SMS or push. AFL silo untouched. `member_reminders` still emails the MEMBER about their own lapsing qualification (different audience).
+- Nothing prunes old notifications (retention is a person's decision). No per-event digest frequency, SMS or push. `member_reminders` still emails the MEMBER about their own lapsing qualification (different audience). Reconcile does not refresh names on existing contacts (deliberate).
 - `crm.trial_days_remaining_by_club` still negates its signed figure for the CRM expired badge (off-by-one from rule 17).
-- Reconcile does not refresh names on existing contacts (deliberate).
 - Old Notification Centre follow-ups (outside comms): `deep_sync_player` low value; no redirect from `/yearbook/{alias_season_id}`.
 
 ## Flags: conflicting, superseded or possibly obsolete guidance

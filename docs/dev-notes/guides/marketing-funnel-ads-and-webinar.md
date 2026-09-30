@@ -88,26 +88,22 @@
 
 ## Traps and failure signatures
 
-- `addInitScript` cannot stub `gtag` (`index.html` redefines it; read `window.dataLayer`); `fbq` is stubbable. `networkidle` never settles (HeartbeatBeacon): wait for the element. `click({force:true})` on a disabled button hangs.
-- Wrong webinar state on a device with a bad clock: `is_past` from the server must win.
-- Two logo lockups on `/demo` or `/trial`: the four-lists trap (rule 47). Advertised recording before the event: title and `og:title` were hardcoded (crawlers never run `usePageMeta`).
-- Inflated cost per signup after the webinar ad: divisor included the other stream (rule 2). Chart marker missing with no error: Fragment (rule 14).
-- Phantom club rows ("Warn" as "Warners Bay"): rule 24. "More selected than searched": rules 19, 23. "Last updated" stuck: rule 16.
-- StreamYard "0 pushed, 2 skipped": mononyms, not a fault; reason must be on the row.
-- Test-harness traps: `\d` in a JS template passed to `page.evaluate` is `d`; CSS-`uppercase` text reads transformed via `innerText`; a `.every()` on an empty array or a compare against `''` is vacuously true; gate "absence is correct" checks on the block existing.
+- Wrong webinar state on a bad-clock device: server `is_past` must win. Advertised recording pre-event: title and `og:title` were hardcoded (crawlers never run `usePageMeta`).
+- Two logo lockups on `/demo` or `/trial`: four-lists trap (rule 47). Inflated cost per signup: divisor included the other stream (rule 2). Chart marker missing, no error: Fragment (rule 14).
+- Phantom club rows ("Warn" as "Warners Bay"): rule 24. "More selected than searched": rules 19, 23. "Last updated" stuck: rule 16. StreamYard "0 pushed, 2 skipped": mononyms, not a fault.
+- Harness: `addInitScript` cannot stub `gtag` (read `window.dataLayer`; `fbq` is stubbable); `networkidle` never settles (HeartbeatBeacon); `click({force:true})` on a disabled button hangs; `\d` in a JS template passed to `page.evaluate` is `d`; CSS-`uppercase` reads transformed; `.every()` on an empty array is vacuous.
 
 ## How to verify a change here
 
-- Backend (real Postgres, shipped route bodies): `backend/verification/verify_meta_ads_streams.py` (control with feature absent REPORTS missing parts; window and guards neutered: the since-spend reads lifetime and a partial window prints a cost instead of withholding), `verify_webinar.py` (DDL three times, mirror agreement, resubmission and bot guards, reminder edges, page meta, phone, name halves), `verify_streamyard_skip_reporting.py`.
-- Browser: `frontend/verification/verify_meta_ads_streams_browser.mjs`, `verify_webinar_browser.mjs`, `verify_club_cta_browser.mjs` (control fails the new checks). Meta Events Manager Test Events is NOT covered (needs a real registration).
-- Never call live StreamYard in a suite (no public DELETE): stub `push_registration`. Earlier probes left four test registrations (`bettercricket-integration-test@`, `bc-it-a@`, `bc-it-b@`, `bc-shipped-fn-test@`) to delete by hand in the dashboard.
-- Control runs must REPORT, not crash: read new keys with `.get`, use presence-safe helpers (`textOf()`, `seen()`, `reachedSuccess()`), gate whole blocks. Diff PASS lists between run and control (`comm -12`): a new-feature check passing in both is a guard or passing for the wrong reason.
+- Backend (real Postgres, shipped route bodies): `backend/verification/verify_meta_ads_streams.py` (control with feature absent REPORTS missing parts; window and guards neutered: since-spend reads lifetime, a partial window prints a cost), `verify_webinar.py` (DDL three times, mirror agreement, resubmission and bot guards, reminder edges, name halves), `verify_streamyard_skip_reporting.py`.
+- Browser: `frontend/verification/verify_meta_ads_streams_browser.mjs`, `verify_webinar_browser.mjs`, `verify_club_cta_browser.mjs`. Meta Events Manager Test Events is NOT covered.
+- Never call live StreamYard in a suite (no public DELETE); stub `push_registration`. Earlier probes left four test registrations (`bettercricket-integration-test@`, `bc-it-a@`, `bc-it-b@`, `bc-shipped-fn-test@`) to delete by hand in their dashboard.
+- Control runs must REPORT, not crash: `.get`, presence-safe helpers (`textOf()`, `seen()`, `reachedSuccess()`), gate whole blocks. Diff PASS lists of run and control (`comm -12`) to find checks that cannot fail.
 
 ## Operator commands and scripts
 
-- No standing scripts here. Engagement diagnostics (`python -m app.scripts.recalc_engagement`, `top_engaged`) belong to the CRM guide.
-- Account-side steps code cannot do: verify `betterat.cricket` in Business Manager; `CompleteRegistration` in Aggregated Event Measurement priority; ad `conversion_domain`; StreamYard registration toggle; set `webinar_recording_url` after the event; SPF/DKIM/DMARC and a real `email_provider`; flip `self_serve_registration_enabled` at launch. Creative reads "WAST"; Perth is AWST.
-- After changing `CAMPAIGN_UTM_*` or `AD_DESTINATIONS`, press Refresh now (`run_snapshot`).
+- No standing scripts here (engagement scripts belong to the CRM guide). After changing `CAMPAIGN_UTM_*` or `AD_DESTINATIONS`, press Refresh now (`run_snapshot`).
+- Account-side steps code cannot do: verify `betterat.cricket` in Business Manager; `CompleteRegistration` in Aggregated Event Measurement priority; ad `conversion_domain`; StreamYard registration toggle; set `webinar_recording_url` after the event; SPF/DKIM/DMARC and a real `email_provider`; flip `self_serve_registration_enabled` at launch.
 
 ## Open follow-ups
 

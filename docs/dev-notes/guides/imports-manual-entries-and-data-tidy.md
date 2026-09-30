@@ -9,7 +9,7 @@
 
 **Archive** (full history, verbatim, do not load whole): `docs/dev-notes/archive/imports-manual-entries-and-data-tidy.md`. Grep hints: `stray innings`, `short_form`, `innings_order_known`, `re-sourced`, `is_team_labelled`, `discriminator`, `name_variant`, `cleanup_seasons`, `import_batch_id`, `staging`, `for-date`, `grade-less`, `exclude_id`, `balls_per_over`, `card_error`.
 
-**Related guides**: `cricketstatz-import` (per-match pairing and `superseded_ddl.py` own the effective views), `stats-figures-records-and-filters` (scope, competitions, rate coverage), `cross-club-and-data-safety` (shared fixtures, never delete manual work), `data-sources-and-sync`.
+**Related guides**: `cricketstatz-import` (pairing, `superseded_ddl.py` owns the effective views), `stats-figures-records-and-filters`, `cross-club-and-data-safety` (never delete manual work), `data-sources-and-sync`.
 
 ## Standing rules
 
@@ -61,24 +61,21 @@
 
 ## Traps and failure signatures
 
-- Same total on both innings (142/7/40 twice): total typed while Opposition, then flipped (rule 1). Repair with `fix_stray_innings_totals`.
-- "All" lower than "Men's", or a filter raises a total: overwrite import dropped matches the file did not hold (rules 21, 22).
-- "— vs —" or `home_team: None`: a reader bypassed `sides_sql` (rule 7). Scores under the wrong team name, "60s" scoring as a club word: rule 10.
-- Bowlers bowl at their own batters: wrong innings number or drifted template (rules 3, 8). Undo of an edit wipes fall of wickets: rule 6.
+- Same total on both innings (142/7/40 twice): rule 1. "All" lower than "Men's": rules 21, 22.
+- "— vs —" or `home_team: None`: reader bypassed `sides_sql` (rule 7). Scores under the wrong team name: rule 10.
+- Bowlers bowl at their own batters: rules 3, 8. Undo of an edit wipes fall of wickets: rule 6.
 - Player page 6 s or 45 s slow after a rollup change: CTE wall (rule 23), or `player_categories` correlated EXISTS per grade row. Look for what every endpoint on the page calls, not what changed.
 - Import 504 while the job finishes, 413, or a vanished POST body: nginx timeout, cap or 301 (rule 20).
-- "Salter, Steve" beside "Steven": short-form step off or "Create all" swept rows (rule 26). Missed Brad K Mant: whole-string edit distance (rule 27). One Day Grade 2 into Grade 4: edit distance on grades (rule 28).
-- 1974 card under "Summer 1999/00": season required from a list that cannot hold it (rule 13). Card invisible under every season: joined through `grade_id` (rule 15).
-- Season deleted with imported history: `_season_in_use` gap (rule 16). Undo leaves surname-only players: no marker (rule 30).
+- "Salter, Steve" beside "Steven": rule 26. Missed Brad K Mant: rule 27. One Day Grade 2 offered into Grade 4: rule 28.
+- 1974 card under "Summer 1999/00": rule 13. Card invisible under every season: rule 15. Season deleted with history: rule 16. Undo leaves surname-only players: rule 30.
 - Harness: suites share one database and stub tables collide (`player_achievements.org_id`), run on a fresh one. StatLab path needs lifespan-only `grade_merge_logs`; views need `_view_ddl.py`. Two migrations with one revision id break Alembic: check `origin/main` at merge.
 
 ## How to verify a change here
 
-Real Postgres, shipped route bodies, and a control run that REPORTS rather than crashes (`.get` on new keys, wrap commit calls, gate blocks on the feature existing). A check against an empty fixture or a crashed control proves nothing.
-- `backend/verification/`: `verify_manual_game_check.py` (control reports 142/7), `verify_scorebook_innings.py` (control: "None v None"), `verify_csv_innings_import.py`, `verify_manual_side_names.py`, `verify_manual_winner.py`, `verify_manual_games_import.py` (staging, pairing, aggregate equals per-innings views, plan has no CTE Scan), `verify_import_team_labels.py`, `verify_junior_residual_scope.py`, `verify_short_form_match.py`, `verify_grade_duplicates.py` (control swaps in SequenceMatcher 0.90), `verify_season_resolve.py`, `verify_manual_innings.py`, `verify_manual_scorecard.py`.
-- `frontend/verification/`: `verify_manual_game_check_browser.mjs`, `verify_scorebook_import_browser.mjs`, `verify_manual_scorecard_sides_browser.mjs`, `verify_short_form_match_browser.mjs`, `verify_grade_duplicates_browser.mjs`, `verify_scorecard_season_browser.mjs`.
-- Live diagnosis before code: `ops/diagnostics/csv_import_unpaired.sql`. Playwright: wait on the form's own field, not `text=Season` (matches the sidebar).
-- After a rollup or view change re-run manual games import, cricketstatz import, match coverage, club records, competitions and rate coverage.
+Real Postgres, shipped route bodies, and a control run that REPORTS rather than crashes (`.get` on new keys, wrap commit calls). A check against an empty fixture or a crashed control proves nothing.
+- `backend/verification/`: `verify_manual_game_check.py` (control reports 142/7), `verify_scorebook_innings.py` (control: "None v None"), `verify_csv_innings_import.py`, `verify_manual_side_names.py`, `verify_manual_winner.py`, `verify_manual_games_import.py` (staging, pairing, aggregate equals per-innings views, plan has no CTE Scan), `verify_import_team_labels.py`, `verify_junior_residual_scope.py`, `verify_short_form_match.py`, `verify_grade_duplicates.py` (control: SequenceMatcher 0.90), `verify_season_resolve.py`. Browser twins sit in `frontend/verification/` (`*_browser.mjs`).
+- Diagnose live data before code: `ops/diagnostics/csv_import_unpaired.sql`. Playwright: wait on the form's own field, not `text=Season`.
+- After a rollup or view change re-run manual games import, cricketstatz import, match coverage, club records, competitions, rate coverage.
 
 ## Operator commands and scripts
 
@@ -104,9 +101,8 @@ All dry run by default; `--apply` acts.
 - [FLAG-IMP-2] 309's `import_authoritative` whole-season model versus the later per-match pairing ("an AND") | `import_authoritative` still in `superseded_ddl.py` (lines 73, 231, 410) so both live in the views | A RE-SOURCED SEASON COUNTS PER MATCH (L641-788) | verify against `cricketstatz-import` guide before changing either
 - [FLAG-IMP-3] Same section says the 037 fan-out was "NOT fixed", then "FIXED" | later bullet wins | same section | keep rule 21
 - [FLAG-IMP-4] Fix credits migration 169 for `v_effective_games` columns | `superseded_ddl.py` now owns and re-issues that view every boot; edits in 169 alone are lost at restart | Uploaded scorecard missing (L15560-15609) | keep the rule, edit the view in `superseded_ddl.py`
-- [FLAG-IMP-5] Quoted suite check counts and caller counts | drift with every change | several | verify by grep
-- [FLAG-IMP-6] Reader notes cite `anthropic 0.40.0` | `requirements.txt` still pins it; model and SDK claims age | Scorecard reader (L15646-15737) | verify on any bump
-- [FLAG-IMP-7] Card layout: deliberate v8.79.2 batting order versus club request | owner decision unresolved | v9.98.6 | ask before changing
+- [FLAG-IMP-5] Reader notes cite `anthropic 0.40.0` | `requirements.txt` still pins it; model and SDK claims age | Scorecard reader (L15646-15737) | verify on any bump
+- [FLAG-IMP-6] Card layout: deliberate v8.79.2 batting order versus club request | owner decision unresolved | v9.98.6 | ask before changing
 
 ## Section coverage
 
@@ -117,7 +113,7 @@ All dry run by default; `--apply` acts.
 | A scorebook import carries the opposition, the score and the stands (migration 311, v9.97.0) (L239-398) | rules extracted | Rules 3 to 7, 12; Operator (recovery) |
 | &nbsp;&nbsp;v9.97.1 opposition named on other readers | rules extracted | Rule 7 |
 | &nbsp;&nbsp;Template, single sundries figure, edit undo (v9.98.2) | rules extracted | Rules 6, 8 |
-| &nbsp;&nbsp;Our innings named for the match's team (v9.98.6) | rules extracted | Rules 10, 11, 12; Flag 7 |
+| &nbsp;&nbsp;Our innings named for the match's team (v9.98.6) | rules extracted | Rules 10, 11, 12; Flag 6 |
 | &nbsp;&nbsp;Recorded winner contradicted (v9.98.7) | rules extracted | Rule 9; Operator |
 | A RE-SOURCED SEASON COUNTS PER MATCH (migration 309, v9.90.3) (L641-788) | rules extracted (overlaps cricketstatz-import pairing) | Rules 21, 22, 24; Flags 2, 3 |
 | &nbsp;&nbsp;v9.90.4 shared-score guard, CTE wall, `auth_games`, `player_categories`, fan-out, StatLab | rules extracted | Rules 22, 23; Traps |

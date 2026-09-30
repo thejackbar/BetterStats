@@ -4,9 +4,9 @@
 - Touching `services/cricketstatz_*.py`, `routers/cricketstatz.py`, `components/admin/CricketStatzImport.jsx` (a panel inside `AdminSync.jsx`).
 - Touching `services/match_pairing.py`, `services/superseded_ddl.py`, `manual_games.superseded_by_game_id` / `pair_prefers_import`, or any of the eight `v_effective_*` views.
 - Symptoms: a career, record board or hundreds count about double for seasons CA and CricketStatz both cover; one person listed twice ("Quinsee, Brad" and "Brad Quinsee"); a merge that halves a career; 3,000 matches and no honours; "30 sixes in an innings of 8"; an import that looks hung.
-- Editing `_merge_players_core`, `services/merge_carry.py`, or the lifespan mirror in `app/main.py` that replays migration DDL.
+- Editing `_merge_players_core`, `merge_carry.py`, or the lifespan mirror in `app/main.py` that replays migration DDL.
 
-**Archive** (full history, verbatim, do not load whole): `docs/dev-notes/archive/cricketstatz-import.md`. Grep hints: `linkreport`, `resolve_player`, `most recent 999`, `IT IS AN AND`, `NEVER RAN`, `pairing_applied`, `TWO THOUSAND LINES`, `log_statement`, `pg_get_viewdef`, `PER-INNINGS DECISION`, `uq_manual_games_superseded_by_game`, `fours * 4`, `Preston`, `player_season_grade_stats`, `run_notes_pass`, `stats_source`, `merge_carry`, `classify_note`, `plan_seasons`, `STALL_AFTER_SECONDS`.
+**Archive** (full history, verbatim, do not load whole): `docs/dev-notes/archive/cricketstatz-import.md`. Grep hints: `linkreport`, `resolve_player`, `most recent 999`, `IT IS AN AND`, `NEVER RAN`, `pairing_applied`, `TWO THOUSAND LINES`, `log_statement`, `pg_get_viewdef`, `PER-INNINGS DECISION`, `fours * 4`, `Preston`, `player_season_grade_stats`, `run_notes_pass`, `stats_source`, `merge_carry`, `classify_note`, `STALL_AFTER_SECONDS`.
 
 **Related guides**: merge/duplicates (`_merge_players_core`); stats and effective views (record boards, shared fixtures); sync (Full Rebuild triggers pairing); BetterImport (`match_players`); awards (`player_achievements`); migrations and lifespan mirrors (numbering).
 
@@ -46,7 +46,7 @@
 
 **Effective views: database must equal code**
 27. `services/superseded_ddl.STATEMENTS` owns all eight views. Change them HERE or the change lasts to the next boot (it also owns migration 291's `caught_behind` on batting). Start from the newest definition (`CREATE OR REPLACE VIEW` cannot drop columns; an older one once took the API down), qualify columns, LEFT JOIN, primary-key joins only, downgrade drops views first.
-28. Never replay an older migration's view DDL from a lifespan mirror. The 266 mirror in `app/main.py` re-ran pre-pairing definitions of two views every boot (same columns, so silently accepted). The mirror now applies 266's column and index only.
+28. Never replay an older migration's view DDL from a lifespan mirror. The 266 mirror in `app/main.py` re-ran pre-pairing definitions of two views every boot (same columns, so accepted silently). The mirror now applies 266's column and index only.
 29. `superseded_ddl.verify(conn)` reads `pg_get_viewdef`, logs SCHEMA MISMATCH per view, never raises, and must log a count EVERY boot. The needle is `superseded_by_game_id` (3 in the aggregate view, 2 per-innings, 0 pre-pairing); do not probe `pair_prefers_import`. A new view joins `VERIFIED_VIEWS`.
 30. `jobs/scheduler.repair_effective_views` runs hourly and re-applies STATEMENTS where verify fails. Keep it. A migration recorded as applied is not evidence its effect exists: ask Postgres first.
 
@@ -65,15 +65,14 @@
 - **Two of eight views stale on a live system**: an older same-column definition replaced them silently (our own 266 mirror). A 169-era one fails loudly (`cannot drop columns from view`). `grep v_effective_games app/main.py` finds one comment because the SQL is in the migration module: search for what executes.
 - **A guard column that makes overwrite fail loudly took the site down** (v9.70.11): the writer was our own boot. Know who trips a guard first.
 - **`resolve_season` returns a `Season`, not an id**: a raw `UPDATE ... WHERE id = :s` bound a repr, was swallowed as a note, wrote zero matches.
-- **Passes `py_compile` and `vite build` but fails**: columns added in raw DDL and not mapped on the ORM model (`ManualGame.cricketstatz_match_id`).
+- **Passes `py_compile` and `vite build` but fails**: raw-DDL columns not mapped on the ORM model.
 - **`games.raw_payload` is `JSON` on the ORM, `JSONB` in migrated databases**: a `create_all` harness cannot union it with the view's `NULL::jsonb`.
-- **`/organisations/{id}/results` ignores `limit`**: repeated "pages" are the same rows, not a fan-out.
 
 ## How to verify a change here
 
 - `backend/verification/verify_cricketstatz_import.py` (parsers over captured reports, import, pairing, views, undo, notes). Controls that must fail: matcher neutered, hooks unwired, per-innings views unfiltered, cache handling, honours classifier and re-stamp.
 - `verify_merge_carry.py` (control: keeper keeps only its own innings), `verify_boundary_counts.py` (SQL mirror equals Python rule), `frontend/verification/verify_cricketstatz_browser.mjs` (panel progress, stall, Stop; control fails the old 95% bar).
-- Re-run neighbours when views change: club records, match coverage, competitions, rate coverage, season fold, shared fixtures, retired not out, records timing.
+- Re-run neighbour stats suites when views change (club records, match coverage, competitions, rate coverage, season fold, shared fixtures, retired not out, records timing).
 - Harness gotchas: suites share one database (stub tables collide); copy lifespan-only tables (`player_achievements`, award tables) column for column; unwind migrations newest first; a control must really stop the run (refuse a scorecard, the one place `CricketStatzError` propagates); a check needs a real duplicate in the fixture; assert the write, not the column name; test tie stability by running `assign` over the same rows in three orders; use realistic opposition names in scale tests.
 
 ## Operator commands and scripts
@@ -86,13 +85,13 @@
 
 ## Open follow-ups
 
-- Missed pairs (about 234 per 3,500 in the awkward case) still count twice with nothing on screen; a "same match?" review list from declined near misses.
+- Missed pairs (about 234 per 3,500 in the awkward case) still count twice, unshown; a "same match?" review list is unbuilt.
+- Unused: `mode=106` ball by ball, their league JSON API, level-8 extract.
 - Nothing flags boundary counts nulled; nothing detects seasons held twice from before pairing.
 - The outside process that once overwrote two views was never named beyond our 266 mirror.
 - `iq_team`, `iq_trends`, `import_reconcile` still read `player_season_grade_stats` unfiltered.
 - `v_effective_batting_innings.id` is not unique across sources (both SERIAL).
 - Merge still does not carry `net_attendance`, `team_members`, `family_members`, availability, `fixture_lineups`, `fee_members`, `comms_contacts`, `merch_movements`, fantasy tables.
-- Unused: `mode=106` ball by ball, their league JSON API, the level-8 database extract; batting hand and bowling type from the player page.
 
 ## Flags: conflicting, superseded or possibly obsolete guidance
 
@@ -102,7 +101,6 @@
 - [FLAG-CSI-4] v9.70.6: a paired imported match is never counted from the import at aggregate level | `superseded_ddl.py` `counts_here` now also counts it when `pair_prefers_import` AND `seasons.import_authoritative` (later migration 309 "re-sourced season counts per match") | L11145, L10782 | verify against the stats guide before relying on rule 24.
 - [FLAG-CSI-5] v9.68.3/9.68.4: overlapping synced seasons are skipped by default (`synced_years` 'skip'), 'cricketstatz' marks seasons so CA steps aside | code keeps the skip default and the option, but marking is gone; the "steps aside" note text is likely stale | L11686-11821 | verify intended default under the AND design.
 - [FLAG-CSI-6] Migrations 285, 286, 287, 290, 291/292, 293 | 303 and 309 also re-run `superseded_ddl.STATEMENTS`; numbers are history | throughout | keep; edit `STATEMENTS`, not a new copy.
-- [FLAG-CSI-7] Suite counts and one-club measurements (Keon Park, Cockburn, Quinsee) | one-off evidence | all "Verified" bullets | history only.
 
 ## Section coverage
 

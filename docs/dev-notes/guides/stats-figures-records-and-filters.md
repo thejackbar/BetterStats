@@ -78,53 +78,41 @@
 
 ## Traps and failure signatures
 
-- Strike rate 320 or 333.33 beside blank balls: SUM/SUM or a browser-side rate (rules 1, 6). Two 10.2 overs summing to 20.4: rule 7.
-- Header average differs from StatLab or by-venue: `not_out` flag wrote Retired Not Out as a wicket (rule 12).
-- 13 matches where the club counts 10: washout (rules 13, 14).
-- A filter INCREASES a total (333 to 337): source switch, not a bug (rule 29). Header, note and grid read 309/313/314: three rules (rules 29 to 31).
-- Junior or senior residual under Juniors/Women's/Masters: residual `grade_id` NULL survived exclusion (rule 23).
-- Match Type pills do nothing with a grade picked: `formats_only()` or a missing `{scope_clause}` (rule 21). Two-day filter returns all innings of a mixed grade: format done at grade level (rule 20). "Under 14s" counted senior: regex (rule 27).
+- Strike rate 320 or 333.33 beside blank balls: rules 1, 6. Overs summing to 20.4: rule 7. Header average differs from StatLab or by-venue: rule 12. 13 matches where the club counts 10: rules 13, 14.
+- A filter INCREASES a total (333 to 337), or header, note and grid read 309/313/314: source switch, not a bug (rules 29 to 31).
+- Residual shows under Juniors/Women's/Masters: rule 23. Match Type pills dead with a grade picked: rule 21. Two-day filter returns a mixed grade's every innings: rule 20. "Under 14s" counted senior: rule 27.
 - Filtered leaderboard fails at execute on finals/captain: clause built but bind not set where all branches share it.
-- Settings page stuck on "Loading…": handler missing `Depends(get_db)` compiles, imports and passes `py_compile`; only awaiting fails. Call route bodies in suites.
-- Grid drops on the default view for senior players of a junior-programme club: blanket skip of the gap heuristic (rule 33). Stray "filter does not apply" notes nobody triggered: rule 34.
-- Records 15s: JIT plus per-row correlated subplan in view 060 (seq scan of ~315k rows). Rules 42 to 44.
-- Filter pills missing in a browser suite: a stub `[]` for `/organisations/{id}/seasons` (row is gated on a season). `MATCHES212` has no word boundary and the headline counts up: wait, read `.pb-num`.
-- Job result never shows: `CompetitionManager.load()` reset to loading on refresh and unmounted `onDone`. Spinner on first load only.
-- Bare curl of `/scores/grades/{id}/matches` returns PascalCase: needs `jsconfig=eccn:true`; go through the client.
+- Settings stuck on "Loading…": handler missing `Depends(get_db)` compiles and passes `py_compile`; only awaiting fails. Call route bodies in suites.
+- Grid drops on the default view for a junior-programme club's seniors: rule 33. Stray "filter does not apply" notes: rule 34. Records 15s: rules 42 to 44.
+- Browser suites: no filter pills means the seasons stub returned `[]`; `MATCHES212` has no word boundary and the headline counts up (read `.pb-num` once still).
+- Job result never shows: `CompetitionManager.load()` reset to loading and unmounted `onDone`. Spinner on first load only.
+- Bare curl of `/scores/grades/{id}/matches` is PascalCase without `jsconfig=eccn:true`; use the client.
 - `CREATE OR REPLACE VIEW` cannot drop a column (266 downgrade drops and recreates; 169's has the same latent defect).
-- Harness tables: build from ORM models and copy lifespan DDL column for column (`bowling_spells.runs` is not `runs_conceded`; `audit_logs` uses `org_id` and its swallowed failure aborts the transaction). `games` has no `organisation_id`; `manual_batting_innings` keys on `manual_game_id`.
+- Harness tables: build from ORM models, copy lifespan DDL column for column (`bowling_spells.runs`, `audit_logs.org_id`; its swallowed failure aborts the transaction). `games` has no `organisation_id`; `manual_batting_innings` keys on `manual_game_id`.
 - Milestone `--apply` off a dry run whose REMOVE list is mostly juniors-turned-seniors: that is scope, not a fix. Do not apply.
 
 ## How to verify a change here
 
-Real-Postgres suites through shipped route bodies, each with a control run that must fail on the named behaviour and report, never crash:
-- `verify_rate_coverage.py`, `verify_rate_coverage_everywhere.py` (control reads 333.3, 300.0, 127.27, captain 6.25); `verify_rate_coverage_browser.mjs`, `verify_radar_rate_browser.mjs`.
-- `verify_retired_not_out.py` (control reads 12.83). `verify_milestone_figures.py` (profile-only writer removes Hetel's 1,000 to 5,000 runs), `verify_milestone_split_browser.mjs`.
-- `verify_match_coverage.py` (`scope_active` forced false fails 6; competition rate control reads 125.0), `verify_match_coverage_browser.mjs`.
-- `verify_stats_by_competition.py` and `verify_competitions_browser.mjs` (re-run for any `GradeScope` change), `verify_junior_residual_scope.py` (control 18/376 under Juniors), `verify_statlab_player_filter.py`, `verify_records_timing.py` (asserts every `pss_gender_clause` is preceded by `pss_club_clause`).
-
-Suite gotchas: read new keys with `.get`/`getattr` and guard clicks so a control run reports; seed through the code under test; a rate fixture needs an innings the rate cannot use; capture stub state BEFORE the action; read per row, not the whole document; CSS `uppercase` returns transformed `innerText`.
-Diagnostics: `ops/diagnostics/records_slow_board.sql`, `records_pushdown_test.sql`, `career_matches_sources.sql`.
-Re-run neighbours after a scope change: competitions, match coverage, shared fixtures, season fold, records timing, junior residual.
+Real-Postgres suites through shipped route bodies, each with a control run that must fail on the named behaviour and report, not crash:
+- `verify_rate_coverage.py`, `verify_rate_coverage_everywhere.py` (control reads 333.3, 127.27, captain 6.25), `verify_retired_not_out.py` (control 12.83), `verify_milestone_figures.py`, `verify_match_coverage.py`, `verify_stats_by_competition.py` (re-run for any `GradeScope` change), `verify_junior_residual_scope.py` (control 18/376), `verify_statlab_player_filter.py`, `verify_records_timing.py` (asserts `pss_club_clause` precedes every `pss_gender_clause`). Browser twins are `*_browser.mjs` (`verify_competitions_browser.mjs`, `verify_match_coverage_browser.mjs`, `verify_rate_coverage_browser.mjs`, `verify_radar_rate_browser.mjs`, `verify_milestone_split_browser.mjs`).
+- Gotchas: read new keys with `.get`/`getattr` and guard clicks so a control reports; seed through the code under test; a rate fixture needs an innings the rate cannot use; capture stub state BEFORE the action; read per row; CSS `uppercase` transforms `innerText`.
+- Diagnostics: `ops/diagnostics/records_slow_board.sql`, `records_pushdown_test.sql`, `career_matches_sources.sql`.
 
 ## Operator commands and scripts
 
-- `python -m app.scripts.reconcile_milestones <org|all> [--apply]` (dry run default; prints removals with dates; `all` prints `[n/N] club (Ns)`).
-- `python -m app.scripts.backfill_retired_not_out <org|all> --apply` (no network; re-derives `source='backfill'` season rows after fixing innings; CA `source='api'` rows untouched). Fix Missing Totals again repairs nothing (`ON CONFLICT DO NOTHING`).
-- `python -m app.scripts.backfill_game_status <org-id-or-slug|all>` (seasons an incremental sync no longer scans; rerun for clubs with `source='backfill'` season rows).
-- `python -m app.scripts.backfill_grade_associations <org|all> [--apply] [--no-group]` (one CA call per season; dry run default).
-- Archive records these as due after deploy (status unknown): reconcile_milestones for Shoalwater; backfill_grade_associations for Applecross and Hamilton.
+- `python -m app.scripts.reconcile_milestones <org|all> [--apply]` (dry run default; prints removals with dates).
+- `python -m app.scripts.backfill_retired_not_out <org|all> --apply` (no network; re-derives `source='backfill'` rows after fixing innings; `source='api'` untouched). Fix Missing Totals again repairs nothing.
+- `python -m app.scripts.backfill_game_status <org-id-or-slug|all>`; `python -m app.scripts.backfill_grade_associations <org|all> [--apply] [--no-group]` (one CA call per season; dry run default).
+- Archive lists as due after deploy (status unknown): reconcile_milestones for Shoalwater; backfill_grade_associations for Applecross and Hamilton.
 
 ## Open follow-ups
 
-- Records: nothing cached or concurrent (ideas: cache unfiltered board on last sync; separate sessions, not `asyncio.gather` on one `AsyncSession`).
-- Scout screens and `iq._their_key_players` not marked aggregate-basis. `iq_team._role_ratings`, `iq_trends._similar_players` use aggregates as z-scored features (left on purpose).
-- No SR column in Batting by Position. `player_season_stats.batting_average` is a second stored copy of a derived number.
-- Result filter offers "Tied" but never matches. Family targets ignore other context filters. Gender filter casing bug on Leaderboard and Records.
-- Players with ~100 games and CA 0 (Sunrise's Jackey Patel) unexplained. Club rankings unfiltered and unnoted (decision needed).
-- Nothing reads PlayHQ's competition name (WAF). AFL silo untouched (`services/afl/grade_labels.py`). BetterIQ, Yearbooks not on GradeScope defaults.
-- Leaner award import template instead of the ACC-flavoured `ACHIEVEMENT_TREE`.
-- History before a Full Rebuild reads ball counts as 0 not NULL; the zero-with-runs test carries it.
+- Records: nothing cached or concurrent (cache on last sync; separate sessions, not `asyncio.gather` on one `AsyncSession`).
+- Scout screens and `iq._their_key_players` not marked aggregate-basis; `iq_team._role_ratings`, `iq_trends._similar_players` use aggregates as features (on purpose).
+- No SR column in Batting by Position. `player_season_stats.batting_average` is a second stored copy.
+- Result filter offers "Tied" but never matches. Family targets ignore other context filters. Gender filter casing bug (Leaderboard, Records).
+- Players with ~100 games and CA 0 unexplained. Club rankings unfiltered and unnoted (decision needed).
+- No PlayHQ competition name (WAF). AFL silo untouched. BetterIQ, Yearbooks not on GradeScope defaults. Leaner award import template wanted.
 
 ## Flags: conflicting, superseded or possibly obsolete guidance
 

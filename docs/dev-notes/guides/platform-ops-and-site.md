@@ -30,7 +30,7 @@
 11. The brand is one word, "BetterCricket", in all copy, titles, OG cards, metadata and the `BRAND` constant in `marketing.js`. Module names stay camelCase (BetterStats is Core). The trading company is BetterSports.
 12. One contact address everywhere: `support@bettersports.com.au`. It is the default reply-to (`settings.email_reply_to`) and the public contact address (`SUPPORT_EMAIL` in `marketing.js`, plus hardcoded copies in `index.html`, `llms.txt`, `og_preview.py`, `self_serve_trial.py` and the marketing pages). `email_from_address` is a separate sending address. Change all copies together.
 13. `email_provider` defaults to `console`: nothing sends until a provider is set. `bettersports.com.au` still needs SPF, DKIM and DMARC.
-14. Social cards for marketing routes are server-rendered by `og_preview.py` (`MARKETING_PAGES`) because crawlers do not run JS. Keep that map in step with marketing routes.
+14. Marketing social cards are server-rendered by `og_preview.py` (`MARKETING_PAGES`), since crawlers do not run JS. Keep that map in step with the routes.
 
 **Blog, Contact form, pricing**
 15. Adding a blog post is three steps that must agree: hero image in `frontend/public/marketing/blog/` (1920x1080), full post in `frontend/src/data/blog.js`, and a matching row in `backend/app/content/blog.py` (`BLOG_POSTS`) copied from `blog.js`. `og_preview._blog_html` and the `seo.py` sitemap (`BLOG_SLUGS`) both read `blog.py`. After deploy, re-scrape shared links in Facebook Sharing Debugger and LinkedIn Post Inspector.
@@ -38,7 +38,7 @@
 17. Club-name search on the Contact form: `GET /public/contact/club-search` reuses `self_serve_trial.search_clubs` but is deliberately NOT under `/public/self-serve`, which sits behind the `self_serve_registration_enabled` flag. The Contact form must work whether or not self-serve is on. It is rate-limited per IP (120 per hour) because every keystroke reaches CA's API. The response is projected down: never return a registered club's slug or Primary Admin name on a marketing page. `already_registered` never blocks.
 18. `club_onboarding_requests.club_org_id` and `.club_source` ('search' | 'manual'): a guid is stored only with `club_source='search'`. A typed name has nothing to key on, and a guessed identity must not be put on the record. An unrecognised `clubSource` drops both.
 19. `_resolve_onboarding_club` takes `org_id` and checks it after the submitter's email but before the name (email-first priority kept). A new club row is created on the real CA guid, so an enquiry row and a crawler row are one row. A `manual:` guid is upgraded to the real one only when no other row holds it (`grassroots_guid` is unique; two rows for one club is a person's merge decision).
-20. Keep the typed club name available (the CA list is Australia only). In `ClubSearchField.jsx`, `club` is only set once `clubSource` is, so a half-typed search is local state and "Club name is required" blocks it.
+20. Keep the typed club name available (CA list is Australia only). In `ClubSearchField.jsx`, `club` is only set once `clubSource` is, so "Club name is required" blocks a half-typed search.
 21. Public pricing lives in `frontend/src/data/pricing.js` (`CORE`, `PRICED_MODULES`, `BUNDLE_DISCOUNT`, `priceFor`, `ALL_IN`, `COMPETITOR_STACK`). It is kept separate from the entitlement registry (`frontend/src/lib/modules.js`) so copy and gating move independently. Public licence is annual only. The bundle discount is a set dollar amount keyed on module count.
 
 **Entitlement, versions, voice**
@@ -66,7 +66,7 @@
 - **Fix that worked:** `docker compose restart "$(docker compose ps --services | grep -iE 'proxy|npm|manager' | head -1)"`. A graceful `nginx -s reload` did NOT clear it (`deploy.sh` tries reload, then restarts if unhealthy).
 - **If the NPM outage recurs:** (1) NPM error log for `could not be resolved`; (2) confirm the containers share a network: `docker compose exec <npm> getent hosts betterstats-frontend`; (3) if the name resolves from NPM but the site still 502s, it is stale per-worker resolver state: restart the proxy service via `docker compose restart`.
 - **Prevention that shipped:** `deploy.sh` refreshes NPM after recreating the frontend, health-checks `https://betterat.cricket/` three times and restarts the proxy only if non-200. The frontend reloads once on a chunk-load failure (`vite:preloadError` in `main.jsx`, chunk-aware `ErrorBoundary`).
-- **A shared link shows the old or generic card.** SPA `usePageMeta` tags never reach crawlers; the card comes from `og_preview.py`. A blog post missing from `blog.py` falls to the homepage card. Re-scrape after deploy.
+- **A shared link shows a generic card.** SPA `usePageMeta` tags never reach crawlers; a blog post missing from `blog.py` falls to the homepage card. Re-scrape after deploy.
 - **Contact store and `/api`.** It assumes `betterat.cricket` routes `/api` to `betterstats-backend`. If the marketing domain is ever served without that proxy, point the form at the absolute backend URL. Meanwhile Formspree still emails.
 
 ## How to verify a change here
@@ -81,7 +81,7 @@
 - `/srv/docker/betterstats/deploy.sh`: the deploy. Nothing here is dry-run: it rebuilds and recreates.
 - `deployafl.sh`: the same deploy for the AFL silo (`bs-afl-*`). Not covered here.
 - `python tools/sync_watch.py snapshot` and `diff A.json B.json`: sync snapshots (`BS_BASE`, default `https://betterat.cricket/api`).
-- `wrangler deploy` in `cloudflare-worker/`: ships the old-domain redirect. Keep the Cloudflare route `betterstats.cricket/*` active. See FLAG-OPS-6.
+- `wrangler deploy` in `cloudflare-worker/`: ships the old-domain redirect (keep route `betterstats.cricket/*` active). See FLAG-OPS-6.
 
 ## Open follow-ups
 
