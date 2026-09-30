@@ -1923,6 +1923,8 @@ export const api = {
   adminGetManualGame: (id) => request(`/club-admin/manual-entries/games/${id}`),
   adminCreateManualGame: (data) =>
     request('/club-admin/manual-entries/games', { method: 'POST', body: JSON.stringify(data) }),
+  adminCheckManualGame: (data) =>
+    request('/club-admin/manual-entries/games/check', { method: 'POST', body: JSON.stringify(data) }),
   adminPatchManualGame: (id, data) =>
     request(`/club-admin/manual-entries/games/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   adminDeleteManualGame: (id) =>

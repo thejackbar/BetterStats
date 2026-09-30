@@ -49,7 +49,7 @@ from app.models.db import (
     get_db,
 )
 from app.routers.auth import get_current_club, get_current_user
-from app.services import dismissal, game_import_staging, import_cleanup, manual_result, scorebook_innings
+from app.services import dismissal, game_import_staging, import_cleanup, manual_game_check, manual_result, scorebook_innings
 from app.services import import_ingest as ingest
 from app.services.grade_labels import suggest_categories, suggest_category
 from app.services.season_resolve import (
@@ -1207,6 +1207,12 @@ async def _replace_game_children(
     for x in data.innings:
         seen_innings[x.innings_number] = x
     for x in seen_innings.values():
+        # Our own innings is totalled from its batters. The form has no box for
+        # our total (only the opposition's, whose batters cannot be itemised),
+        # so one arriving on our innings is a leftover from an innings that was
+        # the opposition's a moment earlier, and stored it would override the
+        # batters and give both sides the same score.
+        ours = x.batting_side == "us"
         db.add(ManualInnings(
             manual_game_id=game_id,
             innings_number=x.innings_number,
@@ -1217,9 +1223,9 @@ async def _replace_game_children(
             no_balls=x.no_balls,
             penalty=x.penalty,
             extras_total=x.extras_total,
-            total_runs=x.total_runs,
-            total_wickets=x.total_wickets,
-            overs=x.overs,
+            total_runs=None if ours else x.total_runs,
+            total_wickets=None if ours else x.total_wickets,
+            overs=None if ours else x.overs,
         ))
 
 
@@ -1656,6 +1662,20 @@ async def _resolve_game_season(
             return season.id, grade.id
 
     return season.id, None
+
+
+@router.post("/games/check")
+async def check_manual_game(
+    data: ManualGameIn,
+    current_user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
+):
+    """What in a game being typed in does not add up.
+
+    Warnings only. Saving is never refused for any of them: a club entering a
+    game from a scorebook often lacks a figure, and a partial record is better
+    than none. Reads the form's payload alone and writes nothing.
+    """
+    return {"warnings": manual_game_check.check_game(data.model_dump())}
 
 
 @router.post("/games")

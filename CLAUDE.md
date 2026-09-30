@@ -1,5 +1,48 @@
 # BetterStats — Claude Session Notes
 
+## A game that does not add up is warned about, never refused (v9.99.2, Sep 2026)
+
+Reported off Hamilton Veterans' 23 Oct 2011 game: Portland and Mt Gambier both
+read 142/7 in 40 overs. Asked whether the opposition total had been forgotten
+and copied across; it had not.
+
+- **THE OPPOSITION TOTAL WAS ENTERED AND RIGHT. OUR INNINGS CARRIED A COPY.**
+  `_merge_manual_innings` lets a recorded `total_runs` replace the batters' sum
+  on any innings, and the form draws the total boxes only when "Who batted" is
+  Opposition. Type a total while an innings is Opposition, flip it to Our
+  innings, and the boxes vanish while the values stay and are saved. Both rows
+  then held 142/7/40 and the card totalled 125/8 nowhere.
+- **THE FIX IS AT THE SOURCE, NOT IN THE MERGE.** A scorebook CSV import
+  legitimately records OUR total (`innings_total`), so the merge still honours
+  one. The hand-entry path stops storing it instead: `_replace_game_children`
+  nulls total/wickets/overs on any innings whose side is "us", the form clears
+  them when the side is flipped (`setInningsSide`) and never sends them
+  (`buildPayload`).
+- **WARNINGS ONLY.** A club entering a scorebook often lacks a figure, so
+  nothing here can refuse a save. `services/manual_game_check.check_game` is
+  the one definition, read by `POST /manual-entries/games/check` (writes
+  nothing) which the form calls, debounced, and shows in an amber box and again
+  in the save confirm. A failed check draws nothing and does not stop a save.
+  It reports: an opposition innings with no total (skipped for a photo upload,
+  which carries their whole card), our bowlers' runs plus byes, leg byes and
+  penalties not reaching their total (or exceeding it when extras are not
+  itemised), overs not matching, an innings set to the wrong side for the rows
+  under it, and a result line that disagrees with the totals (one innings each
+  only).
+- **`scripts/fix_stray_innings_totals <org|all> [--apply]`** repairs stored
+  games, on a narrow signature: our innings carries the SAME runs, wickets and
+  overs as the opposition's, our batters are listed, and batters plus extras do
+  not already equal it. A legitimate total and a tie are left alone. It only
+  NULLs the three columns and writes an audit entry with before and after, so
+  the Audit tab can undo it.
+- **Verified** (`verify_manual_game_check.py`, 36 through the shipped writer,
+  scorecard, route and script against a real Postgres; control with the writer
+  change neutered fails 3, reporting Portland at 142/7) and in Chromium
+  (`verify_manual_game_check_browser.mjs`, 24; control fails 11). Neighbours:
+  manual innings 20, winner 25, side names 24, CSV innings 31.
+- **Noticed, not fixed**: `settle_manual_game` reads the same totals, so a stray
+  copy could have flipped a winner. It reads correctly once the copy is gone.
+
 ## BetterCricket's messages on the club admin dashboard (migration 312, v9.99.0, Oct 2026)
 
 Asked for: a super admin sends a one-line message visible only on the Club
