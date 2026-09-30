@@ -1,10 +1,10 @@
 # Guide: Career and season figures, rates, milestones, grade/match/competition scopes, StatLab, records, awards
 
 **Read this before**:
-- Touching any career, season, leaderboard, record-book, StatLab or profile figure (matches, average, strike rate, economy, milestones).
-- Editing `services/grade_scope.py`, `rate_coverage.py`, `dismissal.py`, `game_status.py`, `milestone_totals.py`, `match_coverage.py`, `competition_*.py`, `routers/records.py`, `services/statlab.py`, `StatLab.jsx`.
-- Adding a filter or query reading `v_effective_player_season_stats` or `game_appearances`.
-- Symptoms: a filter raising a total; header, note and grid disagreeing; strike rate too high; junior season in a senior career; Records 15s.
+- Touching any career, season, leaderboard, record-book, StatLab or profile figure.
+- Editing `services/grade_scope.py`, `rate_coverage.py`, `dismissal.py`, `game_status.py`, `milestone_totals.py`, `match_coverage.py`, `competition_*.py`, `routers/records.py`, `statlab.py`, `StatLab.jsx`.
+- Adding a filter or query on `v_effective_player_season_stats` or `game_appearances`.
+- Symptoms: a filter raising a total; matches disagreeing between header and grid; strike rate too high; junior season in senior career; Records 15s.
 
 **Archive** (full history, verbatim, do not load whole): `docs/dev-notes/archive/stats-figures-records-and-filters.md`. Grep hints: `milestone_totals`, `RETIRED NOT OUT`, `A rate is only as good`, `Season × grade`, `A washout is not`, `StatLab: one player`, `Grade Type / Match Type`, `several values at once`, `A grade is several things`, `IMPORT RESIDUAL`, `Junior stats split`, `Awards`, `Stats by competition`, `two match counts`, `Which lens a panel`.
 
@@ -25,7 +25,7 @@
 10. StatLab family targets re-derive from covered halves and publish no coverage pair. Scout and `iq._their_key_players` stay on aggregates.
 
 **Dismissals and matches played**
-11. `services/dismissal.py` is the one rule, whole-phrase, never `LIKE 'retired%'`. CA ids: 0 DNB, 1 Not Out, 8 Retired Hurt, 13 Retired, 14 Retired Not Out, 15 Absent. 14 (Law 25.4.2) and 8 (from the Law, unmeasured) are not dismissals; 13 (25.4.3) is.
+11. `services/dismissal.py` is the one rule, whole-phrase, never `LIKE 'retired%'`. CA ids: 0 DNB, 1 Not Out, 8 Retired Hurt, 13 Retired, 14 Retired Not Out, 15 Absent. 14 (Law 25.4.2) and 8 are not dismissals; 13 (25.4.3) is.
 12. Fix the writer (`sync.py`, live scorecard merge), not readers. Every average is `innings - not_outs` (by-opposition, by-venue, by-position, by-grade too). A retirement leaves the dismissal donut; retired-out stays.
 13. `games.status` (266) is CA's word verbatim (`result` NULL cannot tell washout from unplayed). `services/game_status.py` is the one vocabulary (`NOT_PLAYED_STATUSES`; NO RESULT excluded). A named player with no bat/bowl/field row in a not-played fixture is subtracted.
 14. That correction lives in `v_effective_player_season_stats` AND every reader counting `game_appearances`, via `appearance_counts_as_match(alias)` (StatLab `appear`, by-grade, by-season-grade, by-venue, Formats). Ask which source a new screen reads. Recent-games lists keep washouts.
@@ -41,7 +41,7 @@
 22. `_RESIDUAL_SOURCES = (manual_aggregate, manual_career, import)` are added back under a category scope; never `api`/`manual_game` (double count).
 23. Import residuals classify by `grade_label` (v9.89.2): `excluded_labels` in `resolve_scope`; `clause(..., label_column=...)` is a CASE (id, else label as `text[]`, else kept). Sites: `_career_residuals`, `_residual_totals_cte`, `_season_by_season_scoped`, StatLab residuals.
 24. Competition axis (283) is an INCLUSION: subquery on `grades.competition_id` (`ix_grades_competition`), not a grade-id list. Junk or foreign ids drop; an all-junk pick is an ACTIVE filter matching nothing. Ungrouped grades, residuals and grade-less manual games drop out (`_fetch_manual_games_as_list` takes the scope).
-25. A grade is in at most one competition. Competitions are the club's groups, seeded one per association (`grades.association_id`); `is_seeded` clears on a person's edit so sync never renames. `grades.competition_id` is ON DELETE SET NULL; ungrouped shows as "Other grades".
+25. A grade is in at most one competition. Competitions are the club's groups, seeded one per association (`grades.association_id`); `is_seeded` clears on a person's edit so sync never renames. `grades.competition_id` is ON DELETE SET NULL.
 26. `resolve_scope_for_player` widens category only when the default leaves a junior-only player empty (`stats_auto_show_played_grades`, 229), never a format, profile only, gated on `scope.category_active`.
 27. `organisations.stats_grade_categories`: empty or all-junk stores NULL. Age-group regexes end `\d+s?`. `grades-with-stats` computes classification in its own query (unnesting inflates runs). Filter rows hide when there is nothing to choose; `api.js` has one `scopeQuery()`.
 
@@ -80,7 +80,7 @@
 
 ## How to verify a change here
 
-- Real-Postgres suites through shipped route bodies, each with a control run that must fail on the named behaviour without crashing: `verify_rate_coverage.py` and `_everywhere.py` (control reads 333.3, 127.27), `verify_retired_not_out.py` (12.83), `verify_milestone_figures.py`, `verify_match_coverage.py`, `verify_stats_by_competition.py` (re-run for any `GradeScope` change), `verify_junior_residual_scope.py` (18/376), `verify_statlab_player_filter.py`, `verify_records_timing.py` (asserts `pss_club_clause` precedes every `pss_gender_clause`). Browser twins: `frontend/verification/verify_*_browser.mjs`.
+- Real-Postgres suites (shipped route bodies), each with a control run that must fail without crashing: `verify_rate_coverage.py` and `_everywhere.py` (control reads 333.3, 127.27), `verify_retired_not_out.py` (12.83), `verify_milestone_figures.py`, `verify_match_coverage.py`, `verify_stats_by_competition.py` (re-run for any `GradeScope` change), `verify_junior_residual_scope.py` (18/376), `verify_statlab_player_filter.py`, `verify_records_timing.py` (asserts `pss_club_clause` precedes every `pss_gender_clause`). Browser twins: `frontend/verification/verify_*_browser.mjs`.
 - Gotchas: read new keys with `.get`/`getattr` and guard clicks so a control reports; seed through the code under test; a rate fixture needs an innings the rate cannot use; capture stub state BEFORE the action; a seasons stub of `[]` hides the filter pills; the headline counts up, so wait then read `.pb-num`.
 - Diagnostics: `ops/diagnostics/records_slow_board.sql`, `records_pushdown_test.sql`, `career_matches_sources.sql`.
 
@@ -119,7 +119,7 @@
 | A milestone is measured on the profile's figure, and a junior split is SHOWN (v9.93.0) (L454-537) | rules extracted | Rules 33, 34; Flags 1, 9 |
 | A RETIRED NOT OUT IS NOT A DISMISSAL (v9.66.0) (L3112-3202) | rules extracted | Rules 11, 12; Operator |
 | A rate is only as good as the innings behind it (migration 282) (L3203-3427) | rules extracted | Rules 1 to 10; Flag 3 |
-| &nbsp;&nbsp;The one figure the browser still worked out (v9.65.1) | rules extracted | Rules 6, 8, 10; Follow-ups |
+| &nbsp;&nbsp;The one figure the browser still worked out (v9.65.1) | rules extracted | Rules 6, 8, 10 |
 | Season × grade matches on a player profile (v9.37.3) (L6123-6190) | rules extracted | Rules 30, 32 |
 | A washout is not a match played (migration 266) (L6569-6643) | rules extracted | Rules 13, 14; Flag 8 |
 | StatLab: one player, and tabs that reshape the filters (v9.96.0) (L6760-6786) | rules extracted | Rule 35 |
@@ -138,7 +138,7 @@
 | &nbsp;&nbsp;Say the two figures differ (v9.63.1, v9.63.2) | rules extracted | Rules 29, 41 (grouping hook); Traps |
 | Which lens a panel is under, said on the panel (v9.64.0) (L16385-16615) | rules extracted | Rules 30, 31 |
 | &nbsp;&nbsp;The grid answers to the bar now | superseded by "The review, and what it changed (v9.64.1)" | Rule 30; Flag 2 |
-| &nbsp;&nbsp;A CLUB DEFAULT IS ALREADY A FILTER | rules extracted | Rule 29 |
+| &nbsp;&nbsp;A club default is already a filter | rules extracted | Rule 29 |
 | &nbsp;&nbsp;The review, and what it changed (v9.64.1) | rules extracted | Rules 30, 31; Flag 7 |
 | &nbsp;&nbsp;Hamilton's second ask was unmet (v9.64.2) | rules extracted | Rule 6; Verify |
 | &nbsp;&nbsp;The order of the competition pills (v9.65.0) | rules extracted | Rule 32; Verify |
