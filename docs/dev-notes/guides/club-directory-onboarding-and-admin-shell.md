@@ -2,7 +2,7 @@
 
 **Read this before**:
 - Touching `services/club_directory.py` (discovery, `_upsert_club`, `_prune_committee`, `export_to_comms`), the Rediscover button, or Directory contact/role/`former_at`.
-- Touching `services/club_teaser.py`, `club_teaser_report.py`, `scripts/pull_club_teasers.py`, `club_teaser_snapshots`, or the `nightly_club_teasers` job.
+- Touching `services/club_teaser.py`, `club_teaser_report.py`, `scripts/pull_club_teasers.py`, `club_teaser_snapshots`, the paced teaser worker (`services/call_pacer.py`, `club_teaser.run_forever`, `club_teaser_calls_per_second`), or the old `nightly_club_teasers` job.
 - Changing how a club is created (`create_club`, `_onboard_club_core`, self-serve submit), `organisations.onboarding_method`, `admin_identity.py`, or the club-admin mobile backfill.
 - Editing the Setup Wizard (`routers/onboarding_wizard.py`, `pages/admin/setup/`, `SetupReturnBar`, `SetupProgressReminder`) or `theme.js` accent pairing.
 - Adding a page, tile or tool to the admin app (`AdminLayout`, `ModuleLayout`, `GROUPS`, `HubCard`, `ModuleHub`, `lib/modules.js`, `lib/superNav.js`).
@@ -26,7 +26,7 @@
 6. `next_pull_at` (indexed) is set at write time: in play 7 days, off season 45, empty 14, junior-only 90, errors 1/3/7/14/30 then flat, plus stable per-club jitter up to +20%. A failed pull keeps the last good snapshot and only backs off.
 7. Targets: kind club, not excluded, not `not_interested`, no `existing_org_id`, real CA guid (not `manual:`), no `trial_modules` (`--include-trialists` overrides). Order: never pulled, emailable contact, longest overdue.
 8. Who gets a snapshot follows the Directory's type filters: `club_teaser.type_filtered_ids` reads `club_directory._filter_conditions`. Default `DEFAULT_TYPE_MODES` excludes junior, carnival, school, rep, cricket_au; setting `club_teaser_type_modes` overrides (`{}` = none). Ids bound as a uuid array. A NULL test counts as "does not match" (coalesce each condition, or the cricket_au exclude drops every club with a blank field).
-9. The job runs by day, never overnight (asked for directly): `OrTrigger`, Perth time, `hour="6-8,21" minute="*/10"` plus `hour="9-20" minute="*/5"`. Id `nightly_club_teasers`; setting `club_teaser_nightly_limit` (clubs per run, unset = 0 = off). Honours the shared Stop switch (`marketing_crawl_control`) between clubs.
+9. The teaser crawl is a paced worker, not a cron job (v9.100.2, supersedes the earlier `OrTrigger` design). `services/call_pacer.CallPacer` hands out slots one gap apart, the gap being `1 / rate` times a random factor in 1 +/- 0.25, so the rate is an average. Idle time is never banked (unlike a token bucket), so a quiet hour cannot release a burst. One pacer per crawl is shared by every club in flight (each club keeps its own `LiveAPI` and `calls` counter, which feeds `club_teaser_snapshots.api_calls`). `club_teaser.run_forever` is started from the `main.py` lifespan, held in `_BACKGROUND_TASKS` and cancelled at shutdown; `paced_cycle` pulls the next 10 due clubs, two at a time, when the crawl is on and inside its hours. The `nightly_club_teasers` job is gone. Settings: `club_teaser_calls_per_second` (unset means OFF; valid 0.05 to 10, a stored value outside that reads as OFF, never clamped up) and `club_teaser_window_start` / `_end` (Perth, start inclusive, end exclusive, default 5 and 22; a backwards pair reads as the default and a write making one is refused). Set them with `PATCH /club-admin/super/general-settings` (no General Settings input yet). The retired `club_teaser_nightly_limit` is read by nothing, so a club that set it now has the crawl OFF until the rate is set. Honours the shared Stop switch (`marketing_crawl_control`) and the hours between clubs (a club in flight finishes). A whole cycle of 3 or more errors and no success backs off 15 minutes; a raising cycle pauses 60s. Sizing: clubs x calls per club / 61,200 seconds (the 05:00 to 22:00 window) is the rate that finishes inside one day (about 2.0 a second at 3,500 clubs and 35 calls; calls per club measured 15, 35 and 78). One API process is assumed: a second would run a second crawl. Suite: `backend/verification/verify_club_teaser_pacing.py`.
 10. Segments field `teaser_snapshot` (ready/empty/junior_only/error/none): contact-level rule on `comms_contacts.marketing_club_id`, no MarketingClub join, club-less contact reads `none`. Directory scope only; fails closed in a club build.
 
 **Directory committee (Rediscover)**
@@ -98,7 +98,7 @@
 ## Operator commands and scripts
 - `python -m app.scripts.pull_club_teasers all --limit N --apply` (dry run by default). `--sample N` runs clubs one at a time with status and call counts. Also `--include-trialists`, `--type key=include|exclude`, `--no-type-filter`. `--apply` ends with the work report (`club_teaser_report.py`; under 20 clubs it warns the sample is too small).
 - `python -m app.scripts.backfill_admin_mobiles [<org|all>] [--apply] [--email-only]` (dry run by default, no network).
-- Set `club_teaser_nightly_limit` (General Settings) to switch the scheduled pull on.
+- Set `club_teaser_calls_per_second` (and optionally `club_teaser_window_start` / `_end`) via `PATCH /club-admin/super/general-settings` to switch the paced pull on. Read the real calls per club first: `python -m app.scripts.pull_club_teasers all --sample 20 --apply --rate 2`. `--apply` ends with a projection in calls and the rate that finishes inside one window.
 - KlubPro deploy: set `KLUBPRO_DATABASE_URL` (never commit) and share a Docker network with `klubpro-postgres`. See `docs/klubpro-migration.md`, `docs/marketing-club-directory.md`.
 
 ## Open follow-ups
@@ -112,6 +112,7 @@
 - [FLAG-CDOAS-3] New Club section reuses Twenty `push_self_serve_registration` | Twenty retired, function no longer in `app/` | L8465-8535 | retire that bullet, keep the "no false self-serve stage" lesson.
 - [FLAG-CDOAS-4] Admin navigation says BetterClubManager routes are super-admin gated, "Coming soon" | text itself says superseded in v9.6.1 (capability-gated for club admins) | L10101-10167 | verify against `App.jsx`.
 - [FLAG-CDOAS-5] Draft section emails `cricket@bettersports.com.au`, platform support is `support@bettersports.com.au` | deliberate, may be stale | L10041-10100 | verify.
+- [FLAG-DIR-6] The teaser snapshot archive section (v9.99 era) still describes the cron design: `OrTrigger` by day, job id `nightly_club_teasers`, setting `club_teaser_nightly_limit`, and a work report with a batch-size table against a 5 minute gap | Superseded in v9.100.2 by the paced worker (rule 9). Main amended those three bullets in place after this split, so the archive keeps the original wording and records the amended text at the end of the file | teaser snapshot section (L538-640) and the two ADDED/AMENDED blocks at the end of `archive/club-directory-onboarding-and-admin-shell.md` | trust rule 9. Known gaps from the note: an upstream outage can read as `empty`, not `error`, and the breaker does not catch it (check before raising the rate); pacing counts calls, not HTTP retries or page requests.
 
 ## Section coverage
 | Original section (heading, original CLAUDE.md line range) | Disposition | Where captured |
@@ -128,3 +129,4 @@
 | . Secondary accent, luminance-guarded (v8.70.2) | rules extracted | Standing 29 |
 | KlubPro to BetterStats Migration Tooling (L13719-13843) | rules extracted | Standing 38 to 42; Traps 4; Operator |
 | A club admin's mobile is already written down at their club (L16912-16979) | rules extracted | Standing 25; Operator; Open |
+|   added after the split: The teaser crawl is paced, not scheduled (v9.100.2) | rules extracted | Rule 9, operator commands, FLAG-DIR-6 |

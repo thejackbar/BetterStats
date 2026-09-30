@@ -817,3 +817,108 @@ club's `fixturesladders/organisations/{guid}/seasons` was requested at offset
   as proof there is another. Dedupe on id.
 
 <!-- END ADDED AFTER THE SPLIT -->
+
+<!-- ADDED AFTER THE SPLIT (2): verbatim from CLAUDE.md on origin/main (commits 92cc83a and aaf227c, v9.100.2). Outside the BEGIN/END markers, so not part of the byte-identical check. -->
+## The teaser crawl is paced, not scheduled (v9.100.2, Sep 2026)
+
+Asked for as a steady, throttled load in place of a small batch every 5 or 10
+minutes: "an ongoing load, which varies a bit from time to time, rather than a
+burst, then a rest, then another burst". The target was the whole directory
+pulled inside one Perth day, 05:00 to 22:00.
+
+- **THE ARITHMETIC CAME FIRST.** 17 hours is 61,200 seconds, so the rate that
+  finishes N clubs is `clubs x calls a club / 61,200`. At 3,500 clubs that is
+  2.0 calls a second at 35 calls a club, 2.9 at 50 and 4.6 at 80. The recommended
+  cap was 3 a second. The calls a club costs is still unmeasured across the
+  directory (the live checks read 15, 35 and 78), so read `api_calls` off a
+  fresh `--sample 20 --apply` before choosing the number.
+- **`services/call_pacer.CallPacer` IS THE WHOLE IDEA.** Callers ask for a slot
+  and slots are handed out one gap apart. The gap is `1 / rate` scaled by a
+  random factor in 1 +/- 0.25, so the RATE IS AN AVERAGE and single gaps are as
+  short as 0.75 / rate. It is a pure module (clock, sleep and random source are
+  arguments), which is how the arithmetic is checked without waiting.
+- **IDLE TIME IS NEVER BANKED.** A slot is never earlier than now, so a pacer
+  that sat quiet for an hour does not release an hour of calls at once. That is
+  the difference from a token bucket, and it is the property that stops this
+  turning back into a burst. The suite mutates it away and reads the result:
+  5 checks fail, including 80 calls going out in 0.02s.
+- **ONE PACER PER CRAWL, SHARED BY EVERY CLUB IN FLIGHT.** Each club still gets
+  its own `LiveAPI` (and its own `calls` counter, which is what
+  `club_teaser_snapshots.api_calls` and the work report read), but they are all
+  handed the same pacer. Two clubs at a time therefore share one rate. A pacer
+  per club would have doubled it.
+- **A WORKER, NOT A JOB.** `club_teaser.run_forever` is started at boot from
+  `main.py`'s lifespan, held in `_BACKGROUND_TASKS` (a bare `create_task` result
+  can be collected the first time it awaits) and cancelled at shutdown. The
+  `nightly_club_teasers` cron job and its `OrTrigger` are gone from the
+  scheduler. `paced_cycle` is one pass: read the settings, and if the crawl is on
+  and inside its hours pull the next 10 due clubs, two at a time. While there is
+  work it never sleeps; otherwise it waits (off 60s, outside the hours until they
+  open but never more than 300s so a widened window is noticed, nothing due 300s).
+  A cycle that raises is logged and followed by a 60s pause, never a hot loop.
+- **THE STOP SWITCH AND THE HOURS ARE ASKED BETWEEN CLUBS.** A club in flight
+  finishes (about half a minute of calls), so both are honoured to within that.
+  Batches are small on purpose: a settings change lands within a couple of
+  minutes.
+- **A WHOLE CYCLE OF ERRORS BACKS OFF A QUARTER OF AN HOUR** (3 or more clubs and
+  not one success). A continuous crawl reaches a broken upstream far faster than
+  a cron job did. Each errored club is also already backed off a day by
+  `next_pull_at`, so the same clubs are not picked again.
+- **OFF UNTIL SOMEBODY SETS IT, AS BEFORE.** `club_teaser_calls_per_second`
+  unset means off. Bounds are 0.05 to 10; a stored value outside them reads as
+  OFF rather than being clamped up into traffic nobody chose. The hours are
+  `club_teaser_window_start` and `_end` (Perth, start inclusive, end exclusive,
+  default 5 and 22; a backwards or out-of-range pair reads as the default, and a
+  write that would make one is refused). There is no General Settings INPUT yet:
+  set them with `PATCH /club-admin/super/general-settings`. **The retired
+  `club_teaser_nightly_limit` is left in place and read by nothing, so a club
+  that had set it now has the crawl OFF until the rate is set.**
+- **PACED PER CALL, NOT PER HTTP REQUEST.** The pacer sits in `LiveAPI._run`, so
+  it counts the same calls the "15 to 80 a club" figures count. A stats call can
+  page (100 rows a page) and `playhq_client._get_with_retry` retries connection
+  failures, so requests on the wire can run a little above the paced rate.
+  Pacing inside the two shared clients would count those too; the sync uses both,
+  so it was left alone. NOTICED, NOT BUILT.
+- **AN UPSTREAM OUTAGE CAN READ AS `empty`, NOT `error`, and the breaker does not
+  catch it.** `get_teams` and friends swallow a failure into `[]`, so a pull
+  during an outage can be recorded as an empty club and re-looked-at in 14 days.
+  Pre-existing, and worth a look before turning the rate up: at 3 a second a bad
+  hour reaches a lot of clubs. NOTICED, NOT FIXED.
+- **ONE API PROCESS IS ASSUMED**, like every in-process job here. A second
+  process would run a second crawl at the same rate.
+- **THE WORK REPORT PROJECTS IN CALLS NOW.** The table of batch sizes against
+  the 5 minute gap described a schedule that no longer exists. `--apply` ends
+  with the calls still to make, the rate that finishes them inside one window and,
+  when a rate is known, how long that takes in days of the window. The script
+  takes `--rate` to pace a by-hand run with the same pacer.
+- **Verified** (`backend/verification/verify_club_teaser_pacing.py`, 86 checks
+  against a real Postgres through the shipped pacer, hours logic, cycle, loop,
+  settings and General Settings route bodies, with a scripted stand-in for the two
+  Cricket Australia client modules so the real `LiveAPI` is what is exercised):
+  average rate within 1% over 20,000 draws, no gap outside the jitter bounds, no
+  banking, fifty callers in one instant getting fifty slots, the hours at both
+  edges and across zones, every refused setting, the cycle in each of its states,
+  the hours closing and Stop pressed mid-batch, a trouble cycle, the loop's
+  sleeps and its survival of a raising cycle, and a real 10-club crawl at 60 a
+  second measured at 58.5 with the worst half second holding 31 calls against 37
+  allowed. **Controls**: against the previous commit it REPORTS the feature
+  missing; with the pacer skipped 5 fail, with idle time banked 5 fail, with the
+  hours ignored between clubs 2 fail. `verify_club_teaser.py` is 91 (one check
+  replaced, the schedule checks now describe the worker).
+- **A CONTROL THAT CRASHES IS NOT A CONTROL.** The first cut of the measured
+  section read `went[-1]` on the list a skipped pacer leaves empty, so the
+  mutation died with a traceback and reported nothing. It reports now.
+- **NOT RUN AGAINST LIVE CRICKET AUSTRALIA.** The next step is
+  `python -m app.scripts.pull_club_teasers all --sample 20 --apply --rate 2` to
+  read the real calls a club and the measured rate, then set
+  `club_teaser_calls_per_second`.
+
+<!-- END ADDED AFTER THE SPLIT (2) -->
+
+<!-- AMENDED AFTER THE SPLIT: main changed three bullets inside the teaser snapshot section (original L538-640, archived above). The text above is the ORIGINAL wording. Current wording of the three amended bullets, verbatim from origin/main: -->
+
+- **THE PULL RUNS BY DAY, NEVER OVERNIGHT (asked for directly).** **SUPERSEDED in v9.100.2: the cron job described here is now a paced worker (section above). The hours are 05:00 to 22:00 by default and the setting is `club_teaser_calls_per_second`. Never overnight still holds.** Steady
+- **OUTBOUND TRAFFIC IS OFF UNTIL SOMEBODY SETS IT.** **SUPERSEDED in v9.100.2: it is off until `club_teaser_calls_per_second` is set; `club_teaser_nightly_limit` is retired.** The job (was: nightly at
+- **`--apply` ENDS WITH A WORK REPORT SO A SMALL RUN CAN BE EXTRAPOLATED.** **CORRECTED in v9.100.2: the projection is in calls and the rate that finishes inside one window; the batch-size table against a 5 minute gap is gone.**
+
+<!-- END AMENDED AFTER THE SPLIT -->

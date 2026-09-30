@@ -2,7 +2,8 @@
 
     python -m app.scripts.pull_club_teasers [all|<marketing-club-id>] [--limit N]
         [--sample N] [--apply] [--include-trialists] [--pause SECONDS]
-        [--concurrency N] [--type junior=include] [--no-type-filter]
+        [--concurrency N] [--rate CALLS_PER_SECOND] [--type junior=include]
+        [--no-type-filter]
 
 Dry run by default: it lists how many clubs are due and touches nothing. With
 ``--apply`` it pulls the due clubs, never-pulled first, then clubs with an
@@ -17,6 +18,11 @@ whatever General Settings ``club_teaser_type_modes`` holds). ``--type
 key=include|exclude`` (repeatable) overrides that, and ``--no-type-filter``
 turns it off.
 
+``--rate R`` paces this run's calls at R a second on average (the same pacer
+the always-on crawl uses), however many clubs run at once. Without it the run is
+as fast as the upstream answers, which is what a sample wants and a big pull
+does not.
+
 ``--sample N`` is the first live check: N clubs (default 20), one at a time,
 with a per-club line showing status and Cricket Australia calls. Dry-run
 unless ``--apply`` is also given.
@@ -27,8 +33,10 @@ junior_only, error) with calls and seconds per club, and a projection for every
 club still due, at the batch sizes the scheduled job might use. A dry run counts
 what is due and makes no calls, so it has nothing to time.
 
-This is also how the directory is filled the first time (about 20-30 Cricket
-Australia calls a club); the daytime job is only the trickle after that.
+The directory is normally filled by the always-on crawl (club_teaser.run_forever),
+which does nothing until General Settings ``club_teaser_calls_per_second`` is
+set. This script is the by-hand way, and the way to measure what a club costs
+(about 15-80 Cricket Australia calls) before setting that rate.
 """
 import argparse
 import asyncio
@@ -36,6 +44,7 @@ import logging
 import time
 
 from app.services import club_directory, club_teaser, club_teaser_report, platform_settings
+from app.services.call_pacer import CallPacer
 
 
 async def main(argv=None) -> int:
@@ -47,6 +56,7 @@ async def main(argv=None) -> int:
     ap.add_argument("--include-trialists", action="store_true")
     ap.add_argument("--pause", type=float, default=0.5)
     ap.add_argument("--concurrency", type=int, default=2)
+    ap.add_argument("--rate", type=float, default=None, metavar="CALLS_PER_SECOND")
     ap.add_argument("--type", action="append", default=[], metavar="KEY=MODE")
     ap.add_argument("--no-type-filter", action="store_true")
     a = ap.parse_args(argv)
@@ -75,14 +85,19 @@ async def main(argv=None) -> int:
         total_due = len(await club_teaser.due_clubs(
             s, 1_000_000, include_trialists=a.include_trialists, club_id=club_id,
             type_modes=modes))
-        configured = await platform_settings.get_club_teaser_nightly_limit(s)
+        configured = await platform_settings.get_club_teaser_rate(s)
+        w_start, w_end = await platform_settings.get_club_teaser_window(s)
     print(f"clubs due in total: {total_due}")
+    if a.rate is not None and not 0 < a.rate <= platform_settings.TEASER_MAX_RATE:
+        ap.error(f"--rate must be above 0 and at most {platform_settings.TEASER_MAX_RATE:g}")
+    pacer = CallPacer(a.rate) if a.rate else None
+    api_factory = (lambda: club_teaser.LiveAPI(pacer=pacer)) if pacer else club_teaser.LiveAPI
 
     started = time.monotonic()
     summary = await club_teaser.run_batch(
         limit, should_stop=club_directory.is_crawl_paused, pause_seconds=a.pause,
         club_concurrency=concurrency, include_trialists=a.include_trialists,
-        club_id=club_id, dry_run=not a.apply, type_modes=modes)
+        club_id=club_id, dry_run=not a.apply, type_modes=modes, api_factory=api_factory)
     elapsed = time.monotonic() - started
     detail = summary.pop("detail", [])
     for k, v in summary.items():
@@ -99,10 +114,12 @@ async def main(argv=None) -> int:
     else:
         # Concurrency here is what THIS run used; the projection re-divides by
         # what the scheduled job uses, from per-club latency.
-        print(f"(this run: {concurrency} club(s) at a time, {a.pause}s pause after each)")
+        print(f"(this run: {concurrency} club(s) at a time, {a.pause}s pause after each"
+              + (f", paced at {a.rate:g} calls/s on average" if a.rate else ", unpaced") + ")")
         for line in club_teaser_report.report_lines(
                 detail, elapsed, total_due=max(0, total_due - len(club_teaser_report.done_rows(detail))),
-                pause_seconds=a.pause, configured_limit=configured):
+                rate=a.rate or configured or None, window_hours=float(w_end - w_start),
+                window_label=f"{w_start:02d}:00-{w_end % 24:02d}:00 Perth"):
             print(line)
     if summary.get("stopped"):
         print("\nStopped by the operator Stop switch before the batch finished.")

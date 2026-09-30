@@ -5,25 +5,19 @@ Pure functions over the per-club rows ``club_teaser.run_batch`` returns, with
 nothing imported beyond the standard library, so the arithmetic can be checked
 without a database. Used by ``python -m app.scripts.pull_club_teasers``.
 
-The projection rests on per-club latency, not on how the sample was run: a
-sample goes one club at a time, the scheduled job goes two, and a club takes
-about as long either way. So wall time for a pass is (clubs x seconds per club)
-divided by the concurrency it will run at.
+The projection is in calls, because the crawl is paced by calls a second
+(services/call_pacer.py): the clubs still due cost about ``average calls per
+club`` each, so the time is calls divided by the rate, and the rate that
+finishes them inside one day's hours is calls divided by those hours. Per-club
+latency is still reported, since it is what a one-at-a-time sample measures.
 """
 from __future__ import annotations
 
-import math
 from typing import Iterable, Optional
 
-# What the scheduled job does (services/club_teaser.run_batch defaults and
-# jobs/scheduler.py): two clubs at a time, a pause after each, and 168 firings
-# a day (10 minute steps 06:00-09:00 and 21:00-21:59, 5 minute steps between).
-SCHEDULED_CONCURRENCY = 2
-RUNS_PER_DAY = 168
-# The tightest gap between two firings. A run longer than this loses the slot
-# behind it (max_instances=1, coalesce=True), so the day's total drops.
-MIN_GAP_SECONDS = 5 * 60
-DEFAULT_LIMITS = (3, 5, 10, 20)
+# The hours the crawl runs when the operator has not set any (05:00 to 22:00
+# Perth, platform_settings.DEFAULT_TEASER_WINDOW).
+DEFAULT_WINDOW_HOURS = 17.0
 SMALL_SAMPLE = 20
 
 
@@ -58,34 +52,34 @@ def by_status(rows: list[dict]) -> dict[str, dict]:
     return out
 
 
-def projection(rows: list[dict], total_due: int, *, pause_seconds: float = 0.0,
-               limits: Iterable[int] = DEFAULT_LIMITS) -> Optional[dict]:
+def projection(rows: list[dict], total_due: int, *, rate: Optional[float] = None,
+               window_hours: float = DEFAULT_WINDOW_HOURS) -> Optional[dict]:
     """What pulling ``total_due`` clubs costs, from the measured averages.
-    None when nothing was pulled, so there is nothing to average."""
+    None when nothing was pulled, so there is nothing to average. ``rate`` (calls
+    a second) adds how long the paced crawl takes; the rate that would finish
+    inside one window is always worked out."""
     if not rows:
         return None
     n = len(rows)
     avg_secs = sum(float(d.get("secs") or 0.0) for d in rows) / n
     avg_calls = sum(int(d.get("calls") or 0) for d in rows) / n
-    slot = avg_secs + pause_seconds
-    total_secs = total_due * slot
-    table = []
-    for lim in sorted(set(int(x) for x in limits if int(x) > 0)):
-        run_secs = math.ceil(lim / SCHEDULED_CONCURRENCY) * slot
-        runs = math.ceil(total_due / lim) if total_due else 0
-        table.append({"limit": lim, "run_secs": run_secs, "runs": runs,
-                      "days": runs / RUNS_PER_DAY,
-                      "fits": run_secs <= MIN_GAP_SECONDS})
-    return {"clubs": total_due, "avg_secs": avg_secs, "avg_calls": avg_calls,
-            "calls": total_due * avg_calls,
-            "serial_secs": total_secs,
-            "scheduled_secs": total_secs / SCHEDULED_CONCURRENCY,
-            "table": table, "sample": n}
+    calls = total_due * avg_calls
+    window_secs = max(window_hours, 0.0) * 3600.0
+    out = {"clubs": total_due, "avg_secs": avg_secs, "avg_calls": avg_calls, "calls": calls,
+           "serial_secs": total_due * avg_secs, "sample": n,
+           "window_hours": window_hours,
+           "rate_for_one_window": (calls / window_secs) if window_secs > 0 else None,
+           "paced": None}
+    if rate and rate > 0:
+        secs = calls / rate
+        out["paced"] = {"rate": rate, "secs": secs,
+                        "window_days": (secs / window_secs) if window_secs > 0 else None}
+    return out
 
 
 def report_lines(detail: list[dict], elapsed: float, *, total_due: int,
-                 pause_seconds: float = 0.0, configured_limit: int = 0,
-                 limits: Iterable[int] = DEFAULT_LIMITS) -> list[str]:
+                 rate: Optional[float] = None, window_hours: float = DEFAULT_WINDOW_HOURS,
+                 window_label: str = "") -> list[str]:
     """The human-readable report. ``elapsed`` is the wall clock of the run."""
     rows = done_rows(detail)
     if not rows:
@@ -112,23 +106,22 @@ def report_lines(detail: list[dict], elapsed: float, *, total_due: int,
     lines.append(f"  slowest        {str(slowest.get('name'))[:40]} "
                  f"({float(slowest.get('secs') or 0.0):.1f}s, {slowest.get('calls', 0)} calls)")
 
-    p = projection(rows, total_due, pause_seconds=pause_seconds, limits=(
-        list(limits) + ([configured_limit] if configured_limit > 0 else [])))
+    p = projection(rows, total_due, rate=rate, window_hours=window_hours)
     lines += ["", f"projection for {total_due} club(s) still due"]
     if not total_due:
         lines.append("  nothing is due, so there is nothing to project")
         return lines
-    lines += [f"  API calls      about {p['calls']:.0f}",
-              f"  one at a time  about {_dur(p['serial_secs'])}",
-              f"  two at a time  about {_dur(p['scheduled_secs'])} of pulling "
-              "(what the scheduled job does)",
-              "",
-              f"  {'clubs/run':>9} {'run takes':>10} {'runs':>6} {'days':>6}  fits the 5 min gap"]
-    for r in p["table"]:
-        mark = "  <- configured" if r["limit"] == configured_limit else ""
-        lines.append(f"  {r['limit']:>9} {_dur(r['run_secs']):>10} {r['runs']:>6} "
-                     f"{r['days']:>6.1f}  {'yes' if r['fits'] else 'NO, slots would be skipped'}{mark}")
-    lines.append(f"  days assume {RUNS_PER_DAY} runs a day and every run finishing in time.")
+    win = f"{window_hours:g}h" + (f" ({window_label})" if window_label else "")
+    lines.append(f"  API calls      about {p['calls']:.0f}")
+    if p["rate_for_one_window"]:
+        lines.append(f"  one window     {p['rate_for_one_window']:.2f} calls a second finishes them inside {win}")
+    if p["paced"]:
+        pc = p["paced"]
+        lines.append(f"  at {pc['rate']:g} a second  about {_dur(pc['secs'])} of crawling"
+                     + (f", {pc['window_days']:.1f} day(s) of {win}" if pc["window_days"] else ""))
+    else:
+        lines.append("  at a set rate  the crawl is off until club_teaser_calls_per_second is set "
+                     "(General Settings), or give this script --rate")
     if n < SMALL_SAMPLE:
         lines.append(f"  Based on {n} club(s): a small sample is noisy, and the mix of "
                      "statuses (junior_only and empty clubs cost far less) moves it. "

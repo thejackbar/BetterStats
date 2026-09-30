@@ -2542,6 +2542,7 @@ async def get_general_settings(
         "default_trial_days": await ps.get_default_trial_days(db),
         "direct_enquiry_hot_days": await ps.get_direct_enquiry_hot_days(db),
         "club_teaser_nightly_limit": await ps.get_club_teaser_nightly_limit(db),
+        **(await _teaser_crawl_settings(db)),
         "self_serve_registration_enabled": await ps.get_self_serve_registration_enabled(db),
         "onboarding_wizard_enabled": await ps.get_onboarding_wizard_enabled(db),
         "trial_nudges_enabled": await ps.get_trial_nudges_enabled(db),
@@ -2555,10 +2556,25 @@ async def get_general_settings(
     }
 
 
+async def _teaser_crawl_settings(db) -> dict:
+    """The teaser crawl's rate and hours as the General Settings screen edits
+    them. A rate of 0 is what the payload says while the crawl is off."""
+    from app.services import platform_settings as ps
+    start, end = await ps.get_club_teaser_window(db)
+    return {"club_teaser_calls_per_second": await ps.get_club_teaser_rate(db),
+            "club_teaser_window_start": start, "club_teaser_window_end": end}
+
+
 class GeneralSettingsUpdate(BaseModel):
     default_trial_days: Optional[int] = None
     direct_enquiry_hot_days: Optional[int] = None
-    club_teaser_nightly_limit: Optional[int] = None
+    club_teaser_nightly_limit: Optional[int] = None  # retired: nothing reads it
+    # The teaser crawl (services/club_teaser.run_forever). Unset rate = off. A
+    # null clears a field back to unset, which is why these go through
+    # exclude_unset like the rest.
+    club_teaser_calls_per_second: Optional[float] = None
+    club_teaser_window_start: Optional[int] = None
+    club_teaser_window_end: Optional[int] = None
     self_serve_registration_enabled: Optional[bool] = None
     onboarding_wizard_enabled: Optional[bool] = None
     trial_nudges_enabled: Optional[bool] = None
@@ -2623,6 +2639,7 @@ async def patch_general_settings(
         "default_trial_days": await ps.get_default_trial_days(db),
         "direct_enquiry_hot_days": await ps.get_direct_enquiry_hot_days(db),
         "club_teaser_nightly_limit": await ps.get_club_teaser_nightly_limit(db),
+        **(await _teaser_crawl_settings(db)),
         "self_serve_registration_enabled": await ps.get_self_serve_registration_enabled(db),
         "onboarding_wizard_enabled": await ps.get_onboarding_wizard_enabled(db),
         "trial_nudges_enabled": await ps.get_trial_nudges_enabled(db),

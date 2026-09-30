@@ -71,6 +71,7 @@ See `guides/club-directory-onboarding-and-admin-shell.md`.
 - **[FLAG-CDOAS-3]** New Club section reuses Twenty `push_self_serve_registration` | Twenty retired, function no longer in `app/` | L8465-8535 | retire that bullet, keep the "no false self-serve stage" lesson.
 - **[FLAG-CDOAS-4]** Admin navigation says BetterClubManager routes are super-admin gated, "Coming soon" | text itself says superseded in v9.6.1 (capability-gated for club admins) | L10101-10167 | verify against `App.jsx`.
 - **[FLAG-CDOAS-5]** Draft section emails `cricket@bettersports.com.au`, platform support is `support@bettersports.com.au` | deliberate, may be stale | L10041-10100 | verify.
+- **[FLAG-DIR-6]** The teaser snapshot archive section (v9.99 era) still describes the cron design: `OrTrigger` by day, job id `nightly_club_teasers`, setting `club_teaser_nightly_limit`, and a work report with a batch-size table against a 5 minute gap | Superseded in v9.100.2 by the paced worker (rule 9). Main amended those three bullets in place after this split, so the archive keeps the original wording and records the amended text at the end of the file | teaser snapshot section (L538-640) and the two ADDED/AMENDED blocks at the end of `archive/club-directory-onboarding-and-admin-shell.md` | trust rule 9. Known gaps from the note: an upstream outage can read as `empty`, not `error`, and the breaker does not catch it (check before raising the rate); pacing counts calls, not HTTP retries or page requests.
 
 ## clubhouse-committee-and-plans
 

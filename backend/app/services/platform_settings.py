@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from datetime import datetime
 
 from fastapi import Depends, HTTPException, status
@@ -26,6 +27,19 @@ logger = logging.getLogger(__name__)
 _INT_KEYS = {"default_trial_days", "direct_enquiry_hot_days", "club_teaser_nightly_limit",
              "crm_incremental_sweep_seconds", "crm_global_sweep_minutes",
              "crm_event_stale_hours"}
+
+# The teaser crawl's rate and hours (services/club_teaser.run_forever). A rate
+# is a float in calls a second, so it cannot use _INT_KEYS' positive-integer
+# check; the hours can be 0 (midnight), so they cannot either. Each entry is
+# (low, high) inclusive. `club_teaser_nightly_limit` above is what the retired
+# cron job read; nothing reads it now, and it is left in place so a stored value
+# and the General Settings payload keep working.
+TEASER_MAX_RATE = 10.0
+_FLOAT_KEYS = {"club_teaser_calls_per_second": (0.05, TEASER_MAX_RATE)}
+_HOUR_KEYS = {"club_teaser_window_start": (0, 23), "club_teaser_window_end": (1, 24)}
+# 05:00 to 22:00 Perth: waking hours at the other end, and the window the whole
+# directory has to fit in.
+DEFAULT_TEASER_WINDOW = (5, 22)
 
 # Boolean feature flags, off by default until a super admin turns them on from
 # General Settings. Each new self-serve-trial-onboarding surface (see
@@ -222,15 +236,47 @@ async def get_direct_enquiry_hot_days(db: AsyncSession) -> int:
 
 
 async def get_club_teaser_nightly_limit(db: AsyncSession) -> int:
-    """How many clubs the nightly teaser-snapshot pass may pull from Cricket
-    Australia. UNSET MEANS 0, WHICH MEANS OFF: it is outbound traffic at scale
-    to a third party, so nobody gets it by deploying. Set it from General
-    Settings (or pull by hand with ``app.scripts.pull_club_teasers``)."""
+    """RETIRED. How many clubs each run of the old cron job pulled. Nothing reads
+    it now: the crawl is a paced worker switched on by
+    ``club_teaser_calls_per_second`` (see ``get_club_teaser_rate``). Kept so a
+    stored value and the General Settings payload keep working."""
     settings = await get_settings(db)
     try:
         return max(0, int(settings.get("club_teaser_nightly_limit")))
     except (TypeError, ValueError):
         return 0
+
+
+async def get_club_teaser_rate(db: AsyncSession) -> float:
+    """Calls a second the teaser crawl may average against Cricket Australia.
+    UNSET MEANS 0, WHICH MEANS OFF, for the same reason the retired per-run
+    limit did: outbound traffic at scale to a third party is never something a
+    deploy switches on. A stored value outside the bounds reads as off rather
+    than being clamped up into traffic nobody chose."""
+    settings = await get_settings(db)
+    try:
+        rate = float(settings.get("club_teaser_calls_per_second"))
+    except (TypeError, ValueError):
+        return 0.0
+    lo, hi = _FLOAT_KEYS["club_teaser_calls_per_second"]
+    return rate if math.isfinite(rate) and lo <= rate <= hi else 0.0
+
+
+async def get_club_teaser_window(db: AsyncSession) -> tuple[int, int]:
+    """(start_hour, end_hour) in Perth time between which the crawl runs, start
+    inclusive and end exclusive. Unset, out of range, or start at or after end
+    reads as the default rather than as a window that is never open."""
+    settings = await get_settings(db)
+    out = []
+    for key, default in zip(("club_teaser_window_start", "club_teaser_window_end"),
+                            DEFAULT_TEASER_WINDOW):
+        try:
+            v = int(settings.get(key))
+        except (TypeError, ValueError):
+            v = default
+        lo, hi = _HOUR_KEYS[key]
+        out.append(v if lo <= v <= hi else default)
+    return (out[0], out[1]) if out[0] < out[1] else DEFAULT_TEASER_WINDOW
 
 
 async def get_club_teaser_type_modes(db: AsyncSession) -> dict:
@@ -459,6 +505,27 @@ async def update_settings(db: AsyncSession, patch: dict) -> dict:
             if ival <= 0:
                 raise ValueError(f"{key} must be a positive integer")
             out[key] = ival
+        elif key in _FLOAT_KEYS:
+            if value is None:
+                out.pop(key, None)
+                continue
+            lo, hi = _FLOAT_KEYS[key]
+            try:
+                fval = float(value)
+            except (TypeError, ValueError):
+                raise ValueError(f"{key} must be a number")
+            if isinstance(value, bool) or not math.isfinite(fval) or not lo <= fval <= hi:
+                raise ValueError(f"{key} must be between {lo} and {hi}")
+            out[key] = fval
+        elif key in _HOUR_KEYS:
+            if value is None:
+                out.pop(key, None)
+                continue
+            lo, hi = _HOUR_KEYS[key]
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or int(value) != value \
+                    or not lo <= int(value) <= hi:
+                raise ValueError(f"{key} must be a whole hour from {lo} to {hi}")
+            out[key] = int(value)
         elif key in _BOOL_KEYS:
             if value is None:
                 out.pop(key, None)
@@ -479,6 +546,10 @@ async def update_settings(db: AsyncSession, patch: dict) -> dict:
                 raise ValueError(f"{key} must start with http:// or https://")
             out[key] = cleaned
         # Unknown keys are ignored (forward-compatible).
+    w_start = out.get("club_teaser_window_start", DEFAULT_TEASER_WINDOW[0])
+    w_end = out.get("club_teaser_window_end", DEFAULT_TEASER_WINDOW[1])
+    if w_start >= w_end:
+        raise ValueError("club_teaser_window_start must be before club_teaser_window_end")
     await db.execute(
         text("UPDATE platform_settings SET settings = CAST(:s AS jsonb), updated_at = NOW() WHERE id = 1"),
         {"s": json.dumps(out)},
