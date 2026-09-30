@@ -16,27 +16,27 @@
 
 **Two products, one pixel event (v9.72.0, v9.72.1)**
 1. `/trial` and `/demo` fire `CompleteRegistration` at dataset 1317878090534903; only `content_category` separates them: `self_serve_trial` (value 399 AUD) and `webinar` (no value). Never add a combined registrations total or one campaign-wide funnel.
-2. Spend is split per stream from per-ad rows (`stream_totals`, `build_streams`); exact, not apportioned. `campaign.cost_per_lead` keeps its name and now means the trial's own.
-3. `stream_for_ad`: `AD_DESTINATIONS` first, then the ad NAME (`Ad_Webinar_*`), so new creatives classify with no code change. Never classify from the AD SET name.
+2. Spend is split per stream from per-ad rows (`stream_totals`, `build_streams`), exact not apportioned. `campaign.cost_per_lead` now means the trial's own.
+3. `stream_for_ad`: `AD_DESTINATIONS` first, then the ad NAME (`Ad_Webinar_*`). Never classify from the AD SET name.
 4. `get_registration_count` reads `organisations` (trial only). The bug was the divisor, not the count; do not change the count.
-5. `meta_capi.send_complete_registration_event` defaults are the trial's (category, value 399). Other callers (`public_webinar.py`) must name their own event or Meta sees webinar signups as A$399 trials.
-6. Each stream also carries a figure measured from the last deliberate change (`stream_totals_since` over `level='ad_daily'` on or after `_last_change_date()`). Label all-time figures as all time.
-7. Add deliberate changes as `CAMPAIGN_ANNOTATIONS` rows (`{date, label, detail}`); pacing never crosses one. One day after a change the insight correctly says nothing.
+5. `meta_capi.send_complete_registration_event` defaults are the trial's (value 399). Other callers (`public_webinar.py`) must name their own event.
+6. Each stream also carries a figure since the last deliberate change (`stream_totals_since`, `level='ad_daily'`, `_last_change_date()`). Label all-time figures as all time.
+7. Record deliberate changes in `CAMPAIGN_ANNOTATIONS` (`{date, label, detail}`); pacing never crosses one.
 8. Spend is settled, results are not. Pacing excludes only today; the 7-day attribution window applies to conversion insights only, so a since-cost inside it is a provisional ceiling: never alert off it.
 9. A partial window withholds the cost and says why (`ad_daily` kept `CAMPAIGN_LENGTH_DAYS + 5`; short spend understates cost).
 10. `get_registration_count_since` shares `_attribution_matches_campaign` with the lifetime count; the lifetime count is never windowed.
 11. A signup with no timestamp (orgs have no `created_at`; use earliest `self_serve_idempotency_keys`) is `undated_trial_results`, never guessed. The manual leads adjustment is lifetime only.
 12. `CAMPAIGN_UTM_*` is a SET per campaign. Unrecognised utm tags are dropped, so a missing entry reads as "new ads produced nothing". After any rename in `meta_ads.py` sweep every `ImportFrom` and `meta_ads.<attr>` in `app/`: a lazy import inside a function survives `py_compile` and `vite build`.
 13. Untagged webinar registrations are reported beside cost per result, never absorbed (cost reads high, the safe direction).
-14. Recharts drops a `ReferenceLine` wrapped in a Fragment: `chartMarkers()` returns an array. `ReferenceArea` draws a `<path>`, not `<rect>`.
+14. Recharts drops a `ReferenceLine` wrapped in a Fragment (`chartMarkers()` returns an array); `ReferenceArea` draws a `<path>`.
 
 **Meta Ads HQ reporting (migrations 200, 201)**
 15. Funnel has a "Club selected" stage (`get_club_selected_count`: distinct Meta visitors who fired `club_prepared`), our count not Meta's.
-16. `meta_ad_snapshots.updated_at` is set on INSERT and `DO UPDATE` in `upsert_snapshot`; "Last updated" reads it.
+16. `meta_ad_snapshots.updated_at` must be set on INSERT and `DO UPDATE` in `upsert_snapshot`.
 17. Budget and length are per campaign: add to `CAMPAIGN_PLANS`; `_campaign_plan()` falls back to `CAMPAIGN_BUDGET_AUD` / `CAMPAIGN_LENGTH_DAYS`.
 18. "Counting since" (`platform_settings.meta_ads_counting_since`) resets on-site funnel STAT counts and Meta insights (`_date_range_params()`), via `_SINCE_LOWER_BOUND` (only narrows). It NEVER windows the "Free trial registrations" KPI. Meta numbers come from stored snapshots: a change needs `run_snapshot()`.
-19. Clubs selected / Clubs searched TABLES are NOT windowed by the cutoff (follow-up list). Default 365 days, max 730 (`TABLE_DAYS_DEFAULT`/`TABLE_DAYS_MAX`).
-20. The cutoff is seeded once in the lifespan, guarded by `meta_ads_counting_since_seeded`, so clearing it is not undone at restart.
+19. Clubs selected / searched TABLES are NOT windowed by the cutoff (follow-up list); default 365 days, max 730.
+20. The cutoff is seeded once (marker `meta_ads_counting_since_seeded`), so clearing it survives restarts.
 21. Meta `campaign["leads"]` is Lead actions only (`_LEAD_ACTION_TYPES`); never sum `complete_registration` in.
 22. `_attribution_matches_campaign` accepts `utm_content`, then `utm_campaign`, then a plain fb/ig/meta `utm_source` or `click_source`. Null attribution: use the KPI manual +/- with a note.
 23. `/track-step` rate limit is keyed by `visitor_id` (IP only as fallback): IP keying starved beacons behind Facebook in-app proxies and CGNAT. Only `/search` needs an IP cap.
@@ -58,8 +58,8 @@
 
 **Club page call to action (v9.91.0, v9.92.1)**
 36. The bar is for PROSPECTS only: a session from a Meta click (utm_source meta/facebook/fb/instagram/ig, medium paid_social, or fbclid/igshid) or that passed `/trial`. Never a club's members, never signed-in users. Dismiss minimises to a pill. The club shown is already registered, so copy sells the visitor's OWN club.
-37. Read campaign params from the session: `visitor.rememberLandingParams()` in `main.jsx` before first render (`bc:landingParams` in sessionStorage); `metaPixel.buildFbcFromFbclid` falls back to it.
-38. Bar must not draw on `/trial` or `/demo`. `lib/clubPath.publicClubSlug` is the one "is a club page" rule (shared with FaviconManager). CompleteRegistration fires only on `status === 'completed'`.
+37. Read campaign params from the session (`visitor.rememberLandingParams()` in `main.jsx`, `bc:landingParams`), not the address bar. The bar must not draw on `/trial` or `/demo`. `lib/clubPath.publicClubSlug` is the one "is a club page" rule. CompleteRegistration fires only on `status === 'completed'`.
+38. (merged into 37)
 39. Wording follows the ad ("Check out your club", "Free · about 3 minutes · no card"); `/trial` placeholder names no real club.
 
 **Webinar registration (migration 296 on)**
@@ -67,13 +67,13 @@
 41. Fire only when the server says `created` (fold on `(event_key, lower(email))`). A resubmission claims nothing; a broken backend still hands over the link and fires nothing. Campaign columns, phone and name halves are COALESCEd (fill, never overwrite).
 42. `services/webinar.EVENT` and mirror `frontend/src/data/webinar.js` drive the page (suite asserts they agree). Past switch is the event's END; server `is_past` beats the local clock. `/demo` is resolved per request (`webinar.page_meta`, `webinarState`), not in `MARKETING_PAGES`.
 43. Recording link is a setting (`webinar_recording_url`, url-validated, `''` clears). `.ics` is an endpoint (CRLF, UTC). The StreamYard link is NOT in the JS bundle (`GET /public/webinar`; grep `frontend/dist`).
-44. Phone is OPTIONAL (8 to 15 digits when typed), stored as typed, deliberately not `admin_identity.mobile_valid`. Label says optional.
+44. Phone is OPTIONAL (8 to 15 digits when typed), stored as typed, not `admin_identity.mobile_valid`.
 45. First and last name are separate fields (migration 301). `name` stays authoritative; halves stored only when BOTH given (`resolve_name`); a surname is never invented. `streamyard.resolve_push_name` is the one rule; stubs must CALL it.
-46. Not `club_onboarding_requests`, and no Hot lead push to any CRM (per direct instruction).
+46. Webinar registrations are not `club_onboarding_requests` and push no Hot lead to any CRM (per direct instruction).
 47. `demo` and `trial` must be in all FOUR top-level-slug lists (`og_preview.RESERVED_ROOT_SEGMENTS`, `FaviconManager.RESERVED_ROOTS`, `SponsorFooter.RESERVED_ROOT_SEGMENTS`, `lib/marketingPaths.MARKETING_PATHS`), but NOT in the `MARKETING_PATHS` behaviours they do not want: `OWN_NAV_PATHS` / `rendersOwnMarketingNav` suppresses the club Navbar alone (`MARKETING_PATHS` also forces dark theme and shows `ClubCTABar`).
 48. Reminder (migration 299): `send_reminders` window is `REMINDER_LEAD_HOURS` (3) before start to end, hourly via `webinar_upkeep`. Registrants inside the window are not reminded. `reminder_sent_at` is the CLAIM; a refusal hands it back with `reminder_error`. `POST /club-admin/super/webinar-reminders` refuses outside the window.
 49. StreamYard push (migration 300): `push_registration` posts to `oa-api.streamyard.com/api/public/webinars/{id}/registrations`. Field ids are FETCHED (`_field_map`, 10 min cache), never hardcoded; broadcast id parsed from `EVENT.watch_url`. Idempotent on email, no overwrite; pushed rows skip before any request. A mononym is skipped with a recorded reason (blank surname is a 400). Best-effort, own session, never raises. `sync_streamyard` (hourly catch-up, `POST /club-admin/super/webinar-streamyard-sync`) reports `reasons`; "NOT SENT" shows the reason on the row.
-50. Only the name is editable (`PATCH /super/webinar-registrations/{id}`); email is the fold and idempotency key. "Add surname" only where a single-word name blocks.
+50. Only the name is editable (`PATCH /super/webinar-registrations/{id}`); email is the fold and idempotency key.
 51. Removing StreamYard's second form is their registration toggle, not code (CORS refuses our origin; registration binds to the creating session; reminder `?token=` is not the registration id). Turning it off loses their registrant list and attendee report.
 
 **Club Directory Rediscover (misfiled here, see Flags)**
@@ -90,19 +90,19 @@
 - Wrong webinar state on a bad-clock device: server `is_past` must win. Recording advertised pre-event: title/`og:title` were hardcoded (crawlers skip `usePageMeta`).
 - Two logo lockups on `/demo` or `/trial`: four-lists trap (rule 47). Inflated cost per signup: divisor included the other stream (rule 2). Chart marker missing, no error: Fragment (rule 14).
 - Phantom club rows ("Warn" as "Warners Bay"): rule 24. "More selected than searched": rules 19, 23. "Last updated" stuck: rule 16. StreamYard "0 pushed, 2 skipped": mononyms, not a fault.
-- Harness: `addInitScript` cannot stub `gtag` (read `window.dataLayer`; `fbq` is stubbable); `networkidle` never settles (HeartbeatBeacon); `click({force:true})` on a disabled button hangs; `\d` in a JS template passed to `page.evaluate` is `d`; CSS-`uppercase` reads transformed; `.every()` on an empty array is vacuous.
+- Harness: `addInitScript` cannot stub `gtag` (read `window.dataLayer`); `networkidle` never settles; `click({force:true})` on a disabled button hangs; CSS-`uppercase` reads transformed; `.every()` on an empty array is vacuous.
 
 ## How to verify a change here
 
 - Backend (real Postgres, shipped route bodies): `backend/verification/verify_meta_ads_streams.py` (control with feature absent REPORTS missing parts; window and guards neutered: since-spend reads lifetime, a partial window prints a cost), `verify_webinar.py` (DDL three times, mirror agreement, resubmission and bot guards, reminder edges, name halves), `verify_streamyard_skip_reporting.py`.
 - Browser: `frontend/verification/verify_meta_ads_streams_browser.mjs`, `verify_webinar_browser.mjs`, `verify_club_cta_browser.mjs`. Meta Events Manager Test Events is NOT covered.
-- Never call live StreamYard in a suite (no public DELETE); stub `push_registration`. Earlier probes left four test registrations (`bettercricket-integration-test@`, `bc-it-a@`, `bc-it-b@`, `bc-shipped-fn-test@`) to delete by hand in their dashboard.
+- Never call live StreamYard in a suite (no public DELETE); stub `push_registration`. Earlier probes left four test registrations (`bc-it-a@` and similar) to delete by hand.
 - Control runs must REPORT, not crash: `.get`, presence-safe helpers (`textOf()`, `seen()`, `reachedSuccess()`), gate whole blocks. Diff PASS lists of run and control (`comm -12`) to find checks that cannot fail.
 
 ## Operator commands and scripts
 
 - No standing scripts here (engagement scripts belong to the CRM guide). After changing `CAMPAIGN_UTM_*` or `AD_DESTINATIONS`, press Refresh now (`run_snapshot`).
-- Account-side steps code cannot do: verify `betterat.cricket` in Business Manager; `CompleteRegistration` in Aggregated Event Measurement priority; ad `conversion_domain`; StreamYard registration toggle; set `webinar_recording_url` after the event; SPF/DKIM/DMARC and a real `email_provider`; flip `self_serve_registration_enabled` at launch.
+- Account-side (not code): verify the domain in Business Manager; `CompleteRegistration` in Aggregated Event Measurement priority; ad `conversion_domain`; StreamYard registration toggle; `webinar_recording_url` after the event; SPF/DKIM/DMARC and a real `email_provider`; `self_serve_registration_enabled` at launch.
 
 ## Open follow-ups
 
@@ -115,14 +115,13 @@
 ## Flags: conflicting, superseded or possibly obsolete guidance
 
 - [FLAG-MKT-1] Archive says `CAMPAIGN_UTM_NAMES` became a set | code now `CAMPAIGN_UTM_CAMPAIGNS` (`meta_ads.py:190`, used by `sales_workspace.py:718`) | ONE CAMPAIGN, TWO PRODUCTS (L789-994) | keep rule, use new name.
-- [FLAG-MKT-2] Archive names `_META_VISITOR_SUBQUERY`, `_META_VISITOR_SUBQUERY_PLAIN`, `_meta_visitor_subquery(bound)` | code shows `_META_VISITOR_EXISTS = _meta_visitor_exists(_SINCE_LOWER_BOUND)` | Meta Ads HQ follow-up (L15458-15509) | verify current names.
+- [FLAG-MKT-2] Archive names `_META_VISITOR_SUBQUERY` (and `_PLAIN`) | code has `_META_VISITOR_EXISTS = _meta_visitor_exists(_SINCE_LOWER_BOUND)` | L15458-15509 | verify names.
 - [FLAG-MKT-3] Phone "REQUIRED" then optional; StreamYard link "in the JS bundle" then removed | both reversed in v9.71.3; `EVENT.watch_url` is server side (`webinar.py:73`) | webinar section (L1827-2032) | rules 43, 44 are current.
-- [FLAG-MKT-4] (merged into FLAG-MKT-3) | | | none
 - [FLAG-MKT-5] Two sub-notes carry v9.71.5 (298 gate, 299 reminder), and 300 says v9.71.6 | version labels collided at merge (archive notes renumbering) | L2179-2582 | trust migration numbers 296, 298, 299, 300, 301, not versions.
 - [FLAG-MKT-6] v9.71.4, migration 298 gate and association refresh are Club Directory rules nested under the webinar section | not webinar code | L2117-2281 | move to the club directory guide; kept here as rules 52 to 54.
 - [FLAG-MKT-7] Wizard Clubs v9.23.0 searched table versus v9.23.1 | later changes it (`resolved_searched_clubs`) | L7437-7573 | later wins, read both.
 - [FLAG-MKT-8] Self-serve says Twenty must be configured for the Hot-100 Lead | Twenty retired in v9.71.0 (CRM guide) | L15249-15329 | verify `push_self_serve_registration` before relying.
-- [FLAG-MKT-9] Verification suites cited for Sections 4 to 8 (wizard clubs, search beacon, self-serve, usage) | none found in `backend/verification` or `frontend/verification` | L7437-7573, L15249-15559 | verify or retire the claim.
+- [FLAG-MKT-9] Suites cited for wizard clubs, search beacon, self-serve, usage | none found in `backend/verification` or `frontend/verification` | L7437-7573, L15249-15559 | verify or retire.
 - [FLAG-MKT-10] Webinar date (Mon 21 Sep 2026) is a hardcoded constant | today is 30 Sep 2026, so the page should be post-event | webinar section | verify `EVENT` and `webinar_recording_url`.
 
 ## Section coverage

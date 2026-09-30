@@ -14,34 +14,34 @@
 
 **Rates (migration 282, `services/rate_coverage.py` as `rc`)**
 1. Runs and balls in a rate come from the same innings. Never `SUM(runs)/SUM(balls)` across a season or career. Only the ratio changes source; runs, innings, wickets keep theirs.
-2. Covered = `balls IS NOT NULL AND (balls > 0 OR runs = 0)` (old sync stored a missing count as 0; a real 0 off 0 is covered).
+2. Covered = `balls IS NOT NULL AND (balls > 0 OR runs = 0)` (old sync stored a missing count as 0).
 3. No scorecards (BetterImport totals): the aggregate stands, payload `basis: "aggregate"`. Do not withhold.
 4. Minimums count covered innings/spells. Platform default 0 on purpose (`organisations.stats_min_rate_innings`/`_spells`, NULL = none, via `services/stats_display.py`). A viewer's explicit 0 is real: test None, not falsiness.
 5. Strike-rate records are per season, never all time.
 6. Rates come from the server only. Use `rc.with_coverage` (presence-aware) and `batting_rate_columns(extra=...)` when did-not-bat rows are selected. Every new rate query imports `rc`.
 7. Overs are cricket notation (10.2): convert to balls before summing or dividing.
 8. Per-innings SR is derived on read (`rc.innings_strike_rate_sql`), never stored or backfilled.
-9. Coverage mark is a dagger, never an asterisk; notes draw only where the figure is short and shown (`RateFootnote` `when`).
+9. Coverage mark is a dagger, never an asterisk; notes only where the figure is short and shown.
 10. StatLab family targets re-derive from covered halves and publish no coverage pair. Scout and `iq._their_key_players` stay on aggregates.
 
 **Dismissals and matches played**
 11. `services/dismissal.py` is the one rule, whole-phrase, never `LIKE 'retired%'`. CA ids: 0 DNB, 1 Not Out, 8 Retired Hurt, 13 Retired, 14 Retired Not Out, 15 Absent. 14 (Law 25.4.2) and 8 (from the Law, unmeasured) are not dismissals; 13 (25.4.3) is.
 12. Fix the writer (`sync.py`, live scorecard merge), not readers. Every average is `innings - not_outs` (by-opposition, by-venue, by-position, by-grade too). A retirement leaves the dismissal donut; retired-out stays.
 13. `games.status` (266) is CA's word verbatim (`result` NULL cannot tell washout from unplayed). `services/game_status.py` is the one vocabulary (`NOT_PLAYED_STATUSES`; NO RESULT excluded). A named player with no bat/bowl/field row in a not-played fixture is subtracted.
-14. That correction lives in `v_effective_player_season_stats` AND every reader counting `game_appearances`, via `appearance_counts_as_match(alias)` (StatLab `appear`, by-grade, by-season-grade, by-venue, Formats). Ask which source a new match-counting screen reads. Recent-games lists keep washouts.
+14. That correction lives in `v_effective_player_season_stats` AND every reader counting `game_appearances`, via `appearance_counts_as_match(alias)` (StatLab `appear`, by-grade, by-season-grade, by-venue, Formats). Ask which source a new screen reads. Recent-games lists keep washouts.
 
 **Grade scope (`services/grade_scope.py`; 228, 229, 259, 283)**
 15. `GradeScope` is the one place a selection becomes SQL. Gate on `scope.active`, never `scope is None`. Empty exclusion set emits no clause.
 16. Category is EXCLUSION: `col IS NULL OR NOT (col = ANY(excluded))`; a row we cannot categorise is not known junior, so kept. Never an include-list. Resolved per grade NAME in Python, never in the WHERE.
 17. `grades.categories`/`match_formats` are TEXT[]; `grades.category` tracks the first entry. Every writer of `category=suggest_category(...)` also writes `categories=` (sync x2, manual_entries x2).
-18. An explicit category pick matches ANY of a grade's categories. The club DEFAULT and `judge_primary=True` judge the primary category only.
-19. Format is per FIXTURE (`games.match_format`; `format_sql_case()` mirrors `format_from_match_type`, change both). An unlabelled game uses its grade's format only if the grade plays one. `format_from_match_type` returns None for unknown strings. Unplaceable formats are left OUT of an explicit format filter.
+18. An explicit category pick matches ANY of a grade's categories; the club DEFAULT and `judge_primary=True` judge the primary only.
+19. Format is per FIXTURE (`games.match_format`; `format_sql_case()` mirrors `format_from_match_type`, change both). An unlabelled game uses its grade's format only if the grade plays one; `format_from_match_type` returns None for unknown strings; unplaceable formats are left OUT of an explicit format filter.
 20. `clause(col, kind)`: `game` (default), `aggregate` (`AND FALSE` under a format filter), `grade` (EXISTS, true grade listings only). A query joining `v_effective_games` is per fixture (`game_alias="g"`). `scope.active` includes `format_active`.
 21. A picked grade beats the CATEGORY half only (`GradeScope.formats_only()`). Picked-grade SQL is separate: add `{scope_clause}` and its bind there too (records.py has five fragments).
 22. `_RESIDUAL_SOURCES = (manual_aggregate, manual_career, import)` are added back under a category scope; never `api`/`manual_game` (double count). Recompute blended averages from summed counts.
-23. Import residuals classify by `grade_label` (v9.89.2): `excluded_labels` in `resolve_scope`; `clause(..., label_column=...)` is a CASE (id, else label as `text[]`, else kept). Sites reading `pss`: `_career_residuals`, `_residual_totals_cte`, `_season_by_season_scoped`, StatLab residuals.
+23. Import residuals classify by `grade_label` (v9.89.2): `excluded_labels` in `resolve_scope`; `clause(..., label_column=...)` is a CASE (id, else label as `text[]`, else kept). Sites: `_career_residuals`, `_residual_totals_cte`, `_season_by_season_scoped`, StatLab residuals.
 24. Competition axis (283) is an INCLUSION: subquery on `grades.competition_id` (`ix_grades_competition`), not a grade-id list. Junk or foreign ids drop; an all-junk pick is an ACTIVE filter matching nothing. Ungrouped grades, residuals and grade-less manual games drop out (`_fetch_manual_games_as_list` takes the scope).
-25. A grade is in at most one competition. Competitions are the club's groups, seeded one per association (`grades.association_id`); `is_seeded` clears on a person's edit so sync never renames. `grades.competition_id` is ON DELETE SET NULL. Ungrouped shows as "Other grades".
+25. A grade is in at most one competition. Competitions are the club's groups, seeded one per association (`grades.association_id`); `is_seeded` clears on a person's edit so sync never renames. `grades.competition_id` is ON DELETE SET NULL; ungrouped shows as "Other grades".
 26. `resolve_scope_for_player` widens category only when the default leaves a junior-only player empty (`stats_auto_show_played_grades`, 229), never a format, profile only, gated on `scope.category_active`.
 27. `organisations.stats_grade_categories`: empty or all-junk stores NULL. Age-group regexes end `\d+s?`. `grades-with-stats` computes classification in its own query (unnesting inflates runs). Filter rows hide when there is nothing to choose; `api.js` has one `scopeQuery()`.
 
@@ -53,7 +53,7 @@
 32. Competition pill order is `display_order` (`POST /admin/competitions/reorder` sends the whole list).
 
 **Milestones (`services/milestone_totals.profile_totals`)**
-33. `profile_totals` is the ONE definition (profile default scope, junior auto-widen, ids as an array); every milestone surface reads it. Entries carry `junior_split`, `counts`, `variant`; the notification dedupe key carries the variant basis. "Without junior" is `judge_primary=True`.
+33. `profile_totals` is the ONE definition (profile default scope, junior auto-widen, ids as an array); every milestone surface reads it. Entries carry `junior_split`, `counts`, `variant` (dedupe key carries the basis). "Without junior" is `judge_primary=True`.
 34. `sync._compute_milestones(reconcile=True)` removes thresholds no longer reached, keeps dates, runs at the END of sync; `match_pull_failed` only adds. Reached = `max(profile figure, whole unscoped career)`. Catch-up adds are undated (`achieved_at` NULL) unless the player has a game within `notification_scan.LOOKBACK_DAYS` (21), else `_src_milestone_achieved` emails "just reached".
 
 **StatLab**
@@ -63,21 +63,20 @@
 
 **Records, awards, grouping**
 38. `get_records` runs `SET LOCAL jit = off` first. Every board on `v_effective_player_season_stats` carries `pss_club_clause` (`pss.player_id = ANY(CAST(:club_player_ids AS uuid[]))`, resolved once, beside `pss_gender_clause`). A bound array pushes down; `= ANY (SELECT ...)` is a semi-join on the whole view (49.8s vs 0.9ms). Never tidy it into a subquery; cast it. A predicate on a view is paid per reference, so give the planner `player_id` up front.
-39. `q` times and labels every query (`_query_label`); `_timed` wraps non-board reads; declare `timings` above first use. `?debug_timing=1` returns `_query_timings` only to viewers who may see org private data; over `SLOW_RECORDS_LOG_MS` (2000) logs worst queries.
+39. `q` times and labels every query (`_query_label`); `_timed` wraps non-board reads; declare `timings` above first use. `?debug_timing=1` returns `_query_timings` only to viewers who may see org private data; requests over `SLOW_RECORDS_LOG_MS` (2000) log worst queries.
 40. Awards (`routers/award_definitions.py`): `STARTER_TEMPLATE` default, `GLOBAL_TEMPLATE` 'comprehensive', `APPLECROSS_TEMPLATE` for slug `applecross`. `/award-definitions/seed?template=` via `TEMPLATES` (unknown = starter); seeds only an EMPTY org. `ACHIEVEMENT_TREE` is only the no-defs fallback. Tables are lifespan-created.
-41. `run_grouping` (`services/competition_grouping.py`) is the one implementation. `sync_runs` kind `competition_grouping` is deliberately not in `_FULL_SYNC_KINDS` and not resumed. Idempotent (only NULL associations written; blank never erases). One run per club (POST returns the in-flight run). One failed season is counted. `needs_grouping` is the only trigger, never `grades_ungrouped`. `MANAGE_MERGES`. `maybe_group_club` fires on `_sync_safe` success and Full Rebuild true-success; the 02:30 job stays. `/{slug}/competitions` must be known to Navbar `CLUB_SECTIONS`/`statsActive`, `SponsorFooter`, `FaviconManager`.
+41. `run_grouping` (`services/competition_grouping.py`) is the one implementation. `sync_runs` kind `competition_grouping` is deliberately not in `_FULL_SYNC_KINDS` and not resumed. Idempotent (only NULL associations written). One run per club (POST returns the in-flight run). A failed season is counted, not fatal. `needs_grouping` is the only trigger, never `grades_ungrouped`. `MANAGE_MERGES`. `maybe_group_club` fires on `_sync_safe` success and Full Rebuild true-success; the 02:30 job stays. `/{slug}/competitions` must be known to Navbar `CLUB_SECTIONS`/`statsActive`, `SponsorFooter`, `FaviconManager`.
 
 ## Traps and failure signatures
 
-- Strike rate 320 or 333.33 beside blank balls: rules 1, 6. Overs summing to 20.4: rule 7. Header average differs from StatLab or by-venue: rule 12. 13 matches where the club counts 10: rules 13, 14.
+- Strike rate 320 or 333.33 beside blank balls: rules 1, 6. Overs summing to 20.4: rule 7. Header average differs from StatLab: rule 12. 13 matches where the club counts 10: rules 13, 14.
 - A filter INCREASES a total (333 to 337), or header, note and grid read 309/313/314: source switch, not a bug (rules 28 to 30).
-- Residual shows under Juniors/Women's/Masters: rule 23. Match Type pills dead with a grade picked: rule 21. Two-day filter returns a mixed grade's every innings: rule 20. "Under 14s" counted senior: rule 27.
+- Residual under Juniors/Women's/Masters: rule 23. Match Type pills dead with a grade picked: rule 21. Mixed grade's every innings under a two-day filter: rule 20. "Under 14s" counted senior: rule 27.
 - Settings stuck on "Loading…": handler missing `Depends(get_db)` compiles and passes `py_compile`; only awaiting fails. Call route bodies in suites.
-- Grid drops on the default view for a junior-programme club's seniors: rule 30. Stray "filter does not apply" notes: rule 31. Records 15s: rule 38.
-- Browser suites: no filter pills means the seasons stub returned `[]`; the headline counts up, so wait then read `.pb-num`.
+- Grid drops on the default view for a junior-programme club: rule 30. Stray "filter does not apply" notes: rule 31. Records 15s: rule 38.
 - Job result never shows: `CompetitionManager.load()` reset to loading and unmounted `onDone`. Spinner on first load only.
 - `CREATE OR REPLACE VIEW` cannot drop a column (266 downgrade drops and recreates; 169's has the same latent defect).
-- Harness tables: build from ORM models, copy lifespan DDL column for column (`bowling_spells.runs`, `audit_logs.org_id`; its swallowed failure aborts the transaction). `games` has no `organisation_id`; `manual_batting_innings` keys on `manual_game_id`.
+- Harness tables: build from ORM models, copy lifespan DDL exactly (`bowling_spells.runs`, `audit_logs.org_id`; a swallowed failure aborts the transaction). `games` has no `organisation_id`.
 - Milestone `--apply` off a dry run whose REMOVE list is mostly juniors-turned-seniors: that is scope, not a fix. Do not apply.
 
 ## How to verify a change here
@@ -96,16 +95,15 @@ Real-Postgres suites through shipped route bodies, each with a control run that 
 
 ## Open follow-ups
 
-- Records: nothing cached or concurrent (cache on last sync; separate sessions, not `asyncio.gather` on one `AsyncSession`).
+- Records: nothing cached or concurrent (cache on last sync; separate sessions, never `asyncio.gather` on one `AsyncSession`).
 - Scout screens and `iq._their_key_players` not marked aggregate-basis; `iq_team._role_ratings`, `iq_trends._similar_players` use aggregates as features (on purpose).
 - `player_season_stats.batting_average` is a second stored copy. No SR column in Batting by Position.
-- Result filter offers "Tied" but never matches. Family targets ignore other context filters. Gender filter casing bug (Leaderboard, Records).
-- Players with ~100 games and CA 0 unexplained. Club rankings unfiltered and unnoted (decision needed).
+- Result filter offers "Tied" but never matches. Family targets ignore other context filters. Gender filter casing bug. Club rankings unfiltered and unnoted (decision needed). Players with ~100 games and CA 0 unexplained.
 - No PlayHQ competition name (WAF). AFL silo untouched. BetterIQ, Yearbooks not on GradeScope defaults. Leaner award import template wanted.
 
 ## Flags: conflicting, superseded or possibly obsolete guidance
 
-- [FLAG-STATS-1] "Milestones are deliberately never filtered" (v9.64.0) | reversed by v9.93.0 (`profile_totals` follows the profile default); Milestones reach-note copy may still say never filtered | Which lens a panel (L16385-16615) vs A milestone is measured (L454-537) | verify frontend copy, align
+- [FLAG-STATS-1] "Milestones are deliberately never filtered" (v9.64.0) | reversed by v9.93.0 (`profile_totals` follows the profile default); Milestones reach-note copy may still say never filtered | Which lens a panel (L16385-16615), A milestone is measured (L454-537) | verify frontend copy, align
 - [FLAG-STATS-2] Gap heuristic "skipped entirely under an active scope" (v9.64.0) | replaced by per-season gating in v9.64.1 (`seasons_left_to_scorecards` in `aggregations.py`) | Which lens a panel (L16385-16615) | retire blanket wording
 - [FLAG-STATS-3] StatLab family targets "left alone" (v9.59.0) | settled in v9.65.1 | A rate is only as good (L3203-3427) | retire
 - [FLAG-STATS-4] `if grade_id or grade_name: scope = None` (228) | narrowed by 259 to `formats_only()` (exists in `grade_scope.py`) | Junior stats split (L8226-8315) | keep rule 21
@@ -114,7 +112,7 @@ Real-Postgres suites through shipped route bodies, each with a control run that 
 - [FLAG-STATS-7] "Grid carries no scope" (v9.63.2), "teammates/captain do not take scope" (v9.64.0) | closed in v9.64.0 and v9.64.1 | Stats by competition; Which lens a panel | retire
 - [FLAG-STATS-8] `aggregations.py:511/553` line refs and "five sites" for `appearance_counts_as_match` | line numbers stale | A washout is not a match played (L6569-6643) | verify with grep
 - [FLAG-STATS-9] Timings, milestone dry-run counts, player-count splits | one-off production evidence, Sep 2026 | several | history only
-- [FLAG-STATS-10] Gender filter left on Leaderboard and Records with a casing bug | not re-checked in code | A grade is several things (L7001-7212) | verify, then fix or retire
+- [FLAG-STATS-10] Gender filter left on Leaderboard and Records with a casing bug | not re-checked in code | A grade is several things (L7001-7212) | verify, fix or retire
 
 ## Section coverage
 
