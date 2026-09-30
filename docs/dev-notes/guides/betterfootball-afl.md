@@ -2,12 +2,12 @@
 
 **Read this before** (concrete triggers):
 - Editing `backend/app/afl_main.py`, `models/afl.py`, `services/afl/*`, `routers/afl/*`, `frontend/src/afl/*`, or anything built with `VITE_SPORT=afl`.
-- Porting a cricket screen, router or service to football (BetterAdmin, BetterSocials, BetterSelect, fees, votes, competitions).
-- Touching the football sync (`services/afl/sync.py`, `sync_fixtures`, `_former_grades_for_team`, `discoverTeams`, `discoverTeamFixture`), PlayHQ GraphQL calls, or `afl_game_details`.
+- Porting a cricket screen, router or service to football.
+- Touching the football sync (`services/afl/sync.py`, `sync_fixtures`, `discoverTeams`), PlayHQ GraphQL calls, or `afl_game_details`.
 - Football Import Stats, Import Results, Import Awards, Manual Entries (`afl_manual_adjustments`), merge or split of football players.
 - Symptoms: early rounds missing after a re-grade, stats reading the opposition's lines, a football page calling the cricket API, a merge that lost a career.
 
-**Archive** (full history, verbatim, do not load whole): `docs/dev-notes/archive/betterfootball-afl.md`. Grep hints: `BetterSelect on BetterFootball`, `afl_lineup_slots`, `a delta, not a replacement`, `afl_manual_adjustments`, `discoverTeamFixture`, `Splitting a player`, `Import Results`, `import-game:`, `Import Awards`, `_award_key`, `Multi-sport: the AFL silo`, `afl_bootstrap`, `cricket_schema_mirror`, `season_group`.
+**Archive** (full history, verbatim, do not load whole): `docs/dev-notes/archive/betterfootball-afl.md`. Grep hints: `afl_lineup_slots`, `a delta, not a replacement`, `afl_manual_adjustments`, `discoverTeamFixture`, `Splitting a player`, `Import Results`, `import-game:`, `Import Awards`, `_award_key`, `Multi-sport`, `afl_bootstrap`, `cricket_schema_mirror`, `season_group`.
 
 **Related guides**: the cricket guides in `docs/dev-notes/guides/` that own behaviour football reuses (competitions and grade scope, votes, BetterSocials, BetterFees, merge carry rules).
 
@@ -18,7 +18,7 @@
 2. Entry is `app/afl_main.py` (`uvicorn app.afl_main:app`, `SPORT=afl`, own `DATABASE_URL`), reusing shared models and `routers/auth.py`. Football code: `models/afl.py`, `services/afl/`, `routers/afl/`. `create_all` builds the DB on first boot; cricket tables exist empty by design.
 3. Every football synced row's PK is `uuid5(org, playhq_id)` (org is `uuid5(AFL_NS, org_code)`). Raw PlayHQ ids live in `grassroots_id` / `playhq_id` and are what API calls use. Players key on the PlayHQ profile id, not the participant id.
 4. `afl_game_details.synced_at` is the incremental-sync signal (NULL means discovered, not yet pulled). It must never get a server default.
-5. Sport is chosen at build time: `VITE_SPORT=afl` mounts `src/afl/AflApp.jsx` (App.jsx early-returns, cricket bundle unchanged). Build args `VITE_SPORT=afl`, `VITE_BASE=/afl/`, `NGINX_CONF=nginx.afl.conf`, `WEB_ROOT=.../html/afl`. nginx proxies `/afl/api` to `bs-afl-backend`, never the cricket backend.
+5. `VITE_SPORT=afl` mounts `src/afl/AflApp.jsx` (App.jsx early-returns, cricket bundle unchanged). Build args `VITE_SPORT=afl`, `VITE_BASE=/afl/`, `NGINX_CONF=nginx.afl.conf`, `WEB_ROOT=.../html/afl`. nginx proxies `/afl/api` to `bs-afl-backend`, never the cricket backend.
 6. Football URLs are API-relative. Images are stored as `images/...` and drawn through `aflApi.mediaUrl`. A cricket `/api/...` URL (font, logo from a shared helper) must go through `rebaseApiUrl` or it resolves against the cricket API.
 7. Stats model: games, goals, behinds, Best on Ground, quarter scores, play-by-play. No StatLab, Yearbook or Website module. Season aggregates are our rollup from per-game lines (`afl_player_season_stats`, recomputed every sync).
 
@@ -58,7 +58,7 @@
 32. Football `_merge_players_core` must also move `afl_imported_stats` and `player_achievements`: raw-SQL tables with a bare `player_id` and NO foreign key, so they orphan and reads that join `players` drop them silently. Their ids are recorded on `afl_merge_logs` (two JSONB columns); older logs read `[]`.
 33. Split a player by SEASON: moves imported stats, game lines (via game season) and `player_achievements`, then recomputes `afl_player_season_stats`. An honour's `season` is free text (season id OR name), so match both. The new record gets NO `playhq_id`. Splitting off EVERY season is refused. No undo log by design: the two records are an exact-name pair, so merging back is the undo.
 34. Import Results (`routers/afl/result_imports.py`, `/club-admin/result-imports/*`, `MANAGE_MANUAL_ENTRIES`; preview, resolve, commit, undo, template). Rows land in `games` plus `afl_game_details` so they appear like synced games. `afl_game_details` gained `source` ('playhq'|'import'), `import_batch_id`, `import_ref`, `is_bye`, `is_forfeit`, `result_note`; `playhq_id` is nullable. Idempotent ALTERs in `afl_main.py`.
-35. Import game id is `uuid5(org, "import-game:" + season|team|date|opponent|round)` so corrected re-uploads UPDATE. The already-synced guard matches (date, opponent, grade name): Seniors and Reserves play the same club the same day, and date+opponent alone drops results. A different-grade game that day imports with a `check` warning.
+35. Import game id is `uuid5(org, "import-game:" + season|team|date|opponent|round)` so re-uploads UPDATE. The already-synced guard matches (date, opponent, grade name): Seniors and Reserves play the same club the same day, and date+opponent alone drops results. A different-grade game that day imports with a `check` warning.
 36. Warnings: `sheet_error` (sheet figures disagree) versus `check` (inferred or odd result). Nothing is auto-corrected. A row that cannot import is `blocked` and named, never dropped silently.
 37. Outcomes match on substrings ("Forfiet"). Cancelled and unscored rows skip; forfeits import as their W/L; byes are opt-in, `status='BYE'` with NULL result (out of W/L/D and played count). Blank home/away is neutral (club stored as nominal home). `GET /resolve` caps row detail at `ROW_DETAIL_LIMIT` (5000); commit covers the whole sheet.
 38. Column auto-mapping is a GLOBAL best assignment (strongest pair first, since "HamPoints" and "OppPoints" tie on "points"), plus a content sniff (60 percent of values in a known vocabulary).
@@ -76,7 +76,7 @@
 - Seniors and Reserves results vanish on Import Results: guard omitted the team (rule 35).
 - A career lost after a merge: FK-less side tables not moved (rule 32), or cascade tables DELETED (rule 31).
 - Same year drawn twice, or a +5 correction as its own season: rule 29.
-- Football page calls the cricket API for a font or logo: missing `rebaseApiUrl`.
+- Football page calls the cricket API: missing `rebaseApiUrl`.
 - `create_all` tables lack `gen_random_uuid()` defaults or later columns: set them idempotently in the football lifespan.
 - GraphQL 400 on every PlayHQ call: an unused variable is still declared.
 - One trophy drawn as several cards, a namesake's honours on another profile, or a clipped trophy name: rule 43.
@@ -101,7 +101,7 @@ Gotchas: earlier browser suites assert on named data (a "Rivals" opponent, a clu
 - [FLAG-AFL-2] `organisations.competitions` (JSON display history, 262) versus `club_competitions` table and `services/afl/competitions` (filter grouping) | two different "competitions" concepts in football, easy to confuse | re-graded team section L6644-6759 and admin port L9975-10040 | keep both
 - [FLAG-AFL-3] `_DROP_ORDER` described as "wings, then ruck rover"; code holds position codes (`LW`, `RW`, `RR`, `LBP`...) in `services/afl/select.py` | consistent, read the constant | BetterSelect on BetterFootball L76-150 | keep
 - [FLAG-AFL-4] `discoverTeamFixture` works on the AFL tenant but not cricket's Grassroots API | cross-archive claim, not re-verified live | re-graded team section L6644-6759 | verify if PlayHQ changes
-- [FLAG-AFL-5] Old `POST /achievements/import` and its template remain but nothing in the UI calls them | may be dead, but cricket's Core Awards may use them | Import Awards L9137-9217 | verify before deleting
+- [FLAG-AFL-5] Old `POST /achievements/import` and template remain, unused by the UI | may be dead, cricket may use them | Import Awards L9137-9217 | verify before deleting
 
 ## Section coverage
 | Original section (heading, original CLAUDE.md line range) | Disposition | Where captured |

@@ -6,11 +6,11 @@
 - Touching `sync.py` player/grade/season identity (`_resolve_org_player`, `_resolve_org_grade`, `grassroots_id`, `uuid5(org, guid)`) or merge code (`_merge_players_core`, `undo_merge`, `merge_carry.CARRIED`).
 - Adding any `DELETE`/`sa_delete` near `manual_*`, a season or grade delete, a Full Rebuild, an import undo, or a club delete/archive.
 - Reading a `players` row from a `fee_members` row, or enrolling people from `game_appearances`.
-- Symptoms: a season table drawn twice or thrice, a Players-list count that differs from the profile, an opponent listed as our member, Juniors returning senior matches, another club's phone or email in a Directory, a club delete that "did nothing", a merge that lost half a career, a second club showing only its unique grades.
+- Symptoms: a season drawn twice, Players-list count differing from the profile, an opponent listed as our member, another club's contact details in a Directory, a club delete that "did nothing", a merge that lost half a career.
 
 **Archive** (full history, verbatim, do not load whole): `docs/dev-notes/archive/cross-club-and-data-safety.md`. Grep hints: `NEVER DELETE OR OVERWRITE`, `FIXTURE BELONGS TO BOTH`, `two and three times over`, `M IS MATCHES PLAYED`, `Grouping is a job`, `already in our own database`, `deadlocked`, `grade leaderboard and the profile`, `this game is ours`, `same year counted twice`, `member leak`, `shared-game rule`, `Club Delete`, `Player Over-Count`, `Grade Collision`.
 
-**Related guides**: `stats-figures-records-and-filters` (GradeScope, club default filter, competitions, match coverage), `data-sources-and-sync` (sync, Full Rebuild), `cricketstatz-import` (`merge_carry`, `hand_edited_games`), `imports-manual-entries-and-data-tidy` (manual entries, undo snapshots, season/grade merges), `clubhouse-people-roster-fees` (fee members, Directory), `betteriq` (per-game `iq_*` reads), `club-directory-onboarding-and-admin-shell` (self-serve, club archive).
+**Related guides**: `stats-figures-records-and-filters` (GradeScope, competitions), `data-sources-and-sync` (sync, Full Rebuild), `cricketstatz-import` (`merge_carry`, `hand_edited_games`), `imports-manual-entries-and-data-tidy` (undo, season/grade merges), `clubhouse-people-roster-fees` (fee members, Directory), `betteriq` (per-game reads), `club-directory-onboarding-and-admin-shell` (self-serve, archive).
 
 ## Standing rules
 
@@ -20,7 +20,7 @@
 2. A merge MOVES a record, never deletes one. `_merge_players_core` once reached no `manual_*` table and each is `ON DELETE CASCADE` on `players.id`, so the merge destroyed the removed player's manual and imported career. `services/merge_carry.CARRIED` is the list (shared with the undo via `merge_logs.carried_row_ids`). A table recording what a player DID belongs on it.
 3. An import replaces only what that import wrote. `cricketstatz_import.import_match` matches on `cricketstatz_match_id`. `hand_edited_games` reads `manual_edit_logs` (the import writes none): an un-undone row means a person edited it, so the import skips the match and says so. An undone edit does not count.
 4. A Full Rebuild deletes from `games`, never `manual_games`.
-5. Season and grade deletes refuse while a manual game or adjustment points at them (`_season_in_use`, `_grade_in_use` in `routers/manual_entries.py`). Both FKs cascade, so these are the only guard.
+5. Season and grade deletes refuse while a manual game or adjustment points at them (`_season_in_use`, `_grade_in_use`, `routers/manual_entries.py`). Both FKs cascade, so these are the only guard.
 6. De-duplicating is not deleting: drop the removed record's row only for an innings the keeper already holds, never one only it had. Match unique keys with `IS NOT DISTINCT FROM`, not `=` (a season adjustment with no grade has a NULL key part).
 7. Enforced by `verify_merge_carry.py`: every `DELETE FROM manual_*` and `sa_delete(Manual*)` must be on `ALLOWED_DELETES` with a stated reason, and every manual table with a `players.id` FK must be on `CARRIED`. A new delete must be justified there.
 8. Recovery for a lost CricketStatz career: re-run the import (deterministic ids, upsert) onto the kept record. Hand-typed history has no recovery path.
@@ -52,7 +52,7 @@
 
 26. CA participant, grade and season GUIDs are shared across clubs. Never `session.get(Player|Grade, raw_guid)` as a global create/skip in sync. Use `sync._resolve_org_player` / `_resolve_org_grade`: look up by `(org, grassroots_id)`, mint `id = uuid5(org, guid)` only when the raw GUID is already a row in another club, else keep the raw GUID (single-club orgs unchanged). `players.id`/`grades.id` no longer equal the CA GUID; the raw one is in `grassroots_id`.
 27. Every Grassroots API call uses the raw GUID (`COALESCE(grassroots_id, id)`): per-grade stats `gradeId`, `get_grade_matches`, `iq_opponent` grade lookups, `ladders.py`, `iq.opponent_ladder`. Scorecard `grade.id` maps via `grade_id_by_guid`, `participantId` via `_team_pid`/`pid_by_guid`.
-28. `undo_merge` must set `grassroots_id` (= `id::text`) on the re-created player, or the next sync mints another duplicate.
+28. `undo_merge` must set `grassroots_id` (= `id::text`) on the re-created player, or the next sync mints a duplicate.
 29. Do NOT merge a legacy-GUID duplicate into a per-club record when their seasons overlap: MyCricket and PlayHQ give different season GUIDs to one real season, `merge_players` dedupes by raw `season_id`, and the career reads 86 = 56 + 30. Recovery is undo-merge. Safe only for disjoint registrations.
 30. Fold, never drop. `_SEASON_FOLD_CTE` folds seasons onto the viewing club's row for that year, then through active merges. Org-filtering games instead leaves the table below the header. A year the club has no row for folds to itself. The historical bundle (`_HISTORICAL_BUNDLE_MATCH_CAP`) stays unfolded. Key season rows by `season_id`, not `season_name`.
 31. `get_player_team_breakdown` is its own pass: `_canonical_season` folds alias, then own-club year row, then merges. Scope BOTH the scorecard side and CA's `player_season_grade_stats` side by season org (one side only breaks the `max(held, claimed)` self-heal). A per-grade manual correction is applied to the cell last, clamped at zero, and excluded from `season_aggregate` (else counted twice).
@@ -65,8 +65,8 @@
 **F. Association backfill and competition grouping**
 
 34. Grouping is a platform job, not a button. It is NOT hooked to `sync_organisation` (an idle club never reaches it via `_record_idle_run`): `competition_grouping.maybe_group_club` runs from nightly `jobs/scheduler.group_all_organisations` (02:30 Perth) over `auto_sync.eligible_clubs`, own try/except and session. `GROUP_CLUBS_PER_RUN = 40`.
-35. It must finish: `run_grouping` reports `seasons_unresolved`; the trigger fires only when the gap exceeds the last completed run's residual. One run per club (`running_run_id`). The button stays as escape hatch.
-36. `games.raw_payload` is dead (nothing writes it): the association cannot be recovered from it.
+35. It must finish: `run_grouping` reports `seasons_unresolved`; it re-fires only when the gap exceeds the last run's residual. One run per club (`running_run_id`).
+36. `games.raw_payload` is dead (nothing writes it), so it cannot supply associations.
 37. Own-data phases in `services/association_backfill.py`: (a) a CA grade GUID is competition-wide, so any club's association applies to every row with it; (b) a club's own grade NAME is its own competition (same `grade_merge_logs` and sponsor-strip rules as `club_grade_rows`); (c) `propagate_from_directory`: a club the Directory shows in EXACTLY one association is filled whole, matched by NAME never by the Directory's id (id spaces disagree), reusing an existing id or minting a `uuid5` in its own namespace, leaving a name that already means two ids alone.
 38. Every phase refuses to guess (`HAVING COUNT(DISTINCT association_id) = 1`): a wrong association files matches under a competition never played. Statements are `WHERE association_id IS NULL`, so reruns write nothing. `grades.association_id` is TEXT: cast to `text[]`, not `uuid[]`.
 39. `propagate_all` loops until nothing writes (max five passes). The API phase applies each answer across EVERY club holding that guid and re-checks each season before its call.
@@ -94,7 +94,7 @@
 Repeatable audits (re-run when adding a per-game read):
 - Player scoping: extract every triple-quoted SQL block, keep those with a per-game table after `FROM`/`JOIN` AND a `JOIN players <alias>`, flag any alias with no `<alias>.organisation_id` in the block. Read CTEs too.
 - "Ours" function audit: read whole function bodies for `:pid` plus a per-game table and no org reference (grepping SQL text flags correct code whose filter arrives via an interpolated `extra`). Found 13 in `aggregations.py`, plus `player_formats` and `get_player_captain_stats`.
-- Season-org audit: flag SQL blocks with a per-game table testing a seasons alias' `organisation_id` without `home_org_id` (89 blocks reported; club-facing stats reads covered).
+- Season-org audit: flag per-game SQL blocks testing a seasons alias' `organisation_id` without `home_org_id` (89 reported).
 - CARRIED audit: walk every `ForeignKey("players.id")` in `models/db.py` against the merge body (reported 41 unmerged).
 
 Suites (`backend/verification/`, real Postgres, shipped route bodies, control run must fail):
@@ -103,7 +103,7 @@ Suites (`backend/verification/`, real Postgres, shipped route bodies, control ru
 - `verify_player_season_fold.py`: control fails on 2 rows for 2025/26; bundle checks must still pass.
 - `verify_association_backfill.py`: neutered phases fail, `commit` ignored fails, ambiguity guard removed shows a side picked. Deadlock cannot be reproduced single-threaded; the suite pins the structural fix.
 - `verify_match_coverage.py` and the competitions suite for the grouping trigger. Member leak: two clubs, one shared fixture.
-- Harness: build tables from ORM models; pull views from the migrations; smoke-execute every patched read scoped and unscoped (caught "missing FROM-clause entry for table g" in captain by-season CTEs, which need no clause).
+- Harness: ORM-built tables, views from the migrations; smoke-execute every patched read scoped and unscoped (caught "missing FROM-clause entry for table g" in captain by-season CTEs, which need no clause).
 
 ## Operator commands and scripts
 
@@ -114,8 +114,8 @@ Suites (`backend/verification/`, real Postgres, shipped route bodies, control ru
 ## Open follow-ups
 
 - `seasons.organisation_id` shape remains in the yearbook generator, fantasy engine and several admin tools (none club-facing stats).
-- Grade-scoped, finals-only and captain-only board branches still count their own per-innings rows, not `_matches_played_cte`.
-- Career size for a player at two synced clubs (unscoped vs scoped path) is a product decision.
+- Grade-scoped, finals-only and captain-only board branches still count their own rows, not `_matches_played_cte`.
+- Career size for a player at two synced clubs (scoped vs unscoped path) is a product decision.
 - Players, Accounts, Directory and Comms Lists legitimately show different counts until the Clubhouse "join the data" step.
 - Season-alias/migration-season dedup (to merge overlapping legacy and per-club players) is unbuilt.
 - The second club gets no row of its own for a both-synced match (shared `games.id`): known limitation.
@@ -126,7 +126,7 @@ Suites (`backend/verification/`, real Postgres, shipped route bodies, control ru
 - [FLAG-XCLUB-2] v9.53.10 and v9.53.11 list the career header and season table counting every game as "noticed, not fixed" | v9.53.12 applied `_club_game_clause` to every player read and asserts they agree | superseded | "seasons drawn two and three times over" (v9.53.10, v9.53.11, v9.53.12 sub-rows) | retire.
 - [FLAG-XCLUB-3] The nine tables in migration 142, the 02:30 Perth time and the five-pass bound come from the archive | `GROUP_CLUBS_PER_RUN = 40` and migrations 060, 062, 067, 142, 143, 167, 169, 223 confirmed in code; the other values not re-checked | "Super Admin Club Delete"; "Grouping is a job" | verify before relying.
 - [FLAG-XCLUB-4] `games.raw_payload` "written by nothing" | `superseded_ddl.py` still selects it and `clone_demo_club.py` copies it | consistent | re-grep before designing on it.
-- [FLAG-XCLUB-5] `services/org_merge.py` exists and mentions `_resolve_org_grade`/`_resolve_org_player` | not covered by this archive | may carry more per-club id rules | verify if merging organisations.
+- [FLAG-XCLUB-5] `services/org_merge.py` mentions `_resolve_org_grade`/`_resolve_org_player` | not in this archive | may carry more per-club id rules | verify if merging organisations.
 
 ## Section coverage
 
@@ -134,7 +134,7 @@ Suites (`backend/verification/`, real Postgres, shipped route bodies, control ru
 |---|---|---|
 | NEVER DELETE OR OVERWRITE WHAT A CLUB TYPED IN BY HAND (v9.68.2), L1771-1826 | rules extracted | Rules 1 to 8, audits, Operator |
 | A FIXTURE BELONGS TO BOTH CLUBS (v9.62.0), L2996-3111 | rules extracted | Rules 9 to 16, Traps, audits |
-|   sub: What Shoalwater Bay reported | rules extracted | Rules 12 to 16, Traps |
+|   sub: What Shoalwater Bay reported | rules extracted | Rules 12 to 16 |
 | A player's seasons drawn two and three times over (v9.53.10), L3428-3893 | rules extracted | Rule 30, Flag 2 |
 |   sub: M IS MATCHES PLAYED. INN IS INNINGS (v9.62.2) | rules extracted | Rule 33 |
 |   sub: Grouping is a job the platform does (v9.62.1) | rules extracted | Rules 34, 35 |

@@ -11,7 +11,7 @@
 
 **Archive** (full history, verbatim, do not load whole): `docs/dev-notes/archive/betterselect-selection-and-nets.md`. Grep hints: `three pools`, `pointer events`, `padding up`, `turning up isn't batting`, `net_checkin_token`, `Ending the night`, `age_basis`, `selection_rule_players`, `visible_age`, `VALUE_FIELDS`, `min-w-0`, `full-replace`, `turn_seq`, `shirt_number`, `ADMIN_MODULE_KEYS`, `availability_link_token`.
 
-**Related guides**: `betterselect-votes-and-medals` (same fixtures and lineups); `imports-manual-entries-and-data-tidy` (profile and member CSV importers); `clubhouse-people-roster-fees` (Directory, `ensure_for_player`); `clubhouse-committee-and-plans` (minutes letterhead); `betterfootball-afl` (football has its own select module); `cross-club-and-data-safety` (org scoping).
+**Related guides**: `betterselect-votes-and-medals` (same fixtures); `imports-manual-entries-and-data-tidy` (importers); `clubhouse-people-roster-fees` (Directory); `clubhouse-committee-and-plans` (letterhead); `betterfootball-afl`; `cross-club-and-data-safety`.
 
 ## Standing rules
 
@@ -48,13 +48,13 @@
 24. QR and NFC are one link, one token (`organisations.net_checkin_token`, mirrors `availability_link_token`). Scanning joins EVERY live session (`net_manager.live_sessions`: active, dated within a day either side of today, no club timezone).
 25. A newcomer is a GUEST (`player_id` NULL + `guest_name`), never a player. Typed details go to `net_checkin_registrations` (`pending`). Approving is the one place a player is created and it CONVERTS the guest row (keep the real row and drop the guest if both exist). Dismissing leaves attendance alone. No `previous_club` column.
 26. Two switches: `net_checkin_require_pin` (default true) and `net_checkin_allow_registration` (a stranger has no number on file).
-27. `net_attendance.source` ('admin'|'self') drives the arrival alert; pre-272 rows read 'admin'. Only `self` pops up, chimes (`beep`/`unlockAudio`) and vibrates; a screen opening mid-session seeds its seen set silently. iOS ignores `navigator.vibrate`; sound needs a first touch. `touch_session` (= `_touch`) must run on a self check-in or the poll sees nothing.
-28. Landing payload never says who is checked in. Refusals are 404, not 403. No Web Push (deliberate).
+27. `net_attendance.source` ('admin'|'self') drives the arrival alert (pre-272 rows read 'admin'). Only `self` pops up, chimes and vibrates; a screen opening mid-session seeds its seen set silently. iOS ignores `navigator.vibrate`. `touch_session` (= `_touch`) must run on a self check-in or the poll sees nothing.
+28. Landing payload never says who is checked in; refusals are 404. No Web Push (deliberate).
 29. Guests to players: `GET /nets/guests` groups by `_guest_key` (case and outer whitespace only, deliberately not fuzzy); anyone with a PENDING registration is left out and counted; `POST /nets/guests/promote` moves the WHOLE history, collapses clashes, settles the registration, resolves the key server side. Gate: `require_any_cap` of `MANAGE_SELECTIONS` or `MANAGE_PLAYERS`. `UnrosteredGuests` renders nothing when empty and never calls the endpoint for a club without BetterSelect (402).
 
 **Self-service availability**
 30. Unauthenticated router, NOT under `require_module`: resolves the club from `availability_link_token`, checks `org_has_module(club,"select")` and the enabled flag itself (else 404). PIN = last-4 of `Player.phone`; cookie `bs_avail` (~30 days); lockout 5 wrong / 15 min per (token, player, IP) via `rate_limit.FailureTracker`; unknown player counts as a failure (no roster enumeration).
-31. Self answers are `player_availability` rows with `source='self'`, `recorded_by` NULL; an admin override re-stamps `'admin'`. Admin endpoints `GET/POST /availability/self-service`, `POST .../regenerate` (cap `MANAGE_SELECTIONS`). The public page and matrix share `upcoming_fixtures_by_date`.
+31. Self answers are `player_availability` rows with `source='self'`, `recorded_by` NULL; an admin override re-stamps `'admin'`. Admin endpoints `GET/POST /availability/self-service`, `POST .../regenerate` (`MANAGE_SELECTIONS`).
 
 **Association rules**
 32. One table `selection_rules` (`kind`, `scope`, `config`); `services/selection_rules.py` is the only reader/writer. Kinds: `age`, `overseas`, `bowling_workload`, `finals_qualification`, `grade_cap`, `fees`, `training`, `registration`, `rest`, `custom`. No table per kind.
@@ -67,7 +67,7 @@
 39. Qualifying games count scorecards AND named XIs, deduped on the DATE. `_FIXTURE_ONLY_KINDS` (`finals_qualification`, `grade_cap`, `rest`, `overseas`) are not answered on the matrix or roster.
 40. An age rule moves the card's age to the competition's date (`visible_age(dob, club, as_of=age_at)`); the club display gate still applies server side.
 41. Screens draw nothing when the club has no rules (`flags.rules`/`rules.active`). Fees and training notes can be switched off (`show_fees`/`show_training` in `selection_rules_config`): value WITHHELD, not hidden; a fees or training RULE still flags.
-42. Starter is only the CA Junior Cricket Policy bowling ladder, skip-don't-replace. No invented numbers. BetterSelect settings live on the rules screen (`MANAGE_SELECTIONS`, not `MANAGE_SETTINGS`).
+42. Starter is only the CA Junior Cricket Policy bowling ladder, skip-don't-replace; no invented numbers. Settings live on the rules screen (`MANAGE_SELECTIONS`, not `MANAGE_SETTINGS`).
 
 **Date of birth and age**
 43. Age is never stored: `player_age.age_on` derives it (None for no date, future, over 120 years; leap-day safe). Club rule applied server side in one place, `visible_age`: `organisations.select_show_age` (default off), `select_show_age_under` (NULL = every player). Never send and hide.
@@ -75,19 +75,19 @@
 45. Never public (no `public_show_age` without asking); `clone_demo_club` does not copy it; nothing syncs a birthday.
 46. `ageFilterOptions` (`selectionMeta.js`, reads `flags.age`) offers only what the rule can answer: no "18 and over" under an under-16 rule, no "no date of birth" under a limit.
 47. Profile importer: add a profile column to `VALUE_FIELDS` and `PLAYER_FIELDS`, plus `FIELD_LABELS`, `SYNONYMS`, `row_profile`, the router's `_current_profile` (or a re-stated value reads as a change), both templates and the wizard `FIELDS`/`SIMPLE`. The suite checks every `PlayerProfileUpdate` field is importable or on a named exclusion list. Wizard `FIELDS` 4th element (hint) must be drawn.
-48. Import dates: ISO, `4 Mar 2012`, `04/03/2012` (DAY FIRST), Excel serial (cells arrive stringified). Serial floor above any 4-digit year. Refuses what `player_age.dob_error` refuses. A country alone marks overseas unless "No". BetterSelect overrides can be SET from a sheet, never cleared.
+48. Import dates: ISO, `4 Mar 2012`, `04/03/2012` (DAY FIRST), Excel serial (cells arrive stringified; serial floor above any 4-digit year). Refuses what `player_age.dob_error` refuses. Country alone marks overseas unless "No". BetterSelect overrides can be SET from a sheet, never cleared.
 
 **Player kit**
 49. `players.shirt_number` is Core (playing attribute). `fee_members.shirt_size`/`.pants_size` are BetterAdmin (a coach or canteen volunteer has no player row). Per direct instruction.
 50. `admin` is NOT an entitlement key: `org_has_module(club,"admin")` is False for every club. Gate on `fees`/`comms`/`merch`/`crm`; frontend copy is `ADMIN_MODULE_KEYS`. Sizes are WITHHELD from a club without the module (`kit_sizes` on the payload), and a write gets the 402 upsell shape. The number rides regardless.
 51. Sizes are free text; `services/player_kit.py` is the one rule for profile, Directory and importer (trim, collapse whitespace, cap). A number is TEXT ("07", "00"). The Directory writes the number via the PLAYER route. Present-and-blank clears, ABSENT leaves alone. Over-long numbers are REPORTED, not clipped.
-52. Member CSV (shared by Directory and BetterFees Members): sizes land on `fee_members`, the number on `players.shirt_number` or nowhere. Resolve via the member's link, else exact name match; a name held by two players resolves to NEITHER (reported in preview). A new person row links to the unambiguous same-name player without a member row; an existing member row is never re-pointed. Gate on the sheet's columns (`columns_used`) at PREVIEW. A bare `shirt` column is claimed by neither.
+52. Member CSV (Directory and BetterFees Members share it): sizes to `fee_members`, number to `players.shirt_number` or nowhere. Resolve via the member's link, else exact name; a name held by two players resolves to NEITHER (reported in preview). New person rows link to the unambiguous same-name player without a member row; an existing member row is never re-pointed. Gate on the sheet's columns (`columns_used`) at PREVIEW. A bare `shirt` column is claimed by neither.
 53. `modules.module_display_name(key)` is the one place the backend names a module (`MODULE_META`, then `BILLABLE_MODULE_NAMES`).
 
 **Layout and process**
 54. `min-w-0` goes on the element that may shrink (`<h1>` `truncate min-w-0`, toggle `shrink-0`), not the group. Selection header uses `flex-wrap xl:flex-nowrap` and moves user name + Logout from `sm` to `xl`; only Selection passes `headerLeft`. `flex-wrap` cannot save a `shrink-0` child. A native date input clips its year if it shares a row (age on the caption line).
 55. Re-check `origin/main` when merging before numbering a migration; duplicate revision ids break Alembic.
-56. Minutes letterhead (see committee guide): colours from `theme_config`, not `primary_color`/`accent_color`; band is two stacked shaded paragraphs, never a table; crest converted to JPEG in the browser on a white-filled canvas, `clubLogoJpeg` returns null not throws; `header` is its own `docBlocks` argument; PDF image objects numbered LAST.
+56. Minutes letterhead (committee guide): colours from `theme_config`; band is two stacked shaded paragraphs, never a table; crest converted to JPEG in-browser on a white canvas, `clubLogoJpeg` returns null not throws; `header` is its own `docBlocks` argument; PDF image objects numbered LAST.
 
 ## Traps and failure signatures
 - Second device's check-in vanishes or two devices differ: full-replace write (6). Arrival never appears: `touch_session` not called (27).

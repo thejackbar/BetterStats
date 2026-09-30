@@ -5,7 +5,7 @@
 - Adding a segment field or rule, a merge variable (`{{trial_days_left}}`, `{{club}}`) or a Lists/Segments facet.
 - Touching `frontend/src/pages/admin/clubhouse/crudShell.jsx`, `segmentEngine.jsx`, `CommsLists.jsx`, `CommsCampaigns`/`CommsCompose`/`CommsTemplates`, `components/admin/EmailEditorTabs.jsx`.
 - Anything in club notifications: `notification_events.py`, `notification_scan.py`, `notifications.py`, `milestone_scan.py`, `NotificationBell`, `NotificationModal`, `/club-admin/notifications/*`.
-- Symptoms: `a[r.key] is not iterable` on `/admin/comms/lists`; a segment matching everyone; Comms reaching far fewer people than the Directory shows; a certificate warning raised twice or never; a bell that opens nothing; a club admin missing from the internal list.
+- Symptoms: `a[r.key] is not iterable`; a segment matching everyone; Comms reaching far fewer people than the Directory; a certificate warning raised twice or never; a bell that opens nothing; a club admin missing from the internal list.
 - Shipping a release (changelog file format).
 
 **Archive** (full history, verbatim, do not load whole): `docs/dev-notes/archive/comms-audiences-and-notifications.md`. Grep hints: `facetOptionsFrom`, `A club decides what it is told about`, `Certificate stages`, `One CRUD shape`, `HTML / Design / Preview`, `Notification Centre`, `Naming a club or a contact`, `nobody at the club ever ran`, `How many clubs an audience reaches`, `Every club admin, on one internal list`, `trial, as an audience`, `Comms has no sync step`.
@@ -21,7 +21,7 @@
 3. Every audience rule fails closed. An unrecognised vocabulary value or wrong case (`WON`) used to drop the condition and widen to everyone. `_vocab` / `_vocab_list` fold case for `deal_won`, `primary_admin`, `trial_status`. Emailing everyone is far worse than reaching nobody.
 4. Rules are ANDed, no NOT. Exclusion needs a multi-select (`input: 'multi'`) whose options PARTITION the audience, so exclude X means pick the others.
 5. "Named club" / "named contact" (`is any of` / `is none of`) NARROW as ordinary ANDed rules, not union overrides (a union include could email someone another rule excluded). Do not join `MarketingClub` for them: `marketing_club_id NOT IN (...)` is NULL for a contact with no directory club and would drop hand-added contacts, so `_pick_clause`'s `nullable` argument ORs `IS NULL` back in on excludes. An empty selection drops the rule; junk ids drop individually.
-6. Picking clubs/contacts: server search `GET /segments/entities?kind=club|contact&q=&ids=` (Directory never shipped to the browser). `ids` is answered whatever `q` is (saved rules render names, chosen rows can be un-picked). Scoped to the acting org, same scope guard as the engine. Drop a response if the box has moved on.
+6. Picking clubs/contacts: server search `GET /segments/entities?kind=club|contact&q=&ids=` (Directory never shipped to the browser). `ids` is answered whatever `q` is. Scoped to the acting org, same scope guard as the engine. Drop a response if the box has moved on.
 7. Primary-admin state has three values: `assigned`, `unassigned`, `not_onboarded`. `unassigned` = nobody is PRIMARY (a non-primary `club_admin` still reads unassigned). `not_onboarded` = prospect with no org (`marketing_clubs.existing_org_id` is `ON DELETE SET NULL`). Predicate mirrors `trial_engagement.org_has_primary_admin` (`role='club_admin'` AND `is_primary_admin`). A yes/no would fold prospects in with test clubs.
 8. Deal won-ness comes from the STAGE (`crm_stages.is_won`, boolean), never `crm_deals.status` or stage name. Scope through the stage's pipeline, never `crm_deals.scope`. Archived deals are off the rule.
 9. `comms_segments.sendable_where` is the one definition of "can be sent to". An opt-out (unsubscribed, bounced, complained, globally suppressed) is never overridden by any sync or export, and a suppressed address is never resurrected.
@@ -30,7 +30,7 @@
 **Comms reads the live Directory (no sync step)**
 
 11. No "sync contacts" concept. `comms.reconcile_contacts_from_directory(db, club)` runs on the read path (`GET /contacts`, `_resolve_audience`, the three segment endpoints). It writes only MISSING addresses (safe on a GET), keeps the old contact when an email changes (may carry suppression/send history), never deletes, skips the outreach org.
-12. Do not filter who becomes a contact by `Player.status` (targeting is a list/segment decision). Do not reintroduce a sync button. Any new Comms surface listing people calls `reconcile_contacts_from_directory` first. Do not add a second overlapping "kind of member" filter to Comms; email filling is the Directory's job (Has email / No email).
+12. Do not filter who becomes a contact by `Player.status` (targeting is a list/segment decision). Do not reintroduce a sync button. Any new Comms surface listing people calls `reconcile_contacts_from_directory` first. Email filling is the Directory's job (Has email / No email filter); do not add an overlapping member-kind filter to Comms.
 
 **Audience figures**
 
@@ -72,7 +72,7 @@
 36. One digest per recipient. Mark sent only when the provider accepts; record a refusal on the row and retry. Console provider is NOT a send (deliveries stay pending). First run capped (`MAX_PER_EVENT` = 40, `LOOKBACK_DAYS` = 21 in `notification_scan.py`). `sync_completed` defaults to the bell, not the inbox, and is not raised when nothing came in. A channel is TEXT (`notification_events.CHANNELS`); absent from `default_channels` means OFF.
 37. Bell and modal were two separate `role === 'super_admin'` gates in `AdminLayout`; both lifted (endpoints are club-scoped via `get_current_club`). Lifting one leaves a bell that opens nothing. Login auto-open stays staff-only.
 38. `services/session_safety.rollback_keeping` is the ONE "rollback but keep instances readable". A bare `rollback()` expires loaded instances; the next attribute read raises MissingGreenlet far from the cause (`scan_org` crashed this way).
-39. Grade milestones (`milestone_scan.grade_milestones`): name folded through active `grade_merge_logs`, active players only, ids bound as `uuid[]` (never a subquery). One-grade players skipped, judged across ALL stats. Both events share one pass via `session.info`.
+39. Grade milestones (`milestone_scan.grade_milestones`): name folded through active `grade_merge_logs`, active players only, ids bound as `uuid[]` (never a subquery). One-grade players skipped, judged across ALL stats.
 40. `POST .../settings/test-email`: self-only `[Test]` digest, touches no delivery, 5 per 10 minutes.
 
 **Old bell (v7.7.3)**
@@ -82,18 +82,18 @@
 
 ## Traps and failure signatures
 
-- `a[r.key] is not iterable`: `facetOptionsFrom` spread `opts[f.key]` for every `FACETS` key but `opts` was a hardcoded literal predating `role`. Throws for empty and `null` lists; `Cannot read properties of undefined (reading 'add')` once a contact has a role. Not the rows. Fix: rule 27. Locator: grep `\.\.\.[a-z]+\[[a-z]+\.key\]`. A comment claiming the function only offers facets with values stayed while it threw.
-- Segment matches everyone: a dropped condition (unknown value, wrong case, directory rule in club scope; rules 2, 3). The five join-less directory fields (`exported`, `emailed`, `opened`, `clicked`, `enquired`) once evaluated on a club's own contacts.
+- `a[r.key] is not iterable`: `facetOptionsFrom` spread `opts[f.key]` for every `FACETS` key but `opts` was a hardcoded literal predating `role`. Throws for empty and `null` lists; `Cannot read properties of undefined (reading 'add')` once a contact has a role. Not the rows. Fix: rule 27. Locator: grep `\.\.\.[a-z]+\[[a-z]+\.key\]`.
+- Segment matches everyone: a dropped condition (unknown value, wrong case, directory rule in club scope; rules 2, 3). The join-less directory fields (`exported`, `emailed`, `opened`, `clicked`, `enquired`) once evaluated on a club's own contacts.
 - Exclude drops hand-added contacts (rule 5). Primary-admin filter sweeps prospects (rule 7).
 - Comms reaches 128 of 1,578: `sync_from_club` filtered `Player.status == "active"` (rules 11, 12). Club count stops at 5000 (rule 13).
 - "0 days left", literal `{{trial_days_left}}`, expired off by one, open-ended trial dropped: rules 16 to 18.
 - Club admin never on the internal list: hook before commit, or no email at create (rules 21, 23). Dry-run backfill said "0 to add" because it queried contacts that do not exist yet; it must project rows it would create.
 - Bell opens nothing (37). Certificate never re-announced (32, 33). Empty capability check for a volunteer coordinator (35). Notice period reset on save (31). MissingGreenlet (38). Stale HTML sent from Design mode (29). Fresh draft wiped (26).
-- Harness: a control run that crashes is not one (guard reads and imports so absence is REPORTED). A check comparing two widened sets cannot fail. Locators can match the sidebar nav, not the open panel. CSS-`uppercase` text reads transformed. `uncheck({ force: true })` throws (click and wait). Lifespan-only tables and columns (`fee_members.member_category`, `member_membership_types`, `player_achievements`) are invisible to `create_all`.
+- Harness: a control run that crashes is not one (guard reads and imports so absence is REPORTED). A check comparing two widened sets cannot fail. Locators can match the sidebar nav, not the open panel. CSS-`uppercase` text reads transformed. `uncheck({ force: true })` throws. Lifespan-only tables (`member_membership_types`, `player_achievements`) are invisible to `create_all`.
 
 ## How to verify a change here
 
-- `backend/verification/verify_notifications.py` (control must REPORT services absent; capability gate, opt-out and retired-threshold neutered fails those three) and `frontend/verification/verify_notifications_browser.mjs` (exact params on the wire: channel toggle sends that channel alone, event switch `enabled` alone, notice period `config` alone and only if changed, personal opt-out to preferences never the rule endpoint, Check now emails nobody, bell opens).
+- `backend/verification/verify_notifications.py` (control must REPORT services absent; gate, opt-out and retired-threshold neutered fails those three) and `frontend/verification/verify_notifications_browser.mjs` (exact params on the wire: a toggle sends only its own field, personal opt-out goes to preferences never the rule endpoint, Check now emails nobody, bell opens).
 - `backend/verification/verify_primary_admin_segment.py` (control: every naming rule matches the WHOLE audience; case folding reverted makes `"Won"` match all clubs), `verify_club_trial_segments.py` (SQL and Python day counts agree; controls: engine reverted, scope guard removed so `emailed` returns everyone), `verify_audience_clubs.py` (6001 contacts across 6000 clubs proves the cap does not apply; real JS `clubCount` run against Python), `verify_admin_contact_list.py` (dry run equals apply; controls: hooks reverted, create form reverted).
 - `frontend/verification/verify_comms_facets.mjs`: shipped functions lifted from the file. Control: `opts[f.key] is not iterable`.
 
@@ -111,28 +111,27 @@
 
 ## Flags: conflicting, superseded or possibly obsolete guidance
 
-- [FLAG-COMMS-1] Admin-contact rule says archived clubs excluded "as the Twenty pushes already follow" | Twenty CRM is retired (no `twenty` in `admin_contact_list.py`) | "Every club admin, on one internal list" (L16805-16911) | keep the rule, ignore the Twenty reference.
-- [FLAG-COMMS-2] Old Notification Centre says "no dedicated notifications table" and lists three endpoints | `routers/notifications.py` now also has `/settings`, `/settings/events/{event_key}`, `/settings/preferences/{event_key}`, `/feed`, `/feed/read` (checked by grep) from the 9.69.0 system | "Notification Centre (v7.7.3)" (L15738-15771) vs "A club decides what it is told about" (L2701-2886) | verify which the bell reads today before editing either.
-- [FLAG-COMMS-3] "AFL silo is untouched" for notifications and the internal list | later work elsewhere mounts cricket routers on football | "A club decides..." and "Every club admin..." | verify before assuming football clubs are covered.
-- [FLAG-COMMS-4] `FACETS` gained `role` in "migration 295's commit" | migration numbers were renumbered often; not checked | "A FACET LISTED IN THE KIT..." (L1577-1630) | history only, do not rely on the number.
-- [FLAG-COMMS-5] Cites `PROJECT_RULES.md` as scope-rule authority | file not opened here | "A club's trial, as an audience..." (L16980-17074) | verify it exists and states the rule.
+- [FLAG-COMMS-1] Admin-contact rule cites "the Twenty pushes" for archived-club exclusion | Twenty CRM is retired (no `twenty` in `admin_contact_list.py`) | "Every club admin, on one internal list" (L16805-16911) | keep the rule, ignore the Twenty reference.
+- [FLAG-COMMS-2] Old Notification Centre says "no dedicated notifications table", three endpoints | `routers/notifications.py` also has `/settings`, `/settings/events/{event_key}`, `/settings/preferences/{event_key}`, `/feed`, `/feed/read` (grep) from the 9.69.0 system | "Notification Centre (v7.7.3)" (L15738-15771) vs "A club decides what it is told about" (L2701-2886) | verify what the bell reads today before editing either.
+- [FLAG-COMMS-3] "AFL silo untouched" | later work elsewhere mounts cricket routers on football | "A club decides..." (L2701-2886), "Every club admin..." (L16805-16911) | verify before assuming football is covered.
+- [FLAG-COMMS-4] `FACETS` gained `role` in "migration 295's commit"; `PROJECT_RULES.md` cited as scope authority | migration numbers were renumbered often; the file was not opened | "A FACET LISTED IN THE KIT..." (L1577-1630), "A club's trial..." (L16980-17074) | verify both before relying on them.
 
 ## Section coverage
 
 | Original section (heading, original CLAUDE.md line range) | Disposition | Where captured |
 |---|---|---|
-| A FACET LISTED IN THE KIT AND MISSING FROM ONE FUNCTION (v9.73.1) L1577-1630 | rules extracted | Rule 27, Traps 1, 2, harness, Open 1, Flag 4 |
-| A club decides what it is told about (migration 288, v9.69.0) L2701-2886 | rules extracted | Rules 30 to 38, 40, Traps, Verify, Open 2, Flags 2, 3 |
-| &nbsp;&nbsp;Certificate stages, grade milestones and a test email (v9.89.0) | rules extracted | Rules 33, 36, 38, 39, 40 |
+| A FACET LISTED IN THE KIT AND MISSING FROM ONE FUNCTION (v9.73.1) L1577-1630 | rules extracted | Rule 27, Traps 1, harness, Open 1, Flag 4 |
+| A club decides what it is told about (migration 288, v9.69.0) L2701-2886 | rules extracted | Rules 30 to 38, 40, Traps, Open 2, Flags 2, 3 |
+| &nbsp;&nbsp;Certificate stages, grade milestones and a test email (v9.89.0) | rules extracted | Rules 33, 36, 38 to 40 |
 | One CRUD shape for Emails, Lists, Segments and Templates (v9.17.0) L8316-8369 | rules extracted | Rules 24 to 26 |
 | BetterComms — HTML / Design / Preview editor (Jul 2026) L13844-13888 | rules extracted | Rules 28, 29 |
 | Notification Centre (v7.7.3) L15738-15771 | rules extracted (partly superseded by the 9.69.0 section) | Rules 41, 42, Open 5, Flag 2 |
-| Naming a club or a contact outright (v9.58.3) L16616-16672 | rules extracted | Rules 5, 6, Verify (primary_admin_segment) |
-| Targeting the clubs nobody at the club ever ran (v9.58.0) L16673-16755 | rules extracted | Rules 3, 4, 7, 8, Traps |
+| Naming a club or a contact outright (v9.58.3) L16616-16672 | rules extracted | Rules 5, 6 |
+| Targeting the clubs nobody at the club ever ran (v9.58.0) L16673-16755 | rules extracted | Rules 3, 4, 7, 8 |
 | &nbsp;&nbsp;Won, and anything but Won (v9.58.1) | rules extracted | Rule 8 |
 | &nbsp;&nbsp;Vocabulary values matched case-insensitively (v9.58.2) | rules extracted | Rule 3 |
-| How many clubs an audience reaches (v9.57.0) L16756-16804 | rules extracted | Rules 13, 14, Verify (audience_clubs) |
-| Every club admin, on one internal list (v9.56.0) L16805-16911 | rules extracted | Rules 19 to 23, Operator commands, Flag 1 |
+| How many clubs an audience reaches (v9.57.0) L16756-16804 | rules extracted | Rules 13, 14 |
+| Every club admin, on one internal list (v9.56.0) L16805-16911 | rules extracted | Rules 19 to 22, Operator commands, Flag 1 |
 | &nbsp;&nbsp;Add New User takes an email and mobile (v9.56.1) | rules extracted | Rule 23 |
-| A club's trial, as an audience and as a number in the email (v9.55.0) L16980-17074 | rules extracted | Rules 1, 2, 15 to 18, Verify, Open 3, Flag 5 |
+| A club's trial, as an audience and as a number in the email (v9.55.0) L16980-17074 | rules extracted | Rules 1, 2, 15 to 18, Open 3 |
 | Comms has no sync step: it reads the live Directory (v9.12.0) L17075-17125 | rules extracted | Rules 10 to 12 |

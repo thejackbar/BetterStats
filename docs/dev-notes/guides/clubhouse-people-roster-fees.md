@@ -65,25 +65,19 @@
 36. Square is a one-way mirror to BetterMerch, all in ONE transaction (helpers `flush`, avoids `MissingGreenlet`). Inventory count is truth: sales import as `sold` movements, then a `stocktake` movement sets the absolute count (no double decrement); dedupe on `external_ref` (`square:{order_id}:{line_uid}`). `ensure_fresh_token` refreshes within a week of the 30-day expiry (`session.refresh(conn)` after). OAuth `state` is a signed JWT (`sign_square_state`, 20 min); callback is public `routers/public_square.py`; `sync_all_square` daily 04:00.
 
 ## Traps and failure signatures
-- "Could not load facilities." for any club: wrong response key (rule 13).
-- Picker empties after choosing, Edge/Safari only: composite in `<label>` (rule 9); fine only if the re-render defers a task.
-- Caret leaves the search box after one character: component declared in render (rule 10). `fill()` cannot catch it.
-- Pale `#e5e7eb` border: rule 4. Tier reset to "Needs tier" or one panel's edits lost: rules 20, 21.
-- Shift chip "undefined ×2", or "Unknown volunteer or area": archived area (rule 27). React renders a bare `undefined` child empty; only string concat prints it.
-- Role add refused with none visible: hidden committee role (rule 31). Match Day roles merged into one chip: rule 28.
-- Centred row pushes page sideways at 390px: rule 5. Header search takes whole line in a column: rule 7.
+- "Could not load facilities.": wrong response key (rule 13). Picker empties after choosing, Edge/Safari only: rule 9. Caret leaves the search box after one character: rule 10 (`fill()` cannot catch it). Pale `#e5e7eb` border: rule 4. Tier reset or a panel's edits lost: rules 20, 21.
+- Shift chip "undefined ×2" or "Unknown volunteer or area": archived area (rule 27); React renders a bare `undefined` child empty, only string concat prints it. Role add refused with none visible: rule 31. Roles merged into one chip: rule 28.
 - Infinite `/fees/all-members` calls: an effect lists `toast` as a dependency and its `catch` raises a toast.
-- Unrelated PATCH 500 in a stubbed-lifespan harness: `audit_logs` missing (aborted transaction poisons the commit); `player_achievements`, `org_award_definitions`, `audit_logs` are lifespan-created, create by hand.
-- Stub returning `{seasons: [...]}` where the router returns a bare array breaks Accounts/Payments and corrupts overflow baselines.
-- Measure the rendered page before theorising about design gaps (Directory vs editors was heading 24px vs 19px, non-wrapping tabs, mono body copy, not the typeface).
+- Unrelated PATCH 500 in a stubbed-lifespan harness: `audit_logs` missing (aborted transaction poisons the commit); create the lifespan-only tables (`player_achievements`, `org_award_definitions`, `audit_logs`) by hand.
+- A stub returning `{seasons: [...]}` where the router returns a bare array breaks Accounts/Payments and corrupts overflow baselines.
+- Measure the rendered page before theorising about design gaps (heading 24px vs 19px, non-wrapping tabs, mono body copy, not the typeface).
 
 ## How to verify a change here
-- Backend, real Postgres: `backend/verification/verify_roster_area_roles.py` (control with feature reverted fails per-role qualification and role-on-shift; includes archived-area cases), `verify_role_create_committee_clash.py` (control neuters the committee branch of `_role_clash_message`), `verify_member_fees_form_save.py` (control fails the tier reset; expire the session after raw UPDATEs).
-- Browser (`frontend/verification/`): `verify_clubhouse_buttons_browser.mjs` (box read off computed style, centring within 24px of header midpoint, search below caption, action on the search line, caret held per character), `verify_member_fees_save_browser.mjs`, `verify_roster_area_roles_browser.mjs`, `verify_roster_role_grid_browser.mjs`, `verify_roster_open_shift_labels_browser.mjs` (target `div[draggable]`), plus other `verify_roster_*_browser.mjs`.
-- Assert layout by measuring real boxes and computed style, not class names. Gate absence and collapse checks on the thing having been shown first.
-- Control runs must report, not crash: use `.get`, no-arg factories (`caught(label, lambda: ...)`), presence-tolerant helpers; guard a whole block, not each read.
-- `text=UNSAVED` matches ancestors (use `data-testid`); filter `/usage/` telemetry out of save counts. HTML5 drag tests: dispatch `DragEvent`s, `dragstart` and `drop` in separate `evaluate` calls.
-- Re-run a 390px `<h1>` font and `scrollWidth > clientWidth` pass over all Clubhouse screens when adding one. Pre-existing 390px overflow: Accounts, Payments, Stock (suite budgets the measured numbers). Suites share one database; stub tables can collide.
+- Backend, real Postgres (`backend/verification/`): `verify_roster_area_roles.py` (control with feature reverted fails per-role qualification and role-on-shift; includes archived-area cases), `verify_role_create_committee_clash.py` (control neuters the committee branch of `_role_clash_message`), `verify_member_fees_form_save.py` (control fails the tier reset; expire the session after raw UPDATEs).
+- Browser (`frontend/verification/`): `verify_clubhouse_buttons_browser.mjs`, `verify_member_fees_save_browser.mjs`, `verify_roster_area_roles_browser.mjs`, `verify_roster_role_grid_browser.mjs`, `verify_roster_open_shift_labels_browser.mjs` (target `div[draggable]`), other `verify_roster_*_browser.mjs`.
+- Assert layout from real boxes and computed style, not class names. Gate absence and collapse checks on the thing having been shown first. Control runs must report, not crash (`.get`, no-arg factories, presence-tolerant helpers).
+- `text=UNSAVED` matches ancestors (use `data-testid`). HTML5 drag tests: dispatch `DragEvent`s, `dragstart` and `drop` in separate `evaluate` calls.
+- Re-run a 390px `<h1>` font and `scrollWidth` pass over all Clubhouse screens when adding one. Pre-existing 390px overflow: Accounts, Payments, Stock (suite budgets measured numbers). Suites share one database; stub tables can collide.
 
 ## Operator commands and scripts
 - None in the archive. Migrations 221, 222, 235, 279, 306 via alembic plus the lifespan mirror. Square deploy: server `.env` `SQUARE_APP_ID`, `SQUARE_APP_SECRET` (never commit), `SQUARE_ENVIRONMENT=production|sandbox`, optional `SQUARE_API_VERSION`; register redirect `https://betterat.cricket/api/public/square/callback`; box must reach `connect.squareup.com`.

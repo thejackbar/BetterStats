@@ -6,12 +6,12 @@
 - Changing how a club is created (`create_club`, `_onboard_club_core`, self-serve submit), `organisations.onboarding_method`, `admin_identity.py`, or the club-admin mobile backfill.
 - Editing the Setup Wizard (`routers/onboarding_wizard.py`, `pages/admin/setup/`, `SetupReturnBar`, `SetupProgressReminder`) or `theme.js` accent pairing.
 - Adding a page, tile or tool to the admin app (`AdminLayout`, `ModuleLayout`, `GROUPS`, `HubCard`, `ModuleHub`, `lib/modules.js`, `lib/superNav.js`).
-- Draft (PIN) pages, the 423 response, `club_lock.py`, `ClubPinGate`, unpause requests.
+- Draft (PIN) pages, the 423 response, `club_lock.py`, unpause requests.
 - KlubPro migration tooling (`routers/klubpro_migration.py`, `/admin/super/migration`).
 - Super admin messages on the club dashboard (`admin_broadcasts`, `AdminBroadcastBanner`).
 - Symptoms: teaser pull returns every club `empty` with 204s; departed officer still listed; opted-out officer re-emailed.
 
-**Archive** (full history, verbatim, do not load whole): `docs/dev-notes/archive/club-directory-onboarding-and-admin-shell.md`. Grep hints: `playHQId`, `admin_broadcasts`, `next_pull_at`, `type_filtered_ids`, `former_at`, `_onboard_club_core`, `password_protected`, `CORE_TILES`, `bs_setup_return`, `safeAccent2`, `migrate_fields`, `backfill_admin_mobiles`.
+**Archive** (full history, verbatim, do not load whole): `docs/dev-notes/archive/club-directory-onboarding-and-admin-shell.md`. Grep hints: `playHQId`, `admin_broadcasts`, `next_pull_at`, `former_at`, `_onboard_club_core`, `password_protected`, `CORE_TILES`, `bs_setup_return`, `safeAccent2`, `migrate_fields`, `backfill_admin_mobiles`.
 
 **Related guides**: comms/segments (Segments `teaser_snapshot`, directory scope rule, `comms_contacts.role`); billing and trials (`start_trial_billing`, module entitlement); CRM/sales (`sync_super_admin_trial_deal`); public site/theme (`theme_config`); migrations and lifespan mirror (check `origin/main` before numbering a migration).
 
@@ -63,11 +63,11 @@
 
 **Draft (PIN) pages**
 35. Migration 205: `organisations.password_protected`, `.password_protect_reason` (`'draft'|'trial_ended'`), `.access_pin_hash` (bcrypt), audit columns; table `club_unpause_requests`. Independent of `is_active`; the gate checks `password_protected` FIRST.
-36. `services/club_lock.py` (modelled on `bs_avail`): cookie `bs_lock` (signed JWT, HttpOnly, 30 days). `GET /{slug}` raises 423 (not 403) with `lock_detail`, ahead of `_public_blocked`. `POST /{slug}/unlock` is rate-limited with lockout. `POST /{slug}/request-unpause` only for `trial_ended`; emails `cricket@bettersports.com.au` deliberately, `reply_to` the requester.
+36. `services/club_lock.py` (modelled on `bs_avail`): cookie `bs_lock` (signed JWT, HttpOnly, 30 days). `GET /{slug}` raises 423 (not 403) with `lock_detail`, ahead of `_public_blocked`. `POST /{slug}/unlock` is rate-limited with lockout. `POST /{slug}/request-unpause` only for `trial_ended`; emails `cricket@bettersports.com.au` (deliberate), `reply_to` the requester.
 37. A club enables Draft itself only while `subscription_status` is `trial` or `active` (off always allowed), always reason `'draft'`; `'trial_ended'` is Super Admin only. Frontend: `useClub.js` `locked` on 423; `ClubPinGate` is checked before `inactive`/`notFound` in the 12 public pages. It is a soft gate: only `GET /clubs/{slug}`, ladders and website are gated server-side.
 
 **KlubPro migration (super admin)**
-38. Lazy second engine `services/klubpro_db.py` (`KLUBPRO_DATABASE_URL`), never ORM-mapped, raw schema-qualified SQL, never Alembic. Router `require_super_admin`. Backup/batch tables are BetterStats-side (migration 072).
+38. Lazy second engine `services/klubpro_db.py` (`KLUBPRO_DATABASE_URL`), never ORM-mapped, raw schema-qualified SQL, never Alembic. Router `require_super_admin`. Backup tables are BetterStats-side (072).
 39. Invariants (`services/klubpro_migration.py`): fill gaps, never clobber with empties; `is_opening_batsman=False` = no info; skills compare as a set; write only `MIGRATABLE_FIELDS` (not first/last/nickname). Flow: dry-run, confirm, per-row backup, write, rollback-able. `plan_player` is the one source for dry-run and import; dry-run reflects saved approvals.
 40. Approve is not import: only Import writes `players`. `upsert_match_mapping` UPDATEs in place for reject/skip with past-tense `match_status`. Approve first frees the KP id from any other BS player (unique on KP id), so `klubpro_player_id` must be nullable (`ensure_match_columns`).
 41. KlubPro stages display labels, BS stores codes: `_norm_batting_hand/_norm_bowling/_norm_gender/_norm_role` (mirror `frontend/src/lib/playerAttributes.js`); unrecognised = empty; `bowling_type` sets both bowling columns; import sets `photo_url` as well as `photo_data`/`photo_mime`.
@@ -95,7 +95,7 @@
 ## Operator commands and scripts
 - `python -m app.scripts.pull_club_teasers all --limit N --apply` (dry run by default). `--sample N` runs clubs one at a time with status and call counts. Also `--include-trialists`, `--type key=include|exclude`, `--no-type-filter`. `--apply` ends with the work report (`club_teaser_report.py`; under 20 clubs it warns the sample is too small).
 - `python -m app.scripts.backfill_admin_mobiles [<org|all>] [--apply] [--email-only]` (dry run by default, no network).
-- Set General Settings `club_teaser_nightly_limit` to switch the scheduled pull on (no UI input yet).
+- Set `club_teaser_nightly_limit` (General Settings) to switch the scheduled pull on.
 - KlubPro deploy: set `KLUBPRO_DATABASE_URL` (never commit) and share a Docker network with `klubpro-postgres`. See `docs/klubpro-migration.md`, `docs/marketing-club-directory.md`.
 
 ## Open follow-ups

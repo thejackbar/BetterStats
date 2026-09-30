@@ -19,9 +19,9 @@
 1. Club cricket comes from CA's Grassroots proxy `grassrootsapiproxy.cricket.com.au`. Use only `/scores/*` and `/fixturesladders/grades/{id}...`. Restricted paths (`/fixturesladders/games/{id}`, `/participants/games/{id}/batting`, `/scorecards/...`) return 403. Do not try them.
 2. Discovery is `/scores/grades/{grade_id}/matches` (all seasons back to 1975). Scorecards are `/scores/matches/{id}?responseModifier=includeScorecard`. HTTP 204 means a PlayHQ-namespace match Grassroots does not hold.
 3. `jsconfig=eccn:true` is a ServiceStack camelCase flag, not a key. A bare curl without it returns PascalCase and `data.get("matches")` reads empty.
-4. `apiv2.cricket.com.au` is the international stats API. No club cricket. Skip.
-5. A PlayHQ `game-centre/<8 hex>` short code is a different id namespace. Nothing derives one from the other. This contradicts `docs/afl-playhq-data-source.md` ("short code IS the real gameID"); that holds for the AFL tenant only.
-6. Do not build a club-facing button on PlayHQ's public `discoverGame` GraphQL: a CloudFront WAF 403s after about three requests. `discoverGradeFixture`/`discoverTeamFixture` 500 on cricket and introspection is blocked.
+4. `apiv2.cricket.com.au` is the international stats API (no club cricket).
+5. A PlayHQ `game-centre/<8 hex>` short code is a different id namespace. This contradicts `docs/afl-playhq-data-source.md` ("short code IS the real gameID"); that holds for the AFL tenant only.
+6. Do not build a club button on PlayHQ's public `discoverGame` GraphQL: a CloudFront WAF 403s after about three requests. `discoverGradeFixture`/`discoverTeamFixture` 500 on cricket and introspection is blocked.
 7. So a PlayHQ link resolves locally: `services/social_match_lookup.py` + `GET /admin/social/match-lookup`. A full UUID passes straight through. A PlayHQ link returns the club's recent completed matches to pick from, narrowed by slugifying the grade in the URL against our grade names (either-side-prefix fallback for sponsor suffixes). `_LOOKBACK_DAYS = 240`. Candidates reuse `_current_grade_rows` + `gr.get_grade_results`; do not write a second "which matches are ours".
 8. Never trust PlayHQ `links.next` alone (it can loop past page 1100). Loops cap and stop on the first short batch (`max_pages=200` in `club_directory.discover_clubs`).
 9. `upsert_organisation` keys on the id given. A PlayHQ UUID after a Grassroots GUID would duplicate the org. `find_matching_organisation` checks primary id, then `playhq_id`, then case-insensitive name. `include_archived=False` is for self-serve "already registered" checks only.
@@ -97,8 +97,7 @@
 - `python -m app.scripts.backfill_caught_behind <org_id|all>`: re-reads scorecards, sets `batting_innings.caught_behind` (Full Rebuild network cost).
 - `python -m app.scripts.rebuild_bowler_wickets <org_id|all>`: re-derives `bowler_wickets` with the flag.
 - `python -m app.scripts.list_skipped_matches`: lists matches the scores API 204'd (no fallback).
-- `python -m app.scripts.reconcile_imports <org>`: rebuilds imported deltas.
-- `/admin/sync` buttons: Sync Now = `POST /organisations/{id}/sync`; Fix Missing Totals = `POST /club-admin/backfill-aggregates` (recomputes `player_season_stats` from per-game rows, no CA fetch); Full Rebuild = `POST /club-admin/hard-refresh` (wipes per-game tables, re-pulls, an hour or more). Old labels: Sync / Backfill Aggregates / Hard Refresh. Internal names and `sync_runs.kind` unchanged.
+- `/admin/sync` buttons: Sync Now = `POST /organisations/{id}/sync`; Fix Missing Totals = `POST /club-admin/backfill-aggregates` (recomputes `player_season_stats` from per-game rows, no CA fetch); Full Rebuild = `POST /club-admin/hard-refresh` (wipes per-game tables, re-pulls, an hour or more). Internal names and `sync_runs.kind` are unchanged from the old labels.
 
 ## Open follow-ups
 
@@ -117,7 +116,7 @@
 - [FLAG-SYNC-7] "`main.py` restart self-heal resumes only the two full kinds" | Not re-checked; `_FULL_SYNC_KINDS` and `auto_sync._FULL_KINDS` are (`org_full`, `org_hard_refresh`) | The scheduled sync pulls the period's results (L7293-7402) | verify before adding a kind.
 - [FLAG-SYNC-8] UK plan names `playcricket_scores_client` and org columns | Neither exists in `backend/app` | UK Expansion — Play-Cricket Data Source (L12734-12744) | keep as design only.
 - [FLAG-SYNC-9] Applecross counts (3957 games, 41423 batting rows), "~3 seasons", "52 seasons" | One-off May 2026 evidence, drifted | May 2026 Historical Data Fix (L12820-12838); Data Source Topology | do not treat as current.
-- [FLAG-SYNC-10] The match-lookup resolver is described for cricket only | `routers/afl/social.py:236` has its own `/admin/social/match-lookup` | A PlayHQ game-centre link (L8075-8164) | verify the sport before changing.
+- [FLAG-SYNC-10] Match-lookup is described for cricket only | `routers/afl/social.py:236` has its own copy | A PlayHQ game-centre link (L8075-8164) | verify the sport.
 
 ## Section coverage
 
