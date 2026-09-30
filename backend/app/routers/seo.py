@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.content.blog import BLOG_SLUGS
+from app.services import junior_hiding
 from app.services.instructional_videos import list_videos
 from app.models.db import Organisation, Player, get_db
 
@@ -130,7 +131,17 @@ async def sitemap(db: AsyncSession = Depends(get_db)):
         .where(Organisation.is_active == True)  # noqa: E712
     )).all()
 
+    # Players a club hides from its public Stats (junior-only, migration 315)
+    # are left out of the sitemap so crawlers are not pointed at a 404.
+    hidden_juniors: set[str] = set()
+    for (oid,) in (await db.execute(
+        select(Organisation.id).where(Organisation.hide_juniors.is_(True))
+    )).all():
+        hidden_juniors |= set((await junior_hiding.resolve(db, oid)).player_ids)
+
     for (pid,) in player_rows:
+        if str(pid).lower() in hidden_juniors:
+            continue
         entries.append(_url_entry(
             f"{SITE}/players/{pid}",
             changefreq="weekly",

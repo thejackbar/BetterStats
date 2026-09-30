@@ -40,6 +40,8 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.junior_hiding import effective_is_junior, guess_is_junior
+
 # A competition with no association behind it — a club's own grouping across
 # associations, or a grade CA never told us the association for. Sorted last
 # in every listing, the same rule the unattributed/unassigned rows elsewhere
@@ -190,7 +192,8 @@ async def list_competitions(db: AsyncSession, org_id) -> list[dict]:
             SELECT c.id, c.name, c.association_id, c.association_name,
                    c.display_order, c.is_seeded,
                    COUNT(gr.id) AS grade_count,
-                   COUNT(DISTINCT gr.season_id) AS season_count
+                   COUNT(DISTINCT gr.season_id) AS season_count,
+                   c.is_junior
               FROM club_competitions c
               LEFT JOIN grades gr ON gr.competition_id = c.id
              WHERE c.organisation_id = CAST(:org AS UUID)
@@ -210,9 +213,35 @@ async def list_competitions(db: AsyncSession, org_id) -> list[dict]:
             "is_seeded": bool(row[5]),
             "grade_count": int(row[6] or 0),
             "season_count": int(row[7] or 0),
+            # Junior or senior cricket (migration 315). `is_junior_tag` is what
+            # a person set (None = nobody has); `is_junior` is the answer in
+            # force, which falls back to a guess from the name.
+            "is_junior_tag": row[8],
+            "is_junior": effective_is_junior(row[8], row[1], row[3]),
+            "suggested_junior": guess_is_junior(row[1], row[3]),
         }
         for row in res.fetchall()
     ]
+
+
+async def set_competition_junior(
+    db: AsyncSession, org_id, competition_id, is_junior: Optional[bool]
+) -> None:
+    """Tag a competition junior (True), senior (False) or back to the guess (None).
+
+    A person's tag is never overwritten by sync or a re-seed, which only ever
+    INSERT competitions. Raises ValueError for a competition that is not this
+    club's. Does NOT commit.
+    """
+    res = await db.execute(
+        text(
+            "UPDATE club_competitions SET is_junior = :j"
+            " WHERE id = CAST(:id AS UUID) AND organisation_id = CAST(:org AS UUID)"
+        ),
+        {"j": is_junior, "id": str(competition_id), "org": str(org_id)},
+    )
+    if not res.rowcount:
+        raise ValueError("Competition not found")
 
 
 async def competition_grades(db: AsyncSession, org_id) -> list[dict]:

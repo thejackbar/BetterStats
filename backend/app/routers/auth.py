@@ -11,6 +11,7 @@ import uuid
 
 from app.models.db import User, ClubMembership, Organisation, get_db
 from app.config.settings import settings
+from app.services import junior_hiding
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -106,6 +107,24 @@ async def user_can_view_org_private(db: AsyncSession, user: User | None, org_id)
         return True
     eff = _effective_club_id(membership, user)
     return eff is not None and str(eff) == str(org_id)
+
+
+async def public_junior_hiding(
+    db: AsyncSession, user: User | None, org_id, *, with_players: bool = True
+):
+    """What a club hides of its junior programme FROM THIS VIEWER.
+
+    Inactive for a club's own admins and Better staff, who see the club whole,
+    and for every club that has not switched ``hide_juniors`` on, which is
+    nearly all of them. Callers pass ``.grade_ids`` to ``resolve_scope`` as
+    ``hidden_grade_ids`` and ``.player_ids`` to the player-visibility helpers.
+    """
+    hiding = await junior_hiding.resolve(db, org_id, with_players=with_players)
+    if not hiding.enabled:
+        return hiding
+    if await user_can_view_org_private(db, user, org_id):
+        return junior_hiding.OFF
+    return hiding
 
 
 async def require_super_admin(

@@ -18,6 +18,73 @@ const HEX_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
 
 const LABEL = 'font-mono text-[10px] tracking-wide3 text-pb-faint uppercase block mb-1.5'
 
+// "Hide juniors": for a club that runs its juniors under the same club id as its
+// seniors and wants the public Stats to be seniors only. The preview reads what
+// the switch would do RIGHT NOW (which competitions count as junior, and who
+// would disappear), so it can be checked before saving.
+function HideJuniorsSection({ checked, onChange }) {
+  const [preview, setPreview] = useState(null)
+  const [error, setError] = useState(null)
+  const [showAll, setShowAll] = useState(false)
+  useEffect(() => {
+    api.adminJuniorsPreview().then(setPreview).catch(e => setError(e.message))
+  }, [])
+  const comps = preview?.junior_competitions || []
+  const players = preview?.hidden_players || []
+  return (
+    <div className="pt-5 pb-hairline-t" id="hide-juniors">
+      <label className={LABEL}>Hide juniors from public stats</label>
+      <p className="font-mono text-[10px] text-pb-faintest mb-3">
+        For clubs that run juniors under the same club as their seniors. When this is on, your
+        public pages leave out every game played in a junior competition and hide any player who
+        has only ever played junior cricket. A player who has played a senior game stays, with
+        their senior figures only. You and your other admins still see everything while signed in.
+        Off by default.
+      </p>
+      <label className="flex items-start gap-2.5 cursor-pointer">
+        <input type="checkbox" checked={checked}
+          onChange={e => onChange(e.target.checked)}
+          data-testid="hide-juniors-toggle"
+          className="accent-pb-accent mt-0.5 shrink-0" />
+        <span className="leading-tight">
+          <span className="text-pb-text text-sm">Hide juniors from the public site</span>
+          <span className="font-mono text-[10px] text-pb-faintest block">
+            Which competitions count as junior is set on the{' '}
+            <Link to="/admin/grades#competitions" className="text-pb-accent hover:underline">Grades &amp; Competitions</Link> page
+          </span>
+        </span>
+      </label>
+      {error && <p className="text-pb-red text-xs mt-2">{error}</p>}
+      {preview && (
+        <div className="mt-3 border pb-hairline rounded p-3" data-testid="hide-juniors-preview">
+          <p className="text-pb-dim text-xs leading-relaxed">
+            {comps.length
+              ? <>Junior right now: {comps.map(c => c.name).join(', ')} ({preview.junior_grade_count} {preview.junior_grade_count === 1 ? 'grade' : 'grades'}).</>
+              : 'None of your competitions read as junior, so turning this on would hide nothing.'}
+            {' '}
+            {preview.hidden_player_count === 0
+              ? 'No players would be hidden.'
+              : <>{preview.hidden_player_count} {preview.hidden_player_count === 1 ? 'player' : 'players'} {preview.enabled ? 'are' : 'would be'} hidden.</>}
+          </p>
+          {players.length > 0 && (
+            <>
+              <button type="button" onClick={() => setShowAll(v => !v)}
+                className="text-xs font-mono uppercase tracking-wide2 text-pb-accent mt-2">
+                {showAll ? 'Close the list' : 'Show who'}
+              </button>
+              {showAll && (
+                <ul className="mt-2 max-h-48 overflow-auto text-xs text-pb-faint columns-2 gap-4">
+                  {players.map(p => <li key={p.id} className="truncate">{p.name}</li>)}
+                </ul>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ColorField({ label, hint, value, fallback, onChange, onReset }) {
   const isDefault = value.toLowerCase() === fallback.toLowerCase()
   return (
@@ -97,6 +164,7 @@ export default function AdminSettings() {
         stats_min_rate_spells: s.stats_min_rate_spells ?? '',
         public_header_logo: !!s.public_header_logo,
         show_competition_filters: !!s.show_competition_filters,
+        hide_juniors: !!s.hide_juniors,
         password_protected: !!s.password_protected,
       })
     }).catch(() => {})
@@ -761,6 +829,12 @@ export default function AdminSettings() {
               </span>
             </label>
           </div>
+
+          {/* --- Hide juniors from public stats --- */}
+          <HideJuniorsSection
+            checked={!!form.hide_juniors}
+            onChange={v => setForm(f => ({ ...f, hide_juniors: v }))}
+          />
 
           {/* --- Password protection --- */}
           <div className="pt-5 pb-hairline-t">

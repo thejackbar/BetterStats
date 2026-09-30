@@ -3094,7 +3094,36 @@ async def get_recently_achieved_milestones_for_org(
     return achieved
 
 
-async def get_player_activity(session: AsyncSession, player_id: str) -> dict:
+async def get_player_activity(
+    session: AsyncSession, player_id: str, scope: Optional[GradeScope] = None
+) -> dict:
+    if scope is not None and scope.active:
+        # A scope (in practice: junior grades a club hides from its public
+        # Stats) can only be answered from the per-innings rows, because CA's
+        # season totals below carry no grade. The two sources agree wherever
+        # the club holds every scorecard, which is the same trade every other
+        # scoped figure here makes.
+        bat = await get_career_batting_from_innings(
+            session, player_id, None, None, None, scope=scope) or {}
+        bowl = await get_career_bowling_from_spells(
+            session, player_id, None, None, None, scope=scope) or {}
+        figures = bowl.get("best_bowling_figures")
+        return {
+            "last_game_date": None,
+            "last_bat_date": None,
+            "last_bowl_date": None,
+            "last_wicket_date": None,
+            "last_duck_date": None,
+            "total_innings": int(bat.get("innings") or 0),
+            "total_ducks": int(bat.get("ducks") or 0),
+            "total_sixes": int(bat.get("total_sixes") or 0),
+            "total_fours": int(bat.get("total_fours") or 0),
+            "total_wickets": int(bowl.get("total_wickets") or 0),
+            "best_spell_wickets": int(bowl.get("best_figures_wickets") or 0),
+            # The season aggregate writes "5-23"; the spell rows write "5/23".
+            "best_bowling_figures": str(figures).replace("/", "-") if figures else None,
+            "wicketless_spells": 0,
+        }
     result = await session.execute(
         text("""
             SELECT

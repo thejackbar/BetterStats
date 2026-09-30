@@ -24,7 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import Grade, Organisation, Season, Team, User, get_db
-from app.routers.auth import get_current_club, get_optional_user, user_can_view_org_private
+from app.routers.auth import get_current_club, get_optional_user, public_junior_hiding, user_can_view_org_private
 from app.routers.teams import ensure_team_grades, _grade_name_map
 from app.services import club_lock, grassroots_scores_client
 from app.services.club_match import club_match_keys
@@ -94,7 +94,8 @@ def _parse_ladder_payload(raw, club_keys: list) -> list:
 
 
 async def _compute_team_ladders(
-    db: AsyncSession, org: Organisation, auto_link: bool = True, public_only: bool = False
+    db: AsyncSession, org: Organisation, auto_link: bool = True, public_only: bool = False,
+    hidden_grade_ids=(),
 ) -> dict:
     if auto_link:
         await ensure_team_grades(db, org.id)  # self-link any teams missing a grade (admin only)
@@ -116,9 +117,12 @@ async def _compute_team_ladders(
     club_keys = club_match_keys(org)
 
     # A public club page hides grades the club opted out of sharing.
+    # The same goes for a junior grade a club hides from its public Stats.
+    hidden = {str(g) for g in hidden_grade_ids}
     linked = [
         t for t in teams
         if t.grade_id and (not public_only or grade_public.get(str(t.grade_id), True))
+        and str(t.grade_id) not in hidden
     ]
     unlinked = [{"team_id": str(t.id), "team_name": t.name} for t in teams if not t.grade_id]
 
@@ -148,7 +152,10 @@ async def team_ladders(
 
 
 @router.get("/public/{slug}")
-async def public_team_ladders(slug: str, request: Request, db: AsyncSession = Depends(get_db)):
+async def public_team_ladders(
+    slug: str, request: Request, db: AsyncSession = Depends(get_db),
+    viewer: User | None = Depends(get_optional_user),
+):
     """Per-team ladders for a public club page (resolved by slug)."""
     org = (await db.execute(
         select(Organisation).where(Organisation.slug == slug.lower())
@@ -160,7 +167,9 @@ async def public_team_ladders(slug: str, request: Request, db: AsyncSession = De
     if not org.is_active:
         raise HTTPException(status_code=403, detail=INACTIVE_DETAIL)
     # Read-only on public GETs — linking happens on the admin side.
-    data = await _compute_team_ladders(db, org, auto_link=False, public_only=True)
+    hiding = await public_junior_hiding(db, viewer, org.id, with_players=False)
+    data = await _compute_team_ladders(
+        db, org, auto_link=False, public_only=True, hidden_grade_ids=hiding.grade_ids)
     # Public view: drop the admin-only "unlinked teams" hint.
     return {"teams": data["teams"]}
 
@@ -190,6 +199,8 @@ async def grade_ladder(
         raise HTTPException(status_code=423, detail=club_lock.lock_detail(org))
     # Hidden grades are only browsable by the club's own admins / Better staff.
     if grade.is_public is False and not await user_can_view_org_private(db, viewer, str(org.id)):
+        raise HTTPException(status_code=404, detail="Grade not found")
+    if gid in (await public_junior_hiding(db, viewer, org.id, with_players=False)).grade_ids:
         raise HTTPException(status_code=404, detail="Grade not found")
     club_keys = club_match_keys(org)
     # Ladder API wants the shared raw CA grade GUID, not our (possibly per-club) PK.

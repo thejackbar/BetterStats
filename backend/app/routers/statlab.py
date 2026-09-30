@@ -13,7 +13,8 @@ from app.auth.capabilities import (
     MANAGE_REPORTS, membership_has_capability, PRIVILEGED_ROLES,
 )
 from app.models.db import get_db, SavedReport, User, ClubMembership, Organisation
-from app.routers.auth import get_current_user, get_current_club
+from app.routers.auth import get_current_user, get_current_club, get_optional_user, public_junior_hiding
+from app.services import player_visibility
 from app.services import statlab as svc
 from app.services import grade_scope
 
@@ -172,6 +173,7 @@ async def statlab_query(
         ),
     ),
     db: AsyncSession = Depends(get_db),
+    viewer: User | None = Depends(get_optional_user),
 ):
     """Run a StatLab query against one of the registered targets.
     Context filters are read directly from the URL — see _CTX_KEYS_* whitelists."""
@@ -184,7 +186,10 @@ async def statlab_query(
         except json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="filter_tree must be valid JSON")
     ctx = _ctx_from_request(request)
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions)
+    hiding = await public_junior_hiding(db, viewer, org_id)
+    scope = await grade_scope.resolve_scope(
+        db, org_id, categories, formats=formats, competitions=competitions,
+        hidden_grade_ids=hiding.grade_ids)
     ctx[svc._SCOPE_KEY] = scope
     try:
         result = await svc.run_query(
@@ -202,7 +207,9 @@ async def statlab_query(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {
-        "rows": _serialise(result["rows"]),
+        # A junior-only player a club hides (services/junior_hiding) is not
+        # named on a StatLab table either.
+        "rows": player_visibility.drop_hidden(_serialise(result["rows"]), hiding.player_ids),
         "has_more": result["has_more"],
         "page": result["page"],
         # So the page can say which grades its figures leave out, the same way
@@ -246,18 +253,24 @@ async def statlab_derived(
         ),
     ),
     db: AsyncSession = Depends(get_db),
+    viewer: User | None = Depends(get_optional_user),
 ):
     if name not in svc.DERIVED_QUERIES:
         raise HTTPException(status_code=400, detail=f"Unknown derived query: {name}")
     ctx = _ctx_from_request(request)
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions)
+    hiding = await public_junior_hiding(db, viewer, org_id)
+    scope = await grade_scope.resolve_scope(
+        db, org_id, categories, formats=formats, competitions=competitions,
+        hidden_grade_ids=hiding.grade_ids)
     ctx[svc._SCOPE_KEY] = scope
     try:
         result = await svc.run_derived(db, name=name, org_id=org_id, limit=limit, page=page, context=ctx)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Derived query error: {e}")
     return {
-        "rows": _serialise(result["rows"]),
+        # A junior-only player a club hides (services/junior_hiding) is not
+        # named on a StatLab table either.
+        "rows": player_visibility.drop_hidden(_serialise(result["rows"]), hiding.player_ids),
         "has_more": result["has_more"],
         "page": result["page"],
         "scope": scope.as_meta(),

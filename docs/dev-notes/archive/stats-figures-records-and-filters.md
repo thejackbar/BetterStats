@@ -1993,3 +1993,103 @@ should be able to lead with the one that matters.
   measuring a redraw.
 
 <!-- END original CLAUDE.md L16385-16615 -->
+
+## Hide a club's juniors from its public Stats (migration 315, v9.101.0)
+
+Kalamunda runs juniors and seniors under ONE Cricket Australia club id and
+wants the juniors gone from the seniors' public Stats. Senior and junior
+cricket are run by different associations, so the association (through the
+club's own competition, seeded one per association) is what separates them.
+Built as a club switch plus a per-competition tag, all derived on read.
+
+- **Two columns, nothing stored about who is hidden.** `club_competitions.is_junior`
+  (tri-state: NULL = nobody has said, the name's guess applies; TRUE/FALSE is a
+  person's call, never overwritten by sync, which only ever INSERTs
+  competitions) and `organisations.hide_juniors` (off for everyone). DDL is one
+  list, `services/junior_hiding_ddl.py`, run by alembic 315 and the lifespan.
+- **`services/junior_hiding.py` is the one definition.** A junior grade is a
+  grade whose competition reads junior, enumerated through `club_grade_rows` so
+  a fixture sitting on ANOTHER club's grade row resolves to OUR competition (by
+  name, then by association) and is judged by our tag. A junior-only player has
+  at least one junior grade among their evidence and nothing that is not:
+  evidence is games (batting, bowling, fielding, appearances) and CA per-grade
+  aggregates; a grade-less game, a residual import or career lump
+  (`manual_aggregate`, `manual_career`, `import`), and a season with totals but
+  no grade evidence all count as NOT junior. FAIL OPEN: hiding a real senior on
+  a guess is the worse mistake. Cached 120s per club (`CACHE_VERSION`), dropped
+  by `forget()` on any tag, assign, delete or seed.
+- **It rides on `GradeScope`, so no query changed.** `resolve_scope(...,
+  hidden_grade_ids=)` folds the junior grades into `excluded_ids` (every
+  existing `clause`/`bind` consumer leaves them out unaware) and keeps them in
+  `hidden_grade_ids` so `formats_only()` puts them back: a picked grade, or
+  `categories=all`, is a choice between what a club shows, never a way past what
+  it hides. The auto-widen for a junior-only player is moot (they 404).
+- **Public only, admins exempt.** `routers/auth.public_junior_hiding` is
+  inactive for `user_can_view_org_private` (own admins and Better staff) and for
+  every club with the switch off. Callers pass `with_players=False` when they
+  only leave games out.
+- **Players routes use ONE router dependency**, `_gate_junior_hidden_player`,
+  on every `/players/{player_id}/...` route: 404 for a junior-only player, and
+  it sets a `ContextVar` (`_PUBLIC_HIDING`) that `_resolve_player_scope` and the
+  two direct `resolve_scope_for_player` sites read. A ContextVar and not a
+  parameter on twenty endpoints, because a route that forgot to pass it would
+  quietly show a junior. Tabs with no scope of their own (`activity`,
+  `formats`, `competitions`, `milestones`, `upcoming-milestones`) were given
+  one, and only when something is hidden, so any other club's answer is
+  byte-identical.
+- **Surfaces covered:** roster and search (`GET /players`), profile and every
+  tab, leaderboards, records (`/records/{org}`, `/club`, `/grades`), club
+  summary, results, games list, scorecard and lineup deep link (404), grade
+  picker, season grades, `grade-categories` (the Juniors pill and junior
+  competitions are not offered), club competitions list, public ladders,
+  fixtures and lineups, StatLab (scope plus `drop_hidden` on rows), the sitemap
+  and the share-card HTML. `player_visibility.hidden_player_ids` unions the
+  junior-only set, so every caller of it (records, milestones, summary shelves,
+  leaderboard rows) is covered.
+- **Admin:** `PATCH /admin/competitions/{id}/junior` (`MANAGE_MERGES`, audited),
+  `GET /admin/juniors/preview` (what the switch WOULD hide, switch on or off),
+  a Cricket type select on each competition (`CompetitionManager
+  showJuniorTag`, cricket only: the AFL backend has no such route), and a
+  switch with a live preview in Club Settings.
+- **Verified** against a real Postgres, `verify_hide_juniors.py` (67 checks;
+  the shipped route bodies, plus 8 through FastAPI itself over httpx): "Division 2" in the junior association is junior
+  though its NAME reads senior; "Under 16s" in the senior association is not; a
+  shared fixture on THEIR grade row is junior; an admin's FALSE tag beats a name
+  reading junior. Each "hidden" check is paired with the same call for an admin
+  and with the switch off. **Control run against the previous commit: 19 fail,
+  exactly the reported behaviour (juniors on the public site), 20 pass (every
+  control/admin/switch-off check).** The suite reads the new modules through
+  `find_spec` so the control reports instead of crashing. Browser
+  `verify_hide_juniors_browser.mjs` (24 checks, 390px, screenshots, wire bodies;
+  control against the previous build: 16 fail, 8 pass).
+- **A CONTEXTVAR SET IN A DEPENDENCY MUST BE RESET BY THE DEPENDENCY.** Calling
+  route bodies by hand cannot show this; only the httpx-over-ASGI checks did. A
+  club admin's request after a public one read the PUBLIC request's hidden
+  grades (Max Mixed's career 30, not 130), because the gate returned early for
+  an inactive hiding without clearing the var and the test client reuses one
+  context. A server gives each request its own context, so production would not
+  have leaked, but the gate now sets `OFF` first.
+- **THE FOOTBALL DATABASE NEEDS THE TWO COLUMNS TOO.** `Organisation` and
+  `ClubCompetition` are shared ORM models, so every `db.get(Organisation, ...)`
+  on football selects `hide_juniors`. Cricket runs `junior_hiding_ddl` by import,
+  which `cricket_schema_mirror`'s literal-statement pass cannot see, so it is
+  listed in `SHARED_DDL_MODULES`. Checked by dropping both columns from a
+  database and running `apply`: 0 before, 2 after. `verify_afl_shared_modules.py`
+  still 28/28.
+- **A HARNESS THAT LISTS SEEDED TABLES NEEDS THE NEW COLUMN.**
+  `list_competitions` now reads `is_junior`, so `verify_stats_by_competition.py`
+  had to run `junior_hiding_ddl.STATEMENTS` after 283 (the lifespan order).
+  Another suite that builds `club_competitions` from `competition_ddl` alone and
+  calls `list_competitions` will fail the same way.
+- **A SOURCE-STRING CHECK CAN FAIL ON FORMATTING.** `verify_milestone_figures`
+  asserts `milestone_totals.profile_totals(db, player.organisation_id` is in
+  `players.py`; wrapping the call after `(` broke it. Kept on one line.
+- **Not covered (known):** stored milestone rows (`/records/{org}/milestones`
+  only drops hidden PLAYERS, not a mixed player's junior-achieved milestone);
+  club rankings (`/players/{id}/rankings`); yearbooks, honours, achievements and
+  awards routers (no scope, no viewer); a scorecard whose owning club is the
+  OTHER club of a shared fixture (the page has no club context to judge it by);
+  an upcoming lineup deep link for a fixture not yet in our database;
+  `players.is_public` still gates only the profile page, not its tabs (existing).
+  A season whose games sit on an alias season row can read "no grade evidence"
+  and so leave a junior visible (fail open, admin-fixable by tagging or merging).

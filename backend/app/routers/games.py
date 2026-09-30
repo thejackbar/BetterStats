@@ -1,14 +1,15 @@
 import re
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import false, select, text
+from sqlalchemy import false, or_, select, text
 from typing import Optional
 import logging
 import uuid
 
 logger = logging.getLogger(__name__)
 
-from app.models.db import Game, Grade, Season, Organisation, BattingInnings, BowlingSpell, FieldingStat, Player, ManualGame, ManualBattingInnings, ManualBowlingSpell, ManualFieldingStat, ManualInnings, get_db
+from app.models.db import Game, Grade, Season, Organisation, BattingInnings, BowlingSpell, FieldingStat, Player, ManualGame, ManualBattingInnings, ManualBowlingSpell, ManualFieldingStat, ManualInnings, User, get_db
+from app.routers.auth import get_optional_user, public_junior_hiding
 from app.services import dismissal, grade_scope
 from app.services.aggregations import get_game_fall_of_wickets, get_game_partnerships
 from app.services.sync import _caught_by_keeper, _innings_keeper_names
@@ -49,6 +50,11 @@ async def _fetch_manual_games_as_list(
             # Competitions were asked for and none of them are this club's.
             # Nothing matches — never everything.
             q = q.where(false())
+    if scope is not None and getattr(scope, "hidden_grade_ids", None):
+        # Junior grades a club hides from its public Stats apply to a hand-typed
+        # game too. A grade-less one is kept: it is not known to be junior.
+        q = q.where(or_(ManualGame.grade_id.is_(None),
+                        ManualGame.grade_id.not_in(list(scope.hidden_grade_ids))))
     if season_id:
         q = q.where(ManualGame.season_id == uuid.UUID(season_id))
     if grade_id:
@@ -120,14 +126,17 @@ async def list_games(
         ),
     ),
     db: AsyncSession = Depends(get_db),
+    viewer: User | None = Depends(get_optional_user),
 ):
     # Grade-type / match-type / competition scope. An explicitly picked grade
     # beats the category half, the same rule the leaderboards follow. Resolved
     # BEFORE the manual games are fetched because they need the competition
     # half of it — see _fetch_manual_games_as_list for why that one axis
     # reaches a grade-less manual game when the other two deliberately don't.
+    hiding = await public_junior_hiding(db, viewer, org_id, with_players=False)
     scope = await grade_scope.resolve_scope(
-        db, org_id, categories, formats=formats, competitions=competitions)
+        db, org_id, categories, formats=formats, competitions=competitions,
+        hidden_grade_ids=hiding.grade_ids)
     if grade_id:
         # A picked grade beats the CATEGORY half only — a grade plays more than
         # one format, so Match Type still has to bite inside it.
@@ -676,6 +685,7 @@ _GENERIC_SIDE_WORDS = {
 async def get_scorecard(
     game_id: str,
     db: AsyncSession = Depends(get_db),
+    viewer: User | None = Depends(get_optional_user),
 ):
     game = await db.get(Game, uuid.UUID(game_id))
     is_manual = False
@@ -705,6 +715,13 @@ async def get_scorecard(
     # toggle). Whether their name also shows in the lower-stakes partnerships
     # and fielding cards is the club's own call (migration 147) — default on.
     include_fillins_stats = bool(org.include_fill_ins_in_stats) if org else True
+
+    # A club that hides its juniors also hides their scorecards from the public:
+    # a junior match reads as absent, the way a hidden player's profile does.
+    if org is not None and game.grade_id:
+        hiding = await public_junior_hiding(db, viewer, org.id, with_players=False)
+        if hiding.active and game.grade_id in hiding.grade_ids:
+            raise HTTPException(status_code=404, detail="Game not found")
 
     # Manual and synced child models share the same field names, so we just
     # pick which model to query against based on the game's provenance.

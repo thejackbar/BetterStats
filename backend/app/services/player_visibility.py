@@ -32,6 +32,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import Player
+from app.services import junior_hiding
 
 # The keys a row might carry a player's id under, across the leaderboard,
 # records, partnership and milestone payloads. A partnership names TWO people
@@ -59,7 +60,12 @@ async def hidden_player_ids(session: AsyncSession, org_id) -> set[str]:
             Player.is_public.is_(False),
         )
     )).scalars().all()
-    return {str(pid).lower() for pid in rows}
+    hidden = {str(pid).lower() for pid in rows}
+    # A club that hides its juniors (migration 315) also hides the players whose
+    # only cricket is in them. Derived on read, and only ever asked of a PUBLIC
+    # viewer: every caller already skips this whole lookup for a club admin.
+    hidden |= (await junior_hiding.resolve(session, oid)).player_ids
+    return hidden
 
 
 def _row_names_hidden(row: Any, hidden: set[str]) -> bool:

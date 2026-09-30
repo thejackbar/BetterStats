@@ -2,11 +2,11 @@
 
 **Read this before**:
 - Touching any career, season, leaderboard, record-book, StatLab or profile figure.
-- Editing `services/grade_scope.py`, `rate_coverage.py`, `dismissal.py`, `game_status.py`, `milestone_totals.py`, `match_coverage.py`, `competition_*.py`, `routers/records.py`, `statlab.py`, `StatLab.jsx`.
+- Editing `services/grade_scope.py`, `junior_hiding.py`, `rate_coverage.py`, `dismissal.py`, `game_status.py`, `milestone_totals.py`, `match_coverage.py`, `competition_*.py`, `routers/records.py`, `statlab.py`, `StatLab.jsx`.
 - Adding a filter or query on `v_effective_player_season_stats` or `game_appearances`.
 - Symptoms: a filter raising a total; matches disagreeing between header and grid; strike rate too high; junior season in senior career; Records 15s.
 
-**Archive** (full history, verbatim, do not load whole): `docs/dev-notes/archive/stats-figures-records-and-filters.md`. Grep hints: `milestone_totals`, `RETIRED NOT OUT`, `A rate is only as good`, `Season × grade`, `A washout is not`, `StatLab: one player`, `Grade Type / Match Type`, `several values at once`, `A grade is several things`, `IMPORT RESIDUAL`, `Junior stats split`, `Awards`, `Stats by competition`, `two match counts`, `Which lens a panel`.
+**Archive** (full history, verbatim, do not load whole): `docs/dev-notes/archive/stats-figures-records-and-filters.md`. Grep hints: `milestone_totals`, `RETIRED NOT OUT`, `A rate is only as good`, `Season × grade`, `A washout is not`, `StatLab: one player`, `Grade Type / Match Type`, `several values at once`, `A grade is several things`, `IMPORT RESIDUAL`, `Junior stats split`, `Awards`, `Stats by competition`, `two match counts`, `Which lens a panel`, `Hide a club's juniors`.
 
 **Related guides**: sync and import guides (writers of `not_out`, `balls`, `match_format`, `status`, residual rows); CricketStatz/import pairing guide (paired twins, per-innings views).
 
@@ -67,6 +67,12 @@
 40. Awards (`routers/award_definitions.py`): `STARTER_TEMPLATE` default, `GLOBAL_TEMPLATE` 'comprehensive', `APPLECROSS_TEMPLATE` for slug `applecross`; seed via `TEMPLATES` (unknown = starter), only into an EMPTY org. `ACHIEVEMENT_TREE` is the no-defs fallback. Tables are lifespan-created.
 41. `run_grouping` (`services/competition_grouping.py`) is the one implementation. `sync_runs` kind `competition_grouping` is deliberately not in `_FULL_SYNC_KINDS` and not resumed. Idempotent (only NULL associations written). One run per club. `needs_grouping` is the only trigger, never `grades_ungrouped`. `MANAGE_MERGES`. `maybe_group_club` fires on `_sync_safe` success and Full Rebuild success; the 02:30 job stays. `/{slug}/competitions` must be known to Navbar `CLUB_SECTIONS`/`statsActive`, `SponsorFooter`, `FaviconManager`.
 
+**Hiding a club's juniors (`services/junior_hiding.py`; 315)**
+42. `organisations.hide_juniors` + `club_competitions.is_junior` (NULL = the name's guess, TRUE/FALSE = a person's, never overwritten by sync). A junior grade is one in a junior competition, via `club_grade_rows` (a foreign row resolves to OUR competition). A junior-only player has junior evidence and nothing else; grade-less games, residual imports and seasons with totals but no grade evidence count as NOT junior (fail open). Derived on read, cached 120s, `forget()` on any tag/assign/delete/seed. The DDL is in `cricket_schema_mirror.SHARED_DDL_MODULES` (shared ORM models map both columns, so football's DB needs them).
+43. It rides on `resolve_scope(..., hidden_grade_ids=)`: folded into `excluded_ids` AND kept in `hidden_grade_ids` so `formats_only()` restores it (a picked grade or `categories=all` never gets past it). Only for a public viewer: `routers/auth.public_junior_hiding` (inactive for `user_can_view_org_private` and switch-off clubs; `with_players=False` when only games matter).
+44. Every `/players/{player_id}/...` route is gated by ONE router dependency (`_gate_junior_hidden_player`: 404 + the `_PUBLIC_HIDING` ContextVar the scope resolvers read). A new player route needs nothing; a NEW public route that names games or players must call `public_junior_hiding` itself.
+45. A scope-less endpoint is only given a scope WHEN something is hidden (`_hidden_only_scope`), so every other club's answer stays byte-identical. Not covered: yearbooks, honours, achievements, awards, club rankings, stored milestone rows (see archive).
+
 ## Traps and failure signatures
 
 - Strike rate 320 or 333.33 beside blank balls: rules 1, 6. Overs summing to 20.4: rule 7. Header average differs from StatLab: rule 12. 13 matches where the club counts 10: rules 13, 14.
@@ -80,7 +86,7 @@
 
 ## How to verify a change here
 
-- Real-Postgres suites (shipped route bodies), each with a control run that must fail without crashing: `verify_rate_coverage.py` and `_everywhere.py` (control reads 333.3, 127.27), `verify_retired_not_out.py` (12.83), `verify_milestone_figures.py`, `verify_match_coverage.py`, `verify_stats_by_competition.py` (re-run for any `GradeScope` change), `verify_junior_residual_scope.py` (18/376), `verify_statlab_player_filter.py`, `verify_records_timing.py` (asserts `pss_club_clause` precedes every `pss_gender_clause`). Browser twins: `frontend/verification/verify_*_browser.mjs`.
+- Real-Postgres suites (shipped route bodies), each with a control run that must fail without crashing: `verify_rate_coverage.py` and `_everywhere.py` (control reads 333.3, 127.27), `verify_retired_not_out.py` (12.83), `verify_milestone_figures.py`, `verify_match_coverage.py`, `verify_stats_by_competition.py` (re-run for any `GradeScope` change), `verify_hide_juniors.py` (control reads juniors on the public site; also run its browser twin), `verify_junior_residual_scope.py` (18/376), `verify_statlab_player_filter.py`, `verify_records_timing.py` (asserts `pss_club_clause` precedes every `pss_gender_clause`). Browser twins: `frontend/verification/verify_*_browser.mjs`.
 - Gotchas: read new keys with `.get`/`getattr` and guard clicks so a control reports; seed through the code under test; a rate fixture needs an innings the rate cannot use; capture stub state BEFORE the action; a seasons stub of `[]` hides the filter pills; the headline counts up, so wait then read `.pb-num`.
 - Diagnostics: `ops/diagnostics/records_slow_board.sql`, `records_pushdown_test.sql`, `career_matches_sources.sql`.
 

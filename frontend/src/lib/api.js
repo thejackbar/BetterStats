@@ -262,6 +262,14 @@ export const api = {
     }),
   adminSeedCompetitions: () =>
     request('/admin/competitions/seed', { method: 'POST' }),
+  // Junior or senior cricket, per competition (migration 315). true = junior,
+  // false = senior, null = back to the guess from the competition's name.
+  adminTagCompetitionJunior: (id, isJunior) =>
+    request(`/admin/competitions/${id}/junior`, {
+      method: 'PATCH', body: JSON.stringify({ is_junior: isJunior }),
+    }),
+  // What "hide juniors" would hide right now, whether or not it is switched on.
+  adminJuniorsPreview: () => request('/admin/juniors/preview'),
   // Is anything still outside the club's competitions, and is a job running.
   // Read on every visit to Manage Grades, so the prompt appears the moment an
   // admin finishes naming their competitions.

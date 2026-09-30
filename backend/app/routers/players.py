@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from contextvars import ContextVar
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text, func
 from sqlalchemy.exc import IntegrityError
@@ -12,7 +14,10 @@ from app.models.db import (
     BattingInnings, BowlingSpell, FieldingStat, Game, Grade, Season,
     Fixture, FixtureLineup, PlayerAvailability, get_db,
 )
-from app.routers.auth import get_current_user, get_optional_user, user_can_view_org_private, get_current_club
+from app.routers.auth import (
+    get_current_user, get_optional_user, user_can_view_org_private, get_current_club,
+    public_junior_hiding,
+)
 from app.auth.capabilities import require_cap, MANAGE_PLAYERS
 from app.services.squad_membership import (
     clear_all_squad_memberships,
@@ -39,13 +44,77 @@ from app.services.milestone_rules import (
 )
 from app.services import iq_teammates
 from app.services import milestone_totals
-from app.services import grade_scope
+from app.services import grade_scope, junior_hiding
 from app.services.player_aliases import normalise_name_key, seed_alias_on_rename
 from app.services.player_age import age_on, dob_error, visible_age
 from app.services.player_kit import clean_shirt_number
 from app.services.player_formats import player_format_splits
 
-router = APIRouter(prefix="/players", tags=["players"])
+# What this request's viewer may not see of the club's junior programme
+# (services/junior_hiding). Set once by `_gate_junior_hidden_player`, which runs
+# ahead of every route that names a player, and read by the scope resolvers
+# below. A ContextVar rather than a parameter on twenty endpoints: a route that
+# forgot to pass it would quietly show a club's juniors, and this way none can
+# forget.
+_PUBLIC_HIDING: ContextVar = ContextVar("public_junior_hiding", default=junior_hiding.OFF)
+
+
+def _hidden_grades() -> tuple:
+    return _PUBLIC_HIDING.get().grade_ids
+
+
+async def _hidden_only_scope(db: AsyncSession, player: Player):
+    """A scope that leaves out ONLY the hidden junior grades, or None.
+
+    For the endpoints that take no category/format/competition scope today: a
+    club that hides nothing must get byte-identical answers, so they only ever
+    receive a scope when there is something hidden to leave out.
+    """
+    ids = _hidden_grades()
+    if not ids or not player.organisation_id:
+        return None
+    return await grade_scope.resolve_scope(
+        db, player.organisation_id, list(grade_scope.GRADE_CATEGORIES),
+        hidden_grade_ids=ids,
+    )
+
+
+async def _gate_junior_hidden_player(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    viewer: User | None = Depends(get_optional_user),
+):
+    """A junior-only player reads as absent to the public of a club hiding juniors.
+
+    Applies to every `/players/{player_id}/...` route, so the profile and each
+    tab behind it agree. Also records which junior grades to leave out of a
+    senior player's figures. A club admin or Better staff is never gated.
+    """
+    # Always start from "nothing hidden". A server gives each request its own
+    # context, but a test client (or any code that reuses one) does not, and a
+    # value left by an earlier public request must never reach a club admin's.
+    _PUBLIC_HIDING.set(junior_hiding.OFF)
+    raw = request.path_params.get("player_id")
+    if not raw:
+        return
+    try:
+        pid = uuid.UUID(str(raw))
+    except (ValueError, TypeError):
+        return
+    org_id = await db.scalar(select(Player.organisation_id).where(Player.id == pid))
+    if not org_id:
+        return
+    hiding = await public_junior_hiding(db, viewer, org_id)
+    if not hiding.active:
+        return
+    if str(pid).lower() in hiding.player_ids:
+        raise HTTPException(status_code=404, detail="Player not found")
+    _PUBLIC_HIDING.set(hiding)
+
+
+router = APIRouter(
+    prefix="/players", tags=["players"], dependencies=[Depends(_gate_junior_hidden_player)]
+)
 
 
 async def _resolve_player_scope(
@@ -63,6 +132,7 @@ async def _resolve_player_scope(
         db, player.organisation_id, str(player.id), categories, formats=formats,
         competitions=competitions,
         auto_widen=bool(org.stats_auto_show_played_grades) if org else True,
+        hidden_grade_ids=_hidden_grades(),
     )
     return scope
 
@@ -125,6 +195,11 @@ async def list_players(
     conditions = [Player.organisation_id == uuid.UUID(org_id)]
     if public_only:
         conditions.append(Player.is_public.is_not(False))
+        # A club that hides its juniors also drops the players whose only
+        # cricket is in them. Empty (and free) for every other club.
+        hiding = await public_junior_hiding(db, viewer, org_id)
+        if hiding.active and hiding.player_ids:
+            conditions.append(Player.id.not_in([uuid.UUID(p) for p in hiding.player_ids]))
     result = await db.execute(select(Player).where(*conditions))
     # Sort by surname for everyone — a display_name_override is free text (often
     # "First Last", no comma) which an alphabetical DB sort would order by first
@@ -219,6 +294,7 @@ async def get_player_stats(
         db, player.organisation_id, player_id, categories, formats=formats,
         competitions=competitions,
         auto_widen=bool(org.stats_auto_show_played_grades) if org else True,
+        hidden_grade_ids=_hidden_grades(),
     )
     use_game_filter = last_n_games or start_date or end_date
     if use_game_filter:
@@ -316,8 +392,11 @@ async def get_player_competitions(
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
     from app.services import competition_stats
-    return await competition_stats.player_competition_breakdown(
-        db, player_id, player.organisation_id, season_id
+    return competition_stats.without_competitions(
+        await competition_stats.player_competition_breakdown(
+            db, player_id, player.organisation_id, season_id
+        ),
+        _PUBLIC_HIDING.get().competition_ids,
     )
 
 
@@ -341,7 +420,7 @@ async def get_player_formats(
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    data = await player_format_splits(db, player_id, season_id)
+    data = await player_format_splits(db, player_id, season_id, hidden_grade_ids=_hidden_grades())
     return {
         "player": {"id": str(player.id), "name": player.display_name},
         **data,
@@ -552,6 +631,7 @@ async def get_player_seasons(
         db, player.organisation_id, player_id, categories, formats=formats,
         competitions=competitions,
         auto_widen=bool(org.stats_auto_show_played_grades) if org else True,
+        hidden_grade_ids=_hidden_grades(),
     )
     return await get_season_by_season(db, player_id, include_prior=True, scope=scope)
 
@@ -570,7 +650,8 @@ async def get_player_milestones_endpoint(player_id: str, db: AsyncSession = Depe
     ]
 
     # Append computed per-grade match milestones (not stored in DB).
-    breakdown = await get_player_team_breakdown(db, player_id, str(player.organisation_id))
+    breakdown = await get_player_team_breakdown(
+        db, player_id, str(player.organisation_id), scope=await _hidden_only_scope(db, player))
     grade_rows = sorted(breakdown.get("rows", []), key=lambda r: r.get("grade_name") or "")
     for row in grade_rows:
         matches_in_grade = int(row.get("matches") or 0)
@@ -609,7 +690,8 @@ async def get_player_activity_endpoint(player_id: str, db: AsyncSession = Depend
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    return await get_player_activity(db, player_id)
+    scope = await _hidden_only_scope(db, player)
+    return await get_player_activity(db, player_id, scope=scope)
 
 
 @router.get("/{player_id}/upcoming-milestones")
@@ -626,7 +708,8 @@ async def get_player_upcoming_milestones(player_id: str, db: AsyncSession = Depe
     from app.services import milestone_scan
     upcoming = []
     if player.organisation_id:
-        got = await milestone_totals.profile_totals(db, player.organisation_id, [str(player.id)])
+        got = await milestone_totals.profile_totals(db, player.organisation_id, [str(player.id)],
+                                                    hidden_grade_ids=_hidden_grades())
         t = got.get(str(player.id)) or {}
         row = {
             "player_id": str(player.id), "player_name": player.display_name,
@@ -641,7 +724,8 @@ async def get_player_upcoming_milestones(player_id: str, db: AsyncSession = Depe
 
     # Per-grade match milestones — uses the same merge-aware breakdown the
     # Team tab does so canonical/merged grade names line up.
-    breakdown = await get_player_team_breakdown(db, player_id, str(player.organisation_id))
+    breakdown = await get_player_team_breakdown(
+        db, player_id, str(player.organisation_id), scope=await _hidden_only_scope(db, player))
     for row in breakdown.get("rows", []):
         matches_in_grade = int(row.get("matches") or 0)
         grade_name = row.get("grade_name")

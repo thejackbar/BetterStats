@@ -204,7 +204,7 @@ class GradeScope:
     __slots__ = (
         "categories", "formats", "excluded_ids", "excluded_categories",
         "excluded_labels", "format_fallback_ids", "param", "competitions",
-        "competition_names", "competition_extra_ids",
+        "competition_names", "competition_extra_ids", "hidden_grade_ids",
     )
 
     def __init__(
@@ -219,10 +219,18 @@ class GradeScope:
         competition_names: Sequence[str] = (),
         competition_extra_ids: Sequence = (),
         excluded_labels: Sequence[str] = (),
+        hidden_grade_ids: Sequence = (),
     ):
         self.categories = tuple(categories)
         self.formats = tuple(formats) if formats is not None else None
-        self.excluded_ids = list(excluded_ids)
+        # Junior grades a club has hidden from its PUBLIC Stats (migration 315,
+        # services/junior_hiding.py). They are folded into `excluded_ids`, so
+        # every existing consumer of the scope leaves them out without knowing
+        # they are there, and they are ALSO kept here so `formats_only()` can
+        # put them back: picking a grade (or "all categories") is a choice
+        # between what a club shows, never a way past what it hides.
+        self.hidden_grade_ids = list(hidden_grade_ids)
+        self.excluded_ids = list(dict.fromkeys([*excluded_ids, *self.hidden_grade_ids]))
         self.excluded_categories = tuple(excluded_categories)
         # Import residual grade_labels (free text, e.g. "Division 3") whose
         # category is out of scope. An import residual carries no grade_id, so
@@ -453,6 +461,7 @@ class GradeScope:
             formats=self.formats, format_fallback_ids=self.format_fallback_ids,
             competitions=self.competitions, competition_names=self.competition_names,
             competition_extra_ids=self.competition_extra_ids,
+            hidden_grade_ids=self.hidden_grade_ids,
         )
 
     def as_meta(self) -> dict:
@@ -465,6 +474,7 @@ class GradeScope:
             "competition_names": list(self.competition_names),
             "active": self.active,
             "category_active": self.category_active,
+            "juniors_hidden": bool(self.hidden_grade_ids),
             "format_active": self.format_active,
             "competition_active": self.competition_active,
         }
@@ -501,6 +511,7 @@ async def resolve_scope(
     competitions=None,
     param: str = "gs_excluded_grade_ids",
     judge_primary: bool = False,
+    hidden_grade_ids: Sequence = (),
 ) -> GradeScope:
     """Turn a category and/or format selection into the grade ids it leaves out.
 
@@ -529,6 +540,11 @@ async def resolve_scope(
     each game's own ``match_format`` (see :meth:`GradeScope.format_clause`), and
     the grade's declared format only stands in for a game whose own was never
     recorded — and then only when the grade plays exactly one format.
+
+    ``hidden_grade_ids`` are the junior grades a club hides from its public
+    Stats (``services/junior_hiding.JuniorHiding.grade_ids``, passed only for a
+    public viewer of a club that has the switch on). They are left out
+    whatever else was picked, so the scope is ACTIVE whenever any exist.
     """
     # An explicit selection is an INCLUSION ("show me the women's grades") and
     # matches on any of a grade's categories. The club default is an EXCLUSION
@@ -565,6 +581,7 @@ async def resolve_scope(
         return GradeScope(
             wanted, [], [], param, formats=wanted_formats,
             competitions=comp_ids, competition_names=comp_names,
+            hidden_grade_ids=hidden_grade_ids,
         )
 
     name_categories = (
@@ -650,6 +667,7 @@ async def resolve_scope(
         competition_names=comp_names,
         competition_extra_ids=comp_grade_ids,
         excluded_labels=excluded_labels,
+        hidden_grade_ids=hidden_grade_ids,
     )
 
 
@@ -724,6 +742,7 @@ async def resolve_scope_for_player(
     competitions=None,
     auto_widen: bool = True,
     param: str = "gs_excluded_grade_ids",
+    hidden_grade_ids: Sequence = (),
 ) -> tuple[GradeScope, bool]:
     """A scope for one player's own page, widened if the default would empty it.
 
@@ -750,6 +769,7 @@ async def resolve_scope_for_player(
     scope = await resolve_scope(
         session, org_id, categories, formats=formats,
         competitions=competitions, param=param,
+        hidden_grade_ids=hidden_grade_ids,
     )
     if explicit or not auto_widen or not scope.category_active:
         return scope, False
@@ -759,6 +779,7 @@ async def resolve_scope_for_player(
     widened = await resolve_scope(
         session, org_id, sorted(set(scope.categories) | played),
         formats=formats, competitions=competitions, param=param,
+        hidden_grade_ids=hidden_grade_ids,
     )
     return widened, True
 
