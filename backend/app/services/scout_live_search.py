@@ -46,6 +46,7 @@ DEFAULT_SIZE = 20
 
 async def search_playcommunity(
     term: str, *, types: tuple[str, ...] = ("PLAYCOMM_CLUB", "PLAYCOMM_PLAYER"), size: int = DEFAULT_SIZE,
+    page: int = 0,
 ) -> dict:
     """Returns `{"clubs": [...], "players": [...]}`. Never raises — a
     network hiccup or an upstream shape change degrades to an empty result,
@@ -53,7 +54,7 @@ async def search_playcommunity(
     term = (term or "").strip()
     if not term:
         return {"clubs": [], "players": []}
-    params = [("term", term), ("size", size), ("page", 0), ("sorting", "ASC"), ("tags", "search")]
+    params = [("term", term), ("size", size), ("page", max(0, int(page))), ("sorting", "ASC"), ("tags", "search")]
     params += [("types", t) for t in types]
     try:
         async with httpx.AsyncClient() as client:

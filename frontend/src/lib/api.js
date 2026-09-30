@@ -1571,6 +1571,15 @@ export const api = {
     request(`/club-admin/players/${playerId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   claimFillIn: (data) =>
     request('/players/claim-fill-in', { method: 'POST', body: JSON.stringify(data) }),
+  // Match a hand-made player to their PlayCricket profile, so their first game
+  // attaches to this record instead of minting a duplicate.
+  playerIdentitySearch: (q) =>
+    request(`/club-admin/player-identity/search?q=${encodeURIComponent(q)}`),
+  playerIdentityLink: (playerId, participantId) =>
+    request('/club-admin/player-identity/link', {
+      method: 'POST',
+      body: JSON.stringify({ player_id: playerId, participant_id: participantId }),
+    }),
   adminListSeasons: () => request('/club-admin/seasons'),
   adminReorderSeasons: (items) =>
     request('/club-admin/seasons/reorder', { method: 'PUT', body: JSON.stringify(items) }),
@@ -3728,6 +3737,8 @@ export const api = {
     request(`/club-admin/fantasy/season/${seasonId}/available-players?q=${encodeURIComponent(q)}`),
   fantasyAddPoolPlayer: (seasonId, data) =>
     request(`/club-admin/fantasy/season/${seasonId}/pool`, { method: 'POST', body: JSON.stringify(data) }),
+  fantasyPriorRecord: (seasonId, { participantId, clubId, clubName }) =>
+    request(`/club-admin/fantasy/season/${seasonId}/prior-record?participant_id=${encodeURIComponent(participantId)}&club_id=${encodeURIComponent(clubId)}&club_name=${encodeURIComponent(clubName || '')}`),
   fantasyAddNewPlayer: (seasonId, data) =>
     request(`/club-admin/fantasy/season/${seasonId}/pool/new-player`, { method: 'POST', body: JSON.stringify(data) }),
   fantasyRemovePoolPlayer: (poolId) =>

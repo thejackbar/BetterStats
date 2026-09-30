@@ -16,6 +16,7 @@ from app.config.settings import settings
 from app.auth.modules import require_module
 from app.routers import instructional_videos
 from app.routers import admin_broadcasts
+from app.routers import player_identity
 from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, cricketstatz, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, public_net_checkin, net_manager, website, comms, public_comms, public_ses, public_contact, public_webinar, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, public_billing, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
     stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
     club_diary, social_media, votes, public_votes, roles_activities, club_room, roster, facility_requests, directory, \
@@ -6185,6 +6186,7 @@ app.include_router(billing.router)  # Account page Stripe Checkout (flag-gated â
 app.include_router(discount_coupons.router)  # BetterCricket-managed discount coupons (migration 156)
 app.include_router(organisations.router)
 app.include_router(players.router)
+app.include_router(player_identity.router)
 app.include_router(games.router)
 app.include_router(leaderboard.router)
 app.include_router(records.router)

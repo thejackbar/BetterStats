@@ -34,7 +34,7 @@ from app.models.db import (
     FantasySeason, FantasyLeague, FantasyLeagueMember, FantasyRound, FantasyPoolPlayer,
     FantasyManager, FantasySquad, FantasySquadPlayer, FantasyDraft, FANTASY_ROLES,
 )
-from app.services import fantasy_engine, fantasy_draft
+from app.services import fantasy_engine, fantasy_draft, player_identity
 from app.services.fantasy_scoring import DEFAULT_SCORING, DEFAULT_RULES
 
 router = APIRouter(prefix="/club-admin/fantasy", tags=["club-admin-fantasy"])
@@ -568,6 +568,22 @@ class NewPlayer(BaseModel):
     name: str
     role: str = "batter"
     price: float = 5.0
+    # The person's PlayCricket participant id from the identity search. With it the
+    # first synced game lands on THIS player; without it the sync mints a second
+    # record and this one scores 0 all season.
+    participant_id: Optional[str] = None
+
+
+@router.get("/season/{season_id}/prior-record")
+async def prior_record(season_id: str, participant_id: str, club_id: str, club_name: str = "",
+                       club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
+    """Role and price for a newcomer from their record at a previous club. Answers
+    ``{status: 'building'}`` while the club's figures are first read; poll it."""
+    fs = await _load_season(db, club, season_id)
+    pid = player_identity.clean_participant_id(participant_id)
+    if pid is None:
+        raise HTTPException(status_code=400, detail="Choose a PlayCricket player first.")
+    return await fantasy_engine.prior_record(db, fs, str(club.id), club_id.strip(), club_name.strip() or None, pid)
 
 
 @router.post("/season/{season_id}/pool/new-player")
@@ -581,15 +597,17 @@ async def add_new_player(season_id: str, body: NewPlayer, club=Depends(get_curre
     name = (body.name or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="Enter a name.")
+    identity = await player_identity.assert_identity_free(db, club, body.participant_id)
     pid = uuid.uuid4()
-    db.add(Player(id=pid, name=name, organisation_id=club.id, player_role=_FANTASY_TO_PROFILE.get(body.role)))
+    db.add(Player(id=pid, name=name, organisation_id=club.id, player_role=_FANTASY_TO_PROFILE.get(body.role),
+                  grassroots_id=identity))
     price = round(float(body.price), 1)
     db.add(FantasyPoolPlayer(
         fantasy_season_id=fs.id, organisation_id=club.id, player_id=pid,
         role=body.role, role_source="admin", base_price=price, current_price=price, is_available=True,
     ))
     await db.commit()
-    return {"ok": True, "player_id": str(pid)}
+    return {"ok": True, "player_id": str(pid), "identity_linked": identity is not None}
 
 
 @router.delete("/pool/{pool_id}")

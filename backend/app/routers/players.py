@@ -984,6 +984,8 @@ def _profile_fields(player: Player) -> dict:
         "photo_url": player.photo_url,
         "hero_photo_url": player.hero_photo_url,
         "playhq_id": player.playhq_id,
+        # Tied to a PlayCricket participant, so their synced games attach here.
+        "identity_linked": bool(player.grassroots_id),
         "squad_team_id": str(player.squad_team_id) if player.squad_team_id else None,
         "is_overseas": player.is_overseas,
         "overseas_country": player.overseas_country,

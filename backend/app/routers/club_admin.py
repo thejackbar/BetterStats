@@ -338,6 +338,10 @@ class PlayerCreate(BaseModel):
     name: Optional[str] = None
     playhq_id: Optional[str] = None
     display_name_override: Optional[str] = None
+    # The person's PlayCricket participant id, picked from the identity search.
+    # Stored as ``grassroots_id`` so the first synced game attaches to this row
+    # instead of minting a duplicate (see services/player_identity).
+    participant_id: Optional[str] = None
 
 
 def _split_written_name(written: str) -> tuple[str, str]:
@@ -390,17 +394,22 @@ async def create_player(
         if conflict.scalar_one_or_none():
             raise HTTPException(status_code=409, detail="Another player already has this PlayHQ ID")
 
+    from app.services import player_identity
+    identity = await player_identity.assert_identity_free(db, club, data.participant_id)
+
     player = Player(
         id=uuid.uuid4(),
         name=name,
         organisation_id=club.id,
         playhq_id=phq_id,
+        grassroots_id=identity,
         display_name_override=override,
     )
     db.add(player)
     await db.commit()
     return {
         "id": str(player.id),
+        "identity_linked": identity is not None,
         "name": player.name,
         "display_name": player.display_name,
         "display_name_override": player.display_name_override,

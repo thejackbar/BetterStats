@@ -257,6 +257,81 @@ async def classify_and_price_one(session: AsyncSession, fs, player_id) -> tuple[
     return role, _baseline_price(row, role)
 
 
+# ── Price from a previous club's record ────────────────────────────────────────
+
+def suggest_from_career(player: dict | None, fs) -> dict | None:
+    """Role and starting price for a player from ANOTHER club's season aggregates
+    (the ``players[]`` entry ``iq_scout`` builds), or None when they have nothing
+    inside the pricing window to price from.
+
+    The same ``_baseline_price`` a club's own players go through, fed the same
+    window, so a newcomer is priced on the scale everyone else is. Two honest
+    gaps, both said on the screen: the aggregates carry no fours or sixes (they
+    count for a little, so a big hitter reads slightly cheap), and no bowling
+    innings, so a bowler is recognised by wickets and balls bowled instead.
+    """
+    if not player:
+        return None
+    window = max(1, int((fs.rules or {}).get("price_window_years", PRICE_WINDOW_YEARS)))
+    recent_from = fs.season_year - (window - 1)
+    seasons = [x for x in (player.get("seasons") or []) if (x.get("year") or 0) >= recent_from]
+    if not seasons:
+        return None
+
+    def tot(k: str) -> int:
+        return int(sum((x.get(k) or 0) for x in seasons))
+
+    matches = tot("matches")
+    if matches <= 0:
+        return None
+    all_seasons = player.get("seasons") or []
+    bat_inns = int(sum((x.get("innings") or 0) for x in all_seasons))
+    wickets = int(sum((x.get("wickets") or 0) for x in all_seasons))
+    bowl_inns = int(sum((x.get("matches") or 0) for x in all_seasons if (x.get("bowling_balls") or 0) > 0))
+    keeper = int(sum((x.get("catches_wk") or 0) + (x.get("stumpings") or 0) for x in all_seasons))
+    role, _src = classify_role(
+        bat_innings=bat_inns, wickets=wickets, bowl_innings=bowl_inns, keeper_dismissals=keeper,
+    )
+    row = {
+        "r_matches": matches, "r_runs": tot("runs"), "r_fours": 0, "r_sixes": 0,
+        "r_fifties": tot("fifties"), "r_hundreds": tot("hundreds"),
+        "r_wickets": tot("wickets"), "r_maidens": tot("maidens"), "r_fivefor": tot("five_fors"),
+        "r_catches": tot("catches"), "r_catches_wk": tot("catches_wk"),
+        "r_stumpings": tot("stumpings"), "r_run_outs": tot("run_outs"),
+    }
+    return {
+        "role": role,
+        "price": _baseline_price(row, role),
+        "basis": {
+            "matches": matches, "runs": row["r_runs"], "wickets": row["r_wickets"],
+            "catches": row["r_catches"], "years": sorted({int(x["year"]) for x in seasons}, reverse=True),
+            "from_year": recent_from,
+        },
+    }
+
+
+async def prior_record(session: AsyncSession, fs, our_org_id: str, club_guid: str,
+                       club_name: str | None, participant_id: str) -> dict:
+    """A person's record at another club, priced. Reuses BetterIQ's club build and
+    its cache row, keyed by the pricing window so it never collides with the
+    ten-year build BetterIQ reads. First build for a club is a minute or so of
+    public Cricket Australia calls, so this answers ``building`` and the screen
+    polls; the admin can always type a price instead."""
+    from app.services import iq_scout  # local: pulls in the scout stack
+    if not iq_scout._is_uuid(club_guid):
+        return {"status": "unavailable", "message": "No Cricket Australia id for that club."}
+    window = max(1, min(5, int((fs.rules or {}).get("price_window_years", PRICE_WINDOW_YEARS))))
+    d = await iq_scout._get_or_start(
+        session, our_org_id, f"career{window}y::{club_guid.lower()}", iq_scout.CAREER_VERSION,
+        lambda: iq_scout._build_career(club_guid, club_name, years=window), name=club_name,
+    )
+    if d.get("status") != "ready":
+        return {"status": d.get("status") or "building"}
+    pid = participant_id.lower()
+    player = next((p for p in d.get("players") or [] if (p.get("player_id") or "").lower() == pid), None)
+    return {"status": "ready", "found": player is not None, "suggestion": suggest_from_career(player, fs)}
+
+
 # ── Round settlement (player points) ───────────────────────────────────────────
 
 async def _round_player_scores(session: AsyncSession, fs, rnd) -> dict[str, dict]:

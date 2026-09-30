@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import BetterFantasyLayout from '../../../components/admin/BetterFantasyLayout'
 import { api } from '../../../lib/api'
+import PlayCricketMatch from '../../../components/admin/PlayCricketMatch'
 
 // Shared pieces for the BetterFantasyCricket admin surface. Each tool (team
 // make-up, scoring, the pool, registered players) is its own page now, so the
@@ -240,6 +241,33 @@ export function PoolManager({ season, flash, fail, onChanged }) {
   const [results, setResults] = useState(null)
   const [np, setNp] = useState({ name: '', role: 'batter', price: 5 })
   const [busy, setBusy] = useState(false)
+  // null until the admin has matched the person to PlayCricket or said they are not on it.
+  const [identity, setIdentity] = useState(null)
+  const [prevClub, setPrevClub] = useState(null)
+  const [prior, setPrior] = useState(null) // { status, found, suggestion }
+  const touched = useRef(false) // the admin has set a role or price by hand
+
+  // Price from the previous club: the club's figures are read on first use, so this
+  // polls while it answers "building" (about two minutes at most) and then stops.
+  const participantId = identity?.kind === 'linked' ? identity.participant_id : null
+  useEffect(() => { setPrevClub(participantId ? (identity.clubs || [])[0] || null : null); setPrior(null) }, [participantId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!participantId || !prevClub) { setPrior(null); return undefined }
+    let alive = true, timer = null, tries = 0
+    const poll = async () => {
+      try {
+        const r = await api.fantasyPriorRecord(season.id, { participantId, clubId: prevClub.id, clubName: prevClub.name })
+        if (!alive) return
+        setPrior(r)
+        if (r.status === 'ready' && r.suggestion && !touched.current) {
+          setNp((n) => ({ ...n, role: r.suggestion.role, price: r.suggestion.price }))
+        }
+        if (r.status === 'building' && ++tries < 30) timer = setTimeout(poll, 4000)
+      } catch (e) { if (alive) setPrior({ status: 'error', message: e.message }) }
+    }
+    poll()
+    return () => { alive = false; clearTimeout(timer) }
+  }, [participantId, prevClub?.id, season.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const search = async () => {
     setBusy(true)
@@ -250,9 +278,13 @@ export function PoolManager({ season, flash, fail, onChanged }) {
     catch (e) { fail(e) }
   }
   const createNew = async () => {
-    if (!np.name.trim()) return
-    try { await api.fantasyAddNewPlayer(season.id, { name: np.name, role: np.role, price: +np.price }); flash('Player created and added.'); setNp({ name: '', role: 'batter', price: 5 }); await onChanged() }
-    catch (e) { fail(e) }
+    if (!np.name.trim() || !identity) return
+    try {
+      await api.fantasyAddNewPlayer(season.id, { name: np.name, role: np.role, price: +np.price, participant_id: participantId })
+      flash(participantId ? 'Player created, linked to PlayCricket and added.' : 'Player created and added.')
+      setNp({ name: '', role: 'batter', price: 5 }); setIdentity(null); touched.current = false
+      await onChanged()
+    } catch (e) { fail(e) }
   }
 
   return (
@@ -277,17 +309,55 @@ export function PoolManager({ season, flash, fail, onChanged }) {
       </div>
       <div className="border-t pb-hairline pt-3">
         <h3 className="font-display font-bold mb-1">New player</h3>
-        <p className="text-xs text-pb-faint mb-2">For someone not in the data yet. They score 0 until their games sync to this record.</p>
+        <p className="text-xs text-pb-faint mb-2">
+          For someone who has joined from another club, or is new. Match them to PlayCricket so their games sync to
+          this record; without that they score 0 all season.
+        </p>
         <div className="flex flex-wrap gap-2 items-end">
           <input value={np.name} onChange={e => setNp({ ...np, name: e.target.value })} placeholder="Name"
-            className="rounded border pb-hairline bg-pb-surface px-3 py-1.5 text-sm" />
-          <select value={np.role} onChange={e => setNp({ ...np, role: e.target.value })}
-            className="rounded border pb-hairline bg-pb-surface px-2 py-1.5 text-sm">
+            className="rounded border pb-hairline bg-pb-surface px-3 py-1.5 text-sm" data-testid="fp-new-name" />
+        </div>
+        <div className="mt-3"><PlayCricketMatch name={np.name} value={identity} onChange={setIdentity} compact /></div>
+
+        {participantId && (
+          <div className="mt-3 rounded-lg border border-pb-hairline bg-pb-surface2 p-3 text-sm" data-testid="fp-prior">
+            <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1.5">Price from a previous club</p>
+            {(identity.clubs || []).length > 0 ? (
+              <div className="flex flex-wrap gap-x-4 gap-y-1 mb-2">
+                {identity.clubs.map(c => (
+                  <label key={c.id} className="inline-flex items-center gap-1.5 text-xs cursor-pointer">
+                    <input type="radio" name="fp-prev-club" checked={prevClub?.id === c.id} onChange={() => setPrevClub(c)} className="accent-pb-accent" />
+                    {c.name}
+                  </label>
+                ))}
+              </div>
+            ) : <p className="text-xs text-pb-faint mb-2">PlayCricket lists no previous club for them. Set a price yourself.</p>}
+            {prior?.status === 'building' && <p className="text-xs text-pb-faint" data-testid="fp-prior-building">Reading {prevClub?.name}'s figures for the first time. This can take a minute or two; you can set a price yourself in the meantime.</p>}
+            {prior?.status === 'unavailable' && <p className="text-xs text-pb-faint">No Cricket Australia record for that club (a representative side, perhaps). Pick another or set a price yourself.</p>}
+            {prior?.status === 'error' && <p className="text-xs text-pb-red">{prior.message}</p>}
+            {prior?.status === 'ready' && !prior.found && <p className="text-xs text-pb-faint" data-testid="fp-prior-none">No games found for them at {prevClub?.name} in the last few seasons. Set a price yourself.</p>}
+            {prior?.status === 'ready' && prior.found && !prior.suggestion && <p className="text-xs text-pb-faint">They have no games at {prevClub?.name} inside this season's pricing window. Set a price yourself.</p>}
+            {prior?.status === 'ready' && prior.suggestion && (
+              <p className="text-xs" data-testid="fp-prior-suggestion">
+                Suggested <strong>{prior.suggestion.role}</strong> at <strong>{prior.suggestion.price}</strong>, from{' '}
+                {prior.suggestion.basis.matches} matches, {prior.suggestion.basis.runs} runs and {prior.suggestion.basis.wickets} wickets
+                at {prevClub?.name} since {prior.suggestion.basis.from_year}. Boundaries aren't counted, so a big hitter reads slightly cheap.
+              </p>
+            )}
+          </div>
+        )}
+
+        <div className="mt-3 flex flex-wrap gap-2 items-end">
+          <select value={np.role} onChange={e => { touched.current = true; setNp({ ...np, role: e.target.value }) }}
+            className="rounded border pb-hairline bg-pb-surface px-2 py-1.5 text-sm" data-testid="fp-new-role">
             {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
           </select>
-          <input type="number" min="0" value={np.price} onChange={e => setNp({ ...np, price: e.target.value })}
-            className="w-24 rounded border pb-hairline bg-pb-surface px-2 py-1.5 text-sm" placeholder="Price" />
-          <button onClick={createNew} className="px-3 py-1.5 rounded bg-pb-accent text-white text-sm">Create &amp; add</button>
+          <input type="number" min="0" value={np.price} onChange={e => { touched.current = true; setNp({ ...np, price: e.target.value }) }}
+            className="w-24 rounded border pb-hairline bg-pb-surface px-2 py-1.5 text-sm" placeholder="Price" data-testid="fp-new-price" />
+          <button onClick={createNew} disabled={!np.name.trim() || !identity}
+            title={identity ? undefined : 'Match them to PlayCricket, or say they are not on it yet'}
+            className="px-3 py-1.5 rounded bg-pb-accent text-white text-sm disabled:opacity-50" data-testid="fp-new-create">Create &amp; add</button>
+          {!identity && <span className="text-xs text-pb-faint">Match to PlayCricket first</span>}
         </div>
       </div>
     </div>

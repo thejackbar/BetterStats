@@ -1,5 +1,113 @@
 # BetterStats — Claude Session Notes
 
+## A hand-made player is matched to PlayCricket before their first game (v9.99.1, Sep 2026)
+
+Reported off a club setting up Fantasy: five players had come across from other
+clubs and were created by hand, and nobody could say whether their stats would
+sync. They would not, and no screen said so.
+
+- **A HAND-MADE PLAYER HAS NO `grassroots_id`, SO THE FIRST SYNCED GAME MINTS A
+  SECOND PLAYER.** `_resolve_org_player` looks a participant GUID up by
+  `(org, grassroots_id)` and mints when it finds none. Every creation path
+  (Add player, Fantasy "new player", a nets registration, promote-a-guest,
+  BetterImport, Import Players, Manual Entries) writes a bare row. The squad
+  pick, the lineup and the Fantasy pool point at the hand-made record, the games
+  land on the duplicate, and the hand-made one scores nothing all season.
+- **THE ADD PLAYER FORM'S "Player ID" BOX NEVER DID THIS.** It writes
+  `playhq_id`, which nothing in the sync reads (`_backfill_player_playhq_ids` went
+  with the Partner sync). It is relabelled "for reference only". A club naturally
+  guesses it is the matching key, which is exactly what was asked about.
+- **THE SEARCH ID IS THE PARTICIPANT ID, checked live rather than assumed.**
+  `api.playcommunity.pulselive.com/ca-search` (already used by BetterScout) returns
+  the same GUID as `id` in a club's `/participants/organisations/{org}/*-statistics`
+  feed and as `participantId` on a scorecard. Twelve players taken from one club's
+  feed and searched came back with their exact GUID for ten; the two misses were
+  common names past the first page (now two pages are read, and a capped result
+  offers a club filter). **The feed writes "Surname, First" and the search needs
+  "First Last"**; the comma form returns nothing.
+- **THERE IS NO WAY TO ASK CRICKET AUSTRALIA FOR ONE PERSON'S RECORD.** The club
+  stats feeds ignore a participant filter (`participantId`, `playerId`, `id` all
+  return the full page) and every per-participant path (`/participants/{id}`, its
+  statistics, `/scores/participants/{id}/matches`) is a 403. A previous-club record
+  therefore means reading that club's season feeds. `iq_scout._build_career`
+  already does exactly that and caches it, so Fantasy reuses it.
+- **THE CAREER CACHE IS KEYED BY THE PRICING WINDOW.** BetterIQ reads
+  `career::<org>` and assumes ten years; a three-year build under that key would
+  hand IQ a shorter window with nothing to say so. Fantasy uses
+  `career{N}y::<org>` (N capped at 5), so the two never collide. The first build
+  for a club is a minute or so of public calls, so the route answers `building`
+  and the screen polls (at most about two minutes) while the admin can type a
+  price instead.
+- **THE PRICE IS THE CLUB'S OWN BASELINE, NOT A SECOND FORMULA.**
+  `fantasy_engine.suggest_from_career` feeds `_baseline_price` the same fields, in
+  the same window, that a club's own players go through. Two gaps are said on the
+  screen: the aggregates carry no fours or sixes (a big hitter reads slightly
+  cheap) and no bowling innings (a bowler is recognised by wickets and balls
+  bowled). Nothing inside the window is no suggestion, never an invented price.
+- **NOTHING ABOUT THE PERSON'S OTHER CLUBS IS STORED.** Search results are shown
+  and discarded; only the confirmed GUID is written. The previous club's figures
+  go into a price, never into this club's stats tables (the cross-club leak this
+  file already records several times).
+- **AN IDENTITY HAS ONE HOLDER PER CLUB.** `uq_player_org_grassroots` enforces it,
+  and `player_identity.holders_of` reports WHO first, so the screen says "already
+  in your club as X" and offers to open that player instead of failing on the
+  index. A legacy raw-GUID player (whose `id` IS the participant id) is found
+  either way. Linking an identity someone else holds is a 409, not a link: that is
+  a duplicate for Merge Players.
+- **THE PLAYER'S OWN ID IS NEVER CHANGED.** Squads, availability, lineups and
+  Fantasy picks all key on it. Only `grassroots_id` is set, and the sync's
+  `pid_by_guid` map (built from that column, in both the aggregate and the
+  game-level pass) already copes with an id that differs from the GUID.
+- **THE ADMIN MUST CHOOSE BEFORE CREATE IS ENABLED.** Match and confirm "joining
+  <club>", or say "not on PlayCricket yet". A form that lets it be skipped gets
+  skipped, and the duplicate arrives on match day. The profile picker has no
+  "not on PlayCricket" escape (that is a creation-time answer) and writes nothing
+  until Link is pressed.
+- **THE SYNC IS THE SAFETY NET FOR THE PATHS THE PICKER DOES NOT COVER.**
+  `player_identity.load_unlinked_candidates` finds hand-made players holding NO
+  record of any kind (no season stats, innings, spells, appearances, imported or
+  manual rows, no `grassroots_id`, no `playhq_id`); `unique_candidate` adopts one
+  only when exactly one fits AND the feed itself does not name two people alike
+  (a father and son). Only a season in the last two years may adopt: a first-seen
+  GUID in an old season is history, not a debutant. The update is guarded on the
+  player still being unlinked, and the sync reports `players_linked`. Anything
+  less certain is left for Merge Duplicates.
+- **A PLAYER WHO HOLDS ANY RECORD IS NEVER ADOPTED**, which is what keeps this
+  from becoming a second, guessing merge. A CricketStatz or BetterImport player
+  has stats, so a same-named CA player is still a Merge Duplicates decision.
+- **NOT BUILT**: the picker is on Add player, Fantasy and the profile. Nets
+  registration approval, promote-a-guest and the two importers still create bare
+  rows and rely on the sync adoption above. The search endpoint is undocumented
+  like every other CA host here, so every call degrades to "no match" and the
+  admin can always say the person is not on PlayCricket yet.
+- **Verified against a real Postgres** (`verify_player_identity.py`, 82 checks
+  through the shipped service and route bodies with the upstream search stubbed:
+  the comma name searched First Last, a second page only when the first is full,
+  the cache, a person marked when registered here or already in the roster, never
+  another club's, one holder per identity, every creation route, linking and its
+  four refusals, the sync adoption and each refusal, and the pricing) **with two
+  control runs**: the previous commit REPORTS the feature absent; with the
+  ambiguity, feed and record guards neutered, 5 fail. **Driven in Chromium**
+  (`verify_player_identity_browser.mjs`, 46: the gate, the confirm step naming the
+  club, the exact payload for a matched and an unmatched player, a capped search,
+  a failed search, the profile link writing nothing until Link, the Fantasy price
+  polling and an admin price never overwritten, no overflow at 390px) **with a
+  control run** that reports each check rather than crashing.
+- **THE BROWSER FOUND A REAL BUG THE BACKEND COULD NOT.** A club filter typed for
+  one search kept hiding results after the search changed to one that was not
+  capped, behind a box that was no longer on screen. It applies only to a capped
+  search now and clears on every new one.
+- **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN, hit again.** The first
+  control died on the first absent locator after six checks. Every read and press
+  in the suite goes through `has`/`press`/`put`/`textOf` now. Several checks also
+  passed their detail string in the expected-value slot of `check(label, got,
+  want)`, which reports a passing result as a failure; the detail is not an
+  argument there.
+- **THE LOCAL HARNESS**: a system `cryptography` without its `cffi` binding panics
+  on `import jose` before any test runs. `pip install --ignore-installed cffi
+  cryptography` fixes it. Postgres here answers on TCP with a password set for the
+  `postgres` user; the socket wants peer auth as that OS user.
+
 ## BetterCricket's messages on the club admin dashboard (migration 312, v9.99.0, Oct 2026)
 
 Asked for: a super admin sends a one-line message visible only on the Club

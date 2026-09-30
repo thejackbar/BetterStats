@@ -22,6 +22,7 @@ import {
 import { splitDisplayName, joinDisplayName } from '../../lib/nameFormat'
 import { useAuth } from '../../contexts/AuthContext'
 import { ADMIN_MODULE_KEYS } from '../../lib/modules'
+import PlayCricketMatch from '../admin/PlayCricketMatch'
 
 const ROLE_LABEL = { '': '—' }
 
@@ -408,7 +409,58 @@ function AliasManager({ playerId }) {
   )
 }
 
-function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, onPhotoChange, heroPhotoUrl, onHeroPhotoChange }) {
+/* ── PlayCricket identity — the participant id the sync attaches games to. A player
+   created by hand has none, so their first synced game would create a second
+   player and leave this one empty. Saves immediately, like AliasManager. ─── */
+function PlayCricketIdentity({ playerId, playerName, linkedInitially }) {
+  const [linked, setLinked] = useState(!!linkedInitially)
+  const [open, setOpen] = useState(false)
+  const [choice, setChoice] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  useEffect(() => { setLinked(!!linkedInitially); setOpen(false); setChoice(null); setErr('') }, [playerId, linkedInitially])
+
+  const save = async () => {
+    if (!choice || choice.kind !== 'linked' || busy) return
+    setBusy(true); setErr('')
+    try {
+      await api.playerIdentityLink(playerId, choice.participant_id)
+      setLinked(true); setOpen(false); setChoice(null)
+    } catch (e) {
+      setErr(e.status === 409 ? `${e.message} Use Merge Players to combine the two records.` : (e.message || 'Could not link'))
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="mt-3 pt-3 border-t border-pb-hairline" data-testid="pc-identity">
+      <div className="text-[11.5px] text-pb-faint mb-1.5">PlayCricket profile</div>
+      {linked ? (
+        <p className="text-[11.5px] text-pb-dim" data-testid="pc-identity-linked">Matched. Their games sync to this player.</p>
+      ) : (
+        <>
+          <p className="text-[11px] text-pb-faintest mb-2">
+            Not matched yet. Match them now so their first game lands on this player instead of creating a second copy.
+          </p>
+          {!open ? (
+            <Btn sm type="button" onClick={() => setOpen(true)}>Find on PlayCricket</Btn>
+          ) : (
+            <div>
+              <PlayCricketMatch name={playerName} value={choice} onChange={setChoice} compact allowNone={false} />
+              <div className="flex items-center gap-2 mt-2">
+                <Btn sm type="button" disabled={!choice || busy} onClick={save}>{busy ? 'Linking…' : 'Link to this player'}</Btn>
+                <button type="button" className="text-[11.5px] underline text-pb-faint hover:text-pb-text" onClick={() => { setOpen(false); setChoice(null) }}>Cancel</button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+      {err && <div className="text-[11px] text-pb-red mt-1.5" data-testid="pc-identity-error">{err}</div>}
+    </div>
+  )
+}
+
+function Details({ draft, set, teams, canEdit, playerId, playerName, identityLinked, photoUrl, onPhotoChange, heroPhotoUrl, onHeroPhotoChange }) {
   const bowlingLabelVal = bowlingLabel(draft.bowling_action, draft.bowling_type)
   const age = ageFromDob(draft.date_of_birth)
   // Where the two KIT SIZES live. They are not on this record and never will
@@ -584,6 +636,7 @@ function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, o
         </label>
       </div>
 
+      {canEdit && playerId && <PlayCricketIdentity playerId={playerId} playerName={playerName} linkedInitially={identityLinked} />}
       {canEdit && playerId && <AliasManager playerId={playerId} />}
     </div>
   )
@@ -655,7 +708,7 @@ export function Profile({ profile, draft, setDraft, dirty, saved, onSave, canEdi
         <Snapshot snapshot={profile.snapshot} squad={squad} draft={draft}
           player={profile} onEditAvail={onEditAvail} canEditAvail={canEditAvail} />
         <Details draft={draft} set={set} teams={profile._teams || []}
-          canEdit={canEdit} playerId={profile.id} playerName={profile.name}
+          canEdit={canEdit} playerId={profile.id} playerName={profile.name} identityLinked={profile.identity_linked}
           photoUrl={profile.photo_url} onPhotoChange={onPhotoChange}
           heroPhotoUrl={profile.hero_photo_url} onHeroPhotoChange={onHeroPhotoChange} />
       </div>

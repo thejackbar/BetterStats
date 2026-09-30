@@ -5,6 +5,7 @@ import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import { nameMatchesSearch, formatPlayerName, joinDisplayName, nameSortKey } from '../../lib/nameFormat'
 import { ALPHABET, RANGES, letterOfName, rangeOfName, groupByLetter } from '../../lib/playerAlphabet'
 import { useAuth } from '../../contexts/AuthContext'
+import PlayCricketMatch from '../../components/admin/PlayCricketMatch'
 import { CAP } from '../../lib/capabilities'
 import { PbSpinner } from '../../lib/presskit'
 import { bowls, bowlingLabel } from '../../lib/playerAttributes'
@@ -220,6 +221,8 @@ export default function AdminPlayers() {
   const [showCreate, setShowCreate] = useState(false)
   const [createForm, setCreateForm] = useState({ first_name: '', last_name: '', playhq_id: '', display_first: '', display_last: '' })
   const [creating, setCreating] = useState(false)
+  // null until the admin has matched the person to PlayCricket or said they are not on it.
+  const [identity, setIdentity] = useState(null)
   const [createMsg, setCreateMsg] = useState('')
   const [editingId, setEditingId] = useState(null) // player id or null
 
@@ -322,10 +325,12 @@ export default function AdminPlayers() {
         last_name: createForm.last_name.trim(),
         playhq_id: createForm.playhq_id.trim() || null,
         display_name_override: joinDisplayName(createForm.display_first, createForm.display_last) || null,
+        participant_id: identity?.kind === 'linked' ? identity.participant_id : null,
       }
       const created = await api.adminCreatePlayer(payload)
       setPlayers(ps => [...ps, created])
       setCreateForm({ first_name: '', last_name: '', playhq_id: '', display_first: '', display_last: '' })
+      setIdentity(null)
       setShowCreate(false)
       setMsg('Player created')
       setTimeout(() => setMsg(''), 2500)
@@ -400,7 +405,15 @@ export default function AdminPlayers() {
               </div>
             </div>
             <div className="mb-3">
-              <label className="font-mono text-[10px] text-pb-faintest block mb-1">Player ID (optional)</label>
+              <PlayCricketMatch
+                name={`${createForm.first_name} ${createForm.last_name}`.trim()}
+                value={identity}
+                onChange={setIdentity}
+                onUseExisting={(p) => { setShowCreate(false); setEditingId(p.id) }}
+              />
+            </div>
+            <div className="mb-3">
+              <label className="font-mono text-[10px] text-pb-faintest block mb-1">PlayHQ profile ID (optional, for reference only)</label>
               <input type="text" value={createForm.playhq_id}
                 onChange={e => setCreateForm(f => ({ ...f, playhq_id: e.target.value }))}
                 className="w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm font-mono focus:outline-none focus:border-pb-amber"
@@ -421,11 +434,13 @@ export default function AdminPlayers() {
               <p className="font-mono text-[10px] text-pb-faintest mt-1">Leave blank to show the synced name. Sorted by surname.</p>
             </div>
             <div className="flex items-center gap-3">
-              <button type="submit" disabled={creating}
+              <button type="submit" disabled={creating || !identity}
+                title={identity ? undefined : 'Match them to PlayCricket, or say they are not on it yet'}
                 className="px-4 py-1.5 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50"
                 style={{ background: 'var(--pb-accent)' }}>
                 {creating ? 'CREATING…' : 'CREATE PLAYER'}
               </button>
+              {!identity && <span className="font-mono text-[10px] text-pb-faint">Match to PlayCricket first</span>}
               {createMsg && <span className="font-mono text-[11px] text-pb-red">{createMsg}</span>}
             </div>
           </form>

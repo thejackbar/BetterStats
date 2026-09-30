@@ -7,7 +7,7 @@ from datetime import datetime, timezone, date, timedelta
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete, text
+from sqlalchemy import select, delete, text, update
 from sqlalchemy.sql import func
 
 from app.models.db import (
@@ -100,6 +100,9 @@ async def _resolve_org_player(
     grassroots_guid: str,
     name: str,
     merged_away: dict,
+    adopt_candidates: Optional[dict] = None,
+    feed_name_counts: Optional[dict] = None,
+    adopted: Optional[list] = None,
 ) -> Optional[uuid.UUID]:
     """Resolve a CA participant GUID to this org's player id, creating a per-club
     player (id = uuid5(org, guid)) the first time the org sees that GUID.
@@ -118,6 +121,29 @@ async def _resolve_org_player(
     # resurrect it; the caller redirects its stats to the kept player.
     if grassroots_guid in merged_away:
         return None
+    # A player somebody created by hand ahead of their first game (Add player, a
+    # nets registration, an import) has no grassroots_id, so without this the
+    # participant below would be minted as a SECOND player and the hand-made one,
+    # the record a squad or a Fantasy pick points at, would sit empty. Adopt it
+    # only when it is the one unambiguous, record-free match; see
+    # player_identity.unique_candidate for what is refused.
+    if adopt_candidates:
+        from app.services import player_identity
+        cid = player_identity.unique_candidate(adopt_candidates, name, feed_name_counts or {})
+        if cid is not None:
+            res = await session.execute(
+                update(Player).where(Player.id == cid, Player.grassroots_id.is_(None))
+                .values(grassroots_id=grassroots_guid)
+            )
+            if res.rowcount == 1:
+                org_player_map[grassroots_guid] = cid
+                for lst in adopt_candidates.values():
+                    if cid in lst:
+                        lst.remove(cid)
+                if adopted is not None:
+                    adopted.append((str(cid), name))
+                logger.info(f"sync: linked hand-made player {cid} to participant {grassroots_guid} ({name})")
+                return cid
     guid_uuid = _parse_uuid(grassroots_guid)
     # Only mint a per-club uuid5 id when the raw GUID is ALREADY a player id in
     # another club (the genuine shared-participant collision). Otherwise keep
@@ -838,6 +864,18 @@ async def _sync_organisation_impl(
             if _ggid:
                 org_grade_map[str(_ggid)] = _grid
 
+        # Hand-made players a first-seen participant may be tied to (see
+        # _resolve_org_player). Loaded once per run; never allowed to fail a sync.
+        adopt_candidates: dict = {}
+        players_adopted: list = []
+        try:
+            from app.services import player_identity
+            adopt_candidates = await player_identity.load_unlinked_candidates(session, org_id)
+        except Exception as _e:
+            await session.rollback()
+            logger.warning(f"sync: could not load hand-made players to link: {_e}")
+            adopt_candidates = {}
+
         # The seasons this run actually touched, and the players whose season
         # aggregates it rewrote. Both are the whole club on a full run and a
         # short list on an incremental one, which is what lets the passes
@@ -970,9 +1008,20 @@ async def _sync_organisation_impl(
             # Resolve each CA participant GUID to this org's player id, minting a
             # per-club player (uuid5(org, guid)) for any GUID the org hasn't seen
             # before. Merged-away GUIDs are skipped (not resurrected).
+            # Only a recent season can be somebody's first: a first-seen GUID in
+            # an old season is history the club has simply not synced before.
+            _feed_names: dict = {}
+            _adopt_here = None
+            if adopt_candidates and (year is None or year >= datetime.now(timezone.utc).year - 1):
+                from app.services.player_aliases import normalise_name_key as _nk
+                for _pd in player_data.values():
+                    _k = _nk(_pd["name"])
+                    _feed_names[_k] = _feed_names.get(_k, 0) + 1
+                _adopt_here = adopt_candidates
             for pid, pdata in player_data.items():
                 await _resolve_org_player(
-                    session, org_id, org_player_map, str(pid), pdata["name"], merged_away
+                    session, org_id, org_player_map, str(pid), pdata["name"], merged_away,
+                    adopt_candidates=_adopt_here, feed_name_counts=_feed_names, adopted=players_adopted,
                 )
             await session.commit()
 
@@ -1068,6 +1117,7 @@ async def _sync_organisation_impl(
 
             await session.commit()
             stats["player_seasons"] += len(player_data)
+            stats["players_linked"] = len(players_adopted)  # hand-made players tied to their CA profile
             stats["season_stats"] += len(player_data)
             logger.info(f"Season {season_data.get('name')}: {len(player_data)} players synced")
             if run_id:
