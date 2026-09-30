@@ -107,6 +107,30 @@ for (const [id, label] of Object.entries(GAMES)) {
   await page.waitForSelector('text=INNINGS', { timeout: 20000 }).catch(() => {})
   const r = await readPage()
   ck('20 Feb: WON sits on Mt Gambier, not Portland', r.away?.won && !r.home?.won, JSON.stringify([r.home, r.away]))
+  // Reported: the centre read "Lost By 30 Runs" over an unnamed "won by 30
+  // runs", a contradiction in one column. The winner is named instead.
+  const centre = await page.evaluate(() => {
+    const grid = document.querySelector('.pb-card .grid')
+    return grid ? grid.children[1].innerText.replace(/\s+/g, ' ').trim() : ''
+  })
+  ck('20 Feb: the centre names the winner and the margin',
+     /Mt\. Gambier Over 60s won by 30 runs/i.test(centre), centre)
+  ck('20 Feb: the club\'s own "Lost By" sentence is not set beside it', !/Lost By/i.test(centre), centre)
+}
+
+// A hand-entered result with no margin we can work out still shows as written.
+{
+  const g = renamed(load('588030cf-43f2-4d4d-81eb-e5ce955b7390'))
+  g.winning_team = null
+  current = g
+  await page.goto(`${BASE}/games/588030cf-43f2-4d4d-81eb-e5ce955b7390`)
+  await page.waitForSelector('text=INNINGS', { timeout: 20000 }).catch(() => {})
+  const centre = await page.evaluate(() => {
+    const grid = document.querySelector('.pb-card .grid')
+    return grid ? grid.children[1].innerText.replace(/\s+/g, ' ').trim() : ''
+  })
+  ck('with no recorded winner the club\'s own result line still shows', /Lost By 30 Runs/i.test(centre), centre)
+  ck('and no unnamed margin is drawn beside it', !/won by/i.test(centre), centre)
 }
 
 // Two sides whose names share only an age band are two sides: every innings

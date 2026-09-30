@@ -246,6 +246,8 @@ function WinnerTag() {
   )
 }
 
+const RESULT_CODES = new Set(['WIN', 'LOSS', 'DRAW', 'TIE', 'NO_RESULT', 'N/R'])
+
 function MatchHeader({ game, innings }) {
   const dateStr = game.played_at
     ? new Date(game.played_at).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
@@ -295,6 +297,11 @@ function MatchHeader({ game, innings }) {
   }
   const winner = (game.winning_team || '').trim()
   const side = winnerSide(winner, homeTeam, awayTeam)
+  // A hand-entered result is the club's own sentence ("Lost By 30 Runs"),
+  // written from their side. In the neutral centre of the header it sat right
+  // beside an unnamed "won by 30 runs" and read as a contradiction, so when
+  // the winner and margin are known the header names the winner instead.
+  const sentenceResult = !!game.result && !RESULT_CODES.has(game.result)
   const homeWon = side === 'a'
   const awayWon = side === 'b'
 
@@ -343,10 +350,16 @@ function MatchHeader({ game, innings }) {
       <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 sm:gap-4 px-2 sm:px-4 py-1">
         <Side label={homeAwayKnown ? 'HOME' : ''} teamName={homeTeam} inns={homeInns} won={homeWon} align="left" />
         <div className="flex flex-col items-center justify-center gap-1.5 px-2 min-w-[90px] sm:min-w-[130px]">
-          <ResultPill result={game.result || 'N/R'} />
-          {margin && (
+          {!sentenceResult && <ResultPill result={game.result || 'N/R'} />}
+          {margin && winner ? (
+            <div className="font-mono text-[10px] text-pb-dim text-center leading-snug" data-testid="match-margin">
+              <span className="text-pb-text font-bold">{winner}</span> {margin}
+            </div>
+          ) : sentenceResult ? (
+            <ResultPill result={game.result} />
+          ) : margin ? (
             <div className="font-mono text-[10px] text-pb-faint text-center leading-snug">{margin}</div>
-          )}
+          ) : null}
           {(dateStr || venue) && (
             <div className="font-mono text-[9px] tracking-wide2 text-pb-faintest text-center mt-1">
               {dateStr}{venue ? <><br />{venue}</> : ''}
