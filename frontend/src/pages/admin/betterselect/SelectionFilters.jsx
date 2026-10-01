@@ -62,7 +62,7 @@ function Check({ label, checked, onChange, dot }) {
   )
 }
 
-export default function SelectionFilters({ filters, sort, setSort, squadOptions, yearsF, setYearsF, count, total, flags, rules }) {
+export default function SelectionFilters({ filters, sort, setSort, squadOptions, yearsF, setYearsF, count, total, inactiveHidden, flags, rules }) {
   const [open, setOpen] = useState(false)
   const { values, search, setSearch, toggle, setValue, setMulti, clearAll, activeCount } = filters
   const hideUnavail = !!values.hideUnavail
@@ -209,7 +209,7 @@ export default function SelectionFilters({ filters, sort, setSort, squadOptions,
         </div>
       )}
 
-      <div className="text-[11.5px] text-pb-faint pb-num">{count} of {total} shown</div>
+      <div className="text-[11.5px] text-pb-faint pb-num">{count} of {total} shown{inactiveHidden > 0 ? ` · ${inactiveHidden} inactive not shown` : ''}</div>
     </div>
   )
 }

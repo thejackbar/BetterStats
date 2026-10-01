@@ -614,8 +614,12 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             "display_name": p.display_name,
             "player_role": p.player_role,
             "skill_positions": p.skill_positions or [],
-            "squads": sorted(squads.get(pid, [])),
-            "squad_team_id": sq_tid,
+            # A player marked inactive is not in a squad, whatever a legacy
+            # team_members row or their old appearances still say. Eligibility
+            # (tier, gender wall) is left as computed so BetterIQ still judges
+            # a saved pick of them the way it always has.
+            "squads": [] if manual_inactive else sorted(squads.get(pid, [])),
+            "squad_team_id": None if manual_inactive else sq_tid,
             "availability": avail.get(pid, "NO_RESPONSE"),
             "availability_reason": avail_reason.get(pid),
             "last_played": lp.isoformat() if lp else None,
@@ -642,7 +646,7 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             "clash": clash.get(pid, []),
             "clash_detail": clash_detail.get(pid, []),
             "clash_blocks": _clash_blocks(fx_team_seq, clash_seqs.get(pid, [])),
-            "squad_match": squad_match,
+            "squad_match": squad_match and not manual_inactive,
             "tier": tier,
             "gender_ok": gender_ok,
             "recent_ok": recent_ok,

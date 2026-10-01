@@ -1155,3 +1155,7 @@ design note: `docs/betterselect-self-availability.md`.
   "View Public Page" in `AdminLayout.jsx` header (→ `/{club_slug}`).
 
 <!-- END original CLAUDE.md L12985-13037 -->
+
+## v9.102.3: inactive players out of the selection pool
+
+The selection board's Available pool listed players marked inactive and tagged them with a squad (legacy `team_members` rows plus recent appearance team names). `assemble_selection` now sends `squads: []`, `squad_team_id: None` and `squad_match: False` for `status == 'inactive'`, leaving tier and `gender_ok` untouched so BetterIQ still flags a saved inactive pick. `AdminSelection.jsx` drops `is_inactive` from `available` and `SelectionFilters` shows "N inactive not shown". Inactive players already in the saved XI still render in their slot. No data was changed: old `team_members` rows for inactive players remain until a repair script clears them.
