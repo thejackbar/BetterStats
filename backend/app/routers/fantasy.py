@@ -15,6 +15,7 @@ its public router land in later phases per the spec's phase plan.
 """
 from __future__ import annotations
 
+import logging
 import secrets
 import uuid
 from datetime import date, datetime, timezone
@@ -36,8 +37,11 @@ from app.models.db import (
 )
 from app.services import fantasy_engine, fantasy_draft
 from app.services.fantasy_scoring import DEFAULT_SCORING, DEFAULT_RULES
+from app.services.session_safety import rollback_keeping
 
-router = APIRouter(prefix="/club-admin/fantasy", tags=["club-admin-fantasy"])
+logger = logging.getLogger(__name__)
+
+router =APIRouter(prefix="/club-admin/fantasy", tags=["club-admin-fantasy"])
 
 _require = Depends(require_cap(MANAGE_FANTASY))
 
@@ -169,6 +173,14 @@ async def create_season(body: SeasonCreate, club=Depends(get_current_club), db: 
     if org is not None and not org.fantasy_link_token:
         org.fantasy_link_token = secrets.token_urlsafe(24)
     await db.commit()
+    # Pull the draw from Play-Cricket straight away so a new season already has
+    # its rounds. Best effort: a failure here must never undo the season.
+    try:
+        await fantasy_engine.generate_rounds(db, fs, refresh=True)
+        await db.commit()
+    except Exception:
+        logger.exception("fantasy: auto round generation failed for season %s", fs.id)
+        await rollback_keeping(db, fs)
     return {"season": _season_dict(fs), "created": True}
 
 
@@ -188,11 +200,12 @@ async def build_pool(season_id: str, club=Depends(get_current_club), db: AsyncSe
 
 @router.post("/season/{season_id}/generate-rounds")
 async def generate_rounds(season_id: str, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
-    """Group the season-year's games into weekly fantasy rounds."""
+    """Group the season-year's match dates into weekly fantasy rounds, reading the
+    Play-Cricket draw directly (no BetterSelect fixture sync needed)."""
     fs = await _load_season(db, club, season_id)
-    n = await fantasy_engine.generate_rounds(db, fs)
+    res = await fantasy_engine.generate_rounds(db, fs, refresh=True)
     await db.commit()
-    return {"rounds": n}
+    return res
 
 
 @router.get("/season/{season_id}/pool")

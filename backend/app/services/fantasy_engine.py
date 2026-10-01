@@ -19,17 +19,25 @@ environment after migration 087.
 """
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 from collections import defaultdict
-from datetime import datetime, time
+from datetime import date, datetime, time
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.db import Organisation
 from app.services import fantasy_squad, fantasy_draft
+from app.services import grassroots_scores_client as gr
+from app.services import playhq_client
+from app.services.club_match import club_match_keys
 from app.services.fantasy_scoring import (
     DEFAULT_SCORING, classify_role, score_player_round,
 )
+
+logger = logging.getLogger(__name__)
 
 # Recent window (in seasons, inclusive of the current year) used to price form.
 PRICE_WINDOW_YEARS = 3
@@ -46,10 +54,105 @@ def _grade_clause(included_grade_ids, alias: str = "g") -> str:
 
 # ── Round generation ───────────────────────────────────────────────────────────
 
-async def generate_rounds(session: AsyncSession, fs) -> int:
-    """Group the season-year's games into weekly rounds (a club weekend = one
-    ISO week) and upsert ``fantasy_rounds``. Idempotent on round_number; never
-    rewrites a round already marked ``scored``. Returns the round count."""
+async def _discover_grade_guids(org_guid: str, year: int) -> list[str]:
+    """Raw CA grade GUIDs the club fields in the season that starts in ``year``,
+    straight from Grassroots: the club's season list (one call), then the teams
+    of each matching season. Mirrors how ``sync.py`` seeds grades, without
+    writing anything. ``sync`` stamps ``seasons.year`` from the season's start
+    date, so the same rule picks the season here."""
+    seasons = await playhq_client.get_seasons(org_guid)
+    season_ids = [
+        s["id"] for s in seasons
+        if isinstance(s, dict) and s.get("id") and (s.get("startDate") or "")[:4] == str(year)
+    ]
+    found: list[str] = []
+    for sid in season_ids:
+        for t in await playhq_client.get_teams(org_guid, sid):
+            grade_objs = list((t or {}).get("grades") or [])
+            if (t or {}).get("grade"):
+                grade_objs.append(t["grade"])
+            for gd in grade_objs:
+                gid = ((gd or {}).get("id") or "").strip()
+                if gid and gid not in found:
+                    found.append(gid)
+    return found
+
+
+async def _live_calendar_dates(session: AsyncSession, fs, refresh: bool) -> tuple[set[date], int]:
+    """Dates the club plays in the fantasy season-year, read straight from the
+    Play-Cricket (Grassroots) season calendar: every match in each of the
+    season's grades that involves the club, whatever its status.
+
+    This is why generating rounds needs no BetterSelect fixture sync and no
+    played games: before a ball is bowled the stored ``games`` table is empty
+    for the new season and upcoming fixtures are never persisted there. Returns
+    ``(dates, grades_checked)``. A grade whose fetch fails contributes nothing
+    (the client already swallows and logs), so a Play-Cricket blip degrades to
+    "fewer dates", never an error. ``refresh`` bypasses the in-process cache so
+    an admin pressing the button sees a newly published draw."""
+    grades = fs.included_grade_ids or None
+    params = {"org": str(fs.organisation_id), "year": fs.season_year}
+    if grades:
+        params["grades"] = grades
+    rows = (await session.execute(
+        text(f"""
+            SELECT DISTINCT COALESCE(g.grassroots_id, g.id::text) AS guid
+            FROM grades g
+            JOIN seasons s ON s.id = g.season_id
+            WHERE s.organisation_id = CAST(:org AS UUID) AND s.year = :year
+              {"AND g.id = ANY(:grades)" if grades else ""}
+        """),
+        params,
+    )).all()
+    guids = [r[0] for r in rows if r[0]]
+    if not guids and not grades:
+        # Nothing synced for this year yet (the club has not synced since the
+        # new season was published). Find its grades the way a sync would, but
+        # read-only: the season list, then each season's teams carry the grade
+        # ids. Skipped when the admin restricted the season to chosen grades,
+        # because those are our own ids and so already on file.
+        guids = await _discover_grade_guids(str(fs.organisation_id), fs.season_year)
+    if not guids:
+        return set(), 0
+
+    org = await session.get(Organisation, fs.organisation_id)
+    keys = club_match_keys(org) if org is not None else []
+    org_id = str(fs.organisation_id).lower()
+    batches = await asyncio.gather(
+        *[gr.get_grade_matches(g, force=refresh) for g in guids], return_exceptions=True,
+    )
+    dates: set[date] = set()
+    for matches in batches:
+        if not isinstance(matches, list):
+            continue
+        for m in matches:
+            teams = m.get("teams") or []
+            ours = any(
+                str((t.get("owningOrganisation") or {}).get("id") or "").lower() == org_id
+                or (keys and any(k in (t.get("displayName") or "").lower() for k in keys))
+                for t in teams
+            )
+            if not ours:
+                continue
+            sched = m.get("matchSchedule") or [{}]
+            day = ((sched[0].get("startDateTime") if sched else "") or "")[:10]
+            try:
+                dates.add(date.fromisoformat(day))
+            except ValueError:
+                continue
+    return dates, len(guids)
+
+
+async def generate_rounds(session: AsyncSession, fs, refresh: bool = False) -> dict:
+    """Group the season-year's match dates into weekly rounds (a club weekend =
+    one ISO week) and upsert ``fantasy_rounds``. Idempotent on round_number;
+    never rewrites a round already marked ``scored``.
+
+    Dates come from two places, merged: games already stored (played, synced,
+    manual) and the live Play-Cricket calendar for the season's grades (upcoming
+    and just-played matches not synced yet). Returns ``{rounds, from_games,
+    from_calendar, grades_checked, detail}``; ``detail`` is a plain sentence the
+    admin screen shows, and explains a zero."""
     grades = fs.included_grade_ids or None
     rows = await session.execute(
         text(f"""
@@ -63,13 +166,35 @@ async def generate_rounds(session: AsyncSession, fs) -> int:
         """),
         {"org": str(fs.organisation_id), "year": fs.season_year, "grades": grades},
     )
+    game_dates = {r[0] for r in rows.all()}
+    try:
+        cal_dates, grades_checked = await _live_calendar_dates(session, fs, refresh)
+    except Exception:
+        logger.exception("fantasy: live calendar read failed for season %s", fs.id)
+        cal_dates, grades_checked = set(), 0
+
     # Group play dates into ISO (year, week) buckets.
     weeks: dict[tuple[int, int], list] = defaultdict(list)
-    for (played_at,) in rows.all():
+    for played_at in sorted(game_dates | cal_dates):
         iso = played_at.isocalendar()
         weeks[(iso[0], iso[1])].append(played_at)
+    result = {
+        "rounds": len(weeks), "from_games": len(game_dates),
+        "from_calendar": len(cal_dates), "grades_checked": grades_checked,
+    }
     if not weeks:
-        return 0
+        if grades_checked:
+            result["detail"] = (
+                f"No rounds yet: Play-Cricket has no matches published for the club in "
+                f"the {fs.season_year}/{(fs.season_year + 1) % 100:02d} grades. Try again once the draw is out."
+            )
+        else:
+            result["detail"] = (
+                f"No rounds yet: Play-Cricket lists no {fs.season_year}/{(fs.season_year + 1) % 100:02d} "
+                f"season or grades for the club, so there is no draw to read. Check the season year "
+                f"matches the one the competition runs under."
+            )
+        return result
 
     existing = await session.execute(
         text("SELECT round_number, status FROM fantasy_rounds WHERE fantasy_season_id = CAST(:fs AS UUID)"),
@@ -100,7 +225,8 @@ async def generate_rounds(session: AsyncSession, fs) -> int:
                 "start": dates[0], "end": dates[-1],
             },
         )
-    return len(weeks)
+    result["detail"] = f"Generated {len(weeks)} round{'' if len(weeks) == 1 else 's'} from the {fs.season_year}/{(fs.season_year + 1) % 100:02d} draw."
+    return result
 
 
 # ── Pool build (role + price) ──────────────────────────────────────────────────

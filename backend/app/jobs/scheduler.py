@@ -329,6 +329,10 @@ async def settle_all_fantasy():
         async with async_session_maker() as session:
             try:
                 fs = await session.get(FantasySeason, fs.id)
+                # Keep the round calendar in step with the Play-Cricket draw, so
+                # a fixture published or moved after setup needs no button press.
+                await fantasy_engine.generate_rounds(session, fs)
+                await session.commit()
                 rounds = (await session.execute(
                     select(FantasyRound).where(
                         FantasyRound.fantasy_season_id == fs.id,

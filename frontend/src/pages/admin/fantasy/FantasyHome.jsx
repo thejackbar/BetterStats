@@ -17,7 +17,7 @@ export default function FantasyHome() {
   const [busy, setBusy] = useState('')
   const [year, setYear] = useState(new Date().getFullYear())
 
-  const flash = (m) => { setMsg(m); setErr(null); setTimeout(() => setMsg(null), 4000) }
+  const flash = (m) => { setMsg(m); setErr(null); setTimeout(() => setMsg(null), Math.max(4000, String(m).length * 90)) }
   const fail = (e) => { setErr(e.message || String(e)); setMsg(null) }
 
   const load = useCallback(async () => {
@@ -43,7 +43,7 @@ export default function FantasyHome() {
   const season = data?.season
   const createSeason = run('create', () => api.fantasyCreateSeason(Number(year)), () => 'Season created.')
   const buildPool = run('pool', () => api.fantasyBuildPool(season.id), (r) => `Pool built: ${r.pool} players.`)
-  const genRounds = run('rounds', () => api.fantasyGenerateRounds(season.id), (r) => `Generated ${r.rounds} rounds.`)
+  const genRounds = run('rounds', () => api.fantasyGenerateRounds(season.id), (r) => r.detail || `Generated ${r.rounds} rounds.`)
   const settleDue = run('settle', () => api.fantasySettleDue(season.id), (r) => `Settled ${r.rounds_settled} rounds.`)
   const deleteSeason = async () => {
     if (!window.confirm('Delete this fantasy season and its pool and rounds? This cannot be undone.')) return

@@ -49,6 +49,17 @@ window scores toward that round.
 
 - Rounds are generated from the real fixture and game calendar: games are grouped
   by weekend (default the Saturday plus Sunday window, configurable).
+- The calendar is read from Play-Cricket itself, merged with stored games
+  (`fantasy_engine.generate_rounds`). It never depends on the BetterSelect
+  `fixtures` table or on a sync, because a new season has no stored games and
+  upcoming fixtures are not persisted in `games`. Grades come from the DB for
+  `seasons.year = season_year`, else are discovered live (season list, then each
+  season's teams), the same way `sync.py` seeds them. Runs on season create, on
+  the admin button (cache bypassed) and in the daily settlement job (cached).
+  A scored round is never rewritten. A zero result returns a plain `detail`
+  sentence saying whether the draw is unpublished or the season does not exist.
+  Proof: `backend/verification/verify_fantasy_rounds.py` (real Postgres, with a
+  `--control` run against the previous commit).
 - A round locks at the start time of its first game. Transfers confirmed after
   the lock apply to the next round.
 - A player who turns out in more than one game in a round has those points summed
