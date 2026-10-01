@@ -7,7 +7,7 @@ import uuid
 from app.services import milestone_scan
 from app.services.club_grades import club_game_sql
 from app.services.grade_scope import GradeScope
-from app.services.game_status import NOT_PLAYED_SQL_LIST, appearance_counts_as_match
+from app.services.game_status import appearance_counts_as_match, not_played_game_sql
 from app.services import rate_coverage as rc
 from app.services.game_sides import sides_sql
 
@@ -405,14 +405,16 @@ async def _scoped_games_played(
             SELECT fs.game_id FROM v_effective_fielding_stats fs WHERE fs.player_id = CAST(:pid AS UUID)
             UNION
             -- A bare roster appearance counts as a match played, unless the
-            -- fixture was called off (migration 266). A club names a side for
-            -- a game that is then washed out, and a Saturday nobody played is
-            -- not a match. A game abandoned after play started still counts,
-            -- via whichever of the three branches above holds its rows.
+            -- fixture was called off (migration 266) or its scorecard shows no
+            -- play (`game_status.looks_unplayed_sql`: a COMPLETED game with an
+            -- empty scorecard). A club names a side for a game that
+            -- is then washed out, and a Saturday nobody played is not a match.
+            -- A game abandoned after play started still counts, via whichever
+            -- of the three branches above holds its rows.
             SELECT ga.game_id FROM game_appearances ga
             JOIN games ag ON ag.id = ga.game_id
             WHERE ga.player_id = CAST(:pid AS UUID)
-              AND (ag.status IS NULL OR ag.status NOT IN ({NOT_PLAYED_SQL_LIST}))
+              AND NOT {not_played_game_sql('ag')}
         )
         {season_clause}{scope_clause}
     """
@@ -2412,7 +2414,7 @@ async def _season_by_season_scoped(
                     UNION SELECT ga.game_id FROM game_appearances ga
                           JOIN games ag ON ag.id = ga.game_id
                           WHERE ga.player_id = CAST(:pid AS UUID)
-                            AND (ag.status IS NULL OR ag.status NOT IN ({NOT_PLAYED_SQL_LIST}))
+                            AND NOT {not_played_game_sql('ag')}
                 ) t
                 JOIN scoped_games sg ON sg.game_id = t.game_id
                 GROUP BY sg.sid

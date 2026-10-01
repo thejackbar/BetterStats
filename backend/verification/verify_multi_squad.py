@@ -81,6 +81,8 @@ async def members(db, pid):
 async def main():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Lifespan DDL (main.py), not on the ORM model: the shared "not played" predicate reads it.
+        await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
         # assemble_selection reads the club's association rules and the nets
         # training window — both raw-SQL lifespan tables create_all never built.
         for t in ("net_sessions", "net_attendance"):

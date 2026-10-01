@@ -36,8 +36,8 @@ function CoverageExplainer({ coverage }) {
           Here it runs the other way: we hold {extra_scorecards} more{' '}
           {extra_scorecards === 1 ? 'scorecard' : 'scorecards'} than the season totals
           count, so a filtered figure can be higher than the career total rather than
-          lower. Often these are matches the player was named in without batting,
-          bowling or fielding, which the season totals leave out.
+          lower. A fixture marked completed with nothing on its scorecard is not
+          counted here, but a game that started and was then stopped is.
         </p>
       )}
       <p className="mb-0">

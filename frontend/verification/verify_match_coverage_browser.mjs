@@ -227,8 +227,10 @@ try {
     ck('it names the surplus direction rather than the missing one',
        /runs the other way/.test(after) && !/no scorecard for/.test(after),
        after.slice(0, 400))
-    ck('and says what the extra scorecards usually are: named, did not bat, '
-       + 'bowl or field', /named in without batting/.test(after), after.slice(0, 500))
+    ck('and says what is and is not counted: an empty scorecard is not a match, '
+       + 'a game that started and was stopped is',
+       /nothing on its scorecard is not\s+counted/.test(after)
+       && /started and was then stopped is/.test(after), after.slice(0, 600))
     ck('and says neither figure is adjusted to match the other',
        /Neither is adjusted/.test(after))
     await page.click('button[aria-label="Why these figures differ"]',
