@@ -4,7 +4,7 @@ from typing import Optional
 import uuid
 
 from app.models.db import User, get_db
-from app.routers.auth import get_optional_user, user_can_view_org_private
+from app.routers.auth import get_optional_user, public_junior_hiding, user_can_view_org_private
 from app.services import grade_scope
 from app.services import player_visibility
 from app.services import stats_display
@@ -19,6 +19,21 @@ router = APIRouter(prefix="/leaderboard", tags=["leaderboard"])
 
 def _stringify(rows: list[dict]) -> list[dict]:
     return [{k: str(v) if isinstance(v, uuid.UUID) else v for k, v in r.items()} for r in rows]
+
+
+async def _scope(db: AsyncSession, viewer, org_id, categories, formats, competitions):
+    """The grade scope for a leaderboard, minus what the club hides from THIS viewer.
+
+    A club that hides its juniors (services/junior_hiding) has its junior
+    grades left out of every board for the public, whatever category, format or
+    competition was picked. A club admin, and every club that has not switched
+    it on, gets exactly the scope they always did.
+    """
+    hiding = await public_junior_hiding(db, viewer, org_id, with_players=False)
+    return await grade_scope.resolve_scope(
+        db, org_id, categories, formats=formats, competitions=competitions,
+        hidden_grade_ids=hiding.grade_ids,
+    )
 
 
 async def _visible(db: AsyncSession, org_id: str, viewer, rows: list[dict]) -> list[dict]:
@@ -86,7 +101,7 @@ async def batting_leaderboard(
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions)
+    scope = await _scope(db, viewer, org_id, categories, formats, competitions)
     rows = await get_batting_leaderboard_extended(
         db, org_id, season_id, grade_id, sort_by, limit,
         min_runs=min_runs,
@@ -148,7 +163,7 @@ async def bowling_leaderboard(
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions)
+    scope = await _scope(db, viewer, org_id, categories, formats, competitions)
     rows = await get_bowling_leaderboard_extended(
         db, org_id, season_id, grade_id, sort_by, limit,
         min_overs=min_overs, min_wickets=min_wickets,
@@ -200,7 +215,7 @@ async def fielding_leaderboard(
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions)
+    scope = await _scope(db, viewer, org_id, categories, formats, competitions)
     rows = await get_fielding_leaderboard(db, org_id, season_id, grade_id, sort_by, limit, grade_name, finals_only=finals_only, captain_only=captain_only, gender=gender, overseas=overseas, scope=scope)
     return _stringify(await _visible(db, org_id, viewer, rows))
 
@@ -245,7 +260,7 @@ async def sirs_batting(
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions)
+    scope = await _scope(db, viewer, org_id, categories, formats, competitions)
     return await _visible(db, org_id, viewer, await get_sirs_batting(db, org_id, season_id, grade_name, finals_only, limit, captain_only=captain_only, gender=gender, overseas=overseas, scope=scope))
 
 
@@ -289,7 +304,7 @@ async def sirs_bowling_innings(
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions)
+    scope = await _scope(db, viewer, org_id, categories, formats, competitions)
     return await _visible(db, org_id, viewer, await get_sirs_bowling_innings(db, org_id, season_id, grade_name, finals_only, limit, captain_only=captain_only, gender=gender, overseas=overseas, scope=scope))
 
 
@@ -333,5 +348,5 @@ async def sirs_bowling_match(
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions)
+    scope = await _scope(db, viewer, org_id, categories, formats, competitions)
     return await _visible(db, org_id, viewer, await get_sirs_bowling_match(db, org_id, season_id, grade_name, finals_only, limit, captain_only=captain_only, gender=gender, overseas=overseas, scope=scope))

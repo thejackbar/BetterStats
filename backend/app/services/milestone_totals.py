@@ -222,7 +222,7 @@ async def _auto_widen(session: AsyncSession, org_id) -> bool:
 
 
 async def profile_totals(session: AsyncSession, org_id, pids: Iterable, *,
-                         with_split: bool = True) -> dict[str, dict]:
+                         with_split: bool = True, hidden_grade_ids=()) -> dict[str, dict]:
     """``{pid: {"totals": {...}, "split": {...} | None, "counts": str | None}}``.
 
     ``totals`` is what the player's profile opens on. ``split`` is present only
@@ -234,7 +234,7 @@ async def profile_totals(session: AsyncSession, org_id, pids: Iterable, *,
     ids = _ids(pids)
     if not ids:
         return {}
-    default = await resolve_scope(session, org_id)
+    default = await resolve_scope(session, org_id, hidden_grade_ids=hidden_grade_ids)
     widen = default.category_active and await _auto_widen(session, org_id)
     need_played = widen or with_split
     played_names = await played_grade_names(session, org_id, ids) if need_played else {}
@@ -254,7 +254,8 @@ async def profile_totals(session: AsyncSession, org_id, pids: Iterable, *,
 
     primary: dict[str, dict] = {}
     for key, members in groups.items():
-        scope = default if not key else await resolve_scope(session, org_id, list(key))
+        scope = default if not key else await resolve_scope(
+            session, org_id, list(key), hidden_grade_ids=hidden_grade_ids)
         primary.update(await totals_under(session, org_id, members, scope))
 
     out = {pid: {"totals": primary.get(pid) or _empty(), "split": None, "counts": None}
@@ -271,10 +272,12 @@ async def profile_totals(session: AsyncSession, org_id, pids: Iterable, *,
         return out
     with_junior = await totals_under(
         session, org_id, split_ids,
-        await resolve_scope(session, org_id, list(GRADE_CATEGORIES)))
+        await resolve_scope(session, org_id, list(GRADE_CATEGORIES),
+                            hidden_grade_ids=hidden_grade_ids))
     without_junior = await totals_under(
         session, org_id, split_ids,
-        await resolve_scope(session, org_id, list(DEFAULT_CATEGORIES), judge_primary=True))
+        await resolve_scope(session, org_id, list(DEFAULT_CATEGORIES), judge_primary=True,
+                            hidden_grade_ids=hidden_grade_ids))
     for pid in split_ids:
         w, s, p = with_junior[pid], without_junior[pid], out[pid]["totals"]
         if w == s:

@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.content import blog as blog_content
+from app.services import junior_hiding
 from app.services import instructional_videos as video_svc
 from app.services import webinar
 from app.models.db import Player, Organisation, get_db
@@ -607,6 +608,13 @@ async def _player_html(player_id: str, page_url: str, base: str, db: AsyncSessio
         return None
 
     org = await db.get(Organisation, player.organisation_id) if player.organisation_id else None
+
+    # A junior-only player a club hides from its public Stats gets no share
+    # card either: this is served to crawlers with no signed-in viewer.
+    if org is not None:
+        hiding = await junior_hiding.resolve(db, org.id)
+        if hiding.enabled and str(player.id).lower() in hiding.player_ids:
+            return None
 
     name = player.display_name
     club_name = org.name if org else ""

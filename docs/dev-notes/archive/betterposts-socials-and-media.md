@@ -782,7 +782,7 @@ entry and its file, and drag the order.
 
 <!-- END original CLAUDE.md L10210-10378 -->
 
-## Team of the Week (v9.101.0)
+## Team of the Week (v9.102.0)
 
 Asked for as "a Player of the Match that looks across every fixture in a round and uses the same scoring, with a team of any size from 11 down to 6 and up to 14".
 

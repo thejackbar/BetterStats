@@ -327,6 +327,12 @@ class Organisation(Base):
     # means the sum of every competition listed rather than Cricket Australia's
     # own lifetime totals (frontend: useGradeFilters).
     show_competition_filters = Column(Boolean, nullable=False, server_default="false", default=False)
+    # Hide the club's junior programme from its PUBLIC Stats (migration 315):
+    # junior-only players drop off the roster, search and leaderboards, and
+    # games in competitions tagged junior drop off every public list. Off by
+    # default. Signed-in club admins still see everything. Read through
+    # services/junior_hiding.py, never directly.
+    hide_juniors = Column(Boolean, nullable=False, server_default="false", default=False)
     # Which grade categories count towards this club's stats by default — a
     # JSONB list of grade_labels.GRADE_CATEGORIES keys (migration 228). NULL
     # means no club preference, and the platform default applies: everything
@@ -1248,6 +1254,10 @@ class ClubCompetition(Base):
     # True on a row this app seeded, cleared the moment a person edits it, so a
     # later re-seed can never overwrite a club's own naming.
     is_seeded = Column(Boolean, nullable=False, server_default="false", default=False)
+    # Junior or senior cricket (migration 315). NULL = nobody has said, and the
+    # reader guesses from the name (services/junior_hiding.py). A person's
+    # TRUE/FALSE is never overwritten by sync or a re-seed.
+    is_junior = Column(Boolean, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 

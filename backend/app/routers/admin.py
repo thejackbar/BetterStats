@@ -31,6 +31,7 @@ from app.services.grade_labels import (
 # Reused rather than copied so the two never disagree about what a name is.
 from app.services.import_ingest import _name_parts, _middles_compatible, is_short_form
 from app.services.player_aliases import seed_alias_on_rename
+from app.services import junior_hiding
 from app.services import merge_carry
 from app.services import grade_duplicates
 from app.services.import_reconcile import reconcile_imported_totals
@@ -1454,6 +1455,7 @@ async def delete_club_competition(
         target_id=competition_id, details={},
     )
     await db.commit()
+    junior_hiding.forget(club.id)
     return {"status": "deleted"}
 
 
@@ -1472,6 +1474,7 @@ async def assign_grade_to_competition(
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     await db.commit()
+    junior_hiding.forget(club.id)
     return {"status": "assigned", "season_rows": moved}
 
 
@@ -1486,6 +1489,78 @@ async def reorder_club_competitions(
     await comp_svc.reorder_competitions(db, club.id, req.competition_ids)
     await db.commit()
     return {"status": "reordered"}
+
+
+class CompetitionJunior(BaseModel):
+    # True = junior cricket, False = senior, null = back to the name-based guess.
+    # Read through `model_fields_set` so an absent key is not a reset.
+    is_junior: bool | None = None
+
+
+@router.patch("/competitions/{competition_id}/junior")
+async def tag_competition_junior(
+    competition_id: str,
+    req: CompetitionJunior,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_cap(MANAGE_MERGES)),
+    club: Organisation = Depends(get_current_club),
+):
+    """Tag a competition as junior or senior cricket (migration 315).
+
+    Only ever changes what a club that has switched "hide juniors" on shows its
+    public. A person's tag is never overwritten by sync.
+    """
+    if "is_junior" not in req.model_fields_set:
+        raise HTTPException(status_code=422, detail="is_junior is required (true, false or null)")
+    from app.services import competitions as comp_svc
+    try:
+        await comp_svc.set_competition_junior(db, club.id, competition_id, req.is_junior)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    from app.services.audit_log import log_activity
+    await log_activity(
+        db, org_id=str(club.id), user_id=current_user.id,
+        action="tag_competition_junior", target_type="competition",
+        target_id=competition_id, details={"is_junior": req.is_junior},
+    )
+    await db.commit()
+    junior_hiding.forget(club.id)
+    return {"status": "tagged", "is_junior_tag": req.is_junior}
+
+
+@router.get("/juniors/preview")
+async def hide_juniors_preview(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+):
+    """What "hide juniors" would hide, whether or not the switch is on.
+
+    So a club can check the tags before it turns the switch on: which
+    competitions count as junior, how many grades that takes with it, and every
+    player who would disappear from the public site (with how many games sit in
+    junior grades). A club admin always sees the club whole regardless.
+    """
+    comps = await junior_hiding.competition_tags(db, club.id)
+    grade_ids = await junior_hiding.junior_grade_ids(db, club.id)
+    hidden = await junior_hiding.junior_only_player_ids(db, club.id, grade_ids)
+    names = []
+    if hidden:
+        rows = await db.execute(
+            select(Player.id, Player.name, Player.display_name_override)
+            .where(Player.id.in_([uuid.UUID(h) for h in hidden]))
+        )
+        names = sorted(
+            ({"id": str(pid), "name": override or name} for pid, name, override in rows.all()),
+            key=lambda r: (r["name"] or "").lower(),
+        )
+    return {
+        "enabled": await junior_hiding.org_hides_juniors(db, club.id),
+        "junior_competitions": [c for c in comps if c["is_junior"]],
+        "junior_grade_count": len(grade_ids),
+        "hidden_player_count": len(names),
+        "hidden_players": names[:300],
+    }
 
 
 @router.get("/competitions/grouping")
@@ -1557,6 +1632,7 @@ async def seed_club_competitions(
     from app.services import competitions as comp_svc
     result = await comp_svc.seed_competitions_for_org(db, club.id)
     await db.commit()
+    junior_hiding.forget(club.id)
     return result
 
 

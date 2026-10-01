@@ -4350,6 +4350,15 @@ async def lifespan(app: FastAPI):
         for _stmt in _COMPETITION_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 315: hide a club's junior programme from its public Stats.
+        # A junior/senior tag on each competition plus the club's switch. Same
+        # one-copy rule: this list and alembic's 315 both run
+        # services/junior_hiding_ddl.STATEMENTS. Must follow the competitions
+        # DDL above, which creates the table the first column lands on.
+        from app.services.junior_hiding_ddl import STATEMENTS as _JUNIOR_HIDING_DDL
+        for _stmt in _JUNIOR_HIDING_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 285: importing a club's history from its own public
         # CricketStatz site. Same one-copy rule — this list and alembic's 285
         # both run services/cricketstatz_ddl.STATEMENTS.

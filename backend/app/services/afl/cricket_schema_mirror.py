@@ -73,6 +73,13 @@ SHARED_DDL_MODULES = (
     # BetterSocials is mounted on the football app too, so its saved templates
     # need their table there.
     ("app.services.social_template_ddl", "STATEMENTS"),
+    # Migration 315. Two columns on TABLES THE SHARED ORM MODELS MAP
+    # (`organisations.hide_juniors`, `club_competitions.is_junior`), so the
+    # football database needs them the moment the model does: without them every
+    # `db.get(Organisation, ...)` on football selects a column that is not there.
+    # Cricket runs this list by import, so the literal-statement pass above
+    # cannot see it.
+    ("app.services.junior_hiding_ddl", "STATEMENTS"),
 )
 
 

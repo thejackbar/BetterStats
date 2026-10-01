@@ -11,7 +11,7 @@ from sqlalchemy import text, select
 import uuid
 
 from app.models.db import get_db, Grade, Season, Organisation, ManualPartnershipRecord, User
-from app.routers.auth import get_optional_user, user_can_view_org_private
+from app.routers.auth import get_optional_user, public_junior_hiding, user_can_view_org_private
 from sqlalchemy import select as sa_select
 from app.services import playhq_client
 from app.services import grade_scope
@@ -127,6 +127,7 @@ async def get_records_grades(
     org_id: str,
     season_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    viewer: User | None = Depends(get_optional_user),
 ):
     """Return grades for the org, optionally scoped to a season."""
     q = (
@@ -136,6 +137,9 @@ async def get_records_grades(
     )
     if season_id:
         q = q.where(Grade.season_id == uuid.UUID(season_id))
+    hiding = await public_junior_hiding(db, viewer, org_id, with_players=False)
+    if hiding.active:
+        q = q.where(Grade.id.not_in(list(hiding.grade_ids)))
     result = await db.execute(q.order_by(text("NULLIF(regexp_replace(grades.name, '[^0-9].*', ''), '')::int NULLS LAST"), Grade.name))
     grades = result.scalars().all()
     if grades:
@@ -281,9 +285,17 @@ async def get_records(
     # exactly this transaction and no pooled connection carries it away.
     await _timed("SET LOCAL jit = off", db.execute(text("SET LOCAL jit = off")))
 
+    # Junior grades the club hides from THIS viewer come off every board, and
+    # stay off when a grade is picked below (`formats_only` keeps them).
+    junior_hiding_now = await _timed(
+        "public_junior_hiding", public_junior_hiding(db, viewer, org_id, with_players=False)
+    )
     scope = await _timed(
         "resolve_scope",
-        grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions),
+        grade_scope.resolve_scope(
+            db, org_id, categories, formats=formats, competitions=competitions,
+            hidden_grade_ids=junior_hiding_now.grade_ids,
+        ),
     )
     if grade_id or grade_name:
         scope = scope.formats_only()
@@ -1855,6 +1867,7 @@ async def get_club_records(
         ),
     ),
     db: AsyncSession = Depends(get_db),
+    viewer: User | None = Depends(get_optional_user),
 ):
     """The CLUB's own records — team totals, margins, streaks, seasons.
 
@@ -1863,13 +1876,16 @@ async def get_club_records(
     per-game pull and nothing else, and a reader who opens the Club tab
     shouldn't pay for every batting and bowling board to be computed first.
 
-    No `player_visibility` pass and no `viewer`: nothing here names a player,
-    so there is no hidden player to prune. `gender` and `captain_only` are
-    absent for the same reason — both are attributes of a person, and a team
-    total has neither.
+    No `player_visibility` pass: nothing here names a player, so there is no
+    hidden player to prune. `gender` and `captain_only` are absent for the same
+    reason — both are attributes of a person, and a team total has neither. The
+    `viewer` is only for a club that hides its juniors: a junior fixture is a
+    team total too, and comes off the public record book with the rest.
     """
+    junior_hiding_now = await public_junior_hiding(db, viewer, org_id, with_players=False)
     scope = await grade_scope.resolve_scope(
-        db, org_id, categories, formats=formats, competitions=competitions)
+        db, org_id, categories, formats=formats, competitions=competitions,
+        hidden_grade_ids=junior_hiding_now.grade_ids)
     if grade_id or grade_name:
         # An explicitly picked grade beats the CATEGORY default and keeps the
         # FORMAT half — the same rule get_records applies above.

@@ -557,3 +557,26 @@ async def _unattributed_matches(
         params,
     )
     return int(res.scalar() or 0)
+
+
+def without_competitions(payload, competition_ids):
+    """A breakdown without the given competitions (a club hiding its juniors).
+
+    Handles both shapes the public endpoints return: a dict carrying ``rows``
+    (whose ``total_matches`` is re-summed so it still equals what is listed)
+    and a plain list of rows. Nothing to drop returns the payload untouched, so
+    every other club gets exactly what it always did.
+    """
+    if not competition_ids:
+        return payload
+    drop = {str(c) for c in competition_ids}
+    keep = lambda r: str(r.get("competition_id")) not in drop  # noqa: E731
+    if isinstance(payload, list):
+        return [r for r in payload if keep(r)]
+    if isinstance(payload, dict) and isinstance(payload.get("rows"), list):
+        rows = [r for r in payload["rows"] if keep(r)]
+        out = {**payload, "rows": rows}
+        if "total_matches" in payload:
+            out["total_matches"] = sum(int(r.get("matches") or 0) for r in rows)
+        return out
+    return payload

@@ -73,7 +73,7 @@
 48. A new top-level marketing route is a club slug until four lists know it: `og_preview.RESERVED_ROOT_SEGMENTS`, `FaviconManager.RESERVED_ROOTS`, `SponsorFooter.RESERVED_ROOT_SEGMENTS`, `lib/marketingPaths.MARKETING_PATHS`. Missing the last stacks the club Navbar over `MarketingNav`. Symptom: `/api/clubs/<route>` 404 on every visit.
 49. A sixth top-level nav link overflows at 820px; `Videos` carries `wide` (`hidden lg:block`).
 
-**Team of the week (v9.101.0, `social/totw-templates.jsx`, `social_rounds.social_totw`, `GET /admin/social/totw`)**
+**Team of the week (v9.102.0, `social/totw-templates.jsx`, `social_rounds.social_totw`, `GET /admin/social/totw`)**
 50. The team lives in `selectedPlayers` (each slot carries `totw: {line, grade, opp, points}`), so add, remove and reorder are the lineup's own. The stepper reads `selectedPlayers.length` and never rebuilds from the ranking: growing appends the next ranked players not already picked, shrinking drops from the end, so a hand swap survives. Size is 6 to 14, default 11 (`TOTW_MIN/MAX/DEFAULT`).
 51. Scoring is `_rank_our_side`, the one function behind both the player of the match and the team of the week; change points there and both move. The pool is one entry per player (their better performance, not a sum, so the pick does not go to whoever played most). A layout that takes a variable count sizes cards and rows from the count; root children that are not `div`s must spread `style` to take a z-index, so masthead and footer are plain functions returning a `div`.
 

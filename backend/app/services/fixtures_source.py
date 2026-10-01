@@ -47,7 +47,7 @@ async def _current_grade_rows(db: AsyncSession, org_id) -> list[tuple]:
     return [(r.guid, r.grade_id, r.grade_name, r.season_name) for r in res]
 
 
-async def org_grassroots_fixtures(db: AsyncSession, org) -> list[dict]:
+async def org_grassroots_fixtures(db: AsyncSession, org, hidden_grade_ids=()) -> list[dict]:
     """Upcoming/live fixtures for the org, filtered to its own games.
 
     Each fixture carries ``grade_name``/``season_name`` (resolved from the DB
@@ -60,8 +60,16 @@ async def org_grassroots_fixtures(db: AsyncSession, org) -> list[dict]:
     ``db_grade_id`` — our own ``grades.id`` for the fixture's grade (distinct
     from the raw CA grade guid returned under ``grade_id``), for a caller that
     needs to stamp a real FK (e.g. persisting a Fixture row).
+
+    ``hidden_grade_ids`` leaves those grades out, for a public viewer of a club
+    that hides its juniors. Admin callers omit it and see every grade.
     """
     rows = await _current_grade_rows(db, org.id)
+    if hidden_grade_ids:
+        # Junior grades a club hides from its public Stats (services/
+        # junior_hiding): never fetched, so they cost no Grassroots call either.
+        hidden = {str(g) for g in hidden_grade_ids}
+        rows = [r for r in rows if str(r[1]) not in hidden]
     if not rows:
         return []
     meta = {guid: (grade_id, gname, sname) for guid, grade_id, gname, sname in rows}

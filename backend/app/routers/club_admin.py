@@ -33,6 +33,7 @@ from app.auth.modules import (
     STATUS_TRIAL, STATUS_ACTIVE, org_default_trial_days, MODULE_CORE,
     BILLABLE_MODULES, BILLABLE_MODULE_NAMES, billing_key_for, STATUS_PRIORITY,
 )
+from app.services import junior_hiding
 from app.services import module_subscriptions as mod_subs
 from app.services import comms_limits
 from app.services import club_requests
@@ -862,6 +863,10 @@ class SettingsPatch(BaseModel):
     # on, the "All" pill means the sum of every competition rather than Cricket
     # Australia's lifetime totals (see useGradeFilters on the frontend).
     show_competition_filters: Optional[bool] = None
+    # Hide the club's junior programme from its PUBLIC Stats (migration 315):
+    # junior-only players and every game in a competition tagged junior. Off by
+    # default; club admins still see everything. See services/junior_hiding.py.
+    hide_juniors: Optional[bool] = None
     # Who may open a committee document the club uploaded (migration 218).
     # True = the uploader, current Office Bearers and the Main Admin only.
     # False = any committee member who can reach the register.
@@ -1016,6 +1021,7 @@ async def get_settings(
         "effective_rate_minimums": await stats_display.club_rate_minimums(db, club.id),
         "public_header_logo": bool(club.public_header_logo),
         "show_competition_filters": bool(club.show_competition_filters),
+        "hide_juniors": bool(club.hide_juniors),
         "committee_docs_office_bearer_only": bool(club.committee_docs_office_bearer_only),
         "diary_start_month": club.diary_start_month or 7,
         "socials_style": club.socials_style,
@@ -1097,6 +1103,11 @@ async def patch_settings(
         club.public_header_logo = bool(data.public_header_logo)
     if data.show_competition_filters is not None:
         club.show_competition_filters = bool(data.show_competition_filters)
+    if data.hide_juniors is not None:
+        club.hide_juniors = bool(data.hide_juniors)
+        # The cached answer is per club and would otherwise serve the old
+        # switch for up to its TTL.
+        junior_hiding.forget(club.id)
     if data.committee_docs_office_bearer_only is not None:
         club.committee_docs_office_bearer_only = bool(data.committee_docs_office_bearer_only)
     if data.diary_start_month is not None:
