@@ -1,0 +1,218 @@
+"""Hiding a player at their own request (migration 316).
+
+A person who asks to be taken off the public site is not a club's call to
+reverse. ``players.is_public`` (migration 265) already hides a player from the
+public roster, search, profile, leaderboards, records, sitemap and share card.
+This module adds the part that makes it a REQUEST:
+
+  * ``privacy_hidden_at`` / ``_by`` / ``_reason`` on the row, so the reason is
+    written down where the next person looks;
+  * the player's photographs are removed, here and in BetterIQ's scouting copy;
+  * while the marker is set, a club admin's profile edit, a bulk profile import
+    and a photo upload may not switch the player back on;
+  * an audit entry the club can read.
+
+WHAT IT DELIBERATELY DOES NOT DO
+--------------------------------
+It never deletes the ``players`` row or anything the player did. The club's own
+match records (scorecards, partnerships, ladders, the other players' figures)
+hang off it, and a deleted row is simply re-created by the next sync. The row
+stays, marked, which is also why the person is not re-imported.
+
+It does NOT mask the name inside a public scorecard, a fall-of-wickets line or
+a dismissal string ("c Smith b Jones"): those are the match record, and the
+same lines are public on Cricket Australia. See the guide for the open decision.
+
+Photographs cannot be restored by :func:`restore_public`: keeping a copy would
+defeat the request. Only the hidden state comes back.
+"""
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Optional
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.db import ManualEditLog, Player
+
+# What a club admin is told when they try to undo a person's request.
+HOLD_MESSAGE = (
+    "This player asked to be removed from the public website, so they cannot be "
+    "switched back on or given a photo here. Contact BetterSports support if "
+    "that has changed."
+)
+
+AUDIT_HIDE = "privacy_hide"
+AUDIT_RESTORE = "privacy_restore"
+
+
+def is_privacy_hidden(player: Optional[Player]) -> bool:
+    """Did this person ask to be hidden? The one definition every guard reads."""
+    return bool(player is not None and getattr(player, "privacy_hidden_at", None) is not None)
+
+
+def _unlink_upload(photo_url: Optional[str]) -> bool:
+    """Remove a legacy on-disk headshot (``/uploads/players/...``), if there is one."""
+    if not photo_url or not photo_url.startswith("/uploads/players/"):
+        return False
+    p = Path("/app") / photo_url.lstrip("/")
+    existed = p.exists()
+    p.unlink(missing_ok=True)
+    return existed
+
+
+async def holdings(session: AsyncSession, player: Player) -> dict:
+    """Everything we hold against this player, for the access request. Read-only.
+
+    Counts rows in every table with a foreign key to ``players(id)``, read from
+    the live catalogue so a table added later is not missed, plus the places a
+    person can sit WITHOUT a foreign key: BetterIQ's scouting copy (keyed on the
+    Cricket Australia participant id) and the people spine.
+    """
+    fk_tables = (await session.execute(text("""
+        SELECT cl.relname AS tbl, att.attname AS col
+          FROM pg_constraint c
+          JOIN pg_class cl   ON cl.oid = c.conrelid
+          JOIN pg_class ref  ON ref.oid = c.confrelid
+          JOIN pg_attribute att ON att.attrelid = c.conrelid AND att.attnum = ANY(c.conkey)
+         WHERE c.contype = 'f' AND ref.relname = 'players' AND array_length(c.conkey, 1) = 1
+         ORDER BY cl.relname, att.attname
+    """))).fetchall()
+
+    linked: list[dict] = []
+    for tbl, col in fk_tables:
+        # Identifiers come from pg_catalog, never from a caller.
+        n = await session.scalar(
+            text(f'SELECT COUNT(*) FROM "{tbl}" WHERE "{col}" = :pid'), {"pid": player.id}
+        )
+        if n:
+            linked.append({"table": tbl, "column": col, "rows": int(n)})
+
+    scouted = (await session.execute(text("""
+        SELECT id, source, club_name, grade_name,
+               (photo_data IS NOT NULL OR photo_url IS NOT NULL) AS has_photo
+          FROM scouted_players
+         WHERE internal_player_id = :pid
+            OR (CAST(:guid AS TEXT) IS NOT NULL AND grassroots_participant_id = CAST(:guid AS TEXT))
+    """), {"pid": player.id, "guid": player.grassroots_id})).fetchall()
+
+    return {
+        "player": {
+            "id": str(player.id),
+            "name": player.name,
+            "grassroots_id": player.grassroots_id,
+            "organisation_id": str(player.organisation_id) if player.organisation_id else None,
+            "is_public": player.is_public is not False,
+            "has_photo": bool(player.photo_data or player.photo_url),
+            "has_action_photo": bool(player.hero_photo_data or player.hero_photo_url),
+            "has_email": bool(player.email),
+            "has_phone": bool(player.phone),
+            "has_date_of_birth": player.date_of_birth is not None,
+            "privacy_hidden_at": player.privacy_hidden_at.isoformat() if player.privacy_hidden_at else None,
+        },
+        "linked_tables": linked,
+        "scouting_copies": [
+            {"id": str(r[0]), "source": r[1], "club": r[2], "grade": r[3], "has_photo": bool(r[4])}
+            for r in scouted
+        ],
+    }
+
+
+async def hide_at_request(
+    session: AsyncSession,
+    player: Player,
+    *,
+    by: str,
+    reason: str,
+    remove_photos: bool = True,
+) -> dict:
+    """Mark a player hidden at their own request. Idempotent; caller commits.
+
+    Returns what changed, so a script can print it and the audit entry can
+    record it (never the photo bytes).
+    """
+    changed = {"already_hidden": is_privacy_hidden(player), "photos_removed": [], "scouting_photos_cleared": 0}
+
+    before = {
+        "is_public": player.is_public is not False,
+        "privacy_hidden_at": player.privacy_hidden_at.isoformat() if player.privacy_hidden_at else None,
+        "had_photo": bool(player.photo_data or player.photo_url),
+        "had_action_photo": bool(player.hero_photo_data or player.hero_photo_url),
+    }
+
+    player.is_public = False
+    if player.privacy_hidden_at is None:
+        player.privacy_hidden_at = datetime.now(timezone.utc)
+    player.privacy_hidden_by = by
+    player.privacy_hidden_reason = reason
+
+    if remove_photos:
+        if player.photo_data or player.photo_url:
+            _unlink_upload(player.photo_url)
+            player.photo_data = None
+            player.photo_mime = None
+            player.photo_url = None
+            changed["photos_removed"].append("photo")
+        if player.hero_photo_data or player.hero_photo_url:
+            player.hero_photo_data = None
+            player.hero_photo_mime = None
+            player.hero_photo_url = None
+            changed["photos_removed"].append("action photo")
+
+        # BetterIQ keeps its own copy for a scouted opponent, keyed on the
+        # Cricket Australia participant id and, for a club's own player, on
+        # internal_player_id. A scouting card with a photo of him is the same
+        # photograph under another table name.
+        res = await session.execute(text("""
+            UPDATE scouted_players
+               SET photo_data = NULL, photo_mime = NULL, photo_url = NULL
+             WHERE (internal_player_id = :pid
+                    OR (CAST(:guid AS TEXT) IS NOT NULL AND grassroots_participant_id = CAST(:guid AS TEXT)))
+               AND (photo_data IS NOT NULL OR photo_url IS NOT NULL)
+        """), {"pid": player.id, "guid": player.grassroots_id})
+        changed["scouting_photos_cleared"] = res.rowcount or 0
+
+    if player.organisation_id:
+        session.add(ManualEditLog(
+            organisation_id=player.organisation_id,
+            user_id=None,
+            action=AUDIT_HIDE,
+            target_table="players",
+            target_id=str(player.id),
+            summary=f"Hidden from the public site at the player's request ({by})",
+            before_json=before,
+            after_json={"is_public": False, "reason": reason, **{k: v for k, v in changed.items() if k != "already_hidden"}},
+        ))
+    return changed
+
+
+async def restore_public(session: AsyncSession, player: Player, *, by: str) -> dict:
+    """Put a player back on the public site. Photographs are NOT restored."""
+    was = is_privacy_hidden(player)
+    player.is_public = True
+    player.privacy_hidden_at = None
+    player.privacy_hidden_by = None
+    player.privacy_hidden_reason = None
+    if player.organisation_id:
+        session.add(ManualEditLog(
+            organisation_id=player.organisation_id,
+            user_id=None,
+            action=AUDIT_RESTORE,
+            target_table="players",
+            target_id=str(player.id),
+            summary=f"Put back on the public site ({by})",
+            before_json={"privacy_hidden": was},
+            after_json={"is_public": True},
+        ))
+    return {"was_hidden": was}
+
+
+async def load_player(session: AsyncSession, raw_id: str) -> Optional[Player]:
+    try:
+        pid = uuid.UUID(str(raw_id))
+    except (ValueError, TypeError):
+        return None
+    return await session.get(Player, pid)

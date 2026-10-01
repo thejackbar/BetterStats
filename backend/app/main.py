@@ -4359,6 +4359,13 @@ async def lifespan(app: FastAPI):
         for _stmt in _JUNIOR_HIDING_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 316: hide a player at their own request. Three columns on
+        # `players` recording that the person asked. Same one-copy rule: this
+        # list and alembic's 316 both run services/player_privacy_ddl.STATEMENTS.
+        from app.services.player_privacy_ddl import STATEMENTS as _PLAYER_PRIVACY_DDL
+        for _stmt in _PLAYER_PRIVACY_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 285: importing a club's history from its own public
         # CricketStatz site. Same one-copy rule — this list and alembic's 285
         # both run services/cricketstatz_ddl.STATEMENTS.

@@ -394,6 +394,18 @@ async def _merge_players_core(
     if keep_id == remove_id:
         raise HTTPException(status_code=400, detail="Cannot merge a player with itself")
 
+    # A person's request to be removed from the public site (migration 316) is
+    # on the row that is about to be deleted. Carry it to the keeper first, or
+    # merging a duplicate quietly puts them back on the site. The keeper's own
+    # photos go too: they may be the same person's.
+    from app.services import player_privacy
+    if player_privacy.is_privacy_hidden(remove) and not player_privacy.is_privacy_hidden(keep):
+        await player_privacy.hide_at_request(
+            db, keep,
+            by=remove.privacy_hidden_by or "merge",
+            reason=(remove.privacy_hidden_reason or "") + " (carried over from a merged duplicate)",
+        )
+
     # --- Collect IDs before making changes (for undo log) ---
     def _ids(rows) -> list:
         return [r.id for r in rows]

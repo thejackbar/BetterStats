@@ -1417,6 +1417,13 @@ class Player(Base):
     # grades.is_public, and read through the same user_can_view_org_private
     # escape so a signed-in club admin still sees their own club whole.
     is_public = Column(Boolean, default=True, nullable=False, server_default="true")
+    # Set when the PERSON asked to be removed from the public site (migration
+    # 316). `is_public` still does the hiding; this says why, and while it is
+    # set no admin edit or bulk import may switch it back on, and no photo may
+    # be uploaded. See services/player_privacy.py.
+    privacy_hidden_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    privacy_hidden_by = Column(Text, nullable=True)
+    privacy_hidden_reason = Column(Text, nullable=True)
     # BetterSelect "non-financial" filter (migration 265). NULL = no override,
     # so the answer comes from BetterFees' own balance; True/False is a club
     # saying so by hand, which is also the only answer a club not running

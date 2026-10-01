@@ -80,6 +80,9 @@ SHARED_DDL_MODULES = (
     # Cricket runs this list by import, so the literal-statement pass above
     # cannot see it.
     ("app.services.junior_hiding_ddl", "STATEMENTS"),
+    # Migration 316. Three columns on `players`, which the shared ORM Player
+    # model maps, so the football database needs them the moment the model does.
+    ("app.services.player_privacy_ddl", "STATEMENTS"),
 )
 
 

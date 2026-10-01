@@ -44,7 +44,7 @@ from app.services.milestone_rules import (
 )
 from app.services import iq_teammates
 from app.services import milestone_totals
-from app.services import grade_scope, junior_hiding
+from app.services import grade_scope, junior_hiding, player_privacy
 from app.services.player_aliases import normalise_name_key, seed_alias_on_rename
 from app.services.player_age import age_on, dob_error, visible_age
 from app.services.player_kit import clean_shirt_number
@@ -84,10 +84,12 @@ async def _gate_junior_hidden_player(
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
-    """A junior-only player reads as absent to the public of a club hiding juniors.
+    """A hidden player reads as absent to the public, on every route naming them.
 
-    Applies to every `/players/{player_id}/...` route, so the profile and each
-    tab behind it agree. Also records which junior grades to leave out of a
+    Two reasons: the club (or the person) switched `players.is_public` off, or
+    the club hides its juniors and this is a junior-only player. Applies to
+    every `/players/{player_id}/...` route, so the profile and each tab behind
+    it agree. Also records which junior grades to leave out of a
     senior player's figures. A club admin or Better staff is never gated.
     """
     # Always start from "nothing hidden". A server gives each request its own
@@ -101,9 +103,19 @@ async def _gate_junior_hidden_player(
         pid = uuid.UUID(str(raw))
     except (ValueError, TypeError):
         return
-    org_id = await db.scalar(select(Player.organisation_id).where(Player.id == pid))
-    if not org_id:
+    row = (await db.execute(
+        select(Player.organisation_id, Player.is_public).where(Player.id == pid)
+    )).first()
+    if not row or not row[0]:
         return
+    org_id = row[0]
+    # A player the club (or the person) has hidden reads as absent on EVERY
+    # route under /players/{id}, not just the profile: the page only shows
+    # what these endpoints answer, so a hidden player's stats must not be one
+    # direct request away. 404 rather than 403, which would confirm the
+    # person exists. A club admin or Better staff is never gated.
+    if row[1] is False and not await user_can_view_org_private(db, viewer, str(org_id)):
+        raise HTTPException(status_code=404, detail="Player not found")
     hiding = await public_junior_hiding(db, viewer, org_id)
     if not hiding.active:
         return
@@ -1072,6 +1084,8 @@ def _profile_fields(player: Player) -> dict:
         "is_overseas": player.is_overseas,
         "overseas_country": player.overseas_country,
         "is_public": player.is_public is not False,
+        # Set when the person asked to be removed; the club cannot switch it back.
+        "privacy_hidden_at": player.privacy_hidden_at.isoformat() if player.privacy_hidden_at else None,
         "is_financial_override": player.is_financial_override,
         "trained_override": player.trained_override,
         "shirt_number": player.shirt_number,
@@ -1298,6 +1312,11 @@ async def update_player_profile(
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
     data = body.model_dump(exclude_unset=True)
+    # A player who asked to be removed is not the club's to put back (migration
+    # 316). Only an explicit attempt to switch them on is refused; every other
+    # edit to their record goes through.
+    if player_privacy.is_privacy_hidden(player) and data.get("is_public") is True:
+        raise HTTPException(status_code=409, detail=player_privacy.HOLD_MESSAGE)
     if "status" in data and data["status"] not in (None, "active", "inactive"):
         raise HTTPException(status_code=400, detail="status must be 'active' or 'inactive'")
     if "date_of_birth" in data:

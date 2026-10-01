@@ -34,6 +34,7 @@ from app.auth.modules import (
     BILLABLE_MODULES, BILLABLE_MODULE_NAMES, billing_key_for, STATUS_PRIORITY,
 )
 from app.services import junior_hiding
+from app.services import player_privacy
 from app.services import module_subscriptions as mod_subs
 from app.services import comms_limits
 from app.services import club_requests
@@ -1346,6 +1347,9 @@ async def _player_for_photo(db: AsyncSession, player_id: str, club: Organisation
 async def _store_player_photo(db, player: Player, file: UploadFile, kind: str) -> dict:
     import uuid as _uuid
     data_col, mime_col, url_col, route = _PLAYER_PHOTO_KINDS[kind]
+    # A player who asked to be removed gets no photograph (migration 316).
+    if player_privacy.is_privacy_hidden(player):
+        raise HTTPException(409, player_privacy.HOLD_MESSAGE)
     ext = Path(file.filename or "").suffix.lower()
     if ext not in PHOTO_ALLOWED_EXTS:
         raise HTTPException(400, "Image files only (jpg, png, webp, gif)")
