@@ -64,6 +64,7 @@
 
 **Other**
 35. On a Full Rebuild's true-success branch only, `hard_refresh_org._run` calls `auto_generate_and_publish_recent_yearbooks(s, org_id, count=3)` in its own try/except and fresh session (a yearbook failure must not look like a sync failure). Sync Now does not. Existing narrative is never overwritten; it publishes even if narrative generation fails. (Yearbooks guide owns this.)
+36. `get_scorecard` returns `fielding` (per player: `catches`, `catches_wk`, `run_outs`, `stumpings`) and `MatchScorecard.jsx` draws it as `FieldingSection`. A scorebook import records catches as a per-player tally, never which batter each got out, so its dismissal text is a bare `c`; this section is where those catches show. The CSFW converter stores keeper catches in `catches_wk` with `catches` blank, so the section shows `max(catches, catches_wk)`. Row dividers use `pb-hairline-t`, never `border-t pb-hairline` (no such colour class).
 
 ## Traps and failure signatures
 
