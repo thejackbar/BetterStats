@@ -33,6 +33,46 @@ from app.services.aggregations import _with_rate_coverage
 _OURS_GAMES = club_game_sql("g", "org_id")
 _APPEARANCE_PLAYED = appearance_counts_as_match("ga")
 
+
+def _appearances_sql(match_grade_filter: str, season_clause: str, finals_clause: str) -> str:
+    """Every (player, game, season) the club's players were IN, at any level.
+
+    Four ways to be in a game, the same four the player profile's MATCHES
+    figure unions (``aggregations._scoped_games_played``): a batting innings
+    (a did-not-bat row included), a bowling spell, a fielding row, and a bare
+    roster appearance. A board's own per-innings rows only ever answer "did
+    something of this kind in the game", so a career board that counted its own
+    rows read matches BATTED in (or bowled in) beside a profile that read
+    matches PLAYED. Shared by the Most Matches board and by
+    :func:`get_records`' correction of the ``matches`` column on the career
+    boards, so the two cannot disagree about what a match played is.
+    """
+    def arm(select: str, table: str, alias: str, extra: str = "") -> str:
+        return f"""
+                SELECT {select}
+                FROM {table}
+                JOIN v_effective_games g ON g.id = {alias}.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                JOIN seasons s ON s.id = gr.season_id
+                WHERE {_OURS_GAMES}{extra}
+                  {match_grade_filter}
+                  {season_clause}
+                  {finals_clause}"""
+    return (
+        arm("bi.player_id, bi.game_id, gr.season_id",
+            "v_effective_batting_innings bi", "bi")
+        + "\n                UNION"
+        + arm("bs.player_id, bs.game_id, gr.season_id",
+              "v_effective_bowling_spells bs", "bs")
+        + "\n                UNION"
+        + arm("fs.player_id, fs.game_id, gr.season_id",
+              "v_effective_fielding_stats fs", "fs")
+        + "\n                UNION\n                -- Named in the side and did nothing measurable in it: still a\n"
+          "                -- match played.\n"
+        + arm("ga.player_id, ga.game_id, gr.season_id",
+              "game_appearances ga", "ga", f"\n                  AND {_APPEARANCE_PLAYED}")
+    )
+
 # This record book has always set its own qualification floors (20 wickets for
 # a bowling average, 50 overs for an economy). These two are their siblings: a
 # strike rate off three innings is a real figure and not a club record.
@@ -1166,50 +1206,7 @@ async def get_records(
     elif use_game_level:
         most_matches = await q(f"""
             WITH appearances AS (
-                SELECT bi.player_id, bi.game_id, gr.season_id
-                FROM v_effective_batting_innings bi
-                JOIN v_effective_games g ON g.id = bi.game_id
-                JOIN grades gr ON gr.id = g.grade_id
-                JOIN seasons s ON s.id = gr.season_id
-                WHERE {_OURS_GAMES}
-                  {_match_grade_filter}
-                  {_gw_season}
-                  {finals_clause}
-                UNION
-                SELECT bs.player_id, bs.game_id, gr.season_id
-                FROM v_effective_bowling_spells bs
-                JOIN v_effective_games g ON g.id = bs.game_id
-                JOIN grades gr ON gr.id = g.grade_id
-                JOIN seasons s ON s.id = gr.season_id
-                WHERE {_OURS_GAMES}
-                  {_match_grade_filter}
-                  {_gw_season}
-                  {finals_clause}
-                UNION
-                SELECT fs.player_id, fs.game_id, gr.season_id
-                FROM v_effective_fielding_stats fs
-                JOIN v_effective_games g ON g.id = fs.game_id
-                JOIN grades gr ON gr.id = g.grade_id
-                JOIN seasons s ON s.id = gr.season_id
-                WHERE {_OURS_GAMES}
-                  {_match_grade_filter}
-                  {_gw_season}
-                  {finals_clause}
-                UNION
-                -- Named in the side and did nothing measurable in it: still a
-                -- match played, which is what this board counts. Without this
-                -- arm "most matches" reads as "most matches you did something
-                -- in", and disagrees with the same player's own MATCHES.
-                SELECT ga.player_id, ga.game_id, gr.season_id
-                FROM game_appearances ga
-                JOIN v_effective_games g ON g.id = ga.game_id
-                JOIN grades gr ON gr.id = g.grade_id
-                JOIN seasons s ON s.id = gr.season_id
-                WHERE {_OURS_GAMES}
-                  AND {_APPEARANCE_PLAYED}
-                  {_match_grade_filter}
-                  {_gw_season}
-                  {finals_clause}
+                {_appearances_sql(_match_grade_filter, _gw_season, finals_clause)}
             )
             SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
                    COUNT(DISTINCT ap.game_id) AS matches,
@@ -1501,6 +1498,33 @@ async def get_records(
         partnerships_flat["by_grade"][grade] = sorted(
             best.values(), key=lambda r: r.get("wicket_number") or 0
         )
+
+    # THE `matches` COLUMN ON THE CAREER BOARDS COUNTS MATCHES PLAYED.
+    # Their own per-innings rows can only say "matches he batted in" (or bowled
+    # in), while the same player's profile and the Leaderboard read matches
+    # played, so a player who was picked and did not bat, or only bowled, showed
+    # fewer here than on his own page (R Spinks: 435 here, 465 there). One query
+    # answers it for the whole club, and a board's own figure is kept as a floor
+    # so this can only ever raise a count that was too low. A captain-only view
+    # is left alone: "matches as captain" is what that board means by matches.
+    if use_game_level and not captain_only:
+        matches_played_rows = await q(f"""
+            WITH appearances AS (
+                {_appearances_sql(_match_grade_filter, _gw_season, finals_clause)}
+            )
+            SELECT p.id::text AS player_id, COUNT(DISTINCT ap.game_id) AS games
+            FROM players p
+            JOIN appearances ap ON ap.player_id = p.id
+            WHERE p.organisation_id = :org_id{gender_clause}
+            GROUP BY p.id
+        """)
+        played = {r["player_id"]: int(r["games"] or 0) for r in matches_played_rows}
+        for board in (top_career_runs, top_batting_avg, most_fifties,
+                      most_hundreds, top_career_wickets, top_bowling_avg,
+                      top_allrounders):
+            for row in board:
+                own = int(row.get("matches") or 0)
+                row["matches"] = max(own, played.get(row["player_id"], 0))
 
     # Players the club has hidden from its public site come off every board
     # here in one pass. Done on the payload rather than inside the ~40

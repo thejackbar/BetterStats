@@ -825,3 +825,13 @@ onboarding wizard, not the existing per-club rebuild button), not a regression.
   called for; a routine weekly sync isn't).
 
 <!-- END original CLAUDE.md L14402-14593 -->
+
+## The scorecard never drew its fielding (v9.100.3, Sep 2026)
+
+Reported by Shoalwater Bay: no catches on a 1992-93 B Grade scorecard. Their file (`manual_games_scorecards.csv`) has that season's 17 B grade matches, 16 with catch or stumping rows and 54 catches in total, credited to individual players.
+
+- **The data was imported and the API returned it.** `get_scorecard` has always sent `fielding`; `MatchScorecard.jsx` never read it. Synced games look fine only because Cricket Australia writes the catcher into the dismissal text (`c Smith b Jones`).
+- **A scorebook records a tally, not a per-wicket catch.** The archive says how many catches each player took in the match and never which batter each one dismissed, so `dismissal_type` is a bare `c`. `FieldingSection` draws the tally. Only columns somebody has a figure in are drawn, most dismissals first, a fill-in is listed unlinked, and nothing is drawn where nothing is recorded.
+- **`catches_wk` is on the payload now**, alongside `catches`. The CSFW converter puts a keeper's catches in `catches_wk` with `catches` blank, so the section shows `max(catches, catches_wk)`.
+- **Driven in Chromium** (`frontend/verification/verify_scorecard_fielding_browser.mjs`, 23: the columns, the keeper, the ordering, links, dashes, nothing drawn for an empty or older payload, a fill-in, no sideways scroll at 390px) **with a control run**: 4 fail, reporting rather than crashing.
+- **A screenshot caught what the checks did not:** the first cut used `border-t pb-hairline`, which is not a class, so the row dividers rendered white. `pb-hairline-t` is the real one.
