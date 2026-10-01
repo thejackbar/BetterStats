@@ -105,13 +105,20 @@ async def _live_calendar_dates(session: AsyncSession, fs, refresh: bool) -> tupl
         params,
     )).all()
     guids = [r[0] for r in rows if r[0]]
-    if not guids and not grades:
-        # Nothing synced for this year yet (the club has not synced since the
-        # new season was published). Find its grades the way a sync would, but
-        # read-only: the season list, then each season's teams carry the grade
-        # ids. Skipped when the admin restricted the season to chosen grades,
-        # because those are our own ids and so already on file.
-        guids = await _discover_grade_guids(str(fs.organisation_id), fs.season_year)
+    if not grades:
+        # Always add the grades Play-Cricket lists for the year to the ones on
+        # file, never only when none are. A club can have SOME of its grades
+        # synced (Leederville had its women's grade but not its men's), and the
+        # rounds then silently covered one program. Discovery is read-only and
+        # mirrors how sync seeds grades: the season list, then each season's
+        # teams carry the grade ids. Skipped when the admin restricted the
+        # season to chosen grades: those are our own ids, so already on file.
+        try:
+            for g in await _discover_grade_guids(str(fs.organisation_id), fs.season_year):
+                if g not in guids:
+                    guids.append(g)
+        except Exception:
+            logger.exception("fantasy: grade discovery failed for season %s", fs.id)
     if not guids:
         return set(), 0
 

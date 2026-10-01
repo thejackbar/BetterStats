@@ -52,9 +52,14 @@ window scores toward that round.
 - The calendar is read from Play-Cricket itself, merged with stored games
   (`fantasy_engine.generate_rounds`). It never depends on the BetterSelect
   `fixtures` table or on a sync, because a new season has no stored games and
-  upcoming fixtures are not persisted in `games`. Grades come from the DB for
-  `seasons.year = season_year`, else are discovered live (season list, then each
-  season's teams), the same way `sync.py` seeds them. Runs on season create, on
+  upcoming fixtures are not persisted in `games`. Grades are the DB's for
+  `seasons.year = season_year` MERGED with those Play-Cricket lists for the year
+  (season list, then each season's teams, as `sync.py` seeds them), never one or
+  the other: a club with only some grades synced (Leederville had its women's
+  but not its men's) silently got one program's weekends. One club-wide season
+  covers every grade, men's and women's, with one pool and one ladder; rounds are
+  the union of weekends either program plays, so the count is usually higher than
+  any single program's round count. Runs on season create, on
   the admin button (cache bypassed) and in the daily settlement job (cached).
   A scored round is never rewritten. A zero result returns a plain `detail`
   sentence saying whether the draw is unpublished or the season does not exist.

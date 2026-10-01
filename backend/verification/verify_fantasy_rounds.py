@@ -12,10 +12,16 @@ This runs the SHIPPED `services/fantasy_engine.generate_rounds`, the shipped
 call (`grassroots_scores_client.get_grade_matches`) is replaced, with a draw
 whose shape is the real `/scores/grades/{id}/matches` payload.
 
-CONTROL: the previous commit's engine (`git show HEAD:...`) is loaded as a
-module and run over the same seed. It must fail on exactly the reported
-behaviour (zero rounds with a published draw), read through presence-safe
-accessors so a different failure shows as a different message, not a crash.
+Second report (Leederville): 12 rounds generated where the club plays 14 men's
+rounds and 14 women's rounds with 2 byes (= 12 dated weeks). The 12 was the
+women's weeks only: the club had only its women's grade on file for the year,
+and live discovery ran only when NO grade was on file, so the men's grades were
+never fetched. Scenario 6 reproduces that.
+
+CONTROL (`--control`): the engine at git HEAD is loaded as a module and run over
+the scenario-6 seed. It must fail on exactly the reported behaviour (women's
+weeks only), read through presence-safe accessors so a different failure shows
+as a different message, not a crash.
 
 Run:  DATABASE_URL=postgresql+asyncpg://root@/fantasy_test?host=/var/run/postgresql \
       python verification/verify_fantasy_rounds.py [--control]
@@ -100,12 +106,35 @@ DRAW = [
     match("2026-10-07", "LCC Firsts", "Casuals", 4, str(ORG)),
 ]
 
+# Scenario 6: a club (Leederville-shaped) with a men's grade and a women's grade.
+# Only the WOMEN'S grade is on file. Men: Sat Oct 3, Sat Oct 10, Sat Oct 24 and a
+# Sat+Sun pair (Nov 7, Nov 8) that is two club rounds but ONE weekend. Women:
+# Sundays Oct 11 and Oct 25, Nov 1, with an undated bye (statusId 5, no schedule).
+LDV = uuid.uuid4()
+GUID_MEN = "ca-grade-guid-ldv-men"
+GUID_WOMEN = "ca-grade-guid-ldv-women"
+LDV_MEN = [
+    match("2026-10-03", "Leederville CC A Grade", "Rovers", 0, str(LDV)),
+    match("2026-10-10", "Rovers", "Leederville CC A Grade", 0, None, str(LDV)),
+    match("2026-10-24", "Leederville CC A Grade", "Tigers", 0, str(LDV)),
+    match("2026-11-07", "Leederville CC A Grade", "Lions", 0, str(LDV)),
+    match("2026-11-08", "Leederville CC A Grade", "Eagles", 0, str(LDV)),
+]
+_bye = match("2026-10-18", "Leederville Cricket Club", "", 5, str(LDV))
+_bye["matchSchedule"] = []                       # a bye has no date at all
+LDV_WOMEN = [
+    match("2026-10-11", "Swan Valley", "Leederville Cricket Club", 0, None, str(LDV)),
+    _bye,
+    match("2026-10-25", "Wanneroo", "Leederville Cricket Club", 0, None, str(LDV)),
+    match("2026-11-01", "University", "Leederville Cricket Club", 0, None, str(LDV)),
+]
+
 FETCH_LOG: list[tuple[str, bool]] = []
 
 
 async def fake_get_grade_matches(grade_id: str, *, force: bool = False):
     FETCH_LOG.append((grade_id, force))
-    return list(DRAW) if grade_id == GUID_NEW else []
+    return list({GUID_NEW: DRAW, GUID_MEN: LDV_MEN, GUID_WOMEN: LDV_WOMEN}.get(grade_id, []))
 
 
 UNSYNCED_ORG = uuid.uuid4()    # a club with NOTHING on file for 2026 (not synced since CA published it)
@@ -119,12 +148,17 @@ async def fake_get_seasons(org_id: str):
             {"id": "ca-season-2025", "name": "Summer 2025/26", "startDate": "2025-10-01"},
             {"id": "ca-season-2026", "name": "Summer 2026/27", "startDate": "2026-10-01"},
         ]
+    if org_id == str(LDV):
+        return [{"id": "ca-season-2026", "name": "Summer 2026/27", "startDate": "2026-07-01"}]
     return []
 
 
 async def fake_get_teams(org_id: str, season_id: str):
     # Only the 2026 season is asked for; a 2025 request would be a bug.
     assert season_id == "ca-season-2026", season_id
+    if org_id == str(LDV):
+        return [{"id": "tm", "grades": [{"id": GUID_MEN, "name": "A Grade"}]},
+                {"id": "tw", "grade": {"id": GUID_WOMEN, "name": "PSWL North-East B"}}]
     return [{"id": "t1", "grades": [{"id": GUID_NEW, "name": "Firsts"}]},
             {"id": "t2", "grade": {"id": GUID_NEW, "name": "Firsts"}}]
 
@@ -171,6 +205,17 @@ async def seed() -> None:
         await s.commit()
 
 
+async def seed_ldv() -> None:
+    async with Session() as s:
+        s.add(Organisation(id=LDV, name="Leederville Cricket Club", slug="ldv", is_active=True))
+        await s.flush()
+        sx = Season(id=uuid.uuid4(), organisation_id=LDV, name="Summer 2026/27", year=2026, grassroots_id="ca-season-2026")
+        s.add(sx)
+        await s.flush()
+        s.add(Grade(id=uuid.uuid4(), season_id=sx.id, name="PSWL North-East B", grassroots_id=GUID_WOMEN))
+        await s.commit()
+
+
 async def season(year: int, org=ORG, **kw) -> FantasySeason:
     async with Session() as s:
         fs = FantasySeason(organisation_id=org, season_year=year, name=f"{year}/{(year + 1) % 100:02d} Fantasy",
@@ -195,7 +240,7 @@ def _count(res) -> object:
 
 
 async def run_control() -> int:
-    """The previous commit's engine over the same seed. Must show 0 rounds."""
+    """The engine at git HEAD over the scenario-6 seed. Must show women's weeks only."""
     src = subprocess.check_output(
         ["git", "show", "HEAD:backend/app/services/fantasy_engine.py"],
         cwd=Path(__file__).resolve().parent.parent.parent, text=True)
@@ -205,13 +250,14 @@ async def run_control() -> int:
         spec = importlib.util.spec_from_file_location("fantasy_engine_control", tmp)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        fs = await season(2026)
+        await seed_ldv()
+        fs = await season(2026, org=LDV)
         async with Session() as s:
             fs = await s.get(FantasySeason, fs.id)
             n = _count(await mod.generate_rounds(s, fs))
             await s.commit()
-        print(f"CONTROL (previous commit): generate_rounds -> {n!r} rounds for a published draw")
-        check("control reproduces the report: zero rounds with a published draw", n == 0, f"got {n!r}")
+        print(f"CONTROL (HEAD engine): Leederville-shaped club -> {n!r} rounds (men's + women's draw published)")
+        check("control reproduces the report: only the women's weeks (3), men's grade never fetched", n == 3, f"got {n!r}")
         return 0 if FAIL == 0 else 1
     finally:
         tmp.unlink(missing_ok=True)
@@ -315,7 +361,7 @@ async def main() -> int:
     async with Session() as s:
         fs3 = await s.get(FantasySeason, fs.id)
         await fantasy_engine.generate_rounds(s, fs3)
-    check("...(checked) synced club made no discovery call", SEASON_LOG == [], repr(SEASON_LOG))
+    check("a club WITH grades on file still asks once, so a missing grade is found (see 6)", SEASON_LOG == [str(ORG)], repr(SEASON_LOG))
 
     print("5. Shipped route bodies")
     FETCH_LOG.clear()
@@ -347,6 +393,28 @@ async def main() -> int:
         body = await fantasy_router.generate_rounds(new_id, club=org2, db=s, _=None)
     check("route returns rounds + detail for the screen", body.get("rounds") == 4 and "detail" in body, repr(body))
     check("admin click bypasses the cache (force=True), one fetch per grade", FETCH_LOG == [(GUID_NEW, True)], repr(FETCH_LOG))
+
+    print("6. Leederville: only the women's grade on file, men's must still be found")
+    await seed_ldv()
+    fs_l = await season(2026, org=LDV)
+    FETCH_LOG.clear()
+    async with Session() as s:
+        fs_l = await s.get(FantasySeason, fs_l.id)
+        res = await fantasy_engine.generate_rounds(s, fs_l)
+        await s.commit()
+    rl = await rounds_of(fs_l.id)
+    # Weekends: Oct 3 (men) | Oct 10 (men Sat) + Oct 11 (women Sun) | Oct 24 (men Sat) + Oct 25 (women Sun)
+    # | Nov 1 (women) | Nov 7 + Nov 8 (two men's club rounds, ONE weekend). Women alone would be 3.
+    want = [(date(2026, 10, 3), date(2026, 10, 3)), (date(2026, 10, 10), date(2026, 10, 11)),
+            (date(2026, 10, 24), date(2026, 10, 25)), (date(2026, 11, 1), date(2026, 11, 1)),
+            (date(2026, 11, 7), date(2026, 11, 8))]
+    got = [(r.start_date, r.end_date) for r in rl]
+    check("men's and women's weekends are both counted (5 weekends, women alone is 3)", got == want, f"got {got}")
+    check("both grades were fetched", sorted(g for g, _ in FETCH_LOG) == sorted([GUID_MEN, GUID_WOMEN]), repr(FETCH_LOG))
+    check("a Saturday men's + Sunday women's weekend is ONE round",
+          any(r.start_date == date(2026, 10, 24) and r.end_date == date(2026, 10, 25) for r in rl))
+    check("an undated bye makes no round and no crash", all(r.start_date is not None for r in rl))
+    check("the grade on file is not fetched twice", len(FETCH_LOG) == len({g for g, _ in FETCH_LOG}), repr(FETCH_LOG))
 
     print(f"\n{PASS} passed, {FAIL} failed")
     return 0 if FAIL == 0 else 1
