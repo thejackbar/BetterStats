@@ -9,6 +9,7 @@
 // + a quiet form indicator (selectionMeta.roleLine / FormBars) — never the old
 // hardcoded positional hints.
 import { useState } from 'react'
+import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { Icon, Avatar, Dot, Tag, RuleTags } from './ui'
 import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
 import { useDrag } from './selectionDnd'
@@ -139,9 +140,10 @@ export function FixtureBar({ vm }) {
 }
 
 export function BalanceStrip({ vm }) {
+  const fmt = useAdminNameFormat()
   const b = vm.balance
-  const cap = vm.capId && vm.filledSet.has(vm.capId) ? vm.poolById[vm.capId]?.display_name : null
-  const wk = vm.wkId && vm.filledSet.has(vm.wkId) ? vm.poolById[vm.wkId]?.display_name : null
+  const cap = vm.capId && vm.filledSet.has(vm.capId) ? fmt(vm.poolById[vm.capId]?.display_name) : null
+  const wk = vm.wkId && vm.filledSet.has(vm.wkId) ? fmt(vm.poolById[vm.wkId]?.display_name) : null
   return (
     <div className="pb-card rounded-xl px-4 py-2 mb-2.5 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[13px]">
       {ROLE_CODES.map((c) => {
@@ -230,6 +232,7 @@ function SlotControls({ vm, id, idx }) {
 
 /* ══ Dual rail ══════════════════════════════════════════════════════════════ */
 function DualCard({ p, kind, idx, vm, drag }) {
+  const fmt = useAdminNameFormat()
   const meta = AVAILABILITY[p.availability] || AVAILABILITY.NO_RESPONSE
   const clash = p.clash?.length > 0
   // A call-up (higher grade taking a player from a lower XI) stays pickable;
@@ -257,7 +260,7 @@ function DualCard({ p, kind, idx, vm, drag }) {
       </span>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
-          <span className="text-[14px] font-semibold truncate">{p.display_name}</span>
+          <span className="text-[14px] font-semibold truncate">{fmt(p.display_name)}</span>
           {p.id === vm.capId && <Tag>C</Tag>}{p.id === vm.wkId && <Tag tone="amber">WK</Tag>}
           {p.squads?.[0] && (kind === 'pool') && <Tag tone={p.squad_match ? 'accent' : 'faint'}>{vm.squadShort(p.squads[0])}</Tag>}
           <AgeTag p={p} />
@@ -374,6 +377,7 @@ export function DualRailView({ vm }) {
 
 /* ══ Team sheet ═════════════════════════════════════════════════════════════ */
 function SheetRow({ i, id, vm, drag }) {
+  const fmt = useAdminNameFormat()
   const p = id ? vm.poolById[id] : null
   const isFocus = vm.focus === i
   const hovered = drag.hover === 'slot:' + i
@@ -391,7 +395,7 @@ function SheetRow({ i, id, vm, drag }) {
           </span>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 min-w-0">
-              <span className="font-display font-semibold text-[16.5px] tracking-tight truncate">{p.display_name}</span>
+              <span className="font-display font-semibold text-[16.5px] tracking-tight truncate">{fmt(p.display_name)}</span>
               {id === vm.capId && <Tag>C</Tag>}{id === vm.wkId && <Tag tone="amber">WK</Tag>}
               <AgeTag p={p} />
               <FlagTags p={p} />
@@ -414,6 +418,7 @@ function SheetRow({ i, id, vm, drag }) {
 }
 
 function TrayCard({ p, vm, drag }) {
+  const fmt = useAdminNameFormat()
   const meta = AVAILABILITY[p.availability] || AVAILABILITY.NO_RESPONSE
   const clash = p.clash?.length > 0
   const callUp = clash && !p.clash_blocks
@@ -432,7 +437,7 @@ function TrayCard({ p, vm, drag }) {
       </span>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
-          <span className="text-[13.5px] font-semibold truncate">{p.display_name}</span>
+          <span className="text-[13.5px] font-semibold truncate">{fmt(p.display_name)}</span>
           {p.squads?.[0] && <Tag tone={p.squad_match ? 'accent' : 'faint'}>{vm.squadShort(p.squads[0])}</Tag>}
           <AgeTag p={p} />
           <FlagTags p={p} />
@@ -454,11 +459,12 @@ function TrayCard({ p, vm, drag }) {
 }
 
 export function TeamSheetView({ vm }) {
+  const fmt = useAdminNameFormat()
   const drag = useDrag()
   const b = vm.balance
   const poolHover = drag.hover === 'pool'
-  const cap = vm.capId && vm.filledSet.has(vm.capId) ? vm.poolById[vm.capId]?.display_name : null
-  const wk = vm.wkId && vm.filledSet.has(vm.wkId) ? vm.poolById[vm.wkId]?.display_name : null
+  const cap = vm.capId && vm.filledSet.has(vm.capId) ? fmt(vm.poolById[vm.capId]?.display_name) : null
+  const wk = vm.wkId && vm.filledSet.has(vm.wkId) ? fmt(vm.poolById[vm.wkId]?.display_name) : null
 
   return (
     <div>

@@ -18,6 +18,7 @@ import BetterSelectLayout from '../../../components/admin/BetterSelectLayout'
 import { useToast } from '../../../contexts/ToastContext'
 import { useTheme } from '../../../contexts/ThemeContext'
 import { api } from '../../../lib/api'
+import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { PbSpinner } from '../../../lib/presskit'
 import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
 import { Icon, Avatar, Dot, Tag, RoleChips } from './ui'
@@ -133,6 +134,7 @@ function AvailBar({ avail }) {
 }
 
 function PlayerRow({ p, n }) {
+  const fmt = useAdminNameFormat()
   const meta = AVAILABILITY[p.availability] || AVAILABILITY.NO_RESPONSE
   const out = p.availability === 'UNAVAILABLE'
   const concern = out || p.availability === 'MAYBE'
@@ -144,7 +146,7 @@ function PlayerRow({ p, n }) {
         <Avatar player={p} size={22} />
         <span className="absolute -right-0.5 -bottom-0.5"><Dot status={p.availability} size={8} style={{ boxShadow: '0 0 0 2px var(--pb-surface)' }} /></span>
       </span>
-      <span className="font-display font-semibold text-[13.5px] truncate flex-1 min-w-0">{p.display_name}</span>
+      <span className="font-display font-semibold text-[13.5px] truncate flex-1 min-w-0">{fmt(p.display_name)}</span>
       {p.is_captain && <Tag>C</Tag>}{p.is_wicket_keeper && <Tag tone="amber">WK</Tag>}
       {concern
         ? <span className="font-mono text-[10px] font-semibold shrink-0" style={{ color: meta.cssVar }}>{out ? 'Out' : 'Maybe'}</span>

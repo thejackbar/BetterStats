@@ -150,3 +150,5 @@ none. Migrations 268, 269, 271, 272, 273, 284, 289, 317 are mirrored idempotentl
 |   sub: Minutes letterhead (v9.69.0) | rules extracted | Rule 56 |
 |   sub: Sponsors: written up, not built | rules extracted (pointer) | Open follow-ups |
 | Self-service player availability (v8.1), L12985-13037 | rules extracted | Rules 30, 31 |
+- `Player.display_name` shows a two-word free-text override as "Last, First" (`name_format.canonical_player_name`). Any list that orders by `coalesce(display_name_override, name)` in SQL must re-sort with `name_sort_key`; raw-SQL COALESCE readers get the unflipped text.
+- BetterSelect admin screens print names through `useAdminNameFormat()` (the club's `player_name_format`), never the raw `display_name`. Sort and search stay on the stored name.

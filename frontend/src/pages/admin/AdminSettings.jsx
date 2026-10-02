@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { setAdminNameFormat } from '../../lib/useAdminNameFormat'
 import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
@@ -328,6 +329,7 @@ export default function AdminSettings() {
       }
       if (/^\d{4}$/.test(pinInput)) payload.access_pin = pinInput
       await api.adminPatchSettings(payload)
+      if (payload.player_name_format) setAdminNameFormat(payload.player_name_format)
       setPinInput('')
       flash('Settings saved')
       api.adminGetSettings().then(setSettings).catch(() => {})
