@@ -558,7 +558,7 @@ async def main():
             session.add(Sponsor(
                 id=new_id, organisation_id=org.id, name=sp.name, website_url=sp.website_url,
                 logo_url=new_logo_url, logo_data=sp.logo_data, logo_mime=sp.logo_mime,
-                display_order=sp.display_order, contact_name=None, email=None, klubpro_sponsor_id=None,
+                display_order=sp.display_order, tier=sp.tier, placements=sp.placements, contact_name=None, email=None, klubpro_sponsor_id=None,
             ))
         counts["sponsors"] = len(src_sponsors)
 

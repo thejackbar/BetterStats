@@ -38,6 +38,7 @@ Open the guide first, then grep its archive if you need the reasoning or the mea
 | Sales workspace, sales performance, commissions, engagement score, the retired Twenty CRM | `guides/sales-crm-and-commissions.md` |
 | Meta ads reporting, `/trial` and `/demo`, webinar and StreamYard, usage tracking, wizard clubs | `guides/marketing-funnel-ads-and-webinar.md` |
 | BetterComms lists, segments, templates, audiences, club notifications | `guides/comms-audiences-and-notifications.md` |
+| Sponsors: tiers, where a sponsor shows, section naming rights, sponsor blocks on BetterPosts, the dashboard slot, the sponsor list | `guides/sponsors-tiers-and-naming.md` |
 | Club Directory crawl, teaser snapshots, new club onboarding, setup wizard, admin navigation, Draft pages, KlubPro, dashboard messages | `guides/club-directory-onboarding-and-admin-shell.md` |
 
 If your change spans two areas, read both guides. If a guide and the code disagree, the code wins: fix the guide in the same change.

@@ -4,16 +4,22 @@ import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import { validateImageFile } from '../../lib/validation'
 import ImageEditorModal from '../../components/ImageEditorModal'
 import { useToast } from '../../contexts/ToastContext'
+import { clearClubSponsors } from '../../lib/useClubSponsors'
 
 export default function AdminSponsors() {
   const toast = useToast()
   const [sponsors, setSponsors] = useState([])
+  // Tier and spot definitions from the server, plus this club's tier names.
+  const [meta, setMeta] = useState(null)
+  const [labelDraft, setLabelDraft] = useState({})
+  const [labelSaving, setLabelSaving] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
   // Add form
   const [addName, setAddName] = useState('')
   const [addUrl, setAddUrl] = useState('')
+  const [addTier, setAddTier] = useState('silver')
   const [adding, setAdding] = useState(false)
   const [addError, setAddError] = useState(null)
 
@@ -41,8 +47,10 @@ export default function AdminSponsors() {
   async function load() {
     setLoading(true)
     try {
-      const data = await api.adminListSponsors()
+      const [data, settings] = await Promise.all([api.adminListSponsors(), api.adminGetSponsorSettings()])
       setSponsors(data)
+      setMeta(settings)
+      setLabelDraft(settings.tier_labels || {})
     } catch (e) {
       setError(e.message)
     } finally {
@@ -61,8 +69,9 @@ export default function AdminSponsors() {
     setAdding(true)
     setAddError(null)
     try {
-      const s = await api.adminCreateSponsor({ name: addName.trim(), website_url: addUrl.trim() || null })
+      const s = await api.adminCreateSponsor({ name: addName.trim(), website_url: addUrl.trim() || null, tier: addTier })
       setSponsors(prev => [...prev, s])
+      clearClubSponsors()
       setAddName('')
       setAddUrl('')
       showFlash('Sponsor added')
@@ -130,6 +139,44 @@ export default function AdminSponsors() {
     }
   }
 
+  const tierLabel = (key) => (meta?.tier_labels?.[key]) || key
+  const defaultSpots = (tier) => meta?.tiers?.find(t => t.key === tier)?.default_placements || []
+
+  async function patchSponsor(id, body, doneMsg) {
+    try {
+      const updated = await api.adminPatchSponsor(id, body)
+      setSponsors(prev => prev.map(s => s.id === id ? { ...s, ...updated } : s))
+      clearClubSponsors()
+      if (doneMsg) showFlash(doneMsg)
+    } catch (e) {
+      toast.error(e.message)
+    }
+  }
+
+  // A spot toggled back to what the tier already does is not an override, so
+  // send null and let the sponsor follow its tier for that spot again.
+  function toggleSpot(sponsor, spot) {
+    const on = sponsor.placements.includes(spot)
+    const tierDefault = defaultSpots(sponsor.tier).includes(spot)
+    const next = !on
+    patchSponsor(sponsor.id, { placements: { [spot]: next === tierDefault ? null : next } })
+  }
+
+  async function saveLabels() {
+    setLabelSaving(true)
+    try {
+      const settings = await api.adminPutSponsorSettings({ tier_labels: labelDraft })
+      setMeta(settings)
+      setLabelDraft(settings.tier_labels || {})
+      clearClubSponsors()
+      showFlash('Tier names saved')
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      setLabelSaving(false)
+    }
+  }
+
   // Drag-and-drop reorder
   function onDragStart(index) {
     dragItem.current = index
@@ -182,7 +229,8 @@ export default function AdminSponsors() {
           )}
         </div>
         <p className="text-pb-faint text-sm mb-6 leading-relaxed">
-          Up to 6 sponsors with logos are shown in the footer on all club pages. Drag rows to reorder.
+          Pick a tier for each sponsor. The tier decides where they show, and you can switch any spot on or off for one sponsor.
+          The bottom bar shows up to 6 logos, biggest tier first. Drag rows to set the order within a tier.
         </p>
 
         {flash && (
@@ -274,7 +322,53 @@ export default function AdminSponsors() {
                             </a>
                           )}
                           {!sponsor.logo_url && (
-                            <span className="text-amber-400 text-[10px] font-mono">No logo — sponsor won't appear in footer</span>
+                            <span className="text-amber-400 text-[10px] font-mono block">No logo: shown by name in the sponsor list only</span>
+                          )}
+                          {meta && (
+                            <div className="mt-2 space-y-1.5">
+                              <select
+                                aria-label={`Tier for ${sponsor.name}`}
+                                value={sponsor.tier}
+                                onChange={e => patchSponsor(sponsor.id, { tier: e.target.value }, 'Tier saved')}
+                                className="px-2 py-1 text-xs bg-pb-bg border pb-hairline rounded text-pb-text focus:outline-none focus:border-pb-accent"
+                              >
+                                {meta.tiers.map(t => (
+                                  <option key={t.key} value={t.key}>{tierLabel(t.key)}</option>
+                                ))}
+                              </select>
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                {meta.placements.map(p => {
+                                  const on = sponsor.placements.includes(p.key)
+                                  const overridden = sponsor.placement_overrides?.[p.key] !== undefined
+                                  return (
+                                    <button
+                                      key={p.key}
+                                      type="button"
+                                      aria-pressed={on}
+                                      onClick={() => toggleSpot(sponsor, p.key)}
+                                      title={overridden ? 'Set by hand. Click to change.' : 'Follows the tier. Click to switch it.'}
+                                      className={`font-mono text-[10px] px-2 py-0.5 rounded border ${
+                                        on ? 'bg-pb-accent/15 border-pb-accent text-pb-text' : 'pb-hairline text-pb-faint'
+                                      }`}
+                                    >
+                                      {p.label}{overridden ? ' *' : ''}
+                                    </button>
+                                  )
+                                })}
+                                {Object.keys(sponsor.placement_overrides || {}).length > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => patchSponsor(sponsor.id, { placements: null }, 'Back to the tier defaults')}
+                                    className="font-mono text-[10px] text-pb-faint hover:text-pb-text underline"
+                                  >
+                                    Reset to tier
+                                  </button>
+                                )}
+                              </div>
+                              {sponsor.placements.includes('dashboard') && !sponsor.logo_url && (
+                                <span className="text-amber-400 text-[10px] font-mono block">Add a logo for the dashboard slot and the bottom bar</span>
+                              )}
+                            </div>
                           )}
                         </>
                       )}
@@ -351,9 +445,6 @@ export default function AdminSponsors() {
         {/* Add new sponsor */}
         <div className="pb-card px-4 py-4">
           <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faintest uppercase mb-3">Add Sponsor</h2>
-          {sponsors.length >= 6 && (
-            <p className="text-amber-400 text-xs font-mono mb-3">Maximum 6 sponsors shown in footer. Delete one to add another.</p>
-          )}
           <form onSubmit={handleAdd} className="space-y-2">
             <input
               value={addName}
@@ -369,6 +460,20 @@ export default function AdminSponsors() {
               type="url"
               className="w-full px-3 py-2 text-sm bg-pb-bg border pb-hairline rounded text-pb-text placeholder-pb-faintest focus:outline-none focus:border-pb-accent"
             />
+            {meta && (
+              <label className="flex items-center gap-2 text-xs text-pb-faint">
+                Tier
+                <select
+                  value={addTier}
+                  onChange={e => setAddTier(e.target.value)}
+                  className="px-2 py-1.5 text-sm bg-pb-bg border pb-hairline rounded text-pb-text focus:outline-none focus:border-pb-accent"
+                >
+                  {meta.tiers.map(t => (
+                    <option key={t.key} value={t.key}>{tierLabel(t.key)}</option>
+                  ))}
+                </select>
+              </label>
+            )}
             {addError && <p className="text-red-400 text-xs">{addError}</p>}
             <button
               type="submit"
@@ -379,9 +484,43 @@ export default function AdminSponsors() {
             </button>
           </form>
           <p className="mt-3 text-pb-faintest text-[11px]">
-            After adding, use the LOGO button on the row to upload a logo image. Only sponsors with logos are shown in the footer.
+            After adding, use the LOGO button on the row to upload a logo image. A sponsor without a logo is named in the sponsor list but left out of the bottom bar and the dashboard slot.
           </p>
         </div>
+
+        {/* Tier names */}
+        {meta && (
+          <div className="pb-card px-4 py-4 mt-6">
+            <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faintest uppercase mb-1">Tier names</h2>
+            <p className="text-pb-faintest text-[11px] mb-3">
+              Rename the tiers to suit your club. Leave one blank to use the standard name. Default spots: {meta.tiers.map(t =>
+                `${tierLabel(t.key)} (${t.default_placements.map(k => meta.placements.find(p => p.key === k)?.label).join(', ')})`
+              ).join('; ')}.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {meta.tiers.map(t => (
+                <label key={t.key} className="text-xs text-pb-faint">
+                  {t.default_label}
+                  <input
+                    value={labelDraft[t.key] ?? ''}
+                    onChange={e => setLabelDraft(prev => ({ ...prev, [t.key]: e.target.value }))}
+                    maxLength={40}
+                    placeholder={t.default_label}
+                    className="mt-1 w-full px-2 py-1.5 text-sm bg-pb-bg border pb-hairline rounded text-pb-text placeholder-pb-faintest focus:outline-none focus:border-pb-accent"
+                  />
+                </label>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={saveLabels}
+              disabled={labelSaving}
+              className="mt-3 px-4 py-1.5 rounded text-sm font-medium bg-pb-accent text-white disabled:opacity-50"
+            >
+              {labelSaving ? 'Saving…' : 'Save names'}
+            </button>
+          </div>
+        )}
 
         <ImageEditorModal
           open={!!editor}

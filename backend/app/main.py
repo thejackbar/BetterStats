@@ -4388,6 +4388,13 @@ async def lifespan(app: FastAPI):
         for _stmt in _MANUAL_INNINGS_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 318: sponsor tiers, per-sponsor placement switches and the
+        # club's own tier names. Same one-copy rule: this list and alembic's
+        # 318 both run services/sponsor_tiers_ddl.STATEMENTS.
+        from app.services.sponsor_tiers_ddl import STATEMENTS as _SPONSOR_TIERS_DDL
+        for _stmt in _SPONSOR_TIERS_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 312: super-admin messages on the club admin dashboard.
         # Same one-copy rule: this and alembic's 312 both run
         # services/admin_broadcast_ddl.STATEMENTS.
