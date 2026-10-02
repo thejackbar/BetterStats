@@ -203,6 +203,10 @@ async function shotNode(page, file) {
   // The source step: the saved team for the match.
   await press(page.getByRole('button', { name: /^Data$/i }))
   await page.waitForTimeout(500)
+  {
+    const early = await readSplit(page)
+    ck('no competition typed: the placeholder word is not printed on the post', early.w > 0 && !/COMPETITION/.test(early.text), early.text.slice(0, 80))
+  }
   const fx = page.getByRole('button', { name: /Scarborough/ })
   ck('the BetterSelect team is offered', await seen(fx))
   await press(fx)
@@ -228,6 +232,7 @@ async function shotNode(page, file) {
   ck('every layer of the reference is its own layer', ['Panel bands', 'Dot texture', 'XI panel', 'Outlined XI', 'Player photo', 'Panel shade', 'Round heading', 'Starting wordmark', 'Starting XI', 'Fixture', 'Venue and time', 'Sponsors'].every((l) => post.layers.includes(l)), post?.layers.join(' | '))
   ck('the photo is the captain\'s (first with a photo), contained', post.photo.w > 0, JSON.stringify(post?.photo))
   ck('a sponsor logo replaces the platform credit', !!post.sponsor && /sponsors\/s1\/logo/.test(post.sponsor.src || ''), JSON.stringify(post.sponsor))
+  ck('the grade pulls through as the competition line', /1ST GRADE/.test(post.text) && !/COMPETITION/.test(post.text), post.text.slice(0, 120))
   ck('nothing marked until asked', post.rows.every((r) => !hasMark(r)))
 
   // Manual flip: the DEBUT button on row 3 (Cartwright) and back.
@@ -279,6 +284,35 @@ async function shotNode(page, file) {
   ck('nothing runs off the post', post.overflowList.length === 0, post.overflowList.join(' ; '))
   ck('no page errors', errors.length === 0, errors.slice(0, 2).join(' | '))
   if (SHOTS && post.w > 0) await shotNode(page, `${SHOTS}/T11-square.png`)
+
+  // ── the Split Panels background ──────────────────────────────────────────
+  await tab(page, 'Brand')
+  const swatch = page.locator('button[title="Split Panels"]')
+  ck('Split Panels is in the background picker', await seen(swatch))
+  const layersBefore = (await readSplit(page)).layers
+  await press(swatch)
+  await page.waitForTimeout(400)
+  const withBg = await readSplit(page)
+  ck('a picked background replaces the pale panel layers', layersBefore.includes('Panel bands') && !withBg.layers.includes('Panel bands') && !withBg.layers.includes('Panel shade') && !withBg.layers.includes('Dot texture'), withBg.layers.join(' | '))
+  ck('Split Panels draws the dark rail itself', !withBg.layers.includes('XI panel'))
+  ck('the names, tags and photo are still on the post', withBg.rows.length === 11 && /DEBUT/.test(withBg.rows[1]?.text || '') && withBg.photo.w > 0)
+  const drawn = await page.evaluate((rootSrc) => {
+    const holder = [...document.querySelectorAll('div')].find((d) => d.style.left === '-9999px' && d.style.position === 'absolute')
+    const root = (new Function(`return (${rootSrc})()`))()
+    const bg = [...holder.querySelectorAll('div')].find((d) => /545px|split/.test(d.getAttribute('style') || '') && d.style.background && /rgb/.test(d.style.background))
+    return { rootBg: root ? getComputedStyle(root).backgroundColor : null, hasPanel: !!holder.querySelector('div[style*="left: 545px"]') }
+  }, ROOT.toString())
+  ck('the post itself is see-through so the background shows', /rgba\(0, 0, 0, 0\)|transparent/.test(drawn.rootBg || ''), String(drawn.rootBg))
+  ck('the background draws a panel split at the same place the layout does', drawn.hasPanel)
+  if (SHOTS) await shotNode(page, `${SHOTS}/T11-background.png`)
+  // Another background keeps the dark rail so the names stay readable.
+  await press(page.locator('button[title="Contour Rings"]'))
+  await page.waitForTimeout(400)
+  ck('any other background keeps the dark XI rail', (await readSplit(page)).layers.includes('XI panel'))
+  await press(page.locator('button[title="Clean"], button[title="None"], button:has-text("✕")').first())
+  await page.waitForTimeout(300)
+  ck('with no background the layout draws its own panels again', (await readSplit(page)).layers.includes('Panel bands'))
+  await tab(page, 'Content')
 
   // ── sizes ────────────────────────────────────────────────────────────────
   for (const [label, w, h] of [['Portrait', 1080, 1350], ['Story', 1080, 1920], ['Square', 1080, 1080]]) {

@@ -8,6 +8,8 @@ import { useAuth } from '../contexts/AuthContext'
 import { CAP } from '../lib/capabilities'
 import { api } from '../lib/api'
 import SeasonSelector from '../components/SeasonSelector'
+import MajorSponsorSlot from '../components/MajorSponsorSlot'
+import { useClubSponsors, forSpot } from '../lib/useClubSponsors'
 import ClubInactive from './ClubInactive'
 import ClubPinGate from './ClubPinGate'
 import { useNameFormat } from '../lib/nameFormat'
@@ -162,6 +164,12 @@ export default function Dashboard() {
   const { user, hasCapability } = useAuth()
   const canSync = hasCapability(CAP.RUN_SYNC) &&
     (user?.role === 'super_admin' || user?.club_id === orgId)
+  // The major-sponsor slot beside the club name. Hidden when the club has none;
+  // an admin who can manage sponsors for THIS club sees a prompt to add one.
+  const sponsorData = useClubSponsors(clubSlug)
+  const majorSponsors = forSpot(sponsorData, 'dashboard')
+  const canManageSponsors = hasCapability(CAP.MANAGE_SPONSORS) &&
+    (user?.role === 'super_admin' || user?.club_id === orgId)
 
   useEffect(() => {
     if (!orgId) return
@@ -225,6 +233,13 @@ export default function Dashboard() {
           title={org.name}
           logo={club?.public_header_logo ? club.logo_url : null}
           logoAlt={`${org.name} crest`}
+          aside={(majorSponsors.length > 0 || canManageSponsors) ? (
+            <MajorSponsorSlot
+              sponsors={majorSponsors}
+              label={sponsorData?.tier_labels?.major}
+              canManage={canManageSponsors}
+            />
+          ) : null}
           meta={[
             summary && <span key="m">PLAYED <span className="text-pb-text">{fmtCount(summary.total_games)}</span></span>,
             summary && <span key="r"><span className="text-pb-text">{fmtCount(summary.total_runs)}</span> RUNS</span>,

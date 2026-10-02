@@ -2830,6 +2830,10 @@ export const api = {
     request(`/club-admin/sponsors/${id}`, { method: 'DELETE' }),
   adminReorderSponsors: (items) =>
     request('/club-admin/sponsors/reorder', { method: 'PUT', body: JSON.stringify(items) }),
+  // The tier and spot definitions plus the club's own tier names.
+  adminGetSponsorSettings: () => request('/club-admin/sponsors/settings'),
+  adminPutSponsorSettings: (data) =>
+    request('/club-admin/sponsors/settings', { method: 'PUT', body: JSON.stringify(data) }),
 
   // ─── Club Room Mode ────────────────────────────────────────────────────────
   clubRoomGetSettings: () => request('/club-admin/club-room/settings'),

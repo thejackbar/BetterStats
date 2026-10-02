@@ -42,7 +42,7 @@ export function autoPanelColor(accent) {
 
 export function SplitPoster({
   width = 1080, height = 1080, team, opponent, match, players, palette,
-  heroImage, headline, featuredId, sponsors, panelColor, markHero,
+  heroImage, headline, featuredId, sponsors, panelColor, markHero, background,
 }) {
   const P = (players || []).slice(0, 11)
   const A = aspectOf(width, height)
@@ -80,7 +80,15 @@ export function SplitPoster({
   const photoTop = share(height, 200)
   const photoH = share(height, 690) - (A === 'story' ? 120 : 0)
 
-  const comp = (match.competition || '').toUpperCase()
+  // The editor fills an empty competition with this word so other layouts have
+  // something to print. Here it would sit above the round as if it were data.
+  const comp = (match.competition && match.competition !== 'COMPETITION' ? match.competition : '').toUpperCase()
+  // A background picked in the editor (Design, Background) draws behind the post.
+  // The pale panel's own layers then step aside so its colours are the ones
+  // that show; the dark XI rail stays unless the picked one is Split Panels,
+  // which draws that rail too.
+  const ownPanels = !background
+  const ownRail = !background || background !== 'split-panels'
   const round = (match.round || '').toUpperCase()
   const side = (headline || '').toUpperCase()
   const when = [match.date, match.time].filter(Boolean).join(', ').toUpperCase()
@@ -89,22 +97,22 @@ export function SplitPoster({
   return (
     <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
-      background: panel, color: '#ffffff', fontFamily: NAME_FONT,
+      background: ownPanels ? panel : 'transparent', color: '#ffffff', fontFamily: NAME_FONT,
     }}>
       {/* Two soft diagonal bands across the pale panel. */}
-      <svg data-layer="Panel bands" width={LEFT_W} height={height} viewBox={`0 0 ${LEFT_W} ${height}`}
+      {ownPanels && <svg data-layer="Panel bands" width={LEFT_W} height={height} viewBox={`0 0 ${LEFT_W} ${height}`}
         style={{ position: 'absolute', left: 0, top: 0 }}>
         <line x1={-40} y1={110 + headShift} x2={LEFT_W + 20} y2={430 + headShift} stroke={band} strokeWidth={118} opacity={0.34} />
         <line x1={-40} y1={270 + headShift} x2={LEFT_W - 44} y2={568 + headShift} stroke={band} strokeWidth={84} strokeLinecap="round" opacity={0.4} />
-      </svg>
+      </svg>}
       {/* Dot texture, strongest low on the panel where it meets the shade. */}
-      <div data-layer="Dot texture" style={{
+      {ownPanels && <div data-layer="Dot texture" style={{
         position: 'absolute', left: 0, top: share(height, 600), width: LEFT_W, height: share(height, 300), overflow: 'hidden',
         WebkitMaskImage: 'linear-gradient(180deg, transparent 0%, #000 70%)', maskImage: 'linear-gradient(180deg, transparent 0%, #000 70%)',
       }}>
         <Halftone color="#ffffff" opacity={0.5} size={9} />
-      </div>
-      <div data-layer="XI panel" style={{ position: 'absolute', left: LEFT_W, top: 0, bottom: 0, width: DARK_W, background: dark }} />
+      </div>}
+      {ownRail && <div data-layer="XI panel" style={{ position: 'absolute', left: LEFT_W, top: 0, bottom: 0, width: DARK_W, background: dark }} />}
       {/* The outlined XI sits UNDER the wordmark, so the G of STARTING crosses it. */}
       <div data-layer="Outlined XI" style={{
         position: 'absolute', left: LEFT_W + 270, top: 48 + headShift, width: DARK_W - 270, textAlign: 'center',
@@ -123,10 +131,10 @@ export function SplitPoster({
                 style={{ width: '100%', height: '100%', objectFit: 'contain', objectPosition: 'center', opacity: 0.35, padding: 60, boxSizing: 'border-box' }} />
             : null}
       </div>
-      <div data-layer="Panel shade" style={{
+      {ownPanels && <div data-layer="Panel shade" style={{
         position: 'absolute', left: 0, bottom: 0, width: LEFT_W, height: share(height, 330),
         background: `linear-gradient(180deg, ${deep}00 0%, ${deep}cc 55%, ${deep} 100%)`,
-      }} />
+      }} />}
 
       {/* Competition and round, top left. */}
       <div data-layer="Round heading" style={{

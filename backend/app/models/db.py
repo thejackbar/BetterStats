@@ -340,6 +340,10 @@ class Organisation(Base):
     # default. Signed-in club admins still see everything. Read through
     # services/junior_hiding.py, never directly.
     hide_juniors = Column(Boolean, nullable=False, server_default="false", default=False)
+    # The club's own names for the four sponsor tiers (migration 318), e.g.
+    # {"major": "Naming Partner"}. NULL means the stock names. Read through
+    # services/sponsor_tiers.resolve_labels, never directly.
+    sponsor_tier_labels = Column(JSONB, nullable=True)
     # Which grade categories count towards this club's stats by default — a
     # JSONB list of grade_labels.GRADE_CATEGORIES keys (migration 228). NULL
     # means no club preference, and the platform default applies: everything
@@ -648,6 +652,11 @@ class Sponsor(Base):
     contact_name = Column(Text, nullable=True)
     email = Column(Text, nullable=True)
     klubpro_sponsor_id = Column(Text, nullable=True)
+    # Tier and hand-set placement switches (migration 318). Where a sponsor
+    # shows is derived on read through services/sponsor_tiers.py: the tier's
+    # defaults with `placements` applied on top (NULL = follow the tier).
+    tier = Column(Text, nullable=False, server_default="silver", default="silver")
+    placements = Column(JSONB, nullable=True)
 
 
 # ─── BetterSocials media library (migration 191) ─────────────────────────────

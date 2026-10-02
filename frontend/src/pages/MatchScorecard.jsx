@@ -7,6 +7,7 @@ import { fmtOvers, oversToBalls, ballsToOvers } from '../lib/cricketFormat'
 import { useAuth } from '../contexts/AuthContext'
 import { CAP } from '../lib/capabilities'
 import { useClubTheme } from '../hooks/useClubTheme'
+import { rememberClubSlug } from '../lib/clubSlug'
 import TeamBadge from '../components/TeamBadge'
 
 // Cricket overs are base-6: 3.4 + 2.3 = 6.1 (3 ov 4 balls + 2 ov 3 balls = 6 ov 1 ball)
@@ -939,6 +940,8 @@ export default function MatchScorecard() {
     if (effectiveOrgId) api.getOrg(effectiveOrgId).then(setOrgData).catch(() => {})
   }, [effectiveOrgId])
   useClubTheme(orgData)
+  // The scorecard URL carries no club slug, so tell the sponsor list which club this is.
+  useEffect(() => { rememberClubSlug(orgData?.slug) }, [orgData?.slug])
 
   useEffect(() => {
     // Only a club admin can even open the claim modal, and the roster list is

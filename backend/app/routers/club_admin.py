@@ -26,7 +26,7 @@ import logging as _logging
 from app.routers.auth import get_current_user, get_current_club, require_super_admin, _hash_password
 from app.auth.capabilities import (
     require_cap, effective_capabilities, ALL_CAPABILITIES,
-    MANAGE_SETTINGS, MANAGE_MERGES, MANAGE_USERS, RUN_HARD_REFRESH, RUN_SYNC,
+    MANAGE_SETTINGS, MANAGE_MERGES, MANAGE_USERS, MANAGE_SPONSORS, RUN_HARD_REFRESH, RUN_SYNC,
 )
 from app.auth.modules import (
     ALL_MODULES, MANAGED_MODULES, ALL_STATUSES, ALL_BILLING_CYCLES, org_entitled_modules,
@@ -34,6 +34,7 @@ from app.auth.modules import (
     BILLABLE_MODULES, BILLABLE_MODULE_NAMES, billing_key_for, STATUS_PRIORITY,
 )
 from app.services import junior_hiding
+from app.services import sponsor_tiers
 from app.services import player_privacy
 from app.services import module_subscriptions as mod_subs
 from app.services import comms_limits
@@ -5512,6 +5513,11 @@ def _sponsor_dict(s: Sponsor) -> dict:
         "website_url": s.website_url,
         "logo_url": s.logo_url,
         "display_order": s.display_order,
+        "tier": s.tier or sponsor_tiers.DEFAULT_TIER,
+        # What the club switched by hand ({"bar": false}); absent keys follow the tier.
+        "placement_overrides": sponsor_tiers.clean_overrides(s.placements) or {},
+        # Where the sponsor actually shows, tier defaults with the overrides applied.
+        "placements": sponsor_tiers.resolve_placements(s.tier, s.placements),
     }
 
 
@@ -5529,21 +5535,66 @@ async def list_sponsors(
     return [_sponsor_dict(s) for s in result.scalars().all()]
 
 
+@router.get("/sponsors/settings")
+async def get_sponsor_settings(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+):
+    """The tier and spot definitions the sponsors screen draws itself from, plus
+    this club's own tier names."""
+    return {
+        **sponsor_tiers.tier_meta(),
+        "tier_labels": sponsor_tiers.resolve_labels(club.sponsor_tier_labels),
+    }
+
+
+class SponsorSettingsPut(BaseModel):
+    tier_labels: Optional[dict[str, Optional[str]]] = None
+
+
+@router.put("/sponsors/settings")
+async def put_sponsor_settings(
+    data: SponsorSettingsPut,
+    current_user: User = Depends(require_cap(MANAGE_SPONSORS)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    # Not sent leaves the names alone; sent (even empty) replaces them, and a
+    # blank or stock name falls back to the stock name.
+    if "tier_labels" in data.model_fields_set:
+        club.sponsor_tier_labels = sponsor_tiers.clean_labels(data.tier_labels)
+        await db.commit()
+        await db.refresh(club)
+    return {
+        **sponsor_tiers.tier_meta(),
+        "tier_labels": sponsor_tiers.resolve_labels(club.sponsor_tier_labels),
+    }
+
+
 class SponsorCreate(BaseModel):
     name: str
     website_url: Optional[str] = None
+    tier: Optional[str] = None
+
+
+def _tier_or_422(value) -> str:
+    try:
+        return sponsor_tiers.clean_tier(value)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Pick a tier: major, gold, silver or supporter")
 
 
 @router.post("/sponsors")
 async def create_sponsor(
     data: SponsorCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_cap(MANAGE_SPONSORS)),
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
     name = data.name.strip()
     if not name:
         raise HTTPException(status_code=422, detail="Name is required")
+    tier = _tier_or_422(data.tier) if data.tier else sponsor_tiers.DEFAULT_TIER
     # Place new sponsor at the end
     result = await db.execute(
         select(func.max(Sponsor.display_order)).where(Sponsor.organisation_id == club.id)
@@ -5554,22 +5605,29 @@ async def create_sponsor(
         name=name,
         website_url=data.website_url.strip() if data.website_url else None,
         display_order=max_order + 1,
+        tier=tier,
     )
     db.add(sponsor)
     await db.commit()
+    await db.refresh(sponsor)
     return _sponsor_dict(sponsor)
 
 
 class SponsorPatch(BaseModel):
     name: Optional[str] = None
     website_url: Optional[str] = None
+    tier: Optional[str] = None
+    # Spot -> true/false, merged over the stored switches. A null on one spot
+    # drops that switch (back to the tier's default); the whole field sent as
+    # null clears every switch; not sent leaves them alone.
+    placements: Optional[dict[str, Optional[bool]]] = None
 
 
 @router.patch("/sponsors/{sponsor_id}")
 async def patch_sponsor(
     sponsor_id: str,
     data: SponsorPatch,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_cap(MANAGE_SPONSORS)),
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
@@ -5580,7 +5638,26 @@ async def patch_sponsor(
         sponsor.name = data.name.strip() or sponsor.name
     if data.website_url is not None:
         sponsor.website_url = data.website_url.strip() or None
+    if "tier" in data.model_fields_set and data.tier is not None:
+        sponsor.tier = _tier_or_422(data.tier)
+    if "placements" in data.model_fields_set:
+        if data.placements is None:
+            sponsor.placements = None
+        else:
+            unknown = [k for k in data.placements if k not in sponsor_tiers.PLACEMENTS]
+            if unknown:
+                raise HTTPException(status_code=422, detail=f"Unknown spot: {unknown[0]}")
+            # An explicit null on one spot drops just that switch (back to the
+            # tier's default); true/false sets it. Merged over what is stored.
+            merged = dict(sponsor_tiers.clean_overrides(sponsor.placements) or {})
+            for spot, val in data.placements.items():
+                if val is None:
+                    merged.pop(spot, None)
+                else:
+                    merged[spot] = val
+            sponsor.placements = sponsor_tiers.clean_overrides(merged)
     await db.commit()
+    await db.refresh(sponsor)
     return _sponsor_dict(sponsor)
 
 
@@ -5588,7 +5665,7 @@ async def patch_sponsor(
 async def upload_sponsor_logo(
     sponsor_id: str,
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_cap(MANAGE_SPONSORS)),
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
@@ -5605,13 +5682,14 @@ async def upload_sponsor_logo(
     import time as _time
     sponsor.logo_url = f"/images/sponsors/{sponsor_id}/logo?v={int(_time.time())}"
     await db.commit()
+    await db.refresh(sponsor)
     return _sponsor_dict(sponsor)
 
 
 @router.delete("/sponsors/{sponsor_id}/logo")
 async def delete_sponsor_logo(
     sponsor_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_cap(MANAGE_SPONSORS)),
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
@@ -5622,13 +5700,14 @@ async def delete_sponsor_logo(
     sponsor.logo_mime = None
     sponsor.logo_url = None
     await db.commit()
+    await db.refresh(sponsor)
     return _sponsor_dict(sponsor)
 
 
 @router.delete("/sponsors/{sponsor_id}")
 async def delete_sponsor(
     sponsor_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_cap(MANAGE_SPONSORS)),
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
@@ -5648,7 +5727,7 @@ class SponsorReorderItem(BaseModel):
 @router.put("/sponsors/reorder")
 async def reorder_sponsors(
     items: list[SponsorReorderItem],
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_cap(MANAGE_SPONSORS)),
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
