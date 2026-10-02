@@ -165,7 +165,7 @@ function FixtureRow({ fx, target, open, onToggle }) {
   const worst = a.flags.find((f) => f.tone === 'red') || a.flags.find((f) => f.tone === 'amber')
   const extra = a.flags.length - (worst ? 1 : 0)
   const complete = a.count >= a.target
-  const cta = a.count === 0 ? 'Build XI' : a.status === 'attention' ? 'Review XI' : 'Edit XI'
+  const cta = fx.has_draft ? 'Continue draft' : a.count === 0 ? 'Build XI' : a.status === 'attention' ? 'Review XI' : 'Edit XI'
   const when = daysUntil(fx.played_on)
   const sv = STATUS_VAR[a.status]
 
@@ -185,6 +185,13 @@ function FixtureRow({ fx, target, open, onToggle }) {
             {fx.start_time && fx.venue && <i className="w-[3px] h-[3px] rounded-full bg-pb-faintest shrink-0" />}
             {fx.venue && <span className="truncate hidden sm:inline">{fx.venue}{ha ? ` (${ha})` : ''}</span>}
             {when && <><i className="w-[3px] h-[3px] rounded-full bg-pb-faintest shrink-0" /><span>{when}</span></>}
+            {fx.has_draft && (
+              <><i className="w-[3px] h-[3px] rounded-full bg-pb-faintest shrink-0" />
+                <span className="font-semibold whitespace-nowrap" style={{ color: 'var(--pb-amber)' }}
+                  title={fx.draft_updated_at ? `Unconfirmed changes saved ${new Date(fx.draft_updated_at).toLocaleString()}` : 'Unconfirmed changes saved'}>
+                  Draft, not confirmed
+                </span></>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-3 shrink-0">

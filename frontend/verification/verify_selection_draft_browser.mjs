@@ -9,6 +9,10 @@
 //   * the button is "Confirm (n)"; only it writes PUT /selection/:id, which is
 //     what clears the draft
 //   * "Discard changes" deletes the draft and returns to the confirmed XI
+//   * two selectors: another selector's draft is picked up by a board with nothing
+//     unsent; a board with unsent changes is refused (409), stops saving, and asks
+//     "Use their version" or "Keep mine", and nothing of theirs is overwritten
+//   * the matchday overview marks a fixture that has a draft
 //   * 390px: no horizontal overflow with the draft banner showing
 //
 //   npx vite preview --outDir <dist> --port 5199 &   then   node verify_selection_draft_browser.mjs
@@ -46,37 +50,61 @@ const run = async () => {
   page.on('dialog', (d) => d.accept())
 
   // The "server": one draft slot, and a log of every write the page makes.
-  const server = { draft: null, confirmed: [] }
-  const wire = { draftPuts: [], draftDeletes: 0, confirms: [] }
+  const server = { draft: null, version: 0, by: null, confirmed: [], overview: [] }
+  const wire = { draftPuts: [], draftDeletes: 0, confirms: [], conflicts: 0 }
+  // Another selector (Sam) changes the draft behind this page's back.
+  const otherSaves = (slots) => {
+    server.draft = { slots, captain_id: null, wicket_keeper_id: null, demotions: [] }
+    server.version += 1
+    server.by = 'Sam Selector'
+  }
+  const conflict = (r) => {
+    wire.conflicts++
+    return r.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ detail: {
+      code: 'draft_conflict', message: 'Someone else changed this draft since you loaded it.',
+      draft: server.draft, version: server.version, updated_by: server.by, updated_at: new Date().toISOString(),
+    } }) })
+  }
   const json = (r, body, status = 200) => r.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
   await page.route('**/api/**', (r) => json(r, {}))
   await page.route('**/api/auth/me', (r) => json(r, ME))
-  await page.route('**/api/selection/overview', (r) => json(r, { fixtures: [] }))
+  await page.route('**/api/selection/overview', (r) => json(r, { fixtures: server.overview, default_team_size: 11 }))
   await page.route(/\/api\/selection\/[^/]+\/previous-xi/, (r) => json(r, { source_fixture_id: null, player_ids: [], captain_id: null, wicket_keeper_id: null }))
   await page.route(/\/api\/selection\/selected-players/, (r) => json(r, { player_ids: [] }))
-  await page.route(new RegExp(`/api/selection/${FID}/draft$`), async (r) => {
+  await page.route(new RegExp(`/api/selection/${FID}/draft(\\?.*)?$`), async (r) => {
     const m = r.request().method()
     if (m === 'PUT') {
       const b = JSON.parse(r.request().postData())
       wire.draftPuts.push(b)
+      if ((b.base_version || 0) !== server.version) return conflict(r)
       server.draft = b
-      return json(r, { status: 'ok' })
+      server.version += 1
+      server.by = 'Jordan Admin'
+      return json(r, { status: 'ok', version: server.version })
     }
-    if (m === 'DELETE') { wire.draftDeletes++; server.draft = null; return json(r, { status: 'ok' }) }
-    return json(r, server.draft ? { draft: server.draft, updated_at: new Date().toISOString(), updated_by: 'Sam Selector' } : { draft: null })
+    if (m === 'DELETE') {
+      const base = Number(new URL(r.request().url()).searchParams.get('base_version') || 0)
+      if (base && base !== server.version && server.draft) return conflict(r)
+      wire.draftDeletes++; server.draft = null; server.version = 0
+      return json(r, { status: 'ok', version: 0 })
+    }
+    return json(r, server.draft
+      ? { draft: server.draft, version: server.version, updated_at: new Date().toISOString(), updated_by: server.by }
+      : { draft: null, version: 0 })
   })
   await page.route(new RegExp(`/api/selection/${FID}$`), async (r) => {
     if (r.request().method() === 'PUT') {
       const b = JSON.parse(r.request().postData())
       wire.confirms.push(b)
       server.confirmed = b.players.map((p) => p.player_id)
-      server.draft = null    // the real route clears it in the same transaction
+      server.draft = null; server.version = 0    // the real route clears it in the same transaction
       return json(r, { status: 'ok', count: b.players.length })
     }
     const lineup = server.confirmed.map((pid, i) => ({ player_id: pid, batting_order: i + 1, is_captain: false, is_wicket_keeper: false }))
     return json(r, { ...FIX.payload, lineup })
   })
 
+  if (process.env.TRACE) page.on('request', (rq) => { if (/selection/.test(rq.url()) && rq.method() !== 'GET') console.log('   >>', rq.method(), rq.url().replace(/^.*\/api/, ''), (rq.postData() || '').slice(0, 120)) })
   const card = (name) => page.locator('div.group.relative.rounded-xl', { hasText: name }).first()
   const body = async () => (await page.locator('body').innerText()).replace(/\s+/g, ' ')
   const open = async () => {
@@ -126,7 +154,7 @@ const run = async () => {
   await page.waitForTimeout(600)
   ok('back on the board: button reads "Confirm (1)" with no Confirm pressed', /Confirm \(1\)/.test(await confirmBtn().innerText()), await confirmBtn().innerText())
   ok('draft banner is back', /Draft\./.test(await body()))
-  ok('the board credits who saved it', /Last saved by Sam Selector/.test(await body()))
+  ok('the board credits who saved it', /Last saved by Jordan Admin/.test(await body()))
   ok('restoring did not write anything', wire.confirms.length === 0)
   await page.screenshot({ path: join(SHOTS, 'selection_draft_restored.png') })
 
@@ -134,7 +162,7 @@ const run = async () => {
   const dels = wire.draftDeletes
   await page.locator('[title="Remove"]').first().click({ timeout: 1500 }).catch(() => {})
   await page.waitForTimeout(1500)
-  ok('a DELETE went out', wire.draftDeletes === dels + 1, `${dels} -> ${wire.draftDeletes}`)
+  ok('a DELETE went out', wire.draftDeletes === dels + 1, `${dels} -> ${wire.draftDeletes}, conflicts ${wire.conflicts}, server v${server.version}, body: ${(await body()).slice(0, 160)}`)
   ok('button reads "Confirmed" again', /Confirmed/.test(await confirmBtn().innerText()))
   ok('banner gone', !/Draft\./.test(await body()))
 
@@ -165,6 +193,83 @@ const run = async () => {
   ok('DELETE sent', wire.draftDeletes === d2 + 1)
   ok('banner gone and button "Confirmed"', !/Draft\./.test(await body()) && /Confirmed/.test(await confirmBtn().innerText()))
   ok('both confirmed players are back on the board', !(await body()).includes('Confirm (') && wire.confirms.length === 1)
+
+  console.log('\n# a second selector: their draft reaches a board with nothing unsent')
+  const poll = async () => { await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange'))); await page.waitForTimeout(700) }
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await open()
+  ok('board starts on the confirmed XI', /Confirmed/.test(await confirmBtn().innerText()), await confirmBtn().innerText())
+  const putsBeforeSam = wire.draftPuts.length
+  otherSaves([ID['Cara Free'], null, ID['Alex Backtoback']])
+  await poll()
+  ok('the board picked up their draft without being touched', /Confirm \(2\)/.test(await confirmBtn().innerText()), await confirmBtn().innerText())
+  ok('it says so', /Sam Selector changed the draft/.test(await body()))
+  ok('and credits them in the strip', /Last saved by Sam Selector/.test(await body()))
+  ok('adopting their draft wrote nothing', wire.draftPuts.length === putsBeforeSam)
+  await page.screenshot({ path: join(SHOTS, 'selection_draft_adopted.png') })
+
+  console.log('\n# a second selector: unsent changes meet theirs')
+  otherSaves([ID['Cara Free']])                     // Sam trims it to one player; this board has not polled yet
+  const conflictsBefore = wire.conflicts
+  await page.locator('[title="Remove"]').first().click()   // we change our copy
+  await page.waitForTimeout(1500)
+  ok('our save was refused (409)', wire.conflicts === conflictsBefore + 1, `${conflictsBefore} -> ${wire.conflicts}`)
+  ok('the conflict strip names them', /Sam Selector changed this draft/.test(await body()), (await body()).slice(0, 300))
+  ok('with both choices', /Use their version/.test(await body()) && /Keep mine/.test(await body()))
+  ok('their draft was not overwritten', (server.draft?.slots || []).filter(Boolean).length === 1 && server.by === 'Sam Selector', JSON.stringify(server.draft))
+  const putsInConflict = wire.draftPuts.length
+  await card('Bob Blocked').click()
+  await page.waitForTimeout(1500)
+  await poll()
+  ok('autosave stays stopped while it is unsettled', wire.draftPuts.length === putsInConflict, `${putsInConflict} -> ${wire.draftPuts.length}`)
+  await page.screenshot({ path: join(SHOTS, 'selection_draft_conflict.png') })
+
+  console.log('\n# Keep mine saves this board over theirs, on their version')
+  const verBefore = server.version
+  await page.getByRole('button', { name: 'Keep mine' }).click({ timeout: 1500 }).catch(() => {})
+  await page.waitForTimeout(1500)
+  ok('strip gone', !/changed this draft/.test(await body()))
+  const lastMine = wire.draftPuts[wire.draftPuts.length - 1] || {}
+  ok('it saved with their version as the base', lastMine.base_version === verBefore, `${lastMine.base_version} vs ${verBefore}`)
+  ok('server now holds this board', server.by === 'Jordan Admin' && server.version === verBefore + 1)
+
+  console.log('\n# Use their version replaces this board and writes nothing')
+  otherSaves([ID['Alex Backtoback']])
+  await page.locator('[title="Remove"]').first().click().catch(() => {})
+  await page.waitForTimeout(1500)
+  ok('conflict strip again', /Sam Selector changed this draft/.test(await body()))
+  const putsBeforeTheirs = wire.draftPuts.length
+  await page.getByRole('button', { name: 'Use their version' }).click({ timeout: 1500 }).catch(() => {})
+  await page.waitForTimeout(1500)
+  ok('strip gone', !/changed this draft/.test(await body()))
+  ok('board shows exactly their one player', /Confirm \(1\)/.test(await confirmBtn().innerText()), await confirmBtn().innerText())
+  ok('nothing was written', wire.draftPuts.length === putsBeforeTheirs)
+  ok('their draft is untouched', server.by === 'Sam Selector')
+
+  console.log('\n# the draft vanishing (confirmed or discarded elsewhere)')
+  server.draft = null; server.version = 0
+  await poll()
+  ok('a board with nothing unsent drops back to the confirmed XI', /Confirmed/.test(await confirmBtn().innerText()) && !/Draft\./.test(await body()), await confirmBtn().innerText())
+  ok('and says why', /confirmed or discarded by someone else/.test(await body()))
+
+  console.log('\n# the matchday overview marks a fixture with a draft')
+  const soon = new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10)
+  const ovFx = (id, extra = {}) => ({ id, label: 'x', opponent_name: 'Rivals', home_away: 'HOME', played_on: soon, start_time: '9:00am',
+    round: '1', venue: 'Oval', team_name: 'Colts', team_sequence: 4, grade_name: 'Colts', lineup: [], ...extra })
+  server.overview = [ovFx(FID, { has_draft: true, draft_updated_at: new Date().toISOString() }), ovFx('00000000-0000-4000-8000-0000000000aa', { team_name: '2nd Grade' })]
+  await page.goto(`${BASE}/admin/betterselect/selection`, { waitUntil: 'domcontentloaded' })
+  await page.getByText('Colts').first().waitFor({ timeout: 20000 }).catch(() => {})
+  await page.waitForTimeout(400)
+  const ovText = await body()
+  ok('the fixture with a draft says "Draft, not confirmed"', /Draft, not confirmed/.test(ovText))
+  ok('only once (the other fixture has none)', (ovText.match(/Draft, not confirmed/g) || []).length === 1, String((ovText.match(/Draft, not confirmed/g) || []).length))
+  await page.screenshot({ path: join(SHOTS, 'selection_draft_overview.png') })
+  await page.setViewportSize({ width: 390, height: 900 })
+  await page.waitForTimeout(300)
+  ok('overview: no horizontal overflow at 390px', (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  server.overview = []
+  await open()
 
   console.log('\n# 390px')
   await card('Alex Backtoback').click().catch(() => {})

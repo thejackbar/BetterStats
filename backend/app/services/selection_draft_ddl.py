@@ -13,6 +13,10 @@ statement is idempotent.
     demotions); only ``routers/selection.py`` writes or reads it. Confirming
     the XI deletes the row. A draft is working state, not a record of what a
     player did, so it is not on ``merge_carry.CARRIED``.
+
+    ``version`` is bumped by every write. A writer says which version it last
+    saw, and a write against an older one is refused with the current draft, so
+    two selectors on one fixture cannot silently overwrite each other.
 """
 
 STATEMENTS: list[str] = [
@@ -21,8 +25,11 @@ STATEMENTS: list[str] = [
         organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
         draft JSONB NOT NULL DEFAULT '{}'::jsonb,
         updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        version INTEGER NOT NULL DEFAULT 1
     )""",
+    # A database that already ran the first cut of 317 has no version column.
+    "ALTER TABLE selection_drafts ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1",
 ]
 
 DOWNGRADE: list[str] = [

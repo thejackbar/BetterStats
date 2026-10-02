@@ -18,6 +18,11 @@ Drives the SHIPPED route bodies (`get_draft`, `save_draft`, `discard_draft`,
   * Confirm writes the lineup AND removes the draft, in one transaction
   * a refused Confirm (same-date clash) leaves the draft alone
   * Discard removes the draft and leaves the confirmed XI alone
+  * two selectors: a save against a stale version is refused (409) with the
+    current draft and who saved it, nothing is overwritten, two simultaneous
+    saves cannot both win, a stale discard is refused, a draft confirmed away
+    is reported as gone rather than resurrected
+  * the matchday overview flags exactly the fixtures that have a draft
 
 CONTROL MODE: against the commit BEFORE this change the draft routes do not
 exist; they are read with `getattr` so the control reports failed checks rather
@@ -56,6 +61,7 @@ engine = create_async_engine(DB, echo=False)
 Session = async_sessionmaker(engine, expire_on_commit=False)
 
 PASS = FAIL = 0
+LAST_DETAIL: list = [None]
 FAILURES: list[str] = []
 
 
@@ -157,7 +163,7 @@ async def main():
     DraftDemotion = getattr(sel, "DraftDemotion", None)
     set_selection, LineupSet, LineupSlot = sel.set_selection, sel.LineupSet, sel.LineupSlot
 
-    org, other_org, user_id, season = (uuid.uuid4() for _ in range(4))
+    org, other_org, user_id, user2_id, season = (uuid.uuid4() for _ in range(5))
     g_hi, g_lo, t_hi, t_lo = (uuid.uuid4() for _ in range(4))
     fx_a, fx_hi, fx_lo, fx_foreign = (uuid.uuid4() for _ in range(4))
     P = [uuid.uuid4() for _ in range(5)]
@@ -168,6 +174,8 @@ async def main():
         db.add(Organisation(id=org, name="Draft CC", slug=f"draft-{org.hex[:8]}"))
         db.add(Organisation(id=other_org, name="Other CC", slug=f"other-{other_org.hex[:8]}"))
         db.add(User(id=user_id, username=f"u{user_id.hex[:8]}", email=f"{user_id.hex[:8]}@x.com", password_hash="x"))
+        db.add(User(id=user2_id, username=f"v{user2_id.hex[:8]}", email=f"{user2_id.hex[:8]}@x.com",
+                    password_hash="x", display_name="Sam Selector"))
         db.add(Season(id=season, organisation_id=org, name="Summer", year=2026))
         await db.flush()
         db.add(Grade(id=g_hi, season_id=season, name="1st Grade"))
@@ -187,17 +195,21 @@ async def main():
                        played_on=d, status="UPCOMING", label="theirs"))
         await db.commit()
 
-    async def call(fn, *args):
-        """Run a route body on its own session; return (result, None) or (None, status)."""
+    async def call(fn, *args, as_user=None, **kw):
+        """Run a route body on its own session; return (result, None) or (None, status).
+        A 409's detail is kept in LAST_DETAIL."""
         if fn is None:
             return None, "absent"
         async with Session() as db:
             club = await db.get(Organisation, org)
-            user = await db.get(User, user_id)
+            user = await db.get(User, as_user or user_id)
             try:
-                return await fn(*args, db=db, club=club, user=user), None
+                return await fn(*args, db=db, club=club, user=user, **kw), None
             except HTTPException as e:
+                LAST_DETAIL[0] = e.detail
                 return None, e.status_code
+            except TypeError as e:    # a build whose route lacks the new argument (control run)
+                return None, f"TypeError: {e}"
 
     async def scalar(sql, **kw):
         async with Session() as db:
@@ -236,7 +248,7 @@ async def main():
     check("the board's confirmed lineup is still empty", sel["lineup"], [])
 
     print("\n# B. A second autosave replaces the first")
-    r, err = await call(save_draft, str(fx_a), body(slots=[str(P[4])]))
+    r, err = await call(save_draft, str(fx_a), body(slots=[str(P[4])], base_version=1))
     check("second autosave accepted", (r or {}).get("status", err), "ok")
     check("still ONE row for the fixture", await scalar("SELECT COUNT(*) FROM selection_drafts WHERE fixture_id=:f", f=fx_a)
           if DraftSet else None, 1)
@@ -246,7 +258,7 @@ async def main():
     print("\n# C. The server cleans what it is sent")
     r, err = await call(save_draft, str(fx_a), body(
         slots=[str(P[0]), str(foreign_player), "not-a-uuid", str(P[0]), str(P[1])],
-        captain_id=str(P[2]), wicket_keeper_id=str(P[1])))
+        captain_id=str(P[2]), wicket_keeper_id=str(P[1]), base_version=2))
     check("accepted", (r or {}).get("status", err), "ok")
     r, _ = await call(get_draft, str(fx_a))
     dr = (r or {}).get("draft") or {}
@@ -298,6 +310,73 @@ async def main():
     r, err = await call(save_draft, str(fx_a), body(slots=[str(P[2])]))
     r, err = await call(discard_draft, str(fx_a))
     check("discard leaves the confirmed XI alone", await lineup_ids(fx_a), {P[0], P[1]})
+
+    print("\n# H. Two selectors on one fixture")
+    # fx_a has no draft now (confirmed in E, discarded in G). Sam and the
+    # first user both open the board and see no draft (version 0).
+    r, err = await call(save_draft, str(fx_a), body(slots=[str(P[0])], base_version=0))
+    check("first selector's autosave (saw no draft) is accepted as version 1", (r or {}).get("version", err), 1)
+    r, err = await call(save_draft, str(fx_a), body(slots=[str(P[1])], base_version=0), as_user=user2_id)
+    check("second selector, who also saw no draft, is refused", err, 409)
+    det = LAST_DETAIL[0] if isinstance(LAST_DETAIL[0], dict) else {}
+    check("the refusal says it is a draft conflict", det.get("code"), "draft_conflict")
+    check("it carries the current draft", (det.get("draft") or {}).get("slots"), [str(P[0])])
+    check("it carries the current version", det.get("version"), 1)
+    check("it says who saved it", det.get("updated_by"), f"u{user_id.hex[:8]}")
+    r, _ = await call(get_draft, str(fx_a))
+    check("nothing was overwritten", ((r or {}).get("draft") or {}).get("slots"), [str(P[0])])
+
+    r, err = await call(save_draft, str(fx_a), body(slots=[str(P[0]), str(P[1])], base_version=1), as_user=user2_id)
+    check("second selector saves against the current version", (r or {}).get("version", err), 2)
+    r, err = await call(save_draft, str(fx_a), body(slots=[str(P[2])], base_version=1))
+    check("first selector, now stale, is refused", err, 409)
+    check("and is told version 2 by Sam Selector",
+          (LAST_DETAIL[0].get("version"), LAST_DETAIL[0].get("updated_by")) if isinstance(LAST_DETAIL[0], dict) else None,
+          (2, "Sam Selector"))
+
+    # Two saves at the same instant against the same version: one write wins.
+    r1, r2 = await asyncio.gather(
+        call(save_draft, str(fx_a), body(slots=[str(P[3])], base_version=2)),
+        call(save_draft, str(fx_a), body(slots=[str(P[4])], base_version=2), as_user=user2_id),
+    )
+    outcomes = sorted([str((r1[0] or {}).get("version", r1[1])), str((r2[0] or {}).get("version", r2[1]))])
+    check("racing saves on one version: exactly one wins, one is refused", outcomes, ["3", "409"])
+    check("the version moved by exactly one", await scalar("SELECT version FROM selection_drafts WHERE fixture_id=:f", f=fx_a)
+          if DraftSet else None, 3)
+
+    r, err = await call(discard_draft, str(fx_a), base_version=2)
+    check("a stale discard is refused", err, 409)
+    check("and the draft survives it", await scalar("SELECT COUNT(*) FROM selection_drafts WHERE fixture_id=:f", f=fx_a)
+          if DraftSet else None, 1)
+    r, err = await call(discard_draft, str(fx_a), base_version=3)
+    check("discarding the version you saw works", (r or {}).get("status", err), "ok")
+    r, err = await call(discard_draft, str(fx_a), base_version=3)
+    check("discarding something already gone is a no-op, not an error", (r or {}).get("status", err), "ok")
+
+    r, err = await call(save_draft, str(fx_a), body(slots=[str(P[0])], base_version=0))
+    check("a fresh draft starts again at version 1", (r or {}).get("version", err), 1)
+    check("confirm (the other selector) removes it", await confirm(fx_a, [P[0], P[1]]), "ok")
+    r, err = await call(save_draft, str(fx_a), body(slots=[str(P[2])], base_version=1))
+    check("a board still holding the confirmed-away draft is refused", err, 409)
+    check("and told there is no draft any more",
+          (LAST_DETAIL[0].get("draft", "absent"), LAST_DETAIL[0].get("version")) if isinstance(LAST_DETAIL[0], dict) else None,
+          (None, 0))
+    check("the confirmed-away draft was not resurrected", await scalar("SELECT COUNT(*) FROM selection_drafts WHERE fixture_id=:f", f=fx_a)
+          if DraftSet else None, 0)
+
+    print("\n# I. The matchday overview flags drafts")
+    async def overview():
+        async with Session() as db:
+            club = await db.get(Organisation, org)
+            return await importlib.import_module("app.routers.selection").selection_overview(db, club)
+    r, err = await call(save_draft, str(fx_lo), body(slots=[str(P[4])], base_version=0))
+    ov = await overview()
+    flags = {f["id"]: (f.get("has_draft"), f.get("draft_updated_at") is not None) for f in ov["fixtures"]}
+    check("fixture with a draft is flagged, with a time", flags.get(str(fx_lo)), (True, True))
+    check("fixtures without one are not", [flags.get(str(fx_a)), flags.get(str(fx_hi))], [(False, False), (False, False)])
+    await call(discard_draft, str(fx_lo))
+    ov = await overview()
+    check("discarding clears the flag", {f["id"]: f.get("has_draft") for f in ov["fixtures"]}.get(str(fx_lo)), False)
 
     print(f"\n{PASS} passed, {FAIL} failed")
     for f in FAILURES:

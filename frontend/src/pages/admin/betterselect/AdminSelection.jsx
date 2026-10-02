@@ -175,6 +175,30 @@ const confirmSig = (filled, capId, wkId, demoList) =>
 
 const DRAFT_DELAY_MS = 600
 const DRAFT_RETRY_MS = 5000
+const DRAFT_POLL_MS = 8000
+
+// A saved draft laid back onto the board. Anyone no longer in the pool is
+// dropped; the server re-judges everything at Confirm.
+function restoreDraft(dd, pool, size) {
+  const inPool = new Set((pool || []).map((p) => p.id))
+  let slots = (dd.slots || []).map((id) => (id && inPool.has(id) ? id : null))
+  if (size === 0) slots = slots.filter(Boolean)
+  else {
+    while (slots.length > size && slots[slots.length - 1] == null) slots.pop()
+    while (slots.length < size) slots.push(null)
+  }
+  const kept = new Set(slots.filter(Boolean))
+  const demo = {}
+  ;(dd.demotions || []).forEach((x) => {
+    if (x.callup_id && kept.has(x.callup_id)) demo[x.player_id] = { fixture_id: x.fixture_id, batting_order: x.batting_order, callupId: x.callup_id }
+  })
+  return {
+    slots,
+    cap: kept.has(dd.captain_id) ? dd.captain_id : null,
+    wk: kept.has(dd.wicket_keeper_id) ? dd.wicket_keeper_id : null,
+    demo,
+  }
+}
 
 export default function AdminSelection() {
   const { fixtureId } = useParams()
@@ -211,6 +235,13 @@ export default function AdminSelection() {
   const draftPending = useRef(null)       // { fixtureId, body|null, sig } waiting for the debounce
   const draftTimer = useRef(null)
   const draftInflight = useRef(null)      // the write in flight: confirm and reload wait for it
+  const draftBusy = useRef(0)             // writes in flight (the poll leaves them alone)
+  const draftVersion = useRef(0)          // server draft version this board last saw (0 = none)
+  // Another selector changed, confirmed or discarded the draft while this board
+  // held unsent changes: { theirs: { draft, version, by, at } | null }. Autosave
+  // stops until it is settled.
+  const [draftConflict, setDraftConflict] = useState(null)
+  const pollDraft = useRef(() => {})
   const [yearsF, setYearsF] = useState(3)
   const [sort, setSort] = useState('squad')
   const [availEdit, setAvailEdit] = useState(null)
@@ -251,29 +282,22 @@ export default function AdminSelection() {
         let wk = lineup.find((l) => l.is_wicket_keeper)?.player_id ?? null
         setBaseSig(confirmSig(init.filter(Boolean), cap, wk, []))
 
-        // An autosaved draft replaces the confirmed XI on the board. Anyone no
-        // longer in the pool is dropped; the server re-judges everything at Confirm.
+        // An autosaved draft replaces the confirmed XI on the board.
         let slotsInit = init
         let demo = {}
         const dd = dr?.draft
         draftOnServer.current = false
+        draftVersion.current = 0
         setDraftInfo(null)
+        setDraftConflict(null)
         if (dd && Array.isArray(dd.slots)) {
-          const inPool = new Set((d.pool || []).map((p) => p.id))
-          let ds = dd.slots.map((id) => (id && inPool.has(id) ? id : null))
-          if (size === 0) ds = ds.filter(Boolean)
-          else {
-            while (ds.length > size && ds[ds.length - 1] == null) ds.pop()
-            while (ds.length < size) ds.push(null)
-          }
-          const kept = new Set(ds.filter(Boolean))
-          slotsInit = ds
-          cap = kept.has(dd.captain_id) ? dd.captain_id : null
-          wk = kept.has(dd.wicket_keeper_id) ? dd.wicket_keeper_id : null
-          ;(dd.demotions || []).forEach((x) => {
-            if (x.callup_id && kept.has(x.callup_id)) demo[x.player_id] = { fixture_id: x.fixture_id, batting_order: x.batting_order, callupId: x.callup_id }
-          })
+          const r = restoreDraft(dd, d.pool, size)
+          slotsInit = r.slots
+          cap = r.cap
+          wk = r.wk
+          demo = r.demo
           draftOnServer.current = true
+          draftVersion.current = dr.version || 0
           setDraftInfo({ at: dr.updated_at, by: dr.updated_by })
         }
         draftServerSig.current = JSON.stringify([slotsInit, cap, wk, demo])
@@ -300,17 +324,32 @@ export default function AdminSelection() {
     if (!p) return draftInflight.current
     draftPending.current = null
     const opts = leaving ? { keepalive: true } : {}
+    draftBusy.current += 1
     const task = Promise.resolve(draftInflight.current).catch(() => {})
-      .then(() => (p.body ? api.bsSaveSelectionDraft(p.fixtureId, p.body, opts) : api.bsDiscardSelectionDraft(p.fixtureId, opts)))
-      .then(() => {
+      // The version is read when the write is sent, so a save queued behind
+      // another of ours carries the version that one produced.
+      .then(() => (p.body
+        ? api.bsSaveSelectionDraft(p.fixtureId, { ...p.body, base_version: draftVersion.current }, opts)
+        : api.bsDiscardSelectionDraft(p.fixtureId, draftVersion.current, opts)))
+      .then((r) => {
+        draftBusy.current -= 1
         if (loadedFor.current !== p.fixtureId) return
+        draftVersion.current = p.body ? (r?.version || 0) : 0
         draftServerSig.current = p.sig
         draftOnServer.current = !!p.body
         setDraftStatus(draftPending.current ? 'saving' : 'saved')
         setDraftInfo(p.body ? { at: new Date().toISOString(), by: null } : null)
       })
       .catch((e) => {
+        draftBusy.current -= 1
         if (loadedFor.current !== p.fixtureId) return
+        if (e.status === 409 && e.detail?.code === 'draft_conflict') {
+          // Someone else got there first. Nothing was overwritten; ask which wins.
+          const t = e.detail
+          setDraftStatus('idle')
+          setDraftConflict({ theirs: t.draft ? { draft: t.draft, version: t.version, by: t.updated_by, at: t.updated_at } : null })
+          return
+        }
         setDraftStatus('error')
         // A dropped connection or a 5xx is worth another go; a refusal is not.
         if ((!e.status || e.status >= 500) && !draftPending.current) {
@@ -475,7 +514,7 @@ export default function AdminSelection() {
   // pause; getting back to the confirmed XI removes the draft. Nothing here
   // touches the confirmed lineup, which is what the rest of the app reads.
   useEffect(() => {
-    if (!canEdit || data === null || loadedFor.current !== fixtureId) return
+    if (!canEdit || data === null || loadedFor.current !== fixtureId || draftConflict) return
     if (dirty ? draftSig === draftServerSig.current : !draftOnServer.current) return
     draftPending.current = {
       fixtureId,
@@ -490,7 +529,60 @@ export default function AdminSelection() {
     setDraftStatus('saving')
     clearTimeout(draftTimer.current)
     draftTimer.current = setTimeout(() => flushDraft(false), DRAFT_DELAY_MS)
-  }, [draftSig, dirty, data, fixtureId, canEdit])  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [draftSig, dirty, data, fixtureId, canEdit, draftConflict])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Take another selector's draft onto the board.
+  const adoptDraft = (t) => {
+    const r = restoreDraft(t.draft, data?.pool, format)
+    setSlots(r.slots)
+    setCapId(r.cap)
+    setWkId(r.wk)
+    setDemotions(r.demo)
+    setFocus(r.slots.findIndex((x) => x == null))
+    draftServerSig.current = JSON.stringify([r.slots, r.cap, r.wk, r.demo])
+    draftOnServer.current = true
+    draftVersion.current = t.version || 0
+    setDraftInfo({ at: t.at, by: t.by })
+    setDraftConflict(null)
+  }
+
+  // Look for another selector's changes while the board is open. Left alone
+  // while a write of ours is waiting or in flight, and while a conflict is
+  // already on screen. A board with nothing unsent just takes the new draft; one
+  // with unsent changes of its own is asked about it (the Draft strip).
+  pollDraft.current = async () => {
+    if (!canEdit || data === null || loadedFor.current !== fixtureId || draftConflict || saving) return
+    if (draftPending.current || draftBusy.current) return
+    let r
+    try { r = await api.bsGetSelectionDraft(fixtureId) } catch { return }
+    if (loadedFor.current !== fixtureId || draftPending.current || draftBusy.current) return
+    if ((r.version || 0) === draftVersion.current) return
+    const theirs = r.draft ? { draft: r.draft, version: r.version, by: r.updated_by, at: r.updated_at } : null
+    if (draftSig === draftServerSig.current) {
+      if (theirs) { adoptDraft(theirs); toastRef.current.info(`${theirs.by || 'Someone'} changed the draft. Showing their version.`) }
+      else { load(); toastRef.current.info('The draft was confirmed or discarded by someone else.') }
+    } else setDraftConflict({ theirs })
+  }
+  useEffect(() => {
+    if (!canEdit) return undefined
+    const tick = () => { if (document.visibilityState === 'visible') pollDraft.current() }
+    const t = setInterval(tick, DRAFT_POLL_MS)
+    document.addEventListener('visibilitychange', tick)
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', tick) }
+  }, [canEdit, fixtureId])
+
+  // The conflict choices. "Mine" keeps this board and saves it over theirs;
+  // "theirs" replaces this board with the draft that is on the server.
+  const keepMine = () => {
+    draftVersion.current = draftConflict?.theirs?.version || 0
+    draftOnServer.current = !!draftConflict?.theirs
+    setDraftConflict(null)   // the autosave effect re-runs and sends this board
+  }
+  const useTheirs = () => {
+    const t = draftConflict?.theirs
+    if (t) adoptDraft(t)
+    else { setDraftConflict(null); load() }
+  }
   const target = format || 0
   const offCount = target > 0 && count !== target
 
@@ -678,9 +770,14 @@ export default function AdminSelection() {
     draftPending.current = null
     try {
       await Promise.resolve(draftInflight.current).catch(() => {})
-      await api.bsDiscardSelectionDraft(fixtureId)
+      await api.bsDiscardSelectionDraft(fixtureId, draftVersion.current)
       load()
-    } catch (e) { toast.error('Could not discard: ' + e.message) }
+    } catch (e) {
+      if (e.status === 409 && e.detail?.code === 'draft_conflict') {
+        const t = e.detail
+        setDraftConflict({ theirs: t.draft ? { draft: t.draft, version: t.version, by: t.updated_by, at: t.updated_at } : null })
+      } else toast.error('Could not discard: ' + e.message)
+    }
   }
 
   const { title, sub, kicker } = fmtHeader(fx)
@@ -764,7 +861,24 @@ export default function AdminSelection() {
 
   return (
     <BetterSelectLayout title="Selection" headerLeft={headerLeft} actions={actions}>
-      {canEdit && dirty && (
+      {canEdit && draftConflict && (
+        <div role="alert" className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border px-3 py-2 text-[12px] text-pb-text"
+          style={{ borderColor: 'var(--pb-amber)', background: 'color-mix(in srgb, var(--pb-amber) 10%, var(--pb-surface))' }}>
+          <span className="min-w-0 flex-1 basis-60">
+            <span className="font-semibold">{draftConflict.theirs ? `${draftConflict.theirs.by || 'Someone else'} changed this draft.` : 'This draft was confirmed or discarded by someone else.'}</span>{' '}
+            {draftConflict.theirs
+              ? 'Your changes are not saved yet. Use their version, or keep yours and save over it.'
+              : 'Your changes are not saved yet. Go back to the confirmed XI, or keep yours as a new draft.'}
+          </span>
+          <span className="flex shrink-0 items-center gap-3">
+            <button type="button" onClick={useTheirs} className="font-display font-semibold text-pb-accent hover:underline">
+              {draftConflict.theirs ? 'Use their version' : 'Use confirmed XI'}
+            </button>
+            <button type="button" onClick={keepMine} className="font-display font-semibold text-pb-accent hover:underline">Keep mine</button>
+          </span>
+        </div>
+      )}
+      {canEdit && dirty && !draftConflict && (
         <div role="status" className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-pb-hairline bg-pb-surface px-3 py-2 text-[12px] text-pb-dim">
           <span className="min-w-0 flex-1 basis-60">
             <span className="font-semibold text-pb-text">Draft.</span>{' '}

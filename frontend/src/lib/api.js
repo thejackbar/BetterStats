@@ -3306,8 +3306,10 @@ export const api = {
   bsGetSelectionDraft: (fixtureId) => request(`/selection/${fixtureId}/draft`),
   bsSaveSelectionDraft: (fixtureId, draft, opts = {}) =>
     request(`/selection/${fixtureId}/draft`, { method: 'PUT', body: JSON.stringify(draft), ...opts }),
-  bsDiscardSelectionDraft: (fixtureId, opts = {}) =>
-    request(`/selection/${fixtureId}/draft`, { method: 'DELETE', ...opts }),
+  // `baseVersion` is the draft version the board last saw: a draft someone else
+  // has changed since is refused with 409 (error.detail = the current draft).
+  bsDiscardSelectionDraft: (fixtureId, baseVersion = 0, opts = {}) =>
+    request(`/selection/${fixtureId}/draft${baseVersion ? `?base_version=${baseVersion}` : ''}`, { method: 'DELETE', ...opts }),
   bsSetDefaultTeamSize: (size) =>
     request('/selection/default-team-size', { method: 'POST', body: JSON.stringify({ size }) }),
   // The previous fixture's named XI (for Selection's "fill from last week").
