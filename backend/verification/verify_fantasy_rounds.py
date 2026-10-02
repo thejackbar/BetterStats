@@ -18,10 +18,15 @@ women's weeks only: the club had only its women's grade on file for the year,
 and live discovery ran only when NO grade was on file, so the men's grades were
 never fetched. Scenario 6 reproduces that.
 
+Third report (Leederville, men's two-day games): a two-day match has one
+`matchSchedule` entry per day, a week apart, in no reliable order. Reading only
+the first entry made the second week of a two-day game its own round (or put the
+match on day 1 in one grade and day 2 in another). Scenario 7 reproduces that.
+
 CONTROL (`--control`): the engine at git HEAD is loaded as a module and run over
-the scenario-6 seed. It must fail on exactly the reported behaviour (women's
-weeks only), read through presence-safe accessors so a different failure shows
-as a different message, not a crash.
+the scenario-7 seed. It must fail on exactly the reported behaviour (a two-day
+game split across rounds), read through presence-safe accessors so a different
+failure shows as a different message, not a crash.
 
 Run:  DATABASE_URL=postgresql+asyncpg://root@/fantasy_test?host=/var/run/postgresql \
       python verification/verify_fantasy_rounds.py [--control]
@@ -129,12 +134,39 @@ LDV_WOMEN = [
     match("2026-11-01", "University", "Leederville Cricket Club", 0, None, str(LDV)),
 ]
 
+# Scenario 7: a club with two men's grades playing two-day games and a women's
+# grade playing Sundays. Round 2 is a two-day match on Oct 10 + Oct 17; grade C
+# lists its two days in REVERSE order, as the live API does for some matches.
+TD = uuid.uuid4()
+GUID_TD_A, GUID_TD_C, GUID_TD_W = "ca-td-a", "ca-td-c", "ca-td-w"
+
+
+def two_day(day1: str, day2: str, org, reverse=False):
+    m = match(day1, "Twoday CC", "Rovers", 0, str(org))
+    entries = [{"matchDay": 1, "startDateTime": f"{day1}T12:30:00"},
+               {"matchDay": 2, "startDateTime": f"{day2}T12:30:00"}]
+    m["matchSchedule"] = entries[::-1] if reverse else entries
+    return m
+
+
+TD_A = [match("2026-10-03", "Twoday CC", "Tigers", 0, str(TD)),
+        two_day("2026-10-10", "2026-10-17", TD),
+        two_day("2026-10-24", "2026-10-31", TD),
+        match("2026-11-07", "Twoday CC", "Lions", 0, str(TD))]
+TD_C = [match("2026-10-03", "Twoday CC", "Tigers", 0, str(TD)),
+        two_day("2026-10-10", "2026-10-17", TD, reverse=True),
+        two_day("2026-10-24", "2026-10-31", TD, reverse=True),
+        match("2026-11-07", "Twoday CC", "Lions", 0, str(TD))]
+TD_W = [match("2026-10-11", "Rovers", "Twoday CC", 0, None, str(TD)),
+        match("2026-10-25", "Rovers", "Twoday CC", 0, None, str(TD))]
+
 FETCH_LOG: list[tuple[str, bool]] = []
 
 
 async def fake_get_grade_matches(grade_id: str, *, force: bool = False):
     FETCH_LOG.append((grade_id, force))
-    return list({GUID_NEW: DRAW, GUID_MEN: LDV_MEN, GUID_WOMEN: LDV_WOMEN}.get(grade_id, []))
+    return list({GUID_NEW: DRAW, GUID_MEN: LDV_MEN, GUID_WOMEN: LDV_WOMEN,
+                  GUID_TD_A: TD_A, GUID_TD_C: TD_C, GUID_TD_W: TD_W}.get(grade_id, []))
 
 
 UNSYNCED_ORG = uuid.uuid4()    # a club with NOTHING on file for 2026 (not synced since CA published it)
@@ -148,7 +180,7 @@ async def fake_get_seasons(org_id: str):
             {"id": "ca-season-2025", "name": "Summer 2025/26", "startDate": "2025-10-01"},
             {"id": "ca-season-2026", "name": "Summer 2026/27", "startDate": "2026-10-01"},
         ]
-    if org_id == str(LDV):
+    if org_id in (str(LDV), str(TD)):
         return [{"id": "ca-season-2026", "name": "Summer 2026/27", "startDate": "2026-07-01"}]
     return []
 
@@ -156,6 +188,10 @@ async def fake_get_seasons(org_id: str):
 async def fake_get_teams(org_id: str, season_id: str):
     # Only the 2026 season is asked for; a 2025 request would be a bug.
     assert season_id == "ca-season-2026", season_id
+    if org_id == str(TD):
+        return [{"id": "ta", "grades": [{"id": GUID_TD_A, "name": "A Grade"}]},
+                {"id": "tc", "grades": [{"id": GUID_TD_C, "name": "C Grade"}]},
+                {"id": "tw", "grade": {"id": GUID_TD_W, "name": "Women"}}]
     if org_id == str(LDV):
         return [{"id": "tm", "grades": [{"id": GUID_MEN, "name": "A Grade"}]},
                 {"id": "tw", "grade": {"id": GUID_WOMEN, "name": "PSWL North-East B"}}]
@@ -216,6 +252,12 @@ async def seed_ldv() -> None:
         await s.commit()
 
 
+async def seed_td() -> None:
+    async with Session() as s:
+        s.add(Organisation(id=TD, name="Twoday Cricket Club", slug="twoday", is_active=True))
+        await s.commit()
+
+
 async def season(year: int, org=ORG, **kw) -> FantasySeason:
     async with Session() as s:
         fs = FantasySeason(organisation_id=org, season_year=year, name=f"{year}/{(year + 1) % 100:02d} Fantasy",
@@ -240,7 +282,7 @@ def _count(res) -> object:
 
 
 async def run_control() -> int:
-    """The engine at git HEAD over the scenario-6 seed. Must show women's weeks only."""
+    """The engine at git HEAD over the scenario-7 seed. Must split the two-day games."""
     src = subprocess.check_output(
         ["git", "show", "HEAD:backend/app/services/fantasy_engine.py"],
         cwd=Path(__file__).resolve().parent.parent.parent, text=True)
@@ -250,14 +292,15 @@ async def run_control() -> int:
         spec = importlib.util.spec_from_file_location("fantasy_engine_control", tmp)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        await seed_ldv()
-        fs = await season(2026, org=LDV)
+        await seed_td()
+        fs = await season(2026, org=TD)
         async with Session() as s:
             fs = await s.get(FantasySeason, fs.id)
             n = _count(await mod.generate_rounds(s, fs))
             await s.commit()
-        print(f"CONTROL (HEAD engine): Leederville-shaped club -> {n!r} rounds (men's + women's draw published)")
-        check("control reproduces the report: only the women's weeks (3), men's grade never fetched", n == 3, f"got {n!r}")
+        rs = await rounds_of(fs.id)
+        print(f"CONTROL (HEAD engine): two-day games -> {n!r} rounds: {[(r.start_date.isoformat(), r.end_date.isoformat()) for r in rs]}")
+        check("control reproduces the report: more than 4 rounds, two-day games split", isinstance(n, int) and n > 4, f"got {n!r}")
         return 0 if FAIL == 0 else 1
     finally:
         tmp.unlink(missing_ok=True)
@@ -415,6 +458,37 @@ async def main() -> int:
           any(r.start_date == date(2026, 10, 24) and r.end_date == date(2026, 10, 25) for r in rl))
     check("an undated bye makes no round and no crash", all(r.start_date is not None for r in rl))
     check("the grade on file is not fetched twice", len(FETCH_LOG) == len({g for g, _ in FETCH_LOG}), repr(FETCH_LOG))
+
+    print("7. Men's two-day games: the whole match is ONE round")
+    await seed_td()
+    fs_t = await season(2026, org=TD)
+    # Stale rounds from an earlier run that split the two-day games: numbers 5 and 6.
+    async with Session() as s:
+        for n_, d_ in ((5, date(2026, 10, 17)), (6, date(2026, 10, 31)), (7, date(2026, 11, 14))):
+            await s.execute(text("INSERT INTO fantasy_rounds (fantasy_season_id, organisation_id, round_number, name, start_date, end_date, status) "
+                                 "VALUES (:fs, :o, :n, :nm, :d, :d, :st)"),
+                            {"fs": fs_t.id, "o": TD, "n": n_, "nm": f"Round {n_}", "d": d_, "st": "scored" if n_ == 7 else "upcoming"})
+        await s.commit()
+    async with Session() as s:
+        fs_t = await s.get(FantasySeason, fs_t.id)
+        res = await fantasy_engine.generate_rounds(s, fs_t)
+        await s.commit()
+    rt = await rounds_of(fs_t.id)
+    got = [(r.round_number, r.start_date, r.end_date) for r in rt]
+    # R1 Oct 3 | R2 two-day Oct 10..17 (women's Oct 11 sits inside) | R3 two-day Oct 24..31 (women's Oct 25 inside) | R4 Nov 7
+    want = [(1, date(2026, 10, 3), date(2026, 10, 3)), (2, date(2026, 10, 10), date(2026, 10, 17)),
+            (3, date(2026, 10, 24), date(2026, 10, 31)), (4, date(2026, 11, 7), date(2026, 11, 7)),
+            (7, date(2026, 11, 14), date(2026, 11, 14))]
+    check("each two-day game is ONE round spanning both weeks (4 rounds, plus the kept scored one)",
+          [g for g in got if g[0] <= 4] == want[:4], f"got {got}")
+    check("the order of a match's two days in the feed does not matter (grade C lists them reversed)",
+          got[1][1:] == (date(2026, 10, 10), date(2026, 10, 17)))
+    check("result reports 4 rounds", res.get("rounds") == 4, repr(res))
+    check("stale unscored surplus rounds (5, 6) are removed", all(g[0] not in (5, 6) for g in got), f"got {got}")
+    check("a SCORED round beyond the new count is never deleted", any(g[0] == 7 for g in got), f"got {got}")
+    # The stored-game side: a game recorded on EITHER day lands inside its round's window.
+    check("a game dated day 1 or day 2 is inside round 2's window",
+          all(rt[1].start_date <= d <= rt[1].end_date for d in (date(2026, 10, 10), date(2026, 10, 17))))
 
     print(f"\n{PASS} passed, {FAIL} failed")
     return 0 if FAIL == 0 else 1
