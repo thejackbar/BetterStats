@@ -6,6 +6,7 @@ import { useToast } from '../../../contexts/ToastContext'
 import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import { nameMatchesSearch } from '../../../lib/nameFormat'
+import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { PbSpinner } from '../../../lib/presskit'
 import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
 import {
@@ -63,6 +64,7 @@ function fixtureSub(dateObj) {
 }
 
 export default function AdminAvailability() {
+  const fmt = useAdminNameFormat()
   const { hasCapability } = useAuth()
   const toast = useToast()
   const navigate = useNavigate()
@@ -424,7 +426,7 @@ export default function AdminAvailability() {
                         className="accent-pb-accent" style={{ width: 15, height: 15 }} />
                     )}
                     <Avatar player={p} size={28} />
-                    <span className="text-sm font-medium truncate">{p.display_name}</span>
+                    <span className="text-sm font-medium truncate">{fmt(p.display_name)}</span>
                     <RuleTags player={p} />
                     {p.is_dormant && <span className="font-mono text-[9px] text-amber-300/80 uppercase shrink-0" title={`Dormant${p.last_played ? ' since ' + fmtYear(p.last_played) : ''}`}>dormant</span>}
                     {p.is_inactive && <span className="font-mono text-[9px] text-pb-red/80 uppercase shrink-0" title="Marked inactive">inactive</span>}

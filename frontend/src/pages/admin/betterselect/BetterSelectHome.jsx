@@ -4,6 +4,7 @@
 // each a click into availability or selection. Built from the live API and
 // defensive about every shape so the landing page degrades rather than breaks.
 import { useState, useEffect, useMemo } from 'react'
+import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import BetterSelectLayout, { GROUPS } from '../../../components/admin/BetterSelectLayout'
 import ModuleHub from '../../../components/admin/ModuleHub'
@@ -65,6 +66,7 @@ export default function BetterSelectHome() {
 // availability or selection. Built from the live API and defensive about
 // every shape so the landing page degrades rather than breaks.
 function BetterSelectOverview() {
+  const fmt = useAdminNameFormat()
   const { hasCapability } = useAuth()
   const navigate = useNavigate()
   const [fixtures, setFixtures] = useState(null)
@@ -148,7 +150,7 @@ function BetterSelectOverview() {
     const items = []
     const keepersOut = squad.filter((p) => (p.skill_positions || []).includes('WKT') && (p.availability === 'NO_RESPONSE' || p.availability === 'MAYBE'))
     if (keepersOut.length) {
-      const names = keepersOut.map((p) => p.display_name).slice(0, 2).join(', ')
+      const names = keepersOut.map((p) => fmt(p.display_name)).slice(0, 2).join(', ')
       items.push({ tone: 'red', action: 'Review', to: '/admin/betterselect/availability',
         node: <>Your keeper{keepersOut.length > 1 ? 's' : ''} <b className="text-pb-text">{names}</b> {keepersOut.length > 1 ? "haven't" : "hasn't"} confirmed</> })
     }
@@ -163,7 +165,7 @@ function BetterSelectOverview() {
         node: <><b className="text-pb-text">{needXI} of {weekendFx.length}</b> weekend team{weekendFx.length === 1 ? '' : 's'} still need{needXI === 1 ? 's' : ''} an XI</> })
     }
     return items
-  }, [squad, tally, playable, heroDate, lineupLen, hero])
+  }, [squad, tally, playable, heroDate, lineupLen, hero, fmt])
 
   const heroTitle = hero ? `${hero.team_name || 'Our team'} vs ${hero.opponent_name || hero.label || 'TBC'}` : ''
   const canSelect = hasCapability(CAP.MANAGE_SELECTIONS)

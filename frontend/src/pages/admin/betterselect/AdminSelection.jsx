@@ -14,6 +14,7 @@
 // Wired to the real selection API + atom kit. Availability colours stay
 // semantic (green/amber/red); the club accent is reserved for chrome.
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import BetterSelectLayout from '../../../components/admin/BetterSelectLayout'
 import { useAuth } from '../../../contexts/AuthContext'
@@ -201,6 +202,7 @@ function restoreDraft(dd, pool, size) {
 }
 
 export default function AdminSelection() {
+  const fmt = useAdminNameFormat()
   const { fixtureId } = useParams()
   const navigate = useNavigate()
   const { hasCapability } = useAuth()
@@ -600,10 +602,10 @@ export default function AdminSelection() {
     // A clash blocks the pick unless this is a higher grade calling the player
     // up from a lower one (clash_blocks=false) — then the pick is allowed and
     // they're dropped from the lower XI when we save.
-    if (p.clash_blocks) { toast.error(`${p.display_name} is already picked for ${p.clash.join(', ')} that day`); return }
-    if (p.clash?.length > 0) toast.info(`Calling ${p.display_name} up from ${p.clash.join(', ')} — they'll be dropped there when you save`)
-    else if (alsoIn(p).length > 0) toast.info(`${p.display_name} is also in ${alsoInLine(p)} that day. Adding to both.`)
-    else if (p.availability === 'UNAVAILABLE') toast.info(`${p.display_name} is marked unavailable — adding anyway`)
+    if (p.clash_blocks) { toast.error(`${fmt(p.display_name)} is already picked for ${p.clash.join(', ')} that day`); return }
+    if (p.clash?.length > 0) toast.info(`Calling ${fmt(p.display_name)} up from ${p.clash.join(', ')} — they'll be dropped there when you save`)
+    else if (alsoIn(p).length > 0) toast.info(`${fmt(p.display_name)} is also in ${alsoInLine(p)} that day. Adding to both.`)
+    else if (p.availability === 'UNAVAILABLE') toast.info(`${fmt(p.display_name)} is marked unavailable — adding anyway`)
     setSlots((prev) => {
       const next = [...prev]
       const existing = next.indexOf(p.id)
@@ -649,17 +651,17 @@ export default function AdminSelection() {
         const p = item.player
         if (p.clash_blocks) return
         const displacedId = slots[tgt.idx]   // who held the slot before this drop
-        if (p.clash?.length > 0) toast.info(`Calling ${p.display_name} up from ${p.clash.join(', ')} — they'll be dropped there when you save`)
-        else if (alsoIn(p).length > 0) toast.info(`${p.display_name} is also in ${alsoInLine(p)} that day. Adding to both.`)
-        else if (p.availability === 'UNAVAILABLE') toast.info(`${p.display_name} is marked unavailable — adding anyway`)
+        if (p.clash?.length > 0) toast.info(`Calling ${fmt(p.display_name)} up from ${p.clash.join(', ')} — they'll be dropped there when you save`)
+        else if (alsoIn(p).length > 0) toast.info(`${fmt(p.display_name)} is also in ${alsoInLine(p)} that day. Adding to both.`)
+        else if (p.availability === 'UNAVAILABLE') toast.info(`${fmt(p.display_name)} is marked unavailable — adding anyway`)
         placeInSlot(tgt.idx, p.id)
         // Cascade: a call-up that bumps a regular sends that regular down to the
         // team below, into the called-up player's vacated slot.
         const src = callUpSource(p)
         if (src && displacedId && displacedId !== p.id) {
           setDemotions((m) => ({ ...m, [displacedId]: { fixture_id: src.fixture_id, batting_order: src.batting_order, callupId: p.id } }))
-          const dn = poolById[displacedId]?.display_name || 'Player'
-          toast.info(`${dn} drops to ${src.team_name || 'the team below'} in ${p.display_name}'s place — saved together`)
+          const dn = fmt(poolById[displacedId]?.display_name) || 'Player'
+          toast.info(`${dn} drops to ${src.team_name || 'the team below'} in ${fmt(p.display_name)}'s place — saved together`)
         }
       } else if (item.kind === 'slot') swapSlots(item.idx, tgt.idx)
     } else if (tgt.kind === 'pool' && item.kind === 'slot') {
@@ -787,7 +789,7 @@ export default function AdminSelection() {
     const lines = filled.map((id, i) => {
       const p = poolById[id]
       const tags = [id === capId && '(C)', id === wkId && '(WK)'].filter(Boolean).join(' ')
-      return `${i + 1}. ${p?.display_name || '—'}${tags ? ' ' + tags : ''}`
+      return `${i + 1}. ${fmt(p?.display_name) || '—'}${tags ? ' ' + tags : ''}`
     })
     return `${title}${sub ? '\n' + sub : ''}\n\n${lines.join('\n')}`
   }
@@ -924,7 +926,7 @@ export default function AdminSelection() {
                     <span className="font-mono text-xs text-pb-faintest w-5 text-right">{i + 1}</span>
                     <Avatar player={p} size={26} />
                     <span className="flex-1 text-[13.5px] truncate">
-                      {p?.display_name}{id === capId && <> <Tag>C</Tag></>}{id === wkId && <> <Tag tone="amber">WK</Tag></>}
+                      {fmt(p?.display_name)}{id === capId && <> <Tag>C</Tag></>}{id === wkId && <> <Tag tone="amber">WK</Tag></>}
                       {' '}<RuleTags player={p} />
                     </span>
                     <RoleChips roles={p?.skill_positions} muted />

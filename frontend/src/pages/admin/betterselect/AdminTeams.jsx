@@ -30,6 +30,7 @@ import BetterSelectLayout from '../../../components/admin/BetterSelectLayout'
 import { useAuth } from '../../../contexts/AuthContext'
 import { useToast } from '../../../contexts/ToastContext'
 import { api } from '../../../lib/api'
+import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { CAP } from '../../../lib/capabilities'
 import { PbSpinner, Field, Input, Select } from '../../../lib/presskit'
 import { formatSeason } from '../../../lib/cricketFormat'
@@ -162,6 +163,7 @@ function TeamModal({ team, onClose, onSaved }) {
  * squad" (the toolbar Bulk-add tool) where you pick the destination here. Either
  * way: multi-select players, then assign them all at once. */
 function BulkAddModal({ fixedTeam, teams, players, dormantCutoff, statusOf, onAssign, onClose }) {
+  const fmt = useAdminNameFormat()
   const [sel, setSel] = useState(() => new Set())
   const [q, setQ] = useState('')
   const [years, setYears] = useState(0)
@@ -220,7 +222,7 @@ function BulkAddModal({ fixedTeam, teams, players, dormantCutoff, statusOf, onAs
                 <input type="checkbox" checked={on} onChange={() => toggle(p.id)} className="accent-pb-accent w-[15px] h-[15px]" />
                 <Dot status={statusOf(p.id)} />
                 <Avatar player={p} size={26} />
-                <span className="flex-1 text-[13.5px] font-medium truncate">{p.display_name || p.name}</span>
+                <span className="flex-1 text-[13.5px] font-medium truncate">{fmt(p.display_name || p.name)}</span>
                 {cur && <span className="font-mono text-[9px] text-pb-faintest truncate shrink-0">in {cur}</span>}
                 {badge && (
                   <span className="font-mono text-[8.5px] text-amber-300/70 uppercase shrink-0"
@@ -307,6 +309,7 @@ function AddToSquadMenu({ p, teams, onAddToSquad }) {
 
 /* ── A draggable player card ───────────────────────────────────────────────── */
 function PlayerCard({ p, status, dormantCutoff, draggable, onDragStart, onDragEnd, onEditAvail, teams, onAddToSquad }) {
+  const fmt = useAdminNameFormat()
   const meta = AVAILABILITY[status] || AVAILABILITY.NO_RESPONSE
   const badge = recencyBadge(p, dormantCutoff)
   return (
@@ -316,7 +319,7 @@ function PlayerCard({ p, status, dormantCutoff, draggable, onDragStart, onDragEn
       {draggable && <span className="text-pb-faintest shrink-0"><Icon name="grip" size={14} /></span>}
       <AvailDot player={p} status={status} onEdit={onEditAvail} />
       <Avatar player={p} size={26} />
-      <span className="flex-1 min-w-0 text-[13px] font-medium truncate">{p.display_name || p.name}</span>
+      <span className="flex-1 min-w-0 text-[13px] font-medium truncate">{fmt(p.display_name || p.name)}</span>
       {p.status === 'inactive' && <span className="font-mono text-[8px] text-pb-faintest uppercase shrink-0" title="Marked inactive">inactive</span>}
       {badge && <span className="font-mono text-[8px] text-amber-300/60 uppercase shrink-0" title={badge.title}>{badge.text}</span>}
       <RoleChips roles={p.skill_positions} muted />
