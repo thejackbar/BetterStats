@@ -10,10 +10,17 @@ BetterIQ's scouting copy, and writes an audit entry.
 It never deletes the player row or anything they did. The club's match records
 hang off the row, and a deleted row is simply re-created by the next sync.
 
+A person has one ``players`` row PER CLUB, all carrying the same Cricket
+Australia participant id. This hides every one of them, and records a
+suppression on that id so a row created later (a club that joins, a fixture
+another club syncs) is born hidden too.
+
 WHAT IT TOUCHES
 ---------------
   * ``players``: ``is_public`` false, ``privacy_hidden_*`` set, photo and action
-    photo columns cleared (and a legacy on-disk headshot unlinked);
+    photo columns cleared (and a legacy on-disk headshot unlinked), on this row
+    AND every other club's row for the same participant id;
+  * ``player_privacy_suppressions``: one row, keyed on the participant id;
   * ``scouted_players``: the photo columns on any row for the same person;
   * ``manual_edit_logs``: one audit entry.
 
@@ -73,9 +80,10 @@ async def run(args) -> int:
             return 2
 
         print(
-            "\nWould hide the player from the public site"
+            f"\nWould hide the player from the public site"
             + ("" if args.keep_photos else " and remove their photographs")
-            + "."
+            + f", on this row and {len(report['other_club_rows'])} other club row(s) for the same person,"
+            + " and record a suppression so new rows are born hidden."
         )
         if not args.apply:
             print("Dry run. Re-run with --apply to write.")

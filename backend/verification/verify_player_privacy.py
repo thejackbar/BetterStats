@@ -131,6 +131,7 @@ def uid() -> uuid.UUID:
 
 OURS, SEASON, ADMIN = uid(), uid(), uid()
 TRENT, PLAIN, CLUBHID = uid(), uid(), uid()
+OTHER, NEWORG, SIB = uid(), uid(), uid()   # Trent's row at ANOTHER club, and a club that joins later
 PHOTO = b"\x89PNG-fake-headshot"
 HERO = b"\x89PNG-fake-action"
 
@@ -206,6 +207,10 @@ async def build_schema() -> None:
             print("  (video DDL not applied:", exc, ")")
         for stmt in EXTRA_DDL:
             await conn.execute(text(stmt))
+        # The SHIPPED DDL for migration 316 (the suppression table is raw SQL, so
+        # create_all never makes it), not a retyped copy.
+        for stmt in PRIVACY_DDL:
+            await conn.execute(text(stmt))
         # The ORM maps instructional_videos without the later raw-SQL columns the
         # sitemap's video listing reads; the shipped DDL above adds them only
         # when the table is absent, so add the one it selects.
@@ -225,6 +230,15 @@ async def seed(session) -> None:
             hero_photo_data=HERO, hero_photo_mime="image/png",
             hero_photo_url=f"/api/images/players/{pid}/hero-photo?v=1",
         ))
+    # The same person at another club: a per-club row (uuid5 id) carrying the
+    # SAME Cricket Australia participant id, with its own photo.
+    session.add(Organisation(id=OTHER, name="Rival Club", is_active=True))
+    session.add(Organisation(id=NEWORG, name="Joins Later", is_active=True))
+    await session.flush()
+    session.add(Player(
+        id=SIB, name="Trent Steenholdt", organisation_id=OTHER, grassroots_id=str(TRENT),
+        photo_data=PHOTO, photo_mime="image/png", photo_url=f"/api/images/players/{SIB}/photo?v=1",
+    ))
     await session.flush()
     await session.execute(text(
         "INSERT INTO users (id, username, email, failed_login_count) VALUES (:i,'admin1','a@x.test',0)"), {"i": ADMIN})
@@ -313,6 +327,7 @@ async def main() -> None:
         print("before: everybody is visible")
         await public_view(c, TRENT, "Trent", True)
         await public_view(c, PLAIN, "control", True)
+        await public_view(c, SIB, "Trent at another club", True)
         listed = await sitemap_ids(c)
         check("sitemap lists all three before", listed == {str(TRENT), str(PLAIN), str(CLUBHID)}, str(listed))
         check("share card exists for Trent before", await og_present(TRENT))
@@ -354,6 +369,9 @@ async def main() -> None:
         await public_view(c, TRENT, "Trent", False)
         await public_view(c, CLUBHID, "club-hidden player", False, " (older switch, no marker)")
         await public_view(c, PLAIN, "control", True, " (stays visible)")
+        await public_view(c, SIB, "Trent's row at ANOTHER club", False, " (same person, same participant id)")
+        check("his photo at the other club is gone too",
+              await col("SELECT photo_data IS NULL AND photo_url IS NULL FROM players WHERE id=:i", i=SIB) is True)
         listed = await sitemap_ids(c)
         check("sitemap no longer lists Trent", str(TRENT) not in listed, str(listed))
         check("sitemap no longer lists the club-hidden player", str(CLUBHID) not in listed, str(listed))
@@ -453,6 +471,21 @@ async def main() -> None:
                 await db.flush()
                 await db.rollback()
             check("sync resolves him to the SAME row, creating no duplicate", got == TRENT, str(got))
+            # A club that joins later, or a fixture another club syncs, mints a NEW row
+            # for the same person. It must be born hidden.
+            async with Session() as db:
+                got2 = await sync_mod._resolve_org_player(db, NEWORG, {}, str(TRENT), "Trent Steenholdt", {})
+                await db.flush()
+                other_guid = str(uid())
+                got3 = await sync_mod._resolve_org_player(db, NEWORG, {}, other_guid, "Someone Else", {})
+                await db.commit()
+            check("a NEW row minted for him at a club that joins later is born hidden",
+                  await col("SELECT is_public IS FALSE AND privacy_hidden_at IS NOT NULL FROM players WHERE id=:i",
+                            i=got2) is True)
+            await public_view(c, got2, "the new row", False)
+            check("...while a new player nobody asked about is created public (the guard is not blanket)",
+                  await col("SELECT is_public IS TRUE AND privacy_hidden_at IS NULL FROM players WHERE id=:i",
+                            i=got3) is True)
             check("his row still carries the marker after a sync-style resolve",
                   await col("SELECT privacy_hidden_at IS NOT NULL AND is_public IS FALSE FROM players WHERE id=:i", i=TRENT) is True)
 
@@ -492,6 +525,8 @@ async def main() -> None:
             async with Session() as db:
                 pl = await db.get(Player, TRENT)
                 rep = await player_privacy.holdings(db, pl)
+            check("the access report lists his rows at the other clubs (the first club and the one that joined later)", len(rep["other_club_rows"]) == 2, str(rep["other_club_rows"]))
+            check("the access report says a suppression is in place", rep["suppressed"] is True)
             check("the access report lists the scouting copy", len(rep["scouting_copies"]) == 1, str(rep["scouting_copies"]))
             check("the access report says the photo is gone", rep["player"]["has_photo"] is False)
 
@@ -513,6 +548,9 @@ async def main() -> None:
             await public_view(c, TRENT, "after restore", True)
             check("restore does NOT bring the photo back",
                   await col("SELECT photo_data IS NULL FROM players WHERE id=:i", i=TRENT) is True)
+            check("restore lifts the other club's row and the suppression too",
+                  await col("SELECT is_public IS TRUE AND privacy_hidden_at IS NULL FROM players WHERE id=:i", i=SIB) is True
+                  and await col("SELECT COUNT(*) FROM player_privacy_suppressions WHERE grassroots_id=:g", g=str(TRENT)) == 0)
             check("marker cleared",
                   await col("SELECT privacy_hidden_at IS NULL FROM players WHERE id=:i", i=TRENT) is True)
 
@@ -536,7 +574,9 @@ async def main() -> None:
                     await conn.execute(text(stmt))
                 for stmt in PRIVACY_DDL:
                     await conn.execute(text(stmt))
-            check("DOWNGRADE drops only the three columns it added",
+            check("the suppression table exists after the re-run",
+                  await col("SELECT COUNT(*) FROM information_schema.tables WHERE table_name='player_privacy_suppressions'") == 1)
+            check("DOWNGRADE drops only what it added",
                   await col("SELECT COUNT(*) FROM information_schema.tables WHERE table_name='players'") == 1)
 
     print(f"\n{PASS} passed, {FAIL} failed")

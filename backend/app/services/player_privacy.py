@@ -14,6 +14,11 @@ This module adds the part that makes it a REQUEST:
 
 WHAT IT DELIBERATELY DOES NOT DO
 --------------------------------
+It hides EVERY club's row for the same person (the Cricket Australia participant
+id is shared, the ``players`` row is per club) and records a suppression keyed on
+that id, so a row minted LATER (a new club, a fixture another club syncs) is
+created hidden too.
+
 It never deletes the ``players`` row or anything the player did. The club's own
 match records (scorecards, partnerships, ladders, the other players' figures)
 hang off it, and a deleted row is simply re-created by the next sync. The row
@@ -99,7 +104,15 @@ async def holdings(session: AsyncSession, player: Player) -> dict:
             OR (CAST(:guid AS TEXT) IS NOT NULL AND grassroots_participant_id = CAST(:guid AS TEXT))
     """), {"pid": player.id, "guid": player.grassroots_id})).fetchall()
 
+    sibs = await siblings(session, player)
+    suppressed = await is_suppressed(session, person_key(player))
     return {
+        "other_club_rows": [
+            {"id": str(sp.id), "organisation_id": str(sp.organisation_id), "name": sp.name,
+             "is_public": sp.is_public is not False, "has_photo": bool(sp.photo_data or sp.photo_url)}
+            for sp in sibs
+        ],
+        "suppressed": bool(suppressed),
         "player": {
             "id": str(player.id),
             "name": player.name,
@@ -128,12 +141,37 @@ async def hide_at_request(
     by: str,
     reason: str,
     remove_photos: bool = True,
+    include_siblings: bool = True,
 ) -> dict:
-    """Mark a player hidden at their own request. Idempotent; caller commits.
-
-    Returns what changed, so a script can print it and the audit entry can
-    record it (never the photo bytes).
+    """Hide a PERSON at their own request: this row, every other club's row for
+    the same participant id, and a suppression for rows created later.
+    Idempotent; caller commits. Returns what changed on THIS row, plus
+    ``siblings`` (the other rows hidden) and ``suppression_recorded``.
     """
+    out = await _hide_one(session, player, by=by, reason=reason, remove_photos=remove_photos)
+    out["siblings"] = []
+    if include_siblings:
+        for sib in await siblings(session, player):
+            res = await _hide_one(session, sib, by=by, reason=reason, remove_photos=remove_photos)
+            out["siblings"].append({"id": str(sib.id), "organisation_id": str(sib.organisation_id), **res})
+    await session.execute(text("""
+        INSERT INTO player_privacy_suppressions (grassroots_id, reason, created_by)
+        SELECT :g, :r, :b
+         WHERE NOT EXISTS (SELECT 1 FROM player_privacy_suppressions WHERE grassroots_id = :g)
+    """), {"g": person_key(player), "r": reason, "b": by})
+    out["suppression_recorded"] = True
+    return out
+
+
+async def _hide_one(
+    session: AsyncSession,
+    player: Player,
+    *,
+    by: str,
+    reason: str,
+    remove_photos: bool = True,
+) -> dict:
+    """Mark ONE row hidden at the person's request. Idempotent; caller commits."""
     changed = {"already_hidden": is_privacy_hidden(player), "photos_removed": [], "scouting_photos_cleared": 0}
 
     before = {
@@ -190,7 +228,17 @@ async def hide_at_request(
 
 
 async def restore_public(session: AsyncSession, player: Player, *, by: str) -> dict:
-    """Put a player back on the public site. Photographs are NOT restored."""
+    """Put a person back on the public site (every club's row, and the
+    suppression). Photographs are NOT restored."""
+    for sib in await siblings(session, player):
+        if is_privacy_hidden(sib):
+            await _restore_one(session, sib, by=by)
+    await session.execute(
+        text("DELETE FROM player_privacy_suppressions WHERE grassroots_id = :g"), {"g": person_key(player)})
+    return await _restore_one(session, player, by=by)
+
+
+async def _restore_one(session: AsyncSession, player: Player, *, by: str) -> dict:
     was = is_privacy_hidden(player)
     player.is_public = True
     player.privacy_hidden_at = None
@@ -208,6 +256,66 @@ async def restore_public(session: AsyncSession, player: Player, *, by: str) -> d
             after_json={"is_public": True},
         ))
     return {"was_hidden": was}
+
+
+def person_key(player: Player) -> str:
+    """The Cricket Australia participant id this row stands for.
+
+    ``grassroots_id`` when set (a per-club row), else the row's own id (the
+    legacy scheme keeps the raw participant id as the primary key).
+    """
+    return str(player.grassroots_id or player.id).lower()
+
+
+async def siblings(session: AsyncSession, player: Player) -> list[Player]:
+    """Every OTHER club's row for the same person."""
+    key = person_key(player)
+    rows = (await session.execute(text("""
+        SELECT id FROM players
+         WHERE id <> :pid
+           AND (LOWER(grassroots_id) = :k OR LOWER(id::text) = :k)
+    """), {"pid": player.id, "k": key})).scalars().all()
+    out = []
+    for pid in rows:
+        p = await session.get(Player, pid)
+        if p is not None:
+            out.append(p)
+    return out
+
+
+async def is_suppressed(session: AsyncSession, guid: Optional[str]) -> Optional[dict]:
+    """The suppression for a participant id, or None. Never raises: a missing
+    table (a database that has not run migration 316) reads as 'nobody asked'
+    rather than breaking player creation. The savepoint keeps a failed lookup
+    from aborting the caller's transaction."""
+    if not guid:
+        return None
+    try:
+        async with session.begin_nested():
+            row = (await session.execute(
+                text("SELECT reason, created_by FROM player_privacy_suppressions WHERE grassroots_id = :g"),
+                {"g": str(guid).lower()},
+            )).first()
+    except Exception:
+        return None
+    return {"reason": row[0], "by": row[1]} if row else None
+
+
+async def protect_new_player(session: AsyncSession, player: Player, guid: Optional[str] = None) -> bool:
+    """Create-time guard: a new row for a person who asked to be removed is born hidden.
+
+    Call it on a ``Player`` that is about to be added, from any creator that
+    knows the participant id. Returns True when it hid the row. The photographs
+    never come with a sync, so there is nothing to strip here.
+    """
+    hit = await is_suppressed(session, guid or player.grassroots_id or player.id)
+    if not hit:
+        return False
+    player.is_public = False
+    player.privacy_hidden_at = datetime.now(timezone.utc)
+    player.privacy_hidden_by = hit["by"] or "suppression"
+    player.privacy_hidden_reason = hit["reason"]
+    return True
 
 
 async def load_player(session: AsyncSession, raw_id: str) -> Optional[Player]:

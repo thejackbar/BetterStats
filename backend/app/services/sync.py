@@ -130,7 +130,13 @@ async def _resolve_org_player(
     new_id = _org_player_id(org_id, grassroots_guid) if clash is not None else guid_uuid
     if new_id is None:
         return None
-    session.add(Player(id=new_id, name=name, organisation_id=org_id, grassroots_id=grassroots_guid))
+    new_player = Player(id=new_id, name=name, organisation_id=org_id, grassroots_id=grassroots_guid)
+    # A person who asked to be removed from the public site (migration 316) gets
+    # a new row hidden at birth, so a club that joins later, or a fixture another
+    # club syncs, does not bring them back. One lookup per NEW player only.
+    from app.services import player_privacy
+    await player_privacy.protect_new_player(session, new_player, grassroots_guid)
+    session.add(new_player)
     org_player_map[grassroots_guid] = new_id
     return new_id
 

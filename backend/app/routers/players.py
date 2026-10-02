@@ -1540,6 +1540,7 @@ async def claim_fill_in(
         clash = await db.get(Player, guid_uuid)
         new_id = uuid.uuid5(club.id, guid) if clash is not None else guid_uuid
         player = Player(id=new_id, name=name, organisation_id=club.id, grassroots_id=guid)
+        await player_privacy.protect_new_player(db, player, guid)
         db.add(player)
         try:
             await db.flush()
