@@ -8,6 +8,15 @@
 // (selection_pool.py) — `form` is the word, `recent` is the sparkline series.
 import { bowlingLabel, battingHandShort } from '../../../lib/playerAttributes'
 
+// A player named in another XI on the same date comes back in one of two ways.
+// `clash` is a real clash (refused, or a call-up). `also_in` is a game that can
+// be played alongside this one (back to back, or junior against senior): the
+// pick is allowed and the card only flags it. Server side: selection_clash.py.
+export function alsoIn(p) { return Array.isArray(p?.also_in) ? p.also_in : [] }
+export function inAnotherXI(p) { return p?.clash?.length > 0 || alsoIn(p).length > 0 }
+export function alsoInLine(p) { return alsoIn(p).map((a) => a.text || a.team_name).join('; ') }
+export function alsoInTight(p) { return alsoIn(p).some((a) => a.tight) }
+
 const ROLE_NOUN = {
   'Batter': 'Batter',
   'Bowler': 'Bowler',

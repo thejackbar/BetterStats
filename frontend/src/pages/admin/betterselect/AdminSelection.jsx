@@ -28,7 +28,7 @@ import { useFilters } from './filters'
 import SelectionFilters from './SelectionFilters'
 import { DnD } from './selectionDnd'
 import { DualRailView, TeamSheetView } from './SelectionViews'
-import { classifyBowl, formBucket, matchesAge } from './selectionMeta'
+import { classifyBowl, formBucket, matchesAge, inAnotherXI, alsoIn, alsoInLine } from './selectionMeta'
 import { matchesRuleFilter, xiCompliance, hasBlockingRule } from './selectionRules'
 
 // Soft role-band each batting slot prefers — drives auto-fill placement (the
@@ -173,6 +173,12 @@ export default function AdminSelection() {
   const navigate = useNavigate()
   const { hasCapability } = useAuth()
   const toast = useToast()
+  // ToastProvider hands out a NEW `toast` object on every render, and showing a
+  // toast re-renders it. `load` must not depend on that object, or every toast
+  // below (a call-up, a back to back pick, "marked unavailable") re-ran load(),
+  // reloaded the fixture and wiped the unsaved XI, losing the pick it announced.
+  const toastRef = useRef(toast)
+  toastRef.current = toast
   const { theme, toggle: toggleTheme } = useTheme()
   const canEdit = hasCapability(CAP.MANAGE_SELECTIONS)
 
@@ -222,8 +228,8 @@ export default function AdminSelection() {
         setDemotions({})
         setDirty(false)
       })
-      .catch((e) => { toast.error(e.message); setData({ pool: [], lineup: [], fixture: null }) })
-  }, [fixtureId, toast])
+      .catch((e) => { toastRef.current.error(e.message); setData({ pool: [], lineup: [], fixture: null }) })
+  }, [fixtureId])
 
   useEffect(() => { load() }, [load])
   useEffect(() => { api.bsSelectionOverview().then((d) => setAllFixtures(d.fixtures || [])).catch(() => {}) }, [])
@@ -335,8 +341,8 @@ export default function AdminSelection() {
     // bearing on this fixture — SelectionFilters drops the group otherwise.
     if (values.rules) list = list.filter((p) => matchesRuleFilter(p, values.rules))
     if (yearsF) list = list.filter((p) => playedWithinYears(p.last_played, yearsF))
-    if (values.status === 'unselected') list = list.filter((p) => !(p.clash?.length > 0))
-    else if (values.status === 'clash') list = list.filter((p) => p.clash?.length > 0)
+    if (values.status === 'unselected') list = list.filter((p) => !inAnotherXI(p))
+    else if (values.status === 'clash') list = list.filter((p) => inAnotherXI(p))
     const sorters = {
       squad: cmp,
       form: (a, b) => (b.score ?? 0) - (a.score ?? 0) || (a.display_name || '').localeCompare(b.display_name || ''),
@@ -370,6 +376,7 @@ export default function AdminSelection() {
     // they're dropped from the lower XI when we save.
     if (p.clash_blocks) { toast.error(`${p.display_name} is already picked for ${p.clash.join(', ')} that day`); return }
     if (p.clash?.length > 0) toast.info(`Calling ${p.display_name} up from ${p.clash.join(', ')} — they'll be dropped there when you save`)
+    else if (alsoIn(p).length > 0) toast.info(`${p.display_name} is also in ${alsoInLine(p)} that day. Adding to both.`)
     else if (p.availability === 'UNAVAILABLE') toast.info(`${p.display_name} is marked unavailable — adding anyway`)
     setSlots((prev) => {
       const next = [...prev]
@@ -419,6 +426,7 @@ export default function AdminSelection() {
         if (p.clash_blocks) return
         const displacedId = slots[tgt.idx]   // who held the slot before this drop
         if (p.clash?.length > 0) toast.info(`Calling ${p.display_name} up from ${p.clash.join(', ')} — they'll be dropped there when you save`)
+        else if (alsoIn(p).length > 0) toast.info(`${p.display_name} is also in ${alsoInLine(p)} that day. Adding to both.`)
         else if (p.availability === 'UNAVAILABLE') toast.info(`${p.display_name} is marked unavailable — adding anyway`)
         placeInSlot(tgt.idx, p.id)
         // Cascade: a call-up that bumps a regular sends that regular down to the
@@ -440,7 +448,9 @@ export default function AdminSelection() {
   const fillEmpty = (useLastWeek) => {
     if (!canEdit) return
     if (format === 0) { toast.error('Set a side size (11/12/13) to auto-fill'); return }
-    const okToPick = (p) => p && !(p.clash?.length > 0) && p.availability !== 'UNAVAILABLE'
+    // Auto-fill never puts anyone in two games; a player in another XI that day
+    // (clash or a back to back game) is picked by hand.
+    const okToPick = (p) => p && !inAnotherXI(p) && p.availability !== 'UNAVAILABLE'
     setSlots((prev) => {
       const next = [...prev]
       const taken = new Set(next.filter(Boolean))

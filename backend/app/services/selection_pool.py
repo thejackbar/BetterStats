@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import FixtureLineup, Grade, Player, Season, Team
 from app.routers.availability import DEFAULT_DORMANCY_MONTHS, months_ago, resolve_period_statuses
 from app.auth.modules import org_has_module
-from app.services import player_age, selection_rules
+from app.services import player_age, selection_clash, selection_rules
 
 # Autofill scoring constants ─────────────────────────────────────────────────
 # Window for "recent form" — last N batting innings & bowling spells per player.
@@ -467,6 +467,8 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
     # board can cascade a bumped player down into a called-up player's vacated
     # slot in the lower team (see routers/selection save).
     clash_detail: dict[str, list] = {}
+    # Same-date selections that do not clash in time: pickable, flagged only.
+    also_in: dict[str, list] = {}
     if fx.played_on:
         cl_res = await db.execute(
             text(
@@ -480,7 +482,26 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             ),
             {"org": club.id, "fid": fx.id, "d": fx.played_on},
         )
-        for pid, where_, seq, other_fid, bo in cl_res.fetchall():
+        cl_rows = cl_res.fetchall()
+        # A same-date selection that can be played alongside this game (back to
+        # back, or junior against senior) is not a clash: the pick is allowed
+        # and the card flags it. See services/selection_clash.py.
+        playable = await selection_clash.compatible_fixtures(
+            db, club.id, fx, {r[3] for r in cl_rows}
+        )
+        for pid, where_, seq, other_fid, bo in cl_rows:
+            verdict = playable.get(str(other_fid))
+            if verdict:
+                also_in.setdefault(str(pid), []).append({
+                    "fixture_id": str(other_fid),
+                    "team_name": where_ or "another fixture",
+                    "start_time": verdict.get("start_time"),
+                    "gap_minutes": verdict.get("gap_minutes"),
+                    "tight": verdict.get("tight", False),
+                    "reason": verdict.get("reason"),
+                    "text": selection_clash.flag_text(where_ or "another fixture", verdict),
+                })
+                continue
             clash.setdefault(str(pid), []).append(where_ or "another fixture")
             clash_seqs.setdefault(str(pid), []).append(seq)
             clash_detail.setdefault(str(pid), []).append({
@@ -645,6 +666,7 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             "selected": pid in lineup,
             "clash": clash.get(pid, []),
             "clash_detail": clash_detail.get(pid, []),
+            "also_in": also_in.get(pid, []),
             "clash_blocks": _clash_blocks(fx_team_seq, clash_seqs.get(pid, [])),
             "squad_match": squad_match and not manual_inactive,
             "tier": tier,

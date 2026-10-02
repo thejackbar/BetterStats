@@ -83,9 +83,12 @@ def _best_available_xi(pool: list[dict], target: int) -> list[dict]:
 
     A clash-blocked player (already named in a same-day XI that this fixture
     does not outrank — the pool's ``clash_blocks``) is not available to this
-    XI, so they're excluded the same way the board itself refuses the pick."""
+    XI, so they're excluded the same way the board itself refuses the pick.
+    A player already named in a same-day XI that can be played alongside this
+    one (``also_in``) is pickable by hand but never chosen for the selector, so
+    a suggestion does not quietly put anyone in two games."""
     cands = [p for p in pool if p.get("autofill_eligible") and p.get("availability") != "UNAVAILABLE"
-             and not p.get("clash_blocks")]
+             and not p.get("clash_blocks") and not p.get("also_in")]
     cands.sort(key=lambda p: (_AVAIL_RANK.get(p.get("availability"), 3), -(p.get("score") or 0)))
     if len(cands) <= target:
         return sorted(cands, key=lambda p: -(p.get("score") or 0))

@@ -12,7 +12,7 @@ import { useState } from 'react'
 import { Icon, Avatar, Dot, Tag, RuleTags } from './ui'
 import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
 import { useDrag } from './selectionDnd'
-import { roleLine, formMeta, spark } from './selectionMeta'
+import { roleLine, formMeta, spark, alsoInLine } from './selectionMeta'
 import { hasRuleFlag, ruleNotes, isBlocked, xiCompliance } from './selectionRules'
 
 const ROLE_CODES = ['BAT', 'ALL', 'BWL', 'WKT']
@@ -268,7 +268,9 @@ function DualCard({ p, kind, idx, vm, drag }) {
           ? (callUp
               ? <div className="text-[11px] text-pb-amber mt-0.5 truncate">↑ Call-up from {p.clash.join(', ')}</div>
               : <div className="text-[11px] text-pb-red mt-0.5 truncate">⛔ Picked for {p.clash.join(', ')}</div>)
-          : p.availability_reason && <div className="text-[11px] text-pb-faint mt-0.5 truncate">{p.availability_reason}</div>}
+          : alsoInLine(p)
+            ? <div className="text-[11px] text-pb-amber mt-0.5 truncate" title={`Also in ${alsoInLine(p)}`}>Also in {alsoInLine(p)}</div>
+            : p.availability_reason && <div className="text-[11px] text-pb-faint mt-0.5 truncate">{p.availability_reason}</div>}
         <RuleNotes p={p} />
       </div>
       {kind === 'pool' ? (
@@ -440,7 +442,10 @@ function TrayCard({ p, vm, drag }) {
           ? (callUp
               ? <div className="text-[10.5px] text-pb-amber mt-0.5 truncate">↑ Call-up from {p.clash.join(', ')}</div>
               : <div className="text-[10.5px] text-pb-red mt-0.5 truncate">⛔ Picked for {p.clash.join(', ')}</div>)
-          : <div className="mt-1"><FormInline p={p} /></div>}
+          : <>
+              {alsoInLine(p) && <div className="text-[10.5px] text-pb-amber mt-0.5 truncate" title={`Also in ${alsoInLine(p)}`}>Also in {alsoInLine(p)}</div>}
+              <div className="mt-1"><FormInline p={p} /></div>
+            </>}
         <RuleNotes p={p} />
       </div>
       {!blocked && <span className="text-pb-faintest shrink-0 group-hover:text-pb-accent transition-colors"><Icon name="plus" size={14} /></span>}

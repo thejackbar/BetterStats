@@ -27,6 +27,7 @@ from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
 from app.models.db import Fixture, FixtureLineup, Grade, Organisation, Player, Team, User, get_db
 from app.routers.auth import get_current_club
 from app.routers.availability import resolve_period_statuses
+from app.services import selection_clash
 from app.services.selection_pool import assemble_selection, rule_context
 
 router = APIRouter(prefix="/selection", tags=["selection"])
@@ -378,7 +379,16 @@ async def set_selection(
             )
             blocking: set[str] = set()
             call_ups: list[tuple] = []  # (player_id, other_fixture_id) to vacate
-            for pid, other_fid, pname, other_seq in clash_res.fetchall():
+            clash_rows = clash_res.fetchall()
+            # Same-date games that can be played alongside this one (back to
+            # back, or junior against senior) are not clashes: the player stays
+            # in both XIs. Re-judged here, not trusted from the browser.
+            playable = await selection_clash.compatible_fixtures(
+                db, club.id, fx, {r[1] for r in clash_rows}
+            )
+            for pid, other_fid, pname, other_seq in clash_rows:
+                if str(other_fid) in playable:
+                    continue
                 can_override = (
                     this_seq is not None
                     and (other_seq or 0) > 0

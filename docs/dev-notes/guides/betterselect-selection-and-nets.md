@@ -2,7 +2,7 @@
 
 **Read this before**:
 - `frontend/src/pages/admin/betterselect/*` (AdminSelection, NetSession, Squads board, `dragOrder.js`, `selectionMeta.js`, `ui.jsx`), `routers/net_manager.py`, `routers/public_net_checkin.py`, `routers/availability.py`, `routers/public_availability.py`.
-- `services/selection_rules.py`, `selection_pool.py`, `player_age.py`, `player_kit.py`, `profile_import.py`.
+- `services/selection_rules.py`, `selection_pool.py`, `selection_clash.py`, `player_age.py`, `player_kit.py`, `profile_import.py`.
 - Squad membership (`squad_team_id`, `team_members`), marking a player inactive, `directory.set_squad`.
 - Nets live session, batting order, padding up, priority, check-in QR/NFC link, guests, `net_attendance`.
 - Self-service availability link (`/avail/:token`, `bs_avail`).
@@ -85,6 +85,10 @@
 52. Member CSV (Directory and BetterFees Members share it): sizes to `fee_members`, number to `players.shirt_number` or nowhere. Resolve via the member's link, else exact name; a name held by two players resolves to NEITHER (reported in preview). New person rows link to the unambiguous same-name player without a member row; an existing member row is never re-pointed. Gate on the sheet's columns (`columns_used`) at PREVIEW. A bare `shirt` column is claimed by neither.
 53. `modules.module_display_name(key)` is the one place the backend names a module (`MODULE_META`, then `BILLABLE_MODULE_NAMES`).
 
+**Same-day picks**
+57. A player may be in two XIs on one date only when `services/selection_clash.py` says the games can be played alongside each other: no multi-day game; junior against senior is always playable; otherwise both start times known and the estimated games (T20 210 min, one day 480, unknown 480) do not overlap. Anything it cannot tell stays a clash. A playable pair is `also_in` on the pool row (flag only) and is never in `clash`/`clash_blocks`; the save re-judges it and skips both the 409 and the call-up. Auto-fill and BetterIQ never choose a player with `also_in`.
+58. Never put `toast` from `useToast()` in a hook dependency array on this screen: the provider returns a new object each render and a toast re-renders it, so the effect reruns. `AdminSelection.load` reads it through `toastRef`, because a reload wipes the unsaved XI.
+
 **Layout and process**
 54. `min-w-0` goes on the element that may shrink (`<h1>` `truncate min-w-0`, toggle `shrink-0`), not the group. Selection header uses `flex-wrap xl:flex-nowrap` and moves user name + Logout from `sm` to `xl`; only Selection passes `headerLeft`. `flex-wrap` cannot save a `shrink-0` child. A native date input clips its year if it shares a row (age on the caption line).
 55. Re-check `origin/main` at merge before numbering a migration (duplicate revision ids break Alembic).
@@ -97,8 +101,8 @@
 - Header toggle painted over or 390px overflow (54). Minutes PDF page blank (56).
 
 ## How to verify a change here
-- Backend (real Postgres, shipped route bodies): `backend/verification/verify_net_batting_order.py`, `verify_net_checkin.py`, `verify_player_kit.py` (control with number resolution and size writes neutered fails the importer checks), `verify_multi_squad.py`.
-- Browser (`frontend/verification/`): `verify_net_batting_order_browser.mjs` (pointer and synthetic touch, `touch-action` read from computed style), `verify_net_admin_browser.mjs`, `verify_net_alert_browser.mjs`, `verify_net_checkin_browser.mjs`, `verify_guest_promotion_browser.mjs`, `verify_squads_pools_browser.mjs`, `verify_minutes_letterhead_browser.mjs`, `verify_minutes_download_browser.mjs` (must pass unchanged).
+- Backend (real Postgres, shipped route bodies): `backend/verification/verify_selection_same_day.py` (control with `selection_clash` absent fails the back to back and junior/senior checks), `backend/verification/verify_net_batting_order.py`, `verify_net_checkin.py`, `verify_player_kit.py` (control with number resolution and size writes neutered fails the importer checks), `verify_multi_squad.py`.
+- Browser (`frontend/verification/`): `verify_net_batting_order_browser.mjs` (pointer and synthetic touch, `touch-action` read from computed style), `verify_net_admin_browser.mjs`, `verify_net_alert_browser.mjs`, `verify_net_checkin_browser.mjs`, `verify_guest_promotion_browser.mjs`, `verify_squads_pools_browser.mjs`, `verify_selection_same_day_browser.mjs` (needs `fixtures/selection_same_day.json`), `verify_minutes_letterhead_browser.mjs`, `verify_minutes_download_browser.mjs` (must pass unchanged).
 - Race two real DB sessions for the version bump and duplicate check-in.
 - A control run that crashes is not a control run: read new keys via `.get`, guard imports, report what is absent. Pair set with clear, entitled with non-entitled.
 - Gotchas: Playwright `**` glob does not cross a `?` (route the live poll by regex or the catch-all hands `{}` and crashes the page); routes match most-recently-registered first; `NAMES.map(att)` passes `(value, index)`; `unzip` glob-matches `[Content_Types].xml`; lifespan raw-SQL tables need their CREATE plus every later ALTER; suites share one database; stubs must match real response shapes.
