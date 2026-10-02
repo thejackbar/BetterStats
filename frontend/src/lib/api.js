@@ -192,6 +192,9 @@ export const api = {
   getSocialResults: (q) => request(`/admin/social/results${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   getSocialPotm: (matchId) => request(`/admin/social/potm/${matchId}`),
   getSocialTotw: (q) => request(`/admin/social/totw${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  // Which of these players have no earlier game on the club's record (debuts).
+  // `before` is the match day as an ISO date; absent means today.
+  getSocialDebuts: (ids, before) => request(`/admin/social/debuts?player_ids=${encodeURIComponent((ids || []).join(','))}${before ? `&before=${encodeURIComponent(String(before).slice(0, 10))}` : ''}`),
 
   // BetterSocials — media library. `kind` is undefined for the ordinary Photos
   // pool, or 'background' for the small reusable post-background library —
