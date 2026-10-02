@@ -77,7 +77,7 @@ function Swatches({ value, onChange, palette }) {
 
 export default function SelectionInspector({
   items, selIds, onUpdate, onReorder, onDuplicate, onRemove, onAlign,
-  palette, players = [], onPickImage, onEditImage, onSendTo, layoutName = null,
+  palette, players = [], onPickImage, onEditImage, onSendTo, layoutName = null, onOpenSponsors,
 }) {
   const [more, setMore] = useState(false)
   const single = selIds.length === 1 ? items.find(it => it.id === selIds[0]) : null
@@ -137,8 +137,18 @@ export default function SelectionInspector({
           </>
         )}
 
-        {single && single.type !== 'image' && (
+        {single && single.type !== 'image' && single.type !== 'sponsors' && (
           <Swatches value={single.color} onChange={c => patch({ color: c })} palette={palette} />
+        )}
+
+        {single?.type === 'sponsors' && (
+          <>
+            <Btn onClick={() => onOpenSponsors?.()} title="Choose which sponsors are on this post">Change sponsors</Btn>
+            {['light', 'dark', 'none'].map(p => (
+              <Btn key={p} active={(single.panel || 'light') === p} title={p === 'none' ? 'No backing panel' : `${p} backing panel`}
+                onClick={() => patch({ panel: p })}>{p === 'light' ? 'Light' : p === 'dark' ? 'Dark' : 'None'}</Btn>
+            ))}
+          </>
         )}
 
         {single?.type === 'image' && (
@@ -236,6 +246,16 @@ export default function SelectionInspector({
             <label className="flex items-center gap-1.5"><Label>Height</Label>
               <Num value={single.h} onChange={v => patch({ h: v })} min={4} max={1080} />
             </label>
+          )}
+          {single.type === 'sponsors' && (
+            <>
+              <label className="flex items-center gap-1.5"><Label>Gap</Label>
+                <Num value={single.gap} onChange={v => patch({ gap: Math.max(0, v) })} min={0} max={200} w="w-14" />
+              </label>
+              <label className="flex items-center gap-1.5"><Label>Padding</Label>
+                <Num value={single.pad} onChange={v => patch({ pad: Math.max(0, v) })} min={0} max={200} w="w-14" />
+              </label>
+            </>
           )}
           {single.type === 'brand' && (
             <label className="flex items-center gap-1.5"><Label>Size</Label>

@@ -163,10 +163,10 @@ async def main() -> None:
     print("== tier service")
     if HAVE:
         check("four tiers in rank order", st.TIERS == ("major", "gold", "silver", "supporter"))
-        check("major shows in all three spots", st.resolve_placements("major", None) == ["dashboard", "bar", "footer"])
-        check("gold shows in bar and list", st.resolve_placements("gold", None) == ["bar", "footer"])
+        check("major shows in all three spots", st.resolve_placements("major", None) == ["dashboard", "bar", "footer", "posts"])
+        check("gold shows in bar and list", st.resolve_placements("gold", None) == ["bar", "footer", "posts"])
         check("supporter shows in the list only", st.resolve_placements("supporter", None) == ["footer"])
-        check("an override switches a spot off", st.resolve_placements("major", {"dashboard": False}) == ["bar", "footer"])
+        check("an override switches a spot off", st.resolve_placements("major", {"dashboard": False}) == ["bar", "footer", "posts"])
         check("an override switches a spot on", st.resolve_placements("supporter", {"dashboard": True}) == ["dashboard", "footer"])
         check("an unknown spot in an override is ignored, never widened",
               st.resolve_placements("supporter", {"everywhere": True, "bar": "yes"}) == ["footer"])
@@ -212,11 +212,11 @@ async def main() -> None:
         row = {s["name"]: s for s in listed}["Quiet Major"]
         check("admin list carries tier, overrides and the resolved spots",
               row.get("tier") == "major" and row.get("placement_overrides") == {"dashboard": False}
-              and row.get("placements") == ["bar", "footer"], str(row))
+              and row.get("placements") == ["bar", "footer", "posts"], str(row))
 
         if HAVE:
             made = await admin_call(ca.create_sponsor, db, club, data=ca.SponsorCreate(name="New One", tier="gold"))
-            check("create takes a tier", made["tier"] == "gold" and made["placements"] == ["bar", "footer"], str(made))
+            check("create takes a tier", made["tier"] == "gold" and made["placements"] == ["bar", "footer", "posts"], str(made))
             plain = await admin_call(ca.create_sponsor, db, club, data=ca.SponsorCreate(name="No Tier Sent"))
             check("create with no tier defaults to silver", plain["tier"] == "silver", str(plain))
             check("create with a bad tier is a 422", await _http_status(
@@ -225,13 +225,13 @@ async def main() -> None:
             sid = str(IDS["gold"])
             out = await admin_call(ca.patch_sponsor, db, club, sponsor_id=sid, data=ca.SponsorPatch(tier="major"))
             check("patch moves a sponsor to major and it follows the tier's spots",
-                  out["tier"] == "major" and out["placements"] == ["dashboard", "bar", "footer"], str(out))
+                  out["tier"] == "major" and out["placements"] == ["dashboard", "bar", "footer", "posts"], str(out))
 
             out = await admin_call(ca.patch_sponsor, db, club, sponsor_id=sid, data=ca.SponsorPatch(name="Gold Co Renamed"))
             check("a patch that sends no tier leaves the tier alone (absent is not a clear)", out["tier"] == "major", str(out))
 
             out = await admin_call(ca.patch_sponsor, db, club, sponsor_id=sid, data=ca.SponsorPatch(placements={"bar": False}))
-            check("patch switches one spot off by hand", out["placements"] == ["dashboard", "footer"]
+            check("patch switches one spot off by hand", out["placements"] == ["dashboard", "footer", "posts"]
                   and out["placement_overrides"] == {"bar": False}, str(out))
             out = await admin_call(ca.patch_sponsor, db, club, sponsor_id=sid, data=ca.SponsorPatch(placements={"footer": False}))
             check("a second switch merges with the first", out["placement_overrides"] == {"bar": False, "footer": False}, str(out))
@@ -239,7 +239,7 @@ async def main() -> None:
             check("a null on one spot drops just that switch", out["placement_overrides"] == {"footer": False}, str(out))
             out = await admin_call(ca.patch_sponsor, db, club, sponsor_id=sid, data=ca.SponsorPatch(placements=None))
             check("placements sent as null clears every switch", out["placement_overrides"] == {}
-                  and out["placements"] == ["dashboard", "bar", "footer"], str(out))
+                  and out["placements"] == ["dashboard", "bar", "footer", "posts"], str(out))
             out = await admin_call(ca.patch_sponsor, db, club, sponsor_id=sid, data=ca.SponsorPatch(placements={"footer": False}))
             out = await admin_call(ca.patch_sponsor, db, club, sponsor_id=sid, data=ca.SponsorPatch(tier="gold"))
             check("changing tier keeps the hand-set switches", out["placement_overrides"] == {"footer": False}, str(out))

@@ -17,6 +17,12 @@ export default function AdminSponsors() {
   const [sections, setSections] = useState([])
   const [sectionDraft, setSectionDraft] = useState({})
   const [sectionSaving, setSectionSaving] = useState(false)
+  // Team and grade pins: options the club can pin to, what is pinned, and the add form.
+  const [pinOptions, setPinOptions] = useState({ teams: [], grades: [] })
+  const [pins, setPins] = useState({ teams: {}, grades: {} })
+  const [pinTarget, setPinTarget] = useState('')
+  const [pinPick, setPinPick] = useState([])
+  const [pinSaving, setPinSaving] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -51,9 +57,11 @@ export default function AdminSponsors() {
   async function load() {
     setLoading(true)
     try {
-      const [data, settings, secs] = await Promise.all([
+      const [data, settings, secs, pinData] = await Promise.all([
         api.adminListSponsors(), api.adminGetSponsorSettings(), api.adminGetSectionNames(),
+        api.adminGetPostDefaults().catch(() => null),
       ])
+      if (pinData) applyPins(pinData)
       setSponsors(data)
       setMeta(settings)
       setLabelDraft(settings.tier_labels || {})
@@ -144,6 +152,39 @@ export default function AdminSponsors() {
     } catch (e) {
       toast.error(e.message)
     }
+  }
+
+  function applyPins(view) {
+    setPinOptions(view.options || { teams: [], grades: [] })
+    setPins({ teams: view.assignments?.teams || {}, grades: view.assignments?.grades || {} })
+  }
+
+  async function savePins(next) {
+    setPinSaving(true)
+    try {
+      applyPins(await api.adminPutPostDefaults(next))
+      showFlash('Post sponsors saved')
+      return true
+    } catch (e) {
+      toast.error(e.message)
+      return false
+    } finally {
+      setPinSaving(false)
+    }
+  }
+
+  async function addPin() {
+    if (!pinTarget || pinPick.length === 0) return
+    const [kind, ...rest] = pinTarget.split(':')
+    const name = rest.join(':')
+    const ok = await savePins({ ...pins, [kind]: { ...pins[kind], [name]: pinPick } })
+    if (ok) { setPinTarget(''); setPinPick([]) }
+  }
+
+  function removePin(kind, name) {
+    const next = { ...pins, [kind]: { ...pins[kind] } }
+    delete next[kind][name]
+    savePins(next)
   }
 
   function applySections(view) {
@@ -548,6 +589,73 @@ export default function AdminSponsors() {
             >
               {labelSaving ? 'Saving…' : 'Save names'}
             </button>
+          </div>
+        )}
+
+        {/* Post sponsors: pinned to a team or grade */}
+        {meta && (
+          <div className="pb-card px-4 py-4 mt-6" data-testid="post-sponsors">
+            <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faintest uppercase mb-1">Sponsors on posts</h2>
+            <p className="text-pb-faintest text-[11px] mb-3">
+              Every post made in BetterPosts starts with a sponsor. With nothing set, it uses the sponsors whose
+              Social posts spot is on (Major and Gold by default), or your top sponsor. Pin sponsors to a team or grade
+              and every post for it starts with them instead. Whoever makes the post can still change them.
+            </p>
+            {Object.entries(pins.teams).map(([name, ids]) => ({ kind: 'teams', name, ids }))
+              .concat(Object.entries(pins.grades).map(([name, ids]) => ({ kind: 'grades', name, ids })))
+              .map(pin => (
+                <div key={`${pin.kind}:${pin.name}`} className="flex items-center gap-2 py-1.5 pb-hairline-b text-sm">
+                  <span className="flex-1 min-w-0 truncate text-pb-text">
+                    {pin.name} <span className="text-pb-faintest text-[11px]">· {pin.kind === 'teams' ? 'team' : 'grade'}</span>
+                  </span>
+                  <span className="text-pb-faint text-xs truncate max-w-[45%]">
+                    {pin.ids.map(id => sponsors.find(s => s.id === id)?.name).filter(Boolean).join(', ')}
+                  </span>
+                  <button type="button" onClick={() => removePin(pin.kind, pin.name)} disabled={pinSaving}
+                    className="font-mono text-[10px] text-red-400 hover:text-red-300 px-2 py-1 rounded border border-red-400/30">
+                    REMOVE
+                  </button>
+                </div>
+              ))}
+            <div className="mt-3 space-y-2">
+              <select
+                value={pinTarget}
+                onChange={e => setPinTarget(e.target.value)}
+                aria-label="Team or grade to pin sponsors to"
+                className="w-full px-2 py-1.5 text-sm bg-pb-bg border pb-hairline rounded text-pb-text focus:outline-none focus:border-pb-accent"
+              >
+                <option value="">Pick a team or grade…</option>
+                {pinOptions.teams.length > 0 && (
+                  <optgroup label="Teams">
+                    {pinOptions.teams.map(t => <option key={`t${t}`} value={`teams:${t}`}>{t}</option>)}
+                  </optgroup>
+                )}
+                {pinOptions.grades.length > 0 && (
+                  <optgroup label="Grades">
+                    {pinOptions.grades.map(g => <option key={`g${g}`} value={`grades:${g}`}>{g}</option>)}
+                  </optgroup>
+                )}
+              </select>
+              <div className="flex flex-wrap gap-1.5">
+                {sponsors.filter(s => s.logo_url).map(s => {
+                  const on = pinPick.includes(s.id)
+                  return (
+                    <button key={s.id} type="button" aria-pressed={on}
+                      onClick={() => setPinPick(prev => on ? prev.filter(x => x !== s.id) : [...prev, s.id])}
+                      className={`font-mono text-[10px] px-2 py-0.5 rounded border ${on ? 'bg-pb-accent/15 border-pb-accent text-pb-text' : 'pb-hairline text-pb-faint'}`}>
+                      {s.name}
+                    </button>
+                  )
+                })}
+              </div>
+              <button type="button" onClick={addPin} disabled={pinSaving || !pinTarget || pinPick.length === 0}
+                className="px-4 py-1.5 rounded text-sm font-medium bg-pb-accent text-white disabled:opacity-40">
+                {pinSaving ? 'Saving…' : 'Pin sponsors'}
+              </button>
+              <p className="text-pb-faintest text-[11px]">
+                Only sponsors with a logo can go on a post. Teams come from BetterSelect. Grades come from the grades your club plays in.
+              </p>
+            </div>
           </div>
         )}
 

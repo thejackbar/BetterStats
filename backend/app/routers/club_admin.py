@@ -16,7 +16,7 @@ from pathlib import Path
 from app.models.db import (
     User, Organisation, ClubMembership, Player, Season, Grade, ManualPartnershipRecord,
     PlayerSyncRequest, Sponsor, ClubOnboardingRequest, ClubUnpauseRequest, OrgModuleSubscription,
-    ModuleActionRequest, CommsLimitRequest, MarketingClub, SyncRun, OnboardingWizardState, get_db
+    ModuleActionRequest, CommsLimitRequest, MarketingClub, SyncRun, OnboardingWizardState, Team, get_db
 )
 from sqlalchemy import text as _text
 from sqlalchemy.exc import IntegrityError
@@ -36,6 +36,7 @@ from app.auth.modules import (
 from app.services import junior_hiding
 from app.services import sponsor_tiers
 from app.services import section_names
+from app.services import post_sponsors
 from app.services import player_privacy
 from app.services import module_subscriptions as mod_subs
 from app.services import comms_limits
@@ -5613,6 +5614,95 @@ async def put_section_names(
     await db.commit()
     await db.refresh(club)
     return section_names.admin_view(club.section_names)
+
+
+async def _club_sponsor_rows(db: AsyncSession, club: Organisation) -> list[Sponsor]:
+    return list((await db.execute(
+        select(Sponsor).where(Sponsor.organisation_id == club.id)
+        .order_by(Sponsor.display_order, Sponsor.created_at)
+    )).scalars().all())
+
+
+async def _post_default_options(db: AsyncSession, club: Organisation) -> dict:
+    """The teams and grades a sponsor can be pinned to: the club's BetterSelect
+    teams if it has any, and every grade name its stats land in."""
+    from app.services.club_grades import club_grade_rows
+    teams = (await db.execute(
+        select(Team.name).where(Team.organisation_id == club.id, Team.is_active.is_(True))
+        .order_by(Team.sequence, Team.name)
+    )).scalars().all()
+    grade_rows = await club_grade_rows(db, club.id)
+    grades: list[str] = []
+    seen: set[str] = set()
+    for g in grade_rows:
+        label = post_sponsors.clean_name(g.name)
+        k = post_sponsors.norm_key(label)
+        if k and k not in seen:
+            seen.add(k)
+            grades.append(label)
+    return {
+        "teams": [t for t in dict.fromkeys(post_sponsors.clean_name(t) for t in teams) if t],
+        "grades": sorted(grades, key=str.lower),
+    }
+
+
+@router.get("/sponsors/post-defaults")
+async def get_post_defaults(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """What the Post sponsors panel draws from: the teams and grades a sponsor can
+    be pinned to, what is pinned, and the sponsors a post gets with nothing pinned."""
+    sponsors = await _club_sponsor_rows(db, club)
+    ids = [str(s.id) for s in sponsors]
+    return {
+        "options": await _post_default_options(db, club),
+        "assignments": post_sponsors.assignments_view(club.post_sponsor_defaults, ids),
+        "club_default_ids": post_sponsors.club_default_ids(sponsors),
+    }
+
+
+class PostDefaultsPut(BaseModel):
+    teams: dict[str, list[str]] = {}
+    grades: dict[str, list[str]] = {}
+
+
+@router.put("/sponsors/post-defaults")
+async def put_post_defaults(
+    data: PostDefaultsPut,
+    current_user: User = Depends(require_cap(MANAGE_SPONSORS)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Replace the club's pinned team and grade sponsors with what is sent. A name
+    sent with no sponsors, or left out, goes back to the club default."""
+    sponsors = await _club_sponsor_rows(db, club)
+    ids = [str(s.id) for s in sponsors]
+    club.post_sponsor_defaults = post_sponsors.clean_assignments(
+        {"teams": data.teams, "grades": data.grades}, ids,
+    )
+    await db.commit()
+    await db.refresh(club)
+    return {
+        "options": await _post_default_options(db, club),
+        "assignments": post_sponsors.assignments_view(club.post_sponsor_defaults, ids),
+        "club_default_ids": post_sponsors.club_default_ids(sponsors),
+    }
+
+
+@router.get("/sponsors/post-default")
+async def get_post_default(
+    team: Optional[str] = None,
+    grade: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """The sponsors a post for this team and grade starts with, and why."""
+    sponsors = await _club_sponsor_rows(db, club)
+    ids, source = post_sponsors.resolve(club.post_sponsor_defaults, sponsors, team, grade)
+    return {"sponsor_ids": ids, "source": source}
 
 
 class SponsorCreate(BaseModel):

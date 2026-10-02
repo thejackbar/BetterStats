@@ -10,6 +10,7 @@ Spots:
   dashboard  the major-sponsor slot on the club dashboard
   bar        the sticky strip of logos at the bottom of every club page
   footer     the full sponsor list at the very bottom of every club page
+  posts      the sponsor block BetterPosts puts on a new post by default
 
 Unknown tiers and unknown spots fail closed: a bad value is refused on write
 and ignored on read, never widened into "shows everywhere".
@@ -28,17 +29,18 @@ DEFAULT_LABELS: dict[str, str] = {
     "supporter": "Supporters",
 }
 
-PLACEMENTS: tuple[str, ...] = ("dashboard", "bar", "footer")
+PLACEMENTS: tuple[str, ...] = ("dashboard", "bar", "footer", "posts")
 
 PLACEMENT_LABELS: dict[str, str] = {
     "dashboard": "Dashboard slot",
     "bar": "Bottom bar",
     "footer": "Sponsor list",
+    "posts": "Social posts",
 }
 
 TIER_DEFAULT_PLACEMENTS: dict[str, tuple[str, ...]] = {
-    "major": ("dashboard", "bar", "footer"),
-    "gold": ("bar", "footer"),
+    "major": ("dashboard", "bar", "footer", "posts"),
+    "gold": ("bar", "footer", "posts"),
     "silver": ("bar", "footer"),
     "supporter": ("footer",),
 }

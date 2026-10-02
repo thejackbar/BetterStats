@@ -106,6 +106,18 @@ export function newBlankItem(type, opts = {}) {
   if (type === 'brand') {
     return { id, type: 'brand', x: 60, y: 60, size: 160, layout: 'row', showName: true, showLogo: true, align: 'left', color: 'ink' }
   }
+  if (type === 'sponsors') {
+    // A grid of the club's sponsor logos, resized to fit the box as sponsors are
+    // added or taken off. `sponsorIds` is resolved against the club's live sponsor
+    // list (data.sponsors), so a saved template always shows current logos.
+    // `auto` marks a block the editor placed by default and nobody has moved yet,
+    // so it can follow the post's team and size until somebody takes it over.
+    return {
+      id, type: 'sponsors', x: opts.x ?? 48, y: opts.y ?? 900, w: opts.w ?? 984, h: opts.h ?? 130,
+      sponsorIds: opts.sponsorIds || [], panel: opts.panel || 'light', gap: opts.gap ?? 28, pad: opts.pad ?? 18,
+      rotation: 0, auto: !!opts.auto,
+    }
+  }
   if (type === 'element') {
     const shape = opts.shape || 'line'
     if (shape === 'line') return { id, type: 'element', shape, x: 120, y: 220, w: 840, h: 6, thickness: 6, color: 'accent', opacity: 1, rotation: 0 }
@@ -148,6 +160,7 @@ export function itemLabel(it) {
   if (it.type === 'text') return `“${(it.text || '').slice(0, 16) || 'Text'}${(it.text || '').length > 16 ? '…' : ''}”`
   if (it.type === 'image') return it.srcName || (it.src ? 'Image' : 'Image (empty)')
   if (it.type === 'brand') return 'Club badge'
+  if (it.type === 'sponsors') return 'Sponsors'
   if (it.type === 'element') return { line: 'Line', divider: 'Divider', rect: 'Box', ellipse: 'Circle', triangle: 'Triangle', star: 'Star', arrow: 'Arrow', chevron: 'Chevron', diamond: 'Diamond', hexagon: 'Hexagon' }[it.shape] || 'Element'
   if (it.type === 'data') return {
     fixtures: 'Fixtures', results: 'Results', record: 'Record', scorecard: 'Scorecard',
@@ -457,11 +470,66 @@ function DataBlock({ item, palette, data = {} }) {
   return null
 }
 
+// Where a default sponsor strip goes on a canvas of this size: a full-width band
+// along the bottom edge, taller when there are more logos to fit.
+export function defaultSponsorGeometry(width, height, count) {
+  const h = count <= 2 ? 120 : count <= 4 ? 140 : 190
+  return { x: 48, w: Math.max(200, width - 96), h, y: Math.max(0, height - h - 40) }
+}
+
+// Best column count for n logos in a w x h box. A logo is assumed about twice as
+// wide as it is tall, so the score is the largest logo a cell can hold. The last
+// row is centred, so an odd count does not leave a hole.
+export function sponsorGridLayout(n, w, h, gap) {
+  if (!n || w <= 0 || h <= 0) return { cols: 1, rows: 1, cellW: 0, cellH: 0 }
+  let best = null
+  for (let cols = 1; cols <= n; cols++) {
+    const rows = Math.ceil(n / cols)
+    const cellW = (w - gap * (cols - 1)) / cols
+    const cellH = (h - gap * (rows - 1)) / rows
+    if (cellW <= 0 || cellH <= 0) continue
+    const score = Math.min(cellW, cellH * 2)
+    if (!best || score > best.score + 0.5) best = { cols, rows, cellW, cellH, score }
+  }
+  return best || { cols: n, rows: 1, cellW: w / n, cellH: h, score: 0 }
+}
+
+const SPONSOR_PANELS = {
+  light: { background: 'rgba(255,255,255,0.94)', borderRadius: 18 },
+  dark: { background: 'rgba(8,10,14,0.62)', borderRadius: 18 },
+  none: { background: 'transparent', borderRadius: 0 },
+}
+
+function SponsorGridBlock({ item, data }) {
+  const list = (data && data.sponsors) || []
+  const picked = (item.sponsorIds || []).map((id) => list.find((s) => s.id === id)).filter((s) => s && s.url)
+  if (!picked.length) return null
+  const pad = item.pad ?? 18
+  const gap = item.gap ?? 28
+  const lay = sponsorGridLayout(picked.length, item.w - pad * 2, item.h - pad * 2, gap)
+  const panel = SPONSOR_PANELS[item.panel] || SPONSOR_PANELS.light
+  return (
+    <div data-sponsor-grid="" style={{
+      width: item.w, height: item.h, boxSizing: 'border-box', padding: pad,
+      display: 'flex', flexWrap: 'wrap', alignContent: 'center', justifyContent: 'center', gap,
+      ...panel,
+    }}>
+      {picked.map((s) => (
+        <div key={s.id} style={{ width: lay.cellW, height: lay.cellH, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <img src={s.url} alt={s.name} draggable={false}
+            style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', display: 'block' }} />
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function renderContent(item, palette, team, data) {
   if (item.type === 'text') return <TextBlock item={item} palette={palette} />
   if (item.type === 'image') return <ImageBlock item={item} palette={palette} />
   if (item.type === 'element') return <ElementBlock item={item} palette={palette} />
   if (item.type === 'data') return <DataBlock item={item} palette={palette} data={data} />
+  if (item.type === 'sponsors') return <SponsorGridBlock item={item} data={data} />
   return <BrandLockup team={team} palette={palette} size={item.size} layout={item.layout} align={item.align} showName={item.showName} showLogo={item.showLogo !== false} nameColor={resolveBlankColor(item.color, palette)} />
 }
 
@@ -662,7 +730,7 @@ export function BlankCanvas({
       Object.entries(starts).forEach(([id, it]) => {
         const p = { x: Math.round(bb.x + (it.x - bb.x) * f), y: Math.round(bb.y + (it.y - bb.y) * f) }
         if (it.type === 'text') { p.fontSize = Math.max(8, Math.round(it.fontSize * f)); p.w = Math.max(40, Math.round(it.w * f)) }
-        else if (it.type === 'image') { p.w = Math.max(30, Math.round(it.w * f)); p.h = Math.max(30, Math.round(it.h * f)) }
+        else if (it.type === 'image' || it.type === 'sponsors') { p.w = Math.max(30, Math.round(it.w * f)); p.h = Math.max(30, Math.round(it.h * f)) }
         else if (it.type === 'element') { p.w = Math.max(4, Math.round(it.w * f)); p.h = Math.max(2, Math.round((it.h || 0) * f)); if (it.thickness) p.thickness = Math.max(1, Math.round(it.thickness * f)) }
         else if (it.type === 'brand') p.size = Math.max(40, Math.round(it.size * f))
         patch[id] = p

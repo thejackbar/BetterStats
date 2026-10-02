@@ -17,6 +17,7 @@ import TextPanel from '../../components/admin/socialpost/panels/TextPanel'
 import ShapesPanel from '../../components/admin/socialpost/panels/ShapesPanel'
 import ClubDataPanel from '../../components/admin/socialpost/panels/ClubDataPanel'
 import LayersPanel from '../../components/admin/socialpost/panels/LayersPanel'
+import SponsorsPanel from '../../components/admin/socialpost/panels/SponsorsPanel'
 import { api } from '../../lib/api'
 import {
   T1_HeroList, T2_CardGrid, T3_SideNumbered, T4_BattingOrder,
@@ -37,7 +38,7 @@ import { exportNodeToPng } from '../../social/exportImage'
 import { SocialBackground, SocialBackgroundDefs, SOCIAL_BACKGROUNDS, GRADIENT_ANGLES, DEFAULT_COLORS as BG_DEFAULT_COLORS } from '../../social/SocialBackgrounds'
 import { EVENT_TEMPLATES, EVENT_PRESETS, DEFAULT_EVENT, resolveMotif, eventPaletteFor } from '../../social/event-templates'
 import EventPostEditor from '../../components/admin/EventPostEditor'
-import { BlankCanvas, newBlankItem, defaultBlankItems } from '../../social/blank-template'
+import { BlankCanvas, newBlankItem, defaultBlankItems, defaultSponsorGeometry } from '../../social/blank-template'
 import { useBlankLayer } from '../../social/useBlankLayer'
 import { useTemplateLayers } from '../../social/useTemplateLayers'
 import { PostLayerProvider } from '../../social/postLayers'
@@ -261,6 +262,20 @@ const BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.BASE_URL + 'ap
 // A sponsor's logo, or null when it has none: asking the images endpoint for a
 // sponsor nobody uploaded a logo for is a 404 and a broken image on the post.
 const sponsorLogoUrl = (s) => (s?.logo_url ? `${BASE_URL}/images/sponsors/${s.id}/logo` : null)
+
+// A sponsor grid the editor placed by default (`auto`) follows the post's team and
+// size until somebody takes it over. Moving it, resizing it or changing its
+// sponsors is taking it over; changing its backing panel is not.
+const SPONSOR_TAKEOVER_KEYS = ['x', 'y', 'w', 'h', 'sponsorIds']
+function releaseSponsorAuto(items, patchMap) {
+  const out = {}
+  Object.entries(patchMap).forEach(([id, patch]) => {
+    const it = items.find((x) => x.id === id)
+    const takesOver = it && it.type === 'sponsors' && it.auto && SPONSOR_TAKEOVER_KEYS.some((k) => k in patch)
+    out[id] = takesOver ? { ...patch, auto: false } : patch
+  })
+  return out
+}
 const footballAsset = (u) => {
   if (!u || /^(https?:|data:|\/\/)/.test(u)) return u
   if (u.startsWith('/api/')) return `${BASE_URL}${u.slice(4)}`
@@ -2528,9 +2543,18 @@ export default function AdminSocialPost() {
     history.commit(label)
   }
   // History-aware wrappers around the layer mutators the inspector/panels drive.
-  const hUpdate = (id, patch) => { record('Edit block'); layer.update(id, patch) }
+  const hUpdate = (id, patch) => { record('Edit block'); layer.patchMany(releaseSponsorAuto(layer.items, { [id]: patch })) }
   const hDuplicate = (id) => { record('Duplicate'); layer.duplicate(id) }
-  const hRemove = (id) => { record('Delete'); layer.remove(id) }
+  const hRemove = (id) => {
+    // Every post carries a sponsor, so taking the last sponsor grid off one asks
+    // first. Saying yes also stops the editor putting it back on this post.
+    const it = layer.items.find((x) => x.id === id)
+    if (it && it.type === 'sponsors' && layer.items.filter((x) => x.type === 'sponsors').length === 1) {
+      if (!window.confirm('Every post carries a sponsor. Take the sponsors off this one anyway?')) return
+      sponsorDismissed.current[sponsorKey] = true
+    }
+    record('Delete'); layer.remove(id)
+  }
   const hAlign = (mode) => { record('Align'); layer.align(mode) }
 
   // Added blocks are drawn INSIDE the layout root, interleaved among the
@@ -2542,7 +2566,9 @@ export default function AdminSocialPost() {
   // render — `layerStack` reads it, and a const declared below its own reader
   // is a temporal-dead-zone crash the first time the panel draws.
   const overlayOn = customEdit && !isBlankTab
-  const overlayItems = overlayOn ? overlay.items : []
+  // The post's sponsor grid is part of the post, not of Custom Edit, so it draws
+  // (and exports) with Custom Edit off. Every other block waits for Custom Edit.
+  const overlayItems = overlayOn ? overlay.items : overlay.items.filter((it) => it.type === 'sponsors')
 
   // ONE STACK, whichever surface is being edited. On a built-in layout it holds
   // the layout's own elements and the added blocks together, ordered by
@@ -2582,8 +2608,7 @@ export default function AdminSocialPost() {
         if (e.shiftKey) history.redo(); else history.undo()
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && layer.selIds.length) {
         e.preventDefault()
-        record('Delete')
-        layer.selIds.forEach((id) => layer.remove(id))
+        layer.selIds.slice().forEach((id) => hRemove(id))
       }
     }
     window.addEventListener('keydown', onKey)
@@ -2734,6 +2759,9 @@ export default function AdminSocialPost() {
   const blankData = {
     team, match: matchData, fixtures, results, record: blankRecord,
     scorecard: scorecardMatch, players: allPlayers, playerStats: playerStatsCache,
+    // Sponsor grids resolve their ids against the club's live list, so a saved
+    // template always draws current logos.
+    sponsors: adminSponsors.filter(sponsorLogoUrl).map((s) => ({ id: s.id, name: s.name, url: sponsorLogoUrl(s) })),
   }
 
   // Fetch career stats for any player referenced by a player data block.
@@ -2902,6 +2930,85 @@ export default function AdminSocialPost() {
     setCustomEdit(false)
   }
 
+  // ── Post sponsors ────────────────────────────────────────────────────────
+  // Every post carries at least one sponsor. The server says which ones a post
+  // like this starts with (the team's pin, the grade's pin, the club default, or
+  // its top sponsor); the editor puts that grid on the post and keeps it
+  // following the team and the canvas size until somebody takes it over.
+  // Hooks, so they sit above the loading return.
+  const [sponsorDefault, setSponsorDefault] = useState({ ids: [], source: 'none', loaded: false })
+  const [sponsorPin, setSponsorPin] = useState(null)
+  // Posts (template + page) whose sponsors somebody took off on purpose.
+  const sponsorDismissed = useRef({})
+  const metaSponsorsAuto = useRef(null)
+  const sponsorTarget = isBlankTab ? canvas : overlay
+  const sponsorKey = `${templateId}|${isBlankTab ? pages.index : 0}`
+  const nativeSponsors = isScorecard || tmpl.kind === 'fixtures' || tmpl.kind === 'results'
+  const sponsorCanvas = (() => {
+    if (isScorecard) return { w: 1920, h: 1080 }
+    const sz = postSizeOf(postSize)
+    return { w: sz.w, h: sz.h }
+  })()
+  const usableSponsors = adminSponsors.filter(sponsorLogoUrl)
+  const usableSponsorKey = usableSponsors.map((x) => x.id).join(',')
+  useEffect(() => {
+    let cancelled = false
+    if (loading) return undefined
+    if (!usableSponsors.length) { setSponsorDefault({ ids: [], source: 'none', loaded: true }); return undefined }
+    const usable = new Set(usableSponsors.map((x) => x.id))
+    const timer = setTimeout(() => {
+      api.adminPostSponsorDefault({ team: headline, grade: match.competition })
+        .then((r) => {
+          if (cancelled) return
+          const ids = (r?.sponsor_ids || []).filter((id) => usable.has(id))
+          setSponsorDefault({ ids: ids.length ? ids : [usableSponsors[0].id], source: ids.length ? r.source : 'top', loaded: true })
+        })
+        // The football silo has no such route, and an older server neither: the
+        // club's first sponsor with a logo is still better than none.
+        .catch(() => { if (!cancelled) setSponsorDefault({ ids: [usableSponsors[0].id], source: 'top', loaded: true }) })
+    }, 350)
+    return () => { cancelled = true; clearTimeout(timer) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, usableSponsorKey, headline, match.competition])
+  useEffect(() => {
+    if (loading || !sponsorDefault.loaded || !sponsorDefault.ids.length || nativeSponsors) return
+    const existing = sponsorTarget.items.find((it) => it.type === 'sponsors')
+    const geo = defaultSponsorGeometry(sponsorCanvas.w, sponsorCanvas.h, sponsorDefault.ids.length)
+    if (!existing) {
+      if (sponsorDismissed.current[sponsorKey]) return
+      const fresh = newBlankItem('sponsors', { ...geo, sponsorIds: sponsorDefault.ids, auto: true })
+      // Functional, so two runs of this effect before React re-renders cannot
+      // put two grids on the post.
+      sponsorTarget.setItems((its) => (its.some((it) => it.type === 'sponsors') ? its : [...its, fresh]))
+      return
+    }
+    if (existing.auto) {
+      const same = existing.sponsorIds.join(',') === sponsorDefault.ids.join(',')
+        && existing.x === geo.x && existing.y === geo.y && existing.w === geo.w && existing.h === geo.h
+      if (!same) sponsorTarget.patchMany({ [existing.id]: { sponsorIds: sponsorDefault.ids, ...geo } })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, sponsorDefault, sponsorTarget.items, sponsorKey, sponsorCanvas.w, sponsorCanvas.h, nativeSponsors])
+  // A layout with sponsor slots of its own (fixtures, results, scorecards) fills
+  // them from the same default, until somebody picks their own logos there.
+  useEffect(() => {
+    if (loading || !sponsorDefault.loaded || !nativeSponsors || !sponsorDefault.ids.length) return
+    const want = [0, 1].map((i) => {
+      const sp = usableSponsors.find((x) => x.id === sponsorDefault.ids[i])
+      return sp ? { url: sponsorLogoUrl(sp), name: sp.name } : { url: null, name: '' }
+    })
+    const wantKey = want.map((x) => x.url || '').join('|')
+    setScorecardMatch((m) => {
+      const curKey = m.meta.sponsors.map((x) => x.url || '').join('|')
+      // Somebody has changed a slot since the last time this filled them: theirs.
+      if (metaSponsorsAuto.current !== null && curKey !== metaSponsorsAuto.current) return m
+      if (curKey === wantKey) { metaSponsorsAuto.current = wantKey; return m }
+      metaSponsorsAuto.current = wantKey
+      return { ...m, meta: { ...m.meta, sponsors: want } }
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, sponsorDefault, nativeSponsors, usableSponsorKey])
+
   if (loading) return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-pb-bg">
       <span className="font-mono text-[11px] text-pb-faint animate-pulse">LOADING...</span>
@@ -2983,7 +3090,7 @@ export default function AdminSocialPost() {
         passThrough
         {...(interactive ? {
           interactive: true, scale, selectedIds: overlay.selIds,
-          onSelect: overlay.select, onDeselect: overlay.deselect, onPatchMany: overlay.patchMany,
+          onSelect: overlay.select, onDeselect: overlay.deselect, onPatchMany: (map) => overlay.patchMany(releaseSponsorAuto(overlay.items, map)),
           onGestureStart: () => record('Move block'), onDuplicate: hDuplicate, onRemove: hRemove,
         } : null)}
         style={{ position: 'absolute', inset: 0, zIndex: z }} />
@@ -3385,7 +3492,7 @@ export default function AdminSocialPost() {
             {isBlankTab ? (
               <BlankCanvas team={team} palette={templatePalette} items={canvas.items} data={blankData}
                 interactive scale={scale} selectedIds={canvas.selIds}
-                onSelect={canvas.select} onDeselect={canvas.deselect} onPatchMany={canvas.patchMany}
+                onSelect={canvas.select} onDeselect={canvas.deselect} onPatchMany={(map) => canvas.patchMany(releaseSponsorAuto(canvas.items, map))}
                 onGestureStart={() => record('Move block')} onDuplicate={hDuplicate} onRemove={hRemove} />
             ) : templateNode({ interactive: true, scale })}
           </div>
@@ -3405,6 +3512,68 @@ export default function AdminSocialPost() {
       onDuplicate={hDuplicate} onRemove={hRemove} onAlign={hAlign}
       palette={themedPalette} players={allPlayers} onPickImage={pickImageForItem} onEditImage={editImageForItem}
       onSendTo={hSendTo} layoutName={!isBlankTab ? tmpl.name : null}
+      onOpenSponsors={() => setTool('sponsors')}
+    />
+  )
+
+  // ── Sponsors panel ─────────────────────────────────────────────────────────
+  const sponsorBlock = sponsorTarget.items.find((it) => it.type === 'sponsors') || null
+  const sponsorsForPanel = adminSponsors.map((sp) => ({
+    id: sp.id, name: sp.name, url: sponsorLogoUrl(sp),
+    tierLabel: sp.tier ? String(sp.tier).toUpperCase() : null,
+  }))
+  const pickSponsors = (ids) => {
+    if (sponsorBlock) {
+      // Taking the last sponsor off goes through the same confirm as deleting the block.
+      if (!ids.length) { hRemove(sponsorBlock.id); return }
+      record('Change sponsors')
+      sponsorTarget.patchMany(releaseSponsorAuto(sponsorTarget.items, { [sponsorBlock.id]: { sponsorIds: ids } }))
+      return
+    }
+    if (!ids.length) return
+    delete sponsorDismissed.current[sponsorKey]
+    const geo = defaultSponsorGeometry(W, H, ids.length)
+    record('Add sponsors')
+    sponsorTarget.setItems((its) => [...its, newBlankItem('sponsors', { ...geo, sponsorIds: ids })])
+  }
+  const useDefaultSponsors = () => {
+    if (!sponsorBlock || !sponsorDefault.ids.length) return
+    record('Default sponsors')
+    sponsorTarget.patchMany({ [sponsorBlock.id]: { sponsorIds: sponsorDefault.ids, ...defaultSponsorGeometry(W, H, sponsorDefault.ids.length), auto: true } })
+  }
+  const setSponsorPanel = (panel) => {
+    if (!sponsorBlock) return
+    record('Sponsor backing')
+    sponsorTarget.patchMany({ [sponsorBlock.id]: { panel } })
+  }
+  const editSponsorsOnPost = () => {
+    if (!sponsorBlock) return
+    if (!isBlankTab) setCustomEdit(true)
+    sponsorTarget.select(sponsorBlock.id)
+  }
+  // Pin the sponsors on this post to its team or grade, so every later post for
+  // it starts with them. The server re-checks the permission.
+  const pinSponsors = async (kind) => {
+    const name = ((kind === 'teams' ? headline : match.competition) || '').trim()
+    if (!name || !sponsorBlock) return
+    setSponsorPin('saving')
+    try {
+      const cur = await api.adminGetPostDefaults()
+      const next = { teams: { ...(cur.assignments?.teams || {}) }, grades: { ...(cur.assignments?.grades || {}) } }
+      next[kind][name] = sponsorBlock.sponsorIds
+      await api.adminPutPostDefaults(next)
+      setSponsorPin(`saved:${kind}`)
+    } catch (e) {
+      setSponsorPin(`err:${e?.message || 'Could not save that'}`)
+    }
+  }
+  const sponsorsPanel = (
+    <SponsorsPanel
+      sponsors={sponsorsForPanel} block={sponsorBlock} defaultInfo={sponsorDefault}
+      context={{ team: headline, grade: match.competition }} native={nativeSponsors}
+      onPick={pickSponsors} onPanel={setSponsorPanel} onUseDefault={useDefaultSponsors}
+      onEditOnPost={editSponsorsOnPost} onRemove={() => sponsorBlock && hRemove(sponsorBlock.id)}
+      onPin={pinSponsors} pinState={sponsorPin}
     />
   )
 
@@ -3650,6 +3819,7 @@ export default function AdminSocialPost() {
             {tool === 'elements' && <ShapesPanel onAdd={addBlock} />}
             {tool === 'data' && <ClubDataPanel onAdd={addBlock} />}
             {tool === 'photos' && photosPanel}
+            {tool === 'sponsors' && sponsorsPanel}
             {tool === 'layers' && (
               <LayersPanel
                 stack={layerStack} selIds={layer.selIds} hidden={tlayers.hidden}

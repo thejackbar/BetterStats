@@ -2834,6 +2834,17 @@ export const api = {
   adminGetSponsorSettings: () => request('/club-admin/sponsors/settings'),
   adminPutSponsorSettings: (data) =>
     request('/club-admin/sponsors/settings', { method: 'PUT', body: JSON.stringify(data) }),
+  // The sponsors a post starts with, and the team/grade pins behind them.
+  adminGetPostDefaults: () => request('/club-admin/sponsors/post-defaults'),
+  adminPutPostDefaults: (data) =>
+    request('/club-admin/sponsors/post-defaults', { method: 'PUT', body: JSON.stringify(data) }),
+  adminPostSponsorDefault: ({ team, grade } = {}) => {
+    const params = new URLSearchParams()
+    if (team) params.set('team', team)
+    if (grade) params.set('grade', grade)
+    const qs = params.toString()
+    return request(`/club-admin/sponsors/post-default${qs ? `?${qs}` : ''}`)
+  },
   // The club's own names for its public sections, each optionally linked to a sponsor.
   adminGetSectionNames: () => request('/club-admin/sponsors/section-names'),
   adminPutSectionNames: (sections) =>

@@ -89,6 +89,8 @@ SHARED_DDL_MODULES = (
     ("app.services.sponsor_tiers_ddl", "STATEMENTS"),
     # Migration 319. `organisations.section_names`, on the shared Organisation model.
     ("app.services.section_names_ddl", "STATEMENTS"),
+    # Migration 320. `organisations.post_sponsor_defaults`, on the shared Organisation model.
+    ("app.services.post_sponsors_ddl", "STATEMENTS"),
 )
 
 

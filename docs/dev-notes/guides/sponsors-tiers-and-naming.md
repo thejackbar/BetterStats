@@ -3,8 +3,9 @@
 **Read this before**:
 - Touching `org_sponsors`, `services/sponsor_tiers*.py`, `GET /clubs/{slug}/sponsors`, `/club-admin/sponsors*`, `AdminSponsors.jsx`, `SponsorFooter.jsx`, `MajorSponsorSlot.jsx` or `useClubSponsors.js`.
 - Adding a public club page or changing how a page finds its club (`lib/clubSlug.js`).
+- Touching `social/blank-template.jsx`'s `sponsors` block, `services/post_sponsors.py` or the Sponsors tool in `AdminSocialPost.jsx`.
 
-**Archive**: `docs/dev-notes/archive/sponsors-tiers-and-naming.md`. Grep hints: `v9.103.0`, `v9.104.0`.
+**Archive**: `docs/dev-notes/archive/sponsors-tiers-and-naming.md`. Grep hints: `v9.103.0`, `v9.104.0`, `v9.105.0`.
 
 ## Standing rules
 
@@ -18,4 +19,7 @@
 8. Every sponsor write needs `MANAGE_SPONSORS` on the server (`require_cap`). The list read stays open because BetterPosts and the setup wizard read it.
 9. Section names (`organisations.section_names`) store only what the club set. The sponsor card is resolved live on read; never copy a logo into the column. A new public section needs an entry in `services/section_names.SECTIONS`, its page must call `useSectionNames`, and its nav label must use `sec.name(key, fallback)`. URLs never change with a rename.
 10. A renamed page keeps its standard wording when nothing is set: every call site passes the old string as the fallback, so removing a name is a no-op, not a blank.
-11. Prose follows the humanizer rules.
+11. Every BetterPosts post carries a sponsor grid (`sponsors` block). `post_sponsors.resolve` is the one answer for which sponsors: team pin, grade pin, club default (`posts` spot), top sponsor. Never copy that order into the frontend. The editor treats an `auto` grid as the server's choice and a touched one as the user's.
+12. A layout with sponsor slots of its own (fixtures, results, scorecards) must not also get a grid. A new template with its own slots needs adding to `nativeSponsors` in `AdminSocialPost`.
+13. Removing the last sponsor grid from a post must go through `hRemove` (it confirms). A new delete path that calls `layer.remove` directly skips the warning.
+14. Prose follows the humanizer rules.
