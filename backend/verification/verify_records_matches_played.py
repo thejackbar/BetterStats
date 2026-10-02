@@ -138,6 +138,11 @@ async def seed(session) -> None:
     g6 = await game(6); await bowl(g6, SPINKS, 2)              # bowled only
     g7 = await game(7); await field(g7, SPINKS)                # fielded only
     g8 = await game(8); await named(g8, SPINKS)                # named only
+    # A played match: the opposition scored, so the scorecard is not empty. (A
+    # COMPLETED game with NOTHING on it is not a match played; see
+    # services/game_status.looks_unplayed_sql.)
+    await ex("UPDATE games SET innings_totals = CAST(:t AS JSONB) WHERE id = :g",
+             t='[{"innings_number": 1, "runs_scored": 150, "wickets": 5, "extras": 3}]', g=g8)
     g9 = await game(9); await bat(g9, SPINKS, 0, dnb=True)     # a DNB row only
     # A control who bats in every match he plays: nothing may move for him.
     with_games = (await session.execute(

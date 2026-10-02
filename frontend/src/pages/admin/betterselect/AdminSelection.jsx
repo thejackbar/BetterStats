@@ -305,7 +305,11 @@ export default function AdminSelection() {
     filters.setValue('rules', 'eligible')
   }, [data, fixtureId])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  const available = useMemo(() => (data?.pool || []).filter((p) => !usedIds.has(p.id)), [data, usedIds])
+  // Players marked inactive are not pickable, so they stay out of the pool (the
+  // Squads board does the same). One already in the saved XI still shows in
+  // their slot. The count is passed down so the pool can say who is missing.
+  const available = useMemo(() => (data?.pool || []).filter((p) => !usedIds.has(p.id) && !p.is_inactive), [data, usedIds])
+  const inactiveHidden = useMemo(() => (data?.pool || []).filter((p) => p.is_inactive && !usedIds.has(p.id)).length, [data, usedIds])
   const pool = useMemo(() => {
     let list = available
     if (search.trim()) list = list.filter((p) => (p.display_name || '').toLowerCase().includes(search.trim().toLowerCase()))
@@ -582,7 +586,7 @@ export default function AdminSelection() {
   const filterBar = (
     <SelectionFilters filters={filters} sort={sort} setSort={setSort} squadOptions={squadOptions}
       yearsF={yearsF} setYearsF={setYearsF} count={pool.length} total={available.length}
-      flags={data?.flags} rules={data?.rules} />
+      inactiveHidden={inactiveHidden} flags={data?.flags} rules={data?.rules} />
   )
 
   const vm = {

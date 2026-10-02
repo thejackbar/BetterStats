@@ -20,6 +20,7 @@
 2. "Still around" uses the club's `dormancy_months` from the availability-matrix payload, the same definition the matrix and `selection_pool` use. No second window.
 3. The fill-in reach offers only windows wider than the dormancy boundary (24 months: 3/5/10/any; 12: 2/3/5/10/any); a control that can only answer "nobody" is worse than none.
 4. Marking a player inactive clears their squad in the same write (`update_player_profile`, profile importer), only when the request sets the status. Reactivating does not re-file. `auto_assign_suggest` and Bulk add skip inactive players. Board shows "N inactive not shown" plus `Show inactive players`.
+   The selection board's Available pool also hides inactive players ("N inactive not shown"), and `assemble_selection` blanks their `squads`, `squad_team_id` and `squad_match` on read.
 5. Every squad write must mirror into `team_members` (`directory.set_squad` once did not). Raw SQL there, by that module's posture.
 
 **Nets live session (multi-device)**

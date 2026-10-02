@@ -16,7 +16,7 @@ import {
   AnimatedNum, Sparkline, Label, Card, Btn, Kpi,
   ResultPill, PageHeader, PbSpinner, TabBar,
 } from '../lib/presskit'
-import { GradeTotalNote } from '../components/MatchCoverage'
+import { GradeTotalNote, MatchCoverageInfo } from '../components/MatchCoverage'
 import { FilterReachDot, FilterReachNote } from '../components/FilterReach'
 import '../styles/honour-badge.css'
 import { countryFlagUrl } from '../data/countries'
@@ -3154,10 +3154,11 @@ export default function PlayerProfile() {
               <div className="pb-card p-4 flex-1">
                 <div className="flex items-center gap-4">
                   <div>
-                    <Label>MATCHES</Label>
-                    <span className="font-mono text-[36px] font-bold pb-num leading-none mt-1 text-pb-text">
-                      <AnimatedNum value={batting?.games || bowling?.games || 0} />
-                    </span>
+                    <MatchCoverageInfo coverage={matchCoverage} label={<Label>MATCHES</Label>}>
+                      <span className="font-mono text-[36px] font-bold pb-num leading-none mt-1 text-pb-text">
+                        <AnimatedNum value={batting?.games || bowling?.games || 0} />
+                      </span>
+                    </MatchCoverageInfo>
                   </div>
                 </div>
               </div>

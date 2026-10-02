@@ -19,7 +19,7 @@ from app.models.db import (
 )
 from app.services import auto_sync, dismissal, playhq_client
 from app.services.boundary_counts import clean as _bounds
-from app.services.game_status import NOT_PLAYED_SQL_LIST, NOT_PLAYED_STATUSES
+from app.services.game_status import NOT_PLAYED_STATUSES, not_played_game_sql
 from app.services.grade_labels import suggest_categories, suggest_category
 
 logger = logging.getLogger(__name__)
@@ -549,7 +549,7 @@ async def _backfill_missing_season_stats(org_id_str: str) -> int:
                     JOIN grades gr ON gr.id = g.grade_id
                     JOIN seasons s ON s.id = gr.season_id
                     WHERE s.organisation_id = :org_id
-                      AND (g.status IS NULL OR g.status NOT IN (""" + NOT_PLAYED_SQL_LIST + """))
+                      AND NOT """ + not_played_game_sql("g") + """
                 ),
                 pairs AS (
                     SELECT player_id, season_id FROM bat_innings

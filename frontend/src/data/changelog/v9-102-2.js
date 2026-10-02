@@ -1,11 +1,10 @@
 export default {
   version: 'v9.102.2',
   date: '2026-10-01',
-  sortKey: '2026-10-01T11:00:00Z',
-  title: 'A hidden player stays hidden, and a player who asks to be removed can be',
+  sortKey: '2026-10-01T12:00:00Z',
+  title: 'BetterFantasyCricket rounds now cover the men\'s and women\'s programs',
   items: [
-    'A player set to Hidden now stays hidden across the whole public site. Before, their profile page stopped loading but their stats could still be fetched directly, they stayed in the sitemap, and search and social previews could still show their name and photo. All three are closed.',
-    'When a player asks to be taken off the public website, BetterSports can now record that request. The player stays hidden, their photos are deleted (including the BetterIQ scouting copy), and the club can no longer switch them back on, upload a photo for them or bring them back by importing a sheet. Their matches stay in your records and totals.',
-    'On a player\'s profile in your admin, someone removed at their own request shows a short note in place of the Hidden switch.',
+    'Generate rounds now checks every grade Play-Cricket lists for the season, alongside the grades already on file. A club that had only some grades synced, such as its women\'s grade without its men\'s, used to get rounds for just those grades. The count was short and the men\'s weekends were missing.',
+    'The fantasy season is one club-wide competition across the men\'s and women\'s programs, so a round is any weekend where either program plays. A club whose men\'s and women\'s draws fall on different weekends will see more rounds than either program\'s own round count.',
   ],
 }

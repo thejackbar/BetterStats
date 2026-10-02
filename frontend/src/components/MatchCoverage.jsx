@@ -1,6 +1,80 @@
 import { useState } from 'react'
 
 /**
+ * The explainer panel on its own, shared by the note under a filtered figure
+ * and by the "i" beside the career Matches number on a profile header.
+ */
+function CoverageExplainer({ coverage }) {
+  const { career_matches, breakdown_matches, without_scorecard, extra_scorecards } = coverage
+  const short = without_scorecard > 0
+  return (
+    <div className="mt-2 p-3 rounded-lg text-[12px] leading-relaxed text-pb-dim"
+         style={{ background: 'var(--pb-surface2)' }}>
+      <p className="mb-2">
+        <strong className="text-pb-text">Two records of the same career.</strong>{' '}
+        Cricket Australia's own season figures count {career_matches} matches in
+        this career. They do not say which grade a match was played in, so they
+        cannot be split by competition, grade type or format.
+      </p>
+      <p className="mb-2">
+        Anything you filter, such as a competition, a grade type or a format, is counted from
+        the {breakdown_matches} matches we hold a scorecard for, not from Cricket
+        Australia's count. That is why the parts do not add up to {career_matches}.
+      </p>
+      {short && (
+        <p className="mb-2">
+          The other {without_scorecard} {without_scorecard === 1 ? 'match is' : 'matches are'}{' '}
+          counted in the career total and appear under no competition, because we hold no
+          scorecard for {without_scorecard === 1 ? 'it' : 'them'} at all. There is nothing
+          waiting to be filed. {without_scorecard === 1 ? 'The match is' : 'The matches are'}{' '}
+          not in the records as {without_scorecard === 1 ? 'a game' : 'games'}, only in
+          Cricket Australia's season count.
+        </p>
+      )}
+      {extra_scorecards > 0 && (
+        <p className="mb-2">
+          Here it runs the other way: we hold {extra_scorecards} more{' '}
+          {extra_scorecards === 1 ? 'scorecard' : 'scorecards'} than the season totals
+          count, so a filtered figure can be higher than the career total rather than
+          lower. A fixture marked completed with nothing on its scorecard is not
+          counted here, but a game that started and was then stopped is.
+        </p>
+      )}
+      <p className="mb-0">
+        Both figures are real. Neither is adjusted to match the other.
+      </p>
+    </div>
+  )
+}
+
+/**
+ * The "i" beside the career Matches figure in a profile header, with its
+ * panel underneath. No sentence beside the number: the number stays clean and
+ * the explanation is one tap away. Drawn only where the two sources differ (the
+ * backend sends the block only then); without it `label` and `children` render
+ * exactly as they would have alone.
+ *
+ * `label` is the small caption the "i" sits beside, `children` the figure.
+ */
+export function MatchCoverageInfo({ coverage, label, children }) {
+  const [open, setOpen] = useState(false)
+  if (!coverage) return <>{label}{children}</>
+  return (
+    <div>
+      <div className="flex items-center gap-1.5">
+        {label}
+        <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open}
+          className="w-4 h-4 rounded-full border border-pb-dim/50 text-[9px] leading-none
+                     text-pb-dim hover:text-pb-text hover:border-pb-text shrink-0"
+          aria-label="Why these figures differ">i</button>
+      </div>
+      {children}
+      {open && <CoverageExplainer coverage={coverage} />}
+    </div>
+  )
+}
+
+/**
  * Why a career total and the per-competition figures do not add up.
  *
  * A career carries two match counts and a filter switches between them: with
@@ -51,43 +125,7 @@ export function MatchCoverageNote({ coverage, filtered = false, className = '' }
                      text-pb-dim hover:text-pb-text hover:border-pb-text shrink-0"
           aria-label="Why these figures differ">i</button>
       </p>
-      {open && (
-        <div className="mt-2 p-3 rounded-lg text-[12px] leading-relaxed text-pb-dim"
-             style={{ background: 'var(--pb-surface2)' }}>
-          <p className="mb-2">
-            <strong className="text-pb-text">Two records of the same career.</strong>{' '}
-            Cricket Australia's own season figures count {career_matches} matches in
-            this career. They do not say which grade a match was played in, so they
-            cannot be split by competition, grade type or format.
-          </p>
-          <p className="mb-2">
-            Anything you filter — a competition, a grade type, a format — is counted from
-            the {breakdown_matches} matches we hold a scorecard for, not from Cricket
-            Australia's count. That is why the parts do not add up to {career_matches}.
-          </p>
-          {short && (
-            <p className="mb-2">
-              The other {without_scorecard} {without_scorecard === 1 ? 'match is' : 'matches are'}{' '}
-              counted in the career total and appear under no competition, because we hold no
-              scorecard for {without_scorecard === 1 ? 'it' : 'them'} at all. There is nothing
-              waiting to be filed — the {without_scorecard === 1 ? 'match is' : 'matches are'}{' '}
-              not in the records as {without_scorecard === 1 ? 'a game' : 'games'}, only in
-              Cricket Australia's season count.
-            </p>
-          )}
-          {extra_scorecards > 0 && (
-            <p className="mb-2">
-              Here it runs the other way: we hold {extra_scorecards} more{' '}
-              {extra_scorecards === 1 ? 'scorecard' : 'scorecards'} than the season totals
-              count, so a filtered figure can be higher than the career total rather than
-              lower.
-            </p>
-          )}
-          <p className="mb-0">
-            Both figures are real. Neither is adjusted to match the other.
-          </p>
-        </div>
-      )}
+      {open && <CoverageExplainer coverage={coverage} />}
     </div>
   )
 }
