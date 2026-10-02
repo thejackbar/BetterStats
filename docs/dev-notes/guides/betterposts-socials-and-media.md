@@ -76,6 +76,7 @@
 **Team of the week (v9.102.0, `social/totw-templates.jsx`, `social_rounds.social_totw`, `GET /admin/social/totw`)**
 50. The team lives in `selectedPlayers` (each slot carries `totw: {line, grade, opp, points}`), so add, remove and reorder are the lineup's own. The stepper reads `selectedPlayers.length` and never rebuilds from the ranking: growing appends the next ranked players not already picked, shrinking drops from the end, so a hand swap survives. Size is 6 to 14, default 11 (`TOTW_MIN/MAX/DEFAULT`).
 51. Scoring is `_rank_our_side`, the one function behind both the player of the match and the team of the week; change points there and both move. The pool is one entry per player (their better performance, not a sum, so the pick does not go to whoever played most). A layout that takes a variable count sizes cards and rows from the count; root children that are not `div`s must spread `style` to take a z-index, so masthead and footer are plain functions returning a `div`.
+52. A saved event template with no `event` field is a pre-v9.99.3 one (layout only). `applyTemplate` starts it from the `EVENT_PRESETS` entry that owns its layout and clears the photo, because the editor's event state defaults to Curry Night and is not persisted. Any new field a template should carry needs the same "absent means legacy" branch.
 
 ## Traps and failure signatures
 - Geometry checks pass but a layout reads wrong (black bands, clumped story names). Judge from real screenshots.

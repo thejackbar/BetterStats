@@ -1471,6 +1471,19 @@ export default function AdminSocialPost() {
       if (tpl.event.motif) setEventMotifKey(tpl.event.motif)
       setEventBg(tpl.event.bg || null)
       if (typeof tpl.event.bgOpacity === 'number') setEventBgOpacity(tpl.event.bgOpacity)
+    } else {
+      // An event poster saved before templates kept their wording holds only the
+      // layout. The editor's own wording starts as Curry Night and is not stored,
+      // so without this a saved Season Launch opened as a Curry Night poster
+      // (with its motif and photo). Start it from the preset that owns the layout.
+      const base = EVENT_PRESETS.find((p) => p.template === tpl.templateId)
+      if (base) {
+        setEvent({ ...DEFAULT_EVENT, ...base.event })
+        setEventPreset(base.key)
+        setEventMotifKey(base.motif)
+        setEventBg(null)
+        setEventBgOpacity(0.85)
+      }
     }
     const clone = (list) => (list || []).map((it) => ({ ...it }))
     if (tpl.custom) {
