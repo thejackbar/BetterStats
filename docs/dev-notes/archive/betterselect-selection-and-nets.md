@@ -1205,3 +1205,7 @@ Frontend (`AdminSelection.jsx`): the version is read when a write is SENT (`draf
 Still open: Confirm does not check for a newer draft (a selector who never polled can confirm over someone else's draft, which is then deleted); a conflict that happens during the keepalive flush on leaving is lost with the page.
 
 Proof: `backend/verification/verify_selection_draft.py` now 55 checks (control against the previous router fails 22). `frontend/verification/verify_selection_draft_browser.mjs` now 54 checks (control against the previous build fails 17): pickup by a clean board, conflict with both choices and the exact base version on the wire, autosave stopped while unsettled, the draft vanishing elsewhere, the overview marker, 390px.
+
+## v9.102.17: free-text "First Last" overrides show as "Last, First"
+
+A `display_name_override` typed as "Damian O'Hara" listed by first name between the synced "Surname, First" rows in the Availability grid. `services/name_format.canonical_player_name` flips a comma-less two-word name to "Last, First" and leaves a comma name, a single token and three or more words alone (a middle name and a double-barrelled surname look the same). `Player.display_name` applies it on read, so nothing stored changes, and `formatPlayerName` in `frontend/src/lib/nameFormat.js` mirrors it. `availability.py` (`club_player_roster`, `availability_matrix`) now sorts in Python by `name_sort_key` because the SQL `ORDER BY coalesce(override, name)` still orders the raw text. Raw-SQL `COALESCE(display_name_override, name)` readers are not covered.

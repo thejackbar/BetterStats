@@ -1465,7 +1465,9 @@ class Player(Base):
 
     @property
     def display_name(self) -> str:
-        return self.display_name_override or self.name
+        # A free-text "First Last" override is shown as "Last, First" like synced names.
+        from app.services.name_format import canonical_player_name
+        return canonical_player_name(self.display_name_override) or self.name
 
 
 class PlayerNameAlias(Base):
