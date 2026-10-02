@@ -64,6 +64,8 @@
 
 **Records, awards, grouping**
 38. `get_records` runs `SET LOCAL jit = off` first. Every board on `v_effective_player_season_stats` carries `pss_club_clause` (`pss.player_id = ANY(CAST(:club_player_ids AS uuid[]))`, resolved once, beside `pss_gender_clause`). A bound array pushes down; `= ANY (SELECT ...)` is a semi-join on the whole view (49.8s vs 0.9ms). Never tidy it into a subquery; cast it. A predicate on a view is paid per reference.
+38a. JIT is off for the whole app (`connect_args={"server_settings": {"jit": "off"}}` in `models/db.py`), not only in Records: the `v_effective_*` views plan at millions and every read compiled first (7s against 0.66s). Never a per-route `SET LOCAL jit`; a new engine must carry the same parameter. `verify_club_pss_and_jit.py` asserts `SHOW jit`.
+38b. `get_records` copies the club's `v_effective_player_season_stats` rows into temp table `_club_pss` once (lazily, in `q`) and the season-total boards read the copy. A new board that needs the season totals reads `_club_pss pss`, never the view; every other board stays on the per-innings views. Under an active scope those boards do not run, so the scoped path is NOT helped (open, see archive: anti-join estimate in the view DDL, `NOT EXISTS` plus a player array, and never the array alone).
 39. `q` times and labels every query (`_query_label`); `_timed` wraps non-board reads; declare `timings` above first use. `?debug_timing=1` returns `_query_timings` only to viewers who may see org private data; requests over `SLOW_RECORDS_LOG_MS` (2000) log worst queries.
 40. Awards (`routers/award_definitions.py`): `STARTER_TEMPLATE` default, `GLOBAL_TEMPLATE` 'comprehensive', `APPLECROSS_TEMPLATE` for slug `applecross`; seed via `TEMPLATES` (unknown = starter), only into an EMPTY org. `ACHIEVEMENT_TREE` is the no-defs fallback. Tables are lifespan-created.
 41. `run_grouping` (`services/competition_grouping.py`) is the one implementation. `sync_runs` kind `competition_grouping` is deliberately not in `_FULL_SYNC_KINDS` and not resumed. Idempotent (only NULL associations written). One run per club. `needs_grouping` is the only trigger, never `grades_ungrouped`. `MANAGE_MERGES`. `maybe_group_club` fires on `_sync_safe` success and Full Rebuild success; the 02:30 job stays. `/{slug}/competitions` must be known to Navbar `CLUB_SECTIONS`/`statsActive`, `SponsorFooter`, `FaviconManager`.
@@ -102,7 +104,7 @@
 
 ## Open follow-ups
 
-- Records: nothing cached or concurrent (cache on last sync; separate sessions, never `asyncio.gather` on one `AsyncSession`).
+- Records under an active scope is still 7 to 12s (per-innings views, mis-estimated anti-join in `superseded_ddl`); see the v9.102.12 note in the archive. Records: nothing cached or concurrent (cache on last sync; separate sessions, never `asyncio.gather` on one `AsyncSession`).
 - Scout screens and `iq._their_key_players` not marked aggregate-basis; `iq_team._role_ratings`, `iq_trends._similar_players` use aggregates on purpose.
 - `player_season_stats.batting_average` is a second stored copy.
 - Result filter offers "Tied" but never matches. Family targets ignore other context filters. Gender filter casing bug. Club rankings unfiltered and unnoted (decision needed). Players with ~100 games and CA 0 unexplained.
