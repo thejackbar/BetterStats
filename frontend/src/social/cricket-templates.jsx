@@ -272,6 +272,54 @@ export function RoleChip({ kind, accent = '#ffc233', ink = '#0b1530' }) {
   )
 }
 
+// A first appearance for the club. Sits beside the role chip on a row, so a
+// player can carry "VC" and "DEBUT" together. Rendered only when the player is
+// flagged, which is what keeps every post without a debutant exactly as it was.
+export function DebutTag({ accent = '#ffc233', ink = '#0b1530', style = {} }) {
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      flexShrink: 0, height: 24, padding: '0 8px',
+      background: accent, color: ink,
+      fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 14, fontWeight: 400,
+      letterSpacing: 1.2, lineHeight: 1, borderRadius: 2, verticalAlign: 'middle',
+      ...style,
+    }}>DEBUT</span>
+  )
+}
+
+// The row of the player who is in the photo, when the admin asks for it to be
+// marked: a wash of the accent behind the name and a bar down its leading edge.
+// Returns null when off (and for every other row), so a spread of it into a
+// row's style changes nothing on a post that is not using the mark.
+export function heroRowMark(isHero, accent, { bleed = 10, side = 'left', padY = null } = {}) {
+  if (!isHero) return null
+  // A row whose names sit against the right edge (T1) carries the bar there.
+  const right = side === 'right'
+  return {
+    background: `linear-gradient(${right ? 270 : 90}deg, ${accent}38 0%, ${accent}14 100%)`,
+    boxShadow: `inset ${right ? '-4px' : '4px'} 0 0 ${accent}`,
+    // The wash reaches `bleed` past the row's own edge and the content stays
+    // where it was. A row whose base style uses the `padding` shorthand names
+    // its vertical padding in `padY`, so the override is the same property
+    // (a longhand beside a shorthand is a React styling trap on re-render).
+    ...(right ? { marginRight: -bleed } : { marginLeft: -bleed }),
+    ...(padY != null
+      ? { padding: right ? `${padY}px ${bleed}px ${padY}px 0` : `${padY}px 0 ${padY}px ${bleed}px` }
+      : (right ? { paddingRight: bleed } : { paddingLeft: bleed })),
+    borderRadius: 2,
+  }
+}
+
+// Is this row the player whose photo fills the hero slot? The templates choose
+// that player with `featuredOf`, so the mark follows the same answer instead of
+// keeping a second opinion about who is in the picture. An uploaded hero image
+// is still "the featured player" as far as the editor is concerned: the Hero
+// Player picker sits right above the upload.
+export function isHeroRow(p, featured, on) {
+  return !!(on && featured && p && p._id != null && p._id === featured._id)
+}
+
 export function PlayerSilhouette({ team, role, ink = '#fff', style = {} }) {
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%', display: 'grid', placeItems: 'center', ...style }}>
@@ -439,7 +487,7 @@ export function orgToPalette(org) {
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 1 — Hero cutout + bold name list
 // ─────────────────────────────────────────────────────────────────────────────
-export function T1_HeroList({ width = 1080, height = 1080, team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus }) {
+export function T1_HeroList({ width = 1080, height = 1080, team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus, markHero }) {
   const P = players.slice(0, 13)
   const A = aspectOf(width, height)
   // ── T1 at 4:5 and 9:16 ────────────────────────────────────────────────────
@@ -582,9 +630,9 @@ export function T1_HeroList({ width = 1080, height = 1080, team, opponent, match
           {P.map((p, i) => {
             const chip = p.captain ? 'C' : p.viceCaptain ? 'VC' : p.keeper ? 'WK' : null
             return (
-              <div key={i} style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10, width: '100%' }}>
+              <div key={i} style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10, width: '100%', ...heroRowMark(isHeroRow(p, featuredOf(players, featuredId), markHero), palette.accent, { side: 'right' }) }}>
                 <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end' }}>
-                  <AutoFitText max={rowMax} min={16} lines={1} pad={8} measureDeps={[chip ? 1 : 0]}
+                  <AutoFitText max={rowMax} min={16} lines={1} pad={8} measureDeps={[chip ? 1 : 0, p.debut ? 1 : 0]}
                     style={{
                       fontFamily: "var(--social-display-font, 'Anton', sans-serif)", lineHeight: 1.05,
                       letterSpacing: 0.5, color: palette.ink,
@@ -596,6 +644,7 @@ export function T1_HeroList({ width = 1080, height = 1080, team, opponent, match
                   </AutoFitText>
                 </div>
                 {chip && <RoleChip kind={chip} accent={palette.accent} ink={palette.primary} />}
+                {p.debut && <DebutTag accent={palette.ink} ink={palette.primary} />}
               </div>
             )
           })}
@@ -742,7 +791,7 @@ export function T2_CardGrid({ width = 1080, height = 1080, team, opponent, match
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 3 — Side image + numbered XI
 // ─────────────────────────────────────────────────────────────────────────────
-export function T3_SideNumbered({ width = 1080, height = 1080, team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus }) {
+export function T3_SideNumbered({ width = 1080, height = 1080, team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus, markHero }) {
   const P = players.slice(0, 11)
   // The vertical spine label echoes the post headline (defaults to STARTING XI).
   // Scale it down for longer headlines so it never runs off the top edge.
@@ -856,10 +905,10 @@ export function T3_SideNumbered({ width = 1080, height = 1080, team, opponent, m
               // runs down to the credit rule instead of stopping where it did on
               // the square and leaving 270px of nothing under it. The square
               // keeps its own naturally-sized rows.
-              <div key={i} style={{ ...(A === 'square' ? null : { flex: 1, minHeight: 0 }), display: 'flex', alignItems: 'center', gap: 12, padding: '7px 0', borderBottom: `1px solid ${palette.ink}1c` }}>
+              <div key={i} style={{ ...(A === 'square' ? null : { flex: 1, minHeight: 0 }), display: 'flex', alignItems: 'center', gap: 12, padding: '7px 0', borderBottom: `1px solid ${palette.ink}1c`, ...heroRowMark(isHeroRow(p, featuredOf(players, featuredId), markHero), palette.accent, { bleed: 8, padY: 7 }) }}>
                 <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: numSize, color: palette.accent, lineHeight: 1, width: Math.round(numSize * 1.2), textAlign: 'right', flexShrink: 0 }}>{i + 1}</div>
                 <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-start' }}>
-                  <AutoFitText max={nameMax} min={16} lines={1} pad={8}
+                  <AutoFitText max={nameMax} min={16} lines={1} pad={8} measureDeps={[p.debut ? 1 : 0]}
                     style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 0.5, color: palette.ink, lineHeight: 1 }}>
                     <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: '0.26em', whiteSpace: 'nowrap' }}>
                       <span style={{ opacity: 0.65, fontWeight: 300, fontSize: '0.74em' }}>{p.first.toUpperCase()}</span>
@@ -868,6 +917,7 @@ export function T3_SideNumbered({ width = 1080, height = 1080, team, opponent, m
                   </AutoFitText>
                 </div>
                 {chip && <RoleChip kind={chip} accent={palette.accent} ink={palette.primary} />}
+                {p.debut && <DebutTag accent={palette.ink} ink={palette.primary} />}
               </div>
             )
           })}
@@ -1480,7 +1530,7 @@ function TornEdge({ color = '#fff', height = 26, width = 1080, style = {} }) {
   )
 }
 
-export function T10_TeamSheet({ width = 1080, height = 1080, team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus }) {
+export function T10_TeamSheet({ width = 1080, height = 1080, team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus, markHero }) {
   const P = players.slice(0, 13)
   const A = aspectOf(width, height)
   // ── T10 at 4:5 and 9:16 ───────────────────────────────────────────────────
@@ -1617,15 +1667,17 @@ export function T10_TeamSheet({ width = 1080, height = 1080, team, opponent, mat
         {P.map((p, i) => {
           const chip = p.captain ? '(C)' : p.viceCaptain ? '(VC)' : p.keeper ? '(WK)' : null
           return (
-            <AutoFitText key={i} max={rowMax} min={15} lines={1} pad={8} measureDeps={[chip ? 1 : 0]}
+            <AutoFitText key={i} max={rowMax} min={15} lines={1} pad={8} measureDeps={[chip ? 1 : 0, p.debut ? 1 : 0]}
               style={{
                 fontFamily: "var(--social-display-font, 'Anton', sans-serif)",
                 lineHeight: 1.08, letterSpacing: 0.6, color: palette.ink,
                 textShadow: `0 6px 22px ${palette.primary}99`,
+                ...heroRowMark(isHeroRow(p, featured, markHero), palette.accent, { bleed: 12 }),
               }}>
               <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: '0.3em', whiteSpace: 'nowrap' }}>
                 <span>{`${p.first || ''} ${p.last || ''}`.trim().toUpperCase()}</span>
                 {chip && <span style={{ color: palette.accent, fontSize: '0.62em', letterSpacing: 1 }}>{chip}</span>}
+                {p.debut && <span style={{ color: palette.accent, fontSize: '0.62em', letterSpacing: 1 }}>(DEBUT)</span>}
               </span>
             </AutoFitText>
           )

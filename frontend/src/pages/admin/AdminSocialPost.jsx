@@ -31,6 +31,7 @@ import {
   ResultsList, ResultsListLeaders, ResultsScoreboard, ResultsRecord, ResultsHeadline, ResultsBoard, ResultsSplit,
   DEFAULT_FIXTURES, DEFAULT_RESULTS,
 } from '../../social/round-templates'
+import { SplitPoster, autoPanelColor } from '../../social/split-template'
 import { TeamOfWeekGrid, TeamOfWeekBoard, TOTW_MIN, TOTW_MAX, TOTW_DEFAULT } from '../../social/totw-templates'
 import { exportNodeToPng } from '../../social/exportImage'
 import { SocialBackground, SocialBackgroundDefs, SOCIAL_BACKGROUNDS, GRADIENT_ANGLES, DEFAULT_COLORS as BG_DEFAULT_COLORS } from '../../social/SocialBackgrounds'
@@ -66,6 +67,7 @@ const ALL_TEMPLATES = [
   { id: 'T8', name: 'Mosaic',          component: T8_Mosaic,          desc: 'Asymmetric photo mosaic',         maxPlayers: 11 },
   { id: 'T9', name: 'Flyer',           component: T9_Flyer,           desc: 'Festival poster style',           maxPlayers: 11 },
   { id: 'T10', name: 'Team Sheet',     component: T10_TeamSheet,      desc: 'Full-bleed photo + torn strip',   maxPlayers: 13 },
+  { id: 'T11', name: 'Split Poster',    component: SplitPoster,        desc: 'Pale panel + dark XI, debut tags', maxPlayers: 11 },
   { id: 'C1', name: 'Announcement',    component: C1_CaptainAnnounce, desc: 'Captain / debut / award',         maxPlayers: 1 },
   { id: 'C2', name: 'Toss',            component: C2_TossWon,         desc: 'Toss result post',                maxPlayers: 0 },
   { id: 'C3', name: 'Player Spotlight',component: C3_ManOfMatch,      desc: 'Man of match / player stats',     maxPlayers: 1 },
@@ -107,7 +109,7 @@ const ALL_TEMPLATES = [
 // The football build drops the layouts that only mean anything with cricket
 // data: the batting order, the results wrap's batting/bowling leaders, and
 // every layout of the three hidden post types (toss, scorecard, final score).
-const AFL_HIDDEN_TEMPLATES = new Set(['T4', 'RR7', 'C2', 'C4', 'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6', 'SC1', 'SC2', 'SC3', 'TW1', 'TW2'])
+const AFL_HIDDEN_TEMPLATES = new Set(['T4', 'T11', 'RR7', 'C2', 'C4', 'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6', 'SC1', 'SC2', 'SC3', 'TW1', 'TW2'])
 const TEMPLATES = IS_AFL ? ALL_TEMPLATES.filter(t => !AFL_HIDDEN_TEMPLATES.has(t.id)) : ALL_TEMPLATES
 
 // The lineup templates that crop the hero photo into a fixed box, and the shape
@@ -118,11 +120,20 @@ const HERO_CROP_ASPECT = { T1: 480 / 845, T3: 380 / 1080, T10: 720 / 1080 }
 const HERO_FOCUS_TEMPLATES = Object.keys(HERO_CROP_ASPECT)
 // The layouts drawn around a hero photo. Derived from the same id list the Hero
 // Image panel is gated on, so the two can't drift apart.
-const HERO_SLOT_TEMPLATES = ['T1', 'T3', 'T6', 'T7', 'T10', 'C1', 'C3']
+const HERO_SLOT_TEMPLATES = ['T1', 'T3', 'T6', 'T7', 'T10', 'T11', 'C1', 'C3']
+// The lineups that can mark which listed player is the one in the photo, and
+// the ones whose Hero Player picker names that player. T7 and the announcement
+// layouts have a single player, so there is no list to mark.
+const HERO_MARK_TEMPLATES = ['T1', 'T3', 'T10', 'T11']
+const HERO_PLAYER_TEMPLATES = ['T1', 'T3', 'T6', 'T10', 'T11']
+// The lineups that draw a DEBUT tag beside a flagged player. The flag is kept
+// on the player either way, so switching layout never loses it.
+const DEBUT_TEMPLATES = ['T1', 'T3', 'T10', 'T11']
+const DEBUT_TEMPLATE_NAMES = { T1: 'Hero List', T3: 'Side Numbered', T10: 'Team Sheet', T11: 'Split Poster' }
 
 const TAB_MAP = {
   T1: 'lineup', T2: 'lineup', T3: 'lineup', T4: 'lineup', T5: 'lineup',
-  T6: 'lineup', T7: 'lineup', T8: 'lineup', T9: 'lineup', T10: 'lineup',
+  T6: 'lineup', T7: 'lineup', T8: 'lineup', T9: 'lineup', T10: 'lineup', T11: 'lineup',
   FX1: 'fixtures', FX2: 'fixtures', FX3: 'fixtures', FX4: 'fixtures', FX5: 'fixtures', FX6: 'fixtures',
   C1: 'announcement', C2: 'toss', C3: 'motm',
   C4: 'result', RS1: 'result', RS2: 'result', RS3: 'result', RS4: 'result', RS5: 'result', RS6: 'result',
@@ -295,7 +306,7 @@ const ROLE_LONG = IS_AFL
   ? { FB: 'Full Back', HB: 'Half Back', C: 'Centre', W: 'Wing', MID: 'Midfield', RUCK: 'Ruck', HF: 'Half Forward', FF: 'Full Forward', UTIL: 'Utility' }
   : { BAT: 'Batter', BOWL: 'Bowler', AR: 'All-Rounder', WK: 'Wicket-Keeper' }
 
-function playerToTemplatePlayer(p, { captain = false, viceCaptain = false, keeper = false, role = IS_AFL ? '' : 'BAT', totw = null } = {}, nameFormat = 'last_first', swap = false) {
+function playerToTemplatePlayer(p, { captain = false, viceCaptain = false, keeper = false, debut = false, role = IS_AFL ? '' : 'BAT', totw = null } = {}, nameFormat = 'last_first', swap = false) {
   const raw = splitName(p.display_name || p.name, nameFormat)
   const first = swap ? raw.last : raw.first
   const last  = swap ? raw.first.toUpperCase() : raw.last
@@ -303,6 +314,8 @@ function playerToTemplatePlayer(p, { captain = false, viceCaptain = false, keepe
     first, last, role,
     roleLong: ROLE_LONG[role] || role,
     captain, viceCaptain, keeper,
+    // First game for the club. Tagged on the lineup layouts that draw it.
+    debut: !!debut,
     headshot: p.photo_url ? `${BASE_URL}/images/players/${p.id}/photo` : null,
     // The action shot, when the club has one. Only the big hero slot reaches
     // for it — grids and card fronts stay on the headshot, which is the photo
@@ -478,8 +491,8 @@ function SelectedPlayerRow({ sp, idx, onUpdate, onRemove, onMoveUp, onMoveDown, 
       >
         {ROLE_OPTIONS.map(r => <option key={r} value={r}>{r || 'Position'}</option>)}
       </select>
-      {(IS_AFL ? ['captain', 'viceCaptain'] : ['captain', 'viceCaptain', 'keeper']).map(field => {
-        const labels = { captain: 'C', viceCaptain: 'VC', keeper: 'WK' }
+      {(IS_AFL ? ['captain', 'viceCaptain', 'debut'] : ['captain', 'viceCaptain', 'keeper', 'debut']).map(field => {
+        const labels = { captain: 'C', viceCaptain: 'VC', keeper: 'WK', debut: 'DEBUT' }
         const active = sp[field]
         return (
           <button
@@ -1184,6 +1197,38 @@ export default function AdminSocialPost() {
   // Which selected player's photo fills the hero slot on lineup templates
   // (T1 / T3 / T6). '' = auto (captain, else first in the order).
   const [heroPlayerId, setHeroPlayerId] = useState('')
+  // Shade the row of the player who is in the photo, so the post says whose
+  // picture it is. Off until asked for: a post made before this existed, or one
+  // whose photo is not of anyone on the list, must not suddenly mark a row.
+  const [markHero, setMarkHero] = useState(false)
+  // The split poster's pale panel. '' = derive it from the club accent.
+  const [splitPanel, setSplitPanel] = useState('')
+
+  // Tag the players who have nothing on record before the match date as
+  // debutants. Runs on its own after a lineup lands (the lineup is already on
+  // screen, the tags arrive a moment later) and on request from the Players
+  // card. It only sets tags for players the club's records could answer for: a
+  // fill-in with no record keeps whatever it had, and an admin's own switch
+  // stays until the next time they ask for a check.
+  const [debutCheck, setDebutCheck] = useState(null)
+  const checkDebuts = useCallback(async (list, isoDate) => {
+    if (IS_AFL) return
+    const ids = (list || []).map((sp) => sp?.player?.id).filter(Boolean)
+    if (!ids.length) { setDebutCheck({ status: 'none' }); return }
+    setDebutCheck({ status: 'loading' })
+    try {
+      const d = await api.getSocialDebuts(ids, isoDate)
+      const debuts = new Set((d.debuts || []).map(String))
+      const known = new Set((d.known || []).map(String))
+      setSelectedPlayers((prev) => prev.map((sp) => {
+        const id = String(sp.player.id)
+        return known.has(id) ? { ...sp, debut: debuts.has(id) } : sp
+      }))
+      setDebutCheck({ status: 'ok', debuts: debuts.size, unknown: ids.filter((id) => !known.has(String(id))).length })
+    } catch (e) {
+      setDebutCheck({ status: 'err', message: e?.message || 'Could not check debuts' })
+    }
+  }, [])
 
   const [scorecardMatch, setScorecardMatch] = useState(DEFAULT_SCORECARD)
   const [scUrlInput, setScUrlInput] = useState('')
@@ -2632,7 +2677,7 @@ export default function AdminSocialPost() {
       summary: motm.summary,
     }
   }
-  if (['T1', 'T3', 'T6', 'T7', 'T10'].includes(templateId) && heroImage.blobUrl) {
+  if (['T1', 'T3', 'T6', 'T7', 'T10', 'T11'].includes(templateId) && heroImage.blobUrl) {
     extraProps.heroImage = heroImage.blobUrl
   }
   // Only the templates that crop a photo into a box can act on a focal point;
@@ -2640,8 +2685,16 @@ export default function AdminSocialPost() {
   if (HERO_FOCUS_TEMPLATES.includes(templateId)) {
     extraProps.heroFocus = heroFocus
   }
-  if (['T1', 'T3', 'T6', 'T10'].includes(templateId) && heroPlayerId) {
+  if (HERO_PLAYER_TEMPLATES.includes(templateId) && heroPlayerId) {
     extraProps.featuredId = heroPlayerId
+  }
+  if (HERO_MARK_TEMPLATES.includes(templateId)) {
+    extraProps.markHero = markHero
+  }
+  if (templateId === 'T11') {
+    extraProps.panelColor = splitPanel || undefined
+    extraProps.background = bgActive ? bgStyle : null
+    extraProps.sponsors = scorecardMatch.meta.sponsors
   }
   if (templateId === 'C4') {
     extraProps.result = {
@@ -2808,6 +2861,8 @@ export default function AdminSocialPost() {
     setHeroFocus(DEFAULT_HERO_FOCUS)
     setHeroMode('player')
     setHeroPlayerId('')
+    setMarkHero(false)
+    setSplitPanel('')
     setMilestone({ value: '', unit: 'GAMES', reason: '', detail: '', playerIdx: 0 })
     setAnnouncement({ kind: 'APPOINTMENT', headline: 'NAMED CAPTAIN', subheadline: 'FOR THE 2025-26 SEASON', playerIdx: 0 })
     setToss({ winner: 'TEAM', decision: 'BAT' })
@@ -3098,9 +3153,10 @@ export default function AdminSocialPost() {
         return { player, role: (pp?.skill_positions?.[0]) || pp?.player_role || player.player_role || 'BAT', captain: !!l.is_captain, viceCaptain: false, keeper: !!l.is_wicket_keeper }
       }).filter(Boolean)
       setSelectedPlayers(picked)
+      checkDebuts(picked, d.fixture?.played_on || null)
       const fx = d.fixture
       if (fx) {
-        setMatch((m) => ({ ...m, round: fx.round || m.round, venue: fx.venue || m.venue, date: fx.played_on || m.date, time: fx.start_time || m.time }))
+        setMatch((m) => ({ ...m, competition: fx.grade || m.competition, round: fx.round || m.round, venue: fx.venue || m.venue, date: fx.played_on || m.date, time: fx.start_time || m.time }))
         if (fx.opponent_name) setOpponent((o) => ({ ...o, name: fx.opponent_name }))
         const tn = teamHeadline(
           (fx.home_away === 'AWAY' ? fx.away_team : fx.home_team) || '',
@@ -3134,7 +3190,8 @@ export default function AdminSocialPost() {
       }
     })
     setSelectedPlayers(picked)
-    setMatch((m) => ({ ...m, round: fx.round || m.round, venue: fx.venue || m.venue, date: fx.date || m.date, time: fx.time || m.time }))
+    checkDebuts(picked, fx.date || null)
+    setMatch((m) => ({ ...m, competition: fx.grade || m.competition, round: fx.round || m.round, venue: fx.venue || m.venue, date: fx.date || m.date, time: fx.time || m.time }))
     if (oppTeam?.club || oppTeam?.name) setOpponent((o) => ({ ...o, name: oppTeam.club || oppTeam.name || o.name, logo: oppTeam.logo_url || o.logo }))
     const tn = teamHeadline(ourTeam.name || ourTeam.club || '', settings?.name, fx.grade || match.competition)
     if (tn) setHeadline(tn)
@@ -4172,6 +4229,30 @@ export default function AdminSocialPost() {
                     ))}
                   </div>
                 )}
+                {selectedPlayers.some(sp => sp.debut) && !DEBUT_TEMPLATES.includes(templateId) && (
+                  <p className="mb-3 text-[11px] text-pb-faint leading-relaxed" data-testid="debut-unsupported">
+                    {tmpl.name} does not draw a debut tag. Layouts that do: <span className="text-pb-dim">{DEBUT_TEMPLATES.map(id => DEBUT_TEMPLATE_NAMES[id]).join(', ')}</span>.
+                  </p>
+                )}
+                {!IS_AFL && selectedPlayers.length > 0 && (
+                  <div className="mb-3 flex flex-col gap-1" data-testid="debut-check">
+                    <button
+                      onClick={() => checkDebuts(selectedPlayers, null)}
+                      disabled={debutCheck?.status === 'loading'}
+                      className="self-start font-mono text-[10px] tracking-wide2 px-2 py-1 rounded border pb-hairline text-pb-faint hover:text-pb-text disabled:opacity-50"
+                    >{debutCheck?.status === 'loading' ? 'CHECKING…' : 'FIND DEBUTS'}</button>
+                    <p className="text-[11px] text-pb-faintest leading-relaxed">
+                      {debutCheck?.status === 'ok'
+                        ? (debutCheck.debuts
+                            ? `${debutCheck.debuts} marked as a debut: no earlier game on the club's record.`
+                            : 'No debuts: every player has an earlier game on the club\'s record.')
+                          + (debutCheck.unknown ? ` ${debutCheck.unknown} not in the club's player list, so left as they were.` : '')
+                        : debutCheck?.status === 'err'
+                          ? debutCheck.message
+                          : 'Marks a player DEBUT when the club holds no earlier game for them. Switch any tag by hand with the DEBUT button on their row.'}
+                    </p>
+                  </div>
+                )}
                 {selectedPlayers.length < tmpl.maxPlayers && (
                   <>
                     <input value={playerSearch} onChange={e => setPlayerSearch(e.target.value)} placeholder="Search players..."
@@ -4215,7 +4296,7 @@ export default function AdminSocialPost() {
               <section className="pb-card p-4">
                 <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Hero Image</h2>
                 <p className="text-[11px] text-pb-faint mb-3">Transparent PNG recommended for best results. Any image with a solid background can be cut out with Edit.</p>
-                {['T1', 'T3', 'T6', 'T10'].includes(templateId) && selectedPlayers.length > 0 && (
+                {HERO_PLAYER_TEMPLATES.includes(templateId) && selectedPlayers.length > 0 && (
                   <div className="mb-3">
                     <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Hero Player</label>
                     <select
@@ -4233,6 +4314,26 @@ export default function AdminSocialPost() {
                     <p className="text-[11px] text-pb-faintest mt-1">
                       {heroImage.blobUrl ? 'Uploaded Hero Image below overrides this.' : 'Pick whose photo fills the hero slot. Upload below to override.'}
                     </p>
+                    {HERO_MARK_TEMPLATES.includes(templateId) && (
+                      <label className="flex items-start gap-2 mt-2 cursor-pointer" data-testid="mark-hero">
+                        <input type="checkbox" checked={markHero} onChange={e => setMarkHero(e.target.checked)} className="mt-0.5" />
+                        <span className="text-[11px] text-pb-dim leading-relaxed">
+                          Mark the player in the photo
+                          <span className="block text-pb-faintest">Shades their row in the list, so the post shows whose picture it is.</span>
+                        </span>
+                      </label>
+                    )}
+                  </div>
+                )}
+                {templateId === 'T11' && (
+                  <div className="mb-3" data-testid="split-panel">
+                    <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Panel colour</label>
+                    <div className="flex items-center gap-3">
+                      <input type="color" value={splitPanel || autoPanelColor(activePalette.accent)} onChange={e => setSplitPanel(e.target.value)}
+                        className="w-8 h-8 rounded cursor-pointer border-0 bg-transparent p-0" />
+                      <span className="text-[11px] text-pb-faint flex-1">{splitPanel ? 'Your colour' : 'Auto: a light tint of the palette accent'}</span>
+                      {splitPanel && <button onClick={() => setSplitPanel('')} className="text-xs font-mono text-pb-faint hover:text-pb-text">Auto</button>}
+                    </div>
                   </div>
                 )}
                 {['C1', 'C3'].includes(templateId) && (

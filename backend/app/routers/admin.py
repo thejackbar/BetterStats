@@ -2141,6 +2141,32 @@ async def get_social_totw(q: str = "", db: AsyncSession = Depends(get_db), club=
         raise HTTPException(500, f"Team of the week error: {exc}") from exc
 
 
+@router.get("/social/debuts", dependencies=[Depends(require_module("socials"))])
+async def get_social_debuts(
+    player_ids: str = "", before: str = "",
+    db: AsyncSession = Depends(get_db), club=Depends(get_current_club),
+):
+    """Which of a lineup's players have nothing on record before the match date,
+    so the BetterSocials lineup posts can tag them as debutants.
+
+    ``player_ids`` is a comma separated list of this club's player ids and
+    ``before`` an optional ISO date (the match day; today when absent). The
+    answer is a suggestion: the editor lets the admin flip any tag by hand."""
+    from datetime import date as _date
+    from app.services.social_debuts import parse_ids, social_debuts
+    on = None
+    if before.strip():
+        try:
+            on = _date.fromisoformat(before.strip()[:10])
+        except ValueError:
+            raise HTTPException(400, "before must be an ISO date (YYYY-MM-DD)")
+    try:
+        return await social_debuts(db, club, parse_ids(player_ids), on)
+    except Exception as exc:
+        log.exception("social debuts failed for %s", getattr(club, "id", "?"))
+        raise HTTPException(500, f"Debut check error: {exc}") from exc
+
+
 async def _get_social_scorecard_inner(match_id: str, db: AsyncSession, club=None):
     raw = await get_match_scorecard(match_id)
     if raw is None:
