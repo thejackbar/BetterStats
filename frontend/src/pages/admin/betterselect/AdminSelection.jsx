@@ -340,7 +340,10 @@ export default function AdminSelection() {
     // The club's own association rules. Only offered when the club has one
     // bearing on this fixture — SelectionFilters drops the group otherwise.
     if (values.rules) list = list.filter((p) => matchesRuleFilter(p, values.rules))
-    if (yearsF) list = list.filter((p) => playedWithinYears(p.last_played, yearsF))
+    // A name typed into search is someone the selector is looking for, so the
+    // "Played ≤ N yrs" window does not hide them. It only trims the browse list.
+    // (Players marked inactive stay out either way: see `available`.)
+    if (yearsF && !search.trim()) list = list.filter((p) => playedWithinYears(p.last_played, yearsF))
     if (values.status === 'unselected') list = list.filter((p) => !inAnotherXI(p))
     else if (values.status === 'clash') list = list.filter((p) => inAnotherXI(p))
     const sorters = {

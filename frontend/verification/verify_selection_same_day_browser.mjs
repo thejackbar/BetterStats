@@ -30,6 +30,11 @@ const ok = (label, cond, detail = '') => {
   else { FAIL++; FAILURES.push(label); console.log(`  FAIL ${label}  ${detail}`) }
 }
 
+// Daniel last played four years ago: outside the board's default "Played <= 3 yrs".
+const fourYearsAgo = new Date(); fourYearsAgo.setFullYear(fourYearsAgo.getFullYear() - 4)
+const cara = FIX.payload.pool.find((p) => p.display_name === 'Cara Free')
+FIX.payload.pool.push({ ...cara, id: 'd4e5f6a7-0000-4000-8000-000000000001', display_name: 'Daniel Newman', last_played: fourYearsAgo.toISOString().slice(0, 10) })
+
 const ME = {
   id: 'u1', username: 'admin', role: 'club_admin', club_slug: 'applecross', organisation_id: 'o1',
   capabilities: ['*'], entitlements: { modules: ['select'], status: 'active' },
@@ -78,6 +83,17 @@ const run = async () => {
   check('Alex card is not greyed out', !(await card('Alex Backtoback').getAttribute('class')).includes('opacity-50'))
   check('Bob card IS greyed out', (await card('Bob Blocked').getAttribute('class')).includes('opacity-50'))
   await page.screenshot({ path: join(SHOTS, 'selection_same_day_1440.png') })
+
+  console.log('\n# search reaches past the recency window')
+  const bodyText = async () => (await page.locator('body').innerText())
+  ok('Daniel (last played 4 years ago) is not in the default browse list', !(await bodyText()).includes('Daniel Newman'))
+  const search = page.getByPlaceholder(/search players/i)
+  await search.fill('Newman')
+  await page.waitForTimeout(300)
+  ok('searching "Newman" finds Daniel', (await bodyText()).includes('Daniel Newman'))
+  await search.fill('')
+  await page.waitForTimeout(300)
+  ok('clearing the search hides him again', !(await bodyText()).includes('Daniel Newman'))
 
   console.log('\n# picking')
   await card('Bob Blocked').click()

@@ -89,6 +89,8 @@
 57. A player may be in two XIs on one date only when `services/selection_clash.py` says the games can be played alongside each other: no multi-day game; junior against senior is always playable; otherwise both start times known and the estimated games (T20 210 min, one day 480, unknown 480) do not overlap. Anything it cannot tell stays a clash. A playable pair is `also_in` on the pool row (flag only) and is never in `clash`/`clash_blocks`; the save re-judges it and skips both the 409 and the call-up. Auto-fill and BetterIQ never choose a player with `also_in`.
 58. Never put `toast` from `useToast()` in a hook dependency array on this screen: the provider returns a new object each render and a toast re-renders it, so the effect reruns. `AdminSelection.load` reads it through `toastRef`, because a reload wipes the unsaved XI.
 
+59. The selection board's "Played ≤ N yrs" window only trims the browse list: it is skipped while the pool search has text. Inactive players stay out regardless. The board and the nets check-in list both require `players.is_player`, so a player missing from both has "Is player" switched off, not a recency problem.
+
 **Layout and process**
 54. `min-w-0` goes on the element that may shrink (`<h1>` `truncate min-w-0`, toggle `shrink-0`), not the group. Selection header uses `flex-wrap xl:flex-nowrap` and moves user name + Logout from `sm` to `xl`; only Selection passes `headerLeft`. `flex-wrap` cannot save a `shrink-0` child. A native date input clips its year if it shares a row (age on the caption line).
 55. Re-check `origin/main` at merge before numbering a migration (duplicate revision ids break Alembic).
