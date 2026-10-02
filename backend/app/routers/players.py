@@ -79,6 +79,29 @@ async def _hidden_only_scope(db: AsyncSession, player: Player):
     )
 
 
+# The routes under /players/{id} a club admin still needs for someone who asked
+# to be removed: edit the record, its aliases, the sync request, claim, rename.
+# Every one is capability-gated itself. Everything else under /players/{id} is a
+# public-profile data route and 404s for a person who asked to be removed.
+_PRIVACY_MANAGEMENT_ROUTES = frozenset({
+    ("GET", "/{player_id}/profile"),
+    ("PATCH", "/{player_id}/profile"),
+    ("GET", "/{player_id}/aliases"),
+    ("POST", "/{player_id}/aliases"),
+    ("DELETE", "/{player_id}/aliases/{alias_id}"),
+    ("POST", "/{player_id}/request-sync"),
+    ("POST", "/{player_id}/claim"),
+    ("PATCH", "/{player_id}"),
+})
+
+
+def _route_template(request: Request) -> str:
+    """The matched route's path template, without the router prefix."""
+    route = request.scope.get("route")
+    path = getattr(route, "path", "") or ""
+    return path[len("/players"):] if path.startswith("/players") else path
+
+
 async def _gate_junior_hidden_player(
     request: Request,
     db: AsyncSession = Depends(get_db),
@@ -104,11 +127,20 @@ async def _gate_junior_hidden_player(
     except (ValueError, TypeError):
         return
     row = (await db.execute(
-        select(Player.organisation_id, Player.is_public).where(Player.id == pid)
+        select(Player.organisation_id, Player.is_public, Player.privacy_hidden_at)
+        .where(Player.id == pid)
     )).first()
     if not row or not row[0]:
         return
     org_id = row[0]
+    # A person who asked to be removed (migration 316) has NO public profile for
+    # anyone: not the public, not a signed-in club admin, not Better staff. The
+    # admin escape below exists so a club can see its own hidden players, but
+    # this person's public page is meant to be gone, and a signed-in admin who
+    # can still open it cannot tell that it is. Only the management routes an
+    # admin screen needs stay reachable (each is capability-gated on its own).
+    if row[2] is not None and (request.method, _route_template(request)) not in _PRIVACY_MANAGEMENT_ROUTES:
+        raise HTTPException(status_code=404, detail="Player not found")
     # A player the club (or the person) has hidden reads as absent on EVERY
     # route under /players/{id}, not just the profile: the page only shows
     # what these endpoints answer, so a hidden player's stats must not be one

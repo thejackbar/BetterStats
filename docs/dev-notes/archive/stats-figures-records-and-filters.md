@@ -2147,3 +2147,12 @@ Follow-up to the Seen 202 against 197 report above. The five extra games were al
 - **An earlier draft also dropped a game whose recorded result "did not match" the play** (a draw after 4.4 overs). That was wrong and was removed: CA counts such a game.
 - **Not covered:** the two `superseded_ddl.py` views (the re-sourced-season rollup and its `unplayed` subquery) keep the status-only rule. They are performance-tuned and the cost of the extra per-game checks could not be measured off production. They only matter for seasons an import re-sourced.
 - **Verified** against a real Postgres: `backend/verification/verify_inferred_unplayed.py` (19 checks through the shipped routes: header, coverage, Formats, Competitions, grid, Milestones, Records Most Matches, plus per-scenario). Control run on the previous code reads 11 matches where 7 are right and fails on exactly the empty-scorecard games. Guards: a fully scored game with a named-only player, one innings recorded, a live game, an older scorecard with rows, a player who bowled in an otherwise empty game, a hand-typed game. 48 older verification harnesses gained the `games.innings_totals` ALTER the lifespan runs.
+
+## v9.102.7: No admin escape for a person who asked to be removed (Oct 2026)
+
+The owner opened the removed player's URL and still saw the profile. It was a cache in front of the backend (the frontend nginx caches no API route), but the check exposed that a signed-in club admin or Better staff could open the page by design, so "is it really gone" could not be answered from an admin session. `_gate_junior_hidden_player` now 404s every `/players/{id}/...` route for a row with `privacy_hidden_at`, for every viewer, except `_PRIVACY_MANAGEMENT_ROUTES` (matched on `(method, route template)` from `request.scope["route"]`). The admin profile card hides "View public profile" for them. Public-data screens that read these routes (the share card, the player comparison, the social post builder) therefore also stop working for such a player, which is intended: no new use of their data.
+
+Noticed, not fixed: `GET /players/{player_id}/profile` is behind `require_cap(MANAGE_PLAYERS)` but loads the player by id with no check that it belongs to the caller's club, so an admin of one club can read another club's player's contact fields.
+
+**Verified against a real Postgres** (`verify_player_privacy.py`, 97 checks) **with a control run**: reverting the gate fails 7 (an admin still opens the removed player's profile and stats).
+

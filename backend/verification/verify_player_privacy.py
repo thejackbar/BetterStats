@@ -534,8 +534,44 @@ async def main() -> None:
         print("a signed-in club admin")
         async with Session() as db:
             who["user"] = await db.get(User, ADMIN)
-        await public_view(c, TRENT, "club admin sees Trent", True, " (club sees its own record whole)")
+        # The club's own switch keeps its admin escape: a club sees its hidden players.
+        await public_view(c, CLUBHID, "club admin sees a club-hidden player", True, " (the club's own switch keeps its escape)")
+        if HAVE:
+            # A person who asked to be removed has NO public profile for anyone,
+            # a signed-in club admin included.
+            await public_view(c, TRENT, "club admin, person who asked to be removed", False, " (no public profile for anyone)")
+            await public_view(c, SIB, "club admin, his row at another club", False, " (no public profile for anyone)")
         who["user"] = None
+
+        if HAVE:
+            # The management routes an admin screen needs stay reachable. Driven
+            # through the shipped gate with a matched-route scope, because the
+            # routes themselves sit behind capability checks.
+            from types import SimpleNamespace as NS
+            from starlette.requests import Request
+
+            def gate_request(method, template):
+                return Request({"type": "http", "method": method, "headers": [], "query_string": b"",
+                                "path_params": {"player_id": str(TRENT)},
+                                "route": NS(path="/players" + template)})
+
+            async def gate(method, template):
+                async with Session() as db:
+                    admin = await db.get(User, ADMIN)
+                    try:
+                        await players_router._gate_junior_hidden_player(gate_request(method, template), db, admin)
+                        return 200
+                    except HTTPException as e:
+                        return e.status_code
+
+            for method, tmpl in (("GET", "/{player_id}/profile"), ("PATCH", "/{player_id}/profile"),
+                                 ("GET", "/{player_id}/aliases"), ("POST", "/{player_id}/request-sync")):
+                got = await gate(method, tmpl)
+                check(f"an admin can still reach the management route {method} {tmpl}", got == 200, str(got))
+            for method, tmpl in (("GET", "/{player_id}"), ("GET", "/{player_id}/stats"),
+                                 ("GET", "/{player_id}/share"), ("GET", "/{player_id}/teammates")):
+                got = await gate(method, tmpl)
+                check(f"...and cannot reach the public-data route {method} {tmpl}", got == 404, str(got))
 
         # ----------------------------------------------------------- RESTORE
         if HAVE:

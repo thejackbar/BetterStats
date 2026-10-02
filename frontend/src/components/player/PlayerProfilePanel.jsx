@@ -647,10 +647,13 @@ export function Profile({ profile, draft, setDraft, dirty, saved, onSave, canEdi
                 <span className="font-mono text-[9.5px] text-pb-accent bg-pb-accent/10 px-1.5 py-px rounded">OPENER</span>
               )}
             </div>
-            <Link to={`/players/${profile.id}`} target="_blank" rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 mt-2 font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-accent transition">
-              View public profile <Icon name="arrow" size={12} />
-            </Link>
+            {/* Someone removed at their own request has no public profile at all. */}
+            {!draft.privacy_hidden_at && (
+              <Link to={`/players/${profile.id}`} target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 mt-2 font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-accent transition">
+                View public profile <Icon name="arrow" size={12} />
+              </Link>
+            )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {canEdit && (
