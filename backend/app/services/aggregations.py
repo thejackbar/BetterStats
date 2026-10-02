@@ -316,9 +316,50 @@ def _matches_played_cte(season_clause: str, scope_clause: str,
         )"""
 
 
+# Stand-ins for the import-residual CTEs when a picked-grade board has none to
+# blend (finals-only and captain-only views, or a grade id with no name to match
+# an import by). The SELECT below them reads ``it.*`` (and ``ib.*``) either way,
+# so leaving the join out failed the whole query with "missing FROM-clause entry
+# for table it". Same columns, no rows: every figure is then the scorecards' own.
+_NO_IMPORT_BAT_CTE = """
+                , import_totals AS (
+                    SELECT NULL::uuid AS player_id, 0::bigint AS games, 0::bigint AS innings,
+                        0::bigint AS total_runs, NULL::int AS high_score, 0::bigint AS fifties,
+                        0::bigint AS hundreds, 0::bigint AS ducks, 0::bigint AS total_fours,
+                        0::bigint AS total_sixes, 0::bigint AS total_balls, 0::bigint AS not_outs
+                    WHERE FALSE
+                )
+                """
+_NO_IMPORT_BAT_JOIN = "LEFT JOIN import_totals it ON it.player_id = p.id"
+_NO_IMPORT_BOWL_CTE = """
+        , import_totals AS (
+            SELECT NULL::uuid AS player_id, 0::bigint AS games, 0::bigint AS total_wickets,
+                0::bigint AS bowling_innings, 0::bigint AS total_runs_conceded,
+                0::numeric AS total_overs, 0::bigint AS total_maidens, 0::bigint AS five_fors
+            WHERE FALSE
+        ),
+        import_best AS (
+            SELECT NULL::uuid AS player_id, NULL::int AS best_bowling_wickets,
+                NULL::text AS best_bowling_figures
+            WHERE FALSE
+        )
+        """
+_NO_IMPORT_BOWL_JOIN = ("LEFT JOIN import_totals it ON it.player_id = p.id "
+                        "LEFT JOIN import_best ib ON ib.player_id = p.id")
+_NO_IMPORT_FIELD_CTE = """
+                , import_totals AS (
+                    SELECT NULL::uuid AS player_id, 0::bigint AS games, 0::bigint AS total_catches,
+                        0::bigint AS total_catches_wk, 0::bigint AS total_run_outs,
+                        0::bigint AS total_stumpings
+                    WHERE FALSE
+                )
+                """
+_NO_IMPORT_FIELD_JOIN = "LEFT JOIN import_totals it ON it.player_id = p.id"
+
+
 def _grade_matches_played(
     *, by_name: bool, season_clause: str, finals_clause: str, scope_clause: str,
-    captain_only: Optional[bool], own_games: str,
+    captain_only: Optional[bool], finals_only: Optional[bool], own_games: str,
 ) -> tuple[str, str, str]:
     """``(cte, join, games)`` for a leaderboard answering one picked grade.
 
@@ -330,12 +371,14 @@ def _grade_matches_played(
     scoped all-grades branch already has.
 
     ``own_games`` is the branch's own count, kept as a floor so this can only
-    raise a figure, never lower one. A finals-only board counts finals played.
-    A captain-only board is left on its own count: "matches as captain" is what
-    that view means. ``cte`` carries a leading comma and ``join`` is empty
-    there, so the caller pastes both unconditionally.
+    raise a figure, never lower one. Finals-only and captain-only boards are
+    left on their own count, exactly as the all-grades finals and captain
+    boards are: "finals batted in" and "matches as captain" are what those
+    views mean, and picking a grade must not change that. ``cte`` carries a
+    leading comma and ``join`` is empty there, so the caller pastes both
+    unconditionally.
     """
-    if captain_only:
+    if captain_only or finals_only:
         return "", "", own_games
     if by_name:
         grade_join = " JOIN grades gr ON gr.id = g.grade_id"
@@ -1104,8 +1147,8 @@ async def get_fielding_leaderboard(
 
     if grade_id:
         params["grade_id"] = grade_id
-        import_cte = ""
-        import_join = ""
+        import_cte = _NO_IMPORT_FIELD_CTE
+        import_join = _NO_IMPORT_FIELD_JOIN
         qualify_clause = "fs.player_id IS NOT NULL"
         if include_import:
             import_grade_name = await _resolve_grade_name(session, org_id, grade_id)
@@ -1129,7 +1172,7 @@ async def get_fielding_leaderboard(
                 import_join = "LEFT JOIN import_totals it ON it.player_id = p.id"
         mp_cte, mp_join, games_expr = _grade_matches_played(
             by_name=False, season_clause="", finals_clause=finals_clause,
-            scope_clause=scope_clause, captain_only=captain_only,
+            scope_clause=scope_clause, captain_only=captain_only, finals_only=finals_only,
             own_games="COUNT(DISTINCT fs.game_id)")
         base = f"""
             WITH fielding_qualifying AS (
@@ -1166,8 +1209,8 @@ async def get_fielding_leaderboard(
     if grade_name:
         params["grade_name"] = grade_name
         season_clause = " AND gr.season_id = ANY(:season_ids)" if season_ids else ""
-        import_cte = ""
-        import_join = ""
+        import_cte = _NO_IMPORT_FIELD_CTE
+        import_join = _NO_IMPORT_FIELD_JOIN
         qualify_clause = "fs.player_id IS NOT NULL"
         if include_import:
             qualify_clause = "fs.player_id IS NOT NULL OR it.player_id IS NOT NULL"
@@ -1188,7 +1231,7 @@ async def get_fielding_leaderboard(
             import_join = "LEFT JOIN import_totals it ON it.player_id = p.id"
         mp_cte, mp_join, games_expr = _grade_matches_played(
             by_name=True, season_clause=season_clause, finals_clause=finals_clause,
-            scope_clause=scope_clause, captain_only=captain_only,
+            scope_clause=scope_clause, captain_only=captain_only, finals_only=finals_only,
             own_games="COUNT(DISTINCT fs.game_id)")
         base = f"""
             WITH fielding_qualifying AS (
@@ -3296,8 +3339,8 @@ async def get_batting_leaderboard_extended(
 
     if grade_id:
         params["grade_id"] = grade_id
-        import_cte = ""
-        import_join = ""
+        import_cte = _NO_IMPORT_BAT_CTE
+        import_join = _NO_IMPORT_BAT_JOIN
         qualify_clause = "q.player_id IS NOT NULL"
         if include_import:
             import_grade_name = await _resolve_grade_name(session, org_id, grade_id)
@@ -3327,7 +3370,7 @@ async def get_batting_leaderboard_extended(
                 import_join = "LEFT JOIN import_totals it ON it.player_id = p.id"
         mp_cte, mp_join, games_expr = _grade_matches_played(
             by_name=False, season_clause="", finals_clause=finals_clause,
-            scope_clause=scope_clause, captain_only=captain_only,
+            scope_clause=scope_clause, captain_only=captain_only, finals_only=finals_only,
             own_games="COUNT(DISTINCT q.game_id)")
         base = f"""
             WITH qualifying AS (
@@ -3380,8 +3423,8 @@ async def get_batting_leaderboard_extended(
     if grade_name:
         params["grade_name"] = grade_name
         season_clause = " AND gr.season_id = ANY(:season_ids)" if season_ids else ""
-        import_cte = ""
-        import_join = ""
+        import_cte = _NO_IMPORT_BAT_CTE
+        import_join = _NO_IMPORT_BAT_JOIN
         qualify_clause = "q.player_id IS NOT NULL"
         if include_import:
             qualify_clause = "q.player_id IS NOT NULL OR it.player_id IS NOT NULL"
@@ -3408,7 +3451,7 @@ async def get_batting_leaderboard_extended(
             import_join = "LEFT JOIN import_totals it ON it.player_id = p.id"
         mp_cte, mp_join, games_expr = _grade_matches_played(
             by_name=True, season_clause=season_clause, finals_clause=finals_clause,
-            scope_clause=scope_clause, captain_only=captain_only,
+            scope_clause=scope_clause, captain_only=captain_only, finals_only=finals_only,
             own_games="COUNT(DISTINCT q.game_id)")
         base = f"""
             WITH qualifying AS (
@@ -3786,8 +3829,8 @@ async def get_bowling_leaderboard_extended(
 
     if grade_id:
         params["grade_id"] = grade_id
-        import_cte = ""
-        import_join = ""
+        import_cte = _NO_IMPORT_BOWL_CTE
+        import_join = _NO_IMPORT_BOWL_JOIN
         qualify_clause = "bq.player_id IS NOT NULL"
         if include_import:
             import_grade_name = await _resolve_grade_name(session, org_id, grade_id)
@@ -3800,7 +3843,7 @@ async def get_bowling_leaderboard_extended(
                                "LEFT JOIN import_best ib ON ib.player_id = p.id")
         mp_cte, mp_join, games_expr = _grade_matches_played(
             by_name=False, season_clause="", finals_clause=finals_clause,
-            scope_clause=scope_clause, captain_only=captain_only,
+            scope_clause=scope_clause, captain_only=captain_only, finals_only=finals_only,
             own_games="COUNT(DISTINCT bq.game_id)")
         base = f"""
             WITH bowling_qualifying AS (
@@ -3876,8 +3919,8 @@ async def get_bowling_leaderboard_extended(
     if grade_name:
         params["grade_name"] = grade_name
         season_clause = " AND gr.season_id = ANY(:season_ids)" if season_ids else ""
-        import_cte = ""
-        import_join = ""
+        import_cte = _NO_IMPORT_BOWL_CTE
+        import_join = _NO_IMPORT_BOWL_JOIN
         qualify_clause = "bq.player_id IS NOT NULL"
         if include_import:
             qualify_clause = "bq.player_id IS NOT NULL OR it.player_id IS NOT NULL"
@@ -3887,7 +3930,7 @@ async def get_bowling_leaderboard_extended(
                            "LEFT JOIN import_best ib ON ib.player_id = p.id")
         mp_cte, mp_join, games_expr = _grade_matches_played(
             by_name=True, season_clause=season_clause, finals_clause=finals_clause,
-            scope_clause=scope_clause, captain_only=captain_only,
+            scope_clause=scope_clause, captain_only=captain_only, finals_only=finals_only,
             own_games="COUNT(DISTINCT bq.game_id)")
         base = f"""
             WITH bowling_qualifying AS (

@@ -213,6 +213,54 @@ async def main() -> None:
     check("and the Leaderboard agrees under the renamed grade",
           games_for(bat, SPINKS) == SPINKS_PLAYED_IN_B, str(games_for(bat, SPINKS)))
 
+    print("\n-- a grade picked with Finals only or Captain only no longer 500s --")
+    # Two finals in the (renamed) grade: one Spinks batted in, one he was only
+    # named for (the opposition scored, so it is a played match).
+    async with Session() as session:
+        f1, f2 = uuid.uuid4(), uuid.uuid4()
+        for gid, day in ((f1, 10), (f2, 11)):
+            await session.execute(text(
+                "INSERT INTO games (id, grade_id, played_at, result, home_org_id, away_org_id, "
+                " match_format, status, is_final, innings_totals) "
+                "VALUES (:i, :g, :d, 'WIN', :o, :x, 'One Day', 'COMPLETED', true, "
+                " CAST(:t AS JSONB))"),
+                {"i": gid, "g": GRADE, "d": date(1996, 12, day), "o": ORG, "x": OPPONENT,
+                 "t": '[{"innings_number": 1, "runs_scored": 150, "wickets": 5, "extras": 3}]'})
+            await session.execute(text(
+                "INSERT INTO game_appearances (game_id, player_id) VALUES (:g, :p)"),
+                {"g": gid, "p": base.SPINKS})
+        await session.execute(text(
+            "INSERT INTO batting_innings (game_id, player_id, runs, balls, fours, sixes, "
+            " not_out, dismissal_type, did_not_bat, batting_position) "
+            "VALUES (:g, :p, 33, 40, 2, 0, false, 'c', false, 3)"), {"g": f1, "p": base.SPINKS})
+        await session.commit()
+
+    async def attempt(**kw):
+        try:
+            return await three_boards(grade_name="Premier", **kw)
+        except Exception as e:  # a control run reports the crash instead of dying on it
+            return str(e).split("\n")[0][:120]
+
+    for label, kw in (("Finals only", {"finals_only": True}), ("Captain only", {"captain_only": True})):
+        got = await attempt(**kw)
+        check(f"{label} with a grade picked answers on all three boards",
+              not isinstance(got, str), str(got))
+        if isinstance(got, str):
+            continue
+        bat, bowl, field = got
+        if kw.get("finals_only"):
+            check("finals only: M stays finals batted in (1), as on the all-grades finals board",
+                  games_for(bat, SPINKS) == 1, str(games_for(bat, SPINKS)))
+            check("finals only: and the runs are that final's alone",
+                  next((r["total_runs"] for r in bat if r["player_id"] == SPINKS), None) == 33)
+        else:
+            check("captain only: M stays matches as captain (2)",
+                  games_for(bat, SPINKS) == 2, str(games_for(bat, SPINKS)))
+    plain = await board(lb.batting_leaderboard, sort_by="total_runs", limit=50, min_runs=0,
+                        min_rate_innings=0, grade_name="Premier")
+    check("the plain grade view is untouched by the finals added above",
+          games_for(plain, SPINKS) == SPINKS_PLAYED_IN_B + 2, str(games_for(plain, SPINKS)))
+
     print(f"\n{PASS} passed, {FAIL} failed")
     for f in FAILURES:
         print("  FAILED:", f)
