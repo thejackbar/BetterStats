@@ -26,6 +26,13 @@ engine = create_async_engine(
     pool_timeout=settings.db_pool_timeout,
     pool_recycle=settings.db_pool_recycle,
     pool_pre_ping=True,
+    # JIT OFF FOR EVERY CONNECTION. The `v_effective_*` views plan at a cost of
+    # millions, past Postgres's JIT thresholds, so every read of one compiled a
+    # plan first: 6 to 7s of compiling in front of a read that runs in well
+    # under a second. Only the record book had turned it off, for itself. This
+    # is OLTP-sized work against a 370 MB database; there is nothing here JIT
+    # can win back. A startup parameter, so no pooled connection can lack it.
+    connect_args={"server_settings": {"jit": "off"}},
 )
 async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 

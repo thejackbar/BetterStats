@@ -1,10 +1,11 @@
 export default {
   version: 'v9.102.12',
   date: '2026-10-02',
-  sortKey: '2026-10-02T21:00:00Z',
-  title: 'Leaderboard grade toggles and StatLab now count the same matches',
+  sortKey: '2026-10-02T23:00:00Z',
+  title: 'Faster club pages, leaderboards, player pages and milestones',
   items: [
-    'Picking A Grade, B Grade and so on on the Club Leaderboard now shows matches played, the same number the all grades view, a player\'s profile and StatLab show. The grade views were counting only the matches a player batted in on the batting board, bowled in on the bowling board and fielded in on the fielding board, so a player picked for a game and not used could read 6 where StatLab read 11.',
-    'StatLab\'s Grade filter now finds a grade your club has renamed. Picking "Premier" for a grade you renamed from "1st Grade" used to list nobody. The old name still works in saved reports.',
+    'Club home pages, the Leaderboard, player profiles and the upcoming milestones panel were taking several seconds to load, and the milestones panel sometimes took ten. The database was spending most of that time getting ready to run each stats query rather than running it. That step is now switched off for the whole site, so these pages should open in a fraction of the time.',
+    'The Records page read each club\'s season totals fourteen separate times. It now reads them once and every board uses that copy, so an unfiltered Records page no longer waits on the same work fourteen times over. The figures on every board are unchanged.',
+    'Records with a grade type or match type filter on (which is how most clubs open it) is still slower than we would like. That one needs separate work and is not part of this release.',
   ],
 }
