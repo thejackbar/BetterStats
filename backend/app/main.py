@@ -4366,6 +4366,13 @@ async def lifespan(app: FastAPI):
         for _stmt in _PLAYER_PRIVACY_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 317: the selection board's autosaved draft. Same one-copy
+        # rule: this list and alembic's 317 both run
+        # services/selection_draft_ddl.STATEMENTS.
+        from app.services.selection_draft_ddl import STATEMENTS as _SELECTION_DRAFT_DDL
+        for _stmt in _SELECTION_DRAFT_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 285: importing a club's history from its own public
         # CricketStatz site. Same one-copy rule — this list and alembic's 285
         # both run services/cricketstatz_ddl.STATEMENTS.

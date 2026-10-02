@@ -168,6 +168,14 @@ function ViewToggle({ value, onChange }) {
   )
 }
 
+// What Confirm would write: the named XI in batting order, captain, keeper and
+// the call-up cascades. Gaps between slots are not part of it.
+const confirmSig = (filled, capId, wkId, demoList) =>
+  JSON.stringify([filled.map((id) => [id, id === capId, id === wkId]), demoList])
+
+const DRAFT_DELAY_MS = 600
+const DRAFT_RETRY_MS = 5000
+
 export default function AdminSelection() {
   const { fixtureId } = useParams()
   const navigate = useNavigate()
@@ -181,6 +189,8 @@ export default function AdminSelection() {
   toastRef.current = toast
   const { theme, toggle: toggleTheme } = useTheme()
   const canEdit = hasCapability(CAP.MANAGE_SELECTIONS)
+  const canEditRef = useRef(canEdit)
+  canEditRef.current = canEdit
 
   const [data, setData] = useState(null)
   const [slots, setSlots] = useState([])
@@ -189,7 +199,18 @@ export default function AdminSelection() {
   const [focus, setFocus] = useState(null)
   const [format, setFormat] = useState(11)
   const [saving, setSaving] = useState(false)
-  const [dirty, setDirty] = useState(false)
+  // The confirmed XI as loaded; "unconfirmed changes" is the board differing
+  // from it. Derived, so putting someone back where they were reads as clean.
+  const [baseSig, setBaseSig] = useState(null)
+  // Autosave of the unconfirmed side (a draft row, apart from the confirmed XI).
+  const [draftStatus, setDraftStatus] = useState('idle')   // idle | saving | saved | error
+  const [draftInfo, setDraftInfo] = useState(null)         // { at, by } when a draft was restored or saved
+  const loadedFor = useRef(null)          // fixture the board's state belongs to
+  const draftOnServer = useRef(false)     // a draft row exists for loadedFor
+  const draftServerSig = useRef('')       // board state the server's draft matches
+  const draftPending = useRef(null)       // { fixtureId, body|null, sig } waiting for the debounce
+  const draftTimer = useRef(null)
+  const draftInflight = useRef(null)      // the write in flight: confirm and reload wait for it
   const [yearsF, setYearsF] = useState(3)
   const [sort, setSort] = useState('squad')
   const [availEdit, setAvailEdit] = useState(null)
@@ -212,24 +233,107 @@ export default function AdminSelection() {
 
   const load = useCallback(() => {
     setData(null)
-    api.bsGetSelection(fixtureId)
-      .then((d) => {
-        setData(d)
+    loadedFor.current = null
+    // A draft write still in flight (just switched fixture, or just confirmed)
+    // must land before we read, or we read the draft it is about to replace.
+    Promise.resolve(draftInflight.current).catch(() => {})
+      .then(() => Promise.all([
+        api.bsGetSelection(fixtureId),
+        canEditRef.current ? api.bsGetSelectionDraft(fixtureId).catch(() => ({ draft: null })) : { draft: null },
+      ]))
+      .then(([d, dr]) => {
         const size = d.default_team_size ?? 11
         const lineup = (d.lineup || []).slice().sort((a, b) => (a.batting_order || 999) - (b.batting_order || 999))
         const count = size > 0 ? Math.max(size, lineup.length) : lineup.length
         const init = Array(count).fill(null)
         lineup.forEach((l, i) => { if (i < count) init[i] = l.player_id })
-        setSlots(init)
-        setCapId(lineup.find((l) => l.is_captain)?.player_id ?? null)
-        setWkId(lineup.find((l) => l.is_wicket_keeper)?.player_id ?? null)
+        let cap = lineup.find((l) => l.is_captain)?.player_id ?? null
+        let wk = lineup.find((l) => l.is_wicket_keeper)?.player_id ?? null
+        setBaseSig(confirmSig(init.filter(Boolean), cap, wk, []))
+
+        // An autosaved draft replaces the confirmed XI on the board. Anyone no
+        // longer in the pool is dropped; the server re-judges everything at Confirm.
+        let slotsInit = init
+        let demo = {}
+        const dd = dr?.draft
+        draftOnServer.current = false
+        setDraftInfo(null)
+        if (dd && Array.isArray(dd.slots)) {
+          const inPool = new Set((d.pool || []).map((p) => p.id))
+          let ds = dd.slots.map((id) => (id && inPool.has(id) ? id : null))
+          if (size === 0) ds = ds.filter(Boolean)
+          else {
+            while (ds.length > size && ds[ds.length - 1] == null) ds.pop()
+            while (ds.length < size) ds.push(null)
+          }
+          const kept = new Set(ds.filter(Boolean))
+          slotsInit = ds
+          cap = kept.has(dd.captain_id) ? dd.captain_id : null
+          wk = kept.has(dd.wicket_keeper_id) ? dd.wicket_keeper_id : null
+          ;(dd.demotions || []).forEach((x) => {
+            if (x.callup_id && kept.has(x.callup_id)) demo[x.player_id] = { fixture_id: x.fixture_id, batting_order: x.batting_order, callupId: x.callup_id }
+          })
+          draftOnServer.current = true
+          setDraftInfo({ at: dr.updated_at, by: dr.updated_by })
+        }
+        draftServerSig.current = JSON.stringify([slotsInit, cap, wk, demo])
+        setData(d)
+        setSlots(slotsInit)
+        setCapId(cap)
+        setWkId(wk)
         setFormat(size)
-        setFocus(init.findIndex((x) => x == null))
-        setDemotions({})
-        setDirty(false)
+        setFocus(slotsInit.findIndex((x) => x == null))
+        setDemotions(demo)
+        setDraftStatus('idle')
+        loadedFor.current = fixtureId
       })
       .catch((e) => { toastRef.current.error(e.message); setData({ pool: [], lineup: [], fixture: null }) })
   }, [fixtureId])
+
+  // Send the pending draft change now. `leaving` marks a page that is going
+  // away, so the request is allowed to outlive it. Writes are chained so a
+  // delete can never overtake the save before it.
+  const flushDraft = useCallback((leaving) => {
+    clearTimeout(draftTimer.current)
+    draftTimer.current = null
+    const p = draftPending.current
+    if (!p) return draftInflight.current
+    draftPending.current = null
+    const opts = leaving ? { keepalive: true } : {}
+    const task = Promise.resolve(draftInflight.current).catch(() => {})
+      .then(() => (p.body ? api.bsSaveSelectionDraft(p.fixtureId, p.body, opts) : api.bsDiscardSelectionDraft(p.fixtureId, opts)))
+      .then(() => {
+        if (loadedFor.current !== p.fixtureId) return
+        draftServerSig.current = p.sig
+        draftOnServer.current = !!p.body
+        setDraftStatus(draftPending.current ? 'saving' : 'saved')
+        setDraftInfo(p.body ? { at: new Date().toISOString(), by: null } : null)
+      })
+      .catch((e) => {
+        if (loadedFor.current !== p.fixtureId) return
+        setDraftStatus('error')
+        // A dropped connection or a 5xx is worth another go; a refusal is not.
+        if ((!e.status || e.status >= 500) && !draftPending.current) {
+          draftPending.current = p
+          draftTimer.current = setTimeout(() => flushDraft(false), DRAFT_RETRY_MS)
+        }
+      })
+    draftInflight.current = task
+    return task
+  }, [])
+
+  // Leaving the board (another fixture, another screen, closing the tab) must
+  // not lose the last change still waiting on the debounce.
+  useEffect(() => {
+    const onHide = () => { if (document.visibilityState === 'hidden') flushDraft(true) }
+    document.addEventListener('visibilitychange', onHide)
+    window.addEventListener('pagehide', onHide)
+    return () => {
+      document.removeEventListener('visibilitychange', onHide)
+      window.removeEventListener('pagehide', onHide)
+      flushDraft(true)
+    }
+  }, [fixtureId, flushDraft])
 
   useEffect(() => { load() }, [load])
   useEffect(() => { api.bsSelectionOverview().then((d) => setAllFixtures(d.fixtures || [])).catch(() => {}) }, [])
@@ -356,21 +460,48 @@ export default function AdminSelection() {
 
   const filled = slots.filter(Boolean)
   const count = filled.length
+  // Only a cascade whose displaced player really left this XI AND whose call-up
+  // is still named: the one definition Confirm sends and "unconfirmed" compares.
+  const demoList = useMemo(
+    () => Object.entries(demotions)
+      .filter(([displacedId, d]) => !filled.includes(displacedId) && filled.includes(d.callupId))
+      .map(([displacedId, d]) => ({ player_id: displacedId, fixture_id: d.fixture_id, batting_order: d.batting_order })),
+    [demotions, slots],  // eslint-disable-line react-hooks/exhaustive-deps
+  )
+  const dirty = baseSig !== null && confirmSig(filled, capId, wkId, demoList) !== baseSig
+  const draftSig = JSON.stringify([slots, capId, wkId, demotions])
+
+  // Autosave. Every change to the side is written to the draft after a short
+  // pause; getting back to the confirmed XI removes the draft. Nothing here
+  // touches the confirmed lineup, which is what the rest of the app reads.
+  useEffect(() => {
+    if (!canEdit || data === null || loadedFor.current !== fixtureId) return
+    if (dirty ? draftSig === draftServerSig.current : !draftOnServer.current) return
+    draftPending.current = {
+      fixtureId,
+      sig: draftSig,
+      body: dirty ? {
+        slots, captain_id: capId, wicket_keeper_id: wkId,
+        demotions: Object.entries(demotions).map(([pid, d]) => ({
+          player_id: pid, fixture_id: d.fixture_id, batting_order: d.batting_order, callup_id: d.callupId,
+        })),
+      } : null,
+    }
+    setDraftStatus('saving')
+    clearTimeout(draftTimer.current)
+    draftTimer.current = setTimeout(() => flushDraft(false), DRAFT_DELAY_MS)
+  }, [draftSig, dirty, data, fixtureId, canEdit])  // eslint-disable-line react-hooks/exhaustive-deps
   const target = format || 0
   const offCount = target > 0 && count !== target
 
   // ── Slot mutations (plain fns — DnD always calls the latest onDrop) ────────
-  const markDirty = () => setDirty(true)
-
   const placeInSlot = (slotIdx, playerId) => {
     setSlots((prev) => { const n = [...prev]; const ex = n.indexOf(playerId); if (ex !== -1) n[ex] = null; n[slotIdx] = playerId; return n })
-    markDirty()
     setFocus(slots.findIndex((x, i) => i > slotIdx && x == null))
   }
   const swapSlots = (from, to) => {
     if (from === to) return
     setSlots((prev) => { const n = [...prev]; const m = n[from]; n[from] = n[to]; n[to] = m; return n })
-    markDirty()
   }
   const tapPlayer = (p) => {
     if (!canEdit) return
@@ -394,19 +525,17 @@ export default function AdminSelection() {
       next[t] = p.id
       return next
     })
-    markDirty()
     setFocus(slots.findIndex((x) => x == null))
   }
   const removeAt = (i) => {
     setSlots((prev) => { const n = [...prev]; const id = n[i]; n[i] = null; if (id === capId) setCapId(null); if (id === wkId) setWkId(null); return n })
-    markDirty()
     setFocus(i)
   }
-  const toggleCap = (id) => { setCapId((c) => (c === id ? null : id)); markDirty() }
-  const toggleWk = (id) => { setWkId((c) => (c === id ? null : id)); markDirty() }
+  const toggleCap = (id) => { setCapId((c) => (c === id ? null : id)) }
+  const toggleWk = (id) => { setWkId((c) => (c === id ? null : id)) }
   const clearXI = () => {
     if (!canEdit) return
-    setSlots((prev) => prev.map(() => null)); setCapId(null); setWkId(null); setFocus(0); markDirty()
+    setSlots((prev) => prev.map(() => null)); setCapId(null); setWkId(null); setFocus(0)
   }
 
   // The lower-grade XI a call-up would come from (its fixture + the player's
@@ -483,7 +612,6 @@ export default function AdminSelection() {
       if (!capId && prevXI.captain_id && poolById[prevXI.captain_id]) setCapId(prevXI.captain_id)
       if (!wkId && prevXI.wicket_keeper_id && poolById[prevXI.wicket_keeper_id]) setWkId(prevXI.wicket_keeper_id)
     }
-    markDirty()
   }
 
   const changeFormat = async (size) => {
@@ -512,7 +640,7 @@ export default function AdminSelection() {
   const save = async () => {
     if (offCount) {
       const diff = count > target ? `${count - target} too many` : `${target - count} too few`
-      if (!window.confirm(`You have ${count} player${count === 1 ? '' : 's'} for a ${target}-a-side match — ${diff}.\n\nSave anyway?`)) return
+      if (!window.confirm(`You have ${count} player${count === 1 ? '' : 's'} for a ${target}-a-side match — ${diff}.\n\nConfirm anyway?`)) return
     }
     // A warning-level rule is the selector's to weigh, so it asks rather than
     // refuses. A blocking one never gets this far — the server decides, and
@@ -521,19 +649,18 @@ export default function AdminSelection() {
     if (warnings.length) {
       const lines = warnings.slice(0, 6).map((w) => `• ${w.player ? w.player + ' — ' : ''}${w.detail}`).join('\n')
       const more = warnings.length > 6 ? `\n…and ${warnings.length - 6} more` : ''
-      if (!window.confirm(`This side breaks ${warnings.length} club rule${warnings.length === 1 ? '' : 's'}:\n\n${lines}${more}\n\nSave anyway?`)) return
+      if (!window.confirm(`This side breaks ${warnings.length} club rule${warnings.length === 1 ? '' : 's'}:\n\n${lines}${more}\n\nConfirm anyway?`)) return
     }
     setSaving(true)
     try {
+      // Drop any draft write still waiting: confirming replaces the draft, and
+      // one landing after it would bring the draft back.
+      clearTimeout(draftTimer.current)
+      draftPending.current = null
+      await Promise.resolve(draftInflight.current).catch(() => {})
       const players = filled.map((id, i) => ({ player_id: id, batting_order: i + 1, is_captain: id === capId, is_wicket_keeper: id === wkId }))
-      // Only cascade a demotion when the displaced player really left this XI AND
-      // the call-up that bumped them is still named (so the lower slot is freed).
-      const demoList = Object.entries(demotions)
-        .filter(([displacedId, d]) => !filled.includes(displacedId) && filled.includes(d.callupId))
-        .map(([displacedId, d]) => ({ player_id: displacedId, fixture_id: d.fixture_id, batting_order: d.batting_order }))
       const r = await api.bsSetSelection(fixtureId, players, demoList)
-      toast.success(`Saved ${r.count} player${r.count === 1 ? '' : 's'}`)
-      setDirty(false)
+      toast.success(`Confirmed ${r.count} player${r.count === 1 ? '' : 's'}`)
       load()
     } catch (e) {
       // A blocking rule comes back as a structured 409 listing exactly what
@@ -542,6 +669,18 @@ export default function AdminSelection() {
       if (breaches?.length) toast.error(`Can't save — ${breaches.join('; ')}`)
       else toast.error(e.message.includes('Already selected') ? e.message : 'Save failed: ' + e.message)
     } finally { setSaving(false) }
+  }
+
+  // Throw the unconfirmed changes away and go back to the confirmed XI.
+  const discardDraft = async () => {
+    if (!window.confirm('Discard your unconfirmed changes and go back to the confirmed XI?')) return
+    clearTimeout(draftTimer.current)
+    draftPending.current = null
+    try {
+      await Promise.resolve(draftInflight.current).catch(() => {})
+      await api.bsDiscardSelectionDraft(fixtureId)
+      load()
+    } catch (e) { toast.error('Could not discard: ' + e.message) }
   }
 
   const { title, sub, kicker } = fmtHeader(fx)
@@ -619,12 +758,30 @@ export default function AdminSelection() {
         <Icon name={theme === 'light' ? 'moon' : 'sun'} size={16} />
       </button>
       <Btn variant="soft" sm icon="share" onClick={() => setShowSheet(true)} disabled={count === 0}><span className="hidden sm:inline">Share</span></Btn>
-      {canEdit && <Btn variant="primary" sm icon="check" onClick={save} disabled={saving || !dirty}>{saving ? 'Saving…' : dirty ? `Save${count ? ` (${count})` : ''}` : 'Saved'}</Btn>}
+      {canEdit && <Btn variant="primary" sm icon="check" onClick={save} disabled={saving || !dirty}>{saving ? 'Confirming…' : dirty ? `Confirm${count ? ` (${count})` : ''}` : 'Confirmed'}</Btn>}
     </div>
   )
 
   return (
     <BetterSelectLayout title="Selection" headerLeft={headerLeft} actions={actions}>
+      {canEdit && dirty && (
+        <div role="status" className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-pb-hairline bg-pb-surface px-3 py-2 text-[12px] text-pb-dim">
+          <span className="min-w-0 flex-1 basis-60">
+            <span className="font-semibold text-pb-text">Draft.</span>{' '}
+            {draftStatus === 'error'
+              ? 'Your changes are not saving yet. Keep this page open until this clears.'
+              : draftStatus === 'saving'
+                ? 'Saving your changes…'
+                : 'Your changes are saved as you go, so you can leave and come back.'}
+            {' '}The confirmed XI stays as it was until you press Confirm.
+            {draftInfo?.by && draftInfo.at && !saving ? ` Last saved by ${draftInfo.by}.` : ''}
+          </span>
+          <button type="button" onClick={discardDraft} disabled={saving}
+            className="shrink-0 font-display font-semibold text-pb-accent hover:underline disabled:opacity-50">
+            Discard changes
+          </button>
+        </div>
+      )}
       <DnD onDrop={onDrop}>
         {view === 'sheet' ? <TeamSheetView vm={vm} /> : <DualRailView vm={vm} />}
       </DnD>

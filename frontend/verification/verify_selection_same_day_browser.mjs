@@ -108,7 +108,7 @@ const run = async () => {
 
   await page.screenshot({ path: join(SHOTS, 'selection_same_day_before_save.png') })
   console.log('\n# save (the exact request)')
-  await page.getByRole('button', { name: /^save/i }).first().click()
+  await page.getByRole("button", { name: /^confirm/i }).first().click()
   await page.waitForTimeout(800)
   const ids = (wire.put?.players || []).map((p) => p.player_id)
   await page.screenshot({ path: join(SHOTS, 'selection_same_day_after_save.png') })

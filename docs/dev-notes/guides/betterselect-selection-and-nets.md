@@ -91,6 +91,8 @@
 
 59. The selection board's "Played ≤ N yrs" window only trims the browse list: it is skipped while the pool search has text. Inactive players stay out regardless. The board and the nets check-in list both require `players.is_player`, so a player missing from both has "Is player" switched off, not a recency problem.
 
+60. The selection board autosaves to `selection_drafts` (migration 317), never to `fixture_lineups`, which is the CONFIRMED XI everything else reads. The draft route runs no clash, call-up or rule check (Confirm does); `PUT /selection/{id}` deletes the draft in its own transaction. `GET /selection/{id}` stays draft-free (BetterIQ shares it). `dirty` is derived from the confirmed XI, not a flag. Any draft write carries its own `fixtureId`, chains behind the one in flight, and Confirm and `load` wait for it.
+
 **Layout and process**
 54. `min-w-0` goes on the element that may shrink (`<h1>` `truncate min-w-0`, toggle `shrink-0`), not the group. Selection header uses `flex-wrap xl:flex-nowrap` and moves user name + Logout from `sm` to `xl`; only Selection passes `headerLeft`. `flex-wrap` cannot save a `shrink-0` child. A native date input clips its year if it shares a row (age on the caption line).
 55. Re-check `origin/main` at merge before numbering a migration (duplicate revision ids break Alembic).
@@ -103,16 +105,17 @@
 - Header toggle painted over or 390px overflow (54). Minutes PDF page blank (56).
 
 ## How to verify a change here
-- Backend (real Postgres, shipped route bodies): `backend/verification/verify_selection_same_day.py` (control with `selection_clash` absent fails the back to back and junior/senior checks), `backend/verification/verify_net_batting_order.py`, `verify_net_checkin.py`, `verify_player_kit.py` (control with number resolution and size writes neutered fails the importer checks), `verify_multi_squad.py`.
-- Browser (`frontend/verification/`): `verify_net_batting_order_browser.mjs` (pointer and synthetic touch, `touch-action` read from computed style), `verify_net_admin_browser.mjs`, `verify_net_alert_browser.mjs`, `verify_net_checkin_browser.mjs`, `verify_guest_promotion_browser.mjs`, `verify_squads_pools_browser.mjs`, `verify_selection_same_day_browser.mjs` (needs `fixtures/selection_same_day.json`), `verify_minutes_letterhead_browser.mjs`, `verify_minutes_download_browser.mjs` (must pass unchanged).
+- Backend (real Postgres, shipped route bodies): `backend/verification/verify_selection_same_day.py` (control with `selection_clash` absent fails the back to back and junior/senior checks), `backend/verification/verify_net_batting_order.py`, `verify_net_checkin.py`, `verify_player_kit.py` (control with number resolution and size writes neutered fails the importer checks), `verify_multi_squad.py`, `verify_selection_draft.py` (draft round trip, nothing in `fixture_lineups`, Confirm clears it, a refused Confirm keeps it).
+- Browser (`frontend/verification/`): `verify_net_batting_order_browser.mjs` (pointer and synthetic touch, `touch-action` read from computed style), `verify_net_admin_browser.mjs`, `verify_net_alert_browser.mjs`, `verify_net_checkin_browser.mjs`, `verify_guest_promotion_browser.mjs`, `verify_squads_pools_browser.mjs`, `verify_selection_draft_browser.mjs` (autosave, flush on leaving, restore, discard, Confirm), `verify_selection_same_day_browser.mjs` (needs `fixtures/selection_same_day.json`), `verify_minutes_letterhead_browser.mjs`, `verify_minutes_download_browser.mjs` (must pass unchanged).
 - Race two real DB sessions for the version bump and duplicate check-in.
 - A control run that crashes is not a control run: read new keys via `.get`, guard imports, report what is absent. Pair set with clear, entitled with non-entitled.
 - Gotchas: Playwright `**` glob does not cross a `?` (route the live poll by regex or the catch-all hands `{}` and crashes the page); routes match most-recently-registered first; `NAMES.map(att)` passes `(value, index)`; `unzip` glob-matches `[Content_Types].xml`; lifespan raw-SQL tables need their CREATE plus every later ALTER; suites share one database; stubs must match real response shapes.
 
 ## Operator commands and scripts
-none. Migrations 268, 269, 271, 272, 273, 284, 289 are mirrored idempotently in the lifespan.
+none. Migrations 268, 269, 271, 272, 273, 284, 289, 317 are mirrored idempotently in the lifespan.
 
 ## Open follow-ups
+- A fixture with a draft is not marked on the matchday overview; two selectors on one fixture overwrite each other's draft.
 - Squads header action cluster overflows 319px at 390px (shared `ModuleLayout`).
 - Nets `adopt` takes any payload; a malformed one mid-deploy takes the screen down.
 - Session CSV lacks padding up and priority. Nothing writes fixture availability from the nets.

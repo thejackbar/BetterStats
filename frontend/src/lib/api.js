@@ -3301,6 +3301,13 @@ export const api = {
   bsGetSelection: (fixtureId) => request(`/selection/${fixtureId}`),
   bsSetSelection: (fixtureId, players, demotions = []) =>
     request(`/selection/${fixtureId}`, { method: 'PUT', body: JSON.stringify({ players, demotions }) }),
+  // Autosaved, unconfirmed side for a fixture. `opts` goes to fetch, so a
+  // leaving page can pass { keepalive: true }.
+  bsGetSelectionDraft: (fixtureId) => request(`/selection/${fixtureId}/draft`),
+  bsSaveSelectionDraft: (fixtureId, draft, opts = {}) =>
+    request(`/selection/${fixtureId}/draft`, { method: 'PUT', body: JSON.stringify(draft), ...opts }),
+  bsDiscardSelectionDraft: (fixtureId, opts = {}) =>
+    request(`/selection/${fixtureId}/draft`, { method: 'DELETE', ...opts }),
   bsSetDefaultTeamSize: (size) =>
     request('/selection/default-team-size', { method: 'POST', body: JSON.stringify({ size }) }),
   // The previous fixture's named XI (for Selection's "fill from last week").

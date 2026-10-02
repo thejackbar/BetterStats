@@ -14,6 +14,7 @@ All endpoints scoped to the caller's club via get_current_club.
 """
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import date, timedelta
 from typing import Optional
@@ -59,6 +60,21 @@ class LineupSet(BaseModel):
 
 class TeamSizeSet(BaseModel):
     size: int
+
+
+class DraftDemotion(Demotion):
+    """A pending cascade as the board holds it; ``callup_id`` is the call-up
+    that bumped the player, so the cascade can be re-judged at confirm."""
+    callup_id: Optional[str] = None
+
+
+class DraftSet(BaseModel):
+    """The board's unconfirmed working state. ``slots`` keeps the gaps (a null
+    is an empty slot) so a half-filled side comes back where it was left."""
+    slots: list[Optional[str]] = []
+    captain_id: Optional[str] = None
+    wicket_keeper_id: Optional[str] = None
+    demotions: list[DraftDemotion] = []
 
 
 async def _get_owned_fixture(db: AsyncSession, fixture_id: str, club_id) -> Fixture:
@@ -307,6 +323,121 @@ async def set_default_team_size(
     return {"status": "ok", "default_team_size": body.size}
 
 
+@router.get("/{fixture_id}/draft")
+async def get_draft(
+    fixture_id: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    """The autosaved, unconfirmed side for this fixture, or ``draft: null``.
+
+    Separate from GET /selection/{id} so the pool payload BetterIQ shares is
+    unchanged, and so only someone who can edit the XI is ever handed a
+    half-built one."""
+    fx = await _get_owned_fixture(db, fixture_id, club.id)
+    row = (await db.execute(
+        text(
+            "SELECT d.draft, d.updated_at, COALESCE(u.display_name, u.username) "
+            "FROM selection_drafts d LEFT JOIN users u ON u.id = d.updated_by "
+            "WHERE d.fixture_id = :fid AND d.organisation_id = :org"
+        ),
+        {"fid": fx.id, "org": club.id},
+    )).first()
+    if not row:
+        return {"draft": None}
+    return {"draft": row[0], "updated_at": row[1].isoformat() if row[1] else None, "updated_by": row[2]}
+
+
+@router.put("/{fixture_id}/draft")
+async def save_draft(
+    fixture_id: str,
+    body: DraftSet,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    """Autosave the board's working side. Never touches ``fixture_lineups``,
+    so none of the checks the confirm path makes (clashes, call-ups, blocking
+    rules) run here: they are judged when the selector confirms. Only the shape
+    is cleaned up: ids that are not this club's players are dropped, and a
+    captain or keeper who is not in the slots is cleared."""
+    fx = await _get_owned_fixture(db, fixture_id, club.id)
+    if len(body.slots) > 40:
+        raise HTTPException(status_code=400, detail="Too many slots")
+
+    def _uid(v):
+        try:
+            return uuid.UUID(v) if v else None
+        except (ValueError, AttributeError, TypeError):
+            return None
+
+    wanted = {_uid(v) for v in body.slots} - {None}
+    wanted |= {_uid(body.captain_id), _uid(body.wicket_keeper_id)} - {None}
+    wanted |= {u for u in (_uid(d.player_id) for d in body.demotions) if u}
+    wanted |= {u for u in (_uid(d.callup_id) for d in body.demotions) if u}
+    owned: set[uuid.UUID] = set()
+    if wanted:
+        res = await db.execute(
+            select(Player.id).where(Player.organisation_id == club.id, Player.id.in_(wanted))
+        )
+        owned = {r[0] for r in res.fetchall()}
+
+    seen: set[uuid.UUID] = set()
+    slots: list[Optional[str]] = []
+    for v in body.slots:
+        u = _uid(v)
+        if u is None or u not in owned or u in seen:
+            slots.append(None)
+            continue
+        seen.add(u)
+        slots.append(str(u))
+    cap = _uid(body.captain_id)
+    wk = _uid(body.wicket_keeper_id)
+    demotions = []
+    for d in body.demotions:
+        u, f, c = _uid(d.player_id), _uid(d.fixture_id), _uid(d.callup_id)
+        if u and f and u in owned and c in seen:
+            demotions.append({
+                "player_id": str(u), "fixture_id": str(f),
+                "batting_order": d.batting_order, "callup_id": str(c),
+            })
+    payload = {
+        "slots": slots,
+        "captain_id": str(cap) if cap in seen else None,
+        "wicket_keeper_id": str(wk) if wk in seen else None,
+        "demotions": demotions,
+    }
+    await db.execute(
+        text(
+            "INSERT INTO selection_drafts (fixture_id, organisation_id, draft, updated_by, updated_at) "
+            "VALUES (:fid, :org, CAST(:d AS jsonb), :uid, now()) "
+            "ON CONFLICT (fixture_id) DO UPDATE SET draft = EXCLUDED.draft, "
+            "updated_by = EXCLUDED.updated_by, updated_at = now()"
+        ),
+        {"fid": fx.id, "org": club.id, "d": json.dumps(payload), "uid": user.id},
+    )
+    await db.commit()
+    return {"status": "ok"}
+
+
+@router.delete("/{fixture_id}/draft")
+async def discard_draft(
+    fixture_id: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    """Throw the draft away: the board goes back to the confirmed XI."""
+    fx = await _get_owned_fixture(db, fixture_id, club.id)
+    await db.execute(
+        text("DELETE FROM selection_drafts WHERE fixture_id = :fid AND organisation_id = :org"),
+        {"fid": fx.id, "org": club.id},
+    )
+    await db.commit()
+    return {"status": "ok"}
+
+
 @router.put("/{fixture_id}")
 async def set_selection(
     fixture_id: str,
@@ -493,5 +624,11 @@ async def set_selection(
             is_wicket_keeper=bool(s.is_wicket_keeper),
             selected_by=user.id,
         ))
+    # Confirming makes the draft redundant: same transaction, so a failed
+    # confirm leaves the draft alone.
+    await db.execute(
+        text("DELETE FROM selection_drafts WHERE fixture_id = :fid"),
+        {"fid": fx.id},
+    )
     await db.commit()
     return {"status": "ok", "count": len(slots)}
