@@ -81,6 +81,7 @@
 **Split Poster, debut tags and the hero-row mark (v9.102.16, `social/split-template.jsx`, `services/social_debuts.py`)**
 53. A debut is "nothing on record before the match date", read from appearances, batting and bowling lines (abandoned games excluded) and EARLIER seasons' summaries only, scoped by `players.organisation_id`. It is a suggestion: `sp.debut` is the admin's to flip, and an id the club cannot answer for is left as it was.
 54. A new tag or option on a lineup layout is a prop that is absent when off, so a post without it stays byte for byte what it was (compare `outerHTML` against the previous build). Where a row's base style uses the `padding` shorthand, override the shorthand, never add a longhand beside it. Hooks for the editor go with the other state, above every early return (React #310).
+55. `matchData` fills an empty competition with the literal `COMPETITION`, so a layout that should print nothing there must treat that literal as empty. Lineup loaders put the grade in `match.competition`. A background variant's Ink role is the palette's ink (white on the built-in palettes), so use Primary for any shade that has to stay dark.
 
 ## Traps and failure signatures
 - Geometry checks pass but a layout reads wrong (black bands, clumped story names). Judge from real screenshots.

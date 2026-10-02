@@ -2693,6 +2693,7 @@ export default function AdminSocialPost() {
   }
   if (templateId === 'T11') {
     extraProps.panelColor = splitPanel || undefined
+    extraProps.background = bgActive ? bgStyle : null
     extraProps.sponsors = scorecardMatch.meta.sponsors
   }
   if (templateId === 'C4') {
@@ -3155,7 +3156,7 @@ export default function AdminSocialPost() {
       checkDebuts(picked, d.fixture?.played_on || null)
       const fx = d.fixture
       if (fx) {
-        setMatch((m) => ({ ...m, round: fx.round || m.round, venue: fx.venue || m.venue, date: fx.played_on || m.date, time: fx.start_time || m.time }))
+        setMatch((m) => ({ ...m, competition: fx.grade || m.competition, round: fx.round || m.round, venue: fx.venue || m.venue, date: fx.played_on || m.date, time: fx.start_time || m.time }))
         if (fx.opponent_name) setOpponent((o) => ({ ...o, name: fx.opponent_name }))
         const tn = teamHeadline(
           (fx.home_away === 'AWAY' ? fx.away_team : fx.home_team) || '',
@@ -3190,7 +3191,7 @@ export default function AdminSocialPost() {
     })
     setSelectedPlayers(picked)
     checkDebuts(picked, fx.date || null)
-    setMatch((m) => ({ ...m, round: fx.round || m.round, venue: fx.venue || m.venue, date: fx.date || m.date, time: fx.time || m.time }))
+    setMatch((m) => ({ ...m, competition: fx.grade || m.competition, round: fx.round || m.round, venue: fx.venue || m.venue, date: fx.date || m.date, time: fx.time || m.time }))
     if (oppTeam?.club || oppTeam?.name) setOpponent((o) => ({ ...o, name: oppTeam.club || oppTeam.name || o.name, logo: oppTeam.logo_url || o.logo }))
     const tn = teamHeadline(ourTeam.name || ourTeam.club || '', settings?.name, fx.grade || match.competition)
     if (tn) setHeadline(tn)
