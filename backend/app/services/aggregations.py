@@ -271,7 +271,8 @@ async def _player_org_id(session: AsyncSession, player_id: str) -> Optional[str]
 _OURS_GAMES = club_game_sql("g", "org_id")
 
 
-def _matches_played_cte(season_clause: str, scope_clause: str) -> str:
+def _matches_played_cte(season_clause: str, scope_clause: str,
+                        grade_join: str = "", grade_clause: str = "") -> str:
     """Per player, the distinct in-scope matches they PLAYED — the "M" column.
 
     A board's games figure was ``COUNT(DISTINCT game_id)`` over its own
@@ -285,13 +286,16 @@ def _matches_played_cte(season_clause: str, scope_clause: str) -> str:
     function unions. **The games are narrowed FIRST** so the three per-innings
     tables are not scanned platform-wide, the shape ``records.py``'s
     ``grade_scoped_games`` already uses.
+
+    ``grade_join`` / ``grade_clause`` narrow the games to one picked grade, for
+    the boards that answer "this grade" (see :func:`_grade_matches_played`).
     """
     return f"""
         board_games AS (
             SELECT g.id
             FROM v_effective_games g
-            JOIN seasons s ON s.id = g.season_id
-            WHERE {_OURS_GAMES}{season_clause}{scope_clause}
+            JOIN seasons s ON s.id = g.season_id{grade_join}
+            WHERE {_OURS_GAMES}{season_clause}{scope_clause}{grade_clause}
         ), matches_played AS (
             SELECT ap.player_id, COUNT(DISTINCT ap.game_id) AS games
             FROM (
@@ -310,6 +314,42 @@ def _matches_played_cte(season_clause: str, scope_clause: str) -> str:
             ) ap
             GROUP BY ap.player_id
         )"""
+
+
+def _grade_matches_played(
+    *, by_name: bool, season_clause: str, finals_clause: str, scope_clause: str,
+    captain_only: Optional[bool], own_games: str,
+) -> tuple[str, str, str]:
+    """``(cte, join, games)`` for a leaderboard answering one picked grade.
+
+    The grade-picked branches counted ``COUNT(DISTINCT game_id)`` over their own
+    per-innings rows, so a player's M under "B Grade" was the matches he BATTED
+    (or bowled, or fielded) in, while the same player read matches PLAYED on
+    the all-grades board, his profile and StatLab. This is
+    :func:`_matches_played_cte` narrowed to the picked grade, the same fix the
+    scoped all-grades branch already has.
+
+    ``own_games`` is the branch's own count, kept as a floor so this can only
+    raise a figure, never lower one. A finals-only board counts finals played.
+    A captain-only board is left on its own count: "matches as captain" is what
+    that view means. ``cte`` carries a leading comma and ``join`` is empty
+    there, so the caller pastes both unconditionally.
+    """
+    if captain_only:
+        return "", "", own_games
+    if by_name:
+        grade_join = " JOIN grades gr ON gr.id = g.grade_id"
+        grade_clause = f" AND {_GRADE_MATCH}"
+    else:
+        grade_join = ""
+        grade_clause = " AND g.grade_id = :grade_id"
+    cte = _matches_played_cte(
+        season_clause, finals_clause + scope_clause, grade_join, grade_clause)
+    return (
+        ",\n" + cte,
+        "LEFT JOIN matches_played mp ON mp.player_id = p.id",
+        f"GREATEST(COALESCE(MAX(mp.games), 0), {own_games})",
+    )
 
 
 async def _club_game_clause(
@@ -1087,18 +1127,22 @@ async def get_fielding_leaderboard(
                 )
                 """
                 import_join = "LEFT JOIN import_totals it ON it.player_id = p.id"
+        mp_cte, mp_join, games_expr = _grade_matches_played(
+            by_name=False, season_clause="", finals_clause=finals_clause,
+            scope_clause=scope_clause, captain_only=captain_only,
+            own_games="COUNT(DISTINCT fs.game_id)")
         base = f"""
             WITH fielding_qualifying AS (
                 SELECT fs.player_id, fs.game_id, fs.catches, fs.catches_wk, fs.run_outs, fs.stumpings
                 FROM v_effective_fielding_stats fs
                 JOIN v_effective_games g ON g.id = fs.game_id{captain_join}
                 WHERE g.grade_id = :grade_id{finals_clause}{scope_clause}
-            ){import_cte}
+            ){import_cte}{mp_cte}
             SELECT * FROM (
                 SELECT
                     p.id AS player_id,
                     COALESCE(p.display_name_override, p.name) AS name,
-                    COUNT(DISTINCT fs.game_id) + COALESCE(MAX(it.games), 0) AS games,
+                    {games_expr} + COALESCE(MAX(it.games), 0) AS games,
                     COALESCE(SUM(fs.catches), 0) + COALESCE(MAX(it.total_catches), 0) AS total_catches,
                     COALESCE(SUM(fs.catches_wk), 0) + COALESCE(MAX(it.total_catches_wk), 0) AS total_catches_wk,
                     COALESCE(SUM(fs.catches - fs.catches_wk), 0) + COALESCE(MAX(it.total_catches), 0) - COALESCE(MAX(it.total_catches_wk), 0) AS total_catches_non_wk,
@@ -1108,6 +1152,7 @@ async def get_fielding_leaderboard(
                         + COALESCE(MAX(it.total_catches), 0) + COALESCE(MAX(it.total_run_outs), 0) + COALESCE(MAX(it.total_stumpings), 0) AS total_dismissals
                 FROM players p
                 LEFT JOIN fielding_qualifying fs ON fs.player_id = p.id
+                {mp_join}
                 {import_join}
                 WHERE p.organisation_id = :org_id{gender_clause}{overseas_clause}
                   AND ({qualify_clause})
@@ -1141,6 +1186,10 @@ async def get_fielding_leaderboard(
             )
             """
             import_join = "LEFT JOIN import_totals it ON it.player_id = p.id"
+        mp_cte, mp_join, games_expr = _grade_matches_played(
+            by_name=True, season_clause=season_clause, finals_clause=finals_clause,
+            scope_clause=scope_clause, captain_only=captain_only,
+            own_games="COUNT(DISTINCT fs.game_id)")
         base = f"""
             WITH fielding_qualifying AS (
                 SELECT fs.player_id, fs.game_id, fs.catches, fs.catches_wk, fs.run_outs, fs.stumpings
@@ -1148,12 +1197,12 @@ async def get_fielding_leaderboard(
                 JOIN v_effective_games g ON g.id = fs.game_id
                 JOIN grades gr ON gr.id = g.grade_id{captain_join}
                 WHERE {_GRADE_MATCH}{season_clause}{finals_clause}{scope_clause}
-            ){import_cte}
+            ){import_cte}{mp_cte}
             SELECT * FROM (
                 SELECT
                     p.id AS player_id,
                     COALESCE(p.display_name_override, p.name) AS name,
-                    COUNT(DISTINCT fs.game_id) + COALESCE(MAX(it.games), 0) AS games,
+                    {games_expr} + COALESCE(MAX(it.games), 0) AS games,
                     COALESCE(SUM(fs.catches), 0) + COALESCE(MAX(it.total_catches), 0) AS total_catches,
                     COALESCE(SUM(fs.catches_wk), 0) + COALESCE(MAX(it.total_catches_wk), 0) AS total_catches_wk,
                     COALESCE(SUM(fs.catches - fs.catches_wk), 0) + COALESCE(MAX(it.total_catches), 0) - COALESCE(MAX(it.total_catches_wk), 0) AS total_catches_non_wk,
@@ -1163,6 +1212,7 @@ async def get_fielding_leaderboard(
                         + COALESCE(MAX(it.total_catches), 0) + COALESCE(MAX(it.total_run_outs), 0) + COALESCE(MAX(it.total_stumpings), 0) AS total_dismissals
                 FROM players p
                 LEFT JOIN fielding_qualifying fs ON fs.player_id = p.id
+                {mp_join}
                 {import_join}
                 WHERE p.organisation_id = :org_id{gender_clause}{overseas_clause}
                   AND ({qualify_clause})
@@ -3275,6 +3325,10 @@ async def get_batting_leaderboard_extended(
                 )
                 """
                 import_join = "LEFT JOIN import_totals it ON it.player_id = p.id"
+        mp_cte, mp_join, games_expr = _grade_matches_played(
+            by_name=False, season_clause="", finals_clause=finals_clause,
+            scope_clause=scope_clause, captain_only=captain_only,
+            own_games="COUNT(DISTINCT q.game_id)")
         base = f"""
             WITH qualifying AS (
                 SELECT bi.player_id, bi.game_id, bi.runs, bi.balls, bi.fours, bi.sixes, bi.not_out
@@ -3283,7 +3337,7 @@ async def get_batting_leaderboard_extended(
                 WHERE g.grade_id = :grade_id{scope_clause}
                   AND NOT COALESCE(bi.did_not_bat, FALSE)
                   AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb'){finals_clause}
-            ){import_cte}
+            ){import_cte}{mp_cte}
             SELECT * FROM (
                 SELECT
                     p.id AS player_id,
@@ -3303,11 +3357,12 @@ async def get_batting_leaderboard_extended(
                     SUM(CASE WHEN q.runs >= 50 AND q.runs < 100 THEN 1 ELSE 0 END) + COALESCE(MAX(it.fifties), 0) AS fifties,
                     SUM(CASE WHEN q.runs >= 100 THEN 1 ELSE 0 END) + COALESCE(MAX(it.hundreds), 0) AS hundreds,
                     SUM(CASE WHEN q.runs = 0 AND NOT q.not_out THEN 1 ELSE 0 END) + COALESCE(MAX(it.ducks), 0) AS ducks,
-                    COUNT(DISTINCT q.game_id) + COALESCE(MAX(it.games), 0) AS games,
+                    {games_expr} + COALESCE(MAX(it.games), 0) AS games,
                     COALESCE(SUM(q.fours), 0) + COALESCE(MAX(it.total_fours), 0) AS total_fours,
                     COALESCE(SUM(q.sixes), 0) + COALESCE(MAX(it.total_sixes), 0) AS total_sixes
                 FROM players p
                 LEFT JOIN qualifying q ON q.player_id = p.id
+                {mp_join}
                 {import_join}
                 WHERE p.organisation_id = :org_id{gender_clause}{overseas_clause}
                   AND ({qualify_clause})
@@ -3351,6 +3406,10 @@ async def get_batting_leaderboard_extended(
             )
             """
             import_join = "LEFT JOIN import_totals it ON it.player_id = p.id"
+        mp_cte, mp_join, games_expr = _grade_matches_played(
+            by_name=True, season_clause=season_clause, finals_clause=finals_clause,
+            scope_clause=scope_clause, captain_only=captain_only,
+            own_games="COUNT(DISTINCT q.game_id)")
         base = f"""
             WITH qualifying AS (
                 SELECT bi.player_id, bi.game_id, bi.runs, bi.balls, bi.fours, bi.sixes, bi.not_out
@@ -3360,7 +3419,7 @@ async def get_batting_leaderboard_extended(
                 WHERE {_GRADE_MATCH}{season_clause}{scope_clause}
                   AND NOT COALESCE(bi.did_not_bat, FALSE)
                   AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb'){finals_clause}
-            ){import_cte}
+            ){import_cte}{mp_cte}
             SELECT * FROM (
                 SELECT
                     p.id AS player_id,
@@ -3380,11 +3439,12 @@ async def get_batting_leaderboard_extended(
                     SUM(CASE WHEN q.runs >= 50 AND q.runs < 100 THEN 1 ELSE 0 END) + COALESCE(MAX(it.fifties), 0) AS fifties,
                     SUM(CASE WHEN q.runs >= 100 THEN 1 ELSE 0 END) + COALESCE(MAX(it.hundreds), 0) AS hundreds,
                     SUM(CASE WHEN q.runs = 0 AND NOT q.not_out THEN 1 ELSE 0 END) + COALESCE(MAX(it.ducks), 0) AS ducks,
-                    COUNT(DISTINCT q.game_id) + COALESCE(MAX(it.games), 0) AS games,
+                    {games_expr} + COALESCE(MAX(it.games), 0) AS games,
                     COALESCE(SUM(q.fours), 0) + COALESCE(MAX(it.total_fours), 0) AS total_fours,
                     COALESCE(SUM(q.sixes), 0) + COALESCE(MAX(it.total_sixes), 0) AS total_sixes
                 FROM players p
                 LEFT JOIN qualifying q ON q.player_id = p.id
+                {mp_join}
                 {import_join}
                 WHERE p.organisation_id = :org_id{gender_clause}{overseas_clause}
                   AND ({qualify_clause})
@@ -3738,6 +3798,10 @@ async def get_bowling_leaderboard_extended(
                 import_cte = _import_bowling_cte(_IMPORT_GRADE_MATCH, import_season_clause)
                 import_join = ("LEFT JOIN import_totals it ON it.player_id = p.id "
                                "LEFT JOIN import_best ib ON ib.player_id = p.id")
+        mp_cte, mp_join, games_expr = _grade_matches_played(
+            by_name=False, season_clause="", finals_clause=finals_clause,
+            scope_clause=scope_clause, captain_only=captain_only,
+            own_games="COUNT(DISTINCT bq.game_id)")
         base = f"""
             WITH bowling_qualifying AS (
                 SELECT bs.player_id, bs.game_id, bs.wickets, bs.runs, bs.overs, bs.maidens
@@ -3753,7 +3817,7 @@ async def get_bowling_leaderboard_extended(
                     bq.wickets::text || '/' || bq.runs::text AS best_bowling_figures
                 FROM bowling_qualifying bq
                 ORDER BY bq.player_id, bq.wickets DESC, bq.runs ASC
-            ){import_cte}
+            ){import_cte}{mp_cte}
             SELECT
                 player_id, name, games, total_wickets, average, economy,
                 econ_counted, econ_of,
@@ -3765,7 +3829,7 @@ async def get_bowling_leaderboard_extended(
                 SELECT
                     p.id AS player_id,
                     COALESCE(p.display_name_override, p.name) AS name,
-                    COUNT(DISTINCT bq.game_id) + COALESCE(MAX(it.games), 0) AS games,
+                    {games_expr} + COALESCE(MAX(it.games), 0) AS games,
                     COALESCE(SUM(bq.wickets), 0) + COALESCE(MAX(it.total_wickets), 0) AS total_wickets,
                     ROUND((COALESCE(SUM(bq.runs), 0) + COALESCE(MAX(it.total_runs_conceded), 0))::numeric
                         / NULLIF(COALESCE(SUM(bq.wickets), 0) + COALESCE(MAX(it.total_wickets), 0), 0), 2) AS average,
@@ -3786,6 +3850,7 @@ async def get_bowling_leaderboard_extended(
                 FROM players p
                 LEFT JOIN bowling_qualifying bq ON bq.player_id = p.id
                 LEFT JOIN best_spell bsf ON bsf.player_id = p.id
+                {mp_join}
                 {import_join}
                 WHERE p.organisation_id = :org_id{gender_clause}{overseas_clause}
                   AND ({qualify_clause})
@@ -3820,6 +3885,10 @@ async def get_bowling_leaderboard_extended(
             import_cte = _import_bowling_cte(_IMPORT_GRADE_MATCH, import_season_clause)
             import_join = ("LEFT JOIN import_totals it ON it.player_id = p.id "
                            "LEFT JOIN import_best ib ON ib.player_id = p.id")
+        mp_cte, mp_join, games_expr = _grade_matches_played(
+            by_name=True, season_clause=season_clause, finals_clause=finals_clause,
+            scope_clause=scope_clause, captain_only=captain_only,
+            own_games="COUNT(DISTINCT bq.game_id)")
         base = f"""
             WITH bowling_qualifying AS (
                 SELECT bs.player_id, bs.game_id, bs.wickets, bs.runs, bs.overs, bs.maidens
@@ -3836,7 +3905,7 @@ async def get_bowling_leaderboard_extended(
                     bq.wickets::text || '/' || bq.runs::text AS best_bowling_figures
                 FROM bowling_qualifying bq
                 ORDER BY bq.player_id, bq.wickets DESC, bq.runs ASC
-            ){import_cte}
+            ){import_cte}{mp_cte}
             SELECT
                 player_id, name, games, total_wickets, average, economy,
                 econ_counted, econ_of,
@@ -3848,7 +3917,7 @@ async def get_bowling_leaderboard_extended(
                 SELECT
                     p.id AS player_id,
                     COALESCE(p.display_name_override, p.name) AS name,
-                    COUNT(DISTINCT bq.game_id) + COALESCE(MAX(it.games), 0) AS games,
+                    {games_expr} + COALESCE(MAX(it.games), 0) AS games,
                     COALESCE(SUM(bq.wickets), 0) + COALESCE(MAX(it.total_wickets), 0) AS total_wickets,
                     ROUND((COALESCE(SUM(bq.runs), 0) + COALESCE(MAX(it.total_runs_conceded), 0))::numeric
                         / NULLIF(COALESCE(SUM(bq.wickets), 0) + COALESCE(MAX(it.total_wickets), 0), 0), 2) AS average,
@@ -3869,6 +3938,7 @@ async def get_bowling_leaderboard_extended(
                 FROM players p
                 LEFT JOIN bowling_qualifying bq ON bq.player_id = p.id
                 LEFT JOIN best_spell bsf ON bsf.player_id = p.id
+                {mp_join}
                 {import_join}
                 WHERE p.organisation_id = :org_id{gender_clause}{overseas_clause}
                   AND ({qualify_clause})
