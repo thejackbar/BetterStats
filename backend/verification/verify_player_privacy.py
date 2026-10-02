@@ -531,6 +531,85 @@ async def main() -> None:
             check("the access report says the photo is gone", rep["player"]["has_photo"] is False)
 
         # -------------------------------------------------------- CLUB ADMIN
+        if HAVE:
+            print("the response filter (every public response, not just his profile)")
+            from app.services import privacy_scrub
+            from fastapi import FastAPI as _FastAPI
+            from fastapi.responses import JSONResponse as _J, PlainTextResponse as _T, Response as _R
+
+            check("name_variants covers the forms a scorecard writes",
+                  {"Trent Steenholdt", "Steenholdt, Trent", "T Steenholdt", "T. Steenholdt",
+                   "Steenholdt T"} <= privacy_scrub.name_variants("Steenholdt, Trent"))
+
+            privacy_scrub.forget()
+            mini = _FastAPI()
+            mini.add_middleware(privacy_scrub.PrivacyScrubMiddleware)
+            TXT = ("Trent Steenholdt, Steenholdt, Trent, T Steenholdt, T. Steenholdt and c Steenholdt b Smith "
+                   f"id {TRENT} {str(TRENT).upper()}")
+            PLAIN_TXT = "Pat Plain scored 50, id " + str(PLAIN)
+
+            @mini.get("/leaky")
+            async def _leaky():
+                return _J({"a": TXT, "ok": PLAIN_TXT, "nested": [{"player_name": "Trent Steenholdt", "player_id": str(TRENT)}]})
+
+            @mini.get("/club-admin/people")
+            async def _admin():
+                return _J({"a": TXT})
+
+            @mini.get("/photo")
+            async def _photo():
+                return _R(b"\x89PNG Trent Steenholdt", media_type="image/png")
+
+            @mini.get("/csv")
+            async def _csv():
+                return _T("name\nTrent Steenholdt\n", media_type="text/csv")
+
+            @mini.get("/lots")
+            async def _lots():
+                return _J({"rows": [{"player_name": f"Somebody {i}"} for i in range(400)] + [{"player_name": "Trent Steenholdt"}]})
+
+            tr = httpx.ASGITransport(app=mini)
+            async with httpx.AsyncClient(transport=tr, base_url="http://m") as mc:
+                r = await mc.get("/leaky")
+                body = r.text
+                check("every written form of his name is replaced",
+                      "Steenholdt" not in body and "Trent" not in body.replace("Trent S", "") and "Player removed" in body, body[:200])
+                check("his id is replaced, upper and lower case", str(TRENT) not in body and str(TRENT).upper() not in body)
+                check("the response is still valid JSON", r.json()["ok"] == PLAIN_TXT)
+                check("other people's names and ids are left alone", "Pat Plain" in body and str(PLAIN) in body)
+                check("content-length matches the rewritten body", int(r.headers["content-length"]) == len(r.content))
+                r = await mc.get("/club-admin/people")
+                check("a request with NO token to a management route is still scrubbed",
+                      "Steenholdt" not in r.text, r.text[:120])
+                r = await mc.get("/club-admin/people", headers={"Authorization": "Bearer x"})
+                check("a signed-in request to a management route is NOT scrubbed (the club runs its own record)",
+                      "Steenholdt" in r.text)
+                r = await mc.get("/leaky", headers={"Authorization": "Bearer x"})
+                check("a token alone does not unscrub a PUBLIC route", "Steenholdt" not in r.text)
+                r = await mc.get("/photo")
+                check("a binary response is passed through untouched", r.content == b"\x89PNG Trent Steenholdt")
+                r = await mc.get("/csv")
+                check("a CSV is scrubbed", "Steenholdt" not in r.text and "Player removed" in r.text)
+                r = await mc.get("/lots")
+                check("a large response is scrubbed and complete", len(r.json()["rows"]) == 401 and "Steenholdt" not in r.text)
+
+            # A bare surname is only removed when nobody else holds it.
+            async with Session() as db:
+                db.add(Player(id=uid(), name="Sam Steenholdt", organisation_id=OURS, grassroots_id=str(uid())))
+                await db.commit()
+            privacy_scrub.forget()
+            tr = httpx.ASGITransport(app=mini)
+            async with httpx.AsyncClient(transport=tr, base_url="http://m") as mc:
+                r = await mc.get("/leaky")
+                check("a surname somebody else shares is NOT scrubbed bare (their data is not damaged)",
+                      "c Steenholdt b Smith" in r.text, r.text[:160])
+                check("...but his full name and initials still are",
+                      "Trent Steenholdt" not in r.text and "T Steenholdt" not in r.text and "T. Steenholdt" not in r.text)
+            async with Session() as db:
+                await db.execute(text("DELETE FROM players WHERE name = 'Sam Steenholdt'"))
+                await db.commit()
+            privacy_scrub.forget()
+
         print("a signed-in club admin")
         async with Session() as db:
             who["user"] = await db.get(User, ADMIN)

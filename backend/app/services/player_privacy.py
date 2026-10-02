@@ -160,6 +160,8 @@ async def hide_at_request(
          WHERE NOT EXISTS (SELECT 1 FROM player_privacy_suppressions WHERE grassroots_id = :g)
     """), {"g": person_key(player), "r": reason, "b": by})
     out["suppression_recorded"] = True
+    from app.services import privacy_scrub
+    privacy_scrub.forget()
     return out
 
 
@@ -235,6 +237,8 @@ async def restore_public(session: AsyncSession, player: Player, *, by: str) -> d
             await _restore_one(session, sib, by=by)
     await session.execute(
         text("DELETE FROM player_privacy_suppressions WHERE grassroots_id = :g"), {"g": person_key(player)})
+    from app.services import privacy_scrub
+    privacy_scrub.forget()
     return await _restore_one(session, player, by=by)
 
 

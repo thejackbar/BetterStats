@@ -6220,6 +6220,10 @@ class UsageTrackingMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(UsageTrackingMiddleware)
+# Removes anyone who asked to be taken off the public site (migration 316) from
+# every public response, by id and by name. See services/privacy_scrub.py.
+from app.services.privacy_scrub import PrivacyScrubMiddleware
+app.add_middleware(PrivacyScrubMiddleware)
 
 app.include_router(auth.router)
 app.include_router(clubs.router)

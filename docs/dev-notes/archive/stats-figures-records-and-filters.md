@@ -2156,3 +2156,13 @@ Noticed, not fixed: `GET /players/{player_id}/profile` is behind `require_cap(MA
 
 **Verified against a real Postgres** (`verify_player_privacy.py`, 97 checks) **with a control run**: reverting the gate fails 7 (an admin still opens the removed player's profile and stats).
 
+## v9.102.8: The whole public site, not just the profile page (Oct 2026)
+
+The owner asked whether there was "absolutely no way" the removed player could be found without an admin login. A new exposure audit (`backend/verification/audit_hidden_player_exposure.py`) called every one of 595 GET routes of the real app, signed out, over a seeded club with one player removed. Before the removal it found him in 15 routes (the control that the scanner can see him); after the removal and the profile gate it still found him in 8: `/games/{id}/scorecard`, `/players/{id}/teammates` and `/teammates/{id}`, `/statlab/query` (it filtered on junior-hiding ids only, so a club-hidden player leaked there too) and four `/yearbooks/{org}/{season}/stats/*` routes (`players`, `batting`, `grades` high-score name, `results` top batter). Fixing each route would have left the next route nobody remembered, and free text (a hand-typed honour board) cannot be found by id at all, so `privacy_scrub.PrivacyScrubMiddleware` scrubs every text GET response instead: the ids become the nil UUID, every written form of the name becomes "Player removed", and a bare surname goes only when no other player holds it. After: 0 of 595 routes mention him. 21 routes error in the harness (they need raw-SQL tables it does not build: achievements, award-definitions, honours, yearbooks root, member portal, self-serve, videos, webinar, sitemap) and are NOT counted as safe; the middleware covers their text responses and a person should read each against real data.
+
+Management exemption: only a request carrying an `Authorization` header to a `MANAGEMENT_PREFIXES` path is unscrubbed. Known gap: an unlisted signed-in management screen shows "Player removed" for that one person.
+
+Cost: a 30-second cached lookup per process, and no buffering at all while nobody is removed. The script clears the cache in its own process only, so a removal takes up to 30 seconds to reach the running backend.
+
+**Verified against a real Postgres** (`verify_player_privacy.py`, 111 checks, including every name form, the id in two cases, valid JSON, content-length, CSV, a binary passed through, a large body, a token to a management route and to a public route, and the shared-surname rule). The audit's before-pass is the control for the after-pass: without the middleware the same audit reported 8 leaks.
+
