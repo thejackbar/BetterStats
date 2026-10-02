@@ -53,6 +53,8 @@ async def main() -> int:
     engine = create_async_engine(DB_URL)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Lifespan DDL (main.py), not on the ORM model: the shared "not played" predicate reads it.
+        await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
 
     Session = async_sessionmaker(engine, expire_on_commit=False)
     async with Session() as db:

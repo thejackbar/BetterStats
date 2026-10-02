@@ -77,6 +77,8 @@ async def build() -> None:
         await conn.execute(text("CREATE SCHEMA public"))
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
         await conn.run_sync(Base.metadata.create_all)
+        # Lifespan DDL (main.py), not on the ORM model: the shared "not played" predicate reads it.
+        await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
         # `create_all` builds club_competitions WITHOUT its gen_random_uuid()
         # server default, so the real DDL's CREATE TABLE IF NOT EXISTS would be
         # a no-op over a table that then refuses every insert. Drop it back to

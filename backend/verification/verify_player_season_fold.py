@@ -93,6 +93,8 @@ G_OURS_19A = uuid.uuid4(); G_OURS_19B = uuid.uuid4(); G_OURS_99 = uuid.uuid4()
 async def build_schema() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Lifespan DDL (main.py), not on the ORM model: the shared "not played" predicate reads it.
+        await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
         # Raw-SQL lifespan tables create_all doesn't make.
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS season_aliases (

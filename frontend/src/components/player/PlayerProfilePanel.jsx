@@ -536,9 +536,24 @@ function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, o
             all on the club's public site. Asked for by juniors who would
             rather not be. Their stats still count towards the club's totals
             and they stay in every admin screen. */}
-        <PToggle on={draft.is_public === false} onChange={(v) => set('is_public', !v)}
-          label="Hidden — keep off the public website" />
-        {draft.is_public === false && (
+        {draft.privacy_hidden_at ? (
+          // The person asked to be taken off the public website. Not the club's
+          // switch to flip: the server refuses it too (409), so show why instead
+          // of a toggle that cannot work.
+          <div className="rounded-lg px-3 py-2.5 text-[12.5px] leading-snug"
+            style={{ background: 'var(--pb-surface2)', border: '1px solid var(--pb-hairline2)' }}>
+            <div className="text-[13.5px] text-pb-text font-medium mb-0.5">Removed at the player's request</div>
+            <div className="text-pb-faint">
+              They asked to be taken off the public website, so they stay hidden and no photo
+              can be added. Their stats still count in your club's totals and in every admin
+              screen. If that has changed, contact BetterSports support.
+            </div>
+          </div>
+        ) : (
+          <PToggle on={draft.is_public === false} onChange={(v) => set('is_public', !v)}
+            label="Hidden — keep off the public website" />
+        )}
+        {!draft.privacy_hidden_at && draft.is_public === false && (
           <div className="pl-[47px] pb-1.5 text-[11.5px] text-pb-faint leading-snug">
             Off the public squad list, search, leaderboards and records, and
             their profile page stops resolving. Still here for you: selection,
@@ -702,6 +717,8 @@ export function draftFromProfile(p) {
     skill_positions: p.skill_positions || [],
     playhq_id: p.playhq_id || '',
     is_public: p.is_public !== false,
+    // Set when the person asked to be removed; read only, never sent back.
+    privacy_hidden_at: p.privacy_hidden_at || null,
     is_financial_override: p.is_financial_override ?? null,
     trained_override: p.trained_override ?? null,
     // "YYYY-MM-DD" or '' — the shape <input type="date"> speaks. The age is

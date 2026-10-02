@@ -317,6 +317,8 @@ async def main() -> None:
     print("settings")
     async with engine.begin() as c:
         await c.run_sync(Base.metadata.create_all)
+        # Lifespan DDL (main.py), not on the ORM model: the shared "not played" predicate reads it.
+        await c.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
         for s in DOWNGRADE:
             await c.execute(text(s))
     async with engine.begin() as c:

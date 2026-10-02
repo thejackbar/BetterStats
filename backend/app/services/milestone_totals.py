@@ -38,7 +38,7 @@ from typing import Iterable, Optional
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.game_status import NOT_PLAYED_SQL_LIST
+from app.services.game_status import not_played_game_sql
 from app.services.grade_labels import GRADE_CATEGORIES, categories_for_name, org_grade_category_sets
 from app.services.grade_scope import DEFAULT_CATEGORIES, GradeScope, club_default_categories, resolve_scope
 
@@ -133,7 +133,7 @@ async def _scoped(session: AsyncSession, org_id, pids: list[str],
             SELECT ga.player_id, ga.game_id FROM game_appearances ga
             JOIN games ag ON ag.id = ga.game_id
              WHERE ga.player_id = ANY({_PIDS})
-               AND (ag.status IS NULL OR ag.status NOT IN ({NOT_PLAYED_SQL_LIST}))
+               AND NOT {not_played_game_sql('ag')}
         )
         SELECT ap.player_id::text AS pid, COUNT(DISTINCT g.id) AS v
         FROM ap JOIN v_effective_games g ON g.id = ap.game_id

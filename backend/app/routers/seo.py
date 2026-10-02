@@ -125,10 +125,14 @@ async def sitemap(db: AsyncSession = Depends(get_db)):
             ))
 
     # Every player at an active club gets a profile URL.
+    # A player hidden from the public site (players.is_public false, which
+    # includes anyone who asked to be removed, migration 316) resolves to a 404,
+    # so they are not listed either.
     player_rows = (await db.execute(
         select(Player.id)
         .join(Organisation, Player.organisation_id == Organisation.id)
         .where(Organisation.is_active == True)  # noqa: E712
+        .where(Player.is_public.is_not(False))
     )).all()
 
     # Players a club hides from its public Stats (junior-only, migration 315)

@@ -15,6 +15,10 @@
 // there on the UNFILTERED view, reading correctly in BOTH directions (we hold
 // more than CA counts about as often as fewer), and never being drawn on a
 // player it has nothing to tell.
+//
+// SHAPE (v9.102.4): the header carries only a small "i" beside the MATCHES
+// label that opens the explainer. There is deliberately NO sentence beside the
+// figure, so the number reads clean and the explanation is one tap away.
 import { existsSync } from 'node:fs'
 import { chromium } from 'playwright'
 
@@ -199,13 +203,13 @@ try {
     ck('the MATCHES tile is found at all', !!tile, JSON.stringify(tile))
     ck('the headline figure is still Cricket Australia\'s own 333',
        tile?.figure === '333', tile?.figure)
-    ck('THE NOTE IS DRAWN ON THE UNFILTERED VIEW — the whole point, so nobody '
-       + 'adds the competitions up first and reads the gap as a mistake',
-       !!tile && /337/.test(tile.text), tile?.text)
-    ck('and it reads as a surplus, never as "337 of 333"',
-       !!tile && /more than/.test(tile.text) && !/337 of 333/.test(tile.text),
+    ck('AN "i" IS OFFERED BESIDE THE FIGURE ON THE UNFILTERED VIEW, so a reader '
+       + 'who adds the competitions up first has somewhere to go',
+       !!tile && tile.hasButton, tile?.text)
+    ck('and there is NO sentence beside the number: the tile is only the label '
+       + 'and the figure until the "i" is opened',
+       !!tile && /^MATCHES\s*i?\s*333$/i.test(tile.text.replace(/\s+/g, "")),
        tile?.text)
-    ck('an explainer is offered beside it', !!tile && tile.hasButton)
 
     // `?? ''` so a CONTROL RUN with the note absent reports each check
     // rather than dying here and saying nothing about the rest.
@@ -223,6 +227,10 @@ try {
     ck('it names the surplus direction rather than the missing one',
        /runs the other way/.test(after) && !/no scorecard for/.test(after),
        after.slice(0, 400))
+    ck('and says what is and is not counted: an empty scorecard is not a match, '
+       + 'a game that started and was stopped is',
+       /nothing on its scorecard is not\s+counted/.test(after)
+       && /started and was then stopped is/.test(after), after.slice(0, 600))
     ck('and says neither figure is adjusted to match the other',
        /Neither is adjusted/.test(after))
     await page.click('button[aria-label="Why these figures differ"]',
@@ -239,8 +247,8 @@ try {
     const { page, ctx, errors } = await open(SHORT)
     const tile = await readTile(page)
     ck('the headline is CA\'s 150', tile?.figure === '150', tile?.figure)
-    ck('the note says how much of it can be broken down',
-       !!tile && /106 of these 150/.test(tile.text), tile?.text)
+    ck('the tile carries an "i" and no sentence', !!tile && tile.hasButton
+       && !/106 of these 150/.test(tile.text), tile?.text)
     // Short timeout + a swallowed failure: a CONTROL RUN has no button to
     // click, and must REPORT the checks below rather than hanging for the
     // default 30s and then dying with nothing said about them.
@@ -340,13 +348,17 @@ try {
     const tile = await readTile(page)
     ck('the headline is the filtered figure, neither of the career numbers',
        tile?.figure === '11', tile?.figure)
-    ck('THE NOTE NEVER CLAIMS ITS FIGURES ARE THE HEADLINE — it names both '
-       + 'career sources instead, so nothing on screen contradicts anything else',
-       !!tile && /counted from the 14 matches we hold a scorecard for, not the 9/
-         .test(tile.text), tile?.text)
-    ck('and it does not print "11" as if it were one of them',
-       !!tile && !/\b11\b/.test(tile.text.replace(/^MATCHES\s*11/, '')),
-       tile?.text)
+    ck('the tile carries an "i" and no sentence claiming a source',
+       !!tile && tile.hasButton && !/scorecard/.test(tile.text), tile?.text)
+    await page.click('button[aria-label="Why these figures differ"]',
+                     { timeout: 2000 }).catch(() => {})
+    await page.waitForTimeout(150)
+    const opened = (await readTile(page))?.text ?? ''
+    ck('THE EXPLAINER NEVER CLAIMS ITS FIGURES ARE THE HEADLINE — it names both '
+       + 'career sources (CA 9, scorecards 14), so nothing on screen contradicts '
+       + 'anything else',
+       /counted from\s+the 14 matches we hold a scorecard for, not from Cricket Australia's count/
+         .test(opened) && /count 9 matches/.test(opened), opened.slice(0, 500))
     ck('no page errors', errors.length === 0, errors.join(' | '))
     await ctx.close()
   }
@@ -440,7 +452,16 @@ try {
       document.documentElement.scrollWidth - document.documentElement.clientWidth)
     ck('no horizontal overflow at 390px', over <= 0, `over by ${over}px`)
     const tile = await readTile(page)
-    ck('and the note is still there', !!tile && /337/.test(tile.text))
+    ck('and the "i" is still there', !!tile && tile.hasButton)
+    // Short timeout + swallowed failure so a control run reports, not hangs.
+    await page.click('button[aria-label="Why these figures differ"]',
+                     { timeout: 2000 }).catch(() => {})
+    await page.waitForTimeout(150)
+    const overOpen = await page.evaluate(() =>
+      document.documentElement.scrollWidth - document.documentElement.clientWidth)
+    ck('and no horizontal overflow at 390px with the explainer open',
+       overOpen <= 0 && /Two records of the same career/.test((await readTile(page))?.text ?? ''),
+       `over by ${overOpen}px`)
     ck('no page errors', errors.length === 0, errors.join(' | '))
     await ctx.close()
   }

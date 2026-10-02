@@ -1,10 +1,10 @@
 export default {
   version: 'v9.102.3',
-  date: '2026-10-02',
-  sortKey: '2026-10-02T09:00:00Z',
-  title: 'BetterFantasyCricket: two-day games are one round',
+  date: '2026-10-01',
+  sortKey: '2026-10-01T15:00:00Z',
+  title: 'Inactive players are out of the selection pool',
   items: [
-    'A two-day match now counts as a single fantasy round. Before, the first week of a two-day game was one round and the second week was another, so a club with two-day men\'s games got extra rounds and the scoring window was cut in half. Both days of a match now sit in the same round, whichever day the scorecard is dated.',
-    'When Generate rounds merges weeks like this, any extra rounds left over from an earlier run are removed, as long as nothing has been scored, picked or drawn against them. Rounds that are already scored are never touched.',
+    'The Available pool on the selection board no longer lists players marked inactive. The pool header says how many are left out, for example "47 inactive not shown".',
+    'An inactive player no longer shows a squad tag, even if an old squad row or their past games still pointed at one.',
   ],
 }

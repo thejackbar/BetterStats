@@ -609,6 +609,13 @@ async def _player_html(player_id: str, page_url: str, base: str, db: AsyncSessio
 
     org = await db.get(Organisation, player.organisation_id) if player.organisation_id else None
 
+    # A player hidden from the public site, including anyone who asked to be
+    # removed (migration 316), gets no share card: this is served to crawlers
+    # with no signed-in viewer, and would otherwise print their name and photo
+    # into search and social previews after the profile itself had gone.
+    if player.is_public is False:
+        return None
+
     # A junior-only player a club hides from its public Stats gets no share
     # card either: this is served to crawlers with no signed-in viewer.
     if org is not None:

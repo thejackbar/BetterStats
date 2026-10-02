@@ -102,6 +102,8 @@ async def main() -> int:  # noqa: C901
         await conn.execute(text("DROP SCHEMA public CASCADE"))
         await conn.execute(text("CREATE SCHEMA public"))
         await conn.run_sync(Base.metadata.create_all)
+        # Lifespan DDL (main.py), not on the ORM model: the shared "not played" predicate reads it.
+        await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
         await conn.execute(text(ROSTER_AREAS_DDL))
         await conn.execute(text(ROSTER_AREA_ROLES_DDL))
 
