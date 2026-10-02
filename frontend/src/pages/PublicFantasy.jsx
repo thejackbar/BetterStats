@@ -11,7 +11,7 @@ import { api } from '../lib/api'
 import {
   ensureThemeCss, loadThemePref, saveThemePref, resolveTheme, DEFAULT_ACCENT,
 } from './fantasy/theme'
-import { FantasyCtx, crestText, DISP, useIsDesktop, ThemeToggle } from './fantasy/ui'
+import { FantasyCtx, crestText, DISP, useIsDesktop, ThemeToggle, fantasyName } from './fantasy/ui'
 import { AppHeader, NavPills, Banner } from './fantasy/shell'
 import bcMark from '../assets/bettercricket-black.svg'
 import Auth from './fantasy/Auth'
@@ -153,7 +153,7 @@ export default function PublicFantasy() {
 
           {phase === 'dead' && (
             <div style={{ textAlign: 'center', marginTop: 48 }}>
-              <div style={{ font: `800 22px ${DISP}`, textTransform: 'uppercase', color: 'var(--text)' }}>{club?.name || 'Fantasy Cricket'}</div>
+              <div style={{ font: `800 22px ${DISP}`, textTransform: 'uppercase', color: 'var(--text)' }}>{fantasyName(club) || club?.name || 'Fantasy Cricket'}</div>
               <div style={{ maxWidth: 440, margin: '12px auto 0' }}><Banner>This fantasy link isn't active yet. Check with your club.</Banner></div>
             </div>
           )}

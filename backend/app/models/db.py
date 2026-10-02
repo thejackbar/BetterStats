@@ -344,6 +344,11 @@ class Organisation(Base):
     # {"major": "Naming Partner"}. NULL means the stock names. Read through
     # services/sponsor_tiers.resolve_labels, never directly.
     sponsor_tier_labels = Column(JSONB, nullable=True)
+    # The club's own names for its public sections, optionally linked to a
+    # sponsor (migration 319), e.g. {"fantasy": {"name": "Froth Fantasy
+    # Cricket", "sponsor_id": "..."}}. NULL means standard names everywhere.
+    # Read through services/section_names.py, never directly.
+    section_names = Column(JSONB, nullable=True)
     # Which grade categories count towards this club's stats by default — a
     # JSONB list of grade_labels.GRADE_CATEGORIES keys (migration 228). NULL
     # means no club preference, and the platform default applies: everything

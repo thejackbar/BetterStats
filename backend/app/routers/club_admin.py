@@ -35,6 +35,7 @@ from app.auth.modules import (
 )
 from app.services import junior_hiding
 from app.services import sponsor_tiers
+from app.services import section_names
 from app.services import player_privacy
 from app.services import module_subscriptions as mod_subs
 from app.services import comms_limits
@@ -5569,6 +5570,49 @@ async def put_sponsor_settings(
         **sponsor_tiers.tier_meta(),
         "tier_labels": sponsor_tiers.resolve_labels(club.sponsor_tier_labels),
     }
+
+
+@router.get("/sponsors/section-names")
+async def get_section_names(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+):
+    """Each public section with its standard name and the club's own name and
+    linked sponsor, for the Section names panel."""
+    return section_names.admin_view(club.section_names)
+
+
+class SectionNameEntry(BaseModel):
+    name: Optional[str] = None
+    sponsor_id: Optional[str] = None
+
+
+class SectionNamesPut(BaseModel):
+    sections: dict[str, SectionNameEntry]
+
+
+@router.put("/sponsors/section-names")
+async def put_section_names(
+    data: SectionNamesPut,
+    current_user: User = Depends(require_cap(MANAGE_SPONSORS)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Replace the club's section names with what is sent. A section left out,
+    or sent with no name and no sponsor, goes back to its standard name."""
+    rows = (await db.execute(
+        select(Sponsor.id).where(Sponsor.organisation_id == club.id)
+    )).scalars().all()
+    try:
+        cleaned = section_names.clean_input(
+            {k: v.model_dump() for k, v in data.sections.items()}, [str(r) for r in rows],
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    club.section_names = cleaned
+    await db.commit()
+    await db.refresh(club)
+    return section_names.admin_view(club.section_names)
 
 
 class SponsorCreate(BaseModel):

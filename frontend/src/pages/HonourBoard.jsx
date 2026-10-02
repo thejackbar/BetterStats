@@ -7,6 +7,7 @@ import ClubInactive from './ClubInactive'
 import ClubPinGate from './ClubPinGate'
 import { Label, PageHeader, PbSpinner } from '../lib/presskit'
 import { useNameFormat } from '../lib/nameFormat'
+import { useSectionNames } from '../lib/sectionNames'
 
 // A board per role the club has recorded somebody in — President, Secretary,
 // Club Coach and the rest — each a list of who held it and when, read out of
@@ -43,6 +44,7 @@ function Years({ spans }) {
 
 export default function HonourBoard() {
   const { clubSlug } = useParams()
+  const sec = useSectionNames(clubSlug)
   const { club, orgId, inactive, notFound, locked, unlock, requestAccess } = useClub(clubSlug)
   useClubTheme(club)
   const fmt = useNameFormat(club)
@@ -75,8 +77,8 @@ export default function HonourBoard() {
     <div className="min-h-screen bg-pb-bg text-pb-text">
       <main className="max-w-[1400px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
         <PageHeader
-          eyebrow={`HONOUR BOARD · ${club?.name?.toUpperCase() || ''}`}
-          title="Who ran the club."
+          eyebrow={sec.renamed('honour_board') ? (club?.name?.toUpperCase() || '') : `HONOUR BOARD · ${club?.name?.toUpperCase() || ''}`}
+          title={sec.name('honour_board', "Who ran the club.")}
           meta={[<span key="x">Every role the club has kept a record of, and who held it.</span>]}
         />
 

@@ -33,13 +33,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.modules import MODULE_FANTASY, org_has_module
 from app.config.settings import settings
 from app.models.db import (
-    Organisation, Player, Team, get_db,
+    Organisation, Player, Sponsor, Team, get_db,
     FantasySeason, FantasyLeague, FantasyManager, FantasySquad, FantasySquadPlayer,
     FantasyLeagueMember, FantasyPoolPlayer, FantasyRound, FantasyTransaction,
     FantasySquadRoundScore, FantasyPlayerRoundScore,
     FantasyDraft, FantasyDraftPick, FantasyDraftWishlist, FantasyWaiverClaim, FantasyTrade,
 )
-from app.services import rate_limit, fantasy_draft, fantasy_engine
+from app.services import rate_limit, fantasy_draft, fantasy_engine, section_names
 from app.services.fantasy_squad import validate_squad, score_squad_round
 from app.services.fantasy_scoring import DEFAULT_RULES, DEFAULT_SCORING
 
@@ -342,7 +342,16 @@ async def landing(token: str, request: Request, db: AsyncSession = Depends(get_d
             "rules": season.rules or DEFAULT_RULES, "scoring": season.scoring or DEFAULT_SCORING,
             "pool_size": pool_n,
         }
-    return {"club": _club_branding(club), "season": season_out, "me": me}
+    branding = _club_branding(club)
+    # The club's own name for the game ("Froth Fantasy Cricket") and the sponsor
+    # linked to it, if it set either. Both null leaves the standard wording.
+    sponsors = (await db.execute(
+        select(Sponsor).where(Sponsor.organisation_id == club.id)
+    )).scalars().all()
+    named = section_names.resolve(club.section_names, sponsors).get("fantasy") or {}
+    branding["fantasy_name"] = named.get("name")
+    branding["fantasy_sponsor"] = named.get("sponsor")
+    return {"club": branding, "season": season_out, "me": me}
 
 
 class RegisterBody(BaseModel):

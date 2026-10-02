@@ -4395,6 +4395,13 @@ async def lifespan(app: FastAPI):
         for _stmt in _SPONSOR_TIERS_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 319: a club's own names for its public sections. Same
+        # one-copy rule: this list and alembic's 319 both run
+        # services/section_names_ddl.STATEMENTS.
+        from app.services.section_names_ddl import STATEMENTS as _SECTION_NAMES_DDL
+        for _stmt in _SECTION_NAMES_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 312: super-admin messages on the club admin dashboard.
         # Same one-copy rule: this and alembic's 312 both run
         # services/admin_broadcast_ddl.STATEMENTS.

@@ -87,6 +87,8 @@ SHARED_DDL_MODULES = (
     # `organisations.sponsor_tier_labels`, all on shared ORM models: football's
     # own sponsors router selects the whole Sponsor entity.
     ("app.services.sponsor_tiers_ddl", "STATEMENTS"),
+    # Migration 319. `organisations.section_names`, on the shared Organisation model.
+    ("app.services.section_names_ddl", "STATEMENTS"),
 )
 
 

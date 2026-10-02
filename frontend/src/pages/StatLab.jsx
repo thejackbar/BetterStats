@@ -14,6 +14,7 @@ import { fmt2, fmtCount, fmtOvers, formatSeason } from '../lib/cricketFormat'
 import {
   GRADE_CATEGORIES, CATEGORY_LABELS, MATCH_FORMATS, FORMAT_LABELS, scopeNote,
 } from '../lib/gradeCategories'
+import { useSectionNames } from '../lib/sectionNames'
 
 // ─── Static config ────────────────────────────────────────────────────────────
 
@@ -1459,6 +1460,7 @@ function SaveReportModal({ open, onClose, onSave, defaultTitle, initial }) {
 
 export default function StatLab() {
   const { clubSlug, reportSlug } = useParams()
+  const sec = useSectionNames(clubSlug)
   const { club, orgId, inactive, notFound, locked, unlock, requestAccess } = useClub(clubSlug)
   useClubTheme(club) // every other club-slug page wears the club's colours + fonts; StatLab was the one that didn't
   const { org, seasons, loading: clubLoading } = useClubData(orgId)
@@ -1807,7 +1809,7 @@ export default function StatLab() {
         <PageHeader
           eyebrow={openReport
             ? 'SAVED REPORT'
-            : (activeDerived || activePreset ? 'STAT LAB · REPORT' : 'STAT LAB · CUSTOM QUERY')}
+            : (activeDerived || activePreset ? `${sec.name('statlab', 'STAT LAB').toUpperCase()} · REPORT` : `${sec.name('statlab', 'STAT LAB').toUpperCase()} · CUSTOM QUERY`)}
           title={openReport
             ? openReport.title
             : (activeDerived && schema?.derived?.[activeDerived]?.label

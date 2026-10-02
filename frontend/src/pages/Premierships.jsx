@@ -7,6 +7,7 @@ import ClubInactive from './ClubInactive'
 import ClubPinGate from './ClubPinGate'
 import { Label, PageHeader, PbSpinner } from '../lib/presskit'
 import { useNameFormat } from '../lib/nameFormat'
+import { useSectionNames } from '../lib/sectionNames'
 
 // Every flag the club has recorded, as the squad that won it — read out of the
 // Premiership awards already sitting on players' profiles, so a club that has
@@ -77,6 +78,7 @@ function PlayerLine({ player, logoUrl, fmt }) {
 
 export default function Premierships() {
   const { clubSlug } = useParams()
+  const sec = useSectionNames(clubSlug)
   const { club, orgId, inactive, notFound, locked, unlock, requestAccess } = useClub(clubSlug)
   useClubTheme(club)
   const fmt = useNameFormat(club)
@@ -107,8 +109,8 @@ export default function Premierships() {
     <div className="min-h-screen bg-pb-bg text-pb-text">
       <main className="max-w-[1400px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
         <PageHeader
-          eyebrow={`PREMIERSHIPS · ${club?.name?.toUpperCase() || ''}`}
-          title="Flags on the wall."
+          eyebrow={sec.renamed('premierships') ? (club?.name?.toUpperCase() || '') : `PREMIERSHIPS · ${club?.name?.toUpperCase() || ''}`}
+          title={sec.name('premierships', "Flags on the wall.")}
           meta={[<span key="x">Every premiership side the club has recorded.</span>]}
         />
 

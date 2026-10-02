@@ -11,6 +11,7 @@ import { useGradeFilters } from '../hooks/useGradeCategories'
 import { PageHeader, PbSpinner, Card } from '../lib/presskit'
 import { useNameFormat, nameMatchesSearch } from '../lib/nameFormat'
 import { fmt2, fmtCount } from '../lib/cricketFormat'
+import { useSectionNames } from '../lib/sectionNames'
 
 function PlayerStat({ label, value, accent }) {
   const display = value ?? '—'
@@ -29,6 +30,7 @@ function PlayerStat({ label, value, accent }) {
 
 export default function Players() {
   const { clubSlug } = useParams()
+  const sec = useSectionNames(clubSlug)
   const { club, orgId, inactive, notFound, locked, unlock, requestAccess } = useClub(clubSlug)
   useClubTheme(club)
   const fmt = useNameFormat(club)
@@ -88,7 +90,7 @@ export default function Players() {
       <main className="max-w-[1300px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
         <PageHeader
           eyebrow={org?.name ? `${org.name.toUpperCase()} · SQUAD` : 'SQUAD'}
-          title="Players."
+          title={sec.name('players', "Players.")}
           meta={[<span key="c">{filtered.length} players</span>]}
           actions={
             <Link

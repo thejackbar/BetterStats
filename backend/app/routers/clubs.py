@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.models.db import ClubUnpauseRequest, Organisation, Season, Sponsor, get_db
-from app.services import sponsor_tiers
+from app.services import sponsor_tiers, section_names
 from app.routers.organisations import _season_sort_key
 from app.auth.modules import org_core_live
 from app.services import club_lock, email_service, rate_limit
@@ -213,6 +213,8 @@ async def get_club_sponsors(slug: str, request: Request, db: AsyncSession = Depe
         "club_name": org.short_name or org.name,
         "current_season": current_season,
         "tier_labels": labels,
+        # The club's own section names, each with its linked sponsor's logo.
+        "section_names": section_names.resolve(org.section_names, sponsors),
         # Every sponsor, logo or not: the full sponsor list names them all, while
         # the bottom bar and the dashboard slot only draw the ones with a logo
         # and a matching entry in `placements`. Tier first, then the club's order.

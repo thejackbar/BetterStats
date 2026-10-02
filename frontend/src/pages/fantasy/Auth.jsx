@@ -1,7 +1,7 @@
 // Auth — register / sign in. Centred crest + wordmark over a soft aurora.
 import { useState } from 'react'
 import { api } from '../../lib/api'
-import { Aurora, Crest, Btn, Segmented, DISP, tintBg, useFantasy } from './ui'
+import { Aurora, Crest, Btn, Segmented, DISP, tintBg, useFantasy, fantasyName } from './ui'
 import { Banner } from './shell'
 
 export default function Auth({ token, season, onAuthed }) {
@@ -45,10 +45,16 @@ export default function Auth({ token, season, onAuthed }) {
               background: 'var(--pb-accent, #06B6D4)', color: 'var(--ink)', font: `800 22px ${DISP}`,
               boxShadow: `inset 0 0 0 1px rgba(255,255,255,.18), 0 12px 34px -8px ${tintBg(70)}`,
             }}>{(club?.short_name || club?.name || 'BFC').slice(0, 4).toUpperCase()}</div>}
-        <div style={{ font: `800 25px ${DISP}`, textTransform: 'uppercase', letterSpacing: '.02em', color: 'var(--text)', marginTop: 16 }}>{club?.name || 'Fantasy Cricket'}</div>
+        <div style={{ font: `800 25px ${DISP}`, textTransform: 'uppercase', letterSpacing: '.02em', color: 'var(--text)', marginTop: 16 }}>{fantasyName(club) || club?.name || 'Fantasy Cricket'}</div>
         <div style={{ font: `600 10px 'Hanken Grotesk'`, letterSpacing: '.22em', textTransform: 'uppercase', color: 'var(--accent-strong)', marginTop: 5 }}>
-          Fantasy Cricket{season?.name ? ` · ${season.name}` : ''}
+          {fantasyName(club) ? (club?.name || 'Fantasy Cricket') : 'Fantasy Cricket'}{season?.name ? ` · ${season.name}` : ''}
         </div>
+        {club?.fantasy_sponsor?.logo_url ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
+            <span style={{ font: `600 9px 'Hanken Grotesk'`, letterSpacing: '.2em', textTransform: 'uppercase', color: 'var(--faint)' }}>Presented by</span>
+            <img src={club.fantasy_sponsor.logo_url} alt={club.fantasy_sponsor.name} style={{ maxHeight: 26, maxWidth: 120, objectFit: 'contain' }} />
+          </div>
+        ) : null}
         <div style={{ font: `500 12.5px 'Hanken Grotesk'`, color: 'var(--dim)', textAlign: 'center', marginTop: 12, lineHeight: 1.5, maxWidth: 250 }}>
           Build your 12, captain a star, climb the club ladder.
         </div>

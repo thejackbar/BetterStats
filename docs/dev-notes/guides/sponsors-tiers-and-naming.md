@@ -4,7 +4,7 @@
 - Touching `org_sponsors`, `services/sponsor_tiers*.py`, `GET /clubs/{slug}/sponsors`, `/club-admin/sponsors*`, `AdminSponsors.jsx`, `SponsorFooter.jsx`, `MajorSponsorSlot.jsx` or `useClubSponsors.js`.
 - Adding a public club page or changing how a page finds its club (`lib/clubSlug.js`).
 
-**Archive**: `docs/dev-notes/archive/sponsors-tiers-and-naming.md`. Grep hints: `v9.103.0`.
+**Archive**: `docs/dev-notes/archive/sponsors-tiers-and-naming.md`. Grep hints: `v9.103.0`, `v9.104.0`.
 
 ## Standing rules
 
@@ -16,4 +16,6 @@
 6. The sponsor DDL (`sponsor_tiers_ddl`) is in `cricket_schema_mirror.SHARED_DDL_MODULES`: football's own sponsors router selects the whole `Sponsor` entity, so a column missing there 500s it.
 7. A club page with no slug in its URL (`/players/:id`, `/games/:id`) tells the sponsor list its club through `rememberClubSlug(org.slug)`. A new such page must do the same.
 8. Every sponsor write needs `MANAGE_SPONSORS` on the server (`require_cap`). The list read stays open because BetterPosts and the setup wizard read it.
-9. Prose follows the humanizer rules.
+9. Section names (`organisations.section_names`) store only what the club set. The sponsor card is resolved live on read; never copy a logo into the column. A new public section needs an entry in `services/section_names.SECTIONS`, its page must call `useSectionNames`, and its nav label must use `sec.name(key, fallback)`. URLs never change with a rename.
+10. A renamed page keeps its standard wording when nothing is set: every call site passes the old string as the fallback, so removing a name is a no-op, not a blank.
+11. Prose follows the humanizer rules.

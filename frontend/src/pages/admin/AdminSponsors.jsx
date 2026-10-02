@@ -13,6 +13,10 @@ export default function AdminSponsors() {
   const [meta, setMeta] = useState(null)
   const [labelDraft, setLabelDraft] = useState({})
   const [labelSaving, setLabelSaving] = useState(false)
+  // Section names: [{ key, default_label, where, name, sponsor_id }] plus the unsaved draft.
+  const [sections, setSections] = useState([])
+  const [sectionDraft, setSectionDraft] = useState({})
+  const [sectionSaving, setSectionSaving] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -47,10 +51,13 @@ export default function AdminSponsors() {
   async function load() {
     setLoading(true)
     try {
-      const [data, settings] = await Promise.all([api.adminListSponsors(), api.adminGetSponsorSettings()])
+      const [data, settings, secs] = await Promise.all([
+        api.adminListSponsors(), api.adminGetSponsorSettings(), api.adminGetSectionNames(),
+      ])
       setSponsors(data)
       setMeta(settings)
       setLabelDraft(settings.tier_labels || {})
+      applySections(secs)
     } catch (e) {
       setError(e.message)
     } finally {
@@ -136,6 +143,28 @@ export default function AdminSponsors() {
       showFlash('Logo removed')
     } catch (e) {
       toast.error(e.message)
+    }
+  }
+
+  function applySections(view) {
+    setSections(view.sections || [])
+    setSectionDraft(Object.fromEntries((view.sections || []).map(x => [x.key, { name: x.name || '', sponsor_id: x.sponsor_id || '' }])))
+  }
+
+  async function saveSections() {
+    setSectionSaving(true)
+    try {
+      // A section with no name and no sponsor is sent too, and the server drops it.
+      const body = Object.fromEntries(Object.entries(sectionDraft).map(([k, v]) => [k, {
+        name: v.name.trim() || null, sponsor_id: v.sponsor_id || null,
+      }]))
+      applySections(await api.adminPutSectionNames(body))
+      clearClubSponsors()
+      showFlash('Section names saved')
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      setSectionSaving(false)
     }
   }
 
@@ -518,6 +547,60 @@ export default function AdminSponsors() {
               className="mt-3 px-4 py-1.5 rounded text-sm font-medium bg-pb-accent text-white disabled:opacity-50"
             >
               {labelSaving ? 'Saving…' : 'Save names'}
+            </button>
+          </div>
+        )}
+
+        {/* Section names */}
+        {sections.length > 0 && (
+          <div className="pb-card px-4 py-4 mt-6" data-testid="section-names">
+            <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faintest uppercase mb-1">Section names</h2>
+            <p className="text-pb-faintest text-[11px] mb-3">
+              Put a sponsor's name on a section of your public site, for example Fantasy becomes "Froth Fantasy Cricket".
+              The new name shows in the menu, the page heading and the page's shared link. Link a sponsor and their logo shows
+              as "Presented by" on that page. Web addresses stay the same. Leave a name blank to keep the standard one.
+            </p>
+            <div className="space-y-3">
+              {sections.map(sec => {
+                const d = sectionDraft[sec.key] || { name: '', sponsor_id: '' }
+                return (
+                  <div key={sec.key} className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2 items-end">
+                    <label className="text-xs text-pb-faint min-w-0">
+                      <span className="block truncate">{sec.default_label} <span className="text-pb-faintest">· {sec.where}</span></span>
+                      <input
+                        value={d.name}
+                        onChange={e => setSectionDraft(prev => ({ ...prev, [sec.key]: { ...prev[sec.key], name: e.target.value } }))}
+                        maxLength={60}
+                        placeholder={sec.default_label}
+                        aria-label={`Name for ${sec.default_label}`}
+                        className="mt-1 w-full px-2 py-1.5 text-sm bg-pb-bg border pb-hairline rounded text-pb-text placeholder-pb-faintest focus:outline-none focus:border-pb-accent"
+                      />
+                    </label>
+                    <label className="text-xs text-pb-faint min-w-0">
+                      Presented by
+                      <select
+                        value={d.sponsor_id}
+                        onChange={e => setSectionDraft(prev => ({ ...prev, [sec.key]: { ...prev[sec.key], sponsor_id: e.target.value } }))}
+                        aria-label={`Sponsor for ${sec.default_label}`}
+                        className="mt-1 w-full px-2 py-1.5 text-sm bg-pb-bg border pb-hairline rounded text-pb-text focus:outline-none focus:border-pb-accent"
+                      >
+                        <option value="">No sponsor</option>
+                        {sponsors.map(s => (
+                          <option key={s.id} value={s.id}>{s.name}{s.logo_url ? '' : ' (no logo)'}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                )
+              })}
+            </div>
+            <button
+              type="button"
+              onClick={saveSections}
+              disabled={sectionSaving}
+              className="mt-3 px-4 py-1.5 rounded text-sm font-medium bg-pb-accent text-white disabled:opacity-50"
+            >
+              {sectionSaving ? 'Saving…' : 'Save section names'}
             </button>
           </div>
         )}

@@ -15,6 +15,7 @@ import {
 import { useNameFormat } from '../lib/nameFormat'
 import { fmt2, fmtCount, formatSeason } from '../lib/cricketFormat'
 import { RateMark, RateFootnote, RateInfo } from '../components/RateCoverage'
+import { useSectionNames } from '../lib/sectionNames'
 
 const BATTING_SORTS = [
   { key: 'total_runs',    label: 'MOST RUNS' },
@@ -409,11 +410,12 @@ function FieldingTable({ rows, sortBy, fmt = n => n }) {
 
 export default function Leaderboard() {
   const { clubSlug } = useParams()
+  const sec = useSectionNames(clubSlug)
   const { club, orgId, inactive, notFound, locked, unlock, requestAccess } = useClub(clubSlug)
   useClubTheme(club)
   const fmt = useNameFormat(club)
   usePageMeta({
-    title: club?.name ? `${club.name} Leaderboard — BetterStats` : null,
+    title: club?.name ? `${club.name} ${sec.name('leaderboard', 'Leaderboard')} — BetterStats` : null,
     description: club?.name ? `Top batting, bowling, and fielding statistics for ${club.name}.` : null,
     image: club?.logo_url || null,
   })
@@ -537,8 +539,8 @@ export default function Leaderboard() {
     <div className="min-h-screen bg-pb-bg text-pb-text">
       <main className="max-w-[1300px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
         <PageHeader
-          eyebrow={`CLUB LEADERBOARD · ${seasonLabel.toUpperCase()}`}
-          title="The ladder."
+          eyebrow={sec.renamed('leaderboard') ? `${(club?.name || '').toUpperCase()} · ${seasonLabel.toUpperCase()}` : `CLUB LEADERBOARD · ${seasonLabel.toUpperCase()}`}
+          title={sec.name('leaderboard', "The ladder.")}
           meta={[<span key="s">All categories. All grades.</span>]}
         />
 

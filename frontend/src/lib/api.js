@@ -2834,6 +2834,10 @@ export const api = {
   adminGetSponsorSettings: () => request('/club-admin/sponsors/settings'),
   adminPutSponsorSettings: (data) =>
     request('/club-admin/sponsors/settings', { method: 'PUT', body: JSON.stringify(data) }),
+  // The club's own names for its public sections, each optionally linked to a sponsor.
+  adminGetSectionNames: () => request('/club-admin/sponsors/section-names'),
+  adminPutSectionNames: (sections) =>
+    request('/club-admin/sponsors/section-names', { method: 'PUT', body: JSON.stringify({ sections }) }),
 
   // ─── Club Room Mode ────────────────────────────────────────────────────────
   clubRoomGetSettings: () => request('/club-admin/club-room/settings'),
