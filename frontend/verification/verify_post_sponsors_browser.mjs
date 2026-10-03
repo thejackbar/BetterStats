@@ -177,12 +177,22 @@ const WITH_PIN = (team, grade) => (grade === 'A Grade' ? { sponsor_ids: ['silver
   await ctx.close()
 }
 
-// 4. A layout with sponsor slots of its own gets no second grid.
+// 4. Roundups reserve a slot for the grid and carry exactly one in it; only the
+// scorecards still draw sponsor slots of their own and so get no second grid.
 {
   const { page, ctx } = await openEditor('/admin/social-post?type=results', { answer: DEFAULT })
   await waitEditor(page)
   await page.waitForTimeout(1200)
-  ck('a results post uses its own sponsor slots, so no extra grid', await page.locator('[data-sponsor-grid]').count() === 0)
+  const n = await page.locator('[data-sponsor-grid]').count()
+  // One in the canvas and one in the off-screen export copy.
+  ck('a results post carries one grid, in its reserved slot', n >= 1 && n <= 2 && (await gridAlts(page)).length > 0, `grids: ${n}`)
+  await ctx.close()
+}
+{
+  const { page, ctx } = await openEditor('/admin/social-post?type=scorecard', { answer: DEFAULT })
+  await waitEditor(page)
+  await page.waitForTimeout(1200)
+  ck('a scorecard uses its own sponsor slots, so no extra grid', await page.locator('[data-sponsor-grid]').count() === 0)
   await ctx.close()
 }
 

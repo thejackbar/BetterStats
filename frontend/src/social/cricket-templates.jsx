@@ -2308,6 +2308,16 @@ function _scExtrasParts(extras) {
   return parts.join(' · ')
 }
 
+// The row type for one scorecard side: the biggest size at which every row still
+// fits in the panel once its fixed parts (header, extras line, column heads) and
+// a 1px rule per row are taken off. One budget baked for the wide post clipped
+// the bottom rows of a full side (12 batters and 6 bowlers) and left the squares,
+// which have more height, with spare room.
+function _scRowFont(panelH, chrome, totalRows, rp, cap) {
+  const budget = panelH - chrome - totalRows
+  return Math.max(12, Math.min(cap, Math.floor((budget / totalRows - 2 * rp) / 1.2)))
+}
+
 function ScSponsorFooter({ bg, ink, dim, dimmer, rule, style = {}, sponsors = [] }) {
   const slots = [0, 1]
   return (
@@ -2328,7 +2338,7 @@ function ScSponsorFooter({ bg, ink, dim, dimmer, rule, style = {}, sponsors = []
           SC2 inverts the bar (bg={ink} ink={bg}), so read the prop, never the
           palette: this component is not given one, and reaching for it is what
           made every scorecard post throw "palette is not defined". */}
-      <CreditMark ink={ink} h={44} />
+      <CreditMark ink={ink} h={44} style={{ justifySelf: 'end' }} />
     </div>
   )
 }
@@ -2346,13 +2356,13 @@ export function SC1_Broadcast({ match, palette = {}, square = false, only = 'hom
   const rule   = _toRgba(ink, 0.10)
   const accent = palette.accent    || '#ffc233'
 
-  const TeamPanel = ({ team, accentC, side }) => {
+  const TeamPanel = ({ team, accentC, side, panelH = 800 }) => {
     const headerInk = team.headerInk || '#0a0a0a'
     const batCount = (team.batting || []).length
     const bowlCount = (team.bowling || []).length
     const totalRows = Math.max(1, batCount + bowlCount)
     const rp = 3
-    const bnf = Math.max(12, Math.min(24, Math.floor((590 / totalRows - 2 * rp) / 1.2)))
+    const bnf = _scRowFont(panelH, 268, totalRows, rp, 24)
     const bff = Math.max(9,  Math.round(bnf * 0.68))
     const brf = Math.max(12, Math.round(bnf * 1.09))
     const bsf = Math.max(9,  Math.round(bnf * 0.59))
@@ -2453,7 +2463,7 @@ export function SC1_Broadcast({ match, palette = {}, square = false, only = 'hom
           </div>
         </div>
         <div style={{ padding: '0 20px', height: 880 }}>
-          <TeamPanel team={team} accentC={team.color || (side === 'home' ? '#1a4eb8' : '#cc1f2c')} side={side} />
+          <TeamPanel team={team} accentC={team.color || (side === 'home' ? '#1a4eb8' : '#cc1f2c')} side={side} panelH={880} />
         </div>
         <ScSponsorFooter bg={panel} ink={ink} dim={dim} dimmer={dimmer} rule={rule} sponsors={m.meta?.sponsors} />
         <GrainSVG opacity={dark ? 0.22 : 0.16} id={`sc1g-${side}`} />
@@ -2509,12 +2519,12 @@ export function SC2_Brutalist({ match, palette = {}, square = false, only = 'hom
   const accent   = palette.accent    || (dark ? '#ffc233' : '#cc1f2c')
   const stripe   = _toRgba(ink, 0.04)
 
-  const TeamCol = ({ team, side }) => {
+  const TeamCol = ({ team, side, panelH = 760 }) => {
     const batCount = (team.batting || []).length
     const bowlCount = (team.bowling || []).length
     const totalRows = Math.max(1, batCount + bowlCount)
     const rp = 3
-    const bnf = Math.max(12, Math.min(22, Math.floor((520 / totalRows - 2 * rp) / 1.2)))
+    const bnf = _scRowFont(panelH, 330, totalRows, rp, 22)
     const bff = Math.max(9,  Math.round(bnf * 0.65))
     const brf = Math.max(12, Math.round(bnf * 1.1))
     const bsf = Math.max(9,  Math.round(bnf * 0.60))
@@ -2609,7 +2619,7 @@ export function SC2_Brutalist({ match, palette = {}, square = false, only = 'hom
           )}
         </div>
         <div style={{ height: 850 }}>
-          <TeamCol team={m[side] || {}} side={side} />
+          <TeamCol team={m[side] || {}} side={side} panelH={850} />
         </div>
         <ScSponsorFooter bg={ink} ink={bg} dim={_toRgba(bg, 0.55)} dimmer={_toRgba(bg, 0.35)} rule={ruleStrong} sponsors={m.meta?.sponsors} style={{ borderRadius: 0, borderTop: `3px solid ${accent}` }} />
         <GrainSVG opacity={dark ? 0.28 : 0.18} id={`sc2g-${side}`} />
