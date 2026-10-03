@@ -413,7 +413,7 @@ export function FixtureBoard({ palette: pal, width = 1080, height = 1080, meta =
   const S = roundScale(width, height)
   const t = sz(S.row)
   const rows = fixtures
-  const cols = '150px minmax(0,1fr) 122px 184px'
+  const cols = `${pick(S.A, { square: 150, portrait: 150, story: 184 })}px minmax(0,1fr) 122px 184px`
   return (
     <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.05} size={11} />
@@ -1270,6 +1270,8 @@ export function ResultsHeadline({ palette: pal, width = 1080, height = 1080, met
   const rest = rows.slice(1)
   const fw = f.outcome === 'W'
   const fc = fw ? WIN : LOSS
+  // A taller post gives the feature card a little more room, so a long club name that wraps to a third line still sits inside it.
+  const lift = pick(S.A, { square: 0, portrait: 16, story: 56 })
   return (
     <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.06} size={11} />
@@ -1287,7 +1289,7 @@ export function ResultsHeadline({ palette: pal, width = 1080, height = 1080, met
           <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={104} />
         </div>
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(196), height: S.head(560) - S.head(196) - 24, background: pal.secondary, borderTop: `3px solid ${fc}`, padding: '26px 32px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+      <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(196), height: S.head(560) - S.head(196) - 24 + lift, background: pal.secondary, borderTop: `3px solid ${fc}`, padding: '26px 32px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, color: pal.accent }}>{`// FEATURE · ${f.grade}`}</span>
           <span style={{ fontFamily: DISPLAY, fontSize: 18, letterSpacing: 2, color: pal.primary, background: fc, padding: '5px 12px' }}>{fw ? 'WON' : 'LOST'}</span>
@@ -1305,7 +1307,7 @@ export function ResultsHeadline({ palette: pal, width = 1080, height = 1080, met
         </div>
         <div style={{ textAlign: 'center', fontFamily: DISPLAY, fontSize: b(40), letterSpacing: 0, marginTop: 20, lineHeight: 1 }}>{club.name} {fw ? 'DEF' : 'LOST TO'} {f.opp} {f.margin}</div>
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(560), bottom: rrFoot(width, height).reserve }}>
+      <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(560) + lift, bottom: rrFoot(width, height).reserve }}>
         <Kicker color={pal.ink} size={12} style={{ opacity: 0.55, marginBottom: 8 }}>{`// OTHER RESULTS`}</Kicker>
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           {rest.map((r, i) => {
