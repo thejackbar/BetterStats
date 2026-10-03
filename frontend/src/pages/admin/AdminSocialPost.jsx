@@ -46,6 +46,7 @@ import { useEditHistory } from '../../social/useEditHistory'
 import { usePages } from '../../social/usePages'
 import PageStrip from '../../components/admin/socialpost/PageStrip'
 import PostPreviewModal from '../../components/admin/socialpost/PostPreviewModal'
+import ClubGamesPicker from '../../components/admin/socialpost/ClubGamesPicker'
 import { templateToBlocks, CUSTOM_EDITABLE } from '../../social/templateToBlocks'
 import { POST_SIZES, DEFAULT_POST_SIZE, postSizeOf, PostFrame } from '../../social/postSizes'
 import { resolveClubFonts, fontWeightFor, buildFontFaceCss } from '../../lib/theme'
@@ -180,7 +181,7 @@ const TAB_ICON = {
 const DATA_TABS = ['lineup', 'fixtures', 'results', 'result', 'scorecard', 'motm', 'totw']
 const SOURCE_HELP = {
   lineup: 'Pick a saved BetterSelect XI or a Play.Cricket published team list below to pull the players, captain, keeper and match details — or add players yourself in Content.',
-  result: 'Paste the match link and we\'ll pull the scores, the top batters and bowlers for both sides, the result and the player of the match.',
+  result: 'Pick a game from your Games page, or paste the match link, and we\'ll pull the scores, the top batters and bowlers for both sides, the result and the player of the match.',
   scorecard: 'Paste the match link and we\'ll pull the full scorecard for both teams.',
   fixtures: 'Pull this round\'s fixtures for every grade straight from the fixtures feed.',
   results: 'Pull the latest round\'s results for every grade straight from the results feed.',
@@ -3771,6 +3772,9 @@ export default function AdminSocialPost() {
                     <MatchPickList picks={activeTab === 'result' ? resPicks : scPicks}
                       onPick={(id) => (activeTab === 'result' ? loadResultMatch(id) : loadScorecardMatch(id))}
                       onDismiss={() => (activeTab === 'result' ? setResPicks(null) : setScPicks(null))} />
+                    {activeTab === 'result' && (
+                      <ClubGamesPicker orgId={settings?.id} onPick={loadResultMatch} busy={resUrlStatus === 'loading'} />
+                    )}
                     <p className="text-pb-faintest text-[10px] mt-2 leading-relaxed">Pulls the scores, top performers and matched player photos. You can still edit everything after.</p>
                   </div>
                 )}
@@ -4729,6 +4733,7 @@ export default function AdminSocialPost() {
                     </p>
                   )}
                   <MatchPickList picks={resPicks} onPick={loadResultMatch} onDismiss={() => setResPicks(null)} />
+                  <ClubGamesPicker orgId={settings?.id} onPick={loadResultMatch} busy={resUrlStatus === 'loading'} />
                   <p className="font-mono text-[9px] mt-1.5 text-pb-faintest">Pulls the top 3 batters & bowlers for both sides and matches your players for photos.</p>
                 </div>
 

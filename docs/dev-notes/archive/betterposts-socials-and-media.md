@@ -825,3 +825,12 @@ Follow-up on v9.102.16: the Split Poster's pale panel asked for as an editable b
 - **T11 `background` prop** (the editor passes `bgStyle` when a background is active, else null). With any background its own bands, dot texture and shade step aside and the root is transparent; with `split-panels` the dark rail steps aside too, since the variant draws it. Layer ids are explicit `data-layer` names, so hiding some does not shift the others.
 - **Competition.** Both lineup loaders now set `match.competition` to `fx.grade`. `matchData` fills an empty competition with the literal `COMPETITION`; T11 treats that literal as empty. Other layouts still print it when nothing was typed.
 - **Verified.** `verify_split_poster_browser.mjs`: 76 passed (production build): grade pulls through, placeholder hidden, swatch present, layer hand-off for Split Panels, another background keeps the rail, clearing the background restores the panels.
+
+## Final Score from the Games page (v9.105.3)
+
+The Final Score tab (C4 and RS1 to RS6) could only be filled from a pasted play.cricket.com.au link, or a PlayHQ link that resolved to a short pick list. A club asked for the data to come from its public Games page (`/{slug}/games`) instead.
+
+- **`components/admin/socialpost/ClubGamesPicker.jsx`.** Collapsed by default; nothing is fetched until it is opened. It reads `getOrgSeasons` then `getOrgResults(orgId, { seasonId })`, the same two calls `GamesPage` makes, so the list and the page cannot disagree. Newest season is the default; season and grade selects narrow it. `ABANDONED` and `CANCELLED` games are dropped (they have no score).
+- **A pick calls `loadResultMatch(game.id)`.** `games.id` is the Cricket Australia match GUID, so it goes straight to `GET /admin/social/scorecard/{id}` and `applyResultScorecard`. It does not go through `match-lookup`. Mounted on the Get your data step and under the Match Result panel's link box.
+- **Known gap, not changed.** `get_social_scorecard` reads Cricket Australia live. A manual game or a scorebook import is on the Games page but has no upstream card, so a pick returns "Scorecard not found". Fixing it means a DB fallback that adapts `games.get_scorecard` output to the `{meta, home, away}` social shape; not built.
+- **Verified.** `frontend/verification/verify_final_score_games_browser.mjs` (production build, API stubbed): 15 passed. Control run on the previous build fails the 10 checks that name the picker and keeps the 5 unrelated ones.

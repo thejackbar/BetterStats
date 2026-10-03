@@ -83,6 +83,9 @@
 54. A new tag or option on a lineup layout is a prop that is absent when off, so a post without it stays byte for byte what it was (compare `outerHTML` against the previous build). Where a row's base style uses the `padding` shorthand, override the shorthand, never add a longhand beside it. Hooks for the editor go with the other state, above every early return (React #310).
 55. `matchData` fills an empty competition with the literal `COMPETITION`, so a layout that should print nothing there must treat that literal as empty. Lineup loaders put the grade in `match.competition`. A background variant's Ink role is the palette's ink (white on the built-in palettes), so use Primary for any shade that has to stay dark.
 
+**Final Score from the Games page (v9.105.3, `socialpost/ClubGamesPicker.jsx`)**
+56. The picker lists what `GamesPage` lists (`getOrgSeasons`, `getOrgResults`) and hands `games.id` to `loadResultMatch`; do not give it a second list or route it through `match-lookup`. The scorecard import is live Cricket Australia only, so a manual or scorebook-imported game on that list answers "Scorecard not found" until a DB fallback exists (see Open follow-ups).
+
 ## Traps and failure signatures
 - Geometry checks pass but a layout reads wrong (black bands, clumped story names). Judge from real screenshots.
 - Hero layouts show a crest, not the cut-out: harness roster stubbed `photo_url: null`. Stubs must cover every conditional's data (give players a photo and a route for it).
@@ -114,6 +117,7 @@
 - Saved templates are still `localStorage` (design handoff proposes `social_post_template`; media library and brand kit already server-side).
 - Multi-file drop into the club library uploads as-is (deliberate).
 - SC1-SC3 have no portrait design or size picker. EV2's square panel clips; EV5/EV8 hide inner layers.
+- Final Score picker: manual and scorebook-imported games have no live card, so the social scorecard 404s for them. Needs a DB fallback adapting `games.get_scorecard` to `{meta, home, away}`.
 - Videos: no draft state, no transcoding (`.mov` refused with a message).
 
 ## Flags: conflicting, superseded or possibly obsolete guidance
