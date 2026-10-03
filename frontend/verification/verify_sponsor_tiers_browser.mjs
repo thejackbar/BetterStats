@@ -126,6 +126,20 @@ const attrOf = (loc, name) => loc.first().getAttribute(name, { timeout: 1500 }).
   ck('one sponsors request serves the slot, the list and the bar', sponsorCalls.length === 1, String(sponsorCalls.length))
   ck('the slot link goes to the sponsor site', await attrOf(page.locator('[data-testid=major-sponsor-slot] a'), 'href') === 'https://maj1.example')
   ck('the header still has its Leaderboard button beside the slot', await page.getByRole('link', { name: /Leaderboard/ }).count() >= 1)
+  // Layout: the buttons sit in the filter row, under the slot, level with the filters.
+  const box = async (loc) => loc.first().boundingBox({ timeout: 1500 }).catch(() => null)
+  const slotBox = await box(page.locator('[data-testid=major-sponsor-slot]'))
+  const lbBox = await box(page.getByRole('link', { name: /Leaderboard/ }))
+  const seasonBox = await box(page.locator('select').first())
+  const nameBox = await box(page.locator('h1'))
+  ck('buttons: Leaderboard sits below the sponsor slot, not in the header',
+     !!(slotBox && lbBox) && lbBox.y >= slotBox.y + slotBox.height, JSON.stringify({ slotBox, lbBox }))
+  ck('buttons: Leaderboard is level with the filter row (centres within 24px)',
+     !!(lbBox && seasonBox) && Math.abs((lbBox.y + lbBox.height / 2) - (seasonBox.y + seasonBox.height / 2)) <= 24, JSON.stringify({ lbBox, seasonBox }))
+  ck('buttons: Leaderboard lines up with the right edge of the slot',
+     !!(slotBox && lbBox) && Math.abs((lbBox.x + lbBox.width) - (slotBox.x + slotBox.width)) <= 2, JSON.stringify({ slotBox, lbBox }))
+  ck('buttons: the slot ends level with the bottom of the club name block',
+     !!(slotBox && nameBox) && slotBox.y + slotBox.height >= nameBox.y + nameBox.height - 4, JSON.stringify({ slotBox, nameBox }))
   ck('no page errors', errors.length === 0, errors.join(' | '))
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/dashboard-one-major.png`, fullPage: true })
   await ctx.close()
@@ -148,6 +162,11 @@ const attrOf = (loc, name) => loc.first().getAttribute(name, { timeout: 1500 }).
   await page.getByText('CLUB DASHBOARD').first().waitFor({ timeout: 15000 }).catch(() => {})
   await page.locator('section[aria-label="Club sponsors"]').waitFor({ timeout: 15000 }).catch(() => {})
   ck('no major: no slot is drawn', await count(page, '[data-testid=major-sponsor-slot]') === 0)
+  {
+    const lb = await page.getByRole('link', { name: /Leaderboard/ }).first().boundingBox({ timeout: 1500 }).catch(() => null)
+    const sel = await page.locator('select').first().boundingBox({ timeout: 1500 }).catch(() => null)
+    ck('no major: Leaderboard stays in the header, above the filters (unchanged layout)', !!(lb && sel) && lb.y + lb.height <= sel.y + 2, JSON.stringify({ lb, sel }))
+  }
   ck('no major: the public sees no add prompt', await page.getByText('Add a major sponsor').count() === 0)
   ck('no major: the other sponsors still show in the list (the check can pass the other way)',
      await count(page, 'section[aria-label="Club sponsors"]') === 1)

@@ -36,3 +36,7 @@ Asked for by the club group: bigger, more prominent sponsor marks in BetterPosts
 - **Layouts with sponsor slots of their own** (fixtures, results, scorecards, `nativeSponsors`) get no grid. Their two slots start from the default, until somebody picks their own (`metaSponsorsAuto`).
 - **Football.** The silo has no `post-default` route; the editor falls back to the first sponsor with a logo.
 - **Verified.** `verify_post_sponsors.py` (real Postgres, shipped route bodies, 35 checks; control on the previous commit fails the three existence checks) and `verify_post_sponsors_browser.mjs` (production build, API stubbed, 24 checks; control build fails 16 and passes the 8 that should not change). The existing `verify_post_designer_browser.mjs` still passes 130 of 130.
+
+## Dashboard buttons on the filter row (v9.105.1)
+
+With the major sponsor slot in the header's right column, Sync and Leaderboard under it left the slot floating above the club name. When the slot (or the admin prompt) shows, `Dashboard.jsx` now passes `actions={null}` to `PageHeader` and renders the same buttons at the right of the Season filter row, so the slot's bottom edge matches the name block and the buttons match the filters. Without a slot nothing moves. Checked in `verify_sponsor_tiers_browser.mjs` by bounding boxes (28 checks), including 390px.
