@@ -86,6 +86,12 @@
 **Final Score from the Games page (v9.105.3, `socialpost/ClubGamesPicker.jsx`)**
 56. The picker lists what `GamesPage` lists (`getOrgSeasons`, `getOrgResults`) and hands `games.id` to `loadResultMatch`; do not give it a second list or route it through `match-lookup`. The scorecard import is live Cricket Australia only, so a manual or scorebook-imported game on that list answers "Scorecard not found" until a DB fallback exists (see Open follow-ups).
 
+**Sponsor slots (v9.106.0, `social/sponsorSlots.js`)**
+56. Every layout reserves a slot for the sponsor grid and exports it in its file's `SPONSOR_SLOTS`; the layout calls the SAME function to keep that rectangle clear. A new template needs an entry and a clear area, or it gets the generic bottom band over its own content. Slots must work at square, portrait and story and read the sponsor `count` only when the shape really differs.
+57. Check a new or changed layout with `verification/shoot_sponsor_slots.mjs` at `SPONSORS=1|2|3`: any `OVERLAP` line is text or a picture under the grid. Read the PNGs, the contact sheet is blank.
+58. Only the scorecards (SC1 to SC3) still draw sponsor logos of their own (`nativeSponsors`). The roundup `SponsorFooter` is a credit-only strip; do not draw logos in a layout as well as reserving a slot.
+59. Scorecard rows are sized from the panel's real height (`_scRowFont`), not a constant. A changed panel height needs its `panelH` passed in. The split squares are native to a 1080 canvas: never frame them.
+
 ## Traps and failure signatures
 - Geometry checks pass but a layout reads wrong (black bands, clumped story names). Judge from real screenshots.
 - Hero layouts show a crest, not the cut-out: harness roster stubbed `photo_url: null`. Stubs must cover every conditional's data (give players a photo and a route for it).
@@ -119,6 +125,7 @@
 - SC1-SC3 have no portrait design or size picker. EV2's square panel clips; EV5/EV8 hide inner layers.
 - Final Score picker: manual and scorebook-imported games have no live card, so the social scorecard 404s for them. Needs a DB fallback adapting `games.get_scorecard` to `{meta, home, away}`.
 - Videos: no draft state, no transcoding (`.mov` refused with a message).
+- Story slots on some footers sit at the very bottom, not lifted clear of the app's reply bar.
 
 ## Flags: conflicting, superseded or possibly obsolete guidance
 - [FLAG-POSTS-1] "Only C1-C4 decompose ... 40+ layouts, large work" | wrong for reflow and layering (v9.74/v9.76) but still true for decomposition; `templateToBlocks.js` exists | "A FIXED LAYOUT CANNOT RE-LAY ITSELF OUT AT 4:5" L995-1085 | keep (decomposition only)

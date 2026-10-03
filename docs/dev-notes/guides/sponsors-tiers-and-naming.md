@@ -20,6 +20,6 @@
 9. Section names (`organisations.section_names`) store only what the club set. The sponsor card is resolved live on read; never copy a logo into the column. A new public section needs an entry in `services/section_names.SECTIONS`, its page must call `useSectionNames`, and its nav label must use `sec.name(key, fallback)`. URLs never change with a rename.
 10. A renamed page keeps its standard wording when nothing is set: every call site passes the old string as the fallback, so removing a name is a no-op, not a blank.
 11. Every BetterPosts post carries a sponsor grid (`sponsors` block). `post_sponsors.resolve` is the one answer for which sponsors: team pin, grade pin, club default (`posts` spot), top sponsor. Never copy that order into the frontend. The editor treats an `auto` grid as the server's choice and a touched one as the user's.
-12. A layout with sponsor slots of its own (fixtures, results, scorecards) must not also get a grid. A new template with its own slots needs adding to `nativeSponsors` in `AdminSocialPost`.
+12. Every layout reserves a slot for the grid (`social/sponsorSlots.js`, `SPONSOR_SLOTS` per template file) and the editor places the grid in it. Only the scorecards draw sponsor logos of their own and get no grid (`nativeSponsors`). A new template needs a slot entry and a clear area, or the grid lands on its content.
 13. Removing the last sponsor grid from a post must go through `hRemove` (it confirms). A new delete path that calls `layer.remove` directly skips the warning.
 14. Prose follows the humanizer rules.
