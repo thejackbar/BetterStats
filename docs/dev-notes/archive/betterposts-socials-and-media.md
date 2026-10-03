@@ -851,3 +851,11 @@ Reported with five screenshots: the sponsor grid (v9.105.0) was placed in one ge
 - **Verified.** All 47 templates at 3 sizes, 2 sponsors: 141 shots, a grid on each, 0 overlaps. Spot runs at 1 and 3 sponsors per family were also clean. Squares are NOT unchanged (space is carved out of most layouts), so `verify_post_designer_browser.mjs`'s "design measurements unchanged at 1080" checks will report the intended differences.
 - **Not done.** Harness contact sheets render blank (a `file://` image from `about:blank`), read the PNGs directly. Story slots on a few footers sit at the very bottom, as their credit marks already did, not lifted clear of the app's reply bar. SC1 and SC2 team names overflow their box by 2 to 4px (descender room, not visibly clipped).
 
+## Final Score result band (v9.106.1)
+
+Follow-up on v9.106.0: the C4 band had the margin on one small line and a tiny MOTM chip, leaving space unused.
+
+- **Band.** `C4_FinalScore` stacks the winner (max 26), `WIN <margin>` (max 54, accent) and a MOTM chip (initial, surname, figures). A tie shows `MATCH TIED` alone. `_c4Geom` band height is 164 / 176 / 196, and the slot follows it.
+- **Props.** `AdminSocialPost` now passes `motmFirst`, `motmBat` and `motmBowl` to C4's `result` as well as `motmLast`.
+- **Verified.** `verification/shoot_final_score.mjs` (real import through the stubbed editor) at all three sizes: no clipped band text. Story still has a tall empty gap between the batting and bowling groups in the performer panels (existing design, not changed).
+

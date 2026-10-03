@@ -2764,6 +2764,7 @@ export default function AdminSocialPost() {
     extraProps.result = {
       winner: result.winner, margin: result.margin, grade: result.grade, teamScore: result.teamScore,
       oppScore: result.oppScore, motmLast: result.motmLast,
+      motmFirst: result.motmFirst, motmBat: result.motmBat, motmBowl: result.motmBowl,
       topBatters: result.topBatters, topBowlers: result.topBowlers,
     }
   }

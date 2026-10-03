@@ -1918,7 +1918,7 @@ function _companionFooter({ width, height, palette, left }) {
 function _c4Geom(width, height) {
   const A = aspectOf(width, height)
   const foot = 60
-  const bandH = pick(A, { square: 148, portrait: 160, story: 180 })
+  const bandH = pick(A, { square: 164, portrait: 176, story: 196 })
   const w = pick(A, { square: 430, portrait: 440, story: 460 })
   const h = pick(A, { square: 112, portrait: 120, story: 140 })
   const inset = 10
@@ -2178,7 +2178,13 @@ export function C4_FinalScore({ width = 1080, height = 1080, result, team, oppon
   // right; the footer is the credit mark alone (see _c4Geom).
   const { foot, bandH, inset, slot } = _c4Geom(width, height)
   const motm = !!result?.motmLast
-  const marginText = result?.winner === 'TIE' ? 'MATCH TIED' : `${winnerSide === 'team' ? team.name : opponent.name} WIN ${result?.margin || ''}`.trim()
+  const tied = result?.winner === 'TIE'
+  const winnerName = winnerSide === 'team' ? team.name : opponent.name
+  const winLine = `WIN ${result?.margin || ''}`.trim()
+  // "M. EDWARDS" when the first name is known, else just the surname; the
+  // figures are whatever the scorecard import filled (batting, bowling).
+  const motmName = [result?.motmFirst ? `${result.motmFirst[0]}.` : '', result?.motmLast].filter(Boolean).join(' ').toUpperCase()
+  const motmFigures = [result?.motmBat, result?.motmBowl].filter(Boolean).join(' · ')
   return (
     <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
@@ -2225,18 +2231,27 @@ export function C4_FinalScore({ width = 1080, height = 1080, result, team, oppon
             batters={oppBatters} bowlers={oppBowlers} palette={palette} Perf={Perf} tall={A !== 'square'} />
         </div>
         <div style={{ margin: '0 48px 18px', height: bandH, flexShrink: 0, boxSizing: 'border-box', padding: `${inset}px ${inset}px ${inset}px 24px`, background: palette.secondary, borderLeft: `4px solid ${palette.accent}`, display: 'flex', alignItems: 'stretch', gap: 20 }}>
-          {/* Margin text left-aligned, chip under it. The text box takes what the
-              chip leaves and shrinks to two lines, so a long club name plus a
-              long margin still sits beside the slot. */}
-          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 8, textAlign: 'left' }}>
-            <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: motm ? 'flex-end' : 'center' }}>
-              <AutoFitText text={marginText} max={38} min={20} lines={2} measureDeps={[width, height, motm]}
-                style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: -0.5, lineHeight: 1.05, color: palette.ink }}>
-                {marginText}
-              </AutoFitText>
-            </div>
+          {/* Result left-aligned and stacked: who won small, the margin big, and the
+              player of the match as a full-width chip under it. Stacking (not one
+              wrapped line) is what lets the margin and the chip both be large. */}
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 6, textAlign: 'left' }}>
+            {tied ? (
+              <AutoFitText text="MATCH TIED" max={56} min={26} measureDeps={[width, height]}
+                style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: -0.5, lineHeight: 1.05, color: palette.ink }}>MATCH TIED</AutoFitText>
+            ) : (
+              <>
+                <AutoFitText text={winnerName} max={26} min={14} measureDeps={[width, height]}
+                  style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 1, lineHeight: 1.05, color: palette.ink, opacity: 0.85 }}>{winnerName}</AutoFitText>
+                <AutoFitText text={winLine} max={54} min={24} measureDeps={[width, height]}
+                  style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: -0.5, lineHeight: 1.05, color: palette.accent }}>{winLine}</AutoFitText>
+              </>
+            )}
             {motm && (
-              <div style={{ alignSelf: 'flex-start', flexShrink: 0, padding: '5px 14px', background: `${palette.ink}10`, border: `1px solid ${palette.accent}`, fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 1.5, color: palette.ink, opacity: 0.85, whiteSpace: 'nowrap' }}>★ MOTM · {result.motmLast}</div>
+              <div style={{ alignSelf: 'flex-start', maxWidth: '100%', boxSizing: 'border-box', display: 'flex', alignItems: 'baseline', gap: 12, padding: '6px 16px', marginTop: 4, background: `${palette.ink}10`, border: `1px solid ${palette.accent}`, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 2, color: palette.accent, flexShrink: 0 }}>★ MOTM</span>
+                <span style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, letterSpacing: 0.5, lineHeight: 1.05, color: palette.ink, overflow: 'hidden', textOverflow: 'ellipsis' }}>{motmName}</span>
+                {motmFigures && <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 16, letterSpacing: 1, color: palette.ink, opacity: 0.75, flexShrink: 0 }}>{motmFigures}</span>}
+              </div>
             )}
           </div>
           <div style={{ width: slot.w, height: slot.h, flexShrink: 0, alignSelf: 'center', borderRadius: 18, background: `${palette.ink}0d` }} />
