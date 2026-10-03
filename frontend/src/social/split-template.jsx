@@ -1,7 +1,8 @@
 // Split poster — a pale panel with the player standing on it, beside a dark
 // panel carrying the numbered XI. Built from a club's own "Starting XI" story:
 // a competition and round tag, the cut-out figure, the side and the wordmark,
-// the XI with its role and debut tags, the fixture in the foot, a sponsor mark.
+// the XI with its role and debut tags, the fixture in the foot, and a sponsor slot
+// under the XI (the editor's sponsor grid goes there; see splitSponsorSlot).
 //
 // Every one of those is its own root child with a `data-layer` name, so each is
 // a layer in the Layers panel and can be reordered or hidden.
@@ -40,9 +41,43 @@ export function autoPanelColor(accent) {
   return mixHex(accent || '#16c784', '#ffffff', 0.55)
 }
 
+// The measurements the layout and its sponsor slot both read, so the grid sits
+// exactly where the XI stops. All three post shapes are 1080 wide.
+function splitGeo(width, height) {
+  const A = aspectOf(width, height)
+  const LEFT_W = Math.round(width * 0.505)
+  const EDGE = 40
+  const DARK_W = width - LEFT_W - EDGE
+  const headShift = pick(A, { square: 0, portrait: 18, story: 120 })
+  const footBottom = pick(A, { square: 32, portrait: 40, story: 200 })
+  const LIST_X = LEFT_W + 96
+  const LIST_R = width - EDGE - 36
+  const listTop = 312 + headShift
+  const listGap = pick(A, { square: 257, portrait: 262, story: 400 })
+  const avail = height - listTop - listGap
+  const rowH = Math.min(pick(A, { square: 46.5, portrait: 60, story: 80 }), avail / 11)
+  return { A, LEFT_W, EDGE, DARK_W, headShift, footBottom, LIST_X, LIST_R, listTop, listGap, rowH }
+}
+
+// Height of the platform credit that closes the dark panel, and the gap above it.
+const CREDIT_H = 44
+const CREDIT_GAP = 12
+
+// Sponsor slot: on the dark panel, directly under the eleven rows, as wide as
+// the XI. It stops above the platform credit and never reaches into the list.
+export function splitSponsorSlot(width = 1080, height = 1080) {
+  const g = splitGeo(width, height)
+  const x = g.LIST_X - 34
+  const bottom = height - g.footBottom - CREDIT_H - CREDIT_GAP
+  const top = g.listTop + 11 * g.rowH + 16
+  // Taller posts have more room under the list, so the grid takes more of it.
+  const h = Math.max(70, Math.min(pick(g.A, { square: 140, portrait: 170, story: 240 }), bottom - top))
+  return { x, y: bottom - h, w: g.LIST_R - x, h, pad: 8, gap: 16, panel: 'light' }
+}
+
 export function SplitPoster({
   width = 1080, height = 1080, team, opponent, match, players, palette,
-  heroImage, headline, featuredId, sponsors, panelColor, markHero, background,
+  heroImage, headline, featuredId, panelColor, markHero, background,
 }) {
   const P = (players || []).slice(0, 11)
   const A = aspectOf(width, height)
@@ -60,21 +95,9 @@ export function SplitPoster({
 
   // Left panel and the dark one beside it. The strip of pale on the right edge
   // is the root's own background, so it needs no layer.
-  const LEFT_W = Math.round(width * 0.505)
-  const EDGE = 40
-  const DARK_W = width - LEFT_W - EDGE
-
   // Where the height goes. The story's top and bottom carry the app's own
   // profile row and reply bar, so the type moves in from both edges there.
-  const headShift = pick(A, { square: 0, portrait: 18, story: 120 })
-  const footBottom = pick(A, { square: 32, portrait: 40, story: 200 })
-
-  const LIST_X = LEFT_W + 96
-  const LIST_R = width - EDGE - 36
-  const listTop = 312 + headShift
-  const listGap = pick(A, { square: 257, portrait: 262, story: 400 })
-  const avail = height - listTop - listGap
-  const rowH = Math.min(pick(A, { square: 46.5, portrait: 60, story: 80 }), avail / 11)
+  const { LEFT_W, EDGE, DARK_W, headShift, footBottom, LIST_X, LIST_R, listTop, rowH } = splitGeo(width, height)
   const nameMax = Math.round(rowH * 0.52)
 
   const photoTop = share(height, 200)
@@ -92,7 +115,6 @@ export function SplitPoster({
   const round = (match.round || '').toUpperCase()
   const side = (headline || '').toUpperCase()
   const when = [match.date, match.time].filter(Boolean).join(', ').toUpperCase()
-  const logos = (sponsors || []).filter((s) => s && s.url)
 
   return (
     <LayerRoot style={{
@@ -212,19 +234,17 @@ export function SplitPoster({
         <div>{when}</div>
       </div>
 
-      {/* Sponsors, or the platform credit when the club has none to show. */}
-      <div data-layer="Sponsors" style={{
-        position: 'absolute', right: EDGE + 36, bottom: footBottom, width: 290, height: 84,
-        display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 18,
+      {/* The sponsor grid goes in splitSponsorSlot, above this credit. */}
+      <div data-layer="Platform credit" style={{
+        position: 'absolute', right: EDGE + 36, bottom: footBottom, height: CREDIT_H,
+        display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
       }}>
-        {logos.length
-          ? logos.slice(0, 2).map((s, i) => (
-              <img key={i} src={s.url} alt={s.name || 'sponsor'}
-                style={{ flex: 1, minWidth: 0, maxHeight: '100%', maxWidth: logos.length > 1 ? '50%' : '100%', objectFit: 'contain', objectPosition: 'right center' }} />
-            ))
-          : <CreditMark ink="#ffffff" h={44} />}
+        <CreditMark ink="#ffffff" h={CREDIT_H} />
       </div>
     </LayerRoot>
   )
 }
 SplitPoster.displayName = 'SplitPoster'
+
+// Where this file's layouts keep the sponsor grid (see sponsorSlots.js).
+export const SPONSOR_SLOTS = { T11: splitSponsorSlot }

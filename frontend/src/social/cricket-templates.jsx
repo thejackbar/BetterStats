@@ -487,9 +487,20 @@ export function orgToPalette(org) {
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 1 — Hero cutout + bold name list
 // ─────────────────────────────────────────────────────────────────────────────
+// T1 sponsor slot: under the hero cut-out, in the hero column's own width. The
+// photo is bottom-anchored in its column, so the slot takes the foot of that
+// column and the photo stops above it; the names rail on the right is untouched.
+// A story lifts it clear of the app's reply bar. Called by the layout AND
+// registered in SLOTS_LINEUP_A, so the room kept and the grid cannot drift.
+const SLOT_T1 = (width, height) => {
+  const h = 100
+  const bottom = pick(aspectOf(width, height), { square: 36, portrait: 40, story: 90 })
+  return { x: 64, y: height - bottom - h, w: 480, h, pad: 8, gap: 14, panel: 'light' }
+}
 export function T1_HeroList({ width = 1080, height = 1080, team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus, markHero }) {
   const P = players.slice(0, 13)
   const A = aspectOf(width, height)
+  const slot = SLOT_T1(width, height)
   // ── T1 at 4:5 and 9:16 ────────────────────────────────────────────────────
   // The square is a spine, a hero column and a name rail. The rail is what the
   // extra height lands in, so the design decision is how the names spend it.
@@ -539,7 +550,7 @@ export function T1_HeroList({ width = 1080, height = 1080, team, opponent, match
           box to the pixel, and on a taller canvas the photo gets the extra room
           instead of leaving a dead band under it. */}
       <div style={{
-        position: 'absolute', left: 64, top: heroTop, width: 480, bottom: 25,
+        position: 'absolute', left: 64, top: heroTop, width: 480, bottom: height - slot.y + 14,
         display: 'grid', placeItems: 'end center', overflow: 'hidden',
       }}>
         <div style={{
@@ -664,9 +675,15 @@ export function T1_HeroList({ width = 1080, height = 1080, team, opponent, match
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 2 — Trading card grid (4×3)
 // ─────────────────────────────────────────────────────────────────────────────
+// T2 sponsor slot: left of the header, directly under the venue line and above
+// the card grid (the spot the club picked by hand). The crest sits to its right,
+// so the slot stops well short of it. The grid opens under the slot on every
+// canvas shape.
+const SLOT_T2 = (width, height) => ({ x: 56, y: 268, w: 500, h: 100, pad: 8, gap: 14, panel: 'light' })
 export function T2_CardGrid({ width = 1080, height = 1080, team, opponent, match, players, palette }) {
   const P = players.slice(0, 12)
   const A = aspectOf(width, height)
+  const slot = SLOT_T2(width, height)
   // ── T2 at 4:5 and 9:16 ────────────────────────────────────────────────────
   // These are trading cards, so the design question is the card's own shape.
   // PORTRAIT keeps 4×3 and spends the extra height on the cards themselves —
@@ -681,7 +698,8 @@ export function T2_CardGrid({ width = 1080, height = 1080, team, opponent, match
   // The header block finishes around 300 whatever the canvas, so the grid opens
   // just under it rather than sliding down with the post — a story that starts
   // its cards at 440 leaves a dead band nobody put anything in.
-  const gridTop = pick(A, { square: 380, portrait: 400, story: 372 })
+  // Now it opens under the sponsor slot, which sits under the header.
+  const gridTop = slot.y + slot.h + 16
   return (
     <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
@@ -726,8 +744,13 @@ export function T2_CardGrid({ width = 1080, height = 1080, team, opponent, match
         <div>
           <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 96, lineHeight: 0.85, color: palette.ink, letterSpacing: -1 }}>LINEUP</div>
           <div style={{ width: 84, height: 4, background: palette.accent, margin: '10px 0 14px' }} />
-          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, letterSpacing: 2, color: palette.ink, opacity: 0.95 }}>
-            {team.name} <span style={{ opacity: 0.5 }}>×</span> {opponent.name}
+          {/* One fitted line, so a long pairing shrinks instead of wrapping onto
+              the venue line and into the sponsor slot below. */}
+          <div style={{ width: 700, height: 36, display: 'flex', alignItems: 'center' }}>
+            <AutoFitText max={30} min={16} lines={1}
+              style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 2, color: palette.ink, opacity: 0.95, lineHeight: 1.2 }}>
+              {team.name} <span style={{ opacity: 0.5 }}>×</span> {opponent.name}
+            </AutoFitText>
           </div>
           <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 16, letterSpacing: 1.8, color: palette.accent, marginTop: 10, fontWeight: 500 }}>
             {match.round} · {match.date} · {match.time}
@@ -791,8 +814,17 @@ export function T2_CardGrid({ width = 1080, height = 1080, team, opponent, match
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 3 — Side image + numbered XI
 // ─────────────────────────────────────────────────────────────────────────────
+// T3 sponsor slot: the foot of the XI column, left of the credit mark, under the
+// rule. The photo strip (and the featured player's name on it) is to its left, so
+// the slot starts at the column's own left edge. The XI rows share what is left.
+const SLOT_T3 = (width, height) => {
+  const strip = pick(aspectOf(width, height), { square: 380, portrait: 408, story: 440 })
+  const x = strip + 80
+  return { x, y: height - 40 - 96, w: width - 40 - 64 - x, h: 96, pad: 8, gap: 14, panel: 'light' }
+}
 export function T3_SideNumbered({ width = 1080, height = 1080, team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus, markHero }) {
   const P = players.slice(0, 11)
+  const slot = SLOT_T3(width, height)
   // The vertical spine label echoes the post headline (defaults to STARTING XI).
   // Scale it down for longer headlines so it never runs off the top edge.
   const spine = (headline || 'STARTING XI').toUpperCase()
@@ -805,7 +837,10 @@ export function T3_SideNumbered({ width = 1080, height = 1080, team, opponent, m
   // The outline spine is measured against the height it runs down, not a fixed
   // 1000, or it stays a square-sized word on a canvas twice as long.
   const spineSize = Math.max(34, Math.min(pick(A, { square: 80, portrait: 96, story: 120 }), Math.floor((height * 0.93) / Math.max(spine.length, 1))))
-  const numSize = pick(A, { square: 42, portrait: 48, story: 56 })
+  const numSize = pick(A, { square: 40, portrait: 48, story: 56 })
+  // The square's rows are naturally sized, so the sponsor slot at the foot is
+  // paid for by a touch less padding per row (7 to 5), not by cutting a row.
+  const rowPad = pick(A, { square: 5, portrait: 7 })
   const nameMax = pick(A, { square: 38, portrait: 42, story: 50 })
   return (
     <LayerRoot style={{
@@ -905,7 +940,7 @@ export function T3_SideNumbered({ width = 1080, height = 1080, team, opponent, m
               // runs down to the credit rule instead of stopping where it did on
               // the square and leaving 270px of nothing under it. The square
               // keeps its own naturally-sized rows.
-              <div key={i} style={{ ...(A === 'square' ? null : { flex: 1, minHeight: 0 }), display: 'flex', alignItems: 'center', gap: 12, padding: '7px 0', borderBottom: `1px solid ${palette.ink}1c`, ...heroRowMark(isHeroRow(p, featuredOf(players, featuredId), markHero), palette.accent, { bleed: 8, padY: 7 }) }}>
+              <div key={i} style={{ ...(A === 'square' ? null : { flex: 1, minHeight: 0 }), display: 'flex', alignItems: 'center', gap: 12, padding: `${rowPad}px 0`, borderBottom: `1px solid ${palette.ink}1c`, ...heroRowMark(isHeroRow(p, featuredOf(players, featuredId), markHero), palette.accent, { bleed: 8, padY: rowPad }) }}>
                 <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: numSize, color: palette.accent, lineHeight: 1, width: Math.round(numSize * 1.2), textAlign: 'right', flexShrink: 0 }}>{i + 1}</div>
                 <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-start' }}>
                   <AutoFitText max={nameMax} min={16} lines={1} pad={8} measureDeps={[p.debut ? 1 : 0]}
@@ -922,7 +957,9 @@ export function T3_SideNumbered({ width = 1080, height = 1080, team, opponent, m
             )
           })}
         </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: 12, paddingTop: 10, borderTop: `2px solid ${palette.accent}` }}>
+        {/* The footer is as tall as the sponsor slot (the grid sits in its left
+            side, bottom-aligned with the column), with the credit on the right. */}
+        <div style={{ boxSizing: 'border-box', height: slot.h + 12, flexShrink: 0, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: 12, paddingTop: 10, borderTop: `2px solid ${palette.accent}` }}>
           <CreditMark ink={palette.ink} h={44} />
         </div>
       </div>
@@ -934,9 +971,17 @@ export function T3_SideNumbered({ width = 1080, height = 1080, team, opponent, m
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 4 — Batting order with role-coded rows
 // ─────────────────────────────────────────────────────────────────────────────
+// T4 sponsor slot: the footer. The club line stays on the left and the credit on
+// the right, and the grid takes the long stretch between them. The footer is as
+// tall as the slot, and the order's rows give up that height.
+const T4_FOOT_BOTTOM = 22
+const SLOT_T4 = (width, height) => ({ x: 440, y: height - T4_FOOT_BOTTOM - 96, w: 500, h: 96, pad: 8, gap: 14, panel: 'light' })
 export function T4_BattingOrder({ width = 1080, height = 1080, team, opponent, match, players, palette }) {
   const P = players.slice(0, 13)
   const A = aspectOf(width, height)
+  const slot = SLOT_T4(width, height)
+  // Footer box: 1px rule + 12px air + the slot's own height.
+  const footH = slot.h + 13
   // ── T4 at 4:5 and 9:16 ────────────────────────────────────────────────────
   // The order is the whole post, so on a taller canvas the ORDER gets the room.
   // The root is a flex column and the rows share what is left below the meta
@@ -979,7 +1024,7 @@ export function T4_BattingOrder({ width = 1080, height = 1080, team, opponent, m
       </div>
       {/* The rows share whatever is left, so the order fills the post instead of
           stopping short of the footer with a dead strip under it. */}
-      <div style={{ flex: 1, minHeight: 0, padding: '16px 56px 92px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ flex: 1, minHeight: 0, padding: `16px 56px ${T4_FOOT_BOTTOM + footH + 12}px`, display: 'flex', flexDirection: 'column', gap: 4 }}>
         {P.map((p, i) => {
           const chip = p.captain ? 'C' : p.viceCaptain ? 'VC' : p.keeper ? 'WK' : null
           const isRole = p.role || 'BAT'
@@ -1011,8 +1056,11 @@ export function T4_BattingOrder({ width = 1080, height = 1080, team, opponent, m
           )
         })}
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, bottom: 22, display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 12, borderTop: `1px solid ${palette.ink}22` }}>
-        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 16, letterSpacing: 1.5, color: palette.ink, opacity: 0.9 }}>{(team.fullName || team.name).toUpperCase()} · {match.season}</div>
+      <div style={{ position: 'absolute', left: 56, right: 56, bottom: T4_FOOT_BOTTOM, boxSizing: 'border-box', height: footH, display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 12, borderTop: `1px solid ${palette.ink}22` }}>
+        <div style={{ width: slot.x - 56 - 24, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 16, letterSpacing: 1.5, lineHeight: 1.25, color: palette.ink, opacity: 0.9 }}>
+          {(team.fullName || team.name).toUpperCase()}
+          <div style={{ opacity: 0.65, fontSize: 13, letterSpacing: 2, marginTop: 3 }}>{match.season}</div>
+        </div>
         <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.25} id="g4" />
@@ -1023,16 +1071,23 @@ export function T4_BattingOrder({ width = 1080, height = 1080, team, opponent, m
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 5 — Brutalist typographic
 // ─────────────────────────────────────────────────────────────────────────────
+// T5 sponsor slot: inside the footer bar, between the STARTING XI / venue stack
+// on the left and the credit on the right. The bar is as tall as the slot plus
+// its own padding; on a taller post the rows share what the bar leaves.
+const T5_FOOT_PAD = 12
+const SLOT_T5 = (width, height) => ({ x: 480, y: height - T5_FOOT_PAD - 92, w: 494, h: 92, pad: 8, gap: 14, panel: 'light' })
 export function T5_Brutalist({ width = 1080, height = 1080, team, opponent, match, players, palette }) {
   const P = players.slice(0, 11)
   const A = aspectOf(width, height)
+  const slot = SLOT_T5(width, height)
+  const footH = slot.h + T5_FOOT_PAD * 2 + 3
   // ── T5 at 4:5 and 9:16 ────────────────────────────────────────────────────
   // Brutalist means the names ARE the artwork, so the taller canvas goes into
   // the type rather than into the space around it. The rows share the room the
   // header and footer leave and each name is allowed to run bigger; the
   // background marks are placed against the real canvas so the watermark still
   // sits behind the middle of the list rather than a third of the way down.
-  const nameMax = pick(A, { square: 64, portrait: 76, story: 92 })
+  const nameMax = pick(A, { square: 60, portrait: 76, story: 92 })
   return (
     <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
@@ -1062,7 +1117,7 @@ export function T5_Brutalist({ width = 1080, height = 1080, team, opponent, matc
           square it keeps its original natural height and bottom padding, so the
           list sits exactly where it did. */}
       <div style={{
-        ...(A === 'square' ? { padding: '32px 44px 0' } : { flex: 1, minHeight: 0, padding: '32px 44px 132px' }),
+        ...(A === 'square' ? { padding: '32px 44px 0' } : { flex: 1, minHeight: 0, padding: `32px 44px ${footH + 16}px` }),
         position: 'relative', zIndex: 2, display: 'flex', flexDirection: 'column', gap: 0,
       }}>
         {P.map((p, i) => {
@@ -1087,12 +1142,13 @@ export function T5_Brutalist({ width = 1080, height = 1080, team, opponent, matc
           )
         })}
       </div>
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, background: palette.secondary, padding: '22px 44px', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', alignItems: 'center', borderTop: `3px solid ${palette.accent}`, zIndex: 2 }}>
-        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, letterSpacing: 2, color: palette.ink, lineHeight: 1, textAlign: 'left' }}>STARTING XI</div>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 22, letterSpacing: 2, color: palette.accent, lineHeight: 1 }}>{match.venue.toUpperCase()}</div>
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 2, color: palette.ink, opacity: 0.85, marginTop: 6 }}>{match.competition} · {match.time}</div>
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, boxSizing: 'border-box', height: footH, background: palette.secondary, padding: `${T5_FOOT_PAD}px 44px`, display: 'grid', gridTemplateColumns: `${slot.x - 44}px ${slot.w}px 1fr`, alignItems: 'center', borderTop: `3px solid ${palette.accent}`, zIndex: 2 }}>
+        <div style={{ minWidth: 0, paddingRight: 18, textAlign: 'left' }}>
+          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, letterSpacing: 2, color: palette.ink, lineHeight: 1 }}>STARTING XI</div>
+          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 20, letterSpacing: 2, color: palette.accent, lineHeight: 1, marginTop: 10, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{match.venue.toUpperCase()}</div>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 2, color: palette.ink, opacity: 0.85, marginTop: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{match.competition} · {match.time}</div>
         </div>
+        <div />
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <CreditMark ink={palette.ink} h={44} />
         </div>
@@ -1105,6 +1161,21 @@ export function T5_Brutalist({ width = 1080, height = 1080, team, opponent, matc
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 6 — Diagonal poster
 // ─────────────────────────────────────────────────────────────────────────────
+// T6's sponsor slot. The footer slab is rotated 3 degrees, so its top edge rises
+// from 97px above the bottom at the left to 153px at the right; the slot sits
+// clear of the HIGH end, a quiet strip of the dark field being left under its
+// left side rather than the slot overlapping the slab. Taller posts give it
+// more height. A single sponsor gets a narrower card so it is not lost in a
+// bar the width of the post.
+const T6_FOOT_H = 120
+const T6_FOOT_BOTTOM = -34
+export const SLOT_T6 = (width = 1080, height = 1080, count = 3) => {
+  const A = aspectOf(width, height)
+  const h = pick(A, { square: 100, portrait: 112, story: 128 })
+  const w = count <= 1 ? 460 : count === 2 ? 720 : width - 112
+  return { x: Math.round((width - w) / 2), y: height - 164 - h, w, h, pad: 8, gap: 24, panel: 'light' }
+}
+
 export function T6_Diagonal({ width = 1080, height = 1080, team, opponent, match, players, palette, heroImage, featuredId }) {
   const P = players.slice(0, 11)
   const A = aspectOf(width, height)
@@ -1114,9 +1185,14 @@ export function T6_Diagonal({ width = 1080, height = 1080, team, opponent, match
   // anchored to the bottom slab rather than starting at a fixed 620 — the
   // square's names ended well short of the footer on a taller post and left a
   // gap that read as the design running out.
+  // The sponsor slot sits ABOVE the footer slab and below the names; the names
+  // grid is anchored to the slot's top edge, so the room it takes comes out of
+  // the hero band (a smaller crest at the square) rather than out of the names.
+  const slot = SLOT_T6(width, height)
   const heroTop = share(height, 230)
-  const heroH = share(height, 370)
-  const nameMax = pick(A, { square: 26, portrait: 30, story: 38 })
+  const heroH = A === 'square' ? 318 : share(height, 340)
+  const crestSize = pick(A, { square: 208, portrait: 250, story: 272 })
+  const nameMax = pick(A, { square: 25, portrait: 30, story: 38 })
   return (
     <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
@@ -1138,10 +1214,10 @@ export function T6_Diagonal({ width = 1080, height = 1080, team, opponent, match
         </div>
       </div>
       <div style={{ position: 'absolute', left: 56, top: heroTop, right: 56, height: heroH, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 24 }}>
-        <div style={{ flexShrink: 0, maxWidth: 320, paddingBottom: 24 }}>
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 2, color: palette.accent, marginBottom: 14 }}>// 1ST XI</div>
-          <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={272} shape="shield" />
-          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 34, letterSpacing: 1, color: palette.ink, opacity: 1, marginTop: 14 }}>{(team.fullName || team.name).toUpperCase()}</div>
+        <div style={{ flexShrink: 0, maxWidth: 320, paddingBottom: A === 'square' ? 6 : 24 }}>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 2, color: palette.accent, marginBottom: A === 'square' ? 8 : 14 }}>// 1ST XI</div>
+          <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={crestSize} shape="shield" />
+          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: pick(A, { square: 30, portrait: 34 }), letterSpacing: 1, color: palette.ink, opacity: 1, marginTop: 14 }}>{(team.fullName || team.name).toUpperCase()}</div>
         </div>
         <div style={{ flex: 1, height: heroH, display: 'grid', placeItems: 'end center', position: 'relative', overflow: 'hidden' }}>
           {(() => {
@@ -1164,18 +1240,18 @@ export function T6_Diagonal({ width = 1080, height = 1080, team, opponent, match
           })()}
         </div>
       </div>
-      {/* Stretched to the footer on a taller post so the pairs share the room;
-          the square keeps its natural-height grid exactly, since equal rows in
-          a box taller than the content spreads that content out. */}
+      {/* Runs from the hero band down to the sponsor slot, in equal rows, so
+          the pairs share whatever room the post has (and never run under the
+          slot). */}
       <div style={{
-        position: 'absolute', left: 56, right: 56, top: heroTop + heroH + 20,
-        ...(A === 'square' ? null : { bottom: 150, gridTemplateRows: `repeat(${Math.ceil(P.length / 2)}, 1fr)` }),
-        display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8,
+        position: 'absolute', left: 56, right: 56, top: heroTop + heroH + (A === 'square' ? 12 : 20),
+        bottom: height - slot.y + 12, gridTemplateRows: `repeat(${Math.ceil(P.length / 2) || 1}, 1fr)`,
+        display: 'grid', gridTemplateColumns: '1fr 1fr', gap: A === 'square' ? 2 : 8,
       }}>
         {P.map((p, i) => {
           const chip = p.captain ? 'C' : p.viceCaptain ? 'VC' : p.keeper ? 'WK' : null
           return (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 0', borderBottom: `1px solid ${palette.ink}1a` }}>
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: A === 'square' ? '2px 0' : '6px 0', borderBottom: `1px solid ${palette.ink}1a` }}>
               <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 1.5, color: palette.accent, width: 26 }}>{String(i + 1).padStart(2, '0')}</div>
               <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-start' }}>
                 <AutoFitText max={nameMax} min={13} lines={1}
@@ -1191,7 +1267,7 @@ export function T6_Diagonal({ width = 1080, height = 1080, team, opponent, match
           )
         })}
       </div>
-      <div style={{ position: 'absolute', left: -200, bottom: -30, width: 1500, height: 150, background: palette.secondary, transform: 'rotate(-3deg)', transformOrigin: 'bottom left', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', alignItems: 'center', padding: '0 290px' }}>
+      <div style={{ position: 'absolute', left: -200, bottom: T6_FOOT_BOTTOM, width: 1500, height: T6_FOOT_H, background: palette.secondary, transform: 'rotate(-3deg)', transformOrigin: 'bottom left', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', alignItems: 'center', padding: '0 290px' }}>
         <div>
           <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, letterSpacing: 1.5, color: palette.accent, opacity: 0.85 }}>VENUE</div>
           <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 22, letterSpacing: 1.5, color: palette.ink, marginTop: 2 }}>{match.venue.toUpperCase()}</div>
@@ -1210,6 +1286,18 @@ export function T6_Diagonal({ width = 1080, height = 1080, team, opponent, match
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 7 — Milestone spotlight
 // ─────────────────────────────────────────────────────────────────────────────
+// T7's sponsor slot: a card on top of the roster band, spanning the post's
+// width. The band is now its natural height at the square (222, down from 270:
+// four rows of names never filled the old one) and takes less of a taller post
+// than it used to, so the slot does not squeeze the cut-out.
+const T7_BAND_H = (height) => grow(height, 222, 0.18)
+export const SLOT_T7 = (width = 1080, height = 1080, count = 3) => {
+  const A = aspectOf(width, height)
+  const h = pick(A, { square: 108, portrait: 116, story: 132 })
+  const w = count <= 1 ? 460 : count === 2 ? 720 : width - 80
+  return { x: Math.round((width - w) / 2), y: height - T7_BAND_H(height) - 14 - h, w, h, pad: 8, gap: 24, panel: 'light' }
+}
+
 export function T7_CaptainSpotlight({ width = 1080, height = 1080, team, opponent, match, players, palette, milestone, heroImage }) {
   const player = milestone?.player || featuredOf(players)
   const value = milestone?.value || '1ST'
@@ -1226,7 +1314,13 @@ export function T7_CaptainSpotlight({ width = 1080, height = 1080, team, opponen
   // player's name sits just above the band, and the gap between them is the
   // design rather than a leftover. The band takes a share of the height, the
   // number steps up, and the cut-out keeps standing on the band's own edge.
-  const bandH = grow(height, 270, 0.25)
+  // The roster band takes less of a taller post than it did, because the
+  // sponsor slot now sits on top of it. The slot is the SAME function the
+  // editor places the grid with, and the cut-out and the left column both stop
+  // at its top edge.
+  const bandH = T7_BAND_H(height)
+  const slot = SLOT_T7(width, height)
+  const slotGap = 14
   const valueSize = pick(A, { square: 320, portrait: 360, story: 420 })
   const lastSize = pick(A, { square: 76, portrait: 88, story: 104 })
   return (
@@ -1248,14 +1342,14 @@ export function T7_CaptainSpotlight({ width = 1080, height = 1080, team, opponen
       </div>
       {/* Bottom-anchored: identical at 1080, and the cutout keeps standing on
           the same line rather than floating with a gap beneath it. */}
-      <div style={{ position: 'absolute', right: 0, top: 60, width: 540, bottom: bandH + 90, display: 'grid', placeItems: 'end center', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', right: 0, top: 60, width: 540, bottom: height - slot.y + slotGap, display: 'grid', placeItems: 'end center', overflow: 'hidden' }}>
         {(heroImage || hasHead) ? (
-          // A cut-out that deliberately overflows its box by 60 and is clipped
-          // at the top — the player bursting out of the panel. Derived from the
-          // canvas rather than fixed at 720, or a taller post just grows the box
-          // and leaves dead air above a photo that never followed it. Exactly
-          // 720 at 1080, so the square is untouched.
-          <img src={heroImage || heroSrcOf(player)} alt={player.last} style={{ height: height - bandH - 90, width: 'auto', objectFit: 'contain', objectPosition: 'bottom', filter: `drop-shadow(0 40px 80px ${palette.primary}ee)` }} />
+          // The cut-out is exactly its box tall, so it stops at the sponsor
+          // slot. (It used to be 60 taller than its box and was clipped by it,
+          // which put a picture's bounds under the slot.) Derived from the
+          // canvas rather than fixed, or a taller post just grows the box and
+          // leaves dead air above a photo that never followed it.
+          <img src={heroImage || heroSrcOf(player)} alt={player.last} style={{ height: slot.y - slotGap - 60, width: 'auto', objectFit: 'contain', objectPosition: 'bottom', filter: `drop-shadow(0 40px 80px ${palette.primary}ee)` }} />
         ) : (
           <img src={team.logo} alt={team.short} style={{ width: 380, height: 380, objectFit: 'contain', marginBottom: 40 }} />
         )}
@@ -1266,7 +1360,7 @@ export function T7_CaptainSpotlight({ width = 1080, height = 1080, team, opponen
           which is a changed square however well it reads at 4:5. */}
       <div style={{
         position: 'absolute', left: 40, top: 96, width: 540, zIndex: 3,
-        ...(A === 'square' ? null : { bottom: bandH + 40, justifyContent: 'space-between' }),
+        ...(A === 'square' ? null : { bottom: height - slot.y + slotGap, justifyContent: 'space-between' }),
         display: 'flex', flexDirection: 'column',
       }}>
         <div>
@@ -1309,6 +1403,18 @@ export function T7_CaptainSpotlight({ width = 1080, height = 1080, team, opponen
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 8 — Asymmetric mosaic
 // ─────────────────────────────────────────────────────────────────────────────
+// T8's sponsor slot is the middle of the foot row, between the BAT/BOWL/AR key
+// (ends about x=200) and the credit mark (starts about x=1000). The tile grid
+// stops above the row, so the slot never sits on a tile.
+const T8_BAND = (A) => pick(A, { square: 124, portrait: 130, story: 144 })
+export const SLOT_T8 = (width = 1080, height = 1080) => {
+  const A = aspectOf(width, height)
+  const band = T8_BAND(A)
+  const h = band - 20
+  const w = 620
+  return { x: Math.round((width - w) / 2), y: height - band + 10, w, h, pad: 6, gap: 20, panel: 'light' }
+}
+
 export function T8_Mosaic({ width = 1080, height = 1080, team, opponent, match, players, palette, featuredIdx = 0 }) {
   const playersXI = players.slice(0, 11)
   const featuredP = playersXI[featuredIdx] || playersXI.find(p => p.captain) || playersXI[0]
@@ -1321,13 +1427,22 @@ export function T8_Mosaic({ width = 1080, height = 1080, team, opponent, match, 
   const ROLE_INK = { BAT: palette.primary, BOWL: palette.primary, AR: palette.ink, WK: palette.ink }
   const A = aspectOf(width, height)
   // ── T8 at 4:5 and 9:16 ────────────────────────────────────────────────────
-  // A tile is only a tile while it is roughly square. PORTRAIT keeps 5×4 and
-  // the extra height makes each one 200×247, which is a better mosaic cell than
-  // the square's own 200×180. STORY would take that to 200×390 — a face down a
-  // letterbox — so the grid turns on its side to 4×6 and the cells land at
-  // 250×250 with the featured player a clean 500 square.
-  const cols = pick(A, { square: 5, story: 4 })
-  const rows = pick(A, { square: 4, story: 6 })
+  // A tile is only a tile while it is roughly square. The square is 5 across;
+  // portrait and story are 4 across (250 wide), so a taller post gives each
+  // tile height rather than a hairline column of them.
+  // The grid is sized to the squad. It used to be 4 rows (5x4 on the square and
+  // portrait, 4x6 on a story) however many players were picked, and an XI plus
+  // the 2x2 feature only ever fills 3 rows of 5 or 4 of 4, so the last rows were
+  // dead air at the bottom of the post (about 500px of it on a story). Now the
+  // rows are what the squad needs, never fewer than the floor below, and the
+  // tiles grow into the room: that room is where the sponsor slot's row lives.
+  const cols = pick(A, { square: 5, portrait: 4, story: 4 })
+  const needRows = Math.ceil((P.length + 3) / cols)
+  const rows = Math.max(needRows, pick(A, { square: 3, portrait: 4, story: 4 }))
+  // The foot of the post is one row: the BAT/BOWL/AR key at the left, the credit
+  // at the right and the sponsor slot between them. The tile grid stops above it.
+  const band = T8_BAND(A)
+  const slot = SLOT_T8(width, height)
   return (
     <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
@@ -1352,7 +1467,7 @@ export function T8_Mosaic({ width = 1080, height = 1080, team, opponent, match, 
         <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 1.5, color: palette.ink, opacity: 0.85 }}>{match.time}</div>
         <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 1.5, color: palette.ink, opacity: 0.85 }}>{match.venue.toUpperCase()}</div>
       </div>
-      <div style={{ position: 'absolute', left: 28, right: 28, top: pick(A, { square: 280, portrait: 300, story: 330 }), bottom: 80, display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)`, gap: 10 }}>
+      <div style={{ position: 'absolute', left: 28, right: 28, top: pick(A, { square: 280, portrait: 300, story: 330 }), bottom: band + 4, display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)`, gap: 10 }}>
         {P.map((p, i) => {
           const isFeatured = i === 0
           const role = p.role || 'BAT'
@@ -1382,7 +1497,7 @@ export function T8_Mosaic({ width = 1080, height = 1080, team, opponent, match, 
           )
         })}
       </div>
-      <div style={{ position: 'absolute', left: 36, right: 36, bottom: 22, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ position: 'absolute', left: 36, right: 36, bottom: 0, height: band, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
           {[['BAT', palette.accent], ['BOWL', palette.ink], ['AR', palette.secondary]].map(([lbl, clr]) => (
             <div key={lbl} style={{ display: 'flex', alignItems: 'center', gap: 6, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.5, color: palette.ink, opacity: 0.7 }}>
@@ -1400,6 +1515,17 @@ export function T8_Mosaic({ width = 1080, height = 1080, team, opponent, match, 
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 9 — Festival flyer
 // ─────────────────────────────────────────────────────────────────────────────
+// T9's sponsor slot: a card across the foot of the poster, just above the date
+// strip and inside the corner brackets (which sit at x 32 to 72, so the widest
+// card stops short of them). The billing is centred in the room above it.
+const T9_FOOT_H = 106
+export const SLOT_T9 = (width = 1080, height = 1080, count = 3) => {
+  const A = aspectOf(width, height)
+  const h = pick(A, { square: 100, portrait: 108, story: 124 })
+  const w = count <= 1 ? 460 : count === 2 ? 720 : width - 192
+  return { x: Math.round((width - w) / 2), y: height - T9_FOOT_H - 22 - h, w, h, pad: 8, gap: 24, panel: 'light' }
+}
+
 export function T9_Flyer({ width = 1080, height = 1080, team, opponent, match, players, palette }) {
   const P = players.slice(0, 11)
   const tier1 = P.slice(0, 2)
@@ -1419,6 +1545,9 @@ export function T9_Flyer({ width = 1080, height = 1080, team, opponent, match, p
   const t3 = pick(A, { square: 40, portrait: 47, story: 72 })
   const tierGap = pick(A, { square: 1, portrait: 1.3, story: 1.8 })
   const perLine = pick(A, { square: 3, portrait: 3, story: 2 })
+  // The sponsor slot sits between the billing and the date strip, inside the
+  // corner brackets. The billing is centred in what is left above it.
+  const slot = SLOT_T9(width, height)
   const t3Lines = []
   for (let i = 0; i < tier3.length; i += perLine) t3Lines.push(tier3.slice(i, i + perLine))
   return (
@@ -1433,7 +1562,7 @@ export function T9_Flyer({ width = 1080, height = 1080, team, opponent, match, p
       {[['left', 'top'], ['right', 'top'], ['left', 'bottom'], ['right', 'bottom']].map(([h, v], i) => (
         <div key={i} style={{
           position: 'absolute',
-          [h]: 32, [v]: v === 'bottom' ? 160 : 32,
+          [h]: 32, [v]: v === 'bottom' ? T9_FOOT_H + 16 : 32,
           width: 40, height: 40,
           borderTop: v === 'top' ? `3px solid ${palette.accent}` : undefined,
           borderBottom: v === 'bottom' ? `3px solid ${palette.accent}` : undefined,
@@ -1456,7 +1585,7 @@ export function T9_Flyer({ width = 1080, height = 1080, team, opponent, match, p
         <span>★ ★ ★ THE LINEUP ★ ★ ★</span>
         <span style={{ flex: '0 1 180px', height: 2, background: palette.accent, opacity: 0.5 }} />
       </div>
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', position: 'relative', zIndex: 2, textAlign: 'center', padding: '0 40px 132px', lineHeight: 0.88, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", color: palette.ink, letterSpacing: -1 }}>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', position: 'relative', zIndex: 2, textAlign: 'center', padding: `0 40px ${height - slot.y + 14}px`, lineHeight: 0.88, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", color: palette.ink, letterSpacing: -1 }}>
         {/* Fitted rather than set at a fixed size: two long surnames side by
             side already ran off the square, and giving the billing more room on
             a portrait poster would have made that worse rather than better. */}
@@ -1491,7 +1620,7 @@ export function T9_Flyer({ width = 1080, height = 1080, team, opponent, match, p
           ))}
         </div>
       </div>
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, background: palette.accent, color: palette.primary, padding: '22px 40px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: T9_FOOT_H, boxSizing: 'border-box', background: palette.accent, color: palette.primary, padding: '0 40px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 40, letterSpacing: 1, lineHeight: 1 }}>{match.date}</div>
           <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 1.5, marginTop: 4 }}>GATES {match.time}</div>
@@ -1530,6 +1659,20 @@ function TornEdge({ color = '#fff', height = 26, width = 1080, style = {} }) {
   )
 }
 
+// T10's sponsor slot lives IN the torn paper strip, between the competition
+// text and the credit mark. The strip is paper (the club's ink colour), so the
+// card is white on cream: a quiet frame that still backs the logos properly.
+// Right edge: 44 page margin, a 40px credit mark and the strip's 22px gap.
+const T10_TEAR_H = 26
+const T10_STRIP_H = (A) => pick(A, { square: 124, portrait: 130, story: 144 })
+export const SLOT_T10 = (width = 1080, height = 1080) => {
+  const A = aspectOf(width, height)
+  const strip = T10_STRIP_H(A)
+  const h = strip - 24
+  const w = 520
+  return { x: width - 44 - 40 - 22 - w, y: height - strip + 12, w, h, pad: 6, gap: 20, panel: 'light' }
+}
+
 export function T10_TeamSheet({ width = 1080, height = 1080, team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus, markHero }) {
   const P = players.slice(0, 13)
   const A = aspectOf(width, height)
@@ -1549,8 +1692,14 @@ export function T10_TeamSheet({ width = 1080, height = 1080, team, opponent, mat
   // would fight a club's own colours.
   const paper = palette.ink
   const paperInk = palette.primary
-  const STRIP_H = 104
-  const TEAR_H = 26
+  // The torn strip IS the sponsor slot's home. It used to be a decoration
+  // (crests, competition, credit) that reserved nothing, so a sponsor grid sat
+  // on the names or on the strip's own text. Now the strip is taller, the
+  // competition text takes two lines in a narrower column, and a spacer the
+  // slot's width keeps the middle of the strip clear for the grid.
+  const slot = SLOT_T10(width, height)
+  const STRIP_H = T10_STRIP_H(A)
+  const TEAR_H = T10_TEAR_H
   // The photo is deliberately SMALLER than the canvas. objectFit:cover scales
   // an image to fill its box, so a box the full height of the post renders a
   // headshot at 1080px tall and turns a face into a billboard — narrowing the
@@ -1700,15 +1849,21 @@ export function T10_TeamSheet({ width = 1080, height = 1080, team, opponent, mat
           <ClubLogo src={team.logo} monogram={team.monogram} color={paperInk} size={54} shape="shield" />
           <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={paperInk} size={54} shape="shield" />
         </div>
-        {comp && (
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <AutoFitText text={comp} max={26} min={11} lines={1}
-              style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 2, color: paperInk, lineHeight: 1 }} />
-            {match.season && (
-              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.6, opacity: 0.6, marginTop: 4 }}>{match.season}</div>
-            )}
-          </div>
-        )}
+        {/* flex: 1 even with no competition, so the spacer and the credit stay
+            where the slot's rectangle says they are. */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {comp && (
+            <>
+              <AutoFitText text={comp} max={26} min={11} lines={2}
+                style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 2, color: paperInk, lineHeight: 1 }} />
+              {match.season && (
+                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.6, opacity: 0.6, marginTop: 4 }}>{match.season}</div>
+              )}
+            </>
+          )}
+        </div>
+        {/* The sponsor grid is placed over this by the editor (SLOT_T10). */}
+        <div aria-hidden="true" style={{ width: slot.w, height: 1, flexShrink: 0 }} />
         <div style={{ flexShrink: 0, marginLeft: 'auto' }}>
           <CreditMark ink={paperInk} h={40} />
         </div>
@@ -1717,6 +1872,61 @@ export function T10_TeamSheet({ width = 1080, height = 1080, team, opponent, mat
     </LayerRoot>
   )
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COMPANION SPONSOR SLOTS (C1 to C4)
+// The sponsor grid used to land on whatever the bottom of each layout drew. Each
+// companion now reserves a rectangle and the layout is built AROUND it. The slot
+// function and the layout read the same geometry, so the space kept and the
+// place the grid goes cannot drift apart. C1 to C3 share one pattern: the credit
+// footer grows to hold the slot, and everything above it sits on the footer's
+// top edge. C4 keeps the slot inside the result band (see _c4Geom).
+// ─────────────────────────────────────────────────────────────────────────────
+const _CREDIT_W = IS_AFL ? 150 : 56
+function _footerGeom(width, height) {
+  const A = aspectOf(width, height)
+  const h = pick(A, { square: 100, portrait: 108, story: 120 })
+  const w = pick(A, { square: 420, portrait: 440, story: 460 })
+  const bar = h + 28
+  return { bar, slot: { x: width - 40 - _CREDIT_W - 16 - w, y: height - bar + 14, w, h, pad: 8, gap: 14, panel: 'light' } }
+}
+const _footerSlot = (width, height) => _footerGeom(width, height).slot
+export const SLOT_C1 = _footerSlot
+export const SLOT_C2 = _footerSlot
+export const SLOT_C3 = _footerSlot
+
+// The footer the three share. A plain function returning a div, not a component,
+// so it is a real root child that can take a z-index. `left` is the footer's own
+// line of text; the empty rounded box is the reserved slot, so a club with no
+// sponsors still sees a deliberate, tidy space (a grid drawn over it covers it).
+function _companionFooter({ width, height, palette, left }) {
+  const { bar, slot } = _footerGeom(width, height)
+  return (
+    <div data-layer="credit-footer" style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: bar, boxSizing: 'border-box', padding: '0 40px', background: palette.primary, borderTop: `2px solid ${palette.accent}`, display: 'flex', alignItems: 'center', zIndex: 3 }}>
+      <div style={{ flex: 1, minWidth: 0, paddingRight: 20 }}>{left}</div>
+      <div style={{ width: slot.w, height: slot.h, flexShrink: 0, marginRight: 16, borderRadius: 18, background: `${palette.ink}0d` }} />
+      <div style={{ width: _CREDIT_W, flexShrink: 0, display: 'flex', justifyContent: 'flex-end' }}>
+        <CreditMark ink={palette.ink} h={44} />
+      </div>
+    </div>
+  )
+}
+
+// C4: the slot sits at the right of the result band, left of it is the margin
+// text. The footer shrinks to the credit mark, so the band is the last thing
+// above it.
+function _c4Geom(width, height) {
+  const A = aspectOf(width, height)
+  const foot = 60
+  const bandH = pick(A, { square: 148, portrait: 160, story: 180 })
+  const w = pick(A, { square: 430, portrait: 440, story: 460 })
+  const h = pick(A, { square: 112, portrait: 120, story: 140 })
+  const inset = 10
+  const bandTop = height - foot - 18 - bandH
+  // Centred in the band's height, `inset` off its right edge.
+  return { foot, bandH, bandTop, inset, slot: { x: width - 48 - inset - w, y: bandTop + Math.round((bandH - h) / 2), w, h, pad: 8, gap: 14, panel: 'light' } }
+}
+export const SLOT_C4 = (width, height) => _c4Geom(width, height).slot
 
 // ─────────────────────────────────────────────────────────────────────────────
 // COMPANION 1 — Generic announcement
@@ -1731,6 +1941,10 @@ export function C1_CaptainAnnounce({ width = 1080, height = 1080, announcement, 
   // design here is the type keeping up with it — a 200px surname under a
   // 1,900px-tall player reads as a caption rather than the announcement.
   const lastSize = pick(A, { square: 200, portrait: 232, story: 280 })
+  // The credit footer grows to hold the sponsor slot, so the cut-out and the
+  // name block both sit on its top edge (they were 124px and 52px above the old
+  // 78px footer; the same gaps now hang off the taller one).
+  const { bar } = _footerGeom(width, height)
   return (
     <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
@@ -1740,11 +1954,12 @@ export function C1_CaptainAnnounce({ width = 1080, height = 1080, announcement, 
       <Halftone color={palette.ink} opacity={0.07} size={11} />
       <Stripes color={palette.accent} opacity={0.04} gap={28} angle={-22} />
       <div style={{ position: 'absolute', left: -40, top: -30, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: share(height, 360), lineHeight: 0.82, color: palette.accent, opacity: 0.09, letterSpacing: -8, userSelect: 'none', whiteSpace: 'nowrap' }}>{(a.kind || 'ANNOUNCEMENT')}</div>
-      <div style={{ position: 'absolute', left: 60, top: 90, right: 60, bottom: 200, display: 'grid', placeItems: 'end center', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', left: 60, top: 90, right: 60, bottom: bar + 122, display: 'grid', placeItems: 'end center', overflow: 'hidden' }}>
         {hasHead ? (
           // Same cut-out rule as T7 and C3 — height follows the canvas so the
-          // box and the player grow together. Exactly 820 at 1080.
-          <img src={player.headshot} alt={player.last} style={{ height: height - 260, width: 'auto', objectFit: 'contain', objectPosition: 'bottom', filter: `drop-shadow(0 40px 80px ${palette.primary}ee)` }} />
+          // box and the player grow together. It overflows its box by 30 and is
+          // clipped at the top, so it is the box height plus 30.
+          <img src={player.headshot} alt={player.last} style={{ height: height - bar - 182, width: 'auto', objectFit: 'contain', objectPosition: 'bottom', filter: `drop-shadow(0 40px 80px ${palette.primary}ee)` }} />
         ) : (
           <img src={team.logo} alt={team.short} style={{ width: 460, height: 460, objectFit: 'contain', marginBottom: 60 }} />
         )}
@@ -1753,17 +1968,19 @@ export function C1_CaptainAnnounce({ width = 1080, height = 1080, announcement, 
         <div><div style={{ display: 'inline-block', padding: '7px 14px', background: palette.accent, color: palette.primary, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 22, letterSpacing: 3 }}>{(a.kind || 'ANNOUNCEMENT').toUpperCase()}</div></div>
         <BrandLockup team={team} palette={palette} size={184} align="right" nameSize={30} style={{ maxWidth: 560 }} />
       </div>
-      <div style={{ position: 'absolute', left: 40, bottom: 130, right: 40, zIndex: 3 }}>
+      <div style={{ position: 'absolute', left: 40, bottom: bar + 52, right: 40, zIndex: 3 }}>
         <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 56, letterSpacing: 3, color: palette.accent, marginBottom: 8, lineHeight: 1 }}>{(a.headline || '').toUpperCase()}</div>
         <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 64, letterSpacing: 1, color: palette.ink, opacity: 0.78, lineHeight: 1 }}>{(player?.first || '').toUpperCase()}</div>
         <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: lastSize, letterSpacing: -3, color: palette.ink, lineHeight: 0.84, marginTop: -6 }}>{player?.last || '—'}</div>
         {a.subheadline && <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 28, letterSpacing: 2, color: palette.accent, marginTop: 10 }}>{a.subheadline.toUpperCase()}</div>}
       </div>
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '16px 40px', background: palette.primary, borderTop: `2px solid ${palette.accent}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 3 }}>
-        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, letterSpacing: 2, color: palette.ink }}>{(team.fullName || team.name).toUpperCase()}</div>
-        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 1.5, color: palette.ink, opacity: 0.65 }}>{match.competition} · {match.season}</div>
-        <CreditMark ink={palette.ink} h={44} />
-      </div>
+      {_companionFooter({ width, height, palette, left: (
+        <>
+          <AutoFitText text={(team.fullName || team.name).toUpperCase()} max={28} min={14} lines={1} measureDeps={[width, height]}
+            style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 2, color: palette.ink, lineHeight: 1.05 }} />
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 1.5, color: palette.ink, opacity: 0.65, marginTop: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{[match.competition, match.season].filter(Boolean).join(' · ')}</div>
+        </>
+      ) })}
       <GrainSVG opacity={0.32} id="ca1" />
     </LayerRoot>
   )
@@ -1782,6 +1999,10 @@ export function C2_TossWon({ width = 1080, height = 1080, toss, team, opponent, 
   // pinning is what left a taller post with the call at the top and a hole
   // under it. The word itself steps up with the canvas.
   const decSize = pick(A, { square: 280, portrait: 330, story: 400 })
+  // The credit footer grows to hold the sponsor slot (see _footerGeom); the
+  // fixture band keeps its 22px gap above it and the decision is centred in what
+  // is left between the header and the band.
+  const { bar } = _footerGeom(width, height)
   return (
     <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
@@ -1804,8 +2025,8 @@ export function C2_TossWon({ width = 1080, height = 1080, toss, team, opponent, 
           stops the chip's own bottom margin collapsing into the line under it,
           so even centring aside, the switch alone moves the square by 12px. */}
       <div style={A === 'square'
-        ? { position: 'absolute', left: 40, top: 320, right: 40 }
-        : { position: 'absolute', left: 40, top: 300, right: 40, bottom: 300, zIndex: 2, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+        ? { position: 'absolute', left: 40, top: 296, right: 40 }
+        : { position: 'absolute', left: 40, top: 300, right: 40, bottom: bar + 170, zIndex: 2, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
         <div style={{ ...(A === 'square' ? { display: 'inline-block' } : { alignSelf: 'flex-start' }), padding: '6px 14px', background: palette.accent, color: palette.primary, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 20, letterSpacing: 3, marginBottom: 12 }}>
           {winnerIsOpponent ? `${opponent.name} WON THE TOSS` : `${team.name} WON THE TOSS`}
         </div>
@@ -1813,7 +2034,7 @@ export function C2_TossWon({ width = 1080, height = 1080, toss, team, opponent, 
         <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: decSize, letterSpacing: -6, color: palette.ink, lineHeight: 0.85, marginTop: -4 }}>{decision}</div>
         <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: Math.round(decSize * 0.26), letterSpacing: 3, color: palette.accent, lineHeight: 1, marginTop: -8 }}>FIRST</div>
       </div>
-      <div style={{ position: 'absolute', left: 40, right: 40, bottom: 100, zIndex: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 28px', background: palette.secondary, borderLeft: `4px solid ${palette.accent}` }}>
+      <div style={{ position: 'absolute', left: 40, right: 40, bottom: bar + 22, zIndex: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 28px', background: palette.secondary, borderLeft: `4px solid ${palette.accent}` }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={84} shape="shield" />
           <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, color: palette.accent }}>VS</div>
@@ -1824,10 +2045,10 @@ export function C2_TossWon({ width = 1080, height = 1080, toss, team, opponent, 
           <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 1.5, color: palette.ink, opacity: 0.75, marginTop: 4 }}>{match.time} · {match.venue.toUpperCase()}</div>
         </div>
       </div>
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '16px 40px', background: palette.primary, borderTop: `2px solid ${palette.accent}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 3 }}>
-        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 24, letterSpacing: 2, color: palette.ink, opacity: 1 }}>{(team.fullName || team.name).toUpperCase()}</div>
-        <CreditMark ink={palette.ink} h={44} />
-      </div>
+      {_companionFooter({ width, height, palette, left: (
+        <AutoFitText text={(team.fullName || team.name).toUpperCase()} max={26} min={14} lines={1} measureDeps={[width, height]}
+          style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 2, color: palette.ink, lineHeight: 1.05 }} />
+      ) })}
       <GrainSVG opacity={0.3} id="ca2" />
     </LayerRoot>
   )
@@ -1848,6 +2069,10 @@ export function C3_ManOfMatch({ width = 1080, height = 1080, motm, team, opponen
   // corner beside his head. The surname and the stat tiles step up with it.
   const lastSize = pick(A, { square: 124, portrait: 144, story: 172 })
   const statSize = pick(A, { square: 76, portrait: 86, story: 100 })
+  // The credit footer grows to hold the sponsor slot (see _footerGeom). The
+  // cut-out box and the stat column both stop at its top edge, with the same
+  // gaps they had above the old 78px footer.
+  const { bar } = _footerGeom(width, height)
   return (
     <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
@@ -1865,19 +2090,19 @@ export function C3_ManOfMatch({ width = 1080, height = 1080, motm, team, opponen
         </div>
         <BrandLockup team={team} palette={palette} size={150} layout="stack" nameSize={22} style={{ maxWidth: 320 }} />
       </div>
-      <div style={{ position: 'absolute', left: 0, top: 220, width: 520, bottom: 160, display: 'grid', placeItems: 'end center', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', left: 0, top: 220, width: 520, bottom: bar + 82, display: 'grid', placeItems: 'end center', overflow: 'hidden' }}>
         {hasHead ? (
           // Same cut-out rule as T7: the photo overflows its box by 60 and is
           // clipped at the top, so its height has to follow the canvas or a
-          // taller post is all box and no player. Exactly 760 at 1080.
-          <img src={player.headshot} alt={player?.last} style={{ height: height - 320, width: 'auto', objectFit: 'contain', objectPosition: 'bottom', filter: `drop-shadow(0 40px 80px ${palette.primary}ee)` }} />
+          // taller post is all box and no player. Box height plus 60.
+          <img src={player.headshot} alt={player?.last} style={{ height: height - bar - 242, width: 'auto', objectFit: 'contain', objectPosition: 'bottom', filter: `drop-shadow(0 40px 80px ${palette.primary}ee)` }} />
         ) : (
           <img src={team.logo} alt={team.short} style={{ width: 400, height: 400, objectFit: 'contain', marginBottom: 80 }} />
         )}
       </div>
       <div style={A === 'square'
         ? { position: 'absolute', right: 36, top: 230, width: 520, zIndex: 3 }
-        : { position: 'absolute', right: 36, top: 230, bottom: 110, width: 520, zIndex: 3, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+        : { position: 'absolute', right: 36, top: 230, bottom: bar + 32, width: 520, zIndex: 3, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
         <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 44, letterSpacing: 1, color: palette.ink, opacity: 0.78, lineHeight: 1 }}>{(player?.first || '').toUpperCase()}</div>
         <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: lastSize, letterSpacing: -1, color: palette.ink, lineHeight: 0.88, marginTop: -2 }}>{player?.last || ''}</div>
         <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 2, color: palette.accent, marginTop: 8 }}>{(player?.roleLong || player?.role || '').toUpperCase()}</div>
@@ -1895,10 +2120,10 @@ export function C3_ManOfMatch({ width = 1080, height = 1080, motm, team, opponen
           </div>
         )}
       </div>
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '16px 40px', background: palette.primary, borderTop: `2px solid ${palette.accent}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 3 }}>
-        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 18, letterSpacing: 2, color: palette.ink }}>{match.venue.toUpperCase()}</div>
-        <CreditMark ink={palette.ink} h={44} />
-      </div>
+      {_companionFooter({ width, height, palette, left: (
+        <AutoFitText text={match.venue.toUpperCase()} max={20} min={12} lines={1} measureDeps={[width, height]}
+          style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 2, color: palette.ink, lineHeight: 1.05 }} />
+      ) })}
       <GrainSVG opacity={0.3} id="ca3" />
     </LayerRoot>
   )
@@ -1944,9 +2169,16 @@ export function C4_FinalScore({ width = 1080, height = 1080, result, team, oppon
       <span style={{ fontSize: 24, color: accent || palette.accent, letterSpacing: 1 }}>{p.line}</span>
     </div>
   )
-  const metaLine = [result?.grade || match.competition, match.round, match.date]
+  // The season rides on the date ("SAT 1 JAN · 2025-26") and the venue is its
+  // own line under it, so the footer no longer carries either.
+  const metaLine = [result?.grade || match.competition, match.round, match.date, match.season]
     .filter((v, i, a) => v && a.indexOf(v) === i).join(' · ')
   const A = aspectOf(width, height)
+  // The result band is the left-aligned margin text with the sponsor slot at its
+  // right; the footer is the credit mark alone (see _c4Geom).
+  const { foot, bandH, inset, slot } = _c4Geom(width, height)
+  const motm = !!result?.motmLast
+  const marginText = result?.winner === 'TIE' ? 'MATCH TIED' : `${winnerSide === 'team' ? team.name : opponent.name} WIN ${result?.margin || ''}`.trim()
   return (
     <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
@@ -1954,11 +2186,12 @@ export function C4_FinalScore({ width = 1080, height = 1080, result, team, oppon
     }}>
       <Halftone color={palette.ink} opacity={0.06} size={10} />
       <Stripes color={palette.accent} opacity={0.03} gap={28} angle={0} />
-      <div style={{ position: 'absolute', inset: 0, paddingBottom: 64, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ position: 'absolute', inset: 0, paddingBottom: foot, display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: '32px 48px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: `3px solid ${palette.accent}` }}>
-          <div>
-            <div style={{ display: 'inline-block', padding: '7px 15px', background: palette.accent, color: palette.primary, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 20, letterSpacing: 3 }}>FULL TIME</div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ display: 'inline-block', padding: '7px 15px', background: palette.accent, color: palette.primary, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 20, letterSpacing: 3 }}>RESULT</div>
             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 1.5, color: palette.ink, opacity: 0.7, marginTop: 9 }}>{metaLine}</div>
+            {match.venue && <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 1.5, color: palette.ink, opacity: 0.7, marginTop: 4 }}>{match.venue.toUpperCase()}</div>}
           </div>
           <BrandLockup team={team} palette={palette} size={92} align="right" nameSize={26} style={{ maxWidth: 460 }} />
         </div>
@@ -1991,20 +2224,26 @@ export function C4_FinalScore({ width = 1080, height = 1080, result, team, oppon
           <PerfPanel title={`${opponent.short} · TOP PERFORMERS`} titleColor={palette.ink} titleOpacity={0.85} edge={`${palette.ink}55`}
             batters={oppBatters} bowlers={oppBowlers} palette={palette} Perf={Perf} tall={A !== 'square'} />
         </div>
-        <div style={{ margin: '0 48px 18px', padding: '15px 24px', background: palette.secondary, borderLeft: `4px solid ${palette.accent}`, textAlign: 'center' }}>
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 2, color: palette.accent, marginBottom: 5 }}>// MATCH RESULT</div>
-          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 38, letterSpacing: -0.5, lineHeight: 1.05, color: palette.ink }}>
-            {result?.winner === 'TIE' ? 'MATCH TIED' : `${winnerSide === 'team' ? team.name : opponent.name} WIN ${result?.margin || ''}`.trim()}
+        <div style={{ margin: '0 48px 18px', height: bandH, flexShrink: 0, boxSizing: 'border-box', padding: `${inset}px ${inset}px ${inset}px 24px`, background: palette.secondary, borderLeft: `4px solid ${palette.accent}`, display: 'flex', alignItems: 'stretch', gap: 20 }}>
+          {/* Margin text left-aligned, chip under it. The text box takes what the
+              chip leaves and shrinks to two lines, so a long club name plus a
+              long margin still sits beside the slot. */}
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 8, textAlign: 'left' }}>
+            <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: motm ? 'flex-end' : 'center' }}>
+              <AutoFitText text={marginText} max={38} min={20} lines={2} measureDeps={[width, height, motm]}
+                style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: -0.5, lineHeight: 1.05, color: palette.ink }}>
+                {marginText}
+              </AutoFitText>
+            </div>
+            {motm && (
+              <div style={{ alignSelf: 'flex-start', flexShrink: 0, padding: '5px 14px', background: `${palette.ink}10`, border: `1px solid ${palette.accent}`, fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 1.5, color: palette.ink, opacity: 0.85, whiteSpace: 'nowrap' }}>★ MOTM · {result.motmLast}</div>
+            )}
           </div>
-          {result?.motmLast && (
-            <div style={{ display: 'inline-block', marginTop: 9, padding: '6px 14px', background: `${palette.ink}10`, border: `1px solid ${palette.accent}`, fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 1.5, color: palette.ink, opacity: 0.85 }}>★ MOTM · {result.motmLast}</div>
-          )}
+          <div style={{ width: slot.w, height: slot.h, flexShrink: 0, alignSelf: 'center', borderRadius: 18, background: `${palette.ink}0d` }} />
         </div>
       </div>
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '18px 48px', background: palette.primary, borderTop: `2px solid ${palette.accent}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 18, letterSpacing: 2, color: palette.ink }}>{match.venue.toUpperCase()}</div>
-        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.5, color: palette.ink, opacity: 0.65 }}>{match.season} SEASON</div>
-        <CreditMark ink={palette.ink} h={44} />
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: foot, boxSizing: 'border-box', padding: '0 48px', background: palette.primary, borderTop: `2px solid ${palette.accent}`, display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
+        <CreditMark ink={palette.ink} h={40} />
       </div>
       <GrainSVG opacity={0.3} id="ca4" />
     </LayerRoot>
@@ -2584,3 +2823,10 @@ ScSponsorFooter.displayName = 'ScSponsorFooter'
 Stripes.displayName = 'Stripes'
 ClubLogo.displayName = 'ClubLogo'
 BrandLockup.displayName = 'BrandLockup'
+
+// Where this file's layouts keep the sponsor grid (see sponsorSlots.js). Three
+// maps so three people can fill them in without touching each other's lines.
+export const SLOTS_LINEUP_A = { T1: SLOT_T1, T2: SLOT_T2, T3: SLOT_T3, T4: SLOT_T4, T5: SLOT_T5 } // T1 to T5
+export const SLOTS_LINEUP_B = { T6: SLOT_T6, T7: SLOT_T7, T8: SLOT_T8, T9: SLOT_T9, T10: SLOT_T10 } // T6 to T10
+export const SLOTS_COMPANION = { C1: SLOT_C1, C2: SLOT_C2, C3: SLOT_C3, C4: SLOT_C4 } // C1 to C4
+export const SPONSOR_SLOTS = { ...SLOTS_LINEUP_A, ...SLOTS_LINEUP_B, ...SLOTS_COMPANION }

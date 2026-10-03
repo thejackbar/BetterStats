@@ -67,7 +67,7 @@ export function templateToBlocks(templateId, ctx = {}) {
     const winLine = tie ? 'MATCH TIED' : `${oppWon ? (result.oppName || 'OPPONENT') : (result.teamName || team.name || 'US')} WIN ${result.margin || ''}`.trim()
     return [
       BR({ x: 700, y: 56, size: 120, layout: 'stack', align: 'right' }),
-      T('FULL TIME', { x: 70, y: 70, w: 420, fontSize: 34, color: 'accent' }),
+      T('RESULT', { x: 70, y: 70, w: 420, fontSize: 34, color: 'accent' }),
       T(`${result.teamName || team.name || 'US'}`, { x: 70, y: 300, w: 700, fontSize: 48, color: 'ink' }),
       T(result.teamScore || '—', { x: 70, y: 360, w: 700, fontSize: 96, color: 'ink' }),
       T(`${result.oppName || 'OPPONENT'}`, { x: 70, y: 520, w: 700, fontSize: 48, color: 'ink' }),
