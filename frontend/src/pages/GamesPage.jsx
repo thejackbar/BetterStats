@@ -131,15 +131,29 @@ export default function GamesPage() {
   // that a null season is the visitor choosing "All seasons", and defaulting
   // again on every null is what snapped that choice straight back to the
   // newest season.
+  //
+  // `seasonReady` holds the results fetch back until that default is decided.
+  // Without it the first fetch goes out with no season (every season the club
+  // has ever played, which is slow) and then again for the current one, and
+  // when the slow one lands last the page lists the whole history under a
+  // dropdown that says the current season.
   const seasonDefaulted = useRef(false)
+  const [seasonReady, setSeasonReady] = useState(false)
   useEffect(() => {
-    if (seasonDefaulted.current || seasons.length === 0) return
+    if (seasonDefaulted.current) return
+    if (seasons.length === 0) {
+      // A club with no seasons has nothing to default to; once loading is
+      // over there is nothing left to wait for.
+      if (!clubLoading) setSeasonReady(true)
+      return
+    }
     seasonDefaulted.current = true
     if (selectedSeason == null) {
       const fromUrl = searchParams.get('season')
       setSelectedSeason(fromUrl && seasons.some(s => s.id === fromUrl) ? fromUrl : seasons[0].id)
     }
-  }, [seasons, selectedSeason, setSelectedSeason, searchParams])
+    setSeasonReady(true)
+  }, [seasons, selectedSeason, setSelectedSeason, searchParams, clubLoading])
 
   // Apply ?grade= once, after that season's grades have loaded.
   useEffect(() => {
@@ -155,13 +169,17 @@ export default function GamesPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!orgId) return
+    if (!orgId || !seasonReady) return
+    // Only the latest request may write: a slower, older one (a wider season
+    // choice or filter) must not land after it and replace the list.
+    let current = true
     setLoading(true)
     api.getOrgResults(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, finalsOnly, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam })
-      .then(setGames)
-      .catch(() => setGames([]))
-      .finally(() => setLoading(false))
-  }, [orgId, selectedSeason, selectedGrade, finalsOnly, categoriesParam, formatsParam, competitionsParam])
+      .then(g => { if (current) setGames(g) })
+      .catch(() => { if (current) setGames([]) })
+      .finally(() => { if (current) setLoading(false) })
+    return () => { current = false }
+  }, [orgId, seasonReady, selectedSeason, selectedGrade, finalsOnly, categoriesParam, formatsParam, competitionsParam])
 
   // Group by grade_name, preserving played_at DESC order within each group
   const byGrade = useMemo(() => {

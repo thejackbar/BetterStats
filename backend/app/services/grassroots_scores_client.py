@@ -34,7 +34,14 @@ _HEADERS = {
     "Referer": "https://play.cricket.com.au/",
 }
 
-_grade_matches_cache: dict[str, list] = {}  # grade_id -> matches
+_grade_matches_cache: dict[str, tuple] = {}  # grade_id -> (fetched_at, matches)
+# A grade's match list carries each fixture's status and date. It used to be
+# cached for the life of the process, so one look at a grade (the Fixtures
+# page, a lineup, the scheduled-sync probe) froze it: a match that finished
+# afterwards stayed LIVE or UPCOMING, and a fixture added or rescheduled later
+# was never seen, until the backend happened to restart. Ten minutes keeps the
+# probe-then-sync reuse that the cache exists for and no longer.
+_GRADE_MATCHES_TTL = 600
 _matches_cache: dict[str, list] = {}  # team_id -> matches
 _scorecard_cache: dict[str, tuple] = {}  # match_id -> (fetched_at, scorecard | None)
 _ladder_cache: dict[str, tuple] = {}  # grade_id -> (fetched_at, data | None)
@@ -86,8 +93,10 @@ async def get_grade_matches(grade_id: str, *, force: bool = False) -> list[dict]
     game-level sync reads "no matches" as "this grade has no games", so a
     cached upstream blip would silently look like a club with no history.
     """
-    if not force and grade_id in _grade_matches_cache:
-        return _grade_matches_cache[grade_id]
+    now = time.time()
+    hit = _grade_matches_cache.get(grade_id)
+    if not force and hit and now - hit[0] < _GRADE_MATCHES_TTL:
+        return hit[1]
     try:
         r = await _get(f"{BASE_URL}/scores/grades/{grade_id}/matches")
         if r.status_code != 200:
@@ -95,7 +104,7 @@ async def get_grade_matches(grade_id: str, *, force: bool = False) -> list[dict]
             return []
         data = r.json()
         matches = data.get("matches") or []
-        _grade_matches_cache[grade_id] = matches
+        _grade_matches_cache[grade_id] = (now, matches)
         return matches
     except Exception as e:
         logger.warning(f"GR scores: /grades/{grade_id}/matches failed: {e}")

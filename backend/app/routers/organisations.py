@@ -723,11 +723,11 @@ async def get_org_lineup_one(
 
 
 async def _sync_safe(org_id: str, run_id: uuid.UUID, kind: str = "org_full", auto_yearbooks: bool = False,
-                     since: date | None = None):
+                     since: date | None = None, fresh: bool = False):
     from app.services.sync import finish_sync_run, pause_sync_run, cancel_sync_run, SyncControlSignal
     import logging
     try:
-        stats = await sync_organisation(org_id, run_id=run_id, kind=kind, since=since)
+        stats = await sync_organisation(org_id, run_id=run_id, kind=kind, since=since, fresh=fresh)
         await finish_sync_run(run_id, stats if isinstance(stats, dict) else {})
 
         # Self-serve registration's first full sync: build, narrate and publish
@@ -829,7 +829,7 @@ async def trigger_quick_sync(org_id: str, background_tasks: BackgroundTasks, _us
     since = auto_sync.quick_sync_since()
     run_id = await start_sync_run(org_uuid, auto_sync.QUICK_KIND, triggered_by_user_id=_user.id)
     _org_sync_running.add(org_id)
-    background_tasks.add_task(_sync_safe, org_id, run_id, auto_sync.QUICK_KIND, False, since)
+    background_tasks.add_task(_sync_safe, org_id, run_id, auto_sync.QUICK_KIND, False, since, True)
     return {"status": "sync_started", "org_id": org_id, "run_id": str(run_id),
             "since": since.isoformat()}
 

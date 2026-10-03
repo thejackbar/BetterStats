@@ -705,6 +705,7 @@ async def sync_organisation(
     run_id: Optional[uuid.UUID] = None,
     kind: str = "org_full",
     since: Optional[date] = None,
+    fresh: bool = False,
 ) -> dict:
     """Thin concurrency gate in front of ``_sync_organisation_impl`` — every
     caller (weekly cron, manual Sync Now, Full Rebuild, self-serve trial
@@ -714,14 +715,19 @@ async def sync_organisation(
 
     ``since`` switches the run to INCREMENTAL mode — see
     ``_sync_organisation_impl``. The scheduled runs pass it; every manual
-    action leaves it None and gets exactly the sync it always did."""
+    action leaves it None and gets exactly the sync it always did.
+
+    ``fresh`` makes the game pass bypass the in-process match-list and
+    scorecard caches. Quick Sync sets it: someone presses the button because a
+    match has only just finished, which is exactly when a cached snapshot from
+    earlier in the match is wrong."""
     if run_id is not None and _SYNC_GOVERNOR.locked():
         await update_sync_run(run_id, {
             "progress_phase": "Queued — waiting for another club's sync to finish",
             "progress_pct": 0, "progress_done": None, "progress_total": None,
         })
     async with _SYNC_GOVERNOR:
-        return await _sync_organisation_impl(org_id_str, run_id=run_id, kind=kind, since=since)
+        return await _sync_organisation_impl(org_id_str, run_id=run_id, kind=kind, since=since, fresh=fresh)
 
 
 async def _sync_organisation_impl(
@@ -729,6 +735,7 @@ async def _sync_organisation_impl(
     run_id: Optional[uuid.UUID] = None,
     kind: str = "org_full",
     since: Optional[date] = None,
+    fresh: bool = False,
 ) -> dict:
     """Full historical sync for an organisation using season-aggregate stats.
 
@@ -1210,6 +1217,7 @@ async def _sync_organisation_impl(
             gr_stats = await sync_grassroots_game_level_data(
                 org_id_str, run_id=run_id, since=since,
                 season_ids=active_season_ids if incremental else None,
+                fresh=fresh,
             )
             stats.update(gr_stats)
         except SyncControlSignal:
@@ -1792,8 +1800,12 @@ async def sync_grassroots_game_level_data(
     run_id: Optional[uuid.UUID] = None,
     since: Optional[date] = None,
     season_ids: Optional[list] = None,
+    fresh: bool = False,
 ) -> dict:
     """Pull game-level scorecards from the Grassroots /scores/* API.
+
+    ``fresh`` reads every grade's match list and every scorecard straight from
+    Cricket Australia instead of the in-process caches (see Quick Sync).
 
     ``since`` and ``season_ids`` scope an INCREMENTAL run (see
     ``_sync_organisation_impl``): only grades belonging to ``season_ids`` are
@@ -1829,7 +1841,7 @@ async def sync_grassroots_game_level_data(
         "gr_games_new": 0, "gr_games_skipped_done": 0, "gr_games_skipped_no_data": 0,
         "gr_batting": 0, "gr_bowling": 0, "gr_fielding": 0,
         "gr_partnerships": 0, "gr_fow": 0, "gr_appearances": 0,
-        "gr_matches_out_of_window": 0,
+        "gr_matches_out_of_window": 0, "gr_matches_not_yet_played": 0,
     }
     org_uuid = _parse_uuid(org_id_str)
     if not org_uuid:
@@ -1928,6 +1940,7 @@ async def sync_grassroots_game_level_data(
     # to only matches where our org is one of the participants, since large grades
     # return every match between all teams in the competition.
     org_id_str_lower = org_id_str.lower()
+    latest_day = (datetime.now(timezone.utc).date() + timedelta(days=1)).isoformat()
     seen_match_ids: set[str] = set()
     match_to_season: dict[str, uuid.UUID] = {}
     match_to_is_final: dict[str, bool] = {}
@@ -1937,7 +1950,7 @@ async def sync_grassroots_game_level_data(
     for grade_idx, (grade_guid, season_id, grade_name, _our_grade_id) in enumerate(grades, start=1):
         stats["gr_teams_scanned"] += 1  # reuse existing stat key for continuity
         try:
-            matches = await gr.get_grade_matches(grade_guid)
+            matches = await gr.get_grade_matches(grade_guid, force=fresh)
         except Exception as e:
             logger.warning(f"GR-sync: grade {grade_name} ({grade_guid}) matches failed: {e}")
             continue
@@ -1956,6 +1969,15 @@ async def sync_grassroots_game_level_data(
                 day = ((sched[0].get("startDateTime") if sched else "") or "")[:10]
                 if not day or day < since.isoformat():
                     stats["gr_matches_out_of_window"] = stats.get("gr_matches_out_of_window", 0) + 1
+                    continue
+                # Nor a fixture that has not been played yet. A grade's list
+                # carries the rest of the season (169 of the 171 fixtures an
+                # incremental Applecross run found were still to come), and each
+                # one costs a scorecard request that comes back empty. A day of
+                # slack, because the fixture's date is local to the club and the
+                # clock here is UTC.
+                if day > latest_day:
+                    stats["gr_matches_not_yet_played"] += 1
                     continue
             teams = m.get("teams") or []
             our_team_m = next(
@@ -2143,7 +2165,7 @@ async def sync_grassroots_game_level_data(
             continue
 
         # Fetch first (no session needed). 204 → not in Grassroots, skip.
-        scorecard = await gr.get_match_scorecard(match_id_str)
+        scorecard = await gr.get_match_scorecard(match_id_str, force=fresh)
         if not scorecard:
             stats["gr_games_skipped_no_data"] += 1
             continue
