@@ -13,6 +13,14 @@ import { useNameFormat, nameMatchesSearch } from '../lib/nameFormat'
 import { fmt2, fmtCount } from '../lib/cricketFormat'
 import { useSectionNames } from '../lib/sectionNames'
 
+// Matches played. Each board reports it for the players on that board, so a
+// bowler who never batted has it only on the bowling one. Both boards use the
+// same definition, so the larger of the two is the figure.
+function matchesPlayed(b, bw) {
+  const g = [b?.games, bw?.games].filter(v => v != null).map(Number)
+  return g.length ? Math.max(...g) : null
+}
+
 function PlayerStat({ label, value, accent }) {
   const display = value ?? '—'
   return (
@@ -59,14 +67,18 @@ export default function Players() {
 
   useEffect(() => {
     if (!orgId) return
-    api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5000, finalsOnly, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam })
+    // This is a roster, not a ranking. A club's "fewest innings before a rate is
+    // shown" is a bar for the leaderboard; left to default it also drops every
+    // player under it from these two lists, and their whole row reads as dashes.
+    // An explicit 0 switches it off (the server tests for null, not falsiness).
+    api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5000, minRateInnings: 0, finalsOnly, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam })
       .then(rows => {
         const map = {}
         rows.forEach(r => { map[r.player_id] = r })
         setBattingStats(map)
       })
       .catch(() => {})
-    api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5000, finalsOnly, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam })
+    api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5000, minRateSpells: 0, finalsOnly, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam })
       .then(rows => {
         const map = {}
         rows.forEach(r => { map[r.player_id] = r })
@@ -181,7 +193,7 @@ export default function Players() {
                       <span className="font-mono text-[10px] text-pb-faint shrink-0">VIEW →</span>
                     </div>
                     <div className="grid grid-cols-5 gap-x-2 gap-y-1.5 text-[11px]">
-                      <PlayerStat label="M" value={b?.games != null ? fmtCount(b.games) : null} />
+                      <PlayerStat label="M" value={matchesPlayed(b, bw) != null ? fmtCount(matchesPlayed(b, bw)) : null} />
                       <PlayerStat label="INN" value={b?.innings} />
                       <PlayerStat label="RUNS" value={b?.total_runs != null ? fmtCount(b.total_runs) : null} accent />
                       <PlayerStat label="AVG" value={b?.average != null ? fmt2(b.average) : null} />
@@ -234,7 +246,7 @@ export default function Players() {
                                 {fmt(player.display_name || player.name)}
                               </Link>
                             </td>
-                            <td className="py-3 font-mono text-pb-dim text-right">{b?.games != null ? fmtCount(b.games) : '—'}</td>
+                            <td className="py-3 font-mono text-pb-dim text-right">{matchesPlayed(b, bw) != null ? fmtCount(matchesPlayed(b, bw)) : '—'}</td>
                             <td className="py-3 font-mono text-pb-dim text-right">{b?.innings ?? '—'}</td>
                             <td className="py-3 text-right">
                               <span className="font-mono font-bold pb-num" style={{ color: 'var(--pb-accent)' }}>

@@ -45,6 +45,8 @@
 26. `resolve_scope_for_player` widens category only when the default leaves a junior-only player empty (`stats_auto_show_played_grades`, 229), never a format, profile only, gated on `scope.category_active`.
 27. `organisations.stats_grade_categories`: empty or all-junk stores NULL. Age-group regexes end `\d+s?`. `grades-with-stats` computes classification in its own query (unnesting inflates runs). Filter rows hide when there is nothing to choose; `api.js` has one `scopeQuery()`.
 
+4a. The Players page is a roster: it sends `min_rate_innings=0` and `min_rate_spells=0` because a board minimum drops the player, not just the rate. M is `max(batting.games, bowling.games)`. A new page that borrows a leaderboard for a list of people does the same. Check: `frontend/scripts/verify-players-page.mjs`.
+
 **Career matches and lenses (say it, never renumber)**
 28. Header matches = `SUM(player_season_stats.matches)` (CA, no grade). Any active scope (club default included) switches to games we hold. The by-grade grid uses per season AND grade `max(held, CA per-grade)` plus unplaceable shortfall. Do NOT adopt `max` in the header (rewrites ~19k players).
 29. `services/match_coverage.py` reads both figures itself. Grade-less games count as held. `extra_scorecards` and `without_scorecard` are separate, never negative. Note only where they differ, never for last-N/date windows, and under a scope it names both sources. Grid note is summed from its own rows and off while the grid is scoped. The profile header carries only an "i" beside MATCHES (`MatchCoverageInfo`, same panel as `MatchCoverageNote`); no sentence beside the figure. Do not render the headline note there.

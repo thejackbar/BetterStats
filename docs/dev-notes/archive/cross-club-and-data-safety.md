@@ -829,3 +829,22 @@ cross-club rows across 38 clubs** were being read as the viewing club's own.
 **Anti-pattern reminder**: don't reintroduce a global `session.get(Grade, raw_guid)` create/skip in sync — use `_resolve_org_grade`. `grades.id` is no longer guaranteed to equal the CA GUID (it's `uuid5(org, guid)` for per-club rows); the raw GUID lives in `grassroots_id`, which is what `/scores/grades/{id}/matches`, the ladder API, and the per-grade stats `gradeId` are keyed on.
 
 <!-- END original CLAUDE.md L12866-12881 -->
+
+## Oct 2026: a merge keeps the person, not only their cricket (v9.106.2)
+
+**Reported at Applecross.** Four new players were added. Two (Pasindu Acharige, Travis Morgan) came up in Merge Players; merging them "wiped their data and photos". The merge screen defaults to keeping the record with a `playhq_id`, which is the synced one with the games. The record it removes is the freshly added roster one, and that is where the headshot, contact details, date of birth, squad and availability live.
+
+**Root cause.** `_merge_players_core` moved the cricket tables and then deleted the `players` row. Nothing copied the row's own columns (`photo_*`, `hero_photo_*`, `email`, `phone`, `date_of_birth`, `shirt_number`, `squad_team_id`, style fields, `skill_positions`, the two override flags), and the tables that point at a player and are `ON DELETE CASCADE` (`team_members`, `fixture_lineups`, `player_availability`, `player_availability_periods`, `net_attendance`, `family_members`, `player_name_aliases`) or `SET NULL` (`fee_members`, `comms_contacts`, `crm_people`, `net_checkin_registrations`) went with it or were left unlinked.
+
+**Fix.**
+- `services/merge_profile.carry_profile(keep, remove)` fills a column on the keeper only where the keeper has nothing (None, blank text, empty list or bytes; `False` and `0` count as answers). A photo, its bytes and its mime type move as one, and only if the keeper has no picture of that kind. The audit entry lists the columns filled (`profile_filled`).
+- Those link tables are on `merge_carry.CARRIED`. `fixture_lineups` and `team_members` have no `id`, so `_ROW_KEY` names the column that identifies the row (`fixture_id`, `team_id`), and `restore_rows` takes `keep_id` to find them again on undo. `fee_members`, `comms_contacts` and `crm_people` are in `_NEVER_DELETE`: if the keeper already holds the matching row, the removed side's is not moved and is not deleted (rule 7: keep it, unlinked).
+- Club-to-club merges (`org_merge`) re-home the source club's players first, and their link rows still carry the source club's id. `carry_rows(..., org_id)` only moves a club-owned link row when it belongs to the keeper's club (`_OWN_CLUB_TABLES`, `_OWN_CLUB`), and `squad_team_id` is skipped when that team is another club's. `fee_members` has a composite FK to `(organisation_id, id)` that would otherwise reject the row and turn the player into a skipped conflict.
+- `carry_rows` now uses `UPDATE ... RETURNING`, so the ids logged are the rows that actually moved.
+- Undo does not take a copied photo or detail back off the keeper (the same call the vote rows already make: nothing is lost, and the same person still has it). The restored player has the cricket and the link rows, not the photo.
+
+**Not recoverable.** The two merges done before this change deleted their rows. There is no copy in the database; the photos and details need re-entering, or a restore from backup.
+
+**Still not carried** (known, listed so nobody assumes otherwise): `fantasy_*`, `vote_nudges`, `phq_id_suggestions`, `player_sync_requests`, `sync_runs`. None is the club's own typed data about the person.
+
+**Proof.** `backend/verification/verify_merge_profile_carry.py` runs the shipped `_merge_players_core` and `undo_merge` against Postgres on its own database. Control run on the previous commit: 21 of 30 checks fail (photo, email, date of birth, squad, availability, lineup, nets, member link, contact, alias all gone). `verify_merge_carry.py` still passes 31 of 31.

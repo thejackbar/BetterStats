@@ -33,6 +33,7 @@ from app.services.import_ingest import _name_parts, _middles_compatible, is_shor
 from app.services.player_aliases import seed_alias_on_rename
 from app.services import junior_hiding
 from app.services import merge_carry
+from app.services import merge_profile
 from app.services import grade_duplicates
 from app.services.import_reconcile import reconcile_imported_totals
 from app.auth.modules import require_module
@@ -598,7 +599,18 @@ async def _merge_players_core(
         # board. All but the honour board are ON DELETE CASCADE, so before this
         # the removal below DELETED them outright — a merge silently destroyed
         # the removed record's whole imported career. See services/merge_carry.
-        carried = await merge_carry.carry_rows(db, keep_id, remove_id)
+        carried = await merge_carry.carry_rows(db, keep_id, remove_id, org_id)
+
+        # The person's own profile (photos, contact details, date of birth,
+        # squad) is on the row about to be deleted. Fill what the keeper lacks.
+        # A squad is a team of one club; after a club-to-club merge the removed
+        # player's can be the other club's, which must not be pointed at.
+        squad_is_ours = remove.squad_team_id is None or bool((await db.execute(
+            text("SELECT 1 FROM teams WHERE id = :t AND organisation_id = :o"),
+            {"t": str(remove.squad_team_id), "o": str(org_id)},
+        )).scalar())
+        profile_filled = merge_profile.carry_profile(
+            keep, remove, skip=() if squad_is_ours else ("squad_team_id",))
 
         # Save data needed for undo log before player is deleted
         keep_original_playhq_id = keep.playhq_id
@@ -695,6 +707,7 @@ async def _merge_players_core(
                     "imported_stats": len(moved_imported_ids),
                     **merge_carry.carried_summary(carried),
                 },
+                "profile_filled": profile_filled,
             },
         )
 
@@ -1845,7 +1858,7 @@ async def undo_merge(req: UndoMergeRequest, db: AsyncSession = Depends(get_db), 
     carried = log.get("carried_row_ids")
     if isinstance(carried, str):
         carried = json.loads(carried or "{}")
-    await merge_carry.restore_rows(db, remove_id, carried or {})
+    await merge_carry.restore_rows(db, remove_id, carried or {}, keep_id=keep_id)
     if log.get("removed_cricketstatz_player_id"):
         # The keeper only took it because it had none of its own, so handing it
         # back cannot collide with one it already held.
