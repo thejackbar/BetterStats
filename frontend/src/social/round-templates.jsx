@@ -257,7 +257,7 @@ function ticketGeo(width = 1080, height = 1080, count = 3) {
   const m = grow(height, 48, 0.04)
   const w = count <= 1 ? 420 : count === 2 ? 620 : 840
   const y = height - m - sh
-  return { A, ticketTop: grow(height, 64, 0.12), ticketBottom: y - 26, slot: { x: Math.round((width - w) / 2), y, w, h: sh, ...SLOT_LOOK } }
+  return { A, ticketTop: grow(height, 92, 0.12), ticketBottom: y - 26, slot: { x: Math.round((width - w) / 2), y, w, h: sh, ...SLOT_LOOK } }
 }
 
 // What SPONSOR_SLOTS hands the editor for FX1-6 and RS1-6. `Bare` is a header with
@@ -766,19 +766,20 @@ export function ResultStar({ palette: pal, width = 1080, height = 1080, result: 
   const p = r.potm
   const { winnerName, tied, line } = outcomeBits(r)
   const initials = (p.first[0] || '') + (p.last[0] || '')
+  // The result bar sits just above the credit strip; the stat boxes sit above it.
+  const barB = creditH(height) + grow(height, 18, 0.1)
   return (
     <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.06} size={11} />
       <Stripes color={pal.accent} opacity={0.04} gap={28} angle={-22} />
       <div style={{ position: 'absolute', left: -30, bottom: share(height, 110), fontFamily: DISPLAY, fontSize: share(height, 360), lineHeight: 0.8, color: pal.ink, opacity: 0.05, letterSpacing: -8, userSelect: 'none', whiteSpace: 'nowrap' }}>{p.last}</div>
-      <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '46px 56px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div>
+      {topBar({ pal, width, height, team: { logo: r.us.logo, mono: r.us.mono }, rule: false, left: (
+        <>
           <Slab bg={pal.accent} fg={pal.primary} size={26} style={{ padding: '8px 16px' }}>RESULT</Slab>
           <Kicker color={pal.ink} size={13} style={{ marginTop: 12, opacity: 0.72 }}>{headLine(r)}</Kicker>
-        </div>
-        <BrandLockup team={{ name: r.us.name, fullName: r.us.name, monogram: r.us.mono, logo: r.us.logo }} palette={pal} size={116} layout="row" align="right" nameSize={30} />
-      </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(230), ...anchor(S.A, null, { bottom: grow(height, 430, 0.18) }), display: 'flex', alignItems: 'center', gap: 44 }}>
+        </>
+      ) })}
+      <div style={{ position: 'absolute', left: 56, right: 56, top: barGeo(width, height, false).h + 42, ...anchor(S.A, null, { bottom: barB + 148 + 190 }), display: 'flex', alignItems: 'center', gap: 44 }}>
         <div style={{ width: b(300), height: b(300), borderRadius: '50%', border: `4px solid ${pal.accent}`, background: `${pal.accent}14`, display: 'grid', placeItems: 'center', fontFamily: DISPLAY, fontSize: 150, color: pal.ink, letterSpacing: 2, flexShrink: 0, overflow: 'hidden' }}>
           {p.photo
             ? <img src={p.photo} alt={`${p.first} ${p.last}`} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top' }} />
@@ -791,7 +792,7 @@ export function ResultStar({ palette: pal, width = 1080, height = 1080, result: 
           <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, color: pal.accent, marginTop: 8 }}>{p.role}</div>
         </div>
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, ...anchor(S.A, { top: 576 }, { bottom: grow(height, 240, 0.18) }), display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <div style={{ position: 'absolute', left: 56, right: 56, ...anchor(S.A, { top: 576 }, { bottom: barB + 148 }), display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         {[['BATTING', p.bat], ['BOWLING', p.bowl]].map(([lab, val], i) => (
           <div key={i} style={{ padding: '16px 22px', background: i === 0 ? pal.accent : `${pal.ink}0c`, border: `1.5px solid ${pal.accent}`, color: i === 0 ? pal.primary : pal.ink }}>
             <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, opacity: 0.75 }}>{lab}</div>
@@ -799,15 +800,13 @@ export function ResultStar({ palette: pal, width = 1080, height = 1080, result: 
           </div>
         ))}
       </div>
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: grow(height, 92, 0.18), padding: '0 56px' }}>
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: barB, padding: '0 56px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 20px', background: pal.secondary, borderLeft: `4px solid ${pal.accent}` }}>
           <span style={{ fontFamily: DISPLAY, fontSize: 24, letterSpacing: 0.5, whiteSpace: 'nowrap', flexShrink: 0 }}>{tied ? 'MATCH TIED' : line}</span>
           <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1, color: pal.ink, opacity: 0.7, marginLeft: 'auto', whiteSpace: 'nowrap', flexShrink: 0 }}>{r.us.mono} {r.us.score} · {r.them.mono} {r.them.score}</span>
         </div>
       </div>
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: `${grow(height, 18, 0.09)}px 56px`, background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
-        <SponsorFooter palette={pal} sponsors={sponsors} h={height} />
-      </div>
+      {creditStrip(pal, height)}
       <Grain opacity={0.3} id="rst-g" />
     </Post>
   )
@@ -828,7 +827,9 @@ export function ResultInningsBars({ palette: pal, width = 1080, height = 1080, r
   const nameF = b(40)
   const scoreF = b(64)
   const valF = b(56)
-  const Bar = ({ t, val, rr, win, fill, fillInk }) => (
+  // POTM bar just above the credit strip; the result panel above it; the bars above that.
+  const potmB = creditH(height) + grow(height, 18, 0.1)
+  const Bar =({ t, val, rr, win, fill, fillInk }) => (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0, flex: 1 }}>
@@ -852,23 +853,22 @@ export function ResultInningsBars({ palette: pal, width = 1080, height = 1080, r
     <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.06} size={11} />
       <Stripes color={pal.accent} opacity={0.03} gap={30} angle={0} />
-      <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '46px 56px 26px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: `3px solid ${pal.accent}` }}>
-        <div>
+      {topBar({ pal, width, height, team: { logo: r.us.logo, mono: r.us.mono }, left: (
+        <>
           <Slab bg={pal.accent} fg={pal.primary} size={28} style={{ padding: '9px 17px' }}>RESULT</Slab>
           <Kicker color={pal.ink} size={13} style={{ marginTop: 12, opacity: 0.72 }}>{headLine(r, true)}</Kicker>
-        </div>
-        <BrandLockup team={{ name: r.us.name, fullName: r.us.name, monogram: r.us.mono, logo: r.us.logo }} palette={pal} size={116} layout="row" align="right" nameSize={30} />
-      </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(240), ...anchor(S.A, null, { bottom: grow(height, 340, 0.18), justifyContent: 'center' }), display: 'flex', flexDirection: 'column', gap: 56 }}>
+        </>
+      ) })}
+      <div style={{ position: 'absolute', left: 56, right: 56, top: barGeo(width, height).h + 30, ...anchor(S.A, null, { bottom: potmB + 248, justifyContent: 'center' }), display: 'flex', flexDirection: 'column', gap: 56 }}>
         <Bar t={r.us} val={usR} rr={usRR} win={won} fill={pal.accent} fillInk={pal.primary} />
         <Bar t={r.them} val={themR} rr={themRR} win={!won && !tied} fill={`${pal.ink}55`} fillInk={pal.ink} />
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, ...anchor(S.A, { top: 720 }, { bottom: grow(height, 240, 0.18) }), padding: '16px 26px', background: pal.secondary, borderLeft: `4px solid ${pal.accent}`, textAlign: 'center' }}>
+      <div style={{ position: 'absolute', left: 56, right: 56, ...anchor(S.A, { top: 720 }, { bottom: potmB + 148 }), padding: '16px 26px', background: pal.secondary, borderLeft: `4px solid ${pal.accent}`, textAlign: 'center' }}>
         <Kicker color={pal.accent} size={12} style={{ marginBottom: 6 }}>{`// MATCH RESULT`}</Kicker>
         <div style={{ fontFamily: DISPLAY, fontSize: b(42), letterSpacing: 0, lineHeight: 1.02 }}>{line}</div>
       </div>
       {(r.potm.first || r.potm.last) && (
-        <div style={{ position: 'absolute', left: 0, right: 0, bottom: grow(height, 92, 0.18), padding: '0 56px' }}>
+        <div style={{ position: 'absolute', left: 0, right: 0, bottom: potmB, padding: '0 56px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '14px 20px', background: pal.secondary, borderLeft: `4px solid ${pal.accent}` }}>
             <span style={{ fontFamily: DISPLAY, fontSize: 16, letterSpacing: 2, color: pal.accent, whiteSpace: 'nowrap', flexShrink: 0 }}>★ POTM</span>
             <span style={{ fontFamily: DISPLAY, fontSize: 28, letterSpacing: 0.5, whiteSpace: 'nowrap', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.potm.first} {r.potm.last}</span>
@@ -876,9 +876,7 @@ export function ResultInningsBars({ palette: pal, width = 1080, height = 1080, r
           </div>
         </div>
       )}
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: `${grow(height, 18, 0.09)}px 56px`, background: pal.primary, borderTop: `2px solid ${pal.accent}` }}>
-        <SponsorFooter palette={pal} sponsors={sponsors} h={height} />
-      </div>
+      {creditStrip(pal, height)}
       <Grain opacity={0.3} id="rib-g" />
     </Post>
   )
@@ -892,12 +890,14 @@ export function ResultTicket({ palette: pal, width = 1080, height = 1080, result
   // before it shadows the helper.
   const tName = b(38)
   const tScore = b(62)
-  const notch = (side) => ({ position: 'absolute', [side]: -17, top: '50%', transform: 'translateY(-50%)', width: 32, height: 32, borderRadius: '50%', background: pal.primary })
+  // The ticket stops above the sponsor panel's row, which `ticketGeo` owns.
+  const T = ticketGeo(width, height)
+  const notch =(side) => ({ position: 'absolute', [side]: -17, top: '50%', transform: 'translateY(-50%)', width: 32, height: 32, borderRadius: '50%', background: pal.primary })
   return (
     <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.06} size={11} />
       <Stripes color={pal.accent} opacity={0.04} gap={26} angle={-20} />
-      <div style={{ position: 'absolute', left: 80, right: 80, top: S.head(108), bottom: S.foot, background: pal.secondary, border: `2px solid ${pal.accent}`, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ position: 'absolute', left: 80, right: 80, top: T.ticketTop, bottom: height - T.ticketBottom, background: pal.secondary, border: `2px solid ${pal.accent}`, display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: '24px 36px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: `2px dashed ${pal.accent}66`, position: 'relative' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0 }}>
             <Shield logo={r.us.logo} monogram={r.us.mono} color={pal.ink} size={88} />
@@ -931,9 +931,6 @@ export function ResultTicket({ palette: pal, width = 1080, height = 1080, result
           </div>
           <div style={{ fontFamily: DISPLAY, fontSize: 16, letterSpacing: 2, color: pal.ink, opacity: 0.85 }}>BETTERCRICKET · ADMIT ONE</div>
         </div>
-      </div>
-      <div style={{ position: 'absolute', left: 80, right: 80, bottom: 44 }}>
-        <SponsorFooter palette={pal} sponsors={sponsors} showBug={false} h={height} />
       </div>
       <Grain opacity={0.3} id="rtk-g" />
     </Post>

@@ -155,7 +155,7 @@ function footer({ pal, width, height }) {
 // TW1 — Team sheet: a grid of photo cards
 // ═══════════════════════════════════════════════════════════════════════════
 export function TeamOfWeekGrid({ palette: pal, width = 1080, height = 1080, team = {}, players = [], totw = {}, sponsors }) {
-  const P = (typeof window !== 'undefined' && window.__TWN) ? Array.from({ length: window.__TWN }, (_, i) => players[i % Math.max(1, players.length)] || {}) : players.slice(0, TOTW_MAX) // TEMP-E
+  const P = players.slice(0, TOTW_MAX)
   const n = P.length
   const F = frame(width, height)
   const cols = totwColumns(n)
@@ -221,7 +221,7 @@ export function TeamOfWeekGrid({ palette: pal, width = 1080, height = 1080, team
 // TW2 — Ranked board: one row per player
 // ═══════════════════════════════════════════════════════════════════════════
 export function TeamOfWeekBoard({ palette: pal, width = 1080, height = 1080, team = {}, players = [], totw = {}, sponsors }) {
-  const P = (typeof window !== 'undefined' && window.__TWN) ? Array.from({ length: window.__TWN }, (_, i) => players[i % Math.max(1, players.length)] || {}) : players.slice(0, TOTW_MAX) // TEMP-E
+  const P = players.slice(0, TOTW_MAX)
   const n = P.length
   const F = frame(width, height)
   const rowH = (height - F.top - F.bottom) / Math.max(1, n)

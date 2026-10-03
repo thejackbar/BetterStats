@@ -601,13 +601,13 @@ export function EVT_Kinetic({ team, event = {}, width = 1080, height = 1080, pal
   const tight = aspect === 'square'
   // Photo band height and the top of the text column. The square's band is
   // shorter; the others keep their share of the canvas.
-  const bandH = pick(aspect, { square: 396, portrait: share(height, 616) })
-  const colTop = pick(aspect, { square: 400, portrait: share(height, 624) })
+  const bandH = pick(aspect, { square: 396, portrait: 560, story: 1040 })
+  const colTop = pick(aspect, { square: 400, portrait: 566, story: 1048 })
   const skew = { transform: 'skewX(-8deg)' }
   const unskew = { display: 'inline-block', transform: 'skewX(8deg)' }
   return (
     <LayerRoot style={{ ...FRAME(width, height), background: P.primary, color: '#fff' }}>
-      <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: bandH, clipPath: 'polygon(0 0, 100% 0, 100% 100%, 0 76%)', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: bandH, clipPath: `polygon(0 0, 100% 0, 100% 100%, 0 ${(((bandH - 148) / bandH) * 100).toFixed(2)}%)`, overflow: 'hidden' }}>
         {motif?.imageUrl
           ? <img src={motif.imageUrl} alt="" crossOrigin="anonymous" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
           : <div style={{ position: 'absolute', inset: 0, background: `repeating-linear-gradient(120deg, ${a(P.accent, 0.06)} 0px, ${a(P.accent, 0.06)} 18px, ${a(P.accent, 0.12)} 18px, ${a(P.accent, 0.12)} 36px)`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -615,8 +615,8 @@ export function EVT_Kinetic({ team, event = {}, width = 1080, height = 1080, pal
             </div>}
         <div style={{ position: 'absolute', inset: 0, background: `linear-gradient(180deg, rgba(0,0,0,0.1) 0%, transparent 35%), linear-gradient(0deg, ${P.primary} 2%, transparent 50%)` }} />
       </div>
-      <div style={{ position: 'absolute', left: -60, top: pick(aspect, { square: 306, portrait: share(height, 512) }), width: 1200, height: 18, background: P.accent, transform: 'rotate(8deg)' }} />
-      <div style={{ position: 'absolute', left: -60, top: pick(aspect, { square: 342, portrait: share(height, 548) }), width: 1200, height: 7, background: a(P.accent, 0.45), transform: 'rotate(8deg)' }} />
+      <div style={{ position: 'absolute', left: -60, top: bandH - 104, width: 1200, height: 18, background: P.accent, transform: 'rotate(8deg)' }} />
+      <div style={{ position: 'absolute', left: -60, top: bandH - 68, width: 1200, height: 7, background: a(P.accent, 0.45), transform: 'rotate(8deg)' }} />
 
       <div style={{ position: 'absolute', top: 56, left: 64, right: 64, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
