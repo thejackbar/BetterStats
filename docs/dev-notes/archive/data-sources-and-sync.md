@@ -391,3 +391,7 @@ GR scorecard parser was reading `isHome` from the top-level `teams` array — si
 `sync_organisation` only calls `finish_sync_run` when it owns the run (i.e. when called without a `run_id`). The hard-refresh handler owns the run itself but only called `finish_sync_run` in its exception branch. Fixed `club_admin.py::hard_refresh_org._run` to call `finish_sync_run(run_id, stats)` after a successful `await sync_organisation(...)`.
 
 <!-- END original CLAUDE.md L12820-12838 -->
+
+## Quick Sync button on /admin/sync (v9.105.2)
+
+Clubs wanted new results almost at once without a whole-history Sync Now. `POST /organisations/{id}/sync/quick` (cap `RUN_SYNC`) starts a run through `_sync_safe` with `since = today - auto_sync.QUICK_LOOKBACK_DAYS` (7), the same incremental path the scheduled sync uses. It has its own run kind, `org_quick` (`auto_sync.QUICK_KIND`), kept out of `_WATERMARK_KINDS` and `_FULL_KINDS`. Reason: a quick run only looks 7 days back, so if it moved the watermark, a club that had been silent for a month and then pressed Quick Sync would have the month hidden from every later scheduled run. It shares `_org_sync_running` with Sync Now, so the two cannot overlap. Labels added in `SyncRunCard`, `NotificationModal` and `usage._SYNC_KIND_LABEL`. Checked by `backend/verification/verify_quick_sync.py` (route body, `_sync_safe` forwarding, real `plan_run` watermark with an `org_recent` control run) and in Chromium at 390px.

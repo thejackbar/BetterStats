@@ -290,6 +290,7 @@ export const api = {
   },
   getSeasonGrades: (orgId, seasonId) => request(`/organisations/${orgId}/seasons/${seasonId}/grades`),
   triggerSync: (orgId) => request(`/organisations/${orgId}/sync`, { method: 'POST' }),
+  triggerQuickSync: (orgId) => request(`/organisations/${orgId}/sync/quick`, { method: 'POST' }),
   getSyncLogs: (orgId) => request(`/organisations/${orgId}/sync-logs`),
   getOrgSummary: (orgId, { seasonId, gradeId, categories, formats, competitions } = {}) => {
     const params = new URLSearchParams()

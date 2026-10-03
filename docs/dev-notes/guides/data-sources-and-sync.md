@@ -74,6 +74,9 @@
 **Added after the split (v9.100.1)**
 45. The Cricket Australia seasons feed (`fixturesladders/organisations/{org}/seasons`) ignores both `offset` and `limit` and returns the club's whole history every call, so "the page was full" never means there is another page. `playhq_client.get_seasons` ends when a page adds no new id and is capped by `_MAX_SEASON_PAGES` (20). The normal sync, `auto_sync`, `iq_scout` and the teaser pull all call it. Never trust a full page as proof of more, and dedupe paged results on id (same trap as the `links.next` note). Archive: grep `seasons feed ignores paging` in `archive/club-directory-onboarding-and-admin-shell.md`.
 
+**Quick Sync (v9.105.2)**
+46. Quick Sync (`POST /organisations/{id}/sync/quick`) is an incremental run over the last `QUICK_LOOKBACK_DAYS` (7) under its own kind `org_quick`. Keep it out of `_WATERMARK_KINDS` and `_FULL_KINDS`: it cannot vouch for the gap since the club's last real run. Archive: grep `Quick Sync button`.
+
 ## Traps and failure signatures
 
 - Two-day grades all billed as One Day: `match_format` had no writer. Rules 18 to 21.
@@ -100,7 +103,7 @@
 - `python -m app.scripts.backfill_caught_behind <org_id|all>`: re-reads scorecards, sets `batting_innings.caught_behind` (Full Rebuild network cost).
 - `python -m app.scripts.rebuild_bowler_wickets <org_id|all>`: re-derives `bowler_wickets` with the flag.
 - `python -m app.scripts.list_skipped_matches`: lists matches the scores API 204'd (no fallback).
-- `/admin/sync` buttons: Sync Now = `POST /organisations/{id}/sync`; Fix Missing Totals = `POST /club-admin/backfill-aggregates` (recomputes `player_season_stats` from per-game rows, no CA fetch); Full Rebuild = `POST /club-admin/hard-refresh` (wipes per-game tables, re-pulls, an hour or more). Internal names and `sync_runs.kind` are unchanged from the old labels.
+- `/admin/sync` buttons: Quick Sync = `POST /organisations/{id}/sync/quick` (last 7 days, kind `org_quick`); Sync Now = `POST /organisations/{id}/sync`; Fix Missing Totals = `POST /club-admin/backfill-aggregates` (recomputes `player_season_stats` from per-game rows, no CA fetch); Full Rebuild = `POST /club-admin/hard-refresh` (wipes per-game tables, re-pulls, an hour or more). Internal names and `sync_runs.kind` are unchanged from the old labels.
 
 ## Open follow-ups
 
