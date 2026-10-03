@@ -76,6 +76,7 @@
 
 **Quick Sync (v9.105.2)**
 46. Quick Sync (`POST /organisations/{id}/sync/quick`) is an incremental run over the last `QUICK_LOOKBACK_DAYS` (7) under its own kind `org_quick`. Keep it out of `_WATERMARK_KINDS` and `_FULL_KINDS`: it cannot vouch for the gap since the club's last real run. Archive: grep `Quick Sync button`.
+47. Cricket Australia reads in an incremental run: the grade match-list cache expires (`_GRADE_MATCHES_TTL` 600s), a manual Quick Sync passes `fresh=True` to skip both caches, and the window has an upper bound (fixtures after tomorrow are not fetched). Never cache a match list or a scorecard for the life of the process.
 
 ## Traps and failure signatures
 
@@ -87,6 +88,7 @@
 - Player shows only 3 seasons in `player_season_stats`: stale or single-hop `merge_logs` redirect. One-off cleanup: `UPDATE merge_logs SET undone_at = NOW() WHERE undone_at IS NULL AND removed_player_id IN (SELECT id FROM players)`.
 - Per-game counts over CA's aggregate by 1 or 2: Absent/DNB rows. One-off: `DELETE FROM batting_innings WHERE dismissal_type IN ('absent','did not bat','dnb')`.
 - Club silently short results after a failed scorecard pull: watermark stepped over it (rule 27).
+- Quick Sync slow, or a just-finished match not arriving: a cached grade list or scorecard from earlier in the match, or scorecard requests for every future fixture. Rule 47.
 - Club stops syncing when its new season opens: "nothing played" decided from grades not yet created (rule 32).
 - `Column expression ... got <property object>` from `select(Player.display_name)`: it is a Python property. Select mapped columns, compute in Python.
 
