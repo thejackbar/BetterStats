@@ -9,8 +9,8 @@
 // Same vocabulary as the roundup family (round-templates.jsx): a masthead, a
 // body and the sponsor strip, drawn on the club palette and the display font,
 // with every element addressable as a layer.
-import { GrainSVG as Grain, Halftone, Stripes, ClubLogo, AutoFitText } from './cricket-templates'
-import { SponsorFooter } from './round-templates'
+import { GrainSVG as Grain, Halftone, Stripes, ClubLogo, AutoFitText, CreditMark } from './cricket-templates'
+import { FOOT_BUG_W } from './round-templates'
 import { aspectOf, pick, grow } from './postAspect'
 import { LayerRoot } from './postLayers'
 
@@ -33,18 +33,38 @@ export function totwColumns(n) {
   return 5
 }
 
+// The sponsor slot. The grid gets a bar of its own along the foot: the strip is as
+// tall as the grid needs (a logo reads at about 90px), the credit mark sits at
+// its right and the body stops above it, whatever the player count. `slotTW` is
+// the ONE function both this layout and SPONSOR_SLOTS call, so the room kept and
+// the place the editor puts the grid cannot drift apart. `count` only sets the
+// panel's width (one logo, a short panel; three, the bar); the layout reserves
+// the widest.
+const TW_PANEL_W = [0, 380, 600, 882]
+const twPadV = (height) => grow(height, 12, 0.02)
+function slotTW(width = 1080, height = 1080, count = 3) {
+  const h = grow(height, 96, 0.06)
+  const room = width - 56 * 2 - FOOT_BUG_W - 22
+  return {
+    x: 56, y: height - twPadV(height) - h, w: Math.min(room, TW_PANEL_W[Math.max(1, Math.min(3, count))]), h,
+    pad: 8, gap: 20, panel: 'light',
+  }
+}
+
 // Where the body starts and how much it leaves clear for the sponsor strip.
 // `grow` keeps the masthead and footer from ballooning on a taller post; the
 // body absorbs the rest, which is more room for the players.
 function frame(width, height) {
   const A = aspectOf(width, height)
+  const s = slotTW(width, height, 3)
+  // The strip's real height (its padding twice, the slot, the rule): derived from
+  // the slot so the body always ends above it.
+  const strip = height - s.y + twPadV(height) + 2
   return {
     A,
-    top: grow(height, 262, 0.14),
-    // The sponsor strip's real height (its padding twice, the slot, the rule)
-    // plus a gap, so the body always ends above it. An estimate that grows at
-    // its own rate ran the last row into the strip on a story.
-    bottom: 2 * grow(height, 22, 0.09) + grow(height, 50, 0.09) + 2 + 18,
+    top: grow(height, 244, 0.14),
+    strip,
+    bottom: strip + grow(height, 14, 0.03),
   }
 }
 
@@ -117,13 +137,16 @@ function masthead({ pal, team, meta, width, big }) {
   )
 }
 
-function footer({ pal, sponsors, height }) {
+// The footer strip. The left is the sponsor slot, left empty for the grid; the
+// platform credit sits at the right.
+function footer({ pal, width, height }) {
   return (
     <div data-layer="Sponsors" style={{
-      position: 'absolute', left: 0, right: 0, bottom: 0, padding: `${grow(height, 22, 0.09)}px 56px`,
+      position: 'absolute', left: 0, right: 0, bottom: 0, height: frame(width, height).strip, boxSizing: 'border-box',
+      padding: '0 56px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
       background: pal.primary, borderTop: `2px solid ${pal.accent}`,
     }}>
-      <SponsorFooter palette={pal} sponsors={sponsors} h={height} />
+      <CreditMark ink={pal.ink} h={40} />
     </div>
   )
 }
@@ -155,7 +178,7 @@ export function TeamOfWeekGrid({ palette: pal, width = 1080, height = 1080, team
     }}>
       <Halftone color={pal.ink} opacity={0.06} size={11} />
       <Stripes color={pal.accent} opacity={0.035} gap={28} angle={45} />
-      <div style={{ position: 'absolute', left: -50, bottom: 60, fontFamily: DISPLAY, fontSize: 300, lineHeight: 0.8, color: pal.ink, opacity: 0.04, letterSpacing: -6, transform: 'rotate(-8deg)', userSelect: 'none', whiteSpace: 'nowrap' }}>TOTW</div>
+      <div style={{ position: 'absolute', left: -50, bottom: F.strip + 64, fontFamily: DISPLAY, fontSize: 300, lineHeight: 0.8, color: pal.ink, opacity: 0.04, letterSpacing: -6, transform: 'rotate(-8deg)', userSelect: 'none', whiteSpace: 'nowrap' }}>TOTW</div>
       {masthead({ pal, team, meta: totw, width, big })}
       <div data-layer="Players" style={{
         position: 'absolute', left: 56, right: 56, top: F.top, bottom: F.bottom,
@@ -188,7 +211,7 @@ export function TeamOfWeekGrid({ palette: pal, width = 1080, height = 1080, team
           )
         })}
       </div>
-      {footer({ pal, sponsors, height })}
+      {footer({ pal, width, height })}
       <Grain opacity={0.32} id="tw1-g" />
     </LayerRoot>
   )
@@ -252,7 +275,7 @@ export function TeamOfWeekBoard({ palette: pal, width = 1080, height = 1080, tea
           )
         })}
       </div>
-      {footer({ pal, sponsors, height })}
+      {footer({ pal, width, height })}
       <Grain opacity={0.3} id="tw2-g" />
     </LayerRoot>
   )
@@ -262,3 +285,6 @@ TeamOfWeekGrid.displayName = 'TeamOfWeekGrid'
 TeamOfWeekBoard.displayName = 'TeamOfWeekBoard'
 Line.displayName = 'Line'
 Face.displayName = 'Face'
+
+// Where this file's layouts keep the sponsor grid (see sponsorSlots.js).
+export const SPONSOR_SLOTS = { TW1: slotTW, TW2: slotTW }

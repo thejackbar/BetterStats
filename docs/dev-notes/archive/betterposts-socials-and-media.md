@@ -825,3 +825,37 @@ Follow-up on v9.102.16: the Split Poster's pale panel asked for as an editable b
 - **T11 `background` prop** (the editor passes `bgStyle` when a background is active, else null). With any background its own bands, dot texture and shade step aside and the root is transparent; with `split-panels` the dark rail steps aside too, since the variant draws it. Layer ids are explicit `data-layer` names, so hiding some does not shift the others.
 - **Competition.** Both lineup loaders now set `match.competition` to `fx.grade`. `matchData` fills an empty competition with the literal `COMPETITION`; T11 treats that literal as empty. Other layouts still print it when nothing was typed.
 - **Verified.** `verify_split_poster_browser.mjs`: 76 passed (production build): grade pulls through, placeholder hidden, swatch present, layer hand-off for Split Panels, another background keeps the rail, clearing the background restores the panels.
+
+## Final Score from the Games page (v9.105.3)
+
+The Final Score tab (C4 and RS1 to RS6) could only be filled from a pasted play.cricket.com.au link, or a PlayHQ link that resolved to a short pick list. A club asked for the data to come from its public Games page (`/{slug}/games`) instead.
+
+- **`components/admin/socialpost/ClubGamesPicker.jsx`.** Collapsed by default; nothing is fetched until it is opened. It reads `getOrgSeasons` then `getOrgResults(orgId, { seasonId })`, the same two calls `GamesPage` makes, so the list and the page cannot disagree. Newest season is the default; season and grade selects narrow it. `ABANDONED` and `CANCELLED` games are dropped (they have no score).
+- **A pick calls `loadResultMatch(game.id)`.** `games.id` is the Cricket Australia match GUID, so it goes straight to `GET /admin/social/scorecard/{id}` and `applyResultScorecard`. It does not go through `match-lookup`. Mounted on the Get your data step and under the Match Result panel's link box.
+- **Known gap, not changed.** `get_social_scorecard` reads Cricket Australia live. A manual game or a scorebook import is on the Games page but has no upstream card, so a pick returns "Scorecard not found". Fixing it means a DB fallback that adapts `games.get_scorecard` output to the `{meta, home, away}` social shape; not built.
+- **Verified.** `frontend/verification/verify_final_score_games_browser.mjs` (production build, API stubbed): 15 passed. Control run on the previous build fails the 10 checks that name the picker and keeps the 5 unrelated ones.
+
+## A sponsor slot in every layout, scorecard squares and scorecard POTM (v9.106.0)
+
+Reported with five screenshots: the sponsor grid (v9.105.0) was placed in one generic bottom band and covered each layout's own content. Asked for: space made for it in every template, Final Score left-justified with the sponsor on the right, venue and season moved up, "FULL TIME" dropped, Fixtures with the club lockup cut to a logo, T11 as the lead lineup, and (second and third messages) scorecard squares that fill the post, a POTM picked like the other tabs, and no clipped scorecard rows.
+
+- **One slot per layout** (`social/sponsorSlots.js`). Each layout file exports `SPONSOR_SLOTS` (`templateId -> (width, height, count) => { x, y, w, h, pad, gap, panel }`), the registry merges them, and the editor reads `sponsorSlotFor(templateId, w, h, count)` for the default grid, a re-patch while the grid is still `auto`, and "Use default sponsors". The layout calls the SAME function to leave the rectangle empty, so the space and the grid cannot drift apart. A layout with no entry falls back to `defaultSponsorGeometry`. Pad is 6 to 10 and the backing is `light` on almost all of them.
+- **Where they went.** T1 under the hero, T2 left of the header under the venue line (where the user dragged it by hand), T3/T4/T5 in the footer, T6 to T9 above the footer strip, T10 in the torn strip, T11 under the XI on the dark panel, C1 to C3 in a taller credit footer, C4 in the result band, FX and RS in the header (club lockup reduced to the crest) or the ticket margin, RR and TW in a taller footer bar (RR3 under the title), EV1 to EV11 in a strip at the foot.
+- **Retired.** `nativeSponsors` is now scorecards only. Fixtures, results and T11 no longer draw logos of their own: `SponsorFooter` in `round-templates.jsx` is a credit-only strip and T11 lost its `sponsors` prop. `scorecardMatch.meta.sponsors` still feeds the SC1 to SC3 footer.
+- **Lineup default.** `LINEUP_DEFAULT` is `T11` (football keeps `T1`, it hides T11). Template ids did not change, so saved posts and templates still open.
+- **Wording.** "FULL TIME" is "RESULT" on C4, RS1 to RS6 and the Custom Edit decomposition.
+- **Scorecard squares.** The 1080 square was wrapped in the 1920x1080 `PostFrame` and scaled to 56% (`nativeSize` was false for scorecards). `nativeSize` is now true while the split is on.
+- **Scorecard POTM.** `loadScorecardMatch` also calls `getSocialPotm`, puts the top ranked player in `meta.motm` (`scMotmOf`) and shows a select of the ranking; typing in the MOTM fields flips it to "Typed by hand". The server still returns a blank `meta.motm`.
+- **Scorecard rows.** `_scRowFont(panelH, chrome, rows, rp, cap)` sizes SC1 and SC2 rows from the real panel height (SC1 800 wide and 880 square, SC2 760 and 850) instead of one budget baked for the wide post, which ran 69px (SC1) and 85px (SC2) past the panel with 12 batters and 6 bowlers.
+- **Tooling.** `verification/shoot_sponsor_slots.mjs` (the real editor, stubbed sponsors with logos, `SPONSORS=1|2|3`, prints `OVERLAP` for any text or picture under the grid), `shoot_scorecards.mjs` (lists clipped text), `verify_scorecard_squares_potm_browser.mjs` (control run on the previous commit fails the scaled square and the three POTM checks), and `verify_post_sponsors_browser.mjs` updated (roundups carry one grid, scorecards none).
+- **Verified.** All 47 templates at 3 sizes, 2 sponsors: 141 shots, a grid on each, 0 overlaps. Spot runs at 1 and 3 sponsors per family were also clean. Squares are NOT unchanged (space is carved out of most layouts), so `verify_post_designer_browser.mjs`'s "design measurements unchanged at 1080" checks will report the intended differences.
+- **Not done.** Harness contact sheets render blank (a `file://` image from `about:blank`), read the PNGs directly. Story slots on a few footers sit at the very bottom, as their credit marks already did, not lifted clear of the app's reply bar. SC1 and SC2 team names overflow their box by 2 to 4px (descender room, not visibly clipped).
+
+## Final Score result band (v9.106.1)
+
+Follow-up on v9.106.0: the C4 band had the margin on one small line and a tiny MOTM chip, leaving space unused.
+
+- **Band.** `C4_FinalScore` stacks the winner (max 26), `WIN <margin>` (max 54, accent) and a MOTM chip (initial, surname, figures). A tie shows `MATCH TIED` alone. `_c4Geom` band height is 164 / 176 / 196, and the slot follows it.
+- **Props.** `AdminSocialPost` now passes `motmFirst`, `motmBat` and `motmBowl` to C4's `result` as well as `motmLast`.
+- **Verified.** `verification/shoot_final_score.mjs` (real import through the stubbed editor) at all three sizes: no clipped band text. Story still has a tall empty gap between the batting and bowling groups in the performer panels (existing design, not changed).
+

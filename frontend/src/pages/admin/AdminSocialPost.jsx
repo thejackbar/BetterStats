@@ -38,7 +38,8 @@ import { exportNodeToPng } from '../../social/exportImage'
 import { SocialBackground, SocialBackgroundDefs, SOCIAL_BACKGROUNDS, GRADIENT_ANGLES, DEFAULT_COLORS as BG_DEFAULT_COLORS } from '../../social/SocialBackgrounds'
 import { EVENT_TEMPLATES, EVENT_PRESETS, DEFAULT_EVENT, resolveMotif, eventPaletteFor } from '../../social/event-templates'
 import EventPostEditor from '../../components/admin/EventPostEditor'
-import { BlankCanvas, newBlankItem, defaultBlankItems, defaultSponsorGeometry } from '../../social/blank-template'
+import { BlankCanvas, newBlankItem, defaultBlankItems } from '../../social/blank-template'
+import { sponsorSlotFor } from '../../social/sponsorSlots'
 import { useBlankLayer } from '../../social/useBlankLayer'
 import { useTemplateLayers } from '../../social/useTemplateLayers'
 import { PostLayerProvider } from '../../social/postLayers'
@@ -46,6 +47,7 @@ import { useEditHistory } from '../../social/useEditHistory'
 import { usePages } from '../../social/usePages'
 import PageStrip from '../../components/admin/socialpost/PageStrip'
 import PostPreviewModal from '../../components/admin/socialpost/PostPreviewModal'
+import ClubGamesPicker from '../../components/admin/socialpost/ClubGamesPicker'
 import { templateToBlocks, CUSTOM_EDITABLE } from '../../social/templateToBlocks'
 import { POST_SIZES, DEFAULT_POST_SIZE, postSizeOf, PostFrame } from '../../social/postSizes'
 import { resolveClubFonts, fontWeightFor, buildFontFaceCss } from '../../lib/theme'
@@ -57,7 +59,12 @@ const EMPTY_LAYER = () => []
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE REGISTRY
 // ─────────────────────────────────────────────────────────────────────────────
+// Split Poster (T11) leads the lineup family and is what a new lineup opens on;
+// the ids stay as they were so saved posts and templates keep working.
+// Football has no Split Poster, so its lineups still open on T1.
+const LINEUP_DEFAULT = IS_AFL ? 'T1' : 'T11'
 const ALL_TEMPLATES = [
+  { id: 'T11', name: 'Split Poster',    component: SplitPoster,        desc: 'Pale panel + dark XI, debut tags', maxPlayers: 11 },
   { id: 'T1', name: 'Hero List',       component: T1_HeroList,        desc: 'Big player + name list',          maxPlayers: 13 },
   { id: 'T2', name: 'Card Grid',       component: T2_CardGrid,        desc: '4×3 trading card grid',           maxPlayers: 12 },
   { id: 'T3', name: 'Side Numbered',   component: T3_SideNumbered,    desc: IS_AFL ? 'Side photo + numbered team' : 'Side photo + numbered XI',        maxPlayers: 11 },
@@ -68,11 +75,10 @@ const ALL_TEMPLATES = [
   { id: 'T8', name: 'Mosaic',          component: T8_Mosaic,          desc: 'Asymmetric photo mosaic',         maxPlayers: 11 },
   { id: 'T9', name: 'Flyer',           component: T9_Flyer,           desc: 'Festival poster style',           maxPlayers: 11 },
   { id: 'T10', name: 'Team Sheet',     component: T10_TeamSheet,      desc: 'Full-bleed photo + torn strip',   maxPlayers: 13 },
-  { id: 'T11', name: 'Split Poster',    component: SplitPoster,        desc: 'Pale panel + dark XI, debut tags', maxPlayers: 11 },
   { id: 'C1', name: 'Announcement',    component: C1_CaptainAnnounce, desc: 'Captain / debut / award',         maxPlayers: 1 },
   { id: 'C2', name: 'Toss',            component: C2_TossWon,         desc: 'Toss result post',                maxPlayers: 0 },
   { id: 'C3', name: 'Player Spotlight',component: C3_ManOfMatch,      desc: 'Man of match / player stats',     maxPlayers: 1 },
-  { id: 'C4', name: 'Result · Classic', component: C4_FinalScore,     desc: 'Full time result + top performers', maxPlayers: 0 },
+  { id: 'C4', name: 'Result · Classic', component: C4_FinalScore,     desc: 'Result + top performers', maxPlayers: 0 },
   // Single-match result layouts (fold into the Final Score tab alongside C4).
   { id: 'RS1', name: 'Margin Hero',    component: ResultMarginHero,   desc: 'Big WIN headline + margin',       maxPlayers: 0, kind: 'singleresult' },
   { id: 'RS2', name: 'Broadcast',      component: ResultBroadcast,    desc: 'Team rows + top performers',      maxPlayers: 0, kind: 'singleresult' },
@@ -165,7 +171,7 @@ const TABS = [
   { key: 'blank',        label: 'Blank' },
 ].filter(t => !IS_AFL || !AFL_HIDDEN_TABS.has(t.key))
 const TAB_FIRST = {
-  lineup: 'T1', fixtures: 'FX1', announcement: 'C1', toss: 'C2', motm: 'C3', totw: 'TW1',
+  lineup: LINEUP_DEFAULT, fixtures: 'FX1', announcement: 'C1', toss: 'C2', motm: 'C3', totw: 'TW1',
   result: 'C4', results: 'RR1', scorecard: 'SC1', events: 'EV1', blank: 'BL1',
 }
 // Icon per post type (from the app's own kit) for the post-type bar and the
@@ -180,7 +186,7 @@ const TAB_ICON = {
 const DATA_TABS = ['lineup', 'fixtures', 'results', 'result', 'scorecard', 'motm', 'totw']
 const SOURCE_HELP = {
   lineup: 'Pick a saved BetterSelect XI or a Play.Cricket published team list below to pull the players, captain, keeper and match details — or add players yourself in Content.',
-  result: 'Paste the match link and we\'ll pull the scores, the top batters and bowlers for both sides, the result and the player of the match.',
+  result: 'Pick a game from your Games page, or paste the match link, and we\'ll pull the scores, the top batters and bowlers for both sides, the result and the player of the match.',
   scorecard: 'Paste the match link and we\'ll pull the full scorecard for both teams.',
   fixtures: 'Pull this round\'s fixtures for every grade straight from the fixtures feed.',
   results: 'Pull the latest round\'s results for every grade straight from the results feed.',
@@ -907,6 +913,15 @@ function useRowDrag(setRows) {
   return { overIdx, onDragStart, onDragOver, onDrop, onDragEnd }
 }
 
+// A ranked POTM player as the scorecard's MOTM block: name and the one-line
+// figures ("64* (34) · 2/22"). `prev.team` is kept; the scorecard owns it.
+function scMotmOf(pl, prev = {}) {
+  const bits = []
+  if (pl.batting) bits.push(`${pl.batting.r}${pl.batting.notOut ? '*' : ''} (${pl.batting.b})`)
+  if (pl.bowling) bits.push(`${pl.bowling.w}/${pl.bowling.r}`)
+  return { ...prev, first: pl.first || '', last: pl.last || '', line: bits.join(' · ') }
+}
+
 // Ranked-player label for the POTM import's player select — name plus whichever
 // stat blocks the scorecard actually holds ("J. BARENDSE · 64 (71) · 2/22").
 function potmPlayerLabel(p) {
@@ -1069,7 +1084,7 @@ export default function AdminSocialPost() {
     if (one && TEMPLATES.some((t) => t.id === one)) return one
     const t = p.get('type')
     if (t && TAB_FIRST[t]) return TAB_FIRST[t]
-    return localStorage.getItem('bs_social_template') || 'T1'
+    return localStorage.getItem('bs_social_template') || LINEUP_DEFAULT
   })
   const [paletteKey, setPaletteKey] = useState(() =>
     localStorage.getItem('bs_social_palette') || 'club'
@@ -1324,6 +1339,10 @@ export default function AdminSocialPost() {
   // chasing team), no page-count picker needed.
   const [scSplit, setScSplit] = useState(false)
   const [scSplitIdx, setScSplitIdx] = useState(0)
+  // Player of the match on the scorecard: our side ranked by the same points the
+  // Player of Match tab uses, so the import picks the top one and the select
+  // below lets somebody choose another. `idx` -1 means it was typed by hand.
+  const [scPotm, setScPotm] = useState({ players: [], idx: -1, note: null })
 
   // Club-event / announcement posters (Events tab). One editable facts object +
   // a chosen layout, motif glyph and optional background photo.
@@ -1793,7 +1812,7 @@ export default function AdminSocialPost() {
     }
     if (sheet.opponent?.name) setOpponent(o => ({ ...o, name: sheet.opponent.name }))
     if (sheet.teamName) setHeadline(sheet.teamName)
-    setTemplateId('T1') // a lineup template
+    setTemplateId(LINEUP_DEFAULT) // a lineup template
     // Clear router state so a refresh doesn't re-apply.
     window.history.replaceState({}, document.title)
   }, [location.state, allPlayers])
@@ -1820,7 +1839,28 @@ export default function AdminSocialPost() {
       setScUrlStatus('ok')
     } catch (e) {
       setScUrlStatus(e?.message || 'Failed to load scorecard')
+      return
     }
+    // Player of the match, the same way the Player of Match tab works it out.
+    // Best effort: the scorecard is already on screen and the fields stay typeable.
+    if (IS_AFL) return
+    try {
+      const ranked = await api.getSocialPotm(matchId)
+      const players = ranked?.players || []
+      setScPotm({ players, idx: players.length ? 0 : -1, note: players.length ? null : 'No player of the match could be worked out. Type one below.' })
+      if (players.length) setScorecardMatch(prev => ({ ...prev, meta: { ...prev.meta, motm: scMotmOf(players[0], prev.meta.motm) } }))
+    } catch {
+      setScPotm({ players: [], idx: -1, note: 'No player of the match could be worked out. Type one below.' })
+    }
+  }
+
+  const patchScMotm = (motm) => { setScPotm(s => ({ ...s, idx: -1 })); patchScMeta({ motm }) }
+
+  const pickScPotm = (idx) => {
+    const pl = scPotm.players[idx]
+    if (!pl) return
+    setScPotm(s => ({ ...s, idx }))
+    setScorecardMatch(prev => ({ ...prev, meta: { ...prev.meta, motm: scMotmOf(pl, prev.meta.motm) } }))
   }
 
   const handleScUrlImport = async () => {
@@ -2437,7 +2477,7 @@ export default function AdminSocialPost() {
 
   const activeTab = TAB_MAP[templateId] || 'lineup'
   const switchTab = (tabKey) => {
-    setTemplateId(TAB_FIRST[tabKey] || 'T1'); setCustomEdit(false)
+    setTemplateId(TAB_FIRST[tabKey] || LINEUP_DEFAULT); setCustomEdit(false)
     // Open the data step the first time you land on a data-driven type; leave it
     // if you move to a type that has nothing to import.
     if (DATA_TABS.includes(tabKey)) {
@@ -2719,12 +2759,12 @@ export default function AdminSocialPost() {
   if (templateId === 'T11') {
     extraProps.panelColor = splitPanel || undefined
     extraProps.background = bgActive ? bgStyle : null
-    extraProps.sponsors = scorecardMatch.meta.sponsors
   }
   if (templateId === 'C4') {
     extraProps.result = {
       winner: result.winner, margin: result.margin, grade: result.grade, teamScore: result.teamScore,
       oppScore: result.oppScore, motmLast: result.motmLast,
+      motmFirst: result.motmFirst, motmBat: result.motmBat, motmBowl: result.motmBowl,
       topBatters: result.topBatters, topBowlers: result.topBowlers,
     }
   }
@@ -2879,7 +2919,7 @@ export default function AdminSocialPost() {
 
   // Reset all state to defaults
   const handleReset = () => {
-    const tid = TAB_FIRST[activeTab] || 'T1'
+    const tid = TAB_FIRST[activeTab] || LINEUP_DEFAULT
     setTemplateId(tid)
     setMatch({ competition: '', round: '', venue: '', date: '', time: '', season: '' })
     setHeadline('')
@@ -2943,7 +2983,9 @@ export default function AdminSocialPost() {
   const metaSponsorsAuto = useRef(null)
   const sponsorTarget = isBlankTab ? canvas : overlay
   const sponsorKey = `${templateId}|${isBlankTab ? pages.index : 0}`
-  const nativeSponsors = isScorecard || tmpl.kind === 'fixtures' || tmpl.kind === 'results'
+  // Only the scorecards still draw sponsor slots of their own (a 1920 landscape
+  // sheet with a footer strip). Every other layout reserves a slot for the grid.
+  const nativeSponsors = isScorecard
   const sponsorCanvas = (() => {
     if (isScorecard) return { w: 1920, h: 1080 }
     const sz = postSizeOf(postSize)
@@ -2973,7 +3015,7 @@ export default function AdminSocialPost() {
   useEffect(() => {
     if (loading || !sponsorDefault.loaded || !sponsorDefault.ids.length || nativeSponsors) return
     const existing = sponsorTarget.items.find((it) => it.type === 'sponsors')
-    const geo = defaultSponsorGeometry(sponsorCanvas.w, sponsorCanvas.h, sponsorDefault.ids.length)
+    const geo = sponsorSlotFor(templateId, sponsorCanvas.w, sponsorCanvas.h, sponsorDefault.ids.length)
     if (!existing) {
       if (sponsorDismissed.current[sponsorKey]) return
       const fresh = newBlankItem('sponsors', { ...geo, sponsorIds: sponsorDefault.ids, auto: true })
@@ -2985,10 +3027,12 @@ export default function AdminSocialPost() {
     if (existing.auto) {
       const same = existing.sponsorIds.join(',') === sponsorDefault.ids.join(',')
         && existing.x === geo.x && existing.y === geo.y && existing.w === geo.w && existing.h === geo.h
+      // A layout's own padding and backing come with its slot, but only when the
+      // slot itself moves: a backing somebody picked is theirs until then.
       if (!same) sponsorTarget.patchMany({ [existing.id]: { sponsorIds: sponsorDefault.ids, ...geo } })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, sponsorDefault, sponsorTarget.items, sponsorKey, sponsorCanvas.w, sponsorCanvas.h, nativeSponsors])
+  }, [loading, sponsorDefault, sponsorTarget.items, sponsorKey, sponsorCanvas.w, sponsorCanvas.h, nativeSponsors, templateId])
   // A layout with sponsor slots of its own (fixtures, results, scorecards) fills
   // them from the same default, until somebody picks their own logos there.
   useEffect(() => {
@@ -3033,7 +3077,10 @@ export default function AdminSocialPost() {
   // A layout that genuinely cannot reflow says so in the registry and is placed
   // into the canvas instead, which is the only thing the letterbox path below is
   // still for.
-  const nativeSize = !tmpl.fixed && !isScorecard
+  // The Instagram-squares split draws each square at 1080x1080 itself (the
+  // `square` prop on SC1-SC3), so it is native to its canvas. Framing it would
+  // scale a 1080 square by 1080/1920 into the middle of the post.
+  const nativeSize = (!tmpl.fixed && !isScorecard) || scSplitOn
   const framed = !isBlankTab && !nativeSize && (W !== nativeW || H !== nativeH)
   // Wraps a layout that cannot reflow for the canvas it's being posted on. Used
   // by the live preview AND the off-screen export node, so the two cannot
@@ -3532,14 +3579,14 @@ export default function AdminSocialPost() {
     }
     if (!ids.length) return
     delete sponsorDismissed.current[sponsorKey]
-    const geo = defaultSponsorGeometry(W, H, ids.length)
+    const geo = sponsorSlotFor(templateId, W, H, ids.length)
     record('Add sponsors')
     sponsorTarget.setItems((its) => [...its, newBlankItem('sponsors', { ...geo, sponsorIds: ids })])
   }
   const useDefaultSponsors = () => {
     if (!sponsorBlock || !sponsorDefault.ids.length) return
     record('Default sponsors')
-    sponsorTarget.patchMany({ [sponsorBlock.id]: { sponsorIds: sponsorDefault.ids, ...defaultSponsorGeometry(W, H, sponsorDefault.ids.length), auto: true } })
+    sponsorTarget.patchMany({ [sponsorBlock.id]: { sponsorIds: sponsorDefault.ids, ...sponsorSlotFor(templateId, W, H, sponsorDefault.ids.length), auto: true } })
   }
   const setSponsorPanel = (panel) => {
     if (!sponsorBlock) return
@@ -3771,6 +3818,9 @@ export default function AdminSocialPost() {
                     <MatchPickList picks={activeTab === 'result' ? resPicks : scPicks}
                       onPick={(id) => (activeTab === 'result' ? loadResultMatch(id) : loadScorecardMatch(id))}
                       onDismiss={() => (activeTab === 'result' ? setResPicks(null) : setScPicks(null))} />
+                    {activeTab === 'result' && (
+                      <ClubGamesPicker orgId={settings?.id} onPick={loadResultMatch} busy={resUrlStatus === 'loading'} />
+                    )}
                     <p className="text-pb-faintest text-[10px] mt-2 leading-relaxed">Pulls the scores, top performers and matched player photos. You can still edit everything after.</p>
                   </div>
                 )}
@@ -4729,6 +4779,7 @@ export default function AdminSocialPost() {
                     </p>
                   )}
                   <MatchPickList picks={resPicks} onPick={loadResultMatch} onDismiss={() => setResPicks(null)} />
+                  <ClubGamesPicker orgId={settings?.id} onPick={loadResultMatch} busy={resUrlStatus === 'loading'} />
                   <p className="font-mono text-[9px] mt-1.5 text-pb-faintest">Pulls the top 3 batters & bowlers for both sides and matches your players for photos.</p>
                 </div>
 
@@ -5072,9 +5123,22 @@ export default function AdminSocialPost() {
                   <div className="col-span-2"><Field label="Venue"><TextInput value={scorecardMatch.meta.venue} onChange={v => patchScMeta({ venue: v })} placeholder="Home Ground" /></Field></div>
                   <div className="col-span-2"><Field label="Toss"><TextInput value={scorecardMatch.meta.toss} onChange={v => patchScMeta({ toss: v })} placeholder="HOME WON THE TOSS · ELECTED TO BAT" /></Field></div>
                   <div className="col-span-2"><Field label="Series"><TextInput value={scorecardMatch.meta.series} onChange={v => patchScMeta({ series: v })} placeholder="SEASON 2025/26" /></Field></div>
-                  <Field label="MOTM First"><TextInput value={scorecardMatch.meta.motm.first} onChange={v => patchScMeta({ motm: { ...scorecardMatch.meta.motm, first: v } })} placeholder="Player" /></Field>
-                  <Field label="MOTM Last"><TextInput value={scorecardMatch.meta.motm.last} onChange={v => patchScMeta({ motm: { ...scorecardMatch.meta.motm, last: v } })} placeholder="NAME" /></Field>
-                  <div className="col-span-2"><Field label="MOTM Line"><TextInput value={scorecardMatch.meta.motm.line} onChange={v => patchScMeta({ motm: { ...scorecardMatch.meta.motm, line: v } })} placeholder="87 (54) · 2/22" /></Field></div>
+                  {(scPotm.players.length > 0 || scPotm.note) && (
+                    <div className="col-span-2">
+                      {scPotm.players.length > 0 ? (
+                        <Field label="Player of the match">
+                          <select value={scPotm.idx} onChange={e => pickScPotm(+e.target.value)}
+                            className="w-full bg-pb-surface border pb-hairline rounded px-2 py-1.5 text-xs text-pb-text font-mono">
+                            {scPotm.idx < 0 && <option value={-1}>Typed by hand</option>}
+                            {scPotm.players.map((p, i) => <option key={i} value={i}>{potmPlayerLabel(p)}</option>)}
+                          </select>
+                        </Field>
+                      ) : <p className="text-pb-faintest text-[10px] leading-relaxed">{scPotm.note}</p>}
+                    </div>
+                  )}
+                  <Field label="MOTM First"><TextInput value={scorecardMatch.meta.motm.first} onChange={v => patchScMotm({ ...scorecardMatch.meta.motm, first: v })} placeholder="Player" /></Field>
+                  <Field label="MOTM Last"><TextInput value={scorecardMatch.meta.motm.last} onChange={v => patchScMotm({ ...scorecardMatch.meta.motm, last: v })} placeholder="NAME" /></Field>
+                  <div className="col-span-2"><Field label="MOTM Line"><TextInput value={scorecardMatch.meta.motm.line} onChange={v => patchScMotm({ ...scorecardMatch.meta.motm, line: v })} placeholder="87 (54) · 2/22" /></Field></div>
                   <div className="col-span-2">
                     <p className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2 mb-1">Sponsor Logos</p>
                     {adminSponsors.length > 0 && (
