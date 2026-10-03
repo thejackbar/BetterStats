@@ -207,7 +207,7 @@ export function EVT_Block({ team, event = {}, width = 1080, height = 1080, palet
   // The colour band is a touch shorter on the square so the detail panel has
   // room for all four cells + the CTA + the sponsor strip. Portrait/story keep
   // their share of the canvas.
-  const bandH = aspect === 'square' ? 480 : share(height, 606)
+  const bandH = pick(aspect, { square: 480, portrait: 650, story: share(height, 606) })
   const tight = aspect === 'square'
   return (
     <LayerRoot style={{ ...FRAME(width, height), background: P.primary, color: '#fff' }}>
@@ -459,7 +459,7 @@ export function EVT_Gazette({ team, event = {}, width = 1080, height = 1080, pal
         </div>
         <div style={{ borderBottom: `3px solid ${ink}`, padding: tight ? '6px 0' : '9px 0', textAlign: 'center', fontFamily: MONO, fontSize: 14, letterSpacing: 5, textTransform: 'uppercase', color: ink }}>{event.kicker}</div>
 
-        <div style={{ textAlign: 'center', padding: pick(aspect, { square: '16px 0 2px', portrait: '44px 0 10px', story: '54px 0 12px' }) }}>
+        <div style={{ textAlign: 'center', padding: pick(aspect, { square: '16px 0 2px', portrait: '30px 0 8px', story: '54px 0 12px' }) }}>
           <div style={{ fontFamily: MONO, fontSize: 15, letterSpacing: 5, textTransform: 'uppercase', color: P.accent, marginBottom: pick(aspect, { square: 6, portrait: 18, story: 20 }) }}>— Official Notice —</div>
           <div style={{ height: twoLineBox(t5max, 0.9), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <AutoFitText text={event.title} max={t5max} min={52} lines={2} measureDeps={[event.title]}
@@ -468,7 +468,7 @@ export function EVT_Gazette({ team, event = {}, width = 1080, height = 1080, pal
           {event.subtitle ? <div style={{ fontFamily: BODY, fontStyle: 'italic', fontSize: pick(aspect, { square: 24, portrait: 33, story: 36 }), color: a(ink, 0.72), marginTop: pick(aspect, { square: 8, portrait: 20, story: 22 }), maxWidth: 840, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.32 }}>{event.subtitle}</div> : null}
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1.35fr 1fr', gap: 40, marginTop: pick(aspect, { square: 12, portrait: 34, story: 40 }), flex: 1, minHeight: 0, borderTop: `1px solid ${line}`, paddingTop: pick(aspect, { square: 14, portrait: 34, story: 40 }) }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1.35fr 1fr', gap: 40, marginTop: pick(aspect, { square: 12, portrait: 22, story: 40 }), flex: 1, minHeight: 0, borderTop: `1px solid ${line}`, paddingTop: pick(aspect, { square: 14, portrait: 22, story: 40 }) }}>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             <div style={{ flex: 1, border: `1px solid ${ink}`, backgroundColor: '#d8d3c6', backgroundImage: motif?.imageUrl ? undefined : `radial-gradient(${a(ink, 0.42)} 1.3px, transparent 1.6px)`, backgroundSize: '7px 7px', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               {motif?.imageUrl
@@ -478,10 +478,10 @@ export function EVT_Gazette({ team, event = {}, width = 1080, height = 1080, pal
             <div style={{ fontFamily: BODY, fontStyle: 'italic', fontSize: 18, color: faint, marginTop: 10 }}>Pictured: members at last year's event.</div>
           </div>
 
-          <div style={{ border: `2px solid ${ink}`, padding: pick(aspect, { square: '12px 22px', portrait: '24px 26px', story: '28px 28px' }), display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          <div style={{ border: `2px solid ${ink}`, padding: pick(aspect, { square: '12px 22px', portrait: '18px 24px', story: '28px 28px' }), display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <div style={{ fontFamily: SERIF, fontWeight: 700, fontSize: 28, color: ink, borderBottom: `2px solid ${ink}`, paddingBottom: tight ? 6 : 10, marginBottom: 4, flexShrink: 0 }}>At a Glance</div>
             {[['Date', event.date], ['Time', event.time], ['Venue', event.venue]].map(([l, v]) => (
-              <div key={l} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, padding: pick(aspect, { square: '7px 0', portrait: '15px 0', story: '17px 0' }), borderBottom: `1px solid ${line}` }}>
+              <div key={l} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, padding: pick(aspect, { square: '7px 0', portrait: '11px 0', story: '17px 0' }), borderBottom: `1px solid ${line}` }}>
                 <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: faint, flexShrink: 0 }}>{l}</span>
                 <span style={{ fontFamily: SERIF, fontWeight: 700, fontSize: 27, color: ink, textAlign: 'right', lineHeight: 1.1 }}>{v}</span>
               </div>
@@ -529,7 +529,7 @@ export function EVT_Sticker({ team, event = {}, width = 1080, height = 1080, pal
       <div style={{ position: 'absolute', right: -130, top: -130, width: 480, height: 480, borderRadius: '50%', background: a(P.accent, 0.18) }} />
       <div style={{ position: 'absolute', left: -90, bottom: share(height, 110), width: 300, height: 300, borderRadius: '50%', border: `4px dashed ${a(P.accent, 0.4)}` }} />
 
-      <div style={{ position: 'absolute', top: pick(aspect, { square: 84, portrait: share(height, 130) }), right: 96, width: tight ? 236 : 280, height: tight ? 236 : 280, background: '#fff', borderRadius: 36, boxShadow: '0 18px 44px rgba(0,0,0,0.16)', transform: 'rotate(7deg)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', top: pick(aspect, { square: 84, portrait: share(height, 130), story: 190 }), right: 96, width: tight ? 236 : 280, height: tight ? 236 : 280, background: '#fff', borderRadius: 36, boxShadow: '0 18px 44px rgba(0,0,0,0.16)', transform: 'rotate(7deg)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
         {motif?.imageUrl
           ? <img src={motif.imageUrl} alt="" crossOrigin="anonymous" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           : <img src={motif?.icon || icoTarget} alt="" style={{ width: tight ? 170 : 200, height: tight ? 170 : 200, objectFit: 'contain' }} />}

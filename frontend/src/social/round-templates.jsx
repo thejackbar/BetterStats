@@ -288,7 +288,7 @@ export function FixtureList({ palette: pal, width = 1080, height = 1080, meta = 
         {rows.map((r, i) => {
           const home = r.ha === 'H'
           return (
-            <div key={i} style={{ flex: 1, display: 'grid', gridTemplateColumns: '162px minmax(0,1fr) 206px', alignItems: 'center', gap: 18, borderBottom: i < rows.length - 1 ? `1px solid ${pal.ink}1a` : 'none' }}>
+            <div key={i} style={{ flex: 1, display: 'grid', gridTemplateColumns: `${pick(S.A, { square: 162, portrait: 178, story: 204 })}px minmax(0,1fr) 206px`, alignItems: 'center', gap: 18, borderBottom: i < rows.length - 1 ? `1px solid ${pal.ink}1a` : 'none' }}>
               <div>
                 <div style={{ width: 30, height: 4, background: pal.accent, marginBottom: 8 }} />
                 <div style={{ fontFamily: DISPLAY, fontSize: t(30), letterSpacing: 0.5, lineHeight: 0.95 }}>{r.grade}</div>
@@ -341,7 +341,7 @@ export function FixtureHype({ palette: pal, width = 1080, height = 1080, meta = 
         {rows.map((r, i) => {
           const home = r.ha === 'H'
           return (
-            <div key={i} style={{ flex: 1, display: 'grid', gridTemplateColumns: '52px 150px minmax(0,1fr) 184px', alignItems: 'center', gap: 20, padding: '0 6px', borderTop: `2px solid ${pal.ink}22` }}>
+            <div key={i} style={{ flex: 1, display: 'grid', gridTemplateColumns: `52px ${pick(S.A, { square: 150, portrait: 166, story: 196 })}px minmax(0,1fr) 184px`, alignItems: 'center', gap: 20, padding: '0 6px', borderTop: `2px solid ${pal.ink}22` }}>
               <div style={{ fontFamily: MONO, fontSize: 22, letterSpacing: 1, color: pal.accent }}>{String(i + 1).padStart(2, '0')}</div>
               <div style={{ fontFamily: DISPLAY, fontSize: t(30), letterSpacing: 0.5, lineHeight: 0.95 }}>{r.grade}</div>
               <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 14 }}>
@@ -543,7 +543,7 @@ export function FixtureSchedule({ palette: pal, width = 1080, height = 1080, met
                 <div style={{ width: 150, textAlign: 'right', paddingRight: 26, fontFamily: DISPLAY, fontSize: t(32), color: pal.accent, lineHeight: 1, flexShrink: 0 }}>{String(r.time || '').replace(' ', '')}</div>
                 <div style={{ width: 16, height: 16, borderRadius: '50%', background: pal.accent, border: `3px solid ${pal.primary}`, zIndex: 2, flexShrink: 0 }} />
                 <div style={{ flex: 1, minWidth: 0, paddingLeft: 26, display: 'flex', alignItems: 'center', gap: 14 }}>
-                  <span style={{ fontFamily: DISPLAY, fontSize: 26, width: 116, flexShrink: 0, lineHeight: 0.95 }}>{r.grade}</span>
+                  <span style={{ fontFamily: DISPLAY, fontSize: 26, width: 132, flexShrink: 0, lineHeight: 0.95 }}>{r.grade}</span>
                   <span style={{ fontFamily: MONO, fontSize: 13, color: home ? pal.accent : pal.ink, opacity: home ? 1 : 0.5, flexShrink: 0, width: 24 }}>{home ? 'VS' : '@'}</span>
                   <span style={{ fontFamily: DISPLAY, fontSize: t(30), flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.opp}</span>
                   <span style={{ fontFamily: MONO, fontSize: 12, color: pal.ink, opacity: 0.6, flexShrink: 0, whiteSpace: 'nowrap' }}>{r.venue} · {home ? 'H' : 'A'}</span>
