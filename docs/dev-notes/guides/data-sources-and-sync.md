@@ -102,6 +102,7 @@
 - `python -m app.scripts.backfill_match_format <org-id-or-slug>`: dry run by default; `--apply`, `--recompute` (re-derive fee match days), `--season YYYY`, `--all-seasons`. Default scope: seasons with `fee_member_seasons` rows plus the latest season. Writes only games under the club's OWN grades.
 - `python -m app.scripts.backfill_caught_behind <org_id|all>`: re-reads scorecards, sets `batting_innings.caught_behind` (Full Rebuild network cost).
 - `python -m app.scripts.rebuild_bowler_wickets <org_id|all>`: re-derives `bowler_wickets` with the flag.
+- `python -m app.scripts.stop_sync <org-id|slug|all>`: dry run by default; `--apply`, `--wait N`. Stops any running or paused sync and leaves it `cancelled` so the startup self-heal cannot resume it. Always cancel BEFORE restarting the backend. Archive: grep `stop_sync script`.
 - `python -m app.scripts.list_skipped_matches`: lists matches the scores API 204'd (no fallback).
 - `/admin/sync` buttons: Quick Sync = `POST /organisations/{id}/sync/quick` (last 7 days, kind `org_quick`); Sync Now = `POST /organisations/{id}/sync`; Fix Missing Totals = `POST /club-admin/backfill-aggregates` (recomputes `player_season_stats` from per-game rows, no CA fetch); Full Rebuild = `POST /club-admin/hard-refresh` (wipes per-game tables, re-pulls, an hour or more). Internal names and `sync_runs.kind` are unchanged from the old labels.
 
