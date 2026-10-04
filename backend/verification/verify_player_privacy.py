@@ -573,7 +573,7 @@ async def main() -> None:
                 r = await mc.get("/leaky")
                 body = r.text
                 check("every written form of his name is replaced",
-                      "Steenholdt" not in body and "Trent" not in body.replace("Trent S", "") and "Player removed" in body, body[:200])
+                      "Steenholdt" not in body and "Trent" not in body.replace("Trent S", "") and "********" in body, body[:200])
                 check("his id is replaced, upper and lower case", str(TRENT) not in body and str(TRENT).upper() not in body)
                 check("the response is still valid JSON", r.json()["ok"] == PLAIN_TXT)
                 check("other people's names and ids are left alone", "Pat Plain" in body and str(PLAIN) in body)
@@ -589,9 +589,33 @@ async def main() -> None:
                 r = await mc.get("/photo")
                 check("a binary response is passed through untouched", r.content == b"\x89PNG Trent Steenholdt")
                 r = await mc.get("/csv")
-                check("a CSV is scrubbed", "Steenholdt" not in r.text and "Player removed" in r.text)
+                check("a CSV is scrubbed", "Steenholdt" not in r.text and "********" in r.text)
                 r = await mc.get("/lots")
                 check("a large response is scrubbed and complete", len(r.json()["rows"]) == 401 and "Steenholdt" not in r.text)
+
+            # The way a scorecard writes a fielder or bowler: Cricket Australia's own
+            # dismissal strings (see sync._parse_bowler_and_fielder), which is where a
+            # removed player's name hides on OTHER players' lines.
+            print("scorecard dismissal strings")
+            DISMISSALS = [
+                "c: T Steenholdt b: J Birbeck", "c T Steenholdt b J Birbeck", "b T Steenholdt",
+                "c & b: T Steenholdt", "c&b T Steenholdt", "lbw b: T Steenholdt",
+                "st \u2020T Steenholdt b: J Birbeck", "st \u2020Steenholdt b: J Birbeck",
+                "c Steenholdt b J Birbeck", "run out (T Steenholdt)", "run out (Steenholdt/Smith)",
+                "c: Steenholdt, T b: J Birbeck",
+            ]
+            privacy_scrub.forget()
+            sc = await privacy_scrub.get_scrubber()
+            check("a scrubber exists while somebody is removed", sc is not None)
+            if sc is not None:
+                for line in DISMISSALS:
+                    out = sc.scrub(line)
+                    check(f"dismissal {line!r} reads {out!r} with his name gone",
+                          "Steenholdt" not in out and "********" in out)
+                check("the bowler's and the fielder's OTHER names are left alone",
+                      sc.scrub("c: T Steenholdt b: J Birbeck") == "c: ******** b: J Birbeck")
+                check("someone with a different surname is left alone",
+                      sc.scrub("c: A Dillon b: J Birbeck") == "c: A Dillon b: J Birbeck")
 
             # A bare surname is only removed when nobody else holds it.
             async with Session() as db:
