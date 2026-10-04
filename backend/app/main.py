@@ -4366,6 +4366,13 @@ async def lifespan(app: FastAPI):
         for _stmt in _PLAYER_PRIVACY_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 317: the selection board's autosaved draft. Same one-copy
+        # rule: this list and alembic's 317 both run
+        # services/selection_draft_ddl.STATEMENTS.
+        from app.services.selection_draft_ddl import STATEMENTS as _SELECTION_DRAFT_DDL
+        for _stmt in _SELECTION_DRAFT_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 285: importing a club's history from its own public
         # CricketStatz site. Same one-copy rule — this list and alembic's 285
         # both run services/cricketstatz_ddl.STATEMENTS.
@@ -4379,6 +4386,27 @@ async def lifespan(app: FastAPI):
         # services/manual_innings_ddl.STATEMENTS.
         from app.services.manual_innings_ddl import STATEMENTS as _MANUAL_INNINGS_DDL
         for _stmt in _MANUAL_INNINGS_DDL:
+            await conn.execute(text(_stmt))
+
+        # Migration 318: sponsor tiers, per-sponsor placement switches and the
+        # club's own tier names. Same one-copy rule: this list and alembic's
+        # 318 both run services/sponsor_tiers_ddl.STATEMENTS.
+        from app.services.sponsor_tiers_ddl import STATEMENTS as _SPONSOR_TIERS_DDL
+        for _stmt in _SPONSOR_TIERS_DDL:
+            await conn.execute(text(_stmt))
+
+        # Migration 319: a club's own names for its public sections. Same
+        # one-copy rule: this list and alembic's 319 both run
+        # services/section_names_ddl.STATEMENTS.
+        from app.services.section_names_ddl import STATEMENTS as _SECTION_NAMES_DDL
+        for _stmt in _SECTION_NAMES_DDL:
+            await conn.execute(text(_stmt))
+
+        # Migration 320: the sponsors a club's posts start with, pinned to a
+        # team or grade. Same one-copy rule: this list and alembic's 320 both
+        # run services/post_sponsors_ddl.STATEMENTS.
+        from app.services.post_sponsors_ddl import STATEMENTS as _POST_SPONSORS_DDL
+        for _stmt in _POST_SPONSORS_DDL:
             await conn.execute(text(_stmt))
 
         # Migration 312: super-admin messages on the club admin dashboard.

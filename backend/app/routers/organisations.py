@@ -1,4 +1,5 @@
 import logging
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -721,11 +722,12 @@ async def get_org_lineup_one(
     return data
 
 
-async def _sync_safe(org_id: str, run_id: uuid.UUID, kind: str = "org_full", auto_yearbooks: bool = False):
+async def _sync_safe(org_id: str, run_id: uuid.UUID, kind: str = "org_full", auto_yearbooks: bool = False,
+                     since: date | None = None):
     from app.services.sync import finish_sync_run, pause_sync_run, cancel_sync_run, SyncControlSignal
     import logging
     try:
-        stats = await sync_organisation(org_id, run_id=run_id, kind=kind)
+        stats = await sync_organisation(org_id, run_id=run_id, kind=kind, since=since)
         await finish_sync_run(run_id, stats if isinstance(stats, dict) else {})
 
         # Self-serve registration's first full sync: build, narrate and publish
@@ -808,6 +810,28 @@ async def trigger_sync(org_id: str, background_tasks: BackgroundTasks, _user: Us
     _org_sync_running.add(org_id)
     background_tasks.add_task(_sync_safe, org_id, run_id, "org_full")
     return {"status": "sync_started", "org_id": org_id, "run_id": str(run_id)}
+
+
+@router.post("/{org_id}/sync/quick", status_code=202)
+async def trigger_quick_sync(org_id: str, background_tasks: BackgroundTasks, _user: User = Depends(require_cap(RUN_SYNC))):
+    """Quick Sync: pull only the last QUICK_LOOKBACK_DAYS of fixtures.
+
+    The same incremental code path the scheduled sync uses (``since=``), so it
+    is a full sync with a smaller input set and never a different one. Run
+    under its own kind, ``org_quick``, which is NOT a watermark kind: a quick
+    sync after a month of silence must not make the next scheduled run think
+    the club is up to date and skip the weeks in between."""
+    from app.services import auto_sync
+    from app.services.sync import start_sync_run
+    if org_id in _org_sync_running:
+        return {"status": "already_running", "org_id": org_id}
+    org_uuid = uuid.UUID(org_id)
+    since = auto_sync.quick_sync_since()
+    run_id = await start_sync_run(org_uuid, auto_sync.QUICK_KIND, triggered_by_user_id=_user.id)
+    _org_sync_running.add(org_id)
+    background_tasks.add_task(_sync_safe, org_id, run_id, auto_sync.QUICK_KIND, False, since)
+    return {"status": "sync_started", "org_id": org_id, "run_id": str(run_id),
+            "since": since.isoformat()}
 
 
 @router.get("/{org_id}/results")

@@ -129,11 +129,29 @@ const FRAME = (width = 1080, height = 1080) => ({
 // taller slot — its extra height belongs in the flex spacers, not here.
 const twoLineBox = (max, lineHeight) => Math.round(2 * max * lineHeight) + 12
 
+// SPONSOR SLOTS. Every poster reserves a rectangle for the club's sponsor grid
+// and the layout calls the SAME slot function to keep that rectangle clear, so
+// the space and the grid cannot drift apart (see sponsorSlots.js). Pad stays
+// small (8) so the logos, not the backing panel, are what you read.
+const SLOT_PAD = 8
+const SLOT_GAP = 24
+const slotRect = (width, height, { x, bottom, h, panel = 'light' }) => ({
+  x, y: height - bottom - h, w: width - 2 * x, h, pad: SLOT_PAD, gap: SLOT_GAP, panel,
+})
+
 // ─────────────────────────────────────────────────────────────────────────────
 // EV1 — FLOODLIT · full-bleed photo + opacity filter (sporty, BetterStats-native)
 // ─────────────────────────────────────────────────────────────────────────────
+// Floodlit: the grid is a full-width strip along the foot, on the dark field
+// below the photo band, with the whole text column sitting above it.
+const slotEV1 = (width, height) => {
+  const A = aspectOf(width, height)
+  return slotRect(width, height, { x: 64, bottom: pick(A, { square: 40, portrait: 44, story: 120 }), h: pick(A, { square: 112, portrait: 120, story: 136 }) })
+}
 export function EVT_Floodlit({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
   const P = palette
+  const A = aspectOf(width, height)
+  const slot = slotEV1(width, height)
   return (
     <LayerRoot style={{ ...FRAME(width, height), background: P.primary, color: '#fff' }}>
       <PhotoLayer motif={motif} palette={P} height={share(height, 680)} scrimFrom={0.04} label={motif?.label} />
@@ -144,15 +162,15 @@ export function EVT_Floodlit({ team, event = {}, width = 1080, height = 1080, pa
         <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 3, textTransform: 'uppercase', color: P.accent, border: `1.5px solid ${a(P.accent, 0.45)}`, borderRadius: 999, padding: '9px 18px', background: a(P.accent, 0.1) }}>Club Event</div>
       </div>
 
-      <div style={{ position: 'absolute', left: 64, right: 64, bottom: 60, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ position: 'absolute', left: 64, right: 64, bottom: height - slot.y + 22, display: 'flex', flexDirection: 'column' }}>
         <div style={{ fontFamily: MONO, fontSize: 18, letterSpacing: 6, textTransform: 'uppercase', color: P.accent, marginBottom: 14 }}>{event.kicker}</div>
         <div style={{ height: twoLineBox(148, 0.86), display: 'flex', alignItems: 'flex-end' }}>
           <AutoFitText text={(event.title || '').toUpperCase()} max={148} min={56} lines={2} measureDeps={[event.title]}
             style={{ fontFamily: SPORT, fontWeight: 800, lineHeight: 0.86, textTransform: 'uppercase', color: '#fff', letterSpacing: 1 }} />
         </div>
-        {event.subtitle ? <div style={{ fontSize: 30, color: 'rgba(255,255,255,0.78)', marginTop: 22, maxWidth: 760, lineHeight: 1.3 }}>{event.subtitle}</div> : null}
+        {event.subtitle ? <div style={{ fontSize: 30, color: 'rgba(255,255,255,0.78)', marginTop: pick(A, { square: 16, portrait: 22 }), maxWidth: 760, lineHeight: 1.3 }}>{event.subtitle}</div> : null}
 
-        <div style={{ display: 'flex', marginTop: 40, borderTop: '1px solid rgba(255,255,255,0.16)', borderBottom: '1px solid rgba(255,255,255,0.16)' }}>
+        <div style={{ display: 'flex', marginTop: pick(A, { square: 28, portrait: 40 }), borderTop: '1px solid rgba(255,255,255,0.16)', borderBottom: '1px solid rgba(255,255,255,0.16)' }}>
           {[['Date', event.date], ['Time', event.time], ['Venue', event.venue]].map(([l, v], i) => (
             <div key={l} style={{ flex: i === 2 ? 1.4 : 1, padding: i ? '22px 0 22px 28px' : '22px 0', borderLeft: i ? '1px solid rgba(255,255,255,0.16)' : 'none' }}>
               <div style={{ fontFamily: MONO, fontSize: 14, letterSpacing: 3, textTransform: 'uppercase', color: 'rgba(255,255,255,0.45)' }}>{l}</div>
@@ -161,12 +179,12 @@ export function EVT_Floodlit({ team, event = {}, width = 1080, height = 1080, pa
           ))}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginTop: 30 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginTop: pick(A, { square: 22, portrait: 30 }) }}>
           {event.price ? <div style={{ background: P.accent, color: P.primary, fontFamily: SPORT, fontWeight: 800, fontSize: 40, textTransform: 'uppercase', letterSpacing: 1, padding: '12px 26px', borderRadius: 10 }}>{event.price}</div> : null}
           {event.cta ? <div style={{ fontFamily: MONO, fontSize: 17, letterSpacing: 2, textTransform: 'uppercase', color: 'rgba(255,255,255,0.7)' }}>{event.cta}</div> : null}
         </div>
 
-        <div style={{ marginTop: 38 }}><Watermark sponsor={event.sponsor} /></div>
+        <div style={{ marginTop: pick(A, { square: 20, portrait: 30 }) }}><Watermark sponsor={event.sponsor} /></div>
       </div>
     </LayerRoot>
   )
@@ -175,13 +193,22 @@ export function EVT_Floodlit({ team, event = {}, width = 1080, height = 1080, pa
 // ─────────────────────────────────────────────────────────────────────────────
 // EV2 — COLOUR BLOCK · club colour leads, giant motif (bold, high-energy)
 // ─────────────────────────────────────────────────────────────────────────────
+// Colour Block: the grid is a strip along the foot of the dark detail panel, under
+// the little watermark line. The colour band gives up some height on the square
+// to pay for it.
+const slotEV2 = (width, height) => {
+  const A = aspectOf(width, height)
+  return slotRect(width, height, { x: 64, bottom: pick(A, { square: 36, portrait: 44, story: 120 }), h: pick(A, { square: 100, portrait: 116, story: 136 }) })
+}
 export function EVT_Block({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
   const P = palette
   const aspect = aspectOf(width, height)
+  const slot = slotEV2(width, height)
   // The colour band is a touch shorter on the square so the detail panel has
-  // room for all four cells + the CTA — the square used to clip the Venue/Entry
-  // row clean off. Portrait/story keep their share of the canvas.
-  const bandH = aspect === 'square' ? 566 : share(height, 606)
+  // room for all four cells + the CTA + the sponsor strip. Portrait/story keep
+  // their share of the canvas.
+  const bandH = pick(aspect, { square: 480, portrait: 650, story: share(height, 606) })
+  const tight = aspect === 'square'
   return (
     <LayerRoot style={{ ...FRAME(width, height), background: P.primary, color: '#fff' }}>
       <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: bandH, background: `linear-gradient(150deg, ${P.accent} 0%, ${a(P.accent, 0.78)} 100%)`, overflow: 'hidden' }}>
@@ -190,22 +217,22 @@ export function EVT_Block({ team, event = {}, width = 1080, height = 1080, palet
           : <img src={motif?.icon || icoHandshake} alt="" style={{ position: 'absolute', right: -130, top: 54, width: 560, height: 560, objectFit: 'contain', opacity: 0.26, transform: 'rotate(-8deg)' }} />}
         <div style={{ position: 'absolute', right: -220, top: -40, width: 560, height: 560, borderRadius: '50%', background: 'radial-gradient(circle, rgba(255,255,255,0.18), transparent 66%)' }} />
 
-        <div style={{ position: 'absolute', top: 60, left: 64, right: 64, display: 'flex', alignItems: 'center', gap: 16 }}>
-          <BrandLockup team={team} palette={P} size={96} nameColor="#fff" nameSize={32} />
+        <div style={{ position: 'absolute', top: tight ? 44 : 60, left: 64, right: 64, display: 'flex', alignItems: 'center', gap: 16 }}>
+          <BrandLockup team={team} palette={P} size={tight ? 84 : 96} nameColor="#fff" nameSize={tight ? 30 : 32} />
           <div style={{ marginLeft: 'auto', fontFamily: MONO, fontSize: 13, letterSpacing: 3, textTransform: 'uppercase', color: '#fff', border: '1.5px solid rgba(255,255,255,0.55)', borderRadius: 999, padding: '9px 18px' }}>Club Event</div>
         </div>
 
-        <div style={{ position: 'absolute', left: 64, right: 64, bottom: 52 }}>
-          <div style={{ fontFamily: MONO, fontSize: 18, letterSpacing: 6, textTransform: 'uppercase', color: 'rgba(255,255,255,0.9)', marginBottom: 16 }}>{event.kicker}</div>
-          <div style={{ height: twoLineBox(158, 0.82), display: 'flex', alignItems: 'flex-end' }}>
-            <AutoFitText text={(event.title || '').toUpperCase()} max={158} min={56} lines={2} measureDeps={[event.title]}
+        <div style={{ position: 'absolute', left: 64, right: 64, bottom: tight ? 38 : 52 }}>
+          <div style={{ fontFamily: MONO, fontSize: 18, letterSpacing: 6, textTransform: 'uppercase', color: 'rgba(255,255,255,0.9)', marginBottom: tight ? 10 : 16 }}>{event.kicker}</div>
+          <div style={{ height: twoLineBox(tight ? 144 : 158, 0.82), display: 'flex', alignItems: 'flex-end' }}>
+            <AutoFitText text={(event.title || '').toUpperCase()} max={tight ? 144 : 158} min={56} lines={2} measureDeps={[event.title]}
               style={{ fontFamily: SPORT, fontWeight: 800, lineHeight: 0.82, textTransform: 'uppercase', color: '#fff', letterSpacing: 1, textShadow: '0 4px 30px rgba(0,0,0,0.18)' }} />
           </div>
         </div>
       </div>
 
-      <div style={{ position: 'absolute', left: 0, top: bandH, right: 0, bottom: 0, padding: pick(aspect, { square: '38px 64px 46px', portrait: '46px 64px 56px', story: '54px 64px 64px' }), boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
-        {event.subtitle ? <div style={{ fontSize: pick(aspect, { square: 26, portrait: 27, story: 29 }), color: 'rgba(255,255,255,0.74)', lineHeight: 1.32, maxWidth: 840, marginBottom: pick(aspect, { square: 22, portrait: 30, story: 34 }), flexShrink: 0 }}>{event.subtitle}</div> : null}
+      <div style={{ position: 'absolute', left: 0, top: bandH, right: 0, bottom: height - slot.y + 12, padding: pick(aspect, { square: '26px 64px 0', portrait: '46px 64px 0', story: '54px 64px 0' }), boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
+        {event.subtitle ? <div style={{ fontSize: pick(aspect, { square: 25, portrait: 27, story: 29 }), color: 'rgba(255,255,255,0.74)', lineHeight: 1.3, maxWidth: 840, marginBottom: pick(aspect, { square: 16, portrait: 30, story: 34 }), flexShrink: 0 }}>{event.subtitle}</div> : null}
         {/* The four details SHARE whatever the panel has left, at every size, so
             they fill the space and centre their content instead of the fixed
             2×2 stack running past the panel (the square used to clip its bottom
@@ -215,19 +242,19 @@ export function EVT_Block({ team, event = {}, width = 1080, height = 1080, palet
           background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 14, overflow: 'hidden',
         }}>
           {[['Date', event.date], ['Time', event.time], ['Venue', event.venue], ['Entry', event.price]].map(([l, v]) => (
-            <div key={l} style={{ background: P.primary, padding: '16px 24px', minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', overflow: 'hidden' }}>
+            <div key={l} style={{ background: P.primary, padding: tight ? '10px 24px' : '16px 24px', minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', overflow: 'hidden' }}>
               <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 3, textTransform: 'uppercase', color: P.accent, marginBottom: 5 }}>{l}</div>
-              <div style={{ fontFamily: SPORT, fontWeight: 700, fontSize: pick(aspect, { square: 36, portrait: 40, story: 44 }), color: '#fff', lineHeight: 1.04, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{v}</div>
+              <div style={{ fontFamily: SPORT, fontWeight: 700, fontSize: pick(aspect, { square: 34, portrait: 40, story: 44 }), color: '#fff', lineHeight: 1.04, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{v}</div>
             </div>
           ))}
         </div>
         {event.cta ? (
-          <div style={{ marginTop: pick(aspect, { square: 20, portrait: 26, story: 28 }), flexShrink: 0, background: P.accent, borderRadius: 14, padding: pick(aspect, { square: '17px 28px', portrait: '20px 28px', story: '22px 30px' }), display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
-            <span style={{ fontFamily: SPORT, fontWeight: 800, fontSize: pick(aspect, { square: 40, portrait: 42, story: 44 }), textTransform: 'uppercase', letterSpacing: 1, color: P.primary, lineHeight: 1 }}>{event.cta}</span>
+          <div style={{ marginTop: pick(aspect, { square: 14, portrait: 26, story: 28 }), flexShrink: 0, background: P.accent, borderRadius: 14, padding: pick(aspect, { square: '12px 28px', portrait: '20px 28px', story: '22px 30px' }), display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+            <span style={{ fontFamily: SPORT, fontWeight: 800, fontSize: pick(aspect, { square: 36, portrait: 42, story: 44 }), textTransform: 'uppercase', letterSpacing: 1, color: P.primary, lineHeight: 1 }}>{event.cta}</span>
             <span style={{ fontFamily: MONO, fontSize: 15, color: P.primary, opacity: 0.7, flexShrink: 0 }}>↗</span>
           </div>
         ) : null}
-        <div style={{ marginTop: 'auto', flexShrink: 0, paddingTop: pick(aspect, { square: 22, portrait: 28, story: 30 }) }}><Watermark sponsor={event.sponsor} /></div>
+        <div style={{ marginTop: 'auto', flexShrink: 0, paddingTop: pick(aspect, { square: 12, portrait: 28, story: 30 }) }}><Watermark sponsor={event.sponsor} /></div>
       </div>
     </LayerRoot>
   )
@@ -237,9 +264,16 @@ export function EVT_Block({ team, event = {}, width = 1080, height = 1080, palet
 // EV3 — TICKET · refined, editorial, motif watermark (premium occasions)
 // Light "paper" surface: uses palette.ink for paper, primary for type.
 // ─────────────────────────────────────────────────────────────────────────────
+// Ticket: the grid is a strip inside the double rule, under the small footer line.
+const slotEV3 = (width, height) => {
+  const A = aspectOf(width, height)
+  return slotRect(width, height, { x: 100, bottom: pick(A, { square: 76, portrait: 80, story: 110 }), h: pick(A, { square: 104, portrait: 116, story: 132 }) })
+}
 export function EVT_Ticket({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
   const P = palette
   const aspect = aspectOf(width, height)
+  const slot = slotEV3(width, height)
+  const tight = aspect === 'square'
   const paper = P.paper || '#f4efe4'
   const ink = P.deepInk || '#1f1c14'
   const line = a(ink, 0.2)
@@ -260,9 +294,9 @@ export function EVT_Ticket({ team, event = {}, width = 1080, height = 1080, pale
         </div>
       ) : null}
 
-      <div style={{ position: 'absolute', inset: '92px 100px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
-        <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
-          {team.logo ? <ClubLogo src={team.logo} size={98} /> : <ClubLogo monogram={team.monogram} color={P.accent} size={98} shape="shield" />}
+      <div style={{ position: 'absolute', top: tight ? 80 : 92, left: 100, right: 100, bottom: height - slot.y + 14, display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+        <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: tight ? 10 : 16 }}>
+          {team.logo ? <ClubLogo src={team.logo} size={tight ? 80 : 98} /> : <ClubLogo monogram={team.monogram} color={P.accent} size={tight ? 80 : 98} shape="shield" />}
           <div style={{ display: 'flex', alignItems: 'center', gap: 18, maxWidth: '84%' }}>
             <div style={{ width: 44, height: 1, background: line, flexShrink: 0 }} />
             <div style={{ fontFamily: SPORT, fontSize: 30, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: ink, lineHeight: 0.98 }}>{team.fullName || team.name}</div>
@@ -273,15 +307,15 @@ export function EVT_Ticket({ team, event = {}, width = 1080, height = 1080, pale
         {/* Hero + ticket stub as ONE block, centred in the leftover space (auto
             margins top and bottom) — the poster reads as a ticket with its
             details, not three groups flung to the top, middle and edges. */}
-        <div style={{ marginTop: 'auto', marginBottom: 'auto', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 30 }}>
-          <div style={{ fontFamily: MONO, fontSize: 17, letterSpacing: 6, textTransform: 'uppercase', color: P.accent, marginBottom: 16 }}>{event.kicker}</div>
-          <div style={{ height: twoLineBox(158, 0.92), display: 'flex', alignItems: 'center', width: '100%' }}>
-            <AutoFitText text={event.title} max={158} min={60} lines={2} measureDeps={[event.title]}
+        <div style={{ marginTop: 'auto', marginBottom: 'auto', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: tight ? 14 : 30 }}>
+          <div style={{ fontFamily: MONO, fontSize: 17, letterSpacing: 6, textTransform: 'uppercase', color: P.accent, marginBottom: tight ? 10 : 16 }}>{event.kicker}</div>
+          <div style={{ height: twoLineBox(tight ? 136 : 158, 0.92), display: 'flex', alignItems: 'center', width: '100%' }}>
+            <AutoFitText text={event.title} max={tight ? 136 : 158} min={60} lines={2} measureDeps={[event.title]}
               style={{ fontFamily: SERIF, fontWeight: 600, lineHeight: 0.92, color: ink, letterSpacing: 1, textAlign: 'center', width: '100%' }} />
           </div>
-          {event.subtitle ? <div style={{ fontFamily: SERIF, fontStyle: 'italic', fontWeight: 500, fontSize: pick(aspect, { square: 34, portrait: 37, story: 39 }), color: a(ink, 0.66), marginTop: 14, maxWidth: 720, lineHeight: 1.3 }}>{event.subtitle}</div> : null}
+          {event.subtitle ? <div style={{ fontFamily: SERIF, fontStyle: 'italic', fontWeight: 500, fontSize: pick(aspect, { square: 31, portrait: 37, story: 39 }), color: a(ink, 0.66), marginTop: tight ? 8 : 14, maxWidth: 720, lineHeight: 1.3 }}>{event.subtitle}</div> : null}
 
-          <div style={{ position: 'relative', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '34px 0 32px' }}>
+          <div style={{ position: 'relative', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: tight ? '22px 0 20px' : '34px 0 32px' }}>
             <div style={{ position: 'absolute', left: -58, width: 34, height: 34, borderRadius: '50%', background: a(ink, 0.08), border: `1px solid ${line}` }} />
             <div style={{ flex: 1, borderTop: `2px dashed ${line}` }} />
             <div style={{ position: 'absolute', right: -58, width: 34, height: 34, borderRadius: '50%', background: a(ink, 0.08), border: `1px solid ${line}` }} />
@@ -294,7 +328,7 @@ export function EVT_Ticket({ team, event = {}, width = 1080, height = 1080, pale
               </div>
             ))}
           </div>
-          {event.cta ? <div style={{ marginTop: 28, fontFamily: MONO, fontSize: 15, letterSpacing: 3, textTransform: 'uppercase', color: P.accent, border: `1.5px solid ${P.accent}`, borderRadius: 999, padding: '11px 26px' }}>{event.cta}</div> : null}
+          {event.cta ? <div style={{ marginTop: tight ? 20 : 28, fontFamily: MONO, fontSize: 15, letterSpacing: 3, textTransform: 'uppercase', color: P.accent, border: `1.5px solid ${P.accent}`, borderRadius: 999, padding: '11px 26px' }}>{event.cta}</div> : null}
         </div>
 
         <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -309,16 +343,23 @@ export function EVT_Ticket({ team, event = {}, width = 1080, height = 1080, pale
 // ─────────────────────────────────────────────────────────────────────────────
 // EV4 — SCOREBOARD · LED dot-matrix, mono numerals (fixtures & selections)
 // ─────────────────────────────────────────────────────────────────────────────
+// Scoreboard: the grid is a strip along the foot, below the CTA line. The fixture
+// card's rows are a little tighter on the square to pay for it.
+const slotEV4 = (width, height) => {
+  const A = aspectOf(width, height)
+  return slotRect(width, height, { x: 64, bottom: pick(A, { square: 40, portrait: 44, story: 120 }), h: pick(A, { square: 108, portrait: 116, story: 136 }) })
+}
 export function EVT_Scoreboard({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
   const P = palette
   const aspect = aspectOf(width, height)
+  const slot = slotEV4(width, height)
   // Title box grows modestly with the canvas; the FLEX GAP below the headline
   // takes the rest, so a taller post breathes in the middle rather than the
   // fixture card sliding under the CTA bar (the reported collision — the card
   // and the footer used to be two separate absolute blocks with nothing
   // stopping them meeting).
   const titleH = twoLineBox(150, 0.84)
-  const rowPad = pick(aspect, { square: 18, portrait: 22, story: 30 })
+  const rowPad = pick(aspect, { square: 9, portrait: 22, story: 30 })
   return (
     <LayerRoot style={{ ...FRAME(width, height), background: P.primary, color: '#fff' }}>
       <div style={{ position: 'absolute', inset: 0, backgroundImage: `radial-gradient(${a(P.accent, 0.1)} 1.4px, transparent 1.6px)`, backgroundSize: '24px 24px' }} />
@@ -332,7 +373,7 @@ export function EVT_Scoreboard({ team, event = {}, width = 1080, height = 1080, 
       {/* One column bounded top AND bottom, so the fixture card can never reach
           the footer. Header block at top, footer group at bottom, slack pooled
           between them. */}
-      <div style={{ position: 'absolute', left: 64, right: 64, top: share(height, 214), bottom: 56, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ position: 'absolute', left: 64, right: 64, top: pick(aspect, { square: 188, portrait: share(height, 214) }), bottom: height - slot.y + 16, display: 'flex', flexDirection: 'column' }}>
         <div style={{ flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
             <div style={{ width: 13, height: 13, borderRadius: '50%', background: P.accent, boxShadow: `0 0 16px ${P.accent}` }} />
@@ -378,47 +419,56 @@ export function EVT_Scoreboard({ team, event = {}, width = 1080, height = 1080, 
 // ─────────────────────────────────────────────────────────────────────────────
 // EV5 — GAZETTE · newspaper masthead + serif headline (stately notices)
 // ─────────────────────────────────────────────────────────────────────────────
+// Gazette: the grid is an advertisement strip along the foot of the page, full
+// frame width, under the closing rule. The frame itself stops above it, so the
+// poster is still one inset frame (one layer).
+const slotEV5 = (width, height) => {
+  const A = aspectOf(width, height)
+  return slotRect(width, height, { x: 56, bottom: pick(A, { square: 52, portrait: 56, story: 110 }), h: pick(A, { square: 100, portrait: 112, story: 132 }) })
+}
 export function EVT_Gazette({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
   const P = palette
   const aspect = aspectOf(width, height)
+  const slot = slotEV5(width, height)
+  const tight = aspect === 'square'
   const paper = P.paper || '#f4f0e6'
   const ink = P.deepInk || '#1a1814'
   const line = a(ink, 0.28)
   const faint = a(ink, 0.55)
   const SERIF = "'Playfair Display', serif"
   const BODY = "'Spectral', serif"
-  const t5max = pick(aspect, { square: 112, portrait: 128, story: 138 })
+  const t5max = pick(aspect, { square: 92, portrait: 128, story: 138 })
   return (
     <LayerRoot style={{ ...FRAME(width, height), background: paper, color: ink, fontFamily: BODY }}>
       {/* This poster keeps everything inside ONE inset frame, so it is a single
           layer rather than a stack. Naming it says so; splitting it would mean
           promoting this div's own children, and a block spliced in among them
           would be offset by the inset from where it was dropped. */}
-      <div data-layer="Poster content" style={{ position: 'absolute', inset: 56, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: faint, paddingBottom: 10 }}>
+      <div data-layer="Poster content" style={{ position: 'absolute', top: 56, left: 56, right: 56, bottom: height - slot.y + 14, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: faint, paddingBottom: tight ? 6 : 10 }}>
           <span>Vol. XCIV — No. 12</span><span>Est. 1921</span>
         </div>
-        <div style={{ borderTop: `3px solid ${ink}`, borderBottom: `1px solid ${ink}`, padding: '16px 0 12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 26 }}>
-          {team.logo ? <ClubLogo src={team.logo} size={88} /> : <ClubLogo monogram={team.monogram} color={ink} size={80} shape="shield" />}
+        <div style={{ borderTop: `3px solid ${ink}`, borderBottom: `1px solid ${ink}`, padding: tight ? '10px 0 8px' : '16px 0 12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 26 }}>
+          {team.logo ? <ClubLogo src={team.logo} size={tight ? 68 : 88} /> : <ClubLogo monogram={team.monogram} color={ink} size={tight ? 64 : 80} shape="shield" />}
           {/* AutoFit the masthead so a long club name shrinks instead of wrapping
               to a two-line block that eats the poster. */}
           <div style={{ flex: 1, minWidth: 0 }}>
-            <AutoFitText text={team.fullName || team.name} max={72} min={34} lines={2} measureDeps={[team.fullName || team.name]}
+            <AutoFitText text={team.fullName || team.name} max={tight ? 60 : 72} min={34} lines={2} measureDeps={[team.fullName || team.name]}
               style={{ fontFamily: SERIF, fontWeight: 900, lineHeight: 0.96, color: ink, letterSpacing: 0.5, textAlign: 'center' }} />
           </div>
         </div>
-        <div style={{ borderBottom: `3px solid ${ink}`, padding: '9px 0', textAlign: 'center', fontFamily: MONO, fontSize: 14, letterSpacing: 5, textTransform: 'uppercase', color: ink }}>{event.kicker}</div>
+        <div style={{ borderBottom: `3px solid ${ink}`, padding: tight ? '6px 0' : '9px 0', textAlign: 'center', fontFamily: MONO, fontSize: 14, letterSpacing: 5, textTransform: 'uppercase', color: ink }}>{event.kicker}</div>
 
-        <div style={{ textAlign: 'center', padding: pick(aspect, { square: '30px 0 6px', portrait: '44px 0 10px', story: '54px 0 12px' }) }}>
-          <div style={{ fontFamily: MONO, fontSize: 15, letterSpacing: 5, textTransform: 'uppercase', color: P.accent, marginBottom: pick(aspect, { square: 14, portrait: 18, story: 20 }) }}>— Official Notice —</div>
+        <div style={{ textAlign: 'center', padding: pick(aspect, { square: '16px 0 2px', portrait: '30px 0 8px', story: '54px 0 12px' }) }}>
+          <div style={{ fontFamily: MONO, fontSize: 15, letterSpacing: 5, textTransform: 'uppercase', color: P.accent, marginBottom: pick(aspect, { square: 6, portrait: 18, story: 20 }) }}>— Official Notice —</div>
           <div style={{ height: twoLineBox(t5max, 0.9), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <AutoFitText text={event.title} max={t5max} min={52} lines={2} measureDeps={[event.title]}
               style={{ fontFamily: SERIF, fontWeight: 900, lineHeight: 0.9, color: ink }} />
           </div>
-          {event.subtitle ? <div style={{ fontFamily: BODY, fontStyle: 'italic', fontSize: pick(aspect, { square: 28, portrait: 33, story: 36 }), color: a(ink, 0.72), marginTop: pick(aspect, { square: 14, portrait: 20, story: 22 }), maxWidth: 840, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.32 }}>{event.subtitle}</div> : null}
+          {event.subtitle ? <div style={{ fontFamily: BODY, fontStyle: 'italic', fontSize: pick(aspect, { square: 24, portrait: 33, story: 36 }), color: a(ink, 0.72), marginTop: pick(aspect, { square: 8, portrait: 20, story: 22 }), maxWidth: 840, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.32 }}>{event.subtitle}</div> : null}
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1.35fr 1fr', gap: 40, marginTop: pick(aspect, { square: 20, portrait: 34, story: 40 }), flex: 1, minHeight: 0, borderTop: `1px solid ${line}`, paddingTop: pick(aspect, { square: 22, portrait: 34, story: 40 }) }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1.35fr 1fr', gap: 40, marginTop: pick(aspect, { square: 12, portrait: 22, story: 40 }), flex: 1, minHeight: 0, borderTop: `1px solid ${line}`, paddingTop: pick(aspect, { square: 14, portrait: 22, story: 40 }) }}>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             <div style={{ flex: 1, border: `1px solid ${ink}`, backgroundColor: '#d8d3c6', backgroundImage: motif?.imageUrl ? undefined : `radial-gradient(${a(ink, 0.42)} 1.3px, transparent 1.6px)`, backgroundSize: '7px 7px', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               {motif?.imageUrl
@@ -428,22 +478,22 @@ export function EVT_Gazette({ team, event = {}, width = 1080, height = 1080, pal
             <div style={{ fontFamily: BODY, fontStyle: 'italic', fontSize: 18, color: faint, marginTop: 10 }}>Pictured: members at last year's event.</div>
           </div>
 
-          <div style={{ border: `2px solid ${ink}`, padding: pick(aspect, { square: '18px 24px', portrait: '24px 26px', story: '28px 28px' }), display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <div style={{ fontFamily: SERIF, fontWeight: 700, fontSize: 28, color: ink, borderBottom: `2px solid ${ink}`, paddingBottom: 10, marginBottom: 4, flexShrink: 0 }}>At a Glance</div>
+          <div style={{ border: `2px solid ${ink}`, padding: pick(aspect, { square: '12px 22px', portrait: '18px 24px', story: '28px 28px' }), display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <div style={{ fontFamily: SERIF, fontWeight: 700, fontSize: 28, color: ink, borderBottom: `2px solid ${ink}`, paddingBottom: tight ? 6 : 10, marginBottom: 4, flexShrink: 0 }}>At a Glance</div>
             {[['Date', event.date], ['Time', event.time], ['Venue', event.venue]].map(([l, v]) => (
-              <div key={l} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, padding: pick(aspect, { square: '11px 0', portrait: '15px 0', story: '17px 0' }), borderBottom: `1px solid ${line}` }}>
+              <div key={l} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, padding: pick(aspect, { square: '7px 0', portrait: '11px 0', story: '17px 0' }), borderBottom: `1px solid ${line}` }}>
                 <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: faint, flexShrink: 0 }}>{l}</span>
                 <span style={{ fontFamily: SERIF, fontWeight: 700, fontSize: 27, color: ink, textAlign: 'right', lineHeight: 1.1 }}>{v}</span>
               </div>
             ))}
-            <div style={{ marginTop: 'auto', background: ink, padding: '13px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+            <div style={{ marginTop: 'auto', background: ink, padding: tight ? '9px 18px' : '13px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
               <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: 'rgba(255,255,255,0.6)', flexShrink: 0 }}>Admission</span>
               <span style={{ fontFamily: SERIF, fontWeight: 900, fontSize: 30, color: '#fff' }}>{event.price}</span>
             </div>
           </div>
         </div>
 
-        <div style={{ borderTop: `3px solid ${ink}`, marginTop: pick(aspect, { square: 18, portrait: 26, story: 30 }), paddingTop: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+        <div style={{ borderTop: `3px solid ${ink}`, marginTop: pick(aspect, { square: 10, portrait: 26, story: 30 }), paddingTop: pick(aspect, { square: 8, portrait: 14 }), display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
           <span style={{ fontFamily: BODY, fontStyle: 'italic', fontSize: 22, color: ink }}>{event.cta}</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             {event.sponsor ? <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: faint }}>{event.sponsor}</span> : null}
@@ -459,9 +509,18 @@ export function EVT_Gazette({ team, event = {}, width = 1080, height = 1080, pal
 // ─────────────────────────────────────────────────────────────────────────────
 // EV6 — STICKER POP · playful rounded badges (casual socials)
 // ─────────────────────────────────────────────────────────────────────────────
+// Sticker Pop: the grid is a strip along the foot with the small watermark line
+// tucked underneath it, so the sticker, chips and CTA all sit above it.
+const slotEV6Bottom = (A) => pick(A, { square: 54, portrait: 58, story: 130 })
+const slotEV6 = (width, height) => {
+  const A = aspectOf(width, height)
+  return slotRect(width, height, { x: 72, bottom: slotEV6Bottom(A), h: pick(A, { square: 100, portrait: 112, story: 132 }) })
+}
 export function EVT_Sticker({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
   const P = palette
   const aspect = aspectOf(width, height)
+  const slot = slotEV6(width, height)
+  const tight = aspect === 'square'
   const paper = P.paper || '#fbf6ec'
   const ink = P.deepInk || '#23202c'
   const FUN = "'Fredoka', sans-serif"
@@ -470,13 +529,13 @@ export function EVT_Sticker({ team, event = {}, width = 1080, height = 1080, pal
       <div style={{ position: 'absolute', right: -130, top: -130, width: 480, height: 480, borderRadius: '50%', background: a(P.accent, 0.18) }} />
       <div style={{ position: 'absolute', left: -90, bottom: share(height, 110), width: 300, height: 300, borderRadius: '50%', border: `4px dashed ${a(P.accent, 0.4)}` }} />
 
-      <div style={{ position: 'absolute', top: share(height, 130), right: 96, width: 280, height: 280, background: '#fff', borderRadius: 36, boxShadow: '0 18px 44px rgba(0,0,0,0.16)', transform: 'rotate(7deg)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', top: pick(aspect, { square: 84, portrait: share(height, 130), story: 190 }), right: 96, width: tight ? 236 : 280, height: tight ? 236 : 280, background: '#fff', borderRadius: 36, boxShadow: '0 18px 44px rgba(0,0,0,0.16)', transform: 'rotate(7deg)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
         {motif?.imageUrl
           ? <img src={motif.imageUrl} alt="" crossOrigin="anonymous" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-          : <img src={motif?.icon || icoTarget} alt="" style={{ width: 200, height: 200, objectFit: 'contain' }} />}
+          : <img src={motif?.icon || icoTarget} alt="" style={{ width: tight ? 170 : 200, height: tight ? 170 : 200, objectFit: 'contain' }} />}
       </div>
 
-      <div style={{ position: 'absolute', inset: 72, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ position: 'absolute', top: 72, left: 72, right: 72, bottom: height - slot.y + 16, display: 'flex', flexDirection: 'column' }}>
         <div style={{ flexShrink: 0, alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 18, maxWidth: 640 }}>
           {team.logo ? <ClubLogo src={team.logo} size={92} /> : <ClubLogo monogram={team.monogram} color={P.accent} size={92} shape="shield" />}
           <div style={{ background: P.accent, color: '#fff', fontFamily: FUN, fontWeight: 600, fontSize: 28, letterSpacing: 1, padding: '12px 26px', borderRadius: 999, transform: 'rotate(-3deg)', boxShadow: `0 8px 22px ${a(P.accent, 0.4)}` }}>{team.fullName || team.name}</div>
@@ -487,17 +546,17 @@ export function EVT_Sticker({ team, event = {}, width = 1080, height = 1080, pal
             (breathing room at the foot) so the logo isn't stranded above a huge
             centred gap. The title box is capped per aspect, not share()d up to
             498px on a story. */}
-        <div style={{ marginTop: pick(aspect, { square: 'auto', portrait: 'auto', story: 96 }), marginBottom: 'auto', width: '100%', display: 'flex', flexDirection: 'column', paddingTop: 28 }}>
+        <div style={{ marginTop: pick(aspect, { square: 'auto', portrait: 'auto', story: 96 }), marginBottom: 'auto', width: '100%', display: 'flex', flexDirection: 'column', paddingTop: tight ? 12 : 28 }}>
           <div>
-            <div style={{ display: 'inline-block', background: a(P.accent, 0.18), color: P.accent, fontFamily: FUN, fontWeight: 600, fontSize: 22, padding: '8px 18px', borderRadius: 999, marginBottom: 18 }}>{event.kicker}</div>
-            <div style={{ height: twoLineBox(158, 0.9), display: 'flex', alignItems: 'flex-end' }}>
-              <AutoFitText text={event.title} max={158} min={60} lines={2} measureDeps={[event.title]}
+            <div style={{ display: 'inline-block', background: a(P.accent, 0.18), color: P.accent, fontFamily: FUN, fontWeight: 600, fontSize: 22, padding: '8px 18px', borderRadius: 999, marginBottom: tight ? 10 : 18 }}>{event.kicker}</div>
+            <div style={{ height: twoLineBox(tight ? 136 : 158, 0.9), display: 'flex', alignItems: 'flex-end' }}>
+              <AutoFitText text={event.title} max={tight ? 136 : 158} min={60} lines={2} measureDeps={[event.title]}
                 style={{ fontFamily: FUN, fontWeight: 700, lineHeight: 0.9, color: ink, letterSpacing: -1 }} />
             </div>
-            {event.subtitle ? <div style={{ fontWeight: 500, fontSize: 29, color: a(ink, 0.7), marginTop: 18, maxWidth: 760, lineHeight: 1.36 }}>{event.subtitle}</div> : null}
+            {event.subtitle ? <div style={{ fontWeight: 500, fontSize: tight ? 26 : 29, color: a(ink, 0.7), marginTop: tight ? 10 : 18, maxWidth: 760, lineHeight: tight ? 1.3 : 1.36 }}>{event.subtitle}</div> : null}
           </div>
 
-          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: pick(aspect, { square: 30, portrait: 36, story: 40 }) }}>
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: pick(aspect, { square: 20, portrait: 36, story: 40 }) }}>
             {[['Date', event.date], ['Time', event.time], ['Venue', event.venue]].map(([l, v]) => (
               <div key={l} style={{ background: '#fff', border: `2.5px solid ${ink}`, borderRadius: 18, padding: '14px 22px', boxShadow: `5px 5px 0 ${ink}` }}>
                 <div style={{ fontWeight: 600, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: P.accent }}>{l}</div>
@@ -506,19 +565,19 @@ export function EVT_Sticker({ team, event = {}, width = 1080, height = 1080, pal
             ))}
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, marginTop: pick(aspect, { square: 34, portrait: 42, story: 46 }) }}>
-            {event.cta ? <div style={{ background: ink, color: '#fff', fontFamily: FUN, fontWeight: 600, fontSize: 34, padding: '18px 38px', borderRadius: 999, boxShadow: '0 10px 26px rgba(0,0,0,0.2)' }}>{event.cta}</div> : <span />}
+          <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, marginTop: pick(aspect, { square: 20, portrait: 42, story: 46 }) }}>
+            {event.cta ? <div style={{ background: ink, color: '#fff', fontFamily: FUN, fontWeight: 600, fontSize: 34, padding: tight ? '14px 34px' : '18px 38px', borderRadius: 999, boxShadow: '0 10px 26px rgba(0,0,0,0.2)' }}>{event.cta}</div> : <span />}
             {event.price ? (
-              <div style={{ width: 150, height: 150, borderRadius: '50%', background: P.accent, color: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', transform: 'rotate(-9deg)', boxShadow: `0 12px 30px ${a(P.accent, 0.4)}`, flexShrink: 0 }}>
+              <div style={{ width: tight ? 124 : 150, height: tight ? 124 : 150, borderRadius: '50%', background: P.accent, color: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', transform: 'rotate(-9deg)', boxShadow: `0 12px 30px ${a(P.accent, 0.4)}`, flexShrink: 0 }}>
                 <span style={{ fontWeight: 600, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', opacity: 0.85 }}>Entry</span>
-                <span style={{ fontFamily: FUN, fontWeight: 700, fontSize: 42, lineHeight: 1 }}>{event.price}</span>
+                <span style={{ fontFamily: FUN, fontWeight: 700, fontSize: tight ? 34 : 42, lineHeight: 1, textAlign: 'center', padding: '0 8px' }}>{event.price}</span>
               </div>
             ) : null}
           </div>
         </div>
       </div>
 
-      <div style={{ position: 'absolute', bottom: 30, left: 72, display: 'flex', alignItems: 'center', gap: 9 }}>
+      <div style={{ position: 'absolute', bottom: slotEV6Bottom(aspect) - 30, left: 72, display: 'flex', alignItems: 'center', gap: 9 }}>
         <BSMark size={18} />
         <span style={{ fontWeight: 500, fontSize: 13, letterSpacing: 1, color: a(ink, 0.5) }}>Made with {PLATFORM_NAME}{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
       </div>
@@ -529,14 +588,26 @@ export function EVT_Sticker({ team, event = {}, width = 1080, height = 1080, pal
 // ─────────────────────────────────────────────────────────────────────────────
 // EV7 — KINETIC · diagonal bands, italic motion type (high-energy sport)
 // ─────────────────────────────────────────────────────────────────────────────
+// Kinetic: the grid is a strip along the foot, on the dark field under the detail
+// bar. The photo band and its diagonal give the square some height back for it.
+const slotEV7 = (width, height) => {
+  const A = aspectOf(width, height)
+  return slotRect(width, height, { x: 64, bottom: pick(A, { square: 40, portrait: 44, story: 120 }), h: pick(A, { square: 104, portrait: 116, story: 136 }) })
+}
 export function EVT_Kinetic({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
   const P = palette
   const aspect = aspectOf(width, height)
+  const slot = slotEV7(width, height)
+  const tight = aspect === 'square'
+  // Photo band height and the top of the text column. The square's band is
+  // shorter; the others keep their share of the canvas.
+  const bandH = pick(aspect, { square: 396, portrait: 560, story: 1040 })
+  const colTop = pick(aspect, { square: 400, portrait: 566, story: 1048 })
   const skew = { transform: 'skewX(-8deg)' }
   const unskew = { display: 'inline-block', transform: 'skewX(8deg)' }
   return (
     <LayerRoot style={{ ...FRAME(width, height), background: P.primary, color: '#fff' }}>
-      <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: share(height, 616), clipPath: 'polygon(0 0, 100% 0, 100% 100%, 0 76%)', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: bandH, clipPath: `polygon(0 0, 100% 0, 100% 100%, 0 ${(((bandH - 148) / bandH) * 100).toFixed(2)}%)`, overflow: 'hidden' }}>
         {motif?.imageUrl
           ? <img src={motif.imageUrl} alt="" crossOrigin="anonymous" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
           : <div style={{ position: 'absolute', inset: 0, background: `repeating-linear-gradient(120deg, ${a(P.accent, 0.06)} 0px, ${a(P.accent, 0.06)} 18px, ${a(P.accent, 0.12)} 18px, ${a(P.accent, 0.12)} 36px)`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -544,8 +615,8 @@ export function EVT_Kinetic({ team, event = {}, width = 1080, height = 1080, pal
             </div>}
         <div style={{ position: 'absolute', inset: 0, background: `linear-gradient(180deg, rgba(0,0,0,0.1) 0%, transparent 35%), linear-gradient(0deg, ${P.primary} 2%, transparent 50%)` }} />
       </div>
-      <div style={{ position: 'absolute', left: -60, top: share(height, 512), width: 1200, height: 18, background: P.accent, transform: 'rotate(8deg)' }} />
-      <div style={{ position: 'absolute', left: -60, top: share(height, 548), width: 1200, height: 7, background: a(P.accent, 0.45), transform: 'rotate(8deg)' }} />
+      <div style={{ position: 'absolute', left: -60, top: bandH - 104, width: 1200, height: 18, background: P.accent, transform: 'rotate(8deg)' }} />
+      <div style={{ position: 'absolute', left: -60, top: bandH - 68, width: 1200, height: 7, background: a(P.accent, 0.45), transform: 'rotate(8deg)' }} />
 
       <div style={{ position: 'absolute', top: 56, left: 64, right: 64, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -559,14 +630,14 @@ export function EVT_Kinetic({ team, event = {}, width = 1080, height = 1080, pal
           detail bar pinned to the foot, slack pooled between. The title block
           and the bar used to be separate absolute blocks, so a long headline or
           a wrapping venue drove them straight into each other. */}
-      <div style={{ position: 'absolute', left: 64, right: 64, top: share(height, 624), bottom: 54, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ position: 'absolute', left: 64, right: 64, top: colTop, bottom: height - slot.y + 16, display: 'flex', flexDirection: 'column' }}>
         <div style={{ flexShrink: 0, ...skew }}>
           <div style={{ fontFamily: MONO, fontSize: 18, letterSpacing: 6, textTransform: 'uppercase', color: P.accent, marginBottom: 12, ...unskew }}>{event.kicker}</div>
-          <div style={{ height: twoLineBox(138, 0.84), display: 'flex', alignItems: 'flex-end' }}>
-            <AutoFitText text={(event.title || '').toUpperCase()} max={138} min={52} lines={2} measureDeps={[event.title]}
+          <div style={{ height: twoLineBox(tight ? 120 : 138, 0.84), display: 'flex', alignItems: 'flex-end' }}>
+            <AutoFitText text={(event.title || '').toUpperCase()} max={tight ? 120 : 138} min={52} lines={2} measureDeps={[event.title]}
               style={{ fontFamily: SPORT, fontStyle: 'italic', fontWeight: 800, lineHeight: 0.84, textTransform: 'uppercase', color: '#fff' }} />
           </div>
-          {event.subtitle ? <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 27, color: 'rgba(255,255,255,0.74)', marginTop: 18, maxWidth: 760, lineHeight: 1.3, ...unskew }}>{event.subtitle}</div> : null}
+          {event.subtitle ? <div style={{ fontFamily: "'Inter', sans-serif", fontSize: tight ? 24 : 27, color: 'rgba(255,255,255,0.74)', marginTop: tight ? 10 : 18, maxWidth: 760, lineHeight: 1.3, ...unskew }}>{event.subtitle}</div> : null}
         </div>
 
         <div style={{ marginTop: 'auto', flexShrink: 0 }}>
@@ -574,16 +645,16 @@ export function EVT_Kinetic({ team, event = {}, width = 1080, height = 1080, pal
             {[['Date', event.date, 1], ['Time', event.time, 1], ['Venue', event.venue, 1.3]].map(([l, v, fl]) => (
               <div key={l} style={{ flex: fl, minWidth: 0 }}>
                 <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 3, textTransform: 'uppercase', color: 'rgba(255,255,255,0.45)' }}>{l}</div>
-                <div style={{ fontFamily: SPORT, fontStyle: 'italic', fontWeight: 800, fontSize: 40, color: '#fff', lineHeight: 1.06 }}>{v}</div>
+                <div style={{ fontFamily: SPORT, fontStyle: 'italic', fontWeight: 800, fontSize: tight ? 36 : 40, color: '#fff', lineHeight: 1.06 }}>{v}</div>
               </div>
             ))}
             {event.price ? (
               <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-                <div style={{ background: P.accent, color: P.primary, fontFamily: SPORT, fontStyle: 'italic', fontWeight: 800, fontSize: 40, textTransform: 'uppercase', padding: '10px 24px', ...skew }}><span style={unskew}>{event.price}</span></div>
+                <div style={{ background: P.accent, color: P.primary, fontFamily: SPORT, fontStyle: 'italic', fontWeight: 800, fontSize: tight ? 36 : 40, textTransform: 'uppercase', padding: '10px 24px', ...skew }}><span style={unskew}>{event.price}</span></div>
               </div>
             ) : null}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginTop: 26, paddingTop: 20, borderTop: '1px solid rgba(255,255,255,0.14)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginTop: tight ? 12 : 26, paddingTop: tight ? 12 : 20, borderTop: '1px solid rgba(255,255,255,0.14)' }}>
             <span style={{ fontFamily: MONO, fontSize: 16, letterSpacing: 2, textTransform: 'uppercase', color: P.accent }}>{event.cta}</span>
             <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0 }}>
               {event.sponsor ? <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: 'rgba(255,255,255,0.42)' }}>{event.sponsor}</span> : null}
@@ -599,8 +670,15 @@ export function EVT_Kinetic({ team, event = {}, width = 1080, height = 1080, pal
 // ─────────────────────────────────────────────────────────────────────────────
 // EV8 — SWISS · ultra-minimal Helvetica, baseline grid (clean & unmistakable)
 // ─────────────────────────────────────────────────────────────────────────────
+// Swiss: the grid is a strip on the poster's 80px side margin. The one inset
+// frame stops above it.
+const slotEV8 = (width, height) => {
+  const A = aspectOf(width, height)
+  return slotRect(width, height, { x: 80, bottom: pick(A, { square: 60, portrait: 64, story: 120 }), h: pick(A, { square: 100, portrait: 112, story: 128 }) })
+}
 export function EVT_Swiss({ team, event = {}, width = 1080, height = 1080, palette }) {
   const P = palette
+  const slot = slotEV8(width, height)
   const paper = P.paper || '#f6f5f2'
   const ink = P.deepInk || '#15171a'
   const faint = a(ink, 0.5)
@@ -609,7 +687,7 @@ export function EVT_Swiss({ team, event = {}, width = 1080, height = 1080, palet
   return (
     <LayerRoot style={{ ...FRAME(width, height), background: paper, color: ink, fontFamily: HELV }}>
       {/* One inset frame holding the whole poster — see EVT_Gazette above. */}
-      <div data-layer="Poster content" style={{ position: 'absolute', inset: 80, display: 'flex', flexDirection: 'column' }}>
+      <div data-layer="Poster content" style={{ position: 'absolute', top: 80, left: 80, right: 80, bottom: height - slot.y + 22, display: 'flex', flexDirection: 'column' }}>
         <div style={{ borderTop: `2px solid ${ink}`, paddingTop: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
             {team.logo ? <ClubLogo src={team.logo} size={76} /> : <ClubLogo monogram={team.monogram} color={ink} size={76} shape="shield" />}
@@ -659,8 +737,17 @@ export function EVT_Swiss({ team, event = {}, width = 1080, height = 1080, palet
 // EV9 — CREST · heritage emblem, gold-on-green serif (prestige occasions)
 // Uses palette.primary as the deep field, palette.accent as the gold.
 // ─────────────────────────────────────────────────────────────────────────────
+// Crest: the grid is a strip inside the double gold rule, under the watermark
+// line. The emblem and the headline are a little smaller on the square.
+const slotEV9 = (width, height) => {
+  const A = aspectOf(width, height)
+  return slotRect(width, height, { x: 96, bottom: pick(A, { square: 72, portrait: 76, story: 112 }), h: pick(A, { square: 100, portrait: 112, story: 128 }) })
+}
 export function EVT_Crest({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
   const P = palette
+  const aspect = aspectOf(width, height)
+  const slot = slotEV9(width, height)
+  const tight = aspect === 'square'
   const cream = P.cream || '#f3ead2'
   const SERIF = "'Cormorant Garamond', serif"
   const line = a(P.accent, 0.55)
@@ -670,30 +757,30 @@ export function EVT_Crest({ team, event = {}, width = 1080, height = 1080, palet
       <div style={{ position: 'absolute', inset: 44, border: `2px solid ${line}`, pointerEvents: 'none' }} />
       <div style={{ position: 'absolute', inset: 52, border: `1px solid ${a(P.accent, 0.3)}`, pointerEvents: 'none' }} />
 
-      <div style={{ position: 'absolute', inset: '84px 96px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
-        <div style={{ width: 264, height: 264, borderRadius: '50%', border: `2px solid ${P.accent}`, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+      <div style={{ position: 'absolute', top: tight ? 74 : 84, left: 96, right: 96, bottom: height - slot.y + 14, display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+        <div style={{ width: tight ? 176 : 264, height: tight ? 176 : 264, borderRadius: '50%', border: `2px solid ${P.accent}`, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
           <div style={{ position: 'absolute', inset: 13, borderRadius: '50%', border: `1px dashed ${a(P.accent, 0.3)}` }} />
-          {team.logo ? <ClubLogo src={team.logo} size={186} /> : <img src={motif?.icon || icoTrophy} alt="" style={{ width: 130, height: 130, objectFit: 'contain' }} />}
+          {team.logo ? <ClubLogo src={team.logo} size={tight ? 124 : 186} /> : <img src={motif?.icon || icoTrophy} alt="" style={{ width: tight ? 88 : 130, height: tight ? 88 : 130, objectFit: 'contain' }} />}
         </div>
 
-        <div style={{ marginTop: 26, background: P.accent, color: P.primary, fontFamily: MONO, fontSize: 22, fontWeight: 700, letterSpacing: 4, textTransform: 'uppercase', padding: '12px 50px', clipPath: 'polygon(0 0, 100% 0, calc(100% - 20px) 50%, 100% 100%, 0 100%, 20px 50%)' }}>{team.name}</div>
+        <div style={{ marginTop: tight ? 16 : 26, background: P.accent, color: P.primary, fontFamily: MONO, fontSize: 22, fontWeight: 700, letterSpacing: 4, textTransform: 'uppercase', padding: tight ? '9px 50px' : '12px 50px', clipPath: 'polygon(0 0, 100% 0, calc(100% - 20px) 50%, 100% 100%, 0 100%, 20px 50%)' }}>{team.name}</div>
 
         <div style={{ marginTop: 'auto' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, marginBottom: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, marginBottom: tight ? 12 : 20 }}>
             <div style={{ width: 80, height: 1, background: P.accent }} />
             <div style={{ width: 9, height: 9, background: P.accent, transform: 'rotate(45deg)' }} />
             <div style={{ width: 80, height: 1, background: P.accent }} />
           </div>
-          <div style={{ fontFamily: MONO, fontSize: 17, letterSpacing: 6, textTransform: 'uppercase', color: P.accent, marginBottom: 14 }}>{event.kicker}</div>
-          <div style={{ height: twoLineBox(130, 0.92), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <AutoFitText text={event.title} max={130} min={52} lines={2} measureDeps={[event.title]}
+          <div style={{ fontFamily: MONO, fontSize: 17, letterSpacing: 6, textTransform: 'uppercase', color: P.accent, marginBottom: tight ? 8 : 14 }}>{event.kicker}</div>
+          <div style={{ height: twoLineBox(tight ? 110 : 130, 0.92), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <AutoFitText text={event.title} max={tight ? 110 : 130} min={52} lines={2} measureDeps={[event.title]}
               style={{ fontFamily: SERIF, fontWeight: 700, lineHeight: 0.92, color: cream, letterSpacing: 1 }} />
           </div>
-          {event.subtitle ? <div style={{ fontFamily: SERIF, fontStyle: 'italic', fontWeight: 500, fontSize: 36, color: a(cream, 0.72), marginTop: 16, maxWidth: 720, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.32 }}>{event.subtitle}</div> : null}
+          {event.subtitle ? <div style={{ fontFamily: SERIF, fontStyle: 'italic', fontWeight: 500, fontSize: tight ? 28 : 36, color: a(cream, 0.72), marginTop: tight ? 8 : 16, maxWidth: 720, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.32 }}>{event.subtitle}</div> : null}
         </div>
 
         <div style={{ marginTop: 'auto', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, marginBottom: 30 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, marginBottom: tight ? 16 : 30 }}>
             <div style={{ width: 60, height: 1, background: line }} />
             <div style={{ width: 7, height: 7, background: P.accent, transform: 'rotate(45deg)' }} />
             <div style={{ width: 60, height: 1, background: line }} />
@@ -702,12 +789,12 @@ export function EVT_Crest({ team, event = {}, width = 1080, height = 1080, palet
             {[['Date', event.date], ['Time', event.time], ['Venue', event.venue]].map(([l, v], i) => (
               <div key={l} style={{ padding: '0 40px', textAlign: 'center', borderLeft: i ? `1px solid ${line}` : 'none' }}>
                 <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 3, textTransform: 'uppercase', color: P.accent }}>{l}</div>
-                <div style={{ fontFamily: SERIF, fontWeight: 600, fontSize: 40, color: cream, marginTop: 4 }}>{v}</div>
+                <div style={{ fontFamily: SERIF, fontWeight: 600, fontSize: tight ? 36 : 40, color: cream, marginTop: 4 }}>{v}</div>
               </div>
             ))}
           </div>
-          {(event.cta || event.price) ? <div style={{ marginTop: 28, fontFamily: MONO, fontSize: 15, letterSpacing: 3, textTransform: 'uppercase', color: cream, border: `1px solid ${P.accent}`, borderRadius: 2, padding: '11px 28px' }}>{[event.cta, event.price].filter(Boolean).join(' · ')}</div> : null}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 26 }}>
+          {(event.cta || event.price) ? <div style={{ marginTop: tight ? 16 : 28, fontFamily: MONO, fontSize: 15, letterSpacing: 3, textTransform: 'uppercase', color: cream, border: `1px solid ${P.accent}`, borderRadius: 2, padding: '11px 28px' }}>{[event.cta, event.price].filter(Boolean).join(' · ')}</div> : null}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: tight ? 14 : 26 }}>
             <BSMark size={17} />
             <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: a(cream, 0.72) }}>Made with {PLATFORM_NAME}{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
           </div>
@@ -720,9 +807,17 @@ export function EVT_Crest({ team, event = {}, width = 1080, height = 1080, palet
 // ─────────────────────────────────────────────────────────────────────────────
 // EV10 — CHALKBOARD · clubhouse blackboard, chalk handwriting (casual notices)
 // ─────────────────────────────────────────────────────────────────────────────
+// Chalkboard: the grid is a pinned paper strip inside the chalk border, below the
+// notice. The notice is a little tighter on the square to leave it room.
+const slotEV10 = (width, height) => {
+  const A = aspectOf(width, height)
+  return slotRect(width, height, { x: 92, bottom: pick(A, { square: 72, portrait: 76, story: 112 }), h: pick(A, { square: 100, portrait: 112, story: 128 }) })
+}
 export function EVT_Chalkboard({ team, event = {}, width = 1080, height = 1080, palette }) {
   const P = palette
   const aspect = aspectOf(width, height)
+  const slot = slotEV10(width, height)
+  const tight = aspect === 'square'
   const board = P.primary || '#20251f'
   const chalk = '#f1efe4'
   const chalk2 = 'rgba(241,239,228,0.74)'
@@ -734,9 +829,9 @@ export function EVT_Chalkboard({ team, event = {}, width = 1080, height = 1080, 
       <div style={{ position: 'absolute', right: '6%', bottom: '18%', width: 380, height: 260, background: 'radial-gradient(ellipse, rgba(255,255,255,0.045), transparent 70%)', transform: 'rotate(12deg)' }} />
       <div style={{ position: 'absolute', inset: 44, border: `2px dashed ${faint}`, borderRadius: 8, pointerEvents: 'none' }} />
 
-      <div style={{ position: 'absolute', inset: '88px 92px', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ position: 'absolute', top: tight ? 76 : 88, left: 92, right: 92, bottom: height - slot.y + 14, display: 'flex', flexDirection: 'column' }}>
         <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 20 }}>
-          {team.logo ? <ClubLogo src={team.logo} size={88} /> : <ClubLogo monogram={team.monogram} color={chalk} size={88} shape="shield" />}
+          {team.logo ? <ClubLogo src={team.logo} size={tight ? 76 : 88} /> : <ClubLogo monogram={team.monogram} color={chalk} size={tight ? 76 : 88} shape="shield" />}
           <div>
             <div style={{ fontWeight: 700, fontSize: 28, letterSpacing: 3, textTransform: 'uppercase', color: chalk, lineHeight: 1 }}>{team.fullName || team.name}</div>
             <div style={{ fontWeight: 600, fontSize: 15, letterSpacing: 5, textTransform: 'uppercase', color: chalk2, marginTop: 6 }}>Notice Board</div>
@@ -747,24 +842,24 @@ export function EVT_Chalkboard({ team, event = {}, width = 1080, height = 1080, 
         {/* The notice and its details are ONE block: centred on square/portrait,
             and pinned a set distance below the masthead on a story (the board
             extends below it) rather than stranding the masthead above a huge gap. */}
-        <div style={{ marginTop: pick(aspect, { square: 'auto', portrait: 'auto', story: 104 }), marginBottom: 'auto', width: '100%', paddingTop: 34 }}>
-          <div style={{ fontFamily: HAND, fontWeight: 600, fontSize: 48, color: P.accent, lineHeight: 1, marginBottom: 6, transform: 'rotate(-1deg)' }}>{event.kicker}</div>
-          <div style={{ height: twoLineBox(172, 0.82), transform: 'rotate(-1.5deg)', display: 'flex', alignItems: 'flex-end' }}>
-            <AutoFitText text={event.title} max={172} min={64} lines={2} measureDeps={[event.title]}
+        <div style={{ marginTop: pick(aspect, { square: 'auto', portrait: 'auto', story: 104 }), marginBottom: 'auto', width: '100%', paddingTop: tight ? 14 : 34 }}>
+          <div style={{ fontFamily: HAND, fontWeight: 600, fontSize: tight ? 42 : 48, color: P.accent, lineHeight: 1, marginBottom: 6, transform: 'rotate(-1deg)' }}>{event.kicker}</div>
+          <div style={{ height: twoLineBox(tight ? 136 : 172, 0.82), transform: 'rotate(-1.5deg)', display: 'flex', alignItems: 'flex-end' }}>
+            <AutoFitText text={event.title} max={tight ? 136 : 172} min={64} lines={2} measureDeps={[event.title]}
               style={{ fontFamily: HAND, fontWeight: 700, lineHeight: 0.82, color: chalk }} />
           </div>
-          {event.subtitle ? <div style={{ fontFamily: HAND, fontWeight: 500, fontSize: 46, color: chalk2, marginTop: 16, maxWidth: 780, lineHeight: 1.15 }}>{event.subtitle}</div> : null}
+          {event.subtitle ? <div style={{ fontFamily: HAND, fontWeight: 500, fontSize: tight ? 38 : 46, color: chalk2, marginTop: tight ? 8 : 16, maxWidth: 780, lineHeight: 1.15 }}>{event.subtitle}</div> : null}
 
-          <div style={{ border: `2px dashed ${faint}`, borderRadius: 10, padding: pick(aspect, { square: '18px 30px', portrait: '22px 30px', story: '26px 32px' }), marginTop: pick(aspect, { square: 34, portrait: 44, story: 52 }) }}>
+          <div style={{ border: `2px dashed ${faint}`, borderRadius: 10, padding: pick(aspect, { square: '8px 30px', portrait: '22px 30px', story: '26px 32px' }), marginTop: pick(aspect, { square: 18, portrait: 44, story: 52 }) }}>
             {[['When', `${event.date || ''}${event.date && event.time ? ' · ' : ''}${event.time || ''}`], ['Where', event.venue], ['Cost', event.price]].map(([l, v]) => (
-              <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 18, padding: '11px 0' }}>
+              <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 18, padding: tight ? '5px 0' : '11px 0' }}>
                 <span style={{ fontWeight: 600, fontSize: 14, letterSpacing: 3, textTransform: 'uppercase', color: P.accent, width: 90 }}>{l}</span>
-                <span style={{ fontFamily: HAND, fontWeight: 600, fontSize: 44, color: chalk, lineHeight: 1.08, whiteSpace: 'nowrap' }}>{v}</span>
+                <span style={{ fontFamily: HAND, fontWeight: 600, fontSize: tight ? 40 : 44, color: chalk, lineHeight: 1.08, whiteSpace: 'nowrap' }}>{v}</span>
               </div>
             ))}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 26 }}>
-            {event.cta ? <div style={{ fontFamily: HAND, fontWeight: 700, fontSize: 46, color: P.accent, border: `3px solid ${P.accent}`, borderRadius: '60% 58% 62% 56%', padding: '8px 34px', transform: 'rotate(-2deg)', lineHeight: 1 }}>{event.cta}</div> : <span />}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: tight ? 14 : 26 }}>
+            {event.cta ? <div style={{ fontFamily: HAND, fontWeight: 700, fontSize: tight ? 40 : 46, color: P.accent, border: `3px solid ${P.accent}`, borderRadius: '60% 58% 62% 56%', padding: tight ? '4px 30px' : '8px 34px', transform: 'rotate(-2deg)', lineHeight: 1 }}>{event.cta}</div> : <span />}
             <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
               <BSMark size={18} />
               <span style={{ fontWeight: 500, fontSize: 13, letterSpacing: 1, color: chalk2 }}>{PLATFORM_NAME}{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
@@ -779,27 +874,35 @@ export function EVT_Chalkboard({ team, event = {}, width = 1080, height = 1080, 
 // ─────────────────────────────────────────────────────────────────────────────
 // EV11 — POLAROID · taped scrapbook photo + marker pen (photo-led socials)
 // ─────────────────────────────────────────────────────────────────────────────
+// Polaroid: the grid is a strip along the foot of the scrapbook page, under the
+// small credit line. The taped photo is a little smaller on the square.
+const slotEV11 = (width, height) => {
+  const A = aspectOf(width, height)
+  return slotRect(width, height, { x: 76, bottom: pick(A, { square: 50, portrait: 56, story: 116 }), h: pick(A, { square: 100, portrait: 112, story: 132 }) })
+}
 export function EVT_Polaroid({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
   const P = palette
   const aspect = aspectOf(width, height)
+  const slot = slotEV11(width, height)
+  const tight = aspect === 'square'
   const paper = P.paper || '#ece3d0'
   const ink = P.deepInk || '#2e2a22'
   const MARKER = "'Permanent Marker', cursive"
   const HAND = "'Caveat', cursive"
   // The polaroid is the hero, so it grows with the canvas — a fixed 404 square
   // adrift in a 1920 story reads as a stamp lost on the page.
-  const photo = pick(aspect, { square: 404, portrait: 470, story: 540 })
+  const photo = pick(aspect, { square: 350, portrait: 470, story: 540 })
   return (
     <LayerRoot style={{ ...FRAME(width, height), background: paper, color: ink }}>
       <div style={{ position: 'absolute', inset: 0, backgroundImage: 'radial-gradient(rgba(120,100,70,0.06) 1px, transparent 1.4px)', backgroundSize: '5px 5px', opacity: 0.6 }} />
-      <div style={{ position: 'absolute', inset: 76, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ marginBottom: 18 }}>
-          <BrandLockup team={team} palette={P} size={84} nameColor={ink} nameSize={30} />
+      <div style={{ position: 'absolute', top: tight ? 64 : 76, left: 76, right: 76, bottom: height - slot.y + 14, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ marginBottom: tight ? 10 : 18 }}>
+          <BrandLockup team={team} palette={P} size={tight ? 76 : 84} nameColor={ink} nameSize={30} />
         </div>
         <div style={{ flexShrink: 0 }}>
           <div style={{ fontFamily: HAND, fontWeight: 600, fontSize: 46, color: P.accent, lineHeight: 1, transform: 'rotate(-1deg)' }}>{event.kicker}</div>
-          <div style={{ height: pick(aspect, { square: 150, portrait: 162, story: 176 }), marginTop: 4, display: 'flex', alignItems: 'flex-end' }}>
-            <AutoFitText text={event.title} max={118} min={44} lines={1} measureDeps={[event.title]}
+          <div style={{ height: pick(aspect, { square: 128, portrait: 162, story: 176 }), marginTop: 4, display: 'flex', alignItems: 'flex-end' }}>
+            <AutoFitText text={event.title} max={tight ? 104 : 118} min={44} lines={1} measureDeps={[event.title]}
               style={{ fontFamily: MARKER, lineHeight: 0.9, color: ink }} />
           </div>
         </div>
@@ -964,3 +1067,19 @@ BSMark.displayName = 'BSMark'
 PhotoLayer.displayName = 'PhotoLayer'
 ClubLockup.displayName = 'ClubLockup'
 Watermark.displayName = 'Watermark'
+
+// Where this file's layouts keep the sponsor grid (see sponsorSlots.js). Each
+// layout calls the same slot function above to leave that rectangle clear.
+export const SPONSOR_SLOTS = {
+  EV1: slotEV1,
+  EV2: slotEV2,
+  EV3: slotEV3,
+  EV4: slotEV4,
+  EV5: slotEV5,
+  EV6: slotEV6,
+  EV7: slotEV7,
+  EV8: slotEV8,
+  EV9: slotEV9,
+  EV10: slotEV10,
+  EV11: slotEV11,
+}

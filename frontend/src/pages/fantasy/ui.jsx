@@ -71,6 +71,10 @@ export function ThemeToggle({ theme, onToggle, size = 30 }) {
 
 // ── context (club crest + accent + token) ────────────────────────────────────
 // `logoUrl` is the club's own logo, falling back to the BetterCricket mark.
+// The club's own name for the game ("Froth Fantasy Cricket"), or null. Set by the club
+// on the Sponsors screen; the standard wording applies when it is null.
+export const fantasyName = (club) => (club && club.fantasy_name) || null
+
 export const FantasyCtx = createContext({ club: null, crest: 'ACC', token: '', logoUrl: null })
 export const useFantasy = () => useContext(FantasyCtx)
 

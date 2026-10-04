@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../lib/api'
+import { rememberClubSlug } from '../lib/clubSlug'
 
 /**
  * Resolves a club slug to its full club object (including UUID).
@@ -28,7 +29,7 @@ export function useClub(slug) {
       .then(c => {
         setClub(c)
         setLoading(false)
-        if (c?.slug) sessionStorage.setItem('bs_last_slug', c.slug)
+        if (c?.slug) rememberClubSlug(c.slug)
       })
       .catch(err => {
         if (err.status === 423 && err.detail) {

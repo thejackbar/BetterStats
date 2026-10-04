@@ -1,12 +1,12 @@
 export default {
   version: 'v9.102.8',
   date: '2026-10-02',
-  sortKey: '2026-10-02T09:00:00Z',
-  title: 'A player removed at their own request is gone from the whole public site',
+  sortKey: '2026-10-02T14:00:00Z',
+  title: 'BetterSelect: pick a player for two games on the same day',
   items: [
-    'Removing a player used to take down their profile page but not their name everywhere else. Match scorecards, teammate lists, StatLab and the yearbook stat pages could still name them. Now every public page and data feed leaves them out: their name (in the forms a scorecard writes it) shows as "********" and their link goes nowhere.',
-    'Your own signed-in admin screens (Directory, selection, fees and the rest) still show the real record, because the club needs it to run the club.',
-    'Relatives are protected. If another player at the club shares the surname (a Tom or Sam Steenholdt beside a removed Trent), a line like "c T Steenholdt b Smith" or "c Steenholdt b Smith" is only masked when it can only mean the removed player. On a scorecard that is worked out from who actually played in that match, and when it could be either, it is left alone so the other player\'s record is never hidden by mistake.',
-    'It only recognises names it has on record. A nickname nobody recorded is not caught, so check a removed player\'s old match pages once.',
+    'You can now pick a player for two games on the same day when the games do not clash. A Colts game in the morning and a T20 at night, or a junior game and a senior game, no longer stop the pick. The card shows an amber "Also in" line with the other game and its start time, and the player stays in both teams when you save.',
+    'The clash is worked out from the start times on the fixtures, using an estimated length for each format (T20 about 3.5 hours, one day about 8 hours). If the gap between the games is under an hour the line says so. Games that overlap, two-day games, and games with no start time (unless one is junior and one is senior) still stop the pick, as before.',
+    'Auto-fill and the BetterIQ suggestion still never put anyone in two games on their own. A player who is already in another team that day is picked by hand.',
+    'Fixed: picking a player and getting a pop-up message (a call-up, "marked unavailable", or the new "Also in" note) could wipe the side you were building. The pop-up reloaded the fixture and the unsaved picks went with it.',
   ],
 }

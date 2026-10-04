@@ -26,6 +26,7 @@ from app.models.db import (
     Fixture, PlayerAvailability, PlayerAvailabilityPeriod, Organisation, Player, User, get_db,
 )
 from app.routers.auth import get_current_club, get_current_user
+from app.services.name_format import name_sort_key
 
 router = APIRouter(prefix="/availability", tags=["availability"])
 
@@ -95,7 +96,8 @@ async def club_player_roster(db: AsyncSession, club: Organisation) -> list[Playe
         .where(Player.organisation_id == club.id, Player.is_player.is_(True))
         .order_by(func.coalesce(Player.display_name_override, Player.name))
     )
-    return list(res.scalars().all())
+    # Surname order: a free-text "First Last" override sorts by first name in SQL.
+    return sorted(res.scalars().all(), key=lambda p: name_sort_key(p.display_name))
 
 
 async def active_self_service_players(db: AsyncSession, club: Organisation) -> list[Player]:
@@ -292,7 +294,7 @@ async def availability_matrix(
         )
         .order_by(func.coalesce(Player.display_name_override, Player.name))
     )
-    players = pl_res.scalars().all()
+    players = sorted(pl_res.scalars().all(), key=lambda p: name_sort_key(p.display_name))
 
     # Recency + squad derivation from appearance history (no schema needed).
     # "dormant" = has played before but not within the club's dormancy window —

@@ -192,6 +192,9 @@ export const api = {
   getSocialResults: (q) => request(`/admin/social/results${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   getSocialPotm: (matchId) => request(`/admin/social/potm/${matchId}`),
   getSocialTotw: (q) => request(`/admin/social/totw${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  // Which of these players have no earlier game on the club's record (debuts).
+  // `before` is the match day as an ISO date; absent means today.
+  getSocialDebuts: (ids, before) => request(`/admin/social/debuts?player_ids=${encodeURIComponent((ids || []).join(','))}${before ? `&before=${encodeURIComponent(String(before).slice(0, 10))}` : ''}`),
 
   // BetterSocials — media library. `kind` is undefined for the ordinary Photos
   // pool, or 'background' for the small reusable post-background library —
@@ -287,6 +290,7 @@ export const api = {
   },
   getSeasonGrades: (orgId, seasonId) => request(`/organisations/${orgId}/seasons/${seasonId}/grades`),
   triggerSync: (orgId) => request(`/organisations/${orgId}/sync`, { method: 'POST' }),
+  triggerQuickSync: (orgId) => request(`/organisations/${orgId}/sync/quick`, { method: 'POST' }),
   getSyncLogs: (orgId) => request(`/organisations/${orgId}/sync-logs`),
   getOrgSummary: (orgId, { seasonId, gradeId, categories, formats, competitions } = {}) => {
     const params = new URLSearchParams()
@@ -2827,6 +2831,25 @@ export const api = {
     request(`/club-admin/sponsors/${id}`, { method: 'DELETE' }),
   adminReorderSponsors: (items) =>
     request('/club-admin/sponsors/reorder', { method: 'PUT', body: JSON.stringify(items) }),
+  // The tier and spot definitions plus the club's own tier names.
+  adminGetSponsorSettings: () => request('/club-admin/sponsors/settings'),
+  adminPutSponsorSettings: (data) =>
+    request('/club-admin/sponsors/settings', { method: 'PUT', body: JSON.stringify(data) }),
+  // The sponsors a post starts with, and the team/grade pins behind them.
+  adminGetPostDefaults: () => request('/club-admin/sponsors/post-defaults'),
+  adminPutPostDefaults: (data) =>
+    request('/club-admin/sponsors/post-defaults', { method: 'PUT', body: JSON.stringify(data) }),
+  adminPostSponsorDefault: ({ team, grade } = {}) => {
+    const params = new URLSearchParams()
+    if (team) params.set('team', team)
+    if (grade) params.set('grade', grade)
+    const qs = params.toString()
+    return request(`/club-admin/sponsors/post-default${qs ? `?${qs}` : ''}`)
+  },
+  // The club's own names for its public sections, each optionally linked to a sponsor.
+  adminGetSectionNames: () => request('/club-admin/sponsors/section-names'),
+  adminPutSectionNames: (sections) =>
+    request('/club-admin/sponsors/section-names', { method: 'PUT', body: JSON.stringify({ sections }) }),
 
   // ─── Club Room Mode ────────────────────────────────────────────────────────
   clubRoomGetSettings: () => request('/club-admin/club-room/settings'),
@@ -3301,6 +3324,15 @@ export const api = {
   bsGetSelection: (fixtureId) => request(`/selection/${fixtureId}`),
   bsSetSelection: (fixtureId, players, demotions = []) =>
     request(`/selection/${fixtureId}`, { method: 'PUT', body: JSON.stringify({ players, demotions }) }),
+  // Autosaved, unconfirmed side for a fixture. `opts` goes to fetch, so a
+  // leaving page can pass { keepalive: true }.
+  bsGetSelectionDraft: (fixtureId) => request(`/selection/${fixtureId}/draft`),
+  bsSaveSelectionDraft: (fixtureId, draft, opts = {}) =>
+    request(`/selection/${fixtureId}/draft`, { method: 'PUT', body: JSON.stringify(draft), ...opts }),
+  // `baseVersion` is the draft version the board last saw: a draft someone else
+  // has changed since is refused with 409 (error.detail = the current draft).
+  bsDiscardSelectionDraft: (fixtureId, baseVersion = 0, opts = {}) =>
+    request(`/selection/${fixtureId}/draft${baseVersion ? `?base_version=${baseVersion}` : ''}`, { method: 'DELETE', ...opts }),
   bsSetDefaultTeamSize: (size) =>
     request('/selection/default-team-size', { method: 'POST', body: JSON.stringify({ size }) }),
   // The previous fixture's named XI (for Selection's "fill from last week").

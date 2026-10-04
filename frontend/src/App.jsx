@@ -25,6 +25,7 @@ import ProtectedRoute from './components/ProtectedRoute'
 import LoadingSpinner from './components/LoadingSpinner'
 import Navbar from './components/Navbar'
 import SponsorFooter from './components/SponsorFooter'
+import SectionBanner from './components/SectionBanner'
 import ScrollToTop from './components/ScrollToTop'
 import FaviconManager from './components/FaviconManager'
 import ClubCTABar from './components/ClubCTABar'
@@ -314,6 +315,7 @@ export default function App() {
         <ClubCTABar />
         <FaviconManager />
         <ConditionalNavbar />
+        <SectionBanner />
         <Suspense fallback={<PageLoader />}>
         <Routes>
           {/* Marketing site */}

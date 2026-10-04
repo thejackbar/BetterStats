@@ -42,7 +42,7 @@ from app.routers.records import get_records
 from app.services import aggregations as agg
 from app.services.player_formats import player_format_splits
 from app.services.aggregations import (
-    get_career_batting_from_innings, get_player_team_breakdown,
+    get_career_batting_from_innings, get_career_batting, get_player_team_breakdown,
     get_season_by_season, _scoped_games_played,
 )
 
@@ -359,14 +359,17 @@ async def main() -> None:
               str(len(g.get("Summer 2010/11", []))))
         total_inn = sum((r.get("batting_innings") or 0) for r in scoped)
         total_runs = sum((r.get("total_runs") or 0) for r in scoped)
-        check("innings are the club's own (4 + 3 = 7), not 11",
-              total_inn == 7, str(total_inn))
-        check("runs are the club's own (180 + 211 = 391), not 442",
-              total_runs == 391, str(total_runs))
+        # 2019/20 is a season CA gave a total for (8 + 2 matches, 300 + 40 runs)
+        # that the club holds no scorecards for: the lens keeps it (see
+        # services/summary_only_seasons). CA's 256-match pre-migration bundle is
+        # not a season and stays out of the scoped table.
+        check("innings are the club's own (4 + 3 scorecards + 10 summary-only = 17), not 21",
+              total_inn == 17, str(total_inn))
+        check("runs are the club's own (180 + 211 + 340 = 731), not 782 or 4731",
+              total_runs == 731, str(total_runs))
 
         print("\n— and the career header agrees with the table under it —")
-        career = await get_career_batting_from_innings(
-            session, str(PLAYER), scope=scope)
+        career = await get_career_batting(session, str(PLAYER), None, scope)
         check("career innings match the season table's",
               (career or {}).get("innings") == total_inn,
               f"career {(career or {}).get('innings')} vs table {total_inn}")

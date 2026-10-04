@@ -33,6 +33,7 @@ from app.services.import_ingest import _name_parts, _middles_compatible, is_shor
 from app.services.player_aliases import seed_alias_on_rename
 from app.services import junior_hiding
 from app.services import merge_carry
+from app.services import merge_profile
 from app.services import grade_duplicates
 from app.services.import_reconcile import reconcile_imported_totals
 from app.auth.modules import require_module
@@ -598,7 +599,18 @@ async def _merge_players_core(
         # board. All but the honour board are ON DELETE CASCADE, so before this
         # the removal below DELETED them outright — a merge silently destroyed
         # the removed record's whole imported career. See services/merge_carry.
-        carried = await merge_carry.carry_rows(db, keep_id, remove_id)
+        carried = await merge_carry.carry_rows(db, keep_id, remove_id, org_id)
+
+        # The person's own profile (photos, contact details, date of birth,
+        # squad) is on the row about to be deleted. Fill what the keeper lacks.
+        # A squad is a team of one club; after a club-to-club merge the removed
+        # player's can be the other club's, which must not be pointed at.
+        squad_is_ours = remove.squad_team_id is None or bool((await db.execute(
+            text("SELECT 1 FROM teams WHERE id = :t AND organisation_id = :o"),
+            {"t": str(remove.squad_team_id), "o": str(org_id)},
+        )).scalar())
+        profile_filled = merge_profile.carry_profile(
+            keep, remove, skip=() if squad_is_ours else ("squad_team_id",))
 
         # Save data needed for undo log before player is deleted
         keep_original_playhq_id = keep.playhq_id
@@ -695,6 +707,7 @@ async def _merge_players_core(
                     "imported_stats": len(moved_imported_ids),
                     **merge_carry.carried_summary(carried),
                 },
+                "profile_filled": profile_filled,
             },
         )
 
@@ -1845,7 +1858,7 @@ async def undo_merge(req: UndoMergeRequest, db: AsyncSession = Depends(get_db), 
     carried = log.get("carried_row_ids")
     if isinstance(carried, str):
         carried = json.loads(carried or "{}")
-    await merge_carry.restore_rows(db, remove_id, carried or {})
+    await merge_carry.restore_rows(db, remove_id, carried or {}, keep_id=keep_id)
     if log.get("removed_cricketstatz_player_id"):
         # The keeper only took it because it had none of its own, so handing it
         # back cannot collide with one it already held.
@@ -2139,6 +2152,32 @@ async def get_social_totw(q: str = "", db: AsyncSession = Depends(get_db), club=
     except Exception as exc:
         log.exception("social totw failed for %s", getattr(club, "id", "?"))
         raise HTTPException(500, f"Team of the week error: {exc}") from exc
+
+
+@router.get("/social/debuts", dependencies=[Depends(require_module("socials"))])
+async def get_social_debuts(
+    player_ids: str = "", before: str = "",
+    db: AsyncSession = Depends(get_db), club=Depends(get_current_club),
+):
+    """Which of a lineup's players have nothing on record before the match date,
+    so the BetterSocials lineup posts can tag them as debutants.
+
+    ``player_ids`` is a comma separated list of this club's player ids and
+    ``before`` an optional ISO date (the match day; today when absent). The
+    answer is a suggestion: the editor lets the admin flip any tag by hand."""
+    from datetime import date as _date
+    from app.services.social_debuts import parse_ids, social_debuts
+    on = None
+    if before.strip():
+        try:
+            on = _date.fromisoformat(before.strip()[:10])
+        except ValueError:
+            raise HTTPException(400, "before must be an ISO date (YYYY-MM-DD)")
+    try:
+        return await social_debuts(db, club, parse_ids(player_ids), on)
+    except Exception as exc:
+        log.exception("social debuts failed for %s", getattr(club, "id", "?"))
+        raise HTTPException(500, f"Debut check error: {exc}") from exc
 
 
 async def _get_social_scorecard_inner(match_id: str, db: AsyncSession, club=None):

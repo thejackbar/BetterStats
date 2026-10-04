@@ -984,6 +984,33 @@ async function pickSize(page, label) {
   await ctx.close()
 }
 
+// ── 7j. An event template saved before wording was kept opens as itself ──────
+// Reported by a club after the 7f fix shipped: their season launch template came
+// back as the Curry Night poster. Templates saved before then hold only the layout
+// (no `event`), and the editor's own wording starts as Curry Night. Opening one
+// must start from the preset that owns its layout, and not carry the previous
+// poster's photo or motif across.
+{
+  const old = { key: 'tpl_oldlaunch', name: 'Season launch', templateId: 'EV7', updated_at: new Date().toISOString() }
+  const store = { templates: [old], fail: false, failGet: false }
+  const { ctx, page, errors } = await openEditor('?type=events', { store })
+  await page.waitForTimeout(600)
+  const title = page.getByPlaceholder('e.g. Wine & Cheese Night')
+  const titleNow = async () => { try { return await title.first().inputValue() } catch { return null } }
+  const before = await titleNow()
+  ck('the editor opens on the Curry Night wording (so the contrast below means something)', /curry/i.test(before || ''), String(before))
+  await press(page.getByRole('button', { name: 'Design', exact: true }))
+  await page.waitForTimeout(250)
+  await press(page.locator('[data-testid="your-templates"]').getByRole('button', { name: /Season launch/ }))
+  await page.waitForTimeout(500)
+  await press(page.getByRole('button', { name: 'Content', exact: true }))
+  await page.waitForTimeout(250)
+  const after = await titleNow()
+  ck('opening the old season launch template shows Season Launch wording, not Curry Night', /season launch/i.test(after || '') && !/curry/i.test(after || ''), String(after))
+  ck('no page errors opening an older template', errors.length === 0, errors.slice(0, 2).join(' | '))
+  await ctx.close()
+}
+
 // ── 8. Narrow viewport ─────────────────────────────────────────────────────
 {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } })

@@ -14,6 +14,7 @@ import { useNameFormat } from '../lib/nameFormat'
 import { fmtOvers, formatSeason } from '../lib/cricketFormat'
 import { normalizeGender } from '../lib/playerAttributes'
 import MilestoneSplitNote from '../components/MilestoneSplitNote'
+import { useSectionNames } from '../lib/sectionNames'
 
 const ORDINALS = ['1st','2nd','3rd','4th','5th','6th','7th','8th','9th','10th']
 
@@ -1070,6 +1071,7 @@ const TABS = [
 
 export default function Records() {
   const { clubSlug } = useParams()
+  const sec = useSectionNames(clubSlug)
   const { club, orgId, inactive, notFound, locked, unlock, requestAccess } = useClub(clubSlug)
   useClubTheme(club)
   const fmt = useNameFormat(club)
@@ -1149,8 +1151,8 @@ export default function Records() {
     <div className="min-h-screen bg-pb-bg text-pb-text">
       <main className="max-w-[1400px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
         <PageHeader
-          eyebrow={`HALL OF RECORDS · ${org?.name?.toUpperCase() || ''}`}
-          title="The record books."
+          eyebrow={sec.renamed('records') ? (org?.name?.toUpperCase() || '') : `HALL OF RECORDS · ${org?.name?.toUpperCase() || ''}`}
+          title={sec.name('records', "The record books.")}
           meta={[<span key="x">Every club benchmark, since day one.</span>]}
         />
         <div className="mb-5 flex flex-wrap gap-3 items-center">

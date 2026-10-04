@@ -49,6 +49,14 @@ logger = logging.getLogger(__name__)
 # An incremental run must not be able to satisfy those.
 RECENT_KIND = "org_recent"
 
+# The kind stamped on a manual Quick Sync (the button on /admin/sync). Also an
+# incremental run, but deliberately kept OUT of _WATERMARK_KINDS: it only ever
+# looks QUICK_LOOKBACK_DAYS back, so it cannot vouch for the gap since the
+# club's last real run. If it moved the watermark, a quick sync after a month
+# of silence would hide that month from the next scheduled sync.
+QUICK_KIND = "org_quick"
+QUICK_LOOKBACK_DAYS = 7
+
 # Kinds that bring a club up to date, and so move the watermark.
 _WATERMARK_KINDS = (RECENT_KIND, "org_full", "org_hard_refresh")
 # Kinds that mean the club's whole history has been pulled at least once.
@@ -328,6 +336,12 @@ async def fixtures_in_window(org_id_str: str, since: date, now: date | None = No
     if in_window == 0:
         return {"sync": False, "reason": "no_fixtures_in_window", "fixtures": 0}
     return {"sync": True, "reason": "fixtures_played", "fixtures": in_window}
+
+
+def quick_sync_since(now: date | None = None) -> date:
+    """First fixture date a Quick Sync asks for (inclusive)."""
+    now = now or datetime.now(timezone.utc).date()
+    return now - timedelta(days=QUICK_LOOKBACK_DAYS)
 
 
 def season_in_window(start_date: date | None, since: date, now: date | None = None) -> bool:

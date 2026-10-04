@@ -61,7 +61,13 @@ window scores toward that round.
   the union of weekends either program plays, so the count is usually higher than
   any single program's round count. Runs on season create, on
   the admin button (cache bypassed) and in the daily settlement job (cached).
-  A scored round is never rewritten. A zero result returns a plain `detail`
+  A match is a SPAN of days: a two-day game has one
+  `matchSchedule` entry per day (a week apart, in no reliable order), and the weeks
+  it touches join into ONE round (`_group_rounds`), so its scorecard stays in one
+  round and a stored game dated either day sits inside the window. Leederville's
+  14 men's rounds became 13 fantasy rounds: only two one-day rounds on the same
+  weekend merged. A scored round is never rewritten; surplus unscored rounds with
+  nothing hanging off them are removed when a regenerate merges weeks. A zero result returns a plain `detail`
   sentence saying whether the draw is unpublished or the season does not exist.
   Proof: `backend/verification/verify_fantasy_rounds.py` (real Postgres, with a
   `--control` run against the previous commit).

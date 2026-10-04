@@ -14,6 +14,7 @@ All endpoints scoped to the caller's club via get_current_club.
 """
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import date, timedelta
 from typing import Optional
@@ -27,6 +28,7 @@ from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
 from app.models.db import Fixture, FixtureLineup, Grade, Organisation, Player, Team, User, get_db
 from app.routers.auth import get_current_club
 from app.routers.availability import resolve_period_statuses
+from app.services import selection_clash
 from app.services.selection_pool import assemble_selection, rule_context
 
 router = APIRouter(prefix="/selection", tags=["selection"])
@@ -58,6 +60,24 @@ class LineupSet(BaseModel):
 
 class TeamSizeSet(BaseModel):
     size: int
+
+
+class DraftDemotion(Demotion):
+    """A pending cascade as the board holds it; ``callup_id`` is the call-up
+    that bumped the player, so the cascade can be re-judged at confirm."""
+    callup_id: Optional[str] = None
+
+
+class DraftSet(BaseModel):
+    """The board's unconfirmed working state. ``slots`` keeps the gaps (a null
+    is an empty slot) so a half-filled side comes back where it was left."""
+    slots: list[Optional[str]] = []
+    captain_id: Optional[str] = None
+    wicket_keeper_id: Optional[str] = None
+    demotions: list[DraftDemotion] = []
+    # The draft version this board last saw (0 = it saw none). A draft that has
+    # moved on since is refused with 409 and the current draft, never overwritten.
+    base_version: int = 0
 
 
 async def _get_owned_fixture(db: AsyncSession, fixture_id: str, club_id) -> Fixture:
@@ -153,6 +173,17 @@ async def selection_overview(
         info = period_map.get(date_iso, {}).get(pid)
         return info["status"] if info else "NO_RESPONSE"
 
+    # Fixtures with an unconfirmed draft behind them. A flag only: the draft
+    # itself goes to people who can edit the XI, through /{id}/draft.
+    draft_rows = await db.execute(
+        text(
+            "SELECT fixture_id, updated_at FROM selection_drafts "
+            "WHERE organisation_id = :org AND fixture_id = ANY(CAST(:ids AS uuid[]))"
+        ),
+        {"org": club.id, "ids": [str(f.id) for f in fixtures]},
+    )
+    drafts = {str(fid): at for fid, at in draft_rows.fetchall()}
+
     out = []
     for f in fixtures:
         date_iso = f.played_on.isoformat() if f.played_on else None
@@ -172,6 +203,8 @@ async def selection_overview(
             "team_sequence": team_seqs.get(str(f.team_id)) if f.team_id else None,
             "grade_name": grade_names.get(str(f.grade_id)) if f.grade_id else None,
             "lineup": lineup,
+            "has_draft": str(f.id) in drafts,
+            "draft_updated_at": drafts[str(f.id)].isoformat() if str(f.id) in drafts and drafts[str(f.id)] else None,
         })
 
     return {"fixtures": out, "default_team_size": club.default_team_size}
@@ -306,6 +339,172 @@ async def set_default_team_size(
     return {"status": "ok", "default_team_size": body.size}
 
 
+async def _current_draft(db: AsyncSession, fixture_id, org_id) -> dict:
+    row = (await db.execute(
+        text(
+            "SELECT d.draft, d.updated_at, COALESCE(u.display_name, u.username), d.version "
+            "FROM selection_drafts d LEFT JOIN users u ON u.id = d.updated_by "
+            "WHERE d.fixture_id = :fid AND d.organisation_id = :org"
+        ),
+        {"fid": fixture_id, "org": org_id},
+    )).first()
+    if not row:
+        return {"draft": None, "version": 0}
+    return {
+        "draft": row[0],
+        "updated_at": row[1].isoformat() if row[1] else None,
+        "updated_by": row[2],
+        "version": row[3],
+    }
+
+
+def _draft_conflict(current: dict) -> HTTPException:
+    return HTTPException(status_code=409, detail={
+        "code": "draft_conflict",
+        "message": "Someone else changed this draft since you loaded it.",
+        **current,
+    })
+
+
+@router.get("/{fixture_id}/draft")
+async def get_draft(
+    fixture_id: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    """The autosaved, unconfirmed side for this fixture: ``draft`` (null when
+    there is none) and its ``version``. The board polls this to pick up another
+    selector's changes.
+
+    Separate from GET /selection/{id} so the pool payload BetterIQ shares is
+    unchanged, and so only someone who can edit the XI is ever handed a
+    half-built one."""
+    fx = await _get_owned_fixture(db, fixture_id, club.id)
+    return await _current_draft(db, fx.id, club.id)
+
+
+@router.put("/{fixture_id}/draft")
+async def save_draft(
+    fixture_id: str,
+    body: DraftSet,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    """Autosave the board's working side. Never touches ``fixture_lineups``,
+    so none of the checks the confirm path makes (clashes, call-ups, blocking
+    rules) run here: they are judged when the selector confirms. Only the shape
+    is cleaned up: ids that are not this club's players are dropped, and a
+    captain or keeper who is not in the slots is cleared.
+
+    ``base_version`` is the version the board last saw. If the draft has moved
+    on (another selector saved, confirmed or discarded it) nothing is written
+    and the answer is a 409 carrying the current draft. The write is one
+    conditional statement, so two simultaneous saves cannot both win."""
+    fx = await _get_owned_fixture(db, fixture_id, club.id)
+    if len(body.slots) > 40:
+        raise HTTPException(status_code=400, detail="Too many slots")
+
+    def _uid(v):
+        try:
+            return uuid.UUID(v) if v else None
+        except (ValueError, AttributeError, TypeError):
+            return None
+
+    wanted = {_uid(v) for v in body.slots} - {None}
+    wanted |= {_uid(body.captain_id), _uid(body.wicket_keeper_id)} - {None}
+    wanted |= {u for u in (_uid(d.player_id) for d in body.demotions) if u}
+    wanted |= {u for u in (_uid(d.callup_id) for d in body.demotions) if u}
+    owned: set[uuid.UUID] = set()
+    if wanted:
+        res = await db.execute(
+            select(Player.id).where(Player.organisation_id == club.id, Player.id.in_(wanted))
+        )
+        owned = {r[0] for r in res.fetchall()}
+
+    seen: set[uuid.UUID] = set()
+    slots: list[Optional[str]] = []
+    for v in body.slots:
+        u = _uid(v)
+        if u is None or u not in owned or u in seen:
+            slots.append(None)
+            continue
+        seen.add(u)
+        slots.append(str(u))
+    cap = _uid(body.captain_id)
+    wk = _uid(body.wicket_keeper_id)
+    demotions = []
+    for d in body.demotions:
+        u, f, c = _uid(d.player_id), _uid(d.fixture_id), _uid(d.callup_id)
+        if u and f and u in owned and c in seen:
+            demotions.append({
+                "player_id": str(u), "fixture_id": str(f),
+                "batting_order": d.batting_order, "callup_id": str(c),
+            })
+    payload = {
+        "slots": slots,
+        "captain_id": str(cap) if cap in seen else None,
+        "wicket_keeper_id": str(wk) if wk in seen else None,
+        "demotions": demotions,
+    }
+    params = {"fid": fx.id, "org": club.id, "d": json.dumps(payload), "uid": user.id}
+    if body.base_version > 0:
+        row = (await db.execute(
+            text(
+                "UPDATE selection_drafts SET draft = CAST(:d AS jsonb), updated_by = :uid, "
+                "updated_at = now(), version = version + 1 "
+                "WHERE fixture_id = :fid AND organisation_id = :org AND version = :base "
+                "RETURNING version"
+            ),
+            {**params, "base": body.base_version},
+        )).first()
+    else:
+        # The board saw no draft: only write if there still is none.
+        row = (await db.execute(
+            text(
+                "INSERT INTO selection_drafts (fixture_id, organisation_id, draft, updated_by, updated_at, version) "
+                "VALUES (:fid, :org, CAST(:d AS jsonb), :uid, now(), 1) "
+                "ON CONFLICT (fixture_id) DO NOTHING RETURNING version"
+            ),
+            params,
+        )).first()
+    if row is None:
+        current = await _current_draft(db, fx.id, club.id)
+        await db.rollback()
+        raise _draft_conflict(current)
+    await db.commit()
+    return {"status": "ok", "version": row[0]}
+
+
+@router.delete("/{fixture_id}/draft")
+async def discard_draft(
+    fixture_id: str,
+    base_version: Optional[int] = None,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    """Throw the draft away: the board goes back to the confirmed XI. With
+    ``base_version`` it only deletes the draft the caller saw: one another
+    selector has changed since is refused (409), and one that is already gone
+    is a no-op."""
+    fx = await _get_owned_fixture(db, fixture_id, club.id)
+    sql = "DELETE FROM selection_drafts WHERE fixture_id = :fid AND organisation_id = :org"
+    params: dict = {"fid": fx.id, "org": club.id}
+    if base_version:
+        sql += " AND version = :base"
+        params["base"] = base_version
+    deleted = (await db.execute(text(sql + " RETURNING 1"), params)).first()
+    if deleted is None and base_version:
+        current = await _current_draft(db, fx.id, club.id)
+        if current["draft"] is not None:
+            await db.rollback()
+            raise _draft_conflict(current)
+    await db.commit()
+    return {"status": "ok", "version": 0}
+
+
 @router.put("/{fixture_id}")
 async def set_selection(
     fixture_id: str,
@@ -378,7 +577,16 @@ async def set_selection(
             )
             blocking: set[str] = set()
             call_ups: list[tuple] = []  # (player_id, other_fixture_id) to vacate
-            for pid, other_fid, pname, other_seq in clash_res.fetchall():
+            clash_rows = clash_res.fetchall()
+            # Same-date games that can be played alongside this one (back to
+            # back, or junior against senior) are not clashes: the player stays
+            # in both XIs. Re-judged here, not trusted from the browser.
+            playable = await selection_clash.compatible_fixtures(
+                db, club.id, fx, {r[1] for r in clash_rows}
+            )
+            for pid, other_fid, pname, other_seq in clash_rows:
+                if str(other_fid) in playable:
+                    continue
                 can_override = (
                     this_seq is not None
                     and (other_seq or 0) > 0
@@ -483,5 +691,11 @@ async def set_selection(
             is_wicket_keeper=bool(s.is_wicket_keeper),
             selected_by=user.id,
         ))
+    # Confirming makes the draft redundant: same transaction, so a failed
+    # confirm leaves the draft alone.
+    await db.execute(
+        text("DELETE FROM selection_drafts WHERE fixture_id = :fid"),
+        {"fid": fx.id},
+    )
     await db.commit()
     return {"status": "ok", "count": len(slots)}

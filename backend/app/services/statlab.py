@@ -262,6 +262,19 @@ def _dismissal_match_sql(param: str) -> str:
     )
 
 
+# A grade picked by NAME, matched inside game_universe. The Grade picker is fed by
+# /organisations/{org}/grades, which lists each grade under its DISPLAY name (the
+# club's rename, else the merge's canonical name, else the grade's own), so a
+# picked value can be either spelling: the canonical name a saved report
+# carries, or the display name the picker sends today. Matching only the
+# canonical name made a renamed grade ("1st Grade" shown as "Premier") return
+# nothing at all. `gdn` is the rename, `am` the merge target, both LATERALs of
+# game_universe. `{p}` is the bound parameter, with its leading colon.
+_GRADE_NAME_MATCH_SQL = (
+    "COALESCE(am.canonical_name, gr.name) = {p}"
+    " OR COALESCE(gdn.display_name_override, am.canonical_name, gr.name) = {p}"
+)
+
 # Match-level context filters — applied inside the game_universe CTE.
 # References inside SQL strings:
 #   g, gr, s, am  → table/CTE aliases visible in game_universe's WHERE clause.
@@ -276,7 +289,7 @@ MATCH_CONTEXT_FILTERS: dict[str, dict] = {
     "min_year":     {"sql": "COALESCE(s.year, 0) >= :ctx_min_year",                   "value_kind": "int"},
     "max_year":     {"sql": "COALESCE(s.year, 9999) <= :ctx_max_year",                "value_kind": "int"},
     "grade_id":     {"sql": "gr.id = CAST(:ctx_grade_id AS UUID)",                    "value_kind": "uuid"},
-    "grade_name":   {"sql": "COALESCE(am.canonical_name, gr.name) = :ctx_grade_name", "value_kind": "text"},
+    "grade_name":   {"sql": f"({_GRADE_NAME_MATCH_SQL.format(p=':ctx_grade_name')})", "value_kind": "text"},
     "opposition":   {"sql": "LOWER(COALESCE(CASE WHEN ga.team_name = g.home_team THEN g.away_team WHEN ga.team_name = g.away_team THEN g.home_team ELSE NULL END, '')) LIKE LOWER(:ctx_opposition)", "value_kind": "text_like"},
     "finals_only":  {"sql": "g.is_final = TRUE",                                       "value_kind": "flag"},
     "result":       {"sql": f"{_RESULT_CASE_SQL} = :ctx_result",                       "value_kind": "result"},
@@ -484,6 +497,8 @@ def _residual_grade_match(prefix: str, suffix: str = "") -> str:
     p = f"{prefix}grade_name{suffix}"
     return (
         f"(COALESCE(rg.name, pss.grade_label) = :{p}"
+        # The club's rename sits on the grade row itself, and the picker sends it.
+        f" OR rg.display_name_override = :{p}"
         " OR EXISTS (SELECT 1 FROM grade_merge_logs gml"
         " WHERE gml.org_id = CAST(:org_id AS UUID)"
         " AND gml.alias_name = COALESCE(rg.name, pss.grade_label) AND gml.undone_at IS NULL"
@@ -986,15 +1001,17 @@ def _build_match_list_filters(ctx: dict) -> tuple[list[str], dict]:
             params[f"ctx_results_{i}"] = v
 
     # Grades ticked by name — what StatLab's own Grade picker sends. Compared
-    # against the same COALESCE(am.canonical_name, gr.name) the single-value
-    # grade_name filter uses, so a merged grade still resolves through its
-    # canonical name and a season's worth of alias spellings all match.
+    # against the same _GRADE_NAME_MATCH_SQL the single-value grade_name filter
+    # uses, so a merged grade still resolves through its canonical name, a
+    # season's worth of alias spellings all match, and a renamed grade matches
+    # under the name the club gave it.
     grade_names = _text_list(ctx.get("grade_names"))
     if grade_names:
-        ph = ", ".join(f":ctx_grade_names_{i}" for i in range(len(grade_names)))
-        clauses.append(f"COALESCE(am.canonical_name, gr.name) IN ({ph})")
+        ors = []
         for i, v in enumerate(grade_names):
+            ors.append(_GRADE_NAME_MATCH_SQL.format(p=f":ctx_grade_names_{i}"))
             params[f"ctx_grade_names_{i}"] = v
+        clauses.append("(" + " OR ".join(ors) + ")")
 
     return clauses, params
 

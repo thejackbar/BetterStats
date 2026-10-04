@@ -53,7 +53,52 @@ CARRIED: tuple[tuple[str, str, str, Optional[tuple[str, ...]]], ...] = (
     # quieter, and just as lost, since every read joins `players`.
     ("player_achievements", "player_id", "int", None),
     ("club_honour_entries", "player_id", "uuid", None),
+    # What a club typed or a player answered about the PERSON rather than the
+    # cricket: availability, who is in which squad and lineup, nets attendance,
+    # family links, the alternate spellings a live feed still resolves, and the
+    # contact rows the lists are built from. All of them were `ON DELETE
+    # CASCADE` (or `SET NULL`, which quietly unlinks a member from their
+    # player), so merging a freshly added roster record into the synced one
+    # emptied the squad, the availability and the contact details with it.
+    ("player_availability", "player_id", "int", ("avail_date",)),
+    ("player_availability_periods", "player_id", "int", None),
+    ("net_attendance", "player_id", "uuid", ("session_id",)),
+    ("net_checkin_registrations", "player_id", "uuid", None),
+    ("fixture_lineups", "player_id", "uuid", ("fixture_id",)),
+    ("team_members", "player_id", "uuid", ("team_id",)),
+    ("family_members", "player_id", "uuid", ("family_id",)),
+    ("player_name_aliases", "player_id", "uuid", ("alias_key",)),
+    ("comms_contacts", "player_id", "uuid", None),
+    ("crm_people", "player_id", "uuid", None),
+    ("fee_members", "player_id", "uuid", ("organisation_id",)),
 )
+
+# Tables whose primary key is not an `id` column: the column that identifies one
+# row among this player's own (the other half of the key is the player).
+_ROW_KEY = {"fixture_lineups": "fixture_id", "team_members": "team_id"}
+
+# A row somebody decided something about (a membership with payments and a role,
+# a contact who unsubscribed, a CRM link) is never deleted to settle a clash
+# with the keeper's. If the keeper already holds the matching row, the removed
+# side's is simply not moved and stays as it was (unlinked, by its own FK).
+_NEVER_DELETE = {"fee_members", "comms_contacts", "crm_people"}
+
+# The link tables above belong to one club. A club-to-club merge (services/
+# org_merge) re-homes the source club's players into the target before merging
+# them, and their rows still carry the SOURCE club's id (and its teams, its
+# families). Carrying those onto a target-club player would leave rows that
+# point across clubs - and fee_members' composite FK refuses them outright - so
+# a row is only carried when it belongs to the keeper's own club. Anything else
+# is left to go as it always did.
+_OWN_CLUB = {
+    "family_members": "EXISTS (SELECT 1 FROM families f WHERE f.id = r.family_id "
+                      "AND f.organisation_id = :org)",
+}
+_OWN_CLUB_TABLES = {
+    "player_availability", "player_availability_periods", "net_attendance",
+    "net_checkin_registrations", "fixture_lineups", "team_members",
+    "player_name_aliases", "comms_contacts", "crm_people", "fee_members",
+}
 
 _CAST = {"int": "int[]", "uuid": "uuid[]"}
 
@@ -73,8 +118,11 @@ async def _exists(db: AsyncSession, table: str) -> bool:
         text("SELECT to_regclass(:t)"), {"t": table})).scalar())
 
 
-async def carry_rows(db: AsyncSession, keep_id, remove_id) -> dict:
+async def carry_rows(db: AsyncSession, keep_id, remove_id, org_id=None) -> dict:
     """Move the removed player's records onto the keeper.
+
+    `org_id` is the keeper's club. When given, the link tables that belong to a
+    club (see `_OWN_CLUB`) only carry the rows that are that club's own.
 
     Returns `{"<table>.<column>": [ids moved]}` for the merge log, so the undo
     can hand back exactly those rows and nothing else.
@@ -84,6 +132,14 @@ async def carry_rows(db: AsyncSession, keep_id, remove_id) -> dict:
         if not await _exists(db, table):
             continue
         params = {"kid": str(keep_id), "rid": str(remove_id)}
+        row_key = _ROW_KEY.get(table, "id")
+        guard = ""
+        if org_id is not None:
+            params["org"] = str(org_id)
+            if table in _OWN_CLUB_TABLES:
+                guard += " AND r.organisation_id = :org"
+            elif table in _OWN_CLUB:
+                guard += f" AND {_OWN_CLUB[table]}"
         if unique_rest:
             # The keeper's row wins. `IS NOT DISTINCT FROM` rather than `=`
             # because part of a key can be NULL — a season adjustment with no
@@ -92,16 +148,23 @@ async def carry_rows(db: AsyncSession, keep_id, remove_id) -> dict:
             # would fail on the unique index.
             joins = " AND ".join(
                 f"k.{c} IS NOT DISTINCT FROM r.{c}" for c in unique_rest)
-            await db.execute(text(
-                f"DELETE FROM {table} r USING {table} k "
-                f" WHERE r.{column} = :rid AND k.{column} = :kid AND {joins}"
-            ), params)
+            if table in _NEVER_DELETE:
+                guard += (f" AND NOT EXISTS (SELECT 1 FROM {table} k "
+                          f"WHERE k.{column} = :kid AND {joins})")
+            else:
+                await db.execute(text(
+                    f"DELETE FROM {table} r USING {table} k "
+                    f" WHERE r.{column} = :rid AND k.{column} = :kid AND {joins}"
+                ), params)
+        # RETURNING, not a SELECT then an UPDATE: the ids logged are the rows
+        # that actually moved, which is fewer than the player's rows whenever
+        # the guard above held one back.
         ids = (await db.execute(text(
-            f"SELECT id FROM {table} WHERE {column} = :rid"), params)).scalars().all()
+            f"UPDATE {table} r SET {column} = :kid "
+            f" WHERE r.{column} = :rid{guard} RETURNING r.{row_key}"
+        ), params)).scalars().all()
         if not ids:
             continue
-        await db.execute(text(
-            f"UPDATE {table} SET {column} = :kid WHERE {column} = :rid"), params)
         # Kept in the id's own type — a JSONB round trip preserves an integer,
         # and asyncpg infers a bound array's type from its elements, so a list
         # of strings cannot be cast to int[] at the other end.
@@ -110,8 +173,12 @@ async def carry_rows(db: AsyncSession, keep_id, remove_id) -> dict:
     return moved
 
 
-async def restore_rows(db: AsyncSession, remove_id, carried: dict) -> int:
-    """Put the carried rows back on the re-created player. Undo's half."""
+async def restore_rows(db: AsyncSession, remove_id, carried: dict, keep_id=None) -> int:
+    """Put the carried rows back on the re-created player. Undo's half.
+
+    `keep_id` is needed for the tables keyed by (thing, player) rather than an
+    `id`: the row to hand back is the one that thing now has under the keeper.
+    """
     if not carried:
         return 0
     restored = 0
@@ -120,10 +187,18 @@ async def restore_rows(db: AsyncSession, remove_id, carried: dict) -> int:
         if not ids or not await _exists(db, table):
             continue
         typed = [str(i) for i in ids] if id_type == "uuid" else [int(i) for i in ids]
+        row_key = _ROW_KEY.get(table, "id")
+        params = {"pid": str(remove_id), "ids": typed}
+        owner = ""
+        if row_key != "id":
+            if keep_id is None:
+                continue
+            owner = f" AND {column} = :kid"
+            params["kid"] = str(keep_id)
         result = await db.execute(text(
             f"UPDATE {table} SET {column} = :pid "
-            f" WHERE id = ANY(CAST(:ids AS {_CAST[id_type]}))"
-        ), {"pid": str(remove_id), "ids": typed})
+            f" WHERE {row_key} = ANY(CAST(:ids AS {_CAST[id_type]})){owner}"
+        ), params)
         restored += result.rowcount or 0
     return restored
 

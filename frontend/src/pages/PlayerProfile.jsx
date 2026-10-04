@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { api } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
 import { useClubTheme } from '../hooks/useClubTheme'
+import { rememberClubSlug } from '../lib/clubSlug'
 import { useNameFormat } from '../lib/nameFormat'
 import { usePageMeta } from '../hooks/usePageMeta'
 import { getSubcategoriesFromDefs, getAchievementsFromDefs, resolveAwardLabel } from '../lib/achievementOptions'
@@ -2848,6 +2849,8 @@ export default function PlayerProfile() {
   const lastMilestonesFetchRef = useRef(null)
 
   useClubTheme(org)
+  // The profile URL carries no club slug, so tell the sponsor list which club this is.
+  useEffect(() => { rememberClubSlug(org?.slug) }, [org?.slug])
   const fmtName = useNameFormat(org)
 
   const player = data?.player

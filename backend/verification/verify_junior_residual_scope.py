@@ -263,7 +263,9 @@ async def main() -> int:
 
         print("\n── the leaderboard residual CTE agrees")
         for lbl, sc, want in (("Juniors", jnr, 0), ("Men's", men, 18)):
-            params: dict = {}
+            from app.services.aggregations import _club_player_ids
+            params: dict = {"org_id": str(ORG),
+                            "club_player_ids": await _club_player_ids(s, ORG)}
             cte = _residual_totals_cte(sc, None, params)
             params["pid"] = str(SEN_IMP)
             got = (await s.execute(text(

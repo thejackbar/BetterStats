@@ -11,6 +11,7 @@ export default function AdminSync() {
   const [settings, setSettings] = useState(null)
   const [logs, setLogs] = useState([])
   const [syncing, setSyncing] = useState(false)
+  const [quickSyncing, setQuickSyncing] = useState(false)
   const [lastTriggered, setLastTriggered] = useState(null)
   const [polling, setPolling] = useState(false)
   const [syncRequests, setSyncRequests] = useState([])
@@ -78,6 +79,7 @@ export default function AdminSync() {
     const timeout = setTimeout(() => {
       setPolling(false)
       setSyncing(false)
+      setQuickSyncing(false)
       setHardRefreshing(false)
     }, 2 * 60 * 60 * 1000)
     return () => { clearInterval(interval); clearTimeout(timeout) }
@@ -98,12 +100,13 @@ export default function AdminSync() {
     if (!lastTriggered || new Date(latest.started_at) >= new Date(lastTriggered)) {
       setPolling(false)
       setSyncing(false)
+      setQuickSyncing(false)
       setHardRefreshing(false)
     }
   }, [logs, polling, lastTriggered])
 
   const handleSync = async () => {
-    if (!orgId || syncing) return
+    if (!orgId || syncing || quickSyncing) return
     setSyncing(true)
     setLastTriggered(new Date().toISOString())
     try {
@@ -120,8 +123,26 @@ export default function AdminSync() {
     }
   }
 
+  const handleQuickSync = async () => {
+    if (!orgId || quickSyncing || syncing || hardRefreshing) return
+    setQuickSyncing(true)
+    setLastTriggered(new Date().toISOString())
+    try {
+      const res = await api.triggerQuickSync(orgId)
+      if (res.status === 'already_running') {
+        setQuickSyncing(false)
+        toast.info('A sync is already running for this club. Wait for it to complete.')
+        return
+      }
+      setPolling(true)
+    } catch (e) {
+      setQuickSyncing(false)
+      toast.error(`Failed to start quick sync: ${e.message}`)
+    }
+  }
+
   const handleBackfillAggregates = async () => {
-    if (!orgId || backfilling || syncing || hardRefreshing) return
+    if (!orgId || backfilling || syncing || quickSyncing || hardRefreshing) return
     setBackfilling(true)
     try {
       const res = await api.adminBackfillAggregates()
@@ -134,7 +155,7 @@ export default function AdminSync() {
   }
 
   const handleCleanupOpposition = async () => {
-    if (!orgId || cleaningOpp || syncing || hardRefreshing || backfilling) return
+    if (!orgId || cleaningOpp || syncing || quickSyncing || hardRefreshing || backfilling) return
     const ok = window.confirm(
       'Remove batting / bowling / fielding rows that belong to players who were on the OPPOSITION team in those games. ' +
       'Inflated match counts (e.g. a current club member who played against us a few times having those games counted as theirs) get corrected. ' +
@@ -160,7 +181,7 @@ export default function AdminSync() {
   }
 
   const handleHardRefresh = async () => {
-    if (!orgId || hardRefreshing || syncing || backfilling) return
+    if (!orgId || hardRefreshing || syncing || quickSyncing || backfilling) return
     const ok = window.confirm(
       'Full Rebuild wipes every stored game for this club and re-pulls all match history. ' +
       'This may take an hour or longer for clubs with a lot of history. Continue?'
@@ -206,7 +227,7 @@ export default function AdminSync() {
             checkedAt={drift?.last_checked_at}
             onRebuild={handleHardRefresh}
             onDismiss={handleDismissDrift}
-            busy={hardRefreshing || syncing || backfilling || cleaningOpp || !orgId}
+            busy={hardRefreshing || syncing || quickSyncing || backfilling || cleaningOpp || !orgId}
           />
         )}
 
@@ -219,11 +240,36 @@ export default function AdminSync() {
         <div className="pb-card p-5 mb-8">
           <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-4 uppercase">Sync Actions</p>
 
-          {/* Update with latest data */}
+          {/* Quick sync: the last week of fixtures only */}
           <div className="flex items-start gap-4 py-3">
             <button
+              onClick={handleQuickSync}
+              disabled={quickSyncing || syncing || hardRefreshing || backfilling || cleaningOpp || !orgId}
+              className="w-44 shrink-0 px-4 py-2 rounded font-mono text-[11px] tracking-wide2 font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-pb-bg"
+              style={{ background: 'var(--pb-accent)' }}
+            >
+              {quickSyncing ? (
+                <>
+                  <span className="w-3 h-3 border-2 border-pb-bg/30 border-t-pb-bg rounded-full animate-spin" />
+                  SYNCING…
+                </>
+              ) : 'QUICK SYNC'}
+            </button>
+            <div className="flex-1">
+              <p className="text-pb-text text-sm font-medium mb-0.5">Pull the last 7 days of results</p>
+              <p className="text-pb-faint text-xs leading-relaxed">
+                Only looks at fixtures from the past week, so it finishes far sooner than Sync Now.
+                Older games are left alone. Use Sync Now if a result older than
+                a week is missing or has been corrected.
+              </p>
+            </div>
+          </div>
+
+          {/* Update with latest data */}
+          <div className="flex items-start gap-4 py-3 pb-hairline-t">
+            <button
               onClick={handleSync}
-              disabled={syncing || hardRefreshing || backfilling || cleaningOpp || !orgId}
+              disabled={syncing || quickSyncing || hardRefreshing || backfilling || cleaningOpp || !orgId}
               className="w-44 shrink-0 px-4 py-2 rounded font-mono text-[11px] tracking-wide2 font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-pb-bg"
               style={{ background: 'var(--pb-accent)' }}
             >
@@ -237,8 +283,8 @@ export default function AdminSync() {
             <div className="flex-1">
               <p className="text-pb-text text-sm font-medium mb-0.5">Pull latest games &amp; stats</p>
               <p className="text-pb-faint text-xs leading-relaxed">
-                Adds new games and updates existing players automatically. Safe to run anytime —
-                this is the normal weekly sync.
+                Adds new games and updates existing players across the club&apos;s whole history.
+                Safe to run anytime. Slower than Quick Sync.
               </p>
             </div>
           </div>
@@ -247,7 +293,7 @@ export default function AdminSync() {
           <div className="flex items-start gap-4 py-3 pb-hairline-t">
             <button
               onClick={handleBackfillAggregates}
-              disabled={backfilling || syncing || hardRefreshing || cleaningOpp || !orgId}
+              disabled={backfilling || syncing || quickSyncing || hardRefreshing || cleaningOpp || !orgId}
               className="w-44 shrink-0 px-4 py-2 rounded font-mono text-[11px] tracking-wide2 font-semibold border transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-pb-text"
               style={{ borderColor: 'var(--pb-hairline)', background: 'transparent' }}
             >
@@ -273,7 +319,7 @@ export default function AdminSync() {
           <div className="flex items-start gap-4 py-3 pb-hairline-t">
             <button
               onClick={handleCleanupOpposition}
-              disabled={cleaningOpp || backfilling || syncing || hardRefreshing || !orgId}
+              disabled={cleaningOpp || backfilling || syncing || quickSyncing || hardRefreshing || !orgId}
               className="w-44 shrink-0 px-4 py-2 rounded font-mono text-[11px] tracking-wide2 font-semibold border transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-pb-text"
               style={{ borderColor: 'var(--pb-hairline)', background: 'transparent' }}
             >
@@ -299,7 +345,7 @@ export default function AdminSync() {
           <div className="flex items-start gap-4 py-3 pb-hairline-t">
             <button
               onClick={handleHardRefresh}
-              disabled={hardRefreshing || syncing || backfilling || cleaningOpp || !orgId}
+              disabled={hardRefreshing || syncing || quickSyncing || backfilling || cleaningOpp || !orgId}
               className="w-44 shrink-0 px-4 py-2 rounded font-mono text-[11px] tracking-wide2 font-semibold border transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-pb-amber"
               style={{ borderColor: 'var(--pb-amber)', background: 'transparent' }}
             >
@@ -320,7 +366,7 @@ export default function AdminSync() {
             </div>
           </div>
 
-          {(syncing || hardRefreshing || runningLog) && (
+          {(syncing || quickSyncing || hardRefreshing || runningLog) && (
             <div className="mt-3 pt-3 pb-hairline-t">
               <ProgressBar
                 pct={runningLog?.stats?.progress_pct ?? 0}

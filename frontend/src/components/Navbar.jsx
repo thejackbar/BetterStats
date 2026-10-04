@@ -8,6 +8,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import NavbarPlayerSearch from "./NavbarPlayerSearch";
 import BrandLogo from "./BrandLogo";
 import { SITE_VERSION } from '../version.js';
+import { useSectionNames } from '../lib/sectionNames';
 
 export { SITE_VERSION };
 
@@ -91,6 +92,8 @@ export default function Navbar() {
   // "get your club online" CTA, so drop the club nav/links and leave just the
   // BetterCricket brand header to match it.
   const slug = (inactive || notFound) ? '' : lookupSlug;
+  // The club's own names for its sections (a sponsor's name on the leaderboard, say).
+  const sec = useSectionNames(slug);
 
   const [openMenu, setOpenMenu] = useState(null);
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
@@ -142,18 +145,18 @@ export default function Navbar() {
 
   const DROPDOWNS = slug ? {
     stats: [
-      { label: "Leaderboard", href: `/${slug}/leaderboard` },
-      { label: "Records",     href: `/${slug}/records` },
-      { label: "Stat Lab",    href: `/${slug}/statlab` },
+      { label: sec.name("leaderboard", "Leaderboard"), href: `/${slug}/leaderboard` },
+      { label: sec.name("records", "Records"), href: `/${slug}/records` },
+      { label: sec.name("statlab", "Stat Lab"), href: `/${slug}/statlab` },
       { label: "Competitions", href: `/${slug}/competitions` },
-      { label: "Premierships", href: `/${slug}/premierships` },
-      { label: "Honour Board", href: `/${slug}/honour-board` },
+      { label: sec.name("premierships", "Premierships"), href: `/${slug}/premierships` },
+      { label: sec.name("honour_board", "Honour Board"), href: `/${slug}/honour-board` },
     ],
     games: [
       { label: "Results",  href: `/${slug}/games` },
       { label: "Fixtures", href: `/${slug}/fixtures` },
       { label: "Lineups",  href: `/${slug}/lineups` },
-      { label: "Ladders",  href: `/${slug}/ladders` },
+      { label: sec.name("ladders", "Ladders"), href: `/${slug}/ladders` },
     ],
   } : {};
 
@@ -166,11 +169,11 @@ export default function Navbar() {
 
   const NAV = slug ? [
     { type: 'link',     label: "Home",    href: `/${slug}` },
-    { type: 'link',     label: "Players", href: `/${slug}/players` },
+    { type: 'link',     label: sec.name("players", "Players"), href: `/${slug}/players` },
     { type: 'dropdown', label: "Stats",   key: 'stats', isActive: statsActive },
     { type: 'dropdown', label: "Games",   key: 'games', isActive: gamesActive },
-    { type: 'link',     label: "Compare", href: `/${slug}/compare` },
-    { type: 'link',     label: "Yearbook",href: `/${slug}/yearbook` },
+    { type: 'link',     label: sec.name("compare", "Compare"), href: `/${slug}/compare` },
+    { type: 'link',     label: sec.name("yearbook", "Yearbook"), href: `/${slug}/yearbook` },
     // The full club website (news, pages, honours, …) — only once the club enables it.
     ...(club?.website_enabled ? [{ type: 'link', label: "Website", href: `/${slug}/website` }] : []),
   ] : [];

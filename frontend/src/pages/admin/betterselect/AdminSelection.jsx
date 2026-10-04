@@ -14,6 +14,7 @@
 // Wired to the real selection API + atom kit. Availability colours stay
 // semantic (green/amber/red); the club accent is reserved for chrome.
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import BetterSelectLayout from '../../../components/admin/BetterSelectLayout'
 import { useAuth } from '../../../contexts/AuthContext'
@@ -28,7 +29,7 @@ import { useFilters } from './filters'
 import SelectionFilters from './SelectionFilters'
 import { DnD } from './selectionDnd'
 import { DualRailView, TeamSheetView } from './SelectionViews'
-import { classifyBowl, formBucket, matchesAge } from './selectionMeta'
+import { classifyBowl, formBucket, matchesAge, inAnotherXI, alsoIn, alsoInLine } from './selectionMeta'
 import { matchesRuleFilter, xiCompliance, hasBlockingRule } from './selectionRules'
 
 // Soft role-band each batting slot prefers — drives auto-fill placement (the
@@ -168,13 +169,54 @@ function ViewToggle({ value, onChange }) {
   )
 }
 
+// What Confirm would write: the named XI in batting order, captain, keeper and
+// the call-up cascades. Gaps between slots are not part of it.
+const confirmSig = (filled, capId, wkId, demoList) =>
+  JSON.stringify([filled.map((id) => [id, id === capId, id === wkId]), demoList])
+
+const DRAFT_DELAY_MS = 600
+const DRAFT_RETRY_MS = 5000
+const DRAFT_POLL_MS = 8000
+
+// A saved draft laid back onto the board. Anyone no longer in the pool is
+// dropped; the server re-judges everything at Confirm.
+function restoreDraft(dd, pool, size) {
+  const inPool = new Set((pool || []).map((p) => p.id))
+  let slots = (dd.slots || []).map((id) => (id && inPool.has(id) ? id : null))
+  if (size === 0) slots = slots.filter(Boolean)
+  else {
+    while (slots.length > size && slots[slots.length - 1] == null) slots.pop()
+    while (slots.length < size) slots.push(null)
+  }
+  const kept = new Set(slots.filter(Boolean))
+  const demo = {}
+  ;(dd.demotions || []).forEach((x) => {
+    if (x.callup_id && kept.has(x.callup_id)) demo[x.player_id] = { fixture_id: x.fixture_id, batting_order: x.batting_order, callupId: x.callup_id }
+  })
+  return {
+    slots,
+    cap: kept.has(dd.captain_id) ? dd.captain_id : null,
+    wk: kept.has(dd.wicket_keeper_id) ? dd.wicket_keeper_id : null,
+    demo,
+  }
+}
+
 export default function AdminSelection() {
+  const fmt = useAdminNameFormat()
   const { fixtureId } = useParams()
   const navigate = useNavigate()
   const { hasCapability } = useAuth()
   const toast = useToast()
+  // ToastProvider hands out a NEW `toast` object on every render, and showing a
+  // toast re-renders it. `load` must not depend on that object, or every toast
+  // below (a call-up, a back to back pick, "marked unavailable") re-ran load(),
+  // reloaded the fixture and wiped the unsaved XI, losing the pick it announced.
+  const toastRef = useRef(toast)
+  toastRef.current = toast
   const { theme, toggle: toggleTheme } = useTheme()
   const canEdit = hasCapability(CAP.MANAGE_SELECTIONS)
+  const canEditRef = useRef(canEdit)
+  canEditRef.current = canEdit
 
   const [data, setData] = useState(null)
   const [slots, setSlots] = useState([])
@@ -183,7 +225,25 @@ export default function AdminSelection() {
   const [focus, setFocus] = useState(null)
   const [format, setFormat] = useState(11)
   const [saving, setSaving] = useState(false)
-  const [dirty, setDirty] = useState(false)
+  // The confirmed XI as loaded; "unconfirmed changes" is the board differing
+  // from it. Derived, so putting someone back where they were reads as clean.
+  const [baseSig, setBaseSig] = useState(null)
+  // Autosave of the unconfirmed side (a draft row, apart from the confirmed XI).
+  const [draftStatus, setDraftStatus] = useState('idle')   // idle | saving | saved | error
+  const [draftInfo, setDraftInfo] = useState(null)         // { at, by } when a draft was restored or saved
+  const loadedFor = useRef(null)          // fixture the board's state belongs to
+  const draftOnServer = useRef(false)     // a draft row exists for loadedFor
+  const draftServerSig = useRef('')       // board state the server's draft matches
+  const draftPending = useRef(null)       // { fixtureId, body|null, sig } waiting for the debounce
+  const draftTimer = useRef(null)
+  const draftInflight = useRef(null)      // the write in flight: confirm and reload wait for it
+  const draftBusy = useRef(0)             // writes in flight (the poll leaves them alone)
+  const draftVersion = useRef(0)          // server draft version this board last saw (0 = none)
+  // Another selector changed, confirmed or discarded the draft while this board
+  // held unsent changes: { theirs: { draft, version, by, at } | null }. Autosave
+  // stops until it is settled.
+  const [draftConflict, setDraftConflict] = useState(null)
+  const pollDraft = useRef(() => {})
   const [yearsF, setYearsF] = useState(3)
   const [sort, setSort] = useState('squad')
   const [availEdit, setAvailEdit] = useState(null)
@@ -206,24 +266,115 @@ export default function AdminSelection() {
 
   const load = useCallback(() => {
     setData(null)
-    api.bsGetSelection(fixtureId)
-      .then((d) => {
-        setData(d)
+    loadedFor.current = null
+    // A draft write still in flight (just switched fixture, or just confirmed)
+    // must land before we read, or we read the draft it is about to replace.
+    Promise.resolve(draftInflight.current).catch(() => {})
+      .then(() => Promise.all([
+        api.bsGetSelection(fixtureId),
+        canEditRef.current ? api.bsGetSelectionDraft(fixtureId).catch(() => ({ draft: null })) : { draft: null },
+      ]))
+      .then(([d, dr]) => {
         const size = d.default_team_size ?? 11
         const lineup = (d.lineup || []).slice().sort((a, b) => (a.batting_order || 999) - (b.batting_order || 999))
         const count = size > 0 ? Math.max(size, lineup.length) : lineup.length
         const init = Array(count).fill(null)
         lineup.forEach((l, i) => { if (i < count) init[i] = l.player_id })
-        setSlots(init)
-        setCapId(lineup.find((l) => l.is_captain)?.player_id ?? null)
-        setWkId(lineup.find((l) => l.is_wicket_keeper)?.player_id ?? null)
+        let cap = lineup.find((l) => l.is_captain)?.player_id ?? null
+        let wk = lineup.find((l) => l.is_wicket_keeper)?.player_id ?? null
+        setBaseSig(confirmSig(init.filter(Boolean), cap, wk, []))
+
+        // An autosaved draft replaces the confirmed XI on the board.
+        let slotsInit = init
+        let demo = {}
+        const dd = dr?.draft
+        draftOnServer.current = false
+        draftVersion.current = 0
+        setDraftInfo(null)
+        setDraftConflict(null)
+        if (dd && Array.isArray(dd.slots)) {
+          const r = restoreDraft(dd, d.pool, size)
+          slotsInit = r.slots
+          cap = r.cap
+          wk = r.wk
+          demo = r.demo
+          draftOnServer.current = true
+          draftVersion.current = dr.version || 0
+          setDraftInfo({ at: dr.updated_at, by: dr.updated_by })
+        }
+        draftServerSig.current = JSON.stringify([slotsInit, cap, wk, demo])
+        setData(d)
+        setSlots(slotsInit)
+        setCapId(cap)
+        setWkId(wk)
         setFormat(size)
-        setFocus(init.findIndex((x) => x == null))
-        setDemotions({})
-        setDirty(false)
+        setFocus(slotsInit.findIndex((x) => x == null))
+        setDemotions(demo)
+        setDraftStatus('idle')
+        loadedFor.current = fixtureId
       })
-      .catch((e) => { toast.error(e.message); setData({ pool: [], lineup: [], fixture: null }) })
-  }, [fixtureId, toast])
+      .catch((e) => { toastRef.current.error(e.message); setData({ pool: [], lineup: [], fixture: null }) })
+  }, [fixtureId])
+
+  // Send the pending draft change now. `leaving` marks a page that is going
+  // away, so the request is allowed to outlive it. Writes are chained so a
+  // delete can never overtake the save before it.
+  const flushDraft = useCallback((leaving) => {
+    clearTimeout(draftTimer.current)
+    draftTimer.current = null
+    const p = draftPending.current
+    if (!p) return draftInflight.current
+    draftPending.current = null
+    const opts = leaving ? { keepalive: true } : {}
+    draftBusy.current += 1
+    const task = Promise.resolve(draftInflight.current).catch(() => {})
+      // The version is read when the write is sent, so a save queued behind
+      // another of ours carries the version that one produced.
+      .then(() => (p.body
+        ? api.bsSaveSelectionDraft(p.fixtureId, { ...p.body, base_version: draftVersion.current }, opts)
+        : api.bsDiscardSelectionDraft(p.fixtureId, draftVersion.current, opts)))
+      .then((r) => {
+        draftBusy.current -= 1
+        if (loadedFor.current !== p.fixtureId) return
+        draftVersion.current = p.body ? (r?.version || 0) : 0
+        draftServerSig.current = p.sig
+        draftOnServer.current = !!p.body
+        setDraftStatus(draftPending.current ? 'saving' : 'saved')
+        setDraftInfo(p.body ? { at: new Date().toISOString(), by: null } : null)
+      })
+      .catch((e) => {
+        draftBusy.current -= 1
+        if (loadedFor.current !== p.fixtureId) return
+        if (e.status === 409 && e.detail?.code === 'draft_conflict') {
+          // Someone else got there first. Nothing was overwritten; ask which wins.
+          const t = e.detail
+          setDraftStatus('idle')
+          setDraftConflict({ theirs: t.draft ? { draft: t.draft, version: t.version, by: t.updated_by, at: t.updated_at } : null })
+          return
+        }
+        setDraftStatus('error')
+        // A dropped connection or a 5xx is worth another go; a refusal is not.
+        if ((!e.status || e.status >= 500) && !draftPending.current) {
+          draftPending.current = p
+          draftTimer.current = setTimeout(() => flushDraft(false), DRAFT_RETRY_MS)
+        }
+      })
+    draftInflight.current = task
+    return task
+  }, [])
+
+  // Leaving the board (another fixture, another screen, closing the tab) must
+  // not lose the last change still waiting on the debounce.
+  useEffect(() => {
+    const onHide = () => { if (document.visibilityState === 'hidden') flushDraft(true) }
+    document.addEventListener('visibilitychange', onHide)
+    window.addEventListener('pagehide', onHide)
+    return () => {
+      document.removeEventListener('visibilitychange', onHide)
+      window.removeEventListener('pagehide', onHide)
+      flushDraft(true)
+    }
+  }, [fixtureId, flushDraft])
 
   useEffect(() => { load() }, [load])
   useEffect(() => { api.bsSelectionOverview().then((d) => setAllFixtures(d.fixtures || [])).catch(() => {}) }, [])
@@ -334,9 +485,12 @@ export default function AdminSelection() {
     // The club's own association rules. Only offered when the club has one
     // bearing on this fixture — SelectionFilters drops the group otherwise.
     if (values.rules) list = list.filter((p) => matchesRuleFilter(p, values.rules))
-    if (yearsF) list = list.filter((p) => playedWithinYears(p.last_played, yearsF))
-    if (values.status === 'unselected') list = list.filter((p) => !(p.clash?.length > 0))
-    else if (values.status === 'clash') list = list.filter((p) => p.clash?.length > 0)
+    // A name typed into search is someone the selector is looking for, so the
+    // "Played ≤ N yrs" window does not hide them. It only trims the browse list.
+    // (Players marked inactive stay out either way: see `available`.)
+    if (yearsF && !search.trim()) list = list.filter((p) => playedWithinYears(p.last_played, yearsF))
+    if (values.status === 'unselected') list = list.filter((p) => !inAnotherXI(p))
+    else if (values.status === 'clash') list = list.filter((p) => inAnotherXI(p))
     const sorters = {
       squad: cmp,
       form: (a, b) => (b.score ?? 0) - (a.score ?? 0) || (a.display_name || '').localeCompare(b.display_name || ''),
@@ -347,30 +501,111 @@ export default function AdminSelection() {
 
   const filled = slots.filter(Boolean)
   const count = filled.length
+  // Only a cascade whose displaced player really left this XI AND whose call-up
+  // is still named: the one definition Confirm sends and "unconfirmed" compares.
+  const demoList = useMemo(
+    () => Object.entries(demotions)
+      .filter(([displacedId, d]) => !filled.includes(displacedId) && filled.includes(d.callupId))
+      .map(([displacedId, d]) => ({ player_id: displacedId, fixture_id: d.fixture_id, batting_order: d.batting_order })),
+    [demotions, slots],  // eslint-disable-line react-hooks/exhaustive-deps
+  )
+  const dirty = baseSig !== null && confirmSig(filled, capId, wkId, demoList) !== baseSig
+  const draftSig = JSON.stringify([slots, capId, wkId, demotions])
+
+  // Autosave. Every change to the side is written to the draft after a short
+  // pause; getting back to the confirmed XI removes the draft. Nothing here
+  // touches the confirmed lineup, which is what the rest of the app reads.
+  useEffect(() => {
+    if (!canEdit || data === null || loadedFor.current !== fixtureId || draftConflict) return
+    if (dirty ? draftSig === draftServerSig.current : !draftOnServer.current) return
+    draftPending.current = {
+      fixtureId,
+      sig: draftSig,
+      body: dirty ? {
+        slots, captain_id: capId, wicket_keeper_id: wkId,
+        demotions: Object.entries(demotions).map(([pid, d]) => ({
+          player_id: pid, fixture_id: d.fixture_id, batting_order: d.batting_order, callup_id: d.callupId,
+        })),
+      } : null,
+    }
+    setDraftStatus('saving')
+    clearTimeout(draftTimer.current)
+    draftTimer.current = setTimeout(() => flushDraft(false), DRAFT_DELAY_MS)
+  }, [draftSig, dirty, data, fixtureId, canEdit, draftConflict])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Take another selector's draft onto the board.
+  const adoptDraft = (t) => {
+    const r = restoreDraft(t.draft, data?.pool, format)
+    setSlots(r.slots)
+    setCapId(r.cap)
+    setWkId(r.wk)
+    setDemotions(r.demo)
+    setFocus(r.slots.findIndex((x) => x == null))
+    draftServerSig.current = JSON.stringify([r.slots, r.cap, r.wk, r.demo])
+    draftOnServer.current = true
+    draftVersion.current = t.version || 0
+    setDraftInfo({ at: t.at, by: t.by })
+    setDraftConflict(null)
+  }
+
+  // Look for another selector's changes while the board is open. Left alone
+  // while a write of ours is waiting or in flight, and while a conflict is
+  // already on screen. A board with nothing unsent just takes the new draft; one
+  // with unsent changes of its own is asked about it (the Draft strip).
+  pollDraft.current = async () => {
+    if (!canEdit || data === null || loadedFor.current !== fixtureId || draftConflict || saving) return
+    if (draftPending.current || draftBusy.current) return
+    let r
+    try { r = await api.bsGetSelectionDraft(fixtureId) } catch { return }
+    if (loadedFor.current !== fixtureId || draftPending.current || draftBusy.current) return
+    if ((r.version || 0) === draftVersion.current) return
+    const theirs = r.draft ? { draft: r.draft, version: r.version, by: r.updated_by, at: r.updated_at } : null
+    if (draftSig === draftServerSig.current) {
+      if (theirs) { adoptDraft(theirs); toastRef.current.info(`${theirs.by || 'Someone'} changed the draft. Showing their version.`) }
+      else { load(); toastRef.current.info('The draft was confirmed or discarded by someone else.') }
+    } else setDraftConflict({ theirs })
+  }
+  useEffect(() => {
+    if (!canEdit) return undefined
+    const tick = () => { if (document.visibilityState === 'visible') pollDraft.current() }
+    const t = setInterval(tick, DRAFT_POLL_MS)
+    document.addEventListener('visibilitychange', tick)
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', tick) }
+  }, [canEdit, fixtureId])
+
+  // The conflict choices. "Mine" keeps this board and saves it over theirs;
+  // "theirs" replaces this board with the draft that is on the server.
+  const keepMine = () => {
+    draftVersion.current = draftConflict?.theirs?.version || 0
+    draftOnServer.current = !!draftConflict?.theirs
+    setDraftConflict(null)   // the autosave effect re-runs and sends this board
+  }
+  const useTheirs = () => {
+    const t = draftConflict?.theirs
+    if (t) adoptDraft(t)
+    else { setDraftConflict(null); load() }
+  }
   const target = format || 0
   const offCount = target > 0 && count !== target
 
   // ── Slot mutations (plain fns — DnD always calls the latest onDrop) ────────
-  const markDirty = () => setDirty(true)
-
   const placeInSlot = (slotIdx, playerId) => {
     setSlots((prev) => { const n = [...prev]; const ex = n.indexOf(playerId); if (ex !== -1) n[ex] = null; n[slotIdx] = playerId; return n })
-    markDirty()
     setFocus(slots.findIndex((x, i) => i > slotIdx && x == null))
   }
   const swapSlots = (from, to) => {
     if (from === to) return
     setSlots((prev) => { const n = [...prev]; const m = n[from]; n[from] = n[to]; n[to] = m; return n })
-    markDirty()
   }
   const tapPlayer = (p) => {
     if (!canEdit) return
     // A clash blocks the pick unless this is a higher grade calling the player
     // up from a lower one (clash_blocks=false) — then the pick is allowed and
     // they're dropped from the lower XI when we save.
-    if (p.clash_blocks) { toast.error(`${p.display_name} is already picked for ${p.clash.join(', ')} that day`); return }
-    if (p.clash?.length > 0) toast.info(`Calling ${p.display_name} up from ${p.clash.join(', ')} — they'll be dropped there when you save`)
-    else if (p.availability === 'UNAVAILABLE') toast.info(`${p.display_name} is marked unavailable — adding anyway`)
+    if (p.clash_blocks) { toast.error(`${fmt(p.display_name)} is already picked for ${p.clash.join(', ')} that day`); return }
+    if (p.clash?.length > 0) toast.info(`Calling ${fmt(p.display_name)} up from ${p.clash.join(', ')} — they'll be dropped there when you save`)
+    else if (alsoIn(p).length > 0) toast.info(`${fmt(p.display_name)} is also in ${alsoInLine(p)} that day. Adding to both.`)
+    else if (p.availability === 'UNAVAILABLE') toast.info(`${fmt(p.display_name)} is marked unavailable — adding anyway`)
     setSlots((prev) => {
       const next = [...prev]
       const existing = next.indexOf(p.id)
@@ -384,19 +619,17 @@ export default function AdminSelection() {
       next[t] = p.id
       return next
     })
-    markDirty()
     setFocus(slots.findIndex((x) => x == null))
   }
   const removeAt = (i) => {
     setSlots((prev) => { const n = [...prev]; const id = n[i]; n[i] = null; if (id === capId) setCapId(null); if (id === wkId) setWkId(null); return n })
-    markDirty()
     setFocus(i)
   }
-  const toggleCap = (id) => { setCapId((c) => (c === id ? null : id)); markDirty() }
-  const toggleWk = (id) => { setWkId((c) => (c === id ? null : id)); markDirty() }
+  const toggleCap = (id) => { setCapId((c) => (c === id ? null : id)) }
+  const toggleWk = (id) => { setWkId((c) => (c === id ? null : id)) }
   const clearXI = () => {
     if (!canEdit) return
-    setSlots((prev) => prev.map(() => null)); setCapId(null); setWkId(null); setFocus(0); markDirty()
+    setSlots((prev) => prev.map(() => null)); setCapId(null); setWkId(null); setFocus(0)
   }
 
   // The lower-grade XI a call-up would come from (its fixture + the player's
@@ -418,16 +651,17 @@ export default function AdminSelection() {
         const p = item.player
         if (p.clash_blocks) return
         const displacedId = slots[tgt.idx]   // who held the slot before this drop
-        if (p.clash?.length > 0) toast.info(`Calling ${p.display_name} up from ${p.clash.join(', ')} — they'll be dropped there when you save`)
-        else if (p.availability === 'UNAVAILABLE') toast.info(`${p.display_name} is marked unavailable — adding anyway`)
+        if (p.clash?.length > 0) toast.info(`Calling ${fmt(p.display_name)} up from ${p.clash.join(', ')} — they'll be dropped there when you save`)
+        else if (alsoIn(p).length > 0) toast.info(`${fmt(p.display_name)} is also in ${alsoInLine(p)} that day. Adding to both.`)
+        else if (p.availability === 'UNAVAILABLE') toast.info(`${fmt(p.display_name)} is marked unavailable — adding anyway`)
         placeInSlot(tgt.idx, p.id)
         // Cascade: a call-up that bumps a regular sends that regular down to the
         // team below, into the called-up player's vacated slot.
         const src = callUpSource(p)
         if (src && displacedId && displacedId !== p.id) {
           setDemotions((m) => ({ ...m, [displacedId]: { fixture_id: src.fixture_id, batting_order: src.batting_order, callupId: p.id } }))
-          const dn = poolById[displacedId]?.display_name || 'Player'
-          toast.info(`${dn} drops to ${src.team_name || 'the team below'} in ${p.display_name}'s place — saved together`)
+          const dn = fmt(poolById[displacedId]?.display_name) || 'Player'
+          toast.info(`${dn} drops to ${src.team_name || 'the team below'} in ${fmt(p.display_name)}'s place — saved together`)
         }
       } else if (item.kind === 'slot') swapSlots(item.idx, tgt.idx)
     } else if (tgt.kind === 'pool' && item.kind === 'slot') {
@@ -440,7 +674,9 @@ export default function AdminSelection() {
   const fillEmpty = (useLastWeek) => {
     if (!canEdit) return
     if (format === 0) { toast.error('Set a side size (11/12/13) to auto-fill'); return }
-    const okToPick = (p) => p && !(p.clash?.length > 0) && p.availability !== 'UNAVAILABLE'
+    // Auto-fill never puts anyone in two games; a player in another XI that day
+    // (clash or a back to back game) is picked by hand.
+    const okToPick = (p) => p && !inAnotherXI(p) && p.availability !== 'UNAVAILABLE'
     setSlots((prev) => {
       const next = [...prev]
       const taken = new Set(next.filter(Boolean))
@@ -470,7 +706,6 @@ export default function AdminSelection() {
       if (!capId && prevXI.captain_id && poolById[prevXI.captain_id]) setCapId(prevXI.captain_id)
       if (!wkId && prevXI.wicket_keeper_id && poolById[prevXI.wicket_keeper_id]) setWkId(prevXI.wicket_keeper_id)
     }
-    markDirty()
   }
 
   const changeFormat = async (size) => {
@@ -499,7 +734,7 @@ export default function AdminSelection() {
   const save = async () => {
     if (offCount) {
       const diff = count > target ? `${count - target} too many` : `${target - count} too few`
-      if (!window.confirm(`You have ${count} player${count === 1 ? '' : 's'} for a ${target}-a-side match — ${diff}.\n\nSave anyway?`)) return
+      if (!window.confirm(`You have ${count} player${count === 1 ? '' : 's'} for a ${target}-a-side match — ${diff}.\n\nConfirm anyway?`)) return
     }
     // A warning-level rule is the selector's to weigh, so it asks rather than
     // refuses. A blocking one never gets this far — the server decides, and
@@ -508,19 +743,18 @@ export default function AdminSelection() {
     if (warnings.length) {
       const lines = warnings.slice(0, 6).map((w) => `• ${w.player ? w.player + ' — ' : ''}${w.detail}`).join('\n')
       const more = warnings.length > 6 ? `\n…and ${warnings.length - 6} more` : ''
-      if (!window.confirm(`This side breaks ${warnings.length} club rule${warnings.length === 1 ? '' : 's'}:\n\n${lines}${more}\n\nSave anyway?`)) return
+      if (!window.confirm(`This side breaks ${warnings.length} club rule${warnings.length === 1 ? '' : 's'}:\n\n${lines}${more}\n\nConfirm anyway?`)) return
     }
     setSaving(true)
     try {
+      // Drop any draft write still waiting: confirming replaces the draft, and
+      // one landing after it would bring the draft back.
+      clearTimeout(draftTimer.current)
+      draftPending.current = null
+      await Promise.resolve(draftInflight.current).catch(() => {})
       const players = filled.map((id, i) => ({ player_id: id, batting_order: i + 1, is_captain: id === capId, is_wicket_keeper: id === wkId }))
-      // Only cascade a demotion when the displaced player really left this XI AND
-      // the call-up that bumped them is still named (so the lower slot is freed).
-      const demoList = Object.entries(demotions)
-        .filter(([displacedId, d]) => !filled.includes(displacedId) && filled.includes(d.callupId))
-        .map(([displacedId, d]) => ({ player_id: displacedId, fixture_id: d.fixture_id, batting_order: d.batting_order }))
       const r = await api.bsSetSelection(fixtureId, players, demoList)
-      toast.success(`Saved ${r.count} player${r.count === 1 ? '' : 's'}`)
-      setDirty(false)
+      toast.success(`Confirmed ${r.count} player${r.count === 1 ? '' : 's'}`)
       load()
     } catch (e) {
       // A blocking rule comes back as a structured 409 listing exactly what
@@ -531,6 +765,23 @@ export default function AdminSelection() {
     } finally { setSaving(false) }
   }
 
+  // Throw the unconfirmed changes away and go back to the confirmed XI.
+  const discardDraft = async () => {
+    if (!window.confirm('Discard your unconfirmed changes and go back to the confirmed XI?')) return
+    clearTimeout(draftTimer.current)
+    draftPending.current = null
+    try {
+      await Promise.resolve(draftInflight.current).catch(() => {})
+      await api.bsDiscardSelectionDraft(fixtureId, draftVersion.current)
+      load()
+    } catch (e) {
+      if (e.status === 409 && e.detail?.code === 'draft_conflict') {
+        const t = e.detail
+        setDraftConflict({ theirs: t.draft ? { draft: t.draft, version: t.version, by: t.updated_by, at: t.updated_at } : null })
+      } else toast.error('Could not discard: ' + e.message)
+    }
+  }
+
   const { title, sub, kicker } = fmtHeader(fx)
   // The same verdict the board's rule strip shows, for the shareable sheet.
   const sheetRules = xiCompliance(data?.rules, poolById, filled)
@@ -538,7 +789,7 @@ export default function AdminSelection() {
     const lines = filled.map((id, i) => {
       const p = poolById[id]
       const tags = [id === capId && '(C)', id === wkId && '(WK)'].filter(Boolean).join(' ')
-      return `${i + 1}. ${p?.display_name || '—'}${tags ? ' ' + tags : ''}`
+      return `${i + 1}. ${fmt(p?.display_name) || '—'}${tags ? ' ' + tags : ''}`
     })
     return `${title}${sub ? '\n' + sub : ''}\n\n${lines.join('\n')}`
   }
@@ -606,12 +857,47 @@ export default function AdminSelection() {
         <Icon name={theme === 'light' ? 'moon' : 'sun'} size={16} />
       </button>
       <Btn variant="soft" sm icon="share" onClick={() => setShowSheet(true)} disabled={count === 0}><span className="hidden sm:inline">Share</span></Btn>
-      {canEdit && <Btn variant="primary" sm icon="check" onClick={save} disabled={saving || !dirty}>{saving ? 'Saving…' : dirty ? `Save${count ? ` (${count})` : ''}` : 'Saved'}</Btn>}
+      {canEdit && <Btn variant="primary" sm icon="check" onClick={save} disabled={saving || !dirty}>{saving ? 'Confirming…' : dirty ? `Confirm${count ? ` (${count})` : ''}` : 'Confirmed'}</Btn>}
     </div>
   )
 
   return (
     <BetterSelectLayout title="Selection" headerLeft={headerLeft} actions={actions}>
+      {canEdit && draftConflict && (
+        <div role="alert" className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border px-3 py-2 text-[12px] text-pb-text"
+          style={{ borderColor: 'var(--pb-amber)', background: 'color-mix(in srgb, var(--pb-amber) 10%, var(--pb-surface))' }}>
+          <span className="min-w-0 flex-1 basis-60">
+            <span className="font-semibold">{draftConflict.theirs ? `${draftConflict.theirs.by || 'Someone else'} changed this draft.` : 'This draft was confirmed or discarded by someone else.'}</span>{' '}
+            {draftConflict.theirs
+              ? 'Your changes are not saved yet. Use their version, or keep yours and save over it.'
+              : 'Your changes are not saved yet. Go back to the confirmed XI, or keep yours as a new draft.'}
+          </span>
+          <span className="flex shrink-0 items-center gap-3">
+            <button type="button" onClick={useTheirs} className="font-display font-semibold text-pb-accent hover:underline">
+              {draftConflict.theirs ? 'Use their version' : 'Use confirmed XI'}
+            </button>
+            <button type="button" onClick={keepMine} className="font-display font-semibold text-pb-accent hover:underline">Keep mine</button>
+          </span>
+        </div>
+      )}
+      {canEdit && dirty && !draftConflict && (
+        <div role="status" className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-pb-hairline bg-pb-surface px-3 py-2 text-[12px] text-pb-dim">
+          <span className="min-w-0 flex-1 basis-60">
+            <span className="font-semibold text-pb-text">Draft.</span>{' '}
+            {draftStatus === 'error'
+              ? 'Your changes are not saving yet. Keep this page open until this clears.'
+              : draftStatus === 'saving'
+                ? 'Saving your changes…'
+                : 'Your changes are saved as you go, so you can leave and come back.'}
+            {' '}The confirmed XI stays as it was until you press Confirm.
+            {draftInfo?.by && draftInfo.at && !saving ? ` Last saved by ${draftInfo.by}.` : ''}
+          </span>
+          <button type="button" onClick={discardDraft} disabled={saving}
+            className="shrink-0 font-display font-semibold text-pb-accent hover:underline disabled:opacity-50">
+            Discard changes
+          </button>
+        </div>
+      )}
       <DnD onDrop={onDrop}>
         {view === 'sheet' ? <TeamSheetView vm={vm} /> : <DualRailView vm={vm} />}
       </DnD>
@@ -640,7 +926,7 @@ export default function AdminSelection() {
                     <span className="font-mono text-xs text-pb-faintest w-5 text-right">{i + 1}</span>
                     <Avatar player={p} size={26} />
                     <span className="flex-1 text-[13.5px] truncate">
-                      {p?.display_name}{id === capId && <> <Tag>C</Tag></>}{id === wkId && <> <Tag tone="amber">WK</Tag></>}
+                      {fmt(p?.display_name)}{id === capId && <> <Tag>C</Tag></>}{id === wkId && <> <Tag tone="amber">WK</Tag></>}
                       {' '}<RuleTags player={p} />
                     </span>
                     <RoleChips roles={p?.skill_positions} muted />

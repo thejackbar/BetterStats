@@ -23,6 +23,7 @@
 5. Season and grade deletes refuse while a manual game or adjustment points at them (`_season_in_use`, `_grade_in_use`, `routers/manual_entries.py`). Both FKs cascade, so these are the only guard.
 6. De-duplicating is not deleting: drop the removed record's row only for an innings the keeper already holds, never one only it had. Match unique keys with `IS NOT DISTINCT FROM`, not `=` (a season adjustment with no grade has a NULL key part).
 7. Enforced by `verify_merge_carry.py`: every `DELETE FROM manual_*` / `sa_delete(Manual*)` must be on `ALLOWED_DELETES` with a reason, and every manual table with a `players.id` FK on `CARRIED`.
+7a. A merge keeps the person too (v9.106.2): `merge_profile.carry_profile` fills the keeper's empty profile columns (photo trio as one unit) before the row is deleted, and the link tables (availability, squads, lineups, nets, family, aliases, fee/comms/CRM links) are on `CARRIED`. `fee_members`, `comms_contacts`, `crm_people` are `_NEVER_DELETE`. A new player-keyed table with a CASCADE or SET NULL FK goes on `CARRIED`; a new `players` column goes in `merge_profile.FIELDS`. Suite: `verify_merge_profile_carry.py` (own database).
 8. Recovery for a lost CricketStatz career: re-run the import (deterministic ids, upsert) onto the kept record. Hand-typed history has no recovery path.
 
 **B. A fixture belongs to both clubs**

@@ -11,6 +11,7 @@ import { useToast } from '../../../contexts/ToastContext'
 import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import { nameMatchesSearch, nameSortKey } from '../../../lib/nameFormat'
+import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { ALPHABET, RANGES, letterOfName, rangeOfName, groupByLetter } from '../../../lib/playerAlphabet'
 import { PbSpinner } from '../../../lib/presskit'
 import { bowls, bowlingLabel } from '../../../lib/playerAttributes'
@@ -32,6 +33,7 @@ function statusOfMatrixRow(row) {
 
 /* ── List row ─────────────────────────────────────────────────────────────── */
 function PlayerRow({ p, rules, active, selected, status, squadName, onSelect, onOpenProfile, onToggleSel, onEditAvail, canEditAvail }) {
+  const fmt = useAdminNameFormat()
   const inactive = p.status === 'inactive'
   const hasContact = !!(p.email || p.phone)
   return (
@@ -47,7 +49,7 @@ function PlayerRow({ p, rules, active, selected, status, squadName, onSelect, on
       </span>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
-          <span className="text-sm font-medium truncate">{p.display_name || p.name}</span>
+          <span className="text-sm font-medium truncate">{fmt(p.display_name || p.name)}</span>
           <RuleTags player={rules} />
           {p.is_overseas && (
             <span title={`Overseas${p.overseas_country ? ` — ${p.overseas_country}` : ''}`}

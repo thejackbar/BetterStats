@@ -83,6 +83,14 @@ SHARED_DDL_MODULES = (
     # Migration 316. Three columns on `players`, which the shared ORM Player
     # model maps, so the football database needs them the moment the model does.
     ("app.services.player_privacy_ddl", "STATEMENTS"),
+    # Migration 318. `org_sponsors.tier` / `.placements` and
+    # `organisations.sponsor_tier_labels`, all on shared ORM models: football's
+    # own sponsors router selects the whole Sponsor entity.
+    ("app.services.sponsor_tiers_ddl", "STATEMENTS"),
+    # Migration 319. `organisations.section_names`, on the shared Organisation model.
+    ("app.services.section_names_ddl", "STATEMENTS"),
+    # Migration 320. `organisations.post_sponsor_defaults`, on the shared Organisation model.
+    ("app.services.post_sponsors_ddl", "STATEMENTS"),
 )
 
 

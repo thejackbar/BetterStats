@@ -23,7 +23,7 @@ import asyncio
 import json
 import logging
 from collections import defaultdict
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,6 +43,8 @@ logger = logging.getLogger(__name__)
 PRICE_WINDOW_YEARS = 3
 # Price band the baseline maps into; tuned so a balanced 12 fits a 100 budget but
 # the premiums can't all be afforded. Heuristic — easy to retune once a club plays.
+# A match longer than this many days between first and last day is treated as bad data.
+MAX_MATCH_SPAN_DAYS = 10
 PRICE_MIN, PRICE_MAX, PRICE_FLOOR, PRICE_K = 4.0, 15.0, 4.0, 0.12
 
 
@@ -78,15 +80,20 @@ async def _discover_grade_guids(org_guid: str, year: int) -> list[str]:
     return found
 
 
-async def _live_calendar_dates(session: AsyncSession, fs, refresh: bool) -> tuple[set[date], int]:
-    """Dates the club plays in the fantasy season-year, read straight from the
+async def _live_calendar_spans(session: AsyncSession, fs, refresh: bool) -> tuple[list[tuple[date, date]], int]:
+    """Spans (first day, last day) of the club's matches in the fantasy season-year, read straight from the
     Play-Cricket (Grassroots) season calendar: every match in each of the
     season's grades that involves the club, whatever its status.
 
     This is why generating rounds needs no BetterSelect fixture sync and no
     played games: before a ball is bowled the stored ``games`` table is empty
-    for the new season and upcoming fixtures are never persisted there. Returns
-    ``(dates, grades_checked)``. A grade whose fetch fails contributes nothing
+    for the new season and upcoming fixtures are never persisted there.
+
+    A match is a SPAN, not a date: a two-day match carries one ``matchSchedule``
+    entry per day (``matchDay`` 1 and 2, a week apart) and the entries are not
+    reliably in day order. Reading only the first one split one match across two
+    rounds, or put it on day 2 in one grade and day 1 in another. Returns
+    ``(spans, grades_checked)``. A grade whose fetch fails contributes nothing
     (the client already swallows and logs), so a Play-Cricket blip degrades to
     "fewer dates", never an error. ``refresh`` bypasses the in-process cache so
     an admin pressing the button sees a newly published draw."""
@@ -120,7 +127,7 @@ async def _live_calendar_dates(session: AsyncSession, fs, refresh: bool) -> tupl
         except Exception:
             logger.exception("fantasy: grade discovery failed for season %s", fs.id)
     if not guids:
-        return set(), 0
+        return [], 0
 
     org = await session.get(Organisation, fs.organisation_id)
     keys = club_match_keys(org) if org is not None else []
@@ -128,7 +135,7 @@ async def _live_calendar_dates(session: AsyncSession, fs, refresh: bool) -> tupl
     batches = await asyncio.gather(
         *[gr.get_grade_matches(g, force=refresh) for g in guids], return_exceptions=True,
     )
-    dates: set[date] = set()
+    spans: list[tuple[date, date]] = []
     for matches in batches:
         if not isinstance(matches, list):
             continue
@@ -141,19 +148,68 @@ async def _live_calendar_dates(session: AsyncSession, fs, refresh: bool) -> tupl
             )
             if not ours:
                 continue
-            sched = m.get("matchSchedule") or [{}]
-            day = ((sched[0].get("startDateTime") if sched else "") or "")[:10]
-            try:
-                dates.add(date.fromisoformat(day))
-            except ValueError:
-                continue
-    return dates, len(guids)
+            days: list[date] = []
+            for entry in m.get("matchSchedule") or []:
+                try:
+                    days.append(date.fromisoformat(((entry or {}).get("startDateTime") or "")[:10]))
+                except ValueError:
+                    continue   # a bye has no schedule at all
+            if days:
+                spans.append((min(days), max(days)))
+    return spans, len(guids)
+
+
+def _group_rounds(spans: list[tuple[date, date]]) -> list[tuple[date, date]]:
+    """Turn match spans into fantasy rounds: ``[(first_day, last_day)]`` in order.
+
+    A round is a club weekend (one ISO week). A match that runs across weeks (a
+    two-day game, a week apart) bridges them, so the weeks it touches are ONE
+    round and its scorecard stays in one round. Weeks are joined transitively.
+    The window runs from the earliest to the latest actual match day in the
+    round, which also covers a stored game whose ``played_at`` is either day.
+    A span longer than ``MAX_MATCH_SPAN_DAYS`` is bad data, so only its end days
+    count as single days rather than gluing a stretch of the season together."""
+    def monday(d: date) -> date:
+        return d - timedelta(days=d.weekday())
+
+    parent: dict[date, date] = {}
+
+    def find(x: date) -> date:
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    days_by_root: dict[date, set[date]] = defaultdict(set)
+    clean: list[tuple[date, date]] = []
+    for a, b in spans:
+        if b < a:
+            a, b = b, a
+        if (b - a).days > MAX_MATCH_SPAN_DAYS:
+            clean += [(a, a), (b, b)]
+        else:
+            clean.append((a, b))
+    for a, b in clean:
+        w, last = monday(a), monday(b)
+        find(w)
+        while w < last:
+            w += timedelta(days=7)
+            parent[find(w)] = find(monday(a))
+    for a, b in clean:
+        days_by_root[find(monday(a))].update((a, b))
+    rounds = [(min(d), max(d)) for d in days_by_root.values()]
+    rounds.sort()
+    return rounds
 
 
 async def generate_rounds(session: AsyncSession, fs, refresh: bool = False) -> dict:
-    """Group the season-year's match dates into weekly rounds (a club weekend =
-    one ISO week) and upsert ``fantasy_rounds``. Idempotent on round_number;
-    never rewrites a round already marked ``scored``.
+    """Group the season-year's matches into rounds (a club weekend = one ISO
+    week; a two-day match spanning two weeks is ONE round, see ``_group_rounds``)
+    and upsert ``fantasy_rounds``. Idempotent on round_number; never rewrites a
+    round already marked ``scored``. Rounds beyond the new count that nobody has
+    scored, picked for or drawn against are removed, so a regenerate that merges
+    weeks does not leave stale rounds behind.
 
     Dates come from two places, merged: games already stored (played, synced,
     manual) and the live Play-Cricket calendar for the season's grades (upcoming
@@ -175,21 +231,18 @@ async def generate_rounds(session: AsyncSession, fs, refresh: bool = False) -> d
     )
     game_dates = {r[0] for r in rows.all()}
     try:
-        cal_dates, grades_checked = await _live_calendar_dates(session, fs, refresh)
+        cal_spans, grades_checked = await _live_calendar_spans(session, fs, refresh)
     except Exception:
         logger.exception("fantasy: live calendar read failed for season %s", fs.id)
-        cal_dates, grades_checked = set(), 0
+        cal_spans, grades_checked = [], 0
 
-    # Group play dates into ISO (year, week) buckets.
-    weeks: dict[tuple[int, int], list] = defaultdict(list)
-    for played_at in sorted(game_dates | cal_dates):
-        iso = played_at.isocalendar()
-        weeks[(iso[0], iso[1])].append(played_at)
+    cal_days = {d for a, b in cal_spans for d in (a, b)}
+    windows = _group_rounds(cal_spans + [(d, d) for d in game_dates])
     result = {
-        "rounds": len(weeks), "from_games": len(game_dates),
-        "from_calendar": len(cal_dates), "grades_checked": grades_checked,
+        "rounds": len(windows), "from_games": len(game_dates),
+        "from_calendar": len(cal_days), "grades_checked": grades_checked,
     }
-    if not weeks:
+    if not windows:
         if grades_checked:
             result["detail"] = (
                 f"No rounds yet: Play-Cricket has no matches published for the club in "
@@ -209,13 +262,11 @@ async def generate_rounds(session: AsyncSession, fs, refresh: bool = False) -> d
     )
     scored = {r["round_number"] for r in existing.mappings() if r["status"] == "scored"}
 
-    n = 0
-    for n, key in enumerate(sorted(weeks), start=1):
+    for n, (first, last) in enumerate(windows, start=1):
         if n in scored:
             continue  # leave settled rounds untouched
         # games.played_at is a DATE, so the round window is date-keyed. We don't
         # hold kick-off times, so the lock is the start of the round's first day.
-        dates = sorted(weeks[key])
         await session.execute(
             text("""
                 INSERT INTO fantasy_rounds
@@ -228,11 +279,26 @@ async def generate_rounds(session: AsyncSession, fs, refresh: bool = False) -> d
             """),
             {
                 "fs": str(fs.id), "org": str(fs.organisation_id), "n": n,
-                "name": f"Round {n}", "lock_at": datetime.combine(dates[0], time()),
-                "start": dates[0], "end": dates[-1],
+                "name": f"Round {n}", "lock_at": datetime.combine(first, time()),
+                "start": first, "end": last,
             },
         )
-    result["detail"] = f"Generated {len(weeks)} round{'' if len(weeks) == 1 else 's'} from the {fs.season_year}/{(fs.season_year + 1) % 100:02d} draw."
+    # Merging weeks can leave fewer rounds than an earlier run made. Drop the
+    # surplus only when nothing at all hangs off it (no scores, squad lineups or
+    # chips, draws or transfers): those rows record what somebody did.
+    await session.execute(
+        text("""
+            DELETE FROM fantasy_rounds r
+            WHERE r.fantasy_season_id = CAST(:fs AS UUID) AND r.round_number > :n
+              AND r.status <> 'scored'
+              AND NOT EXISTS (SELECT 1 FROM fantasy_player_round_scores x WHERE x.round_id = r.id)
+              AND NOT EXISTS (SELECT 1 FROM fantasy_squad_round_scores x WHERE x.round_id = r.id)
+              AND NOT EXISTS (SELECT 1 FROM fantasy_transactions x WHERE x.round_id = r.id)
+              AND NOT EXISTS (SELECT 1 FROM fantasy_h2h_fixtures x WHERE x.round_id = r.id)
+        """),
+        {"fs": str(fs.id), "n": len(windows)},
+    )
+    result["detail"] = f"Generated {len(windows)} round{'' if len(windows) == 1 else 's'} from the {fs.season_year}/{(fs.season_year + 1) % 100:02d} draw."
     return result
 
 

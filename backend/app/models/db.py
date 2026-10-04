@@ -26,6 +26,13 @@ engine = create_async_engine(
     pool_timeout=settings.db_pool_timeout,
     pool_recycle=settings.db_pool_recycle,
     pool_pre_ping=True,
+    # JIT OFF FOR EVERY CONNECTION. The `v_effective_*` views plan at a cost of
+    # millions, past Postgres's JIT thresholds, so every read of one compiled a
+    # plan first: 6 to 7s of compiling in front of a read that runs in well
+    # under a second. Only the record book had turned it off, for itself. This
+    # is OLTP-sized work against a 370 MB database; there is nothing here JIT
+    # can win back. A startup parameter, so no pooled connection can lack it.
+    connect_args={"server_settings": {"jit": "off"}},
 )
 async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -333,6 +340,19 @@ class Organisation(Base):
     # default. Signed-in club admins still see everything. Read through
     # services/junior_hiding.py, never directly.
     hide_juniors = Column(Boolean, nullable=False, server_default="false", default=False)
+    # The club's own names for the four sponsor tiers (migration 318), e.g.
+    # {"major": "Naming Partner"}. NULL means the stock names. Read through
+    # services/sponsor_tiers.resolve_labels, never directly.
+    sponsor_tier_labels = Column(JSONB, nullable=True)
+    # The club's own names for its public sections, optionally linked to a
+    # sponsor (migration 319), e.g. {"fantasy": {"name": "Froth Fantasy
+    # Cricket", "sponsor_id": "..."}}. NULL means standard names everywhere.
+    # Read through services/section_names.py, never directly.
+    section_names = Column(JSONB, nullable=True)
+    # Sponsors pinned to a team or a grade so every post for it starts with them
+    # (migration 320). NULL means none pinned. Read through
+    # services/post_sponsors.py, never directly.
+    post_sponsor_defaults = Column(JSONB, nullable=True)
     # Which grade categories count towards this club's stats by default — a
     # JSONB list of grade_labels.GRADE_CATEGORIES keys (migration 228). NULL
     # means no club preference, and the platform default applies: everything
@@ -641,6 +661,11 @@ class Sponsor(Base):
     contact_name = Column(Text, nullable=True)
     email = Column(Text, nullable=True)
     klubpro_sponsor_id = Column(Text, nullable=True)
+    # Tier and hand-set placement switches (migration 318). Where a sponsor
+    # shows is derived on read through services/sponsor_tiers.py: the tier's
+    # defaults with `placements` applied on top (NULL = follow the tier).
+    tier = Column(Text, nullable=False, server_default="silver", default="silver")
+    placements = Column(JSONB, nullable=True)
 
 
 # ─── BetterSocials media library (migration 191) ─────────────────────────────
@@ -1458,7 +1483,9 @@ class Player(Base):
 
     @property
     def display_name(self) -> str:
-        return self.display_name_override or self.name
+        # A free-text "First Last" override is shown as "Last, First" like synced names.
+        from app.services.name_format import canonical_player_name
+        return canonical_player_name(self.display_name_override) or self.name
 
 
 class PlayerNameAlias(Base):

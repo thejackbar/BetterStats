@@ -1,10 +1,10 @@
 export default {
   version: 'v9.102.7',
   date: '2026-10-02',
-  sortKey: '2026-10-02T06:00:00Z',
-  title: 'A player removed at their own request has no public profile for anyone',
+  sortKey: '2026-10-02T12:00:00Z',
+  title: 'BetterFantasyCricket: two-day games are one round',
   items: [
-    'A player who asked to be removed now has no public profile page for anyone, including a signed-in club admin. Before, an admin could still open the page, which made it hard to tell whether it had really gone. Hidden players you set yourself still show to your own admins as before.',
-    'Editing their record, their former names and their sync request still work from the admin screens. Their profile card no longer shows a "View public profile" link.',
+    'A two-day match now counts as a single fantasy round. Before, the first week of a two-day game was one round and the second week was another, so a club with two-day men\'s games got extra rounds and the scoring window was cut in half. Both days of a match now sit in the same round, whichever day the scorecard is dated.',
+    'When Generate rounds merges weeks like this, any extra rounds left over from an earlier run are removed, as long as nothing has been scored, picked or drawn against them. Rounds that are already scored are never touched.',
   ],
 }

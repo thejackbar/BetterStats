@@ -34,6 +34,7 @@ export function syncProgressLabel(s) {
 const KIND_LABEL = {
   org_full: 'sync now',
   org_recent: 'results sync',
+  org_quick: 'quick sync',
   org_hard_refresh: 'full rebuild',
   player_deep: 'player deep sync',
 }

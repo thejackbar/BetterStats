@@ -1,13 +1,28 @@
 /**
+ * Put a stored name into the canonical "Last, First" shape. Only the
+ * unambiguous two-word free-text override ("Damian O'Hara") is flipped; a
+ * single token or three or more words are left alone, since a middle name and
+ * a double-barrelled surname look the same. Mirrors the backend
+ * canonical_player_name.
+ */
+export function canonicalPlayerName(name) {
+  if (!name || name.includes(',')) return name
+  const words = name.trim().split(/\s+/)
+  return words.length === 2 ? `${words[1]}, ${words[0]}` : name
+}
+
+/**
  * Format a player name stored as "Last, First" into the desired display format.
- * If the name doesn't contain a comma (e.g. a display_name_override), it's returned as-is.
+ * A two-word free-text override is treated as "First Last". Any other name
+ * without a comma is returned as-is.
  */
 export function formatPlayerName(name, format) {
   if (!name) return name
+  name = canonicalPlayerName(name)
   if (!format || format === 'last_first') return name
 
   const commaIdx = name.indexOf(',')
-  if (commaIdx === -1) return name  // custom override or unusual format — don't touch
+  if (commaIdx === -1) return name  // single token or unusual format — don't touch
 
   const last = name.slice(0, commaIdx).trim()
   const first = name.slice(commaIdx + 1).trim()
