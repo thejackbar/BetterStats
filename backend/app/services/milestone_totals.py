@@ -40,6 +40,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.game_status import not_played_game_sql
 from app.services.grade_labels import GRADE_CATEGORIES, categories_for_name, org_grade_category_sets
+from app.services.summary_only_seasons import held_years_cte, summary_only_seasons_clause
 from app.services.grade_scope import DEFAULT_CATEGORIES, GradeScope, club_default_categories, resolve_scope
 
 STATS = ("runs", "wickets", "matches", "catches")
@@ -143,7 +144,12 @@ async def _scoped(session: AsyncSession, org_id, pids: list[str],
 
     residual = scope.clause("pss.grade_id", "aggregate", label_column="pss.grade_label")
     params["sources"] = list(RESIDUAL_SOURCES)
+    # A season CA gave a total for and the club holds no scorecards for is added
+    # back, as the profile does (summary_only_seasons).
+    held = held_years_cte(
+        f"{_OURS}{game_scope}", lambda a: f"{a}.player_id = ANY({_PIDS})")
     rows = await session.execute(text(f"""
+        WITH {held}
         SELECT pss.player_id::text AS pid,
                COALESCE(SUM(pss.runs), 0)    AS runs,
                COALESCE(SUM(pss.wickets), 0) AS wickets,
@@ -151,7 +157,8 @@ async def _scoped(session: AsyncSession, org_id, pids: list[str],
                COALESCE(SUM(pss.catches), 0) AS catches
         FROM v_effective_player_season_stats pss
         WHERE pss.player_id = ANY({_PIDS})
-          AND pss.source = ANY(:sources){residual}
+          AND ((pss.source = ANY(:sources){residual})
+               OR {summary_only_seasons_clause(scope)})
         GROUP BY pss.player_id
     """), params)
     for r in rows.mappings():

@@ -5,7 +5,13 @@ from datetime import date as date_cls
 import uuid
 
 from app.services import milestone_scan
-from app.services.club_grades import club_game_sql
+from app.services.club_grades import club_game_clause, club_game_sql
+from app.services.summary_only_seasons import (
+    HISTORICAL_BUNDLE_MATCH_CAP,
+    club_player_ids as _club_player_ids,
+    held_years_cte as _held_years_cte,
+    summary_only_seasons_clause as _summary_only_seasons_clause,
+)
 from app.services.grade_scope import GradeScope
 from app.services.game_status import appearance_counts_as_match, not_played_game_sql
 from app.services import rate_coverage as rc
@@ -116,8 +122,12 @@ def _residual_totals_cte(scope: GradeScope, season_ids, params: dict) -> str:
     params["residual_sources"] = list(_RESIDUAL_SOURCES)
     scope.bind(params)
     season_clause = " AND pss.season_id = ANY(:season_ids)" if season_ids else ""
+    # The caller binds `club_player_ids` (see _club_player_ids) beside `org_id`.
+    held = _held_years_cte(
+        f"{_OURS_GAMES}{scope.clause('g.grade_id')}",
+        lambda a: f"{a}.player_id = ANY(CAST(:club_player_ids AS uuid[]))")
     return f"""
-        residual_totals AS (
+        {held}, residual_totals AS (
             SELECT pss.player_id,
                 COALESCE(SUM(pss.matches), 0) AS games,
                 COALESCE(SUM(pss.batting_innings), 0) AS innings,
@@ -144,7 +154,9 @@ def _residual_totals_cte(scope: GradeScope, season_ids, params: dict) -> str:
                 COALESCE(SUM(pss.run_outs), 0) AS total_run_outs,
                 COALESCE(SUM(pss.stumpings), 0) AS total_stumpings
             FROM v_effective_player_season_stats pss
-            WHERE pss.source = ANY(:residual_sources){season_clause}{scope.clause("pss.grade_id", "aggregate", label_column="pss.grade_label")}
+            WHERE pss.player_id = ANY(CAST(:club_player_ids AS uuid[])){season_clause}
+              AND ((pss.source = ANY(:residual_sources){scope.clause("pss.grade_id", "aggregate", label_column="pss.grade_label")})
+                   OR {_summary_only_seasons_clause(scope)})
             GROUP BY pss.player_id
         )
     """
@@ -178,8 +190,19 @@ async def _career_residuals(
     scope_clause = scope.clause("pss.grade_id", "aggregate", label_column="pss.grade_label") if _scoped(scope) else ""
     if _scoped(scope):
         scope.bind(params)
+    # A summary-only season (no scorecards that year) is added back as well:
+    # see _summary_only_seasons_clause.
+    summary_clause = "FALSE"
+    held = ""
+    if _scoped(scope):
+        params["club_org"] = await _player_org_id(session, player_id)
+        held = "WITH" + _held_years_cte(
+            "TRUE" + scope.clause("g.grade_id") + club_game_clause("g"),
+            lambda a: f"{a}.player_id = CAST(:pid AS UUID)")
+        summary_clause = _summary_only_seasons_clause(scope)
     res = await session.execute(
         text(f"""
+            {held}
             SELECT
                 COALESCE(SUM(pss.matches), 0) AS games,
                 COALESCE(SUM(pss.batting_innings), 0) AS innings,
@@ -206,8 +229,8 @@ async def _career_residuals(
                 COALESCE(SUM(pss.run_outs), 0) AS total_run_outs,
                 COALESCE(SUM(pss.stumpings), 0) AS total_stumpings
             FROM v_effective_player_season_stats pss
-            WHERE pss.player_id = CAST(:pid AS UUID)
-              AND pss.source = ANY(:sources){season_clause}{scope_clause}
+            WHERE pss.player_id = CAST(:pid AS UUID){season_clause}
+              AND ((pss.source = ANY(:sources){scope_clause}) OR {summary_clause})
         """),
         params,
     )
@@ -1328,6 +1351,7 @@ async def get_fielding_leaderboard(
         # board reads grade-blind season aggregates, so a category filter has to
         # be answered from per-game rows plus the aggregate-only residuals.
         season_clause = " AND g.season_id = ANY(:season_ids)" if season_ids else ""
+        params["club_player_ids"] = await _club_player_ids(session, org_id)
         residual_cte = _residual_totals_cte(scope, season_ids, params)
         matches_cte = _matches_played_cte(season_clause, scope_clause)
         base = f"""
@@ -2398,7 +2422,7 @@ _SEASON_FOLD_CTE = """
 # a player (Keith London: 256, David Cohen: 119). A season row above this cap is a
 # historical bundle, not a season — it's folded into "Prior Seasons & Adjustments"
 # rather than shown as a dated season.
-_HISTORICAL_BUNDLE_MATCH_CAP = 60
+_HISTORICAL_BUNDLE_MATCH_CAP = HISTORICAL_BUNDLE_MATCH_CAP
 
 
 async def _season_by_season_scoped(
@@ -2432,6 +2456,10 @@ async def _season_by_season_scoped(
     clause = (scope.clause("g.grade_id")
               + await _club_game_clause(session, player_id, params))
     resid_clause = scope.clause("pss.grade_id", "aggregate", label_column="pss.grade_label")
+    held = _held_years_cte(
+        "TRUE" + scope.clause("g.grade_id") + club_game_clause("g"),
+        lambda a: f"{a}.player_id = CAST(:pid AS UUID)")
+    params["club_org"] = await _player_org_id(session, player_id)
     fold = _SEASON_FOLD_CTE.rstrip() + ",\n"
     res = await session.execute(
         text(f"""
@@ -2515,7 +2543,7 @@ async def _season_by_season_scoped(
             -- Aggregate-only rows with no scorecards behind them (an imported
             -- season, a manual season adjustment). Filtered by grade_id where
             -- one is set; exclusion semantics keep the usual grade-less rows.
-            resid AS (
+            {held}, resid AS (
                 SELECT COALESCE(sf.fold_id, pss.season_id) AS sid,
                     SUM(pss.matches) AS matches,
                     SUM(pss.batting_innings) AS batting_innings,
@@ -2548,7 +2576,8 @@ async def _season_by_season_scoped(
                 LEFT JOIN season_fold sf ON sf.raw_id = pss.season_id
                 WHERE pss.player_id = CAST(:pid AS UUID)
                   AND pss.season_id IS NOT NULL
-                  AND pss.source = ANY(:residual_sources){resid_clause}
+                  AND ((pss.source = ANY(:residual_sources){resid_clause})
+                       OR {_summary_only_seasons_clause(scope)})
                 GROUP BY COALESCE(sf.fold_id, pss.season_id)
             )
             SELECT
@@ -3597,6 +3626,7 @@ async def get_batting_leaderboard_extended(
         # Scoped through `v_effective_games.season_id` rather than a grades join,
         # so a manual game entered without a grade is not silently dropped.
         season_clause = " AND g.season_id = ANY(:season_ids)" if season_ids else ""
+        params["club_player_ids"] = await _club_player_ids(session, org_id)
         residual_cte = _residual_totals_cte(scope, season_ids, params)
         matches_cte = _matches_played_cte(season_clause, scope_clause)
         base = f"""
@@ -4128,6 +4158,7 @@ async def get_bowling_leaderboard_extended(
     if _scoped(scope):
         # See get_batting_leaderboard_extended's equivalent branch.
         season_clause = " AND g.season_id = ANY(:season_ids)" if season_ids else ""
+        params["club_player_ids"] = await _club_player_ids(session, org_id)
         residual_cte = _residual_totals_cte(scope, season_ids, params)
         matches_cte = _matches_played_cte(season_clause, scope_clause)
         base = f"""
