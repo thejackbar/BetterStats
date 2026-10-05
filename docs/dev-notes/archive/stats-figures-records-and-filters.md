@@ -2258,7 +2258,7 @@ Closes the "NOT done" section of the v9.102.12 note. Local database of productio
 
 **Proof.** `verify_summary_only_seasons.py` (20 checks) on the real view stack. Control run on the previous `aggregations.py`: Brad 0/0/0, the summary-only club 0, the season table 0, the board 0, career batting and fielding 0. Unchanged on both: junior-only and split seasons stay out, a covered year adds nothing, bundle stays out. `verify_player_season_fold.py` expectations updated (its scoped table now includes a summary-only 2019/20 season, 17 innings and 731 runs); `verify_milestone_figures.py` caught the milestone scan disagreeing with the profile until it shared the definition. Also green: junior residual scope, rate coverage, retired not out, shared fixture stats, hide juniors, leaderboard grade matches.
 
-## v9.106.11: BetterSocials and the other modules (Oct 2026)
+## v9.106.13: BetterSocials and the other modules (Oct 2026)
 
 The owner sent three BetterSocials posts (Final Score, Result, Man of the Match) that still named a removed player, and asked that ALL modules honour the block. Three separate causes, found by reading where each post gets its data:
 

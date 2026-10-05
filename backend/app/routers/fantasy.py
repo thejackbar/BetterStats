@@ -35,7 +35,7 @@ from app.models.db import (
     FantasySeason, FantasyLeague, FantasyLeagueMember, FantasyRound, FantasyPoolPlayer,
     FantasyManager, FantasySquad, FantasySquadPlayer, FantasyDraft, FANTASY_ROLES,
 )
-from app.services import fantasy_engine, fantasy_draft, fantasy_pool_check
+from app.services import fantasy_engine, fantasy_draft, fantasy_pool_check, fantasy_grades
 from app.routers import public_fantasy
 from app.services.fantasy_scoring import DEFAULT_SCORING, DEFAULT_RULES
 from app.services.session_safety import rollback_keeping
@@ -726,19 +726,62 @@ async def list_manual_scores(season_id: str, club=Depends(get_current_club), db:
     } for r in rows]}
 
 
+# ── which grades count towards scoring ──────────────────────────────────────────
+
+@router.get("/season/{season_id}/grades")
+async def season_grades(season_id: str, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
+    """The grades that can count this season, grouped by the club's competitions,
+    each with its games so far and whether it is switched on."""
+    fs = await _load_season(db, club, season_id)
+    return await fantasy_grades.grade_options(db, fs)
+
+
+class GradeScopeBody(BaseModel):
+    excluded_keys: list[str]
+
+
+@router.put("/season/{season_id}/grades")
+async def set_season_grades(season_id: str, body: GradeScopeBody, club=Depends(get_current_club),
+                            db: AsyncSession = Depends(get_db), _=_require):
+    """Switch grades off (or back on) for this season's scoring. ``excluded_keys``
+    is every grade that should NOT count; anything not listed counts. Rounds already
+    scored are scored again with the new choice, each team keeping the players it
+    had in that round, so the ladder changes. Round dates for later weekends refresh
+    overnight."""
+    fs = await _load_season(db, club, season_id)
+    options = await fantasy_grades.grade_options(db, fs)
+    known = fantasy_grades.all_keys(options)
+    unknown = sorted(set(body.excluded_keys) - known)
+    if unknown:
+        raise HTTPException(status_code=400, detail="Some of those grades aren't part of this season. Refresh and try again.")
+    if known and known <= set(body.excluded_keys):
+        raise HTTPException(status_code=400, detail="Leave at least one grade switched on, or nothing would score.")
+    # Keep a switch-off for a grade that has no games or row this season yet, so it
+    # is still off when the grade appears.
+    carried = fantasy_engine.excluded_grade_keys(fs) - known
+    rules = dict(fs.rules or DEFAULT_RULES)
+    rules["excluded_grade_keys"] = sorted(carried | set(body.excluded_keys))
+    fs.rules = rules
+    fs.included_grade_ids = None                   # superseded: the list above says it all
+    await db.flush()
+    done = await fantasy_engine.rescore_from_round(db, fs, 1)
+    await db.commit()
+    return {"ok": True, "excluded": rules["excluded_grade_keys"], "rescored": done}
+
+
 # ── hand-added players and their real profiles ─────────────────────────────────
 
 @router.get("/season/{season_id}/unmatched-players")
 async def unmatched_players(season_id: str, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
     """Pool players with no games this season. ``pairs`` are the ones that have a
-    same-name profile with games (merge them); ``waiting`` are hand-added players
-    picked by a team with no such profile yet (nothing to merge until they play)."""
+    same-name profile with games (merge them); ``waiting`` are players picked by a
+    team who have no counted games this season and no such profile to merge."""
     fs = await _load_season(db, club, season_id)
     rows = await fantasy_pool_check.zero_stat_pool_players(db, club.id)
     return {
         "season_year": fs.season_year,
         "pairs": [r for r in rows if r["twins"]],
-        "waiting": [r for r in rows if not r["twins"] and r["added_by_hand"] and r["picked_by"] > 0],
+        "waiting": [r for r in rows if not r["twins"] and r["picked_by"] > 0],
     }
 
 

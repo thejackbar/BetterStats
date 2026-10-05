@@ -843,7 +843,7 @@ Comms could reach 128. Two separate causes, and the second is the structural one
   list/segment decision, not an address-book one.
 <!-- END original CLAUDE.md L17075-17125 -->
 
-## v9.106.13: No email to a person who asked to be removed (Oct 2026)
+## v9.106.14: No email to a person who asked to be removed (Oct 2026)
 
 The owner asked that BetterComms, and every email, leave out the removed player, and any person who asks. Rather than audit 26 callers of `get_email_provider()` and hope, the block sits where they all converge: the provider returned by `get_email_provider()` is wrapped (`PrivacyGuardedProvider`) and refuses a recipient on the removed list with a `SendResult(ok=False, error="blocked: ...")`, which every caller already handles as a failed send, so it reads as a failure and never as a success (rule 26). The same list is applied in `email_suppression.deliverable()` for the per-club senders and in `comms_segments.sendable_where` so an audience, a count and a "reachable" figure never include the person.
 

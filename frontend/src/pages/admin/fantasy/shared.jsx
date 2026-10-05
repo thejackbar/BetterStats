@@ -13,10 +13,10 @@ import { CAP } from '../../../lib/capabilities'
 export const ROLES = ['keeper', 'batter', 'allrounder', 'bowler']
 export const fmt = (n) => (n == null ? '—' : Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
 
-export function Btn({ onClick, busy, children, kind = 'accent' }) {
+export function Btn({ onClick, busy, disabled, children, kind = 'accent' }) {
   const base = 'px-3 py-1.5 rounded text-sm font-medium disabled:opacity-50 transition-opacity'
   const cls = kind === 'accent' ? 'bg-pb-accent text-white hover:opacity-90' : 'border pb-hairline text-pb-text hover:bg-pb-surface2'
-  return <button onClick={onClick} disabled={busy} className={`${base} ${cls}`}>{busy ? '…' : children}</button>
+  return <button onClick={onClick} disabled={busy || disabled} className={`${base} ${cls}`}>{busy ? '…' : children}</button>
 }
 
 export function Field({ label, children }) {
@@ -778,11 +778,99 @@ export function HandAddedPlayersCard({ season, flash, fail }) {
         </div>
       )}
       {!!data.waiting.length && (
-        <p className="mt-3 text-xs text-pb-faint">
-          Added by hand and not played yet, so there is nothing to merge: {data.waiting.map(w => `${w.name} (${w.picked_by} team${w.picked_by === 1 ? '' : 's'})`).join(', ')}.
-          They will show up above once a profile with the same name has a game.
-        </p>
+        <div className="mt-3 text-xs text-pb-faint">
+          Picked by teams, but with no games counted this season and no same-name profile to merge:{' '}
+          {data.waiting.map(w => `${w.name} (${w.picked_by} team${w.picked_by === 1 ? '' : 's'}${w.added_by_hand ? ', added by hand' : ''})`).join(', ')}.
+          <div className="mt-1">
+            If one of them has played, their game may be on a different profile (look for a duplicate on the Players page), in a grade that is switched off, or not synced yet.
+          </div>
+        </div>
       )}
+    </div>
+  )
+}
+
+
+// Which competitions and grades count towards this season's scoring. Everything is on
+// to begin with; switch a grade (or a whole competition) off and games in it stop
+// scoring. By grade name, so the same grade is left out wherever a shared fixture is
+// stored. A grade that turns up later counts until it is switched off. Saving scores
+// the rounds already scored again, each team keeping the players it had that round.
+export function GradeScopeCard({ season, flash, fail, onSaved }) {
+  const [opts, setOpts] = useState(null)
+  const [off, setOff] = useState(new Set())      // keys switched off in the form
+  const [saved, setSaved] = useState(new Set())  // keys switched off on the server
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(() => api.fantasyGrades(season.id).then(d => {
+    const o = new Set(d.competitions.flatMap(c => c.grades).filter(g => !g.on).map(g => g.key))
+    setOpts(d); setOff(o); setSaved(o)
+  }).catch(e => { setOpts({ competitions: [] }); fail(e) }), [season.id, fail])
+  useEffect(() => { load() }, [load])
+
+  if (!opts) return null
+  const all = opts.competitions.flatMap(c => c.grades)
+  if (!all.length) {
+    return (
+      <div className="pb-card p-5">
+        <h3 className="font-display font-bold mb-1">Which grades count</h3>
+        <p className="text-xs text-pb-faint">No grades for this season have been synced yet. They appear here once the club has fixtures, and every grade counts until you switch one off.</p>
+      </div>
+    )
+  }
+  const dirty = off.size !== saved.size || [...off].some(k => !saved.has(k))
+  const nothingOn = all.every(g => off.has(g.key))
+  const toggle = (key) => setOff(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n })
+  const toggleGroup = (grades) => setOff(prev => {
+    const n = new Set(prev)
+    const allOn = grades.every(g => !n.has(g.key))
+    grades.forEach(g => (allOn ? n.add(g.key) : n.delete(g.key)))
+    return n
+  })
+  const save = async () => {
+    if (!window.confirm('Save this? Rounds that are already scored are scored again with these grades, so the ladder will change. Each team keeps the players it had in that round.')) return
+    setBusy(true)
+    try { await api.fantasySetGrades(season.id, [...off]); flash('Saved. Scored rounds were scored again.'); await load(); onSaved?.() }
+    catch (e) { fail(e) } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="pb-card p-5">
+      <h3 className="font-display font-bold mb-1">Which competitions and grades count</h3>
+      <p className="text-xs text-pb-faint mb-3">
+        This season ({opts.season_year}) only. Everything counts to begin with. Switch a grade or a whole competition off and games in it stop scoring,
+        including a fixture the other club has stored under its own copy of that grade. A grade that appears later counts until you switch it off.
+      </p>
+      <div className="space-y-4">
+        {opts.competitions.map(c => {
+          const n = c.grades.filter(g => !off.has(g.key)).length
+          return (
+            <div key={c.id || 'other'} className="rounded border pb-hairline">
+              <label className="flex items-center gap-3 px-3 py-2 bg-pb-surface2/40 cursor-pointer">
+                <input type="checkbox" checked={n === c.grades.length} ref={el => { if (el) el.indeterminate = n > 0 && n < c.grades.length }}
+                  onChange={() => toggleGroup(c.grades)} className="h-4 w-4 shrink-0" />
+                <span className="font-medium text-sm min-w-0 break-words flex-1">{c.name}</span>
+                <span className="text-xs text-pb-faint shrink-0">{n} of {c.grades.length} on</span>
+              </label>
+              <div className="divide-y pb-hairline">
+                {c.grades.map(g => (
+                  <label key={g.key} className="flex items-center gap-3 px-3 py-2 cursor-pointer">
+                    <input type="checkbox" checked={!off.has(g.key)} onChange={() => toggle(g.key)} className="h-4 w-4 shrink-0 ml-5" />
+                    <span className={`text-sm min-w-0 break-words flex-1 ${off.has(g.key) ? 'text-pb-faint line-through' : ''}`}>{g.name}</span>
+                    <span className="text-xs text-pb-faint shrink-0">{g.games} game{g.games === 1 ? '' : 's'}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      {nothingOn && <p className="mt-3 text-xs text-amber-400">Leave at least one grade switched on, or nothing would score.</p>}
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <Btn onClick={save} busy={busy} disabled={!dirty || nothingOn}>Save and re-score</Btn>
+        {dirty && !busy && <button onClick={() => setOff(new Set(saved))} className="text-xs underline text-pb-faint hover:text-pb-text">Undo changes</button>}
+        {!dirty && off.size > 0 && <span className="text-xs text-pb-faint">{off.size} grade{off.size === 1 ? '' : 's'} switched off</span>}
+      </div>
     </div>
   )
 }

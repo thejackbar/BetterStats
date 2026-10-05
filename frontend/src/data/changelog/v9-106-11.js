@@ -1,12 +1,10 @@
 export default {
   version: 'v9.106.11',
   date: '2026-10-05',
-  sortKey: '2026-10-05T01:00:00Z',
-  title: 'BetterSocials posts and every other module now leave out a player who asked to be removed',
+  sortKey: '2026-10-05T16:00:00Z',
+  title: 'Fantasy: clearer reasons when a player has no stats, and the engine can switch grades off',
   items: [
-    'A player removed at their own request no longer appears in BetterSocials. The scorecard post shows their row masked as ******** so the totals still add up, and they cannot be picked for Player of the Match, Team of the Week, a lineup or a debut tag. This applies to a signed-in admin too, because the post is what gets published.',
-    'Relatives are still safe. With a Tom and a Sam Steenholdt beside a removed Trent, only Trent is masked, because it goes by the player\'s id and not by the surname.',
-    'BetterIQ and BetterScout, which show other clubs\' players, no longer show a removed player either. Your own admin screens (Players, Directory, fees, selection) still show the real record so you can manage it.',
-    'Posts you have already made and shared are not changed. They need deleting where they were posted.',
+    'The card on Fantasy > Registered players now says "added by hand" only for a player created in Fantasy with no Cricket Australia or PlayHQ id. Before, it also said so for any synced player whose pool role an admin had changed, which was misleading.',
+    'The list underneath is now every player picked by teams who has no games counted this season and no same-name profile to merge, with the usual reasons: their game may be on a different profile (a duplicate on the Players page), in a grade that is switched off, or not synced yet.',
   ],
 }
