@@ -721,7 +721,30 @@ async def sync_organisation(
             "progress_pct": 0, "progress_done": None, "progress_total": None,
         })
     async with _SYNC_GOVERNOR:
-        return await _sync_organisation_impl(org_id_str, run_id=run_id, kind=kind, since=since)
+        result = await _sync_organisation_impl(org_id_str, run_id=run_id, kind=kind, since=since)
+    # Outside the governor: the fee refresh is database-only and must not hold
+    # the slot another club's sync is queued behind.
+    if kind != "player_deep":
+        await _refresh_fee_match_days(org_id_str)
+    return result
+
+
+async def _refresh_fee_match_days(org_id_str: str) -> None:
+    """Rebuild the club's auto-derived fee match days off the games just synced.
+
+    Lives here, not in the scheduler, because every way of pulling games in
+    (the scheduled run, Sync Now, Full Rebuild, hard refresh, self-serve
+    registration) ends in ``sync_organisation``. It used to run only after the
+    scheduled sync, so a game pulled in by hand left a player on the fee list
+    with no match day until someone pressed Rebuild match days.
+
+    Never raises: a fee error must not turn a good sync into a failed one.
+    """
+    try:
+        from app.services.fees import recompute_fee_match_days
+        await recompute_fee_match_days(org_id_str)
+    except Exception as e:
+        logger.error(f"Fee recompute failed for org {org_id_str}: {e}")
 
 
 async def _sync_organisation_impl(
