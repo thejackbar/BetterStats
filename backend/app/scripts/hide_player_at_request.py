@@ -37,6 +37,15 @@ USAGE (dry run unless --apply)
 ``--report`` prints what we hold against the person (every table with a
 foreign key to ``players``, plus the scouting copy), for an access request.
 ``--keep-photos`` hides the player without touching the photographs.
+
+``--evidence`` writes a PDF (or ``--format html``) the person can be sent: every
+match they are recorded in as a clickable link to the scorecard (their name reads
+********) and to their profile page (it says "Player not found"), checked live
+from the server unless ``--no-verify``. It holds nothing financial. It is written
+to stdout, so from the server:
+
+    docker compose exec -T betterstats-backend python -m app.scripts.hide_player_at_request \
+        <player_id> --evidence > evidence.pdf
 """
 from __future__ import annotations
 
@@ -55,6 +64,23 @@ async def run(args) -> int:
         if player is None:
             print(f"No player with id {args.player_id}", file=sys.stderr)
             return 2
+
+        if getattr(args, "evidence", False):
+            from app.services import privacy_evidence
+            data = await privacy_evidence.gather(session, player, args.base_url)
+            checks = None if args.no_verify else await privacy_evidence.verify(data)
+            if args.format == "html":
+                sys.stdout.write(privacy_evidence.render_html(data, checks))
+            else:
+                sys.stdout.flush()
+                sys.stdout.buffer.write(privacy_evidence.render_pdf(data, checks))
+                sys.stdout.buffer.flush()
+            if checks:
+                bad = [u for u, c in checks.items() if c["ok"] is False]
+                n_ok = sum(1 for c in checks.values() if c["ok"])
+                print(f"evidence: {n_ok} of {len(checks)} checks passed, {len(bad)} failed"
+                      + ("".join(f"\n  FAILED: {u}" for u in bad)), file=sys.stderr)
+            return 1 if checks and any(c["ok"] is False for c in checks.values()) else 0
 
         report = await player_privacy.holdings(session, player)
         print(json.dumps(report, indent=2, default=str))
@@ -105,6 +131,10 @@ def main() -> None:
     ap.add_argument("--restore", action="store_true", help="put the player back on the public site")
     ap.add_argument("--keep-photos", action="store_true", help="hide without removing photographs")
     ap.add_argument("--apply", action="store_true", help="write (default is a dry run)")
+    ap.add_argument("--evidence", action="store_true", help="write the PDF/HTML evidence document to stdout")
+    ap.add_argument("--format", choices=("pdf", "html"), default="pdf", help="evidence format (default pdf)")
+    ap.add_argument("--base-url", default="https://betterat.cricket", help="site the links point at")
+    ap.add_argument("--no-verify", action="store_true", help="do not open the links live from the server")
     sys.exit(asyncio.run(run(ap.parse_args())))
 
 
