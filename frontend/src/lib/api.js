@@ -3801,6 +3801,17 @@ export const api = {
     request(`/club-admin/fantasy/managers/${managerId}`, { method: 'DELETE' }),
   fantasyManagerTeams: (managerId) =>
     request(`/club-admin/fantasy/managers/${managerId}/teams`),
+  fantasyPlayerSearch: (seasonId, q) =>
+    request(`/club-admin/fantasy/season/${seasonId}/player-search?q=${encodeURIComponent(q)}`),
+  fantasyAddSquadPlayer: (squadId, data) =>
+    request(`/club-admin/fantasy/squads/${squadId}/players`, { method: 'POST', body: JSON.stringify(data) }),
+  fantasyRemoveSquadPlayer: (squadId, playerId, fromRound = 1) =>
+    request(`/club-admin/fantasy/squads/${squadId}/players/${playerId}?from_round=${fromRound}`, { method: 'DELETE' }),
+  fantasyManualScores: (seasonId) => request(`/club-admin/fantasy/season/${seasonId}/manual-scores`),
+  fantasySetManualScore: (roundId, playerId, data) =>
+    request(`/club-admin/fantasy/rounds/${roundId}/players/${playerId}/score`, { method: 'PUT', body: JSON.stringify(data) }),
+  fantasyClearManualScore: (roundId, playerId) =>
+    request(`/club-admin/fantasy/rounds/${roundId}/players/${playerId}/score`, { method: 'DELETE' }),
 }
 
 function _iqQs(opponent, fixtureId, team, name) {

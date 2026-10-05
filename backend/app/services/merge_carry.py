@@ -71,6 +71,23 @@ CARRIED: tuple[tuple[str, str, str, Optional[tuple[str, ...]]], ...] = (
     ("comms_contacts", "player_id", "uuid", None),
     ("crm_people", "player_id", "uuid", None),
     ("fee_members", "player_id", "uuid", ("organisation_id",)),
+    # BetterFantasyCricket. A player added to the pool by hand before they have
+    # played (so a manager can pick them) is merged into their real record once
+    # their games arrive. Every one of these is `ON DELETE CASCADE` (squad picks,
+    # the pool entry, the round points) or `SET NULL` (captain, the audit log,
+    # draft picks, the live lot), so merging used to remove the player from every
+    # team that had picked them and blank the rest.
+    ("fantasy_squad_players", "player_id", "uuid", ("squad_id",)),
+    ("fantasy_pool_players", "player_id", "uuid", ("fantasy_season_id",)),
+    ("fantasy_player_round_scores", "player_id", "uuid", ("round_id",)),
+    ("fantasy_squad_round_scores", "captain_player_id", "uuid", None),
+    ("fantasy_squad_round_scores", "vice_captain_player_id", "uuid", None),
+    ("fantasy_squad_round_scores", "dropped_player_id", "uuid", None),
+    ("fantasy_transactions", "player_id", "uuid", None),
+    ("fantasy_draft_picks", "player_id", "uuid", None),
+    ("fantasy_drafts", "lot_player_id", "uuid", None),
+    ("fantasy_waiver_claims", "add_player_id", "uuid", None),
+    ("fantasy_waiver_claims", "drop_player_id", "uuid", None),
 )
 
 # Tables whose primary key is not an `id` column: the column that identifies one
@@ -93,11 +110,22 @@ _NEVER_DELETE = {"fee_members", "comms_contacts", "crm_people"}
 _OWN_CLUB = {
     "family_members": "EXISTS (SELECT 1 FROM families f WHERE f.id = r.family_id "
                       "AND f.organisation_id = :org)",
+    "fantasy_squad_players": "EXISTS (SELECT 1 FROM fantasy_squads s WHERE s.id = r.squad_id "
+                             "AND s.organisation_id = :org)",
+    "fantasy_squad_round_scores": "EXISTS (SELECT 1 FROM fantasy_squads s WHERE s.id = r.squad_id "
+                                  "AND s.organisation_id = :org)",
+    "fantasy_transactions": "EXISTS (SELECT 1 FROM fantasy_squads s WHERE s.id = r.squad_id "
+                            "AND s.organisation_id = :org)",
+    "fantasy_player_round_scores": "EXISTS (SELECT 1 FROM fantasy_seasons s WHERE s.id = r.fantasy_season_id "
+                                   "AND s.organisation_id = :org)",
+    "fantasy_draft_picks": "EXISTS (SELECT 1 FROM fantasy_drafts d WHERE d.id = r.draft_id "
+                           "AND d.organisation_id = :org)",
 }
 _OWN_CLUB_TABLES = {
     "player_availability", "player_availability_periods", "net_attendance",
     "net_checkin_registrations", "fixture_lineups", "team_members",
     "player_name_aliases", "comms_contacts", "crm_people", "fee_members",
+    "fantasy_pool_players", "fantasy_drafts", "fantasy_waiver_claims",
 }
 
 _CAST = {"int": "int[]", "uuid": "uuid[]"}
@@ -170,7 +198,28 @@ async def carry_rows(db: AsyncSession, keep_id, remove_id, org_id=None) -> dict:
         # of strings cannot be cast to int[] at the other end.
         moved[_key(table, column)] = (
             [str(i) for i in ids] if id_type == "uuid" else [int(i) for i in ids])
+    await _rewrite_fantasy_lineups(db, keep_id, remove_id, org_id)
     return moved
+
+
+async def _rewrite_fantasy_lineups(db: AsyncSession, keep_id, remove_id, org_id=None) -> None:
+    """A scored Fantasy round keeps a JSONB snapshot of each squad's lineup, with
+    the player's id inside it. Point it at the keeper, or Points and Live show the
+    merged-away player as unknown. Not on the undo list: the snapshot is derived,
+    and the next settle of that round writes it again."""
+    if not await _exists(db, "fantasy_squad_round_scores"):
+        return
+    guard = ""
+    params = {"kid": str(keep_id), "rid": str(remove_id)}
+    if org_id is not None:
+        guard = (" AND EXISTS (SELECT 1 FROM fantasy_squads s WHERE s.id = r.squad_id "
+                 "AND s.organisation_id = :org)")
+        params["org"] = str(org_id)
+    await db.execute(text(
+        "UPDATE fantasy_squad_round_scores r "
+        "   SET lineup = replace(r.lineup::text, :rid, :kid)::jsonb "
+        " WHERE r.lineup::text LIKE '%' || :rid || '%'" + guard
+    ), params)
 
 
 async def restore_rows(db: AsyncSession, remove_id, carried: dict, keep_id=None) -> int:

@@ -409,7 +409,15 @@ async def list_managers(club=Depends(get_current_club), db: AsyncSession = Depen
             for sq in (await db.execute(
                 select(FantasySquad).where(FantasySquad.league_id == league.id)
             )).scalars().all():
-                squads[str(sq.manager_id)] = (sq.team_name, float(sq.total_points))
+                squads[str(sq.manager_id)] = (sq.team_name, float(sq.total_points), sq.id)
+        counts = dict((str(sid), n) for sid, n in (await db.execute(
+            select(FantasySquadPlayer.squad_id, func.count())
+            .where(FantasySquadPlayer.squad_id.in_([v[2] for v in squads.values()] or [uuid.uuid4()]))
+            .group_by(FantasySquadPlayer.squad_id)
+        )).all())
+        squad_size = (season.rules or DEFAULT_RULES).get("squad_size", 12)
+    else:
+        counts, squad_size = {}, None
     return {
         "managers": [
             {
@@ -419,6 +427,10 @@ async def list_managers(club=Depends(get_current_club), db: AsyncSession = Depen
                 "team_name": squads.get(str(m.id), (None, None))[0],
                 "total_points": squads.get(str(m.id), (None, None))[1],
                 "has_squad": str(m.id) in squads,
+                # A team with fewer players than the rules want has lost someone
+                # (a merge used to do it); the list flags it so it can be put right.
+                "pick_count": counts.get(str(squads[str(m.id)][2]), 0) if str(m.id) in squads else None,
+                "squad_size": squad_size,
             }
             for m in managers
         ]
@@ -500,6 +512,8 @@ async def manager_teams(manager_id: str, club=Depends(get_current_club), db: Asy
         squads.append({
             "squad_id": str(sq.id), "league": lg.name, "kind": lg.kind,
             "season_year": ssn.season_year, "team_name": sq.team_name,
+            "squad_size": (ssn.rules or DEFAULT_RULES).get("squad_size", 12),
+            "season_id": str(sq.fantasy_season_id),
             "total_points": float(sq.total_points or 0),
             "budget_remaining": float(sq.budget_remaining) if sq.budget_remaining is not None else None,
             "players": [
@@ -513,6 +527,203 @@ async def manager_teams(manager_id: str, club=Depends(get_current_club), db: Asy
             ],
         })
     return {"manager": {"id": str(mgr.id), "display_name": mgr.display_name}, "squads": squads}
+
+
+# ── admin overrides: a team's picks, and hand-typed round scores ───────────────
+#
+# For the cases the data cannot answer on its own: a player who was merged into
+# their real record and fell out of the teams that had picked them, or someone
+# whose games are not in the data yet. Both are the club's own typing, so
+# settlement never overwrites them (see fantasy_engine.set_manual_score).
+
+async def _load_squad(db: AsyncSession, club, squad_id: str) -> FantasySquad:
+    sq = await db.get(FantasySquad, squad_id)
+    if sq is None or str(sq.organisation_id) != str(club.id):
+        raise HTTPException(status_code=404, detail="Team not found")
+    return sq
+
+
+async def _pick_warnings(db: AsyncSession, fs: FantasySeason, sq: FantasySquad) -> list[str]:
+    """Squad-size and role-quota problems after an override. Warned about, never
+    refused: the admin is putting right something the rules could not see."""
+    rules = fs.rules or DEFAULT_RULES
+    picks = (await db.execute(
+        select(FantasySquadPlayer).where(FantasySquadPlayer.squad_id == sq.id)
+    )).scalars().all()
+    warnings = []
+    size = rules.get("squad_size", 12)
+    if len(picks) != size:
+        warnings.append(f"This team now has {len(picks)} players; the rules say {size}.")
+    quota = rules.get("role_quota", DEFAULT_RULES["role_quota"])
+    have: dict[str, int] = {}
+    for p in picks:
+        have[p.role] = have.get(p.role, 0) + 1
+    for role, want in quota.items():
+        if have.get(role, 0) != want:
+            warnings.append(f"{have.get(role, 0)} {role}(s) against a quota of {want}.")
+    if not any(p.is_captain for p in picks):
+        warnings.append("This team has no captain. Set one from the team's own Captain screen.")
+    return warnings
+
+
+@router.get("/season/{season_id}/player-search")
+async def player_search(season_id: str, q: str = "", club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
+    """Club players by name, in the pool or not, for the admin pickers."""
+    fs = await _load_season(db, club, season_id)
+    t = q.strip()
+    if len(t) < 2:
+        return {"players": []}
+    rows = (await db.execute(text("""
+        SELECT p.id, p.name, pp.role, (pp.id IS NOT NULL) AS in_pool
+        FROM players p
+        LEFT JOIN fantasy_pool_players pp ON pp.player_id = p.id AND pp.fantasy_season_id = CAST(:fs AS UUID)
+        WHERE p.organisation_id = CAST(:org AS UUID) AND p.is_player IS NOT FALSE AND p.name ILIKE :q
+        ORDER BY (pp.id IS NOT NULL) DESC, p.name LIMIT 15
+    """), {"fs": str(fs.id), "org": str(club.id), "q": f"%{t}%"})).mappings().all()
+    return {"players": [{"player_id": str(r["id"]), "name": r["name"], "role": r["role"], "in_pool": bool(r["in_pool"])} for r in rows]}
+
+
+class SquadPickBody(BaseModel):
+    player_id: str
+    replace_player_id: str | None = None
+    role: str | None = None
+    from_round: int = 1
+
+
+@router.post("/squads/{squad_id}/players")
+async def add_squad_player(squad_id: str, body: SquadPickBody, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
+    """Put a player into a team, or swap one player for another, ignoring the
+    lock, the budget and the role quota (those come back as warnings). Rounds
+    from ``from_round`` on that have already scored are scored again, so the
+    player counts as if they had been picked from that round. The team's bank is
+    not changed."""
+    sq = await _load_squad(db, club, squad_id)
+    fs = await db.get(FantasySeason, sq.fantasy_season_id)
+    player = await db.get(Player, body.player_id)
+    if player is None or str(player.organisation_id) != str(club.id):
+        raise HTTPException(status_code=404, detail="Player not found")
+    if body.role is not None and body.role not in FANTASY_ROLES:
+        raise HTTPException(status_code=400, detail="Invalid role")
+    already = (await db.execute(
+        select(FantasySquadPlayer).where(FantasySquadPlayer.squad_id == sq.id, FantasySquadPlayer.player_id == player.id)
+    )).scalar_one_or_none()
+    if already is not None:
+        raise HTTPException(status_code=409, detail="They are already in this team.")
+
+    pool = (await db.execute(
+        select(FantasyPoolPlayer).where(FantasyPoolPlayer.fantasy_season_id == fs.id, FantasyPoolPlayer.player_id == player.id)
+    )).scalar_one_or_none()
+    if pool is None:
+        role, price = await fantasy_engine.classify_and_price_one(db, fs, player.id)
+        pool = FantasyPoolPlayer(
+            fantasy_season_id=fs.id, organisation_id=club.id, player_id=player.id,
+            role=body.role or role, role_source="admin", base_price=price, current_price=price, is_available=True,
+        )
+        db.add(pool)
+        await db.flush()
+    elif body.role and body.role != pool.role:
+        pool.role, pool.role_source = body.role, "admin"
+
+    captain = vice = False
+    if body.replace_player_id:
+        out = (await db.execute(
+            select(FantasySquadPlayer).where(FantasySquadPlayer.squad_id == sq.id, FantasySquadPlayer.player_id == body.replace_player_id)
+        )).scalar_one_or_none()
+        if out is None:
+            raise HTTPException(status_code=404, detail="The player to replace isn't in this team.")
+        captain, vice = out.is_captain, out.is_vice_captain
+        await db.delete(out)
+        await db.flush()
+    db.add(FantasySquadPlayer(
+        squad_id=sq.id, player_id=player.id, role=pool.role, is_captain=captain, is_vice_captain=vice,
+        purchase_price=pool.current_price, added_round=max(int(body.from_round), 1),
+    ))
+    await db.flush()
+    done = await fantasy_engine.rescore_from_round(db, fs, body.from_round)
+    warnings = await _pick_warnings(db, fs, sq)
+    await db.commit()
+    return {"ok": True, "rescored": done, "warnings": warnings}
+
+
+@router.delete("/squads/{squad_id}/players/{player_id}")
+async def remove_squad_player(squad_id: str, player_id: str, from_round: int = 1, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
+    """Take a player out of a team and score the rounds from ``from_round`` on again."""
+    sq = await _load_squad(db, club, squad_id)
+    fs = await db.get(FantasySeason, sq.fantasy_season_id)
+    pick = (await db.execute(
+        select(FantasySquadPlayer).where(FantasySquadPlayer.squad_id == sq.id, FantasySquadPlayer.player_id == player_id)
+    )).scalar_one_or_none()
+    if pick is None:
+        raise HTTPException(status_code=404, detail="They aren't in this team.")
+    await db.delete(pick)
+    await db.flush()
+    done = await fantasy_engine.rescore_from_round(db, fs, from_round)
+    warnings = await _pick_warnings(db, fs, sq)
+    await db.commit()
+    return {"ok": True, "rescored": done, "warnings": warnings}
+
+
+class ManualScoreBody(BaseModel):
+    points: float
+    note: str | None = None
+
+
+async def _load_round(db: AsyncSession, club, round_id: str) -> tuple[FantasyRound, FantasySeason]:
+    rnd = await db.get(FantasyRound, round_id)
+    if rnd is None or str(rnd.organisation_id) != str(club.id):
+        raise HTTPException(status_code=404, detail="Round not found")
+    return rnd, await _load_season(db, club, str(rnd.fantasy_season_id))
+
+
+@router.put("/rounds/{round_id}/players/{player_id}/score")
+async def set_manual_score(round_id: str, player_id: str, body: ManualScoreBody, club=Depends(get_current_club),
+                           user=Depends(get_current_user), db: AsyncSession = Depends(get_db), _=_require):
+    """Type in a player's fantasy points for a round, replacing whatever the
+    scorecards give. For a player whose games are not in the data. Settlement
+    leaves it alone until it is cleared."""
+    rnd, fs = await _load_round(db, club, round_id)
+    in_pool = (await db.execute(
+        select(FantasyPoolPlayer.id).where(FantasyPoolPlayer.fantasy_season_id == fs.id, FantasyPoolPlayer.player_id == player_id)
+    )).scalar_one_or_none()
+    if in_pool is None:
+        raise HTTPException(status_code=404, detail="That player isn't in the pool.")
+    if abs(body.points) > 1000:
+        raise HTTPException(status_code=400, detail="That doesn't look like a round score.")
+    await fantasy_engine.set_manual_score(db, fs, rnd, player_id, body.points, (body.note or "").strip() or None, user.id)
+    done = await fantasy_engine.rescore_round(db, fs, rnd)
+    await db.commit()
+    return {"ok": True, "rescored": done}
+
+
+@router.delete("/rounds/{round_id}/players/{player_id}/score")
+async def clear_manual_score(round_id: str, player_id: str, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
+    """Remove a typed-in score; the round goes back to the scorecards."""
+    rnd, fs = await _load_round(db, club, round_id)
+    if not await fantasy_engine.clear_manual_score(db, rnd, player_id):
+        raise HTTPException(status_code=404, detail="No typed-in score to remove.")
+    done = await fantasy_engine.rescore_round(db, fs, rnd)
+    await db.commit()
+    return {"ok": True, "rescored": done}
+
+
+@router.get("/season/{season_id}/manual-scores")
+async def list_manual_scores(season_id: str, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
+    """Every hand-typed score in the season, newest round first."""
+    fs = await _load_season(db, club, season_id)
+    rows = (await db.execute(text("""
+        SELECT prs.round_id, r.round_number, r.name AS round_name, prs.player_id, p.name,
+               prs.total_points, prs.breakdown->>'note' AS note, prs.computed_at
+        FROM fantasy_player_round_scores prs
+        JOIN fantasy_rounds r ON r.id = prs.round_id
+        JOIN players p ON p.id = prs.player_id
+        WHERE prs.fantasy_season_id = CAST(:fs AS UUID) AND prs.breakdown->>'manual' IS NOT NULL
+        ORDER BY r.round_number DESC, p.name
+    """), {"fs": str(fs.id)})).mappings().all()
+    return {"scores": [{
+        "round_id": str(r["round_id"]), "round_number": r["round_number"], "round_name": r["round_name"],
+        "player_id": str(r["player_id"]), "name": r["name"], "points": float(r["total_points"]),
+        "note": r["note"], "at": r["computed_at"].isoformat() if r["computed_at"] else None,
+    } for r in rows]}
 
 
 # ── pool management (add returning / new players) ──────────────────────────────

@@ -396,7 +396,89 @@ const ROLE_RANK = { keeper: 0, batter: 1, allrounder: 2, bowler: 3 }
 
 // Inline panel showing a manager's picked squad(s): the club-ladder team and any
 // draft teams, with captain/vice and each pick's season points.
-function ManagerTeams({ squads, busy }) {
+// Search the club's players by name (in the pool or not) and pick one.
+function PlayerPicker({ seasonId, onPick, placeholder = 'Search players…' }) {
+  const [q, setQ] = useState('')
+  const [rows, setRows] = useState([])
+  useEffect(() => {
+    if (q.trim().length < 2) { setRows([]); return }
+    let on = true
+    const t = setTimeout(() => {
+      api.fantasyPlayerSearch(seasonId, q.trim()).then(d => on && setRows(d.players || [])).catch(() => on && setRows([]))
+    }, 250)
+    return () => { on = false; clearTimeout(t) }
+  }, [q, seasonId])
+  return (
+    <div className="relative min-w-0">
+      <input value={q} onChange={e => setQ(e.target.value)} placeholder={placeholder}
+        className="w-full rounded border pb-hairline bg-pb-surface px-2 py-1.5 text-sm" />
+      {!!rows.length && (
+        <div className="absolute z-20 mt-1 w-full max-h-56 overflow-auto rounded border pb-hairline bg-pb-surface shadow-lg">
+          {rows.map(r => (
+            <button key={r.player_id} type="button" onClick={() => { onPick(r); setQ(''); setRows([]) }}
+              className="w-full text-left px-2 py-1.5 text-sm hover:bg-pb-surface2 flex items-center gap-2">
+              <span className="truncate flex-1">{r.name}</span>
+              <span className="text-[11px] text-pb-faint shrink-0">{r.in_pool ? r.role : 'not in pool yet'}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Put right a team the rules could not: add a player (optionally in place of
+// another), or take one out. Scored rounds from "From round" on are scored again.
+function SquadEditor({ squad, onChanged, flash, fail }) {
+  const [pick, setPick] = useState(null)
+  const [replace, setReplace] = useState('')
+  const [fromRound, setFromRound] = useState(1)
+  const [busy, setBusy] = useState(false)
+  const [warn, setWarn] = useState([])
+
+  const report = (r, msg) => { setWarn(r.warnings || []); flash(msg); onChanged?.() }
+  const add = async () => {
+    if (!pick) return
+    setBusy(true)
+    try {
+      const r = await api.fantasyAddSquadPlayer(squad.squad_id, {
+        player_id: pick.player_id, replace_player_id: replace || null, from_round: Number(fromRound) || 1,
+      })
+      setPick(null); setReplace('')
+      report(r, `${pick.name} is in the team.`)
+    } catch (e) { fail(e) } finally { setBusy(false) }
+  }
+  return (
+    <div className="mt-3 border-t pb-hairline pt-3">
+      <div className="text-xs text-pb-faint mb-1.5">
+        Add a player to this team. The lock, budget and role quota are ignored, and the rounds already scored from the round you choose are scored again, so they count as if picked then.
+      </div>
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="flex-1 min-w-[200px]">
+          {pick
+            ? <div className="flex items-center gap-2 rounded border pb-hairline px-2 py-1.5 text-sm"><span className="truncate flex-1">{pick.name}</span>
+                <button onClick={() => setPick(null)} className="text-xs underline text-pb-faint">Change</button></div>
+            : <PlayerPicker seasonId={squad.season_id} onPick={setPick} />}
+        </div>
+        <label className="text-xs text-pb-faint flex flex-col gap-1">Replacing
+          <select value={replace} onChange={e => setReplace(e.target.value)}
+            className="rounded border pb-hairline bg-pb-surface px-2 py-1.5 text-sm max-w-[180px]">
+            <option value="">Nobody (add)</option>
+            {squad.players.map(p => <option key={p.player_id} value={p.player_id}>{p.name}</option>)}
+          </select>
+        </label>
+        <label className="text-xs text-pb-faint flex flex-col gap-1">From round
+          <input type="number" min="1" value={fromRound} onChange={e => setFromRound(e.target.value)}
+            className="w-20 rounded border pb-hairline bg-pb-surface px-2 py-1.5 text-sm" />
+        </label>
+        <Btn onClick={add} busy={busy}>Add to team</Btn>
+      </div>
+      {warn.map((w, i) => <div key={i} className="mt-1.5 text-xs text-amber-400">{w}</div>)}
+    </div>
+  )
+}
+
+function ManagerTeams({ squads, busy, onChanged, flash, fail }) {
   if (busy && !squads) return <p className="text-xs text-pb-faint">Loading team…</p>
   if (!squads) return null
   if (!squads.length) return <p className="text-xs text-pb-faint">No team selected yet.</p>
@@ -411,6 +493,7 @@ function ManagerTeams({ squads, busy }) {
           <div key={sq.squad_id} className="rounded border pb-hairline bg-pb-surface2/40 p-3">
             <div className="text-sm font-medium">
               {sq.team_name}
+              {sq.players.length !== sq.squad_size && <span className="ml-2 text-xs font-normal text-amber-400">{sq.players.length} of {sq.squad_size} players</span>}
               <span className="text-pb-faint font-normal"> · {sq.league} · {sq.season_year}/{String((sq.season_year + 1) % 100).padStart(2, '0')} · {fmt(sq.total_points)} pts{sq.budget_remaining != null ? ` · $${fmt(sq.budget_remaining)} bank` : ''}</span>
             </div>
             <div className="mt-2 grid sm:grid-cols-2 gap-x-6 gap-y-0.5">
@@ -423,9 +506,15 @@ function ManagerTeams({ squads, busy }) {
                     {p.is_vice_captain && <span className="ml-1 text-pb-faint font-semibold">(V)</span>}
                   </span>
                   <span className="tabular-nums text-pb-faint shrink-0">{fmt(p.total_points)} pts</span>
+                  <button onClick={async () => {
+                    if (!window.confirm(`Take ${p.name} out of ${sq.team_name}? Scored rounds are scored again without them.`)) return
+                    try { const r = await api.fantasyRemoveSquadPlayer(sq.squad_id, p.player_id, 1); flash(`${p.name} removed.${(r.warnings || []).length ? ' ' + r.warnings.join(' ') : ''}`); onChanged?.() }
+                    catch (e) { fail(e) }
+                  }} className="text-[11px] underline text-pb-faint hover:text-pb-text shrink-0">Remove</button>
                 </div>
               ))}
             </div>
+            {sq.kind === 'global_salary_cap' && flash && <SquadEditor squad={sq} onChanged={onChanged} flash={flash} fail={fail} />}
           </div>
         )
       })}
@@ -475,6 +564,10 @@ export function ManagersCard({ flash, fail }) {
       if (w) w.location.href = url; else window.location.assign(url)
     } catch (e) { w?.close(); fail(e) } finally { setBusy('') }
   }
+  const reloadTeams = async (m) => {
+    try { const d = await api.fantasyManagerTeams(m.id); setTeams(t => ({ ...t, [m.id]: d.squads })); await load() }
+    catch (e) { fail(e) }
+  }
   const viewTeams = async (m) => {
     if (openId === m.id) { setOpenId(null); return }
     setOpenId(m.id)
@@ -521,6 +614,9 @@ export function ManagersCard({ flash, fail }) {
                         <div className="font-medium text-sm truncate">{m.display_name}
                           {m.team_name && <span className="text-pb-faint font-normal"> · {m.team_name}</span>}
                           {!m.has_squad && <span className="ml-2 text-[11px] text-pb-faint">no squad</span>}
+                          {m.has_squad && m.squad_size != null && m.pick_count < m.squad_size && (
+                            <span className="ml-2 text-[11px] text-amber-400">{m.pick_count} of {m.squad_size} players</span>
+                          )}
                         </div>
                         <div className="text-xs text-pb-faint truncate">{m.email || 'no email'}{m.total_points != null ? ` · ${fmt(m.total_points)} pts` : ''}</div>
                       </div>
@@ -537,12 +633,86 @@ export function ManagersCard({ flash, fail }) {
                     </div>
                   )}
                   {openId === m.id && editing !== m.id && (
-                    <div className="mt-2.5"><ManagerTeams squads={teams[m.id]} busy={teamsBusy === m.id} /></div>
+                    <div className="mt-2.5"><ManagerTeams squads={teams[m.id]} busy={teamsBusy === m.id} onChanged={() => reloadTeams(m)} flash={flash} fail={fail} /></div>
                   )}
                 </div>
               ))}
             </div>
           )}
+    </div>
+  )
+}
+
+
+// Type in a player's fantasy points for a round, for someone whose games are not
+// in the data. Settlement leaves these alone; Remove hands the round back to the
+// scorecards.
+export function ManualScoresCard({ season, flash, fail }) {
+  const [rounds, setRounds] = useState([])
+  const [scores, setScores] = useState(null)
+  const [roundId, setRoundId] = useState('')
+  const [pick, setPick] = useState(null)
+  const [points, setPoints] = useState('')
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(() => api.fantasyManualScores(season.id).then(d => setScores(d.scores)).catch(() => setScores([])), [season.id])
+  useEffect(() => {
+    load()
+    api.fantasyListRounds(season.id).then(d => { setRounds(d.rounds || []); setRoundId(r => r || d.rounds?.[0]?.id || '') }).catch(() => {})
+  }, [season.id, load])
+
+  const save = async () => {
+    if (!pick || !roundId || points === '' || Number.isNaN(Number(points))) return
+    setBusy(true)
+    try {
+      await api.fantasySetManualScore(roundId, pick.player_id, { points: Number(points), note: note.trim() || null })
+      flash(`${pick.name}: ${points} points saved.`); setPick(null); setPoints(''); setNote(''); await load()
+    } catch (e) { fail(e) } finally { setBusy(false) }
+  }
+  const remove = async (r) => {
+    try { await api.fantasyClearManualScore(r.round_id, r.player_id); flash('Typed-in score removed.'); await load() }
+    catch (e) { fail(e) }
+  }
+  const inp = 'rounded border pb-hairline bg-pb-surface px-2 py-1.5 text-sm'
+  return (
+    <div className="pb-card p-5">
+      <h3 className="font-display font-bold mb-1">Typed-in scores</h3>
+      <p className="text-xs text-pb-faint mb-3">
+        For a player whose games are not in the data yet. The points you type replace the scorecard figure for that round, and a round that is already scored is scored again. The player has to be in the pool. Settling never changes a typed-in score.
+      </p>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="text-xs text-pb-faint flex flex-col gap-1">Round
+          <select value={roundId} onChange={e => setRoundId(e.target.value)} className={`${inp} max-w-[180px]`}>
+            {rounds.map(r => <option key={r.id} value={r.id}>{r.name || `Round ${r.round_number}`}</option>)}
+          </select>
+        </label>
+        <div className="flex-1 min-w-[200px]">
+          {pick
+            ? <div className="flex items-center gap-2 rounded border pb-hairline px-2 py-1.5 text-sm"><span className="truncate flex-1">{pick.name}</span>
+                <button onClick={() => setPick(null)} className="text-xs underline text-pb-faint">Change</button></div>
+            : <PlayerPicker seasonId={season.id} onPick={setPick} />}
+        </div>
+        <label className="text-xs text-pb-faint flex flex-col gap-1">Points
+          <input type="number" step="0.5" value={points} onChange={e => setPoints(e.target.value)} className={`${inp} w-24`} />
+        </label>
+        <label className="text-xs text-pb-faint flex flex-col gap-1 flex-1 min-w-[140px]">Note (optional)
+          <input value={note} onChange={e => setNote(e.target.value)} placeholder="e.g. 42 off 30, 2 wickets" className={inp} />
+        </label>
+        <Btn onClick={save} busy={busy}>Save score</Btn>
+      </div>
+      {!!scores?.length && (
+        <div className="mt-4 divide-y pb-hairline">
+          {scores.map(r => (
+            <div key={`${r.round_id}-${r.player_id}`} className="py-2 flex items-center gap-3 text-sm">
+              <span className="w-24 text-pb-faint shrink-0">{r.round_name || `Round ${r.round_number}`}</span>
+              <span className="flex-1 min-w-0 truncate">{r.name}{r.note && <span className="text-pb-faint"> · {r.note}</span>}</span>
+              <span className="tabular-nums shrink-0">{fmt(r.points)}</span>
+              <button onClick={() => remove(r)} className="text-xs underline text-pb-faint hover:text-pb-text shrink-0">Remove</button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
