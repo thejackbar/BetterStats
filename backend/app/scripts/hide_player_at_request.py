@@ -38,6 +38,11 @@ USAGE (dry run unless --apply)
 foreign key to ``players``, plus the scouting copy), for an access request.
 ``--keep-photos`` hides the player without touching the photographs.
 
+``--contact-check`` answers "what contact details do we hold?": for every table that
+records something against the person it says, per column, whether an email, phone,
+date of birth, address or emergency contact has a value (never the value). It sees
+this database only.
+
 ``--evidence`` writes a PDF (or ``--format html``) the person can be sent: every
 match they are recorded in as a clickable link to the scorecard (their name reads
 ********) and to their profile page (it says "Player not found"), checked live
@@ -64,6 +69,10 @@ async def run(args) -> int:
         if player is None:
             print(f"No player with id {args.player_id}", file=sys.stderr)
             return 2
+
+        if getattr(args, "contact_check", False):
+            print(json.dumps(await player_privacy.contact_audit(session, player), indent=2, default=str))
+            return 0
 
         if getattr(args, "evidence", False):
             from app.services import privacy_evidence
@@ -131,6 +140,7 @@ def main() -> None:
     ap.add_argument("--restore", action="store_true", help="put the player back on the public site")
     ap.add_argument("--keep-photos", action="store_true", help="hide without removing photographs")
     ap.add_argument("--apply", action="store_true", help="write (default is a dry run)")
+    ap.add_argument("--contact-check", action="store_true", help="say which contact details we hold (read-only, no values)")
     ap.add_argument("--evidence", action="store_true", help="write the PDF/HTML evidence document to stdout")
     ap.add_argument("--format", choices=("pdf", "html"), default="pdf", help="evidence format (default pdf)")
     ap.add_argument("--base-url", default="https://betterat.cricket", help="site the links point at")

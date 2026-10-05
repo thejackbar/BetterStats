@@ -214,6 +214,40 @@ async def main() -> int:
     check("--report: a person WITH an address on record shows it blocked (the control for the above)",
           rep["email_blocked"] is True and rep["email_addresses"], str(rep.get("email_blocked")))
 
+    print("the contact-details audit (what do we hold?)")
+    SENT_PHONE, SENT_NOTE = "0400 111 222", "ring his wife on 0412 999 888"
+    async with hj.Session() as s:
+        await s.execute(text("UPDATE fee_members SET mobile = :m, notes = :n WHERE player_id = :p"),
+                        {"m": SENT_PHONE, "n": SENT_NOTE, "p": pid})
+        await s.execute(text("UPDATE players SET date_of_birth = '1988-03-01' WHERE id = :p"), {"p": pid})
+        await s.commit()
+    async with hj.Session() as s:
+        aud = await player_privacy.contact_audit(s, await s.get(Player, pid))
+    summ = aud["summary"]
+    check("an email on his fee-membership record is found", summ["email"] is True, str(summ))
+    check("a mobile number is found", summ["phone"] is True)
+    check("a date of birth on his player record is found", summ["date_of_birth"] is True)
+    check("no address column holds anything, so address reads False (the control that it can say no)",
+          summ["address"] is False and summ["emergency_contact"] is False, str(summ))
+    check("it names WHERE: fee_members.email, fee_members.mobile and players.date_of_birth",
+          {("fee_members", "email"), ("fee_members", "mobile"), ("players", "date_of_birth")}
+          <= {(c["table"], c["column"]) for c in aud["columns_with_a_value"]}, str(aud["columns_with_a_value"]))
+    check("a note that could hold a number is listed for a person to read, not counted as a contact detail",
+          any(c["table"] == "fee_members" and c["column"] == "notes" for c in aud["free_text_with_a_value_to_read_by_hand"]))
+    dumped = json.dumps(aud, default=str)
+    check("it never prints a value (no phone number, note text, email or date of birth in the output)",
+          not any(v in dumped for v in (SENT_PHONE, SENT_NOTE, "financial.sentinel", "1988-03-01")))
+    check("it says it sees this database only and names what it cannot see",
+          aud["scope"] == "this database only" and "Play-Cricket" in aud["not_covered"])
+    async with hj.Session() as s:
+        empty = await player_privacy.contact_audit(s, await s.get(Player, hj.P["M1"]))
+    check("a person with nothing on record: every category False and no column has a value",
+          not any(empty["summary"].values()) and not empty["columns_with_a_value"], str(empty["summary"]))
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        await script.run(SimpleNamespace(**{**vars(args), "evidence": False, "contact_check": True}))
+    check("--contact-check prints the audit as JSON", json.loads(buf.getvalue())["summary"]["email"] is True)
+
     print(f"\n{PASS} passed, {FAIL} failed")
     if FAILURES:
         print("FAILED:", *FAILURES, sep="\n  ")

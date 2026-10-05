@@ -2281,3 +2281,13 @@ Also: `--report` now reports `email_blocked: null` with a note when the person h
 
 **Verified against a real Postgres** (`verify_privacy_evidence.py`, 30 checks through the real app: three matches listed with full URLs, a control that the live check reports the name and id BEFORE the removal and passes AFTER, an unreachable site, HTML links, PDF link annotations, no financial wording or fee-record email, an unusual name, the command's output). The rendered PDF was looked at.
 
+## v9.106.21: What contact details do we hold? (Oct 2026)
+
+The owner wanted to confirm to the removed person that neither BetterCricket nor the club holds an email, phone, date of birth or address for him. The earlier `--report` could only say email: it showed no address on his player, fee-member or contact rows, but the fee-member row also has `mobile` and `notes` that nobody had looked at, and a "no" from a check that only looks at some places is not a confirmation. `player_privacy.contact_audit` walks every table with a foreign key to the person, everything hanging off their fee-member and family rows, and their account, and for each text or date column named like a contact detail says whether a row of theirs has a value. It prints yes or no and the table and column, never the value. Notes-like columns are listed apart, to be read by a person.
+
+What it cannot say: it sees this database only. Applecross's own registration forms and spreadsheets, Play-Cricket, PlayHQ and Cricket Australia hold their own records, and the result says so; the club and those bodies have to be asked.
+
+Also recorded for the reply: his request asks for "all personal information" (access) but does not mention fees, membership or payments by name, so he has not asked about them specifically. A full access answer still covers them, or says who holds them. That is a legal call for the owner and their adviser.
+
+**Verified against a real Postgres** (`verify_privacy_evidence.py`, now 40 checks: an email, a mobile and a date of birth are found and named by table and column, address and emergency contact read False as the control that it can say no, a note is listed apart, no value is ever printed, a person with nothing reads all False, the command outputs JSON).
+

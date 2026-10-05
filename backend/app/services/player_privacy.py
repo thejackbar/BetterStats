@@ -375,3 +375,107 @@ async def load_player(session: AsyncSession, raw_id: str) -> Optional[Player]:
     except (ValueError, TypeError):
         return None
     return await session.get(Player, pid)
+
+
+# ---------------------------------------------------------------------------
+# What contact details do we hold? (read-only, for confirming to the person)
+# ---------------------------------------------------------------------------
+
+_CONTACT_COLUMN_RE = (
+    r"(e[-_]?mail|phone|mobile|telephone|dob|birth|address|street|suburb|postcode|post_code|postal|city|town"
+    r"|emergency|next_of_kin|\bkin\b)"
+)
+_FREE_TEXT_COLUMN_RE = r"^(notes?|comments?|description|details?|memo|remarks?)$"
+_CATEGORIES = (
+    ("email", r"e[-_]?mail"),
+    ("phone", r"phone|mobile|telephone"),
+    ("date_of_birth", r"dob|birth"),
+    ("address", r"address|street|suburb|postcode|post_code|postal|city|town"),
+    ("emergency_contact", r"emergency|next_of_kin|\bkin\b"),
+)
+
+
+async def contact_audit(session: AsyncSession, player: Player) -> dict:
+    """Which contact details do we hold for this person, anywhere? Read-only.
+
+    Looks at every table that records something against the person: the player
+    rows, every table with a foreign key to them, every table hanging off their
+    fee-membership and family records, and their sign-in account. In each it asks,
+    for text and date columns whose name says email, phone, date of birth, address,
+    emergency contact, whether any row of THEIRS has a value. It reports yes or no
+    per column and never prints the value. Free-text fields (notes) are listed
+    separately: a note can hold a number, so a person has to read them.
+
+    It can only see this database. It says nothing about the club's own spreadsheets,
+    Play-Cricket or PlayHQ registration, and the result says so.
+    """
+    import re
+    people = [player] + await siblings(session, player)
+    pids = [str(p.id) for p in people]
+
+    async def children(parent: str, ids: list[str]) -> list[tuple[str, str, list[str]]]:
+        """(table, fk column, ids) for every single-column FK onto parent(id)."""
+        rows = (await session.execute(text("""
+            SELECT cl.relname, att.attname
+              FROM pg_constraint c
+              JOIN pg_class cl  ON cl.oid = c.conrelid
+              JOIN pg_class ref ON ref.oid = c.confrelid
+              JOIN pg_attribute att ON att.attrelid = c.conrelid AND att.attnum = ANY(c.conkey)
+             WHERE c.contype = 'f' AND ref.relname = :p AND array_length(c.conkey, 1) = 1
+        """), {"p": parent})).fetchall()
+        return [(t, c, ids) for t, c in rows]
+
+    scopes: list[tuple[str, str, list[str]]] = [("players", "id", pids)] + await children("players", pids)
+    fee_ids = [r[0] for r in (await session.execute(
+        text("SELECT id::text FROM fee_members WHERE player_id::text = ANY(:p)"), {"p": pids})).fetchall()]
+    if fee_ids:
+        scopes += await children("fee_members", fee_ids)
+    fam_ids = [r[0] for r in (await session.execute(
+        text("SELECT DISTINCT family_id::text FROM family_members WHERE player_id::text = ANY(:p)"),
+        {"p": pids})).fetchall()]
+    if fam_ids:
+        scopes += [("families", "id", fam_ids)] + await children("families", fam_ids)
+    user_ids = [str(p.user_id) for p in people if getattr(p, "user_id", None)]
+    if user_ids:
+        scopes.append(("users", "id", user_ids))
+
+    found: dict[tuple[str, str], int] = {}
+    free_text: dict[tuple[str, str], int] = {}
+    tables_seen: set[str] = set()
+    for table, fk, ids in scopes:
+        cols = (await session.execute(text("""
+            SELECT column_name FROM information_schema.columns
+             WHERE table_schema = 'public' AND table_name = :t
+               AND data_type IN ('text', 'character varying', 'character', 'date',
+                                 'timestamp with time zone', 'timestamp without time zone')
+        """), {"t": table})).scalars().all()
+        for col in cols:
+            contact = re.search(_CONTACT_COLUMN_RE, col, re.I)
+            note = re.match(_FREE_TEXT_COLUMN_RE, col, re.I)
+            if not (contact or note):
+                continue
+            # Identifiers come from the catalogue, never from a caller.
+            n = await session.scalar(text(
+                f'SELECT COUNT(*) FROM "{table}" WHERE "{fk}"::text = ANY(:ids) '
+                f'AND "{col}" IS NOT NULL AND TRIM("{col}"::text) <> \'\''), {"ids": ids})
+            tables_seen.add(table)
+            (found if contact else free_text)[(table, col)] = (found if contact else free_text).get((table, col), 0) + int(n or 0)
+
+    summary = {}
+    for name, rx in _CATEGORIES:
+        summary[name] = any(n > 0 for (t, c), n in found.items() if re.search(rx, c, re.I))
+    return {
+        "scope": "this database only",
+        "tables_checked": sorted({t for t, _, _ in scopes}),
+        "summary": summary,
+        "columns_with_a_value": [
+            {"table": t, "column": c, "rows": n} for (t, c), n in sorted(found.items()) if n > 0],
+        "columns_checked_and_empty": [
+            {"table": t, "column": c} for (t, c), n in sorted(found.items()) if n == 0],
+        "free_text_with_a_value_to_read_by_hand": [
+            {"table": t, "column": c, "rows": n} for (t, c), n in sorted(free_text.items()) if n > 0],
+        "not_covered": (
+            "Applecross Cricket Club's own records outside BetterCricket (registration forms, spreadsheets, "
+            "Play-Cricket, PlayHQ) and Cricket Australia's systems. Those have to be asked of the club and "
+            "of Cricket Australia."),
+    }
