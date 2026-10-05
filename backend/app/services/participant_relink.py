@@ -83,7 +83,7 @@ def _our_team(scorecard: dict, org_id) -> Optional[dict]:
 
 async def plan(db: AsyncSession, org_id, year: int, fetch: Fetch, today: Optional[date] = None) -> dict:
     """Games of this club in ``year`` whose stored rows lack a rostered player sync can
-    now recognise by full name. Reads the live team sheet of each synced game (one
+    now recognise (by full name, or by an id that a later merge now resolves). Reads the live team sheet of each synced game (one
     request per game, cached by the client)."""
     today = today or date.today()
     by_guid, merged, unique = await _org_maps(db, org_id)
@@ -110,12 +110,20 @@ async def plan(db: AsyncSession, org_id, year: int, fetch: Fetch, today: Optiona
             if kp is not None:
                 known[guid] = kp
         found = participant_names.resolve_roster_by_name(sheet, known, unique)
-        if not found:
+        if not found and not known:
             continue
         have = {r[0] for r in (await db.execute(text(
             "SELECT player_id FROM game_appearances WHERE game_id = :g"), {"g": g["id"]})).all()}
         names = {p.get("participantId"): (p.get("playerShortName") or p.get("displayName") or p.get("name")) for p in sheet}
-        missing = {guid: pid for guid, pid in found.items() if pid not in have}
+        # Two kinds: an id we do not know but whose full name matches one player, and an
+        # id we DO know (directly, or through a merge made after the game was stored)
+        # whose player has no appearance in the stored game.
+        wanted, taken = {}, set()
+        for guid, pid in {**known, **found}.items():
+            if pid not in have and pid not in taken:
+                wanted[guid] = pid
+                taken.add(pid)
+        missing = wanted
         if not missing:
             continue
         pname = {r[0]: r[1] for r in (await db.execute(text(

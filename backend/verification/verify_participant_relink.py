@@ -79,8 +79,11 @@ PAYLOAD = {
 }
 
 
+EXTRA: dict = {}
+
+
 async def fetch(gid):
-    return PAYLOAD if str(gid) == str(GAME) else None
+    return PAYLOAD if str(gid) == str(GAME) else EXTRA.get(str(gid))
 
 
 def unit_checks() -> None:
@@ -288,6 +291,39 @@ async def main() -> int:
     async with Session() as s:
         angus = (await s.execute(text("SELECT COUNT(*) FROM game_appearances WHERE game_id=:g AND player_id=:p"), {"g": new_game, "p": ANGUS})).scalar()
     check("and Angus Taylor, who was not on the sheet, got nothing", angus == 0, repr(angus))
+
+    print("9. A player whose id a later merge resolves, in a game stored before the merge")
+    # David's real case: his team-sheet id was redirected by a merge made after the game
+    # was stored, so sync knows the id and still has no row for him in that game.
+    red, g_red, game4 = uuid.uuid4(), str(uuid.uuid4()), uuid.uuid4()
+    async with Session() as s:
+        grade = (await s.execute(text("SELECT id FROM grades LIMIT 1"))).scalar()
+        s.add(Player(id=red, name="Reg, Redirect", organisation_id=ORG, grassroots_id=str(uuid.uuid4())))
+        await s.flush()
+        s.add(Game(id=game4, grade_id=grade, played_at=TODAY - timedelta(days=1), home_team="Alpha - 4s", away_team="Opp - 4s",
+                   home_org_id=ORG, status="COMPLETED"))
+        await s.flush()
+        await s.execute(text("INSERT INTO merge_logs (org_id, keep_player_id, keep_player_name, removed_player_id, removed_player_name) "
+                             "VALUES (:o, :k, 'Reg, Redirect', :r, 'Reg, Redirect')"), {"o": ORG, "k": red, "r": uuid.UUID(g_red)})
+        await s.commit()
+    p4 = {"id": str(game4), "teams": [{"id": "t1", "displayName": "Alpha - 4s", "owningOrganisation": {"id": str(ORG)},
+                                       "players": [{"participantId": g_red, "playerShortName": "R Reg"}]}],
+          "innings": [{"inningsOrder": 1, "batting": [], "bowling": [{"participantId": g_red, "playerShortName": "R Reg", "oversBowled": 4,
+                                                                       "maidensBowled": 0, "runsConceded": 12, "wicketsTaken": 1}], "fielding": []}]}
+    EXTRA[str(game4)] = p4
+    async with Session() as s:
+        found4 = await rl.plan(s, ORG, TODAY.year, fetch)
+        await s.rollback()
+    hit = next((g for g in found4["games"] if g["game_id"] == str(game4)), None)
+    check("the plan lists the redirected player for that game", hit is not None and hit["missing"][0]["player_id"] == str(red), repr(found4["games"] and [g["game_id"] for g in found4["games"]]))
+    async with Session() as s:
+        n4 = await rl.attach(s, ORG, game4, p4, {g_red: red})
+        await s.commit()
+    check("and attaching gives them their appearance and bowling", n4["appearances"] == 1 and n4["bowling"] == 1, repr(n4))
+    async with Session() as s:
+        again = await rl.plan(s, ORG, TODAY.year, fetch)
+        await s.rollback()
+    check("after that the plan has nothing left for them", all(g["game_id"] != str(game4) for g in again["games"]))
     return base.FAIL
 
 
