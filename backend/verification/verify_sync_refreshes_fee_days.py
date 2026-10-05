@@ -58,6 +58,16 @@ async def main():
         from app.services import superseded_ddl
         for stmt in superseded_ddl.STATEMENTS:
             await conn.execute(text(stmt))
+        # What the post-sync hand-added player merge writes and reads.
+        import sys as _sys
+        _sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from verify_merge_carry import EXTRA_DDL
+        for stmt in EXTRA_DDL:
+            await conn.execute(text(stmt))
+        await conn.execute(text("""CREATE TABLE IF NOT EXISTS merge_pair_ignores (
+            id SERIAL PRIMARY KEY, org_id UUID NOT NULL, player_a_id UUID NOT NULL,
+            player_b_id UUID NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW(),
+            UNIQUE (org_id, player_a_id, player_b_id))"""))
 
     org, sid, gid, pid, game = (uuid.uuid4() for _ in range(5))
     async with async_session_maker() as db:
@@ -121,6 +131,28 @@ async def main():
     check("player_deep does not rebuild fee days", "recompute" in calls, False)
     await sync_mod.sync_organisation(str(org), kind="org_full")
     check("org_full does rebuild fee days", "recompute" in calls)
+
+    # A hand-added player is merged into their synced record BEFORE the fee refresh,
+    # so the person is charged once, on the kept record.
+    from app.models.db import FeeMember, PlayerSeasonStats
+    hand, twin, hgame = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    async with async_session_maker() as db:
+        db.add_all([Player(id=hand, organisation_id=org, name="Casey Newman"),
+                    Player(id=twin, organisation_id=org, name="Newman, Casey", grassroots_id=str(twin))])
+        await db.flush()
+        db.add_all([PlayerSeasonStats(player_id=twin, season_id=sid, matches=1),
+                    FeeMember(id=uuid.uuid4(), organisation_id=org, player_id=hand, full_name="Casey Newman")])
+        await db.commit()
+    await sync_mod.sync_organisation(str(org), kind="org_full")
+    async with async_session_maker() as db:
+        gone = (await db.execute(text("SELECT count(*) FROM players WHERE id = :p"), {"p": hand})).scalar()
+        members = (await db.execute(text(
+            "SELECT count(*) FROM fee_members WHERE organisation_id = :o AND full_name ILIKE '%casey%'"),
+            {"o": org})).scalar()
+        on_kept = (await db.execute(text(
+            "SELECT count(*) FROM fee_members WHERE player_id = :p"), {"p": twin})).scalar()
+    check("a sync merges the hand-added player into their synced record", gone, 0)
+    check("one fee person for them, on the kept record", (members, on_kept), (1, 1))
 
     print(f"\n{PASS} passed, {FAIL} failed")
     sys.exit(1 if FAIL else 0)

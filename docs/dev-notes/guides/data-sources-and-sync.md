@@ -140,3 +140,4 @@
 | &nbsp;&nbsp;&nbsp;### Admin UI button names (Sync Actions card) | rules extracted | Operator commands (`/admin/sync` buttons) |
 | PlayHQ Partner API — May 2026 Audit (L12780-12799) | superseded by Sync Architecture and later code (Partner path fully gone) | Standing rule 35, Flags SYNC-1 to SYNC-4, Open follow-ups |
 | May 2026 Historical Data Fix — Resolution Log (L12820-12838) | rules extracted | Standing rules 11, 35, 36, Traps 5 to 7, Flag SYNC-9 |
+48. A stored game is repaired on every pass: when `our_appearances_done` skips it, `participant_relink.repair_stored_game` first attaches any player the team sheet names whom the club now holds (resolved by `_team_pid`, scorecard already fetched, no extra request). Never add a second "who is on the sheet" resolver. A full-name match to a record with no CA id stamps the participant id on it (`adopt_identity`) so the feed does not mint a twin. Archive: grep `sync repairs dropped players itself`.

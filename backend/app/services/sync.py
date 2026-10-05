@@ -725,8 +725,22 @@ async def sync_organisation(
     # Outside the governor: the fee refresh is database-only and must not hold
     # the slot another club's sync is queued behind.
     if kind != "player_deep":
+        # Order matters: a hand-added player merged into their synced record
+        # first, so the fee refresh charges the person once, on the kept record.
+        await _merge_hand_added_players(org_id_str)
         await _refresh_fee_match_days(org_id_str)
     return result
+
+
+async def _merge_hand_added_players(org_id_str: str) -> None:
+    """Merge a player the club typed in by hand into the synced record that
+    appeared when they played (services/hand_added_merge.py, undoable from the merge
+    log). Never raises."""
+    try:
+        from app.services import hand_added_merge
+        await hand_added_merge.merge_pairs(org_id_str, apply=True)
+    except Exception as e:
+        logger.error(f"Hand-added player merge failed for org {org_id_str}: {e}")
 
 
 async def _refresh_fee_match_days(org_id_str: str) -> None:
@@ -2191,6 +2205,8 @@ async def sync_grassroots_game_level_data(
         )
         our_team_name = ""
         our_team_pids: set[uuid.UUID] = set()
+        # Participants this game attached to a player by full name (see below).
+        name_attached: dict[str, uuid.UUID] = {}
         # Raw participantId strings for our roster, resolved or not — lets the
         # partnership/fielding fill-in handling below tell "one of ours, just
         # unregistered" apart from "genuinely the opposition's", since a plain
@@ -2213,6 +2229,7 @@ async def sync_grassroots_game_level_data(
                 _gu = _parse_uuid(_g)
                 if _gu is not None:
                     pid_by_guid[_gu] = _kp
+                    name_attached[str(_gu)] = _kp
                     logger.info(f"GR-sync: attached unknown participant {_g} to player {_kp} by full name")
             for roster_p in (our_team.get("players") or []):
                 raw_guid = roster_p.get("participantId") or ""
@@ -2247,6 +2264,19 @@ async def sync_grassroots_game_level_data(
                 # exists — otherwise the second club's stats for that match
                 # never land, even across a Full Rebuild (the same
                 # row-exists check would keep short-circuiting first).
+                # A hand-added player this team sheet was matched to by full name
+                # takes the participant id, so the season totals feed finds that
+                # record rather than minting a second one for the same person.
+                if name_attached:
+                    try:
+                        from app.services import participant_relink
+                        _adopted = await participant_relink.adopt_identity(session, org_uuid, name_attached)
+                        if _adopted:
+                            stats["gr_players_adopted"] = stats.get("gr_players_adopted", 0) + _adopted
+                    except Exception as _e:
+                        await session.rollback()
+                        logger.warning(f"GR-sync: identity adoption for {match_id_str} failed: {_e}")
+
                 existing = await session.execute(
                     text("SELECT venue, result, innings_totals FROM games WHERE id=:gid LIMIT 1"),
                     {"gid": match_id_str},
@@ -2320,6 +2350,20 @@ async def sync_grassroots_game_level_data(
                         )
                         await session.commit()
                     if our_appearances_done:
+                        # A finished game is not read again, so a player who was
+                        # unknown when it first synced stays missing from it. The
+                        # scorecard is already in hand: attach anyone the team
+                        # sheet names whom the club holds now.
+                        try:
+                            from app.services import participant_relink
+                            _fixed = await participant_relink.repair_stored_game(
+                                session, org_uuid, match_uuid, scorecard,
+                                lambda g: _team_pid(_parse_uuid(g)))
+                            if _fixed:
+                                stats["gr_rows_repaired"] = stats.get("gr_rows_repaired", 0) + sum(_fixed.values())
+                        except Exception as _e:
+                            await session.rollback()
+                            logger.warning(f"GR-sync: repair of {match_id_str} failed: {_e}")
                         stats["gr_games_skipped_done"] += 1
                         continue
                     # else: the row exists (the other synced club created it)
