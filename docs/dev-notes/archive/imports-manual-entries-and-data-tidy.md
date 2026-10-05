@@ -1112,3 +1112,7 @@ pages + a 1993 TCA "Official Summary of Match" form). Full how-to-improve-it doc
   import-time FOW/partnership name resolution — unchanged on purpose.
 
 <!-- END original CLAUDE.md L15646-15737 -->
+
+## One sheet line filed under two same-name players (Oct 2026, script only)
+
+Leederville's Paul K Jones showed 512 matches and 4,324 runs against the club sheet's 258 and 1,165. Paul G Jones, a different person with the stored name "Jones, Paul", was correct. Paul K's season-less "Prior Seasons & Adjustments" line was 338 matches and 3,360 runs: his own 84 and 201 plus Paul G's sheet line (254 games, 3,159 runs). Paul K's profile total minus Paul G's profile total equalled the sheet figure for matches, innings, wickets and catches. The reconciler sums every `imported_stats` row a player holds, so a copy of another player's line adds that career. `app/scripts/remove_cross_attached_imports.py` removes the keeper's rows that are exact copies of the other player's, with an audit entry holding each row. The cause of the original mis-filing was not established (no production database access in the session). The matcher already flags two same-name players as ambiguous, so a manual pick at import time or an older import is the likely source. Targets for Paul K's season-less line after the fix: matches 84, innings 65, not outs 10, runs 201, wickets 64, runs conceded 1,357, catches 30.
