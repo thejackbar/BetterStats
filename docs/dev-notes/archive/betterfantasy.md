@@ -71,3 +71,7 @@ Reported: Ashton Taylor and David Gardner had played (Play-Cricket) and were on 
 ## v9.106.12 (2026-10-05): choose which grades count
 
 Asked for: on/off control of which competitions and grades score, current season only. Competitions come from `club_competitions` (the club's own grouping), grades from `club_grade_rows` restricted to grades with a row or a game this season year. Verified by `verify_fantasy_grade_scope.py` (22 checks; the control runs the previous engine and still scores a grade that is switched off) and a Chromium run with the API stubbed (the PUT body on the wire, the confirm text, no overflow at 390px). Round dates for later weekends refresh in the nightly `generate_rounds`; the PUT does not call Play-Cricket.
+
+## v9.106.15 (2026-10-05): the trace reads imported and paired matches
+
+The Gardner trace showed no 2026 game for a record whose scorecard row is in the public API, because `trace_player` found games from the synced tables only. Imported and hand-typed games live in `manual_*` tables keyed by a manual game, and a synced game replaced by a preferred paired import is filtered out of the effective views. The trace now finds games through the effective views, reads facts from `v_effective_games`, tags each game `api` or `manual`, and explains a synced game the views hide (paired import named). `verify_fantasy_trace.py` (12 checks) applies `superseded_ddl.STATEMENTS` itself because the pairing filter is not in any migration view; the control run against the old trace fails the three new checks.
