@@ -22,7 +22,13 @@ import uuid
 from sqlalchemy import text
 
 from app.models.db import async_session_maker
+from datetime import date
+
+from sqlalchemy import select
+
+from app.models.db import FantasyRound, FantasySeason
 from app.scripts import fantasy_round_drift
+from app.services import fantasy_engine
 from app.services import grassroots_scores_client as gr
 from app.services import participant_relink as relink
 
@@ -70,6 +76,23 @@ async def run(org: str, year: int | None, apply: bool) -> None:
                 total[k] += v
         await db.commit()
         print(f"\nAdded {total['appearances']} appearance(s), {total['batting']} batting, {total['bowling']} bowling, {total['fielding']} fielding row(s).")
+    # A round still running only shows points once it is refreshed (the overview's
+    # "Settle due rounds" and the nightly job do this), so do it here too.
+    async with async_session_maker() as db:
+        fs_id = (await db.execute(text(
+            "SELECT id FROM fantasy_seasons WHERE organisation_id = :o ORDER BY season_year DESC LIMIT 1"), {"o": club_id})).scalar()
+        if fs_id is not None:
+            fs = await db.get(FantasySeason, fs_id)
+            today = date.today()
+            running = (await db.execute(select(FantasyRound).where(
+                FantasyRound.fantasy_season_id == fs.id,
+                FantasyRound.status.notin_(fantasy_engine.AUTO_SETTLE_SKIP),
+                FantasyRound.start_date <= today, FantasyRound.end_date > today,
+            ).order_by(FantasyRound.round_number))).scalars().all()
+            for rnd in running:
+                n = await fantasy_engine.refresh_live_round(db, fs, rnd)
+                print(f"  Round {rnd.round_number} is still running: points refreshed for {n} player(s).")
+            await db.commit()
     await fantasy_round_drift.run(org, True)
 
 

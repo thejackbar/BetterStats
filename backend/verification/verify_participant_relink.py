@@ -263,6 +263,15 @@ async def main() -> int:
     check("Ashton scores", str(ASH) in sc and sc[str(ASH)]["total"] > 0, repr(sc.get(str(ASH))))
     check("David scores (an appearance and a maiden)", str(DG) in sc and sc[str(DG)]["total"] > 0, repr(sc.get(str(DG))))
     check("Angus, who did not play, does not", str(ANGUS) not in sc)
+    # The round is still running, so the points only reach the player list and ladder once it is refreshed.
+    async with Session() as s:
+        fs = await s.get(FantasySeason, FS_ID)
+        rnd = await s.get(FantasyRound, R2)
+        await fantasy_engine.refresh_live_round(s, fs, rnd)
+        await s.commit()
+        pool = {str(r[0]): float(r[1]) for r in (await s.execute(text(
+            "SELECT player_id, total_points FROM fantasy_pool_players WHERE fantasy_season_id = :f"), {"f": FS_ID})).all()}
+    check("after a live refresh the pool shows their points", pool.get(str(ASH), 0) > 0 and pool.get(str(DG), 0) > 0, repr((pool.get(str(ASH)), pool.get(str(DG)))))
 
     print("7. Running it again changes nothing")
     async with Session() as s:
