@@ -581,11 +581,20 @@ async def main() -> None:
                 r = await mc.get("/club-admin/people")
                 check("a request with NO token to a management route is still scrubbed",
                       "Steenholdt" not in r.text, r.text[:120])
+                from jose import jwt as _jwt
+                from app.config.settings import settings as _settings
+                from app.routers.auth import COOKIE_NAME as _COOKIE
+                _tok = _jwt.encode({"sub": str(ADMIN)}, _settings.secret_key, algorithm=_settings.algorithm)
+                session = {"Cookie": f"{_COOKIE}={_tok}"}
+                r = await mc.get("/club-admin/people", headers={"Cookie": f"{_COOKIE}=not-a-real-token"})
+                check("a junk session cookie does NOT unscrub a management route", "Steenholdt" not in r.text)
                 r = await mc.get("/club-admin/people", headers={"Authorization": "Bearer x"})
-                check("a signed-in request to a management route is NOT scrubbed (the club runs its own record)",
+                check("an Authorization header alone does NOT unscrub (sign-in is by session cookie)", "Steenholdt" not in r.text)
+                r = await mc.get("/club-admin/people", headers=session)
+                check("a request with a valid session cookie to a management route is NOT scrubbed (the club runs its own record)",
                       "Steenholdt" in r.text)
-                r = await mc.get("/leaky", headers={"Authorization": "Bearer x"})
-                check("a token alone does not unscrub a PUBLIC route", "Steenholdt" not in r.text)
+                r = await mc.get("/leaky", headers=session)
+                check("a valid session alone does not unscrub a PUBLIC route", "Steenholdt" not in r.text)
                 r = await mc.get("/photo")
                 check("a binary response is passed through untouched", r.content == b"\x89PNG Trent Steenholdt")
                 r = await mc.get("/csv")

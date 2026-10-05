@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import ImageEditorModal from '../../components/ImageEditorModal'
 import Dropdown from '../../components/Dropdown'
@@ -18,7 +18,7 @@ import ShapesPanel from '../../components/admin/socialpost/panels/ShapesPanel'
 import ClubDataPanel from '../../components/admin/socialpost/panels/ClubDataPanel'
 import LayersPanel from '../../components/admin/socialpost/panels/LayersPanel'
 import SponsorsPanel from '../../components/admin/socialpost/panels/SponsorsPanel'
-import { api } from '../../lib/api'
+import { api, setPublishingContext } from '../../lib/api'
 import {
   T1_HeroList, T2_CardGrid, T3_SideNumbered, T4_BattingOrder,
   T5_Brutalist, T6_Diagonal, T7_CaptainSpotlight, T8_Mosaic, T9_Flyer, T10_TeamSheet,
@@ -1022,6 +1022,14 @@ const stable = (v) => {
 const blocksSig = (items) => stable((items || []).map(({ id, ...rest }) => rest))
 
 export default function AdminSocialPost() {
+  // This screen builds posts that get published. Tell the server so anyone who
+  // asked to be removed from the public site is left out of everything it reads
+  // (roster, selection, scorecards), even for a signed-in admin. A layout effect
+  // runs before any child's fetch effect, so the very first request carries it.
+  useLayoutEffect(() => {
+    setPublishingContext(true)
+    return () => setPublishingContext(false)
+  }, [])
   const location = useLocation()
   const navigate = useNavigate()
   // Which rail tool's panel is showing. A data-driven post type opens on the

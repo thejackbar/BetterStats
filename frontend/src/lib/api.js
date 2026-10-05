@@ -50,8 +50,20 @@ function iqScopeQuery(path) {
   return path + (path.includes('?') ? '&' : '?') + parts.join('&')
 }
 
+// True while a screen that builds PUBLISHED output (BetterSocials posts) is open.
+// Every request it makes then carries `X-Publishing: 1`, and the server removes
+// anyone who asked to be taken off the public site from what it answers, even
+// to a signed-in admin: the club is not the audience of a post. See
+// backend/app/services/privacy_scrub.py.
+let publishingContext = false
+export function setPublishingContext(on) { publishingContext = !!on }
+
 async function request(path, options = {}) {
-  const headers = { 'Content-Type': 'application/json', ...options.headers }
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(publishingContext ? { 'X-Publishing': '1' } : {}),
+    ...options.headers,
+  }
   const res = await fetch(`${BASE}${iqScopeQuery(path)}`, { ...options, headers, credentials: 'include' })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: statusMessage(res) }))

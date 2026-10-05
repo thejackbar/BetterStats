@@ -58,12 +58,31 @@ NIL_UUID = "00000000-0000-0000-0000-000000000000"
 CACHE_SECONDS = 30
 
 # Routes where a signed-in club works with its own people. Everything not
-# listed is scrubbed. An unlisted management screen shows "********"
-# for the one person, which is the safe way to be wrong.
+# listed is scrubbed. An unlisted management screen shows "********" for the
+# one person, which is the safe way to be wrong.
 MANAGEMENT_PREFIXES = (
     "/club-admin", "/admin", "/auth", "/selection", "/selection-rules", "/availability",
-    "/teams", "/fixtures", "/nets", "/votes", "/scout", "/iq", "/families",
+    "/teams", "/fixtures", "/nets", "/votes", "/families",
 )
+# NOT management, on purpose: /iq (BetterIQ) and /scout (BetterScout) show OTHER
+# clubs' players by name (the opposition, a scouted card), so the "it is the
+# club's own record" reason for an exemption does not hold. A club's own
+# analysis of its own removed player reads "********" there, which is the
+# accepted cost.
+# The player routes a club admin's own screens use to edit a record.
+MANAGEMENT_PATH_RE = re.compile(r"^/players/[^/]+/(profile|aliases)(/|$)")
+
+# PUBLISHING: output that gets posted, printed, emailed or shown to the public.
+# Scrubbed even for a signed-in admin, because the club is not the audience.
+# BetterSocials builds its posts from these routes; the frontend also sends
+# `X-Publishing: 1` on every request a publishing screen makes (lib/api.js), so
+# a route that screen reads from elsewhere (the roster, the selection) is covered
+# without listing it here.
+PUBLISHING_PREFIXES = ("/admin/social",)
+PUBLISHING_HEADER = b"x-publishing"
+# A scorecard keeps his row (the totals must still add up), masked. Everything
+# else a publishing screen reads drops him from lists (a ranking, a shortlist).
+MASK_ONLY_RE = re.compile(r"^/admin/social/scorecard/")
 
 _SCRUBBABLE_TYPES = ("application/json", "text/csv", "text/plain", "text/html", "application/xml", "text/xml")
 
@@ -142,8 +161,17 @@ def _compile(names) -> Optional[re.Pattern]:
     return re.compile(r"(?<![\w])(?:" + "|".join(re.escape(n) for n in names) + r")(?![\w])", re.IGNORECASE)
 
 
+_FIRST_KEYS = {"first", "first_name", "firstname", "mono", "initials", "initial"}
+_NAME_KEYS = {"first", "last", "short", "full", "display", "mono", "initials", "initial", "nickname"}
+
+
+def _is_name_key(key) -> bool:
+    k = str(key).lower()
+    return k in _NAME_KEYS or k.endswith("name")
+
+
 class Scrubber:
-    __slots__ = ("_name_re", "_id_re", "persons")
+    __slots__ = ("_name_re", "_id_re", "persons", "_ids", "_surnames")
 
     def __init__(self, persons: list[Person]):
         self.persons = persons
@@ -152,6 +180,11 @@ class Scrubber:
         for p in persons:
             safe |= p.safe
             ids |= p.ids
+        self._ids = {i.lower() for i in ids if i}
+        self._surnames = {
+            (parse_name(n)[1] if parse_name(n) else n).lower()
+            for p in persons for n in p.own if n and len(n) >= 4
+        }
         # Longest first, so "Steenholdt, Trent" wins over "Steenholdt".
         self._name_re = _compile(safe)
         idl = sorted({i.lower() for i in ids if i})
@@ -163,6 +196,47 @@ class Scrubber:
         if self._name_re is not None:
             body = self._name_re.sub(REMOVED_NAME, body)
         return body
+
+    def mentions(self, text_: str) -> bool:
+        """Cheap test: could this body name a removed person at all?"""
+        low = text_.lower()
+        return any(i in low for i in self._ids) or any(sn in low for sn in self._surnames)
+
+    # ---- structure: a record that carries his id IS him ----------------------
+    def _row_is_removed(self, row: dict) -> bool:
+        return any(isinstance(v, str) and v.lower() in self._ids for v in row.values())
+
+    def _mask_row(self, row: dict) -> dict:
+        out = {}
+        for k, v in row.items():
+            if isinstance(v, str) and v.lower() in self._ids:
+                out[k] = NIL_UUID
+            elif isinstance(v, str) and _is_name_key(k):
+                out[k] = "" if str(k).lower() in _FIRST_KEYS else REMOVED_NAME
+            else:
+                out[k] = v
+        return out
+
+    def structural(self, obj, drop: bool = False):
+        """Blank the name fields of any record carrying a removed person's id.
+
+        Cricket Australia data and the social payloads hold a name as SEPARATE
+        fields (first, last, short) beside the id, which a text search cannot
+        recognise when a relative shares the surname. The id is exact. With
+        ``drop`` the record leaves a list entirely (a ranking, a shortlist, a
+        roster) instead of staying as a masked row.
+        """
+        if isinstance(obj, list):
+            out = []
+            for item in obj:
+                if drop and isinstance(item, dict) and self._row_is_removed(item):
+                    continue
+                out.append(self.structural(item, drop))
+            return out
+        if isinstance(obj, dict):
+            row = {k: self.structural(v, drop) for k, v in obj.items()}
+            return self._mask_row(row) if self._row_is_removed(obj) else row
+        return obj
 
     # ---- one match scorecard ------------------------------------------------
     def scrub_card(self, obj):
@@ -202,10 +276,20 @@ def _walk_strings(obj):
 
 
 def _walk_name_values(obj):
-    """Strings held under a key that ends in "name" (player_name, batter1_name...)."""
+    """Every player name a card holds, however it is stored.
+
+    A key ending in "name" (player_name, batter1_name), a ``short`` form, and the
+    social payloads' SPLIT form: a dict with ``first`` and ``last`` is one player,
+    "first last". Missing the split form means a card looks as if nobody else
+    shares a surname, and an ambiguous line is scrubbed from a relative.
+    """
     if isinstance(obj, dict):
+        first, last = obj.get("first"), obj.get("last")
+        if isinstance(last, str) and last:
+            yield f"{first} {last}".strip() if isinstance(first, str) else last
         for k, v in obj.items():
-            if isinstance(v, str) and str(k).lower().endswith("name"):
+            kl = str(k).lower()
+            if isinstance(v, str) and (kl.endswith("name") or kl in ("short", "full")):
                 yield v
             else:
                 yield from _walk_name_values(v)
@@ -355,23 +439,61 @@ async def get_scrubber() -> Optional[Scrubber]:
 
 # A match scorecard: the one response where the ambiguous name forms can be
 # resolved, because the card says who played.
-_CARD_PATH_RE = re.compile(r"^/games/[^/]+/scorecard/?$")
+_CARD_PATH_RE = re.compile(r"^/(games/[^/]+|admin/social)/scorecard(/[^/]+)?/?$")
 
 
-def _scrub_card_json(scrubber: Scrubber, decoded: str) -> str:
+def _scrub_json(scrubber: Scrubber, decoded: str, *, is_card: bool, drop: bool) -> str:
+    """Parse, resolve a scorecard's ambiguous forms, mask records by id, write back."""
     import json
+    if not scrubber.mentions(decoded):
+        return decoded
     try:
         obj = json.loads(decoded)
     except ValueError:
         return decoded
-    return json.dumps(scrubber.scrub_card(obj), ensure_ascii=False, separators=(",", ":"))
+    if is_card:
+        obj = scrubber.scrub_card(obj)
+    obj = scrubber.structural(obj, drop=drop)
+    return json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
+
+
+def _cookie_value(scope, name: str) -> Optional[str]:
+    for k, v in scope.get("headers", []):
+        if k == b"cookie":
+            for part in v.decode("latin-1").split(";"):
+                key, _, val = part.strip().partition("=")
+                if key == name:
+                    return val
+    return None
+
+
+def _has_valid_session(scope) -> bool:
+    """A real, unexpired session cookie (the signature is checked, no DB hit)."""
+    try:
+        from jose import jwt
+        from app.config.settings import settings
+        from app.routers.auth import COOKIE_NAME
+        token = _cookie_value(scope, COOKIE_NAME)
+        if not token:
+            return False
+        return bool(jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm]).get("sub"))
+    except Exception:
+        return False
+
+
+def _is_publishing(scope) -> bool:
+    path = scope.get("path", "") or ""
+    if any(path == p or path.startswith(p + "/") for p in PUBLISHING_PREFIXES):
+        return True
+    return any(k == PUBLISHING_HEADER and v.strip() in (b"1", b"true") for k, v in scope.get("headers", []))
 
 
 def _is_management(scope) -> bool:
     path = scope.get("path", "") or ""
-    if not any(path == p or path.startswith(p + "/") for p in MANAGEMENT_PREFIXES):
-        return False
-    return any(k == b"authorization" for k, _ in scope.get("headers", []))
+    on_route = MANAGEMENT_PATH_RE.match(path) or any(
+        path == p or path.startswith(p + "/") for p in MANAGEMENT_PREFIXES
+    )
+    return bool(on_route) and _has_valid_session(scope)
 
 
 class PrivacyScrubMiddleware:
@@ -384,11 +506,15 @@ class PrivacyScrubMiddleware:
         if scope["type"] != "http" or scope.get("method") != "GET":
             return await self.app(scope, receive, send)
         scrubber = await get_scrubber()
-        if scrubber is None or _is_management(scope):
+        publishing = _is_publishing(scope)
+        # Publishing output is scrubbed even for a signed-in admin; otherwise a
+        # signed-in request to a management route is the club's own record.
+        if scrubber is None or (not publishing and _is_management(scope)):
             return await self.app(scope, receive, send)
 
         held: dict = {"start": None, "chunks": [], "pass": False, "json": False}
         is_card = bool(_CARD_PATH_RE.match(scope.get("path", "") or ""))
+        drop = publishing and not MASK_ONLY_RE.match(scope.get("path", "") or "")
 
         async def send_wrapper(message):
             if held["pass"]:
@@ -410,8 +536,8 @@ class PrivacyScrubMiddleware:
                 body = b"".join(held["chunks"])
                 try:
                     decoded = body.decode("utf-8")
-                    if is_card and held["json"]:
-                        decoded = _scrub_card_json(scrubber, decoded)
+                    if held["json"]:
+                        decoded = _scrub_json(scrubber, decoded, is_card=is_card, drop=drop)
                     cleaned = scrubber.scrub(decoded).encode("utf-8")
                 except UnicodeDecodeError:
                     cleaned = body

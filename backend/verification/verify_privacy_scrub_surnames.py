@@ -203,6 +203,111 @@ async def main() -> int:
         check("scorecard route: with Tom also in the match the line is left alone",
               "c T Steenholdt b J Smith" in r.text and "Tom Steenholdt" in r.text)
 
+    # ------------------------------------------------ BetterSocials / publishing
+    print("publishing: BetterSocials reads, with relatives at the club and a signed-in admin")
+    await seed()
+    from jose import jwt
+    from app.config.settings import settings
+    from app.routers.auth import COOKIE_NAME
+    tok = jwt.encode({"sub": str(PAT)}, settings.secret_key, algorithm=settings.algorithm)
+    signed_in = {"Cookie": f"{COOKIE_NAME}={tok}"}
+    publishing = {**signed_in, "X-Publishing": "1"}
+
+    def row(pid, first, last, short):
+        return {"first": first, "last": last, "short": short, "pid": str(pid), "guid": str(pid), "points": 10}
+
+    ranked = {"match": {"opponent": "WEMBLEY"}, "players": [
+        row(TRENT, "Trent", "Steenholdt", "T. STEENHOLDT"),
+        row(TOM, "Tom", "Steenholdt", "T. STEENHOLDT"),
+        row(SAM, "Sam", "Steenholdt", "S. STEENHOLDT"),
+        row(PAT, "Pat", "Plain", "P. PLAIN"),
+    ]}
+    sc_card = {"batting": [row(TRENT, "Trent", "Steenholdt", "T. STEENHOLDT"),
+                           row(TOM, "Tom", "Steenholdt", "T. STEENHOLDT")],
+               "opposition_batting": [{"player_name": "Opp", "dismissal_type": "c T Steenholdt b J Smith"}]}
+    roster = [{"id": str(TRENT), "name": "Trent Steenholdt"}, {"id": str(TOM), "name": "Tom Steenholdt"},
+              {"id": str(PAT), "name": "Pat Plain"}]
+    store = {"potm": ranked, "scorecard": sc_card, "roster": roster}
+    pub_app = FastAPI()
+    pub_app.add_middleware(privacy_scrub.PrivacyScrubMiddleware)
+
+    @pub_app.get("/admin/social/potm/{m}")
+    async def _potm(m: str):
+        return JSONResponse(store["potm"])
+
+    @pub_app.get("/admin/social/totw")
+    async def _totw():
+        return JSONResponse(store["potm"])
+
+    @pub_app.get("/admin/social/scorecard/{m}")
+    async def _scard(m: str):
+        return JSONResponse(store["scorecard"])
+
+    @pub_app.get("/club-admin/players")
+    async def _roster():
+        return JSONResponse(store["roster"])
+
+    @pub_app.get("/selection/overview")
+    async def _sel():
+        return JSONResponse(store["roster"])
+
+    @pub_app.get("/players/{pid}/profile")
+    async def _profile(pid: str):
+        return JSONResponse({"id": pid, "name": "Trent Steenholdt"})
+
+    @pub_app.get("/iq/opponent/{x}")
+    async def _iq(x: str):
+        return JSONResponse(store["roster"])
+
+    @pub_app.get("/scout/players")
+    async def _scout():
+        return JSONResponse(store["roster"])
+
+    transport = httpx.ASGITransport(app=pub_app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://m") as c_:
+        sc = await privacy_scrub.get_scrubber()
+        for path in ("/iq/opponent/1", "/scout/players"):
+            j = (await c_.get(path, headers=signed_in)).json()
+            check(f"{path} (shows OTHER clubs' players) is scrubbed even with a valid session",
+                  all(r["id"] != str(TRENT) and r["name"] != "Trent Steenholdt" for r in j), str(j))
+        # Player of the match shortlist: he must not be nominable.
+        j = (await c_.get("/admin/social/potm/1", headers=signed_in)).json()
+        names = [(p["first"], p["last"]) for p in j["players"]]
+        check("BetterSocials POTM (signed-in admin): he is NOT on the shortlist",
+              ("Trent", "Steenholdt") not in names and all(str(TRENT) not in str(p) for p in j["players"]), str(names))
+        check("...Tom, Sam and Pat are all still on it (a relative is never dropped)",
+              {("Tom", "Steenholdt"), ("Sam", "Steenholdt"), ("Pat", "Plain")} <= set(names), str(names))
+        j = (await c_.get("/admin/social/totw", headers=signed_in)).json()
+        check("BetterSocials Team of the Week: he is not in the pool",
+              all(p["first"] != "Trent" for p in j["players"]) and len(j["players"]) == 3)
+        # The full scorecard keeps his row so the totals add up, masked.
+        j = (await c_.get("/admin/social/scorecard/1", headers=signed_in)).json()
+        b = j["batting"][0]
+        check("BetterSocials scorecard: his row is KEPT but masked (first, last and short all gone)",
+              b["first"] == "" and b["last"] == STARS and b["short"] == STARS and b["pid"] != str(TRENT) and b["guid"] != str(TRENT),
+              str(b))
+        check("...Tom's row beside it is untouched", j["batting"][1]["first"] == "Tom" and j["batting"][1]["short"] == "T. STEENHOLDT")
+        check("...and the ambiguous dismissal line is resolved from who played (Tom also played: left alone)",
+              j["opposition_batting"][0]["dismissal_type"] == "c T Steenholdt b J Smith")
+        # Same route without any session: still scrubbed (control for the sign-in logic).
+        j = (await c_.get("/admin/social/scorecard/1")).json()
+        check("the same scorecard with no session is masked too", j["batting"][0]["last"] == STARS)
+        # A roster read for a publishing screen, via the header, drops him...
+        j = (await c_.get("/club-admin/players", headers=publishing)).json()
+        check("the roster read by a publishing screen (X-Publishing) omits him",
+              [r["name"] for r in j] == ["Tom Steenholdt", "Pat Plain"], str(j))
+        j = (await c_.get("/selection/overview", headers=publishing)).json()
+        check("...and so does the selection read by a publishing screen", all(str(TRENT) not in str(r) for r in j))
+        # ...but the club's own Players screen (no header, valid session) still has him to manage.
+        j = (await c_.get("/club-admin/players", headers=signed_in)).json()
+        check("the club's own Players screen (session, no publishing header) still lists him to manage",
+              [r["name"] for r in j][0] == "Trent Steenholdt" and j[0]["id"] == str(TRENT), str(j))
+        j = (await c_.get(f"/players/{TRENT}/profile", headers=signed_in)).json()
+        check("the admin profile editor route is the club's record: real name and id",
+              j["name"] == "Trent Steenholdt" and j["id"] == str(TRENT))
+        j = (await c_.get(f"/players/{TRENT}/profile")).json()
+        check("the same profile route with no session is scrubbed", j["name"] != "Trent Steenholdt")
+
     # ----------------------------------------------- no relatives: scrub it all
     print("no other Steenholdt at the club")
     await seed(others=False)
