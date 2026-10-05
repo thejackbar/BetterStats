@@ -34,7 +34,7 @@ from app.services import grassroots_scores_client as gr
 from app.services import playhq_client
 from app.services.club_match import club_match_keys
 from app.services.fantasy_scoring import (
-    DEFAULT_SCORING, classify_role, score_player_round,
+    DEFAULT_RULES, DEFAULT_SCORING, classify_role, score_player_round,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,6 +46,12 @@ PRICE_WINDOW_YEARS = 3
 # A match longer than this many days between first and last day is treated as bad data.
 MAX_MATCH_SPAN_DAYS = 10
 PRICE_MIN, PRICE_MAX, PRICE_FLOOR, PRICE_K = 4.0, 15.0, 4.0, 0.12
+
+# A round an admin has taken back out of settlement. It reads as not scored
+# everywhere (public pages, ladders), but the automatic settlers skip it so the
+# daily job doesn't put the points straight back; the admin's Settle button does.
+ROUND_UNSETTLED = "unsettled"
+AUTO_SETTLE_SKIP = ("scored", ROUND_UNSETTLED)
 
 
 def _grade_clause(included_grade_ids, alias: str = "g") -> str:
@@ -550,19 +556,10 @@ async def _round_player_scores(session: AsyncSession, fs, rnd) -> dict[str, dict
     return out
 
 
-async def settle_round(session: AsyncSession, fs, rnd) -> int:
-    """Compute each player's fantasy points for a round from the scorecards of the
-    games in the round window, and upsert ``fantasy_player_round_scores``.
-    Idempotent on (round, player). Marks the round ``scored`` and refreshes the
-    pool's season totals. Returns the number of players scored."""
-    by_player = await _round_player_scores(session, fs, rnd)
-    if not by_player:
-        await _mark_scored(session, rnd, 0)
-        return 0
-
+async def _write_player_scores(session: AsyncSession, fs, rnd, by_player: dict[str, dict]) -> int:
+    """Upsert each player's round score. Idempotent on (round, player)."""
     scored = 0
     for pid, sc in by_player.items():
-        base_pts, total_pts, breakdown = sc["base"], sc["total"], sc["breakdown"]
         await session.execute(
             text("""
                 INSERT INTO fantasy_player_round_scores
@@ -575,11 +572,51 @@ async def settle_round(session: AsyncSession, fs, rnd) -> int:
             """),
             {
                 "fs": str(fs.id), "rid": str(rnd.id), "pid": pid,
-                "base": base_pts, "total": total_pts,
-                "bd": json.dumps(breakdown), "games": sc["games"],
+                "base": sc["base"], "total": sc["total"],
+                "bd": json.dumps(sc["breakdown"]), "games": sc["games"],
             },
         )
         scored += 1
+    return scored
+
+
+async def refresh_live_round(session: AsyncSession, fs, rnd) -> int:
+    """Provisional scoring for a round that has started but isn't over, so points
+    show on the ladder and the player list while a long round is still running
+    (a two-week round otherwise shows nothing until the end).
+
+    Writes the same player, squad and ladder rows settlement does, from the games
+    in the window so far, but leaves the round unscored, grants no free transfer
+    and fills no head-to-head result; settlement later recomputes it all and does
+    those. A no-op unless the round has started and is not scored. Returns the
+    number of players with points."""
+    if rnd.status == "scored" or not rnd.start_date or rnd.start_date > date.today():
+        return 0
+    by_player = await _round_player_scores(session, fs, rnd)
+    # Provisional rows are ours to replace, so a corrected scorecard that no
+    # longer scores a player drops them rather than leaving a stale figure.
+    await session.execute(
+        text("""DELETE FROM fantasy_player_round_scores
+                WHERE round_id = CAST(:rid AS UUID) AND player_id <> ALL(CAST(:pids AS UUID[]))"""),
+        {"rid": str(rnd.id), "pids": list(by_player)},
+    )
+    n = await _write_player_scores(session, fs, rnd, by_player)
+    await _refresh_pool_totals(session, fs, rnd)
+    await fantasy_squad.score_squads_for_round(session, fs, rnd, rollover=False)
+    return n
+
+
+async def settle_round(session: AsyncSession, fs, rnd) -> int:
+    """Compute each player's fantasy points for a round from the scorecards of the
+    games in the round window, and upsert ``fantasy_player_round_scores``.
+    Idempotent on (round, player). Marks the round ``scored`` and refreshes the
+    pool's season totals. Returns the number of players scored."""
+    by_player = await _round_player_scores(session, fs, rnd)
+    if not by_player:
+        await _mark_scored(session, rnd, 0)
+        return 0
+
+    scored = await _write_player_scores(session, fs, rnd, by_player)
 
     await _refresh_pool_totals(session, fs, rnd)
     # Roll the per-player points up into each squad's best-11 round score + ladder.
@@ -596,6 +633,84 @@ async def settle_round(session: AsyncSession, fs, rnd) -> int:
         fs.status = "active"
     await _mark_scored(session, rnd, scored)
     return scored
+
+
+async def unsettle_round(session: AsyncSession, fs, rnd) -> int:
+    """Undo ``settle_round`` for a round that was settled by mistake. Returns the
+    number of player scores removed (0 when the round wasn't scored).
+
+    Only what settlement wrote is touched. Each squad's round row also carries
+    what its manager did before the round locked (chip played, transfers made,
+    points hit), so a row with any of that is kept and just has its scoring
+    cleared, and a row with none of it is removed. The round goes to
+    ``unsettled``, which the automatic settlers skip, until it is settled again.
+    A round still inside its window goes back to ``upcoming`` instead, so it
+    carries on as an in-progress round (provisional points, settled when it ends)."""
+    if rnd.status != "scored":
+        return 0
+    p = {"rid": str(rnd.id), "fs": str(fs.id)}
+
+    removed = (await session.execute(
+        text("DELETE FROM fantasy_player_round_scores WHERE round_id = CAST(:rid AS UUID)"), p,
+    )).rowcount or 0
+    await session.execute(
+        text("""DELETE FROM fantasy_squad_round_scores
+                WHERE round_id = CAST(:rid AS UUID)
+                  AND chip_used IS NULL AND transfers_made = 0 AND transfer_hit = 0"""), p,
+    )
+    await session.execute(
+        text("""UPDATE fantasy_squad_round_scores
+                SET points = 0, raw_points = 0, captain_player_id = NULL,
+                    dropped_player_id = NULL, lineup = '[]'::jsonb
+                WHERE round_id = CAST(:rid AS UUID)"""), p,
+    )
+    await session.execute(
+        text("""UPDATE fantasy_h2h_fixtures
+                SET home_points = NULL, away_points = NULL, result = NULL
+                WHERE round_id = CAST(:rid AS UUID)"""), p,
+    )
+    in_progress = bool(rnd.end_date and rnd.end_date >= date.today())
+    new_status = "upcoming" if in_progress else ROUND_UNSETTLED
+    await session.execute(
+        text("""UPDATE fantasy_rounds SET status = :st, scored_at = NULL, updated_at = NOW()
+                WHERE id = CAST(:rid AS UUID)"""),
+        {**p, "st": new_status},
+    )
+    rnd.status, rnd.scored_at = new_status, None
+
+    # Totals follow the rows that are left. Last-round points show the latest
+    # round that is still scored.
+    await session.execute(
+        text("""
+            UPDATE fantasy_pool_players pp SET
+                total_points = COALESCE((
+                    SELECT SUM(prs.total_points) FROM fantasy_player_round_scores prs
+                    WHERE prs.fantasy_season_id = CAST(:fs AS UUID) AND prs.player_id = pp.player_id
+                ), 0),
+                last_round_points = COALESCE((
+                    SELECT prs.total_points FROM fantasy_player_round_scores prs
+                    WHERE prs.player_id = pp.player_id AND prs.round_id = (
+                        SELECT r.id FROM fantasy_rounds r
+                        WHERE r.fantasy_season_id = CAST(:fs AS UUID) AND r.status = 'scored'
+                        ORDER BY r.round_number DESC LIMIT 1)
+                ), 0),
+                updated_at = NOW()
+            WHERE pp.fantasy_season_id = CAST(:fs AS UUID)
+        """), p,
+    )
+    await fantasy_squad.recompute_squad_totals(session, fs)
+
+    # Take back the free transfer settlement banked. A squad with a wildcard or
+    # free hit armed (a huge bank) is left alone.
+    per = int((fs.rules or DEFAULT_RULES).get("free_transfers_per_round", 1))
+    await session.execute(
+        text("""UPDATE fantasy_squads SET free_transfers = GREATEST(free_transfers - :per, 0)
+                WHERE fantasy_season_id = CAST(:fs AS UUID) AND free_transfers < 100"""),
+        {"per": per, "fs": p["fs"]},
+    )
+    if in_progress:
+        await refresh_live_round(session, fs, rnd)
+    return removed
 
 
 async def _refresh_pool_totals(session: AsyncSession, fs, rnd) -> None:

@@ -1,0 +1,10 @@
+# BetterFantasyCricket (club fantasy competition)
+
+Code: `backend/app/services/fantasy_engine.py` (rounds, pool, settlement), `fantasy_squad.py`, `fantasy_draft.py`, `routers/fantasy.py` (club admin), `routers/public_fantasy.py` (member play), `frontend/src/pages/admin/fantasy`, `frontend/src/pages/fantasy`. Checks: `backend/verification/verify_fantasy_rounds.py`, `verify_fantasy_unsettle.py`.
+
+- A round's `status` is `upcoming | scored | unsettled`. `unsettled` means an admin took an ended round back out of settlement. Every public read treats it as not scored; the nightly job and Settle due rounds skip it (`fantasy_engine.AUTO_SETTLE_SKIP`). Use that tuple, never a bare `!= "scored"`, for anything that settles unattended.
+- `settle_round` writes player scores, pool totals, squad round rows, season totals, head-to-head results, the free-transfer rollover and the status. `unsettle_round` must undo each. Add a line there when settlement starts writing something new.
+- A squad's round row also holds what the manager did before lock (`chip_used`, `transfers_made`, `transfer_hit`). Unsettle keeps any row with those and only clears scoring. Never delete such a row.
+- `refresh_live_round` writes provisional player, squad and ladder rows for a running round, so a long round shows points. It must never grant the rollover, fill head-to-head results or mark the round scored. Anything shown as "live" that adds a round's points to `squad.total_points` has to swap out the stored provisional figure first, or it counts twice.
+- The free-transfer rollover is not idempotent: re-settling an already scored round banks another one. Unsettle takes one back (floored at 0, squads holding a wildcard or free hit left alone).
+- Super admin entry: Better HQ > Clubs & Data > Fantasy Competitions (`/admin/super/fantasy`). Open uses `switchClub(clubId, 'admin/fantasy')`.

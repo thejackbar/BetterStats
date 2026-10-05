@@ -314,8 +314,8 @@ async def settle_all_fantasy():
 
     Runs daily after the weekly sync, so a weekend's scorecards turn into fantasy
     points (and ladders) without an admin pressing a button. Idempotent — a round
-    already scored is skipped, and re-running over a corrected scorecard
-    recomputes in place. Each season is isolated so one failure can't stop the
+    already scored is skipped, as is one an admin unsettled (it waits for their
+    Settle button), and re-running over a corrected scorecard recomputes in place. Each season is isolated so one failure can't stop the
     rest. Imports are local to keep the fantasy engine off the startup path.
     """
     from datetime import date
@@ -336,12 +336,24 @@ async def settle_all_fantasy():
                 rounds = (await session.execute(
                     select(FantasyRound).where(
                         FantasyRound.fantasy_season_id == fs.id,
-                        FantasyRound.status != "scored",
+                        FantasyRound.status.notin_(fantasy_engine.AUTO_SETTLE_SKIP),
                         FantasyRound.end_date <= date.today(),
                     ).order_by(FantasyRound.round_number)
                 )).scalars().all()
                 for rnd in rounds:
                     await fantasy_engine.settle_round(session, fs, rnd)
+                # A round still running gets provisional points, so a two-week
+                # round shows its points as the games sync, not at the end.
+                running = (await session.execute(
+                    select(FantasyRound).where(
+                        FantasyRound.fantasy_season_id == fs.id,
+                        FantasyRound.status.notin_(fantasy_engine.AUTO_SETTLE_SKIP),
+                        FantasyRound.start_date <= date.today(),
+                        FantasyRound.end_date > date.today(),
+                    ).order_by(FantasyRound.round_number)
+                )).scalars().all()
+                for rnd in running:
+                    await fantasy_engine.refresh_live_round(session, fs, rnd)
                 await session.commit()
             except Exception as e:
                 await session.rollback()

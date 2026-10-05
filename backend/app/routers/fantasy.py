@@ -24,10 +24,10 @@ from typing import Optional
 import bcrypt as _bcrypt
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.routers.auth import get_current_club
+from app.routers.auth import get_current_club, require_super_admin
 from app.auth.capabilities import require_cap, MANAGE_FANTASY
 from app.auth.modules import org_has_module, MODULE_FANTASY
 from app.models.db import (
@@ -616,6 +616,74 @@ async def remove_pool_player(pool_id: str, club=Depends(get_current_club), db: A
     return {"ok": True}
 
 
+# ── super admin: every club's competition ──────────────────────────────────────
+
+@router.get("/super/competitions")
+async def super_competitions(_=Depends(require_super_admin), db: AsyncSession = Depends(get_db)):
+    """Every club that has a fantasy season, newest season first per club, with
+    where its round calendar is up to and the top of its ladder, so Better HQ can
+    see the current scores and jump into a club's Fantasy admin (the page switches
+    club first). Read-only; ladder points include a running round's provisional
+    points, same as the club's own ladder."""
+    seasons = (await db.execute(text("""
+        SELECT DISTINCT ON (fs.organisation_id)
+               fs.id, fs.organisation_id, fs.name, fs.season_year, fs.status,
+               o.name AS club_name, o.slug AS club_slug
+        FROM fantasy_seasons fs
+        JOIN organisations o ON o.id = fs.organisation_id
+        WHERE o.archived_at IS NULL
+        ORDER BY fs.organisation_id, fs.season_year DESC, fs.created_at DESC
+    """))).mappings().all()
+    if not seasons:
+        return {"competitions": []}
+    ids = [r["id"] for r in seasons]
+
+    rounds = {str(r["fantasy_season_id"]): r for r in (await db.execute(text("""
+        SELECT fantasy_season_id,
+               COUNT(*) AS total,
+               COUNT(*) FILTER (WHERE status = 'scored') AS scored,
+               MIN(round_number) FILTER (WHERE status <> 'scored') AS next_round
+        FROM fantasy_rounds WHERE fantasy_season_id = ANY(CAST(:ids AS uuid[]))
+        GROUP BY fantasy_season_id
+    """), {"ids": ids})).mappings().all()}
+
+    squads: dict[str, list] = {}
+    counts: dict[str, int] = {}
+    for r in (await db.execute(text("""
+        SELECT fantasy_season_id, team_name, manager_name, total_points, rnk, n FROM (
+            SELECT sq.fantasy_season_id, sq.team_name, m.display_name AS manager_name, sq.total_points,
+                   RANK() OVER (PARTITION BY sq.fantasy_season_id ORDER BY sq.total_points DESC) AS rnk,
+                   COUNT(*) OVER (PARTITION BY sq.fantasy_season_id) AS n
+            FROM fantasy_squads sq
+            JOIN fantasy_leagues l ON l.id = sq.league_id AND l.kind = 'global_salary_cap'
+            JOIN fantasy_managers m ON m.id = sq.manager_id
+            WHERE sq.fantasy_season_id = ANY(CAST(:ids AS uuid[]))
+        ) t WHERE rnk <= 3 ORDER BY fantasy_season_id, rnk, team_name
+    """), {"ids": ids})).mappings().all():
+        k = str(r["fantasy_season_id"])
+        counts[k] = int(r["n"])
+        squads.setdefault(k, []).append({
+            "rank": int(r["rnk"]), "team_name": r["team_name"],
+            "manager": r["manager_name"], "points": float(r["total_points"]),
+        })
+
+    out = []
+    for s in seasons:
+        k = str(s["id"])
+        rd = rounds.get(k)
+        out.append({
+            "club_id": str(s["organisation_id"]), "club_name": s["club_name"], "club_slug": s["club_slug"],
+            "season_id": k, "season_name": s["name"], "season_year": s["season_year"], "status": s["status"],
+            "rounds_total": int(rd["total"]) if rd else 0,
+            "rounds_scored": int(rd["scored"]) if rd else 0,
+            "next_round": rd["next_round"] if rd else None,
+            "managers": counts.get(k, 0),
+            "top": squads.get(k, []),
+        })
+    out.sort(key=lambda c: (c["club_name"] or "").lower())
+    return {"competitions": out}
+
+
 # ── rounds + settlement ─────────────────────────────────────────────────────────
 
 @router.get("/season/{season_id}/rounds")
@@ -651,16 +719,34 @@ async def settle_round(round_id: str, club=Depends(get_current_club), db: AsyncS
     return {"players_scored": n}
 
 
+@router.post("/rounds/{round_id}/unsettle")
+async def unsettle_round(round_id: str, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
+    """Take a round that was settled by mistake back out of settlement. Clears the
+    player and squad points, ladder totals and head-to-head results it produced.
+    Chips and transfers managers made for the round are kept. The round is then
+    skipped by the automatic settlers until Settle is pressed on it again."""
+    rnd = await db.get(FantasyRound, round_id)
+    if rnd is None or str(rnd.organisation_id) != str(club.id):
+        raise HTTPException(status_code=404, detail="Round not found")
+    if rnd.status != "scored":
+        raise HTTPException(status_code=409, detail="This round isn't settled.")
+    fs = await _load_season(db, club, str(rnd.fantasy_season_id))
+    n = await fantasy_engine.unsettle_round(db, fs, rnd)
+    await db.commit()
+    return {"ok": True, "players_cleared": n}
+
+
 @router.post("/season/{season_id}/settle-due")
 async def settle_due(season_id: str, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
     """Settle every round whose window has finished and isn't scored yet — the
-    after-the-weekend rollup. Safe to re-run."""
+    after-the-weekend rollup. Safe to re-run. A round an admin unsettled stays
+    out until it is settled by hand."""
     fs = await _load_season(db, club, season_id)
     today = date.today()
     rounds = (await db.execute(
         select(FantasyRound).where(
             FantasyRound.fantasy_season_id == fs.id,
-            FantasyRound.status != "scored",
+            FantasyRound.status.notin_(fantasy_engine.AUTO_SETTLE_SKIP),
             FantasyRound.end_date <= today,
         ).order_by(FantasyRound.round_number)
     )).scalars().all()
@@ -668,8 +754,18 @@ async def settle_due(season_id: str, club=Depends(get_current_club), db: AsyncSe
     for rnd in rounds:
         await fantasy_engine.settle_round(db, fs, rnd)
         settled += 1
+    # Rounds still running get provisional points so the ladder moves mid-round.
+    running = (await db.execute(
+        select(FantasyRound).where(
+            FantasyRound.fantasy_season_id == fs.id,
+            FantasyRound.status.notin_(fantasy_engine.AUTO_SETTLE_SKIP),
+            FantasyRound.start_date <= today, FantasyRound.end_date > today,
+        ).order_by(FantasyRound.round_number)
+    )).scalars().all()
+    for rnd in running:
+        await fantasy_engine.refresh_live_round(db, fs, rnd)
     await db.commit()
-    return {"rounds_settled": settled}
+    return {"rounds_settled": settled, "rounds_refreshed": len(running)}
 
 
 @router.delete("/season/{season_id}")

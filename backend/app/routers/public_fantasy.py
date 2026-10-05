@@ -1365,7 +1365,13 @@ async def live(token: str, request: Request, db: AsyncSession = Depends(get_db))
                 WHERE league_id = CAST(:lid AS UUID) AND id <> CAST(:sid AS UUID)"""),
         {"lid": str(squad.league_id), "sid": str(squad.id)},
     )).scalars().all()
-    live_total = float(squad.total_points) + res["points"]
+    # squad.total_points already carries this round's stored provisional score
+    # (the nightly refresh), so swap it for the fresh figure rather than add.
+    stored = (await db.execute(
+        text("SELECT points FROM fantasy_squad_round_scores WHERE squad_id = CAST(:sid AS UUID) AND round_id = CAST(:rid AS UUID)"),
+        {"sid": str(squad.id), "rid": str(rnd.id)},
+    )).scalar_one_or_none()
+    live_total = float(squad.total_points) - float(stored or 0) + res["points"]
     prov_rank = 1 + sum(1 for t in others if float(t) > live_total)
     playing = sum(1 for e in res["lineup"] if (e.get("games") or score_by_player.get(e["player_id"], (0, 0))[1]))
     return {

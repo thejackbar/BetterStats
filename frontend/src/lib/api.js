@@ -3760,6 +3760,9 @@ export const api = {
   fantasyListRounds: (seasonId) => request(`/club-admin/fantasy/season/${seasonId}/rounds`),
   fantasySettleRound: (roundId) =>
     request(`/club-admin/fantasy/rounds/${roundId}/settle`, { method: 'POST' }),
+  fantasyUnsettleRound: (roundId) =>
+    request(`/club-admin/fantasy/rounds/${roundId}/unsettle`, { method: 'POST' }),
+  superFantasyCompetitions: () => request('/club-admin/fantasy/super/competitions'),
   fantasySettleDue: (seasonId) =>
     request(`/club-admin/fantasy/season/${seasonId}/settle-due`, { method: 'POST' }),
   fantasyDeleteSeason: (seasonId) =>
