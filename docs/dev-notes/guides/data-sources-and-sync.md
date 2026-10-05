@@ -53,7 +53,7 @@
 29. `org_recent` is deliberately not a full kind. Setup Wizard `_sync_ready`, `wizard_analytics` and `club_admin._FULL_SYNC_KINDS` read `org_full`/`org_hard_refresh` as "history pulled". Keep any new run kind out of that tuple. `main.py` restart self-heal resumes only the two full kinds.
 30. Incremental is the SAME code path with smaller inputs: `auto_sync.season_in_window` (`SEASON_SPAN_DAYS = 400`) and `sync_grassroots_game_level_data(since=, season_ids=)`. The grade fan-out (one match-list call per grade per run) is as much of the saving as the scorecards.
 31. An incremental run that added no games skips `_backfill_missing_season_stats`, `reconcile_imported_totals` and the bare `ANALYZE`. Milestones are scoped to players whose aggregates changed, not skipped.
-32. `fixtures_in_window` asks "did the club play anything since its last pull" first (grade lists cached in-process for the sync). It is NOT an "is the season over" model. Every "sync anyway" branch is load-bearing: a CA season we do not hold or hold without grades, and every grade returning `[]` (`get_grade_matches` returns `[]` for a transient failure and an empty grade alike). Future fixtures do not count.
+32. `fixtures_in_window` asks "did the club play anything since its last pull" first (grade lists cached in-process for the sync). It is NOT an "is the season over" model. Every "sync anyway" branch is load-bearing: a CA season we do not hold or hold without grades, and every grade returning `[]` (`get_grade_matches` returns `[]` for a transient failure and an empty grade alike). Future fixtures do not count. Also: a season held with only SOME of the grades CA lists teams for (`new_grade_to_seed`, read from the teams feed via `_ca_grade_guids`), because only the sync this probe gates ever creates a grade row; deciding from held grades alone hid Leederville's whole Round 1 (archive: grep `Leederville's Round 1`).
 33. An idle check still records a successful `org_recent` run so the watermark moves; otherwise the window reaches 90 days and the club gets a quarterly full rebuild for doing nothing.
 34. Drift is DETECTED, not re-pulled (per direct instruction, no periodic full sync). `services/sync_drift.py` (monthly `check_all_organisations_drift`) compares CA season aggregates with `player_season_stats`, per player and only for participants CA reports; ignores `_backfill_missing_season_stats` rows and participants in a live merge; CA returning nothing is `unavailable`, never drift. Acknowledging survives a re-check that still finds drift. It never writes stats.
 
@@ -76,6 +76,8 @@
 
 **Quick Sync (v9.105.2)**
 46. Quick Sync (`POST /organisations/{id}/sync/quick`) is an incremental run over the last `QUICK_LOOKBACK_DAYS` (7) under its own kind `org_quick`. Keep it out of `_WATERMARK_KINDS` and `_FULL_KINDS`: it cannot vouch for the gap since the club's last real run. Archive: grep `Quick Sync button`.
+
+47. `grassroots_scores_client._grade_matches_cache` expires after `_GRADE_MATCHES_TTL` (30 min); `force=True` bypasses it. It used to live for the whole process, shared by the probe, the sync, BetterIQ, social rounds and fantasy, so never rely on a list being as old as the process. A new `sync_runs.skip_reason` of `no_fixtures_in_window` on a club that CA shows playing is this bug's signature.
 
 ## Traps and failure signatures
 

@@ -34,7 +34,14 @@ _HEADERS = {
     "Referer": "https://play.cricket.com.au/",
 }
 
-_grade_matches_cache: dict[str, list] = {}  # grade_id -> matches
+# grade_id -> (fetched_at, matches). A grade's match list is the one place a
+# fixture's status turns from UPCOMING to COMPLETED, and the backend process
+# lives from deploy to deploy, so an unbounded entry served a Round 1 list from
+# before the draw was published to every sync, probe, IQ and social read until
+# the next restart. Half an hour is long enough that the probe and the sync
+# that follows it in one scheduled run share a single fetch per grade.
+_grade_matches_cache: dict[str, tuple] = {}
+_GRADE_MATCHES_TTL = 1800
 _matches_cache: dict[str, list] = {}  # team_id -> matches
 _scorecard_cache: dict[str, tuple] = {}  # match_id -> (fetched_at, scorecard | None)
 _ladder_cache: dict[str, tuple] = {}  # grade_id -> (fetched_at, data | None)
@@ -86,8 +93,9 @@ async def get_grade_matches(grade_id: str, *, force: bool = False) -> list[dict]
     game-level sync reads "no matches" as "this grade has no games", so a
     cached upstream blip would silently look like a club with no history.
     """
-    if not force and grade_id in _grade_matches_cache:
-        return _grade_matches_cache[grade_id]
+    hit = _grade_matches_cache.get(grade_id)
+    if not force and hit and time.time() - hit[0] < _GRADE_MATCHES_TTL:
+        return hit[1]
     try:
         r = await _get(f"{BASE_URL}/scores/grades/{grade_id}/matches")
         if r.status_code != 200:
@@ -95,7 +103,7 @@ async def get_grade_matches(grade_id: str, *, force: bool = False) -> list[dict]
             return []
         data = r.json()
         matches = data.get("matches") or []
-        _grade_matches_cache[grade_id] = matches
+        _grade_matches_cache[grade_id] = (time.time(), matches)
         return matches
     except Exception as e:
         logger.warning(f"GR scores: /grades/{grade_id}/matches failed: {e}")
