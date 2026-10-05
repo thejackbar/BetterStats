@@ -67,3 +67,7 @@ Reported: Ashton Taylor and David Gardner had played (Play-Cricket) and were on 
 ## Scarborough, second look: David Gardner and Ashton Taylor
 
 `fantasy_round_drift` came back clean, so stale settlement was not the cause. Public data: Gardner's scorecard rows in the 3 Oct 3rd grade game carry the profile id `a5c8b54e` and the game is counted (Rose, Cody scores in it), yet the Merge card listed "Gardner, David" as having no games, so the pool holds a different record with the same display name, or a filter drops him. Not resolvable from outside; `fantasy_trace_player` was added to answer it from the database. Also: Ashton's merge history shows two "Taylor, Ashton" records merged into "Ashton Taylor" the same morning, and the 3rd grade scorecard still names the 8 runs / 2-21 line "Taylor, Angus", so a person-identity question remains for the club.
+
+## v9.106.12 (2026-10-05): choose which grades count
+
+Asked for: on/off control of which competitions and grades score, current season only. Competitions come from `club_competitions` (the club's own grouping), grades from `club_grade_rows` restricted to grades with a row or a game this season year. Verified by `verify_fantasy_grade_scope.py` (22 checks; the control runs the previous engine and still scores a grade that is switched off) and a Chromium run with the API stubbed (the PUT body on the wire, the confirm text, no overflow at 390px). Round dates for later weekends refresh in the nightly `generate_rounds`; the PUT does not call Play-Cricket.
