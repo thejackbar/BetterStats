@@ -28,14 +28,14 @@ from sqlalchemy import select, func, and_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.routers.auth import get_current_club, get_current_user, require_super_admin
-from app.auth.capabilities import require_cap, MANAGE_FANTASY
+from app.auth.capabilities import require_cap, MANAGE_FANTASY, MANAGE_MERGES
 from app.auth.modules import org_has_module, MODULE_FANTASY
 from app.models.db import (
     get_db, Organisation, Player,
     FantasySeason, FantasyLeague, FantasyLeagueMember, FantasyRound, FantasyPoolPlayer,
     FantasyManager, FantasySquad, FantasySquadPlayer, FantasyDraft, FANTASY_ROLES,
 )
-from app.services import fantasy_engine, fantasy_draft
+from app.services import fantasy_engine, fantasy_draft, fantasy_pool_check
 from app.routers import public_fantasy
 from app.services.fantasy_scoring import DEFAULT_SCORING, DEFAULT_RULES
 from app.services.session_safety import rollback_keeping
@@ -724,6 +724,47 @@ async def list_manual_scores(season_id: str, club=Depends(get_current_club), db:
         "player_id": str(r["player_id"]), "name": r["name"], "points": float(r["total_points"]),
         "note": r["note"], "at": r["computed_at"].isoformat() if r["computed_at"] else None,
     } for r in rows]}
+
+
+# ── hand-added players and their real profiles ─────────────────────────────────
+
+@router.get("/season/{season_id}/unmatched-players")
+async def unmatched_players(season_id: str, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
+    """Pool players with no games this season. ``pairs`` are the ones that have a
+    same-name profile with games (merge them); ``waiting`` are hand-added players
+    picked by a team with no such profile yet (nothing to merge until they play)."""
+    fs = await _load_season(db, club, season_id)
+    rows = await fantasy_pool_check.zero_stat_pool_players(db, club.id)
+    return {
+        "season_year": fs.season_year,
+        "pairs": [r for r in rows if r["twins"]],
+        "waiting": [r for r in rows if not r["twins"] and r["added_by_hand"] and r["picked_by"] > 0],
+    }
+
+
+class MergePoolPlayerBody(BaseModel):
+    keep_player_id: str
+    remove_player_id: str
+
+
+@router.post("/season/{season_id}/merge-player")
+async def merge_pool_player(season_id: str, body: MergePoolPlayerBody, club=Depends(get_current_club),
+                            user=Depends(require_cap(MANAGE_MERGES)), db: AsyncSession = Depends(get_db), _=_require):
+    """Merge a hand-added pool player into the same-name profile that holds their
+    games. Only a pair the unmatched list shows is accepted, so this is not a
+    general merge tool. It is the club's normal player merge (their team picks, pool
+    entry and round points follow the kept profile, and it can be undone from the
+    merge log), then the scored rounds are scored again so the stats show at once."""
+    fs = await _load_season(db, club, season_id)
+    pairs = await fantasy_pool_check.zero_stat_pool_players(db, club.id)
+    ok = any(p["player_id"] == body.remove_player_id and any(t["player_id"] == body.keep_player_id for t in p["twins"]) for p in pairs)
+    if not ok:
+        raise HTTPException(status_code=409, detail="That pair is no longer on the list. Refresh and try again.")
+    from app.routers.admin import _merge_players_core
+    result = await _merge_players_core(db, uuid.UUID(body.keep_player_id), uuid.UUID(body.remove_player_id), club.id, user)
+    done = await fantasy_engine.rescore_from_round(db, fs, 1)
+    await db.commit()
+    return {**result, "rescored": done}
 
 
 # ── pool management (add returning / new players) ──────────────────────────────

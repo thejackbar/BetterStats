@@ -3807,6 +3807,9 @@ export const api = {
     request(`/club-admin/fantasy/squads/${squadId}/players`, { method: 'POST', body: JSON.stringify(data) }),
   fantasyRemoveSquadPlayer: (squadId, playerId, fromRound = 1) =>
     request(`/club-admin/fantasy/squads/${squadId}/players/${playerId}?from_round=${fromRound}`, { method: 'DELETE' }),
+  fantasyUnmatched: (seasonId) => request(`/club-admin/fantasy/season/${seasonId}/unmatched-players`),
+  fantasyMergePlayer: (seasonId, keepId, removeId) =>
+    request(`/club-admin/fantasy/season/${seasonId}/merge-player`, { method: 'POST', body: JSON.stringify({ keep_player_id: keepId, remove_player_id: removeId }) }),
   fantasyManualScores: (seasonId) => request(`/club-admin/fantasy/season/${seasonId}/manual-scores`),
   fantasySetManualScore: (roundId, playerId, data) =>
     request(`/club-admin/fantasy/rounds/${roundId}/players/${playerId}/score`, { method: 'PUT', body: JSON.stringify(data) }),

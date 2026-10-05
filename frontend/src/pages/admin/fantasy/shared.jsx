@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import BetterFantasyLayout from '../../../components/admin/BetterFantasyLayout'
 import { api } from '../../../lib/api'
+import { useAuth } from '../../../contexts/AuthContext'
+import { CAP } from '../../../lib/capabilities'
 
 // Shared pieces for the BetterFantasyCricket admin surface. Each tool (team
 // make-up, scoring, the pool, registered players) is its own page now, so the
@@ -712,6 +714,74 @@ export function ManualScoresCard({ season, flash, fail }) {
             </div>
           ))}
         </div>
+      )}
+    </div>
+  )
+}
+
+
+// Players added to Fantasy by hand have no games of their own. When their real games
+// sync they land on a separate profile with the same name, so the hand-added one
+// scores nothing. This lists those pairs with a Merge button. The merge is the
+// club's normal player merge (team picks, pool entry and round points follow the
+// kept profile, and it can be undone from the merge log), then the scored rounds are
+// scored again so the stats show at once.
+export function HandAddedPlayersCard({ season, flash, fail }) {
+  const { hasCapability } = useAuth()
+  const canMerge = hasCapability(CAP.MANAGE_MERGES)
+  const [data, setData] = useState(null)
+  const [busy, setBusy] = useState('')
+  const load = useCallback(() => api.fantasyUnmatched(season.id).then(setData).catch(e => { setData({ pairs: [], waiting: [] }); fail(e) }), [season.id, fail])
+  useEffect(() => { load() }, [load])
+
+  const merge = async (p, t) => {
+    if (!window.confirm(
+      `Merge ${p.name} into ${t.name} (${t.games} game${t.games === 1 ? '' : 's'} this season)?\n\n` +
+      `${t.name} is kept. ${p.name}${p.picked_by ? `, picked in ${p.picked_by} team${p.picked_by === 1 ? '' : 's'},` : ''} is removed, and those teams keep the player under ${t.name}. ` +
+      `Scored rounds are scored again. It can be undone from the merge log.`)) return
+    setBusy(`${p.player_id}:${t.player_id}`)
+    try {
+      await api.fantasyMergePlayer(season.id, t.player_id, p.player_id)
+      flash(`${p.name} merged into ${t.name}. Scored rounds were scored again.`)
+      await load()
+    } catch (e) { fail(e); await load() } finally { setBusy('') }
+  }
+
+  if (!data) return null
+  if (!data.pairs.length && !data.waiting.length) return null
+  return (
+    <div className="pb-card p-5">
+      <h3 className="font-display font-bold mb-1">Hand-added players with stats on another profile</h3>
+      <p className="text-xs text-pb-faint mb-3">
+        These players were added to Fantasy by hand, so they have no games of their own. A profile with the same name has played in {data.season_year},
+        so their points are sitting there. Merge the pair and the stats come through.
+        {!canMerge && ' You need the Merge data permission to merge players.'}
+      </p>
+      {!!data.pairs.length && (
+        <div className="divide-y pb-hairline">
+          {data.pairs.map(p => (
+            <div key={p.player_id} className="py-2.5">
+              <div className="text-sm font-medium min-w-0 break-words">
+                {p.name}
+                <span className="text-pb-faint font-normal text-xs"> · {p.added_by_hand ? 'added by hand' : 'in the pool'} · picked in {p.picked_by} team{p.picked_by === 1 ? '' : 's'} · no games</span>
+              </div>
+              {p.twins.map(t => (
+                <div key={t.player_id} className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm">
+                  <span className="flex-1 min-w-[12rem] break-words text-pb-dim">Stats are on <span className="text-pb-text">{t.name}</span> ({t.games} game{t.games === 1 ? '' : 's'})</span>
+                  <Btn kind="ghost" onClick={() => merge(p, t)} busy={busy === `${p.player_id}:${t.player_id}`}>
+                    {canMerge ? 'Merge' : 'Merge (no permission)'}
+                  </Btn>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+      {!!data.waiting.length && (
+        <p className="mt-3 text-xs text-pb-faint">
+          Added by hand and not played yet, so there is nothing to merge: {data.waiting.map(w => `${w.name} (${w.picked_by} team${w.picked_by === 1 ? '' : 's'})`).join(', ')}.
+          They will show up above once a profile with the same name has a game.
+        </p>
       )}
     </div>
   )

@@ -1,4 +1,4 @@
-import { FantasyFrame, ManagersCard, ManualScoresCard, useFantasySeason } from './shared'
+import { FantasyFrame, ManagersCard, ManualScoresCard, HandAddedPlayersCard, useFantasySeason } from './shared'
 
 // Registered players — the people who signed up on the public link. View the
 // team each one picked, put right a team that lost a player, edit their details,
@@ -9,6 +9,7 @@ export default function FantasyPlayers() {
   return (
     <FantasyFrame title="Registered players" needSeason={false} msg={msg} err={err}>
       <div className="space-y-6">
+        {season && <HandAddedPlayersCard season={season} flash={flash} fail={fail} />}
         <ManagersCard flash={flash} fail={fail} />
         {season && <ManualScoresCard season={season} flash={flash} fail={fail} />}
       </div>

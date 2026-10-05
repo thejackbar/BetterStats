@@ -40,7 +40,7 @@ from app.routers.admin import _merge_players_core, undo_merge, UndoMergeRequest
 Session, check = base.Session, base.check
 ORG, SQ_X, SQ_Y, R1, R2, FS_ID = base.ORG, base.SQ_X, base.SQ_Y, base.R1, base.R2, base.FS_ID
 A, B = base.A, base.B
-M, K, N, Z, M2, K2, M3, K3, M4, K4, M5, K5 = (uuid.uuid4() for _ in range(12))     # M manual Raja, K his real record, N a new player, Z another club's player
+M, K, N, Z, M2, K2, M3, K3, M4, K4, M5, K5, M6, K6, BT, BT2 = (uuid.uuid4() for _ in range(16))     # M manual Raja, K his real record, N a new player, Z another club's player
 REPO = Path(__file__).resolve().parent.parent.parent
 # `merge_carry` as it was before this fix (the parent of the commit that added the
 # Fantasy tables). A moving rev such as HEAD would stop reproducing the bug the day
@@ -477,6 +477,92 @@ async def main_checks() -> None:
         nothing = await ff.merged_player_ids(s, ORG, since=future)
         await s.rollback()
     check("merged-since a later date leaves no one eligible, so nothing is added from the whole pool", nothing == set(), repr(nothing))
+
+    print("13. Nothing is lost: a hand-added player in EVERY Fantasy table that can point at a player")
+    from app.services import merge_carry
+    async with Session() as s:
+        fks = [(r[0], r[1]) for r in (await s.execute(text("""
+            SELECT c.conrelid::regclass::text, a.attname FROM pg_constraint c
+            JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
+            WHERE c.contype = 'f' AND c.confrelid = 'players'::regclass AND c.conrelid::regclass::text LIKE 'fantasy%'
+            ORDER BY 1, 2"""))).all()]
+        await s.rollback()
+    carried = {(t, c) for t, c, _i, _u in merge_carry.CARRIED}
+    check("every Fantasy column that points at a player is on the merge's carry list (so a new table fails here)",
+          set(fks) <= carried and len(fks) >= 11, repr(sorted(set(fks) - carried)))
+    async with Session() as s:
+        s.add_all([Player(id=M6, name="Everywhere Man", organisation_id=ORG), Player(id=K6, name="Everywhere Man", organisation_id=ORG, grassroots_id="ev-ca")])
+        await s.flush()
+        s.add(base.FantasyPoolPlayer(fantasy_season_id=FS_ID, organisation_id=ORG, player_id=M6, role="batter", base_price=5, current_price=5))
+        s.add(base.FantasySquadPlayer(squad_id=SQ_X, player_id=M6, role="batter", purchase_price=5))
+        await s.commit()
+        mgr = (await s.execute(text("SELECT id FROM fantasy_managers WHERE organisation_id=:o LIMIT 1"), {"o": ORG})).scalar()
+        lg = (await s.execute(text("""INSERT INTO fantasy_leagues (fantasy_season_id, organisation_id, kind, name)
+                                      VALUES (:f, :o, 'draft', 'Draft') RETURNING id"""), {"f": FS_ID, "o": ORG})).scalar()
+        dr = (await s.execute(text("""INSERT INTO fantasy_drafts (league_id, organisation_id, lot_player_id)
+                                      VALUES (:l, :o, :p) RETURNING id"""), {"l": lg, "o": ORG, "p": M6})).scalar()
+        await s.execute(text("INSERT INTO fantasy_draft_picks (draft_id, pick_index, round_no, manager_id, player_id) VALUES (:d, 1, 1, :m, :p)"), {"d": dr, "m": mgr, "p": M6})
+        await s.execute(text("""INSERT INTO fantasy_waiver_claims (league_id, organisation_id, manager_id, add_player_id, drop_player_id)
+                                VALUES (:l, :o, :m, :p, :x), (:l, :o, :m, :x, :p)"""), {"l": lg, "o": ORG, "m": mgr, "p": M6, "x": A})
+        await s.execute(text("INSERT INTO fantasy_transactions (squad_id, type, player_id, detail) VALUES (:s, 'transfer_in', :p, '{}')"), {"s": SQ_X, "p": M6})
+        await s.execute(text("""UPDATE fantasy_squad_round_scores SET captain_player_id=:p, vice_captain_player_id=:p, dropped_player_id=:p
+                                WHERE squad_id=:s AND round_id=:r"""), {"p": M6, "s": SQ_X, "r": R1})
+        await s.execute(text("""INSERT INTO fantasy_player_round_scores (fantasy_season_id, round_id, player_id, total_points, base_points, breakdown, games_counted)
+                                VALUES (:f, :r, :p, 7, 7, '{}', 1)"""), {"f": FS_ID, "r": R1, "p": M6})
+        await s.commit()
+
+    async def refs(who):
+        out = {}
+        async with Session() as s:
+            for t, c in fks:
+                out[(t, c)] = (await s.execute(text(f"SELECT COUNT(*) FROM {t} WHERE {c} = :p"), {"p": who})).scalar()
+        return out
+    before = await refs(M6)
+    check("the seed puts him in every one of those tables (so the check below is not vacuous)", all(n >= 1 for n in before.values()),
+          repr({k: n for k, n in before.items() if n < 1}))
+    await merge(keep=K6, remove=M6)
+    after_m, after_k = await refs(M6), await refs(K6)
+    check("nothing is left pointing at the merged-away record, in any Fantasy table", all(n == 0 for n in after_m.values()),
+          repr({k: n for k, n in after_m.items() if n}))
+    check("and every row he had is now on the real record, none lost, none duplicated", after_k == before,
+          repr({k: (before[k], after_k[k]) for k in before if before[k] != after_k[k]}))
+
+    print("14. The Merge button")
+    async with Session() as s:
+        s.add_all([Player(id=BT, name="Bryce Test", organisation_id=ORG), Player(id=BT2, name="Test, Bryce", organisation_id=ORG, grassroots_id="bt-ca")])
+        await s.flush()
+        gid = (await s.execute(text("SELECT id FROM games ORDER BY played_at DESC LIMIT 1"))).scalar()
+        s.add(GameAppearance(game_id=gid, player_id=BT2, team_name="Alpha"))
+        s.add(BattingInnings(game_id=gid, player_id=BT2, innings_number=1, runs=31, balls=25, fours=0, sixes=0, dismissal_type="bowled", not_out=False))
+        s.add(base.FantasyPoolPlayer(fantasy_season_id=FS_ID, organisation_id=ORG, player_id=BT, role="batter", role_source="admin", base_price=5, current_price=5))
+        s.add(base.FantasySquadPlayer(squad_id=SQ_X, player_id=BT, role="batter", purchase_price=5))
+        await s.commit()
+    async with Session() as s:
+        lst = await fr.unmatched_players(str(FS_ID), club=org, db=s, _=None)
+    mine = [p for p in lst["pairs"] if p["player_id"] == str(BT)]
+    check("the list offers the pair, with the games on the real profile", mine and mine[0]["twins"][0]["player_id"] == str(BT2) and mine[0]["twins"][0]["games"] == 1, repr(mine))
+    for label, keep, remove in (("a pair that is not on the list", str(N), str(BT)), ("the pair reversed", str(BT), str(BT2))):
+        try:
+            async with Session() as s:
+                await fr.merge_pool_player(str(FS_ID), fr.MergePoolPlayerBody(keep_player_id=keep, remove_player_id=remove), club=org, user=FakeUser(), db=s, _=None)
+            check(f"{label} is refused", False, "no error")
+        except HTTPException as e:
+            check(f"{label} is refused", e.status_code == 409, str(e.status_code))
+    check("and nothing changed", str(BT) in await picks(SQ_X))
+    async with Session() as s:
+        res = await fr.merge_pool_player(str(FS_ID), fr.MergePoolPlayerBody(keep_player_id=str(BT2), remove_player_id=str(BT)), club=org, user=FakeUser(), db=s, _=None)
+    check("merging the listed pair works and reports what it carried and re-scored",
+          res.get("status") == "merged" and "rescored" in res and (res.get("carried") or {}).get("fantasy_squad_players") == 1, repr(res))
+    check("the team that picked him still has him, under the real profile", str(BT2) in await picks(SQ_X) and str(BT) not in await picks(SQ_X))
+    pts = await q("SELECT r.round_number, prs.total_points FROM fantasy_player_round_scores prs JOIN fantasy_rounds r ON r.id = prs.round_id WHERE prs.player_id=:p", p=BT2)
+    check("his stats now count: the round his game was in was scored again with him", pts and all(float(p[1]) > 0 for p in pts), repr(pts))
+    check("and the team's score for that round includes him", float((await q("SELECT COALESCE(SUM(points),0) FROM fantasy_squad_round_scores WHERE squad_id=:s", s=SQ_X))[0][0]) > 0)
+    async with Session() as s:
+        gone = await fr.unmatched_players(str(FS_ID), club=org, db=s, _=None)
+    check("he is off the list", all(p["player_id"] != str(BT) for p in gone["pairs"]))
+    import inspect
+    check("the endpoint is gated by the merge permission as well as the Fantasy one",
+          "require_cap(MANAGE_MERGES)" in inspect.getsource(fr).split("async def merge_pool_player")[1].split("\n\n")[0] + inspect.getsource(fr).split("async def merge_pool_player")[1][:400])
 
 
 async def run_control() -> int:
