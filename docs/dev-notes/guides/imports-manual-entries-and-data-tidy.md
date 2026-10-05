@@ -80,6 +80,7 @@ All dry run by default; `--apply` acts.
 - `python -m app.scripts.settle_manual_winners <org|all> [--apply]`: fix contradicted winners. Run for Hamilton.
 - `python -m app.scripts.repair_overwrite_pairs <org|all> [--apply]`: pair matches an overwrite import left unpaired (import-created, re-sourced seasons only). Read the held-back list first; run `all` after v9.90.3.
 - `python -m app.scripts.reconcile_imports <org>`; `python -m app.scripts.reconcile_milestones <org|all> [--apply]`. Shoalwater recovery: undo the CSFW batch, re-import `manual_games_scorecards.csv`, then both repair scripts.
+- `python -m app.scripts.remove_cross_attached_imports <org> <keeper-player-id> <other-player-id> [--apply]`: removes the keeper's `imported_stats` rows that are figure-for-figure copies of the other player's (two same-name players given one sheet line), audits each, rebuilds the import deltas and reads the season-less line back. Never touches hand-typed adjustments (reports them).
 - `python -m app.scripts.purge_import_only_players <org-id-or-slug>`: cleanup for batches undone before 234, one club at a time.
 - `python -m app.scripts.cleanup_seasons <org-id-or-slug>`; `python -m app.scripts.refile_manual_game_seasons <org|all>` (grade carried BY NAME); `python -m app.scripts.scorecard_eval <cases_dir>`.
 
