@@ -6,6 +6,9 @@ season points that it does not already hold, taking the role the team is short o
 first so the role quota is met. Ties (the season has often barely started, so many
 players are on the same points) go to the higher priced player, then by name. The
 lock and the budget are ignored, as in the admin team editor.
+
+``only_merged`` limits the choice to players who were merged (see
+``merged_player_ids``), still by most season points.
 """
 from __future__ import annotations
 
@@ -21,7 +24,27 @@ from app.services.fantasy_scoring import DEFAULT_RULES
 ROLE_ORDER = ["keeper", "batter", "allrounder", "bowler"]
 
 
-async def plan_fill(db: AsyncSession, org_id) -> list[dict]:
+async def merged_player_ids(db: AsyncSession, org_id, since=None) -> set[str]:
+    """The live records of players the club merged since Fantasy began (or since
+    ``since``, a date). A merge's kept profile is always live; the merged-away
+    record is live only if the merge was undone, and then both are the same person,
+    so both are eligible."""
+    rows = (await db.execute(text("""
+        SELECT removed_player_id, keep_player_id, undone_at FROM merge_logs
+        WHERE org_id = CAST(:o AS UUID)
+          AND merged_at >= COALESCE(CAST(:since AS TIMESTAMPTZ),
+                (SELECT MIN(created_at) FROM fantasy_seasons WHERE organisation_id = CAST(:o AS UUID)))
+    """), {"o": str(org_id), "since": since})).all()
+    ids: set[str] = set()
+    for removed, keep, undone in rows:
+        if keep:
+            ids.add(str(keep))
+        if removed and undone:
+            ids.add(str(removed))
+    return ids
+
+
+async def plan_fill(db: AsyncSession, org_id, only_merged: bool = False, merged_since=None) -> list[dict]:
     season = (await db.execute(text("""
         SELECT id, rules FROM fantasy_seasons WHERE organisation_id = CAST(:o AS UUID)
         ORDER BY season_year DESC LIMIT 1"""), {"o": str(org_id)})).first()
@@ -35,6 +58,9 @@ async def plan_fill(db: AsyncSession, org_id) -> list[dict]:
         SELECT pp.player_id, p.name, pp.role, pp.total_points, pp.current_price
         FROM fantasy_pool_players pp JOIN players p ON p.id = pp.player_id
         WHERE pp.fantasy_season_id = :f AND pp.is_available"""), {"f": fs_id})).mappings().all()]
+    if only_merged:
+        eligible = await merged_player_ids(db, org_id, merged_since)
+        pool = [r for r in pool if str(r["player_id"]) in eligible]
     pool.sort(key=lambda r: (-float(r["total_points"]), -float(r["current_price"]), r["name"] or ""))
     plans = []
     for sq in (await db.execute(text("""

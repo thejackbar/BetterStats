@@ -450,6 +450,34 @@ async def main_checks() -> None:
         await s.rollback()
     check("a second run has nothing to do", again == [], repr(again))
 
+    print("12. Only players who were merged")
+    from datetime import datetime, timezone, timedelta
+    async with Session() as s:
+        merged_ids = await ff.merged_player_ids(s, ORG)
+        await s.rollback()
+    check("the eligible set is the live records of merged players (kept profiles, and undone ones)",
+          str(K3) in merged_ids and str(K5) in merged_ids and str(M4) in merged_ids and str(M3) not in merged_ids and str(P1) not in merged_ids, repr(len(merged_ids)))
+    async with Session() as s:
+        await s.execute(text("UPDATE fantasy_pool_players SET total_points = 1 WHERE player_id = ANY(CAST(:ids AS uuid[]))"), {"ids": [str(K3)]})
+        await s.execute(text("UPDATE fantasy_pool_players SET total_points = 5 WHERE player_id = ANY(CAST(:ids AS uuid[]))"), {"ids": [str(K5)]})
+        await s.execute(text("DELETE FROM fantasy_squad_players WHERE squad_id = :y AND player_id IN (:a, :b)"), {"y": SQ_Y, "a": P1, "b": P3})
+        await s.commit()
+    async with Session() as s:
+        every = {p["team_name"]: p for p in await ff.plan_fill(s, ORG)}
+        merged_only = {p["team_name"]: p for p in await ff.plan_fill(s, ORG, only_merged=True)}
+        await s.rollback()
+    check("without the restriction Y takes a top scorer from the whole pool",
+          {c["name"] for c in every["Y Team"]["adds"]} & {"Top Keeper", "Top Bowler"}, repr([c["name"] for c in every["Y Team"]["adds"]]))
+    chosen = [c for c in merged_only["Y Team"]["adds"]]
+    check("with it, every player added is a merged player", chosen and all(str(c["player_id"]) in merged_ids for c in chosen), repr([c["name"] for c in chosen]))
+    check("and it is the highest scorer among the merged players the team does not hold",
+          chosen[0]["name"] == "Dead Row" and float(chosen[0]["total_points"]) == 5.0, repr([(c["name"], float(c["total_points"])) for c in chosen]))
+    future = datetime.now(timezone.utc) + timedelta(days=1)
+    async with Session() as s:
+        nothing = await ff.merged_player_ids(s, ORG, since=future)
+        await s.rollback()
+    check("merged-since a later date leaves no one eligible, so nothing is added from the whole pool", nothing == set(), repr(nothing))
+
 
 async def run_control() -> int:
     await setup()
