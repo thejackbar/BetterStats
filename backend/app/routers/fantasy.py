@@ -22,12 +22,12 @@ from datetime import date, datetime, timezone
 from typing import Optional
 
 import bcrypt as _bcrypt
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy import select, func, and_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.routers.auth import get_current_club, require_super_admin
+from app.routers.auth import get_current_club, get_current_user, require_super_admin
 from app.auth.capabilities import require_cap, MANAGE_FANTASY
 from app.auth.modules import org_has_module, MODULE_FANTASY
 from app.models.db import (
@@ -36,6 +36,7 @@ from app.models.db import (
     FantasyManager, FantasySquad, FantasySquadPlayer, FantasyDraft, FANTASY_ROLES,
 )
 from app.services import fantasy_engine, fantasy_draft
+from app.routers import public_fantasy
 from app.services.fantasy_scoring import DEFAULT_SCORING, DEFAULT_RULES
 from app.services.session_safety import rollback_keeping
 
@@ -614,6 +615,32 @@ async def remove_pool_player(pool_id: str, club=Depends(get_current_club), db: A
     await db.delete(pp)
     await db.commit()
     return {"ok": True}
+
+
+# ── view the public pages as a team ────────────────────────────────────────────
+
+class ViewAsBody(BaseModel):
+    manager_id: str
+
+
+@router.post("/view-as")
+async def start_view_as(body: ViewAsBody, response: Response, club=Depends(get_current_club),
+                        user=Depends(get_current_user), db: AsyncSession = Depends(get_db), _=_require):
+    """Open the club's public Fantasy pages as one of its managers, read-only. Sets
+    a short-lived cookie on this browser (the public pages read it ahead of any
+    member sign-in) and returns where to go. The manager's own sign-in, PIN and
+    squad are not touched."""
+    try:
+        mgr = await db.get(FantasyManager, uuid.UUID(body.manager_id))
+    except ValueError:
+        mgr = None
+    if mgr is None or str(mgr.organisation_id) != str(club.id):
+        raise HTTPException(status_code=404, detail="Team not found")
+    if not club.fantasy_link_token:
+        raise HTTPException(status_code=409, detail="This club has no public Fantasy link yet.")
+    public_fantasy.issue_view_as(response, club.id, mgr.id, user.id)
+    logger.info("fantasy view-as: user=%s club=%s manager=%s", user.id, club.id, mgr.id)
+    return {"ok": True, "url": f"/fantasy/{club.fantasy_link_token}", "display_name": mgr.display_name}
 
 
 # ── super admin: every club's competition ──────────────────────────────────────

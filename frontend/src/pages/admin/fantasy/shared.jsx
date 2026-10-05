@@ -465,6 +465,16 @@ export function ManagersCard({ flash, fail }) {
     try { await api.fantasyDeleteManager(m.id); flash('Player deleted.'); await load() }
     catch (e) { fail(e) } finally { setBusy('') }
   }
+  const viewAs = async (m) => {
+    // Open the tab first (a popup opened after an await is blocked), then point it at the public pages.
+    const w = window.open('', '_blank')
+    setBusy(`v:${m.id}`)
+    try {
+      const r = await api.fantasyViewAs(m.id)
+      const url = window.location.origin + r.url
+      if (w) w.location.href = url; else window.location.assign(url)
+    } catch (e) { w?.close(); fail(e) } finally { setBusy('') }
+  }
   const viewTeams = async (m) => {
     if (openId === m.id) { setOpenId(null); return }
     setOpenId(m.id)
@@ -489,7 +499,7 @@ export function ManagersCard({ flash, fail }) {
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search players…" className={`${inp} w-48`} />
         )}
       </div>
-      <p className="text-xs text-pb-faint mb-3">People who signed up on the public link. View the team they picked, edit a name or email, reset a forgotten PIN, or remove a tester or duplicate.</p>
+      <p className="text-xs text-pb-faint mb-3">People who signed up on the public link. View the team they picked, open the whole game as them (read only) with View as, edit a name or email, reset a forgotten PIN, or remove a tester or duplicate.</p>
 
       {managers === null ? <p className="text-sm text-pb-faint">Loading…</p>
         : !list.length ? <p className="text-sm text-pb-faint">{managers.length ? 'No players match.' : 'No one has signed up yet.'}</p>
@@ -519,6 +529,9 @@ export function ManagersCard({ flash, fail }) {
                           {openId === m.id ? 'Hide team' : 'View team'}
                         </button>
                       )}
+                      <button onClick={() => viewAs(m)} disabled={busy === `v:${m.id}`}
+                        title="Open the public Fantasy pages as this player, read only"
+                        className="text-xs underline text-pb-faint hover:text-pb-text disabled:opacity-50">View as</button>
                       <button onClick={() => startEdit(m)} className="text-xs underline text-pb-faint hover:text-pb-text">Edit</button>
                       <button onClick={() => remove(m)} disabled={busy === m.id} className="text-xs underline text-pb-red disabled:opacity-50">Delete</button>
                     </div>

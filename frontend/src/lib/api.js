@@ -3267,6 +3267,10 @@ export const api = {
     request(`/public/votes/${token}/fixtures/${fixtureId}/ballot`, { method: 'POST', body: JSON.stringify(data) }),
 
   // ─── BetterFantasyCricket: public member play ───────────
+  fanViewAsManagers: (token) => request(`/public/fantasy/${token}/view-as/managers`),
+  fanViewAsSwitch: (token, managerId) =>
+    request(`/public/fantasy/${token}/view-as/switch`, { method: 'POST', body: JSON.stringify({ manager_id: managerId }) }),
+  fanViewAsExit: (token) => request(`/public/fantasy/${token}/view-as/exit`, { method: 'POST' }),
   fanLanding: (token) => request(`/public/fantasy/${token}`),
   fanRegister: (token, data) => request(`/public/fantasy/${token}/register`, { method: 'POST', body: JSON.stringify(data) }),
   fanLogin: (token, data) => request(`/public/fantasy/${token}/login`, { method: 'POST', body: JSON.stringify(data) }),
@@ -3762,6 +3766,8 @@ export const api = {
     request(`/club-admin/fantasy/rounds/${roundId}/settle`, { method: 'POST' }),
   fantasyUnsettleRound: (roundId) =>
     request(`/club-admin/fantasy/rounds/${roundId}/unsettle`, { method: 'POST' }),
+  fantasyViewAs: (managerId) =>
+    request('/club-admin/fantasy/view-as', { method: 'POST', body: JSON.stringify({ manager_id: managerId }) }),
   superFantasyCompetitions: () => request('/club-admin/fantasy/super/competitions'),
   fantasySettleDue: (seasonId) =>
     request(`/club-admin/fantasy/season/${seasonId}/settle-due`, { method: 'POST' }),
