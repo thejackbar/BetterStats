@@ -48,6 +48,8 @@ async def run(org: str, year: int | None, apply: bool) -> None:
         print(f"\n{name}, season {year}")
         found = await relink.plan(db, club_id, int(year), _paced_fetch)
         print(f"  Checked {found['games_checked']} synced game(s); {found['no_data']} had no data from Cricket Australia.")
+        for d in found["deferred"]:
+            print(f"  Left to sync (our side is not stored yet): {d['date']}  {d['match']}  [{d['grade']}]")
         if not found["games"]:
             print("  Nothing to attach: every rostered player Cricket Australia names is already in the stored games.")
             await db.rollback()

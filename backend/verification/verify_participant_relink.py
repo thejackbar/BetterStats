@@ -303,11 +303,12 @@ async def main() -> int:
         s.add(Game(id=game4, grade_id=grade, played_at=TODAY - timedelta(days=1), home_team="Alpha - 4s", away_team="Opp - 4s",
                    home_org_id=ORG, status="COMPLETED"))
         await s.flush()
+        s.add(GameAppearance(game_id=game4, player_id=ROSE, team_name="Alpha - 4s"))   # sync has stored our side here
         await s.execute(text("INSERT INTO merge_logs (org_id, keep_player_id, keep_player_name, removed_player_id, removed_player_name) "
                              "VALUES (:o, :k, 'Reg, Redirect', :r, 'Reg, Redirect')"), {"o": ORG, "k": red, "r": uuid.UUID(g_red)})
         await s.commit()
     p4 = {"id": str(game4), "teams": [{"id": "t1", "displayName": "Alpha - 4s", "owningOrganisation": {"id": str(ORG)},
-                                       "players": [{"participantId": g_red, "playerShortName": "R Reg"}]}],
+                                       "players": [{"participantId": GUID_ROSE, "playerShortName": "Cody Rose"}, {"participantId": g_red, "playerShortName": "R Reg"}]}],
           "innings": [{"inningsOrder": 1, "batting": [], "bowling": [{"participantId": g_red, "playerShortName": "R Reg", "oversBowled": 4,
                                                                        "maidensBowled": 0, "runsConceded": 12, "wicketsTaken": 1}], "fielding": []}]}
     EXTRA[str(game4)] = p4
@@ -324,6 +325,23 @@ async def main() -> int:
         again = await rl.plan(s, ORG, TODAY.year, fetch)
         await s.rollback()
     check("after that the plan has nothing left for them", all(g["game_id"] != str(game4) for g in again["games"]))
+
+    print("10. A game whose own side sync has not stored yet is left to sync")
+    game5 = uuid.uuid4()
+    async with Session() as s:
+        grade = (await s.execute(text("SELECT id FROM grades LIMIT 1"))).scalar()
+        s.add(Game(id=game5, grade_id=grade, played_at=TODAY - timedelta(days=1), home_team="Alpha - 5s", away_team="Opp - 5s",
+                   home_org_id=ORG, status="COMPLETED"))
+        await s.commit()
+    EXTRA[str(game5)] = {"id": str(game5), "teams": [{"id": "t1", "displayName": "Alpha - 5s", "owningOrganisation": {"id": str(ORG)},
+                         "players": [{"participantId": GUID_ROSE, "playerShortName": "Cody Rose"},
+                                     {"participantId": GUID_ASH_NEW, "playerShortName": "Ashton Taylor"}]}], "innings": []}
+    async with Session() as s:
+        found5 = await rl.plan(s, ORG, TODAY.year, fetch)
+        await s.rollback()
+    check("no player of ours has an appearance, so nothing is attached (sync would collide with it)",
+          all(g["game_id"] != str(game5) for g in found5["games"]), repr([g["game_id"] for g in found5["games"]]))
+    check("and the game is reported as left to sync", any(d["game_id"] == str(game5) for d in found5["deferred"]), repr(found5["deferred"]))
     return base.FAIL
 
 

@@ -93,7 +93,7 @@ async def plan(db: AsyncSession, org_id, year: int, fetch: Fetch, today: Optiona
         JOIN grades gr ON gr.id = g.grade_id JOIN seasons s ON s.id = gr.season_id
         WHERE {club_game_sql("g", "org")} AND s.year = :y AND g.source = 'api' AND g.played_at <= :today
         ORDER BY g.played_at"""), {"org": str(org_id), "y": year, "today": today})).mappings().all()
-    out, no_data = [], 0
+    out, deferred, no_data = [], [], 0
     for g in games:
         sc = await fetch(str(g["id"]))
         if not sc:
@@ -118,6 +118,14 @@ async def plan(db: AsyncSession, org_id, year: int, fetch: Fetch, today: Optiona
         # Two kinds: an id we do not know but whose full name matches one player, and an
         # id we DO know (directly, or through a merge made after the game was stored)
         # whose player has no appearance in the stored game.
+        # Sync stores a game's rows in one go and skips the game once any of our
+        # players has an appearance in it. Where none has, sync has not finished our
+        # side and will add every row itself on its next run; rows added here first
+        # would collide with its inserts and fail the game for good. Leave those to it.
+        if not (have & (set(known.values()) | set(found.values()))):
+            deferred.append({"game_id": str(g["id"]), "date": g["played_at"], "match": f"{g['home_team']} v {g['away_team']}",
+                             "grade": g["grade"], "players": len(sheet)})
+            continue
         wanted, taken = {}, set()
         for guid, pid in {**known, **found}.items():
             if pid not in have and pid not in taken:
@@ -135,7 +143,7 @@ async def plan(db: AsyncSession, org_id, year: int, fetch: Fetch, today: Optiona
                         for guid, pid in missing.items()],
             "scorecard": sc,
         })
-    return {"games": out, "games_checked": len(games), "no_data": no_data}
+    return {"games": out, "deferred": deferred, "games_checked": len(games), "no_data": no_data}
 
 
 async def attach(db: AsyncSession, org_id, game_id, scorecard: dict, wanted: dict) -> dict:
