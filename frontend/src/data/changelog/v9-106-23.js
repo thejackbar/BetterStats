@@ -1,10 +1,11 @@
 export default {
   version: 'v9.106.23',
   date: '2026-10-05',
-  sortKey: '2026-10-05T14:00:00Z',
-  title: 'New players now show in Fees even before their scorecard is in',
+  sortKey: '2026-10-05T12:00:00Z',
+  title: 'Awards import now reads CSV files saved from Excel on a Mac, and says what went wrong when a file fails',
   items: [
-    'A player who Cricket Australia counts in the season totals but whose scorecard we do not hold yet never appeared in Fees, and Rebuild match days could not add them. They now get a fee line for the season with no match days, and the first scorecard that turns up charges that same line.',
-    'Grades set to Exclude, players with no matches and players from another club are still left out.',
+    'A CSV saved from Excel on a Mac (or by some other tools) uses an old line ending that the import could not read. The page showed "Unexpected token I, Internal S... is not valid JSON" and nothing was added. These files now import normally.',
+    'CSV files saved by Excel on Windows with curly quotes or accented letters now read correctly too.',
+    'If an awards file still cannot be read, the page now shows a plain message and says nothing was added, instead of a JSON error.',
   ],
 }

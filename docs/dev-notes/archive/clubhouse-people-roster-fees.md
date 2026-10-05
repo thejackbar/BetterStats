@@ -1278,7 +1278,7 @@ OAuth code-flow, per club.
 
 <!-- END original CLAUDE.md L12891-12984 -->
 
-## v9.106.23: Fees enrols players who only exist in the season totals
+## v9.106.24: Fees enrols players who only exist in the season totals
 
 Report: new players (example `Cowcher, Baxter`, one match in CA's totals, `match_coverage.without_scorecard = 1`, no `games` row) were missing from Admin > Fees. Cause: `recompute_fee_match_days` enrolled from `game_appearances` (plus football lines) only, and returned early when a season had no scored games. A player first seen through the aggregate sync has a `players` row and a `player_season_stats` / `player_season_grade_stats` row but no appearance until a scorecard syncs, and a match CA counts can stay without one for good, so Rebuild could not add them either.
 Fix: `_aggregate_player_ids` adds club players (`players.organisation_id`) with matches > 0 this season. Per-grade rows decide when present (an Exclude grade stays out); the season total decides only for a player with no per-grade row. They get a `fee_members` and `fee_member_seasons` row and no match days. The early exit for a season with no scored games is gone (stale auto rows are still cleaned up at the end).
