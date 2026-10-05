@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 from app.models.db import Game, Grade, Season, Organisation, BattingInnings, BowlingSpell, FieldingStat, Player, ManualGame, ManualBattingInnings, ManualBowlingSpell, ManualFieldingStat, ManualInnings, User, get_db
 from app.routers.auth import get_optional_user, public_junior_hiding
-from app.services import dismissal, grade_scope
+from app.services import dismissal, grade_scope, participant_names
 from app.services.aggregations import get_game_fall_of_wickets, get_game_partnerships
 from app.services.sync import _caught_by_keeper, _innings_keeper_names
 from app.services import rate_coverage as rc
@@ -964,11 +964,19 @@ async def get_scorecard(
             guid_to_pid: dict[str, uuid.UUID] = {r[1]: r[0] for r in player_rows if r[1]}
             id_to_display: dict[uuid.UUID, str] = {r[0]: (r[2] or r[3]) for r in player_rows}
             id_by_str: dict[str, uuid.UUID] = {str(r[0]): r[0] for r in player_rows}
-            nk_to_pid: dict[tuple, uuid.UUID] = {}
+            # (surname, first initial) is ambiguous at any club with two "A Taylor"s:
+            # keep every holder of the key and only link when exactly one has it,
+            # rather than silently picking whichever row came first.
+            nk_holders: dict[tuple, set] = {}
             for _pid, _guid, _override, _name in player_rows:
                 _dname = _override or _name
                 if _dname and not _looks_redacted(_dname):
-                    nk_to_pid.setdefault(_name_key(_dname), _pid)
+                    nk_holders.setdefault(_name_key(_dname), set()).add(_pid)
+            nk_to_pid: dict[tuple, uuid.UUID] = {k: next(iter(v)) for k, v in nk_holders.items() if len(v) == 1}
+            # The team sheet carries the full name even where the batting row only has
+            # an initial, and a full name held by one player beats an initial.
+            full_to_pid = participant_names.unique_by_full_name(
+                [(r[0], r[2] or r[3]) for r in player_rows])
 
             def _resolve_linked_id(pid_str: str, name: str) -> Optional[uuid.UUID]:
                 """Which of our own players (if any) this GR participant is —
@@ -989,8 +997,20 @@ async def get_scorecard(
                     alias_pid = alias_map.get(normalise_name_key(name))
                     if alias_pid:
                         return id_by_str.get(alias_pid)
+                roster_name = pid_to_name.get(pid_str)
+                if roster_name and participant_names.looks_full(roster_name):
+                    full_pid = full_to_pid.get(participant_names.full_name_key(roster_name))
+                    if full_pid is not None:
+                        return full_pid
                 if name and not _looks_redacted(name):
-                    return nk_to_pid.get(_name_key(name))
+                    cand = nk_to_pid.get(_name_key(name))
+                    # The team sheet gave a full name that matched nobody. A player who
+                    # shares only the surname and initial (Angus for Ashton Taylor) is a
+                    # different person, so the loose match needs a compatible given name.
+                    if cand is not None and roster_name and participant_names.looks_full(roster_name) \
+                            and not participant_names.first_names_compatible(roster_name, id_to_display.get(cand)):
+                        return None
+                    return cand
                 return None
 
             # Org name first word — the PRIMARY signal for which GR team is

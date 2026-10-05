@@ -116,7 +116,14 @@ async def trace_player(db: AsyncSession, org_id, term: str) -> dict:
         merges = [dict(r) for r in (await db.execute(text("""
             SELECT id, merged_at, removed_player_name, keep_player_name, removed_player_id = :p AS was_removed, undone_at
             FROM merge_logs WHERE keep_player_id = :p OR removed_player_id = :p ORDER BY merged_at"""), {"p": pid})).mappings().all()]
+        # Every game this record has a row in, from the EFFECTIVE views so an imported
+        # or hand-typed card (manual_* tables, keyed by a manual game) is found as well
+        # as a synced one, plus the raw synced tables so a row the views hide (a synced
+        # game replaced by a paired import) still shows up and can be explained.
         gids = [r[0] for r in (await db.execute(text("""
+            SELECT game_id FROM v_effective_batting_innings WHERE player_id = :p UNION
+            SELECT game_id FROM v_effective_bowling_spells WHERE player_id = :p UNION
+            SELECT game_id FROM v_effective_fielding_stats WHERE player_id = :p UNION
             SELECT game_id FROM batting_innings WHERE player_id = :p UNION
             SELECT game_id FROM bowling_spells WHERE player_id = :p UNION
             SELECT game_id FROM fielding_stats WHERE player_id = :p UNION
@@ -124,23 +131,20 @@ async def trace_player(db: AsyncSession, org_id, term: str) -> dict:
         games = []
         if gids:
             for g in (await db.execute(text("""
-                SELECT g.id, g.played_at, g.home_team, g.away_team, gr.id AS grade_id, gr.name AS grade, s.year,
-                       s.organisation_id AS season_owner,
-                       e.id IS NOT NULL AS in_view, e.organisation_id AS e_org, e.home_org_id AS e_home, e.away_org_id AS e_away,
-                       (SELECT COUNT(*) FROM v_effective_batting_innings x WHERE x.game_id = g.id AND x.player_id = :p) AS bat,
-                       (SELECT COUNT(*) FROM v_effective_bowling_spells x WHERE x.game_id = g.id AND x.player_id = :p) AS bowl,
-                       (SELECT COUNT(*) FROM v_effective_fielding_stats x WHERE x.game_id = g.id AND x.player_id = :p) AS field
-                FROM games g
-                LEFT JOIN grades gr ON gr.id = g.grade_id LEFT JOIN seasons s ON s.id = gr.season_id
-                LEFT JOIN v_effective_games e ON e.id = g.id
-                WHERE g.id = ANY(CAST(:g AS uuid[])) ORDER BY g.played_at"""), {"p": pid, "g": [str(x) for x in gids]})).mappings().all():
+                SELECT e.id, e.played_at, e.home_team, e.away_team, e.grade_id, gr.name AS grade, s.year, e.source,
+                       e.organisation_id AS e_org, e.home_org_id AS e_home, e.away_org_id AS e_away,
+                       (SELECT COUNT(*) FROM v_effective_batting_innings x WHERE x.game_id = e.id AND x.player_id = :p) AS bat,
+                       (SELECT COUNT(*) FROM v_effective_bowling_spells x WHERE x.game_id = e.id AND x.player_id = :p) AS bowl,
+                       (SELECT COUNT(*) FROM v_effective_fielding_stats x WHERE x.game_id = e.id AND x.player_id = :p) AS field
+                FROM v_effective_games e
+                LEFT JOIN grades gr ON gr.id = e.grade_id
+                LEFT JOIN seasons s ON s.id = COALESCE(gr.season_id, e.season_id)
+                WHERE e.id = ANY(CAST(:g AS uuid[])) ORDER BY e.played_at"""), {"p": pid, "g": [str(x) for x in gids]})).mappings().all():
                 o = str(org_id)
-                verdict, rnd = "counts", None
+                verdict = "counts"
                 day = g["played_at"].date() if hasattr(g["played_at"], "date") else g["played_at"]
                 rnd = next((r["round_number"] for r in rounds if r["start_date"] and r["end_date"] and r["start_date"] <= day <= r["end_date"]), None)
-                if not g["in_view"]:
-                    verdict = "not in v_effective_games (washed out, superseded by an import, or not played)"
-                elif g["year"] != fs.season_year:
+                if g["year"] != fs.season_year:
                     verdict = f"season year {g['year']}, not {fs.season_year}"
                 elif not (str(g["e_org"]) == o or str(g["e_home"]) == o or str(g["e_away"]) == o):
                     verdict = "the game is not the club's (own fixture or one of the two sides)"
@@ -151,7 +155,25 @@ async def trace_player(db: AsyncSession, org_id, term: str) -> dict:
                 elif not (g["bat"] or g["bowl"] or g["field"]):
                     verdict = "only an appearance row: counts the appearance point, no batting, bowling or fielding rows in the effective views"
                 games.append({"date": day, "match": f"{g['home_team']} v {g['away_team']}", "grade": g["grade"], "year": g["year"],
-                              "round": rnd, "rows": f"bat {g['bat']}, bowl {g['bowl']}, field {g['field']}", "verdict": verdict})
+                              "round": rnd, "source": g["source"], "game_id": str(g["id"]),
+                              "rows": f"bat {g['bat']}, bowl {g['bowl']}, field {g['field']}", "verdict": verdict})
+            # A synced game the effective games view does not show: say why. The usual
+            # reason is a paired import that is preferred (its rows count instead, under
+            # whichever record the import named), or a washed-out game.
+            shown = {g["game_id"] for g in games}
+            for g in (await db.execute(text("""
+                SELECT g.id, g.played_at, g.home_team, g.away_team, gr.name AS grade, s.year, g.status,
+                       (SELECT mg.id FROM manual_games mg WHERE mg.superseded_by_game_id = g.id AND mg.pair_prefers_import LIMIT 1) AS import_id
+                FROM games g LEFT JOIN grades gr ON gr.id = g.grade_id LEFT JOIN seasons s ON s.id = gr.season_id
+                WHERE g.id = ANY(CAST(:g AS uuid[])) ORDER BY g.played_at"""), {"g": [str(x) for x in gids]})).mappings().all():
+                if str(g["id"]) in shown:
+                    continue
+                day = g["played_at"].date() if hasattr(g["played_at"], "date") else g["played_at"]
+                why = (f"hidden from scoring: an imported match ({g['import_id']}) is paired to this game and preferred, so the import's rows count instead"
+                       if g["import_id"] else f"not in v_effective_games (status {g['status']}: washed out, or not played)")
+                games.append({"date": day, "match": f"{g['home_team']} v {g['away_team']}", "grade": g["grade"], "year": g["year"],
+                              "round": None, "source": "api", "game_id": str(g["id"]), "rows": "synced rows hidden", "verdict": why})
+            games.sort(key=lambda x: x["date"])
         stored = [dict(r) for r in (await db.execute(text("""
             SELECT r.round_number, prs.total_points, prs.breakdown->>'manual' IS NOT NULL AS manual
             FROM fantasy_player_round_scores prs JOIN fantasy_rounds r ON r.id = prs.round_id

@@ -42,7 +42,7 @@ async def run(org: str, term: str) -> None:
             if not p["games"]:
                 print("    games: none. This record has no scorecard rows at all.")
             for g in p["games"]:
-                print(f"    {g['date']}  {g['match']}  [{g['grade']}]  rows: {g['rows']}  round: {g['round'] or '-'}  =>  {g['verdict']}")
+                print(f"    {g['date']}  {g['match']}  [{g['grade']}]  [{g['source']}] rows: {g['rows']}  round: {g['round'] or '-'}  =>  {g['verdict']}")
             print("    stored round points: " + (", ".join(f"R{s['round_number']}={float(s['total_points']):g}{' (typed in)' if s['manual'] else ''}" for s in p["stored"]) or "none"))
 
 
