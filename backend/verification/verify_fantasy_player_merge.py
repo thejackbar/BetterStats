@@ -304,6 +304,37 @@ async def main_checks() -> None:
     check("running it again finds nothing", not [f for f in again if f["removed_id"] == str(M3)], repr(again))
     await bk.dispose()
 
+    print("8. Pool players with no stats, and who holds them (the Scarborough report)")
+    from app.services import fantasy_pool_check as pc
+    AT, AT2, CH = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    async with Session() as s:
+        s.add_all([Player(id=AT, name="Ashton Taylor", organisation_id=ORG),                          # added by hand
+                   Player(id=AT2, name="Taylor, Ashton", organisation_id=ORG, grassroots_id="at-ca"),   # the synced twin
+                   Player(id=CH, name="Chris Hansberry", organisation_id=ORG)])                        # added by hand, no twin
+        await s.flush()
+        gid = (await s.execute(text("SELECT id FROM games ORDER BY played_at DESC LIMIT 1"))).scalar()
+        s.add(GameAppearance(game_id=gid, player_id=AT2, team_name="Alpha"))
+        s.add(BattingInnings(game_id=gid, player_id=AT2, innings_number=1, runs=22, balls=20, fours=0, sixes=0,
+                             dismissal_type="bowled", not_out=False))
+        for p in (AT, CH):
+            s.add(base.FantasyPoolPlayer(fantasy_season_id=FS_ID, organisation_id=ORG, player_id=p, role="batter",
+                                         role_source="admin", base_price=5, current_price=5))
+        s.add(base.FantasySquadPlayer(squad_id=SQ_X, player_id=AT, role="batter", purchase_price=5))
+        await s.commit()
+    async with Session() as s:
+        rows = {r["name"]: r for r in await pc.zero_stat_pool_players(s, ORG)}
+    check("a hand-added player with no games is listed, with the profile that holds his stats",
+          [t["player_id"] for t in rows.get("Ashton Taylor", {}).get("twins", [])] == [str(AT2)], repr(rows.get("Ashton Taylor")))
+    check("the twin's name is matched however it is written ('Taylor, Ashton')", rows.get("Ashton Taylor", {}).get("twins", [{}])[0].get("games") == 1)
+    check("it says how many teams picked him", rows.get("Ashton Taylor", {}).get("picked_by") == 1)
+    check("a hand-added player with no twin is listed on his own", rows.get("Chris Hansberry", {}).get("twins") == [], repr(rows.get("Chris Hansberry")))
+    check("a pool player who has games is not listed", "Ann Ace" not in rows and "Taylor, Ashton" not in rows, repr(list(rows)))
+    res = await merge(keep=AT2, remove=AT)
+    async with Session() as s:
+        rows2 = {r["name"] for r in await pc.zero_stat_pool_players(s, ORG)}
+    check("after merging the pair, he is gone from the list", "Ashton Taylor" not in rows2, repr(rows2))
+    check("and the team that picked him still has him, under the synced profile", str(AT2) in await picks(SQ_X))
+
 
 async def run_control() -> int:
     await setup()
