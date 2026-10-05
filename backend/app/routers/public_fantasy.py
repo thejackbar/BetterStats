@@ -48,10 +48,42 @@ from app.services.fantasy_scoring import DEFAULT_RULES, DEFAULT_SCORING
 # of plays per half-season (see rules).
 FANTASY_CHIPS = ("wildcard", "triple_captain", "bench_boost", "free_hit")
 
-router = APIRouter(prefix="/public/fantasy", tags=["public-fantasy"])
-
 COOKIE_NAME = "bs_fantasy"
 SESSION_DAYS = 30
+
+# Admin "view as a team": a club admin (or Better HQ) opens the public pages as one
+# of the club's managers to see exactly what that manager sees. It rides a second,
+# short-lived cookie that takes precedence over the member's own session, and it is
+# read-only: every write on this router is refused while it is on.
+VIEW_AS_COOKIE = "bs_fantasy_viewas"
+VIEW_AS_HOURS = 3
+
+
+def _view_as_payload(request: Request) -> Optional[dict]:
+    raw = request.cookies.get(VIEW_AS_COOKIE)
+    if not raw:
+        return None
+    try:
+        payload = jwt.decode(raw, settings.secret_key, algorithms=[settings.algorithm])
+    except JWTError:
+        return None
+    return payload if payload.get("typ") == "fantasy_viewas" else None
+
+
+async def _block_writes_while_viewing(request: Request) -> None:
+    """Router dependency: no changes while viewing as a team. Only the view-as
+    endpoints themselves (switch team, exit) are let through."""
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return
+    if _view_as_payload(request) is not None and "/view-as/" not in request.url.path:
+        raise HTTPException(
+            status_code=403,
+            detail="You're viewing this team as an admin, so changes are switched off. Exit the view to play as yourself.",
+        )
+
+
+router = APIRouter(prefix="/public/fantasy", tags=["public-fantasy"],
+                   dependencies=[Depends(_block_writes_while_viewing)])
 
 # Auth throttles, mirroring the BetterSelect public router.
 LOGIN_MAX_FAILURES = 6
@@ -96,7 +128,36 @@ def _issue_cookie(response: Response, club_id, manager_id) -> None:
     )
 
 
+def issue_view_as(response: Response, club_id, manager_id, admin_user_id) -> None:
+    """Start (or switch) a read-only admin view as ``manager_id``."""
+    exp = datetime.now(timezone.utc) + timedelta(hours=VIEW_AS_HOURS)
+    token = jwt.encode(
+        {"club": str(club_id), "mgr": str(manager_id), "by": str(admin_user_id),
+         "typ": "fantasy_viewas", "exp": exp},
+        settings.secret_key, algorithm=settings.algorithm,
+    )
+    response.set_cookie(
+        key=VIEW_AS_COOKIE, value=token, httponly=True, secure=settings.cookie_secure,
+        samesite="lax", max_age=VIEW_AS_HOURS * 60 * 60, path="/",
+    )
+
+
+def _read_view_as(request: Request, club_id) -> Optional[dict]:
+    """The active view-as for this club, or None."""
+    payload = _view_as_payload(request)
+    if not payload or payload.get("club") != str(club_id):
+        return None
+    try:
+        uuid.UUID(payload["mgr"])
+    except (KeyError, ValueError, TypeError):
+        return None
+    return payload
+
+
 def _read_session(request: Request, club_id) -> Optional[uuid.UUID]:
+    va = _read_view_as(request, club_id)
+    if va:
+        return uuid.UUID(va["mgr"])
     raw = request.cookies.get(COOKIE_NAME)
     if not raw:
         return None
@@ -330,6 +391,9 @@ async def landing(token: str, request: Request, db: AsyncSession = Depends(get_d
         mgr = await db.get(FantasyManager, mid)
         if mgr and mgr.organisation_id == club.id:
             me = {"id": str(mgr.id), "display_name": mgr.display_name}
+    view_as = None
+    if _read_view_as(request, club.id):
+        view_as = {"manager_id": me["id"] if me else None, "display_name": me["display_name"] if me else None}
     season_out = None
     if season is not None:
         pool_n = (await db.execute(
@@ -351,7 +415,67 @@ async def landing(token: str, request: Request, db: AsyncSession = Depends(get_d
     named = section_names.resolve(club.section_names, sponsors).get("fantasy") or {}
     branding["fantasy_name"] = named.get("name")
     branding["fantasy_sponsor"] = named.get("sponsor")
-    return {"club": branding, "season": season_out, "me": me}
+    return {"club": branding, "season": season_out, "me": me, "view_as": view_as}
+
+
+async def team_rows(db: AsyncSession, club: Organisation, season: Optional[FantasySeason]) -> list[dict]:
+    """Every manager the club has, with their squad on the club ladder (team name
+    and points) when they have built one this season. Ranked, then by name."""
+    league = await _global_league(db, season) if season is not None else None
+    rows = (await db.execute(
+        text("""
+            SELECT m.id, m.display_name, m.last_seen_at, sq.id AS squad_id, sq.team_name, sq.total_points
+            FROM fantasy_managers m
+            LEFT JOIN fantasy_squads sq ON sq.manager_id = m.id AND sq.league_id = CAST(:lid AS UUID)
+            WHERE m.organisation_id = CAST(:org AS UUID)
+            ORDER BY sq.total_points DESC NULLS LAST, lower(m.display_name)
+        """),
+        {"lid": str(league.id) if league else None, "org": str(club.id)},
+    )).mappings().all()
+    return [{
+        "manager_id": str(r["id"]), "display_name": r["display_name"],
+        "team_name": r["team_name"], "has_squad": r["squad_id"] is not None,
+        "total_points": float(r["total_points"]) if r["total_points"] is not None else None,
+        "last_seen_at": r["last_seen_at"].isoformat() if r["last_seen_at"] else None,
+    } for r in rows]
+
+
+class ViewAsSwitch(BaseModel):
+    manager_id: str
+
+
+@router.get("/{token}/view-as/managers")
+async def view_as_managers(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """The teams an admin can switch between while viewing as one. Only answers
+    while a view-as is active for this club."""
+    club = await _club_for_token(db, token)
+    if not _read_view_as(request, club.id):
+        raise HTTPException(status_code=403, detail="Not viewing as a team.")
+    return {"teams": await team_rows(db, club, await _current_season(db, club))}
+
+
+@router.post("/{token}/view-as/switch")
+async def view_as_switch(token: str, body: ViewAsSwitch, request: Request, response: Response, db: AsyncSession = Depends(get_db)):
+    """Move an active view-as to another of the club's managers."""
+    club = await _club_for_token(db, token)
+    va = _read_view_as(request, club.id)
+    if not va:
+        raise HTTPException(status_code=403, detail="Not viewing as a team.")
+    try:
+        mgr = await db.get(FantasyManager, uuid.UUID(body.manager_id))
+    except ValueError:
+        mgr = None
+    if mgr is None or mgr.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Team not found")
+    issue_view_as(response, club.id, mgr.id, va.get("by"))
+    return {"ok": True, "display_name": mgr.display_name}
+
+
+@router.post("/{token}/view-as/exit")
+async def view_as_exit(token: str, response: Response):
+    """End the view-as. Needs no sign-in: all it does is clear this browser's cookie."""
+    response.delete_cookie(VIEW_AS_COOKIE, path="/")
+    return {"ok": True}
 
 
 class RegisterBody(BaseModel):
@@ -1365,7 +1489,13 @@ async def live(token: str, request: Request, db: AsyncSession = Depends(get_db))
                 WHERE league_id = CAST(:lid AS UUID) AND id <> CAST(:sid AS UUID)"""),
         {"lid": str(squad.league_id), "sid": str(squad.id)},
     )).scalars().all()
-    live_total = float(squad.total_points) + res["points"]
+    # squad.total_points already carries this round's stored provisional score
+    # (the nightly refresh), so swap it for the fresh figure rather than add.
+    stored = (await db.execute(
+        text("SELECT points FROM fantasy_squad_round_scores WHERE squad_id = CAST(:sid AS UUID) AND round_id = CAST(:rid AS UUID)"),
+        {"sid": str(squad.id), "rid": str(rnd.id)},
+    )).scalar_one_or_none()
+    live_total = float(squad.total_points) - float(stored or 0) + res["points"]
     prov_rank = 1 + sum(1 for t in others if float(t) > live_total)
     playing = sum(1 for e in res["lineup"] if (e.get("games") or score_by_player.get(e["player_id"], (0, 0))[1]))
     return {

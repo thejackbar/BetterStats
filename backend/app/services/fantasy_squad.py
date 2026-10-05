@@ -121,9 +121,36 @@ def score_squad_round(picks, score_by_player: dict[str, tuple[float, int]], best
     }
 
 
-async def score_squads_for_round(session: AsyncSession, fs, rnd) -> int:
+async def recompute_squad_totals(session: AsyncSession, fs) -> None:
+    """Roll each squad's season total up from its round scores. A squad with no
+    round rows left goes to 0 (unsettling a round can empty one)."""
+    await session.execute(
+        text("""
+            UPDATE fantasy_squads sq SET
+                total_points = COALESCE((
+                    SELECT SUM(srs.points)
+                    FROM fantasy_squad_round_scores srs
+                    JOIN fantasy_rounds r ON r.id = srs.round_id
+                    WHERE srs.squad_id = sq.id AND r.fantasy_season_id = CAST(:fs AS UUID)
+                ), 0),
+                updated_at = NOW()
+            WHERE sq.fantasy_season_id = CAST(:fs AS UUID)
+        """),
+        {"fs": str(fs.id)},
+    )
+
+
+async def score_squads_for_round(session: AsyncSession, fs, rnd, rollover: bool = True,
+                                 from_snapshot: bool = False) -> int:
     """Score every squad in the season for a round and roll the ladder totals.
-    Idempotent on (squad, round). Returns the number of squads scored."""
+    Idempotent on (squad, round). Returns the number of squads scored.
+    ``rollover=False`` is the provisional pass for a round still in progress: it
+    must not bank the next round's free transfer, which only settlement grants.
+    ``from_snapshot`` scores a round that is already scored with the players each
+    squad had IN THAT ROUND (the lineup stored when it was settled), not the picks
+    it holds now: managers transfer between rounds, so scoring an old round with
+    today's picks would rewrite its history. A squad with no stored lineup for the
+    round (it joined later) is left out."""
     squads = (await session.execute(
         select(FantasySquad).where(FantasySquad.fantasy_season_id == fs.id)
     )).scalars().all()
@@ -137,6 +164,19 @@ async def score_squads_for_round(session: AsyncSession, fs, rnd) -> int:
     picks_by_squad: dict = defaultdict(list)
     for sp in sp_rows:
         picks_by_squad[sp.squad_id].append(sp)
+    if from_snapshot:
+        from types import SimpleNamespace
+        stored = {str(sid): lineup for sid, lineup in (await session.execute(
+            text("SELECT squad_id, lineup FROM fantasy_squad_round_scores WHERE round_id = CAST(:rid AS UUID)"),
+            {"rid": str(rnd.id)},
+        )).all()}
+        picks_by_squad = defaultdict(list)
+        for sq in squads:
+            for e in stored.get(str(sq.id)) or []:
+                picks_by_squad[sq.id].append(SimpleNamespace(
+                    player_id=e["player_id"], role=e.get("role"),
+                    is_captain=bool(e.get("is_captain")), is_vice_captain=bool(e.get("is_vice"))))
+        squads = [sq for sq in squads if picks_by_squad.get(sq.id)]
 
     score_rows = (await session.execute(
         select(
@@ -187,22 +227,10 @@ async def score_squads_for_round(session: AsyncSession, fs, rnd) -> int:
             },
         )
 
-    # Roll each squad's season total from its round scores.
-    await session.execute(
-        text("""
-            UPDATE fantasy_squads sq SET total_points = COALESCE(t.total, 0), updated_at = NOW()
-            FROM (
-                SELECT srs.squad_id, SUM(srs.points) AS total
-                FROM fantasy_squad_round_scores srs
-                JOIN fantasy_rounds r ON r.id = srs.round_id
-                WHERE r.fantasy_season_id = CAST(:fs AS UUID)
-                GROUP BY srs.squad_id
-            ) t
-            WHERE sq.id = t.squad_id AND sq.fantasy_season_id = CAST(:fs AS UUID)
-        """),
-        {"fs": str(fs.id)},
-    )
+    await recompute_squad_totals(session, fs)
 
+    if not rollover:
+        return len(squads)
     # Rollover: settling this round grants the next round's free transfer, banked
     # up to the cap. This also resets a wildcard's unlimited window to normal.
     per = int(rules.get("free_transfers_per_round", 1))

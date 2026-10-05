@@ -257,6 +257,9 @@ async def fixtures_in_window(org_id_str: str, since: date, now: date | None = No
       has been published and there is structure to seed. Deciding "no
       fixtures" from grades we have not created yet is how a club silently
       stops syncing the day its new season opens.
+    * A season held with only some of the grades CA lists teams for. The draw
+      is often made after the season row was first seeded, and the grades
+      added since can only be created by the sync this probe gates.
     * Every grade returning an empty match list. ``get_grade_matches``
       returns ``[]`` for a transient upstream failure as well as for a
       genuinely empty grade, and those two are indistinguishable here — so a
@@ -309,6 +312,18 @@ async def fixtures_in_window(org_id_str: str, since: date, now: date | None = No
     if not grade_guids:
         return {"sync": True, "reason": "no_grades_seeded_yet", "fixtures": 0}
 
+    # A season held with SOME grades is not a season held with all of them. A
+    # club's season row is created the first time a sync sees it, often in the
+    # pre-season when one team has a grade; the rest arrive when the draw is
+    # made, and only the season loop in ``sync_organisation`` ever creates a
+    # grade row. Judging "nothing played" from the grades we hold therefore
+    # hid a whole round (Leederville, Round 1 2026/27, six grades) while this
+    # probe, the only thing gating that loop, kept answering "no fixtures".
+    # One teams call per in-play season is the same source the sync seeds from.
+    ca_grades = await _ca_grade_guids(org_id_str, in_play)
+    if ca_grades - {str(g).lower() for g in grade_guids}:
+        return {"sync": True, "reason": "new_grade_to_seed", "fixtures": 0}
+
     org_lower = org_id_str.lower()
     total_seen = 0
     in_window = 0
@@ -336,6 +351,32 @@ async def fixtures_in_window(org_id_str: str, since: date, now: date | None = No
     if in_window == 0:
         return {"sync": False, "reason": "no_fixtures_in_window", "fixtures": 0}
     return {"sync": True, "reason": "fixtures_played", "fixtures": in_window}
+
+
+async def _ca_grade_guids(org_id_str: str, season_guids: list[str]) -> set[str]:
+    """Lower-cased grade ids Cricket Australia says this club has a team in.
+
+    Read the way ``sync_organisation`` reads them (a team's ``grades`` list
+    plus its ``grade``), and only ids that sync could actually seed: it skips
+    anything that is not a UUID, so counting one here would make a club look
+    permanently "new". ``get_teams`` returns ``[]`` for a transient failure
+    and for a club with no teams alike, so an empty answer adds nothing and
+    the caller falls back to the grades it holds.
+    """
+    found: set[str] = set()
+    for sid in season_guids:
+        for t in await playhq_client.get_teams(org_id_str, sid):
+            objs = list(t.get("grades") or [])
+            if t.get("grade"):
+                objs.append(t["grade"])
+            for gd in objs:
+                raw = ((gd or {}).get("id") or "").strip()
+                try:
+                    uuid.UUID(raw)
+                except ValueError:
+                    continue
+                found.add(raw.lower())
+    return found
 
 
 def quick_sync_since(now: date | None = None) -> date:

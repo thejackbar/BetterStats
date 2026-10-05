@@ -29,6 +29,7 @@ import { PlayerProfile, Compare, StatsExplorer } from './fantasy/Players'
 import Notifications, { unreadCount } from './fantasy/Notifications'
 import Settings, { HowToPlay } from './fantasy/Settings'
 import Share from './fantasy/Share'
+import ViewAsBar from './fantasy/ViewAsBar'
 
 const NAV = [['team', 'My Team'], ['points', 'Points'], ['pick', 'Pick Squad'], ['ladder', 'Ladder'], ['leagues', 'Leagues'], ['draft', 'Draft']]
 const QUICK = [['transfers', 'Transfers'], ['chips', 'Chips'], ['fixtures', 'Fixtures'], ['stats', 'Players'], ['live', 'Live'], ['share', 'Share'], ['help', 'Rules']]
@@ -51,6 +52,7 @@ export default function PublicFantasy() {
   const [error, setError] = useState('')
   const [msg, setMsg] = useState('')
   const [unread, setUnread] = useState(0)
+  const [viewAs, setViewAs] = useState(null)   // admin viewing as a team (read only)
 
   const [themePref, setThemePref] = useState(loadThemePref())
   const [theme, setTheme] = useState(resolveTheme(loadThemePref()))
@@ -86,7 +88,7 @@ export default function PublicFantasy() {
     (async () => {
       try {
         const d = await api.fanLanding(token)
-        setClub(d.club); setSeason(d.season)
+        setClub(d.club); setSeason(d.season); setViewAs(d.view_as || null)
         if (!d.season) { setPhase('dead'); return }
         setRules(d.season.rules)
         if (d.me) {
@@ -106,7 +108,11 @@ export default function PublicFantasy() {
   useEffect(() => { if (phase === 'app') refreshNotifs() }, [phase, refreshNotifs, squad])
 
   const onAuthed = async () => { const m = await loadApp(); setViewRaw(m.squad ? 'team' : 'pick'); setPhase('app') }
-  const logout = async () => { await api.fanLogout(token).catch(() => {}); setManager(null); setSquad(null); setPhase('auth') }
+  const logout = async () => {
+    // While an admin is viewing as a team, "sign out" leaves the view; it must not touch the team.
+    if (viewAs) { await api.fanViewAsExit(token).catch(() => {}); window.location.assign('/admin/fantasy'); return }
+    await api.fanLogout(token).catch(() => {}); setManager(null); setSquad(null); setPhase('auth')
+  }
 
   // Brand mark: the club's own logo, or the BetterCricket mark when none is set.
   const ctx = { club, crest: crestText(club), token, logoUrl: club?.logo_url || bcMark }
@@ -143,6 +149,7 @@ export default function PublicFantasy() {
     <FantasyCtx.Provider value={ctx}>
       <div className="bfc-root" data-theme={theme} style={rootSx}>
         <div style={{ maxWidth: desktop ? 'min(1800px, 96vw)' : 540, margin: '0 auto', padding: desktop ? '22px 28px 64px' : '18px 16px 56px' }}>
+          {viewAs && <ViewAsBar token={token} viewAs={viewAs} fail={fail} />}
           {phase !== 'app' && (
             <div style={{ display: 'flex', justifyContent: 'flex-end', maxWidth: 440, margin: '0 auto 4px' }}>
               <ThemeToggle theme={theme} onToggle={onToggleTheme} />

@@ -257,6 +257,10 @@ restore_to_scratch
 
 if [ "$cmd" = "check" ]; then
   log "check-only run — scratch container '$SCRATCH_CONTAINER' left running for manual inspection. Remove it with: docker rm -f $SCRATCH_CONTAINER"
+  # The scratch password is random per run, so print the connection string the
+  # backend container can use to read this copy (e.g. restore_fantasy_merged_picks --backup-url).
+  # The scratch database is disposable and only reachable on the internal network.
+  log "Read it from the backend with: postgresql+asyncpg://${POSTGRES_USER}:${SCRATCH_PASSWORD}@${SCRATCH_CONTAINER}:5432/${POSTGRES_DB}"
   finish_task "$TASK_ID" completed
   exit 0
 fi

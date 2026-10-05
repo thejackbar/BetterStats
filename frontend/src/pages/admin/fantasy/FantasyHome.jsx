@@ -44,7 +44,7 @@ export default function FantasyHome() {
   const createSeason = run('create', () => api.fantasyCreateSeason(Number(year)), () => 'Season created.')
   const buildPool = run('pool', () => api.fantasyBuildPool(season.id), (r) => `Pool built: ${r.pool} players.`)
   const genRounds = run('rounds', () => api.fantasyGenerateRounds(season.id), (r) => r.detail || `Generated ${r.rounds} rounds.`)
-  const settleDue = run('settle', () => api.fantasySettleDue(season.id), (r) => `Settled ${r.rounds_settled} rounds.`)
+  const settleDue = run('settle', () => api.fantasySettleDue(season.id), (r) => `Settled ${r.rounds_settled} rounds` + (r.rounds_refreshed ? `, updated points for ${r.rounds_refreshed} in progress` : '') + (r.rounds_refreshed_late ? `, brought ${r.rounds_refreshed_late} recent round(s) up to date with late scorecards` : '') + '.')
   const deleteSeason = async () => {
     if (!window.confirm('Delete this fantasy season and its pool and rounds? This cannot be undone.')) return
     setBusy('delete'); setErr(null)
@@ -61,6 +61,12 @@ export default function FantasyHome() {
   const regenerate = async () => {
     if (!window.confirm('Make a new link? The old one stops working.')) return
     setBusy('regen'); try { await api.fantasyRegenerateLink(); flash('New link created.'); await load() }
+    catch (e) { fail(e) } finally { setBusy('') }
+  }
+  const unsettleOne = async (r) => {
+    if (!window.confirm(`Unsettle ${r.name || `Round ${r.round_number}`}? Its points come off the ladder and player totals. Chips and transfers managers made are kept. An ended round stays unsettled, and locked to managers, until you settle it again.`)) return
+    setBusy(`r:${r.id}`); setErr(null)
+    try { await api.fantasyUnsettleRound(r.id); flash('Round unsettled.'); await load() }
     catch (e) { fail(e) } finally { setBusy('') }
   }
   const settleOne = async (rid) => {
@@ -159,9 +165,21 @@ export default function FantasyHome() {
                         <td className="py-1.5 pr-3">{r.name || `Round ${r.round_number}`}</td>
                         <td className="py-1.5 pr-3 text-pb-faint">{r.start_date}{r.end_date && r.end_date !== r.start_date ? ` – ${r.end_date}` : ''}</td>
                         <td className="py-1.5 pr-3">
-                          <span className={r.status === 'scored' ? 'text-pb-accent' : 'text-pb-faint'}>{r.status}</span>
+                          <span className={r.status === 'scored' ? 'text-pb-accent' : r.status === 'unsettled' ? 'text-amber-400' : 'text-pb-faint'}>{r.status}</span>
+                          {r.drift && (
+                            <div className="text-[11px] text-amber-400 mt-0.5 max-w-xs">
+                              Scorecards have changed since this was settled: {r.drift.count} player{r.drift.count === 1 ? '' : 's'} score differently now
+                              ({r.drift.players.join(', ')}{r.drift.count > r.drift.players.length ? ', …' : ''}). Press Settle to bring it up to date; it also happens overnight.
+                            </div>
+                          )}
                         </td>
-                        <td className="py-1.5 pr-3 text-right">
+                        <td className="py-1.5 pr-3 text-right whitespace-nowrap">
+                          {r.status === 'scored' && (
+                            <button onClick={() => unsettleOne(r)} disabled={busy === `r:${r.id}`}
+                              className="text-xs underline text-pb-faint hover:text-pb-text disabled:opacity-50 mr-3">
+                              Unsettle
+                            </button>
+                          )}
                           <button onClick={() => settleOne(r.id)} disabled={busy === `r:${r.id}`}
                             className="text-xs underline text-pb-faint hover:text-pb-text disabled:opacity-50">
                             {busy === `r:${r.id}` ? '…' : 'Settle'}

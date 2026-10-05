@@ -133,8 +133,9 @@ export function AuthProvider({ children }) {
   // Super-admin club switching. Persists the acted-as club server-side, then
   // hard-reloads into the admin dashboard so every page refetches under the new
   // club scope (a soft context update would leave already-mounted pages showing
-  // the previous club's data). Pass null to return to the home club.
-  const switchClub = useCallback(async (clubId) => {
+  // the previous club's data). Pass null to return to the home club. `landOn`
+  // is the path under the base to land on (default the dashboard).
+  const switchClub = useCallback(async (clubId, landOn = 'admin') => {
     const res = await fetch(API_BASE + '/auth/switch-club', {
       method: 'POST',
       credentials: 'include',
@@ -154,7 +155,7 @@ export function AuthProvider({ children }) {
     // Base-path aware (see API_BASE above) — a bare '/admin' lands on the
     // umbrella betterat.football landing page for a silo built under a path
     // prefix (e.g. AFL's /afl/), not that silo's own admin app.
-    window.location.assign(import.meta.env.BASE_URL + 'admin')
+    window.location.assign(import.meta.env.BASE_URL + landOn)
   }, [])
 
   const clearJustLoggedIn = useCallback(() => setJustLoggedIn(false), [])

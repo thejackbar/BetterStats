@@ -3279,6 +3279,10 @@ export const api = {
     request(`/public/votes/${token}/fixtures/${fixtureId}/ballot`, { method: 'POST', body: JSON.stringify(data) }),
 
   // ─── BetterFantasyCricket: public member play ───────────
+  fanViewAsManagers: (token) => request(`/public/fantasy/${token}/view-as/managers`),
+  fanViewAsSwitch: (token, managerId) =>
+    request(`/public/fantasy/${token}/view-as/switch`, { method: 'POST', body: JSON.stringify({ manager_id: managerId }) }),
+  fanViewAsExit: (token) => request(`/public/fantasy/${token}/view-as/exit`, { method: 'POST' }),
   fanLanding: (token) => request(`/public/fantasy/${token}`),
   fanRegister: (token, data) => request(`/public/fantasy/${token}/register`, { method: 'POST', body: JSON.stringify(data) }),
   fanLogin: (token, data) => request(`/public/fantasy/${token}/login`, { method: 'POST', body: JSON.stringify(data) }),
@@ -3772,6 +3776,11 @@ export const api = {
   fantasyListRounds: (seasonId) => request(`/club-admin/fantasy/season/${seasonId}/rounds`),
   fantasySettleRound: (roundId) =>
     request(`/club-admin/fantasy/rounds/${roundId}/settle`, { method: 'POST' }),
+  fantasyUnsettleRound: (roundId) =>
+    request(`/club-admin/fantasy/rounds/${roundId}/unsettle`, { method: 'POST' }),
+  fantasyViewAs: (managerId) =>
+    request('/club-admin/fantasy/view-as', { method: 'POST', body: JSON.stringify({ manager_id: managerId }) }),
+  superFantasyCompetitions: () => request('/club-admin/fantasy/super/competitions'),
   fantasySettleDue: (seasonId) =>
     request(`/club-admin/fantasy/season/${seasonId}/settle-due`, { method: 'POST' }),
   fantasyDeleteSeason: (seasonId) =>
@@ -3804,6 +3813,20 @@ export const api = {
     request(`/club-admin/fantasy/managers/${managerId}`, { method: 'DELETE' }),
   fantasyManagerTeams: (managerId) =>
     request(`/club-admin/fantasy/managers/${managerId}/teams`),
+  fantasyPlayerSearch: (seasonId, q) =>
+    request(`/club-admin/fantasy/season/${seasonId}/player-search?q=${encodeURIComponent(q)}`),
+  fantasyAddSquadPlayer: (squadId, data) =>
+    request(`/club-admin/fantasy/squads/${squadId}/players`, { method: 'POST', body: JSON.stringify(data) }),
+  fantasyRemoveSquadPlayer: (squadId, playerId, fromRound = 1) =>
+    request(`/club-admin/fantasy/squads/${squadId}/players/${playerId}?from_round=${fromRound}`, { method: 'DELETE' }),
+  fantasyUnmatched: (seasonId) => request(`/club-admin/fantasy/season/${seasonId}/unmatched-players`),
+  fantasyMergePlayer: (seasonId, keepId, removeId) =>
+    request(`/club-admin/fantasy/season/${seasonId}/merge-player`, { method: 'POST', body: JSON.stringify({ keep_player_id: keepId, remove_player_id: removeId }) }),
+  fantasyManualScores: (seasonId) => request(`/club-admin/fantasy/season/${seasonId}/manual-scores`),
+  fantasySetManualScore: (roundId, playerId, data) =>
+    request(`/club-admin/fantasy/rounds/${roundId}/players/${playerId}/score`, { method: 'PUT', body: JSON.stringify(data) }),
+  fantasyClearManualScore: (roundId, playerId) =>
+    request(`/club-admin/fantasy/rounds/${roundId}/players/${playerId}/score`, { method: 'DELETE' }),
 }
 
 function _iqQs(opponent, fixtureId, team, name) {

@@ -33,6 +33,7 @@ Open the guide first, then grep its archive if you need the reasoning or the mea
 | BetterAdmin or Clubhouse shell and UI kit, Directory, roster, areas and roles, fees and Accounts, merch, assets | `guides/clubhouse-people-roster-fees.md` |
 | BetterIQ: opposition, selection analysis, trends, team analysis, scouting cards | `guides/betteriq.md` |
 | Anything under `services/afl`, `routers/afl`, `frontend/src/afl`, `afl_main.py`, or a shared router mounted on football | `guides/betterfootball-afl.md` |
+| BetterFantasyCricket: rounds, settlement and unsettling, live points, the fantasy admin and member screens | `guides/betterfantasy.md` |
 | BetterPosts, post templates and sizes, layers, club fonts and theme tokens, instructional videos | `guides/betterposts-socials-and-media.md` |
 | Stripe checkout, subscriptions, coupons, pay by invoice, the billing feature flags | `guides/billing-stripe-and-invoicing.md` |
 | Sales workspace, sales performance, commissions, engagement score, the retired Twenty CRM | `guides/sales-crm-and-commissions.md` |
