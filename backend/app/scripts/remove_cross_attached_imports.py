@@ -18,7 +18,12 @@ Each removed row gets an audit entry holding the whole row, then the club's deri
 import figures are rebuilt. The script then reads the keeper's season-less line back
 from `v_effective_player_season_stats` so you can see the result. Dry run by default:
 
-    python -m app.scripts.remove_cross_attached_imports <org-id-or-slug> <keeper-player-id> <other-player-id> [--apply]
+    python -m app.scripts.remove_cross_attached_imports <org-id-or-slug> <keeper-player-id> <other-player-id> [--row-id N ...] [--apply]
+
+By default only exact copies of a row the other player holds are removed. When the
+other player no longer holds their own copy (Leederville's Paul G did not), name the
+keeper's row with `--row-id N`: only a row that belongs to the keeper in this club is
+accepted, and the dry run lists what would go.
 
 For Leederville: the keeper is Paul K (5cb1722d-369a-4b96-ac8f-5b2cb951d89d) and the
 other player is Paul G (83ae1a5e-1d7e-4dd9-b1e9-a4fadf68d379).
@@ -92,7 +97,7 @@ async def _lump(db, pid: uuid.UUID) -> dict:
     return dict(res.mappings().first() or {})
 
 
-async def run(org: str, keeper: str, other: str, apply: bool) -> dict:
+async def run(org: str, keeper: str, other: str, apply: bool, row_ids: list[int] | None = None) -> dict:
     from app.routers.manual_entries import _log_edit
     from app.services import import_reconcile as recon
 
@@ -120,7 +125,14 @@ async def run(org: str, keeper: str, other: str, apply: bool) -> dict:
 
         k_objs, o_objs = await rows_for(kid), await rows_for(oid)
         k_rows, o_rows = [_row(x) for x in k_objs], [_row(x) for x in o_objs]
-        dupes = copies_of(k_rows, o_rows)
+        if row_ids:
+            held = {r["id"] for r in k_rows}
+            missing = [i for i in row_ids if i not in held]
+            if missing:
+                raise SystemExit(f"imported_stats row(s) {missing} are not held by {names[kid]} in this club")
+            dupes = [r for r in k_rows if r["id"] in set(row_ids)]
+        else:
+            dupes = copies_of(k_rows, o_rows)
         dupe_ids = {d["id"] for d in dupes}
 
         before = await _lump(db, kid)
@@ -128,7 +140,8 @@ async def run(org: str, keeper: str, other: str, apply: bool) -> dict:
         print(f"Imported rows held: keeper {len(k_rows)}, other {len(o_rows)}")
         print(f"Keeper's season-less line now: {before}")
         for r in k_rows:
-            tag = "COPY of the other player's row" if r["id"] in dupe_ids else "keep"
+            tag = ("REMOVE (named by --row-id)" if row_ids else "COPY of the other player's row") \
+                if r["id"] in dupe_ids else "keep"
             print(f"  imported_stats #{r['id']} batch={r['import_batch_id']} scope={r['scope']} "
                   f"season={r['season_label'] or r['season_id']} grade={r['grade_label']} "
                   f"games={r['games_played']} inn={r['batting_innings']} runs={r['batting_runs']} "
@@ -178,10 +191,24 @@ async def run(org: str, keeper: str, other: str, apply: bool) -> dict:
 
 
 def main() -> None:
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    argv = sys.argv[1:]
+    row_ids: list[int] = []
+    args: list[str] = []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--row-id" and i + 1 < len(argv):
+            row_ids.append(int(argv[i + 1]))
+            i += 2
+            continue
+        if a.startswith("--row-id="):
+            row_ids.append(int(a.split("=", 1)[1]))
+        elif not a.startswith("--"):
+            args.append(a)
+        i += 1
     if len(args) != 3:
         raise SystemExit(__doc__)
-    asyncio.run(run(args[0], args[1], args[2], "--apply" in sys.argv))
+    asyncio.run(run(args[0], args[1], args[2], "--apply" in argv, row_ids or None))
 
 
 if __name__ == "__main__":
