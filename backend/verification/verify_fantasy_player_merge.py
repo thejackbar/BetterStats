@@ -40,7 +40,7 @@ from app.routers.admin import _merge_players_core, undo_merge, UndoMergeRequest
 Session, check = base.Session, base.check
 ORG, SQ_X, SQ_Y, R1, R2, FS_ID = base.ORG, base.SQ_X, base.SQ_Y, base.R1, base.R2, base.FS_ID
 A, B = base.A, base.B
-M, K, N, Z, M2, K2, M3, K3 = (uuid.uuid4() for _ in range(8))     # M manual Raja, K his real record, N a new player, Z another club's player
+M, K, N, Z, M2, K2, M3, K3, M4, K4 = (uuid.uuid4() for _ in range(10))     # M manual Raja, K his real record, N a new player, Z another club's player
 REPO = Path(__file__).resolve().parent.parent.parent
 # `merge_carry` as it was before this fix (the parent of the commit that added the
 # Fantasy tables). A moving rev such as HEAD would stop reproducing the bug the day
@@ -334,6 +334,44 @@ async def main_checks() -> None:
         rows2 = {r["name"] for r in await pc.zero_stat_pool_players(s, ORG)}
     check("after merging the pair, he is gone from the list", "Ashton Taylor" not in rows2, repr(rows2))
     check("and the team that picked him still has him, under the synced profile", str(AT2) in await picks(SQ_X))
+
+    print("9. Merged, then undone (Raja Pannu): back as himself, but out of the teams")
+    async with Session() as s:
+        s.add_all([Player(id=M4, name="Raja Pannu", organisation_id=ORG), Player(id=K4, name="Raja Pannu", organisation_id=ORG, grassroots_id="raja2-ca")])
+        await s.flush()
+        s.add(base.FantasySquadPlayer(squad_id=SQ_X, player_id=M4, role="batter", purchase_price=5, added_round=1, is_captain=False))
+        await s.commit()
+    async with Session() as s:
+        await fr.settle_round(str(R1), club=org, db=s, _=None)       # the lineup snapshot names him
+    await asyncio.sleep(1.1)
+    bk2 = create_async_engine(bk_url)
+    async with bk2.begin() as c:                                      # a second backup, taken while he was in the team
+        await c.execute(text("DELETE FROM fantasy_squad_players"))
+        for r in await q("SELECT squad_id, player_id, role, is_captain, is_vice_captain, added_round FROM fantasy_squad_players"):
+            await c.execute(text("INSERT INTO fantasy_squad_players VALUES (:a,:b,:c,:d,:e,:f)"), dict(a=r[0], b=r[1], c=r[2], d=r[3], e=r[4], f=r[5]))
+    await merge(control=True, keep=K4, remove=M4)                      # the old merge deletes his pick
+    async with Session() as s:
+        log = (await s.execute(text("SELECT id FROM merge_logs WHERE org_id=:o AND removed_player_id=:p"), {"o": str(ORG), "p": str(M4)})).scalar()
+        await undo_merge(UndoMergeRequest(merge_log_id=log, org_id=str(ORG)), db=s, current_user=FakeUser())
+    check("(reproduced) he exists again but is in no team", str(M4) not in await picks(SQ_X) and bool(await q("SELECT 1 FROM players WHERE id=:p", p=M4)))
+    async with Session() as s:
+        listed = await repair.merged_since_fantasy_began(s, ORG)
+    check("the merged list still shows the undone merge, marked", any(m["removed"] == "Raja Pannu" and m["undone"] for m in listed), repr(listed))
+    async with Session() as s:
+        by_snapshot = [f for f in await repair.find_lost_picks(s, ORG) if f["removed_id"] == str(M4)]
+    check("the lineup snapshots find him, to be restored as himself", [(f["squad_id"], f["keep_id"]) for f in by_snapshot] == [(str(SQ_X), str(M4))], repr(by_snapshot))
+    async with Session() as s, AsyncSession(bk2) as b:
+        by_backup = [f for f in await repair.find_lost_picks_from_backup(s, b, ORG) if f["removed_id"] == str(M4)]
+    check("a backup finds him too", [(f["squad_id"], f["keep_id"]) for f in by_backup] == [(str(SQ_X), str(M4))], repr(by_backup))
+    async with Session() as s:
+        await repair.restore(s, ORG, by_backup, USER.id)
+        await s.commit()
+    check("applied: he is back in the team under his own id, and in the pool", str(M4) in await picks(SQ_X)
+          and bool(await q("SELECT 1 FROM fantasy_pool_players WHERE player_id=:p", p=M4)))
+    async with Session() as s, AsyncSession(bk2) as b:
+        again = [f for f in await repair.find_lost_picks_from_backup(s, b, ORG) if f["removed_id"] == str(M4)]
+    check("and a second run finds nothing", not again)
+    await bk2.dispose()
 
 
 async def run_control() -> int:

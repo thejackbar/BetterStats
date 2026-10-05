@@ -32,14 +32,18 @@ logger = logging.getLogger(__name__)
 async def find_lost_picks(db: AsyncSession, org_id) -> list[dict]:
     """Squads that lost a merged-away player, with the evidence for each."""
     merges = (await db.execute(text("""
-        SELECT id, merged_at, removed_player_id, keep_player_id, removed_player_name
+        SELECT id, merged_at, removed_player_id, keep_player_id, removed_player_name, undone_at
         FROM merge_logs
-        WHERE org_id = CAST(:o AS UUID) AND undone_at IS NULL AND removed_player_id IS NOT NULL
+        WHERE org_id = CAST(:o AS UUID) AND removed_player_id IS NOT NULL
         ORDER BY merged_at
     """), {"o": str(org_id)})).mappings().all()
     found: list[dict] = []
     for m in merges:
-        rid, kid = str(m["removed_player_id"]), str(m["keep_player_id"])
+        # An undone merge put the player back under their own id (and, as the merge
+        # had already deleted the picks, not in any team), so they are restored as
+        # themselves rather than as the profile they had been merged into.
+        rid = str(m["removed_player_id"])
+        kid = rid if m["undone_at"] else str(m["keep_player_id"])
         rows = (await db.execute(text("""
             SELECT sq.id AS squad_id, sq.team_name, sq.fantasy_season_id, r.round_number, srs.lineup
             FROM fantasy_squad_round_scores srs
@@ -82,13 +86,14 @@ async def merged_since_fantasy_began(db: AsyncSession, org_id) -> list[dict]:
     merged into a real profile), so it is the list to look at when the lineups
     cannot say which."""
     rows = (await db.execute(text("""
-        SELECT m.id, m.merged_at, m.removed_player_name, m.keep_player_name
+        SELECT m.id, m.merged_at, m.removed_player_name, m.keep_player_name, m.undone_at
         FROM merge_logs m
-        WHERE m.org_id = CAST(:o AS UUID) AND m.undone_at IS NULL
+        WHERE m.org_id = CAST(:o AS UUID)
           AND m.merged_at >= (SELECT MIN(created_at) FROM fantasy_seasons WHERE organisation_id = CAST(:o AS UUID))
         ORDER BY m.merged_at
     """), {"o": str(org_id)})).mappings().all()
-    return [{"merge_id": r["id"], "at": r["merged_at"], "removed": r["removed_player_name"], "kept": r["keep_player_name"]}
+    return [{"merge_id": r["id"], "at": r["merged_at"], "removed": r["removed_player_name"], "kept": r["keep_player_name"],
+             "undone": r["undone_at"] is not None}
             for r in rows]
 
 
@@ -102,11 +107,13 @@ async def find_lost_picks_from_backup(db: AsyncSession, backup: AsyncSession, or
     live_players = {str(r[0]) for r in (await db.execute(text(
         "SELECT id FROM players WHERE organisation_id = CAST(:o AS UUID)"), org)).all()}
     chain: dict[str, tuple] = {}
+    undone: dict[str, tuple] = {}          # merged, then undone: back under their own id, picks gone
     for m in (await db.execute(text("""
-        SELECT id, removed_player_id, keep_player_id, removed_player_name FROM merge_logs
-        WHERE org_id = CAST(:o AS UUID) AND undone_at IS NULL AND removed_player_id IS NOT NULL
+        SELECT id, removed_player_id, keep_player_id, removed_player_name, undone_at FROM merge_logs
+        WHERE org_id = CAST(:o AS UUID) AND removed_player_id IS NOT NULL ORDER BY merged_at
     """), org)).mappings().all():
-        chain[str(m["removed_player_id"])] = (str(m["keep_player_id"]), m["id"], m["removed_player_name"])
+        rec = (str(m["keep_player_id"]), m["id"], m["removed_player_name"])
+        (undone if m["undone_at"] else chain)[str(m["removed_player_id"])] = rec
     held: dict[str, set] = {}
     for sid, pid in (await db.execute(text("""
         SELECT sp.squad_id, sp.player_id FROM fantasy_squad_players sp
@@ -122,8 +129,21 @@ async def find_lost_picks_from_backup(db: AsyncSession, backup: AsyncSession, or
     """), org)).mappings().all()
     for r in rows:
         squad_id, pid = str(r["squad_id"]), str(r["player_id"])
-        if pid in live_players or squad_id not in held:
-            continue                                         # still there, or the team itself is gone
+        if squad_id not in held:
+            continue                                         # the team itself is gone
+        if pid in live_players:
+            # Live under the same id. That is a loss only if a merge of this player was
+            # undone (the merge deleted the pick, the undo did not bring it back); any
+            # other pick a team no longer holds may be a transfer, so is left alone.
+            if pid in undone and pid not in held[squad_id]:
+                _k, mid, nm = undone[pid]
+                found.append({
+                    "squad_id": squad_id, "team_name": r["team_name"], "season_id": str(r["fantasy_season_id"]),
+                    "merge_id": mid, "removed_id": pid, "keep_id": pid, "player_name": nm or "(merged player)",
+                    "role": r["role"] or "batter", "was_captain": bool(r["is_captain"]), "was_vice": bool(r["is_vice_captain"]),
+                    "first_round": r["added_round"] or 1,
+                })
+            continue
         keep, merge_id, name = None, None, None
         cur, hops = pid, 0
         while cur in chain and hops < 8:

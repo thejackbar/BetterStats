@@ -36,3 +36,7 @@ Leederville's dry run found no lineup evidence (round 1 had been unsettled, whic
 ## Scarborough: hand-added pool players with no stats
 
 "Add new player" creates a brand-new club record with no games (`add_new_player`). The real games sync onto a separate record (their own CA id), so the hand-added player scores 0 while a same-name twin holds the stats. `services/fantasy_pool_check.zero_stat_pool_players` and `python -m app.scripts.fantasy_zero_stat_players <org|all>` (read only) list each pool player with no games this season and the same-name profile that has them; the fix is to merge the pair (the merge now carries picks and the pool entry) and re-settle. Name match is on the sorted words of the name, so "Taylor, Ashton" matches "Ashton Taylor". Covered by section 8 of `verify_fantasy_player_merge.py`.
+
+## Leederville: merges that were undone
+
+The first dry run listed 7 merges but not Raja Pannu: the merge had been undone. Undo re-creates the player under his own id but not his picks (the merge had already cascaded them away), and `fantasy_merge_repair` read only non-undone merges, so neither the lineup snapshots nor `--backup-url` would have found him. Both paths now treat an undone merge as "restore him as himself" (`keep_id = removed_id`), `find_lost_picks_from_backup` restores a same-id pick only when a merge of that player was undone (any other pick a team no longer holds may be a legitimate transfer), and the merged-players list marks undone merges. Section 9 of `verify_fantasy_player_merge.py`.

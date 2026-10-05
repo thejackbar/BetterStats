@@ -58,7 +58,7 @@ async def run(org: str, apply: bool, backup_url: str | None = None) -> None:
                 if merged:
                     print("  Players merged since Fantasy started (the missing player is one of these):")
                     for m in merged:
-                        print(f"    {m['at']:%d %b %Y}: {m['removed']} merged into {m['kept']}")
+                        print(f"    {m['at']:%d %b %Y}: {m['removed']} merged into {m['kept']}" + ("  (undone)" if m["undone"] else ""))
             for s in short:
                 print(f"  needs a hand: {s['team_name']} has {s['players']} of {s['wanted']} players, "
                       f"no record of who is missing. Use Registered players > the team > Add player.")
