@@ -408,6 +408,48 @@ async def main_checks() -> None:
         await s.rollback()
     check("and a second run finds nothing", not again, repr(again))
 
+    print("11. Fill short teams with the top scorers")
+    from app.services import fantasy_fill_short as ff
+    P1, P2, P3, P4 = (uuid.uuid4() for _ in range(4))
+    async with Session() as s:
+        s.add_all([Player(id=P1, name="Top Keeper", organisation_id=ORG), Player(id=P2, name="Second Keeper", organisation_id=ORG),
+                   Player(id=P3, name="Top Bowler", organisation_id=ORG), Player(id=P4, name="Zero Bowler", organisation_id=ORG)])
+        await s.flush()
+        for pid, role, pts, price in ((P1, "keeper", 90, 9), (P2, "keeper", 50, 6), (P3, "bowler", 70, 7), (P4, "bowler", 0, 15)):
+            s.add(base.FantasyPoolPlayer(fantasy_season_id=FS_ID, organisation_id=ORG, player_id=pid, role=role,
+                                         base_price=price, current_price=price, total_points=pts))
+        # rules: 3 picks, 1 keeper + 2 bowlers. X holds one batter (so is short two), Y holds a keeper and a bowler (short one).
+        await s.execute(text("UPDATE fantasy_seasons SET rules = CAST(:r AS JSONB) WHERE id=:f"),
+                        {"r": '{"squad_size": 3, "role_quota": {"keeper": 1, "batter": 0, "allrounder": 0, "bowler": 2}}', "f": FS_ID})
+        await s.execute(text("DELETE FROM fantasy_squad_players WHERE squad_id IN (:x, :y)"), {"x": SQ_X, "y": SQ_Y})
+        s.add(base.FantasySquadPlayer(squad_id=SQ_X, player_id=A, role="batter"))
+        s.add(base.FantasySquadPlayer(squad_id=SQ_Y, player_id=P1, role="keeper"))
+        s.add(base.FantasySquadPlayer(squad_id=SQ_Y, player_id=P3, role="bowler"))
+        await s.commit()
+    async with Session() as s:
+        plans = {p["team_name"]: p for p in await ff.plan_fill(s, ORG)}
+        await s.rollback()
+    check("both short teams are planned, whole teams are not", set(plans) == {"X Team", "Y Team"}, repr(list(plans)))
+    check("Y holds a keeper and one bowler and wants a second bowler: the only other one is Zero Bowler",
+          [c["name"] for c in plans["Y Team"]["adds"]] == ["Zero Bowler"], repr(plans["Y Team"]["adds"]))
+    check("X (short two, wants a keeper and two bowlers) gets the top keeper and the top-scoring bowler, not the priciest",
+          {c["name"] for c in plans["X Team"]["adds"]} == {"Top Keeper", "Top Bowler"}, repr([c["name"] for c in plans["X Team"]["adds"]]))
+    check("each takes the role it is short of, so the quota is met",
+          sorted(c["role"] for c in plans["X Team"]["adds"]) == ["bowler", "keeper"], repr(plans["X Team"]["adds"]))
+    check("a dry run changed nothing", len(await picks(SQ_X)) == 1)
+    async with Session() as s:
+        n = await ff.apply_fill(s, ORG, await ff.plan_fill(s, ORG), USER.id)
+        await s.commit()
+    check("applied: the right number of players were added", n == 3, str(n))
+    for sq in (SQ_X, SQ_Y):
+        check(f"team now has 3 players, no duplicates ({'X' if sq == SQ_X else 'Y'})", len(await picks(sq)) == 3)
+    aud = await q("SELECT COUNT(*) FROM audit_logs WHERE action='fantasy_fill_short_team'")
+    check("an audit entry per team", aud[0][0] == 2, repr(aud))
+    async with Session() as s:
+        again = await ff.plan_fill(s, ORG)
+        await s.rollback()
+    check("a second run has nothing to do", again == [], repr(again))
+
 
 async def run_control() -> int:
     await setup()
