@@ -314,8 +314,9 @@ async def settle_all_fantasy():
 
     Runs daily after the weekly sync, so a weekend's scorecards turn into fantasy
     points (and ladders) without an admin pressing a button. Idempotent — a round
-    already scored is skipped, as is one an admin unsettled (it waits for their
-    Settle button), and re-running over a corrected scorecard recomputes in place. Each season is isolated so one failure can't stop the
+    already scored is not settled twice, as is one an admin unsettled (it waits for
+    their Settle button); a round scored in the last fortnight is checked against its
+    scorecards and settled again if they have changed since. Each season is isolated so one failure can't stop the
     rest. Imports are local to keep the fantasy engine off the startup path.
     """
     from datetime import date
@@ -354,6 +355,12 @@ async def settle_all_fantasy():
                 )).scalars().all()
                 for rnd in running:
                     await fantasy_engine.refresh_live_round(session, fs, rnd)
+                # A scorecard finished or corrected after its round was settled (or a
+                # game that synced late) would otherwise leave a player who played on
+                # 0 for good: settle again any recent round that has drifted.
+                late = await fantasy_engine.refresh_recent_rounds(session, fs)
+                if late:
+                    logger.info(f"Fantasy: refreshed {late} recent round(s) for season {fs.id} after late scorecards")
                 await session.commit()
             except Exception as e:
                 await session.rollback()

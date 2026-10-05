@@ -107,5 +107,5 @@ async def apply_fill(db: AsyncSession, org_id, plans: list[dict], user_id=None, 
                "d": json.dumps({"added": [{"player_id": str(c["player_id"]), "name": c["name"], "points": float(c["total_points"])}
                                           for c in plan["adds"]], "from_round": from_round})})
     for sid in {p["season_id"] for p in plans}:
-        await fantasy_engine.rescore_from_round(db, await db.get(FantasySeason, sid), from_round)
+        await fantasy_engine.rescore_from_round(db, await db.get(FantasySeason, sid), from_round, live_picks=True)
     return n

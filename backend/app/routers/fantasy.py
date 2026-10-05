@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import secrets
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 import bcrypt as _bcrypt
@@ -639,7 +639,7 @@ async def add_squad_player(squad_id: str, body: SquadPickBody, club=Depends(get_
         purchase_price=pool.current_price, added_round=max(int(body.from_round), 1),
     ))
     await db.flush()
-    done = await fantasy_engine.rescore_from_round(db, fs, body.from_round)
+    done = await fantasy_engine.rescore_from_round(db, fs, body.from_round, live_picks=True)
     warnings = await _pick_warnings(db, fs, sq)
     await db.commit()
     return {"ok": True, "rescored": done, "warnings": warnings}
@@ -657,7 +657,7 @@ async def remove_squad_player(squad_id: str, player_id: str, from_round: int = 1
         raise HTTPException(status_code=404, detail="They aren't in this team.")
     await db.delete(pick)
     await db.flush()
-    done = await fantasy_engine.rescore_from_round(db, fs, from_round)
+    done = await fantasy_engine.rescore_from_round(db, fs, from_round, live_picks=True)
     warnings = await _pick_warnings(db, fs, sq)
     await db.commit()
     return {"ok": True, "rescored": done, "warnings": warnings}
@@ -971,9 +971,20 @@ async def list_rounds(season_id: str, club=Depends(get_current_club), db: AsyncS
     rows = (await db.execute(
         select(FantasyRound).where(FantasyRound.fantasy_season_id == fs.id).order_by(FantasyRound.round_number)
     )).scalars().all()
+    # A round scored in the last fortnight whose scorecards have changed since: who now
+    # scores differently, so the admin can see why a player who played is on 0.
+    cutoff = date.today() - timedelta(days=fantasy_engine.RECENT_ROUND_DAYS)
+    drift: dict[str, list] = {}
+    for r in rows:
+        if r.status == "scored" and r.end_date and r.end_date >= cutoff:
+            d = await fantasy_engine.round_drift(db, fs, r)
+            if d:
+                drift[str(r.id)] = d
     return {
         "rounds": [
             {
+                "drift": {"count": len(drift[str(r.id)]), "players": [f"{d['name']} ({d['stored']:g} → {d['now']:g})" for d in drift[str(r.id)][:6]]}
+                         if str(r.id) in drift else None,
                 "id": str(r.id), "round_number": r.round_number, "name": r.name,
                 "lock_at": r.lock_at.isoformat() if r.lock_at else None,
                 "start_date": r.start_date.isoformat() if r.start_date else None,
@@ -1043,8 +1054,9 @@ async def settle_due(season_id: str, club=Depends(get_current_club), db: AsyncSe
     )).scalars().all()
     for rnd in running:
         await fantasy_engine.refresh_live_round(db, fs, rnd)
+    late = await fantasy_engine.refresh_recent_rounds(db, fs)
     await db.commit()
-    return {"rounds_settled": settled, "rounds_refreshed": len(running)}
+    return {"rounds_settled": settled, "rounds_refreshed": len(running), "rounds_refreshed_late": late}
 
 
 @router.delete("/season/{season_id}")

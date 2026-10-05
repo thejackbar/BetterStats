@@ -44,7 +44,7 @@ export default function FantasyHome() {
   const createSeason = run('create', () => api.fantasyCreateSeason(Number(year)), () => 'Season created.')
   const buildPool = run('pool', () => api.fantasyBuildPool(season.id), (r) => `Pool built: ${r.pool} players.`)
   const genRounds = run('rounds', () => api.fantasyGenerateRounds(season.id), (r) => r.detail || `Generated ${r.rounds} rounds.`)
-  const settleDue = run('settle', () => api.fantasySettleDue(season.id), (r) => `Settled ${r.rounds_settled} rounds` + (r.rounds_refreshed ? `, updated points for ${r.rounds_refreshed} in progress.` : '.'))
+  const settleDue = run('settle', () => api.fantasySettleDue(season.id), (r) => `Settled ${r.rounds_settled} rounds` + (r.rounds_refreshed ? `, updated points for ${r.rounds_refreshed} in progress` : '') + (r.rounds_refreshed_late ? `, brought ${r.rounds_refreshed_late} recent round(s) up to date with late scorecards` : '') + '.')
   const deleteSeason = async () => {
     if (!window.confirm('Delete this fantasy season and its pool and rounds? This cannot be undone.')) return
     setBusy('delete'); setErr(null)
@@ -166,6 +166,12 @@ export default function FantasyHome() {
                         <td className="py-1.5 pr-3 text-pb-faint">{r.start_date}{r.end_date && r.end_date !== r.start_date ? ` – ${r.end_date}` : ''}</td>
                         <td className="py-1.5 pr-3">
                           <span className={r.status === 'scored' ? 'text-pb-accent' : r.status === 'unsettled' ? 'text-amber-400' : 'text-pb-faint'}>{r.status}</span>
+                          {r.drift && (
+                            <div className="text-[11px] text-amber-400 mt-0.5 max-w-xs">
+                              Scorecards have changed since this was settled: {r.drift.count} player{r.drift.count === 1 ? '' : 's'} score differently now
+                              ({r.drift.players.join(', ')}{r.drift.count > r.drift.players.length ? ', …' : ''}). Press Settle to bring it up to date; it also happens overnight.
+                            </div>
+                          )}
                         </td>
                         <td className="py-1.5 pr-3 text-right whitespace-nowrap">
                           {r.status === 'scored' && (

@@ -292,5 +292,5 @@ async def restore(db: AsyncSession, org_id, found: list[dict], user_id=None) -> 
         seasons_done[f["season_id"]] = min(f["first_round"], seasons_done.get(f["season_id"], 10 ** 6))
         restored += 1
     for sid, from_round in seasons_done.items():
-        await fantasy_engine.rescore_from_round(db, await db.get(FantasySeason, sid), from_round)
+        await fantasy_engine.rescore_from_round(db, await db.get(FantasySeason, sid), from_round, live_picks=True)
     return restored

@@ -140,11 +140,17 @@ async def recompute_squad_totals(session: AsyncSession, fs) -> None:
     )
 
 
-async def score_squads_for_round(session: AsyncSession, fs, rnd, rollover: bool = True) -> int:
+async def score_squads_for_round(session: AsyncSession, fs, rnd, rollover: bool = True,
+                                 from_snapshot: bool = False) -> int:
     """Score every squad in the season for a round and roll the ladder totals.
     Idempotent on (squad, round). Returns the number of squads scored.
     ``rollover=False`` is the provisional pass for a round still in progress: it
-    must not bank the next round's free transfer, which only settlement grants."""
+    must not bank the next round's free transfer, which only settlement grants.
+    ``from_snapshot`` scores a round that is already scored with the players each
+    squad had IN THAT ROUND (the lineup stored when it was settled), not the picks
+    it holds now: managers transfer between rounds, so scoring an old round with
+    today's picks would rewrite its history. A squad with no stored lineup for the
+    round (it joined later) is left out."""
     squads = (await session.execute(
         select(FantasySquad).where(FantasySquad.fantasy_season_id == fs.id)
     )).scalars().all()
@@ -158,6 +164,19 @@ async def score_squads_for_round(session: AsyncSession, fs, rnd, rollover: bool 
     picks_by_squad: dict = defaultdict(list)
     for sp in sp_rows:
         picks_by_squad[sp.squad_id].append(sp)
+    if from_snapshot:
+        from types import SimpleNamespace
+        stored = {str(sid): lineup for sid, lineup in (await session.execute(
+            text("SELECT squad_id, lineup FROM fantasy_squad_round_scores WHERE round_id = CAST(:rid AS UUID)"),
+            {"rid": str(rnd.id)},
+        )).all()}
+        picks_by_squad = defaultdict(list)
+        for sq in squads:
+            for e in stored.get(str(sq.id)) or []:
+                picks_by_squad[sq.id].append(SimpleNamespace(
+                    player_id=e["player_id"], role=e.get("role"),
+                    is_captain=bool(e.get("is_captain")), is_vice_captain=bool(e.get("is_vice"))))
+        squads = [sq for sq in squads if picks_by_squad.get(sq.id)]
 
     score_rows = (await session.execute(
         select(

@@ -31,7 +31,8 @@ async def zero_stat_pool_players(db: AsyncSession, org_id) -> list[dict]:
     game_ids = [r[0] for r in (await db.execute(text("""
         SELECT g.id FROM v_effective_games g
         JOIN grades gr ON gr.id = g.grade_id JOIN seasons s ON s.id = gr.season_id
-        WHERE s.organisation_id = CAST(:o AS UUID) AND s.year = :y"""), {"o": str(org_id), "y": year})).all()]
+        WHERE (g.organisation_id = CAST(:o AS UUID) OR g.home_org_id = CAST(:o AS UUID)
+               OR g.away_org_id = CAST(:o AS UUID)) AND s.year = :y"""), {"o": str(org_id), "y": year})).all()]
     games: dict[str, int] = {}
     if game_ids:
         for pid, n in (await db.execute(text("""

@@ -54,3 +54,12 @@ Six teams stayed short with no trace of who they lost. `services/fantasy_fill_sh
 ## v9.106.9 (2026-10-05): the Merge button
 
 `GET /club-admin/fantasy/season/{id}/unmatched-players` (pairs with a same-name twin that has games, plus hand-added players waiting) and `POST .../merge-player`. `HandAddedPlayersCard` on Fantasy > Registered players. Chosen so Scarborough (which had not merged anything yet) could merge safely without the command line. Verified with sections 13 and 14 of `verify_fantasy_player_merge.py` (91 checks; 13 proves nothing is lost across all 11 Fantasy player columns, 14 covers the endpoints: only a listed pair is accepted, the reversed pair is refused, the carried and re-scored result) and a Chromium run with the API stubbed (the exact request on the wire, the confirm text, the flash, no overflow at 390px after letting the lines wrap).
+
+## v9.106.10 (2026-10-05): Scarborough, players who played but scored 0
+
+Reported: Ashton Taylor and David Gardner had played (Play-Cricket) and were on 0 in many teams; the My Team page was cut off on the right.
+
+- Checked against the public API: Gardner's 3 Oct Men's Third Grade scorecard (did not bat, bowled 0-43) is in the system under his own profile and is worth +4 for the appearance alone, so the data was there. The engine did not see it, most plausibly because the round was settled before that scorecard landed and nothing re-checked a scored round. Ashton Taylor is a separate data case: his synced profile only has a did-not-bat row in the U17s game, while his season totals (8 runs, 2-21) equal the line the 3rd grade scorecard records for "Taylor, Angus". Either one person has two profiles or the scorecard feed mislabels him; the club has to confirm on Play-Cricket before anyone merges Angus into Ashton.
+- Fixed: `round_drift`, `refresh_recent_rounds` (14 days), `from_snapshot` re-settle, drift shown in `list_rounds` and on the overview, `python -m app.scripts.fantasy_round_drift <org> [--apply]`.
+- Fixed: engine game reads used `seasons.organisation_id` (rule 2). Not the cause here (every Scarborough game is owned by Scarborough) but a real hole.
+- Fixed: My Team desktop grid used `1fr 340px`, which cannot shrink below its content, so the rail overshot by ~240px at 1920 and the page scrolled sideways from 1024 up; now `minmax(0, 1fr)` with wrapping cards. Measured with Playwright at eight widths before and after.

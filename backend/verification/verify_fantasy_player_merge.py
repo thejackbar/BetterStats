@@ -36,6 +36,7 @@ from app.models.db import Organisation, Player, BattingInnings, GameAppearance, 
 from app.routers import admin as admin_router
 from app.routers import fantasy as fr
 from app.routers.admin import _merge_players_core, undo_merge, UndoMergeRequest
+from app.services import fantasy_engine
 
 Session, check = base.Session, base.check
 ORG, SQ_X, SQ_Y, R1, R2, FS_ID = base.ORG, base.SQ_X, base.SQ_Y, base.R1, base.R2, base.FS_ID
@@ -232,8 +233,10 @@ async def main_checks() -> None:
         s.add(base.FantasyPoolPlayer(fantasy_season_id=FS_ID, organisation_id=ORG, player_id=M2, role="allrounder", base_price=6, current_price=6))
         s.add(base.FantasySquadPlayer(squad_id=SQ_X, player_id=M2, role="allrounder", purchase_price=6, added_round=1, is_captain=False))
         await s.commit()
-    async with Session() as s:
-        await fr.settle_round(str(R1), club=org, db=s, _=None)         # round 1's lineup snapshots now name M2 in X's team
+    async with Session() as s:                                         # as an admin edit would: round 1's lineup now names M2 in X's team
+        fs_ = await s.get(FantasySeason, FS_ID); rnd_ = await s.get(base.FantasyRound, R1)
+        await fantasy_engine.settle_round(s, fs_, rnd_, live_picks=True)
+        await s.commit()
     await asyncio.sleep(1.1)                                           # the merge happens after the round was scored
     await merge(control=True, keep=K2, remove=M2)                      # the OLD merge: deletes the pick
     check("(damage reproduced) X lost him in the old merge", str(M2) not in await picks(SQ_X) and str(K2) not in await picks(SQ_X))
@@ -341,8 +344,10 @@ async def main_checks() -> None:
         await s.flush()
         s.add(base.FantasySquadPlayer(squad_id=SQ_X, player_id=M4, role="batter", purchase_price=5, added_round=1, is_captain=False))
         await s.commit()
-    async with Session() as s:
-        await fr.settle_round(str(R1), club=org, db=s, _=None)       # the lineup snapshot names him
+    async with Session() as s:                                       # as an admin edit would: the lineup snapshot names him
+        fs_ = await s.get(FantasySeason, FS_ID); rnd_ = await s.get(base.FantasyRound, R1)
+        await fantasy_engine.settle_round(s, fs_, rnd_, live_picks=True)
+        await s.commit()
     await asyncio.sleep(1.1)
     bk2 = create_async_engine(bk_url)
     async with bk2.begin() as c:                                      # a second backup, taken while he was in the team

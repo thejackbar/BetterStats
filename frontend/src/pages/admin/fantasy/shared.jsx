@@ -213,7 +213,7 @@ export function ScoringCard({ season, flash, fail, onSaved }) {
         How many fantasy points each thing is worth. A player's output outside their role (a bowler's
         runs, a batter's wickets, a keeper's batting and dismissals) is multiplied by the off-role number,
         and the captain's round total is multiplied before each squad's best {season.rules?.count_best_n ?? 11} are counted.
-        New values apply to rounds settled from now on. Re-settle a scored round to apply them there too.
+        New values apply to rounds settled from now on, and to any round scored in the last fortnight the next time it is brought up to date. Settle an older scored round again to apply them there too.
       </p>
       <div className="space-y-4">
         {SCORING_GROUPS.map(([group, fields]) => (
