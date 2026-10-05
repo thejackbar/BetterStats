@@ -46,6 +46,18 @@ async def main():
         await conn.execute(text("DROP SCHEMA public CASCADE"))
         await conn.execute(text("CREATE SCHEMA public"))
         await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
+        # `games.raw_payload` is JSON on the ORM and JSONB in the migrated database;
+        # the view's UNION cannot mix them, so reconcile as the neighbouring suites do.
+        for tbl, col in (await conn.execute(text(
+                "SELECT table_name, column_name FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND data_type = 'json'"))).all():
+            await conn.execute(text(
+                f'ALTER TABLE "{tbl}" ALTER COLUMN "{col}" TYPE jsonb USING "{col}"::text::jsonb'))
+        # The effective views the shared played rule reads, as the lifespan applies them.
+        from app.services import superseded_ddl
+        for stmt in superseded_ddl.STATEMENTS:
+            await conn.execute(text(stmt))
 
     org, sid, gid, pid, game = (uuid.uuid4() for _ in range(5))
     async with async_session_maker() as db:
@@ -63,8 +75,11 @@ async def main():
         async with async_session_maker() as db:
             if not await db.get(Game, game):
                 db.add(Game(id=game, grade_id=gid, played_at=date.today() - timedelta(days=2),
-                            home_team="CVPCC Colts", away_team="Applecross Colts"))
+                            home_team="CVPCC Colts", away_team="Applecross Colts",
+                            status="COMPLETED"))
                 await db.flush()
+                await db.execute(text("UPDATE games SET innings_totals = CAST(:t AS JSONB) WHERE id = :g"),
+                                 {"t": '[{"runs_scored": 120, "wickets": 5}]', "g": game})
                 db.add(GameAppearance(game_id=game, player_id=pid))
             await db.commit()
         return {"gr_games_new": 1}

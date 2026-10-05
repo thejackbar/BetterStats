@@ -26,6 +26,7 @@ os.environ.setdefault("SECRET_KEY", "verify-secret-key-for-tests-only")
 from sqlalchemy import text  # noqa: E402
 
 PASS = FAIL = 0
+PLAYED = '[{"runs_scored": 120, "wickets": 5}]'
 
 
 def check(label, got, want=True):
@@ -49,6 +50,20 @@ async def main():
         await conn.execute(text("DROP SCHEMA public CASCADE"))
         await conn.execute(text("CREATE SCHEMA public"))
         await conn.run_sync(Base.metadata.create_all)
+        # Raw-SQL column (main.py lifespan, migration 233) that the shared
+        # played rule reads.
+        await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
+        # `games.raw_payload` is JSON on the ORM and JSONB in the migrated database;
+        # the view's UNION cannot mix them, so reconcile as the neighbouring suites do.
+        for tbl, col in (await conn.execute(text(
+                "SELECT table_name, column_name FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND data_type = 'json'"))).all():
+            await conn.execute(text(
+                f'ALTER TABLE "{tbl}" ALTER COLUMN "{col}" TYPE jsonb USING "{col}"::text::jsonb'))
+        # The effective views the shared played rule reads, as the lifespan applies them.
+        from app.services import superseded_ddl
+        for stmt in superseded_ddl.STATEMENTS:
+            await conn.execute(text(stmt))
 
     org, other = uuid.uuid4(), uuid.uuid4()
     sid, g_open, g_excl = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
@@ -73,8 +88,10 @@ async def main():
         ])
         await db.flush()
         db.add(Game(id=game, grade_id=g_open, played_at=date.today() - timedelta(days=3),
-                    home_team="Applecross", away_team="Opp"))
+                    home_team="Applecross", away_team="Opp", status="COMPLETED"))
         await db.flush()
+        await db.execute(text("UPDATE games SET innings_totals = CAST(:t AS JSONB) WHERE id = :g"),
+                         {"t": PLAYED, "g": game})
         db.add(GameAppearance(game_id=game, player_id=scored))
         db.add_all([
             PlayerSeasonGradeStats(player_id=agg_only, season_id=sid, grade_id=g_open, matches=1),
@@ -138,8 +155,10 @@ async def main():
                     Player(id=foreign_bowler, organisation_id=other, name="Foreign, Fred")])
         await db.flush()
         db.add(Game(id=g2game, grade_id=g_open, played_at=date.today() - timedelta(days=1),
-                    home_team="CVPCC Colts", away_team="Applecross Colts"))
+                    home_team="CVPCC Colts", away_team="Applecross Colts", status="COMPLETED"))
         await db.flush()
+        await db.execute(text("UPDATE games SET innings_totals = CAST(:t AS JSONB) WHERE id = :g"),
+                         {"t": PLAYED, "g": g2game})
         db.add(GameAppearance(game_id=g2game, player_id=mate))
         db.add_all([BowlingSpell(game_id=g2game, player_id=bowler, innings_number=1, overs=3, runs=7, wickets=1),
                     BowlingSpell(game_id=g2game, player_id=foreign_bowler, innings_number=2, overs=2, runs=9, wickets=0)])
@@ -151,6 +170,47 @@ async def main():
     check("another club's bowler in the same game stays out", foreign_bowler in got4, False)
     await recompute_fee_match_days(str(org), str(sid))
     check("second run does not double-charge the bowler", (await enrolled()).get(bowler), 1)
+
+    # Named is playing, unless the game was called off. A washed-out game and a
+    # completed game with an empty scorecard charge nobody; a game called off
+    # AFTER play started still charges the player who has a line in it.
+    washed, empty, dnp, called_off_played = (uuid.uuid4() for _ in range(4))
+    pa, pb = uuid.uuid4(), uuid.uuid4()
+    async with async_session_maker() as db:
+        db.add_all([Player(id=pa, organisation_id=org, name="Washout, Wes"),
+                    Player(id=pb, organisation_id=org, name="Bowled, Ben")])
+        await db.flush()
+        db.add_all([
+            Game(id=washed, grade_id=g_open, played_at=date.today() - timedelta(days=9),
+                 home_team="A", away_team="B", status="ABANDONED"),
+            Game(id=empty, grade_id=g_open, played_at=date.today() - timedelta(days=8),
+                 home_team="C", away_team="D", status="COMPLETED"),
+            Game(id=called_off_played, grade_id=g_open, played_at=date.today() - timedelta(days=7),
+                 home_team="E", away_team="F", status="ABANDONED"),
+        ])
+        await db.flush()
+        db.add_all([GameAppearance(game_id=washed, player_id=pa),
+                    GameAppearance(game_id=empty, player_id=pa),
+                    GameAppearance(game_id=called_off_played, player_id=pa),
+                    GameAppearance(game_id=called_off_played, player_id=pb),
+                    BowlingSpell(game_id=called_off_played, player_id=pb, innings_number=1, overs=2, runs=5, wickets=0)])
+        await db.commit()
+    await recompute_fee_match_days(str(org), str(sid))
+    async with async_session_maker() as db:
+        rows = {r[0]: r[1] for r in (await db.execute(text("""
+            SELECT md.game_id, count(*) FROM fee_match_days md
+            JOIN fee_member_seasons ms ON ms.id = md.member_season_id
+            JOIN fee_members fm ON fm.id = ms.member_id
+            WHERE fm.player_id = :p GROUP BY md.game_id"""), {"p": pa})).all()}
+        rows_b = {r[0]: r[1] for r in (await db.execute(text("""
+            SELECT md.game_id, count(*) FROM fee_match_days md
+            JOIN fee_member_seasons ms ON ms.id = md.member_season_id
+            JOIN fee_members fm ON fm.id = ms.member_id
+            WHERE fm.player_id = :p GROUP BY md.game_id"""), {"p": pb})).all()}
+    check("named in an abandoned game with no play: not charged", washed in rows, False)
+    check("named in a completed game with an empty scorecard: not charged", empty in rows, False)
+    check("named but with no line in a game called off after play: not charged", called_off_played in rows, False)
+    check("a line in a game called off after play: still charged", rows_b.get(called_off_played), 1)
 
     # A season with no scored game at all (a new season before any scorecard).
     sid2, g2, fresh = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()

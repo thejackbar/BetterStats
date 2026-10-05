@@ -20,6 +20,7 @@ from typing import Optional
 
 from sqlalchemy import select, func, text
 
+from app.services.game_status import appearance_counts_as_match
 from app.models.db import (
     async_session_maker,
     Season, Grade, Game, Player, GameAppearance,
@@ -411,9 +412,15 @@ async def recompute_fee_match_days(organisation_id: str, season_id: str | None =
         # The org filter therefore belongs on the PLAYER, not the game. Loading
         # the players first and keeping only ours is what makes the rest of this
         # function (member creation, match-day charges) safe.
+        # Being named in the side is playing, unless the game was called off
+        # (`game_status.appearance_counts_as_match`, the rule every games-played
+        # figure uses). Without it a washed-out Saturday charged the whole team.
         appearances = (
             await session.execute(
-                select(GameAppearance).where(GameAppearance.game_id.in_(game_ids))
+                select(GameAppearance).where(
+                    GameAppearance.game_id.in_(game_ids),
+                    text(appearance_counts_as_match("game_appearances")),
+                )
             )
         ).scalars().all() if game_ids else []
         # One row per (game, player) whichever table it came from, or a game
