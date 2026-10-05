@@ -2271,3 +2271,13 @@ Other modules checked: public voting, fantasy, net check-in, lineups, yearbooks,
 
 **Verified against a real Postgres** (`verify_privacy_scrub_surnames.py` 41 checks, `verify_player_privacy.py` 128, exposure audit still 0 of 601 routes) and **in Chromium** (`verify_publishing_header_browser.mjs`: every player-data request the builder makes carries the header, the Players screen does not), each with a control that fails without the change.
 
+## v9.106.20: The evidence PDF (Oct 2026)
+
+The owner wanted something to send the removed person: every match he is recorded in as a clickable link, so he can see how the scorecard now renders and that his profile says "not found", with no financial information. `services/privacy_evidence.py` gathers the matches (synced and manual games through his appearances, innings, spells and fielding), builds the full public URLs (`/games/{id}`, `/players/{id}`, and the same as data under `/api/`), optionally opens each one live and records the result, and renders one set of wording to both HTML and a PDF (`fpdf2`, built-in Latin-1 fonts, a name with another script cannot break it). The links are real PDF link annotations, checked with pypdf. `--evidence` writes to stdout so it can be redirected from `docker compose exec -T`.
+
+Decisions: nothing financial appears, including the fact that a fee record exists (the owner's instruction; the legal duty to answer an access request is separate and is answered in the letter, not this document). No email, phone, date of birth or address either. The live check only counts a profile as passing when the body says "Player not found", because the first draft accepted any 404 and a mistyped address passes that. The check's "name appears" test uses full-name forms only, so a relative's "T Steenholdt" is never called a leak. A site the server cannot reach reads "Not checked", never a pass. Copy avoids the word "feeds" for the same reason the test scans for financial words.
+
+Also: `--report` now reports `email_blocked: null` with a note when the person has no address on record (it said `false`, which read as "not protected").
+
+**Verified against a real Postgres** (`verify_privacy_evidence.py`, 30 checks through the real app: three matches listed with full URLs, a control that the live check reports the name and id BEFORE the removal and passes AFTER, an unreachable site, HTML links, PDF link annotations, no financial wording or fee-record email, an unusual name, the command's output). The rendered PDF was looked at.
+

@@ -110,7 +110,12 @@ async def holdings(session: AsyncSession, player: Player) -> dict:
     addrs = sorted(await privacy_email.addresses_for_players(session, [player.id] + [sp.id for sp in sibs]))
     return {
         "email_addresses": addrs,
-        "email_blocked": bool(addrs) and all([await privacy_email.is_removed_address(a, session) for a in addrs]),
+        # None, not False, when there is nothing to block: False reads as "not
+        # protected". The block is derived from the records at each send, so an
+        # address added later is refused too.
+        "email_blocked": (all([await privacy_email.is_removed_address(a, session) for a in addrs]) if addrs else None),
+        "email_note": ("no email address is on record, so there is nothing to block yet; one added later is blocked automatically"
+                       if not addrs else "every address on record is blocked"),
         "other_club_rows": [
             {"id": str(sp.id), "organisation_id": str(sp.organisation_id), "name": sp.name,
              "is_public": sp.is_public is not False, "has_photo": bool(sp.photo_data or sp.photo_url)}
