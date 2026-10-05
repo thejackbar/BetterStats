@@ -231,6 +231,11 @@ async def check_org(org_id_str: str, *, max_seasons: int = MAX_SEASONS_PER_RUN) 
 
     async with async_session_maker() as session:
         merged = await _merged_guids(session, org_uuid)
+        # Someone who asked to be removed is not collected, so CA's figures for
+        # them will always differ from ours. That is not drift.
+        from app.services import player_privacy
+        _sup_guids, _ = await player_privacy.suppressed_participants(session, org_uuid)
+        merged = set(merged) | set(_sup_guids)
 
         # Least-recently-checked first. The newest season by year is excluded —
         # it is the one the incremental sync is actively maintaining.

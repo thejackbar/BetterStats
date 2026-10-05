@@ -23,6 +23,7 @@ from sqlalchemy import select
 
 from app.content import blog as blog_content
 from app.services import junior_hiding
+from app.services import player_privacy
 from app.services import section_names
 from app.services import instructional_videos as video_svc
 from app.services import webinar
@@ -718,6 +719,12 @@ async def og_preview(
 
     html = None
     if route and route["type"] == "player":
+        # A person who asked to be removed: the address is gone, not a generic
+        # branded card that a crawler would index under their old URL.
+        if await player_privacy.is_removed_person(db, route["player_id"]):
+            return HTMLResponse(
+                content=player_privacy.GONE_HTML, status_code=410, headers=player_privacy.GONE_HEADERS,
+            )
         html = await _player_html(route["player_id"], page_url, base, db)
     elif route and route["type"] == "blog":
         html = _blog_html(route["slug"], page_url, base)

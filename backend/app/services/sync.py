@@ -828,6 +828,15 @@ async def _sync_organisation_impl(
             if _gid:
                 org_player_map[str(_gid)] = _pid
 
+        # People who asked to be removed are never collected again: their
+        # participant ids are dropped from every season feed below, so no row,
+        # no new player and no stats are written for them. Their stored rows are
+        # left alone here; a Full Rebuild wipes the games and does not bring
+        # them back (the game pass skips them too).
+        from app.services import player_privacy
+        suppressed_guids, _suppressed_pids = await player_privacy.suppressed_participants(session, org_id)
+        stats.setdefault("suppressed_people_skipped", 0)
+
         # grassroots_id -> grade_id for this org's existing grades. Same per-club
         # id scheme as players: a shared CA grade GUID is minted as uuid5(org, guid)
         # the first time this org sees it (when another club already owns the raw
@@ -918,6 +927,10 @@ async def _sync_organisation_impl(
             batting_list = await playhq_client.get_batting_stats(org_id_str, raw_season_id)
             bowling_list = await playhq_client.get_bowling_stats(org_id_str, raw_season_id)
             fielding_list = await playhq_client.get_fielding_stats(org_id_str, raw_season_id)
+            batting_list, _n1 = player_privacy.drop_suppressed_rows(batting_list, suppressed_guids)
+            bowling_list, _n2 = player_privacy.drop_suppressed_rows(bowling_list, suppressed_guids)
+            fielding_list, _n3 = player_privacy.drop_suppressed_rows(fielding_list, suppressed_guids)
+            stats["suppressed_people_skipped"] += _n1 + _n2 + _n3
 
             # Merge all participant data keyed by player UUID
             player_data: dict[uuid.UUID, dict] = {}
@@ -1110,6 +1123,10 @@ async def _sync_organisation_impl(
                         except Exception as e:
                             logger.warning(f"GR per-grade aggregate failed for grade={grade_id_str} season={raw_season_id}: {e}")
                             continue
+                        gbat, _g1 = player_privacy.drop_suppressed_rows(gbat, suppressed_guids)
+                        gbowl, _g2 = player_privacy.drop_suppressed_rows(gbowl, suppressed_guids)
+                        gfield, _g3 = player_privacy.drop_suppressed_rows(gfield, suppressed_guids)
+                        stats["suppressed_people_skipped"] += _g1 + _g2 + _g3
 
                         per_grade: dict[uuid.UUID, dict] = {}
                         for p in gbat:
@@ -1417,6 +1434,7 @@ def extract_bowler_wickets(
     gate_pids: set,
     pid_by_guid: dict,
     merged_away: dict,
+    suppressed_guids: frozenset = frozenset(),
 ) -> list:
     """Return a list of BowlerWicket rows to insert from a GR scorecard.
 
@@ -1512,7 +1530,10 @@ def extract_bowler_wickets(
                 innings_number=inn_num,
                 bowler_id=bowler_pid,
                 fielder_id=fielder_pid,
-                batter_name=row.get("playerShortName") or pid_to_short_name.get(row.get("participantId") or ""),
+                # The wicket is the bowler's record and stays; the name of a
+                # batter who asked to be removed is not kept.
+                batter_name=(None if str(row.get("participantId") or "").lower() in suppressed_guids
+                             else row.get("playerShortName") or pid_to_short_name.get(row.get("participantId") or "")),
                 batter_position=row.get("batOrder"),
                 dismissal_type=method or None,
                 caught_behind=(method == "caught" and _caught_by_keeper(d_text, keeper_names)),
@@ -1842,6 +1863,8 @@ async def sync_grassroots_game_level_data(
     known_player_ids: set[uuid.UUID] = set()
     pid_by_guid: dict[uuid.UUID, uuid.UUID] = {}  # raw CA participant GUID -> this org's player id
     org_unique_names: dict = {}  # full name -> player id, for names exactly one of our players holds
+    suppressed_guids: frozenset = frozenset()  # people who asked to be removed (lower-case raw ids)
+    suppressed_pids: frozenset = frozenset()   # this org's rows for them
     async with async_session_maker() as session:
         org = await session.get(Organisation, org_uuid)
         if not org:
@@ -1877,8 +1900,14 @@ async def sync_grassroots_game_level_data(
             select(Player.id, Player.grassroots_id, Player.name, Player.display_name_override, Player.is_player)
             .where(Player.organisation_id == org_uuid)
         )
+        # Who asked to be removed: never attributed a game line, never matched
+        # by name, never kept as a name-only fill-in. See `_team_pid` below.
+        from app.services import player_privacy
+        suppressed_guids, suppressed_pids = await player_privacy.suppressed_participants(session, org_uuid)
         _name_pairs: list[tuple] = []
         for _pid, _gid, _pname, _pover, _is_player in player_res:
+            if _pid in suppressed_pids:
+                continue
             known_player_ids.add(_pid)
             g = _parse_uuid(_gid) if _gid else None
             if g is not None:
@@ -1922,12 +1951,17 @@ async def sync_grassroots_game_level_data(
         """
         if guid is None:
             return None
+        if str(guid).lower() in suppressed_guids:
+            return None
         p = pid_by_guid.get(guid)
         if p is None:
             p = merged_away.get(guid)  # legacy merged-away GUID (removed_player_id == raw GUID)
             if p is None:
                 return None
-        return merged_away.get(p, p)
+        resolved = merged_away.get(p, p)
+        # A merge can point at a person who asked to be removed; never land a
+        # game line on them that way.
+        return None if resolved in suppressed_pids else resolved
 
     # Enumerate match IDs by fanning out across all known grades.
     # /scores/grades/{id}/matches works for all seasons including pre-2000,
@@ -2554,7 +2588,8 @@ async def sync_grassroots_game_level_data(
                         pid = _team_pid(_parse_uuid(raw_pid))
                         field_name = None
                         if pid is None or pid not in our_team_pids:
-                            if pid is None and raw_pid in our_team_roster_guids:
+                            if (pid is None and raw_pid in our_team_roster_guids
+                                    and raw_pid.lower() not in suppressed_guids):
                                 # On our roster but not a known `players` row — a
                                 # fill-in or a CA-redacted junior. Capture the
                                 # catch/run-out/stumping under their GR name
@@ -2597,7 +2632,10 @@ async def sync_grassroots_game_level_data(
                             wicket_number=wkt,
                             score_at_fall=row.get("runs"),
                             player_id=pid,
-                            batter_name=row.get("playerShortName"),
+                            # The wicket stays in the card; the name of a person
+                            # who asked to be removed does not.
+                            batter_name=(None if str(row.get("participantId") or "").lower() in suppressed_guids
+                                         else row.get("playerShortName")),
                         ))
                         fow_count += 1
 
@@ -2647,7 +2685,7 @@ async def sync_grassroots_game_level_data(
                                     b1_id = cand
                                 else:
                                     b2_id = cand
-                            elif v in our_team_roster_guids:
+                            elif v in our_team_roster_guids and str(v).lower() not in suppressed_guids:
                                 # On our roster but not a known `players` row — a
                                 # fill-in (borrowed player) or a CA-redacted junior.
                                 # Capture their GR name instead of losing that half
@@ -2678,7 +2716,8 @@ async def sync_grassroots_game_level_data(
                 # to one of our players. Helper builds short-name → pid maps
                 # from each innings' bowling/fielding rows and resolves through
                 # merged_away. Reused by app.scripts.rebuild_bowler_wickets.
-                for bw in extract_bowler_wickets(scorecard, match_uuid, our_team_pids, pid_by_guid, merged_away):
+                for bw in extract_bowler_wickets(scorecard, match_uuid, our_team_pids, pid_by_guid, merged_away,
+                                         suppressed_guids=suppressed_guids):
                     session.add(bw)
 
                 # innings_totals isn't on the Game ORM model (migration 230 is a

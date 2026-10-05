@@ -352,6 +352,58 @@ async def is_suppressed(session: AsyncSession, guid: Optional[str]) -> Optional[
     return {"reason": row[0], "by": row[1]} if row else None
 
 
+async def suppressed_participants(
+    session: AsyncSession, org_id: uuid.UUID,
+) -> tuple[frozenset[str], frozenset[uuid.UUID]]:
+    """Who a sync must never collect for: ``(participant ids, this club's player ids)``.
+
+    The participant ids are lower-case raw Cricket Australia ids, from the
+    suppression list (every club) plus any row in this club that carries a
+    removal request (``privacy_hidden_at``), keyed the way ``person_key`` keys
+    it. The player ids are this club's rows for those people, so a name match
+    or a merge redirect can never land a game line back on them.
+
+    A club that merely hid a player with ``is_public`` is NOT in here: that is
+    the club's choice about display, and its stats keep syncing.
+
+    Never raises. A database without the suppression table (migration 316 not
+    run) reads as "nobody asked", the same call ``is_suppressed`` makes, and the
+    savepoint keeps a failed lookup from aborting the caller's transaction.
+    """
+    try:
+        async with session.begin_nested():
+            guids = {
+                str(r[0]).lower() for r in (await session.execute(
+                    text("SELECT grassroots_id FROM player_privacy_suppressions"))).all() if r[0]
+            }
+            guids |= {
+                str(r[0]).lower() for r in (await session.execute(text(
+                    "SELECT COALESCE(grassroots_id, id::text) FROM players "
+                    "WHERE organisation_id = :o AND privacy_hidden_at IS NOT NULL"),
+                    {"o": org_id})).all() if r[0]
+            }
+            pids: set[uuid.UUID] = set()
+            if guids:
+                pids = {r[0] for r in (await session.execute(text(
+                    "SELECT id FROM players WHERE organisation_id = :o "
+                    "AND (privacy_hidden_at IS NOT NULL "
+                    "     OR LOWER(COALESCE(grassroots_id, id::text)) = ANY(:g))"),
+                    {"o": org_id, "g": sorted(guids)})).all()}
+    except Exception:
+        return frozenset(), frozenset()
+    return frozenset(guids), frozenset(pids)
+
+
+def drop_suppressed_rows(rows: list, suppressed: frozenset[str]) -> tuple[list, int]:
+    """``rows`` without the ones whose ``id`` is a suppressed participant id,
+    and how many were dropped. For the season-aggregate feeds, where ``id`` is
+    the raw participant id."""
+    if not suppressed or not rows:
+        return rows, 0
+    kept = [r for r in rows if str((r or {}).get("id") or "").lower() not in suppressed]
+    return kept, len(rows) - len(kept)
+
+
 async def protect_new_player(session: AsyncSession, player: Player, guid: Optional[str] = None) -> bool:
     """Create-time guard: a new row for a person who asked to be removed is born hidden.
 
@@ -375,6 +427,42 @@ async def load_player(session: AsyncSession, raw_id: str) -> Optional[Player]:
     except (ValueError, TypeError):
         return None
     return await session.get(Player, pid)
+
+
+async def is_removed_person(session: AsyncSession, raw_id: str) -> bool:
+    """True when this player row belongs to someone who asked to be removed.
+
+    Only that: a club's own ``is_public`` switch is its choice and keeps its admin
+    escape, so it is not "removed". Never raises on a malformed id or a database
+    that has not run migration 316; both read as "not removed".
+    """
+    try:
+        pid = uuid.UUID(str(raw_id))
+    except (ValueError, TypeError):
+        return False
+    try:
+        async with session.begin_nested():
+            row = (await session.execute(
+                text("SELECT 1 FROM players WHERE id = :p AND privacy_hidden_at IS NOT NULL"), {"p": pid},
+            )).first()
+    except Exception:
+        return False
+    return row is not None
+
+
+# The page a removed person's address answers with. No name, no id, nothing to index.
+GONE_HTML = (
+    '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+    '<meta name="viewport" content="width=device-width, initial-scale=1">'
+    '<meta name="robots" content="noindex, nofollow, noarchive">'
+    "<title>Page removed</title></head>"
+    "<body><h1>This page has been removed</h1>"
+    "<p>This player profile is no longer available.</p></body></html>"
+)
+GONE_HEADERS = {
+    "X-Robots-Tag": "noindex, nofollow, noarchive",
+    "Cache-Control": "no-cache",
+}
 
 
 # ---------------------------------------------------------------------------

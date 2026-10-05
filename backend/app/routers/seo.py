@@ -11,12 +11,12 @@ SEO/AEO endpoints.
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
-from fastapi.responses import PlainTextResponse, Response
+from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.content.blog import BLOG_SLUGS
-from app.services import junior_hiding
+from app.services import junior_hiding, player_privacy
 from app.services.instructional_videos import list_videos
 from app.models.db import Organisation, Player, get_db
 
@@ -181,3 +181,20 @@ async def robots():
         f"Sitemap: {SITE}/sitemap.xml\n"
     )
     return PlainTextResponse(body, headers={"cache-control": "public, max-age=86400"})
+
+
+@router.get("/seo/player-page/{player_id}", include_in_schema=False)
+async def player_page_gate(player_id: str, db: AsyncSession = Depends(get_db)):
+    """Asked by nginx (frontend/nginx.conf) before it serves a `/players/<id>` page.
+
+    Every player page is the same single-page shell, so without this a removed
+    person's address answers 200 and search engines keep it as a soft 404. A person
+    who asked to be removed gets a real 410 and `noindex`. Everyone else is handed
+    straight back to the shell with an internal redirect, so nothing about how
+    their page loads changes. A club's own hidden players are NOT answered here:
+    that switch keeps its admin escape, and the API already reads them as absent
+    to the public.
+    """
+    if await player_privacy.is_removed_person(db, player_id):
+        return HTMLResponse(player_privacy.GONE_HTML, status_code=410, headers=player_privacy.GONE_HEADERS)
+    return Response(status_code=200, headers={"X-Accel-Redirect": "/index.html"})

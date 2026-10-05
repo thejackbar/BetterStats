@@ -62,7 +62,13 @@ async def rebuild_for_org(org_id_str: str) -> None:
         )
         known_player_ids = set()
         pid_by_guid: dict = {}  # raw CA participant GUID -> this org's player id (identity for legacy)
+        # People who asked to be removed are not collected: left out of the maps,
+        # and their name is kept off any wicket row (see sync.extract_bowler_wickets).
+        from app.services import player_privacy
+        suppressed_guids, suppressed_pids = await player_privacy.suppressed_participants(session, org_id)
         for _pid, _gid in players.all():
+            if _pid in suppressed_pids:
+                continue
             known_player_ids.add(_pid)
             if _gid:
                 try:
@@ -132,7 +138,8 @@ async def rebuild_for_org(org_id_str: str) -> None:
                     else:
                         p = merged_away.get(p, p)
                     our_team_pids.add(p)
-            rows = extract_bowler_wickets(scorecard, gid, our_team_pids, pid_by_guid, merged_away)
+            rows = extract_bowler_wickets(scorecard, gid, our_team_pids, pid_by_guid, merged_away,
+                                        suppressed_guids=suppressed_guids)
             # Per-game wipe + reinsert in ONE transaction, only now that the
             # fetch above succeeded — a failed fetch `continue`d and left the
             # game's existing rows intact. An empty `rows` correctly clears a
