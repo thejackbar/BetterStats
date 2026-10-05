@@ -9,7 +9,8 @@ from every team that had picked him. Every Fantasy table that points at a player
 Runs the SHIPPED `admin._merge_players_core` and `undo_merge`, the shipped
 `routers/fantasy` admin route bodies, and `fantasy_engine`.
 
-CONTROL (`--control`): the same merge with `merge_carry` as it was at git HEAD. It
+CONTROL (`--control`): the same merge with `merge_carry` as it was before the fix
+(`CONTROL_REV`). It
 must lose the pick on exactly the reported behaviour.
 
 Run:  DATABASE_URL=postgresql+asyncpg://root@/fantasy_test?host=/var/run/postgresql \
@@ -39,8 +40,12 @@ from app.routers.admin import _merge_players_core, undo_merge, UndoMergeRequest
 Session, check = base.Session, base.check
 ORG, SQ_X, SQ_Y, R1, R2, FS_ID = base.ORG, base.SQ_X, base.SQ_Y, base.R1, base.R2, base.FS_ID
 A, B = base.A, base.B
-M, K, N, Z, M2, K2 = (uuid.uuid4() for _ in range(6))     # M manual Raja, K his real record, N a new player, Z another club's player
+M, K, N, Z, M2, K2, M3, K3 = (uuid.uuid4() for _ in range(8))     # M manual Raja, K his real record, N a new player, Z another club's player
 REPO = Path(__file__).resolve().parent.parent.parent
+# `merge_carry` as it was before this fix (the parent of the commit that added the
+# Fantasy tables). A moving rev such as HEAD would stop reproducing the bug the day
+# the fix is committed.
+CONTROL_REV = "853bfe9"
 USER = type("U", (), {"id": uuid.uuid4()})()
 
 
@@ -93,7 +98,7 @@ async def setup() -> None:
 async def merge(control=False, keep=None, remove=None) -> dict:
     keep, remove = keep or K, remove or M
     if control:
-        src = subprocess.check_output(["git", "show", "HEAD:backend/app/services/merge_carry.py"], cwd=REPO, text=True)
+        src = subprocess.check_output(["git", "show", f"{CONTROL_REV}:backend/app/services/merge_carry.py"], cwd=REPO, text=True)
         tmp = Path(__file__).resolve().parent / "_merge_carry_control.py"
         tmp.write_text(src)
         try:
@@ -254,6 +259,50 @@ async def main_checks() -> None:
     async with Session() as s:
         shorts = await repair.find_short_squads(s, ORG, set())
     check("teams short of players with no evidence are listed, not guessed at", all("team_name" in r for r in shorts) and len(shorts) >= 1, repr(shorts))
+
+    print("7. Who is missing, from a backup taken before the merge")
+    import os
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+    live_url = os.environ["DATABASE_URL"]
+    bk_url = live_url.replace("/fantasy_test", "/backup_test")
+    admin = create_async_engine(live_url.replace("/fantasy_test", "/postgres"), isolation_level="AUTOCOMMIT")
+    async with admin.connect() as c:
+        await c.execute(text("DROP DATABASE IF EXISTS backup_test"))
+        await c.execute(text("CREATE DATABASE backup_test"))
+    await admin.dispose()
+    async with Session() as s:
+        s.add_all([Player(id=M3, name="Tom Hand", organisation_id=ORG), Player(id=K3, name="Tom Hand", organisation_id=ORG, grassroots_id="tom-ca")])
+        await s.flush()
+        s.add(base.FantasySquadPlayer(squad_id=SQ_X, player_id=M3, role="bowler", purchase_price=5, added_round=1, is_captain=False))
+        s.add(base.FantasySquadPlayer(squad_id=SQ_Y, player_id=M3, role="bowler", purchase_price=5, added_round=1, is_vice_captain=False))
+        await s.commit()
+    bk = create_async_engine(bk_url)
+    async with bk.begin() as c:                                        # the backup: the two tables the repair reads
+        await c.execute(text("CREATE TABLE fantasy_squads (id uuid, team_name text, fantasy_season_id uuid, organisation_id uuid)"))
+        await c.execute(text("""CREATE TABLE fantasy_squad_players (squad_id uuid, player_id uuid, role text,
+                                is_captain boolean, is_vice_captain boolean, added_round int)"""))
+        for r in await q("SELECT id, team_name, fantasy_season_id, organisation_id FROM fantasy_squads"):
+            await c.execute(text("INSERT INTO fantasy_squads VALUES (:a,:b,:c,:d)"), dict(a=r[0], b=r[1], c=r[2], d=r[3]))
+        for r in await q("SELECT squad_id, player_id, role, is_captain, is_vice_captain, added_round FROM fantasy_squad_players"):
+            await c.execute(text("INSERT INTO fantasy_squad_players VALUES (:a,:b,:c,:d,:e,:f)"), dict(a=r[0], b=r[1], c=r[2], d=r[3], e=r[4], f=r[5]))
+    await merge(control=True, keep=K3, remove=M3)                      # the old merge, after the backup
+    async with Session() as s:
+        listed = await repair.merged_since_fantasy_began(s, ORG)
+    check("the merged players are listed as candidates", "Tom Hand" in [m["removed"] for m in listed], repr(listed))
+    async with Session() as s, AsyncSession(bk) as b:
+        found = await repair.find_lost_picks_from_backup(s, b, ORG)
+    mine = [f for f in found if f["removed_id"] == str(M3)]
+    check("the backup names exactly the two teams that held him", sorted(f["squad_id"] for f in mine) == sorted([str(SQ_X), str(SQ_Y)]), repr(found))
+    check("and only him: a pick that is still live is not touched", all(f["removed_id"] == str(M3) for f in found), repr([f["player_name"] for f in found]))
+    check("he is resolved to his real record, with his role", all(f["keep_id"] == str(K3) and f["role"] == "bowler" for f in mine), repr(mine))
+    async with Session() as s:
+        await repair.restore(s, ORG, mine, USER.id)
+        await s.commit()
+    check("applied: both teams have him back", str(K3) in await picks(SQ_X) and str(K3) in await picks(SQ_Y))
+    async with Session() as s, AsyncSession(bk) as b:
+        again = await repair.find_lost_picks_from_backup(s, b, ORG)
+    check("running it again finds nothing", not [f for f in again if f["removed_id"] == str(M3)], repr(again))
+    await bk.dispose()
 
 
 async def run_control() -> int:

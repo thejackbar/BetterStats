@@ -76,6 +76,73 @@ async def find_lost_picks(db: AsyncSession, org_id) -> list[dict]:
     return found
 
 
+async def merged_since_fantasy_began(db: AsyncSession, org_id) -> list[dict]:
+    """Players merged away since the club's first Fantasy season was created. The
+    missing player of a short team is one of these (the hand-added record that was
+    merged into a real profile), so it is the list to look at when the lineups
+    cannot say which."""
+    rows = (await db.execute(text("""
+        SELECT m.id, m.merged_at, m.removed_player_name, m.keep_player_name
+        FROM merge_logs m
+        WHERE m.org_id = CAST(:o AS UUID) AND m.undone_at IS NULL
+          AND m.merged_at >= (SELECT MIN(created_at) FROM fantasy_seasons WHERE organisation_id = CAST(:o AS UUID))
+        ORDER BY m.merged_at
+    """), {"o": str(org_id)})).mappings().all()
+    return [{"merge_id": r["id"], "at": r["merged_at"], "removed": r["removed_player_name"], "kept": r["keep_player_name"]}
+            for r in rows]
+
+
+async def find_lost_picks_from_backup(db: AsyncSession, backup: AsyncSession, org_id) -> list[dict]:
+    """Exact answer from a backup taken before the merge. Any pick the backup holds
+    for a player who no longer exists is followed through the merge log (removed
+    -> kept, however many merges deep) to the record that is live now; if the team
+    does not hold that record, it lost the pick. Pick a backup from just before the
+    merge: a player the manager transferred out in between would be put back."""
+    org = {"o": str(org_id)}
+    live_players = {str(r[0]) for r in (await db.execute(text(
+        "SELECT id FROM players WHERE organisation_id = CAST(:o AS UUID)"), org)).all()}
+    chain: dict[str, tuple] = {}
+    for m in (await db.execute(text("""
+        SELECT id, removed_player_id, keep_player_id, removed_player_name FROM merge_logs
+        WHERE org_id = CAST(:o AS UUID) AND undone_at IS NULL AND removed_player_id IS NOT NULL
+    """), org)).mappings().all():
+        chain[str(m["removed_player_id"])] = (str(m["keep_player_id"]), m["id"], m["removed_player_name"])
+    held: dict[str, set] = {}
+    for sid, pid in (await db.execute(text("""
+        SELECT sp.squad_id, sp.player_id FROM fantasy_squad_players sp
+        JOIN fantasy_squads sq ON sq.id = sp.squad_id WHERE sq.organisation_id = CAST(:o AS UUID)
+    """), org)).all():
+        held.setdefault(str(sid), set()).add(str(pid))
+    found = []
+    rows = (await backup.execute(text("""
+        SELECT sp.squad_id, sp.player_id, sp.role, sp.is_captain, sp.is_vice_captain, sp.added_round,
+               sq.team_name, sq.fantasy_season_id
+        FROM fantasy_squad_players sp JOIN fantasy_squads sq ON sq.id = sp.squad_id
+        WHERE sq.organisation_id = CAST(:o AS UUID)
+    """), org)).mappings().all()
+    for r in rows:
+        squad_id, pid = str(r["squad_id"]), str(r["player_id"])
+        if pid in live_players or squad_id not in held:
+            continue                                         # still there, or the team itself is gone
+        keep, merge_id, name = None, None, None
+        cur, hops = pid, 0
+        while cur in chain and hops < 8:
+            cur, merge_id, name = chain[cur][0], chain[cur][1], chain[cur][2] or name
+            hops += 1
+            if cur in live_players:
+                keep = cur
+                break
+        if keep is None or keep in held[squad_id]:
+            continue
+        found.append({
+            "squad_id": squad_id, "team_name": r["team_name"], "season_id": str(r["fantasy_season_id"]),
+            "merge_id": merge_id, "removed_id": pid, "keep_id": keep, "player_name": name or "(merged player)",
+            "role": r["role"] or "batter", "was_captain": bool(r["is_captain"]), "was_vice": bool(r["is_vice_captain"]),
+            "first_round": r["added_round"] or 1,
+        })
+    return found
+
+
 async def find_short_squads(db: AsyncSession, org_id, exclude_ids: set[str]) -> list[dict]:
     """Teams with fewer players than their season's rules want, that the snapshots
     do not explain."""
