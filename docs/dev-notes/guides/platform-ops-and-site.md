@@ -52,8 +52,9 @@
 27. PostgreSQL `ORDER BY year DESC` sorts NULLs first: always add `.nullslast()`.
 28. `Season.year` is NULL when Grassroots omits `startDate`: fall back to parsing the name (`"Summer 2010/11"` gives 2010).
 29. CA field names: `bowlingEconomyRate`, `fieldingTotalCatches`; no `bowlingOvers` (derive from `bowlingBalls`).
-30. PlayHQ's public game summary API gives no cricket scorecards without a partner JWT.
+30. PlayHQ's v1 and `/partner/` game summaries are marked "not applicable to Cricket". The public v2 summary (`/v2/games/{id}/summary`, headers `x-api-key` and `x-phq-tenant`) DOES carry per-player batting, bowling, fielding and fall of wickets, names only where the person's PlayHQ visibility allows. Its ids are PlayHQ profile ids (`players.playhq_id`), not the Grassroots participant ids BetterStats keys on, and its history is about three seasons. Applecross holds a key (Oct 2026); nothing is built on it (OpenAPI spec supplied by the owner, not tested live).
 31. `stats["player_seasons"]` in sync counts player-season records, not unique players.
+32. `frontend/nginx.conf` rate limits `/api/players` (2 r/s, burst 20), `/api/players/` and `/api/games/` (10 r/s, burst 100) per client: the LAST `X-Forwarded-For` entry, because the proxy manager appends it and anything earlier is the caller's own. No header means no limit, deliberately, so a missing header can never put every visitor in one bucket. It also sends `/players/<uuid>` through `GET /seo/player-page/{id}` (410 for a removed person, the page shell for everyone else, the shell again if the backend is slow or down). Keep each limited block proxying exactly as `location /api/` does, and keep bursts well above a profile's tab walk (about 25 calls). After a deploy: `curl -sI https://betterat.cricket/players/<removed id>` says 410, and `docker compose logs betterstats-frontend --since 10m | grep 'limiting requests'` shows the limiter working. `verify_nginx_player_pages.py` runs the real conf under nginx.
 
 ## Traps and failure signatures
 

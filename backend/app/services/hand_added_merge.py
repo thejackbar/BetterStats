@@ -28,6 +28,7 @@ these has to hold, and anything else is left for the merge screen:
   this year's new "Sam Smith";
 * the two share a full name (two words or more, no bare initials or asterisks)
   and no other player of the club has it;
+* nobody in the name group asked to be removed (`privacy_hidden_at`);
 * the pair is not one the club chose to keep apart (`merge_pair_ignores`).
 
 Nothing here reads another club's players. The one thing the merge does not do
@@ -126,7 +127,8 @@ async def find_pairs(db: AsyncSession, org_id) -> list[dict]:
                 AND p.cricketstatz_player_id IS NULL AND p.import_batch_id IS NULL
                 AND p.user_id IS NULL AND COALESCE(p.claimed, FALSE) = FALSE) AS hand,
                (p.grassroots_id IS NOT NULL
-                AND p.cricketstatz_player_id IS NULL AND p.import_batch_id IS NULL) AS synced
+                AND p.cricketstatz_player_id IS NULL AND p.import_batch_id IS NULL) AS synced,
+               (p.privacy_hidden_at IS NOT NULL) AS removed
           FROM players p
          WHERE p.organisation_id = CAST(:o AS UUID) AND p.is_player IS NOT FALSE"""),
         {"o": str(org_id)})).mappings().all()
@@ -138,6 +140,13 @@ async def find_pairs(db: AsyncSession, org_id) -> list[dict]:
 
     candidates = []
     for group in by_key.values():
+        # A person who asked to be removed is never merged automatically, from
+        # either side: a merge copies columns across and moves records, and could
+        # put their cricket on a visible record. It also counts as "somebody else
+        # with the name", so the group is left alone. The merge screen is still
+        # there for a human who knows why.
+        if any(p["removed"] for p in group):
+            continue
         hands = [p for p in group if p["hand"]]
         twins = [p for p in group if p["synced"]]
         # Exactly one of each and nobody else with the name: two people called

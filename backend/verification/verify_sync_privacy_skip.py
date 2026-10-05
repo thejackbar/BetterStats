@@ -255,6 +255,10 @@ async def seed() -> None:
         await conn.execute(text("""CREATE TABLE IF NOT EXISTS merge_logs (
             id SERIAL PRIMARY KEY, merged_at TIMESTAMPTZ DEFAULT NOW(), org_id UUID, keep_player_id UUID, keep_player_name TEXT,
             removed_player_id UUID, removed_player_name TEXT, undone_at TIMESTAMPTZ)"""))
+        await conn.execute(text("""CREATE TABLE IF NOT EXISTS merge_pair_ignores (
+            id SERIAL PRIMARY KEY, org_id UUID NOT NULL, player_a_id UUID NOT NULL,
+            player_b_id UUID NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW(),
+            UNIQUE (org_id, player_a_id, player_b_id))"""))
         await conn.execute(text("""CREATE TABLE IF NOT EXISTS grade_merge_logs (
             id SERIAL PRIMARY KEY, merged_at TIMESTAMPTZ DEFAULT NOW(), org_id UUID NOT NULL,
             canonical_name TEXT NOT NULL, alias_name TEXT NOT NULL, undone_at TIMESTAMPTZ)"""))
@@ -401,6 +405,28 @@ async def run() -> None:
           await count("SELECT COUNT(*) FROM batting_innings WHERE player_id = :p", p=R) == 0
           and await count("SELECT COUNT(*) FROM fielding_stats WHERE player_name ILIKE :p", p=pat) == 0
           and await count("SELECT COUNT(*) FROM player_season_stats WHERE player_id = :p", p=R) == 0)
+
+    print("\n10. The automatic merge of a hand-added player leaves them alone")
+    import importlib.util
+    if importlib.util.find_spec("app.services.hand_added_merge") is None:
+        print("   (hand_added_merge is not in this checkout: skipped)")
+    else:
+        from app.services import hand_added_merge
+        async with Session() as s:
+            # What a club really holds: the removed person's retained history in the latest season,
+            # and a new player the club typed in by hand with the same full name.
+            s.add(Player(id=uuid.uuid4(), name="Remy Removed", organisation_id=ORG_A))
+            s.add(Player(id=uuid.uuid4(), name="Kay Keep", organisation_id=ORG_A))
+            await s.execute(text("INSERT INTO game_appearances (game_id, player_id, team_name) VALUES (:g, :p, 'Alpha - 1s') "
+                                 "ON CONFLICT DO NOTHING"), {"g": uuid.UUID(M1), "p": R})
+            await s.commit()
+        async with Session() as s:
+            pairs = await hand_added_merge.find_pairs(s, ORG_A)
+        names = {p["keep"]["name"] for p in pairs}
+        check("an ordinary hand-added player IS paired with their synced twin (could be present)",
+              "Keep, Kay" in names, str(names))
+        check("a hand-added player is NOT paired with a twin who asked to be removed",
+              "Removed, Remy" not in names, str(names))
 
     print(f"\n{base.PASS} passed, {base.FAIL} failed")
     if base.FAIL:
