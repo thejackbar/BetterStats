@@ -492,14 +492,24 @@ def _parse_xlsx(content: bytes) -> list[dict]:
 
 
 def _parse_csv(content: bytes) -> list[dict]:
-    text_content = content.decode("utf-8-sig")
-    reader = csv.DictReader(io.StringIO(text_content))
-    return [
-        {k.strip().lower().replace(" ", "_"): (v.strip() if v else "")
-         for k, v in row.items()}
-        for row in reader
-        if any(row.values())
-    ]
+    try:
+        text_content = content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        # Excel on Windows saves "CSV" as Windows-1252, not UTF-8.
+        text_content = content.decode("cp1252", errors="replace")
+    # newline=None turns bare CR (Excel for Mac's "CSV") and CRLF into LF, so
+    # the csv module sees ordinary rows. Left as-is, a CR-only file is one
+    # giant line and csv raises "new-line character seen in unquoted field".
+    try:
+        reader = csv.DictReader(io.StringIO(text_content, newline=None))
+        return [
+            {(k or "").strip().lower().replace(" ", "_"): (v.strip() if isinstance(v, str) else "")
+             for k, v in row.items()}
+            for row in reader
+            if any(row.values())
+        ]
+    except csv.Error as e:
+        raise HTTPException(status_code=400, detail=f"That file could not be read as a CSV ({e}). Save it again as CSV (Comma delimited) and retry.")
 
 
 async def _load_existing(db: AsyncSession, org_id: str) -> list:

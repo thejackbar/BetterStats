@@ -2606,7 +2606,15 @@ export const api = {
       method: 'POST',
       body: form,
       credentials: 'include',
-    }).then(r => r.json())
+    }).then(async r => {
+      const body = await r.text()
+      let data = null
+      try { data = JSON.parse(body) } catch { /* the server answered with plain text */ }
+      if (!r.ok || !data) {
+        throw new Error(data?.detail || (r.ok ? 'The server sent back something unexpected.' : `The import failed (error ${r.status}). Nothing was added.`))
+      }
+      return data
+    })
   },
   forceImportAchievements: (orgId, rows, { batchId = null, filename = null } = {}) =>
     request(`/achievements/import/force?org_id=${orgId}`, {
