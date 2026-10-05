@@ -17,7 +17,7 @@ from app.models.db import (
     PlayerSeasonStats, PlayerSeasonGradeStats, Milestone,
     SyncRun, async_session_maker
 )
-from app.services import auto_sync, dismissal, playhq_client
+from app.services import auto_sync, dismissal, participant_names, playhq_client
 from app.services.boundary_counts import clean as _bounds
 from app.services.game_status import NOT_PLAYED_STATUSES, not_played_game_sql
 from app.services.grade_labels import suggest_categories, suggest_category
@@ -1841,6 +1841,7 @@ async def sync_grassroots_game_level_data(
     grades: list[tuple] = []  # (grade_id, season_id, grade_name)
     known_player_ids: set[uuid.UUID] = set()
     pid_by_guid: dict[uuid.UUID, uuid.UUID] = {}  # raw CA participant GUID -> this org's player id
+    org_unique_names: dict = {}  # full name -> player id, for names exactly one of our players holds
     async with async_session_maker() as session:
         org = await session.get(Organisation, org_uuid)
         if not org:
@@ -1873,13 +1874,20 @@ async def sync_grassroots_game_level_data(
         # (id = uuid5(org, guid)) it maps the scorecard's raw participantId to
         # the uuid5 id so game-level rows attach to the right record.
         player_res = await session.execute(
-            select(Player.id, Player.grassroots_id).where(Player.organisation_id == org_uuid)
+            select(Player.id, Player.grassroots_id, Player.name, Player.display_name_override, Player.is_player)
+            .where(Player.organisation_id == org_uuid)
         )
-        for _pid, _gid in player_res:
+        _name_pairs: list[tuple] = []
+        for _pid, _gid, _pname, _pover, _is_player in player_res:
             known_player_ids.add(_pid)
             g = _parse_uuid(_gid) if _gid else None
             if g is not None:
                 pid_by_guid[g] = _pid
+            if _is_player is not False:
+                _name_pairs.append((_pid, _pover or _pname))
+        # Full names held by exactly one player, for a team sheet whose participant
+        # id is one we never stored (see services/participant_names.py).
+        org_unique_names = participant_names.unique_by_full_name(_name_pairs)
         logger.info(f"GR-sync: {len(known_player_ids)} existing players in org")
 
         # Build merged-away → kept redirect map so scorecards referencing a
@@ -2167,6 +2175,22 @@ async def sync_grassroots_game_level_data(
         our_team_roster_guids: set[str] = set()
         if our_team:
             our_team_name = our_team.get("displayName") or our_team.get("name") or ""
+            # A rostered player whose participant id we never stored (CA issues a new
+            # one per registration, or the player is new to the club) is attached by
+            # full name when exactly one of our players has it. Without this their
+            # whole game is dropped and they score nothing in Fantasy.
+            _sheet = our_team.get("players") or []
+            _known = {}
+            for _rp in _sheet:
+                _g = _rp.get("participantId") or ""
+                _kp = _team_pid(_parse_uuid(_g)) if _g else None
+                if _kp is not None:
+                    _known[_g] = _kp
+            for _g, _kp in participant_names.resolve_roster_by_name(_sheet, _known, org_unique_names).items():
+                _gu = _parse_uuid(_g)
+                if _gu is not None:
+                    pid_by_guid[_gu] = _kp
+                    logger.info(f"GR-sync: attached unknown participant {_g} to player {_kp} by full name")
             for roster_p in (our_team.get("players") or []):
                 raw_guid = roster_p.get("participantId") or ""
                 rpid = _team_pid(_parse_uuid(raw_guid))
