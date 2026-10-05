@@ -352,7 +352,8 @@ async def recompute_fee_match_days(organisation_id: str, season_id: str | None =
     """Rebuild auto-derived match-day rows for one season.
 
     - Auto-creates fee_members (linked to the stats player) + fee_member_seasons
-      for anyone who appears in a game, or who CA's season totals credit with a
+      for anyone who appears in a game (an appearance row or any batting, bowling
+      or fielding row), or who CA's season totals credit with a
       match we hold no scorecard for, and isn't tracked yet. New members land
       with no tier (the "Needs tier" review queue) unless their carry-forward
       current_tier matches a schedule row this season.
@@ -418,7 +419,9 @@ async def recompute_fee_match_days(organisation_id: str, season_id: str | None =
         # One row per (game, player) whichever table it came from, or a game
         # read from both would be charged twice.
         appearances = list({(a.game_id, a.player_id): a for a in (
-            list(appearances) + (await _football_appearances(session, game_ids) if game_ids else []))}.values())
+            list(appearances)
+            + (await _football_appearances(session, game_ids) if game_ids else [])
+            + (await _stat_line_appearances(session, game_ids) if game_ids else []))}.values())
 
         # Players with a season total but no scorecard of ours get a fee row too,
         # just with no match days to charge until a scorecard turns up.
@@ -568,6 +571,33 @@ async def recompute_fee_match_days(organisation_id: str, season_id: str | None =
             "entries_upserted": entries_upserted,
             "entries_deleted": entries_deleted,
         }
+
+
+async def _stat_line_appearances(session, game_ids) -> list:
+    """Players with a batting, bowling or fielding row in these games, whether or
+    not the game carries an appearance row for them.
+
+    Having a stat line is having played; the match-coverage figures count it that
+    way (`match_coverage.scorecard_matches`). Fees read appearances only, so a
+    player whose stat rows were stored without an appearance (a bowling spell and
+    no `game_appearances` row, found on a club's live data) was on the fee list
+    with no match day for a game they bowled in.
+
+    Whose rows these are is decided by the caller's player filter, not here: a
+    shared fixture carries the other club's players' rows too.
+    """
+    rows = await session.execute(text("""
+        SELECT game_id, player_id FROM batting_innings
+         WHERE game_id = ANY(:ids) AND player_id IS NOT NULL
+        UNION
+        SELECT game_id, player_id FROM bowling_spells
+         WHERE game_id = ANY(:ids) AND player_id IS NOT NULL
+        UNION
+        SELECT game_id, player_id FROM fielding_stats
+         WHERE game_id = ANY(:ids) AND player_id IS NOT NULL
+    """), {"ids": list(game_ids)})
+    from types import SimpleNamespace
+    return [SimpleNamespace(game_id=r[0], player_id=r[1]) for r in rows.fetchall()]
 
 
 async def _aggregate_player_ids(session, season_id, org_id, grades: dict) -> set:

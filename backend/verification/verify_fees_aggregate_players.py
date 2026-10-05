@@ -41,7 +41,7 @@ def check(label, got, want=True):
 async def main():
     from app.models.db import (
         Game, GameAppearance, Grade, Organisation, Player, PlayerSeasonGradeStats,
-        PlayerSeasonStats, Season, Base, engine, async_session_maker,
+        PlayerSeasonStats, Season, Base, BowlingSpell, engine, async_session_maker,
     )
     from app.services.fees import recompute_fee_match_days
 
@@ -128,6 +128,29 @@ async def main():
             "SELECT count(*) FROM fee_members WHERE organisation_id=:o AND player_id=:p"),
             {"o": org, "p": agg_only})).scalar()
     check("one fee member row for that player", n, 1)
+
+    # Cowcher's shape: a game whose appearance rows name the rest of the side, and
+    # a bowler with a spell but NO appearance row. He must still be charged for it.
+    g2game, bowler, mate, foreign_bowler = (uuid.uuid4() for _ in range(4))
+    async with async_session_maker() as db:
+        db.add_all([Player(id=bowler, organisation_id=org, name="Cowcher, Baxter"),
+                    Player(id=mate, organisation_id=org, name="Mate, Max"),
+                    Player(id=foreign_bowler, organisation_id=other, name="Foreign, Fred")])
+        await db.flush()
+        db.add(Game(id=g2game, grade_id=g_open, played_at=date.today() - timedelta(days=1),
+                    home_team="CVPCC Colts", away_team="Applecross Colts"))
+        await db.flush()
+        db.add(GameAppearance(game_id=g2game, player_id=mate))
+        db.add_all([BowlingSpell(game_id=g2game, player_id=bowler, innings_number=1, overs=3, runs=7, wickets=1),
+                    BowlingSpell(game_id=g2game, player_id=foreign_bowler, innings_number=2, overs=2, runs=9, wickets=0)])
+        await db.commit()
+    await recompute_fee_match_days(str(org), str(sid))
+    got4 = await enrolled()
+    check("bowler with a spell and no appearance is charged the game", got4.get(bowler), 1)
+    check("teammate with an appearance is charged the game", got4.get(mate), 1)
+    check("another club's bowler in the same game stays out", foreign_bowler in got4, False)
+    await recompute_fee_match_days(str(org), str(sid))
+    check("second run does not double-charge the bowler", (await enrolled()).get(bowler), 1)
 
     # A season with no scored game at all (a new season before any scorecard).
     sid2, g2, fresh = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
