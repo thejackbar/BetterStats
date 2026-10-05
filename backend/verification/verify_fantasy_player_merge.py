@@ -465,6 +465,9 @@ async def main_checks() -> None:
     async with Session() as s:
         await s.execute(text("UPDATE fantasy_pool_players SET total_points = 1 WHERE player_id = ANY(CAST(:ids AS uuid[]))"), {"ids": [str(K3)]})
         await s.execute(text("UPDATE fantasy_pool_players SET total_points = 5 WHERE player_id = ANY(CAST(:ids AS uuid[]))"), {"ids": [str(K5)]})
+        # (settling recomputes pool totals from the round scores, so the whole-pool top scorers are set again here)
+        await s.execute(text("UPDATE fantasy_pool_players SET total_points = 90 WHERE player_id = :p"), {"p": P1})
+        await s.execute(text("UPDATE fantasy_pool_players SET total_points = 70 WHERE player_id = :p"), {"p": P3})
         await s.execute(text("DELETE FROM fantasy_squad_players WHERE squad_id = :y AND player_id IN (:a, :b)"), {"y": SQ_Y, "a": P1, "b": P3})
         await s.commit()
     async with Session() as s:

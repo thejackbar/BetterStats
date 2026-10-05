@@ -778,10 +778,13 @@ export function HandAddedPlayersCard({ season, flash, fail }) {
         </div>
       )}
       {!!data.waiting.length && (
-        <p className="mt-3 text-xs text-pb-faint">
-          Added by hand and not played yet, so there is nothing to merge: {data.waiting.map(w => `${w.name} (${w.picked_by} team${w.picked_by === 1 ? '' : 's'})`).join(', ')}.
-          They will show up above once a profile with the same name has a game.
-        </p>
+        <div className="mt-3 text-xs text-pb-faint">
+          Picked by teams, but with no games counted this season and no same-name profile to merge:{' '}
+          {data.waiting.map(w => `${w.name} (${w.picked_by} team${w.picked_by === 1 ? '' : 's'}${w.added_by_hand ? ', added by hand' : ''})`).join(', ')}.
+          <div className="mt-1">
+            If one of them has played, their game may be on a different profile (look for a duplicate on the Players page), in a grade that is switched off, or not synced yet.
+          </div>
+        </div>
       )}
     </div>
   )

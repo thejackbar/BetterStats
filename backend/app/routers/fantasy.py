@@ -731,14 +731,14 @@ async def list_manual_scores(season_id: str, club=Depends(get_current_club), db:
 @router.get("/season/{season_id}/unmatched-players")
 async def unmatched_players(season_id: str, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
     """Pool players with no games this season. ``pairs`` are the ones that have a
-    same-name profile with games (merge them); ``waiting`` are hand-added players
-    picked by a team with no such profile yet (nothing to merge until they play)."""
+    same-name profile with games (merge them); ``waiting`` are players picked by a
+    team who have no counted games this season and no such profile to merge."""
     fs = await _load_season(db, club, season_id)
     rows = await fantasy_pool_check.zero_stat_pool_players(db, club.id)
     return {
         "season_year": fs.season_year,
         "pairs": [r for r in rows if r["twins"]],
-        "waiting": [r for r in rows if not r["twins"] and r["added_by_hand"] and r["picked_by"] > 0],
+        "waiting": [r for r in rows if not r["twins"] and r["picked_by"] > 0],
     }
 
 

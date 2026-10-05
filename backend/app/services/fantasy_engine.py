@@ -55,28 +55,48 @@ ROUND_UNSETTLED = "unsettled"
 AUTO_SETTLE_SKIP = ("scored", ROUND_UNSETTLED)
 
 
+def excluded_grade_keys(fs) -> set[str]:
+    """The grades an admin switched off for this season, as name keys (see
+    ``_grade_scope``). Kept in the season's rules so no migration is needed."""
+    return set((fs.rules or {}).get("excluded_grade_keys") or [])
+
+
 async def _grade_scope(session: AsyncSession, fs) -> list | None:
     """The grade ids a game may sit in to count, or None for every grade.
 
-    ``included_grade_ids`` holds the club's OWN grade ids. A fixture between two
-    clubs that both sync is one ``games`` row whose ``grade_id`` is whichever
-    club's row it was first synced under, so matching on our ids alone would drop
-    it the moment the other club had synced it first. Each included grade is
-    widened to every grade row of the same name key the club's games sit in
-    (``club_grade_rows``)."""
+    Two things narrow it, and both are by grade NAME KEY rather than by id:
+
+    * ``rules.excluded_grade_keys``: grades an admin switched off for the season.
+      Everything else stays on, so a grade that turns up mid-season counts.
+    * ``included_grade_ids`` (older, the club's own grade ids): only those count.
+
+    A fixture between two clubs that both sync is one ``games`` row whose
+    ``grade_id`` is whichever club's row it was first synced under, so matching on
+    our ids alone would drop it the moment the other club had synced it first.
+    Each decision is therefore made on the grade's name key and applied to every
+    grade row of that key the club's games sit in (``club_grade_rows``).
+
+    The result can be an EMPTY list (every grade switched off): that means nothing
+    counts, which is not the same as None."""
     ids = fs.included_grade_ids or None
-    if not ids:
+    excluded = excluded_grade_keys(fs)
+    if not ids and not excluded:
         return None
-    want = {str(i) for i in ids}
     rows = await club_grade_rows(session, fs.organisation_id)
-    keys = {c.key for c in rows if str(c.id) in want}
-    return sorted({str(c.id) for c in rows if c.key in keys} | want)
+    allowed = rows
+    if ids:
+        want = {str(i) for i in ids}
+        keep = {c.key for c in rows if str(c.id) in want}
+        allowed = [c for c in allowed if c.key in keep]
+    if excluded:
+        allowed = [c for c in allowed if c.key not in excluded]
+    return sorted({str(c.id) for c in allowed})
 
 
 def _grade_clause(included_grade_ids, alias: str = "g") -> str:
     """Optional ``AND <alias>.grade_id = ANY(:grades)`` when the season restricts
-    which grades count. NULL/empty means every grade."""
-    return f" AND {alias}.grade_id = ANY(:grades)" if included_grade_ids else ""
+    which grades count. None means every grade; an empty list means none do."""
+    return f" AND {alias}.grade_id = ANY(:grades)" if included_grade_ids is not None else ""
 
 
 # ── Round generation ───────────────────────────────────────────────────────────
@@ -122,9 +142,9 @@ async def _live_calendar_spans(session: AsyncSession, fs, refresh: bool) -> tupl
     (the client already swallows and logs), so a Play-Cricket blip degrades to
     "fewer dates", never an error. ``refresh`` bypasses the in-process cache so
     an admin pressing the button sees a newly published draw."""
-    grades = fs.included_grade_ids or None
+    grades = await _grade_scope(session, fs)
     params = {"org": str(fs.organisation_id), "year": fs.season_year}
-    if grades:
+    if grades is not None:
         params["grades"] = grades
     rows = (await session.execute(
         text(f"""
@@ -132,12 +152,12 @@ async def _live_calendar_spans(session: AsyncSession, fs, refresh: bool) -> tupl
             FROM grades g
             JOIN seasons s ON s.id = g.season_id
             WHERE s.organisation_id = CAST(:org AS UUID) AND s.year = :year
-              {"AND g.id = ANY(:grades)" if grades else ""}
+              {"AND g.id = ANY(:grades)" if grades is not None else ""}
         """),
         params,
     )).all()
     guids = [r[0] for r in rows if r[0]]
-    if not grades:
+    if grades is None:
         # Always add the grades Play-Cricket lists for the year to the ones on
         # file, never only when none are. A club can have SOME of its grades
         # synced (Leederville had its women's grade but not its men's), and the
@@ -653,7 +673,7 @@ async def settle_round(session: AsyncSession, fs, rnd, live_picks: bool = False)
         text("SELECT 1 FROM fantasy_player_round_scores WHERE round_id = CAST(:rid AS UUID) "
              "AND breakdown->>'manual' IS NOT NULL LIMIT 1"), {"rid": str(rnd.id)},
     )).scalar())
-    if not by_player and not has_manual:
+    if not by_player and not has_manual and rnd.status != "scored":
         await _mark_scored(session, rnd, 0)
         return 0
     # Settling a round that is already scored (to pick up a corrected scorecard or
@@ -661,6 +681,14 @@ async def settle_round(session: AsyncSession, fs, rnd, live_picks: bool = False)
     first_settle = rnd.status != "scored"
     from_snapshot = (not first_settle) and not live_picks
 
+    # A figure the data no longer gives (a grade switched off, a scorecard corrected)
+    # must not linger: only what was typed in by hand is kept regardless.
+    await session.execute(
+        text("""DELETE FROM fantasy_player_round_scores
+                WHERE round_id = CAST(:rid AS UUID) AND player_id <> ALL(CAST(:pids AS UUID[]))
+                  AND breakdown->>'manual' IS NULL"""),
+        {"rid": str(rnd.id), "pids": list(by_player)},
+    )
     scored = await _write_player_scores(session, fs, rnd, by_player)
 
     await _refresh_pool_totals(session, fs, rnd)
@@ -881,20 +909,19 @@ async def unsettle_round(session: AsyncSession, fs, rnd) -> int:
 
 async def _refresh_pool_totals(session: AsyncSession, fs, rnd) -> None:
     """Recompute each pool player's season total and this-round points from the
-    per-round scores (so re-settling a corrected round self-heals the totals)."""
+    per-round scores (so re-settling a corrected round self-heals the totals). A
+    player left with no score rows at all goes back to 0."""
     await session.execute(
         text("""
             UPDATE fantasy_pool_players pp SET
-                total_points = COALESCE(t.total, 0),
-                last_round_points = COALESCE(lr.pts, 0),
+                total_points = COALESCE((
+                    SELECT SUM(prs.total_points) FROM fantasy_player_round_scores prs
+                    WHERE prs.fantasy_season_id = CAST(:fs AS UUID) AND prs.player_id = pp.player_id), 0),
+                last_round_points = COALESCE((
+                    SELECT prs.total_points FROM fantasy_player_round_scores prs
+                    WHERE prs.round_id = CAST(:rid AS UUID) AND prs.player_id = pp.player_id), 0),
                 updated_at = NOW()
-            FROM (SELECT player_id, SUM(total_points) AS total
-                  FROM fantasy_player_round_scores
-                  WHERE fantasy_season_id = CAST(:fs AS UUID) GROUP BY player_id) t
-            LEFT JOIN (SELECT player_id, total_points AS pts
-                       FROM fantasy_player_round_scores
-                       WHERE round_id = CAST(:rid AS UUID)) lr ON lr.player_id = t.player_id
-            WHERE pp.fantasy_season_id = CAST(:fs AS UUID) AND pp.player_id = t.player_id
+            WHERE pp.fantasy_season_id = CAST(:fs AS UUID)
         """),
         {"fs": str(fs.id), "rid": str(rnd.id)},
     )

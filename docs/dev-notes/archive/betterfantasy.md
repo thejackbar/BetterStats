@@ -63,3 +63,7 @@ Reported: Ashton Taylor and David Gardner had played (Play-Cricket) and were on 
 - Fixed: `round_drift`, `refresh_recent_rounds` (14 days), `from_snapshot` re-settle, drift shown in `list_rounds` and on the overview, `python -m app.scripts.fantasy_round_drift <org> [--apply]`.
 - Fixed: engine game reads used `seasons.organisation_id` (rule 2). Not the cause here (every Scarborough game is owned by Scarborough) but a real hole.
 - Fixed: My Team desktop grid used `1fr 340px`, which cannot shrink below its content, so the rail overshot by ~240px at 1920 and the page scrolled sideways from 1024 up; now `minmax(0, 1fr)` with wrapping cards. Measured with Playwright at eight widths before and after.
+
+## Scarborough, second look: David Gardner and Ashton Taylor
+
+`fantasy_round_drift` came back clean, so stale settlement was not the cause. Public data: Gardner's scorecard rows in the 3 Oct 3rd grade game carry the profile id `a5c8b54e` and the game is counted (Rose, Cody scores in it), yet the Merge card listed "Gardner, David" as having no games, so the pool holds a different record with the same display name, or a filter drops him. Not resolvable from outside; `fantasy_trace_player` was added to answer it from the database. Also: Ashton's merge history shows two "Taylor, Ashton" records merged into "Ashton Taylor" the same morning, and the 3rd grade scorecard still names the 8 runs / 2-21 line "Taylor, Angus", so a person-identity question remains for the club.
