@@ -848,3 +848,18 @@ cross-club rows across 38 clubs** were being read as the viewing club's own.
 **Still not carried** (known, listed so nobody assumes otherwise): `fantasy_*`, `vote_nudges`, `phq_id_suggestions`, `player_sync_requests`, `sync_runs`. None is the club's own typed data about the person.
 
 **Proof.** `backend/verification/verify_merge_profile_carry.py` runs the shipped `_merge_players_core` and `undo_merge` against Postgres on its own database. Control run on the previous commit: 21 of 30 checks fail (photo, email, date of birth, squad, availability, lineup, nets, member link, contact, alias all gone). `verify_merge_carry.py` still passes 31 of 31.
+
+
+## v9.106.22: Two holes in the player routes (Oct 2026)
+
+Found while reading the player router for the privacy work and then confirmed by running them against a seeded database, not assumed:
+
+- `PATCH /players/{player_id}` (`rename_player`) had no login dependency and the router is mounted with none, so an anonymous request renamed any player at any club (it also rewrote `player_achievements` names and added an alias). Nothing in `frontend/src` called it. Deleted.
+- `GET` and `PATCH /players/{player_id}/profile` had `require_cap(MANAGE_PLAYERS)` and no same-club check: an admin of club A read club B's player's email and phone and set the phone to "0000 CHANGED". The aliases routes beside them were already scoped (404), which is how the gap showed. Both now take `get_current_club` and 404 on a mismatch.
+- `POST /players/{id}/claim` was on the privacy allowlist (`_PRIVACY_MANAGEMENT_ROUTES`), so a person who asked to be removed could still have their profile claimed. Off the list, so it 404s.
+
+Existing suites that called `update_player_profile` directly (`verify_player_privacy`, `verify_multi_squad`, `verify_player_kit`) now pass the club, and the kit suite's Stats-only club passes its own.
+
+I have not looked at the production logs for earlier use of either hole; a PATCH `/players/` request from a client that is not the site would show it.
+
+**Verified against a real Postgres** (`verify_player_route_access.py`, 11 checks: anonymous and signed-in rename refused, the club's own rename path still works, another club's profile unreadable and unwritable, an admin's own club's player still readable and editable, no login is 401, a removed person cannot be claimed while an ordinary profile still can) **with a control run** against the unfixed code: 5 fail on exactly those behaviours. Privacy 128, multi-squad 44, player kit 68, hide-juniors 67.

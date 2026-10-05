@@ -425,7 +425,7 @@ async def main() -> None:
                 admin = await db.get(User, ADMIN)
                 body = players_router.PlayerProfileUpdate(is_public=True)
                 try:
-                    await players_router.update_player_profile(str(TRENT), body, db, admin)
+                    await players_router.update_player_profile(str(TRENT), body, db, admin, club=await db.get(Organisation, OURS))
                     refused = None
                 except HTTPException as e:
                     refused = e.status_code
@@ -436,7 +436,8 @@ async def main() -> None:
                 admin = await db.get(User, ADMIN)
                 try:
                     await players_router.update_player_profile(
-                        str(TRENT), players_router.PlayerProfileUpdate(shirt_number="7"), db, admin)
+                        str(TRENT), players_router.PlayerProfileUpdate(shirt_number="7"), db, admin,
+                        club=await db.get(Organisation, OURS))
                     ok = True
                 except HTTPException as e:
                     ok = False

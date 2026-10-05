@@ -253,9 +253,11 @@ async def person(session, club_id, key):
     return next((p for p in rows if key in (p["name"] or "")), None)
 
 
-async def patch_player(session, pid, **body):
+async def patch_player(session, pid, club_id=None, **body):
+    from app.models.db import Organisation
     return await players_router.update_player_profile(
-        player_id=str(pid), body=players_router.PlayerProfileUpdate(**body), db=session, user=USER)
+        player_id=str(pid), body=players_router.PlayerProfileUpdate(**body), db=session, user=USER,
+        club=await session.get(Organisation, club_id or ORG))
 
 
 async def patch_member(session, mid, club_id=ORG, **body):
@@ -365,7 +367,7 @@ async def main() -> None:
 
     print("\n-- a Stats-only club still gets the number --")
     async with Session() as session:
-        await patch_player(session, SO_PLAYER, shirt_number="9")
+        await patch_player(session, SO_PLAYER, club_id=STATS_ONLY, shirt_number="9")
         check("A CLUB WITH NO BETTERADMIN CAN STILL NUMBER ITS PLAYERS",
               await stored(session, "players", "shirt_number", "id", SO_PLAYER) == "9")
 

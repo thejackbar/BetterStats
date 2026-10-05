@@ -80,7 +80,7 @@ async def _hidden_only_scope(db: AsyncSession, player: Player):
 
 
 # The routes under /players/{id} a club admin still needs for someone who asked
-# to be removed: edit the record, its aliases, the sync request, claim, rename.
+# to be removed: edit the record, its aliases and the sync request.
 # Every one is capability-gated itself. Everything else under /players/{id} is a
 # public-profile data route and 404s for a person who asked to be removed.
 _PRIVACY_MANAGEMENT_ROUTES = frozenset({
@@ -90,8 +90,6 @@ _PRIVACY_MANAGEMENT_ROUTES = frozenset({
     ("POST", "/{player_id}/aliases"),
     ("DELETE", "/{player_id}/aliases/{alias_id}"),
     ("POST", "/{player_id}/request-sync"),
-    ("POST", "/{player_id}/claim"),
-    ("PATCH", "/{player_id}"),
 })
 
 
@@ -1009,37 +1007,6 @@ async def request_player_sync(
     return {"status": "requested"}
 
 
-class PlayerRename(BaseModel):
-    name: str
-
-
-@router.patch("/{player_id}")
-async def rename_player(
-    player_id: str,
-    body: PlayerRename,
-    db: AsyncSession = Depends(get_db),
-):
-    name = body.name.strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="Name cannot be empty")
-    player = await db.get(Player, uuid.UUID(player_id))
-    if not player:
-        raise HTTPException(status_code=404, detail="Player not found")
-    old_name = player.name
-    player.name = name
-    # Keep player_achievements rows in sync for unlinked records
-    await db.execute(
-        text("UPDATE player_achievements SET player_name = :new WHERE player_id = :pid"),
-        {"new": name, "pid": player_id},
-    )
-    # Record the old name as an alias so a live feed (Play.Cricket, a
-    # Grassroots scorecard) still using it keeps resolving to this player —
-    # see services/player_aliases.py.
-    await seed_alias_on_rename(db, player.organisation_id, player.id, old_name)
-    await db.commit()
-    return {"status": "renamed", "old_name": old_name, "new_name": name}
-
-
 class PlayerProfileUpdate(BaseModel):
     # All editable management fields. Callers (the legacy modal and the new
     # BetterSelect Players screen) send a subset — only provided fields update.
@@ -1323,11 +1290,14 @@ async def _full_profile(db: AsyncSession, player: Player) -> dict:
 async def get_player_profile(
     player_id: str,
     db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
     _user: User = Depends(require_cap(MANAGE_PLAYERS)),
 ):
     """All editable management fields + assigned squad + selection snapshot."""
     player = await db.get(Player, uuid.UUID(player_id))
-    if not player:
+    # A club admin sees their OWN club's players only. Without this check any
+    # admin of any club could read another club's contact details by id.
+    if not player or player.organisation_id != club.id:
         raise HTTPException(status_code=404, detail="Player not found")
     return await _full_profile(db, player)
 
@@ -1338,10 +1308,13 @@ async def update_player_profile(
     body: PlayerProfileUpdate,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_cap(MANAGE_PLAYERS)),
+    club: Organisation = Depends(get_current_club),
 ):
     """Update admin-managed player attributes; returns the same shape as GET."""
     player = await db.get(Player, uuid.UUID(player_id))
-    if not player:
+    # Same club only, as on the read: otherwise any admin could overwrite another
+    # club's player's email, phone or date of birth.
+    if not player or player.organisation_id != club.id:
         raise HTTPException(status_code=404, detail="Player not found")
     data = body.model_dump(exclude_unset=True)
     # A player who asked to be removed is not the club's to put back (migration
@@ -1361,7 +1334,7 @@ async def update_player_profile(
         data["shirt_number"] = clean_shirt_number(data["shirt_number"])
     # Capture the effective display name before display_name_override changes,
     # so a rename via this route also gets remembered as an alias — same as
-    # the plain-name rename_player endpoint above.
+    # the club's rename path (club_admin PATCH /players/{id}).
     old_display_name = player.display_name if "display_name_override" in data else None
     # Squad membership (team_members is authoritative; squad_team_id is the
     # derived primary). Two ways in: squad_team_ids = the whole set (the profile

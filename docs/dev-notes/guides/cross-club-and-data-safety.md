@@ -79,6 +79,12 @@
 42. The live schema can drift from the ORM: `partnerships.game_id` was not `ON DELETE CASCADE` live, so the club delete rolled back silently. Migration 142 fixes nine per-game and per-player stat tables (incl. `partnerships`, `milestones`, `fee_match_days`): `NOT VALID` then `VALIDATE CONSTRAINT`, checking `pg_constraint.confdeltype` first. Do not trust ORM `ondelete` on pre-Alembic tables.
 43. `sync.find_matching_organisation(..., include_archived=True)` by default (so `upsert_organisation` reuses an archived row). Self-serve `search`, `/prepare`, `/submit` pass `include_archived=False`, and `/submit` clears `archived_at` on reuse.
 
+**H. Routes that take a player id (access)**
+
+44. Every route that takes a player id and is NOT public must check `player.organisation_id == club.id` with `get_current_club`, and answer 404 (not 403, which confirms the player exists). A capability check (`require_cap(MANAGE_PLAYERS)`) says the caller is an admin of SOME club, nothing about THIS player. `GET` and `PATCH /players/{id}/profile` lacked it, so any club's admin could read and overwrite another club's player's contact fields. `verify_player_route_access.py` is the check, and its control run fails on the old code.
+45. There is no `PATCH /players/{id}` (it renamed any player with no login at all and nothing used it). Rename is `PATCH /club-admin/players/{id}`. A route with neither a login dependency nor a club check is a hole: grep a new `@router.patch/post/delete` for `get_current_user` or `require_cap` before it ships.
+46. Known, left on purpose: `POST /players/{id}/request-sync` is public (the profile page's "request a sync" button, de-duplicated). `POST /players/{id}/claim` lets any signed-in user claim an unclaimed profile and no screen calls it; it is closed for a person who asked to be removed and otherwise unchanged.
+
 ## Traps and failure signatures
 
 - Season "2025/26" twice, rows sum to the header: fixture filed under the first club's season (rule 30).

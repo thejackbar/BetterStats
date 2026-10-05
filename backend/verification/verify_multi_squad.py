@@ -266,13 +266,15 @@ async def main():
         db.add(objP); await db.commit()
     async with Session() as db:
         user = await db.get(User, user_id)
-        await update_player_profile(str(pP), PlayerProfileUpdate(squad_team_ids=[str(T1), str(T2)]), db, user)
+        await update_player_profile(str(pP), PlayerProfileUpdate(squad_team_ids=[str(T1), str(T2)]), db, user,
+                                    club=await db.get(Organisation, org_id))
     async with Session() as db:
         check("profile multi-set → {1st,2nd}", await members(db, pP) == {T1, T2})
         check("profile multi-set primary 1st", await primary(db, pP) == T1)
     async with Session() as db:
         user = await db.get(User, user_id)
-        await update_player_profile(str(pP), PlayerProfileUpdate(status="inactive"), db, user)
+        await update_player_profile(str(pP), PlayerProfileUpdate(status="inactive"), db, user,
+                                    club=await db.get(Organisation, org_id))
     async with Session() as db:
         check("inactive clears every squad", await members(db, pP) == set())
         check("inactive clears primary", await primary(db, pP) is None)
