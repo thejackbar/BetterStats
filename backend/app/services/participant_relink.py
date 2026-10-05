@@ -249,3 +249,74 @@ async def attach(db: AsyncSession, org_id, game_id, scorecard: dict, wanted: dic
             n["fielding"] += 1
     await db.flush()
     return n
+
+
+async def repair_stored_game(db: AsyncSession, org_id, game_id, scorecard: dict, resolve) -> Optional[dict]:
+    """Attach the rows a stored game is missing for players its team sheet names.
+
+    Called from sync for a game it has already stored, with the scorecard it has
+    just fetched anyway, so repairing costs no extra request to Cricket Australia.
+    A player who was unknown when the game was first synced (new to the club, or
+    only hand-added) had their appearance, batting, bowling and fielding dropped,
+    and sync never reads a finished game for them again. By the time the game
+    comes round again they usually exist, and the team sheet still names them.
+
+    ``resolve`` is sync's own ``_team_pid`` applied to a participant id string, so
+    "who is known" is decided in exactly one place, merge redirects and the
+    full-name match included. Only a player the club already holds is attached;
+    nothing is created, nothing is deleted, and a row already there is left alone.
+
+    Returns the counts added, or None when the game is complete. Commits its own
+    work. The caller catches anything it raises: a repair must never fail a sync.
+    """
+    team = _our_team(scorecard, org_id)
+    if not team:
+        return None
+    gid = game_id if isinstance(game_id, uuid.UUID) else uuid.UUID(str(game_id))
+    have = {r[0] for r in (await db.execute(text(
+        "SELECT player_id FROM game_appearances WHERE game_id = :g"), {"g": gid})).all()}
+    wanted: dict = {}
+    taken: set = set()
+    for p in team.get("players") or []:
+        guid = p.get("participantId") or ""
+        pid = resolve(guid) if guid else None
+        if pid is None or pid in have or pid in taken:
+            continue
+        wanted[guid] = pid
+        taken.add(pid)
+    if not wanted:
+        return None
+    n = await attach(db, org_id, gid, scorecard, wanted)
+    await db.commit()
+    logger.info("GR-sync: repaired %s: %s", gid, n)
+    return n
+
+
+async def adopt_identity(db: AsyncSession, org_id, adopt: dict) -> int:
+    """Give a hand-added player the Cricket Australia id sync just matched them to.
+
+    ``adopt`` is ``{participant guid: player id}`` from a team sheet read by full
+    name. A record the club typed in has no Cricket Australia id, so the season
+    totals feed, which keys on that id, would mint a second record for the same
+    person and the two would have to be merged by hand later. Stamping the id on
+    the record the club already holds means the feed finds it instead.
+
+    Only a record with no CA id, no PlayHQ id and no import behind it takes one
+    (an imported career is a person with a history, left to the merge screen), and
+    only an id nobody in this club already holds. Returns how many were stamped.
+    """
+    n = 0
+    for guid, pid in adopt.items():
+        res = await db.execute(text("""
+            UPDATE players SET grassroots_id = :g
+             WHERE id = :p AND organisation_id = CAST(:o AS UUID)
+               AND grassroots_id IS NULL AND playhq_id IS NULL
+               AND cricketstatz_player_id IS NULL AND import_batch_id IS NULL
+               AND NOT EXISTS (SELECT 1 FROM players x
+                                WHERE x.organisation_id = CAST(:o AS UUID) AND x.grassroots_id = :g)
+        """), {"g": str(guid), "p": pid, "o": str(org_id)})
+        n += res.rowcount or 0
+    if n:
+        await db.commit()
+    return n
+

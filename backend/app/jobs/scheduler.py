@@ -8,7 +8,6 @@ from sqlalchemy import select, text
 
 from app.models.db import async_session_maker
 from app.services.sync import sync_organisation
-from app.services.fees import recompute_fee_match_days
 from app.services.square_sync import sync_all_square
 from app.config.settings import settings
 
@@ -210,14 +209,12 @@ async def sync_all_organisations():
         if org_id in _org_sync_running or org_id in _hard_refresh_running:
             logger.info(f"Scheduled sync: {org.name} already has a sync in flight, skipping")
             continue
-        synced = False
         try:
             async with async_session_maker() as session:
                 plan = await auto_sync.plan_run(session, org.id)
             if plan["mode"] == "full":
                 logger.info(f"Syncing org (full — {plan['reason']}): {org.name} ({org.id})")
                 await sync_organisation(org_id, kind="org_full")
-                synced = True
             else:
                 # Did anything get played in this period? An empty period is
                 # ordinary — the off-season, the Christmas break, a bye, a
@@ -233,17 +230,10 @@ async def sync_all_organisations():
                 logger.info(f"Syncing org ({probe['fixtures']} fixture(s) since {plan['since']}): "
                             f"{org.name} ({org.id})")
                 await sync_organisation(org_id, kind=auto_sync.RECENT_KIND, since=plan["since"])
-                synced = True
         except Exception as e:
             logger.error(f"Sync failed for org {org.id}: {e}")
-        if not synced:
-            continue
-        # Refresh auto-derived fee match-days off the freshly synced games.
-        # Isolated from the sync above so a fee error never fails the sync.
-        try:
-            await recompute_fee_match_days(org_id)
-        except Exception as e:
-            logger.error(f"Fee recompute failed for org {org.id}: {e}")
+        # Fee match days are refreshed inside sync_organisation itself, so a
+        # scheduled run and a manual one are followed by the same rebuild.
 
 
 async def _record_idle_run(org_id, since, reason: str) -> None:

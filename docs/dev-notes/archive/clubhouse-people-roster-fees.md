@@ -1277,3 +1277,30 @@ OAuth code-flow, per club.
   precedent as `playcricket_api_token`); encryption-at-rest is a hardening follow-up.
 
 <!-- END original CLAUDE.md L12891-12984 -->
+
+## v9.106.24: Fees enrols players who only exist in the season totals
+
+Report: new players (example `Cowcher, Baxter`, one match in CA's totals) were missing from Admin > Accounts. CORRECTION (v9.106.25): his game did exist (Colts T20, 3 Oct); the player page's `without_scorecard` figure hides junior grades and was misread as "no scorecard". The enrolment gap below is real, but it was not the whole story. Cause: `recompute_fee_match_days` enrolled from `game_appearances` (plus football lines) only, and returned early when a season had no scored games. A player first seen through the aggregate sync has a `players` row and a `player_season_stats` / `player_season_grade_stats` row but no appearance until a scorecard syncs, and a match CA counts can stay without one for good, so Rebuild could not add them either.
+Fix: `_aggregate_player_ids` adds club players (`players.organisation_id`) with matches > 0 this season. Per-grade rows decide when present (an Exclude grade stays out); the season total decides only for a player with no per-grade row. They get a `fee_members` and `fee_member_seasons` row and no match days. The early exit for a season with no scored games is gone (stale auto rows are still cleaned up at the end).
+Proof: `backend/verification/verify_fees_aggregate_players.py` on a real Postgres; the control against the previous `services/fees.py` fails exactly the three "enrolled" checks.
+Not changed: recompute still only runs after the scheduled sync, so a manual sync or an import is not followed by one until someone presses Rebuild match days.
+
+## v9.106.25: every sync rebuilds fee match days
+
+Report: after v9.106.24, Cowcher was on Accounts but his 3 Oct game gave him no match day, grade set to Auto. Cause: `recompute_fee_match_days` ran only at the end of the SCHEDULED sync (`jobs/scheduler.py`). Rebuild match days enrolled him from the season totals before his game had synced; Sync Now then pulled the game and its appearance in, and nothing rebuilt the match days. Hard refresh and Full Rebuild had the same gap.
+Fix: `services/sync.py` `sync_organisation` (the gate every caller goes through) calls `_refresh_fee_match_days` after the governor is released, for every kind except `player_deep`. It never raises. The scheduler's own call is gone so a scheduled run does not rebuild twice.
+Proof: `backend/verification/verify_sync_refreshes_fee_days.py` on a real Postgres with the CA pull stubbed; the control against the previous `sync.py` fails the match-day and org_full checks.
+Not verified from outside: that this was the cause on the live club (no access to its database). Pressing Rebuild match days once after deploy should bring his day in.
+
+## v9.106.26: a stat line counts as playing for match days
+
+Report: after v9.106.25 and a Rebuild ("0 new members, 0 entries"), Cowcher still had no match day for the 3 Oct Colts T20 game (grade `fee_format` t20, correct season). Read-only SQL on the live database showed the game held 9 `game_appearances` rows, all Applecross, none his, while his bowling spell was stored. `fee_match_days` for the game belonged to the 9 others. So recompute (appearances only) could never see him.
+Fix: `_stat_line_appearances` in `services/fees.py` adds any player with a `batting_innings`, `bowling_spells` or `fielding_stats` row in the season's games, unioned with appearances and football lines, deduplicated per (game, player). The player filter (`players.organisation_id`) still decides whose they are, so a shared fixture's other club's rows stay out. This is the same rule `match_coverage.scorecard_matches` already uses for "played".
+Proof: `backend/verification/verify_fees_aggregate_players.py` (a spell-only bowler, a teammate with an appearance, another club's bowler in the same game); the control against v9.106.24 `fees.py` fails the bowler checks.
+Open: what stored his spell without his appearance is not established. Sync only writes a spell for a rostered player, and `participant_relink.attach` writes the appearance with it, so look at players first synced after the game (new participant id, no name match) and at merges. Other readers of `game_appearances` alone (captain stats, teammates, selection) still miss such a player.
+
+## v9.106.27: fee match days use the shared "played" rule
+
+Product rule from the club: being named in a game that was played is playing, never dependent on a stat line, the same as games played in a player's statistics. `recompute_fee_match_days` took every `game_appearances` row, so a washed-out or cancelled game, and a COMPLETED game with an empty scorecard, charged everyone named. It now filters appearances through `game_status.appearance_counts_as_match` (called off, or empty scorecard, only counts for a player with a batting, bowling or fielding line). Stale unpaid auto rows for such games are removed by the existing `_delete_stale_auto_entries`; paid rows are kept. The stat-line union from v9.106.26 stays (a stat line is also playing).
+Harness note: the shared rule reads `games.innings_totals` (raw-SQL column, migration 233) and the `v_effective_*` views, so `verify_fees_aggregate_players.py` applies `superseded_ddl.STATEMENTS` and converts `raw_payload` to jsonb like the neighbouring suites. A test game now needs `status` and `innings_totals` to count as played.
+Cowcher's case itself was a different gap: his appearance was never stored (his id on the team sheet was unknown when the game synced), so no read-side rule can find him. `python -m app.scripts.relink_rostered_players applecross --year 2026 --apply` adds it; the dry run listed him and Hamish Watson.
