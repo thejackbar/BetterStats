@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -97,12 +98,14 @@ async def merged_since_fantasy_began(db: AsyncSession, org_id) -> list[dict]:
             for r in rows]
 
 
-async def find_lost_picks_from_backup(db: AsyncSession, backup: AsyncSession, org_id) -> list[dict]:
-    """Exact answer from a backup taken before the merge. Any pick the backup holds
-    for a player who no longer exists is followed through the merge log (removed
-    -> kept, however many merges deep) to the record that is live now; if the team
-    does not hold that record, it lost the pick. Pick a backup from just before the
-    merge: a player the manager transferred out in between would be put back."""
+async def _lost_from_rows(db: AsyncSession, org_id, rows: list[dict]) -> list[dict]:
+    """Which of these earlier picks (from a backup, or from deleted row versions still
+    on disk) were lost to a merge. Any pick for a player who no longer exists is
+    followed through the merge log (removed -> kept, however many merges deep) to the
+    record that is live now; if the team does not hold that record, it lost the pick.
+    A pick for a player who is live under the same id counts only when a merge of
+    that player was undone (the merge deleted the pick and the undo did not bring it
+    back); any other pick a team no longer holds may be a transfer, so is left alone."""
     org = {"o": str(org_id)}
     live_players = {str(r[0]) for r in (await db.execute(text(
         "SELECT id FROM players WHERE organisation_id = CAST(:o AS UUID)"), org)).all()}
@@ -114,35 +117,37 @@ async def find_lost_picks_from_backup(db: AsyncSession, backup: AsyncSession, or
     """), org)).mappings().all():
         rec = (str(m["keep_player_id"]), m["id"], m["removed_player_name"])
         (undone if m["undone_at"] else chain)[str(m["removed_player_id"])] = rec
+    squads = {str(r["id"]): r for r in (await db.execute(text(
+        "SELECT id, team_name, fantasy_season_id FROM fantasy_squads WHERE organisation_id = CAST(:o AS UUID)"), org)).mappings().all()}
     held: dict[str, set] = {}
     for sid, pid in (await db.execute(text("""
         SELECT sp.squad_id, sp.player_id FROM fantasy_squad_players sp
         JOIN fantasy_squads sq ON sq.id = sp.squad_id WHERE sq.organisation_id = CAST(:o AS UUID)
     """), org)).all():
         held.setdefault(str(sid), set()).add(str(pid))
-    found = []
-    rows = (await backup.execute(text("""
-        SELECT sp.squad_id, sp.player_id, sp.role, sp.is_captain, sp.is_vice_captain, sp.added_round,
-               sq.team_name, sq.fantasy_season_id
-        FROM fantasy_squad_players sp JOIN fantasy_squads sq ON sq.id = sp.squad_id
-        WHERE sq.organisation_id = CAST(:o AS UUID)
-    """), org)).mappings().all()
+    found, seen = [], set()
+
+    def add(r, squad_id, pid, keep, merge_id, name):
+        if (squad_id, keep) in seen:
+            return
+        seen.add((squad_id, keep))
+        sq = squads[squad_id]
+        found.append({
+            "squad_id": squad_id, "team_name": sq["team_name"], "season_id": str(sq["fantasy_season_id"]),
+            "merge_id": merge_id, "removed_id": pid, "keep_id": keep, "player_name": name or "(merged player)",
+            "role": r.get("role") or "batter", "was_captain": bool(r.get("is_captain")), "was_vice": bool(r.get("is_vice_captain")),
+            "first_round": r.get("added_round") or 1,
+        })
+
     for r in rows:
         squad_id, pid = str(r["squad_id"]), str(r["player_id"])
-        if squad_id not in held:
-            continue                                         # the team itself is gone
+        if squad_id not in squads:
+            continue                                         # not this club's team, or the team is gone
+        held_now = held.get(squad_id, set())
         if pid in live_players:
-            # Live under the same id. That is a loss only if a merge of this player was
-            # undone (the merge deleted the pick, the undo did not bring it back); any
-            # other pick a team no longer holds may be a transfer, so is left alone.
-            if pid in undone and pid not in held[squad_id]:
+            if pid in undone and pid not in held_now:
                 _k, mid, nm = undone[pid]
-                found.append({
-                    "squad_id": squad_id, "team_name": r["team_name"], "season_id": str(r["fantasy_season_id"]),
-                    "merge_id": mid, "removed_id": pid, "keep_id": pid, "player_name": nm or "(merged player)",
-                    "role": r["role"] or "batter", "was_captain": bool(r["is_captain"]), "was_vice": bool(r["is_vice_captain"]),
-                    "first_round": r["added_round"] or 1,
-                })
+                add(r, squad_id, pid, pid, mid, nm)
             continue
         keep, merge_id, name = None, None, None
         cur, hops = pid, 0
@@ -152,15 +157,82 @@ async def find_lost_picks_from_backup(db: AsyncSession, backup: AsyncSession, or
             if cur in live_players:
                 keep = cur
                 break
-        if keep is None or keep in held[squad_id]:
+        if keep is None or keep in held_now:
             continue
-        found.append({
-            "squad_id": squad_id, "team_name": r["team_name"], "season_id": str(r["fantasy_season_id"]),
-            "merge_id": merge_id, "removed_id": pid, "keep_id": keep, "player_name": name or "(merged player)",
-            "role": r["role"] or "batter", "was_captain": bool(r["is_captain"]), "was_vice": bool(r["is_vice_captain"]),
-            "first_round": r["added_round"] or 1,
-        })
+        add(r, squad_id, pid, keep, merge_id, name)
     return found
+
+
+async def find_lost_picks_from_backup(db: AsyncSession, backup: AsyncSession, org_id) -> list[dict]:
+    """Exact answer from a backup taken before the merge. Pick a backup from just
+    before it: a player the manager transferred out in between would be put back."""
+    rows = (await backup.execute(text("""
+        SELECT sp.squad_id, sp.player_id, sp.role, sp.is_captain, sp.is_vice_captain, sp.added_round
+        FROM fantasy_squad_players sp JOIN fantasy_squads sq ON sq.id = sp.squad_id
+        WHERE sq.organisation_id = CAST(:o AS UUID)
+    """), {"o": str(org_id)})).mappings().all()
+    return await _lost_from_rows(db, org_id, [dict(r) for r in rows])
+
+
+_PICK_COLUMNS = ["id", "squad_id", "player_id", "role", "is_captain", "is_vice_captain"]
+
+
+def parse_pick_tuple(t_data: bytes) -> dict:
+    """The user data of a `fantasy_squad_players` heap tuple: id, squad_id and
+    player_id are 16 bytes each (uuid has no alignment padding), then `role` as a
+    short varlena (one length byte that counts itself) and the two booleans."""
+    squad_id = uuid.UUID(bytes=bytes(t_data[16:32]))
+    player_id = uuid.UUID(bytes=bytes(t_data[32:48]))
+    head = t_data[48]
+    if not head & 1:                                          # not a short varlena: leave the rest unread
+        return {"squad_id": squad_id, "player_id": player_id}
+    n = head >> 1
+    role = bytes(t_data[49:48 + n]).decode("utf-8", "replace")
+    off = 48 + n
+    return {"squad_id": squad_id, "player_id": player_id, "role": role,
+            "is_captain": bool(t_data[off]), "is_vice_captain": bool(t_data[off + 1])}
+
+
+async def read_deleted_picks(db: AsyncSession) -> list[dict]:
+    """Every deleted or replaced version of a squad pick that is still on disk.
+    Postgres keeps a deleted row's old version until VACUUM removes it, so picks
+    that a merge cascaded away can often be read back for a while. Needs a
+    superuser (pageinspect). Read only; the extension is dropped again if this
+    created it. Returns the newest version of each (squad, player) pair."""
+    layout = [r[0] for r in (await db.execute(text("""
+        SELECT attname FROM pg_attribute WHERE attrelid = 'fantasy_squad_players'::regclass
+        AND attnum BETWEEN 1 AND 6 AND NOT attisdropped ORDER BY attnum"""))).all()]
+    if layout != _PICK_COLUMNS:
+        raise RuntimeError(f"fantasy_squad_players has an unexpected column layout {layout}; refusing to read raw pages")
+    had = bool((await db.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'pageinspect'"))).scalar())
+    if not had:
+        await db.execute(text("CREATE EXTENSION pageinspect"))
+    try:
+        blocks = int((await db.execute(text(
+            "SELECT pg_relation_size('fantasy_squad_players') / current_setting('block_size')::int"))).scalar() or 0)
+        if blocks == 0:
+            return []
+        raw = (await db.execute(text("""
+            SELECT hp.t_xmin::text::bigint AS xmin, hp.t_data
+            FROM generate_series(0, :n - 1) AS b,
+                 LATERAL heap_page_items(get_raw_page('fantasy_squad_players', b)) hp
+            WHERE hp.lp_flags = 1 AND hp.t_xmax::text <> '0' AND hp.t_data IS NOT NULL
+        """), {"n": blocks})).all()
+    finally:
+        if not had:
+            await db.execute(text("DROP EXTENSION IF EXISTS pageinspect"))
+    newest: dict[tuple, tuple] = {}
+    for xmin, data in raw:
+        r = parse_pick_tuple(data)
+        k = (str(r["squad_id"]), str(r["player_id"]))
+        if k not in newest or xmin > newest[k][0]:
+            newest[k] = (xmin, r)
+    return [r for _x, r in newest.values()]
+
+
+async def find_lost_picks_from_dead_rows(db: AsyncSession, org_id) -> list[dict]:
+    """Lost picks, read from the deleted row versions still on disk (no backup needed)."""
+    return await _lost_from_rows(db, org_id, await read_deleted_picks(db))
 
 
 async def find_short_squads(db: AsyncSession, org_id, exclude_ids: set[str]) -> list[dict]:

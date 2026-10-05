@@ -40,7 +40,7 @@ from app.routers.admin import _merge_players_core, undo_merge, UndoMergeRequest
 Session, check = base.Session, base.check
 ORG, SQ_X, SQ_Y, R1, R2, FS_ID = base.ORG, base.SQ_X, base.SQ_Y, base.R1, base.R2, base.FS_ID
 A, B = base.A, base.B
-M, K, N, Z, M2, K2, M3, K3, M4, K4 = (uuid.uuid4() for _ in range(10))     # M manual Raja, K his real record, N a new player, Z another club's player
+M, K, N, Z, M2, K2, M3, K3, M4, K4, M5, K5 = (uuid.uuid4() for _ in range(12))     # M manual Raja, K his real record, N a new player, Z another club's player
 REPO = Path(__file__).resolve().parent.parent.parent
 # `merge_carry` as it was before this fix (the parent of the commit that added the
 # Fantasy tables). A moving rev such as HEAD would stop reproducing the bug the day
@@ -372,6 +372,41 @@ async def main_checks() -> None:
         again = [f for f in await repair.find_lost_picks_from_backup(s, b, ORG) if f["removed_id"] == str(M4)]
     check("and a second run finds nothing", not again)
     await bk2.dispose()
+
+    print("10. No backup and no key: read the deleted picks still on disk")
+    async with Session() as s:
+        await s.execute(text("ALTER TABLE fantasy_squad_players SET (autovacuum_enabled = false)"))   # as at the club: not yet vacuumed
+        s.add_all([Player(id=M5, name="Dead Row", organisation_id=ORG), Player(id=K5, name="Dead Row", organisation_id=ORG, grassroots_id="dr-ca")])
+        await s.flush()
+        s.add(base.FantasySquadPlayer(squad_id=SQ_Y, player_id=M5, role="keeper", is_captain=True, purchase_price=5, added_round=1))
+        await s.commit()
+    await merge(control=True, keep=K5, remove=M5)                      # the old merge: the row is deleted
+    check("(reproduced) the pick is gone from the live table", str(M5) not in await picks(SQ_Y) and str(K5) not in await picks(SQ_Y))
+    async with Session() as s:
+        found = [f for f in await repair.find_lost_picks_from_dead_rows(s, ORG) if f["removed_id"] == str(M5)]
+        await s.rollback()
+    check("the deleted row is still on disk, and is matched to his real record", [(f["squad_id"], f["keep_id"]) for f in found] == [(str(SQ_Y), str(K5))], repr(found))
+    check("with his role and the captain's armband read back from the page", found and found[0]["role"] == "keeper" and found[0]["was_captain"] is True, repr(found))
+    ext = await q("SELECT 1 FROM pg_extension WHERE extname='pageinspect'")
+    check("the dry run leaves nothing installed behind", not ext, repr(ext))
+    async with Session() as s:
+        every = await repair.read_deleted_picks(s)
+        await s.rollback()
+    pairs = {(str(r["squad_id"]), str(r["player_id"])) for r in every}
+    check("it reads deleted versions (the merged picks are there)", (str(SQ_Y), str(M5)) in pairs and (str(SQ_X), str(M3)) in pairs, repr(len(pairs)))
+    check("and never a pick that was not deleted (X's own A and B were only ever inserted)",
+          (str(SQ_X), str(A)) not in pairs and (str(SQ_X), str(B)) not in pairs, repr(sorted(pairs)[:3]))
+    async with Session() as s:
+        await repair.restore(s, ORG, found, USER.id)
+        await s.commit()
+    row = await q("SELECT role, is_captain FROM fantasy_squad_players WHERE squad_id=:s AND player_id=:p", s=SQ_Y, p=K5)
+    caps = (await q("SELECT COUNT(*) FROM fantasy_squad_players WHERE squad_id=:s AND is_captain", s=SQ_Y))[0][0]
+    check("applied: he is back with his role", [r[0] for r in row] == ["keeper"], repr(row))
+    check("and the team keeps its one captain (it already had one, so no second armband)", caps == 1 and [r[1] for r in row] == [False], repr((caps, row)))
+    async with Session() as s:
+        again = [f for f in await repair.find_lost_picks_from_dead_rows(s, ORG) if f["removed_id"] == str(M5)]
+        await s.rollback()
+    check("and a second run finds nothing", not again, repr(again))
 
 
 async def run_control() -> int:

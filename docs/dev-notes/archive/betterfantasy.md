@@ -40,3 +40,7 @@ Leederville's dry run found no lineup evidence (round 1 had been unsettled, whic
 ## Leederville: merges that were undone
 
 The first dry run listed 7 merges but not Raja Pannu: the merge had been undone. Undo re-creates the player under his own id but not his picks (the merge had already cascaded them away), and `fantasy_merge_repair` read only non-undone merges, so neither the lineup snapshots nor `--backup-url` would have found him. Both paths now treat an undone merge as "restore him as himself" (`keep_id = removed_id`), `find_lost_picks_from_backup` restores a same-id pick only when a merge of that player was undone (any other pick a team no longer holds may be a legitimate transfer), and the merged-players list marks undone merges. Section 9 of `verify_fantasy_player_merge.py`.
+
+## Leederville: no backup key, so read the dead rows
+
+`restore.sh check` needs the age private key, which the club operator did not have. Postgres keeps a deleted row's old version until VACUUM, and the merges had deleted only ~30 picks from a few hundred (under autovacuum's 50 + 20% threshold), so `read_deleted_picks` reads the old `fantasy_squad_players` tuples with pageinspect (uuid columns at fixed offsets 0, 16, 32, then `role` as a short varlena and the two booleans), keeps the newest version of each (squad, player), and feeds them through the same matching as the backup route (`_lost_from_rows`). The column layout is checked first and it refuses to read if it differs. Section 10 of `verify_fantasy_player_merge.py`.

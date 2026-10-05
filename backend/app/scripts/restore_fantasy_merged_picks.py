@@ -18,6 +18,12 @@ no longer exists through the merge log to the record that is live now:
 
     python -m app.scripts.restore_fantasy_merged_picks <org-id-or-slug> \
         --backup-url postgresql+asyncpg://user:pass@host:port/scratchdb [--apply]
+
+With no backup (the age key is not to hand), the deleted picks can often still be
+read from the live database: Postgres keeps a deleted row's old version on disk
+until VACUUM clears it. Read only, and best done soon after the merges:
+
+    python -m app.scripts.restore_fantasy_merged_picks <org-id-or-slug> --from-dead-rows [--apply]
 """
 from __future__ import annotations
 
@@ -32,7 +38,7 @@ from app.models.db import async_session_maker
 from app.services import fantasy_merge_repair as repair
 
 
-async def run(org: str, apply: bool, backup_url: str | None = None) -> None:
+async def run(org: str, apply: bool, backup_url: str | None = None, dead_rows: bool = False) -> None:
     backup_engine = create_async_engine(backup_url) if backup_url else None
     async with async_session_maker() as db:
         where = "" if org == "all" else " WHERE id::text = :o OR slug = :o"
@@ -44,6 +50,12 @@ async def run(org: str, apply: bool, backup_url: str | None = None) -> None:
             if backup_engine is not None:
                 async with AsyncSession(backup_engine) as backup:
                     found = await repair.find_lost_picks_from_backup(db, backup, club_id)
+            elif dead_rows:
+                try:
+                    found = await repair.find_lost_picks_from_dead_rows(db, club_id)
+                except Exception as e:   # not a superuser, or the table has been vacuumed into a different shape
+                    await db.rollback()
+                    raise SystemExit(f"Could not read the deleted rows: {e}\nThis needs a database superuser (pageinspect).")
             else:
                 found = await repair.find_lost_picks(db, club_id)
             short = await repair.find_short_squads(db, club_id, {f["squad_id"] for f in found})
@@ -53,7 +65,7 @@ async def run(org: str, apply: bool, backup_url: str | None = None) -> None:
             for f in found:
                 print(f"  {'restore' if apply else 'would restore'}: {f['player_name']} to {f['team_name']} "
                       f"(was in their lineup from round {f['first_round']}, merged by log #{f['merge_id']})")
-            if short and backup_engine is None:
+            if short and backup_engine is None and not dead_rows:
                 merged = await repair.merged_since_fantasy_began(db, club_id)
                 if merged:
                     print("  Players merged since Fantasy started (the missing player is one of these):")
@@ -78,4 +90,4 @@ if __name__ == "__main__":
     if "--backup-url" in sys.argv:
         url = sys.argv[sys.argv.index("--backup-url") + 1]
         args = [a for a in args if a != url]
-    asyncio.run(run(args[0] if args else "all", "--apply" in sys.argv, url))
+    asyncio.run(run(args[0] if args else "all", "--apply" in sys.argv, url, "--from-dead-rows" in sys.argv))
