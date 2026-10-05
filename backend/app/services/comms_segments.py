@@ -25,7 +25,7 @@ from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import (
-    CommsContact, CommsSegment, CommsSegmentMember, EmailSuppression, Player,
+    CommsContact, CommsSegment, CommsSegmentMember, EmailSuppression, FeeMember, Player,
     PlayerSeasonStats, PlayerAvailability, Season,
     MarketingClub, Organisation, CommsRecipient, EmailEvent, ClubOnboardingRequest,
     ClubMembership, CrmDeal, CrmPipeline, CrmStage,
@@ -386,6 +386,24 @@ def sendable_where(club_id):
         CommsContact.complained.is_(False),
         CommsContact.excluded.is_(False),
         ~exists().where(func.lower(EmailSuppression.email) == func.lower(CommsContact.email)),
+        *_not_removed_person(),
+    ]
+
+
+def _not_removed_person():
+    """A contact linked to a person who asked to be removed (migration 316) is
+    never in an audience, even when the address on file is new.
+
+    Independent sub-queries over ALIASED tables, on purpose: the outer query often
+    joins Player already, and a correlated EXISTS over the same table is correlated
+    away by SQLAlchemy and left with no FROM clause. The hidden set is tiny, and
+    the NULL tests keep an unlinked contact (the usual case) in the audience."""
+    hp, hp2, hf = aliased(Player), aliased(Player), aliased(FeeMember)
+    hidden_players = select(hp.id).where(hp.privacy_hidden_at.is_not(None))
+    hidden_members = select(hf.id).join(hp2, hp2.id == hf.player_id).where(hp2.privacy_hidden_at.is_not(None))
+    return [
+        or_(CommsContact.player_id.is_(None), CommsContact.player_id.not_in(hidden_players)),
+        or_(CommsContact.member_id.is_(None), CommsContact.member_id.not_in(hidden_members)),
     ]
 
 

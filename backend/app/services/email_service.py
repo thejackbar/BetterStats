@@ -370,7 +370,34 @@ class SesEmailProvider(EmailProvider):
         return SendResult(ok=False, error=last_err)
 
 
+class PrivacyGuardedProvider(EmailProvider):
+    """Wraps the real provider so NOTHING in the app can email a person who asked
+    to be removed (services/privacy_email). Every module sends through
+    ``get_email_provider()``, so this is the one choke point: a caller that forgot
+    to ask the audience or the send gate is still refused here."""
+
+    def __init__(self, inner: EmailProvider):
+        self._inner = inner
+        self.name = inner.name
+
+    def __getattr__(self, item):          # anything else the provider exposes
+        return getattr(self._inner, item)
+
+    async def send(self, msg: EmailMessage) -> SendResult:
+        from app.services import privacy_email
+        if await privacy_email.is_removed_address(msg.to_email):
+            logger.info("[email:blocked] recipient asked to be removed; not sent (subject=%r)", msg.subject)
+            return SendResult(ok=False, error="blocked: this person asked to be removed and is never emailed")
+        return await self._inner.send(msg)
+
+
 def get_email_provider() -> EmailProvider:
+    """The active provider, wrapped so a person who asked to be removed is never emailed."""
+    inner = _resolve_provider()
+    return inner if isinstance(inner, PrivacyGuardedProvider) else PrivacyGuardedProvider(inner)
+
+
+def _resolve_provider() -> EmailProvider:
     """Resolve the active provider from settings, falling back to console.
 
     A provider that's selected but not fully configured falls back to console

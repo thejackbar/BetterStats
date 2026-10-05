@@ -2332,6 +2332,11 @@ async def delete_suppression(
     e = _norm_email(email)
     if not e:
         raise HTTPException(status_code=422, detail="A valid email is required")
+    from app.services import privacy_email
+    if await privacy_email.is_removed_address(e, db):
+        raise HTTPException(status_code=409, detail=(
+            "This person asked to be removed and is never emailed. "
+            "Contact BetterSports support if that has changed."))
     removed = await suppress.remove_suppression(db, e)
     await db.execute(
         update(CommsContact)

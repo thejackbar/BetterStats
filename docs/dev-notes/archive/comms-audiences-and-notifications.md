@@ -842,3 +842,16 @@ Comms could reach 128. Two separate causes, and the second is the structural one
   button. Do not add a `status` filter to who becomes a contact — targeting is a
   list/segment decision, not an address-book one.
 <!-- END original CLAUDE.md L17075-17125 -->
+
+## v9.106.13: No email to a person who asked to be removed (Oct 2026)
+
+The owner asked that BetterComms, and every email, leave out the removed player, and any person who asks. Rather than audit 26 callers of `get_email_provider()` and hope, the block sits where they all converge: the provider returned by `get_email_provider()` is wrapped (`PrivacyGuardedProvider`) and refuses a recipient on the removed list with a `SendResult(ok=False, error="blocked: ...")`, which every caller already handles as a failed send, so it reads as a failure and never as a success (rule 26). The same list is applied in `email_suppression.deliverable()` for the per-club senders and in `comms_segments.sendable_where` so an audience, a count and a "reachable" figure never include the person.
+
+The list is derived on read (`privacy_email._ADDRESS_SQL`), not stored: a stored list would miss an address added to the person's record after the removal, which is exactly how a removed person gets emailed. `hide_at_request` also writes the addresses to `email_suppressions` (reason `manual`, which `deliverable` already treats as blocking everything; source `privacy_request` marks it) and sets `comms_contacts.excluded` on each linked contact, so the existing screens show them as suppressed. `upsert_contact` creates a contact for a removed address already excluded, because the Directory re-creates contacts on every read.
+
+First draft of the audience clause used a correlated `EXISTS` over `Player` and `FeeMember`; two existing suites (`verify_comms_segments_merge`, `verify_admin_contact_list`) caught it: where the outer query already joins `Player`, SQLAlchemy correlates the table away and the statement has no FROM ("returned no FROM clauses due to auto-correlation"), and `admin_contact_list.sync`, which never raises, then silently produced an empty list. It is now independent sub-queries over aliased tables with explicit NULL tests. `verify_admin_contact_list` fails identically on the commit before this change in this sandbox (7 checks, same traceback), so it cannot vouch for that path here; the segments suite (96) and the others pass.
+
+Not done: a family or guardian address is another person's and is not blocked; an email to the family as a whole still goes to the others. The sign-in email of a claimed account is blocked too, so a removed person cannot receive a password reset until support lifts it.
+
+**Verified against a real Postgres** (`verify_privacy_email.py`, 25 checks: the three addresses, the audience, all three send categories, the provider guard and the real `get_email_provider()`, an address and a contact added after the removal, a club trying to un-suppress, an ordinary bounce still removable, restore) **with a control run** against the previous commit: 14 fail (he stays in the audience, the gate and the real provider send to him). `verify_comms_segments_merge` 96, `verify_comms_recipients` 22, `verify_audience_clubs` 19, `verify_club_trial_segments` 73, `verify_notifications` 146, privacy suites unchanged.
+

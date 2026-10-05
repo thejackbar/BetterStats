@@ -106,7 +106,11 @@ async def holdings(session: AsyncSession, player: Player) -> dict:
 
     sibs = await siblings(session, player)
     suppressed = await is_suppressed(session, person_key(player))
+    from app.services import privacy_email
+    addrs = sorted(await privacy_email.addresses_for_players(session, [player.id] + [sp.id for sp in sibs]))
     return {
+        "email_addresses": addrs,
+        "email_blocked": bool(addrs) and all([await privacy_email.is_removed_address(a, session) for a in addrs]),
         "other_club_rows": [
             {"id": str(sp.id), "organisation_id": str(sp.organisation_id), "name": sp.name,
              "is_public": sp.is_public is not False, "has_photo": bool(sp.photo_data or sp.photo_url)}
@@ -160,9 +164,38 @@ async def hide_at_request(
          WHERE NOT EXISTS (SELECT 1 FROM player_privacy_suppressions WHERE grassroots_id = :g)
     """), {"g": person_key(player), "r": reason, "b": by})
     out["suppression_recorded"] = True
+    out["emails"] = await _suppress_emails(
+        session, [player] + (await siblings(session, player) if include_siblings else []), reason, by)
     from app.services import privacy_scrub
     privacy_scrub.forget()
     return out
+
+
+async def _suppress_emails(session: AsyncSession, players: list, reason: str, by: str) -> dict:
+    """No email to this person, from any module.
+
+    Every address on record goes on the global suppression list (marked so a club
+    cannot lift it), and each BetterComms contact for them is excluded. Contacts
+    are kept, never deleted: an exclusion is a decision somebody made. The send
+    guard in services/privacy_email also derives the addresses live, so one added
+    later is covered without re-running this.
+    """
+    from app.services import email_suppression, privacy_email
+    addrs = await privacy_email.addresses_for_players(session, [p.id for p in players])
+    added = 0
+    for a in sorted(addrs):
+        if await email_suppression.add_privacy_suppression(session, a, f"{reason} ({by})"):
+            added += 1
+    res = await session.execute(text("""
+        UPDATE comms_contacts
+           SET excluded = TRUE, excluded_at = COALESCE(excluded_at, NOW())
+         WHERE excluded IS NOT TRUE
+           AND (LOWER(email) = ANY(:addrs)
+                OR player_id::text = ANY(:pids)
+                OR member_id IN (SELECT id FROM fee_members WHERE player_id::text = ANY(:pids)))
+    """), {"addrs": list(addrs), "pids": [str(p.id) for p in players]})
+    privacy_email.forget()
+    return {"addresses": sorted(addrs), "suppressions_added": added, "contacts_excluded": res.rowcount or 0}
 
 
 async def _hide_one(
@@ -237,6 +270,15 @@ async def restore_public(session: AsyncSession, player: Player, *, by: str) -> d
             await _restore_one(session, sib, by=by)
     await session.execute(
         text("DELETE FROM player_privacy_suppressions WHERE grassroots_id = :g"), {"g": person_key(player)})
+    # Lift the email block this removal recorded. Contacts the removal excluded
+    # stay excluded (an admin re-includes them): restoring must never re-email
+    # someone by itself.
+    from app.services import privacy_email
+    people = [player] + await siblings(session, player)
+    for addr in await privacy_email.addresses_for_players(session, [p.id for p in people]):
+        await session.execute(text(
+            "DELETE FROM email_suppressions WHERE LOWER(email) = :e AND source = 'privacy_request'"), {"e": addr})
+    privacy_email.forget()
     from app.services import privacy_scrub
     privacy_scrub.forget()
     return await _restore_one(session, player, by=by)

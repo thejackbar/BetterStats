@@ -80,6 +80,11 @@
 41. `users.last_notification_seen_at`, `last_seen_app_version` (migration 029); `GET /club-admin/notifications/count` (60s poll), `/summary`, `POST /seen`; window 14 days.
 42. Changelog: one file per release in `frontend/src/data/changelog/`, default-exporting `{ version, date, sortKey, title, items[] }`. `SITE_VERSION` derives from `CHANGELOG[0]`; never hand-edit `version.js`. Bell adds `newChangelogCount` client-side; login auto-open fires if `unseen_count > 0` or an entry is newer than `last_seen_version`.
 
+**A person who asked to be removed (migration 316)**
+
+43. Nobody who asked to be taken off the public site (`players.privacy_hidden_at`) is ever emailed, from any module. `services/privacy_email.py` derives their addresses LIVE (player email, linked fee-member email, linked contacts, claimed-account email, and `email_suppressions.source = 'privacy_request'`), so a new address is covered with nothing re-run. Three layers, keep all three: `email_service.get_email_provider()` returns a `PrivacyGuardedProvider` (every send in the app goes through it; a NEW sender must use `get_email_provider()`, never a provider class directly), `email_suppression.deliverable()` (all categories, transactional included), and `comms_segments._not_removed_person()` inside `sendable_where` (independent sub-queries over ALIASED tables: a correlated EXISTS on `Player` is correlated away when the outer query joins it and the statement loses its FROM).
+44. `hide_at_request` suppresses the addresses (reason `manual`, source `privacy_request`) and sets `comms_contacts.excluded`; it never deletes a contact. `remove_suppression` and `DELETE /comms/suppressions` refuse those rows (409). `restore_public` lifts the suppression but leaves contacts excluded, so a restore never re-emails by itself. Family and guardian addresses are other people's and are not blocked.
+
 ## Traps and failure signatures
 
 - `a[r.key] is not iterable`: `facetOptionsFrom` spread `opts[f.key]` for every `FACETS` key but `opts` was a hardcoded literal predating `role`. Throws for empty and `null` lists; `Cannot read properties of undefined (reading 'add')` once a contact has a role. Not the rows. Fix: rule 27. 
