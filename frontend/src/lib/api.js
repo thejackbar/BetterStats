@@ -2155,10 +2155,18 @@ export const api = {
   metaAdsCountingSince: () => request('/club-admin/meta-ads/counting-since'),
   metaAdsSetCountingSince: (since) =>
     request('/club-admin/meta-ads/counting-since', { method: 'POST', body: JSON.stringify({ since }) }),
-  // Re-scope the admin app to another club (super admin only). Pass null to
-  // return to the staff member's home club. Returns the fresh /auth/me payload.
+  // Re-scope the admin app to another club. Pass null to return to the home
+  // club. A super admin may pick any club; a club admin only a club a Super
+  // Admin has linked to theirs. Returns the fresh /auth/me payload.
   switchClub: (clubId) =>
     request('/auth/switch-club', { method: 'POST', body: JSON.stringify({ club_id: clubId }) }),
+  // Linked clubs (migration 322): a Super Admin groups clubs so their Club
+  // Admins can switch between them.
+  superListClubLinks: () => request('/club-admin/super/club-links'),
+  superLinkClubs: (clubAId, clubBId) =>
+    request('/club-admin/super/club-links', { method: 'POST', body: JSON.stringify({ club_a_id: clubAId, club_b_id: clubBId }) }),
+  superUnlinkClub: (clubId) =>
+    request(`/club-admin/super/club-links/${clubId}`, { method: 'DELETE' }),
   superListClubs: (includeArchived = false) =>
     request(`/club-admin/super/clubs${includeArchived ? '?include_archived=true' : ''}`),
   // CSV export: clubs with a module trial expiring within `days` (default 3),

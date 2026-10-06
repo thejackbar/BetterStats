@@ -7,6 +7,7 @@ import { moduleBrand } from '../../lib/moduleBrand'
 import AdminLayout from '../../components/admin/AdminLayout'
 import SyncRunCard from '../../components/admin/SyncRunCard'
 import AdminBroadcastBanner from '../../components/admin/AdminBroadcastBanner'
+import LinkedClubSwitcher from '../../components/admin/LinkedClubSwitcher'
 import { formatSeason } from '../../lib/cricketFormat'
 
 const fmtDate = (d) =>
@@ -353,7 +354,7 @@ export default function AdminDashboard() {
             )}
           </p>
         )}
-        <p className="text-pb-faintest text-xs mb-6">
+        <p className="text-pb-faintest text-xs mb-4">
           {isSuper ? (
             'Super admin — all modules available'
           ) : billingModules.length ? (
@@ -379,6 +380,10 @@ export default function AdminDashboard() {
             </>
           )}
         </p>
+
+        {/* Only for a Club Admin whose club a Super Admin has linked to others;
+            renders nothing otherwise. */}
+        <LinkedClubSwitcher variant="card" />
 
         {allExpired && !remindDismissed && (
           <div className="pb-card p-4 mb-6 border border-amber-500/30 bg-amber-500/5">

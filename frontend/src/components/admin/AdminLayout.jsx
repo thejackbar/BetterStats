@@ -11,6 +11,7 @@ import { CHANGELOG } from '../../data/changelog'
 import NotificationBell from '../NotificationBell'
 import NotificationModal from '../NotificationModal'
 import ClubSwitcher from './ClubSwitcher'
+import LinkedClubSwitcher from './LinkedClubSwitcher'
 import TrialBanner from './TrialBanner'
 import BrandLogo from '../BrandLogo'
 import { SUPER_OVERVIEW, SUPER_SECTIONS, SALES_MANAGEMENT_ITEMS, visibleSectionItems, sectionBadgeCount } from '../../lib/superNav'
@@ -343,6 +344,13 @@ export default function AdminLayout({ children }) {
             <div className="hidden sm:block">
               <ClubSwitcher />
             </div>
+            {/* A Club Admin of linked clubs picks which one they work in. Absent
+                (renders nothing) for a club with no link. */}
+            {user?.can_switch_linked_clubs && (
+              <div className="hidden sm:block">
+                <LinkedClubSwitcher />
+              </div>
+            )}
             {user?.club_slug && (
               <Link
                 to={`/${user.club_slug}`}
@@ -426,6 +434,22 @@ export default function AdminLayout({ children }) {
         </div>
       )}
 
+      {/* Linked-club banner — a Club Admin working in a club other than their
+          own is told so on every page, with a way back, so a change never lands
+          on the wrong club unnoticed. */}
+      {user?.acting_as_linked_club && (
+        <div
+          className="text-center font-mono text-[10px] tracking-wide2 py-1.5 px-4"
+          style={{ background: 'color-mix(in srgb, var(--pb-accent) 18%, transparent)', color: 'var(--pb-text)' }}
+          data-testid="linked-club-banner"
+        >
+          WORKING IN <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>{(user.club_name || user.club_slug || '').toUpperCase()}</span> ·{' '}
+          <button onClick={() => switchClub(null)} className="underline hover:no-underline">
+            back to {user.home_club_name || 'your club'}
+          </button>
+        </div>
+      )}
+
       <div className="flex flex-1 max-w-7xl mx-auto w-full">
         {/* Mobile drawer backdrop — dims the page and closes the menu on tap.
             Sits below the sidebar (z-40) and the header (z-50); mobile only. */}
@@ -455,6 +479,9 @@ export default function AdminLayout({ children }) {
             <div className="md:hidden mb-2 pb-2 border-b pb-hairline-b space-y-1.5">
               {user?.can_switch_clubs && (
                 <div className="px-2"><ClubSwitcher /></div>
+              )}
+              {user?.can_switch_linked_clubs && (
+                <div className="px-2"><LinkedClubSwitcher /></div>
               )}
               <div className="px-2 flex items-center justify-between gap-2 font-mono text-[11px] text-pb-faint">
                 <span className="truncate">
