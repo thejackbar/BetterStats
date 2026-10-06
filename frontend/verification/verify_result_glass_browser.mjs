@@ -37,13 +37,14 @@ const SPONSOR = (i) => svg(270, 84, ['#2a7', '#a52', '#26a', '#a26'][i % 4], `SP
 
 const SETTINGS = {
   id: 'org-1', name: 'South Perth Cricket Club', short_name: 'SPCC', slug: 'southperth',
-  logo_url: null, primary_color: '#0b3a2e', accent_color: '#1faa7a', theme_config: null,
+  logo_url: '/x', primary_color: '#0b3a2e', accent_color: '#1faa7a', theme_config: null,
 }
 const first = ['Chris', 'George', 'Sam', 'Brody', 'Matt', 'Aaron', 'Regan', 'Angus', 'Noah', 'Josh', 'Tom', 'Max']
 const last = ['HANSBERRY', 'PULLINGER', 'TIMMINS', 'COUCH', 'ALLEN', 'OFFER', 'SPEAR', 'TURNER', 'EGAN', 'CANTRILL', 'FOX-DEAN', 'COHEN']
 const bat = (i, runs, balls, notOut = false) => ({ num: i + 1, first: first[i], last: last[i], r: runs, b: balls, notOut, didNotBat: false, out: 'b X' })
 const bowl = (i, w, r, o) => ({ first: first[i], last: last[i], o, m: 0, r, w, econ: r / 10 })
-const SCORECARD = (batted = true) => ({
+const CREST = (c, t) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 120" width="100" height="120"><path d="M5 5h90v70q0 30-45 40Q5 105 5 75z" fill="${c}"/><text x="50" y="70" font-family="Arial" font-weight="800" font-size="38" fill="#fff" text-anchor="middle">${t}</text></svg>`
+const SCORECARD = (batted = true, oppLogo = true) => ({
   meta: { competition: 'MENS FIRST GRADE', round: 'ROUND 1', venue: 'RICHARDSON PARK', date: '2026-10-03', result: 'SOUTH PERTH WON BY 14 RUNS' },
   home: {
     name: 'South Perth Cricket Club', short: 'SPCC', total: 242, wickets: 4, overs: '50',
@@ -52,7 +53,7 @@ const SCORECARD = (batted = true) => ({
   },
   away: batted
     ? {
-      name: 'Scarborough Cricket Club', short: 'SCAR', total: 228, wickets: 8, overs: '50',
+      name: 'Scarborough Cricket Club', short: 'SCAR', ...(oppLogo ? { logo: '/api/images/clubs/opp/logo' } : {}), total: 228, wickets: 8, overs: '50',
       batting: [bat(1, 53, 100), bat(3, 33, 19), bat(4, 25, 42), bat(9, 113, 156, true)],
       bowling: [bowl(0, 2, 42, '10'), bowl(1, 1, 63, '10'), bowl(2, 1, 49, '10'), bowl(3, 0, 30, '5')],
     }
@@ -61,7 +62,7 @@ const SCORECARD = (batted = true) => ({
 
 const browser = await chromium.launch(existsSync(EXECUTABLE) ? { executablePath: EXECUTABLE } : {})
 
-async function openEditor({ viewport = { width: 1700, height: 2300 }, nSponsors = 1, batted = true, local = {}, size = 'square', mobile = false } = {}) {
+async function openEditor({ viewport = { width: 1700, height: 2300 }, nSponsors = 1, batted = true, oppLogo = true, local = {}, size = 'square', mobile = false } = {}) {
   const ctx = await browser.newContext({ viewport })
   const page = await ctx.newPage()
   const errors = []
@@ -72,13 +73,15 @@ async function openEditor({ viewport = { width: 1700, height: 2300 }, nSponsors 
   await page.route(/fonts\.(googleapis|gstatic)\.com/, (route) => route.abort())
   await page.route('**/api/**', async (route) => {
     const url = route.request().url()
+    if (/\/images\/organisations\/[^/]+\/logo/.test(url)) return route.fulfill({ status: 200, contentType: 'image/svg+xml', body: CREST('#c22030', 'SP') })
+    if (/\/images\/clubs\/opp\/logo/.test(url)) return route.fulfill({ status: 200, contentType: 'image/svg+xml', body: CREST('#1a4eb8', 'SC') })
     if (/\/images\/sponsors\/s(\d+)\/logo/.test(url)) return route.fulfill({ status: 200, contentType: 'image/svg+xml', body: SPONSOR(Number(url.match(/s(\d+)\/logo/)[1]) - 1) })
     if (/\/auth\/me/.test(url)) return route.fulfill(json({
       id: 'u1', username: 'admin', role: 'club_admin', club_slug: 'southperth',
       entitlements: { modules: ['socials', 'select', 'stats', 'admin', 'iq'], status: 'active' },
     }))
     if (/\/admin\/social\/match-lookup/.test(url)) return route.fulfill(json({ kind: 'match', match_id: 'm1' }))
-    if (/\/admin\/social\/scorecard\//.test(url)) return route.fulfill(json(SCORECARD(batted)))
+    if (/\/admin\/social\/scorecard\//.test(url)) return route.fulfill(json(SCORECARD(batted, oppLogo)))
     if (/\/admin\/social\/potm\//.test(url)) return route.fulfill(json({ match: {}, players: [] }))
     if (/\/admin\/social\/templates/.test(url)) return route.fulfill(json([]))
     if (/\/admin\/social\/media/.test(url)) return route.fulfill(json([]))
@@ -169,8 +172,11 @@ async function read(page) {
       head: rel(q('Match header')), headText: q('Match header') ? q('Match header').innerText.replace(/\s+/g, ' ').trim() : '',
       us: rel(us), them: rel(them),
       usText: us ? us.innerText.replace(/\s+/g, ' ').trim() : '', themText: them ? them.innerText.replace(/\s+/g, ' ').trim() : '',
-      glassImgs: [us, them].map((p) => (p ? p.querySelectorAll('img').length : 0)),
-      glassFilter: us && us.querySelector('img') ? getComputedStyle(us.querySelector('img')).filter : '',
+      crests: [us, them].map((p) => (p ? p.querySelectorAll('img[style*="object-fit: contain"]').length : 0)),
+      crestBoxes: [us, them].map((p) => { const i = p && p.querySelector('img[style*="object-fit: contain"]'); return i ? rel(i) : null }),
+      backing: q('Sponsor backing') ? { ...rel(q('Sponsor backing')), fills: [...q('Sponsor backing').children].map((c) => getComputedStyle(c).backgroundColor) } : null,
+      glassImgs: [us, them].map((p) => (p ? p.querySelectorAll('img[style*="blur"]').length : 0)),
+      glassFilter: us && us.querySelector('img[style*="blur"]') ? getComputedStyle(us.querySelector('img[style*="blur"]')).filter : '',
       photo: q('Background photo') ? !!q('Background photo').querySelector('img') : false,
       tintBg: q('Blur and tint') ? getComputedStyle(q('Blur and tint').lastElementChild).backgroundColor : '',
       scrim: q('Blur and tint') ? rel(q('Blur and tint')) : null,
@@ -220,6 +226,9 @@ const union = (...bs) => { const l = bs.filter(Boolean); return { x: Math.min(..
   ck('three performers a side', d && (d.usText.match(/\d+\*?\s*\(\d+\)/g) || []).length === 4 && (d.themText.match(/\d+\*?\s*\(\d+\)/g) || []).length === 4, d && `${d.usText} || ${d.themText}`)
   ck('a hundred is picked out', d && /113\*/.test(d.themText))
   ck('one trophy, for the winner', d && d.trophies >= 1 && d.trophies <= 4, d && `${d.trophies} gold paths`)
+  ck('both club crests are drawn in the panel headers', drawn(d) && d.crests[0] === 1 && d.crests[1] === 1, d && JSON.stringify(d.crests))
+  ck('the crests sit inside their panels', drawn(d) && d.crestBoxes.every((b, i) => b && b.w > 20 && b.x >= [d.us, d.them][i].x && b.r <= [d.us, d.them][i].r), d && JSON.stringify(d.crestBoxes))
+  ck('no sponsor backing by default', drawn(d) && !d.backing)
   ck('BetterCricket logo is drawn', d && d.credit && d.credit.h > 10 && !!d.creditImg, d && JSON.stringify(d.credit))
   ck('nothing outside the post', drawn(d) && d.outside.length === 0, d && d.outside.join(','))
   ck('no clipped text', drawn(d) && d.textHits.length === 0, d && d.textHits.join('|'))
@@ -238,6 +247,8 @@ for (const [label, W, H] of SIZES) {
   await importResult(page)
   await addPhoto(page)
   await setSize(page, label)
+  await glassControls(page)
+  await page.getByTestId('glass-sponsor-shade').fill('0.5')
   for (const pos of POSITIONS) {
     await glassControls(page)
     await press(page.getByTestId(`glass-pos-${pos}`))
@@ -257,11 +268,59 @@ for (const [label, W, H] of SIZES) {
     ck(`${tag}: no clipped text`, drawn(d) && d.textHits.length === 0, d.textHits.join('|'))
     ck(`${tag}: BetterCricket logo clear of the card`, drawn(d) && d.credit && !overlaps(d.credit, card), JSON.stringify(d.credit))
     ck(`${tag}: sponsor grid clear of the card`, drawn(d) && d.grid && !overlaps(d.grid, card), JSON.stringify(d.grid))
+    ck(`${tag}: sponsor backing is inside the post and clear of the card`, drawn(d) && d.backing && d.backing.x >= 0 && d.backing.r <= W && d.backing.y >= 0 && d.backing.b <= H && !overlaps(d.backing, card), JSON.stringify(d.backing))
     ck(`${tag}: sponsor label sits just above the grid`, drawn(d) && d.label && d.grid && Math.abs(d.label.b - d.grid.y) < 40, JSON.stringify({ l: d.label, g: d.grid }))
     ck(`${tag}: sponsors are at the free end`, drawn(d) && d.grid && (v === 'top' ? d.grid.y > H * 0.6 : d.grid.b < H * 0.4), JSON.stringify(d.grid))
     ck(`${tag}: BetterCricket logo is at the free end`, drawn(d) && d.credit && (v === 'top' ? d.credit.y > H * 0.6 : d.credit.b < H * 0.4), JSON.stringify(d.credit))
     if (SHOTS) await shotNode(page, `${SHOTS}/${label.toLowerCase()}-${pos}.png`)
   }
+  await ctx.close()
+}
+
+// ── 2b. Logos on and off, a club with no logo, and the sponsor shade ─────────
+{
+  const { ctx, page } = await openEditor({ nSponsors: 1, oppLogo: false })
+  await importResult(page)
+  const on = await read(page)
+  ck('no opposition logo: its panel shows initials, ours keeps the crest', drawn(on) && on.crests[0] === 1 && on.crests[1] === 0 && /^[A-Z]{1,3}\s+SCARBOROUGH/.test(on.themText), on && `${on.crests} ${on.themText}`)
+  await glassControls(page)
+  await page.getByTestId('glass-logos').locator('input').uncheck()
+  await page.waitForTimeout(400)
+  const off = await read(page)
+  ck('turning logos off removes every crest and monogram', drawn(off) && off.crests[0] === 0 && off.crests[1] === 0 && /^SCARBOROUGH/.test(off.themText), off && `${off.crests} ${off.themText}`)
+  await page.getByTestId('glass-logos').locator('input').check()
+  await page.waitForTimeout(300)
+  await glassControls(page)
+  await page.getByTestId('glass-sponsor-shade').fill('0.6')
+  await page.waitForTimeout(500)
+  const dark = await read(page)
+  const card = dark && drawn(dark) && union(dark.head, dark.us, dark.them)
+  ck('a dark backing appears behind the sponsor label and logo', drawn(dark) && dark.backing && dark.backing.fills.some((f) => /rgba\(0, 0, 0, 0\.6\)/.test(f)), dark && JSON.stringify(dark.backing))
+  ck('the backing holds the label and the grid and stays in the post', drawn(dark) && dark.backing && dark.grid && dark.label
+    && dark.backing.x <= dark.grid.x && dark.backing.r >= dark.grid.r && dark.backing.y <= dark.label.y && dark.backing.b >= dark.grid.b
+    && dark.backing.x >= 0 && dark.backing.r <= 1080 && dark.backing.y >= 0 && dark.backing.b <= 1080, dark && JSON.stringify(dark.backing))
+  ck('the backing is clear of the card', drawn(dark) && dark.backing && !overlaps(dark.backing, card))
+  await glassControls(page)
+  await press(page.getByTestId('glass-sponsor-tone-light'))
+  await page.waitForTimeout(400)
+  const light = await read(page)
+  ck('light glass backs with white', drawn(light) && light.backing && light.backing.fills.some((f) => /rgba\(255, 255, 255, 0\.6\)/.test(f)), light && JSON.stringify(light.backing))
+  ck('the label turns dark on a strong light backing', drawn(light) && light.label && light.label.text.length > 0)
+  await glassControls(page)
+  await page.getByTestId('glass-sponsor-shade').fill('0')
+  await page.waitForTimeout(400)
+  const none = await read(page)
+  ck('shade at zero takes the backing away', drawn(none) && !none.backing)
+  await ctx.close()
+}
+{
+  const { ctx, page } = await openEditor({ nSponsors: 0 })
+  await importResult(page)
+  await glassControls(page)
+  await page.getByTestId('glass-sponsor-shade').fill('0.6')
+  await page.waitForTimeout(400)
+  const d = await read(page)
+  ck('no sponsors: no backing even with shade on', drawn(d) && !d.backing)
   await ctx.close()
 }
 

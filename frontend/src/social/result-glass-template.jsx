@@ -36,7 +36,10 @@ export const GLASS_POSITIONS = [
   { key: 'bottom-center', label: 'Bottom centre' },
   { key: 'bottom-right', label: 'Bottom right' },
 ]
-export const GLASS_DEFAULTS = { position: 'top-center', tint: 0.55, perfUs: 'bat', perfThem: 'bat' }
+// `logos`: the club crests in the panel headers. `sponsorShade` is how strong the
+// glass backing behind the sponsor logos is (0 = none) and `sponsorTone` whether
+// it is dark or light.
+export const GLASS_DEFAULTS = { position: 'top-center', tint: 0.55, perfUs: 'bat', perfThem: 'bat', logos: true, sponsorShade: 0, sponsorTone: 'dark' }
 export const GLASS_FOCUS = { x: 50, y: 50, scale: 1 }
 
 const parts = (position) => {
@@ -51,6 +54,8 @@ export function glassGeo(width = 1080, height = 1080, position = 'top-center') {
   const A = aspectOf(width, height)
   const { top, side } = parts(position)
   const f = pick(A, { square: 1, portrait: 1.06, story: 1.2 })
+  // Type scale for the panels. A centred card keeps its width on every shape, so
+  // its type grows less than a side card's, whose panels widen with the post.
   const edge = pick(A, { square: 52, portrait: 54, story: 56 })
   // A story's top carries the profile row and its bottom the reply bar.
   const topM = pick(A, { square: 52, portrait: 56, story: 210 })
@@ -58,7 +63,7 @@ export function glassGeo(width = 1080, height = 1080, position = 'top-center') {
   const gapP = Math.round(20 * f)
   const bw = side === 'center' ? width - edge * 2 : pick(A, { square: 500, portrait: 520, story: 560 })
   const panelW = side === 'center' ? (bw - gapP) / 2 : bw
-  const s = (panelW / 482) * f
+  const s = (panelW / 482) * (side === 'center' ? pick(A, { square: 1, portrait: 1.03, story: 1.08 }) : f)
   const headH = Math.round(70 * f)
   const headGap = Math.round(28 * f)
   const panelH = Math.round(246 * s)
@@ -127,6 +132,28 @@ const Trophy = ({ size }) => (
 )
 Trophy.displayName = 'Trophy'
 
+// A club's crest in the panel header: the logo when there is one, else its
+// monogram on a glass disc, so a club with no logo on file still has a mark.
+function CrestMark({ logo, mono, size }) {
+  if (logo) {
+    return (
+      <div style={{ width: size, height: size, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <img src={logo} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', display: 'block', filter: 'drop-shadow(0 2px 6px rgba(0,0,0,0.35))' }} />
+      </div>
+    )
+  }
+  const m = String(mono || '').trim().slice(0, 3).toUpperCase()
+  if (!m) return null
+  return (
+    <div style={{
+      width: size, height: size, flexShrink: 0, borderRadius: '50%', boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'rgba(255,255,255,0.16)', border: '1.5px solid rgba(255,255,255,0.4)', color: '#fff', fontWeight: BOLD,
+      fontSize: Math.round(size * (m.length > 2 ? 0.3 : 0.38)), letterSpacing: 0.5,
+    }}>{m}</div>
+  )
+}
+CrestMark.displayName = 'CrestMark'
+
 export function ResultGlass({
   palette = {}, width = 1080, height = 1080, result: r = {}, look, photo, focus, sponsorCount = 0,
 }) {
@@ -175,6 +202,17 @@ export function ResultGlass({
   // position (new column widths) has to arrive as a dependency.
   const fitKey = [L.position, width, height]
 
+  // The backing behind the sponsor logos: a glass pane over the label and the
+  // grid's slot. Dark takes the photo down, light lifts it for dark logos.
+  const shadeA = Math.max(0, Math.min(1, Number(L.sponsorShade) || 0))
+  const lightTone = L.sponsorTone === 'light'
+  const padX = Math.round(20 * f), padY = Math.round(12 * f)
+  const back = {
+    x: Math.max(0, sp.x - padX), y: Math.max(0, sp.y - sp._labelH - padY),
+    w: Math.min(width, sp.w + padX * 2), h: sp.h + sp._labelH + padY * 2,
+  }
+  const labelInk = lightTone && shadeA > 0.35 ? '#0b0b0c' : '#ffffff'
+
   const winUs = r.winner === 'us'
   const winThem = r.winner === 'them'
   const headParts = {
@@ -193,11 +231,18 @@ export function ResultGlass({
 
   // One size for both team names too, from the longer: a name that shrinks on its
   // own beside one that did not reads as a mistake. AutoFitText stays as the net.
-  const teamRoom = panelW - Math.round(44 * s) - Math.round(34 * s) - Math.round(165 * s)
+  const crest = Math.round(46 * s)
+  const showCrest = L.logos !== false
+  const teamRoom = panelW - Math.round(44 * s) - Math.round(34 * s) - Math.round(165 * s) - (showCrest ? crest + Math.round(10 * s) : 0)
   const longTeam = Math.max(String(us.name || '').length, String(them.name || '').length, 8)
-  const teamFs = Math.max(13, Math.min(Math.round(25 * s), Math.floor(teamRoom / (0.66 * longTeam))))
+  // A long name (the full club name, with its "Cricket Club") takes two lines at a
+  // readable size rather than one line squeezed small, for both teams alike.
+  const wrapNames = longTeam > 15
+  const teamFs = wrapNames
+    ? Math.max(13, Math.min(Math.round(20 * s), Math.floor(teamRoom / (0.62 * (Math.ceil(longTeam / 2) + 2)))))
+    : Math.max(13, Math.min(Math.round(25 * s), Math.floor(teamRoom / (0.66 * longTeam))))
 
-  const glassPane = (x, y, w, h, key, body) => (
+  const glassPane = (x, y, w, h, key, body, shade) => (
     <div key={key} data-layer={key} style={{
       position: 'absolute', left: x, top: y, width: w, height: h, boxSizing: 'border-box', overflow: 'hidden',
       borderRadius: Math.round(14 * s), border: '1.5px solid rgba(255,255,255,0.34)',
@@ -210,7 +255,7 @@ export function ResultGlass({
         </div>
       )}
       <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg, rgba(255,255,255,0.26) 0%, rgba(255,255,255,0.08) 38%, rgba(255,255,255,0.03) 62%, rgba(255,255,255,0.16) 100%)' }} />
-      <div style={{ position: 'absolute', inset: 0, background: 'rgba(8,12,20,0.16)' }} />
+      <div style={{ position: 'absolute', inset: 0, background: shade ? `rgba(${shade.c},${shade.a})` : 'rgba(8,12,20,0.16)' }} />
       <div style={{ position: 'relative', width: '100%', height: '100%' }}>{body}</div>
     </div>
   )
@@ -227,9 +272,17 @@ export function ResultGlass({
       <>
         <div style={{ height: headHt, padding: `0 ${pad}px`, display: 'flex', alignItems: 'center', gap: Math.round(10 * s), boxSizing: 'border-box' }}>
           <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: Math.round(10 * s) }}>
+            {showCrest && <CrestMark logo={t.logo} mono={t.mono} size={crest} />}
             <div style={{ minWidth: 0, flexShrink: 1 }}>
-              <AutoFitText text={String(t.name || '').toUpperCase()} max={teamFs} min={12} lines={1} measureDeps={[teamFs, ...fitKey]}
-                style={{ fontWeight: win ? BOLD : 500, letterSpacing: 0.4, lineHeight: 1.1, color: '#fff' }} />
+              {wrapNames ? (
+                <div style={{
+                  fontSize: teamFs, fontWeight: win ? BOLD : 500, letterSpacing: 0.4, lineHeight: 1.1, color: '#fff',
+                  display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                }}>{String(t.name || '').toUpperCase()}</div>
+              ) : (
+                <AutoFitText text={String(t.name || '').toUpperCase()} max={teamFs} min={12} lines={1} measureDeps={[teamFs, showCrest, ...fitKey]}
+                  style={{ fontWeight: win ? BOLD : 500, letterSpacing: 0.4, lineHeight: 1.1, color: '#fff' }} />
+              )}
             </div>
             {win && <Trophy size={Math.round(22 * s)} />}
           </div>
@@ -320,11 +373,14 @@ export function ResultGlass({
       {teamPanel(us, them, winUs, L.perfUs, rowsFor('us', L.perfUs), 'Our scorecard', usX, usY)}
       {teamPanel(them, us, winThem, L.perfThem, rowsFor('them', L.perfThem), 'Their scorecard', themX, themY)}
 
+      {sponsorCount > 0 && shadeA > 0 && glassPane(back.x, back.y, back.w, back.h, 'Sponsor backing', null,
+        { c: lightTone ? '255,255,255' : '0,0,0', a: shadeA })}
+
       {sponsorCount > 0 && (
         <div data-layer="Sponsor label" style={{
           position: 'absolute', left: sp.x, width: sp.w, top: sp.y - sp._labelH, height: sp._labelH,
           display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center',
-          fontSize: Math.round(14 * f), fontWeight: 600, letterSpacing: 1.4, textTransform: 'uppercase', textShadow: '0 1px 8px rgba(0,0,0,0.6)',
+          fontSize: Math.round(14 * f), fontWeight: 600, letterSpacing: 1.4, textTransform: 'uppercase', color: labelInk, textShadow: labelInk === '#ffffff' ? '0 1px 8px rgba(0,0,0,0.6)' : 'none',
         }}>Proudly sponsored by</div>
       )}
 

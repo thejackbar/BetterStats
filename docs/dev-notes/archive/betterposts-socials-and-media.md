@@ -899,3 +899,13 @@ Feedback on the first release (screenshots from a club): the font did not change
 - **Credit.** `CreditMark` is 52px high (was 22), white on a dark or absent bar.
 - **Verified.** `verify_lineup_card_browser.mjs`: 63 passed. Control on the v9.106.32 source fails the seven new checks (credit size, font variable, picking Anton, size follows the face, Dark bar, no box round the logos, None).
 
+
+
+## Glass Card: club crests and sponsor shade (v9.106.37)
+
+Follow-up to v9.106.36: pull the club logos onto the cards and allow a shade or tint behind the sponsor logos.
+
+- **Crests.** `CrestMark` in `result-glass-template.jsx` draws `result.us.logo` and `result.them.logo` (the same fields the other single results use) in the panel header, left of the name, and falls back to the monogram on a glass disc. `glassLook.logos` (default on) turns them off; the name room shrinks by the crest only while it is on.
+- **Sponsor shade.** `glassLook.sponsorShade` (0 to 0.9, default 0 so nothing changes for a saved post) and `sponsorTone` (`dark` or `light`) draw a glass pane layer, `Sponsor backing`, over the label and the grid's slot with the same blurred photo copy the panels use. It is drawn by the layout from the slot, not by the grid block, so the block's own Backing buttons are independent of it. A grid somebody has dragged away from its slot leaves the backing where the slot is. With no sponsors there is no backing. The label goes dark on a light backing above 35%.
+- **Long names wrap.** With a crest the name had too little room and `AutoFitText` squeezed "SOUTH PERTH CRICKET CLUB" to its 12px floor. Past 15 characters both names take a two-line clamp at one shared size (`wrapNames`). Centred cards also scale their type less on portrait and story (they keep the same width on every shape).
+- **Verified.** `verify_result_glass_browser.mjs`: 256 passed (crests in both headers and inside their panels, initials for a club with no logo, logos off, backing absent by default, dark then light fill, holds the label and grid, inside the post and clear of the card at all six positions and three sizes, none with no sponsors). Two checks of my own were wrong first (the crest counted as a second photo copy; the initials regex) and were fixed in the script, not the layout.

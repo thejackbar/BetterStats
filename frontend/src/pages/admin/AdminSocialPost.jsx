@@ -5157,6 +5157,30 @@ export default function AdminSocialPost() {
                   <span className="font-mono text-[11px] text-pb-faint w-10 text-right">{Math.round(glassLook.tint * 100)}%</span>
                 </div>
 
+                <label className="flex items-start gap-2 mb-4 cursor-pointer" data-testid="glass-logos">
+                  <input type="checkbox" checked={glassLook.logos !== false} onChange={(e) => patchGlassLook({ logos: e.target.checked })} className="mt-0.5" />
+                  <span className="text-[11px] text-pb-dim leading-relaxed">
+                    Club logos on the scorecards
+                    <span className="block text-pb-faintest">Your crest and the opposition's. A club with no logo on file shows its initials.</span>
+                  </span>
+                </label>
+
+                <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Shade behind sponsor logos</label>
+                <div className="flex items-center gap-3 mb-2">
+                  <input type="range" min="0" max="0.9" step="0.05" value={glassLook.sponsorShade} data-testid="glass-sponsor-shade"
+                    onChange={(e) => patchGlassLook({ sponsorShade: Number(e.target.value) })} className="flex-1" />
+                  <span className="font-mono text-[11px] text-pb-faint w-10 text-right">{glassLook.sponsorShade > 0 ? `${Math.round(glassLook.sponsorShade * 100)}%` : 'Off'}</span>
+                </div>
+                <div className="flex gap-2 mb-1" role="radiogroup" aria-label="Sponsor shade tone">
+                  {[['dark', 'Dark glass'], ['light', 'Light glass']].map(([k, label]) => (
+                    <button key={k} role="radio" aria-checked={glassLook.sponsorTone === k} data-testid={`glass-sponsor-tone-${k}`}
+                      onClick={() => patchGlassLook({ sponsorTone: k })}
+                      className={`flex-1 py-1.5 rounded border text-xs font-mono transition-colors ${glassLook.sponsorTone === k ? '' : 'text-pb-faint border-transparent hover:border-pb-hairline'}`}
+                      style={glassLook.sponsorTone === k ? { borderColor: 'var(--pb-accent)', color: 'var(--pb-accent)' } : {}}>{label}</button>
+                  ))}
+                </div>
+                <p className="text-[11px] text-pb-faintest mb-4">Dark suits white logos, light suits dark ones. It sits behind the label and the logos.</p>
+
                 <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Players shown</label>
                 <div className="grid grid-cols-2 gap-3">
                   {[{ k: 'perfUs', label: `${team.name || 'Our'} panel` }, { k: 'perfThem', label: `${oppData.name || 'Their'} panel` }].map(({ k, label }) => (
