@@ -26,7 +26,7 @@ function ModuleName({ name }) {
   return <span className="font-display font-bold text-lg">{name}</span>
 }
 
-function ModuleTile({ mod, entitled, planRow, pendingKind, coreLive, canSubscribe, requesting, error, onStartTrial }) {
+function ModuleTile({ mod, entitled, websiteOnly, planRow, pendingKind, coreLive, canSubscribe, requesting, error, onStartTrial }) {
   const brand = moduleBrand(mod.key)
   // SUBSCRIBE deep-links to the Account page with this module pre-ticked. An
   // add-on requires BetterStats (Core) too, so when Core isn't live we tick it
@@ -68,9 +68,19 @@ function ModuleTile({ mod, entitled, planRow, pendingKind, coreLive, canSubscrib
             <img src={brand.logo} alt="" className="w-8 h-8 rounded-lg shrink-0" />
             <ModuleName name={mod.name} />
           </div>
-          <span className="text-2xl group-hover:translate-x-1 transition-transform" style={{ color: 'var(--pb-accent)' }}>→</span>
+          <span className="flex items-center gap-2 shrink-0">
+            {websiteOnly && (
+              <span className="font-mono text-[10px] tracking-wide2 text-pb-faint border pb-hairline rounded px-2 py-0.5 uppercase">Website only</span>
+            )}
+            <span className="text-2xl group-hover:translate-x-1 transition-transform" style={{ color: 'var(--pb-accent)' }}>→</span>
+          </span>
         </div>
         <div className="text-pb-faint text-sm mt-1">{mod.blurb}</div>
+        {websiteOnly && (
+          <p className="font-mono text-[10px] text-pb-faintest mt-2">
+            Your public website is included with BetterStats. BetterPosts is an add-on this club has not subscribed to.
+          </p>
+        )}
         {planRow?.status === 'subscribed' && (
           <p className="font-mono text-[10px] text-pb-faintest mt-2">
             Subscribed{planRow.renewal_date ? ` · renews ${fmtDate(planRow.renewal_date)}` : ''}
@@ -438,6 +448,10 @@ export default function AdminDashboard() {
                 // whose Core website is dark anyway). While Core is live,
                 // alwaysOpen keeps those two open and add-ons gate on their own.
                 entitled={coreLive && (tile.alwaysOpen || (tile.isGroup ? tile.members.some(m => hasModule(m.key)) : hasModule(tile.key)))}
+                // The BetterSocials hub is open to every club because the BetterStats (Core)
+                // Website lives in it. Say so when the club has NOT got the paid
+                // part, so the tile does not read as a subscription.
+                websiteOnly={coreLive && tile.alwaysOpen && billingKey === 'socials' && !hasModule(billingKey)}
                 planRow={planByModule[billingKey]}
                 pendingKind={pending?.kind}
                 coreLive={coreLive}

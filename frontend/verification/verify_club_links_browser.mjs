@@ -42,7 +42,7 @@ function meFor(state) {
     linked_clubs: state.role === 'club_admin' ? linked : [],
     can_switch_linked_clubs: state.role === 'club_admin' && linked.length > 1,
     acting_as_linked_club: state.role === 'club_admin' && state.linked && state.current !== 'c1',
-    entitlements: { modules: ['select'], status: 'active', billing_modules: [] }, capabilities: [],
+    entitlements: { modules: state.modules ?? ['select'], status: 'active', core_live: true, billing_modules: [] }, capabilities: [],
   }
 }
 
@@ -207,6 +207,34 @@ for (const [label, over] of [
   ck(`${label}: no header switcher`, (await page.getByTestId('linked-club-switcher').count()) === 0)
   ck(`${label}: no banner`, (await page.getByTestId('linked-club-banner').count()) === 0)
   ck(`${label}: nothing asked the server to switch`, !state.calls.some(c => c.p === '/auth/switch-club'))
+  await ctx.close()
+}
+
+// ── The BetterSocials hub is open to every club (the Core Website is in it) ──
+// A club without the paid module must not look as if it has subscribed.
+for (const [label, modules, expectTag] of [
+  ['a Core-only club', [], true],
+  ['a club that holds BetterSocials', ['socials'], false],
+]) {
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  const page = await ctx.newPage()
+  const state = makeState({ modules, current: 'c2' })
+  await stub(page, state)
+  await page.goto(`${BASE}/admin`)
+  await wait(page)
+  await page.waitForTimeout(400)
+  const tile = page.locator('a[href="/admin/bettersocials"]').filter({ hasText: 'BetterSocials' })
+  const tiles = await tile.count()
+  ck(`${label}: the BetterSocials tile is still there and opens the hub`, tiles >= 1, `${tiles}`)
+  const tagged = await page.getByText('Website only', { exact: false }).count()
+  ck(`${label}: ${expectTag ? 'the tile says Website only' : 'no Website only label'}`, expectTag ? tagged === 1 : tagged === 0, `${tagged}`)
+  const side = page.locator('aside a[href="/admin/bettersocials"]').first()
+  const title = (await side.getAttribute('title').catch(() => '')) || ''
+  const sideText = await side.innerText().catch(() => '')
+  ck(`${label}: ${expectTag ? 'the sidebar entry explains itself on hover' : 'the sidebar entry has no such note'}`,
+    expectTag ? /not subscribed/.test(title) : title === '', JSON.stringify(title))
+  ck(`${label}: the sidebar name is not squeezed`, /BetterSocials/.test(sideText), JSON.stringify(sideText))
+  if (expectTag) await page.screenshot({ path: `${SHOTS}/club-links-website-only.png` }).catch(() => {})
   await ctx.close()
 }
 

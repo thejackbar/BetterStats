@@ -622,11 +622,16 @@ export default function AdminLayout({ children }) {
                   </span>
                 )
                 if (mod.built && entitled) {
+                  // The BetterSocials hub is open to every club (the BetterStats Core Website
+                  // is in it); say so in a tooltip when the club has not got the paid
+                  // part. No text tag: the sidebar is too narrow and truncates the name.
+                  const websiteOnly = mod.alwaysOpen && (mod.billingKey || mod.key) === 'socials' && !hasModule('socials')
                   return (
                     <Link
                       key={mod.key}
                       to={mod.to}
                       onClick={() => setMobileOpen(false)}
+                      title={websiteOnly ? 'Your website is included. BetterPosts is an add-on this club has not subscribed to' : undefined}
                       className={`flex items-center gap-2 px-2 py-1.5 rounded transition-colors font-display font-bold text-[13px] text-pb-text ${
                         isActive(mod.to) ? 'bg-pb-surface2' : 'hover:bg-pb-surface2'
                       }`}
