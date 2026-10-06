@@ -23,3 +23,4 @@
 12. Every layout reserves a slot for the grid (`social/sponsorSlots.js`, `SPONSOR_SLOTS` per template file) and the editor places the grid in it. Only the scorecards draw sponsor logos of their own and get no grid (`nativeSponsors`). A new template needs a slot entry and a clear area, or the grid lands on its content.
 13. Removing the last sponsor grid from a post must go through `hRemove` (it confirms). A new delete path that calls `layer.remove` directly skips the warning.
 14. Prose follows the humanizer rules.
+15. A slot function may read `count` when the layout's bar depends on it (T12's white bar is 150, 175 or 235 tall). The editor then passes `sponsorCount` to the layout, and `pickSponsors` re-seats a grid still sitting in the old slot.

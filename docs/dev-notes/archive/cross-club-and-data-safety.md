@@ -864,7 +864,7 @@ I have not looked at the production logs for earlier use of either hole; a PATCH
 
 **Verified against a real Postgres** (`verify_player_route_access.py`, 11 checks: anonymous and signed-in rename refused, the club's own rename path still works, another club's profile unreadable and unwritable, an admin's own club's player still readable and editable, no login is 401, a removed person cannot be claimed while an ordinary profile still can) **with a control run** against the unfixed code: 5 fail on exactly those behaviours. Privacy 128, multi-squad 44, player kit 68, hide-juniors 67.
 
-## Linked clubs: a Club Admin can switch between clubs a Super Admin has linked (v9.106.31, migration 322)
+## Linked clubs: a Club Admin can switch between clubs a Super Admin has linked (v9.106.33, migration 322)
 
 **Asked for.** A Super Admin links two clubs. Their Club Admins then choose which club to work in from the dashboard. A club with no link sees nothing of it. Each club's own trials and subscription must bind a switched admin.
 

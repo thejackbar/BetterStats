@@ -53,30 +53,49 @@ def held_years_cte(games_where: str, player_pred) -> str:
     carries whichever club's season synced it first, and one real season is
     routinely several `seasons` rows. `player_pred(alias)` narrows the per-game
     tables to the player(s) asked about.
+
+    Both CTEs are MATERIALIZED and the game filter is an array, for speed.
+    `summary_only_seasons_clause` reads `held_years` from inside a correlated
+    NOT EXISTS, so left alone Postgres inlines the CTE and rebuilds the player's
+    whole game history once per season-stats row. Summer Hill's all-seasons
+    leaderboards did that 4,510 times at about 9ms each, 41s of a 43s query.
+    Materialising builds it once. `= ANY(ARRAY(SELECT ...))` evaluates the id
+    list once as an InitPlan and uses it as a bound array (the same shape as
+    `= ANY(CAST(:ids AS uuid[]))`), where `IN (SELECT ...)` against the CTE
+    became a nested loop that re-read it 165,000 times.
+
+    `held_years` never holds a NULL year, on purpose. `summary_only_seasons_clause`
+    reads it with an uncorrelated `(player_id, year) NOT IN (SELECT ...)` so
+    Postgres hashes it (a correlated NOT EXISTS against a materialised CTE scans
+    it once per season-stats row, 3.8s against 0.15s on a synthetic club), and
+    NOT IN is unknown, not true, when the list holds a NULL. A NULL-year game
+    could never have matched a season with a year anyway.
     """
+    held_ids = "ANY(ARRAY(SELECT id FROM held_games))"
     return f"""
-        held_games AS (
+        held_games AS MATERIALIZED (
             SELECT g.id, hs.year
             FROM v_effective_games g
             JOIN seasons hs ON hs.id = g.season_id
             WHERE {games_where}
-        ), held_years AS (
+        ), held_years AS MATERIALIZED (
             SELECT DISTINCT ap.player_id, hg.year
             FROM (
                 SELECT bi.player_id, bi.game_id FROM v_effective_batting_innings bi
-                 WHERE {player_pred('bi')} AND bi.game_id IN (SELECT id FROM held_games)
+                 WHERE {player_pred('bi')} AND bi.game_id = {held_ids}
                 UNION
                 SELECT bs.player_id, bs.game_id FROM v_effective_bowling_spells bs
-                 WHERE {player_pred('bs')} AND bs.game_id IN (SELECT id FROM held_games)
+                 WHERE {player_pred('bs')} AND bs.game_id = {held_ids}
                 UNION
                 SELECT fs.player_id, fs.game_id FROM v_effective_fielding_stats fs
-                 WHERE {player_pred('fs')} AND fs.game_id IN (SELECT id FROM held_games)
+                 WHERE {player_pred('fs')} AND fs.game_id = {held_ids}
                 UNION
                 SELECT ga.player_id, ga.game_id FROM game_appearances ga
-                 WHERE {player_pred('ga')} AND ga.game_id IN (SELECT id FROM held_games)
+                 WHERE {player_pred('ga')} AND ga.game_id = {held_ids}
                    AND {_APPEARANCE_PLAYED}
             ) ap
             JOIN held_games hg ON hg.id = ap.game_id
+            WHERE hg.year IS NOT NULL
         )"""
 
 
@@ -107,9 +126,8 @@ def summary_only_seasons_clause(scope: GradeScope, pss: str = "pss") -> str:
         AND COALESCE({pss}.matches, 0) <= {HISTORICAL_BUNDLE_MATCH_CAP}
         AND EXISTS (SELECT 1 FROM seasons ys
                      WHERE ys.id = {pss}.season_id AND ys.year IS NOT NULL
-                       AND NOT EXISTS (SELECT 1 FROM held_years hy
-                                        WHERE hy.player_id = {pss}.player_id
-                                          AND hy.year = ys.year))
+                       AND ({pss}.player_id, ys.year) NOT IN
+                           (SELECT hy.player_id, hy.year FROM held_years hy))
         AND NOT EXISTS (SELECT 1 FROM player_season_grade_stats sg
                          WHERE sg.player_id = {pss}.player_id
                            AND sg.season_id = {pss}.season_id
