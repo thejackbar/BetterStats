@@ -105,7 +105,7 @@ async def user_can_view_org_private(db: AsyncSession, user: User | None, org_id)
         return False
     if membership.role == "super_admin":
         return True
-    eff = _effective_club_id(membership, user)
+    eff = await effective_club_id(db, membership, user)
     return eff is not None and str(eff) == str(org_id)
 
 
@@ -199,18 +199,30 @@ async def require_onboarding_wizard_enabled(db: AsyncSession = Depends(get_db)) 
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
 
-def _effective_club_id(membership: ClubMembership | None, user: User) -> uuid.UUID | None:
+async def effective_club_id(db: AsyncSession, membership: ClubMembership | None, user: User) -> uuid.UUID | None:
     """The club a request is scoped to.
 
     Super admins are Better staff who manage every club, so they can "act as"
     any club via ``User.active_club_id`` (set through ``POST /auth/switch-club``).
-    Everyone else is pinned to the single club on their membership — the override
-    is ignored for non-super roles, so it can never widen a club admin's reach.
+
+    A club admin is pinned to the club on their membership, except that a Super
+    Admin may have linked that club to others (services/club_links.py): then they
+    can act in any club of the group, through the same column. The link is
+    checked on every request, so unlinking, deactivating or archiving the club
+    ends the switch at once and a stale ``active_club_id`` can never widen their
+    reach. Every other role is always pinned to the membership's club.
     """
     if membership is None:
         return None
-    if membership.role == "super_admin" and getattr(user, "active_club_id", None):
-        return user.active_club_id
+    active = getattr(user, "active_club_id", None)
+    if not active or active == membership.club_id:
+        return membership.club_id
+    if membership.role == "super_admin":
+        return active
+    if membership.role == "club_admin":
+        from app.services import club_links
+        if await club_links.can_switch_to(db, membership.club_id, active):
+            return active
     return membership.club_id
 
 
@@ -224,7 +236,7 @@ async def get_current_club(
     membership = result.scalar_one_or_none()
     if not membership:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No club membership found")
-    eff_id = _effective_club_id(membership, current_user)
+    eff_id = await effective_club_id(db, membership, current_user)
     acting_as_override = eff_id != membership.club_id
     # Eager-load per-module subscriptions so the entitlement gate enforces
     # read-time trial expiry exactly (see app/auth/modules.py).
@@ -573,8 +585,17 @@ async def _build_me(current_user: User, db: AsyncSession) -> dict:
     role = membership.role if membership else None
     caps = effective_capabilities(role, membership.capabilities if membership else None) if role else []
 
-    home_club = await db.get(Organisation, membership.club_id) if membership else None
-    eff_id = _effective_club_id(membership, current_user)
+    # Loaded WITH the subscription rows. For a club admin at their own club this
+    # is also the club entitlement_summary reads below, and a second db.get with
+    # eager-load options returns this cached copy without loading them, which
+    # skipped read-time trial expiry (an ended trial's module stayed listed until
+    # the daily sweep). A linked club is loaded fresh below, so without this a
+    # linked admin saw the correct, stricter plan and the club's own admin did not.
+    home_club = await db.get(
+        Organisation, membership.club_id,
+        options=[selectinload(Organisation.module_subscriptions)],
+    ) if membership else None
+    eff_id = await effective_club_id(db, membership, current_user)
     acting_as_override = bool(membership) and eff_id != membership.club_id
     # Eager-load per-module subscriptions so entitlement_summary can return each
     # module's status / renewal / trial end (and apply read-time trial expiry).
@@ -596,6 +617,20 @@ async def _build_me(current_user: User, db: AsyncSession) -> dict:
     is_super = role == "super_admin"
     acting = bool(is_super and home_club and club and club.id != home_club.id)
 
+    # Linked clubs (services/club_links.py): the clubs a Club Admin may work in
+    # because a Super Admin linked their club to them, home club first. Empty
+    # for everyone else, and for a club with no active link, which is what hides
+    # the switcher in the admin app. Super admins have the full switcher instead.
+    linked_clubs: list[dict] = []
+    if role == "club_admin" and membership is not None:
+        from app.services import club_links
+        linked_clubs = await club_links.switchable_clubs(db, membership.club_id)
+        for c in linked_clubs:
+            c["is_current"] = c["id"] == str(eff_id)
+    acting_linked = bool(
+        role == "club_admin" and membership is not None and eff_id and eff_id != membership.club_id
+    )
+
     return {
         "id": str(current_user.id),
         "username": current_user.username,
@@ -615,6 +650,11 @@ async def _build_me(current_user: User, db: AsyncSession) -> dict:
         "home_club_id": str(membership.club_id) if membership else None,
         "home_club_name": home_club.name if home_club else None,
         "acting_as_club": acting,
+        # Club Admin of linked clubs: the group they can switch between and
+        # whether they are currently working in one other than their home club.
+        "linked_clubs": linked_clubs,
+        "can_switch_linked_clubs": bool(linked_clubs),
+        "acting_as_linked_club": acting_linked,
         # The club's primary/owner admin gate: only the primary may request a paid
         # module subscription (any club_admin may request a trial). True for a super
         # admin so the UI never blocks them.
@@ -641,17 +681,22 @@ async def switch_club(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Super-admin-only: re-scope the whole admin app to another club.
+    """Re-scope the whole admin app to another club.
 
-    Persists the choice on the user row so every subsequent club-scoped request
+    A super admin may pick any club. A club admin may pick a club a Super Admin
+    has linked to their own (services/club_links.py), or their home club. The
+    choice is persisted on the user row so every subsequent club-scoped request
     (and a page reload) resolves to the acted-as club until they switch again.
     """
+    from app.services import club_links
+
     result = await db.execute(
         select(ClubMembership).where(ClubMembership.user_id == current_user.id)
     )
     membership = result.scalar_one_or_none()
-    if not membership or membership.role != "super_admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only super admins can switch clubs")
+    if not membership or membership.role not in ("super_admin", "club_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only club admins and super admins can switch clubs")
+    is_super = membership.role == "super_admin"
 
     if not data.club_id:
         current_user.active_club_id = None
@@ -660,9 +705,14 @@ async def switch_club(
             target_id = uuid.UUID(data.club_id)
         except ValueError:
             raise HTTPException(status_code=422, detail="Invalid club id")
-        target = await db.get(Organisation, target_id)
-        if not target:
-            raise HTTPException(status_code=404, detail="Club not found")
+        if is_super:
+            target = await db.get(Organisation, target_id)
+            if not target:
+                raise HTTPException(status_code=404, detail="Club not found")
+        elif target_id != membership.club_id and not await club_links.can_switch_to(db, membership.club_id, target_id):
+            # One answer for "not linked", "inactive", "archived" and "no such
+            # club", so this cannot be used to probe which clubs exist.
+            raise HTTPException(status_code=403, detail="That club is not linked to yours")
         # Acting as the home club is just the cleared state — keep it NULL so
         # acting_as_club reads false.
         current_user.active_club_id = None if target_id == membership.club_id else target_id

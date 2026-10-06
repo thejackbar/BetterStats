@@ -91,6 +91,9 @@ SHARED_DDL_MODULES = (
     ("app.services.section_names_ddl", "STATEMENTS"),
     # Migration 320. `organisations.post_sponsor_defaults`, on the shared Organisation model.
     ("app.services.post_sponsors_ddl", "STATEMENTS"),
+    # Migration 322. `club_links`: the shared `/auth/me` reads it for a Club
+    # Admin, so the football database needs the (empty) table.
+    ("app.services.club_link_ddl", "STATEMENTS"),
 )
 
 

@@ -20,15 +20,27 @@ from app.services import grade_scope
 
 
 async def _user_can_manage_reports(db: AsyncSession, user: User, club: Organisation) -> bool:
-    """True when the user has the MANAGE_REPORTS capability on this club."""
+    """True when the user has the MANAGE_REPORTS capability on this club.
+
+    A user has one membership, at their home club. Anywhere else the request's
+    club is an acted-as one: a super admin may act in any club, and a club admin
+    in a club a Super Admin has linked to theirs (services/club_links.py). Both
+    imply every capability. (This used to read ``user.role``, which does not
+    exist on the User model, so it raised for anyone outside their home club.)"""
     row = await db.execute(
-        select(ClubMembership)
-        .where(ClubMembership.user_id == user.id, ClubMembership.club_id == club.id)
+        select(ClubMembership).where(ClubMembership.user_id == user.id)
     )
     m = row.scalar_one_or_none()
     if not m:
-        return user.role in PRIVILEGED_ROLES
-    return membership_has_capability(m.role, m.capabilities, MANAGE_REPORTS)
+        return False
+    if m.club_id == club.id:
+        return membership_has_capability(m.role, m.capabilities, MANAGE_REPORTS)
+    if m.role == "super_admin":
+        return True
+    if m.role == "club_admin":
+        from app.services import club_links
+        return await club_links.covers_club(db, m.club_id, club.id)
+    return False
 
 
 router = APIRouter(prefix="/statlab", tags=["statlab"])

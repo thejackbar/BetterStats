@@ -459,7 +459,7 @@ def require_module(module: str):
     # Imports kept inside the closure to avoid a circular import — auth.py
     # imports from models.db, which would otherwise re-import this module at
     # startup (same pattern as require_cap).
-    from app.routers.auth import get_current_user
+    from app.routers.auth import get_current_user, effective_club_id
     from app.models.db import ClubMembership, Organisation, User, get_db
     from sqlalchemy.orm import selectinload
 
@@ -473,14 +473,20 @@ def require_module(module: str):
         membership = row.scalar_one_or_none()
         if not membership:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No club membership found")
+        # Super admins operate cross-club, never gated by a single club's modules.
+        # (Their gate has always read the home club; unchanged.)
+        # A club admin working in a linked club is gated by THAT club's modules,
+        # the one get_current_club scopes the request's data to, never the home
+        # club's: effective_club_id is the single answer to "which club".
+        gate_id = membership.club_id if membership.role == "super_admin" \
+            else await effective_club_id(db, membership, current_user)
         # Eager-load the per-module rows so read-time trial expiry is exact.
         club = await db.get(
-            Organisation, membership.club_id,
+            Organisation, gate_id,
             options=[selectinload(Organisation.module_subscriptions)],
         )
         if club is None:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Club not found")
-        # Super admins operate cross-club, never gated by a single club's modules.
         if membership.role == "super_admin":
             return club
         if not org_has_module(club, module):
