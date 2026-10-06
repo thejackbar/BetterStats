@@ -4,7 +4,7 @@ from typing import Optional
 from datetime import date as date_cls
 import uuid
 
-from app.services import milestone_scan
+from app.services import milestone_rules, milestone_scan
 from app.services.club_grades import club_game_clause, club_game_sql
 from app.services.summary_only_seasons import (
     HISTORICAL_BUNDLE_MATCH_CAP,
@@ -3159,6 +3159,15 @@ async def get_recently_achieved_milestones_for_org(
         10, 25, 50, 75, 100, 150, 200, 250, 300, 400, 500,
         600, 700, 800, 900, 1000, 1500, 2000, 2500, 3000, 4000, 5000,
     ]
+    # A club that picked its own increments (Milestones screen) sees those
+    # rungs here too. A club on the default keeps the list above, which carries
+    # smaller rungs the other screens hide; changing it would change every
+    # default club's recent list on deploy.
+    _scheme = await milestone_rules.load_scheme(session, org_id)
+    if _scheme.runs_step != milestone_rules.DEFAULT_RUNS_STEP:
+        RUN_MILESTONES = list(range(_scheme.runs_step, 50001, _scheme.runs_step))
+    if _scheme.wickets_step != milestone_rules.DEFAULT_WICKETS_STEP:
+        WICKET_MILESTONES = list(range(_scheme.wickets_step, 5001, _scheme.wickets_step))
     MATCH_MILESTONES = [10, 25, 50, 100, 150, 200, 250, 300, 400, 500, 750, 1000]
     CATCH_MILESTONES = [10, 25, 50, 100, 150, 200, 300, 400, 500, 750, 1000, 1500, 2000]
 

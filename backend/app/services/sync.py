@@ -2795,7 +2795,8 @@ async def sync_grassroots_game_level_data(
 
 
 async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: uuid.UUID,
-                              *, reconcile: bool = False, dry_run: bool = False) -> dict:
+                              *, reconcile: bool = False, dry_run: bool = False,
+                              catch_up: bool = False) -> dict:
     """Bring the stored career milestones into line with the player's figures.
 
     The figures are the ones the player's own profile opens on
@@ -2816,6 +2817,11 @@ async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: u
     read as a career of nothing. A threshold still reached keeps its original
     ``achieved_at``.
 
+    ``catch_up`` writes every addition undated, whatever the player has played
+    lately. A club changing its milestone increments gets the rungs the new
+    step adds (250, 500 and 750 runs for a player already past 1,000) filled in
+    as history; they must not be dated today and announced as just reached.
+
     ``dry_run`` reports without writing. Returns ``{"added": [...], "removed":
     [...], "dated": [...]}``, each item ``(player_id, type, value)``; ``dated`` is
     the additions written with today's date, which the notification scan will
@@ -2823,7 +2829,7 @@ async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: u
     """
     from sqlalchemy import text
     from app.services import milestone_totals
-    from app.services.milestone_rules import crossed_thresholds
+    from app.services.milestone_rules import crossed_thresholds, load_scheme
 
     detail_fmt = {
         "runs":    lambda v: f"{v:,} career runs",
@@ -2879,6 +2885,7 @@ async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: u
     """), {"pids": ids, "org": str(org_id)})).mappings().all()
     before = {r["pid"]: r for r in before_rows}
 
+    scheme = await load_scheme(session, org_id)
     today = date.today()
     remove_ids = []
     pending: list[tuple[str, str, int, bool]] = []  # (pid, type, threshold, before-season)
@@ -2888,7 +2895,7 @@ async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: u
         have = existing.get(pid, {})
         for mt in ("runs", "wickets", "matches", "catches"):
             current = max(int(totals.get(mt) or 0), int(career.get(mt) or 0))
-            for threshold in crossed_thresholds(mt, current):
+            for threshold in crossed_thresholds(mt, current, scheme):
                 if (mt, threshold) in have:
                     continue
                 pending.append((pid, mt, threshold,
@@ -2915,7 +2922,7 @@ async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: u
     # cannot change the answer to "played in the last three weeks".
     from app.services.notification_scan import LOOKBACK_DAYS
     recent_from = today - timedelta(days=LOOKBACK_DAYS)
-    ask = sorted({pid for pid, _, _, hist in pending if not hist})
+    ask = [] if catch_up else sorted({pid for pid, _, _, hist in pending if not hist})
     last_played: dict = {}
     if ask:
         last_played = {r[0]: r[1] for r in (await session.execute(text("""
@@ -2946,7 +2953,7 @@ async def _compute_milestones(session: AsyncSession, player_ids: list, org_id: u
     for pid, mt, threshold, hist in pending:
         report["added"].append((pid, mt, threshold))
         played = last_played.get(pid)
-        historical = hist or played is None or played < recent_from
+        historical = catch_up or hist or played is None or played < recent_from
         if not historical:
             report["dated"].append((pid, mt, threshold))
         if not dry_run:

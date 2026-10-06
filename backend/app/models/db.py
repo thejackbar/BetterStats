@@ -373,6 +373,10 @@ class Organisation(Base):
     # services/stats_display.py, never directly.
     stats_min_rate_innings = Column(Integer, nullable=True)
     stats_min_rate_spells = Column(Integer, nullable=True)
+    # A club's own run and wicket milestone increments (migration 321). NULL is
+    # the default scheme. Read through services/milestone_rules.load_scheme.
+    milestone_runs_step = Column(Integer, nullable=True)
+    milestone_wickets_step = Column(Integer, nullable=True)
     # ─── AFL — optional public leaderboard categories (migration 217) ────────
     # Games and Goals are always shown; a club decides whether Best on Ground
     # and its two vote-tally leaderboards (Club/Competition Best & Fairest —

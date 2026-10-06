@@ -5,6 +5,8 @@ import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import { useClub } from '../../hooks/useClub'
 import { normalizeGender } from '../../lib/playerAttributes'
 import MilestoneSplitNote from '../../components/MilestoneSplitNote'
+import { useAuth } from '../../contexts/AuthContext'
+import { CAP } from '../../lib/capabilities'
 
 const CAT_LABELS = {
   batting: 'BATTING',
@@ -44,6 +46,41 @@ function CatBadge({ cat }) {
   )
 }
 
+// What a step looks like in play, for the line under each picker. The default
+// carries an extra first rung (500 runs, 50 wickets); every other step is a
+// plain multiple of itself.
+function ladderText(stat, step) {
+  const first = stat === 'runs' ? (step === 1000 ? [500, 1000, 2000, 3000] : [step, step * 2, step * 3, step * 4])
+    : (step === 100 ? [50, 100, 200, 300] : [step, step * 2, step * 3, step * 4])
+  return `${first.map(n => n.toLocaleString()).join(', ')}…`
+}
+
+function StepPicker({ label, stat, value, options, onChange, disabled }) {
+  return (
+    <div>
+      <p className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase mb-1.5">{label}</p>
+      <div className="flex border pb-hairline rounded overflow-hidden w-fit">
+        {options.map(opt => (
+          <button
+            key={opt}
+            type="button"
+            disabled={disabled}
+            onClick={() => onChange(opt)}
+            aria-pressed={value === opt}
+            className={`px-3 py-1.5 font-mono text-[10px] tracking-wide2 transition-colors disabled:opacity-50 ${
+              value === opt ? 'bg-pb-surface2' : 'text-pb-faint hover:text-pb-text'
+            }`}
+            style={value === opt ? { color: 'var(--pb-accent)' } : {}}
+          >
+            {opt.toLocaleString()}
+          </button>
+        ))}
+      </div>
+      <p className="text-pb-faintest text-xs mt-1.5">{ladderText(stat, value)}</p>
+    </div>
+  )
+}
+
 function ProgressBar({ current, target }) {
   const pct = Math.min(100, Math.round((current / target) * 100))
   return (
@@ -69,6 +106,10 @@ export default function AdminMilestones() {
 
   const { club } = useClub()
   const slug = club?.slug
+  const { hasCapability } = useAuth()
+  const canPickSteps = hasCapability(CAP.MANAGE_MILESTONES)
+  const [savingStep, setSavingStep] = useState(false)
+  const [stepError, setStepError] = useState(null)
 
   useEffect(() => {
     setLoading(true)
@@ -76,6 +117,26 @@ export default function AdminMilestones() {
       .then(d => { setData(d); setLoading(false) })
       .catch(e => { setError(e.message); setLoading(false) })
   }, [])
+
+  const loadReport = () => api.adminGetMilestones().then(d => { setData(d); return d })
+
+  // Saving fills in the rungs the new step adds on the server, in the
+  // background, so the list is read again straight away and once more shortly
+  // after. A club on a large history may see the first read without the new
+  // rungs; the second picks them up.
+  const changeStep = async (key, value) => {
+    setSavingStep(true)
+    setStepError(null)
+    try {
+      await api.adminSetMilestoneScheme({ [key]: value })
+      await loadReport()
+      setTimeout(() => { loadReport().catch(() => {}) }, 4000)
+    } catch (e) {
+      setStepError(e.message)
+    } finally {
+      setSavingStep(false)
+    }
+  }
 
   const { upcomingFiltered, achievedFiltered } = useMemo(() => {
     if (!data) return { upcomingFiltered: [], achievedFiltered: [] }
@@ -109,6 +170,39 @@ export default function AdminMilestones() {
           <h1 className="font-display font-bold text-2xl text-pb-text mb-1">Milestones</h1>
           <p className="text-pb-faint text-sm">Upcoming and achieved milestones across all club members.</p>
         </div>
+
+        {/* Which milestones the club tracks. Applies to the Milestones page the
+            public sees, the dashboard, player profiles and the milestone emails. */}
+        {data?.scheme && (
+          <div className="pb-card px-4 py-4 mb-6">
+            <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Milestones tracked</p>
+            <p className="text-pb-faint text-sm mb-3">
+              Choose how often a run or wicket milestone is marked. Matches and catches stay at every 50.
+            </p>
+            <div className="flex flex-wrap gap-x-8 gap-y-4">
+              <StepPicker
+                label="Runs, every"
+                stat="runs"
+                value={data.scheme.runs_step}
+                options={data.scheme_options.runs_steps}
+                onChange={v => changeStep('runs_step', v)}
+                disabled={!canPickSteps || savingStep}
+              />
+              <StepPicker
+                label="Wickets, every"
+                stat="wickets"
+                value={data.scheme.wickets_step}
+                options={data.scheme_options.wickets_steps}
+                onChange={v => changeStep('wickets_step', v)}
+                disabled={!canPickSteps || savingStep}
+              />
+            </div>
+            {!canPickSteps && (
+              <p className="text-pb-faintest text-xs mt-3">You need the Milestones permission to change these.</p>
+            )}
+            {stepError && <p className="text-red-400 text-sm mt-3">{stepError}</p>}
+          </div>
+        )}
 
         {/* Filter bar */}
         <div className="flex flex-wrap items-center gap-3 mb-6">

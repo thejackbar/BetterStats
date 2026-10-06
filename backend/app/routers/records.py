@@ -1761,9 +1761,11 @@ async def get_records_milestones(
     themselves are not.
     """
     from app.services.milestone_rules import (
-        next_threshold, reach_window, crossed_thresholds, is_displayable,
+        next_threshold, reach_window, crossed_thresholds, is_displayable, load_scheme,
     )
     from app.services import milestone_scan
+
+    scheme = await load_scheme(db, org_id)
 
     _CAT = {
         "runs": "batting", "wickets": "bowling", "catches": "fielding", "matches": "matches",
@@ -1796,7 +1798,7 @@ async def get_records_milestones(
         for r in ach_rows.mappings().all():
             mt = r["milestone_type"]
             mv = r["milestone_value"]
-            if not is_displayable(mt, mv):
+            if not is_displayable(mt, mv, scheme):
                 continue
             achieved.append({
                 "player_id": r["player_id"],
@@ -1909,7 +1911,7 @@ async def get_records_milestones(
             rows = await db.execute(text(sql), params)
             for r in rows.mappings().all():
                 n = int(r["total"])
-                for threshold in crossed_thresholds(mt, n):
+                for threshold in crossed_thresholds(mt, n, scheme):
                     achieved.append({
                         "player_id": r["player_id"],
                         "player_name": r["player_name"],
@@ -1922,11 +1924,11 @@ async def get_records_milestones(
                     })
                 if r["player_id"] not in active_ids:
                     continue
-                target = next_threshold(mt, n)
+                target = next_threshold(mt, n, scheme)
                 if target is None:
                     continue
                 needed = target - n
-                if needed > reach_window(mt, target):
+                if needed > reach_window(mt, target, scheme):
                     continue
                 upcoming.append({
                     "player_id": r["player_id"],

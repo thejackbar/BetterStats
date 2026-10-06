@@ -521,9 +521,11 @@ async def player_trend(
     fielding = await get_career_fielding(session, player_id, scope=scope_obj)
 
     # Next milestones from career totals.
+    scheme = await milestone_rules.load_scheme(session, org_id)
+
     def _milestone(mt: str, category: str, current: int | None):
         cur = int(current or 0)
-        target = milestone_rules.next_threshold(mt, cur)
+        target = milestone_rules.next_threshold(mt, cur, scheme)
         if not target:
             return None
         return {"type": mt, "category": category, "current": cur,

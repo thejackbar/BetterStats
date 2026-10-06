@@ -1930,6 +1930,10 @@ export const api = {
   adminClearResolvedSyncRequests: () =>
     request('/club-admin/sync-requests/resolved', { method: 'DELETE' }),
   adminGetMilestones: () => request('/club-admin/milestones'),
+  // Body keys are optional: a key left out leaves that increment alone, null
+  // puts it back to the default.
+  adminSetMilestoneScheme: (body) =>
+    request('/club-admin/milestones/scheme', { method: 'PUT', body: JSON.stringify(body) }),
   // Seasons where Cricket Australia's figures no longer match ours — written
   // by the monthly drift check, since the scheduled sync only pulls recent
   // fixtures and never revisits older seasons on its own.

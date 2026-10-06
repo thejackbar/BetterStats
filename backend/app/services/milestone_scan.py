@@ -39,7 +39,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services import milestone_totals
-from app.services.milestone_rules import crossed_thresholds, next_threshold, reach_window
+from app.services.milestone_rules import (
+    Scheme, crossed_thresholds, load_scheme, next_threshold, reach_window,
+)
 
 # Current year and the two before it. A season with no year at all is kept —
 # an unknown date is not evidence the player has stopped playing.
@@ -103,17 +105,17 @@ async def active_player_totals(session: AsyncSession, org_id: str) -> list[dict]
     return people
 
 
-def _in_reach(stat: str, current: int):
-    target = next_threshold(stat, current)
+def _in_reach(stat: str, current: int, scheme: Scheme | None = None):
+    target = next_threshold(stat, current, scheme)
     if target is None:
         return None
     needed = target - current
-    if needed > reach_window(stat, target):
+    if needed > reach_window(stat, target, scheme):
         return None
     return target, needed
 
 
-def upcoming_from_totals(rows: list[dict]) -> list[dict]:
+def upcoming_from_totals(rows: list[dict], scheme: Scheme | None = None) -> list[dict]:
     """One entry per (player, stat) whose next threshold is within reach.
 
     Unsorted — the callers disagree about the order on purpose. The reports
@@ -146,7 +148,7 @@ def upcoming_from_totals(rows: list[dict]) -> list[dict]:
                 if w != wo:
                     extra = {"junior_split": {"with_junior": w, "without_junior": wo},
                              "counts": r.get("counts")}
-            hit = _in_reach(stat, current)
+            hit = _in_reach(stat, current, scheme)
             if hit:
                 out.append({**base, **extra, "current": current,
                             "target": hit[0], "needed": hit[1]})
@@ -156,7 +158,7 @@ def upcoming_from_totals(rows: list[dict]) -> list[dict]:
                 other = extra["junior_split"][basis]
                 if other == current:
                     continue
-                o = _in_reach(stat, other)
+                o = _in_reach(stat, other, scheme)
                 if not o or (hit and o[0] == hit[0]):
                     continue
                 out.append({**base, **extra, "current": other, "target": o[0],
@@ -166,7 +168,10 @@ def upcoming_from_totals(rows: list[dict]) -> list[dict]:
 
 async def upcoming_career_milestones(session: AsyncSession, org_id: str) -> list[dict]:
     """The club's in-reach career milestones, unsorted."""
-    return upcoming_from_totals(await active_player_totals(session, org_id))
+    return upcoming_from_totals(
+        await active_player_totals(session, org_id),
+        await load_scheme(session, org_id),
+    )
 
 
 # ─── Grade-level milestones, every grade at once ─────────────────────────────
@@ -247,6 +252,7 @@ async def grade_milestones(session: AsyncSession, org_id: str, *,
     reach. Each row carries ``grade`` (the name the club reads) and
     ``grade_key`` (a stable, case-folded key for de-duplication).
     """
+    scheme = await load_scheme(session, org_id)
     cutoff_year = datetime.date.today().year - ACTIVE_SEASON_YEARS
     people = (await session.execute(text("""
         SELECT p.id::text AS player_id,
@@ -307,16 +313,16 @@ async def grade_milestones(session: AsyncSession, org_id: str, *,
             "grade": labels.get(name) or name,
             "grade_key": (name or "").strip().lower(),
         }
-        earlier = set(crossed_thresholds(mt, before))
-        for threshold in crossed_thresholds(mt, total):
+        earlier = set(crossed_thresholds(mt, before, scheme))
+        for threshold in crossed_thresholds(mt, total, scheme):
             if threshold not in earlier:
                 out["achieved"].append({**base, "milestone_value": threshold,
                                         "current": total})
         last = r["last_played"]
         if last is None or last < still_playing_from:
             continue
-        target = next_threshold(mt, total)
-        if target is None or target - total > reach_window(mt, target):
+        target = next_threshold(mt, total, scheme)
+        if target is None or target - total > reach_window(mt, target, scheme):
             continue
         out["upcoming"].append({**base, "current": total, "target": target,
                                 "needed": target - total})

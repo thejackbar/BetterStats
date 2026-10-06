@@ -27,6 +27,7 @@ from app.routers.auth import get_current_user, get_current_club, require_super_a
 from app.auth.capabilities import (
     require_cap, effective_capabilities, ALL_CAPABILITIES,
     MANAGE_SETTINGS, MANAGE_MERGES, MANAGE_USERS, MANAGE_SPONSORS, RUN_HARD_REFRESH, RUN_SYNC,
+    MANAGE_MILESTONES,
 )
 from app.auth.modules import (
     ALL_MODULES, MANAGED_MODULES, ALL_STATUSES, ALL_BILLING_CYCLES, org_entitled_modules,
@@ -34,6 +35,7 @@ from app.auth.modules import (
     BILLABLE_MODULES, BILLABLE_MODULE_NAMES, billing_key_for, STATUS_PRIORITY,
 )
 from app.services import junior_hiding
+from app.services.milestone_rules import RUNS_STEPS, WICKETS_STEPS
 from app.services import sponsor_tiers
 from app.services import section_names
 from app.services import post_sponsors
@@ -6237,11 +6239,12 @@ async def list_milestones_report(
     """
     import datetime
     from app.services.milestone_rules import (
-        next_threshold, reach_window, crossed_thresholds, is_displayable,
+        next_threshold, reach_window, crossed_thresholds, is_displayable, load_scheme,
     )
     from app.services import milestone_scan
 
     org_id = str(club.id)
+    scheme = await load_scheme(db, org_id)
     _CAT = {
         "runs": "batting",
         "wickets": "bowling",
@@ -6272,7 +6275,7 @@ async def list_milestones_report(
     for r in ach_rows.mappings().all():
         mt = r["milestone_type"]
         mv = r["milestone_value"]
-        if not is_displayable(mt, mv):
+        if not is_displayable(mt, mv, scheme):
             continue
         achieved.append({
             "player_id": r["player_id"],
@@ -6415,4 +6418,83 @@ async def list_milestones_report(
 
     upcoming.sort(key=lambda m: m["needed"])
 
-    return {"upcoming": upcoming, "achieved": achieved}
+    return {
+        "upcoming": upcoming,
+        "achieved": achieved,
+        "scheme": {"runs_step": scheme.runs_step, "wickets_step": scheme.wickets_step},
+        "scheme_options": {"runs_steps": list(RUNS_STEPS), "wickets_steps": list(WICKETS_STEPS)},
+    }
+
+
+class MilestoneSchemeUpdate(BaseModel):
+    runs_step: Optional[int] = None
+    wickets_step: Optional[int] = None
+
+
+async def _fill_milestone_rungs(org_id) -> None:
+    """Write the rungs a new increment adds, as history. Own session, never raises.
+
+    Runs after the caller's commit (rule 14): a club changing its increments
+    must not see an error because a rebuild over every player failed. A sync
+    fills the same rows on its next run, so a failure here costs a delay only.
+    """
+    try:
+        from app.models.db import async_session_maker
+        from app.services.sync import _compute_milestones
+        async with async_session_maker() as session:
+            ids = [r[0] for r in (await session.execute(
+                _text("SELECT id::text FROM players WHERE organisation_id = CAST(:org AS uuid)"
+                      " AND is_player = TRUE"), {"org": str(org_id)}))]
+            await _compute_milestones(session, ids, org_id, catch_up=True)
+    except Exception:
+        _logging.getLogger(__name__).exception("milestone scheme backfill failed for %s", org_id)
+
+
+@router.put("/milestones/scheme")
+async def update_milestone_scheme(
+    data: MilestoneSchemeUpdate,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(require_cap(MANAGE_MILESTONES)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Pick the club's run and wicket milestone increments.
+
+    A key that is not sent leaves that increment alone; an explicit null puts it
+    back to the default. A value the screen does not offer is refused, not
+    quietly mapped to the default. Stored rows are never deleted: a rung the new
+    step does not use is hidden by ``is_displayable`` and returns if the club
+    picks that step again. Rungs the new step adds are filled in, undated.
+    """
+    from app.services.audit_log import log_activity
+    from app.services.milestone_rules import clean_runs_step, clean_wickets_step
+
+    before = (club.milestone_runs_step, club.milestone_wickets_step)
+    fields = data.model_fields_set
+    if "runs_step" in fields:
+        if data.runs_step is not None and data.runs_step not in RUNS_STEPS:
+            raise HTTPException(status_code=422,
+                                detail=f"Runs step must be one of {', '.join(map(str, RUNS_STEPS))}")
+        club.milestone_runs_step = data.runs_step
+    if "wickets_step" in fields:
+        if data.wickets_step is not None and data.wickets_step not in WICKETS_STEPS:
+            raise HTTPException(status_code=422,
+                                detail=f"Wickets step must be one of {', '.join(map(str, WICKETS_STEPS))}")
+        club.milestone_wickets_step = data.wickets_step
+
+    changed = before != (club.milestone_runs_step, club.milestone_wickets_step)
+    await db.commit()
+    await db.refresh(club)
+    saved = {
+        "runs_step": clean_runs_step(club.milestone_runs_step),
+        "wickets_step": clean_wickets_step(club.milestone_wickets_step),
+    }
+    if changed:
+        # After the commit: a failed audit write must not undo the club's choice.
+        await log_activity(
+            db, org_id=club.id, user_id=current_user.id,
+            action="update_milestone_scheme", target_type="organisation",
+            target_id=str(club.id), details=saved, commit=True,
+        )
+        background_tasks.add_task(_fill_milestone_rungs, club.id)
+    return saved

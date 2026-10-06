@@ -45,7 +45,7 @@ from app.models.db import Organisation, async_session_maker
 from app.services import email_service, milestone_scan
 from app.services import notification_events as ev
 from app.services import notifications as notif
-from app.services.milestone_rules import is_displayable
+from app.services.milestone_rules import is_displayable, load_scheme
 from app.services.session_safety import rollback_keeping
 
 logger = logging.getLogger(__name__)
@@ -76,6 +76,7 @@ _MILESTONE_STAT_LABELS = {
 
 async def _src_milestone_achieved(session: AsyncSession, org_id, config: dict) -> list[dict]:
     cutoff = date.today() - timedelta(days=LOOKBACK_DAYS)
+    scheme = await load_scheme(session, org_id)
     rows = (await session.execute(text("""
         SELECT m.player_id, m.milestone_type, m.milestone_value, m.achieved_at,
                COALESCE(p.display_name_override, p.name) AS player_name
@@ -92,7 +93,7 @@ async def _src_milestone_achieved(session: AsyncSession, org_id, config: dict) -
         # The stored table keeps smaller, retired thresholds (10 matches, 100
         # runs) that no screen draws any more. Announcing one would be telling a
         # club about a milestone its own Records page does not recognise.
-        if not is_displayable(r["milestone_type"], r["milestone_value"]):
+        if not is_displayable(r["milestone_type"], r["milestone_value"], scheme):
             continue
         stat = _MILESTONE_STAT_LABELS.get(r["milestone_type"], r["milestone_type"])
         out.append({

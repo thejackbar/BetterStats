@@ -40,7 +40,7 @@ from app.services.aggregations import (
     _club_game_clause,
 )
 from app.services.milestone_rules import (
-    crossed_thresholds, is_displayable, next_threshold, reach_window,
+    crossed_thresholds, is_displayable, load_scheme, next_threshold, reach_window,
 )
 from app.services import iq_teammates
 from app.services import milestone_totals
@@ -684,11 +684,12 @@ async def get_player_milestones_endpoint(player_id: str, db: AsyncSession = Depe
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
     rows = await get_player_milestones(db, player_id)
-    # Filter out pre-existing rows that don't match the current threshold scheme
+    # Filter out pre-existing rows that don't match the club's threshold scheme
     # (10/25 matches, 100/250 runs, etc.) — they stay in the DB, just hidden.
+    scheme = await load_scheme(db, player.organisation_id)
     milestones = [
         _str_keys(r) for r in rows
-        if is_displayable(r["milestone_type"], r["milestone_value"])
+        if is_displayable(r["milestone_type"], r["milestone_value"], scheme)
     ]
 
     # Append computed per-grade match milestones (not stored in DB).
@@ -759,7 +760,8 @@ async def get_player_upcoming_milestones(player_id: str, db: AsyncSession = Depe
         }
         for stat, _cat, col in milestone_scan.STAT_DEFS:
             row[col] = int((t.get("totals") or {}).get(stat) or 0)
-        for m in milestone_scan.upcoming_from_totals([row]):
+        for m in milestone_scan.upcoming_from_totals(
+                [row], await load_scheme(db, player.organisation_id)):
             upcoming.append({k: m[k] for k in (
                 "type", "current", "target", "needed", "junior_split", "counts", "variant",
             ) if k in m})

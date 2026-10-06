@@ -4409,6 +4409,13 @@ async def lifespan(app: FastAPI):
         for _stmt in _POST_SPONSORS_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 321: a club's own run and wicket milestone increments.
+        # Same one-copy rule: this list and alembic's 321 both run
+        # services/milestone_scheme_ddl.STATEMENTS.
+        from app.services.milestone_scheme_ddl import STATEMENTS as _MILESTONE_SCHEME_DDL
+        for _stmt in _MILESTONE_SCHEME_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 312: super-admin messages on the club admin dashboard.
         # Same one-copy rule: this and alembic's 312 both run
         # services/admin_broadcast_ddl.STATEMENTS.
