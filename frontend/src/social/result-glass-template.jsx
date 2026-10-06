@@ -23,7 +23,9 @@ import { mixHex } from './split-template'
 import { aspectOf, pick } from './postAspect'
 import { LayerRoot } from './postLayers'
 
-const FONT = "'Hanken Grotesk', 'Inter', sans-serif"
+// The club's chosen display face and weight (Style, Font in the editor).
+const FONT = "var(--social-display-font, 'Hanken Grotesk', 'Inter', sans-serif)"
+const BOLD = 'var(--social-display-font-weight, 800)'
 const GOLD = '#f2d94e'
 
 export const GLASS_POSITIONS = [
@@ -227,12 +229,12 @@ export function ResultGlass({
           <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: Math.round(10 * s) }}>
             <div style={{ minWidth: 0, flexShrink: 1 }}>
               <AutoFitText text={String(t.name || '').toUpperCase()} max={teamFs} min={12} lines={1} measureDeps={[teamFs, ...fitKey]}
-                style={{ fontWeight: win ? 800 : 500, letterSpacing: 0.4, lineHeight: 1.1, color: '#fff' }} />
+                style={{ fontWeight: win ? BOLD : 500, letterSpacing: 0.4, lineHeight: 1.1, color: '#fff' }} />
             </div>
             {win && <Trophy size={Math.round(22 * s)} />}
           </div>
           {score && (
-            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'baseline', gap: Math.round(5 * s), fontWeight: win ? 800 : 500, color: '#fff' }}>
+            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'baseline', gap: Math.round(5 * s), fontWeight: win ? BOLD : 500, color: '#fff' }}>
               <span style={{ fontSize: Math.round(31 * s), lineHeight: 1, letterSpacing: 0.3 }}>{score}</span>
               {t.overs ? <span style={{ fontSize: Math.round(14 * s), fontWeight: 500, opacity: 0.7 }}>({t.overs})</span> : null}
             </div>
@@ -251,11 +253,11 @@ export function ResultGlass({
                   <AutoFitText max={nameFs} min={11} lines={1} measureDeps={[p.n, p.first, p.sn, nameFs, ...fitKey]}
                     style={{ lineHeight: 1.1, letterSpacing: 0.2, color: '#fff' }}>
                     {n.first ? <span style={{ fontWeight: 400, opacity: 0.92 }}>{n.first} </span> : null}
-                    <span style={{ fontWeight: 800 }}>{n.last}</span>
+                    <span style={{ fontWeight: BOLD }}>{n.last}</span>
                   </AutoFitText>
                 </div>
                 <div style={{ flexShrink: 0, display: 'flex', alignItems: 'baseline', gap: Math.round(4 * s), color: fg.hot ? GOLD : '#fff' }}>
-                  <span style={{ fontSize: Math.round(22 * s), fontWeight: 700, lineHeight: 1 }}>{fg.main}</span>
+                  <span style={{ fontSize: Math.round(22 * s), fontWeight: BOLD, lineHeight: 1 }}>{fg.main}</span>
                   {fg.sub ? <span style={{ fontSize: Math.round(12 * s), fontWeight: 500, opacity: 0.7, color: '#fff' }}>({fg.sub})</span> : null}
                 </div>
               </div>
@@ -306,11 +308,11 @@ export function ResultGlass({
         textShadow: '0 2px 14px rgba(0,0,0,0.5)',
       }}>
         <div style={{ width: leftW, minWidth: 0 }}>
-          <AutoFitText text={headParts.grade} max={headFs} min={14} lines={1} measureDeps={fitKey} style={{ fontWeight: 800, letterSpacing: 0.6, lineHeight: 1.15, color: '#fff' }} />
+          <AutoFitText text={headParts.grade} max={headFs} min={14} lines={1} measureDeps={fitKey} style={{ fontWeight: BOLD, letterSpacing: 0.6, lineHeight: 1.15, color: '#fff' }} />
           <AutoFitText text={headParts.venue} max={subFs} min={11} lines={1} measureDeps={fitKey} style={{ fontWeight: 400, letterSpacing: 1.2, lineHeight: 1.3, color: '#fff', opacity: 0.78 }} />
         </div>
         <div style={{ width: rightW, minWidth: 0, textAlign: 'right' }}>
-          <AutoFitText text={headParts.round} max={headFs} min={14} lines={1} measureDeps={fitKey} style={{ fontWeight: 800, letterSpacing: 0.6, lineHeight: 1.15, color: '#fff' }} />
+          <AutoFitText text={headParts.round} max={headFs} min={14} lines={1} measureDeps={fitKey} style={{ fontWeight: BOLD, letterSpacing: 0.6, lineHeight: 1.15, color: '#fff' }} />
           <AutoFitText text={headParts.date} max={subFs} min={11} lines={1} measureDeps={fitKey} style={{ fontWeight: 400, letterSpacing: 1.2, lineHeight: 1.3, color: '#fff', opacity: 0.78 }} />
         </div>
       </div>

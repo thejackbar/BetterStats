@@ -2812,6 +2812,8 @@ export default function AdminSocialPost() {
     extraProps.logoRatio = lineupLogoRatio
     // None means the layout draws no bar at all.
     extraProps.sponsorCount = gridLogoCount
+    // The Backing buttons in the Sponsors tool colour the layout's whole bar.
+    extraProps.sponsorPanel = overlay.items.find((it) => it.type === 'sponsors')?.panel || 'light'
   }
   if (templateId === 'C4') {
     extraProps.result = {
@@ -3668,7 +3670,10 @@ export default function AdminSocialPost() {
       // The Glass Card's slot is wider for more logos, the same way.
       if (templateId === 'T12' || templateId === 'RS7') {
         const was = sponsorSlotFor(templateId, W, H, (sponsorBlock.sponsorIds || []).length || 1, slotOpts)
-        if (['x', 'y', 'w', 'h'].every((k) => sponsorBlock[k] === was[k])) follow = sponsorSlotFor(templateId, W, H, ids.length, slotOpts)
+        if (['x', 'y', 'w', 'h'].every((k) => sponsorBlock[k] === was[k])) {
+          const { x, y, w, h } = sponsorSlotFor(templateId, W, H, ids.length, slotOpts)
+          follow = { x, y, w, h }
+        }
       }
       sponsorTarget.patchMany(releaseSponsorAuto(sponsorTarget.items, { [sponsorBlock.id]: { sponsorIds: ids, ...follow } }))
       return

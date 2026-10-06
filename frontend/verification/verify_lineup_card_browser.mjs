@@ -145,6 +145,7 @@ async function read(page) {
     const rows = list ? [...list.children].filter((r) => r.style.position === 'absolute' && r.style.height).map((r) => ({ ...rel(r), text: r.innerText.replace(/\s+/g, ' ').trim(), iconKey: r.querySelector('svg') ? r.querySelector('svg').innerHTML.replace(/\s+/g, '').length : 0, fs: r.children[1] && r.children[1].firstElementChild ? parseFloat(getComputedStyle(r.children[1].firstElementChild).fontSize) : 0 })) : []
     const bar = q('Sponsor bar'), logo = q('Club logo'), wash = q('Colour wash'), bg = q('Background photo'), details = q('Match details')
     const corner = q('Corner top left')
+    const credit = q('Platform credit'), nameEl = list && list.querySelector('[data-name]')
     const grid = root.querySelector('[data-sponsor-grid]')
     const clipped = (e) => { for (let a = e.parentElement; a && a !== root; a = a.parentElement) if (getComputedStyle(a).overflow === 'hidden') return true; return false }
     return {
@@ -153,7 +154,10 @@ async function read(page) {
       wash: wash ? { bg: getComputedStyle(wash).backgroundColor, full: getComputedStyle(wash).background, opacity: getComputedStyle(wash).opacity } : null,
       corner: corner ? corner.querySelector('polygon').getAttribute('fill') : null,
       bg: bg ? bg.querySelector('img').getAttribute('src') : null,
-      grid: grid ? { ...rel(grid), n: grid.querySelectorAll('img').length } : null,
+      grid: grid ? { ...rel(grid), n: grid.querySelectorAll('img').length, bg: getComputedStyle(grid).backgroundColor } : null,
+      barBg: bar ? getComputedStyle(bar).backgroundColor : null,
+      credit: credit && credit.querySelector('img') ? rel(credit.querySelector('img')) : null,
+      nameFont: nameEl ? getComputedStyle(nameEl).fontFamily : '', detailFont: details ? getComputedStyle(details.querySelector('div,span')).fontFamily : '',
       details: details ? details.innerText.replace(/\s+/g, ' ').trim() : '',
       overflowList: [...root.querySelectorAll('*')].filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && (r.right > rr.right + 1 || r.left < rr.left - 1 || r.bottom > rr.bottom + 1 || r.top < rr.top - 1) && !e.closest('svg') && e.tagName !== 'IMG' && !clipped(e) }).map((e) => `${e.tagName}${e.getAttribute('data-layer') ? '[' + e.getAttribute('data-layer') + ']' : ''}`),
     }
@@ -292,6 +296,58 @@ const openCardControls = async (page) => {
   ck('reload: wash is back', re.wash && re.wash.bg === 'rgb(26, 58, 138)', JSON.stringify(re.wash))
   ck('reload: corner is back', (re.corner || '').toLowerCase() === '#ff6600', re.corner)
   await again.ctx.close()
+}
+
+// ── 4b. Brand font, sponsor backing colours the whole bar, bigger credit ─────
+{
+  const { ctx, page } = await openEditor({ nSponsors: 6 })
+  await loadXI(page)
+  await page.waitForTimeout(600)
+  let d = await read(page)
+  ck('credit mark is big enough to read', d.credit && d.credit.h >= 44, JSON.stringify(d.credit))
+  ck('default backing: whole bar is white', d.barBg === 'rgb(255, 255, 255)', d.barBg)
+  ck('the grid draws no box of its own', d.grid && d.grid.bg === 'rgba(0, 0, 0, 0)', JSON.stringify(d.grid))
+  ck('names use the display font variable', /Anton|Barlow|Teko|Bebas|Oswald|Archivo|Big Shoulders|Antonio|Hanken/.test(d.nameFont), d.nameFont)
+  const w0 = (await read(page)).rows[0].fs
+
+  // Brand font: pick another face in the Style controls and the card follows.
+  let found = false
+  await tab(page, 'Brand')
+  await page.waitForTimeout(300)
+  const sel = page.locator('select:has(option:text-is("Anton"))')
+  if (await sel.count()) { await sel.first().selectOption({ label: 'Anton' }); found = true }
+  await page.waitForTimeout(700)
+  d = await read(page)
+  ck('picking Anton in Style changes the card text', found && /Anton/.test(d.nameFont) && /Anton/.test(d.detailFont), `${found} ${d.nameFont} | ${d.detailFont}`)
+  if (found) {
+    await sel.first().selectOption({ label: 'Archivo Black' })
+    await page.waitForTimeout(900)
+    const wide = await read(page)
+    ck('a wide face still shares one size and fits', new Set(wide.rows.map((r) => Math.round(r.fs))).size === 1 && wide.overflowList.length === 0, wide.rows.map((r) => r.fs).join(','))
+    const clipped = await page.evaluate((src) => {
+      const r = (new Function(`return (${src})()`))()
+      return [...r.querySelectorAll('[data-layer="Match details"] div')].filter((e) => e.scrollWidth > e.clientWidth + 1).map((e) => e.innerText)
+    }, ROOT.toString())
+    ck('the fixture still fits after a wide face is picked', clipped.length === 0, clipped.join(' | '))
+    ck('the size follows the face (wide face is smaller than condensed)', wide.rows[0].fs < d.rows[0].fs, `${wide.rows[0].fs} vs ${d.rows[0].fs}`)
+  }
+
+  // Sponsor backing: Dark colours the entire bar.
+  await press(page.getByRole('button', { name: 'Sponsors' }))
+  await page.waitForTimeout(300)
+  await press(page.locator('span:text-is("Backing")').locator('xpath=..').getByRole('button', { name: 'Dark', exact: true }))
+  await page.waitForTimeout(500)
+  d = await read(page)
+  ck('Dark backing makes the whole bar dark', d.barBg && d.barBg !== 'rgb(255, 255, 255)' && /rgba?\(8, 10, 14/.test(d.barBg), d.barBg)
+  ck('...and still no box round the logos', d.grid && d.grid.bg === 'rgba(0, 0, 0, 0)', JSON.stringify(d.grid))
+  ck('...bar still spans the full width', d.bar && d.bar.w === 1080 && d.bar.x === 0, JSON.stringify(d.bar))
+  if (SHOTS) await shotNode(page, `${SHOTS}/card-dark-bar.png`)
+  await press(page.locator('span:text-is("Backing")').locator('xpath=..').getByRole('button', { name: 'None', exact: true }))
+  await page.waitForTimeout(500)
+  d = await read(page)
+  ck('None backing leaves the bar off so the photo shows', d.bar === null, JSON.stringify(d.bar))
+  ck('...and the logos are still on the post', d.grid && d.grid.n === 6, JSON.stringify(d.grid))
+  await ctx.close()
 }
 
 // ── 5. Portrait, story, and a phone ─────────────────────────────────────────
