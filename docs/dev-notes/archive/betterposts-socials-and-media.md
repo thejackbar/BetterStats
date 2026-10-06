@@ -873,3 +873,15 @@ Asked for from a club's own graphic: a photo background under a colour wash, the
 - **Hooks trap hit.** A `useState` added next to the upload handlers sat below the `if (loading) return` and gave React #310 on open. New editor state goes with the other state near the top.
 - **Verified.** `verification/verify_lineup_card_browser.mjs` (production build, API stubbed): 50 passed. It checks eleven rows, the five icon kinds, one and eight sponsors, none, a 6:1 and a 1:1 logo, wash and corner reaching the post, the upload request on the wire (`kind=background`), the saved `socials_style.lineup_card`, a reload applying it, portrait and story, and 390px. Control with the shared name size reverted fails exactly the two "one name size" checks (portrait and story). `shoot_sponsor_slots.mjs T12` at `SPONSORS=1` and `3`: 0 overlaps.
 - **Not done.** The fixture is printed from `team.name` and `opponent.name` as the other lineups do, with `VS` (a club that writes "V's" cannot change it). The wash and corner have no gradient or pattern options. The card has no hero photo slot.
+
+## Match Day Card follow-up: brand font, whole-bar backing, bigger credit (v9.106.35)
+
+Feedback on the first release (screenshots from a club): the font did not change with Brand, the Sponsors Backing buttons drew a box inside the white bar instead of changing the bar, and the BetterCricket mark was too small.
+
+- **Font.** `FONT` / `WEIGHT` are `var(--social-display-font)` and `var(--social-display-font-weight)`, the same variables the other layouts read; the first release hard-coded Hanken Grotesk. Per-row `AutoFitText` is gone from the names. `useSharedNameSize` measures every `[data-name]` at the cap (`rowH * 0.62`) and takes the largest size at which the widest fits, again when a web font finishes loading (`loadingdone`). Names and fixture lines therefore move with the face (Anton against Archivo Black).
+- **Loop trap.** The number column's width first followed the fitted size, and the size is measured from the room beside that column, so the two chased each other (React #185 the moment a font was picked). The column is now `nameCap * 1.7`, fixed.
+- **AutoFitText and font swaps.** It re-fits only on its own props, so a face change left the fixture lines clipped. The hook returns a `fontSig` (computed family plus font-load count) and the fixture lines take it as `measureDeps`.
+- **Backing is the bar.** The slot returns `panel: 'light', layoutBacked: true`. `newBlankItem` keeps `layoutBacked`, `SponsorGridBlock` draws no backing of its own for such an item, and the editor passes the block's `panel` to the layout as `sponsorPanel`: light is white, dark is `rgba(8,10,14,0.9)`, none draws no bar (the photo shows). `pickSponsors` re-seats a grid with x, y, w, h only, so it no longer resets the chosen backing.
+- **Credit.** `CreditMark` is 52px high (was 22), white on a dark or absent bar.
+- **Verified.** `verify_lineup_card_browser.mjs`: 63 passed. Control on the v9.106.32 source fails the seven new checks (credit size, font variable, picking Anton, size follows the face, Dark bar, no box round the logos, None).
+

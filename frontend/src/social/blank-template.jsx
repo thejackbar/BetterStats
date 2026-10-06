@@ -116,6 +116,9 @@ export function newBlankItem(type, opts = {}) {
       id, type: 'sponsors', x: opts.x ?? 48, y: opts.y ?? 900, w: opts.w ?? 984, h: opts.h ?? 130,
       sponsorIds: opts.sponsorIds || [], panel: opts.panel || 'light', gap: opts.gap ?? 28, pad: opts.pad ?? 18,
       rotation: 0, auto: !!opts.auto,
+      // The layout draws the backing itself (a whole bar, not a box round the logos):
+      // `panel` still holds the choice, and the layout reads it from here.
+      ...(opts.layoutBacked ? { layoutBacked: true } : null),
     }
   }
   if (type === 'element') {
@@ -507,7 +510,7 @@ function SponsorGridBlock({ item, data }) {
   const pad = item.pad ?? 18
   const gap = item.gap ?? 28
   const lay = sponsorGridLayout(picked.length, item.w - pad * 2, item.h - pad * 2, gap)
-  const panel = SPONSOR_PANELS[item.panel] || SPONSOR_PANELS.light
+  const panel = item.layoutBacked ? SPONSOR_PANELS.none : (SPONSOR_PANELS[item.panel] || SPONSOR_PANELS.light)
   return (
     <div data-sponsor-grid="" style={{
       width: item.w, height: item.h, boxSizing: 'border-box', padding: pad,

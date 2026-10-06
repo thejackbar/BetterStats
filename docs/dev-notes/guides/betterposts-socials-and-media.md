@@ -97,6 +97,9 @@
 61. Its sponsor bar is as tall as the logo count needs, so the slot takes `count` and the editor passes `sponsorCount`. Zero logos draws no bar. A root child that is an SVG must be the element itself (a plain function, not a component) or the Layers panel loses its `data-layer`.
 62. Measure anything the canvas and the export node must agree on (logo ratio) in the editor and pass it down, and give a list one shared type size rather than fitting each row alone.
 
+63. A layout reads the club font from `--social-display-font` and `--social-display-font-weight`, never a hard-coded family. Text fitted by `AutoFitText` does not re-fit when the face changes: hand it a font signature in `measureDeps`. A size measured from the room beside a column must not feed back into that column's width (React #185).
+64. A layout that draws the sponsor bar itself marks the slot `layoutBacked: true` and reads the block's `panel` as the bar's colour (`sponsorPanel`); the grid then draws no box of its own.
+
 ## Traps and failure signatures
 - Geometry checks pass but a layout reads wrong (black bands, clumped story names). Judge from real screenshots.
 - Hero layouts show a crest, not the cut-out: harness roster stubbed `photo_url: null`. Stubs must cover every conditional's data (give players a photo and a route for it).

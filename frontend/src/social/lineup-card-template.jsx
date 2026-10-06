@@ -19,12 +19,16 @@
 //
 // Every part is a root child with a `data-layer` name, so each is a layer in
 // the Layers panel and can be reordered or hidden.
+import { useLayoutEffect, useRef, useState } from 'react'
 import { AutoFitText, CreditMark, RoleChip, DebutTag } from './cricket-templates'
 import { mixHex } from './split-template'
 import { aspectOf, pick } from './postAspect'
 import { LayerRoot } from './postLayers'
 
-const NAME_FONT = "'Hanken Grotesk', 'Inter', sans-serif"
+// The club's chosen display face and its weight (Style, Font in the editor), the
+// same variables every other layout reads, so the card follows the brand.
+const FONT = "var(--social-display-font, 'Hanken Grotesk', 'Inter', sans-serif)"
+const WEIGHT = 'var(--social-display-font-weight, 700)'
 
 function rgb(hex) {
   const h = String(hex || '').replace('#', '')
@@ -85,7 +89,7 @@ export function lineupCardSponsorSlot(width = 1080, height = 1080, count = 1) {
   return {
     x: 180, w: width - 360,
     y: height - g.barTotal + padY, h: g.barH - padY * 2,
-    pad: 6, gap: 20, panel: 'none',
+    pad: 6, gap: 20, panel: 'light', layoutBacked: true,
   }
 }
 
@@ -150,9 +154,52 @@ function cornerSvg(layer, c1, c2, style) {
   )
 }
 
+// One type size for the whole list: the largest at which the widest name still
+// fits its row. Faces differ a lot in width (Teko against Archivo Black), so it
+// is measured in the DOM rather than guessed, and measured again when a web font
+// finishes loading. A per-row fit would shrink one long surname on its own and
+// read as a mistake beside ten that did not.
+function useSharedNameSize(listRef, cap) {
+  const [size, setSize] = useState(cap)
+  // Changes when the face changes or a web font finishes loading, so text fitted
+  // by AutoFitText (which only re-fits on its own props) can be told to re-fit.
+  const [fontSig, setFontSig] = useState('')
+  const loads = useRef(0)
+  useLayoutEffect(() => {
+    const list = listRef.current
+    if (!list) return undefined
+    let cancelled = false
+    const fit = () => {
+      if (cancelled) return
+      const els = [...list.querySelectorAll('[data-name]')]
+      if (!els.length) return
+      let best = cap
+      els.forEach((el) => {
+        const prev = el.style.fontSize
+        el.style.fontSize = `${cap}px`
+        const room = (el.parentElement ? el.parentElement.clientWidth : 0) - 8
+        const need = el.offsetWidth
+        el.style.fontSize = prev
+        if (need > room && need > 0) best = Math.min(best, (cap * room) / need)
+      })
+      const next = Math.max(12, Math.floor(best))
+      setSize((cur) => (cur === next ? cur : next))
+      const sig = `${getComputedStyle(list).fontFamily}|${loads.current}`
+      setFontSig((cur) => (cur === sig ? cur : sig))
+    }
+    fit()
+    const fonts = typeof document !== 'undefined' ? document.fonts : null
+    if (fonts && fonts.ready) fonts.ready.then(fit)
+    const onLoaded = () => { loads.current += 1; fit() }
+    if (fonts && fonts.addEventListener) fonts.addEventListener('loadingdone', onLoaded)
+    return () => { cancelled = true; if (fonts && fonts.removeEventListener) fonts.removeEventListener('loadingdone', onLoaded) }
+  })
+  return { size: Math.min(size, cap), fontSig }
+}
+
 export function LineupCard({
   width = 1080, height = 1080, team = {}, opponent = {}, match = {}, players, palette = {},
-  card, sponsorCount = 1, logoRatio = 1,
+  card, sponsorCount = 1, sponsorPanel = 'light', logoRatio = 1,
 }) {
   const P = (players || []).slice(0, 11)
   const c = { ...LINEUP_CARD_DEFAULTS, ...(card || {}) }
@@ -174,12 +221,12 @@ export function LineupCard({
   const line = panelInk === '#ffffff' ? 'rgba(255,255,255,0.26)' : 'rgba(0,0,0,0.22)'
   const chipBg = panelInk === '#ffffff' ? '#ffffff' : '#0b0b0c'
   const chipInk = panelInk === '#ffffff' ? '#0b0b0c' : '#ffffff'
-  // One type size for the whole list, from the longest name: a surname that
-  // shrinks on its own row reads as a mistake beside eleven that did not. A name
-  // that is still too wide for its row (the captain's chip takes room) is fitted
-  // by AutoFitText, which only ever steps down from this.
-  const longest = P.reduce((m, p) => Math.max(m, `${p.first || ''} ${p.last || ''}`.trim().length), 8)
-  const nameMax = Math.max(12, Math.min(Math.round(rowH * 0.5), Math.floor((LIST_W - RAIL_W - 12) / (0.6 * longest + 2))))
+  const listRef = useRef(null)
+  const nameCap = Math.round(rowH * 0.62)
+  const { size: nameSize, fontSig } = useSharedNameSize(listRef, nameCap)
+  // Fixed by the cap, not the fitted size: the size is measured from the room this
+  // column leaves, so a column that moved with it would chase its own tail.
+  const numW = Math.round(nameCap * 1.7)
   const iconSize = Math.round(Math.min(rowH * 0.78, 52))
 
   // The logo: as wide as the list allows or as tall as the header allows,
@@ -190,16 +237,19 @@ export function LineupCard({
   const logoW = Math.min((LIST_W + 40) * scale, g.logoMaxH * scale * ratio)
   const logoH = logoW / ratio
 
+  // The Backing choice in the Sponsors tool colours the whole bar, not a box in it.
+  const barBg = sponsorPanel === 'dark' ? 'rgba(8,10,14,0.9)' : sponsorPanel === 'none' ? 'transparent' : '#ffffff'
+  const barLight = barBg === '#ffffff'
   const detailsX = LIST_X + LIST_W + 48
   const detailsW = width - EDGE - detailsX
-  const fixture = pick(A, { square: 48, portrait: 54, story: 60 })
-  const small = pick(A, { square: 32, portrait: 36, story: 40 })
+  const fixture = pick(A, { square: 58, portrait: 64, story: 70 })
+  const small = pick(A, { square: 40, portrait: 44, story: 48 })
   const compText = (match.competition && match.competition !== 'COMPETITION' ? match.competition : '').toUpperCase()
 
   return (
     <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
-      background: c.bgUrl ? '#0b1220' : wash, color: ink, fontFamily: NAME_FONT,
+      background: c.bgUrl ? '#0b1220' : wash, color: ink, fontFamily: FONT, fontWeight: WEIGHT,
     }}>
       {c.bgUrl && (
         <div data-layer="Background photo" style={{ position: 'absolute', left: 0, top: 0, width, height }}>
@@ -212,8 +262,8 @@ export function LineupCard({
         opacity: c.bgUrl ? washOpacity : 1,
       }} />
 
-      {g.barH > 0 && (
-        <div data-layer="Sponsor bar" style={{ position: 'absolute', left: 0, top: height - g.barTotal, width, height: g.barTotal, background: '#ffffff' }} />
+      {g.barH > 0 && sponsorPanel !== 'none' && (
+        <div data-layer="Sponsor bar" style={{ position: 'absolute', left: 0, top: height - g.barTotal, width, height: g.barTotal, background: barBg }} />
       )}
 
       {cornerSvg('Corner top left', corner, cornerLight, { left: 0, top: 0 })}
@@ -228,7 +278,7 @@ export function LineupCard({
         </div>
       )}
 
-      <div data-layer="Starting XI" style={{
+      <div data-layer="Starting XI" ref={listRef} style={{
         position: 'absolute', left: LIST_X, top: g.listTop, width: LIST_W, height: g.listH,
         background: panel, color: panelInk, boxShadow: '0 10px 30px rgba(0,0,0,0.28)', overflow: 'hidden',
       }}>
@@ -241,15 +291,13 @@ export function LineupCard({
               boxSizing: 'border-box', borderBottom: i < P.length - 1 ? `1px solid ${line}` : 'none',
             }}>
               <div style={{
-                width: Math.round(nameMax * 2), flexShrink: 0, textAlign: 'right', paddingRight: 14, boxSizing: 'border-box',
-                fontWeight: 500, fontSize: nameMax, lineHeight: 1, opacity: 0.92,
+                width: numW, flexShrink: 0, textAlign: 'right', paddingRight: 12, boxSizing: 'border-box',
+                fontSize: nameSize, lineHeight: 1, opacity: 0.92,
               }}>{i + 1}.</div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <AutoFitText max={nameMax} min={12} lines={1} pad={6}
-                  measureDeps={[p.captain, p.viceCaptain, p.keeper, p.debut]}
-                  style={{ fontWeight: 600, letterSpacing: 0.2, lineHeight: 1.1, color: panelInk }}>
+              <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+                <span data-name="" style={{ display: 'inline-block', whiteSpace: 'nowrap', fontSize: nameSize, letterSpacing: 0.3, lineHeight: 1.1, color: panelInk }}>
                   {`${p.first || ''} ${p.last || ''}`.trim()}
-                </AutoFitText>
+                </span>
               </div>
               <div style={{ display: 'flex', gap: 5, flexShrink: 0, alignItems: 'center', paddingRight: 8 }}>
                 {p.captain && <RoleChip kind="C" accent={chipBg} ink={chipInk} />}
@@ -270,26 +318,26 @@ export function LineupCard({
       }}>
         {compText && (
           <AutoFitText text={compText} max={Math.round(small * 0.7)} min={12} lines={1}
-            style={{ fontWeight: 600, letterSpacing: 2, lineHeight: 1.2, opacity: 0.85, marginBottom: 14 }} />
+            measureDeps={[fontSig]} style={{ letterSpacing: 2, lineHeight: 1.2, opacity: 0.85, marginBottom: 14 }} />
         )}
         <AutoFitText text={(team.name || '').toUpperCase()} max={fixture} min={18} lines={1}
-          style={{ fontWeight: 800, letterSpacing: 0.5, lineHeight: 1.15 }} />
-        <div style={{ fontWeight: 700, fontSize: Math.round(small * 0.85), lineHeight: 1.5, letterSpacing: 1 }}>VS</div>
+          measureDeps={[fontSig]} style={{ letterSpacing: 0.5, lineHeight: 1.15 }} />
+        <div style={{ fontSize: Math.round(small * 0.85), lineHeight: 1.5, letterSpacing: 1 }}>VS</div>
         <AutoFitText text={(opponent.name || '').toUpperCase()} max={fixture} min={18} lines={1}
-          style={{ fontWeight: 800, letterSpacing: 0.5, lineHeight: 1.15 }} />
+          measureDeps={[fontSig]} style={{ letterSpacing: 0.5, lineHeight: 1.15 }} />
         <div style={{ marginTop: 34 }}>
           <AutoFitText text={(match.date || '').toUpperCase()} max={small} min={14} lines={1}
-            style={{ fontWeight: 700, letterSpacing: 0.4, lineHeight: 1.3 }} />
+            measureDeps={[fontSig]} style={{ letterSpacing: 0.4, lineHeight: 1.3 }} />
           <AutoFitText text={(match.time || '').toUpperCase()} max={small} min={14} lines={1}
-            style={{ fontWeight: 700, letterSpacing: 0.4, lineHeight: 1.3 }} />
+            measureDeps={[fontSig]} style={{ letterSpacing: 0.4, lineHeight: 1.3 }} />
           <AutoFitText text={(match.venue || '').toUpperCase()} max={small} min={14} lines={2}
-            style={{ fontWeight: 700, letterSpacing: 0.4, lineHeight: 1.3 }} />
+            measureDeps={[fontSig]} style={{ letterSpacing: 0.4, lineHeight: 1.3 }} />
         </div>
       </div>
 
       {g.barH > 0 && (
-        <div data-layer="Platform credit" style={{ position: 'absolute', left: 36, top: height - g.lift - 14 - 26, height: 26, display: 'flex', alignItems: 'center' }}>
-          <CreditMark ink="#0b0b0c" h={22} />
+        <div data-layer="Platform credit" style={{ position: 'absolute', left: 36, top: height - g.lift - 16 - 52, height: 52, display: 'flex', alignItems: 'center' }}>
+          <CreditMark ink={barLight ? '#0b0b0c' : '#ffffff'} h={52} />
         </div>
       )}
     </LayerRoot>

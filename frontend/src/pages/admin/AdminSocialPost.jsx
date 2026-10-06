@@ -2793,6 +2793,8 @@ export default function AdminSocialPost() {
     const usable = new Set(adminSponsors.filter(sponsorLogoUrl).map((x) => x.id))
     const grid = overlay.items.find((it) => it.type === 'sponsors')
     extraProps.sponsorCount = grid ? (grid.sponsorIds || []).filter((id) => usable.has(id)).length : 0
+    // The Backing buttons in the Sponsors tool colour the layout's whole bar.
+    extraProps.sponsorPanel = grid?.panel || 'light'
   }
   if (templateId === 'C4') {
     extraProps.result = {
@@ -3640,7 +3642,10 @@ export default function AdminSocialPost() {
       let follow = null
       if (templateId === 'T12') {
         const was = sponsorSlotFor(templateId, W, H, (sponsorBlock.sponsorIds || []).length || 1)
-        if (['x', 'y', 'w', 'h'].every((k) => sponsorBlock[k] === was[k])) follow = sponsorSlotFor(templateId, W, H, ids.length)
+        if (['x', 'y', 'w', 'h'].every((k) => sponsorBlock[k] === was[k])) {
+          const { x, y, w, h } = sponsorSlotFor(templateId, W, H, ids.length)
+          follow = { x, y, w, h }
+        }
       }
       sponsorTarget.patchMany(releaseSponsorAuto(sponsorTarget.items, { [sponsorBlock.id]: { sponsorIds: ids, ...follow } }))
       return
