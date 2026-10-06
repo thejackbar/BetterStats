@@ -2340,7 +2340,7 @@ Fix, in `services/summary_only_seasons.py` only: `held_games` and `held_years` a
 
 Verified on a local Postgres 16 with a synthetic club (16,000 games, about 1,330 of the club's, 4,000 players, 4,800 player-season rows, three NULL-year seasons): old shape 6.5s, MATERIALIZED plus array only 3.8s, with the NOT IN 0.15s; all three return identical rows (same md5). The clause keeps 493,443 of 658,800 runs, so the equality check can fail, and the variant without the NULL-year filter returns a different answer. Not yet measured on production data: re-run `explain_leaderboard.py` on the server after deploy and compare with the 27.8s and 26.5s control.
 
-## v9.106.33: Life Members on the cricket Honour Board
+## v9.106.34: Life Members on the cricket Honour Board
 
 Shoalwater Bay CC reported that Life Membership showed on a player's profile (Darren Hind, 2003/04) but the Stats > Honour Board page had no Life Membership entry. Cause: `services/honours.office_bearer_boards` only read `player_achievements.category = 'Office Bearer'`, and the page's own text says boards are built from Office Bearer awards. Their import (`SBCC_Achievements_ready.csv`) had 21 Life Membership rows (category `Life Membership`, subcategory `Club`) and they were stored correctly; they were simply never read by that page.
 
