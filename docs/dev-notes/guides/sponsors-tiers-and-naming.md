@@ -24,3 +24,4 @@
 13. Removing the last sponsor grid from a post must go through `hRemove` (it confirms). A new delete path that calls `layer.remove` directly skips the warning.
 14. Prose follows the humanizer rules.
 15. A slot function may read `count` when the layout's bar depends on it (T12's white bar is 150, 175 or 235 tall). The editor then passes `sponsorCount` to the layout, and `pickSponsors` re-seats a grid still sitting in the old slot.
+16. A slot that depends on an editor choice (the Glass Card's position) gets it as the fourth argument of the slot function via `sponsorSlotFor(..., opts)`; the editor must pass the same `opts` everywhere it seats a grid.

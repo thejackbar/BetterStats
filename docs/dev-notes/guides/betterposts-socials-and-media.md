@@ -97,6 +97,11 @@
 61. Its sponsor bar is as tall as the logo count needs, so the slot takes `count` and the editor passes `sponsorCount`. Zero logos draws no bar. A root child that is an SVG must be the element itself (a plain function, not a component) or the Layers panel loses its `data-layer`.
 62. Measure anything the canvas and the export node must agree on (logo ratio) in the editor and pass it down, and give a list one shared type size rather than fitting each row alone.
 
+**Glass Card (RS7, v9.106.36, `social/result-glass-template.jsx`)**
+63. Glass is a blurred COPY of the photo (`filter: blur`, `mask-image`), never `backdrop-filter`: modern-screenshot does not paint it. Check a layout like this by downloading a real PNG, not by reading the preview.
+64. A slot that moves with an editor option takes it as `opts` (`sponsorSlotFor(id, w, h, count, opts)`), and every call site passes the same `slotOpts`. Position changes re-seat a grid still in its old slot. A layout whose widths change with an option must pass that option in `AutoFitText` `measureDeps`, or the text keeps the old fit.
+65. A browser check about a layout's card (overlap, clipped, clear of) must require the card to be drawn, or it passes on the control run.
+
 ## Traps and failure signatures
 - Geometry checks pass but a layout reads wrong (black bands, clumped story names). Judge from real screenshots.
 - Hero layouts show a crest, not the cut-out: harness roster stubbed `photo_url: null`. Stubs must cover every conditional's data (give players a photo and a route for it).
