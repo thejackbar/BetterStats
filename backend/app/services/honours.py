@@ -24,6 +24,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 PREMIERSHIP_CATEGORY = "Premiership"
 OFFICE_BEARER_CATEGORY = "Office Bearer"
+LIFE_MEMBERSHIP_CATEGORY = "Life Membership"
+# Life Membership has no role types under it (the subcategory is just "Club" or
+# whatever the club's import wrote), so its board is not grouped by subcategory.
+# One group, named for the people in it.
+LIFE_MEMBERS_GROUP = "Life Members"
 
 # ``player_achievements.season`` holds EITHER a seasons-table id (what an
 # Awards screen writes) or a plain label like "2025/26" (what an import
@@ -48,6 +53,7 @@ _GROUP_ORDER = [
     "Captains",
     "Coaches",
     "Other Roles",
+    LIFE_MEMBERS_GROUP,
 ]
 
 # Within a group, the seats a club expects at the top. Everything else falls
@@ -319,46 +325,58 @@ def _span_label(spans: list[tuple[int, Optional[int]]], open_ended: bool) -> str
     return ", ".join(parts)
 
 
-async def office_bearer_boards(db: AsyncSession, org_id: uuid.UUID) -> dict:
+async def office_bearer_boards(db: AsyncSession, org_id: uuid.UUID, *,
+                               include_life_members: bool = False) -> dict:
     """One board per role the club has recorded somebody in — President,
     Secretary, Club Coach and the rest — each listing who held it and when.
 
     The years come from the seasons the club filed each term under, folded
     into spans, so twelve yearly rows for one long-serving secretary read as
     the one line a reader expects rather than twelve.
+
+    ``include_life_members`` adds the club's Life Membership awards as one more
+    board, "Life Members". Off by default: the football silo calls this too and
+    has its own way of showing a life membership, so only the caller that asks
+    gets the extra group. The year shown is the season the club recorded the
+    life membership under.
     """
-    rows = await _rows(db, org_id, OFFICE_BEARER_CATEGORY)
     renames = await _renames(db, org_id)
+    sources = [(OFFICE_BEARER_CATEGORY, await _rows(db, org_id, OFFICE_BEARER_CATEGORY))]
+    if include_life_members:
+        sources.append((LIFE_MEMBERSHIP_CATEGORY,
+                        await _rows(db, org_id, LIFE_MEMBERSHIP_CATEGORY)))
 
     boards: dict[tuple, dict] = {}
-    for r in rows:
-        if not r["name"] or not r["achievement"]:
-            continue
-        sub = (r["subcategory"] or "").strip()
-        role = renames.get((OFFICE_BEARER_CATEGORY, sub, r["achievement"])) or r["achievement"]
-        bkey = (sub.lower(), role.lower())
-        b = boards.get(bkey)
-        if b is None:
-            b = boards[bkey] = {"group": sub or "Other Roles", "role": role, "holders": {}}
-        pkey = _person_key(r["player_id"], r["name"])
-        h = b["holders"].get(pkey)
-        if h is None:
-            h = b["holders"][pkey] = {
-                "player_id": r["player_id"], "name": r["name"],
-                "photo_url": r["photo_url"], "_years": [], "_open": False,
-            }
-        start = year_of(r["season_name"], r["season_year"])
-        if start is None:
-            # No year to place them by. Kept, because they DID hold the role
-            # and dropping them would quietly shorten the club's own history;
-            # they sort to the bottom of the board with no years shown.
-            continue
-        end = year_of(r["season_end_name"], r["season_end_year"])
-        # An end that isn't a year at all ("Present", "Current") is the club
-        # saying the term is still running, not a season we failed to parse.
-        if r["season_end_name"] and end is None:
-            h["_open"] = True
-        h["_years"].append((start, end))
+    for category, rows in sources:
+        for r in rows:
+            if not r["name"] or not r["achievement"]:
+                continue
+            sub = (r["subcategory"] or "").strip()
+            role = renames.get((category, sub, r["achievement"])) or r["achievement"]
+            group = LIFE_MEMBERS_GROUP if category == LIFE_MEMBERSHIP_CATEGORY else (sub or "Other Roles")
+            bkey = (group.lower(), role.lower())
+            b = boards.get(bkey)
+            if b is None:
+                b = boards[bkey] = {"group": group, "role": role, "holders": {}}
+            pkey = _person_key(r["player_id"], r["name"])
+            h = b["holders"].get(pkey)
+            if h is None:
+                h = b["holders"][pkey] = {
+                    "player_id": r["player_id"], "name": r["name"],
+                    "photo_url": r["photo_url"], "_years": [], "_open": False,
+                }
+            start = year_of(r["season_name"], r["season_year"])
+            if start is None:
+                # No year to place them by. Kept, because they DID hold the role
+                # and dropping them would quietly shorten the club's own history;
+                # they sort to the bottom of the board with no years shown.
+                continue
+            end = year_of(r["season_end_name"], r["season_end_year"])
+            # An end that isn't a year at all ("Present", "Current") is the club
+            # saying the term is still running, not a season we failed to parse.
+            if r["season_end_name"] and end is None:
+                h["_open"] = True
+            h["_years"].append((start, end))
 
     out = []
     for b in boards.values():

@@ -24,4 +24,4 @@ async def get_premierships(org_id: uuid.UUID, db: AsyncSession = Depends(get_db)
 
 @router.get("/{org_id}/office-bearers")
 async def get_office_bearers(org_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    return await honours.office_bearer_boards(db, org_id)
+    return await honours.office_bearer_boards(db, org_id, include_life_members=True)

@@ -34,6 +34,7 @@ import {
 } from '../../social/round-templates'
 import { SplitPoster, autoPanelColor } from '../../social/split-template'
 import { LineupCard, LINEUP_CARD_DEFAULTS, cardWashDefault } from '../../social/lineup-card-template'
+import { ResultGlass, GLASS_DEFAULTS, GLASS_FOCUS, GLASS_POSITIONS } from '../../social/result-glass-template'
 import { TeamOfWeekGrid, TeamOfWeekBoard, TOTW_MIN, TOTW_MAX, TOTW_DEFAULT } from '../../social/totw-templates'
 import { exportNodeToPng } from '../../social/exportImage'
 import { SocialBackground, SocialBackgroundDefs, SOCIAL_BACKGROUNDS, GRADIENT_ANGLES, DEFAULT_COLORS as BG_DEFAULT_COLORS } from '../../social/SocialBackgrounds'
@@ -88,6 +89,7 @@ const ALL_TEMPLATES = [
   { id: 'RS4', name: 'Star of the Day', component: ResultStar,        desc: 'Player-of-the-match hero',        maxPlayers: 0, kind: 'singleresult' },
   { id: 'RS5', name: 'Innings Bars',   component: ResultInningsBars,  desc: 'Proportional score bars',         maxPlayers: 0, kind: 'singleresult' },
   { id: 'RS6', name: 'Match Ticket',   component: ResultTicket,       desc: 'Ticket-stub aesthetic',           maxPlayers: 0, kind: 'singleresult' },
+  { id: 'RS7', name: 'Glass Card',     component: ResultGlass,        desc: 'Your photo, glass scorecards, six positions', maxPlayers: 0, kind: 'singleresult' },
   // Fixtures roundup — one post, all grades.
   { id: 'FX1', name: 'List',           component: FixtureList,        desc: 'Clean factual rows',              maxPlayers: 0, kind: 'fixtures' },
   { id: 'FX2', name: 'Match-day Hype', component: FixtureHype,        desc: 'Diagonal poster',                 maxPlayers: 0, kind: 'fixtures' },
@@ -118,7 +120,7 @@ const ALL_TEMPLATES = [
 // The football build drops the layouts that only mean anything with cricket
 // data: the batting order, the results wrap's batting/bowling leaders, and
 // every layout of the three hidden post types (toss, scorecard, final score).
-const AFL_HIDDEN_TEMPLATES = new Set(['T4', 'T11', 'T12', 'RR7', 'C2', 'C4', 'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6', 'SC1', 'SC2', 'SC3', 'TW1', 'TW2'])
+const AFL_HIDDEN_TEMPLATES = new Set(['T4', 'T11', 'T12', 'RR7', 'C2', 'C4', 'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6', 'RS7', 'SC1', 'SC2', 'SC3', 'TW1', 'TW2'])
 const TEMPLATES = IS_AFL ? ALL_TEMPLATES.filter(t => !AFL_HIDDEN_TEMPLATES.has(t.id)) : ALL_TEMPLATES
 
 // The lineup templates that crop the hero photo into a fixed box, and the shape
@@ -145,7 +147,7 @@ const TAB_MAP = {
   T6: 'lineup', T7: 'lineup', T8: 'lineup', T9: 'lineup', T10: 'lineup', T11: 'lineup', T12: 'lineup',
   FX1: 'fixtures', FX2: 'fixtures', FX3: 'fixtures', FX4: 'fixtures', FX5: 'fixtures', FX6: 'fixtures',
   C1: 'announcement', C2: 'toss', C3: 'motm',
-  C4: 'result', RS1: 'result', RS2: 'result', RS3: 'result', RS4: 'result', RS5: 'result', RS6: 'result',
+  C4: 'result', RS1: 'result', RS2: 'result', RS3: 'result', RS4: 'result', RS5: 'result', RS6: 'result', RS7: 'result',
   RR1: 'results', RR2: 'results', RR3: 'results', RR4: 'results', RR5: 'results', RR6: 'results', RR7: 'results',
   TW1: 'totw', TW2: 'totw',
   SC1: 'scorecard', SC2: 'scorecard', SC3: 'scorecard',
@@ -548,7 +550,7 @@ function StatRow({ stat, onChange, onRemove }) {
 function PerformerRow({ p, onChange, onRemove }) {
   return (
     <div className="flex gap-2 items-center">
-      <input value={p.last} onChange={e => onChange({ ...p, last: e.target.value })} placeholder="Name"
+      <input value={p.last} onChange={e => onChange({ ...p, last: e.target.value, surname: '' })} placeholder="Name"
         className="flex-1 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-sm text-pb-text placeholder:text-pb-faintest" />
       <input value={p.line} onChange={e => onChange({ ...p, line: e.target.value })} placeholder="87 (54) or 3-22 (4)"
         className="w-36 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-sm text-pb-text placeholder:text-pb-faintest font-mono" />
@@ -641,6 +643,7 @@ function topBatters(t) {
       line: `${b.r}${b.notOut ? '*' : ''} (${b.b})`,
       pid: b.pid || null,
       first: b.first || '',
+      surname: b.last || '',
     }))
 }
 
@@ -688,6 +691,8 @@ function topBowlers(t) {
       line: `${b.w}/${b.r}`,
       pid: b.pid || null,
       first: b.first || '',
+      surname: b.last || '',
+      overs: b.o != null ? String(b.o) : '',
     }))
 }
 
@@ -1256,6 +1261,16 @@ export default function AdminSocialPost() {
   // a square crest each get the box that suits them.
   const [lineupLogoRatio, setLineupLogoRatio] = useState(1)
   const [cardUploadError, setCardUploadError] = useState('')
+  // The Glass Card's own choices: where the scorecards sit on the photo, how dark
+  // the tint behind them is and which performers each side shows. The photo is
+  // the post's hero image (it changes every match); the rest is the club's habit,
+  // so this browser keeps it.
+  const [glassLook, setGlassLook] = useState(() => {
+    try { return { ...GLASS_DEFAULTS, ...JSON.parse(localStorage.getItem('bs_social_result_glass') || '{}') } } catch { return { ...GLASS_DEFAULTS } }
+  })
+  const patchGlassLook = (patch) => setGlassLook((c) => ({ ...c, ...patch }))
+  useEffect(() => { try { localStorage.setItem('bs_social_result_glass', JSON.stringify(glassLook)) } catch { /* private window */ } }, [glassLook])
+  const [glassFocus, setGlassFocus] = useState(GLASS_FOCUS)
 
   // Tag the players who have nothing on record before the match date as
   // debutants. Runs on its own after a lineup lands (the lineup is already on
@@ -2785,14 +2800,20 @@ export default function AdminSocialPost() {
     extraProps.panelColor = splitPanel || undefined
     extraProps.background = bgActive ? bgStyle : null
   }
+  // How many logos the post's sponsor grid holds, for the layouts whose room for
+  // it depends on the count (T12's bar) or that label it (the Glass Card).
+  const gridLogoCount = (() => {
+    const usable = new Set(adminSponsors.filter(sponsorLogoUrl).map((x) => x.id))
+    const grid = overlay.items.find((it) => it.type === 'sponsors')
+    return grid ? (grid.sponsorIds || []).filter((id) => usable.has(id)).length : 0
+  })()
   if (templateId === 'T12') {
     extraProps.card = lineupCard
     extraProps.logoRatio = lineupLogoRatio
-    // How many logos the sponsor bar holds, so its height follows the count.
     // None means the layout draws no bar at all.
-    const usable = new Set(adminSponsors.filter(sponsorLogoUrl).map((x) => x.id))
-    const grid = overlay.items.find((it) => it.type === 'sponsors')
-    extraProps.sponsorCount = grid ? (grid.sponsorIds || []).filter((id) => usable.has(id)).length : 0
+    extraProps.sponsorCount = gridLogoCount
+    // The Backing buttons in the Sponsors tool colour the layout's whole bar.
+    extraProps.sponsorPanel = overlay.items.find((it) => it.type === 'sponsors')?.panel || 'light'
   }
   if (templateId === 'C4') {
     extraProps.result = {
@@ -2904,7 +2925,7 @@ export default function AdminSocialPost() {
     extraProps.sponsors = scorecardMatch.meta.sponsors
   }
   if (tmpl.kind === 'singleresult') {
-    const mapPerf = (arr) => (arr || []).map((p) => ({ n: p.last, l: p.line })).filter((p) => p.n || p.l)
+    const mapPerf = (arr) => (arr || []).map((p) => ({ n: p.last, l: p.line, first: p.first || '', sn: p.surname || '', o: p.overs || '' })).filter((p) => p.n || p.l)
     // POTM photo: an uploaded hero image wins, else the matched player's profile
     // photo (RS4 "Star of the Day" shows it in place of the initials).
     const motmProfile = playerForPid(result.motmPlayerId)
@@ -2927,6 +2948,12 @@ export default function AdminSocialPost() {
       topBowl: { us: mapPerf(result.topBowlers.team), them: mapPerf(result.topBowlers.opponent) },
     }
     extraProps.sponsors = scorecardMatch.meta.sponsors
+    if (templateId === 'RS7') {
+      extraProps.look = glassLook
+      extraProps.photo = heroImage.blobUrl || null
+      extraProps.focus = glassFocus
+      extraProps.sponsorCount = gridLogoCount
+    }
   }
   if (tmpl.kind === 'blank') {
     extraProps.items = canvas.items
@@ -3020,6 +3047,8 @@ export default function AdminSocialPost() {
   // Only the scorecards still draw sponsor slots of their own (a 1920 landscape
   // sheet with a footer strip). Every other layout reserves a slot for the grid.
   const nativeSponsors = isScorecard
+  // A layout whose sponsor slot moves with an editor choice (the Glass Card's position).
+  const slotOpts = templateId === 'RS7' ? { position: glassLook.position } : undefined
   const sponsorCanvas = (() => {
     if (isScorecard) return { w: 1920, h: 1080 }
     const sz = postSizeOf(postSize)
@@ -3049,7 +3078,7 @@ export default function AdminSocialPost() {
   useEffect(() => {
     if (loading || !sponsorDefault.loaded || !sponsorDefault.ids.length || nativeSponsors) return
     const existing = sponsorTarget.items.find((it) => it.type === 'sponsors')
-    const geo = sponsorSlotFor(templateId, sponsorCanvas.w, sponsorCanvas.h, sponsorDefault.ids.length)
+    const geo = sponsorSlotFor(templateId, sponsorCanvas.w, sponsorCanvas.h, sponsorDefault.ids.length, slotOpts)
     if (!existing) {
       if (sponsorDismissed.current[sponsorKey]) return
       const fresh = newBlankItem('sponsors', { ...geo, sponsorIds: sponsorDefault.ids, auto: true })
@@ -3066,7 +3095,7 @@ export default function AdminSocialPost() {
       if (!same) sponsorTarget.patchMany({ [existing.id]: { sponsorIds: sponsorDefault.ids, ...geo } })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, sponsorDefault, sponsorTarget.items, sponsorKey, sponsorCanvas.w, sponsorCanvas.h, nativeSponsors, templateId])
+  }, [loading, sponsorDefault, sponsorTarget.items, sponsorKey, sponsorCanvas.w, sponsorCanvas.h, nativeSponsors, templateId, slotOpts?.position])
   // A layout with sponsor slots of its own (fixtures, results, scorecards) fills
   // them from the same default, until somebody picks their own logos there.
   useEffect(() => {
@@ -3638,23 +3667,41 @@ export default function AdminSocialPost() {
       // The Match Day Card's bar is as tall as its logos need, so a grid still
       // sitting where the layout put it follows the bar. One somebody moved stays.
       let follow = null
-      if (templateId === 'T12') {
-        const was = sponsorSlotFor(templateId, W, H, (sponsorBlock.sponsorIds || []).length || 1)
-        if (['x', 'y', 'w', 'h'].every((k) => sponsorBlock[k] === was[k])) follow = sponsorSlotFor(templateId, W, H, ids.length)
+      // The Glass Card's slot is wider for more logos, the same way.
+      if (templateId === 'T12' || templateId === 'RS7') {
+        const was = sponsorSlotFor(templateId, W, H, (sponsorBlock.sponsorIds || []).length || 1, slotOpts)
+        if (['x', 'y', 'w', 'h'].every((k) => sponsorBlock[k] === was[k])) {
+          const { x, y, w, h } = sponsorSlotFor(templateId, W, H, ids.length, slotOpts)
+          follow = { x, y, w, h }
+        }
       }
       sponsorTarget.patchMany(releaseSponsorAuto(sponsorTarget.items, { [sponsorBlock.id]: { sponsorIds: ids, ...follow } }))
       return
     }
     if (!ids.length) return
     delete sponsorDismissed.current[sponsorKey]
-    const geo = sponsorSlotFor(templateId, W, H, ids.length)
+    const geo = sponsorSlotFor(templateId, W, H, ids.length, slotOpts)
     record('Add sponsors')
     sponsorTarget.setItems((its) => [...its, newBlankItem('sponsors', { ...geo, sponsorIds: ids })])
+  }
+  // Moving the Glass Card moves the free end of the photo, so a sponsor grid still
+  // sitting where the layout put it goes with it. One somebody moved stays.
+  const changeGlassPosition = (position) => {
+    if (position === glassLook.position) return
+    if (sponsorBlock) {
+      const n = (sponsorBlock.sponsorIds || []).length || 1
+      const was = sponsorSlotFor('RS7', W, H, n, { position: glassLook.position })
+      if (['x', 'y', 'w', 'h'].every((k) => sponsorBlock[k] === was[k])) {
+        record('Move scorecard')
+        sponsorTarget.patchMany({ [sponsorBlock.id]: sponsorSlotFor('RS7', W, H, n, { position }) })
+      }
+    }
+    patchGlassLook({ position })
   }
   const useDefaultSponsors = () => {
     if (!sponsorBlock || !sponsorDefault.ids.length) return
     record('Default sponsors')
-    sponsorTarget.patchMany({ [sponsorBlock.id]: { sponsorIds: sponsorDefault.ids, ...sponsorSlotFor(templateId, W, H, sponsorDefault.ids.length), auto: true } })
+    sponsorTarget.patchMany({ [sponsorBlock.id]: { sponsorIds: sponsorDefault.ids, ...sponsorSlotFor(templateId, W, H, sponsorDefault.ids.length, slotOpts), auto: true } })
   }
   const setSponsorPanel = (panel) => {
     if (!sponsorBlock) return
@@ -4958,6 +5005,7 @@ export default function AdminSocialPost() {
 
                 {/* POTM image — Star of the Day shows a player profile photo or an
                     uploaded hero image in place of the initials (RS4 feedback). */}
+                {templateId !== 'RS7' && (
                 <div className="mb-4 pt-3 border-t pb-hairline">
                   <div className="flex items-center justify-between mb-2">
                     <label className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase">POTM Photo</label>
@@ -5017,6 +5065,7 @@ export default function AdminSocialPost() {
                     </div>
                   )}
                 </div>
+                )}
 
                 {[
                   { side: 'team', label: `Our Batters`, type: 'topBatters' },
@@ -5047,6 +5096,80 @@ export default function AdminSocialPost() {
                     </div>
                   </div>
                 ))}
+              </section>
+            )}
+
+            {/* Glass Card (RS7): the photo, where the scorecards sit, how dark the tint is */}
+            {activeTab === 'result' && templateId === 'RS7' && (
+              <section className="pb-card p-4" data-testid="glass-card-look">
+                <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Glass Card</h2>
+                <p className="text-[11px] text-pb-faint mb-3">Your photo fills the post. The scorecards sit on glass over a blurred, darkened part of it.</p>
+
+                <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Background photo</label>
+                <div className="flex flex-col gap-3 mb-4">
+                  <label className="flex items-center gap-3 cursor-pointer group">
+                    <span className="px-3 py-2 rounded border pb-hairline text-xs font-mono text-pb-faint group-hover:bg-pb-surface2 transition-colors">Choose File</span>
+                    <span className="text-[11px] text-pb-faint truncate">{heroImage.blobUrl ? 'Photo selected' : 'No file chosen'}</span>
+                    <input type="file" accept="image/png,image/webp,image/jpeg" onChange={handleHeroFile} className="sr-only" data-testid="glass-photo-input" />
+                  </label>
+                  {heroImage.blobUrl && (
+                    <div className="flex items-start gap-3">
+                      <img src={heroImage.blobUrl} alt="Background preview" className="w-16 h-16 object-cover rounded bg-pb-surface2" />
+                      <div className="flex flex-col gap-2 flex-1">
+                        <button onClick={() => setEditor({ key: 'hero', source: heroImage.blobUrl })}
+                          className="text-xs font-mono text-pb-faint hover:text-pb-text text-left">✎ Edit (crop)</button>
+                        <button onClick={() => { URL.revokeObjectURL(heroImage.blobUrl); setHeroImage({ blobUrl: null }); setGlassFocus(GLASS_FOCUS) }}
+                          className="text-xs text-pb-faintest hover:text-red-400 font-mono text-left">Remove photo</button>
+                      </div>
+                    </div>
+                  )}
+                  {!heroImage.blobUrl && <p className="text-[11px] text-pb-faintest">Without a photo the card sits on your palette colour.</p>}
+                  <HeroFocusControl src={heroImage.blobUrl || null} value={glassFocus} onChange={setGlassFocus} defaults={GLASS_FOCUS} aspect={W / H} />
+                </div>
+
+                <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Scorecard position</label>
+                <div className="grid grid-cols-3 gap-2 mb-1" role="radiogroup" aria-label="Scorecard position">
+                  {GLASS_POSITIONS.map((o) => {
+                    const on = glassLook.position === o.key
+                    const [v, h] = o.key.split('-')
+                    const wide = h === 'center'
+                    return (
+                      <button key={o.key} role="radio" aria-checked={on} aria-label={o.label} data-testid={`glass-pos-${o.key}`}
+                        onClick={() => changeGlassPosition(o.key)} title={o.label}
+                        className={`relative h-14 rounded border transition-colors ${on ? '' : 'pb-hairline hover:bg-pb-surface2'}`}
+                        style={on ? { borderColor: 'var(--pb-accent)' } : undefined}>
+                        <span className="absolute rounded-sm" style={{
+                          background: on ? 'var(--pb-accent)' : 'rgba(150,160,175,0.55)',
+                          width: wide ? '76%' : '44%', height: '38%',
+                          left: wide ? '12%' : h === 'left' ? '8%' : 'auto', right: h === 'right' ? '8%' : 'auto',
+                          top: v === 'top' ? '10%' : 'auto', bottom: v === 'bottom' ? '10%' : 'auto',
+                        }} />
+                      </button>
+                    )
+                  })}
+                </div>
+                <p className="text-[11px] text-pb-faintest mb-4">{GLASS_POSITIONS.find((o) => o.key === glassLook.position)?.label}. Your sponsors and the BetterCricket logo take the free end of the photo.</p>
+
+                <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Tint behind the card</label>
+                <div className="flex items-center gap-3 mb-4">
+                  <input type="range" min="0.1" max="0.9" step="0.05" value={glassLook.tint} data-testid="glass-tint"
+                    onChange={(e) => patchGlassLook({ tint: Number(e.target.value) })} className="flex-1" />
+                  <span className="font-mono text-[11px] text-pb-faint w-10 text-right">{Math.round(glassLook.tint * 100)}%</span>
+                </div>
+
+                <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Players shown</label>
+                <div className="grid grid-cols-2 gap-3">
+                  {[{ k: 'perfUs', label: `${team.name || 'Our'} panel` }, { k: 'perfThem', label: `${oppData.name || 'Their'} panel` }].map(({ k, label }) => (
+                    <div key={k}>
+                      <span className="block text-[10px] text-pb-faintest mb-1 truncate">{label}</span>
+                      <select value={glassLook[k]} data-testid={`glass-${k}`} onChange={(e) => patchGlassLook({ [k]: e.target.value })}
+                        className="w-full bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-sm text-pb-text">
+                        <option value="bat">Top batters</option>
+                        <option value="bowl">Top bowlers</option>
+                      </select>
+                    </div>
+                  ))}
+                </div>
               </section>
             )}
 
