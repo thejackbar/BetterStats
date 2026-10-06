@@ -140,19 +140,22 @@ function _appendContext(params, context) {
   })
 }
 
-// Grade-type / match-type / competition scope as a query string. Takes
-// {categories, formats, competitions}, or a bare string meaning categories
+// Grade-type / match-type / competition / grade scope as a query string. Takes
+// {categories, formats, competitions, grades}, or a bare string meaning categories
 // alone (what the pre-format callers passed). Returns '' when nothing is
 // selected, so the URL is byte-identical to what it was before any of the
 // three filters existed.
 function scopeQuery(scope) {
   if (!scope) return ''
-  const { categories, formats, competitions } =
+  const { categories, formats, competitions, grades } =
     typeof scope === 'string' ? { categories: scope } : scope
   const params = new URLSearchParams()
   if (categories) params.set('categories', categories)
   if (formats) params.set('formats', formats)
   if (competitions) params.set('competitions', competitions)
+  // Grade NAMES, repeated rather than comma-joined: a grade can be called
+  // "Division 1, North". One name or a list; null and [] send nothing.
+  for (const g of [].concat(grades || [])) if (g) params.append('grades', g)
   const qs = params.toString()
   return qs ? `?${qs}` : ''
 }
@@ -349,7 +352,7 @@ export const api = {
     const qs = params.toString()
     return request(`/players/${playerId}/formats${qs ? `?${qs}` : ''}`)
   },
-  getPlayerStats: (playerId, { seasonId, gradeId, lastNGames, startDate, endDate, categories, formats, competitions } = {}) => {
+  getPlayerStats: (playerId, { seasonId, gradeId, lastNGames, startDate, endDate, categories, formats, competitions, grades } = {}) => {
     const params = new URLSearchParams()
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
@@ -359,6 +362,7 @@ export const api = {
     if (categories) params.set('categories', categories)
     if (formats) params.set('formats', formats)
     if (competitions) params.set('competitions', competitions)
+    for (const g of [].concat(grades || [])) if (g) params.append('grades', g)
     return request(`/players/${playerId}/stats?${params}`)
   },
   // `scope` is the same grade-type / match-type selection the career stats call

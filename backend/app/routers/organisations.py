@@ -317,7 +317,13 @@ async def get_org_grades(
         """),
         params,
     )
-    return [{"name": row.display_name} for row in result]
+    # The club's own reading order (Manage Grades -> Order) rides along so a
+    # picker can follow it. Additive: `name` and the row order are exactly what
+    # they were, and a grade the club has not placed carries null.
+    from app.services.aggregations import _org_grade_display_orders
+    orders = await _org_grade_display_orders(db, org_id)
+    return [{"name": row.display_name, "display_order": orders.get(row.display_name)}
+            for row in result]
 
 
 @router.get("/{org_id}/grade-categories")

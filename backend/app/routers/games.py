@@ -50,6 +50,12 @@ async def _fetch_manual_games_as_list(
             # Competitions were asked for and none of them are this club's.
             # Nothing matches — never everything.
             q = q.where(false())
+    if scope is not None and getattr(scope, "grade_active", False):
+        # A picked grade is an INCLUSION too, so a grade-less hand-typed game
+        # drops out for the same reason it does under a competition.
+        q = q.where(ManualGame.grade_id.in_(
+            [uuid.UUID(str(g)) for g in scope.grade_pick_ids]) if scope.grade_pick_ids
+            else false())
     if scope is not None and getattr(scope, "hidden_grade_ids", None):
         # Junior grades a club hides from its public Stats apply to a hand-typed
         # game too. A grade-less one is kept: it is not known to be junior.

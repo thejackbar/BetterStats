@@ -77,6 +77,8 @@ from app.services.grade_labels import (
     format_sql_case,
     formats_for_name,
     normalise_category,
+    grade_alias_map,
+    grade_key,
     normalise_formats,
     org_grade_category_sets,
     org_grade_format_sets,
@@ -153,6 +155,39 @@ def normalise_competitions(value) -> Optional[tuple[str, ...]]:
     return tuple(dict.fromkeys(out))
 
 
+def normalise_grade_names(value) -> Optional[tuple[str, ...]]:
+    """Coerce a picked-grade selection to a tuple of grade NAMES.
+
+    The profile's Grade picker is fed by ``/organisations/{org}/grades``, which
+    lists each grade under the name Manage Grades gives it (the club's rename,
+    else the merge's canonical name, else the grade's own). That is what arrives
+    here, so it is the one input that can contain a comma: a grade called
+    "Division 1, North". The wire form therefore repeats the parameter
+    (``?grades=A&grades=B``) and a list is taken as it comes. A bare string is
+    split on the pipe character, which no grade name carries, never on a comma.
+
+    None (or ``"all"``) means no grade filter, which is the default: a grade is
+    something a person asks for, never something applied on their behalf. A
+    selection that is present but empty after cleaning is an ACTIVE filter
+    matching nothing, for the same reason ``normalise_competitions`` fails
+    closed.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        raw: Iterable = value.split("|")
+    elif isinstance(value, (list, tuple, set)):
+        raw = []
+        for v in value:
+            raw.extend(str(v).split("|"))
+    else:
+        return None
+    cleaned = [str(v).strip() for v in raw]
+    if any(v.lower() == ALL for v in cleaned):
+        return None
+    return tuple(dict.fromkeys(v for v in cleaned if v))
+
+
 def primary_category(categories) -> str:
     """The one-answer view of a grade's categories.
 
@@ -205,6 +240,7 @@ class GradeScope:
         "categories", "formats", "excluded_ids", "excluded_categories",
         "excluded_labels", "format_fallback_ids", "param", "competitions",
         "competition_names", "competition_extra_ids", "hidden_grade_ids",
+        "grades", "grade_names", "grade_pick_ids",
     )
 
     def __init__(
@@ -220,6 +256,9 @@ class GradeScope:
         competition_extra_ids: Sequence = (),
         excluded_labels: Sequence[str] = (),
         hidden_grade_ids: Sequence = (),
+        grades: Optional[Sequence] = None,
+        grade_names: Sequence[str] = (),
+        grade_pick_ids: Sequence = (),
     ):
         self.categories = tuple(categories)
         self.formats = tuple(formats) if formats is not None else None
@@ -259,6 +298,14 @@ class GradeScope:
         # its own competition. Kept as an explicit list because there are only
         # ever a handful, which is what lets the main test stay a subquery.
         self.competition_extra_ids = list(competition_extra_ids)
+        # The grades a person picked by name (the profile's Grade filter). None
+        # means no grade filter; an EMPTY tuple is a real filter that matched
+        # none of this club's grades and so matches nothing. `grade_pick_ids`
+        # is every grade row (our own and a shared fixture's foreign one) whose
+        # name resolves to a picked grade, worked out once in `resolve_scope`.
+        self.grades = tuple(grades) if grades is not None else None
+        self.grade_names = tuple(grade_names)
+        self.grade_pick_ids = list(grade_pick_ids)
 
     @property
     def category_active(self) -> bool:
@@ -273,16 +320,21 @@ class GradeScope:
         return self.competitions is not None
 
     @property
+    def grade_active(self) -> bool:
+        return self.grades is not None
+
+    @property
     def active(self) -> bool:
         """Is this scope doing anything at all?
 
-        Includes the format and competition axes, neither of which emits grade
+        Includes the format, competition and grade axes, neither of which emits grade
         exclusions of its own — every caller gates the switch to per-game
         sources on this, and both are only answerable from per-game rows
         (Cricket Australia's season aggregates carry no grade, so they can say
         nothing about which competition a run was scored in).
         """
-        return self.category_active or self.format_active or self.competition_active
+        return (self.category_active or self.format_active
+                or self.competition_active or self.grade_active)
 
     @property
     def _label_param(self) -> str:
@@ -303,6 +355,10 @@ class GradeScope:
     @property
     def _comp_extra_param(self) -> str:
         return f"{self.param}_comp_grades"
+
+    @property
+    def _grade_param(self) -> str:
+        return f"{self.param}_picked_grades"
 
     def clause(
         self,
@@ -344,7 +400,7 @@ class GradeScope:
         a grade-less manual game — carries no competition and drops out; see
         the module docstring for why that is the right way round.
         """
-        out = self.competition_clause(column)
+        out = self.competition_clause(column) + self.grade_clause(column)
         if self.category_active:
             if label_column is not None:
                 # A residual that carries a classifiable grade_label (an import
@@ -426,6 +482,23 @@ class GradeScope:
             f" WHERE gsc.competition_id = ANY(:{self._comp_param})){extra})"
         )
 
+    def grade_clause(self, column: str = "g.grade_id") -> str:
+        """The picked-grade condition for a grade column (leading AND).
+
+        An INCLUSION with no ``IS NULL`` tolerance, like the competition clause:
+        a grade-less manual game, or a career residual with no grade, is not in
+        the grade being asked for. A list of grade ids rather than a subquery,
+        because a grade NAME spans a row per season (plus another club's row on
+        a shared fixture) and is resolved to ids once in Python, which keeps the
+        SQL a bound array that pushes down into the ``v_effective_*`` views.
+        """
+        if not self.grade_active:
+            return ""
+        if not self.grade_pick_ids:
+            # Grades were asked for and none of them are this club's.
+            return " AND FALSE"
+        return f" AND ({column} = ANY(:{self._grade_param}))"
+
     def bind(self, params: dict) -> dict:
         """Add this scope's bind parameters to a params dict, in place."""
         if self.category_active:
@@ -435,6 +508,8 @@ class GradeScope:
             params[self._fmt_param] = list(self.formats)
             if self.format_fallback_ids:
                 params[self._fmt_fallback_param] = self.format_fallback_ids
+        if self.grade_active and self.grade_pick_ids:
+            params[self._grade_param] = list(self.grade_pick_ids)
         if self.competitions:
             params[self._comp_param] = list(self.competitions)
             if self.competition_extra_ids:
@@ -462,6 +537,8 @@ class GradeScope:
             competitions=self.competitions, competition_names=self.competition_names,
             competition_extra_ids=self.competition_extra_ids,
             hidden_grade_ids=self.hidden_grade_ids,
+            grades=self.grades, grade_names=self.grade_names,
+            grade_pick_ids=self.grade_pick_ids,
         )
 
     def as_meta(self) -> dict:
@@ -472,6 +549,8 @@ class GradeScope:
             "formats": list(self.formats) if self.formats is not None else None,
             "competitions": list(self.competitions) if self.competitions is not None else None,
             "competition_names": list(self.competition_names),
+            "grades": list(self.grade_names) if self.grades is not None else None,
+            "grade_active": self.grade_active,
             "active": self.active,
             "category_active": self.category_active,
             "juniors_hidden": bool(self.hidden_grade_ids),
@@ -502,6 +581,51 @@ async def _resolve_competitions(session: AsyncSession, org_id, wanted):
     return kept, tuple(rows[w] for w in kept)
 
 
+async def _resolve_picked_grades(session: AsyncSession, org_id, wanted, club_grades):
+    """Turn picked grade names into the grade rows they stand for.
+
+    Returns ``(grade ids, picked names)``. The names are the ones this club
+    actually lists; a name nobody here holds (a stale link, another club's
+    grade, a typo) is dropped, so an all-junk pick is an active filter matching
+    nothing and never one matching everything.
+
+    A picked value can be either spelling the picker has used: the DISPLAY name
+    ``/organisations/{org}/grades`` lists (Manage Grades' rename, else the merge's
+    canonical name, else the grade's own) or the canonical name a saved link
+    carries. Both resolve to a grade KEY (sponsor suffix off, lowercased, folded
+    through the club's merges, exactly as ``club_grade_rows`` keys every row), so
+    a grade renamed on Manage Grades, merged under another name, or renamed by
+    Cricket Australia between seasons still lands on every season's row, and on
+    the other club's row when a shared fixture sits in it.
+    """
+    aliases = await grade_alias_map(session, org_id)
+    # The club's own renames: display name -> the canonical grade it renames.
+    res = await session.execute(
+        text(
+            "SELECT DISTINCT gr.name, gr.display_name_override FROM grades gr"
+            " JOIN seasons s ON s.id = gr.season_id"
+            " WHERE s.organisation_id = CAST(:org AS UUID)"
+            " AND gr.display_name_override IS NOT NULL"
+        ),
+        {"org": str(org_id)},
+    )
+    rename_key: dict[str, str] = {}
+    for name, override in res.fetchall():
+        key = grade_key(name)
+        rename_key[grade_key(override)] = aliases.get(key, key)
+    held = {row.key for row in club_grades}
+    keys: set[str] = set()
+    names: list[str] = []
+    for picked in wanted:
+        key = grade_key(picked)
+        key = rename_key.get(key) or aliases.get(key, key)
+        if key in held:
+            keys.add(key)
+            names.append(picked)
+    ids = [row.id for row in club_grades if row.key in keys]
+    return ids, tuple(names)
+
+
 async def resolve_scope(
     session: AsyncSession,
     org_id,
@@ -509,6 +633,7 @@ async def resolve_scope(
     *,
     formats=None,
     competitions=None,
+    grades=None,
     param: str = "gs_excluded_grade_ids",
     judge_primary: bool = False,
     hidden_grade_ids: Sequence = (),
@@ -545,6 +670,15 @@ async def resolve_scope(
     Stats (``services/junior_hiding.JuniorHiding.grade_ids``, passed only for a
     public viewer of a club that has the switch on). They are left out
     whatever else was picked, so the scope is ACTIVE whenever any exist.
+
+    ``grades`` are grade NAMES as the public Grade picker lists them (Manage
+    Grades' rename, else the merge's canonical name, else the grade's own; see
+    :func:`_resolve_picked_grades`). It is an INCLUSION like the competition
+    axis. **A picked grade beats the CATEGORY half**, the same call
+    :meth:`GradeScope.formats_only` makes for the leaderboards: someone who chose
+    "Under 14s" plainly wants the juniors, so no category exclusion is built at
+    all. The format and competition halves are kept, and a hidden junior grade
+    stays hidden whatever was picked.
     """
     # An explicit selection is an INCLUSION ("show me the women's grades") and
     # matches on any of a grade's categories. The club default is an EXCLUSION
@@ -573,15 +707,22 @@ async def resolve_scope(
     elif wanted_competitions is not None:
         comp_ids = ()
 
+    wanted_grades = normalise_grade_names(grades)
     category_filter = set(wanted) < set(GRADE_CATEGORIES)
+    if wanted_grades is not None:
+        # Picking a grade is a choice between what the club shows, never a way
+        # to be told "nothing" because the default leaves that category out.
+        category_filter = False
+        wanted = GRADE_CATEGORIES
     # The grade walk below is also what finds the shared fixtures a competition
     # filter has to reach, so a competition-only scope runs it too.
     if not org_id or (not category_filter and wanted_formats is None
-                      and not comp_ids):
+                      and not comp_ids and wanted_grades is None):
         return GradeScope(
             wanted, [], [], param, formats=wanted_formats,
             competitions=comp_ids, competition_names=comp_names,
             hidden_grade_ids=hidden_grade_ids,
+            grades=() if wanted_grades is not None else None,
         )
 
     name_categories = (
@@ -599,13 +740,18 @@ async def resolve_scope(
     # can never name, which (the filter being an exclusion) means it is KEPT by
     # every category at once. That is how 28 senior matches read as juniors as
     # well as seniors. See services/club_grades.py.
-    grades = await club_grade_rows(session, org_id)
+    club_grades = await club_grade_rows(session, org_id)
+    pick_ids: list = []
+    pick_names: tuple = ()
+    if wanted_grades is not None:
+        pick_ids, pick_names = await _resolve_picked_grades(
+            session, org_id, wanted_grades, club_grades)
     excluded_ids = []
     excluded_categories = set()
     fallback_ids = []
     comp_ids_set = set(comp_ids or ())
     comp_grade_ids = []
-    for row in grades:
+    for row in club_grades:
         grade_id, name = row.id, row.name
         if (comp_ids and not row.is_own and row.competition_id is not None
                 and str(row.competition_id) in comp_ids_set):
@@ -668,6 +814,9 @@ async def resolve_scope(
         competition_extra_ids=comp_grade_ids,
         excluded_labels=excluded_labels,
         hidden_grade_ids=hidden_grade_ids,
+        grades=pick_names if wanted_grades is not None else None,
+        grade_names=pick_names,
+        grade_pick_ids=pick_ids,
     )
 
 
@@ -740,6 +889,7 @@ async def resolve_scope_for_player(
     *,
     formats=None,
     competitions=None,
+    grades=None,
     auto_widen: bool = True,
     param: str = "gs_excluded_grade_ids",
     hidden_grade_ids: Sequence = (),
@@ -768,7 +918,7 @@ async def resolve_scope_for_player(
     explicit = normalise_categories(categories) is not None
     scope = await resolve_scope(
         session, org_id, categories, formats=formats,
-        competitions=competitions, param=param,
+        competitions=competitions, grades=grades, param=param,
         hidden_grade_ids=hidden_grade_ids,
     )
     if explicit or not auto_widen or not scope.category_active:
@@ -778,7 +928,7 @@ async def resolve_scope_for_player(
         return scope, False
     widened = await resolve_scope(
         session, org_id, sorted(set(scope.categories) | played),
-        formats=formats, competitions=competitions, param=param,
+        formats=formats, competitions=competitions, grades=grades, param=param,
         hidden_grade_ids=hidden_grade_ids,
     )
     return widened, True
