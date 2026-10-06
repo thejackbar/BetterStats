@@ -92,6 +92,11 @@
 58. Only the scorecards (SC1 to SC3) still draw sponsor logos of their own (`nativeSponsors`). The roundup `SponsorFooter` is a credit-only strip; do not draw logos in a layout as well as reserving a slot.
 59. Scorecard rows are sized from the panel's real height (`_scRowFont`), not a constant. A changed panel height needs its `panelH` passed in. The split squares are native to a 1080 canvas: never frame them.
 
+**Match Day Card (T12, v9.106.32, `social/lineup-card-template.jsx`)**
+60. The card's look (photo, wash, corner, panel, logo) is the club's default in `socials_style.lineup_card`. A new key in that blob must be on `_SOCIALS_STYLE_KEYS` (the server strips the rest), in `DEFAULT_STYLE_JSON` in snapshot key order, and in the applied-style normaliser. Empty colours mean "derive from the accent", never a stored hex.
+61. Its sponsor bar is as tall as the logo count needs, so the slot takes `count` and the editor passes `sponsorCount`. Zero logos draws no bar. A root child that is an SVG must be the element itself (a plain function, not a component) or the Layers panel loses its `data-layer`.
+62. Measure anything the canvas and the export node must agree on (logo ratio) in the editor and pass it down, and give a list one shared type size rather than fitting each row alone.
+
 ## Traps and failure signatures
 - Geometry checks pass but a layout reads wrong (black bands, clumped story names). Judge from real screenshots.
 - Hero layouts show a crest, not the cut-out: harness roster stubbed `photo_url: null`. Stubs must cover every conditional's data (give players a photo and a route for it).

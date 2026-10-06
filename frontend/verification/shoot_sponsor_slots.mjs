@@ -27,7 +27,7 @@ const BASE = process.env.BASE || 'http://127.0.0.1:5199'
 const EXECUTABLE = process.env.PW_CHROMIUM || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome'
 
 const ALL = [
-  'T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11',
+  'T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12',
   'C1', 'C2', 'C3', 'C4',
   'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6',
   'FX1', 'FX2', 'FX3', 'FX4', 'FX5', 'FX6',

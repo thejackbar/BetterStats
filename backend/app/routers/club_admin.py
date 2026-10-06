@@ -905,6 +905,8 @@ _sanitize_theme_config = theme_config_service.sanitize_theme_config
 # deep validation would just chase its shape around.
 _SOCIALS_STYLE_KEYS = {
     "palette", "dark", "font", "bg", "bg_colors", "palettes", "designs",
+    # The Match Day Card's own look: background photo, wash, corner, list and logo.
+    "lineup_card",
     # Saved Templates ride the same blob as palettes and designs. Left off this
     # allowlist they were stripped on the way in, so a saved template only ever
     # lived in the one browser that made it and never reached another admin.

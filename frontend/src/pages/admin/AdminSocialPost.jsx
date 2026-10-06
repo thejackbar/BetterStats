@@ -33,6 +33,7 @@ import {
   DEFAULT_FIXTURES, DEFAULT_RESULTS,
 } from '../../social/round-templates'
 import { SplitPoster, autoPanelColor } from '../../social/split-template'
+import { LineupCard, LINEUP_CARD_DEFAULTS, cardWashDefault } from '../../social/lineup-card-template'
 import { TeamOfWeekGrid, TeamOfWeekBoard, TOTW_MIN, TOTW_MAX, TOTW_DEFAULT } from '../../social/totw-templates'
 import { exportNodeToPng } from '../../social/exportImage'
 import { SocialBackground, SocialBackgroundDefs, SOCIAL_BACKGROUNDS, GRADIENT_ANGLES, DEFAULT_COLORS as BG_DEFAULT_COLORS } from '../../social/SocialBackgrounds'
@@ -65,6 +66,7 @@ const EMPTY_LAYER = () => []
 const LINEUP_DEFAULT = IS_AFL ? 'T1' : 'T11'
 const ALL_TEMPLATES = [
   { id: 'T11', name: 'Split Poster',    component: SplitPoster,        desc: 'Pale panel + dark XI, debut tags', maxPlayers: 11 },
+  { id: 'T12', name: 'Match Day Card', component: LineupCard,         desc: 'Photo + colour wash, role icons, sponsor bar', maxPlayers: 11 },
   { id: 'T1', name: 'Hero List',       component: T1_HeroList,        desc: 'Big player + name list',          maxPlayers: 13 },
   { id: 'T2', name: 'Card Grid',       component: T2_CardGrid,        desc: '4×3 trading card grid',           maxPlayers: 12 },
   { id: 'T3', name: 'Side Numbered',   component: T3_SideNumbered,    desc: IS_AFL ? 'Side photo + numbered team' : 'Side photo + numbered XI',        maxPlayers: 11 },
@@ -116,7 +118,7 @@ const ALL_TEMPLATES = [
 // The football build drops the layouts that only mean anything with cricket
 // data: the batting order, the results wrap's batting/bowling leaders, and
 // every layout of the three hidden post types (toss, scorecard, final score).
-const AFL_HIDDEN_TEMPLATES = new Set(['T4', 'T11', 'RR7', 'C2', 'C4', 'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6', 'SC1', 'SC2', 'SC3', 'TW1', 'TW2'])
+const AFL_HIDDEN_TEMPLATES = new Set(['T4', 'T11', 'T12', 'RR7', 'C2', 'C4', 'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6', 'SC1', 'SC2', 'SC3', 'TW1', 'TW2'])
 const TEMPLATES = IS_AFL ? ALL_TEMPLATES.filter(t => !AFL_HIDDEN_TEMPLATES.has(t.id)) : ALL_TEMPLATES
 
 // The lineup templates that crop the hero photo into a fixed box, and the shape
@@ -135,12 +137,12 @@ const HERO_MARK_TEMPLATES = ['T1', 'T3', 'T10', 'T11']
 const HERO_PLAYER_TEMPLATES = ['T1', 'T3', 'T6', 'T10', 'T11']
 // The lineups that draw a DEBUT tag beside a flagged player. The flag is kept
 // on the player either way, so switching layout never loses it.
-const DEBUT_TEMPLATES = ['T1', 'T3', 'T10', 'T11']
-const DEBUT_TEMPLATE_NAMES = { T1: 'Hero List', T3: 'Side Numbered', T10: 'Team Sheet', T11: 'Split Poster' }
+const DEBUT_TEMPLATES = ['T1', 'T3', 'T10', 'T11', 'T12']
+const DEBUT_TEMPLATE_NAMES = { T1: 'Hero List', T3: 'Side Numbered', T10: 'Team Sheet', T11: 'Split Poster', T12: 'Match Day Card' }
 
 const TAB_MAP = {
   T1: 'lineup', T2: 'lineup', T3: 'lineup', T4: 'lineup', T5: 'lineup',
-  T6: 'lineup', T7: 'lineup', T8: 'lineup', T9: 'lineup', T10: 'lineup', T11: 'lineup',
+  T6: 'lineup', T7: 'lineup', T8: 'lineup', T9: 'lineup', T10: 'lineup', T11: 'lineup', T12: 'lineup',
   FX1: 'fixtures', FX2: 'fixtures', FX3: 'fixtures', FX4: 'fixtures', FX5: 'fixtures', FX6: 'fixtures',
   C1: 'announcement', C2: 'toss', C3: 'motm',
   C4: 'result', RS1: 'result', RS2: 'result', RS3: 'result', RS4: 'result', RS5: 'result', RS6: 'result',
@@ -994,7 +996,7 @@ function MatchPickList({ picks, onPick, onDismiss }) {
 // before any style has ever been stored server-side.
 const DEFAULT_STYLE_JSON = JSON.stringify({
   palette: 'club', dark: true, font: 'barlow', bg: 'none',
-  bg_colors: {}, palettes: [], designs: [],
+  bg_colors: {}, palettes: [], designs: [], lineup_card: LINEUP_CARD_DEFAULTS,
 })
 
 // Saved templates live in their own table now (one row each), not in the Style
@@ -1241,6 +1243,19 @@ export default function AdminSocialPost() {
   const [markHero, setMarkHero] = useState(false)
   // The split poster's pale panel. '' = derive it from the club accent.
   const [splitPanel, setSplitPanel] = useState('')
+  // The Match Day Card's look: background photo, wash, corner and panel colours,
+  // logo. A club sets these once, so they ride in the club's saved Style
+  // (socials_style.lineup_card) and every new lineup opens with them. The browser
+  // keeps a copy for a signed-in user who cannot save settings.
+  const [lineupCard, setLineupCard] = useState(() => {
+    try { return { ...LINEUP_CARD_DEFAULTS, ...JSON.parse(localStorage.getItem('bs_social_lineup_card') || '{}') } } catch { return { ...LINEUP_CARD_DEFAULTS } }
+  })
+  const patchLineupCard = (patch) => setLineupCard((c) => ({ ...c, ...patch }))
+  useEffect(() => { try { localStorage.setItem('bs_social_lineup_card', JSON.stringify(lineupCard)) } catch { /* private window */ } }, [lineupCard])
+  // Width over height of the logo the card shows, measured so a 6:1 wordmark and
+  // a square crest each get the box that suits them.
+  const [lineupLogoRatio, setLineupLogoRatio] = useState(1)
+  const [cardUploadError, setCardUploadError] = useState('')
 
   // Tag the players who have nothing on record before the match date as
   // debutants. Runs on its own after a lineup lands (the lineup is already on
@@ -1715,7 +1730,7 @@ export default function AdminSocialPost() {
   const styleSaveTimer = useRef(null)
   const styleSnapshot = JSON.stringify({
     palette: paletteKey, dark: darkMode, font: fontKey, bg: bgStyle,
-    bg_colors: bgColors, palettes: savedPalettes, designs: savedDesigns,
+    bg_colors: bgColors, palettes: savedPalettes, designs: savedDesigns, lineup_card: lineupCard,
   })
   useEffect(() => {
     if (!settings) return undefined
@@ -1749,6 +1764,7 @@ export default function AdminSocialPost() {
             bg_colors: st.bg_colors && typeof st.bg_colors === 'object' ? st.bg_colors : {},
             palettes: Array.isArray(st.palettes) ? st.palettes : [],
             designs: Array.isArray(st.designs) ? st.designs : [],
+            lineup_card: { ...LINEUP_CARD_DEFAULTS, ...(st.lineup_card && typeof st.lineup_card === 'object' ? st.lineup_card : {}) },
           }
           setPaletteKey(applied.palette)
           setDarkMode(applied.dark)
@@ -1757,6 +1773,7 @@ export default function AdminSocialPost() {
           setBgColors(applied.bg_colors)
           setSavedPalettes(applied.palettes)
           setSavedDesigns(applied.designs)
+          if (st.lineup_card && typeof st.lineup_card === 'object') setLineupCard(applied.lineup_card)
           styleServerRef.current = JSON.stringify(applied)
         }
         setAllPlayers(p)
@@ -2768,6 +2785,15 @@ export default function AdminSocialPost() {
     extraProps.panelColor = splitPanel || undefined
     extraProps.background = bgActive ? bgStyle : null
   }
+  if (templateId === 'T12') {
+    extraProps.card = lineupCard
+    extraProps.logoRatio = lineupLogoRatio
+    // How many logos the sponsor bar holds, so its height follows the count.
+    // None means the layout draws no bar at all.
+    const usable = new Set(adminSponsors.filter(sponsorLogoUrl).map((x) => x.id))
+    const grid = overlay.items.find((it) => it.type === 'sponsors')
+    extraProps.sponsorCount = grid ? (grid.sponsorIds || []).filter((id) => usable.has(id)).length : 0
+  }
   if (templateId === 'C4') {
     extraProps.result = {
       winner: result.winner, margin: result.margin, grade: result.grade, teamScore: result.teamScore,
@@ -3060,6 +3086,19 @@ export default function AdminSocialPost() {
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, sponsorDefault, nativeSponsors, usableSponsorKey])
+
+  // Measure the Match Day Card's logo so the layout can give a 6:1 wordmark and
+  // a square crest each the box that suits them. An image that will not load
+  // keeps the last ratio; the layout then draws nothing for it anyway.
+  const lineupLogoSrc = lineupCard.logoUrl || team.logo || ''
+  useEffect(() => {
+    if (!lineupLogoSrc) return undefined
+    let cancelled = false
+    const im = new Image()
+    im.onload = () => { if (!cancelled && im.naturalWidth && im.naturalHeight) setLineupLogoRatio(im.naturalWidth / im.naturalHeight) }
+    im.src = lineupLogoSrc
+    return () => { cancelled = true }
+  }, [lineupLogoSrc])
 
   if (loading) return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-pb-bg">
@@ -3407,6 +3446,20 @@ export default function AdminSocialPost() {
     }
   }
   const useBgAsset = (asset) => { setBgStyle('custom-image'); setBgCustomUrl(asset.url) }
+  // Match Day Card: a photo or logo uploaded here is stored in the club's library
+  // and becomes the card's default straight away, so the next lineup opens with it.
+  const uploadCardImage = async (file, field) => {
+    if (!file) return
+    setCardUploadError('')
+    try {
+      const saved = await api.uploadSocialMedia(file, field === 'bgUrl' ? 'background' : undefined)
+      if (field === 'bgUrl') setBgAssets((a) => [saved, ...a])
+      else setMediaAssets((a) => [saved, ...a])
+      patchLineupCard({ [field]: saved.url })
+    } catch (e) {
+      setCardUploadError(e?.message || 'That upload did not go through. Try again.')
+    }
+  }
   const deleteBgAsset = async (asset) => {
     setBgAssets((a) => a.filter((x) => x.id !== asset.id))
     if (bgCustomUrl === asset.url) { setBgStyle('none'); setBgCustomUrl(null) }
@@ -3582,7 +3635,14 @@ export default function AdminSocialPost() {
       // Taking the last sponsor off goes through the same confirm as deleting the block.
       if (!ids.length) { hRemove(sponsorBlock.id); return }
       record('Change sponsors')
-      sponsorTarget.patchMany(releaseSponsorAuto(sponsorTarget.items, { [sponsorBlock.id]: { sponsorIds: ids } }))
+      // The Match Day Card's bar is as tall as its logos need, so a grid still
+      // sitting where the layout put it follows the bar. One somebody moved stays.
+      let follow = null
+      if (templateId === 'T12') {
+        const was = sponsorSlotFor(templateId, W, H, (sponsorBlock.sponsorIds || []).length || 1)
+        if (['x', 'y', 'w', 'h'].every((k) => sponsorBlock[k] === was[k])) follow = sponsorSlotFor(templateId, W, H, ids.length)
+      }
+      sponsorTarget.patchMany(releaseSponsorAuto(sponsorTarget.items, { [sponsorBlock.id]: { sponsorIds: ids, ...follow } }))
       return
     }
     if (!ids.length) return
@@ -4498,6 +4558,83 @@ export default function AdminSocialPost() {
                     </div>
                   </>
                 )}
+              </section>
+            )}
+
+            {templateId === 'T12' && (
+              <section className="pb-card p-4" data-testid="lineup-card-style">
+                <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Card look</h2>
+                <p className="text-[11px] text-pb-faint leading-relaxed mb-3">These are saved for your club, so every new lineup card opens with them.</p>
+
+                <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Background photo</label>
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <label className="px-2.5 py-1.5 rounded border pb-hairline2 text-xs font-mono text-pb-dim hover:text-pb-text hover:border-pb-accent cursor-pointer">
+                    Upload photo
+                    <input type="file" accept="image/*" className="hidden" data-testid="lineup-card-bg-input"
+                      onChange={(e) => { uploadCardImage(e.target.files?.[0], 'bgUrl'); e.target.value = '' }} />
+                  </label>
+                  {lineupCard.bgUrl && <button onClick={() => patchLineupCard({ bgUrl: '' })} className="text-xs font-mono text-pb-faint hover:text-pb-text">Remove</button>}
+                </div>
+                {bgAssets.length > 0 && (
+                  <div className="grid grid-cols-4 gap-1.5 mb-3">
+                    {bgAssets.filter((a) => !a._tmp).slice(0, 8).map((a) => (
+                      <button key={a.id} onClick={() => patchLineupCard({ bgUrl: a.url })} title={a.name}
+                        className={`aspect-square rounded overflow-hidden border ${lineupCard.bgUrl === a.url ? 'border-pb-accent' : 'pb-hairline'}`}>
+                        <img src={a.url} alt={a.name} className="w-full h-full object-cover" />
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {!lineupCard.bgUrl && <p className="text-[11px] text-pb-faintest mb-3">No photo yet, so the card shows the wash colour on its own.</p>}
+
+                <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Colour wash over the photo</label>
+                <div className="flex items-center gap-3 mb-1">
+                  <input type="color" data-testid="lineup-card-wash" value={lineupCard.wash || cardWashDefault(activePalette.accent)} onChange={(e) => patchLineupCard({ wash: e.target.value })}
+                    className="w-8 h-8 rounded cursor-pointer border-0 bg-transparent p-0" />
+                  <input type="range" min="0" max="1" step="0.05" value={lineupCard.washOpacity} onChange={(e) => patchLineupCard({ washOpacity: Number(e.target.value) })}
+                    className="flex-1" aria-label="Wash strength" />
+                  <span className="font-mono text-[10px] text-pb-faint w-9 text-right">{Math.round(lineupCard.washOpacity * 100)}%</span>
+                  {lineupCard.wash && <button onClick={() => patchLineupCard({ wash: '' })} className="text-xs font-mono text-pb-faint hover:text-pb-text">Auto</button>}
+                </div>
+                <p className="text-[11px] text-pb-faintest mb-3">{lineupCard.wash ? 'Your colour' : 'Auto: a deep shade of the palette accent'}</p>
+
+                <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Corner design</label>
+                <div className="flex items-center gap-3 mb-3">
+                  <input type="color" data-testid="lineup-card-corner" value={lineupCard.corner || activePalette.accent} onChange={(e) => patchLineupCard({ corner: e.target.value })}
+                    className="w-8 h-8 rounded cursor-pointer border-0 bg-transparent p-0" />
+                  <span className="text-[11px] text-pb-faint flex-1">{lineupCard.corner ? 'Your colour' : 'Auto: the palette accent'}</span>
+                  {lineupCard.corner && <button onClick={() => patchLineupCard({ corner: '' })} className="text-xs font-mono text-pb-faint hover:text-pb-text">Auto</button>}
+                </div>
+
+                <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Player list colour</label>
+                <div className="flex items-center gap-3 mb-3">
+                  <input type="color" data-testid="lineup-card-panel" value={lineupCard.panel || activePalette.accent} onChange={(e) => patchLineupCard({ panel: e.target.value })}
+                    className="w-8 h-8 rounded cursor-pointer border-0 bg-transparent p-0" />
+                  <span className="text-[11px] text-pb-faint flex-1">{lineupCard.panel ? 'Your colour' : 'Auto: the palette accent'}</span>
+                  {lineupCard.panel && <button onClick={() => patchLineupCard({ panel: '' })} className="text-xs font-mono text-pb-faint hover:text-pb-text">Auto</button>}
+                </div>
+
+                <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Logo</label>
+                <div className="flex flex-wrap items-center gap-2 mb-1">
+                  <label className="px-2.5 py-1.5 rounded border pb-hairline2 text-xs font-mono text-pb-dim hover:text-pb-text hover:border-pb-accent cursor-pointer">
+                    Upload logo
+                    <input type="file" accept="image/*" className="hidden" data-testid="lineup-card-logo-input"
+                      onChange={(e) => { uploadCardImage(e.target.files?.[0], 'logoUrl'); e.target.value = '' }} />
+                  </label>
+                  {lineupCard.logoUrl && <button onClick={() => patchLineupCard({ logoUrl: '' })} className="text-xs font-mono text-pb-faint hover:text-pb-text">Use club logo</button>}
+                </div>
+                <p className="text-[11px] text-pb-faintest mb-2">
+                  {lineupLogoSrc
+                    ? `${lineupCard.logoUrl ? 'Your uploaded logo' : 'Your club logo'}, ${lineupLogoRatio >= 1.2 ? `wide (${lineupLogoRatio.toFixed(1)} to 1)` : lineupLogoRatio <= 0.85 ? 'tall' : 'square-ish'}. The card sizes its box to fit.`
+                    : 'No club logo yet. Upload one here or add it in Settings.'}
+                </p>
+                <div className="flex items-center gap-3">
+                  <span className="font-mono text-[10px] text-pb-faint uppercase">Size</span>
+                  <input type="range" min="0.5" max="1.3" step="0.05" value={lineupCard.logoScale} onChange={(e) => patchLineupCard({ logoScale: Number(e.target.value) })}
+                    className="flex-1" aria-label="Logo size" />
+                  <span className="font-mono text-[10px] text-pb-faint w-9 text-right">{Math.round(lineupCard.logoScale * 100)}%</span>
+                </div>
+                {cardUploadError && <p className="text-[11px] text-red-400 mt-2" role="alert">{cardUploadError}</p>}
               </section>
             )}
 
