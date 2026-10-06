@@ -371,7 +371,11 @@ async def main() -> int:
         T3, t3_subs = plan("Paused", status="paused", modules=["fees"], subs=[("core", "active", None), ("fees", "active", None)])
         T4, t4_subs = plan("Corelapsed", modules=["fees"], subs=[("core", "trial", now - timedelta(days=2)), ("fees", "active", None)])
         T5, t5_subs = plan("Subscribed", modules=["fees"], subs=[("core", "active", None), ("fees", "active", None)])
-        planned = [(H, h_subs), (T1, t1_subs), (T2, t2_subs), (T3, t3_subs), (T4, t4_subs), (T5, t5_subs)]
+        # The junior-club case: Core only, no add-on at all, while the home club holds BetterSocials.
+        T6, t6_subs = plan("Coreonly", modules=[], subs=[("core", "active", None)])
+        H.module_overrides = ["comms", "socials"]
+        h_subs = [("core", "active", None), ("comms", "active", None), ("socials", "active", None)]
+        planned = [(H, h_subs), (T1, t1_subs), (T2, t2_subs), (T3, t3_subs), (T4, t4_subs), (T5, t5_subs), (T6, t6_subs)]
         for o, _ in planned:
             db.add(o)
         await db.flush()
@@ -411,7 +415,7 @@ async def main() -> int:
         check("at home the admin holds the home club's module, not the others'",
               allowed(g, "comms", pid["home"]) and g["fees"] == 402, str(g))
         check("/auth/me entitlements are the home club's",
-              e.get("modules") == ["comms"] and e.get("core_live") is True, str(e.get("modules")))
+              e.get("modules") == ["comms", "socials"] and e.get("core_live") is True, str(e.get("modules")))
 
         g, e = await switch_and_gate(pid["trialing"])
         check("in a club on a live trial, that trial's module opens and the home club's does not",
@@ -432,6 +436,19 @@ async def main() -> int:
         g, e = await switch_and_gate(pid["corelapsed"])
         check("in a club whose Core trial has ended nothing is open, even a subscribed add-on",
               g["fees"] == 402 and e.get("core_live") is False, f"{g} core_live={e.get('core_live')}")
+
+        # A Core-only club: BetterSocials (held by the home club) must NOT carry over.
+        async def gate_socials(target):
+            await swc("h_admin", target)
+            return await gate("h_admin", "socials"), await ent("h_admin")
+        gs, e = await gate_socials(None)
+        check("at the home club BetterSocials is open", gs == pid["home"], str(gs))
+        gs, e = await gate_socials(pid["coreonly"])
+        check("in a Core-only linked club BetterSocials is refused (402) even though the home club holds it",
+              gs == 402, str(gs))
+        check("...and /auth/me lists no add-on, Core still live",
+              (e.get("modules") or []) == [] and e.get("core_live") is True, f"{e.get('modules')} {e.get('core_live')}")
+        await swc("h_admin", None)
 
         g, e = await switch_and_gate(pid["subscribed"])
         check("in a subscribed club its modules are open", allowed(g, "fees", pid["subscribed"]), str(g))
