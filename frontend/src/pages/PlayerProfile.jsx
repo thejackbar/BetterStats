@@ -2803,11 +2803,15 @@ export default function PlayerProfile() {
     categoriesParam: catParam, formatsParam: fmtParam,
     competitionsParam: compParam,
   } = useGradeFilters(profileOrgId)
+  // One grade picked by the name Manage Grades gives it, null for every grade.
+  // Not seeded from anything: a grade is something a person asks for.
+  const [gradeName, setGradeName] = useState(null)
   const { data, loading, error } = usePlayerStats(playerId, {
     seasonId,
     categories: catParam,
     formats: fmtParam,
     competitions: compParam,
+    grades: gradeName,
   })
   const gradeScope = data?.grade_scope
   // Why the career total and the per-competition figures differ — read by the
@@ -2818,7 +2822,7 @@ export default function PlayerProfile() {
   // fire on THIS, never on `gradeScope.active`: a club with a junior programme
   // has a default scope on every visit, and the default is already announced
   // once by the header. Six more notes about it would be noise.
-  const filterPick = { categories: catParam, formats: fmtParam, competitions: compParam }
+  const filterPick = { categories: catParam, formats: fmtParam, competitions: compParam, grades: gradeName }
   const filterScope = filterPick
   useEffect(() => {
     const oid = data?.player?.organisation_id
@@ -2898,14 +2902,14 @@ export default function PlayerProfile() {
     if (!playerId) return
     // The season table was sent the category and format halves and never the
     // competition — the same class of gap as the grid, found while closing it.
-    const scope = { categories: catParam, formats: fmtParam, competitions: compParam }
+    const scope = { categories: catParam, formats: fmtParam, competitions: compParam, grades: gradeName }
     api.getPlayerSeasons(playerId, scope)
       .then(setSeasonStats).catch(() => setSeasonStats([]))
     // Milestones are deliberately never filtered: a career fact, and what the
     // notification bell reports. The Milestones tab says so.
     api.getPlayerUpcomingMilestones(playerId).then(setUpcomingMilestones).catch(() => setUpcomingMilestones([]))
     api.getPlayerCaptainStats(playerId, scope).then(setCaptainStats).catch(() => setCaptainStats({}))
-  }, [playerId, catParam, fmtParam, compParam])
+  }, [playerId, catParam, fmtParam, compParam, gradeName])
 
   useEffect(() => {
     if (!data?.player?.organisation_id) return
@@ -2915,6 +2919,30 @@ export default function PlayerProfile() {
     api.listAchievements(oid, { playerId }).then(setAchievements).catch(() => setAchievements([]))
     api.listAwardDefinitions(oid).then(d => setAwardDefs(d || [])).catch(() => {})
   }, [data?.player?.organisation_id, playerId])
+
+  // The club's grades as Manage Grades has them: the club's rename, merged
+  // names folded together, grades it keeps private left out, in its own reading
+  // order. The same list the Leaderboard's Grade picker reads, narrowed to the
+  // picked season so the picker never offers a grade that season did not have.
+  const [orgGrades, setOrgGrades] = useState([])
+  useEffect(() => {
+    const oid = data?.player?.organisation_id
+    if (!oid) return
+    let cancelled = false
+    api.getOrgGrades(oid, seasonId)
+      .then(list => {
+        if (cancelled) return
+        const grades = Array.isArray(list) ? list : []
+        // Placed grades first in the club's order, the rest after in the order
+        // the server sent them (a stable sort keeps that).
+        const placed = grades.filter(g => g.display_order != null)
+          .sort((a, b) => a.display_order - b.display_order)
+        setOrgGrades([...placed, ...grades.filter(g => g.display_order == null)])
+        setGradeName(prev => (prev && grades.some(g => g.name === prev) ? prev : null))
+      })
+      .catch(() => { if (!cancelled) setOrgGrades([]) })
+    return () => { cancelled = true }
+  }, [data?.player?.organisation_id, seasonId])
 
   useEffect(() => {
     if (!data?.player) return
@@ -2930,8 +2958,8 @@ export default function PlayerProfile() {
     // (a new object reference every time the season filter refetches career
     // stats) — so this only re-runs when the player changes or the Junior/
     // Senior/etc toggle actually changes, not on every unrelated re-render.
-    const scope = { categories: catParam, formats: fmtParam, competitions: compParam }
-    const key = `${playerId}|${catParam || ''}|${fmtParam || ''}|${compParam || ''}`
+    const scope = { categories: catParam, formats: fmtParam, competitions: compParam, grades: gradeName }
+    const key = `${playerId}|${catParam || ''}|${fmtParam || ''}|${compParam || ''}|${gradeName || ''}`
     if (lastAuxFetchRef.current === key) return
     lastAuxFetchRef.current = key
     // Reset stale state from previously-viewed player — otherwise navigating
@@ -2966,17 +2994,18 @@ export default function PlayerProfile() {
       if (bv.status === 'fulfilled') setByVenue(Array.isArray(bv.value) ? bv.value : [])
       if (bo.status === 'fulfilled') setByOpposition(Array.isArray(bo.value) ? bo.value : [])
     })
-  }, [playerId, data?.player, catParam, fmtParam])
+  }, [playerId, data?.player, catParam, fmtParam, compParam, gradeName])
 
   useEffect(() => {
     if (!playerId || !data?.player) return
     const empty = { rows: [], unattributed: 0, total_aggregate_matches: 0 }
     api.getPlayerTeamBreakdown(playerId, {
       seasonId, categories: catParam, formats: fmtParam, competitions: compParam,
+      grades: gradeName,
     })
       .then(res => setTeamBreakdown(res && res.rows ? res : empty))
       .catch(() => setTeamBreakdown(empty))
-  }, [playerId, data?.player, seasonId, catParam, fmtParam, compParam])
+  }, [playerId, data?.player, seasonId, catParam, fmtParam, compParam, gradeName])
 
   if (loading) return <PbSpinner message="Loading player data…" />
   if (error) return <div className="max-w-7xl mx-auto px-4 py-16 text-pb-red">Error: {error}</div>
@@ -3141,6 +3170,24 @@ export default function PlayerProfile() {
               availableCategories={availableCategories.length ? availableCategories : (gradeScope?.available || [])}
               availableFormats={availableFormats}
             />
+            {/* A club with one grade has nothing to choose between, so the
+                control is not drawn (the Competition filter's own rule). */}
+            {orgGrades.length > 1 && (
+              <>
+                <Label>GRADE</Label>
+                <select
+                  aria-label="Grade"
+                  value={gradeName || ''}
+                  onChange={e => setGradeName(e.target.value || null)}
+                  className="bg-pb-surface border border-pb-hairline2 text-pb-text text-[11px] font-mono rounded px-3 py-1.5 min-w-0 max-w-full focus:outline-none focus:border-pb-accent cursor-pointer"
+                >
+                  <option value="">All Grades</option>
+                  {orgGrades.map(g => (
+                    <option key={g.name} value={g.name}>{g.name}</option>
+                  ))}
+                </select>
+              </>
+            )}
           </div>
         )}
         {(autoShownNote(gradeScope) || scopeNote(gradeScope)) && (

@@ -162,6 +162,7 @@ router = APIRouter(
 async def _resolve_player_scope(
     db: AsyncSession, player: Player, categories: Optional[str],
     formats: Optional[str] = None, competitions: Optional[str] = None,
+    grades: Optional[list[str]] = None,
 ):
     """Same grade-type and match-type scope the career/grade breakdowns use, for
     the rest of the Analysis-tab sub-endpoints (dismissals, by-position,
@@ -172,7 +173,7 @@ async def _resolve_player_scope(
     org = await db.get(Organisation, player.organisation_id) if player.organisation_id else None
     scope, _ = await grade_scope.resolve_scope_for_player(
         db, player.organisation_id, str(player.id), categories, formats=formats,
-        competitions=competitions,
+        competitions=competitions, grades=grades,
         auto_widen=bool(org.stats_auto_show_played_grades) if org else True,
         hidden_grade_ids=_hidden_grades(),
     )
@@ -325,6 +326,15 @@ async def get_player_stats(
             "cannot otherwise answer. Omitted applies no competition filter."
         ),
     ),
+    grades: Optional[list[str]] = Query(
+        None,
+        description=(
+            "Grade names to count, as the public Grade picker lists them "
+            "(Manage Grades' rename, else the merge's canonical name). Repeat the "
+            "parameter for several. A picked grade beats the default grade-type "
+            "exclusion. Omitted applies no grade filter."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     player = await db.get(Player, uuid.UUID(player_id))
@@ -334,7 +344,7 @@ async def get_player_stats(
     org = await db.get(Organisation, player.organisation_id) if player.organisation_id else None
     scope, auto_shown = await grade_scope.resolve_scope_for_player(
         db, player.organisation_id, player_id, categories, formats=formats,
-        competitions=competitions,
+        competitions=competitions, grades=grades,
         auto_widen=bool(org.stats_auto_show_played_grades) if org else True,
         hidden_grade_ids=_hidden_grades(),
     )
@@ -473,12 +483,13 @@ async def get_player_formats(
 async def get_player_dismissals(
     player_id: str, categories: Optional[str] = Query(None),
     formats: Optional[str] = Query(None),
-    competitions: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
+    competitions: Optional[str] = Query(None),
+    grades: Optional[list[str]] = Query(None), db: AsyncSession = Depends(get_db)
 ):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions, grades)
     return await get_dismissal_breakdown(db, player_id, scope=scope)
 
 
@@ -486,12 +497,13 @@ async def get_player_dismissals(
 async def get_player_by_position(
     player_id: str, categories: Optional[str] = Query(None),
     formats: Optional[str] = Query(None),
-    competitions: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
+    competitions: Optional[str] = Query(None),
+    grades: Optional[list[str]] = Query(None), db: AsyncSession = Depends(get_db)
 ):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions, grades)
     return await get_batting_by_position(db, player_id, scope=scope)
 
 
@@ -501,6 +513,7 @@ async def get_player_by_grade(
     categories: Optional[str] = Query(None),
     formats: Optional[str] = Query(None),
     competitions: Optional[str] = Query(None),
+    grades: Optional[list[str]] = Query(None),
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
@@ -509,7 +522,7 @@ async def get_player_by_grade(
         raise HTTPException(status_code=404, detail="Player not found")
     org_id = str(player.organisation_id)
     public_only = not await user_can_view_org_private(db, viewer, org_id)
-    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions, grades)
     return await get_batting_by_grade(db, player_id, org_id, public_only=public_only, scope=scope)
 
 
@@ -519,6 +532,7 @@ async def get_player_bowling_by_grade(
     categories: Optional[str] = Query(None),
     formats: Optional[str] = Query(None),
     competitions: Optional[str] = Query(None),
+    grades: Optional[list[str]] = Query(None),
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
@@ -527,7 +541,7 @@ async def get_player_bowling_by_grade(
         raise HTTPException(status_code=404, detail="Player not found")
     org_id = str(player.organisation_id)
     public_only = not await user_can_view_org_private(db, viewer, org_id)
-    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions, grades)
     return await get_bowling_by_grade(db, player_id, org_id, public_only=public_only, scope=scope)
 
 
@@ -535,12 +549,13 @@ async def get_player_bowling_by_grade(
 async def get_player_bowling_dismissals(
     player_id: str, categories: Optional[str] = Query(None),
     formats: Optional[str] = Query(None),
-    competitions: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
+    competitions: Optional[str] = Query(None),
+    grades: Optional[list[str]] = Query(None), db: AsyncSession = Depends(get_db)
 ):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions, grades)
     return await get_bowling_dismissal_breakdown(db, player_id, scope=scope)
 
 
@@ -548,12 +563,13 @@ async def get_player_bowling_dismissals(
 async def get_player_bowling_by_batter_position(
     player_id: str, categories: Optional[str] = Query(None),
     formats: Optional[str] = Query(None),
-    competitions: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
+    competitions: Optional[str] = Query(None),
+    grades: Optional[list[str]] = Query(None), db: AsyncSession = Depends(get_db)
 ):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions, grades)
     return await get_bowling_by_batter_position(db, player_id, scope=scope)
 
 
@@ -561,12 +577,13 @@ async def get_player_bowling_by_batter_position(
 async def get_player_by_venue_endpoint(
     player_id: str, categories: Optional[str] = Query(None),
     formats: Optional[str] = Query(None),
-    competitions: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
+    competitions: Optional[str] = Query(None),
+    grades: Optional[list[str]] = Query(None), db: AsyncSession = Depends(get_db)
 ):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions, grades)
     return await get_player_by_venue(db, player_id, scope=scope)
 
 
@@ -574,12 +591,13 @@ async def get_player_by_venue_endpoint(
 async def get_player_by_opposition_endpoint(
     player_id: str, categories: Optional[str] = Query(None),
     formats: Optional[str] = Query(None),
-    competitions: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
+    competitions: Optional[str] = Query(None),
+    grades: Optional[list[str]] = Query(None), db: AsyncSession = Depends(get_db)
 ):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions, grades)
     return await get_player_by_opposition(db, player_id, scope=scope)
 
 
@@ -589,6 +607,7 @@ async def get_player_teammates(
     categories: Optional[str] = Query(None),
     formats: Optional[str] = Query(None),
     competitions: Optional[str] = Query(None),
+    grades: Optional[list[str]] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     """Every player this player has shared a side with, most games together first,
@@ -597,7 +616,7 @@ async def get_player_teammates(
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions, grades)
     result = await iq_teammates.teammates(db, str(player.organisation_id), player_id, scope=scope)
     return result or {"player": {"player_id": player_id, "name": player.name}, "teammates": []}
 
@@ -609,6 +628,7 @@ async def get_player_teammate_split(
     categories: Optional[str] = Query(None),
     formats: Optional[str] = Query(None),
     competitions: Optional[str] = Query(None),
+    grades: Optional[list[str]] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     """This player's batting, bowling and the team's record split by whether the
@@ -616,7 +636,7 @@ async def get_player_teammate_split(
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions, grades)
     result = await iq_teammates.with_split(
         db, str(player.organisation_id), player_id, teammate_id, scope=scope)
     if result is None:
@@ -631,6 +651,7 @@ async def get_player_team_breakdown_endpoint(
     categories: Optional[str] = Query(None),
     formats: Optional[str] = Query(None),
     competitions: Optional[str] = Query(None),
+    grades: Optional[list[str]] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     player = await db.get(Player, uuid.UUID(player_id))
@@ -639,7 +660,7 @@ async def get_player_team_breakdown_endpoint(
     # The filter bar sits above every tab, so this grid answers to it like the
     # rest of the Analysis panels. Without it a club filtering to Men's on the
     # Batting tab found the women's grades back on Team, one click away.
-    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions, grades)
     return await get_player_team_breakdown(
         db, player_id, str(player.organisation_id), season_id, scope=scope
     )
@@ -663,6 +684,7 @@ async def get_player_seasons(
     categories: Optional[str] = Query(None),
     formats: Optional[str] = Query(None),
     competitions: Optional[str] = Query(None),
+    grades: Optional[list[str]] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     player = await db.get(Player, uuid.UUID(player_id))
@@ -671,7 +693,7 @@ async def get_player_seasons(
     org = await db.get(Organisation, player.organisation_id) if player.organisation_id else None
     scope, _ = await grade_scope.resolve_scope_for_player(
         db, player.organisation_id, player_id, categories, formats=formats,
-        competitions=competitions,
+        competitions=competitions, grades=grades,
         auto_widen=bool(org.stats_auto_show_played_grades) if org else True,
         hidden_grade_ids=_hidden_grades(),
     )
@@ -718,12 +740,13 @@ async def get_player_milestones_endpoint(player_id: str, db: AsyncSession = Depe
 async def get_player_partnerships_endpoint(
     player_id: str, categories: Optional[str] = Query(None),
     formats: Optional[str] = Query(None),
-    competitions: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
+    competitions: Optional[str] = Query(None),
+    grades: Optional[list[str]] = Query(None), db: AsyncSession = Depends(get_db)
 ):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions, grades)
     rows = await get_player_partnerships(db, player_id, scope=scope)
     return [_str_keys(r) for r in rows]
 
@@ -800,6 +823,7 @@ async def get_player_captain_stats(
     categories: Optional[str] = Query(None),
     formats: Optional[str] = Query(None),
     competitions: Optional[str] = Query(None),
+    grades: Optional[list[str]] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     pid = uuid.UUID(player_id)
@@ -815,7 +839,7 @@ async def get_player_captain_stats(
     # that one string rather than being pasted into six places.
     player = await db.get(Player, pid)
     if player:
-        scope = await _resolve_player_scope(db, player, categories, formats, competitions)
+        scope = await _resolve_player_scope(db, player, categories, formats, competitions, grades)
         if scope.active:
             scope.bind(params)
             club = club + scope.clause("g.grade_id")

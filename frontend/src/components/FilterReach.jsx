@@ -34,6 +34,7 @@
 // when nobody has touched it reads as a fault in a control they never used.
 const FILTER_LABELS = [
   ['competitions', 'Competition'],
+  ['grades', 'Grade'],
   ['categories', 'Grade type'],
   ['formats', 'Match type'],
 ]
