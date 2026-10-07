@@ -568,3 +568,14 @@ Admin gaps and push everything to main".
   not scoped by the grade-type default (career facts, as on cricket).
 
 <!-- END original CLAUDE.md L9975-10040 -->
+
+<!-- v9.107.1: every football club holds every football module -->
+## Every football club holds BetterSelect, BetterSocials and BetterAdmin (v9.107.1)
+
+BetterSelect was already ported to football (v9.100.0: `routers/afl/select.py`, five screens, nav gated on `hasModule('select')`). What was missing was entitlement: football has no billing or module marketplace, so a club held a module only if a super admin ticked it in Better HQ, and `register_organisation` created every new club with `module_overrides = []`. A club nobody had ticked got a 402 on `/afl-select/*`, `/admin/social/*` and the BetterAdmin routers.
+
+- `services/afl/modules.py` is now the one definition of the football module switches (`AFL_MODULE_TOGGLES`, moved out of `routers/afl/super_clubs.py`) and of the default set `AFL_DEFAULT_MODULES` (comms, crm, fees, merch, select, socials).
+- `sync.register_organisation` creates a new club holding all of them.
+- `grant_default_modules_once` runs in the football lifespan, right after `platform_settings` is seeded. It UNIONs the six keys into every existing club's `module_overrides` (additive, a key outside the set such as `iq` is kept) and then writes `platform_settings.settings.afl_default_modules_granted`. The lifespan re-runs on every boot, so without the marker a super admin's later switch-off would be reverted by the next restart.
+- Better HQ's per-club toggles are unchanged and still work after the grant.
+- Verified: `backend/verification/verify_afl_modules_access.py` (15 checks, real Postgres, real boot path and HTTP stack). Control run on the previous code reports 11 failures: bare club holds `[]`, `/afl-select/squads` answers 402, new club holds `[]`. Existing suites re-run green: shared modules 28, select 73, settings 41, social 27, admin extras 28, seasons 21, competitions 37, manual entries 75, player profile 21. `verify_afl_fee_match_days` fails identically before and after (it needs a cricket `v_effective_batting_innings` view this database lacks).

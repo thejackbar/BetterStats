@@ -50,6 +50,7 @@ from app.services.sync import (  # noqa: F401  (re-exported for callers)
     start_sync_run, update_sync_run, finish_sync_run, _progress,
 )
 from app.services.afl import playhq_client as phq
+from app.services.afl.modules import AFL_DEFAULT_MODULES
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +146,9 @@ async def register_organisation(session: AsyncSession, playhq_org_id: str) -> Or
         is_active=True,
         logo_url=_best_logo(profile.get("logo")),
         contact_email=profile.get("email"),
+        # Football has no module marketplace: a new club holds every football
+        # module, and a super admin can switch one off afterwards.
+        module_overrides=list(AFL_DEFAULT_MODULES),
     )
     session.add(org)
     await session.commit()

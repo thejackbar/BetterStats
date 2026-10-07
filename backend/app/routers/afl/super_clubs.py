@@ -17,27 +17,17 @@ from pydantic import BaseModel
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.modules import (
-    MODULE_COMMS, MODULE_CRM, MODULE_FEES, MODULE_MERCH, MODULE_SELECT, MODULE_SOCIALS,
-)
 from app.models.db import ClubMembership, Organisation, SyncRun, User, get_db
 from app.routers.afl.club_admin import _has_running_sync, _run_sync, _spawn
 from app.routers.auth import require_super_admin
 from app.services.afl import sync as afl_sync
+from app.services.afl.modules import AFL_MODULE_TOGGLES
 from app.services.memberships import set_primary_admin
 
 router = APIRouter(prefix="/club-admin/super", tags=["afl-super-clubs"])
 
-# The add-on modules a football club can hold. AFL has no billing or module
-# marketplace, so a super admin switches them on here, per club, the same way
-# cricket's super admin sets ``module_overrides`` (the one entitlement source,
-# app/auth/modules.py). BetterAdmin is one switch covering its four entitlement
-# keys, exactly as cricket sells it as one module.
-AFL_MODULE_TOGGLES = {
-    "socials": (MODULE_SOCIALS,),
-    "select": (MODULE_SELECT,),
-    "admin": (MODULE_FEES, MODULE_COMMS, MODULE_MERCH, MODULE_CRM),
-}
+# The add-on modules a football club can hold live in services/afl/modules.py.
+# A new club starts with all of them; a super admin switches one off here.
 
 
 def _toggles_from_overrides(overrides) -> dict:

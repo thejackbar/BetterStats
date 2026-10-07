@@ -68,10 +68,12 @@
 42. `importMatching.jsx` (`frontend/src/afl/pages/admin/`) is the shared wizard kit for Import Stats, Results and Awards (`SearchSelect`, `MatchTable`, `FieldRow`, `StatusBadge`, `PlayerMatch`, `parseSeasonGuess`). No second copy. Awards page: `AflAdminAwardsImport.jsx` at `/admin/import-awards`.
 43. Football profile honour board: `GET /afl-players/{id}` returns `achievements`, drawn by `frontend/src/afl/components/honours.jsx`. Repeated wins of one trophy are ONE entry with every year. Resolve `display_name` in Python, not a join (duplicate definitions fan rows out). Name fallback only for a row with NO `player_id`. `honours.css` (`.afl-honours`) widens the card to 196px.
 44. Navbar `AflPlayerSearch` is cricket's search pointed at the AFL roster and `/{slug}/players/{id}`, filtered locally, results show games and goals. Navbar breakpoint is `lg` (six links plus search do not fit at 768px).
+45. Every football club holds every football module. `services/afl/modules.py` owns `AFL_MODULE_TOGGLES` and `AFL_DEFAULT_MODULES`; `register_organisation` starts a club with all of them, and `grant_default_modules_once` (football lifespan) UNIONs them into existing clubs a single time, guarded by `platform_settings.settings.afl_default_modules_granted`. Never make the grant unconditional: the lifespan runs every boot and would revert a super admin's switch-off. Verified by `verify_afl_modules_access.py`.
 
 ## Traps and failure signatures
 - Early rounds of a team absent after a re-grade: `discoverTeams` only knows the current grade (rules 9, 10).
 - Best on ground or games belong to the opposition: a read lacks `l.side = d.our_side` (control run reads 4 games for 3).
+- A football club gets 402 on BetterSelect, Socials or BetterAdmin: its `module_overrides` lacks the key (rule 45).
 - Every football player "dormant" on the availability link: `dormant_player_ids` not reading `afl_player_game_lines`.
 - Seniors and Reserves results vanish on Import Results: guard omitted the team (rule 35).
 - A career lost after a merge: FK-less side tables not moved (rule 32), or cascade tables DELETED (rule 31).
@@ -82,7 +84,7 @@
 - One trophy drawn as several cards, a namesake's honours on another profile, or a clipped trophy name: rule 43.
 
 ## How to verify a change here
-Backend suites in `backend/verification/`, each on a real Postgres through the real AFL boot path and HTTP stack, each with a control run that must REPORT, not crash: `verify_afl_select.py` (control: our-side scoping and football dormancy removed, 4 fail) and the other `verify_afl_*.py` (manual_entries, competitions, seasons, settings, player_profile, admin_extras, social, shared_modules, fee_match_days). Re-run all after touching shared code.
+Backend suites in `backend/verification/`, each on a real Postgres through the real AFL boot path and HTTP stack, each with a control run that must REPORT, not crash: `verify_afl_select.py` (control: our-side scoping and football dormancy removed, 4 fail) and the other `verify_afl_*.py` (manual_entries, competitions, seasons, settings, player_profile, admin_extras, social, shared_modules, fee_match_days, modules_access). Re-run all after touching shared code.
 Browser suites (Chromium, football production build) in `frontend/verification/`: `verify_afl_select_browser.mjs` (seeded by `seed_afl_select_browser.py`; control fails most checks on the previous build), `verify_afl_socials_browser.mjs` (fixture from `seed_afl_socials_browser.py`), and `verify_afl_betteradmin`, `admin_gaps`, `admin_edits` `_browser.mjs`.
 Gotchas: earlier browser suites assert on named data (a "Rivals" opponent, a club holding every BetterAdmin module), so on the Select seed they fail for the fixture, not the code. Build the schema through the real AFL lifespan, run twice.
 

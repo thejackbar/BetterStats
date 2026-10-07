@@ -185,6 +185,15 @@ async def lifespan(app: FastAPI):
             "INSERT INTO platform_settings (id, settings) VALUES (1, '{}') "
             "ON CONFLICT (id) DO NOTHING"))
 
+        # Every football club holds every football module (BetterSelect,
+        # BetterSocials, BetterAdmin). Granted once to the clubs that exist, so
+        # a super admin's later switch-off survives the next boot; a club
+        # registered after this starts with them (sync.register_organisation).
+        from app.services.afl import modules as afl_modules
+        granted = await afl_modules.grant_default_modules_once(conn)
+        if granted:
+            logger.info("afl_main: granted the football modules to %d club(s)", granted)
+
         # Phase 1 admin-tools tables (Player list / Import Players / Merge
         # Grades / Awards / Sponsors / Users / All Clubs) — raw-SQL-only in
         # cricket's main.py lifespan (never added to the ORM Base), so they
