@@ -60,7 +60,7 @@ SELECT m.id::text, m.played_at, m.home_team, m.away_team, gr.name
 
 def _full_name_forms(player) -> list[str]:
     """Only forms that can mean nobody else (the full name), so the live check never
-    calls a relative's "T Steenholdt" a leak."""
+    calls a relative's "T Marlowe" a leak."""
     out: set[str] = set()
     for raw in (player.name, player.display_name):
         pn = privacy_scrub.parse_name(raw or "")

@@ -2896,6 +2896,7 @@ export default function PlayerProfile() {
     description: metaDesc,
     image: data?.player?.photo_url || org?.logo_url || null,
     jsonLd: playerJsonLd,
+    robots: 'noindex, nofollow, noarchive, nosnippet, noimageindex',
   })
 
   useEffect(() => {

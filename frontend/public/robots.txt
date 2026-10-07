@@ -1,5 +1,7 @@
-# BetterCricket — robots policy
-# Search and AI crawlers are welcome. Admin and API routes are off-limits.
+# BetterCricket robots policy
+# Marketing and club pages may be crawled. Admin and API routes are off-limits.
+# Player profile pages are not for crawlers: they are disallowed here, carry a
+# noindex header and meta tag, and are left out of the sitemap.
 
 User-agent: *
 Allow: /
@@ -9,6 +11,6 @@ Disallow: /login
 Disallow: /onboard
 Disallow: /api/
 Disallow: /og-preview
-Disallow: /players/*/share
+Disallow: /players/
 
 Sitemap: https://betterat.cricket/sitemap.xml

@@ -14,12 +14,12 @@ For a GET whose response is text (JSON, CSV, HTML, XML), replaces
 
   * each removed person's ids (every club's row for them) with the nil UUID,
     so a JSON shape stays valid and a link goes nowhere;
-  * their name, in the forms a scorecard writes it ("Trent Steenholdt",
-    "Steenholdt, Trent", "T Steenholdt", "T. Steenholdt", "Steenholdt T"), and
+  * their name, in the forms a scorecard writes it ("Toby Marlowe",
+    "Marlowe, Toby", "T Marlowe", "T. Marlowe", "Marlowe T"), and
     any alias, with "********";
   * their bare surname too, but ONLY when nobody else the club holds shares it,
     so removing a rare surname also catches a dismissal line that writes just
-    "c Steenholdt b Smith" without renaming somebody's brother.
+    "c Marlowe b Smith" without renaming somebody's brother.
 
 WHO IS NOT SCRUBBED
 -------------------
@@ -108,9 +108,9 @@ def _initial(first: str) -> str:
 def forms_by_kind(first: Optional[str], last: str) -> dict[str, set[str]]:
     """Every way a scorecard writes this name, grouped by how ambiguous it is.
 
-    full:    "Trent Steenholdt", "Steenholdt, Trent", "Steenholdt Trent"
-    initial: "T Steenholdt", "T. Steenholdt", "Steenholdt, T", "Steenholdt T"
-    bare:    "Steenholdt" (Cricket Australia writes a keeper as "st †Steenholdt")
+    full:    "Toby Marlowe", "Marlowe, Toby", "Marlowe Toby"
+    initial: "T Marlowe", "T. Marlowe", "Marlowe, T", "Marlowe T"
+    bare:    "Marlowe" (Cricket Australia writes a keeper as "st †Marlowe")
     """
     out: dict[str, set[str]] = {"full": set(), "initial": set(), "bare": set()}
     if last and len(last) >= 4:
@@ -185,7 +185,7 @@ class Scrubber:
             (parse_name(n)[1] if parse_name(n) else n).lower()
             for p in persons for n in p.own if n and len(n) >= 4
         }
-        # Longest first, so "Steenholdt, Trent" wins over "Steenholdt".
+        # Longest first, so "Marlowe, Toby" wins over "Marlowe".
         self._name_re = _compile(safe)
         idl = sorted({i.lower() for i in ids if i})
         self._id_re = re.compile("|".join(re.escape(i) for i in idl), re.IGNORECASE) if idl else None
@@ -243,9 +243,9 @@ class Scrubber:
         """Scrub a parsed scorecard, resolving the forms that are ambiguous
         across the whole club using the people actually in THIS match.
 
-        "T Steenholdt" cannot be scrubbed site-wide when a Tom Steenholdt also
+        "T Marlowe" cannot be scrubbed site-wide when a Tom Marlowe also
         exists. In one match it usually can: if the removed person is in the
-        card (their id is there) and no other Steenholdt with a T is, the line
+        card (their id is there) and no other Marlowe with a T is, the line
         can only be them. If another is in the card too, it is left alone.
         """
         strings = list(_walk_strings(obj))

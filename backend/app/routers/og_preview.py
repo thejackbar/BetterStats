@@ -176,6 +176,10 @@ MARKETING_PAGES: dict[str, tuple[str, str]] = {
     ),
 }
 
+# Sent on player profile responses and in their meta tag. Same string as the
+# nginx `X-Robots-Tag` on /players/ and /api/players/ (frontend/nginx.conf).
+PLAYER_ROBOTS = "noindex, nofollow, noarchive, nosnippet, noimageindex"
+
 UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I
 )
@@ -731,4 +735,9 @@ async def og_preview(
     if not html:
         html = _marketing_html(path, base)
 
-    return HTMLResponse(content=html, headers={"cache-control": "public, max-age=300"})
+    headers = {"cache-control": "public, max-age=300"}
+    if route and route["type"] == "player":
+        # A player card exists for link previews, not for search: keep it out of
+        # every index and archive.
+        headers["x-robots-tag"] = PLAYER_ROBOTS
+    return HTMLResponse(content=html, headers=headers)

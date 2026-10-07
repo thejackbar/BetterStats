@@ -5,7 +5,7 @@ Runs the SHIPPED `services/player_privacy.py`, `scripts/hide_player_at_request.p
 and the shipped routers (`players` through FastAPI itself, `seo`, `og_preview`,
 `club_admin`) over a club with three players:
 
-  * TRENT    asked to be removed. Has a photo, an action photo and a BetterIQ
+  * TOBY    asked to be removed. Has a photo, an action photo and a BetterIQ
              scouting copy of the photo, plus a row against him in another table.
   * PLAIN    the control: never asked, same photos, must stay fully visible.
   * CLUBHID  a player the CLUB hid with the older `is_public` switch alone
@@ -130,8 +130,8 @@ def uid() -> uuid.UUID:
 
 
 OURS, SEASON, ADMIN = uid(), uid(), uid()
-TRENT, PLAIN, CLUBHID = uid(), uid(), uid()
-OTHER, NEWORG, SIB = uid(), uid(), uid()   # Trent's row at ANOTHER club, and a club that joins later
+TOBY, PLAIN, CLUBHID = uid(), uid(), uid()
+OTHER, NEWORG, SIB = uid(), uid(), uid()   # Toby's row at ANOTHER club, and a club that joins later
 PHOTO = b"\x89PNG-fake-headshot"
 HERO = b"\x89PNG-fake-action"
 
@@ -222,7 +222,7 @@ async def build_schema() -> None:
 async def seed(session) -> None:
     session.add(Organisation(id=OURS, name="Applecross", is_active=True))
     await session.flush()
-    for pid, name in ((TRENT, "Trent Steenholdt"), (PLAIN, "Pat Plain"), (CLUBHID, "Cass Clubhid")):
+    for pid, name in ((TOBY, "Toby Marlowe"), (PLAIN, "Pat Plain"), (CLUBHID, "Cass Clubhid")):
         session.add(Player(
             id=pid, name=name, organisation_id=OURS, grassroots_id=str(pid),
             photo_data=PHOTO, photo_mime="image/png",
@@ -236,7 +236,7 @@ async def seed(session) -> None:
     session.add(Organisation(id=NEWORG, name="Joins Later", is_active=True))
     await session.flush()
     session.add(Player(
-        id=SIB, name="Trent Steenholdt", organisation_id=OTHER, grassroots_id=str(TRENT),
+        id=SIB, name="Toby Marlowe", organisation_id=OTHER, grassroots_id=str(TOBY),
         photo_data=PHOTO, photo_mime="image/png", photo_url=f"/api/images/players/{SIB}/photo?v=1",
     ))
     await session.flush()
@@ -247,7 +247,7 @@ async def seed(session) -> None:
         "VALUES (gen_random_uuid(), :c, :u, 'club_admin')"), {"c": OURS, "u": ADMIN})
     # BetterIQ scouting copies: one keyed on his Cricket Australia participant
     # id, one on the control player. Both hold a photograph.
-    for guid, name in ((str(TRENT), "Trent Steenholdt"), (str(PLAIN), "Pat Plain")):
+    for guid, name in ((str(TOBY), "Toby Marlowe"), (str(PLAIN), "Pat Plain")):
         await session.execute(text(
             "INSERT INTO scouted_players (id, source, grassroots_participant_id, name, photo_data, photo_mime, photo_url) "
             "VALUES (gen_random_uuid(), 'au_grassroots', :g, :n, :b, 'image/png', '/api/images/scouted-players/x/photo')"),
@@ -264,6 +264,7 @@ def make_app(who: dict):
     app = FastAPI()
     app.include_router(players_router.router)
     app.include_router(seo_router.router)
+    app.include_router(og_router.router)
 
     async def _db():
         async with Session() as s:
@@ -293,15 +294,23 @@ async def public_view(c, pid, label_prefix, expect_visible: bool, note: str = ""
 
 
 async def sitemap_ids(c) -> set[str]:
+    """Which of the three fixture players the sitemap lists. Since v9.106.38 it
+    lists NO player profile, so this is expected to be empty at every point; the
+    control that the scanner can see anything is `sitemap_lists_other_pages`."""
     r = await c.get("/sitemap.xml")
     check("sitemap serves", r.status_code == 200, f"{r.status_code} {r.text[:200]}")
-    return {pid for pid in map(str, (TRENT, PLAIN, CLUBHID)) if f"/players/{pid}<" in r.text}
+    return {pid for pid in map(str, (TOBY, PLAIN, CLUBHID)) if f"/players/{pid}<" in r.text}
+
+
+async def sitemap_lists_other_pages(c) -> bool:
+    r = await c.get("/sitemap.xml")
+    return r.status_code == 200 and "<loc>https://betterat.cricket/</loc>" in r.text
 
 
 async def og_present(pid) -> bool:
     async with Session() as db:
         html = await og_router._player_html(str(pid), f"https://betterat.cricket/players/{pid}", "https://betterat.cricket", db)
-    return html is not None and "Steenholdt" in html if str(pid) == str(TRENT) else html is not None
+    return html is not None and "Marlowe" in html if str(pid) == str(TOBY) else html is not None
 
 
 async def col(sql: str, **kw):
@@ -325,18 +334,28 @@ async def main() -> None:
     async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
         # ------------------------------------------------------------ BEFORE
         print("before: everybody is visible")
-        await public_view(c, TRENT, "Trent", True)
+        await public_view(c, TOBY, "Toby", True)
         await public_view(c, PLAIN, "control", True)
-        await public_view(c, SIB, "Trent at another club", True)
+        await public_view(c, SIB, "Toby at another club", True)
         listed = await sitemap_ids(c)
-        check("sitemap lists all three before", listed == {str(TRENT), str(PLAIN), str(CLUBHID)}, str(listed))
-        check("share card exists for Trent before", await og_present(TRENT))
+        check("sitemap lists no player profile, even a visible one (they are noindex)", listed == set(), str(listed))
+        check("control: the sitemap does still list other pages", await sitemap_lists_other_pages(c))
+        rb = await c.get("/robots.txt")
+        check("robots.txt disallows /players/", "Disallow: /players/\n" in rb.text, rb.text[:300])
+        check("control: robots.txt still allows the rest of the site", "Allow: /\n" in rb.text)
+        og = await c.get("/og-preview", params={"path": f"/players/{PLAIN}"})
+        check("a visible player's share card is served (200)", og.status_code == 200, str(og.status_code))
+        check("...and is marked noindex in its header",
+              og.headers.get("x-robots-tag") == "noindex, nofollow, noarchive, nosnippet, noimageindex", str(og.headers.get("x-robots-tag")))
+        og_m = await c.get("/og-preview", params={"path": "/pricing"})
+        check("control: a marketing page has no such header", "x-robots-tag" not in og_m.headers)
+        check("share card exists for Toby before", await og_present(TOBY))
 
         # ---------------------------------------------------------- HIDE HIM
         print("asking to be removed")
         if HAVE:
             # Dry run first: writes nothing.
-            args = SimpleNamespace(player_id=str(TRENT), reason="asked by email", by="Jack", report=False,
+            args = SimpleNamespace(player_id=str(TOBY), reason="asked by email", by="Jack", report=False,
                                    restore=False, keep_photos=False, apply=False)
             import contextlib, io
             buf = io.StringIO()
@@ -346,7 +365,7 @@ async def main() -> None:
                 rc = await script.run(args)
             check("dry run exits cleanly", rc == 0, str(rc))
             check("dry run wrote nothing (still public, photo kept)",
-                  await col("SELECT is_public AND photo_data IS NOT NULL FROM players WHERE id=:i", i=TRENT) is True)
+                  await col("SELECT is_public AND photo_data IS NOT NULL FROM players WHERE id=:i", i=TOBY) is True)
             check("dry run report names what is held (scouting copy)", "scouting_copies" in buf.getvalue() and "has_photo" in buf.getvalue())
 
             args.apply = True
@@ -357,7 +376,7 @@ async def main() -> None:
             print("  CONTROL RUN: services/player_privacy.py does not exist at this commit; "
                   "hiding is is_public=false alone")
             async with Session() as db:
-                await db.execute(text("UPDATE players SET is_public = false WHERE id = :i"), {"i": TRENT})
+                await db.execute(text("UPDATE players SET is_public = false WHERE id = :i"), {"i": TOBY})
                 await db.commit()
 
         async with Session() as db:
@@ -366,84 +385,85 @@ async def main() -> None:
 
         # ------------------------------------------------------------- AFTER
         print("after: public viewer")
-        await public_view(c, TRENT, "Trent", False)
+        await public_view(c, TOBY, "Toby", False)
         await public_view(c, CLUBHID, "club-hidden player", False, " (older switch, no marker)")
         await public_view(c, PLAIN, "control", True, " (stays visible)")
-        await public_view(c, SIB, "Trent's row at ANOTHER club", False, " (same person, same participant id)")
+        await public_view(c, SIB, "Toby's row at ANOTHER club", False, " (same person, same participant id)")
         check("his photo at the other club is gone too",
               await col("SELECT photo_data IS NULL AND photo_url IS NULL FROM players WHERE id=:i", i=SIB) is True)
         listed = await sitemap_ids(c)
-        check("sitemap no longer lists Trent", str(TRENT) not in listed, str(listed))
-        check("sitemap no longer lists the club-hidden player", str(CLUBHID) not in listed, str(listed))
-        check("sitemap still lists the control player", str(PLAIN) in listed, str(listed))
-        check("no share card for Trent (crawlers get no name or photo)", not await og_present(TRENT))
+        check("sitemap lists no hidden person", str(TOBY) not in listed, str(listed))
+        check("sitemap lists no club-hidden player", str(CLUBHID) not in listed, str(listed))
+        check("sitemap lists nobody (profiles are noindex), the control player included", listed == set(), str(listed))
+        check("control: the sitemap does still list other pages", await sitemap_lists_other_pages(c))
+        check("no share card for Toby (crawlers get no name or photo)", not await og_present(TOBY))
         check("share card still built for the control player", await og_present(PLAIN))
 
         print("after: what is stored")
-        check("Trent's headshot is gone",
-              await col("SELECT photo_data IS NULL AND photo_url IS NULL FROM players WHERE id=:i", i=TRENT) is True)
-        check("Trent's action photo is gone",
-              await col("SELECT hero_photo_data IS NULL AND hero_photo_url IS NULL FROM players WHERE id=:i", i=TRENT) is True)
+        check("Toby's headshot is gone",
+              await col("SELECT photo_data IS NULL AND photo_url IS NULL FROM players WHERE id=:i", i=TOBY) is True)
+        check("Toby's action photo is gone",
+              await col("SELECT hero_photo_data IS NULL AND hero_photo_url IS NULL FROM players WHERE id=:i", i=TOBY) is True)
         check("the BetterIQ scouting copy of his photo is gone",
               await col("SELECT photo_data IS NULL AND photo_url IS NULL FROM scouted_players "
-                        "WHERE grassroots_participant_id=:g", g=str(TRENT)) is True)
+                        "WHERE grassroots_participant_id=:g", g=str(TOBY)) is True)
         check("the control player's headshot is untouched",
               await col("SELECT photo_data IS NOT NULL FROM players WHERE id=:i", i=PLAIN) is True)
         check("the control player's scouting copy is untouched",
               await col("SELECT photo_data IS NOT NULL FROM scouted_players WHERE grassroots_participant_id=:g",
                         g=str(PLAIN)) is True)
         check("the player ROW is kept (his match records hang off it)",
-              await col("SELECT COUNT(*) FROM players WHERE id=:i", i=TRENT) == 1)
+              await col("SELECT COUNT(*) FROM players WHERE id=:i", i=TOBY) == 1)
 
         if HAVE:
             check("marker is set on the row",
                   await col("SELECT privacy_hidden_at IS NOT NULL AND privacy_hidden_by='Jack' "
-                            "AND privacy_hidden_reason='asked by email' FROM players WHERE id=:i", i=TRENT) is True)
+                            "AND privacy_hidden_reason='asked by email' FROM players WHERE id=:i", i=TOBY) is True)
             check("an audit entry was written for the club",
                   await col("SELECT COUNT(*) FROM manual_edit_logs WHERE action='privacy_hide' "
-                            "AND target_id=:t AND organisation_id=:o", t=str(TRENT), o=OURS) == 1)
+                            "AND target_id=:t AND organisation_id=:o", t=str(TOBY), o=OURS) == 1)
             check("the audit entry holds no photo bytes",
                   await col("SELECT NOT (before_json::text ILIKE '%PNG%' OR after_json::text ILIKE '%PNG%') "
-                            "FROM manual_edit_logs WHERE action='privacy_hide' AND target_id=:t", t=str(TRENT)) is True)
+                            "FROM manual_edit_logs WHERE action='privacy_hide' AND target_id=:t", t=str(TOBY)) is True)
             check("the control player carries no marker",
                   await col("SELECT privacy_hidden_at IS NULL FROM players WHERE id=:i", i=PLAIN) is True)
 
             # ---- idempotent
-            first = await col("SELECT privacy_hidden_at FROM players WHERE id=:i", i=TRENT)
+            first = await col("SELECT privacy_hidden_at FROM players WHERE id=:i", i=TOBY)
             async with Session() as db:
-                pl = await db.get(Player, TRENT)
+                pl = await db.get(Player, TOBY)
                 out = await player_privacy.hide_at_request(db, pl, by="Jack", reason="asked by email")
                 await db.commit()
             check("hiding twice reports it was already hidden", out["already_hidden"] is True)
             check("hiding twice keeps the original timestamp",
-                  await col("SELECT privacy_hidden_at FROM players WHERE id=:i", i=TRENT) == first)
+                  await col("SELECT privacy_hidden_at FROM players WHERE id=:i", i=TOBY) == first)
 
             # ---- the club cannot put him back
             print("the club cannot undo it")
             async with Session() as db:
-                pl = await db.get(Player, TRENT)
+                pl = await db.get(Player, TOBY)
                 admin = await db.get(User, ADMIN)
                 body = players_router.PlayerProfileUpdate(is_public=True)
                 try:
-                    await players_router.update_player_profile(str(TRENT), body, db, admin, club=await db.get(Organisation, OURS))
+                    await players_router.update_player_profile(str(TOBY), body, db, admin, club=await db.get(Organisation, OURS))
                     refused = None
                 except HTTPException as e:
                     refused = e.status_code
             check("profile edit switching him public is refused (409)", refused == 409, str(refused))
             check("...and he is still hidden",
-                  await col("SELECT is_public FROM players WHERE id=:i", i=TRENT) is False)
+                  await col("SELECT is_public FROM players WHERE id=:i", i=TOBY) is False)
             async with Session() as db:
                 admin = await db.get(User, ADMIN)
                 try:
                     await players_router.update_player_profile(
-                        str(TRENT), players_router.PlayerProfileUpdate(shirt_number="7"), db, admin,
+                        str(TOBY), players_router.PlayerProfileUpdate(shirt_number="7"), db, admin,
                         club=await db.get(Organisation, OURS))
                     ok = True
                 except HTTPException as e:
                     ok = False
             check("an unrelated profile edit still works for him (not a lock on the record)", ok)
             async with Session() as db:
-                pl = await db.get(Player, TRENT)
+                pl = await db.get(Player, TOBY)
                 up = UploadFile(filename="x.png", file=__import__("io").BytesIO(PHOTO))
                 try:
                     await club_admin_router._store_player_photo(db, pl, up, "photo")
@@ -468,14 +488,14 @@ async def main() -> None:
                 rows = (await db.execute(text(
                     "SELECT COALESCE(grassroots_id, id::text), id FROM players WHERE organisation_id=:o"), {"o": OURS})).all()
                 pmap = {g: i for g, i in rows}
-                got = await sync_mod._resolve_org_player(db, OURS, pmap, str(TRENT), "Trent Steenholdt", {})
+                got = await sync_mod._resolve_org_player(db, OURS, pmap, str(TOBY), "Toby Marlowe", {})
                 await db.flush()
                 await db.rollback()
-            check("sync resolves him to the SAME row, creating no duplicate", got == TRENT, str(got))
+            check("sync resolves him to the SAME row, creating no duplicate", got == TOBY, str(got))
             # A club that joins later, or a fixture another club syncs, mints a NEW row
             # for the same person. It must be born hidden.
             async with Session() as db:
-                got2 = await sync_mod._resolve_org_player(db, NEWORG, {}, str(TRENT), "Trent Steenholdt", {})
+                got2 = await sync_mod._resolve_org_player(db, NEWORG, {}, str(TOBY), "Toby Marlowe", {})
                 await db.flush()
                 other_guid = str(uid())
                 got3 = await sync_mod._resolve_org_player(db, NEWORG, {}, other_guid, "Someone Else", {})
@@ -488,16 +508,16 @@ async def main() -> None:
                   await col("SELECT is_public IS TRUE AND privacy_hidden_at IS NULL FROM players WHERE id=:i",
                             i=got3) is True)
             check("his row still carries the marker after a sync-style resolve",
-                  await col("SELECT privacy_hidden_at IS NOT NULL AND is_public IS FALSE FROM players WHERE id=:i", i=TRENT) is True)
+                  await col("SELECT privacy_hidden_at IS NOT NULL AND is_public IS FALSE FROM players WHERE id=:i", i=TOBY) is True)
 
             # ---- a merge must not put him back
             print("merging a duplicate")
             from app.routers.admin import _merge_players_core
             DUP_HIDDEN, DUP_KEEP = uid(), uid()
             async with Session() as db:
-                db.add(Player(id=DUP_HIDDEN, name="Trent S (dup)", organisation_id=OURS, grassroots_id=str(DUP_HIDDEN),
+                db.add(Player(id=DUP_HIDDEN, name="Toby S (dup)", organisation_id=OURS, grassroots_id=str(DUP_HIDDEN),
                               photo_data=PHOTO, photo_mime="image/png"))
-                db.add(Player(id=DUP_KEEP, name="Trent Steenholdt (keeper)", organisation_id=OURS,
+                db.add(Player(id=DUP_KEEP, name="Toby Marlowe (keeper)", organisation_id=OURS,
                               grassroots_id=str(DUP_KEEP), photo_data=PHOTO, photo_mime="image/png"))
                 await db.commit()
             async with Session() as db:
@@ -524,7 +544,7 @@ async def main() -> None:
 
             # ---- the report
             async with Session() as db:
-                pl = await db.get(Player, TRENT)
+                pl = await db.get(Player, TOBY)
                 rep = await player_privacy.holdings(db, pl)
             check("the access report lists his rows at the other clubs (the first club and the one that joined later)", len(rep["other_club_rows"]) == 2, str(rep["other_club_rows"]))
             check("the access report says a suppression is in place", rep["suppressed"] is True)
@@ -539,19 +559,19 @@ async def main() -> None:
             from fastapi.responses import JSONResponse as _J, PlainTextResponse as _T, Response as _R
 
             check("name_variants covers the forms a scorecard writes",
-                  {"Trent Steenholdt", "Steenholdt, Trent", "T Steenholdt", "T. Steenholdt",
-                   "Steenholdt T"} <= privacy_scrub.name_variants("Steenholdt, Trent"))
+                  {"Toby Marlowe", "Marlowe, Toby", "T Marlowe", "T. Marlowe",
+                   "Marlowe T"} <= privacy_scrub.name_variants("Marlowe, Toby"))
 
             privacy_scrub.forget()
             mini = _FastAPI()
             mini.add_middleware(privacy_scrub.PrivacyScrubMiddleware)
-            TXT = ("Trent Steenholdt, Steenholdt, Trent, T Steenholdt, T. Steenholdt and c Steenholdt b Smith "
-                   f"id {TRENT} {str(TRENT).upper()}")
+            TXT = ("Toby Marlowe, Marlowe, Toby, T Marlowe, T. Marlowe and c Marlowe b Smith "
+                   f"id {TOBY} {str(TOBY).upper()}")
             PLAIN_TXT = "Pat Plain scored 50, id " + str(PLAIN)
 
             @mini.get("/leaky")
             async def _leaky():
-                return _J({"a": TXT, "ok": PLAIN_TXT, "nested": [{"player_name": "Trent Steenholdt", "player_id": str(TRENT)}]})
+                return _J({"a": TXT, "ok": PLAIN_TXT, "nested": [{"player_name": "Toby Marlowe", "player_id": str(TOBY)}]})
 
             @mini.get("/club-admin/people")
             async def _admin():
@@ -559,60 +579,60 @@ async def main() -> None:
 
             @mini.get("/photo")
             async def _photo():
-                return _R(b"\x89PNG Trent Steenholdt", media_type="image/png")
+                return _R(b"\x89PNG Toby Marlowe", media_type="image/png")
 
             @mini.get("/csv")
             async def _csv():
-                return _T("name\nTrent Steenholdt\n", media_type="text/csv")
+                return _T("name\nTrent Marlowe\n", media_type="text/csv")
 
             @mini.get("/lots")
             async def _lots():
-                return _J({"rows": [{"player_name": f"Somebody {i}"} for i in range(400)] + [{"player_name": "Trent Steenholdt"}]})
+                return _J({"rows": [{"player_name": f"Somebody {i}"} for i in range(400)] + [{"player_name": "Toby Marlowe"}]})
 
             tr = httpx.ASGITransport(app=mini)
             async with httpx.AsyncClient(transport=tr, base_url="http://m") as mc:
                 r = await mc.get("/leaky")
                 body = r.text
                 check("every written form of his name is replaced",
-                      "Steenholdt" not in body and "Trent" not in body.replace("Trent S", "") and "********" in body, body[:200])
-                check("his id is replaced, upper and lower case", str(TRENT) not in body and str(TRENT).upper() not in body)
+                      "Marlowe" not in body and "Toby" not in body.replace("Toby S", "") and "********" in body, body[:200])
+                check("his id is replaced, upper and lower case", str(TOBY) not in body and str(TOBY).upper() not in body)
                 check("the response is still valid JSON", r.json()["ok"] == PLAIN_TXT)
                 check("other people's names and ids are left alone", "Pat Plain" in body and str(PLAIN) in body)
                 check("content-length matches the rewritten body", int(r.headers["content-length"]) == len(r.content))
                 r = await mc.get("/club-admin/people")
                 check("a request with NO token to a management route is still scrubbed",
-                      "Steenholdt" not in r.text, r.text[:120])
+                      "Marlowe" not in r.text, r.text[:120])
                 from jose import jwt as _jwt
                 from app.config.settings import settings as _settings
                 from app.routers.auth import COOKIE_NAME as _COOKIE
                 _tok = _jwt.encode({"sub": str(ADMIN)}, _settings.secret_key, algorithm=_settings.algorithm)
                 session = {"Cookie": f"{_COOKIE}={_tok}"}
                 r = await mc.get("/club-admin/people", headers={"Cookie": f"{_COOKIE}=not-a-real-token"})
-                check("a junk session cookie does NOT unscrub a management route", "Steenholdt" not in r.text)
+                check("a junk session cookie does NOT unscrub a management route", "Marlowe" not in r.text)
                 r = await mc.get("/club-admin/people", headers={"Authorization": "Bearer x"})
-                check("an Authorization header alone does NOT unscrub (sign-in is by session cookie)", "Steenholdt" not in r.text)
+                check("an Authorization header alone does NOT unscrub (sign-in is by session cookie)", "Marlowe" not in r.text)
                 r = await mc.get("/club-admin/people", headers=session)
                 check("a request with a valid session cookie to a management route is NOT scrubbed (the club runs its own record)",
-                      "Steenholdt" in r.text)
+                      "Marlowe" in r.text)
                 r = await mc.get("/leaky", headers=session)
-                check("a valid session alone does not unscrub a PUBLIC route", "Steenholdt" not in r.text)
+                check("a valid session alone does not unscrub a PUBLIC route", "Marlowe" not in r.text)
                 r = await mc.get("/photo")
-                check("a binary response is passed through untouched", r.content == b"\x89PNG Trent Steenholdt")
+                check("a binary response is passed through untouched", r.content == b"\x89PNG Toby Marlowe")
                 r = await mc.get("/csv")
-                check("a CSV is scrubbed", "Steenholdt" not in r.text and "********" in r.text)
+                check("a CSV is scrubbed", "Marlowe" not in r.text and "********" in r.text)
                 r = await mc.get("/lots")
-                check("a large response is scrubbed and complete", len(r.json()["rows"]) == 401 and "Steenholdt" not in r.text)
+                check("a large response is scrubbed and complete", len(r.json()["rows"]) == 401 and "Marlowe" not in r.text)
 
             # The way a scorecard writes a fielder or bowler: Cricket Australia's own
             # dismissal strings (see sync._parse_bowler_and_fielder), which is where a
             # removed player's name hides on OTHER players' lines.
             print("scorecard dismissal strings")
             DISMISSALS = [
-                "c: T Steenholdt b: J Birbeck", "c T Steenholdt b J Birbeck", "b T Steenholdt",
-                "c & b: T Steenholdt", "c&b T Steenholdt", "lbw b: T Steenholdt",
-                "st \u2020T Steenholdt b: J Birbeck", "st \u2020Steenholdt b: J Birbeck",
-                "c Steenholdt b J Birbeck", "run out (T Steenholdt)", "run out (Steenholdt/Smith)",
-                "c: Steenholdt, T b: J Birbeck",
+                "c: T Marlowe b: J Birbeck", "c T Marlowe b J Birbeck", "b T Marlowe",
+                "c & b: T Marlowe", "c&b T Marlowe", "lbw b: T Marlowe",
+                "st \u2020T Marlowe b: J Birbeck", "st \u2020Marlowe b: J Birbeck",
+                "c Marlowe b J Birbeck", "run out (T Marlowe)", "run out (Marlowe/Smith)",
+                "c: Marlowe, T b: J Birbeck",
             ]
             privacy_scrub.forget()
             sc = await privacy_scrub.get_scrubber()
@@ -621,26 +641,26 @@ async def main() -> None:
                 for line in DISMISSALS:
                     out = sc.scrub(line)
                     check(f"dismissal {line!r} reads {out!r} with his name gone",
-                          "Steenholdt" not in out and "********" in out)
+                          "Marlowe" not in out and "********" in out)
                 check("the bowler's and the fielder's OTHER names are left alone",
-                      sc.scrub("c: T Steenholdt b: J Birbeck") == "c: ******** b: J Birbeck")
+                      sc.scrub("c: T Marlowe b: J Birbeck") == "c: ******** b: J Birbeck")
                 check("someone with a different surname is left alone",
                       sc.scrub("c: A Dillon b: J Birbeck") == "c: A Dillon b: J Birbeck")
 
             # A bare surname is only removed when nobody else holds it.
             async with Session() as db:
-                db.add(Player(id=uid(), name="Sam Steenholdt", organisation_id=OURS, grassroots_id=str(uid())))
+                db.add(Player(id=uid(), name="Sam Marlowe", organisation_id=OURS, grassroots_id=str(uid())))
                 await db.commit()
             privacy_scrub.forget()
             tr = httpx.ASGITransport(app=mini)
             async with httpx.AsyncClient(transport=tr, base_url="http://m") as mc:
                 r = await mc.get("/leaky")
                 check("a surname somebody else shares is NOT scrubbed bare (their data is not damaged)",
-                      "c Steenholdt b Smith" in r.text, r.text[:160])
+                      "c Marlowe b Smith" in r.text, r.text[:160])
                 check("...but his full name and initials still are",
-                      "Trent Steenholdt" not in r.text and "T Steenholdt" not in r.text and "T. Steenholdt" not in r.text)
+                      "Toby Marlowe" not in r.text and "T Marlowe" not in r.text and "T. Marlowe" not in r.text)
             async with Session() as db:
-                await db.execute(text("DELETE FROM players WHERE name = 'Sam Steenholdt'"))
+                await db.execute(text("DELETE FROM players WHERE name = 'Sam Marlowe'"))
                 await db.commit()
             privacy_scrub.forget()
 
@@ -652,7 +672,7 @@ async def main() -> None:
         if HAVE:
             # A person who asked to be removed has NO public profile for anyone,
             # a signed-in club admin included.
-            await public_view(c, TRENT, "club admin, person who asked to be removed", False, " (no public profile for anyone)")
+            await public_view(c, TOBY, "club admin, person who asked to be removed", False, " (no public profile for anyone)")
             await public_view(c, SIB, "club admin, his row at another club", False, " (no public profile for anyone)")
         who["user"] = None
 
@@ -665,7 +685,7 @@ async def main() -> None:
 
             def gate_request(method, template):
                 return Request({"type": "http", "method": method, "headers": [], "query_string": b"",
-                                "path_params": {"player_id": str(TRENT)},
+                                "path_params": {"player_id": str(TOBY)},
                                 "route": NS(path="/players" + template)})
 
             async def gate(method, template):
@@ -689,19 +709,19 @@ async def main() -> None:
         # ----------------------------------------------------------- RESTORE
         if HAVE:
             print("restore")
-            args = SimpleNamespace(player_id=str(TRENT), reason=None, by="Jack", report=False,
+            args = SimpleNamespace(player_id=str(TOBY), reason=None, by="Jack", report=False,
                                    restore=True, keep_photos=False, apply=True)
             with contextlib.redirect_stdout(io.StringIO()):
                 rc = await script.run(args)
             check("restore exits cleanly", rc == 0)
-            await public_view(c, TRENT, "after restore", True)
+            await public_view(c, TOBY, "after restore", True)
             check("restore does NOT bring the photo back",
-                  await col("SELECT photo_data IS NULL FROM players WHERE id=:i", i=TRENT) is True)
+                  await col("SELECT photo_data IS NULL FROM players WHERE id=:i", i=TOBY) is True)
             check("restore lifts the other club's row and the suppression too",
                   await col("SELECT is_public IS TRUE AND privacy_hidden_at IS NULL FROM players WHERE id=:i", i=SIB) is True
-                  and await col("SELECT COUNT(*) FROM player_privacy_suppressions WHERE grassroots_id=:g", g=str(TRENT)) == 0)
+                  and await col("SELECT COUNT(*) FROM player_privacy_suppressions WHERE grassroots_id=:g", g=str(TOBY)) == 0)
             check("marker cleared",
-                  await col("SELECT privacy_hidden_at IS NULL FROM players WHERE id=:i", i=TRENT) is True)
+                  await col("SELECT privacy_hidden_at IS NULL FROM players WHERE id=:i", i=TOBY) is True)
 
             # ---- DDL: idempotent, and really adds the columns
             print("migration 316 DDL")

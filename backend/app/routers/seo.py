@@ -1,10 +1,11 @@
 """
 SEO/AEO endpoints.
 
-- /sitemap.xml  — dynamic XML sitemap covering marketing pages, every active
-                   club's section pages, and every player profile. Search
-                   engines fetch this directly (nginx proxies the request to
-                   the backend; see frontend/nginx.conf).
+- /sitemap.xml  — dynamic XML sitemap covering marketing pages and every active
+                   club's section pages. Player profiles are NOT listed (they
+                   are noindex and disallowed in robots.txt). Search engines
+                   fetch this directly (nginx proxies the request to the
+                   backend; see frontend/nginx.conf).
 - /robots.txt   — also served from frontend/public/robots.txt as a static file,
                    but exposed here for parity / curl debugging.
 """
@@ -16,9 +17,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.content.blog import BLOG_SLUGS
-from app.services import junior_hiding
 from app.services.instructional_videos import list_videos
-from app.models.db import Organisation, Player, get_db
+from app.models.db import Organisation, get_db
 
 router = APIRouter(tags=["seo"])
 
@@ -124,33 +124,9 @@ async def sitemap(db: AsyncSession = Depends(get_db)):
                 priority="0.7" if section == "dashboard" else "0.5",
             ))
 
-    # Every player at an active club gets a profile URL.
-    # A player hidden from the public site (players.is_public false, which
-    # includes anyone who asked to be removed, migration 316) resolves to a 404,
-    # so they are not listed either.
-    player_rows = (await db.execute(
-        select(Player.id)
-        .join(Organisation, Player.organisation_id == Organisation.id)
-        .where(Organisation.is_active == True)  # noqa: E712
-        .where(Player.is_public.is_not(False))
-    )).all()
-
-    # Players a club hides from its public Stats (junior-only, migration 315)
-    # are left out of the sitemap so crawlers are not pointed at a 404.
-    hidden_juniors: set[str] = set()
-    for (oid,) in (await db.execute(
-        select(Organisation.id).where(Organisation.hide_juniors.is_(True))
-    )).all():
-        hidden_juniors |= set((await junior_hiding.resolve(db, oid)).player_ids)
-
-    for (pid,) in player_rows:
-        if str(pid).lower() in hidden_juniors:
-            continue
-        entries.append(_url_entry(
-            f"{SITE}/players/{pid}",
-            changefreq="weekly",
-            priority="0.6",
-        ))
+    # Player profiles are deliberately NOT listed: they are noindex and
+    # disallowed in robots.txt, and a sitemap that points crawlers at them
+    # would contradict both.
 
     body = (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -176,7 +152,7 @@ async def robots():
         "Disallow: /onboard\n"
         "Disallow: /api/\n"
         "Disallow: /og-preview\n"
-        "Disallow: /players/*/share\n"
+        "Disallow: /players/\n"
         "\n"
         f"Sitemap: {SITE}/sitemap.xml\n"
     )

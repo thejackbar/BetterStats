@@ -60,8 +60,10 @@ function setJsonLd(data) {
  *   - jsonLd: optional schema.org JSON-LD object or array — injected as a
  *             scoped <script> and cleared on unmount.
  *   - canonical: explicit canonical URL (defaults to og:url)
+ *   - robots: value for <meta name=robots>; removed again on unmount so it
+ *             never leaks onto the next route
  */
-export function usePageMeta({ title, description, image, url, type = 'website', jsonLd, canonical } = {}) {
+export function usePageMeta({ title, description, image, url, type = 'website', jsonLd, canonical, robots } = {}) {
   useEffect(() => {
     const prevTitle = document.title
     if (title) document.title = title
@@ -85,12 +87,14 @@ export function usePageMeta({ title, description, image, url, type = 'website', 
     tags.filter(([, v]) => v).forEach(([p, v]) => setMeta(p, v))
     setCanonical(resolvedCanonical)
     if (jsonLd) setJsonLd(jsonLd)
+    if (robots) setMeta('robots', robots)
 
     return () => {
       document.title = prevTitle
       // Don't remove the description/canonical/JSON-LD wholesale — the next
       // page's usePageMeta call will overwrite them. Only clear tags we added.
       if (jsonLd) setJsonLd(null)
+      if (robots) removeMeta('robots')
     }
-  }, [title, description, image, url, type, canonical, JSON.stringify(jsonLd)])
+  }, [title, description, image, url, type, canonical, robots, JSON.stringify(jsonLd)])
 }

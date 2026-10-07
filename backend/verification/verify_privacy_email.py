@@ -5,7 +5,7 @@ Runs the SHIPPED `services/player_privacy.py`, `services/privacy_email.py`,
 `services/comms_contacts.upsert_contact` and `services/email_service.get_email_provider`
 against a real Postgres.
 
-The club: TRENT (removed) with an address on his player record, a different one
+The club: TOBY (removed) with an address on his player record, a different one
 on his fee record, a sign-in email on a claimed account and a BetterComms contact
 for each; TOM, a relative with the same surname, PAT, and a committee address.
 
@@ -70,9 +70,9 @@ def check(label: str, ok: bool, detail: str = "") -> None:
 
 
 ORG = uuid.uuid4()
-TRENT, TOM, PAT, ACCT = (uuid.uuid4() for _ in range(4))
+TOBY, TOM, PAT, ACCT = (uuid.uuid4() for _ in range(4))
 FM_TRENT, FM_TOM = uuid.uuid4(), uuid.uuid4()
-T_PLAYER, T_FEE, T_ACCT = "trent@club.test", "trent.fee@club.test", "trent.acct@club.test"
+T_PLAYER, T_FEE, T_ACCT = "toby@club.test", "toby.fee@club.test", "toby.acct@club.test"
 TOM_MAIL, PAT_MAIL, COMMITTEE = "tom@club.test", "pat@club.test", "committee@club.test"
 ALL_TRENT = {T_PLAYER, T_FEE, T_ACCT}
 
@@ -101,17 +101,17 @@ async def seed() -> None:
             await conn.execute(text(stmt))
     async with Session() as s:
         s.add(Organisation(id=ORG, name="Applecross", is_active=True))
-        s.add(User(id=ACCT, username="trent", email=T_ACCT))
+        s.add(User(id=ACCT, username="toby", email=T_ACCT))
         await s.flush()
-        for pid, nm, em, uid_ in ((TRENT, "Trent Steenholdt", T_PLAYER, ACCT), (TOM, "Tom Steenholdt", TOM_MAIL, None),
+        for pid, nm, em, uid_ in ((TOBY, "Toby Marlowe", T_PLAYER, ACCT), (TOM, "Tom Marlowe", TOM_MAIL, None),
                                   (PAT, "Pat Plain", PAT_MAIL, None)):
             s.add(Player(id=pid, name=nm, organisation_id=ORG, grassroots_id=str(pid), email=em, user_id=uid_))
         await s.flush()
-        s.add(FeeMember(id=FM_TRENT, organisation_id=ORG, player_id=TRENT, full_name="Trent Steenholdt", email=T_FEE))
-        s.add(FeeMember(id=FM_TOM, organisation_id=ORG, player_id=TOM, full_name="Tom Steenholdt", email=TOM_MAIL))
+        s.add(FeeMember(id=FM_TRENT, organisation_id=ORG, player_id=TOBY, full_name="Toby Marlowe", email=T_FEE))
+        s.add(FeeMember(id=FM_TOM, organisation_id=ORG, player_id=TOM, full_name="Tom Marlowe", email=TOM_MAIL))
         await s.flush()
-        for em, nm, pid, mid in ((T_PLAYER, "Trent", TRENT, None), (T_FEE, "Trent", None, FM_TRENT),
-                                 (T_ACCT, "Trent", None, None), (TOM_MAIL, "Tom", TOM, None),
+        for em, nm, pid, mid in ((T_PLAYER, "Toby", TOBY, None), (T_FEE, "Toby", None, FM_TRENT),
+                                 (T_ACCT, "Toby", None, None), (TOM_MAIL, "Tom", TOM, None),
                                  (PAT_MAIL, "Pat", PAT, None), (COMMITTEE, "Committee", None, None)):
             s.add(CommsContact(organisation_id=ORG, email=em, name=nm, source="player", player_id=pid, member_id=mid))
         await s.commit()
@@ -127,7 +127,7 @@ async def audience() -> set[str]:
 
 async def remove_trent() -> dict | None:
     async with Session() as s:
-        pl = await s.get(Player, TRENT)
+        pl = await s.get(Player, TOBY)
         if HAVE:
             out = await player_privacy.hide_at_request(s, pl, by="Jack", reason="asked by email")
             await s.commit()
@@ -182,20 +182,20 @@ async def main() -> int:
 
     print("an address or contact added AFTER the removal")
     async with Session() as s:
-        await s.execute(text("UPDATE players SET email = 'trent.new@club.test' WHERE id = :i"), {"i": TRENT})
+        await s.execute(text("UPDATE players SET email = 'toby.new@club.test' WHERE id = :i"), {"i": TOBY})
         await s.commit()
     if HAVE:
         privacy_email.forget()
-    r = await real.send(msg("trent.new@club.test"))
+    r = await real.send(msg("toby.new@club.test"))
     check("a NEW address on his record is refused with nobody re-running anything", not r.ok, str(r))
     async with Session() as s:
-        outcome = await upsert_contact(s, ORG, "trent.new@club.test", "Trent", "player", player_id=TRENT)
+        outcome = await upsert_contact(s, ORG, "toby.new@club.test", "Toby", "player", player_id=TOBY)
         await s.commit()
     async with Session() as s:
-        c = (await s.execute(select(CommsContact).where(CommsContact.email == "trent.new@club.test"))).scalar_one()
+        c = (await s.execute(select(CommsContact).where(CommsContact.email == "toby.new@club.test"))).scalar_one()
     check("a contact re-created for him from the Directory is born excluded", c.excluded is True)
     async with Session() as s:
-        s.add(CommsContact(organisation_id=ORG, email="odd@elsewhere.test", name="Trent", source="manual", player_id=TRENT))
+        s.add(CommsContact(organisation_id=ORG, email="odd@elsewhere.test", name="Toby", source="manual", player_id=TOBY))
         await s.commit()
     if HAVE:
         privacy_email.forget()
@@ -220,9 +220,9 @@ async def main() -> int:
     print("restore")
     if HAVE:
         async with Session() as s:
-            pl = await s.get(Player, TRENT)
+            pl = await s.get(Player, TOBY)
             await player_privacy.restore_public(s, pl, by="Jack")
-            await s.execute(text("UPDATE players SET email = :e WHERE id = :i"), {"e": T_PLAYER, "i": TRENT})
+            await s.execute(text("UPDATE players SET email = :e WHERE id = :i"), {"e": T_PLAYER, "i": TOBY})
             await s.commit()
         privacy_email.forget()
         async with Session() as s:

@@ -4,12 +4,12 @@
 //   npx vite build --outDir /tmp/dist_pp && npx vite preview --outDir /tmp/dist_pp --port 5203 &
 //   node frontend/verification/verify_player_privacy_browser.mjs [baseUrl]
 //
-// Two players are listed. Trent asked to be removed (privacy_hidden_at set,
+// Two players are listed. Toby asked to be removed (privacy_hidden_at set,
 // is_public false). Pat is hidden by the club's own switch (is_public false, no
-// marker). The point of the pair: Trent's profile shows a note and NO switch, Pat's
+// marker). The point of the pair: Toby's profile shows a note and NO switch, Pat's
 // still shows the switch, so the screen cannot pass by drawing nothing.
 //
-// What is asserted on the wire: saving Trent's profile sends is_public: false
+// What is asserted on the wire: saving Toby's profile sends is_public: false
 // (never true) and never sends the read-only marker back.
 import { existsSync } from 'node:fs'
 import { chromium } from 'playwright'
@@ -23,7 +23,7 @@ const ck = (name, cond, extra = '') => {
   else { fail++; console.log(`FAIL ${name}${extra ? `  ${extra}` : ''}`) }
 }
 
-const TRENT = 'aaaaaaaa-0000-4000-8000-000000000001'
+const TOBY = 'aaaaaaaa-0000-4000-8000-000000000001'
 const PAT = 'aaaaaaaa-0000-4000-8000-000000000002'
 
 const row = (id, name, extra = {}) => ({
@@ -31,11 +31,11 @@ const row = (id, name, extra = {}) => ({
   skill_positions: [], squad_team_ids: [], player_role: null, ...extra,
 })
 const ROSTER = [
-  row(TRENT, 'Steenholdt, Trent', { is_public: false }),
+  row(TOBY, 'Marlowe, Toby', { is_public: false }),
   row(PAT, 'Plain, Pat', { is_public: false }),
 ]
 const PROFILES = {
-  [TRENT]: row(TRENT, 'Steenholdt, Trent', { is_public: false, privacy_hidden_at: '2026-10-01T02:00:00+00:00' }),
+  [TOBY]: row(TOBY, 'Marlowe, Toby', { is_public: false, privacy_hidden_at: '2026-10-01T02:00:00+00:00' }),
   [PAT]: row(PAT, 'Plain, Pat', { is_public: false, privacy_hidden_at: null }),
 }
 
@@ -88,14 +88,14 @@ for (const width of [1280, 390]) {
   console.log(`\nAdmin Players at ${width}px`)
   const { page, ctx, errors, calls } = await open(width)
 
-  // Trent: asked to be removed.
-  await openProfile(page, 'Steenholdt')
+  // Toby: asked to be removed.
+  await openProfile(page, 'Marlowe')
   let body = await page.locator('body').innerText()
-  ck('Trent: the note says it was at the player\'s request', /Removed at the player's request/.test(body))
-  ck('Trent: there is NO Hidden switch to flip',
+  ck('Toby: the note says it was at the player\'s request', /Removed at the player's request/.test(body))
+  ck('Toby: there is NO Hidden switch to flip',
     (await page.getByText('Hidden — keep off the public website').count()) === 0)
-  ck('Trent: the note says what stays (club totals, admin screens)', /club's totals/.test(body))
-  ck(`Trent: no horizontal overflow at ${width}px`, (await overflow(page)) <= 1, String(await overflow(page)))
+  ck('Toby: the note says what stays (club totals, admin screens)', /club's totals/.test(body))
+  ck(`Toby: no horizontal overflow at ${width}px`, (await overflow(page)) <= 1, String(await overflow(page)))
   await page.screenshot({ path: `/tmp/claude-0/pp_trent_${width}.png` })
 
   // Save his profile: the PATCH must keep him hidden and never carry the marker.
@@ -107,13 +107,13 @@ for (const width of [1280, 390]) {
     await save.click().catch(() => {})
     await page.waitForTimeout(700)
   }
-  const patch = calls.find(c => c.method === 'PATCH' && c.path === `/players/${TRENT}/profile`)
+  const patch = calls.find(c => c.method === 'PATCH' && c.path === `/players/${TOBY}/profile`)
   if (patch) {
     const sent = JSON.parse(patch.body)
-    ck('Trent: saving sends is_public: false on the wire', sent.is_public === false, patch.body)
-    ck('Trent: the read-only marker is never sent back', !('privacy_hidden_at' in sent), patch.body)
+    ck('Toby: saving sends is_public: false on the wire', sent.is_public === false, patch.body)
+    ck('Toby: the read-only marker is never sent back', !('privacy_hidden_at' in sent), patch.body)
   } else {
-    ck('Trent: saving his profile sent a PATCH at all', false, 'no PATCH captured')
+    ck('Toby: saving his profile sent a PATCH at all', false, 'no PATCH captured')
   }
 
   // Pat: hidden by the club's own switch only. The control: the switch IS drawn.
