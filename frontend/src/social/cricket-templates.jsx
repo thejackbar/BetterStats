@@ -497,6 +497,11 @@ const SLOT_T1 = (width, height) => {
   const bottom = pick(aspectOf(width, height), { square: 36, portrait: 40, story: 90 })
   return { x: 64, y: height - bottom - h, w: 480, h, pad: 8, gap: 14, panel: 'light' }
 }
+// The editor fills an empty competition with the word COMPETITION so layouts that
+// always print one have something to show. A layout that is happy to print
+// nothing reads it through here.
+const realComp = (m) => (m && m.competition && m.competition !== 'COMPETITION' ? m.competition : '')
+
 export function T1_HeroList({ width = 1080, height = 1080, team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus, markHero }) {
   const P = players.slice(0, 13)
   const A = aspectOf(width, height)
@@ -680,7 +685,7 @@ export function T1_HeroList({ width = 1080, height = 1080, team, opponent, match
 // so the slot stops well short of it. The grid opens under the slot on every
 // canvas shape.
 const SLOT_T2 = (width, height) => ({ x: 56, y: 268, w: 500, h: 100, pad: 8, gap: 14, panel: 'light' })
-export function T2_CardGrid({ width = 1080, height = 1080, team, opponent, match, players, palette }) {
+export function T2_CardGrid({ width = 1080, height = 1080, team, opponent, match, players, palette, headline }) {
   const P = players.slice(0, 12)
   const A = aspectOf(width, height)
   const slot = SLOT_T2(width, height)
@@ -712,7 +717,7 @@ export function T2_CardGrid({ width = 1080, height = 1080, team, opponent, match
         fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 320, lineHeight: 0.8,
         color: palette.ink, opacity: 0.04, letterSpacing: -6,
         transform: 'rotate(-8deg)', userSelect: 'none', whiteSpace: 'nowrap',
-      }}>LINEUP</div>
+      }}>{(headline || 'LINEUP').toUpperCase()}</div>
       <svg style={{ position: 'absolute', left: -180, top: -180, width: 560, height: 560, opacity: 0.08 }}>
         <circle cx="280" cy="280" r="260" fill="none" stroke={palette.ink} strokeWidth="2" />
         <circle cx="280" cy="280" r="200" fill="none" stroke={palette.ink} strokeWidth="2" />
@@ -742,7 +747,7 @@ export function T2_CardGrid({ width = 1080, height = 1080, team, opponent, match
       </div>
       <div style={{ position: 'relative', padding: '44px 56px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', zIndex: 2 }}>
         <div>
-          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 96, lineHeight: 0.85, color: palette.ink, letterSpacing: -1 }}>LINEUP</div>
+          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: Math.max(44, Math.min(96, Math.floor(640 / (Math.max((headline || 'LINEUP').length, 1) * 0.5)))), lineHeight: 0.85, color: palette.ink, letterSpacing: -1, maxWidth: 640, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{(headline || 'LINEUP').toUpperCase()}</div>
           <div style={{ width: 84, height: 4, background: palette.accent, margin: '10px 0 14px' }} />
           {/* One fitted line, so a long pairing shrinks instead of wrapping onto
               the venue line and into the sponsor slot below. */}
@@ -753,7 +758,7 @@ export function T2_CardGrid({ width = 1080, height = 1080, team, opponent, match
             </AutoFitText>
           </div>
           <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 16, letterSpacing: 1.8, color: palette.accent, marginTop: 10, fontWeight: 500 }}>
-            {match.round} · {match.date} · {match.time}
+            {[realComp(match), match.round, match.date, match.time].filter(Boolean).join(' · ')}
           </div>
           <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 1.5, color: palette.ink, opacity: 0.7, marginTop: 4 }}>
             {match.venue.toUpperCase()}
@@ -1076,7 +1081,7 @@ export function T4_BattingOrder({ width = 1080, height = 1080, team, opponent, m
 // its own padding; on a taller post the rows share what the bar leaves.
 const T5_FOOT_PAD = 12
 const SLOT_T5 = (width, height) => ({ x: 480, y: height - T5_FOOT_PAD - 92, w: 494, h: 92, pad: 8, gap: 14, panel: 'light' })
-export function T5_Brutalist({ width = 1080, height = 1080, team, opponent, match, players, palette }) {
+export function T5_Brutalist({ width = 1080, height = 1080, team, opponent, match, players, palette, headline }) {
   const P = players.slice(0, 11)
   const A = aspectOf(width, height)
   const slot = SLOT_T5(width, height)
@@ -1144,7 +1149,7 @@ export function T5_Brutalist({ width = 1080, height = 1080, team, opponent, matc
       </div>
       <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, boxSizing: 'border-box', height: footH, background: palette.secondary, padding: `${T5_FOOT_PAD}px 44px`, display: 'grid', gridTemplateColumns: `${slot.x - 44}px ${slot.w}px 1fr`, alignItems: 'center', borderTop: `3px solid ${palette.accent}`, zIndex: 2 }}>
         <div style={{ minWidth: 0, paddingRight: 18, textAlign: 'left' }}>
-          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, letterSpacing: 2, color: palette.ink, lineHeight: 1 }}>STARTING XI</div>
+          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, letterSpacing: 2, color: palette.ink, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{(headline || 'STARTING XI').toUpperCase()}</div>
           <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 20, letterSpacing: 2, color: palette.accent, lineHeight: 1, marginTop: 10, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{match.venue.toUpperCase()}</div>
           <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 2, color: palette.ink, opacity: 0.85, marginTop: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{match.competition} · {match.time}</div>
         </div>
@@ -1377,7 +1382,7 @@ export function T7_CaptainSpotlight({ width = 1080, height = 1080, team, opponen
       <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: bandH, background: palette.primary, borderTop: `3px solid ${palette.accent}`, padding: A === 'square' ? '18px 40px' : '18px 40px 26px', zIndex: 3, display: 'flex', flexDirection: 'column' }}>
         <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
           <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 2, color: palette.accent }}>// JOINED BY THE XI</div>
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 1.5, color: palette.ink, opacity: 0.6 }}>{match.venue.toUpperCase()} · {match.date} · {match.time}</div>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 1.5, color: palette.ink, opacity: 0.6 }}>{[realComp(match), match.venue.toUpperCase(), match.date, match.time].filter(Boolean).join(' · ')}</div>
         </div>
         {/* Equal rows filling the band on a taller post; the square keeps its
             natural-height grid, since stretching it spreads the names apart. */}
@@ -1415,7 +1420,7 @@ export const SLOT_T8 = (width = 1080, height = 1080) => {
   return { x: Math.round((width - w) / 2), y: height - band + 10, w, h, pad: 6, gap: 20, panel: 'light' }
 }
 
-export function T8_Mosaic({ width = 1080, height = 1080, team, opponent, match, players, palette, featuredIdx = 0 }) {
+export function T8_Mosaic({ width = 1080, height = 1080, team, opponent, match, players, palette, headline, featuredIdx = 0 }) {
   const playersXI = players.slice(0, 11)
   const featuredP = playersXI[featuredIdx] || playersXI.find(p => p.captain) || playersXI[0]
   const rest = playersXI.filter(p => p !== featuredP)
@@ -1454,7 +1459,7 @@ export function T8_Mosaic({ width = 1080, height = 1080, team, opponent, match, 
       </div>
       <div style={{ position: 'relative', padding: '36px 36px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 2 }}>
         <div>
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 2, color: palette.accent, marginBottom: 6 }}>// STARTING XI · {match.competition}</div>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 2, color: palette.accent, marginBottom: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 560 }}>// {(headline || 'STARTING XI').toUpperCase()} · {match.competition}</div>
           <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 60, lineHeight: 0.9, color: palette.ink, letterSpacing: -1 }}>
             {team.name} <span style={{ color: palette.accent }}>v</span> {opponent.name}
           </div>
@@ -1526,7 +1531,7 @@ export const SLOT_T9 = (width = 1080, height = 1080, count = 3) => {
   return { x: Math.round((width - w) / 2), y: height - T9_FOOT_H - 22 - h, w, h, pad: 8, gap: 24, panel: 'light' }
 }
 
-export function T9_Flyer({ width = 1080, height = 1080, team, opponent, match, players, palette }) {
+export function T9_Flyer({ width = 1080, height = 1080, team, opponent, match, players, palette, headline }) {
   const P = players.slice(0, 11)
   const tier1 = P.slice(0, 2)
   const tier2 = P.slice(2, 5)
@@ -1582,7 +1587,7 @@ export function T9_Flyer({ width = 1080, height = 1080, team, opponent, match, p
       </div>
       <div style={{ flexShrink: 0, position: 'relative', zIndex: 2, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, margin: '8px 0 16px', fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 18, letterSpacing: 6, color: palette.accent }}>
         <span style={{ flex: '0 1 180px', height: 2, background: palette.accent, opacity: 0.5 }} />
-        <span>★ ★ ★ THE LINEUP ★ ★ ★</span>
+        <span style={{ minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>★ ★ ★ {(headline || 'THE LINEUP').toUpperCase()} ★ ★ ★</span>
         <span style={{ flex: '0 1 180px', height: 2, background: palette.accent, opacity: 0.5 }} />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', position: 'relative', zIndex: 2, textAlign: 'center', padding: `0 40px ${height - slot.y + 14}px`, lineHeight: 0.88, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", color: palette.ink, letterSpacing: -1 }}>

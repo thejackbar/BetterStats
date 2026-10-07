@@ -199,7 +199,7 @@ function useSharedNameSize(listRef, cap) {
 
 export function LineupCard({
   width = 1080, height = 1080, team = {}, opponent = {}, match = {}, players, palette = {},
-  card, sponsorCount = 1, sponsorPanel = 'light', logoRatio = 1,
+  card, sponsorCount = 1, sponsorPanel = 'light', logoRatio = 1, headline = '',
 }) {
   const P = (players || []).slice(0, 11)
   const c = { ...LINEUP_CARD_DEFAULTS, ...(card || {}) }
@@ -319,6 +319,10 @@ export function LineupCard({
         {compText && (
           <AutoFitText text={compText} max={Math.round(small * 0.7)} min={12} lines={1}
             measureDeps={[fontSig]} style={{ letterSpacing: 2, lineHeight: 1.2, opacity: 0.85, marginBottom: 14 }} />
+        )}
+        {(headline || '').trim() && (
+          <AutoFitText text={headline.trim().toUpperCase()} max={Math.round(small * 0.8)} min={12} lines={1}
+            measureDeps={[fontSig]} style={{ letterSpacing: 1.5, lineHeight: 1.2, marginBottom: 10 }} />
         )}
         <AutoFitText text={(team.name || '').toUpperCase()} max={fixture} min={18} lines={1}
           measureDeps={[fontSig]} style={{ letterSpacing: 0.5, lineHeight: 1.15 }} />

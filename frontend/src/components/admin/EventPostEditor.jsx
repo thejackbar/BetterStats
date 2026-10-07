@@ -46,6 +46,7 @@ export default function EventPostEditor({
   motifKey, setMotifKey,
   bgImage, setBgImage,
   bgOpacity = 0.85, setBgOpacity,
+  savedEvents = [], activeSavedKey = null, onPickSaved,
 }) {
   const fileRef = useRef(null)
   const patch = (p) => setEvent({ ...event, ...p })
@@ -81,6 +82,24 @@ export default function EventPostEditor({
             </button>
           ))}
         </div>
+        {savedEvents.length > 0 && onPickSaved && (
+          <div className="mt-3" data-testid="saved-events">
+            <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-2">Your saved events ({savedEvents.length})</label>
+            <div className="flex flex-col gap-1.5 max-h-48 overflow-y-auto">
+              {savedEvents.map((t) => (
+                <button key={t.key} onClick={() => onPickSaved(t.key)} data-testid="saved-event"
+                  className="text-left px-2.5 py-2 rounded border pb-hairline text-xs transition-colors min-w-0"
+                  style={activeSavedKey === t.key ? { borderColor: 'var(--pb-accent)' } : {}}>
+                  <div className="text-pb-text truncate">{t.name}</div>
+                  <div className="font-mono text-[9px] text-pb-faintest truncate mt-0.5">{[t.title && t.title !== t.name ? t.title : '', t.layout].filter(Boolean).join(' · ')}</div>
+                </button>
+              ))}
+            </div>
+            <p className="font-mono text-[9px] text-pb-faintest mt-2 leading-relaxed">
+              These keep the wording, motif and photo you saved, along with the layout.
+            </p>
+          </div>
+        )}
         <p className="font-mono text-[9px] text-pb-faintest mt-2 leading-relaxed">
           Only examples. Pick one to pre-fill the copy and a matching layout, then change anything. Or type your own event name above and fill in the details below.
         </p>

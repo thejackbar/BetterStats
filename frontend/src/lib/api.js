@@ -1606,6 +1606,9 @@ export const api = {
   adminListPlayers: () => request('/club-admin/players'),
   adminCreatePlayer: (data) =>
     request('/club-admin/players', { method: 'POST', body: JSON.stringify(data) }),
+  // Players the club already holds who might be the name just typed (read-only).
+  adminSimilarPlayers: (name) =>
+    request('/club-admin/players/similar', { method: 'POST', body: JSON.stringify({ name }) }),
   adminPatchPlayer: (playerId, data) =>
     request(`/club-admin/players/${playerId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   claimFillIn: (data) =>
