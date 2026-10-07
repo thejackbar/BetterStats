@@ -24,11 +24,14 @@ import { SPONSOR_SLOTS as CRICKET } from './cricket-templates'
 import { SPONSOR_SLOTS as SPLIT } from './split-template'
 import { SPONSOR_SLOTS as CARD } from './lineup-card-template'
 import { SPONSOR_SLOTS as GLASS } from './result-glass-template'
+import { SPONSOR_SLOTS as COVER } from './round-cover-template'
+import { SPONSOR_SLOTS as HIGHLIGHTS } from './highlights-cover-template'
+import { SPONSOR_SLOTS as GIANT } from './giant-type-template'
 import { SPONSOR_SLOTS as ROUND } from './round-templates'
 import { SPONSOR_SLOTS as TOTW } from './totw-templates'
 import { SPONSOR_SLOTS as EVENT } from './event-templates'
 
-const SLOTS = { ...CRICKET, ...SPLIT, ...CARD, ...GLASS, ...ROUND, ...TOTW, ...EVENT }
+const SLOTS = { ...CRICKET, ...SPLIT, ...CARD, ...GLASS, ...COVER, ...HIGHLIGHTS, ...GIANT, ...ROUND, ...TOTW, ...EVENT }
 
 /** Does this layout reserve a sponsor slot of its own? */
 export function hasSponsorSlot(templateId) {

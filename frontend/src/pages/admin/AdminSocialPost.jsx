@@ -35,6 +35,9 @@ import {
 import { SplitPoster, autoPanelColor } from '../../social/split-template'
 import { LineupCard, LINEUP_CARD_DEFAULTS, cardWashDefault } from '../../social/lineup-card-template'
 import { ResultGlass, GLASS_DEFAULTS, GLASS_FOCUS, GLASS_POSITIONS } from '../../social/result-glass-template'
+import { RoundCover } from '../../social/round-cover-template'
+import { ResultHighlights, HIGHLIGHTS_FOCUS } from '../../social/highlights-cover-template'
+import { GiantType } from '../../social/giant-type-template'
 import { TeamOfWeekGrid, TeamOfWeekBoard, TOTW_MIN, TOTW_MAX, TOTW_DEFAULT } from '../../social/totw-templates'
 import { exportNodeToPng } from '../../social/exportImage'
 import { SocialBackground, SocialBackgroundDefs, SOCIAL_BACKGROUNDS, GRADIENT_ANGLES, DEFAULT_COLORS as BG_DEFAULT_COLORS } from '../../social/SocialBackgrounds'
@@ -70,6 +73,7 @@ const LINEUP_DEFAULT = IS_AFL ? 'T1' : 'T11'
 const ALL_TEMPLATES = [
   { id: 'T11', name: 'Split Poster',    component: SplitPoster,        desc: 'Pale panel + dark XI, debut tags', maxPlayers: 11 },
   { id: 'T12', name: 'Match Day Card', component: LineupCard,         desc: 'Photo + colour wash, role icons, sponsor bar', maxPlayers: 11 },
+  { id: 'T13', name: 'Round Cover',    component: RoundCover,         desc: 'Hero photo, giant side word, round number', maxPlayers: 0 },
   { id: 'T1', name: 'Hero List',       component: T1_HeroList,        desc: 'Big player + name list',          maxPlayers: 13 },
   { id: 'T2', name: 'Card Grid',       component: T2_CardGrid,        desc: '4×3 trading card grid',           maxPlayers: 12 },
   { id: 'T3', name: 'Side Numbered',   component: T3_SideNumbered,    desc: IS_AFL ? 'Side photo + numbered team' : 'Side photo + numbered XI',        maxPlayers: 11 },
@@ -81,6 +85,7 @@ const ALL_TEMPLATES = [
   { id: 'T9', name: 'Flyer',           component: T9_Flyer,           desc: 'Festival poster style',           maxPlayers: 11 },
   { id: 'T10', name: 'Team Sheet',     component: T10_TeamSheet,      desc: 'Full-bleed photo + torn strip',   maxPlayers: 13 },
   { id: 'C1', name: 'Announcement',    component: C1_CaptainAnnounce, desc: 'Captain / debut / award',         maxPlayers: 1 },
+  { id: 'C5', name: 'Giant Type',      component: GiantType,          desc: 'FIRST XI / 100 / 5FA behind the player', maxPlayers: 1 },
   { id: 'C2', name: 'Toss',            component: C2_TossWon,         desc: 'Toss result post',                maxPlayers: 0 },
   { id: 'C3', name: 'Player Spotlight',component: C3_ManOfMatch,      desc: 'Man of match / player stats',     maxPlayers: 1 },
   { id: 'C4', name: 'Result · Classic', component: C4_FinalScore,     desc: 'Result + top performers', maxPlayers: 0 },
@@ -92,6 +97,7 @@ const ALL_TEMPLATES = [
   { id: 'RS5', name: 'Innings Bars',   component: ResultInningsBars,  desc: 'Proportional score bars',         maxPlayers: 0, kind: 'singleresult' },
   { id: 'RS6', name: 'Match Ticket',   component: ResultTicket,       desc: 'Ticket-stub aesthetic',           maxPlayers: 0, kind: 'singleresult' },
   { id: 'RS7', name: 'Glass Card',     component: ResultGlass,        desc: 'Your photo, glass scorecards, six positions', maxPlayers: 0, kind: 'singleresult' },
+  { id: 'RS8', name: 'Highlights Cover', component: ResultHighlights, desc: 'Full-bleed photo, title and one score card', maxPlayers: 0, kind: 'singleresult' },
   // Fixtures roundup — one post, all grades.
   { id: 'FX1', name: 'List',           component: FixtureList,        desc: 'Clean factual rows',              maxPlayers: 0, kind: 'fixtures' },
   { id: 'FX2', name: 'Match-day Hype', component: FixtureHype,        desc: 'Diagonal poster',                 maxPlayers: 0, kind: 'fixtures' },
@@ -122,18 +128,18 @@ const ALL_TEMPLATES = [
 // The football build drops the layouts that only mean anything with cricket
 // data: the batting order, the results wrap's batting/bowling leaders, and
 // every layout of the three hidden post types (toss, scorecard, final score).
-const AFL_HIDDEN_TEMPLATES = new Set(['T4', 'T11', 'T12', 'RR7', 'C2', 'C4', 'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6', 'RS7', 'SC1', 'SC2', 'SC3', 'TW1', 'TW2'])
+const AFL_HIDDEN_TEMPLATES = new Set(['T4', 'T11', 'T12', 'T13', 'C5', 'RR7', 'C2', 'C4', 'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6', 'RS7', 'RS8', 'SC1', 'SC2', 'SC3', 'TW1', 'TW2'])
 const TEMPLATES = IS_AFL ? ALL_TEMPLATES.filter(t => !AFL_HIDDEN_TEMPLATES.has(t.id)) : ALL_TEMPLATES
 
 // The lineup templates that crop the hero photo into a fixed box, and the shape
 // of that box — the framing control previews the same crop the post will make.
 // T6 and T7 size the element to a free-standing cutout instead, so there is no
 // crop window to reposition and they are deliberately absent.
-const HERO_CROP_ASPECT = { T1: 480 / 845, T3: 380 / 1080, T10: 720 / 1080 }
+const HERO_CROP_ASPECT = { T1: 480 / 845, T3: 380 / 1080, T10: 720 / 1080, T13: 0.8 }
 const HERO_FOCUS_TEMPLATES = Object.keys(HERO_CROP_ASPECT)
 // The layouts drawn around a hero photo. Derived from the same id list the Hero
 // Image panel is gated on, so the two can't drift apart.
-const HERO_SLOT_TEMPLATES = ['T1', 'T3', 'T6', 'T7', 'T10', 'T11', 'C1', 'C3']
+const HERO_SLOT_TEMPLATES = ['T1', 'T3', 'T6', 'T7', 'T10', 'T11', 'T13', 'C1', 'C3', 'C5']
 // The lineups that can mark which listed player is the one in the photo, and
 // the ones whose Hero Player picker names that player. T7 and the announcement
 // layouts have a single player, so there is no list to mark.
@@ -146,10 +152,10 @@ const DEBUT_TEMPLATE_NAMES = { T1: 'Hero List', T3: 'Side Numbered', T10: 'Team 
 
 const TAB_MAP = {
   T1: 'lineup', T2: 'lineup', T3: 'lineup', T4: 'lineup', T5: 'lineup',
-  T6: 'lineup', T7: 'lineup', T8: 'lineup', T9: 'lineup', T10: 'lineup', T11: 'lineup', T12: 'lineup',
+  T6: 'lineup', T7: 'lineup', T8: 'lineup', T9: 'lineup', T10: 'lineup', T11: 'lineup', T12: 'lineup', T13: 'lineup',
   FX1: 'fixtures', FX2: 'fixtures', FX3: 'fixtures', FX4: 'fixtures', FX5: 'fixtures', FX6: 'fixtures',
-  C1: 'announcement', C2: 'toss', C3: 'motm',
-  C4: 'result', RS1: 'result', RS2: 'result', RS3: 'result', RS4: 'result', RS5: 'result', RS6: 'result', RS7: 'result',
+  C1: 'announcement', C5: 'announcement', C2: 'toss', C3: 'motm',
+  C4: 'result', RS1: 'result', RS2: 'result', RS3: 'result', RS4: 'result', RS5: 'result', RS6: 'result', RS7: 'result', RS8: 'result',
   RR1: 'results', RR2: 'results', RR3: 'results', RR4: 'results', RR5: 'results', RR6: 'results', RR7: 'results',
   TW1: 'totw', TW2: 'totw',
   SC1: 'scorecard', SC2: 'scorecard', SC3: 'scorecard',
@@ -1302,6 +1308,8 @@ export default function AdminSocialPost() {
   const patchGlassLook = (patch) => setGlassLook((c) => ({ ...c, ...patch }))
   useEffect(() => { try { localStorage.setItem('bs_social_result_glass', JSON.stringify(glassLook)) } catch { /* private window */ } }, [glassLook])
   const [glassFocus, setGlassFocus] = useState(GLASS_FOCUS)
+  // The Highlights Cover frames its photo the same way, with its own default (the player sits high).
+  const [highlightsFocus, setHighlightsFocus] = useState(HIGHLIGHTS_FOCUS)
 
   // Tag the players who have nothing on record before the match date as
   // debutants. Runs on its own after a lineup lands (the lineup is already on
@@ -2825,7 +2833,7 @@ export default function AdminSocialPost() {
       player: milestonePlayer ? playerToTemplatePlayer(milestonePlayer.player, milestonePlayer, nameFormat, swapNames) : undefined,
     }
   }
-  if (templateId === 'C1') {
+  if (templateId === 'C1' || templateId === 'C5') {
     const annPlayer = selectedPlayers[announcement.playerIdx]
     let annTemplatePlayer = annPlayer ? playerToTemplatePlayer(annPlayer.player, annPlayer, nameFormat, swapNames) : undefined
     if (annTemplatePlayer && heroMode === 'hero' && heroImage.blobUrl) {
@@ -2849,7 +2857,7 @@ export default function AdminSocialPost() {
       summary: motm.summary,
     }
   }
-  if (['T1', 'T3', 'T6', 'T7', 'T10', 'T11'].includes(templateId) && heroImage.blobUrl) {
+  if (['T1', 'T3', 'T6', 'T7', 'T10', 'T11', 'T13'].includes(templateId) && heroImage.blobUrl) {
     extraProps.heroImage = heroImage.blobUrl
   }
   // Only the templates that crop a photo into a box can act on a focal point;
@@ -2882,6 +2890,8 @@ export default function AdminSocialPost() {
     // The Backing buttons in the Sponsors tool colour the layout's whole bar.
     extraProps.sponsorPanel = overlay.items.find((it) => it.type === 'sponsors')?.panel || 'light'
   }
+  // The three card layouts keep a slot for the sponsor grid and ask how many logos it holds.
+  if (templateId === 'T13' || templateId === 'C5') extraProps.sponsorCount = gridLogoCount
   if (templateId === 'C4') {
     extraProps.result = {
       winner: result.winner, margin: result.margin, grade: result.grade, teamScore: result.teamScore,
@@ -3019,6 +3029,11 @@ export default function AdminSocialPost() {
       extraProps.look = glassLook
       extraProps.photo = heroImage.blobUrl || null
       extraProps.focus = glassFocus
+      extraProps.sponsorCount = gridLogoCount
+    }
+    if (templateId === 'RS8') {
+      extraProps.photo = heroImage.blobUrl || null
+      extraProps.focus = highlightsFocus
       extraProps.sponsorCount = gridLogoCount
     }
   }
@@ -3740,7 +3755,7 @@ export default function AdminSocialPost() {
       // sitting where the layout put it follows the bar. One somebody moved stays.
       let follow = null
       // The Glass Card's slot is wider for more logos, the same way.
-      if (templateId === 'T12' || templateId === 'RS7') {
+      if (['T12', 'RS7', 'T13', 'C5', 'RS8'].includes(templateId)) {
         const was = sponsorSlotFor(templateId, W, H, (sponsorBlock.sponsorIds || []).length || 1, slotOpts)
         if (['x', 'y', 'w', 'h'].every((k) => sponsorBlock[k] === was[k])) {
           const { x, y, w, h } = sponsorSlotFor(templateId, W, H, ids.length, slotOpts)
@@ -4838,7 +4853,7 @@ export default function AdminSocialPost() {
                     </div>
                   </div>
                 )}
-                {['C1', 'C3'].includes(templateId) && (
+                {['C1', 'C3', 'C5'].includes(templateId) && (
                   <div className="flex gap-2 mb-3">
                     <button
                       onClick={() => setHeroMode('player')}
@@ -4852,12 +4867,12 @@ export default function AdminSocialPost() {
                     >Hero Image</button>
                   </div>
                 )}
-                {(!['C1', 'C3'].includes(templateId) || heroMode === 'hero') && (
+                {(!['C1', 'C3', 'C5'].includes(templateId) || heroMode === 'hero') && (
                   <div className="flex flex-col gap-3">
                     <label className="flex items-center gap-3 cursor-pointer group">
                       <span className="px-3 py-2 rounded border pb-hairline text-xs font-mono text-pb-faint group-hover:bg-pb-surface2 transition-colors">Choose File</span>
                       <span className="text-[11px] text-pb-faint truncate">{heroImage.blobUrl ? 'Image selected' : 'No file chosen'}</span>
-                      <input type="file" accept="image/png,image/webp,image/jpeg" onChange={handleHeroFile} className="sr-only" />
+                      <input type="file" accept="image/png,image/webp,image/jpeg" onChange={handleHeroFile} className="sr-only" data-testid="hero-photo-input" />
                     </label>
                     {heroImage.blobUrl && (
                       <div className="flex items-start gap-3">
@@ -4915,7 +4930,7 @@ export default function AdminSocialPost() {
             )}
 
             {/* C1 Announcement */}
-            {templateId === 'C1' && (
+            {(templateId === 'C1' || templateId === 'C5') && (
               <section className="pb-card p-4">
                 <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Announcement</h2>
                 <div className="grid grid-cols-1 gap-3">
@@ -5095,7 +5110,7 @@ export default function AdminSocialPost() {
 
                 {/* POTM image — Star of the Day shows a player profile photo or an
                     uploaded hero image in place of the initials (RS4 feedback). */}
-                {templateId !== 'RS7' && (
+                {templateId !== 'RS7' && templateId !== 'RS8' && (
                 <div className="mb-4 pt-3 border-t pb-hairline">
                   <div className="flex items-center justify-between mb-2">
                     <label className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase">POTM Photo</label>
@@ -5186,6 +5201,35 @@ export default function AdminSocialPost() {
                     </div>
                   </div>
                 ))}
+              </section>
+            )}
+
+            {/* Highlights Cover (RS8): the one photo the whole post is built on */}
+            {activeTab === 'result' && templateId === 'RS8' && (
+              <section className="pb-card p-4" data-testid="highlights-cover-look">
+                <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Highlights Cover</h2>
+                <p className="text-[11px] text-pb-faint mb-3">Your photo fills the post. The title and one score card for both teams sit over the foot of it. The top row is the winner unless you know who batted first.</p>
+                <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Cover photo</label>
+                <div className="flex flex-col gap-3">
+                  <label className="flex items-center gap-3 cursor-pointer group">
+                    <span className="px-3 py-2 rounded border pb-hairline text-xs font-mono text-pb-faint group-hover:bg-pb-surface2 transition-colors">Choose File</span>
+                    <span className="text-[11px] text-pb-faint truncate">{heroImage.blobUrl ? 'Photo selected' : 'No file chosen'}</span>
+                    <input type="file" accept="image/png,image/webp,image/jpeg" onChange={handleHeroFile} className="sr-only" data-testid="highlights-photo-input" />
+                  </label>
+                  {heroImage.blobUrl && (
+                    <div className="flex items-start gap-3">
+                      <img src={heroImage.blobUrl} alt="Cover preview" className="w-16 h-16 object-cover rounded bg-pb-surface2" />
+                      <div className="flex flex-col gap-2 flex-1">
+                        <button onClick={() => setEditor({ key: 'hero', source: heroImage.blobUrl })}
+                          className="text-xs font-mono text-pb-faint hover:text-pb-text text-left">✎ Edit (crop)</button>
+                        <button onClick={() => { URL.revokeObjectURL(heroImage.blobUrl); setHeroImage({ blobUrl: null }); setHighlightsFocus(HIGHLIGHTS_FOCUS) }}
+                          className="text-xs text-pb-faintest hover:text-red-400 font-mono text-left">Remove photo</button>
+                      </div>
+                    </div>
+                  )}
+                  {!heroImage.blobUrl && <p className="text-[11px] text-pb-faintest">Without a photo the cover sits on a dark ground. Add the match photo the whole carousel opens with.</p>}
+                  <HeroFocusControl src={heroImage.blobUrl || null} value={highlightsFocus} onChange={setHighlightsFocus} defaults={HIGHLIGHTS_FOCUS} aspect={W / H} />
+                </div>
               </section>
             )}
 

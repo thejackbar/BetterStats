@@ -105,6 +105,13 @@
 67. A slot that moves with an editor option takes it as `opts` (`sponsorSlotFor(id, w, h, count, opts)`), and every call site passes the same `slotOpts`. Position changes re-seat a grid still in its old slot. A layout whose widths change with an option must pass that option in `AutoFitText` `measureDeps`, or the text keeps the old fit.
 68. A browser check about a layout's card (overlap, clipped, clear of) must require the card to be drawn, or it passes on the control run.
 
+**Card layouts: Round Cover T13, Giant Type C5, Highlights Cover RS8 (v9.107.0, `social/card-kit.jsx`)**
+69. They are portrait-first card layouts built from the club's own graphics. Colours come from the palette (`primary` card, `secondary` glow, `accent` headline, `ink` type) and `glowColor` falls back to a deep shade of the accent when `secondary` is a near-grey, so the default club palette is never a flat slab. Fonts come from `--social-display-font`. Nothing is Scarborough-specific.
+70. The shared drawing parts in `card-kit.jsx` are plain functions that return the element, so each root child carries its own `data-layer`. No `backdrop-filter` anywhere: glass panes are a plain tint, because the PNG export does not paint it. Masks, `-webkit-text-stroke`, repeating gradients and quarter-turn text were checked in a real downloaded PNG and survive.
+71. T13 and RS8 reserve their sponsor slot (`roundCoverSponsorSlot`, `highlightsSponsorSlot`) in their own files, and the layout reads `sponsorCount` to decide whether to keep the room (`count > 0`); the slot function is called with `max(1, count)`. C5 does the same. A new count-dependent slot must also be on the `pickSponsors` reseat list in `AdminSocialPost.jsx`.
+72. T13 reads the picture's own shape on load: a tall cut-out is shown whole (`contain`), a wide photo fills its box (`cover`); the framing control still moves it. C5 draws the headline twice, filled behind the player and hollow in front, so a plain photo still reads as designed. C5 reuses the C1 announcement state (`kind`, `headline`, `subheadline`, `playerIdx`) and the C1 hero-mode switch; any `templateId === 'C1'` branch in the editor needs C5 beside it (the fields panel was one).
+73. RS8 puts the winner on the top row unless `result.battedFirst` is `'us'` or `'them'`. Nothing sets it yet, because the scorecard import carries no batting order. All three are in `AFL_HIDDEN_TEMPLATES`; RS8 and its tab were already cricket-only.
+
 ## Traps and failure signatures
 - Geometry checks pass but a layout reads wrong (black bands, clumped story names). Judge from real screenshots.
 - Hero layouts show a crest, not the cut-out: harness roster stubbed `photo_url: null`. Stubs must cover every conditional's data (give players a photo and a route for it).
@@ -119,6 +126,7 @@
 
 ## How to verify a change here
 - `frontend/verification/verify_post_designer_browser.mjs` (base URL as `argv[2]`): canvas and export node move together, layout fills the FULL canvas, scorecard keeps 1920x1080, design measurements unchanged at 1080, layer stack read off the OFF-SCREEN EXPORT NODE, saved template through a real reload, no overflow at 390px. Control against the previous commit must fail the reflow, portrait-design and layer sections (framed=true, empty layer list, every z 0, no Send to back).
+- Card layouts: `frontend/verification/verify_card_layouts_browser.mjs` (production build, API stubbed; `CUTOUT=` a transparent PNG and `PHOTO=` a JPEG; 147 checks incl. a real PNG download at 2x). Control against the previous commit: 105 fail, and the 36 that pass are guards paired with a positive check. `shoot_card_layouts.mjs` writes a PNG per layout and size; `shoot_sponsor_slots.mjs T13 C5 RS8` at `SPONSORS=1|3` reported 0 overlaps.
 - Backend: `backend/verification/verify_instructional_videos.py` (real Postgres, shipped route bodies). `backend/verification/verify_social_totw.py` (team of the week; the control run on the previous commit fails only the two `exists` checks, and its POTM and results digest must match byte for byte). `frontend/verification/verify_totw_browser.mjs` sweeps sizes 6 to 14 on both layouts at all three post sizes for overlap and overflow. `verify_videos_browser.mjs` with `canManage` forced true must fail the gate checks (signed-out and `club_admin` see no controls).
 - Harness: address the frame by `data-post-frame`. `backgroundColor` cannot see a gradient: measure BEFORE and AFTER. `display: contents` wrappers have no size: probe through them, and read a `null` as "my selector missed". Keep units consistent in one return object. CSS `uppercase` text returns uppercased from `innerText`.
 - Find checks that cannot fail: `comm -12 <(grep ^PASS run.log|sort) <(grep ^PASS control.log|sort)`; anything naming the new feature is a guard or passing for the wrong reason, so make it a contrast gated on the action having landed.
@@ -131,6 +139,8 @@
 - No scripts owned by this area. Migrations: 226 (`public_header_logo`), 280 (`instructional_videos`).
 
 ## Open follow-ups
+- Set mode: a team-list set (cover plus one slide per grade) and a highlights set (cover plus photo-only slides) are still one post at a time. The blank carousel and the derived roundup pages are the only multi-slide posts.
+- RS8: nothing supplies `result.battedFirst`, so the top row is the winner. Round Cover and Giant Type have no saved club defaults (a club's look is the palette and Brand font only).
 - No portrait-NATIVE template variants (a design job per template). Reflow and per-template portrait designs are done.
 - A layout's own elements can be reordered and hidden but not moved or retyped (a `transform` offset per layer is the suggested next step).
 - Saved templates are still `localStorage` (design handoff proposes `social_post_template`; media library and brand kit already server-side).
