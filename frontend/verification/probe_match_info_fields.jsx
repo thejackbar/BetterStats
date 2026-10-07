@@ -10,6 +10,9 @@ import * as split from '../src/social/split-template.jsx'
 import * as card from '../src/social/lineup-card-template.jsx'
 import * as totw from '../src/social/totw-templates.jsx'
 import * as glass from '../src/social/result-glass-template.jsx'
+import * as roundCover from '../src/social/round-cover-template.jsx'
+import * as giant from '../src/social/giant-type-template.jsx'
+import * as highlights from '../src/social/highlights-cover-template.jsx'
 
 const HEAD = 'ZZHEADLINEZZ', COMP = 'ZZCOMPZZ'
 const pal = { primary: '#102040', secondary: '#183060', accent: '#f0b000', ink: '#ffffff', name: 'x' }
@@ -23,7 +26,8 @@ const fx = Array.from({ length: 5 }, (_, i) => ({ id: i, grade: 'A', opp: 'Opp' 
 const rs = Array.from({ length: 5 }, (_, i) => ({ id: i, grade: 'A', opp: 'Opp' + i, oppMono: 'OP', outcome: 'W', us: '1/100', them: '2/90', margin: 'BY 5 RUNS' }))
 const result = { comp: COMP, grade: '', round: 'ROUND 1', date: 'SAT 1 JAN', season: '2025-26', venue: 'V',
   us: { name: 'Home', mono: 'H', score: '1/100', overs: '20' }, them: { name: 'Away', mono: 'A', score: '2/90', overs: '20' }, winner: 'us', margin: 'BY 5 RUNS',
-  potm: { first: 'A', last: 'B', role: '', bat: '', bowl: '' }, topBatters: [], topBowlers: [] }
+  potm: { first: 'A', last: 'B', role: '', bat: '', bowl: '' }, topBatters: [], topBowlers: [],
+  topBat: { us: [], them: [] }, topBowl: { us: [], them: [] } }
 
 const lineupProps = { team, opponent, match, players, palette: pal, headline: HEAD, width: 1080, height: 1080 }
 const LAYOUTS = {
@@ -43,6 +47,9 @@ const LAYOUTS = {
   RS3: [rounds.ResultVersusColumns, { palette: pal, result }], RS4: [rounds.ResultStar, { palette: pal, result }],
   RS5: [rounds.ResultInningsBars, { palette: pal, result }], RS6: [rounds.ResultTicket, { palette: pal, result }],
   RS7: [glass.ResultGlass, { palette: pal, result }],
+  RS8: [highlights.ResultHighlights, { palette: pal, result }],
+  T13: [roundCover.RoundCover, lineupProps],
+  C5: [giant.GiantType, { ...lineupProps, announcement: { kind: 'DEBUT', headline: 'ZZANNZZ', subheadline: '', player: players[0] } }],
   TW1: [totw.TeamOfWeekGrid, { palette: pal, players, totw: { round: 'ROUND 1', date: 'SAT 1 JAN', comp: COMP, showPoints: true } }],
   TW2: [totw.TeamOfWeekBoard, { palette: pal, players, totw: { round: 'ROUND 1', date: 'SAT 1 JAN', comp: COMP, showPoints: true } }],
 }

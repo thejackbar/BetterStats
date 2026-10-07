@@ -254,6 +254,24 @@ await section('step 4', async () => {
 }
 })
 
+await section('round cover headline and competition', async () => {
+  const { ctx, page } = await openEditor({ template: 'T13' })
+  await tab(page, 'Content')
+  await page.getByPlaceholder(/Applecross 6th XI/).fill('FIRST XI ZZ')
+  await page.waitForTimeout(500)
+  const post = await readPost(page)
+  ck('Round Cover prints the headline', /FIRST XI ZZ/.test(post.text), post.text.slice(0, 120))
+  ck('...and says it does not print the competition', await seen(page.getByTestId('competition-unsupported')))
+  ck('...and does not call the headline unsupported', !(await seen(page.getByTestId('headline-unsupported'))))
+  await ctx.close()
+})
+await section('match day card competition note', async () => {
+  const { ctx, page } = await openEditor({})
+  await tab(page, 'Content')
+  ck('a layout that prints the competition makes no such note', !(await seen(page.getByTestId('competition-unsupported'))))
+  await ctx.close()
+})
+
 // ── 4. A player added by hand ────────────────────────────────────────────────
 const MATCH = [{ id: 'p5', name: 'Smith, Steven', photo_url: null, player_role: 'All Rounder', confidence: 0.9, reason: 'Short form of the same first name' }]
 async function fillManual(page, first, last, role, withPhoto) {

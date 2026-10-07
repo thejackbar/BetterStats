@@ -351,8 +351,10 @@ function readEventDraft() {
 // "A Grade"). Proved by `verification/probe_match_info_fields.mjs`, which renders
 // every layout with marker text. T4, T6 and T7 have no title to put it in, and
 // the round-ups, results and toss posts are not named by a side. Every layout
-// prints the Competition. A field the open layout ignores says so on screen.
-const HEADLINE_TEMPLATES = ['T1', 'T2', 'T3', 'T5', 'T8', 'T9', 'T10', 'T11', 'T12']
+// prints the Competition except Round Cover and Giant Type (a round number and a
+// figure are their headlines). A field the open layout ignores says so on screen.
+const HEADLINE_TEMPLATES = ['T1', 'T2', 'T3', 'T5', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13']
+const NO_COMPETITION_TEMPLATES = ['T13', 'C5']
 const ROLE_OPTIONS = IS_AFL ? ['', 'FB', 'HB', 'C', 'W', 'MID', 'RUCK', 'HF', 'FF', 'UTIL'] : ['BAT', 'BOWL', 'AR', 'WK']
 const ROLE_LONG = IS_AFL
   ? { FB: 'Full Back', HB: 'Half Back', C: 'Centre', W: 'Wing', MID: 'Midfield', RUCK: 'Ruck', HF: 'Half Forward', FF: 'Full Forward', UTIL: 'Utility' }
@@ -4580,7 +4582,14 @@ export default function AdminSocialPost() {
                       </p>
                     )}
                   </div>
-                  <Field label="Competition"><TextInput value={match.competition} onChange={v => patchMatch({ competition: v })} placeholder={IS_AFL ? 'PREMIER C' : 'PREMIER T20'} /></Field>
+                  <div>
+                    <Field label="Competition"><TextInput value={match.competition} onChange={v => patchMatch({ competition: v })} placeholder={IS_AFL ? 'PREMIER C' : 'PREMIER T20'} /></Field>
+                    {NO_COMPETITION_TEMPLATES.includes(templateId) && (
+                      <p className="mt-1.5 text-[11px] text-pb-faint leading-relaxed" data-testid="competition-unsupported">
+                        {tmpl.name} does not print the competition.
+                      </p>
+                    )}
+                  </div>
                   <Field label="Round"><TextInput value={match.round} onChange={v => patchMatch({ round: v })} placeholder="ROUND 7" /></Field>
                   <Field label="Venue"><TextInput value={match.venue} onChange={v => patchMatch({ venue: v })} placeholder="Heathcote Reserve" /></Field>
                   <Field label="Date"><TextInput value={match.date} onChange={v => patchMatch({ date: v })} placeholder="SAT 30 MAY" /></Field>
