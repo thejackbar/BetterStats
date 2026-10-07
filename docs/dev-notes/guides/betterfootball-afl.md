@@ -42,7 +42,7 @@
 20. Profile fields: date of birth (admin only, never public), jumper number (text, "07" kept), positions (public only with `public_show_role`), action photo. Draft mode uses a 4-digit PIN via shared `ClubPinGate` (423 from `/clubs/{slug}`). The trial-ended unpause queue was deliberately not ported.
 
 **BetterSelect on football**
-21. Football has its own selection module because cricket's pool, matrix and rules read cricket per-innings tables: `services/afl/select.py`, `select_rules.py`, `routers/afl/select.py` (`/afl-select/*`, `require_module("select")`, writes on `MANAGE_SELECTIONS`), five screens in `frontend/src/afl/pages/admin/select/`. Shared tables reused as is: `fixtures`, `teams`, `team_members`, `player_availability`, `player_availability_periods`.
+21. Football has its own selection module because cricket's pool, matrix and rules read cricket per-innings tables: `services/afl/select.py`, `select_rules.py`, `routers/afl/select.py` (`/afl-select/*`, `require_module("select")`, writes on `MANAGE_SELECTIONS`), five screens in `frontend/src/afl/pages/admin/select/`, run inside cricket's `BetterSelectLayout` at `/admin/betterselect/*` (rule 46). Shared tables reused as is: `fixtures`, `teams`, `team_members`, `player_availability`, `player_availability_periods`.
 22. The team sheet is its own table, `afl_lineup_slots` (slot is a field position, `INT` bench or `EMG` emergency, plus captain and vice). `fixture_lineups` is a batting list and is not touched. Six lines (B, HB, C, HF, F, Followers). A smaller side drops positions in `_DROP_ORDER` (`select.py`, wings first) so a 16-a-side grade plays without wings.
 23. Fixtures are the games the sync already holds (it writes every game on the draw, played or not). `sync_fixtures` (end of every sync, and Update from PlayHQ) upserts a `fixtures` row keyed on the GAME'S OWN ID. A sync never deletes a fixture.
 24. Form is OUR side only: `afl_player_game_lines` carries both teams, so every read joins `l.side = d.our_side`.
@@ -69,10 +69,12 @@
 43. Football profile honour board: `GET /afl-players/{id}` returns `achievements`, drawn by `frontend/src/afl/components/honours.jsx`. Repeated wins of one trophy are ONE entry with every year. Resolve `display_name` in Python, not a join (duplicate definitions fan rows out). Name fallback only for a row with NO `player_id`. `honours.css` (`.afl-honours`) widens the card to 196px.
 44. Navbar `AflPlayerSearch` is cricket's search pointed at the AFL roster and `/{slug}/players/{id}`, filtered locally, results show games and goals. Navbar breakpoint is `lg` (six links plus search do not fit at 768px).
 45. Every football club holds every football module. `services/afl/modules.py` owns `AFL_MODULE_TOGGLES` and `AFL_DEFAULT_MODULES`; `register_organisation` starts a club with all of them, and `grant_default_modules_once` (football lifespan) UNIONs them into existing clubs a single time, guarded by `platform_settings.settings.afl_default_modules_granted`. Never make the grant unconditional: the lifespan runs every boot and would revert a super admin's switch-off. Verified by `verify_afl_modules_access.py`.
+46. Football BetterSelect is cricket's module surface, not a section of the football sidebar. `AflSelectShell` renders `components/admin/BetterSelectLayout` (with `AFL_GROUPS` behind `IS_AFL`; cricket's list must stay untouched) around the five screens on cricket's `/admin/betterselect/*` URLs, and `/admin/select/*` redirects keeping the query. A screen's `PageHead` carries its actions into the header by portal and keeps its caption on the page. Do not add cricket-only tools (Players, Nets, Votes, Ladders) to `AFL_GROUPS`. The layout keeps header actions `shrink-0`, so the slot carries its own `max-w` to wrap at 390px.
 
 ## Traps and failure signatures
 - Early rounds of a team absent after a re-grade: `discoverTeams` only knows the current grade (rules 9, 10).
 - Best on ground or games belong to the opposition: a read lacks `l.side = d.our_side` (control run reads 4 games for 3).
+- A football select screen that overflows at 390px: header actions not wrapping (slot needs a `max-w`) or a grid card without `min-w-0` (rule 46).
 - A football club gets 402 on BetterSelect, Socials or BetterAdmin: its `module_overrides` lacks the key (rule 45).
 - Every football player "dormant" on the availability link: `dormant_player_ids` not reading `afl_player_game_lines`.
 - Seniors and Reserves results vanish on Import Results: guard omitted the team (rule 35).
@@ -85,7 +87,7 @@
 
 ## How to verify a change here
 Backend suites in `backend/verification/`, each on a real Postgres through the real AFL boot path and HTTP stack, each with a control run that must REPORT, not crash: `verify_afl_select.py` (control: our-side scoping and football dormancy removed, 4 fail) and the other `verify_afl_*.py` (manual_entries, competitions, seasons, settings, player_profile, admin_extras, social, shared_modules, fee_match_days, modules_access). Re-run all after touching shared code.
-Browser suites (Chromium, football production build) in `frontend/verification/`: `verify_afl_select_browser.mjs` (seeded by `seed_afl_select_browser.py`; control fails most checks on the previous build), `verify_afl_socials_browser.mjs` (fixture from `seed_afl_socials_browser.py`), and `verify_afl_betteradmin`, `admin_gaps`, `admin_edits` `_browser.mjs`.
+Browser suites (Chromium, football production build) in `frontend/verification/`: `verify_afl_select_browser.mjs` (seeded by `seed_afl_select_browser.py`; control fails most checks on the previous build) and `verify_afl_select_layout_browser.mjs` (the cricket chrome, same seed with every module held; control: 50 fail), `verify_afl_socials_browser.mjs` (fixture from `seed_afl_socials_browser.py`), and `verify_afl_betteradmin`, `admin_gaps`, `admin_edits` `_browser.mjs`.
 Gotchas: earlier browser suites assert on named data (a "Rivals" opponent, a club holding every BetterAdmin module), so on the Select seed they fail for the fixture, not the code. Build the schema through the real AFL lifespan, run twice.
 
 ## Operator commands and scripts

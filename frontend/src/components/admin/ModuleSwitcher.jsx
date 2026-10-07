@@ -20,10 +20,11 @@ import { IS_AFL } from '../../lib/sport'
 // mark as the house brand.
 const CORE = { key: 'stats', name: 'Dashboard', to: '/admin', title: 'Admin dashboard' }
 
-// The football app has two add-on modules and none of cricket's other tiles, so
+// The football app has three add-on modules and none of cricket's other tiles, so
 // its switcher is its own short list. The hub for each is the screen that app
 // mounts for it.
 const AFL_TILES = [
+  { key: 'select', name: 'BetterSelect', to: '/admin/betterselect', paths: ['/admin/betterselect'], modules: ['select'] },
   { key: 'socials', name: 'BetterSocials', to: '/admin/bettersocials', paths: ['/admin/bettersocials', '/admin/social-post'], modules: ['socials'] },
   { key: 'admin', name: 'BetterAdmin', to: '/admin/clubhouse', paths: ['/admin/clubhouse', '/admin/fees', '/admin/comms', '/admin/merch', '/admin/committee', '/admin/events', '/admin/assets', '/admin/club-diary'], modules: ['fees', 'comms', 'merch', 'crm'] },
 ]

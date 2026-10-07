@@ -9,6 +9,10 @@ import { moduleBrand } from '../../lib/moduleBrand'
 import ModuleLockup from '../ModuleLockup'
 import ModuleSwitcher from './ModuleSwitcher'
 import BookmarkButton from './BookmarkButton'
+import { IS_AFL, PLATFORM_NAME } from '../../lib/sport'
+
+// The football app has no bookmarks service, so the star renders nothing there.
+const Bookmark = IS_AFL ? () => null : BookmarkButton
 
 const BRAND = moduleBrand('select')
 
@@ -32,7 +36,7 @@ function loadClubBranding() {
 // listing its tools, and the sidebar flattens the same groups into headed
 // sections. One source of truth, three views. URLs of the tools themselves
 // are unchanged — only the surrounding chrome moved.
-export const GROUPS = [
+const CRICKET_GROUPS = [
   {
     key: 'squad',
     label: 'Your Squad',
@@ -71,6 +75,43 @@ export const GROUPS = [
     ],
   },
 ]
+
+// Football's BetterSelect: the same four-part shape, with football's own tools.
+// Its screens live in src/afl/pages/admin/select and run inside this chrome (the
+// AflSelectShell route), on the same /admin/betterselect URLs cricket uses. No
+// Players page (football's roster is the Players screen in the main admin), no
+// Nets, and Votes/Ladders are not part of it. Every football select route
+// gates on MANAGE_SELECTIONS, so every item carries that capability.
+const AFL_GROUPS = [
+  {
+    key: 'squad',
+    label: 'Your Squad',
+    desc: 'Your sides in order, and who is in each squad.',
+    items: [
+      { to: '/admin/betterselect/squads', label: 'Squads', icon: 'teams', cap: CAP.MANAGE_SELECTIONS, desc: 'Set up your sides and file your players into them.' },
+    ],
+  },
+  {
+    key: 'matchday',
+    label: 'Match Day',
+    desc: 'The weekly cycle: the draw, availability and picking the side.',
+    items: [
+      { to: '/admin/betterselect/fixtures', label: 'Fixtures', icon: 'fixtures', cap: CAP.MANAGE_SELECTIONS, desc: "PlayHQ's draw for your sides, plus any game you add." },
+      { to: '/admin/betterselect/availability', label: 'Availability', icon: 'availability', cap: CAP.MANAGE_SELECTIONS, desc: "Who can play on each match date." },
+      { to: '/admin/betterselect/selection', label: 'Selection', icon: 'selection', cap: CAP.MANAGE_SELECTIONS, desc: 'Name the side: the ground, the bench and the emergencies.' },
+    ],
+  },
+  {
+    key: 'setup',
+    label: 'Setup',
+    desc: 'The rules your competition runs on.',
+    items: [
+      { to: '/admin/betterselect/rules', label: 'Selection rules', icon: 'settings', cap: CAP.MANAGE_SELECTIONS, desc: "Your league's age limits, finals qualification and eligibility." },
+    ],
+  },
+]
+
+export const GROUPS = IS_AFL ? AFL_GROUPS : CRICKET_GROUPS
 
 // The sidebar flattens the groups: Overview, then a heading + its tools per group.
 export const NAV = [
@@ -136,7 +177,7 @@ export default function BetterSelectLayout({ children, title, caption, actions, 
           ? <img src={club.logo_url} alt="" className="w-8 h-8 rounded object-contain bg-pb-surface2 shrink-0" />
           : <span className="w-8 h-8 rounded bg-pb-accent/15 text-pb-accent font-display font-bold flex items-center justify-center shrink-0">{(club?.name || 'B')[0]}</span>}
         <div className="min-w-0">
-          <div className="font-display font-bold text-sm leading-tight truncate" title={club?.name || ''}>{club?.name || 'BetterCricket'}</div>
+          <div className="font-display font-bold text-sm leading-tight truncate" title={club?.name || ''}>{club?.name || PLATFORM_NAME}</div>
         </div>
       </div>
       {/* Module lockup — which Better module this surface is */}
@@ -203,7 +244,7 @@ export default function BetterSelectLayout({ children, title, caption, actions, 
           <ModuleSwitcher className="hidden md:flex min-w-0" />
           <div className="flex items-center gap-3 shrink-0">
             {actions}
-            <BookmarkButton pageLabel={bookmarkLabel} />
+            <Bookmark pageLabel={bookmarkLabel} />
             {/* Who you are signed in as, from xl up. It used to show from sm,
                 which is ~110px of the least useful thing in the bar at exactly
                 the widths where the bar has too much in it. Below xl the
