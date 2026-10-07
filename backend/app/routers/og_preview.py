@@ -171,8 +171,8 @@ MARKETING_PAGES: dict[str, tuple[str, str]] = {
     "/privacy": (
         "Privacy Policy — BetterCricket",
         "How BetterCricket, provided by BetterSports, collects, stores and "
-        "handles club, player and account information under the Australian "
-        "Privacy Act.",
+        "handles club, player and account information, and how to ask for "
+        "your details to be hidden or removed.",
     ),
 }
 
