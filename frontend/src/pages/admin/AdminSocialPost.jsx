@@ -38,7 +38,7 @@ import { ResultGlass, GLASS_DEFAULTS, GLASS_FOCUS, GLASS_POSITIONS } from '../..
 import { TeamOfWeekGrid, TeamOfWeekBoard, TOTW_MIN, TOTW_MAX, TOTW_DEFAULT } from '../../social/totw-templates'
 import { exportNodeToPng } from '../../social/exportImage'
 import { SocialBackground, SocialBackgroundDefs, SOCIAL_BACKGROUNDS, GRADIENT_ANGLES, DEFAULT_COLORS as BG_DEFAULT_COLORS } from '../../social/SocialBackgrounds'
-import { EVENT_TEMPLATES, EVENT_PRESETS, DEFAULT_EVENT, resolveMotif, eventPaletteFor } from '../../social/event-templates'
+import { EVENT_TEMPLATES, EVENT_PRESETS, DEFAULT_EVENT, resolveMotif, eventPaletteFor, prepareEventList, defaultEventList } from '../../social/event-templates'
 import EventPostEditor from '../../components/admin/EventPostEditor'
 import { BlankCanvas, newBlankItem, defaultBlankItems } from '../../social/blank-template'
 import { sponsorSlotFor } from '../../social/sponsorSlots'
@@ -115,7 +115,7 @@ const ALL_TEMPLATES = [
   { id: 'SC3', name: 'Dashboard',      component: SC3_Dashboard,      desc: 'Soft cards, app-style',           maxPlayers: 0, isScorecard: true },
   // Club-event / announcement posters — own "Events" tab, surface + photo flags
   // come from the event registry.
-  ...EVENT_TEMPLATES.map((t) => ({ id: t.id, name: t.name, component: t.component, desc: t.desc, maxPlayers: 0, kind: 'event', surface: t.surface, photo: t.photo })),
+  ...EVENT_TEMPLATES.map((t) => ({ id: t.id, name: t.name, component: t.component, desc: t.desc, maxPlayers: 0, kind: 'event', surface: t.surface, photo: t.photo, list: !!t.list })),
   // Freeform WYSIWYG canvas — add/move/resize your own text & images.
   { id: 'BL1', name: 'Blank Canvas', component: BlankCanvas, desc: 'Freeform — add your own text & images', maxPlayers: 0, kind: 'blank' },
 ]
@@ -155,6 +155,7 @@ const TAB_MAP = {
   SC1: 'scorecard', SC2: 'scorecard', SC3: 'scorecard',
   EV1: 'events', EV2: 'events', EV3: 'events', EV4: 'events', EV5: 'events', EV6: 'events',
   EV7: 'events', EV8: 'events', EV9: 'events', EV10: 'events', EV11: 'events',
+  EL1: 'events', EL2: 'events', EL3: 'events',
   BL1: 'blank',
 }
 // The football build (lib/sport.js) leaves out the three post types that are
@@ -1421,6 +1422,10 @@ export default function AdminSocialPost() {
   const [eventMotifKey, setEventMotifKey] = useState(() => eventDraft0.current?.motif || 'star')
   const [eventBg, setEventBg] = useState(() => eventDraft0.current?.bg || null)        // object URL, library URL or null
   const [eventBgOpacity, setEventBgOpacity] = useState(() => (typeof eventDraft0.current?.bgOpacity === 'number' ? eventDraft0.current.bgOpacity : 0.85))
+  // An icon the club searched for, kept as a data URI, used when the motif is 'custom'.
+  const [eventMotifIcon, setEventMotifIcon] = useState(() => eventDraft0.current?.motifIcon || '')
+  // The run of events the list layouts (Agenda, Calendar, Icon Cards) draw.
+  const [eventList, setEventList] = useState(() => (Array.isArray(eventDraft0.current?.list?.items) ? eventDraft0.current.list : defaultEventList()))
 
   // Two freeform layers of blocks: `canvas` is the standalone Blank Canvas
   // template; `overlay` is the "Custom Edit" layer that sits on top of any real
@@ -1522,13 +1527,13 @@ export default function AdminSocialPost() {
       try {
         let bg = eventBg
         if (typeof bg === 'string' && bg.startsWith('blob:')) bg = await persistBlobUrl(bg)
-        localStorage.setItem(EVENT_DRAFT_KEY, JSON.stringify({ facts: event, preset: eventPreset, motif: eventMotifKey, bg: bg || null, bgOpacity: eventBgOpacity }))
+        localStorage.setItem(EVENT_DRAFT_KEY, JSON.stringify({ facts: event, preset: eventPreset, motif: eventMotifKey, motifIcon: eventMotifIcon, list: eventList, bg: bg || null, bgOpacity: eventBgOpacity }))
       } catch { /* quota, private window or a failed upload: the draft is a convenience */ }
     }, 500)
     return () => clearTimeout(id)
   // persistBlobUrl is stable in effect (it only reads a ref and the API).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [event, eventPreset, eventMotifKey, eventBg, eventBgOpacity])
+  }, [event, eventPreset, eventMotifKey, eventMotifIcon, eventList, eventBg, eventBgOpacity])
 
   // Save the current post as a reusable Template (works on every tab). Captures
   // the base template + Style; on the Blank Canvas / Custom Edit it also
@@ -1554,7 +1559,7 @@ export default function AdminSocialPost() {
       if (activeTab === 'events') {
         const bg = await persistBlobUrl(eventBg)
         if (eventBg && !bg) lost += 1
-        eventContent = { facts: event, preset: eventPreset, motif: eventMotifKey, bg, bgOpacity: eventBgOpacity }
+        eventContent = { facts: event, preset: eventPreset, motif: eventMotifKey, motifIcon: eventMotifIcon, list: eventList, bg, bgOpacity: eventBgOpacity }
       }
       const tpl = {
         key, name: finalName, templateId, custom: usingOverlay,
@@ -1634,6 +1639,10 @@ export default function AdminSocialPost() {
       if (tpl.event.facts && typeof tpl.event.facts === 'object') setEvent({ ...DEFAULT_EVENT, ...tpl.event.facts })
       if (tpl.event.preset) setEventPreset(tpl.event.preset)
       if (tpl.event.motif) setEventMotifKey(tpl.event.motif)
+      setEventMotifIcon(tpl.event.motifIcon || '')
+      // A template saved before event lists existed has no list: keep the one
+      // the editor holds rather than blanking it.
+      if (tpl.event.list && Array.isArray(tpl.event.list.items)) setEventList(tpl.event.list)
       setEventBg(tpl.event.bg || null)
       if (typeof tpl.event.bgOpacity === 'number') setEventBgOpacity(tpl.event.bgOpacity)
     } else {
@@ -3024,10 +3033,12 @@ export default function AdminSocialPost() {
     extraProps.event = event
     extraProps.motif = resolveMotif({
       motifKey: eventMotifKey,
+      customIcon: eventMotifIcon,
       imageUrl: eventBg,
       opacity: eventBgOpacity,
       label: (EVENT_PRESETS.find((p) => p.key === eventPreset)?.photoLabel) || 'Add a photo',
     })
+    if (tmpl.list) extraProps.list = prepareEventList(eventList)
   }
 
   const fontStyle = {
@@ -3081,6 +3092,8 @@ export default function AdminSocialPost() {
     setEvent(DEFAULT_EVENT)
     setEventPreset('curry')
     setEventMotifKey('star')
+    setEventMotifIcon('')
+    setEventList(defaultEventList())
     try { localStorage.removeItem(EVENT_DRAFT_KEY) } catch { /* fine */ }
     if (eventBg && eventBg.startsWith('blob:')) URL.revokeObjectURL(eventBg)
     setEventBg(null)
@@ -3805,6 +3818,8 @@ export default function AdminSocialPost() {
       onAddBrandLockup={() => addBlock('brand')}
       sponsors={adminSponsors.map((s) => ({ name: s.name, url: sponsorLogoUrl(s) }))}
       onAddSponsor={(sp) => addBlock('image', { src: sp.url, srcName: sp.name, fit: 'contain' })}
+      onAddIcon={(ic) => addBlock('image', { src: ic.dataUri, srcName: ic.name, fit: 'contain', w: 260, h: 260 })}
+      accent={activePalette.accent} dark={darkMode}
       club={{ name: settings?.name, logo_url: team.logo }}
     />
   )
@@ -5672,6 +5687,10 @@ export default function AdminSocialPost() {
                   bgOpacity={eventBgOpacity} setBgOpacity={setEventBgOpacity}
                   savedEvents={savedTemplates.filter((t) => t.event?.facts && TEMPLATES.find((x) => x.id === t.templateId)?.kind === 'event')
                     .map((t) => ({ key: t.key, name: t.name, title: t.event.facts.title || '', layout: layoutLabel(t) }))}
+                  motifIcon={eventMotifIcon} setMotifIcon={setEventMotifIcon}
+                  eventList={eventList} setEventList={setEventList}
+                  uploadPhoto={async (file) => (await api.uploadSocialMedia(file))?.url || null}
+                  accent={activePalette.accent} dark={darkMode}
                   activeSavedKey={activeTemplate?.key}
                   onPickSaved={(key) => applyTemplate(savedTemplates.find((t) => t.key === key))}
                 />

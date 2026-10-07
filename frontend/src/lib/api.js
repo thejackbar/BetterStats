@@ -216,6 +216,19 @@ export const api = {
   // same table, same upload endpoint, just tagged differently on the way in.
   listSocialMedia: (kind) => request(`/admin/social/media${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`)
     .then(rows => (Array.isArray(rows) ? rows.map(rebaseAsset) : rows)),
+  // Online icon library, searched and fetched through our own server (open
+  // licences only). The data URI is what a post stores, so it never depends on
+  // the library being up again and always exports.
+  searchIcons: (q) => request(`/admin/social/icons/search?q=${encodeURIComponent(q)}&limit=48`),
+  iconUrl: (id, color) => `${BASE}/admin/social/icons/svg?id=${encodeURIComponent(id)}${color ? `&color=${encodeURIComponent(color)}` : ''}`,
+  iconDataUri: async (id, color) => {
+    const r = await fetch(`${BASE}/admin/social/icons/svg?id=${encodeURIComponent(id)}${color ? `&color=${encodeURIComponent(color)}` : ''}`, { credentials: 'include' })
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}))
+      throw new Error(typeof e.detail === 'string' ? e.detail : `HTTP ${r.status}`)
+    }
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(await r.text())}`
+  },
   uploadSocialMedia: (file, kind) => {
     const form = new FormData()
     form.append('file', file)
