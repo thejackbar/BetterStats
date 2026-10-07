@@ -20,6 +20,7 @@
 //  7. Icon search: results come back, picking one stores its SVG on the post (an
 //     event, and a block on the blank canvas), and a failed search says so.
 import { existsSync, mkdirSync } from 'node:fs'
+import { deflateSync } from 'node:zlib'
 import { chromium } from 'playwright'
 
 const BASE = process.argv[2] || 'http://127.0.0.1:5197'
@@ -41,6 +42,15 @@ const PLAYERS = [
   person('p4', 'North, Ash', 'All Rounder', ['ALL']),
   person('p5', 'Smith, Steven', 'All Rounder', ['ALL']),
 ]
+// A real, decodable PNG (the photo editor has to load it), w by h of one colour.
+function makePng(w, h, [r, g, b]) {
+  const crcT = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0 })
+  const crc = (buf) => { let c = 0xffffffff; for (const x of buf) c = crcT[(c ^ x) & 255] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0 }
+  const chunk = (type, data) => { const t = Buffer.from(type); const len = Buffer.alloc(4); len.writeUInt32BE(data.length); const c = Buffer.alloc(4); c.writeUInt32BE(crc(Buffer.concat([t, data]))); return Buffer.concat([len, t, data, c]) }
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2
+  const row = Buffer.concat([Buffer.from([0]), Buffer.from(Array.from({ length: w }, () => [r, g, b]).flat())])
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(Buffer.concat(Array.from({ length: h }, () => row)))), chunk('IEND', Buffer.alloc(0))])
+}
 const SVG = (c) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="${c}"/></svg>`
 const PIC = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><rect width="100" height="100" fill="#556b8d"/></svg>`
 
@@ -52,7 +62,7 @@ async function openEditor({ type = 'lineup', template = 'T12', viewport = { widt
   const ctx = keepStorage ? await browser.newContext({ viewport, storageState: keepStorage }) : await browser.newContext({ viewport })
   const page = await ctx.newPage()
   page.setDefaultTimeout(6000)
-  const log = { errors: [], created: [], similarAsked: [], photos: [], puts: [], uploads: [], iconSearches: [] }
+  const log = { errors: [], created: [], similarAsked: [], photos: [], photoBodies: [], puts: [], uploads: [], iconSearches: [] }
   page.on('pageerror', (e) => log.errors.push(String(e)))
   page.on('console', (m) => { if (m.type() === 'error' && !/favicon|ERR_|404|502|Failed to load resource/.test(m.text())) log.errors.push(m.text()) })
   const json = (body, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) })
@@ -89,7 +99,7 @@ async function openEditor({ type = 'lineup', template = 'T12', viewport = { widt
     if (/\/admin\/social\/debuts/.test(url)) return route.fulfill(json({ debuts: [], known: [], before: '2026-10-10' }))
     if (/\/club-admin\/settings/.test(url)) return route.fulfill(json(settings))
     if (/\/club-admin\/players\/similar/.test(url)) { log.similarAsked.push(JSON.parse(req.postData() || '{}').name); return route.fulfill(json({ candidates: similar })) }
-    if (/\/club-admin\/players\/([^/]+)\/photo/.test(url)) { log.photos.push(url.match(/players\/([^/]+)\/photo/)[1]); return route.fulfill(json({ photo_url: `/api/images/players/${url.match(/players\/([^/]+)\/photo/)[1]}/photo?v=1` })) }
+    if (/\/club-admin\/players\/([^/]+)\/photo/.test(url)) { log.photos.push(url.match(/players\/([^/]+)\/photo/)[1]); log.photoBodies.push(req.postDataBuffer()?.toString('latin1') || ''); return route.fulfill(json({ photo_url: `/api/images/players/${url.match(/players\/([^/]+)\/photo/)[1]}/photo?v=1` })) }
     if (/\/club-admin\/players/.test(url)) {
       if (m === 'POST') {
         const body = JSON.parse(req.postData() || '{}'); log.created.push(body)
@@ -280,13 +290,25 @@ async function fillManual(page, first, last, role, withPhoto) {
   await page.getByTestId('manual-first').fill(first)
   await page.getByTestId('manual-last').fill(last)
   if (role) await page.getByTestId('manual-role').selectOption(role)
-  if (withPhoto) await page.getByTestId('manual-photo').setInputFiles({ name: 'face.png', mimeType: 'image/png', buffer: Buffer.from('\x89PNG\r\n\x1a\nfake') })
+  if (withPhoto) {
+    await page.getByTestId('manual-photo').setInputFiles({ name: 'face.jpg', mimeType: 'image/png', buffer: makePng(64, 64, [120, 90, 60]) })
+    // The photo goes through the editor first; keep it as it is.
+    await page.getByRole('button', { name: 'Apply', exact: true }).click()
+    await page.waitForTimeout(600)
+  }
 }
 await section('step 5', async () => {
 {
   const { ctx, page, log } = await openEditor({ similar: MATCH })
   ck('the add-by-hand button is offered', await seen(page.getByTestId('add-manual-player')) || (await tab(page, 'Content'), await seen(page.getByTestId('add-manual-player'))))
   await fillManual(page, 'Steve', 'Smith', 'All Rounder', true)
+  ck('choosing a photo has already put the cut-out editor through its paces', await seen(page.getByTestId('manual-photo-edit')))
+  await press(page.getByTestId('manual-photo-edit'))
+  await page.waitForTimeout(400)
+  ck('the editor offers the AI cut-out for a photo', await seen(page.getByRole('button', { name: /Remove background \(photo\)/ })))
+  await page.getByRole('button', { name: 'Apply', exact: true }).click()
+  await page.waitForTimeout(600)
+  ck('...and nothing is uploaded until the player is added', log.photos.length === 0, JSON.stringify(log.photos))
   await press(page.getByTestId('manual-add'))
   await page.waitForTimeout(500)
   ck('the club is asked about the typed name', log.similarAsked.join('|') === 'Steve Smith', JSON.stringify(log.similarAsked))
@@ -295,6 +317,7 @@ await section('step 5', async () => {
   await press(page.getByTestId('add-as-new'))
   await page.waitForTimeout(700)
   ck('"add as new" makes exactly one player', log.created.length === 1, JSON.stringify(log.created))
+  ck('the photo that is saved is the edited PNG', log.photoBodies.length === 1 && /filename="player-photo\.png"/.test(log.photoBodies[0]) && /image\/png/.test(log.photoBodies[0]), (log.photoBodies[0] || '').slice(0, 160).replace(/[^\x20-\x7e]/g, '.'))
   ck('...with the name split and the role', log.created[0]?.first_name === 'Steve' && log.created[0]?.last_name === 'Smith' && log.created[0]?.player_role === 'All Rounder', JSON.stringify(log.created[0]))
   ck('...and the photo goes to the new player', log.photos.join(',') === 'new1', JSON.stringify(log.photos))
   const vals = await page.locator('select').filter({ has: page.locator('option[value="AR"]') }).evaluateAll((els) => els.map((e) => e.value))
