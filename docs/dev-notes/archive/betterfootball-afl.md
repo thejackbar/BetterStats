@@ -569,8 +569,8 @@ Admin gaps and push everything to main".
 
 <!-- END original CLAUDE.md L9975-10040 -->
 
-<!-- v9.107.1: every football club holds every football module -->
-## Every football club holds BetterSelect, BetterSocials and BetterAdmin (v9.107.1)
+<!-- v9.108.1: every football club holds every football module -->
+## Every football club holds BetterSelect, BetterSocials and BetterAdmin (v9.108.1)
 
 BetterSelect was already ported to football (v9.100.0: `routers/afl/select.py`, five screens, nav gated on `hasModule('select')`). What was missing was entitlement: football has no billing or module marketplace, so a club held a module only if a super admin ticked it in Better HQ, and `register_organisation` created every new club with `module_overrides = []`. A club nobody had ticked got a 402 on `/afl-select/*`, `/admin/social/*` and the BetterAdmin routers.
 
