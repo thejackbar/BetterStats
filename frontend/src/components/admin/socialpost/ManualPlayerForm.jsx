@@ -10,6 +10,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../../../lib/api'
 import { ROLE_OPTS } from '../../../lib/playerAttributes'
+import { validateImageFile } from '../../../lib/validation'
+import ImageEditorModal from '../../ImageEditorModal'
 
 const input = 'w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-sm text-pb-text placeholder:text-pb-faintest'
 const label = 'block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1'
@@ -18,7 +20,8 @@ export default function ManualPlayerForm({ roster, onAdd, onClose }) {
   const [first, setFirst] = useState('')
   const [last, setLast] = useState('')
   const [role, setRole] = useState('')
-  const [photo, setPhoto] = useState(null)       // File
+  const [photo, setPhoto] = useState(null)       // File, after the editor (crop, cut-out)
+  const [editing, setEditing] = useState(null)     // File | blob URL open in the editor
   const [preview, setPreview] = useState(null)   // object URL
   const [step, setStep] = useState('form')       // form | similar
   const [similar, setSimilar] = useState([])
@@ -34,10 +37,17 @@ export default function ManualPlayerForm({ roster, onAdd, onClose }) {
     const f = e.target.files?.[0]
     e.target.value = ''
     if (!f) return
-    if (!/^image\//.test(f.type)) { setError('Choose an image file (jpg, png, webp or gif).'); return }
+    const bad = validateImageFile(f)
+    if (bad) { setError(bad); return }
     setError('')
-    setPhoto(f)
-    setPreview((old) => { if (old) URL.revokeObjectURL(old); return URL.createObjectURL(f) })
+    // Every photo goes through the same editor as the player profile (crop, and
+    // the AI cut-out for a clean headshot) before it is kept.
+    setEditing(f)
+  }
+  const applyEdited = (file) => {
+    setEditing(null)
+    setPhoto(file)
+    setPreview((old) => { if (old) URL.revokeObjectURL(old); return URL.createObjectURL(file) })
   }
 
   // The photo is best effort: the player exists either way, so a failed upload
@@ -148,6 +158,7 @@ export default function ManualPlayerForm({ roster, onAdd, onClose }) {
               className="px-2.5 py-1.5 rounded border pb-hairline2 text-xs font-mono text-pb-dim hover:text-pb-text hover:border-pb-accent">
               {photo ? 'Change photo' : 'Upload photo'}
             </button>
+            {photo && <button onClick={() => setEditing(photo)} data-testid="manual-photo-edit" className="text-xs font-mono text-pb-dim hover:text-pb-text">Edit / cut out</button>}
             {photo && <button onClick={() => { setPhoto(null); setPreview(null) }} className="text-xs font-mono text-pb-faint hover:text-pb-text">Remove</button>}
             <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={pickFile} data-testid="manual-photo" />
           </div>
@@ -159,11 +170,21 @@ export default function ManualPlayerForm({ roster, onAdd, onClose }) {
             </button>
           </div>
           <p className="text-[11px] text-pb-faintest leading-relaxed mt-2">
-            Saved to the club's players, so they are there next time and in stats. We check for the same person first.
+            Saved to the club's players, photo included, so they are there next time and in stats. You can crop it and cut the background out before it is saved. We check for the same person first.
           </p>
         </>
       )}
       {error && <p className="text-[11px] text-red-400 mt-2" role="alert">{error}</p>}
+      <ImageEditorModal
+        open={!!editing}
+        source={editing}
+        title="Edit Player Photo"
+        aspect={1}
+        outputType="image/png"
+        outputName="player-photo.png"
+        onCancel={() => setEditing(null)}
+        onApply={applyEdited}
+      />
     </div>
   )
 }

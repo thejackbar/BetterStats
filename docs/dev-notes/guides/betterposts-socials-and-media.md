@@ -119,6 +119,7 @@
 72. The event poster in progress lives in `bs_social_event_draft` and in saved templates as `event` (`facts`, `preset`, `motif`, `motifIcon`, `list`, `bg`, `bgOpacity`). A new event field joins all three (state initialiser, draft writer, template save and apply) or it is lost on a reload. Absent means legacy.
 73. Event list layouts (`EL1` to `EL3`, `social/event-list-templates.jsx`) are given prepared items (`prepareEventList`), never raw ones. Their body is sized from `headingH`, not a guessed constant. At most `MAX_LIST_ITEMS` (8).
 74. Icon search goes through our server only (`services/icon_library.py`): licence-safe sets, cached, paced, SVG refused if it carries script or an external reference. The post stores a data URI. A new outbound call to Iconify, or a new set, goes through `SETS` and the sanitiser. Sets with an attribution condition (CC BY and similar) are not added.
+75. A player photo chosen anywhere in BetterPosts goes through `ImageEditorModal` (crop, cut-out) before it is uploaded to the profile, and an existing player's photo is only filled when empty, never replaced.
 
 ## Traps and failure signatures
 - Geometry checks pass but a layout reads wrong (black bands, clumped story names). Judge from real screenshots.
