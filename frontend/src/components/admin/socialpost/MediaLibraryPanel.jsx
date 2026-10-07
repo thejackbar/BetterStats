@@ -15,11 +15,15 @@
 //   sponsors          [{ name, url }] from the brand kit
 //   onAddSponsor(sponsor)
 //   club              { name, logo_url } from api.adminGetSettings()
+//   onAddIcon(icon)   puts a searched icon on the post as an image block
+//   accent, dark      the club accent and surface, for line-icon colour
 import { useState } from 'react'
+import IconSearch from './IconSearch'
 
 const TABS = [
   { key: 'uploads', label: 'Uploads' },
   { key: 'players', label: 'Players' },
+  { key: 'icons', label: 'Icons' },
   { key: 'club', label: 'Club' },
 ]
 
@@ -29,6 +33,7 @@ export default function MediaLibraryPanel({
   assets = [], onUpload, onUseAsset, onEditAsset, onAddEmptyFrame,
   players = [], onAddPlayerPhoto,
   onAddBrandLockup, sponsors = [], onAddSponsor, club,
+  onAddIcon, accent, dark,
 }) {
   const [tab, setTab] = useState('uploads')
   const [dragOver, setDragOver] = useState(false)
@@ -116,6 +121,10 @@ export default function MediaLibraryPanel({
             })}
           </div>
         </div>
+      )}
+
+      {tab === 'icons' && (
+        <IconSearch onPick={onAddIcon} accent={accent} dark={dark} />
       )}
 
       {tab === 'club' && (

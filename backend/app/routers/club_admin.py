@@ -345,6 +345,19 @@ class PlayerCreate(BaseModel):
     name: Optional[str] = None
     playhq_id: Optional[str] = None
     display_name_override: Optional[str] = None
+    # The profile role ("All Rounder"), so a player typed into a lineup post
+    # carries their role and icon with them. Optional: every other creator
+    # (scorecard reader, imports) leaves it empty as before.
+    player_role: Optional[str] = None
+
+
+# The profile roles (frontend lib/playerAttributes.ROLE_OPTS) and the skill
+# codes the selection filters key on, derived from the role as the profile
+# editor derives them (ROLE_TO_SKILLS).
+_PLAYER_ROLE_SKILLS = {
+    "Batter": ["BAT"], "Bowler": ["BWL"], "All Rounder": ["ALL"],
+    "Wicketkeeper": ["WKT"], "Wicketkeeper-Batter": ["WKT", "BAT"],
+}
 
 
 def _split_written_name(written: str) -> tuple[str, str]:
@@ -397,12 +410,18 @@ async def create_player(
         if conflict.scalar_one_or_none():
             raise HTTPException(status_code=409, detail="Another player already has this PlayHQ ID")
 
+    role = (data.player_role or "").strip() or None
+    if role and role not in _PLAYER_ROLE_SKILLS:
+        raise HTTPException(status_code=422, detail="Unknown player role")
+
     player = Player(
         id=uuid.uuid4(),
         name=name,
         organisation_id=club.id,
         playhq_id=phq_id,
         display_name_override=override,
+        player_role=role,
+        skill_positions=list(_PLAYER_ROLE_SKILLS[role]) if role else [],
     )
     db.add(player)
     await db.commit()
@@ -412,7 +431,31 @@ async def create_player(
         "display_name": player.display_name,
         "display_name_override": player.display_name_override,
         "playhq_id": player.playhq_id,
+        "player_role": player.player_role,
+        "skill_positions": player.skill_positions or [],
+        "photo_url": player.photo_url,
+        "hero_photo_url": player.hero_photo_url,
+        "is_player": player.is_player,
     }
+
+
+class PlayerSimilarQuery(BaseModel):
+    name: str
+
+
+@router.post("/players/similar")
+async def similar_players(
+    data: PlayerSimilarQuery,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Players this club already holds who might be the person just typed, best
+    first. Read-only: the caller offers them and the admin decides, so a hand-typed
+    player is not minted twice. Registered before ``/players/{player_id}`` routes
+    only matters for GET; this is a POST on a fixed path."""
+    from app.services.similar_players import find_similar
+    return {"candidates": await find_similar(db, club.id, data.name)}
 
 
 # ---------------------------------------------------------------------------

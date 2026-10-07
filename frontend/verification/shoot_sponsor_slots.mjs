@@ -33,7 +33,7 @@ const ALL = [
   'FX1', 'FX2', 'FX3', 'FX4', 'FX5', 'FX6',
   'RR1', 'RR2', 'RR3', 'RR4', 'RR5', 'RR6', 'RR7',
   'SC1', 'SC2', 'SC3',
-  'EV1', 'EV2', 'EV3', 'EV4', 'EV5', 'EV6', 'EV7', 'EV8', 'EV9', 'EV10', 'EV11',
+  'EV1', 'EV2', 'EV3', 'EV4', 'EV5', 'EV6', 'EV7', 'EV8', 'EV9', 'EV10', 'EV11', 'EL1', 'EL2', 'EL3',
   'BL1',
 ]
 const IDS = ONLY.length ? ONLY : ALL

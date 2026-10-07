@@ -179,6 +179,14 @@ function outcomeBits(r) {
   return { tied, won, winnerName, line }
 }
 
+// Round, date and the competition when the club has typed one. The editor fills an
+// empty competition with the word COMPETITION, which is left out here rather than
+// printed on a header that never carried it.
+function kickParts(meta) {
+  const comp = meta.comp && meta.comp !== 'COMPETITION' ? meta.comp : ''
+  return [meta.round, meta.date, comp].filter(Boolean).join(' · ')
+}
+
 // Header meta strip — grade (RS1 feedback) takes the competition slot when set
 // (for a single match the grade is the headline label), then round · date [· venue].
 function headLine(r, withVenue = false) {
@@ -471,7 +479,7 @@ export function FixtureHeadline({ palette: pal, width = 1080, height = 1080, met
       {topBar({ pal, width, height, team: { logo: club.logo, mono: club.mono }, rule: false, left: (
         <>
           <Slab bg={pal.accent} fg={pal.primary} size={26} style={{ padding: '8px 16px' }}>FIXTURES</Slab>
-          <Kicker color={pal.ink} size={13} style={{ marginTop: 12, opacity: 0.72 }}>{`// ${meta.round} · ${meta.date}`}</Kicker>
+          <Kicker color={pal.ink} size={13} style={{ marginTop: 12, opacity: 0.72 }}>{`// ${kickParts(meta)}`}</Kicker>
         </>
       ) })}
       <div style={{ position: 'absolute', left: 56, right: 56, top: headB, height: panelH, boxSizing: 'border-box', background: pal.secondary, borderTop: `3px solid ${pal.accent}`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
@@ -1008,7 +1016,7 @@ export function ResultsList({ palette: pal, width = 1080, height = 1080, meta = 
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '44px 56px 28px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: `3px solid ${pal.accent}` }}>
         <div>
           <Slab bg={pal.accent} fg={pal.primary} size={30} style={{ padding: '9px 18px' }}>RESULTS</Slab>
-          <Kicker color={pal.ink} size={14} style={{ marginTop: 14, opacity: 0.72 }}>{`// ${meta.round} · ${meta.date}`}</Kicker>
+          <Kicker color={pal.ink} size={14} style={{ marginTop: 14, opacity: 0.72 }}>{`// ${kickParts(meta)}`}</Kicker>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <div style={{ textAlign: 'right' }}>
@@ -1080,7 +1088,7 @@ export function ResultsListLeaders({ palette: pal, width = 1080, height = 1080, 
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '40px 56px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: `3px solid ${pal.accent}` }}>
         <div>
           <Slab bg={pal.accent} fg={pal.primary} size={28} style={{ padding: '8px 16px' }}>RESULTS</Slab>
-          <Kicker color={pal.ink} size={13} style={{ marginTop: 12, opacity: 0.72 }}>{`// ${meta.round} · ${meta.date}`}</Kicker>
+          <Kicker color={pal.ink} size={13} style={{ marginTop: 12, opacity: 0.72 }}>{`// ${kickParts(meta)}`}</Kicker>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <div style={{ textAlign: 'right' }}>
@@ -1163,7 +1171,7 @@ export function ResultsScoreboard({ palette: pal, width = 1080, height = 1080, m
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '44px 56px 26px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <div style={{ fontFamily: DISPLAY, fontSize: b(76), letterSpacing: -1, lineHeight: 0.9 }}>RESULTS</div>
-          <Kicker color={pal.accent} size={15} style={{ marginTop: 8 }}>{`// ${meta.round} · ${meta.date}`}</Kicker>
+          <Kicker color={pal.accent} size={15} style={{ marginTop: 8 }}>{`// ${kickParts(meta)}`}</Kicker>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <div style={{ textAlign: 'right' }}>
@@ -1219,7 +1227,7 @@ export function ResultsRecord({ palette: pal, width = 1080, height = 1080, meta 
       <div style={{ position: 'absolute', right: -50, top: slot.y + slot.h + 8, fontFamily: DISPLAY, fontSize: share(height, 620), lineHeight: 0.74, color: pal.ink, opacity: 0.05, letterSpacing: -18, userSelect: 'none' }}>{rec.w}–{rec.l}</div>
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '48px 56px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
-          <Kicker color={pal.accent} size={15}>{`// ${meta.round} · ${meta.date}`}</Kicker>
+          <Kicker color={pal.accent} size={15}>{`// ${kickParts(meta)}`}</Kicker>
           <div style={{ fontFamily: DISPLAY, fontSize: b(110), letterSpacing: -2, lineHeight: 0.85, marginTop: 6 }}>WEEKEND<br />WRAP</div>
         </div>
         {/* The club is a crest here: its name is already in the record strip, and the room it took goes to the sponsor slot below the title. */}
@@ -1279,7 +1287,7 @@ export function ResultsHeadline({ palette: pal, width = 1080, height = 1080, met
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '44px 56px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <Slab bg={pal.accent} fg={pal.primary} size={26} style={{ padding: '8px 16px' }}>RESULTS</Slab>
-          <Kicker color={pal.ink} size={13} style={{ marginTop: 12, opacity: 0.72 }}>{`// ${meta.round} · ${meta.date}`}</Kicker>
+          <Kicker color={pal.ink} size={13} style={{ marginTop: 12, opacity: 0.72 }}>{`// ${kickParts(meta)}`}</Kicker>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <div style={{ textAlign: 'right' }}>
@@ -1343,7 +1351,7 @@ export function ResultsBoard({ palette: pal, width = 1080, height = 1080, meta =
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '44px 56px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: `3px solid ${pal.accent}` }}>
         <div>
           <Slab bg={pal.accent} fg={pal.primary} size={30} style={{ padding: '9px 18px' }}>RESULTS</Slab>
-          <Kicker color={pal.ink} size={14} style={{ marginTop: 14, opacity: 0.72 }}>{`// ${meta.round} · ${meta.date}`}</Kicker>
+          <Kicker color={pal.ink} size={14} style={{ marginTop: 14, opacity: 0.72 }}>{`// ${kickParts(meta)}`}</Kicker>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <div style={{ textAlign: 'right' }}>
@@ -1419,7 +1427,7 @@ export function ResultsSplit({ palette: pal, width = 1080, height = 1080, meta =
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '44px 56px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: `3px solid ${pal.accent}` }}>
         <div>
           <Slab bg={pal.accent} fg={pal.primary} size={30} style={{ padding: '9px 18px' }}>RESULTS</Slab>
-          <Kicker color={pal.ink} size={14} style={{ marginTop: 14, opacity: 0.72 }}>{`// ${meta.round} · ${meta.date} · HOW THE GRADES WENT`}</Kicker>
+          <Kicker color={pal.ink} size={14} style={{ marginTop: 14, opacity: 0.72 }}>{`// ${kickParts(meta)} · HOW THE GRADES WENT`}</Kicker>
         </div>
         <BrandLockup team={{ name: club.full || club.name, fullName: club.full, monogram: club.mono, logo: club.logo }} palette={pal} size={110} layout="row" align="right" nameSize={34} />
       </div>

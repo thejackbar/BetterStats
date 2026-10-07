@@ -41,7 +41,7 @@ import { GiantType } from '../../social/giant-type-template'
 import { TeamOfWeekGrid, TeamOfWeekBoard, TOTW_MIN, TOTW_MAX, TOTW_DEFAULT } from '../../social/totw-templates'
 import { exportNodeToPng } from '../../social/exportImage'
 import { SocialBackground, SocialBackgroundDefs, SOCIAL_BACKGROUNDS, GRADIENT_ANGLES, DEFAULT_COLORS as BG_DEFAULT_COLORS } from '../../social/SocialBackgrounds'
-import { EVENT_TEMPLATES, EVENT_PRESETS, DEFAULT_EVENT, resolveMotif, eventPaletteFor } from '../../social/event-templates'
+import { EVENT_TEMPLATES, EVENT_PRESETS, DEFAULT_EVENT, resolveMotif, eventPaletteFor, prepareEventList, defaultEventList } from '../../social/event-templates'
 import EventPostEditor from '../../components/admin/EventPostEditor'
 import { BlankCanvas, newBlankItem, defaultBlankItems } from '../../social/blank-template'
 import { sponsorSlotFor } from '../../social/sponsorSlots'
@@ -53,10 +53,12 @@ import { usePages } from '../../social/usePages'
 import PageStrip from '../../components/admin/socialpost/PageStrip'
 import PostPreviewModal from '../../components/admin/socialpost/PostPreviewModal'
 import ClubGamesPicker from '../../components/admin/socialpost/ClubGamesPicker'
+import ManualPlayerForm from '../../components/admin/socialpost/ManualPlayerForm'
 import { templateToBlocks, CUSTOM_EDITABLE } from '../../social/templateToBlocks'
 import { POST_SIZES, DEFAULT_POST_SIZE, postSizeOf, PostFrame } from '../../social/postSizes'
 import { resolveClubFonts, fontWeightFor, buildFontFaceCss } from '../../lib/theme'
 import { IS_AFL } from '../../lib/sport'
+import { socialRole } from '../../lib/playerAttributes'
 
 // Stable initial value for the (empty) Custom Edit overlay layer.
 const EMPTY_LAYER = () => []
@@ -119,7 +121,7 @@ const ALL_TEMPLATES = [
   { id: 'SC3', name: 'Dashboard',      component: SC3_Dashboard,      desc: 'Soft cards, app-style',           maxPlayers: 0, isScorecard: true },
   // Club-event / announcement posters — own "Events" tab, surface + photo flags
   // come from the event registry.
-  ...EVENT_TEMPLATES.map((t) => ({ id: t.id, name: t.name, component: t.component, desc: t.desc, maxPlayers: 0, kind: 'event', surface: t.surface, photo: t.photo })),
+  ...EVENT_TEMPLATES.map((t) => ({ id: t.id, name: t.name, component: t.component, desc: t.desc, maxPlayers: 0, kind: 'event', surface: t.surface, photo: t.photo, list: !!t.list })),
   // Freeform WYSIWYG canvas — add/move/resize your own text & images.
   { id: 'BL1', name: 'Blank Canvas', component: BlankCanvas, desc: 'Freeform — add your own text & images', maxPlayers: 0, kind: 'blank' },
 ]
@@ -159,6 +161,7 @@ const TAB_MAP = {
   SC1: 'scorecard', SC2: 'scorecard', SC3: 'scorecard',
   EV1: 'events', EV2: 'events', EV3: 'events', EV4: 'events', EV5: 'events', EV6: 'events',
   EV7: 'events', EV8: 'events', EV9: 'events', EV10: 'events', EV11: 'events',
+  EL1: 'events', EL2: 'events', EL3: 'events',
   BL1: 'blank',
 }
 // The football build (lib/sport.js) leaves out the three post types that are
@@ -332,6 +335,26 @@ function deriveShort(name) {
 }
 
 // A football side is named by position, not as batters and bowlers.
+// The event poster being worked on (its wording, motif and photo) is kept in this
+// browser as it is typed, so leaving the page and coming back finds the Halloween
+// post where it was left instead of the Curry Night the editor starts with. Only
+// the wording is the post; the layout, palette and font persist on their own.
+const EVENT_DRAFT_KEY = 'bs_social_event_draft'
+function readEventDraft() {
+  try {
+    const d = JSON.parse(localStorage.getItem(EVENT_DRAFT_KEY) || 'null')
+    return d && typeof d === 'object' && d.facts && typeof d.facts === 'object' ? d : null
+  } catch { return null }
+}
+
+// The layouts that print the Headline typed in Match Info (the side: "1st XI",
+// "A Grade"). Proved by `verification/probe_match_info_fields.mjs`, which renders
+// every layout with marker text. T4, T6 and T7 have no title to put it in, and
+// the round-ups, results and toss posts are not named by a side. Every layout
+// prints the Competition except Round Cover and Giant Type (a round number and a
+// figure are their headlines). A field the open layout ignores says so on screen.
+const HEADLINE_TEMPLATES = ['T1', 'T2', 'T3', 'T5', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13']
+const NO_COMPETITION_TEMPLATES = ['T13', 'C5']
 const ROLE_OPTIONS = IS_AFL ? ['', 'FB', 'HB', 'C', 'W', 'MID', 'RUCK', 'HF', 'FF', 'UTIL'] : ['BAT', 'BOWL', 'AR', 'WK']
 const ROLE_LONG = IS_AFL
   ? { FB: 'Full Back', HB: 'Half Back', C: 'Centre', W: 'Wing', MID: 'Midfield', RUCK: 'Ruck', HF: 'Half Forward', FF: 'Full Forward', UTIL: 'Utility' }
@@ -507,36 +530,45 @@ function DesignSwatch({ design, selected, onClick }) {
 
 function SelectedPlayerRow({ sp, idx, onUpdate, onRemove, onMoveUp, onMoveDown, isFirst, isLast }) {
   const { player } = sp
+  // Two lines so the tag buttons stay inside the panel: the name and remove
+  // button on top, the position and C / VC / WK / DEBUT tags below, wrapping
+  // rather than running out over the design.
   return (
-    <div className="flex items-center gap-2 p-2 rounded bg-pb-surface border pb-hairline">
-      <div className="flex flex-col gap-0.5 mr-1">
+    <div data-testid="selected-player-row" className="flex items-start gap-2 p-2 rounded bg-pb-surface border pb-hairline min-w-0">
+      <div className="flex flex-col gap-0.5 mt-0.5">
         <button onClick={onMoveUp} disabled={isFirst} className="text-pb-faintest hover:text-pb-text disabled:opacity-20 text-xs leading-none">▲</button>
         <button onClick={onMoveDown} disabled={isLast} className="text-pb-faintest hover:text-pb-text disabled:opacity-20 text-xs leading-none">▼</button>
       </div>
-      <span className="font-mono text-[10px] text-pb-faintest w-4 shrink-0">{idx + 1}</span>
-      <span className="text-sm text-pb-text flex-1 truncate">{player.display_name || player.name}</span>
-      <select
-        value={sp.role}
-        onChange={e => onUpdate({ role: e.target.value })}
-        className="font-mono text-[10px] bg-pb-surface2 border pb-hairline rounded px-1 py-0.5 text-pb-text"
-      >
-        {ROLE_OPTIONS.map(r => <option key={r} value={r}>{r || 'Position'}</option>)}
-      </select>
-      {(IS_AFL ? ['captain', 'viceCaptain', 'debut'] : ['captain', 'viceCaptain', 'keeper', 'debut']).map(field => {
-        const labels = { captain: 'C', viceCaptain: 'VC', keeper: 'WK', debut: 'DEBUT' }
-        const active = sp[field]
-        return (
-          <button
-            key={field}
-            onClick={() => onUpdate({ [field]: !active })}
-            style={active ? { background: 'var(--pb-accent)', color: 'var(--pb-bg)' } : {}}
-            className={`font-mono text-[10px] px-1.5 py-0.5 rounded border pb-hairline transition-colors ${active ? '' : 'text-pb-faint hover:text-pb-text'}`}
+      <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="font-mono text-[10px] text-pb-faintest shrink-0">{idx + 1}</span>
+          <span className="text-sm text-pb-text flex-1 min-w-0 truncate">{player.display_name || player.name}</span>
+          <button onClick={onRemove} aria-label="Remove player" className="text-pb-faintest hover:text-red-400 text-xs shrink-0">✕</button>
+        </div>
+        <div className="flex flex-wrap items-center gap-1">
+          <select
+            value={sp.role}
+            onChange={e => onUpdate({ role: e.target.value })}
+            className="font-mono text-[10px] bg-pb-surface2 border pb-hairline rounded px-1 py-0.5 text-pb-text"
           >
-            {labels[field]}
-          </button>
-        )
-      })}
-      <button onClick={onRemove} className="text-pb-faintest hover:text-red-400 text-xs ml-1">✕</button>
+            {ROLE_OPTIONS.map(r => <option key={r} value={r}>{r || 'Position'}</option>)}
+          </select>
+          {(IS_AFL ? ['captain', 'viceCaptain', 'debut'] : ['captain', 'viceCaptain', 'keeper', 'debut']).map(field => {
+            const labels = { captain: 'C', viceCaptain: 'VC', keeper: 'WK', debut: 'DEBUT' }
+            const active = sp[field]
+            return (
+              <button
+                key={field}
+                onClick={() => onUpdate({ [field]: !active })}
+                style={active ? { background: 'var(--pb-accent)', color: 'var(--pb-on-accent, var(--pb-bg))' } : {}}
+                className={`font-mono text-[10px] px-1.5 py-0.5 rounded border pb-hairline transition-colors ${active ? '' : 'text-pb-faint hover:text-pb-text'}`}
+              >
+                {labels[field]}
+              </button>
+            )
+          })}
+        </div>
+      </div>
     </div>
   )
 }
@@ -1083,6 +1115,7 @@ export default function AdminSocialPost() {
   }, [])
   const [settings, setSettings] = useState(null)
   const [allPlayers, setAllPlayers] = useState([])
+  const [manualPlayerOpen, setManualPlayerOpen] = useState(false)
   const [adminSponsors, setAdminSponsors] = useState([])
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState(false)
@@ -1392,11 +1425,17 @@ export default function AdminSocialPost() {
 
   // Club-event / announcement posters (Events tab). One editable facts object +
   // a chosen layout, motif glyph and optional background photo.
-  const [event, setEvent] = useState(DEFAULT_EVENT)
-  const [eventPreset, setEventPreset] = useState('curry')
-  const [eventMotifKey, setEventMotifKey] = useState('star')
-  const [eventBg, setEventBg] = useState(null)        // object URL or null
-  const [eventBgOpacity, setEventBgOpacity] = useState(0.85)
+  const eventDraft0 = useRef(undefined)
+  if (eventDraft0.current === undefined) eventDraft0.current = readEventDraft()
+  const [event, setEvent] = useState(() => (eventDraft0.current ? { ...DEFAULT_EVENT, ...eventDraft0.current.facts } : DEFAULT_EVENT))
+  const [eventPreset, setEventPreset] = useState(() => (eventDraft0.current ? (eventDraft0.current.preset ?? '') : 'curry'))
+  const [eventMotifKey, setEventMotifKey] = useState(() => eventDraft0.current?.motif || 'star')
+  const [eventBg, setEventBg] = useState(() => eventDraft0.current?.bg || null)        // object URL, library URL or null
+  const [eventBgOpacity, setEventBgOpacity] = useState(() => (typeof eventDraft0.current?.bgOpacity === 'number' ? eventDraft0.current.bgOpacity : 0.85))
+  // An icon the club searched for, kept as a data URI, used when the motif is 'custom'.
+  const [eventMotifIcon, setEventMotifIcon] = useState(() => eventDraft0.current?.motifIcon || '')
+  // The run of events the list layouts (Agenda, Calendar, Icon Cards) draw.
+  const [eventList, setEventList] = useState(() => (Array.isArray(eventDraft0.current?.list?.items) ? eventDraft0.current.list : defaultEventList()))
 
   // Two freeform layers of blocks: `canvas` is the standalone Blank Canvas
   // template; `overlay` is the "Custom Edit" layer that sits on top of any real
@@ -1490,6 +1529,22 @@ export default function AdminSocialPost() {
     return { items: out, lost }
   }
 
+  // Keep the event draft as it is typed. A photo added from disk is a blob: URL
+  // that dies with the tab, so it goes into the club's media library once (the
+  // same cache a saved template uses) and the draft holds the library address.
+  useEffect(() => {
+    const id = setTimeout(async () => {
+      try {
+        let bg = eventBg
+        if (typeof bg === 'string' && bg.startsWith('blob:')) bg = await persistBlobUrl(bg)
+        localStorage.setItem(EVENT_DRAFT_KEY, JSON.stringify({ facts: event, preset: eventPreset, motif: eventMotifKey, motifIcon: eventMotifIcon, list: eventList, bg: bg || null, bgOpacity: eventBgOpacity }))
+      } catch { /* quota, private window or a failed upload: the draft is a convenience */ }
+    }, 500)
+    return () => clearTimeout(id)
+  // persistBlobUrl is stable in effect (it only reads a ref and the API).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [event, eventPreset, eventMotifKey, eventMotifIcon, eventList, eventBg, eventBgOpacity])
+
   // Save the current post as a reusable Template (works on every tab). Captures
   // the base template + Style; on the Blank Canvas / Custom Edit it also
   // captures the block layout. `updateKey` overwrites that template in place.
@@ -1514,7 +1569,7 @@ export default function AdminSocialPost() {
       if (activeTab === 'events') {
         const bg = await persistBlobUrl(eventBg)
         if (eventBg && !bg) lost += 1
-        eventContent = { facts: event, preset: eventPreset, motif: eventMotifKey, bg, bgOpacity: eventBgOpacity }
+        eventContent = { facts: event, preset: eventPreset, motif: eventMotifKey, motifIcon: eventMotifIcon, list: eventList, bg, bgOpacity: eventBgOpacity }
       }
       const tpl = {
         key, name: finalName, templateId, custom: usingOverlay,
@@ -1594,6 +1649,10 @@ export default function AdminSocialPost() {
       if (tpl.event.facts && typeof tpl.event.facts === 'object') setEvent({ ...DEFAULT_EVENT, ...tpl.event.facts })
       if (tpl.event.preset) setEventPreset(tpl.event.preset)
       if (tpl.event.motif) setEventMotifKey(tpl.event.motif)
+      setEventMotifIcon(tpl.event.motifIcon || '')
+      // A template saved before event lists existed has no list: keep the one
+      // the editor holds rather than blanking it.
+      if (tpl.event.list && Array.isArray(tpl.event.list.items)) setEventList(tpl.event.list)
       setEventBg(tpl.event.bg || null)
       if (typeof tpl.event.bgOpacity === 'number') setEventBgOpacity(tpl.event.bgOpacity)
     } else {
@@ -2081,7 +2140,7 @@ export default function AdminSocialPost() {
     const player = rosterPlayer || { id: pl.pid || `potm_${playerIdx}`, display_name: fallbackName }
     setSelectedPlayers([{
       player,
-      role: !IS_AFL && rosterPlayer?.player_role && ['BAT', 'BOWL', 'AR', 'WK'].includes(rosterPlayer.player_role) ? rosterPlayer.player_role : role,
+      role: !IS_AFL && rosterPlayer ? socialRole(rosterPlayer, role) : role,
       captain: false, viceCaptain: false, keeper: false,
     }])
 
@@ -2152,7 +2211,7 @@ export default function AdminSocialPost() {
     const fallbackName = pl.first && pl.last ? `${pl.last}, ${pl.first}` : (pl.last || pl.first || pl.short || 'Player')
     const player = rosterPlayer || { id: pl.pid || `totw_${pl.guid || i}`, display_name: fallbackName }
     const derived = pl.batting && pl.bowling ? 'AR' : pl.bowling ? 'BOWL' : 'BAT'
-    const role = rosterPlayer?.player_role && ['BAT', 'BOWL', 'AR', 'WK'].includes(rosterPlayer.player_role) ? rosterPlayer.player_role : derived
+    const role = rosterPlayer ? socialRole(rosterPlayer, derived) : derived
     return {
       player, role, captain: false, viceCaptain: false, keeper: false,
       totw: { line: totwLine(pl), grade: pl.grade || '', opp: pl.opp || '', points: pl.points },
@@ -2423,9 +2482,19 @@ export default function AdminSocialPost() {
     if (selectedPlayers.find(sp => sp.player.id === p.id)) return
     const role = IS_AFL
       ? ((p.skill_positions || [])[0] || '')
-      : p.player_role && ['BAT','BOWL','AR','WK'].includes(p.player_role) ? p.player_role : 'BAT'
+      : socialRole(p)
     setSelectedPlayers(prev => [...prev, { player: p, role, captain: false, viceCaptain: false, keeper: false }])
   }, [selectedPlayers])
+
+  // A player typed in by hand is a real record now: it joins the roster the
+  // designer searches and goes into the lineup in the same step.
+  const onManualPlayer = (p, note, { existing } = {}) => {
+    if (!existing) setAllPlayers((prev) => [...prev, p])
+    else if (p.photo_url) setAllPlayers((prev) => prev.map((x) => (String(x.id) === String(p.id) ? { ...x, photo_url: p.photo_url } : x)))
+    addPlayer(p)
+    setManualPlayerOpen(false)
+    flashNote({ text: note, tool: 'content' })
+  }
 
   const removePlayer = useCallback(idx => setSelectedPlayers(prev => prev.filter((_, i) => i !== idx)), [])
 
@@ -2981,10 +3050,12 @@ export default function AdminSocialPost() {
     extraProps.event = event
     extraProps.motif = resolveMotif({
       motifKey: eventMotifKey,
+      customIcon: eventMotifIcon,
       imageUrl: eventBg,
       opacity: eventBgOpacity,
       label: (EVENT_PRESETS.find((p) => p.key === eventPreset)?.photoLabel) || 'Add a photo',
     })
+    if (tmpl.list) extraProps.list = prepareEventList(eventList)
   }
 
   const fontStyle = {
@@ -3038,7 +3109,10 @@ export default function AdminSocialPost() {
     setEvent(DEFAULT_EVENT)
     setEventPreset('curry')
     setEventMotifKey('star')
-    if (eventBg) URL.revokeObjectURL(eventBg)
+    setEventMotifIcon('')
+    setEventList(defaultEventList())
+    try { localStorage.removeItem(EVENT_DRAFT_KEY) } catch { /* fine */ }
+    if (eventBg && eventBg.startsWith('blob:')) URL.revokeObjectURL(eventBg)
     setEventBg(null)
     setEventBgOpacity(0.85)
     canvas.reset(defaultBlankItems())
@@ -3395,7 +3469,7 @@ export default function AdminSocialPost() {
         const player = byId[l.player_id]
         if (!player) return null
         const pp = poolById[l.player_id]
-        return { player, role: (pp?.skill_positions?.[0]) || pp?.player_role || player.player_role || 'BAT', captain: !!l.is_captain, viceCaptain: false, keeper: !!l.is_wicket_keeper }
+        return { player, role: IS_AFL ? ((pp?.skill_positions?.[0]) || '') : socialRole({ ...player, ...(pp || {}) }), captain: !!l.is_captain, viceCaptain: false, keeper: !!l.is_wicket_keeper }
       }).filter(Boolean)
       setSelectedPlayers(picked)
       checkDebuts(picked, d.fixture?.played_on || null)
@@ -3428,7 +3502,7 @@ export default function AdminSocialPost() {
       const fallback = { id: p.participant_id, display_name: p.name }
       return {
         player: player || fallback,
-        role: IS_AFL ? '' : p.is_wicket_keeper ? 'WK' : (player?.player_role || 'BAT'),
+        role: IS_AFL ? '' : p.is_wicket_keeper ? 'WK' : socialRole(player),
         captain: !!p.is_captain,
         viceCaptain: false,
         keeper: !!p.is_wicket_keeper,
@@ -3761,6 +3835,8 @@ export default function AdminSocialPost() {
       onAddBrandLockup={() => addBlock('brand')}
       sponsors={adminSponsors.map((s) => ({ name: s.name, url: sponsorLogoUrl(s) }))}
       onAddSponsor={(sp) => addBlock('image', { src: sp.url, srcName: sp.name, fit: 'contain' })}
+      onAddIcon={(ic) => addBlock('image', { src: ic.dataUri, srcName: ic.name, fit: 'contain', w: 260, h: 260 })}
+      accent={activePalette.accent} dark={darkMode}
       club={{ name: settings?.name, logo_url: team.logo }}
     />
   )
@@ -3815,7 +3891,7 @@ export default function AdminSocialPost() {
   return (
     <>
       <SocialBackgroundDefs />
-      <SaveTemplateDialog open={saveDialogOpen} defaultName={`Template ${savedTemplates.length + 1}`}
+      <SaveTemplateDialog open={saveDialogOpen} defaultName={activeTab === 'events' && (event.title || '').trim() ? event.title.trim() : `Template ${savedTemplates.length + 1}`}
         activeName={activeTemplate?.name} saving={savingTemplate} error={templateError}
         onSave={onSaveDialog} onClose={() => setSaveDialogOpen(false)} />
       <input ref={blankImgInputRef} type="file" accept="image/png,image/webp,image/jpeg" className="sr-only"
@@ -4495,8 +4571,25 @@ export default function AdminSocialPost() {
               <section className="pb-card p-4">
                 <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Match Info</h2>
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="col-span-2"><Field label="Headline (lineup posts)"><TextInput value={headline} onChange={setHeadline} placeholder={IS_AFL ? 'SQUAD · e.g. Reserves' : 'SQUAD · e.g. Applecross 6th XI'} /></Field></div>
-                  <Field label="Competition"><TextInput value={match.competition} onChange={v => patchMatch({ competition: v })} placeholder={IS_AFL ? 'PREMIER C' : 'PREMIER T20'} /></Field>
+                  <div className="col-span-2">
+                    <Field label="Headline (the side, on lineup posts)">
+                      <TextInput value={headline} onChange={setHeadline} placeholder={IS_AFL ? 'SQUAD · e.g. Reserves' : 'SQUAD · e.g. Applecross 6th XI'} />
+                    </Field>
+                    {!HEADLINE_TEMPLATES.includes(templateId) && (
+                      <p className="mt-1.5 text-[11px] text-pb-faint leading-relaxed" data-testid="headline-unsupported">
+                        {tmpl.name} does not print a headline{headline ? ', so this text is kept for when you switch layout' : ''}. Layouts that do:{' '}
+                        <span className="text-pb-dim">{HEADLINE_TEMPLATES.map((id) => TEMPLATES.find((t) => t.id === id)).filter(Boolean).map((t) => t.name).join(', ')}</span>.
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <Field label="Competition"><TextInput value={match.competition} onChange={v => patchMatch({ competition: v })} placeholder={IS_AFL ? 'PREMIER C' : 'PREMIER T20'} /></Field>
+                    {NO_COMPETITION_TEMPLATES.includes(templateId) && (
+                      <p className="mt-1.5 text-[11px] text-pb-faint leading-relaxed" data-testid="competition-unsupported">
+                        {tmpl.name} does not print the competition.
+                      </p>
+                    )}
+                  </div>
                   <Field label="Round"><TextInput value={match.round} onChange={v => patchMatch({ round: v })} placeholder="ROUND 7" /></Field>
                   <Field label="Venue"><TextInput value={match.venue} onChange={v => patchMatch({ venue: v })} placeholder="Heathcote Reserve" /></Field>
                   <Field label="Date"><TextInput value={match.date} onChange={v => patchMatch({ date: v })} placeholder="SAT 30 MAY" /></Field>
@@ -4602,6 +4695,12 @@ export default function AdminSocialPost() {
                           : 'Marks a player DEBUT when the club holds no earlier game for them. Switch any tag by hand with the DEBUT button on their row.'}
                     </p>
                   </div>
+                )}
+                {!IS_AFL && selectedPlayers.length < tmpl.maxPlayers && (
+                  manualPlayerOpen
+                    ? <ManualPlayerForm roster={allPlayers} onAdd={onManualPlayer} onClose={() => setManualPlayerOpen(false)} />
+                    : <button onClick={() => setManualPlayerOpen(true)} data-testid="add-manual-player"
+                        className="mb-3 font-mono text-[10px] tracking-wide2 px-2 py-1 rounded border pb-hairline text-pb-faint hover:text-pb-text">+ ADD A PLAYER BY HAND</button>
                 )}
                 {selectedPlayers.length < tmpl.maxPlayers && (
                   <>
@@ -5639,6 +5738,14 @@ export default function AdminSocialPost() {
                   motifKey={eventMotifKey} setMotifKey={setEventMotifKey}
                   bgImage={eventBg} setBgImage={setEventBg}
                   bgOpacity={eventBgOpacity} setBgOpacity={setEventBgOpacity}
+                  savedEvents={savedTemplates.filter((t) => t.event?.facts && TEMPLATES.find((x) => x.id === t.templateId)?.kind === 'event')
+                    .map((t) => ({ key: t.key, name: t.name, title: t.event.facts.title || '', layout: layoutLabel(t) }))}
+                  motifIcon={eventMotifIcon} setMotifIcon={setEventMotifIcon}
+                  eventList={eventList} setEventList={setEventList}
+                  uploadPhoto={async (file) => (await api.uploadSocialMedia(file))?.url || null}
+                  accent={activePalette.accent} dark={darkMode}
+                  activeSavedKey={activeTemplate?.key}
+                  onPickSaved={(key) => applyTemplate(savedTemplates.find((t) => t.key === key))}
                 />
               </section>
             )}

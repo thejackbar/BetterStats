@@ -23,6 +23,7 @@ import { AutoFitText, BrandLockup, ClubLogo, GrainSVG, Halftone, Stripes } from 
 import { IS_AFL, PLATFORM_NAME } from '../lib/sport'
 import { aspectOf, pick, share } from './postAspect'
 import { LayerRoot } from './postLayers'
+import { EVENT_LIST_TEMPLATES, SPONSOR_SLOTS as LIST_SLOTS, MAX_LIST_ITEMS } from './event-list-templates'
 
 // Bundled motif glyphs (already in the repo at src/assets/thiings/).
 import icoTrophy from '../assets/thiings/trophy.png'
@@ -959,6 +960,8 @@ export const EVENT_TEMPLATES = [
   { id: 'EV9',  name: 'Crest',       component: EVT_Crest,      desc: 'Heritage emblem, gold-on-green',    surface: 'dark',  photo: false },
   { id: 'EV10', name: 'Chalkboard',  component: EVT_Chalkboard, desc: 'Clubhouse blackboard handwriting',  surface: 'dark',  photo: false },
   { id: 'EV11', name: 'Polaroid',    component: EVT_Polaroid,   desc: 'Taped scrapbook photo + marker',    surface: 'light', photo: true },
+  // A run of events on one post (agenda, calendar, icon cards).
+  ...EVENT_LIST_TEMPLATES,
 ]
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1047,9 +1050,72 @@ export const DEFAULT_EVENT_MOTIF = { key: 'star', icon: motifIcon('star'), image
 
 // Resolve a motif descriptor for a template, given the chosen motif key + any
 // uploaded photo. Pass the result straight to a template's `motif` prop.
-export function resolveMotif({ motifKey, imageUrl, opacity, label }) {
-  return { key: motifKey, icon: motifIcon(motifKey), imageUrl: imageUrl || null, opacity: opacity ?? 0.85, label: label || 'Add a photo' }
+export function resolveMotif({ motifKey, imageUrl, opacity, label, customIcon }) {
+  // `custom` is an icon the club searched for (a data URI it keeps with the post).
+  const icon = motifKey === 'custom' && customIcon ? customIcon : motifIcon(motifKey)
+  return { key: motifKey, icon, imageUrl: imageUrl || null, opacity: opacity ?? 0.85, label: label || 'Add a photo' }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EVENT LIST — the raw items the editor holds, and the prepared form the list
+// layouts draw (event-list-templates.jsx). A layout never parses a date or looks
+// an icon up.
+//   raw item: { id, date: 'YYYY-MM-DD' | '', title, time, venue, price,
+//               iconKey: motif key | 'custom' | '', iconUri, imageUrl }
+// ─────────────────────────────────────────────────────────────────────────────
+export { MAX_LIST_ITEMS }
+const MONTHS = ['JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER']
+const WEEKDAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT']
+const ISO = /^(\d{4})-(\d{2})-(\d{2})$/
+
+export const parseIsoDate = (iso) => {
+  const m = ISO.exec(iso || '')
+  if (!m) return null
+  const [y, mo, d] = [Number(m[1]), Number(m[2]) - 1, Number(m[3])]
+  const dt = new Date(Date.UTC(y, mo, d))
+  // A date that does not exist (31 Feb) is not a date.
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === mo && dt.getUTCDate() === d ? { y, mo, d, wd: dt.getUTCDay() } : null
+}
+
+export function prepareEventList(raw = {}) {
+  const items = (raw.items || []).slice(0, MAX_LIST_ITEMS).map((it, i) => {
+    const p = parseIsoDate(it.date)
+    const mon = p ? MONTHS[p.mo].slice(0, 3) : ''
+    const wd = p ? WEEKDAYS[p.wd] : ''
+    const iconSrc = it.iconKey === 'custom' ? it.iconUri : (it.iconKey ? (EVENT_MOTIFS.find((m) => m.key === it.iconKey)?.icon || null) : null)
+    return {
+      id: it.id || `i${i}`,
+      iso: p ? it.date : '', day: p ? String(p.d) : '', mon, wd,
+      dateLabel: p ? `${wd[0]}${wd.slice(1).toLowerCase()} ${p.d} ${mon[0]}${mon.slice(1).toLowerCase()}` : '',
+      title: it.title || '', time: it.time || '', venue: it.venue || '', price: it.price || '',
+      visual: it.imageUrl ? { kind: 'image', src: it.imageUrl } : (iconSrc ? { kind: 'icon', src: iconSrc } : null),
+    }
+  })
+  // The calendar shows the month of the earliest dated event.
+  const dated = items.filter((it) => it.iso).sort((x, y) => (x.iso < y.iso ? -1 : 1))
+  const first = dated.length ? parseIsoDate(dated[0].iso) : null
+  const now = new Date()
+  const year = first ? first.y : now.getFullYear()
+  const month = first ? first.mo : now.getMonth()
+  return { items, year, month, monthLabel: `${MONTHS[month]} ${year}` }
+}
+
+const pad2 = (n) => String(n).padStart(2, '0')
+const plusDays = (days) => {
+  const d = new Date()
+  d.setDate(d.getDate() + days)
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+}
+// What a new list starts with, so the layouts are never an empty page. Dates are
+// relative to today so the calendar opens on a month that is about to happen.
+export const defaultEventList = () => ({
+  items: [
+    { id: 'e1', date: plusDays(7), title: 'Working Bee', time: '9:00 AM', venue: 'The Clubhouse', price: 'Free', iconKey: 'star', iconUri: '', imageUrl: '' },
+    { id: 'e2', date: plusDays(12), title: 'Quiz Night', time: '7:30 PM', venue: 'The Clubhouse', price: '$12', iconKey: 'target', iconUri: '', imageUrl: '' },
+    { id: 'e3', date: plusDays(19), title: 'Season Launch', time: '11:00 AM', venue: 'Home Ground', price: 'Free', iconKey: 'calendar', iconUri: '', imageUrl: '' },
+    { id: 'e4', date: plusDays(26), title: 'Presentation Night', time: '7:00 PM', venue: 'The Pavilion', price: '$55', iconKey: 'trophy', iconUri: '', imageUrl: '' },
+  ],
+})
 
 // Light-surface directions want a paper/ink pair rather than dark mode. Merge
 // these onto the active palette before handing it to a light template so the
@@ -1071,6 +1137,7 @@ Watermark.displayName = 'Watermark'
 // Where this file's layouts keep the sponsor grid (see sponsorSlots.js). Each
 // layout calls the same slot function above to leave that rectangle clear.
 export const SPONSOR_SLOTS = {
+  ...LIST_SLOTS,
   EV1: slotEV1,
   EV2: slotEV2,
   EV3: slotEV3,
