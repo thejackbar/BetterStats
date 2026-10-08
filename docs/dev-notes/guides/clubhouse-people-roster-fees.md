@@ -124,3 +124,5 @@
 | BetterFees Match-Fee Auto-Allocation (v7.32.0), L12882-12890 | rules extracted | Rule 19 |
 | BetterMerch club stock register (v8.18), L12891-12984 | rules extracted (Equipment superseded by asset register) | Rules 35, 36; FLAG-CLUB-3 |
 | - Square POS integration (migration 084, v8.18.1) | rules extracted | Rule 36; Operator commands |
+
+- `ModuleLayout` is phone-aware (v9.109.0): below `md` a slim sticky bar plus a scrolling header, and `twoRow` actions wrap. Accounts draws cards below `md`. A new wide table on a Clubhouse screen needs the same (`hidden md:block` table plus a `md:hidden` card list).

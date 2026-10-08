@@ -287,7 +287,7 @@ function AddToSquadMenu({ p, teams, onAddToSquad }) {
       <button ref={btnRef} type="button" draggable={false}
         onMouseDown={(e) => e.stopPropagation()} onClick={toggle}
         title="Add to another squad"
-        className="shrink-0 w-5 h-5 inline-flex items-center justify-center rounded-md border border-pb-hairline2 text-pb-faint hover:text-pb-accent hover:border-pb-accent/40 opacity-60 group-hover:opacity-100 focus:opacity-100 transition-opacity">
+        className="shrink-0 w-5 h-5 [@media(pointer:coarse)]:w-9 [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:-my-1.5 inline-flex items-center justify-center rounded-md border border-pb-hairline2 text-pb-faint hover:text-pb-accent hover:border-pb-accent/40 opacity-60 [@media(pointer:coarse)]:opacity-100 group-hover:opacity-100 focus:opacity-100 transition-opacity">
         <Icon name="plus" size={12} />
       </button>
       {open && pos && createPortal(
@@ -1045,18 +1045,23 @@ export default function AdminTeams() {
   }
 
   const loading = teams === null || players === null
-  const actions = canManage && (
-    <div className="flex gap-2">
+  // The same buttons twice: in the header from `md` up, and as a wrapping row
+  // at the top of the page on a phone. Five buttons are ~600px, which on a 390px
+  // screen widened the whole page to fit them (and the sticky header with it).
+  const actionButtons = canManage && (
+    <>
       <Btn variant="ghost" sm icon="bolt" onClick={() => setAutoSeed(true)}>Auto-seed squads</Btn>
       {(teams?.length || 0) > 0 && <Btn variant="soft" sm icon="bolt" onClick={() => setAutoAssign(true)}>Auto-assign players</Btn>}
       {(teams?.length || 0) > 0 && <Btn variant="ghost" sm icon="reset" onClick={fixOrder} disabled={resequencing}>{resequencing ? 'Reordering…' : 'Fix order'}</Btn>}
       {(teams?.length || 0) > 0 && <Btn variant="ghost" sm icon="trash" onClick={() => setManageSquads(true)}>Manage squads</Btn>}
       <Btn variant="primary" sm icon="plus" onClick={() => setEditing(null)}>New squad</Btn>
-    </div>
+    </>
   )
+  const actions = canManage && <div className="hidden md:flex gap-2">{actionButtons}</div>
 
   return (
     <BetterSelectLayout title="Squads" actions={actions}>
+      {canManage && <div className="md:hidden flex flex-wrap gap-2 mb-3" data-squads-actions>{actionButtons}</div>}
       {editing !== undefined && (
         <TeamModal team={editing} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); loadTeams() }} />
       )}

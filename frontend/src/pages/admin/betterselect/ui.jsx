@@ -208,16 +208,29 @@ export function Dot({ status, size = 9, glow = false, className = '', style }) {
   )
 }
 
-/* Clickable status dot — calls onEdit(player) (used to open QuickAvailModal). */
+/* Clickable status dot — calls onEdit(player) (used to open QuickAvailModal).
+   A real button, not a span: the dot is 9px, and on a phone a thumb lands on the
+   avatar link beside it (the player's profile) about as often as on the dot. So
+   a touch screen gets a 40px square to hit, pulled back with negative margins so
+   the card does not grow to match. Wherever the pointer is coarse, not by
+   viewport width: a tablet in landscape has the same thumb. */
 export function AvailDot({ player, status, onEdit, glow, size }) {
   const s = status ?? player?.availability ?? player?.avail ?? 'NO_RESPONSE'
+  if (!onEdit) {
+    return <span className="inline-flex items-center"><Dot status={s} glow={glow} size={size} /></span>
+  }
   return (
-    <span
-      onClick={onEdit ? (e) => { e.stopPropagation(); onEdit(player) } : undefined}
-      title={onEdit ? 'Update availability' : undefined}
-      className={`inline-flex items-center -m-1 p-1 rounded-full ${onEdit ? 'cursor-pointer' : ''}`}>
+    <button
+      type="button"
+      draggable={false}
+      onClick={(e) => { e.stopPropagation(); onEdit(player) }}
+      onMouseDown={(e) => e.stopPropagation()}
+      title="Update availability"
+      aria-label={`Update availability for ${playerName(player)}`}
+      data-avail-dot
+      className="shrink-0 inline-flex items-center justify-center -m-1 p-1 rounded-full cursor-pointer [@media(pointer:coarse)]:-mx-1.5 [@media(pointer:coarse)]:-my-3 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:p-0 [@media(pointer:coarse)]:active:bg-pb-surface">
       <Dot status={s} glow={glow} size={size} />
-    </span>
+    </button>
   )
 }
 
@@ -460,9 +473,13 @@ export function AvailSummary({ players, statusOf = (p) => p.availability ?? p.av
 /* ── Quick-update availability modal (presentational) ─────────────────────
    onPick(status) is called when a status is chosen; the caller persists it. */
 export function QuickAvailModal({ player, dateLabel, current, onPick, onClose }) {
+  // A bottom sheet on a phone (the buttons land under the thumb, and it can only
+  // ever be as wide as the screen), a centred card from `sm` up.
   return (
-    <div onClick={onClose} className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-      <div onClick={(e) => e.stopPropagation()} className="w-[380px] max-w-full bg-pb-surface rounded-2xl border border-pb-hairline2 overflow-hidden shadow-2xl">
+    <div onClick={onClose} role="dialog" aria-modal="true" aria-label="Update availability"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/60 backdrop-blur-sm">
+      <div onClick={(e) => e.stopPropagation()}
+        className="w-full sm:w-[380px] max-w-full bg-pb-surface rounded-t-2xl sm:rounded-2xl border border-pb-hairline2 overflow-hidden shadow-2xl pb-[env(safe-area-inset-bottom)] sm:pb-0">
         <div className="flex items-center gap-3 px-[18px] py-4 border-b border-pb-hairline">
           {player && <Avatar player={player} size={38} noLink />}
           <div className="flex-1 min-w-0">
@@ -471,7 +488,7 @@ export function QuickAvailModal({ player, dateLabel, current, onPick, onClose })
             </div>
             <div className="font-display font-bold text-[17px] mt-0.5 truncate">{player ? playerName(player) : 'Player'}</div>
           </div>
-          <button onClick={onClose} className="text-pb-faint hover:text-pb-text p-1" aria-label="Close"><Icon name="close" size={18} /></button>
+          <button onClick={onClose} className="text-pb-faint hover:text-pb-text w-10 h-10 -mr-2 inline-flex items-center justify-center" aria-label="Close"><Icon name="close" size={18} /></button>
         </div>
         <div className="p-4 grid grid-cols-2 gap-2.5">
           {AVAIL_ORDER.map((s) => {
@@ -479,7 +496,7 @@ export function QuickAvailModal({ player, dateLabel, current, onPick, onClose })
             const on = current === s
             return (
               <button key={s} type="button" onClick={() => onPick(s)}
-                className="flex items-center gap-2.5 px-3.5 py-3 rounded-xl font-display font-semibold text-[14.5px] text-left transition"
+                className="flex items-center gap-2.5 px-3.5 py-3.5 sm:py-3 min-h-[56px] sm:min-h-0 rounded-xl font-display font-semibold text-[14.5px] text-left transition"
                 style={{
                   border: `1.5px solid ${on ? meta.cssVar : 'var(--pb-hairline2)'}`,
                   background: on ? `color-mix(in srgb, ${meta.cssVar} 12%, transparent)` : 'transparent',

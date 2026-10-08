@@ -8,7 +8,6 @@
 // the pointer DnD engine (selectionDnd). Player rows show the real role + style
 // + a quiet form indicator (selectionMeta.roleLine / FormBars) — never the old
 // hardcoded positional hints.
-import { useState } from 'react'
 import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { Icon, Avatar, Dot, Tag, RuleTags } from './ui'
 import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
@@ -28,7 +27,7 @@ const ROLE_LBL = { BAT: 'BAT', ALL: 'ALL', BWL: 'BWL', WKT: 'WK' }
  * speaks to the same fact the plain badge did — fees, training — the rule's
  * badge replaces it rather than sitting beside it: same two letters, now
  * coloured by how seriously the club takes it. */
-function FlagTags({ p }) {
+export function FlagTags({ p }) {
   return (
     <>
       <RuleTags player={p} />
@@ -43,7 +42,7 @@ function FlagTags({ p }) {
 }
 /* The quiet half of the rules: a junior's bowling limit, or a permit that
  * cleared them. Not a warning, so it reads as a line rather than a badge. */
-function RuleNotes({ p }) {
+export function RuleNotes({ p }) {
   const notes = ruleNotes(p)
   if (!notes.length) return null
   return <div className="text-[11px] text-pb-faint mt-0.5 truncate" title={notes.join(' · ')}>{notes.join(' · ')}</div>
@@ -53,7 +52,7 @@ function RuleNotes({ p }) {
  * is one this selector is meant to see. Drawn plainly rather than as a
  * warning: it is there to be read alongside the bowling style when working
  * out a young quick's workload, not to flag anyone. */
-function AgeTag({ p }) {
+export function AgeTag({ p }) {
   if (p.age == null) return null
   return <Tag tone="faint" title={`${p.age} years old`}>{p.age}y</Tag>
 }
@@ -219,14 +218,37 @@ export function RuleStrip({ vm }) {
 function SlotControls({ vm, id, idx }) {
   if (!vm.canEdit) return null
   return (
-    <div className="flex items-center gap-1 shrink-0">
-      <button onClick={(e) => { e.stopPropagation(); vm.toggleCap(id) }} title="Captain"
-        className={`w-[26px] h-[26px] rounded-md text-[10px] font-bold font-mono ${id === vm.capId ? 'bg-pb-accent text-pb-bg' : 'bg-pb-surface text-pb-faint hover:text-pb-text'}`}>C</button>
-      <button onClick={(e) => { e.stopPropagation(); vm.toggleWk(id) }} title="Wicket-keeper"
-        className={`w-[26px] h-[26px] rounded-md text-[10px] font-bold font-mono ${id === vm.wkId ? 'bg-pb-amber text-pb-bg' : 'bg-pb-surface text-pb-faint hover:text-pb-text'}`}>WK</button>
-      <button onClick={(e) => { e.stopPropagation(); vm.removeAt(idx) }} title="Remove"
-        className="w-[26px] h-[26px] rounded-md flex items-center justify-center text-pb-faintest hover:text-pb-red hover:bg-pb-red/10"><Icon name="close" size={14} /></button>
-    </div>
+    <>
+      {/* Desk: three small buttons. Below `lg` they were 26px each, which a
+          thumb cannot hit one at a time, so a phone gets the cluster below. */}
+      <div className="hidden lg:flex items-center gap-1 shrink-0">
+        <button onClick={(e) => { e.stopPropagation(); vm.toggleCap(id) }} title="Captain"
+          className={`w-[26px] h-[26px] rounded-md text-[10px] font-bold font-mono ${id === vm.capId ? 'bg-pb-accent text-pb-bg' : 'bg-pb-surface text-pb-faint hover:text-pb-text'}`}>C</button>
+        <button onClick={(e) => { e.stopPropagation(); vm.toggleWk(id) }} title="Wicket-keeper"
+          className={`w-[26px] h-[26px] rounded-md text-[10px] font-bold font-mono ${id === vm.wkId ? 'bg-pb-amber text-pb-bg' : 'bg-pb-surface text-pb-faint hover:text-pb-text'}`}>WK</button>
+        <button onClick={(e) => { e.stopPropagation(); vm.removeAt(idx) }} title="Remove"
+          className="w-[26px] h-[26px] rounded-md flex items-center justify-center text-pb-faintest hover:text-pb-red hover:bg-pb-red/10"><Icon name="close" size={14} /></button>
+      </div>
+      {/* Phone: move up, move down, and one "more" button that opens everything
+          else (captain, keeper, availability, remove) as large buttons. */}
+      <div className="flex lg:hidden items-center shrink-0 -mr-1.5" data-slot-phone-controls>
+        <button type="button" onClick={(e) => { e.stopPropagation(); vm.swapSlots(idx, idx - 1) }} disabled={idx === 0}
+          aria-label={`Move ${vm.poolById[id]?.display_name || 'player'} up`} data-move-up
+          className="w-10 h-10 inline-flex items-center justify-center rounded-lg text-pb-dim active:bg-pb-surface disabled:opacity-25">
+          <Icon name="arrow" size={17} style={{ transform: 'rotate(-90deg)' }} />
+        </button>
+        <button type="button" onClick={(e) => { e.stopPropagation(); vm.swapSlots(idx, idx + 1) }} disabled={idx >= vm.slots.length - 1}
+          aria-label={`Move ${vm.poolById[id]?.display_name || 'player'} down`} data-move-down
+          className="w-10 h-10 inline-flex items-center justify-center rounded-lg text-pb-dim active:bg-pb-surface disabled:opacity-25">
+          <Icon name="arrow" size={17} style={{ transform: 'rotate(90deg)' }} />
+        </button>
+        <button type="button" onClick={(e) => { e.stopPropagation(); vm.openSlot(idx) }}
+          aria-label={`Options for ${vm.poolById[id]?.display_name || 'player'}`} data-slot-more
+          className="w-10 h-10 inline-flex items-center justify-center rounded-lg text-pb-dim active:bg-pb-surface">
+          <span className="text-[20px] leading-none tracking-[-0.1em] pb-0.5">•••</span>
+        </button>
+      </div>
+    </>
   )
 }
 
@@ -252,7 +274,7 @@ function DualCard({ p, kind, idx, vm, drag }) {
       onClick={kind === 'pool' && interactive ? drag.clickGuard(() => vm.tapPlayer(p)) : undefined}>
       <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: p.availability === 'NO_RESPONSE' ? 'var(--pb-faintest)' : meta.cssVar }} />
       {kind === 'slot' && vm.canEdit && (
-        <span {...drag.bind(dragItem)} className="cursor-grab text-pb-faintest shrink-0" style={{ touchAction: 'none' }} title="Drag to reorder / off"><Icon name="grip" size={14} /></span>
+        <span {...drag.bind(dragItem)} className="max-sm:hidden cursor-grab text-pb-faintest shrink-0" style={{ touchAction: 'none' }} title="Drag to reorder / off"><Icon name="grip" size={14} /></span>
       )}
       <span className="relative shrink-0">
         <Avatar player={p} size={34} />
@@ -281,7 +303,7 @@ function DualCard({ p, kind, idx, vm, drag }) {
           <FormBars p={p} h={16} />
           <FormWord p={p} />
         </div>
-      ) : <FormBars p={p} h={16} />}
+      ) : <span className="max-sm:hidden"><FormBars p={p} h={16} /></span>}
       {kind === 'pool'
         ? (!blocked && <span className="text-pb-faintest shrink-0 group-hover:text-pb-accent"><Icon name="arrow" size={16} /></span>)
         : <SlotControls vm={vm} id={p.id} idx={idx} />}
@@ -296,12 +318,12 @@ function DualSlot({ i, id, vm, drag }) {
   return (
     <div className="flex items-stretch gap-2 shrink-0">
       <span className="font-display font-bold text-[18px] text-pb-faintest w-[22px] flex items-center justify-center shrink-0 pb-num">{i + 1}</span>
-      <div className="flex-1 min-w-0" data-drop-kind="slot" data-drop-idx={i} onClick={() => !p && vm.canEdit && vm.setFocus(i)}>
+      <div className="flex-1 min-w-0" data-drop-kind="slot" data-drop-idx={i} onClick={() => !p && vm.canEdit && (vm.isPhone ? vm.openAdd(i) : vm.setFocus(i))}>
         {p
           ? <DualCard p={p} kind="slot" idx={i} vm={vm} drag={drag} />
           : (
-            <div className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border border-dashed min-h-[50px] text-[13px] transition-colors ${hovered ? 'border-pb-accent text-pb-accent bg-pb-accent/10 border-solid' : isFocus ? 'border-pb-accent text-pb-accent bg-pb-accent/[0.06]' : 'border-pb-hairline2 text-pb-faintest'}`}>
-              <Icon name="plus" size={15} /><span>{isFocus ? 'Tap a player in the pool' : hovered ? 'Drop here' : 'Open slot'}</span>
+            <div className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border border-dashed min-h-[50px] max-lg:min-h-[56px] text-[13px] transition-colors ${hovered ? 'border-pb-accent text-pb-accent bg-pb-accent/10 border-solid' : isFocus ? 'border-pb-accent text-pb-accent bg-pb-accent/[0.06]' : 'border-pb-hairline2 text-pb-faintest'}`}>
+              <Icon name="plus" size={15} /><span>{vm.isPhone ? 'Tap to add a player' : isFocus ? 'Tap a player in the pool' : hovered ? 'Drop here' : 'Open slot'}</span>
             </div>
           )}
       </div>
@@ -311,7 +333,9 @@ function DualSlot({ i, id, vm, drag }) {
 
 export function DualRailView({ vm }) {
   const drag = useDrag()
-  const [mpanel, setMpanel] = useState('pool')
+  // Which panel a phone shows lives in the screen (the bottom bar switches it),
+  // so a pick made from the Add sheet and the bar's counts agree with this.
+  const mpanel = vm.panel
   const poolHover = drag.hover === 'pool'
 
   return (
@@ -319,14 +343,6 @@ export function DualRailView({ vm }) {
       <FixtureBar vm={vm} />
       <BalanceStrip vm={vm} />
       <RuleStrip vm={vm} />
-
-      {/* Mobile Pool ⇄ XI switcher */}
-      <div className="grid grid-cols-2 gap-1.5 sticky top-[56px] z-20 mb-3 p-1.5 pb-card rounded-xl lg:hidden">
-        <button onClick={() => setMpanel('pool')}
-          className={`inline-flex items-center justify-center gap-1.5 py-2.5 rounded-lg font-display font-semibold text-[13.5px] ${mpanel === 'pool' ? 'bg-pb-accent/14 text-pb-accent' : 'text-pb-faint'}`}><Icon name="player" size={15} />Available pool</button>
-        <button onClick={() => setMpanel('xi')}
-          className={`inline-flex items-center justify-center gap-1.5 py-2.5 rounded-lg font-display font-semibold text-[13.5px] ${mpanel === 'xi' ? 'bg-pb-accent/14 text-pb-accent' : 'text-pb-faint'}`}><Icon name="selection" size={15} />Your XI · {vm.count}/{vm.target || '∞'}</button>
-      </div>
 
       <div className="grid items-start gap-3.5 lg:gap-0 lg:grid-cols-[minmax(0,1fr)_56px_minmax(0,1fr)]">
         {/* Pool */}
@@ -355,7 +371,7 @@ export function DualRailView({ vm }) {
 
         {/* XI */}
         <section className={`pb-card rounded-xl flex flex-col min-h-0 min-w-0 ${mpanel === 'xi' ? '' : 'hidden'} lg:flex`}>
-          <header className="px-4 py-3 border-b pb-hairline flex items-center justify-between">
+          <header className="px-4 py-3 border-b pb-hairline flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
             <h3 className="font-display font-bold text-[15px]">Selected XI <span className="text-pb-faint font-medium text-[13px]">· batting order</span></h3>
             {vm.canEdit && (
               <div className="flex items-center gap-2">
@@ -365,6 +381,14 @@ export function DualRailView({ vm }) {
               </div>
             )}
           </header>
+          {vm.canEdit && (
+            <div className="lg:hidden px-2 pt-2">
+              <button type="button" onClick={() => vm.openAdd()} data-open-add
+                className="w-full min-h-[50px] inline-flex items-center justify-center gap-2 rounded-xl border border-pb-accent/40 bg-pb-accent/[0.07] text-pb-accent font-display font-semibold text-[14.5px]">
+                <Icon name="plus" size={16} /> Add players <span className="text-pb-faint font-normal text-[12.5px]">search or pick</span>
+              </button>
+            </div>
+          )}
           <div className="flex flex-col gap-1.5 p-2 overflow-auto pb-scroll max-h-none lg:max-h-[calc(100vh-300px)]">
             {vm.slots.map((id, i) => <DualSlot key={i} i={i} id={id} vm={vm} drag={drag} />)}
             {vm.format === 0 && <div className="px-4 py-3 rounded-xl border border-dashed border-pb-hairline2 text-center text-[12px] text-pb-faintest">Tap a player to add to the order</div>}
@@ -383,19 +407,19 @@ function SheetRow({ i, id, vm, drag }) {
   const hovered = drag.hover === 'slot:' + i
   const zebra = p && i % 2 === 1
   return (
-    <div data-drop-kind="slot" data-drop-idx={i} onClick={() => !p && vm.canEdit && vm.setFocus(i)}
-      className={`flex items-center gap-3 px-4 sm:px-5 min-h-[50px] py-1.5 border-b border-pb-hairline transition-colors ${!p ? 'cursor-pointer' : ''} ${hovered ? 'bg-pb-accent/10 shadow-[inset_3px_0_0_var(--pb-accent)]' : isFocus && !p ? 'bg-pb-accent/[0.06] shadow-[inset_3px_0_0_var(--pb-accent)]' : zebra ? 'bg-pb-surface2/45' : ''}`}>
-      <span className="font-display font-bold text-[25px] leading-none w-7 text-center shrink-0 pb-num tracking-tight" style={{ color: p ? 'var(--pb-accent)' : 'var(--pb-faintest)' }}>{i + 1}</span>
+    <div data-drop-kind="slot" data-drop-idx={i} onClick={() => !p && vm.canEdit && (vm.isPhone ? vm.openAdd(i) : vm.setFocus(i))}
+      className={`flex items-center gap-2 sm:gap-3 pl-3 pr-2 sm:px-5 min-h-[50px] max-lg:min-h-[58px] py-1.5 border-b border-pb-hairline transition-colors ${!p ? 'cursor-pointer' : ''} ${hovered ? 'bg-pb-accent/10 shadow-[inset_3px_0_0_var(--pb-accent)]' : isFocus && !p ? 'bg-pb-accent/[0.06] shadow-[inset_3px_0_0_var(--pb-accent)]' : zebra ? 'bg-pb-surface2/45' : ''}`}>
+      <span className="font-display font-bold text-[25px] max-sm:text-[21px] leading-none w-7 max-sm:w-5 text-center shrink-0 pb-num tracking-tight" style={{ color: p ? 'var(--pb-accent)' : 'var(--pb-faintest)' }}>{i + 1}</span>
       {p ? (
         <>
-          {vm.canEdit && <span {...drag.bind({ kind: 'slot', idx: i, player: p })} className="cursor-grab text-pb-faintest shrink-0" style={{ touchAction: 'none' }} title="Drag to reorder / off"><Icon name="grip" size={15} /></span>}
+          {vm.canEdit && <span {...drag.bind({ kind: 'slot', idx: i, player: p })} className="max-sm:hidden cursor-grab text-pb-faintest shrink-0" style={{ touchAction: 'none' }} title="Drag to reorder / off"><Icon name="grip" size={15} /></span>}
           <span className="relative shrink-0">
             <Avatar player={p} size={34} />
             <span className="absolute -right-px -bottom-px"><Dot status={p.availability} size={11} style={{ boxShadow: '0 0 0 2px var(--pb-surface)' }} /></span>
           </span>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 min-w-0">
-              <span className="font-display font-semibold text-[16.5px] tracking-tight truncate">{fmt(p.display_name)}</span>
+              <span className="font-display font-semibold text-[16.5px] max-sm:text-[15px] tracking-tight truncate">{fmt(p.display_name)}</span>
               {id === vm.capId && <Tag>C</Tag>}{id === vm.wkId && <Tag tone="amber">WK</Tag>}
               <AgeTag p={p} />
               <FlagTags p={p} />
@@ -410,7 +434,7 @@ function SheetRow({ i, id, vm, drag }) {
         </>
       ) : (
         <span className="flex-1 font-display text-[14px]" style={{ color: isFocus ? 'var(--pb-accent)' : 'var(--pb-faintest)' }}>
-          {isFocus ? 'Tap a card below to draft here' : hovered ? 'Drop to draft' : 'Open slot'}
+          {vm.isPhone ? 'Tap to add a player' : isFocus ? 'Tap a card below to draft here' : hovered ? 'Drop to draft' : 'Open slot'}
         </span>
       )}
     </div>

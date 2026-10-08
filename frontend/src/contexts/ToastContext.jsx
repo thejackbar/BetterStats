@@ -50,7 +50,11 @@ const ICONS = {
 function ToastContainer({ toasts, dismiss }) {
   if (!toasts.length) return null
   return (
-    <div className="fixed bottom-4 right-4 z-[9999] flex flex-col gap-2 pointer-events-none">
+    // `--pb-bottom-bar` is set by a screen that pins a bar to the bottom of a
+    // phone (the Selection board's Confirm bar), so a toast sits above it
+    // instead of covering the button it is reporting on. Unset it is 0px.
+    <div className="fixed right-4 z-[9999] flex flex-col gap-2 pointer-events-none"
+      style={{ bottom: 'calc(1rem + var(--pb-bottom-bar, 0px))' }}>
       {toasts.map(t => (
         <div
           key={t.id}

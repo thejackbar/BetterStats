@@ -29,7 +29,9 @@ import { useFilters } from './filters'
 import SelectionFilters from './SelectionFilters'
 import { DnD } from './selectionDnd'
 import { DualRailView, TeamSheetView } from './SelectionViews'
-import { classifyBowl, formBucket, matchesAge, inAnotherXI, alsoIn, alsoInLine } from './selectionMeta'
+import { AddPlayersSheet, SlotSheet, MobileBar } from './SelectionMobile'
+import { useMediaQuery } from '../../../hooks/useMediaQuery'
+import { classifyBowl, formBucket, matchesAge, inAnotherXI, alsoIn, alsoInLine, nameMatches } from './selectionMeta'
 import { matchesRuleFilter, xiCompliance, hasBlockingRule } from './selectionRules'
 
 // Soft role-band each batting slot prefers — drives auto-fill placement (the
@@ -247,6 +249,12 @@ export default function AdminSelection() {
   const [yearsF, setYearsF] = useState(3)
   const [sort, setSort] = useState('squad')
   const [availEdit, setAvailEdit] = useState(null)
+  // Phone only. `panel` is which of Pool / XI the bottom bar has up; the two
+  // sheets are the "add players" search and one batting-order row's actions.
+  const isPhone = useMediaQuery('(max-width: 1023px)')
+  const [panel, setPanel] = useState('xi')
+  const [addOpen, setAddOpen] = useState(false)
+  const [slotOpen, setSlotOpen] = useState(null)
   const [showSheet, setShowSheet] = useState(false)
   const [copied, setCopied] = useState(false)
   const [allFixtures, setAllFixtures] = useState([])
@@ -463,7 +471,7 @@ export default function AdminSelection() {
   const inactiveHidden = useMemo(() => (data?.pool || []).filter((p) => p.is_inactive && !usedIds.has(p.id)).length, [data, usedIds])
   const pool = useMemo(() => {
     let list = available
-    if (search.trim()) list = list.filter((p) => (p.display_name || '').toLowerCase().includes(search.trim().toLowerCase()))
+    if (search.trim()) list = list.filter((p) => nameMatches(p.display_name, search))
     if (values.role?.length) list = list.filter((p) => (p.skill_positions || []).some((r) => values.role.includes(r)))
     if (values.avail?.length) list = list.filter((p) => values.avail.includes(p.availability || 'NO_RESPONSE'))
     if (values.bowling?.length) list = list.filter((p) => values.bowling.includes(classifyBowl(p)))
@@ -845,19 +853,25 @@ export default function AdminSelection() {
     poolById, pool, slots, capId, wkId, focus, format, count, target, balance,
     rules: data?.rules,
     filledSet: usedIds, canAutofill, hasPrev,
+    available, view, isPhone, panel, setPanel,
+    openAdd: (i) => { if (i != null) setFocus(i); setAddOpen(true) },
+    openSlot: (i) => setSlotOpen(i),
     changeFormat, tapPlayer, placeInSlot, removeAt, swapSlots, setFocus, toggleCap, toggleWk,
     autofill: () => fillEmpty(false), fillLastWeek: () => fillEmpty(true), clearXI, setAvailEdit,
   }
 
   const headerLeft = <ViewToggle value={view} onChange={setView} />
+  const confirmLabel = saving ? 'Confirming…' : dirty ? `Confirm${count ? ` (${count})` : ''}` : 'Confirmed'
   const actions = (
     <div className="flex items-center gap-2.5">
+      {/* The site's own top bar already carries the theme toggle on a phone. */}
       <button onClick={toggleTheme} title="Toggle theme"
-        className="inline-flex items-center justify-center w-[34px] h-[34px] rounded-lg bg-pb-surface2 border border-pb-hairline text-pb-dim hover:text-pb-text">
+        className="max-md:hidden inline-flex items-center justify-center w-[34px] h-[34px] rounded-lg bg-pb-surface2 border border-pb-hairline text-pb-dim hover:text-pb-text">
         <Icon name={theme === 'light' ? 'moon' : 'sun'} size={16} />
       </button>
       <Btn variant="soft" sm icon="share" onClick={() => setShowSheet(true)} disabled={count === 0}><span className="hidden sm:inline">Share</span></Btn>
-      {canEdit && <Btn variant="primary" sm icon="check" onClick={save} disabled={saving || !dirty}>{saving ? 'Confirming…' : dirty ? `Confirm${count ? ` (${count})` : ''}` : 'Confirmed'}</Btn>}
+      {/* Below `lg` Confirm lives in the bar pinned to the bottom of the screen. */}
+      {canEdit && <Btn variant="primary" sm icon="check" className="max-lg:hidden" onClick={save} disabled={saving || !dirty}>{confirmLabel}</Btn>}
     </div>
   )
 
@@ -889,8 +903,10 @@ export default function AdminSelection() {
               : draftStatus === 'saving'
                 ? 'Saving your changes…'
                 : 'Your changes are saved as you go, so you can leave and come back.'}
-            {' '}The confirmed XI stays as it was until you press Confirm.
-            {draftInfo?.by && draftInfo.at && !saving ? ` Last saved by ${draftInfo.by}.` : ''}
+            <span className="max-sm:hidden">
+              {' '}The confirmed XI stays as it was until you press Confirm.
+              {draftInfo?.by && draftInfo.at && !saving ? ` Last saved by ${draftInfo.by}.` : ''}
+            </span>
           </span>
           <button type="button" onClick={discardDraft} disabled={saving}
             className="shrink-0 font-display font-semibold text-pb-accent hover:underline disabled:opacity-50">
@@ -898,9 +914,18 @@ export default function AdminSelection() {
           </button>
         </div>
       )}
-      <DnD onDrop={onDrop}>
-        {view === 'sheet' ? <TeamSheetView vm={vm} /> : <DualRailView vm={vm} />}
-      </DnD>
+      {/* Room for the pinned bar on a phone, so the last row is not under it. */}
+      <div className="max-lg:pb-24">
+        <DnD onDrop={onDrop}>
+          {view === 'sheet' ? <TeamSheetView vm={vm} /> : <DualRailView vm={vm} />}
+        </DnD>
+      </div>
+
+      <MobileBar vm={vm} confirm={canEdit && (
+        <Btn variant="primary" icon="check" className="min-h-[44px] shrink-0" onClick={save} disabled={saving || !dirty}>{confirmLabel}</Btn>
+      )} />
+      {canEdit && addOpen && <AddPlayersSheet vm={vm} onClose={() => setAddOpen(false)} />}
+      {canEdit && slotOpen != null && <SlotSheet vm={vm} idx={slotOpen} onClose={() => setSlotOpen(null)} />}
 
       {availEdit && (
         <QuickAvailModal player={availEdit} dateLabel={fx?.played_on} current={availEdit.availability}

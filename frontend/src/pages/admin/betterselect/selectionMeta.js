@@ -17,6 +17,17 @@ export function inAnotherXI(p) { return p?.clash?.length > 0 || alsoIn(p).length
 export function alsoInLine(p) { return alsoIn(p).map((a) => a.text || a.team_name).join('; ') }
 export function alsoInTight(p) { return alsoIn(p).some((a) => a.tight) }
 
+// Every word typed must appear somewhere in the name, in any order, so
+// "jack bar" finds "Barendse, Jack" and "barendse jack" finds "Jack Barendse".
+// A plain substring test failed both: the stored name is "Last, First" and the
+// selector types it however they say it. Empty query matches everyone.
+export function nameMatches(name, query) {
+  const words = String(query || '').toLowerCase().split(/[\s,]+/).filter(Boolean)
+  if (!words.length) return true
+  const hay = String(name || '').toLowerCase()
+  return words.every((w) => hay.includes(w))
+}
+
 const ROLE_NOUN = {
   'Batter': 'Batter',
   'Bowler': 'Bowler',

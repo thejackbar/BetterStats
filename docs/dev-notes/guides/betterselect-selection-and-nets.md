@@ -93,6 +93,11 @@
 
 60. The selection board autosaves to `selection_drafts` (migration 317), never to `fixture_lineups`, which is the CONFIRMED XI everything else reads. The draft route runs no clash, call-up or rule check (Confirm does); `PUT /selection/{id}` deletes the draft in its own transaction. `GET /selection/{id}` stays draft-free (BetterIQ shares it). `dirty` is derived from the confirmed XI, not a flag. Any draft write carries its own `fixtureId`, chains behind the one in flight, and Confirm and `load` wait for it. Drafts are versioned: every write names the `base_version` it saw and a stale one is a 409 `draft_conflict` with the current draft (never an overwrite); the board polls, adopts a change silently when nothing is unsent, and otherwise asks (Use their version / Keep mine). The overview carries `has_draft` only.
 
+**Phone layout**
+61. A page wider than the screen is not a scroll on a phone: the browser widens the layout viewport, the sticky header covers the list and fixed modals open off to one side. Every action cluster must wrap below `md` (never `shrink-0` on a phone). Test with a real mobile context and compare `scrollWidth` to the SCREEN width, not `innerWidth`.
+62. Below `lg` the Selection board uses `SelectionMobile.jsx`: bottom bar (Confirm lives there, not in the header), Add players sheet, per-row up/down and ••• sheet. Touch targets are 40px or more; the grip is desk only. Sheets use `visualViewport` so the keyboard does not hide the list. Search is `selectionMeta.nameMatches` (any word order); never a plain substring.
+63. `AvailDot` is a button, 40px under `(pointer: coarse)`. A stray tap there used to open the profile via the avatar link.
+
 **Layout and process**
 54. `min-w-0` goes on the element that may shrink (`<h1>` `truncate min-w-0`, toggle `shrink-0`), not the group. Selection header uses `flex-wrap xl:flex-nowrap` and moves user name + Logout from `sm` to `xl`; only Selection passes `headerLeft`. `flex-wrap` cannot save a `shrink-0` child. A native date input clips its year if it shares a row (age on the caption line).
 55. Re-check `origin/main` at merge before numbering a migration (duplicate revision ids break Alembic).
@@ -116,7 +121,7 @@ none. Migrations 268, 269, 271, 272, 273, 284, 289, 317 are mirrored idempotentl
 
 ## Open follow-ups
 - Confirm does not check for a newer draft from another selector; a 409 during the keepalive flush on leaving is lost with the page.
-- Squads header action cluster overflows 319px at 390px (shared `ModuleLayout`).
+- Other BetterAdmin tables (Payments, Directory, and so on) still need a phone card layout like Accounts; the shell no longer overflows but a wide table is still clipped in its box.
 - Nets `adopt` takes any payload; a malformed one mid-deploy takes the screen down.
 - Session CSV lacks padding up and priority. Nothing writes fixture availability from the nets.
 - No Web Push, no bowling-overs count against actual junior spells.
