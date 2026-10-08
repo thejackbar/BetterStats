@@ -1251,3 +1251,7 @@ Verification: `backend/verification/verify_selection_drop_in.py` (21 checks, rea
 Reported: a 3rd XI squad player picked in the 2nd XI showed first in the 4ths pool. The board autosaves unconfirmed sides to `selection_drafts`, and the pool's "named in another XI" test reads only `fixture_lineups` (confirmed), so a player sitting in the 2nds DRAFT looked unpicked. A confirmed 2nds pick was already handled (it is a `clash`). `selection_pool.assemble_selection` now reads other same-day fixtures' draft `slots` (`jsonb_array_elements_text`, tolerant of gaps and junk) into `in_draft_of`; `_drop_in_from` treats that as picked. A draft is working state and still never blocks a pick or becomes a `clash`. Cards show "In 2nd XI draft (not confirmed)" in amber.
 
 Verification: `verify_selection_drop_in.py` now 29 checks; control on the v9.109.2 code fails the three draft checks (labelled, no `in_draft_of`, sorted first). Not covered: a multi-day fixture that spans the date but starts on another (the clash query matches `played_on` only).
+
+## v9.109.4: the quick availability box links to the player
+
+`QuickAvailModal` (`ui.jsx`) header is a button when the player has an id: it calls `onClose()` then navigates to `/admin/betterselect/players?player=<id>` (the profile and edit panel). The avatar inside stays `noLink` so the button owns the tap. Shared by Squads, Selection and Players, so all three get it. Check added to `verify_mobile_admin_browser.mjs` (Squads block).

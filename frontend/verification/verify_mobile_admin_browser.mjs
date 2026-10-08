@@ -90,7 +90,7 @@ const run = async () => {
     const { browser, page, errors } = await launch()
     const writes = []
     page.on('request', (rq) => { if (rq.method() === 'POST' && /\/api\/availability$/.test(rq.url())) writes.push(JSON.parse(rq.postData() || '{}')) })
-    await stubSquads(page)
+    await stubPlayers(page)
     await page.goto(`${BASE}/admin/betterselect/teams`, { waitUntil: 'domcontentloaded' })
     await page.getByText('Abbas, Aamir').first().waitFor({ timeout: 15000 }).catch(() => {})
     await page.waitForTimeout(400)
@@ -115,6 +115,15 @@ const run = async () => {
     await page.waitForTimeout(300)
     ok('choosing a status saves it for the fixture date', writes.length === 1 && writes[0].status === 'UNAVAILABLE' && writes[0].date === '2027-04-20', JSON.stringify(writes))
     ok('the sheet closes after the pick', (await count(dlg)) === 0)
+    // From the sheet, the face and name lead to the player's profile and edit page.
+    const dot2 = await box(page.locator('[data-avail-dot]').first())
+    if (dot2) await page.touchscreen.tap(dot2.x + dot2.width / 2, dot2.y + dot2.height / 2)
+    await page.waitForTimeout(250)
+    ok('the sheet offers the player\'s profile from their face', (await count(dlg.locator('[data-open-profile]'))) === 1)
+    await tap(dlg.locator('[data-open-profile]'))
+    await page.waitForTimeout(500)
+    ok('tapping it opens that player on the Players page', /\/betterselect\/players\?player=p\d/.test(page.url()), page.url())
+    ok('and closes the sheet', (await count(page.getByRole('dialog', { name: /Update availability/i }))) === 0)
     ok('no script error', errors.length === 0, errors.join(' | '))
     await browser.close()
   }

@@ -473,6 +473,7 @@ export function AvailSummary({ players, statusOf = (p) => p.availability ?? p.av
 /* ── Quick-update availability modal (presentational) ─────────────────────
    onPick(status) is called when a status is chosen; the caller persists it. */
 export function QuickAvailModal({ player, dateLabel, current, onPick, onClose }) {
+  const navigate = useNavigate()
   // A bottom sheet on a phone (the buttons land under the thumb, and it can only
   // ever be as wide as the screen), a centred card from `sm` up.
   return (
@@ -481,13 +482,35 @@ export function QuickAvailModal({ player, dateLabel, current, onPick, onClose })
       <div onClick={(e) => e.stopPropagation()}
         className="w-full sm:w-[380px] max-w-full bg-pb-surface rounded-t-2xl sm:rounded-2xl border border-pb-hairline2 overflow-hidden shadow-2xl pb-[env(safe-area-inset-bottom)] sm:pb-0">
         <div className="flex items-center gap-3 px-[18px] py-4 border-b border-pb-hairline">
-          {player && <Avatar player={player} size={38} noLink />}
-          <div className="flex-1 min-w-0">
-            <div className="font-mono text-[10px] uppercase tracking-wide3 text-pb-accent">
-              Update availability{dateLabel ? ` · ${dateLabel}` : ''}
-            </div>
-            <div className="font-display font-bold text-[17px] mt-0.5 truncate">{player ? playerName(player) : 'Player'}</div>
-          </div>
+          {/* The face and the name are the way through to the player's profile
+              and edit page: you opened this to change one answer, and the next
+              thing you want is often to fix who they are. */}
+          {player?.id
+            ? (
+              <button type="button" onClick={() => { onClose(); navigate(`/admin/betterselect/players?player=${player.id}`) }}
+                data-open-profile aria-label={`Open ${playerName(player)}'s profile`} title="Open profile and edit player"
+                className="flex items-center gap-3 flex-1 min-w-0 text-left -my-1 py-1 rounded-lg active:bg-pb-surface2">
+                <Avatar player={player} size={44} noLink />
+                <span className="flex-1 min-w-0">
+                  <span className="block font-mono text-[10px] uppercase tracking-wide3 text-pb-accent">
+                    Update availability{dateLabel ? ` · ${dateLabel}` : ''}
+                  </span>
+                  <span className="block font-display font-bold text-[17px] mt-0.5 truncate">{playerName(player)}</span>
+                  <span className="block text-[11.5px] text-pb-faint">Open profile and edit ›</span>
+                </span>
+              </button>
+            )
+            : (
+              <>
+                {player && <Avatar player={player} size={38} noLink />}
+                <div className="flex-1 min-w-0">
+                  <div className="font-mono text-[10px] uppercase tracking-wide3 text-pb-accent">
+                    Update availability{dateLabel ? ` · ${dateLabel}` : ''}
+                  </div>
+                  <div className="font-display font-bold text-[17px] mt-0.5 truncate">{player ? playerName(player) : 'Player'}</div>
+                </div>
+              </>
+            )}
           <button onClick={onClose} className="text-pb-faint hover:text-pb-text w-10 h-10 -mr-2 inline-flex items-center justify-center" aria-label="Close"><Icon name="close" size={18} /></button>
         </div>
         <div className="p-4 grid grid-cols-2 gap-2.5">
