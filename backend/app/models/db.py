@@ -5571,6 +5571,9 @@ class FantasySquad(Base):
     chips_used = Column(JSONB, nullable=False, server_default="{}")
     total_points = Column(Numeric(8, 2), nullable=False, server_default="0")
     joined_round = Column(Integer, nullable=True)
+    # Points a mid-season joiner starts on (level with the lowest team when they
+    # joined). Added back by fantasy_squad.recompute_squad_totals.
+    catchup_points = Column(Numeric(8, 2), nullable=False, server_default="0")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 

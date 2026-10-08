@@ -39,7 +39,7 @@ from app.models.db import (
     FantasySquadRoundScore, FantasyPlayerRoundScore,
     FantasyDraft, FantasyDraftPick, FantasyDraftWishlist, FantasyWaiverClaim, FantasyTrade,
 )
-from app.services import rate_limit, fantasy_draft, fantasy_engine, section_names
+from app.services import rate_limit, fantasy_draft, fantasy_engine, fantasy_squad, section_names
 from app.services.fantasy_squad import validate_squad, score_squad_round
 from app.services.fantasy_scoring import DEFAULT_RULES, DEFAULT_SCORING
 
@@ -682,6 +682,9 @@ async def me(token: str, request: Request, db: AsyncSession = Depends(get_db)):
             payload["last_round"] = {"number": lr[0], "points": float(lr[1])}
         payload["overall_rank"] = await _overall_rank(db, league.id if league else None, squad.id)
         payload["chips"] = _chip_states(season, squad, rnd, cur_chip)
+        payload["joined_round"] = squad.joined_round
+        payload["catchup_points"] = float(squad.catchup_points or 0)
+        payload["can_rebuild"] = season.status != "active" or await _may_rebuild(db, squad, rnd)
 
     round_info = None
     if rnd:
@@ -690,7 +693,13 @@ async def me(token: str, request: Request, db: AsyncSession = Depends(get_db)):
             "lock_at": rnd.lock_at.isoformat() if rnd.lock_at else None,
             "locked": _round_locked(rnd), "status": rnd.status,
         }
-    return {"manager": {"id": str(mgr.id), "display_name": mgr.display_name}, "squad": payload, "round": round_info}
+    # A manager who has no squad yet in a season that is already running starts
+    # level with the lowest team: tell them the figure before they pick.
+    start_points = None
+    if squad is None and league is not None and season.status == "active":
+        start_points = await fantasy_squad.lowest_scored_total(db, league.id)
+    return {"manager": {"id": str(mgr.id), "display_name": mgr.display_name}, "squad": payload, "round": round_info,
+            "start_points": start_points}
 
 
 @router.get("/{token}/round")
@@ -757,19 +766,28 @@ class SquadBody(BaseModel):
 @router.post("/{token}/squad")
 async def build_squad(token: str, body: SquadBody, request: Request, db: AsyncSession = Depends(get_db)):
     """Create or replace the manager's squad in the club ladder. Allowed while the
-    season is still open and before any round has scored; once the season is live,
-    changes go through transfers (a later phase)."""
+    season is still open and before any round has scored. Once the season is live,
+    a manager with no squad can still join (they start level with the lowest team
+    and score from the next round that has not locked) and may rebuild until that
+    first round locks; everyone else changes their squad through transfers."""
     club = await _club_for_token(db, token)
     mgr = await _manager_for_session(db, request, club)
     season = await _current_season(db, club)
     if season is None or not season.registration_open:
         raise HTTPException(status_code=403, detail="The squad window is closed for this club.")
-    if season.status == "active":
-        raise HTTPException(status_code=409, detail="The season has started — squad changes go through transfers.")
+    if season.status == "completed":
+        raise HTTPException(status_code=403, detail="This season is over.")
     await _assert_unlocked(db, season)
     league = await _global_league(db, season)
     if league is None:
         raise HTTPException(status_code=404, detail="No club ladder yet")
+    squad = (await db.execute(
+        select(FantasySquad).where(FantasySquad.league_id == league.id, FantasySquad.manager_id == mgr.id)
+    )).scalar_one_or_none()
+    live = season.status == "active"
+    rnd = await _current_round(db, season) if live else None
+    if live and squad is not None and not await _may_rebuild(db, squad, rnd):
+        raise HTTPException(status_code=409, detail="The season has started — squad changes go through transfers.")
     rate_limit.enforce(f"fantasy-write:{mgr.id}", WRITE_LIMIT, WRITE_WINDOW)
 
     # Build the pool lookup the validator needs.
@@ -789,15 +807,19 @@ async def build_squad(token: str, body: SquadBody, request: Request, db: AsyncSe
     budget = (season.rules or DEFAULT_RULES).get("budget", DEFAULT_RULES["budget"])
     spend = sum(pool[str(p["player_id"])]["current_price"] for p in picks)
 
-    squad = (await db.execute(
-        select(FantasySquad).where(FantasySquad.league_id == league.id, FantasySquad.manager_id == mgr.id)
-    )).scalar_one_or_none()
     if squad is None:
         squad = FantasySquad(
             fantasy_season_id=season.id, league_id=league.id, manager_id=mgr.id,
             organisation_id=club.id, team_name=team_name,
             budget_remaining=round(budget - spend, 1),
         )
+        if live:
+            # Joined mid-season: level with the lowest team as of the last scored
+            # round, scoring from the round that is open now (the one after the last
+            # scored round when none is open). Fixed here; later rounds add to it.
+            squad.catchup_points = await fantasy_squad.lowest_scored_total(db, league.id)
+            squad.total_points = squad.catchup_points
+            squad.joined_round = rnd.round_number if rnd is not None else await _next_round_number(db, season)
         db.add(squad)
         await db.flush()
         db.add(FantasyLeagueMember(league_id=league.id, manager_id=mgr.id, squad_id=squad.id))
@@ -893,6 +915,33 @@ async def _current_round(db: AsyncSession, season: FantasySeason) -> Optional[Fa
             FantasyRound.fantasy_season_id == season.id, FantasyRound.status != "scored",
         ).order_by(FantasyRound.round_number).limit(1)
     )).scalar_one_or_none()
+
+
+async def _next_round_number(db: AsyncSession, season: FantasySeason) -> int:
+    """The round after the last scored one: where a manager who joins when no round
+    is open starts scoring."""
+    last = (await db.execute(
+        text("SELECT COALESCE(MAX(round_number), 0) FROM fantasy_rounds "
+             "WHERE fantasy_season_id = CAST(:fs AS UUID) AND status = 'scored'"),
+        {"fs": str(season.id)},
+    )).scalar_one()
+    return int(last) + 1
+
+
+async def _may_rebuild(db: AsyncSession, squad: FantasySquad, rnd: Optional[FantasyRound]) -> bool:
+    """A manager who joined mid-season may redo the whole squad until the first round
+    they score in has locked, as everyone could before the season started. It ends
+    when that round locks or scores, or once they have played a chip or made a
+    transfer (those are tallied against the round and a rebuild would sidestep them)."""
+    if squad.joined_round is None or rnd is None or rnd.round_number != squad.joined_round:
+        return False
+    used = (await db.execute(
+        text("""SELECT 1 FROM fantasy_squad_round_scores
+                WHERE squad_id = CAST(:sid AS UUID) AND round_id = CAST(:rid AS UUID)
+                  AND (chip_used IS NOT NULL OR transfers_made > 0 OR transfer_hit > 0) LIMIT 1"""),
+        {"sid": str(squad.id), "rid": str(rnd.id)},
+    )).scalar()
+    return not used
 
 
 def _round_locked(rnd: Optional[FantasyRound]) -> bool:

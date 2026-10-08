@@ -122,12 +122,14 @@ def score_squad_round(picks, score_by_player: dict[str, tuple[float, int]], best
 
 
 async def recompute_squad_totals(session: AsyncSession, fs) -> None:
-    """Roll each squad's season total up from its round scores. A squad with no
-    round rows left goes to 0 (unsettling a round can empty one)."""
+    """Roll each squad's season total up from its round scores, plus the points a
+    mid-season joiner started on (``catchup_points``, 0 for everyone else). A squad
+    with no round rows left goes to its catch-up figure (unsettling a round can
+    empty one)."""
     await session.execute(
         text("""
             UPDATE fantasy_squads sq SET
-                total_points = COALESCE((
+                total_points = sq.catchup_points + COALESCE((
                     SELECT SUM(srs.points)
                     FROM fantasy_squad_round_scores srs
                     JOIN fantasy_rounds r ON r.id = srs.round_id
@@ -138,6 +140,28 @@ async def recompute_squad_totals(session: AsyncSession, fs) -> None:
         """),
         {"fs": str(fs.id)},
     )
+
+
+async def lowest_scored_total(session: AsyncSession, league_id, exclude_squad_id=None) -> float:
+    """The lowest season total on a league's ladder as of the last SCORED round
+    (a squad's catch-up points plus its scored rounds), over squads that hold
+    picks. This is what a manager who joins mid-season starts level with. It
+    ignores a round still in progress, so a provisional figure never sets it.
+    0 when nobody else is on the ladder yet."""
+    row = (await session.execute(
+        text("""
+            SELECT MIN(sq.catchup_points + COALESCE((
+                       SELECT SUM(srs.points) FROM fantasy_squad_round_scores srs
+                       JOIN fantasy_rounds r ON r.id = srs.round_id
+                       WHERE srs.squad_id = sq.id AND r.status = 'scored'), 0))
+            FROM fantasy_squads sq
+            WHERE sq.league_id = CAST(:lid AS UUID)
+              AND (CAST(:me AS UUID) IS NULL OR sq.id <> CAST(:me AS UUID))
+              AND EXISTS (SELECT 1 FROM fantasy_squad_players sp WHERE sp.squad_id = sq.id)
+        """),
+        {"lid": str(league_id), "me": str(exclude_squad_id) if exclude_squad_id else None},
+    )).scalar()
+    return round(float(row), 2) if row is not None else 0.0
 
 
 async def score_squads_for_round(session: AsyncSession, fs, rnd, rollover: bool = True,
@@ -154,6 +178,10 @@ async def score_squads_for_round(session: AsyncSession, fs, rnd, rollover: bool 
     squads = (await session.execute(
         select(FantasySquad).where(FantasySquad.fantasy_season_id == fs.id)
     )).scalars().all()
+    # A manager who joined mid-season is only scored from the round they joined in:
+    # an admin re-score of earlier rounds (live picks) must not give them points
+    # for games that were played before they picked.
+    squads = [s for s in squads if s.joined_round is None or s.joined_round <= rnd.round_number]
     if not squads:
         return 0
     squad_ids = [s.id for s in squads]

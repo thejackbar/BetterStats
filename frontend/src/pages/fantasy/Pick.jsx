@@ -6,15 +6,17 @@
 import { useMemo, useState } from 'react'
 import { api } from '../../lib/api'
 import {
-  StatTile, DISP, tintBg, money, Btn, Field, CapBadge,
+  StatTile, DISP, tintBg, money, pts, Btn, Field, CapBadge,
   ROLE_ORDER, ROLE_LABEL, GREEN,
 } from './ui'
 import { ScreenTitle, SectionLabel, PlayerRow } from './shell'
 
-export default function Pick({ token, pool, rules, squad, season, onSaved, fail, nav, flash, desktop }) {
+export default function Pick({ token, pool, rules, squad, season, startPoints, onSaved, fail, nav, flash, desktop }) {
   const active = season?.status === 'active'
-  if (active && squad) return <CaptainEditor token={token} squad={squad} onSaved={onSaved} fail={fail} flash={flash} nav={nav} />
-  return <Builder token={token} pool={pool} rules={rules} squad={squad} onSaved={onSaved} fail={fail} nav={nav} desktop={desktop} />
+  // A manager who joined mid-season can still redo the squad until their first round locks.
+  if (active && squad && !squad.can_rebuild) return <CaptainEditor token={token} squad={squad} onSaved={onSaved} fail={fail} flash={flash} nav={nav} />
+  const joinPoints = active ? (squad ? squad.catchup_points : startPoints) : null
+  return <Builder token={token} pool={pool} rules={rules} squad={squad} joinPoints={joinPoints} onSaved={onSaved} fail={fail} nav={nav} desktop={desktop} />
 }
 
 // A small control cluster (Captain · Vice · remove) for a picked-squad row.
@@ -39,7 +41,7 @@ function SquadControls({ p, onCap, onRemove }) {
   )
 }
 
-function Builder({ token, pool, rules, squad, onSaved, fail, nav, desktop }) {
+function Builder({ token, pool, rules, squad, joinPoints, onSaved, fail, nav, desktop }) {
   const quota = rules?.role_quota || { keeper: 1, batter: 4, allrounder: 3, bowler: 4 }
   const budget = rules?.budget ?? 100
   const size = rules?.squad_size ?? 12
@@ -117,6 +119,13 @@ function Builder({ token, pool, rules, squad, onSaved, fail, nav, desktop }) {
       <div style={{ flex: 1 }}><StatTile label="In the bank" value={money(left)} color={left < 0 ? '#ef5b5b' : GREEN} /></div>
       <div style={{ flex: 1 }}><StatTile label="Picked" value={`${chosen.length} / ${size}`} /></div>
       <div style={{ flex: 1 }}><StatTile label="Spent" value={money(spend)} /></div>
+    </div>
+  )
+
+  // The season is already running: say where this team will start, so the late entry is not a surprise.
+  const lateNote = joinPoints != null && (
+    <div style={{ borderRadius: 10, padding: '9px 12px', font: `600 11.5px 'Hanken Grotesk'`, color: 'var(--accent-strong)', background: tintBg(12), border: `1px solid ${tintBg(28)}` }}>
+      The season is already under way. You start on {pts(joinPoints)} points, level with the bottom team, and score from the next round. Once that round locks, changes go through transfers.
     </div>
   )
 
@@ -211,6 +220,7 @@ function Builder({ token, pool, rules, squad, onSaved, fail, nav, desktop }) {
         <ScreenTitle title="Pick Squad" sub={`${size}-man · ${money(budget)} budget`} back onBack={() => nav('team')} />
         <div style={{ display: 'grid', gridTemplateColumns: '420px 1fr', gap: 22, alignItems: 'start', paddingTop: 16 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {lateNote}
             {tiles}
             {nameField}
             {saveBtn}
@@ -231,6 +241,7 @@ function Builder({ token, pool, rules, squad, onSaved, fail, nav, desktop }) {
     <div>
       <ScreenTitle title="Pick Squad" sub={`${size}-man · ${money(budget)} budget`} back onBack={() => nav('team')} />
 
+      {lateNote && <div style={{ padding: '14px 0 0' }}>{lateNote}</div>}
       <div style={{ padding: '14px 0 0' }}>{tiles}</div>
       <div style={{ padding: '12px 0 0' }}>{nameField}</div>
       <div style={{ paddingTop: 12 }}>{saveBtn}</div>

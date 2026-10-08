@@ -16,7 +16,7 @@ const ord = (n) => {
 }
 const teamInitials = (name) => (name || 'My XI').split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase()
 
-export function Onboarding({ manager, season, onBuild }) {
+export function Onboarding({ manager, season, startPoints, onBuild }) {
   const steps = [
     ['Build your squad', 'Pick 12 within $100'],
     ['Name your captain', 'Doubles their points'],
@@ -33,6 +33,11 @@ export function Onboarding({ manager, season, onBuild }) {
           <div style={{ font: `500 13px 'Hanken Grotesk'`, color: 'var(--dim)', marginTop: 10, lineHeight: 1.5, maxWidth: 280, margin: '10px auto 0' }}>
             You're in for {season?.name || 'this season'}. Three quick steps and you're on the ladder.
           </div>
+          {startPoints != null && (
+            <div style={{ font: `600 12px 'Hanken Grotesk'`, color: 'var(--accent-strong)', marginTop: 10, lineHeight: 1.5, maxWidth: 300, margin: '10px auto 0' }}>
+              The season is already under way. You start on {pts(startPoints)} points, level with the bottom team.
+            </div>
+          )}
         </div>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
@@ -61,7 +66,7 @@ export function Onboarding({ manager, season, onBuild }) {
   )
 }
 
-export default function MyTeam({ token, manager, squad, season, round, onChange, flash, fail, nav, desktop }) {
+export default function MyTeam({ token, manager, squad, season, round, startPoints, onChange, flash, fail, nav, desktop }) {
   const [openId, setOpenId] = useState(null)
   const [gwPts, setGwPts] = useState(null)   // player_id -> last-round base points
   const [snapshot, setSnapshot] = useState(null)   // club-ladder snapshot for the desktop rail
@@ -87,9 +92,11 @@ export default function MyTeam({ token, manager, squad, season, round, onChange,
     return () => { on = false }
   }, [token, desktop, squad])
 
-  if (!squad) return <Onboarding manager={manager} season={season} onBuild={() => nav('pick')} />
+  if (!squad) return <Onboarding manager={manager} season={season} startPoints={startPoints} onBuild={() => nav('pick')} />
 
   const rank = squad.overall_rank
+  // A mid-season joiner who has not played their first round can still redo the squad.
+  const transfersOnly = active && !squad.can_rebuild
   const stats = [
     ['Total points', pts(squad.total_points)],
     [squad.last_round ? `GW${squad.last_round.number} pts` : 'GW pts', squad.last_round ? pts(squad.last_round.points) : '—'],
@@ -148,7 +155,7 @@ export default function MyTeam({ token, manager, squad, season, round, onChange,
           <div style={{ minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
               <div style={{ font: `700 12px ${DISP}`, letterSpacing: '.14em', textTransform: 'uppercase', color: 'var(--dim)' }}>Your XI · team sheet</div>
-              <button onClick={() => nav('pick')} style={{ background: 'none', border: 'none', color: 'var(--accent-strong)', font: `600 11px 'Hanken Grotesk'`, cursor: 'pointer' }}>{active ? 'Captain ›' : 'Edit squad ›'}</button>
+              <button onClick={() => nav('pick')} style={{ background: 'none', border: 'none', color: 'var(--accent-strong)', font: `600 11px 'Hanken Grotesk'`, cursor: 'pointer' }}>{transfersOnly ? 'Captain ›' : 'Edit squad ›'}</button>
             </div>
             {groups.map(g => (
               <div key={g.role} style={{ display: 'flex', gap: 14, alignItems: 'center', padding: '11px 0', borderTop: '1px solid var(--surface2)' }}>
@@ -216,7 +223,7 @@ export default function MyTeam({ token, manager, squad, season, round, onChange,
       </div>
 
       <div style={{ display: 'flex', gap: 8, paddingTop: 16 }}>
-        <Btn variant="ghost" full onClick={() => nav('pick')}>{active ? 'View / captain' : 'Edit squad'}</Btn>
+        <Btn variant="ghost" full onClick={() => nav('pick')}>{transfersOnly ? 'View / captain' : 'Edit squad'}</Btn>
         {active && <Btn variant="soft" full onClick={() => nav('transfers')}>Transfers</Btn>}
       </div>
     </div>

@@ -4424,6 +4424,13 @@ async def lifespan(app: FastAPI):
         for _stmt in _CLUB_LINK_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 323: the points a Fantasy manager who joins mid-season
+        # starts on. Same one-copy rule: this list and alembic's 323 both run
+        # services/fantasy_late_join_ddl.STATEMENTS.
+        from app.services.fantasy_late_join_ddl import STATEMENTS as _FANTASY_LATE_JOIN_DDL
+        for _stmt in _FANTASY_LATE_JOIN_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 312: super-admin messages on the club admin dashboard.
         # Same one-copy rule: this and alembic's 312 both run
         # services/admin_broadcast_ddl.STATEMENTS.

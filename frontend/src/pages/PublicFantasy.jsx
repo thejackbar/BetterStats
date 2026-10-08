@@ -47,6 +47,7 @@ export default function PublicFantasy() {
   const [pool, setPool] = useState(null)
   const [rules, setRules] = useState(null)
   const [round, setRound] = useState(null)
+  const [startPoints, setStartPoints] = useState(null)   // what a mid-season joiner starts on
   const [view, setViewRaw] = useState('team')
   const [params, setParams] = useState({})
   const [error, setError] = useState('')
@@ -79,7 +80,7 @@ export default function PublicFantasy() {
 
   const loadApp = useCallback(async () => {
     const [m, p] = await Promise.all([api.fanMe(token), api.fanPool(token).catch(() => null)])
-    setManager(m.manager); setSquad(m.squad); setRound(m.round)
+    setManager(m.manager); setSquad(m.squad); setRound(m.round); setStartPoints(m.start_points ?? null)
     if (p) { setPool(p.players); setRules(p.rules) }
     return m
   }, [token])
@@ -124,8 +125,8 @@ export default function PublicFantasy() {
 
   const screen = () => {
     switch (view) {
-      case 'team': return <MyTeam token={token} manager={manager} squad={squad} season={season} round={round} onChange={loadApp} flash={flash} fail={fail} nav={nav} desktop={desktop} />
-      case 'pick': return <Pick token={token} pool={pool} rules={rules} squad={squad} season={season} onSaved={async () => { flash('Saved.'); await loadApp(); nav('team') }} fail={fail} flash={flash} nav={nav} desktop={desktop} />
+      case 'team': return <MyTeam token={token} manager={manager} squad={squad} season={season} round={round} startPoints={startPoints} onChange={loadApp} flash={flash} fail={fail} nav={nav} desktop={desktop} />
+      case 'pick': return <Pick token={token} pool={pool} rules={rules} squad={squad} season={season} startPoints={startPoints} onSaved={async () => { flash('Saved.'); await loadApp(); nav('team') }} fail={fail} flash={flash} nav={nav} desktop={desktop} />
       case 'transfers': return <Transfers token={token} squad={squad} pool={pool} rules={rules} round={round} onChange={loadApp} flash={flash} fail={fail} nav={nav} desktop={desktop} />
       case 'chips': return <Chips token={token} squad={squad} round={round} onChange={loadApp} flash={flash} fail={fail} nav={nav} />
       case 'points': return <Points token={token} nav={nav} desktop={desktop} />
