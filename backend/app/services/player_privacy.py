@@ -270,11 +270,14 @@ async def _hide_one(
 async def restore_public(session: AsyncSession, player: Player, *, by: str) -> dict:
     """Put a person back on the public site (every club's row, and the
     suppression). Photographs are NOT restored."""
+    # The suppression goes FIRST: the database trigger keeps a suppressed person
+    # hidden, so a row switched back on while the suppression stands would be
+    # forced hidden again.
+    await session.execute(
+        text("DELETE FROM player_privacy_suppressions WHERE grassroots_id = :g"), {"g": person_key(player)})
     for sib in await siblings(session, player):
         if is_privacy_hidden(sib):
             await _restore_one(session, sib, by=by)
-    await session.execute(
-        text("DELETE FROM player_privacy_suppressions WHERE grassroots_id = :g"), {"g": person_key(player)})
     # Lift the email block this removal recorded. Contacts the removal excluded
     # stay excluded (an admin re-includes them): restoring must never re-email
     # someone by itself.

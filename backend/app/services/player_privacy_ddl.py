@@ -21,6 +21,17 @@ that joins later, or a fixture a different club syncs, mints a NEW row for the
 same person. The suppression is what stops that new row appearing publicly:
 every creator that knows the participant id checks it
 (``services/player_privacy.protect_new_player``).
+
+THE DATABASE ENFORCES IT TOO. The suppression belongs to the person, not to a
+club, so it is enforced where every club's rows live. A BEFORE INSERT and a
+BEFORE UPDATE trigger on ``players`` look the row's participant id up in the
+suppression table and force it hidden: ``is_public`` false and the marker set.
+That covers a creator nobody remembered to teach (an importer, a raw INSERT, a
+code path written next year) and any attempt to switch a suppressed person back
+on. The trigger forces rather than raises, so a sync or a merge never fails on
+it. The backfill statement hides any row that predates the trigger. It cannot
+help a row with no participant id (a hand-typed player): those are caught by
+the name masking in ``services/privacy_scrub``.
 """
 
 STATEMENTS: list[str] = [
@@ -33,9 +44,51 @@ STATEMENTS: list[str] = [
         created_by TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )""",
+    # to_jsonb(NEW) reads grassroots_id without naming the column, so the same
+    # function loads on a database whose players table lacks it.
+    """CREATE OR REPLACE FUNCTION player_privacy_enforce() RETURNS trigger AS $fn$
+    DECLARE
+        sup RECORD;
+    BEGIN
+        SELECT s.reason, s.created_by INTO sup
+          FROM player_privacy_suppressions s
+         WHERE s.grassroots_id IN (
+                   LOWER(COALESCE(to_jsonb(NEW) ->> 'grassroots_id', '')),
+                   LOWER(NEW.id::text))
+         LIMIT 1;
+        IF FOUND THEN
+            NEW.is_public := FALSE;
+            IF NEW.privacy_hidden_at IS NULL THEN
+                NEW.privacy_hidden_at := NOW();
+                NEW.privacy_hidden_by := COALESCE(sup.created_by, 'suppression');
+                NEW.privacy_hidden_reason := sup.reason;
+            END IF;
+        END IF;
+        RETURN NEW;
+    END
+    $fn$ LANGUAGE plpgsql""",
+    "DROP TRIGGER IF EXISTS player_privacy_enforce_ins ON players",
+    """CREATE TRIGGER player_privacy_enforce_ins BEFORE INSERT ON players
+       FOR EACH ROW EXECUTE PROCEDURE player_privacy_enforce()""",
+    "DROP TRIGGER IF EXISTS player_privacy_enforce_upd ON players",
+    """CREATE TRIGGER player_privacy_enforce_upd
+       BEFORE UPDATE OF is_public, privacy_hidden_at, grassroots_id ON players
+       FOR EACH ROW EXECUTE PROCEDURE player_privacy_enforce()""",
+    # Rows that predate the trigger. Matches nothing once they are all marked.
+    """UPDATE players p
+          SET is_public = FALSE,
+              privacy_hidden_at = COALESCE(p.privacy_hidden_at, NOW()),
+              privacy_hidden_by = COALESCE(p.privacy_hidden_by, s.created_by, 'suppression'),
+              privacy_hidden_reason = COALESCE(p.privacy_hidden_reason, s.reason)
+         FROM player_privacy_suppressions s
+        WHERE (LOWER(p.grassroots_id) = s.grassroots_id OR LOWER(p.id::text) = s.grassroots_id)
+          AND (p.privacy_hidden_at IS NULL OR p.is_public IS NOT FALSE)""",
 ]
 
 DOWNGRADE: list[str] = [
+    "DROP TRIGGER IF EXISTS player_privacy_enforce_upd ON players",
+    "DROP TRIGGER IF EXISTS player_privacy_enforce_ins ON players",
+    "DROP FUNCTION IF EXISTS player_privacy_enforce()",
     "DROP TABLE IF EXISTS player_privacy_suppressions",
     "ALTER TABLE players DROP COLUMN IF EXISTS privacy_hidden_reason",
     "ALTER TABLE players DROP COLUMN IF EXISTS privacy_hidden_by",

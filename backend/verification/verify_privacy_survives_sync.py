@@ -127,6 +127,86 @@ async def main() -> int:
     again_other = await resolve(maker, ORG2, OTHER, name="Steenholdt, Pat")
     check("the control comes back visible", await state(maker, again_other) == (True, False))
 
+    print("\nA creator nobody taught about the suppression (the database enforces it)")
+    ORG3 = uuid.UUID("bbbbbbbb-0000-4000-8000-000000000003")
+    async with maker() as db:
+        await db.execute(text("INSERT INTO organisations (id, name, slug, is_active) VALUES (:o, 'club-three', 'club-three', true)"),
+                         {"o": str(ORG3)})
+        raw_id, raw_ctrl, orm_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        # A raw INSERT, like an importer or the undo path: no protect_new_player.
+        await db.execute(text(
+            "INSERT INTO players (id, organisation_id, name, grassroots_id) VALUES (:p, :o, 'Steenholdt, T', :g)"),
+            {"p": str(raw_id), "o": str(ORG3), "g": str(TRENT).upper()})
+        await db.execute(text(
+            "INSERT INTO players (id, organisation_id, name, grassroots_id) VALUES (:p, :o, 'Steenholdt, Pat', :g)"),
+            {"p": str(raw_ctrl), "o": str(ORG3), "g": str(OTHER)})
+        # An ORM insert with no guard call at all.
+        db.add(Player(id=orm_id, name="Trent S", organisation_id=ORG3, grassroots_id=str(TRENT)))
+        await db.commit()
+    check("a raw INSERT for his participant id is hidden and marked", await state(maker, raw_id) == (False, True))
+    check("an ORM insert that never called the guard is hidden and marked", await state(maker, orm_id) == (False, True))
+    check("a raw INSERT for the control stays visible", await state(maker, raw_ctrl) == (True, False))
+
+    print("\nSwitching a suppressed person back on")
+    async with maker() as db:
+        await db.execute(text("UPDATE players SET is_public = TRUE, privacy_hidden_at = NULL WHERE id = ANY(CAST(:ids AS uuid[]))"),
+                         {"ids": [str(TRENT), str(raw_id)]})
+        await db.execute(text("UPDATE players SET is_public = FALSE WHERE id = :p"), {"p": str(raw_ctrl)})
+        await db.commit()
+    check("a direct UPDATE cannot make him visible again", await state(maker, TRENT) == (False, True))
+    check("nor his row at another club", await state(maker, raw_id) == (False, True))
+    check("an UPDATE on the control still works (it was hidden by the club)", (await state(maker, raw_ctrl))[0] is False)
+    async with maker() as db:
+        await db.execute(text("UPDATE players SET is_public = TRUE WHERE id = :p"), {"p": str(raw_ctrl)})
+        await db.commit()
+    check("and can be switched back on", await state(maker, raw_ctrl) == (True, False))
+
+    print("\nA row that escaped before the trigger existed")
+    async with maker() as db:
+        await db.execute(text("DROP TRIGGER IF EXISTS player_privacy_enforce_ins ON players"))
+        await db.execute(text("DROP TRIGGER IF EXISTS player_privacy_enforce_upd ON players"))
+        esc = uuid.uuid4()
+        ORG4 = uuid.UUID("bbbbbbbb-0000-4000-8000-000000000004")
+        await db.execute(text("INSERT INTO organisations (id, name, slug, is_active) VALUES (:o, 'club-four', 'club-four', true)"),
+                         {"o": str(ORG4)})
+        await db.execute(text(
+            "INSERT INTO players (id, organisation_id, name, grassroots_id) VALUES (:p, :o, 'Steenholdt, T', :g)"),
+            {"p": str(esc), "o": str(ORG4), "g": str(TRENT)})
+        await db.commit()
+    check("(setup) it really is visible with no trigger", await state(maker, esc) == (True, False))
+    async with engine.begin() as conn:
+        for st in PRIVACY_DDL:
+            await conn.execute(text(st))
+    check("re-running the DDL (a boot) hides it", await state(maker, esc) == (False, True))
+    async with engine.begin() as conn:
+        for st in PRIVACY_DDL:
+            await conn.execute(text(st))
+    check("and a second boot is harmless", await state(maker, esc) == (False, True))
+    check("and leaves the control alone", await state(maker, OTHER) == (True, False))
+
+    print("\nThe limit: a hand-typed player has no participant id")
+    hand = uuid.uuid4()
+    async with maker() as db:
+        await db.execute(text("INSERT INTO players (id, organisation_id, name) VALUES (:p, :o, 'Steenholdt, Trent')"),
+                         {"p": str(hand), "o": str(ORG3)})
+        await db.commit()
+    check("the trigger cannot know a row with no participant id (name masking covers it)",
+          await state(maker, hand) == (True, False))
+
+    print("\nPutting him back on request still works")
+    async with maker() as db:
+        t = await db.get(Player, TRENT)
+        await player_privacy.restore_public(db, t, by="verifier")
+        await db.commit()
+    check("restore brings his rows back, at every club", await state(maker, TRENT) == (True, False)
+          and await state(maker, new_id) == (True, False) and await state(maker, raw_id) == (True, False))
+    async with maker() as db:
+        t = await db.get(Player, TRENT)
+        await player_privacy.hide_at_request(db, t, by="verifier", reason="privacy request")
+        await db.commit()
+    check("and hiding him again works", await state(maker, TRENT) == (False, True)
+          and await state(maker, raw_id) == (False, True))
+
     print("\nA merge, then somebody undoes it")
     DUP = uuid.UUID("bbbbbbbb-2222-4000-8000-000000000001")
     KEEP = uuid.UUID("bbbbbbbb-2222-4000-8000-000000000002")

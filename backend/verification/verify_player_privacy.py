@@ -705,10 +705,11 @@ async def main() -> None:
 
             # ---- DDL: idempotent, and really adds the columns
             print("migration 316 DDL")
+            from app.services.player_privacy_ddl import DOWNGRADE as _DOWN
             async with engine.begin() as conn:
-                for stmt in ("ALTER TABLE players DROP COLUMN privacy_hidden_at",
-                             "ALTER TABLE players DROP COLUMN privacy_hidden_by",
-                             "ALTER TABLE players DROP COLUMN privacy_hidden_reason"):
+                # The shipped downgrade, so the triggers go before the columns
+                # they watch (a bare DROP COLUMN is refused while they exist).
+                for stmt in _DOWN:
                     await conn.execute(text(stmt))
                 for _ in range(2):  # the lifespan re-runs it on every boot
                     for stmt in PRIVACY_DDL:

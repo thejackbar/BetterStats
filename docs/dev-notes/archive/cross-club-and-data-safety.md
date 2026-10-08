@@ -884,3 +884,7 @@ I have not looked at the production logs for earlier use of either hole; a PATCH
 ## v9.108.5: hidden person survives undo-merge (2026-10-08)
 
 Audit of every path that writes or creates `players` rows. Sync never writes `is_public`; hard refresh wipes games only; a re-pulled row is born hidden from `player_privacy_suppressions`. The one hole was `undo_merge`, whose raw INSERT skipped the guard. Fixed with `player_privacy.protect_restored_player`. Verified by `verify_privacy_survives_sync.py` (control run fails only the undo-merge check).
+
+## v9.108.6: removal enforced by database triggers (2026-10-08)
+
+The suppression is global (keyed on the participant id), but enforcement had depended on each creator calling `protect_new_player`. Added `player_privacy_enforce` as BEFORE INSERT and BEFORE UPDATE OF (is_public, privacy_hidden_at, grassroots_id) triggers plus a boot-time backfill, all in the shared DDL list (the football mirror runs it whole; the function reads `grassroots_id` through `to_jsonb(NEW)`). `restore_public` now lifts the suppression first. `verify_privacy_survives_sync.py` (30 checks; the control on a fresh database fails exactly the six new ones). `verify_player_privacy.py` now runs the shipped DOWNGRADE instead of a bare DROP COLUMN.
