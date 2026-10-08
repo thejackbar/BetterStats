@@ -408,7 +408,7 @@ function AliasManager({ playerId }) {
   )
 }
 
-function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, onPhotoChange, heroPhotoUrl, onHeroPhotoChange }) {
+function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, onPhotoChange, heroPhotoUrl, onHeroPhotoChange, onPrivacyReleased }) {
   const bowlingLabelVal = bowlingLabel(draft.bowling_action, draft.bowling_type)
   const age = ageFromDob(draft.date_of_birth)
   // Where the two KIT SIZES live. They are not on this record and never will
@@ -536,7 +536,9 @@ function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, o
             all on the club's public site. Asked for by juniors who would
             rather not be. Their stats still count towards the club's totals
             and they stay in every admin screen. */}
-        {draft.privacy_hidden_at ? (
+        {draft.privacy_hidden_at && draft.privacy_name_match ? (
+          <NameMatchHold profileId={playerId} onReleased={onPrivacyReleased} />
+        ) : draft.privacy_hidden_at ? (
           // The person asked to be taken off the public website. Not the club's
           // switch to flip: the server refuses it too (409), so show why instead
           // of a toggle that cannot work.
@@ -605,7 +607,50 @@ function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, o
 }
 
 /* ── Profile panel ────────────────────────────────────────────────────────── */
-export function Profile({ profile, draft, setDraft, dirty, saved, onSave, canEdit, onEditAvail, canEditAvail, onClose, onPhotoChange, onHeroPhotoChange, footer }) {
+// A player held only because their name matches a person who asked to be
+// removed. Unlike a person's own request, the club can settle this one: if it is
+// somebody else, one confirmed click puts them back. Declared at module level so
+// it keeps its state across the parent's renders.
+function NameMatchHold({ profileId, onReleased }) {
+  const [confirming, setConfirming] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const release = async () => {
+    setBusy(true); setErr('')
+    try {
+      const updated = await api.bsReleasePrivacyHold(profileId)
+      onReleased?.(updated)
+    } catch (e) {
+      setErr(e.message || 'Could not release this player')
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="rounded-lg px-3 py-2.5 text-[12.5px] leading-snug"
+      style={{ background: 'var(--pb-surface2)', border: '1px solid var(--pb-hairline2)' }}>
+      <div className="text-[13.5px] text-pb-text font-medium mb-0.5">Held: same name as a person who asked to be removed</div>
+      <div className="text-pb-faint">
+        This player has no Cricket Australia id, and the name matches someone who asked to be taken
+        off the public website. They stay hidden until you confirm this is a different person.
+        Their stats still count in your club's totals and in every admin screen.
+      </div>
+      {err && <div className="mt-1.5 text-pb-red">{err}</div>}
+      <div className="mt-2 flex items-center gap-2">
+        {!confirming ? (
+          <Btn sm onClick={() => setConfirming(true)}>This is a different person</Btn>
+        ) : (
+          <>
+            <span className="text-pb-text">Show them on the public website?</span>
+            <Btn variant="primary" sm disabled={busy} onClick={release}>{busy ? 'Saving…' : 'Yes, show them'}</Btn>
+            <Btn sm disabled={busy} onClick={() => setConfirming(false)}>Cancel</Btn>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+export function Profile({ profile, draft, setDraft, dirty, saved, onSave, canEdit, onEditAvail, canEditAvail, onClose, onPhotoChange, onHeroPhotoChange, onPrivacyReleased, footer }) {
   const set = (k, v) => setDraft((d) => ({ ...d, [k]: v }))
   const squad = profile.squad
   const handLabel = (BAT_HANDS.find((h) => h[0] === (draft.batting_hand || '')) || [])[1]
@@ -675,7 +720,8 @@ export function Profile({ profile, draft, setDraft, dirty, saved, onSave, canEdi
         <Details draft={draft} set={set} teams={profile._teams || []}
           canEdit={canEdit} playerId={profile.id} playerName={profile.name}
           photoUrl={profile.photo_url} onPhotoChange={onPhotoChange}
-          heroPhotoUrl={profile.hero_photo_url} onHeroPhotoChange={onHeroPhotoChange} />
+          heroPhotoUrl={profile.hero_photo_url} onHeroPhotoChange={onHeroPhotoChange}
+          onPrivacyReleased={onPrivacyReleased} />
       </div>
       {footer}
     </div>
@@ -722,6 +768,8 @@ export function draftFromProfile(p) {
     is_public: p.is_public !== false,
     // Set when the person asked to be removed; read only, never sent back.
     privacy_hidden_at: p.privacy_hidden_at || null,
+    // True when the hold is only a name match the club can release.
+    privacy_name_match: !!p.privacy_name_match,
     is_financial_override: p.is_financial_override ?? null,
     trained_override: p.trained_override ?? null,
     // "YYYY-MM-DD" or '' — the shape <input type="date"> speaks. The age is

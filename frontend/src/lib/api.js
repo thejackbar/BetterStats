@@ -3507,6 +3507,9 @@ export const api = {
   bsGetPlayerProfile: (id) => request(`/players/${id}/profile`),
   bsUpdatePlayerProfile: (id, data) =>
     request(`/players/${id}/profile`, { method: 'PATCH', body: JSON.stringify(data) }),
+  // A player held only because their name matches a person who asked to be
+  // removed: the club confirms they are somebody else. Returns the profile.
+  bsReleasePrivacyHold: (id) => request(`/players/${id}/privacy-release`, { method: 'POST' }),
 
   // Former/alternate names — so a live feed (Play.Cricket, a Grassroots
   // scorecard) using an old name still resolves to this player.

@@ -25,6 +25,7 @@ const ck = (name, cond, extra = '') => {
 
 const TRENT = 'aaaaaaaa-0000-4000-8000-000000000001'
 const PAT = 'aaaaaaaa-0000-4000-8000-000000000002'
+const NAMESAKE = 'aaaaaaaa-0000-4000-8000-000000000003'
 
 const row = (id, name, extra = {}) => ({
   id, name, display_name: name, status: 'active', is_player: true, is_public: true,
@@ -33,10 +34,14 @@ const row = (id, name, extra = {}) => ({
 const ROSTER = [
   row(TRENT, 'Steenholdt, Trent', { is_public: false }),
   row(PAT, 'Plain, Pat', { is_public: false }),
+  row(NAMESAKE, 'Trent Steenholdt', { is_public: false }),
 ]
 const PROFILES = {
   [TRENT]: row(TRENT, 'Steenholdt, Trent', { is_public: false, privacy_hidden_at: '2026-10-01T02:00:00+00:00' }),
   [PAT]: row(PAT, 'Plain, Pat', { is_public: false, privacy_hidden_at: null }),
+  // Held only because the NAME matches a removed person: the club can release it.
+  [NAMESAKE]: row(NAMESAKE, 'Trent Steenholdt', {
+    is_public: false, privacy_hidden_at: '2026-10-01T02:00:00+00:00', privacy_name_match: true }),
 }
 
 const browser = await chromium.launch(existsSync(EXECUTABLE) ? { executablePath: EXECUTABLE } : {})
@@ -66,6 +71,11 @@ async function open(width) {
     }
     if (p === '/club-admin/players') return json(ROSTER)
     if (p === '/club-admin/settings') return json({ id: 'org-1', name: 'Applecross', slug: 'applecross', player_name_format: 'last_first' })
+    const rel = p.match(/^\/players\/([^/]+)\/privacy-release$/)
+    if (rel && req.method() === 'POST') {
+      PROFILES[rel[1]] = { ...PROFILES[rel[1]], is_public: true, privacy_hidden_at: null, privacy_name_match: false }
+      return json(PROFILES[rel[1]])
+    }
     const m = p.match(/^\/players\/([^/]+)\/profile$/)
     if (m && req.method() === 'GET') return json(PROFILES[m[1]] || {})
     if (m && req.method() === 'PATCH') return json({ ...(PROFILES[m[1]] || {}), ...(JSON.parse(body || '{}')) })
@@ -125,6 +135,34 @@ for (const width of [1280, 390]) {
     (await page.getByText('Hidden — keep off the public website').count()) === 1)
   ck('Pat: no "at the player\'s request" note', !/Removed at the player's request/.test(body))
   await page.screenshot({ path: `/tmp/claude-0/pp_pat_${width}.png` })
+
+  // The namesake: held by NAME only. A different note, and a way to release it.
+  await page.goto(`${BASE}/admin/players`, { waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(1200)
+  await page.locator('.pl-row').nth(2).click()
+  await page.waitForTimeout(900)
+  body = await page.locator('body').innerText()
+  ck('Namesake: says it is held for the same name', /Held: same name as a person who asked to be removed/.test(body))
+  ck('Namesake: does NOT say it was the player\'s own request', !/Removed at the player's request/.test(body))
+  ck('Namesake: offers "This is a different person"', (await page.getByRole('button', { name: 'This is a different person' }).count()) === 1)
+  ck(`Namesake: no horizontal overflow at ${width}px`, (await overflow(page)) <= 1, String(await overflow(page)))
+  await page.screenshot({ path: `/tmp/claude-0/pp_namesake_${width}.png` })
+  await page.getByRole('button', { name: 'This is a different person' }).click()
+  ck('Namesake: asks to confirm before doing it',
+    (await page.getByText('Show them on the public website?').count()) === 1
+    && !calls.some(c => c.path === `/players/${NAMESAKE}/privacy-release`))
+  await page.getByRole('button', { name: 'Cancel' }).click()
+  ck('Namesake: Cancel sends nothing', !calls.some(c => c.path === `/players/${NAMESAKE}/privacy-release`))
+  await page.getByRole('button', { name: 'This is a different person' }).click()
+  await page.getByRole('button', { name: 'Yes, show them' }).click()
+  await page.waitForTimeout(800)
+  const relCall = calls.find(c => c.method === 'POST' && c.path === `/players/${NAMESAKE}/privacy-release`)
+  ck('Namesake: confirming sends POST /privacy-release for that player', !!relCall)
+  body = await page.locator('body').innerText()
+  ck('Namesake: the hold note is gone afterwards', !/Held: same name/.test(body))
+  ck('Namesake: the club\'s own Hidden switch is back (they are an ordinary player now)',
+    (await page.getByText('Hidden — keep off the public website').count()) === 1)
+  PROFILES[NAMESAKE] = row(NAMESAKE, 'Trent Steenholdt', { is_public: false, privacy_hidden_at: '2026-10-01T02:00:00+00:00', privacy_name_match: true })
 
   ck('no page errors', errors.length === 0, errors.join(' | '))
   await ctx.close()

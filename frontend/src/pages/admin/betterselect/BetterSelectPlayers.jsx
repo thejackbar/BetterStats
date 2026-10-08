@@ -466,7 +466,8 @@ export default function BetterSelectPlayers() {
               : <Profile profile={profileForView} draft={draft} setDraft={setDraft}
                   dirty={dirty} saved={savedTick} onSave={onSave} canEdit={canEdit}
                   onEditAvail={openAvail} canEditAvail={canEdit}
-                  onPhotoChange={onPhotoChange} onHeroPhotoChange={onHeroPhotoChange} />}
+                  onPhotoChange={onPhotoChange} onHeroPhotoChange={onHeroPhotoChange}
+                  onPrivacyReleased={(updated) => { setProfile(updated); setDraft(draftFromProfile(updated)) }} />}
         </div>
       </div>
 

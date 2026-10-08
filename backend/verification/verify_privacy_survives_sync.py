@@ -56,6 +56,16 @@ async def state(maker, pid):
     return None if r is None else (r[0] is not False, bool(r[1]))
 
 
+async def names_of(maker, guid):
+    """The person's names on the global record; None where the column does not exist (the control)."""
+    try:
+        async with maker() as db:
+            return (await db.execute(text(
+                "SELECT names FROM player_privacy_suppressions WHERE grassroots_id = :g"), {"g": str(guid)})).scalar()
+    except Exception:
+        return None
+
+
 async def resolve(maker, org, guid, name="Steenholdt, Trent", cache=None):
     async with maker() as db:
         pid = await sync._resolve_org_player(db, org, cache if cache is not None else {}, str(guid), name, {})
@@ -184,14 +194,126 @@ async def main() -> int:
     check("and a second boot is harmless", await state(maker, esc) == (False, True))
     check("and leaves the control alone", await state(maker, OTHER) == (True, False))
 
-    print("\nThe limit: a hand-typed player has no participant id")
-    hand = uuid.uuid4()
+    print("\nA hand-typed player with his name (no participant id, so matched on name)")
+    keys = await names_of(maker, TRENT)
+    check("the global record keeps his name as a key", "steenholdt trent" in (keys or []), str(keys))
+
+    async def typed(name, *, org=ORG3, gid=None, override=None):
+        pid = uuid.uuid4()
+        async with maker() as db:
+            await db.execute(text(
+                "INSERT INTO players (id, organisation_id, name, grassroots_id, display_name_override) "
+                "VALUES (:p, :o, :n, :g, :d)"),
+                {"p": str(pid), "o": str(org), "n": name, "g": gid, "d": override})
+            await db.commit()
+        return pid
+
+    async def held_by(pid):
+        async with maker() as db:
+            return (await db.execute(text("SELECT privacy_hidden_by FROM players WHERE id = :p"), {"p": str(pid)})).scalar()
+
+    h1 = await typed("Trent Steenholdt")
+    h2 = await typed("  steenholdt,   TRENT ")
+    h3 = await typed("Trent S", override="Trent Steenholdt")
+    check("'Trent Steenholdt' typed by hand is held hidden", await state(maker, h1) == (False, True))
+    check("so is the same name in another order and case", await state(maker, h2) == (False, True))
+    check("so is a row whose display name matches", await state(maker, h3) == (False, True))
+    check("and it says it is a name hold, not his own request", await held_by(h1) == "name-match", str(await held_by(h1)))
+    c_first = await typed("Pat Steenholdt")
+    c_sur = await typed("Steenholdt")
+    c_init = await typed("T. Steenholdt")
+    c_long = await typed("Trent Steenholdt-Jones")
+    c_other = await typed("Steenholdt, Trent", org=ORG1, gid=str(uuid.uuid4()))
+    check("the same surname with another first name stays visible", await state(maker, c_first) == (True, False))
+    check("a lone surname stays visible", await state(maker, c_sur) == (True, False))
+    check("an initial and surname stays visible", await state(maker, c_init) == (True, False))
+    check("a different, longer name stays visible", await state(maker, c_long) == (True, False))
+    check("the same name with a DIFFERENT participant id stays visible (a different person)",
+          await state(maker, c_other) == (True, False))
+
+    print("\nA hand-typed player who is already there when somebody asks to be removed")
+    ZED = uuid.UUID("bbbbbbbb-3333-4000-8000-000000000001")
     async with maker() as db:
-        await db.execute(text("INSERT INTO players (id, organisation_id, name) VALUES (:p, :o, 'Steenholdt, Trent')"),
-                         {"p": str(hand), "o": str(ORG3)})
+        await db.execute(text("INSERT INTO players (id, organisation_id, name, grassroots_id) VALUES (:p, :o, 'Quinn, Zed', :g)"),
+                         {"p": str(ZED), "o": str(ORG1), "g": str(ZED)})
         await db.commit()
-    check("the trigger cannot know a row with no participant id (name masking covers it)",
-          await state(maker, hand) == (True, False))
+    e1 = await typed("Zed Quinn")
+    e_ctl = await typed("Pat Quinn")
+    check("(setup) the namesake is visible before the request", await state(maker, e1) == (True, False))
+    async with maker() as db:
+        z = await db.get(Player, ZED)
+        out = await player_privacy.hide_at_request(db, z, by="verifier", reason="privacy request")
+        await db.commit()
+    check("hiding him holds the existing namesake", await state(maker, e1) == (False, True)
+          and out.get("name_matches_held") == 1, str(out.get("name_matches_held")))
+    check("and leaves a different first name alone", await state(maker, e_ctl) == (True, False))
+
+    print("\nHis names outlive his rows")
+    YAN = uuid.UUID("bbbbbbbb-3333-4000-8000-000000000002")
+    async with maker() as db:
+        await db.execute(text("INSERT INTO players (id, organisation_id, name, grassroots_id) VALUES (:p, :o, 'Rowe, Yan', :g)"),
+                         {"p": str(YAN), "o": str(ORG1), "g": str(YAN)})
+        await db.commit()
+    async with maker() as db:
+        y = await db.get(Player, YAN)
+        await player_privacy.hide_at_request(db, y, by="verifier", reason="privacy request")
+        await db.commit()
+    async with maker() as db:
+        await db.execute(text("DELETE FROM players WHERE id = :p"), {"p": str(YAN)})
+        await db.commit()
+    y1 = await typed("Yan Rowe")
+    check("with every row of his gone, a hand-typed 'Yan Rowe' is still held", await state(maker, y1) == (False, True))
+
+    print("\nReleasing a name hold, and renaming")
+    async with maker() as db:
+        row = await db.get(Player, h1)
+        try:
+            await player_privacy.release_name_match(db, row, by="verifier")
+        except AttributeError:
+            pass  # the control has no release
+        await db.commit()
+    check("an admin confirming a different person puts the row back", await state(maker, h1) == (True, False))
+    async with maker() as db:
+        await db.execute(text("UPDATE players SET name = 'Trent  Steenholdt' WHERE id = :p"), {"p": str(h1)})
+        await db.execute(text("UPDATE players SET is_public = TRUE WHERE id = :p"), {"p": str(h1)})
+        await db.commit()
+    check("and a later edit does not hold it again", await state(maker, h1) == (True, False))
+    async with maker() as db:
+        refused = False
+        try:
+            await player_privacy.release_name_match(db, await db.get(Player, TRENT), by="verifier")
+        except ValueError:
+            refused = True
+        except AttributeError:
+            pass  # the control has no release
+    check("his OWN request cannot be released this way", refused and await state(maker, TRENT) == (False, True))
+    async with maker() as db:
+        await db.execute(text("UPDATE players SET name = 'Someone Else' WHERE id = :p"), {"p": str(h2)})
+        await db.commit()
+    check("renaming a held row to a different name lets it go", await state(maker, h2) == (True, False))
+    async with maker() as db:
+        await db.execute(text("UPDATE players SET name = 'Trent Steenholdt' WHERE id = :p"), {"p": str(h2)})
+        await db.commit()
+    check("renaming it onto his name holds it again", await state(maker, h2) == (False, True))
+    club_hidden = await typed("Lee Smith")
+    async with maker() as db:
+        await db.execute(text("UPDATE players SET is_public = FALSE WHERE id = :p"), {"p": str(club_hidden)})
+        await db.execute(text("UPDATE players SET name = 'Lee Smythe' WHERE id = :p"), {"p": str(club_hidden)})
+        await db.commit()
+    check("a row the CLUB hid is never un-hidden by a rename", (await state(maker, club_hidden))[0] is False)
+
+    print("\nA suppression recorded before names were kept")
+    try:
+        async with maker() as db:
+            await db.execute(text("UPDATE player_privacy_suppressions SET names = NULL WHERE grassroots_id = :g"), {"g": str(TRENT)})
+            await db.commit()
+    except Exception:
+        pass  # the control has no names column
+    async with engine.begin() as conn:
+        for st in PRIVACY_DDL:
+            await conn.execute(text(st))
+    keys = await names_of(maker, TRENT)
+    check("a boot fills his names back in from his own rows", "steenholdt trent" in (keys or []), str(keys))
 
     print("\nPutting him back on request still works")
     async with maker() as db:
@@ -200,12 +322,15 @@ async def main() -> int:
         await db.commit()
     check("restore brings his rows back, at every club", await state(maker, TRENT) == (True, False)
           and await state(maker, new_id) == (True, False) and await state(maker, raw_id) == (True, False))
+    check("his name-matched namesakes are let go with him", await state(maker, h2) == (True, False)
+          and await state(maker, h3) == (True, False), str(await state(maker, h2)))
     async with maker() as db:
         t = await db.get(Player, TRENT)
         await player_privacy.hide_at_request(db, t, by="verifier", reason="privacy request")
         await db.commit()
     check("and hiding him again works", await state(maker, TRENT) == (False, True)
           and await state(maker, raw_id) == (False, True))
+    check("and holds his namesakes again", await state(maker, h2) == (False, True))
 
     print("\nA merge, then somebody undoes it")
     DUP = uuid.UUID("bbbbbbbb-2222-4000-8000-000000000001")

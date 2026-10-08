@@ -1453,6 +1453,9 @@ class Player(Base):
     privacy_hidden_at = Column(TIMESTAMP(timezone=True), nullable=True)
     privacy_hidden_by = Column(Text, nullable=True)
     privacy_hidden_reason = Column(Text, nullable=True)
+    # An admin confirmed a row held because its NAME matched a removed person is
+    # a different person; the name match then skips this row.
+    privacy_name_cleared_at = Column(TIMESTAMP(timezone=True), nullable=True)
     # BetterSelect "non-financial" filter (migration 265). NULL = no override,
     # so the answer comes from BetterFees' own balance; True/False is a club
     # saying so by hand, which is also the only answer a club not running

@@ -90,6 +90,7 @@ _PRIVACY_MANAGEMENT_ROUTES = frozenset({
     ("POST", "/{player_id}/aliases"),
     ("DELETE", "/{player_id}/aliases/{alias_id}"),
     ("POST", "/{player_id}/request-sync"),
+    ("POST", "/{player_id}/privacy-release"),
 })
 
 
@@ -1111,6 +1112,8 @@ def _profile_fields(player: Player) -> dict:
         "is_public": player.is_public is not False,
         # Set when the person asked to be removed; the club cannot switch it back.
         "privacy_hidden_at": player.privacy_hidden_at.isoformat() if player.privacy_hidden_at else None,
+        # True when the hold is only a NAME match, which the club can release.
+        "privacy_name_match": player_privacy.is_name_match_hold(player),
         "is_financial_override": player.is_financial_override,
         "trained_override": player.trained_override,
         "shirt_number": player.shirt_number,
@@ -1347,7 +1350,10 @@ async def update_player_profile(
     # 316). Only an explicit attempt to switch them on is refused; every other
     # edit to their record goes through.
     if player_privacy.is_privacy_hidden(player) and data.get("is_public") is True:
-        raise HTTPException(status_code=409, detail=player_privacy.HOLD_MESSAGE)
+        raise HTTPException(
+            status_code=409,
+            detail=player_privacy.NAME_MATCH_HOLD_MESSAGE if player_privacy.is_name_match_hold(player)
+            else player_privacy.HOLD_MESSAGE)
     if "status" in data and data["status"] not in (None, "active", "inactive"):
         raise HTTPException(status_code=400, detail="status must be 'active' or 'inactive'")
     if "date_of_birth" in data:
@@ -1396,6 +1402,30 @@ async def update_player_profile(
             db, player.organisation_id, player.id, player.squad_team_id, new_id, user.id)
     if old_display_name and old_display_name != player.display_name:
         await seed_alias_on_rename(db, player.organisation_id, player.id, old_display_name)
+    await db.commit()
+    await db.refresh(player)
+    return await _full_profile(db, player)
+
+
+@router.post("/{player_id}/privacy-release")
+async def release_privacy_name_hold(
+    player_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_cap(MANAGE_PLAYERS)),
+    club: Organisation = Depends(get_current_club),
+):
+    """Confirm that a player held only because their NAME matches a person who
+    asked to be removed is somebody else. Same club only. A person's own
+    request is never released here (409): BetterSports lifts those."""
+    player = await db.get(Player, uuid.UUID(player_id))
+    if not player or player.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Player not found")
+    if not player_privacy.is_name_match_hold(player):
+        raise HTTPException(
+            status_code=409,
+            detail="Only a player held because of a name match can be released here.")
+    await player_privacy.release_name_match(
+        db, player, by=getattr(user, "username", None) or str(user.id), user_id=user.id)
     await db.commit()
     await db.refresh(player)
     return await _full_profile(db, player)

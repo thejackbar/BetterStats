@@ -888,3 +888,7 @@ Audit of every path that writes or creates `players` rows. Sync never writes `is
 ## v9.108.6: removal enforced by database triggers (2026-10-08)
 
 The suppression is global (keyed on the participant id), but enforcement had depended on each creator calling `protect_new_player`. Added `player_privacy_enforce` as BEFORE INSERT and BEFORE UPDATE OF (is_public, privacy_hidden_at, grassroots_id) triggers plus a boot-time backfill, all in the shared DDL list (the football mirror runs it whole; the function reads `grassroots_id` through `to_jsonb(NEW)`). `restore_public` now lifts the suppression first. `verify_privacy_survives_sync.py` (30 checks; the control on a fresh database fails exactly the six new ones). `verify_player_privacy.py` now runs the shipped DOWNGRADE instead of a bare DROP COLUMN.
+
+## v9.108.7: name matching for hand-typed players (2026-10-08)
+
+The trigger enforced the suppression by participant id only. A hand-typed or imported row has none, so `player_privacy_suppressions` now keeps `names` and the trigger holds a no-id row whose canonical name key matches (`name-match`, releasable by the club, audited). Rejected: matching on surname plus initial, or on any one-word name (false positives on relatives). Rule: hiding wrongly is recoverable, showing a person who asked not to be shown is not. `verify_privacy_survives_sync.py` (52 checks; the control fails the 11 new ones), `verify_player_privacy.py` (+10 route checks), `verify_player_privacy_browser.mjs` (+ the namesake, 36 checks).

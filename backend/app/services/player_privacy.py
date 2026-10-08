@@ -44,6 +44,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import ManualEditLog, Player
 
 # What a club admin is told when they try to undo a person's request.
+# privacy_hidden_by for a row held only because its NAME matches a removed person.
+NAME_MATCH = "name-match"
+
+NAME_MATCH_HOLD_MESSAGE = (
+    "This player is held because the name matches a person who asked to be removed "
+    "from the public website. If they are a different person, confirm that with "
+    "'This is a different person' on their profile."
+)
+
 HOLD_MESSAGE = (
     "This player asked to be removed from the public website, so they cannot be "
     "switched back on or given a photo here. Contact BetterSports support if "
@@ -57,6 +66,11 @@ AUDIT_RESTORE = "privacy_restore"
 def is_privacy_hidden(player: Optional[Player]) -> bool:
     """Did this person ask to be hidden? The one definition every guard reads."""
     return bool(player is not None and getattr(player, "privacy_hidden_at", None) is not None)
+
+
+def is_name_match_hold(player: Optional[Player]) -> bool:
+    """Hidden only because the name matches a removed person (an admin can release it)."""
+    return bool(is_privacy_hidden(player) and getattr(player, "privacy_hidden_by", None) == NAME_MATCH)
 
 
 def _unlink_upload(photo_url: Optional[str]) -> bool:
@@ -169,11 +183,95 @@ async def hide_at_request(
          WHERE NOT EXISTS (SELECT 1 FROM player_privacy_suppressions WHERE grassroots_id = :g)
     """), {"g": person_key(player), "r": reason, "b": by})
     out["suppression_recorded"] = True
+    people = [player] + (await siblings(session, player) if include_siblings else [])
+    out["names_recorded"] = await _record_names(session, player, people)
+    out["name_matches_held"] = await _sweep_name_matches(session, person_key(player))
     out["emails"] = await _suppress_emails(
         session, [player] + (await siblings(session, player) if include_siblings else []), reason, by)
     from app.services import privacy_scrub
     privacy_scrub.forget()
     return out
+
+
+async def _record_names(session: AsyncSession, player: Player, people: list) -> int:
+    """Keep the person's names on the global record, so a hand-typed row with the
+    same name can be recognised even if every row of theirs is gone. Names are
+    stored as canonical keys (``privacy_name_key``); a single word never counts."""
+    raw: set[str] = set()
+    for p in people:
+        for n in (p.name, getattr(p, "display_name_override", None)):
+            if n and n.strip():
+                raw.add(n)
+    try:
+        async with session.begin_nested():
+            for pid, alias in (await session.execute(
+                text("SELECT player_id::text, alias_name FROM player_name_aliases WHERE player_id::text = ANY(:ids)"),
+                {"ids": [str(p.id) for p in people]},
+            )).fetchall():
+                if alias and alias.strip():
+                    raw.add(alias)
+    except Exception:
+        pass  # a database without the aliases table: the names on the rows are enough
+    res = await session.execute(text("""
+        UPDATE player_privacy_suppressions
+           SET names = COALESCE((
+                 SELECT array_agg(DISTINCT k) FROM (
+                     SELECT UNNEST(COALESCE(names, CAST('{}' AS TEXT[]))) AS k
+                     UNION
+                     SELECT privacy_name_key(n) FROM UNNEST(CAST(:raw AS TEXT[])) AS n
+                 ) q
+                 WHERE k IS NOT NULL AND array_length(string_to_array(k, ' '), 1) >= 2
+                   AND NOT EXISTS (SELECT 1 FROM unnest(string_to_array(k, ' ')) w WHERE length(w) < 2)
+               ), CAST('{}' AS TEXT[]))
+         WHERE grassroots_id = :g
+    """), {"raw": sorted(raw), "g": person_key(player)})
+    return res.rowcount or 0
+
+
+async def _sweep_name_matches(session: AsyncSession, key: str) -> int:
+    """Hold every existing row with no participant id whose name is on the
+    suppression. SET name = name makes the UPDATE trigger do the matching, so
+    there is one rule, in the database."""
+    res = await session.execute(text("""
+        UPDATE players p SET name = p.name
+         WHERE NULLIF(p.grassroots_id, '') IS NULL
+           AND p.privacy_name_cleared_at IS NULL
+           AND p.privacy_hidden_at IS NULL
+           AND EXISTS (SELECT 1 FROM player_privacy_suppressions s
+                        WHERE s.grassroots_id = :g
+                          AND (privacy_name_key(p.name) = ANY(s.names)
+                               OR privacy_name_key(to_jsonb(p) ->> 'display_name_override') = ANY(s.names)))
+    """), {"g": key})
+    return res.rowcount or 0
+
+
+async def release_name_match(session: AsyncSession, player: Player, *, by: str, user_id=None) -> dict:
+    """An admin confirms a row held only by name is a different person.
+
+    Refuses anything that is not a name hold: a person's own request is lifted
+    by BetterSports (``restore_public``), never by a club. Caller commits."""
+    if not is_name_match_hold(player):
+        raise ValueError("Only a hold placed because of a name match can be released here.")
+    player.privacy_name_cleared_at = datetime.now(timezone.utc)
+    player.privacy_hidden_at = None
+    player.privacy_hidden_by = None
+    player.privacy_hidden_reason = None
+    player.is_public = True
+    if player.organisation_id:
+        session.add(ManualEditLog(
+            organisation_id=player.organisation_id,
+            user_id=user_id,
+            action=AUDIT_RESTORE,
+            target_table="players",
+            target_id=str(player.id),
+            summary=f"Confirmed a different person from a name match, and put back on the public site ({by})",
+            before_json={"privacy_hidden_by": NAME_MATCH},
+            after_json={"is_public": True, "privacy_name_cleared": True},
+        ))
+    from app.services import privacy_email, privacy_scrub
+    privacy_scrub.forget()
+    privacy_email.forget()
+    return {"released": True}
 
 
 async def _suppress_emails(session: AsyncSession, players: list, reason: str, by: str) -> dict:
@@ -275,6 +373,9 @@ async def restore_public(session: AsyncSession, player: Player, *, by: str) -> d
     # forced hidden again.
     await session.execute(
         text("DELETE FROM player_privacy_suppressions WHERE grassroots_id = :g"), {"g": person_key(player)})
+    # Rows held only by this person's name are let go by the trigger (it lifts a
+    # name hold that no longer matches any suppression).
+    await session.execute(text("UPDATE players SET name = name WHERE privacy_hidden_by = :nm"), {"nm": NAME_MATCH})
     for sib in await siblings(session, player):
         if is_privacy_hidden(sib):
             await _restore_one(session, sib, by=by)

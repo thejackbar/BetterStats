@@ -156,6 +156,7 @@ function ProfileModal({ playerId, teams, canEdit, index, total, onPrev, onNext, 
                 dirty={dirty} saved={saved} onSave={onSave} canEdit={canEdit}
                 canEditAvail={canEdit} onEditAvail={(pl, date) => setAvailEdit({ player: pl, date })}
                 onClose={onClose} onPhotoChange={onPhotoChange} onHeroPhotoChange={onHeroPhotoChange}
+                onPrivacyReleased={(updated) => { setProfile(updated); setDraft(draftFromProfile(updated)); onSaved?.(updated) }}
                 footer={showMerch ? <PlayerMerchPanel playerId={playerId} /> : null} />}
         </div>
       </div>

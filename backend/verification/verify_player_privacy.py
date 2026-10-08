@@ -686,6 +686,60 @@ async def main() -> None:
                 got = await gate(method, tmpl)
                 check(f"...and cannot reach the public-data route {method} {tmpl}", got == 404, str(got))
 
+        # ------------------------------------------- a namesake held by NAME
+        if HAVE:
+            print("a hand-typed player with his name")
+            NAMESAKE = uid()
+            async with Session() as db:
+                db.add(Player(id=NAMESAKE, name="Trent Steenholdt", organisation_id=OURS))
+                await db.commit()
+            check("a hand-typed 'Trent Steenholdt' is held hidden, as a name hold",
+                  await col("SELECT is_public IS FALSE AND privacy_hidden_by = 'name-match' FROM players WHERE id=:i", i=NAMESAKE) is True)
+            async with Session() as db:
+                admin = await db.get(User, ADMIN)
+                prof = await players_router.get_player_profile(str(NAMESAKE), db, await db.get(Organisation, OURS), admin)
+                his = await players_router.get_player_profile(str(TRENT), db, await db.get(Organisation, OURS), admin)
+            check("the profile says it is a name match the club can release", prof.get("privacy_name_match") is True)
+            check("his own removal is NOT flagged as releasable", his.get("privacy_name_match") is False)
+            check("and the namesake's profile does not reveal his reason or who he is",
+                  "asked by email" not in str(prof) and "Jack" not in str(prof.get("privacy_hidden_reason")))
+            async with Session() as db:
+                admin = await db.get(User, ADMIN)
+                try:
+                    await players_router.update_player_profile(
+                        str(NAMESAKE), players_router.PlayerProfileUpdate(is_public=True), db, admin,
+                        club=await db.get(Organisation, OURS))
+                    refused = None
+                except HTTPException as e:
+                    refused = (e.status_code, str(e.detail))
+            check("the switch is refused, with a message that points at the release",
+                  refused and refused[0] == 409 and "different person" in refused[1], str(refused))
+            async with Session() as db:
+                admin = await db.get(User, ADMIN)
+                try:
+                    await players_router.release_privacy_name_hold(str(TRENT), db, admin, await db.get(Organisation, OURS))
+                    res = None
+                except HTTPException as e:
+                    res = e.status_code
+            check("his OWN request cannot be released through the endpoint (409)", res == 409, str(res))
+            async with Session() as db:
+                admin = await db.get(User, ADMIN)
+                try:
+                    await players_router.release_privacy_name_hold(str(NAMESAKE), db, admin, await db.get(Organisation, OTHER))
+                    res = None
+                except HTTPException as e:
+                    res = e.status_code
+            check("another club's admin cannot release it (404)", res == 404, str(res))
+            async with Session() as db:
+                admin = await db.get(User, ADMIN)
+                out = await players_router.release_privacy_name_hold(str(NAMESAKE), db, admin, await db.get(Organisation, OURS))
+            check("the club confirming a different person puts them back",
+                  out.get("is_public") is True and out.get("privacy_name_match") is False and out.get("privacy_hidden_at") is None)
+            check("with an audit entry the club can see",
+                  await col("SELECT COUNT(*) FROM manual_edit_logs WHERE action='privacy_restore' AND target_id=:t", t=str(NAMESAKE)) == 1)
+            check("and the real person is untouched",
+                  await col("SELECT is_public IS FALSE AND privacy_hidden_at IS NOT NULL FROM players WHERE id=:i", i=TRENT) is True)
+
         # ----------------------------------------------------------- RESTORE
         if HAVE:
             print("restore")
