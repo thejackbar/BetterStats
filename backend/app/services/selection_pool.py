@@ -204,6 +204,32 @@ def _tier_for(fx_seq: int | None, sq_seq: int | None) -> int | None:
     return None
 
 
+def _pool_rank(tier: int | None, drop_in: bool) -> int:
+    """Where a player sorts on the board's default (Squad order): a player from
+    the squad ABOVE who has not been picked anywhere that day first, then the
+    fixture's own squad (1), the squad below (2), the rest of the squad above
+    (3), everyone else (99). The browser applies the same order."""
+    if drop_in:
+        return 0
+    return tier if tier is not None else 99
+
+
+def _drop_in_from(
+    tier: int | None, above_name: str | None, *, has_date: bool, picked_elsewhere: bool,
+    in_lineup: bool, available: bool, eligible: bool,
+) -> str | None:
+    """The name of the squad above, when this player is a natural pick for THIS
+    fixture because that squad has not taken them: they are one grade up (tier
+    3, never the fixture's own squad), named in no XI that day, and neither
+    marked out nor barred. None when we cannot tell (no fixture date), which is
+    silence rather than a guess."""
+    if tier != 3 or not above_name or not has_date or not eligible:
+        return None
+    if picked_elsewhere or in_lineup or not available:
+        return None
+    return above_name
+
+
 def _clash_blocks(this_seq: int | None, other_seqs: list[int | None]) -> bool:
     """Whether a same-date selection elsewhere blocks picking the player here.
 
@@ -538,13 +564,15 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
     # Per-squad-team metadata: sequence + women's-grade flag.
     squad_meta: dict[str, tuple[int, bool]] = {}
     sq_meta_res = await db.execute(
-        select(Team.id, Team.sequence, Grade.fee_format)
+        select(Team.id, Team.sequence, Grade.fee_format, Team.short_name, Team.name)
         .select_from(Team)
         .outerjoin(Grade, Team.grade_id == Grade.id)
         .where(Team.organisation_id == club.id)
     )
-    for tid, seq, fee in sq_meta_res.fetchall():
+    squad_label: dict[str, str] = {}
+    for tid, seq, fee, short, nm in sq_meta_res.fetchall():
         squad_meta[str(tid)] = (seq or 0, fee == "women")
+        squad_label[str(tid)] = short or nm or ""
 
     # The two module-derived selection flags. Both can come back None — "we
     # can't tell" — in which case only a per-player override answers, which is
@@ -596,15 +624,26 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
         squad_match = bool(_fixture_team_id and _fixture_team_id in my_squads)
         gender_squads = [s for s in my_squads if squad_meta.get(s, (0, False))[1] == fx_is_women]
         gender_ok = bool(gender_squads)
+        tier_squad: str | None = None
         if fx_team_seq:
             tier = None
             for s in gender_squads:
                 t = _tier_for(fx_team_seq, squad_meta.get(s, (0, False))[0])
                 if t is not None and (tier is None or t < tier):
-                    tier = t
+                    tier, tier_squad = t, s
         else:
             tier = 1 if (squad_match and gender_ok) else None
         recent_ok = bool(lp) and lp >= autofill_cutoff
+        # A player the squad above has not picked that day is the obvious first
+        # call for the grade below, so say so (and sort them first).
+        drop_in_from = _drop_in_from(
+            tier, squad_label.get(tier_squad or ""),
+            has_date=bool(fx.played_on),
+            picked_elsewhere=bool(clash.get(pid) or also_in.get(pid)),
+            in_lineup=pid in lineup,
+            available=avail.get(pid) != "UNAVAILABLE",
+            eligible=gender_ok and not manual_inactive,
+        )
         rb, rw, ss = recent_bat.get(pid), recent_bowl.get(pid), season_stats.get(pid)
         score = _compute_score(p.skill_positions, rb, rw, ss)
 
@@ -670,6 +709,8 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             "clash_blocks": _clash_blocks(fx_team_seq, clash_seqs.get(pid, [])),
             "squad_match": squad_match and not manual_inactive,
             "tier": tier,
+            # The squad above that has not picked this player today, or None.
+            "drop_in_from": drop_in_from,
             "gender_ok": gender_ok,
             "recent_ok": recent_ok,
             "score": round(score, 2),
@@ -714,7 +755,7 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
 
     _AVAIL_RANK = {"AVAILABLE": 0, "MAYBE": 1, "NO_RESPONSE": 2, "UNAVAILABLE": 3}
     pool.sort(key=lambda e: (
-        e["tier"] if e["tier"] is not None else 99,
+        _pool_rank(e["tier"], bool(e["drop_in_from"])),
         -(e["score"] or 0.0),
         _AVAIL_RANK.get(e["availability"], 9),
         (e["display_name"] or "").lower(),

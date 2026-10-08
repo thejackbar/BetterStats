@@ -99,6 +99,8 @@
 63. `AvailDot` is a button, 40px under `(pointer: coarse)`. A stray tap there used to open the profile via the avatar link.
 64. A tiny dot drawn on a profile-link picture steals taps on iOS (the tap goes to the link). Give the dot its own 32px+ button and make the picture a non-link on a phone. Players is one-at-a-time below `lg` (`phoneOpen`), never list-above-profile.
 
+65. The pool's default order is `selection_pool._pool_rank` / `selectionMeta.poolRank`: drop-ins (`drop_in_from`: one grade up, named in no XI that day, available) first, then tier 1, 2, 3, then the rest. Change both together. `tier` and auto-fill are deliberately untouched.
+
 **Layout and process**
 54. `min-w-0` goes on the element that may shrink (`<h1>` `truncate min-w-0`, toggle `shrink-0`), not the group. Selection header uses `flex-wrap xl:flex-nowrap` and moves user name + Logout from `sm` to `xl`; only Selection passes `headerLeft`. `flex-wrap` cannot save a `shrink-0` child. A native date input clips its year if it shares a row (age on the caption line).
 55. Re-check `origin/main` at merge before numbering a migration (duplicate revision ids break Alembic).

@@ -123,7 +123,10 @@ const run = async () => {
   const NAMES = ['Abbas, Aamir', 'Barendse, Jack', 'Barker, David', 'Ashworth, Shayne', 'Kumar, Raj', 'Singh, Amit', 'Perera, Nuwan',
     'Smith, Tom', 'Jones, Ben', 'Wilson, Sam', 'Taylor, Max', 'Brown, Lee', 'Davis, Cal', 'Evans, Zac']
   const tpl = FIX.payload.pool.find((p) => !p.clash?.length && !p.also_in?.length) || FIX.payload.pool[0]
-  const pool = NAMES.map((n, i) => ({ ...tpl, id: `pl-${i}`, display_name: n, name: n, clash: [], clash_detail: [], clash_blocks: false, also_in: [], availability: i % 5 === 4 ? 'UNAVAILABLE' : 'AVAILABLE', skill_positions: i % 4 === 0 ? ['WKT'] : ['BAT'], squads: [], is_inactive: false, last_played: '2026-03-01', rule_flags: [], rule_notes: [], rule_state: 'ok' }))
+  const pool = NAMES.map((n, i) => ({ ...tpl, id: `pl-${i}`, display_name: n, name: n, clash: [], clash_detail: [], clash_blocks: false, also_in: [], availability: i % 5 === 4 ? 'UNAVAILABLE' : 'AVAILABLE', skill_positions: i % 4 === 0 ? ['WKT'] : ['BAT'], squads: [], is_inactive: false, last_played: '2026-03-01', rule_flags: [], rule_notes: [], rule_state: 'ok', tier: 1, drop_in_from: null }))
+  // Davis is in the 3rd XI squad and not picked there: one grade up (tier 3), so he
+  // would sort LAST by tier alone; the server says he is a drop-in and he goes first.
+  Object.assign(pool.find((p) => p.display_name === 'Davis, Cal'), { tier: 3, drop_in_from: '3rd XI' })
   const payload = { ...FIX.payload, pool, lineup: [] }
 
   const stubSelection = async (page, state) => {
@@ -175,6 +178,8 @@ const run = async () => {
     const sb = await box(sheet.locator('> div'))
     ok('the sheet is wholly on screen', inScreen(sb), JSON.stringify(sb))
     ok('with nothing typed it lists the pool', (await count(sheet.locator('[data-add-row]'))) === 14, `got ${await count(sheet.locator('[data-add-row]'))}`)
+    const firstRow = await text(sheet.locator('[data-add-row]'))
+    ok('a player the squad above has not picked is listed first, and says so', /Davis, Cal/.test(firstRow) && /Not picked in 3rd XI/.test(firstRow), firstRow.replace(/\s+/g, ' '))
     await fill('jack bar')
     await page.waitForTimeout(150)
     const rows = sheet.locator('[data-add-row]')
@@ -233,6 +238,8 @@ const run = async () => {
     await page.waitForTimeout(200)
     ok('the Pool tab shows the pool', await page.getByText('Available pool').first().isVisible().catch(() => false))
     await page.screenshot({ path: join(SHOTS, 'selection_pool.png') })
+    const firstPool = await text(page.locator('section', { hasText: 'Available pool' }).locator('div.group.relative').first())
+    ok('the pool lists him first too, with the label', /Davis, Cal/.test(firstPool) && /Not picked in 3rd XI/.test(firstPool), firstPool.replace(/\s+/g, ' '))
     // The dot sits on the picture. A tap on it (even off to the side, where iOS
     // would have handed it to the avatar link) opens the availability sheet.
     const poolCard = (n) => page.locator('section', { hasText: 'Available pool' }).locator('div.group.relative', { hasText: n }).first()

@@ -31,7 +31,7 @@ import { DnD } from './selectionDnd'
 import { DualRailView, TeamSheetView } from './SelectionViews'
 import { AddPlayersSheet, SlotSheet, MobileBar } from './SelectionMobile'
 import { useMediaQuery } from '../../../hooks/useMediaQuery'
-import { classifyBowl, formBucket, matchesAge, inAnotherXI, alsoIn, alsoInLine, nameMatches } from './selectionMeta'
+import { classifyBowl, formBucket, matchesAge, inAnotherXI, alsoIn, alsoInLine, nameMatches, poolRank } from './selectionMeta'
 import { matchesRuleFilter, xiCompliance, hasBlockingRule } from './selectionRules'
 
 // Soft role-band each batting slot prefers — drives auto-fill placement (the
@@ -396,9 +396,10 @@ export default function AdminSelection() {
   }, [data])
   const usedIds = useMemo(() => new Set(slots.filter(Boolean)), [slots])
 
-  // Default (Squad order) comparator: tier → form score → availability → name.
+  // Default (Squad order) comparator: players the squad above has not picked
+  // first, then tier → form score → availability → name.
   const cmp = useCallback((a, b) => {
-    const at = a.tier ?? 99, bt = b.tier ?? 99
+    const at = poolRank(a), bt = poolRank(b)
     if (at !== bt) return at - bt
     const sa = a.score ?? 0, sb = b.score ?? 0
     if (sa !== sb) return sb - sa

@@ -15,6 +15,15 @@ import { bowlingLabel, battingHandShort } from '../../../lib/playerAttributes'
 export function alsoIn(p) { return Array.isArray(p?.also_in) ? p.also_in : [] }
 export function inAnotherXI(p) { return p?.clash?.length > 0 || alsoIn(p).length > 0 }
 export function alsoInLine(p) { return alsoIn(p).map((a) => a.text || a.team_name).join('; ') }
+// A player the squad above has not picked that day: the natural first call for
+// the grade below. The server decides (selection_pool._drop_in_from) and names
+// the squad; this only words it.
+export function dropInLine(p) { return p?.drop_in_from ? `Not picked in ${p.drop_in_from}` : '' }
+// The board's default order, mirroring selection_pool._pool_rank: those players
+// first, then the fixture's own squad (1), the squad below (2), the rest of the
+// squad above (3), everyone else.
+export function poolRank(p) { return p?.drop_in_from ? 0 : (p?.tier ?? 99) }
+
 export function alsoInTight(p) { return alsoIn(p).some((a) => a.tight) }
 
 // Every word typed must appear somewhere in the name, in any order, so

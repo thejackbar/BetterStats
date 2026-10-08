@@ -18,7 +18,7 @@ import { Link } from 'react-router-dom'
 import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { AVAILABILITY, availRank } from '../../../lib/availability'
 import { Icon, Avatar, Dot, Tag } from './ui'
-import { roleLine, nameMatches, alsoInLine } from './selectionMeta'
+import { roleLine, nameMatches, alsoInLine, dropInLine } from './selectionMeta'
 import { FlagTags, RuleNotes, AgeTag } from './SelectionViews'
 
 // The part of the screen that is actually visible. With the keyboard up, a phone
@@ -109,7 +109,9 @@ function AddRow({ p, onAdd }) {
             ? <span className="block text-[11px] text-pb-amber truncate">↑ Call-up from {p.clash.join(', ')}</span>
             : alsoInLine(p)
               ? <span className="block text-[11px] text-pb-amber truncate">Also in {alsoInLine(p)}</span>
-              : null}
+              : dropInLine(p)
+                ? <span className="block text-[11px] text-pb-accent truncate" data-drop-in>↓ {dropInLine(p)}</span>
+                : null}
         <RuleNotes p={p} />
       </span>
       {!blocked && (
