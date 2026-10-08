@@ -304,3 +304,7 @@ Push to this branch AND to `main` via MCP after each change.
 - `stats["player_seasons"]` in sync is `len(player_data)` summed across seasons, i.e. player-season records, not unique players. With 52 seasons × ~3.4 avg seasons/player ≈ 5326 (which Applecross actually shows). Renamed from `stats["players"]` to match what it counts.
 
 <!-- END original CLAUDE.md L12812-12819 -->
+
+## v9.108.4: privacy policy rewrite (2026-10-08)
+
+`frontend/src/pages/marketing/Privacy.jsx` was rewritten to the owner's supplied text, same layout. It now describes the per-person "removed at the person's request" behaviour (hidden at every club, name shown as `********`, club emails stopped, profile kept from coming back) and its limits. The old APP/Privacy Act sentence and the separate OAIC "Complaints" section are not in the supplied text, so they are gone; put them back if the adviser wants them.
