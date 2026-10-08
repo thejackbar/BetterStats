@@ -1759,6 +1759,12 @@ async def undo_merge(req: UndoMergeRequest, db: AsyncSession = Depends(get_db), 
             "grassroots_id": str(remove_id),
         },
     )
+    # The raw INSERT above skips the create-time guard. A person who asked to be
+    # removed must not come back visible because somebody undid a merge.
+    from app.services import player_privacy
+    restored = await db.get(Player, remove_id)
+    if restored is not None:
+        await player_privacy.protect_restored_player(db, restored, keep)
 
     # asyncpg returns JSONB columns as Python lists already; guard against
     # legacy string-encoded rows just in case.

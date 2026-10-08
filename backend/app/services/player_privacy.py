@@ -369,6 +369,23 @@ async def protect_new_player(session: AsyncSession, player: Player, guid: Option
     return True
 
 
+async def protect_restored_player(session: AsyncSession, restored: Player, keep: Optional[Player]) -> bool:
+    """Undoing a merge re-creates the merged-away row with a raw INSERT, which
+    skips ``protect_new_player``. Hide it again when the person asked: by the
+    participant id, or because the row it was merged into is hidden (a merge
+    joins two records of ONE person, and a merge carries the hide across, so a
+    hidden keeper means the removed record was the person's too). Fails closed."""
+    if await protect_new_player(session, restored, str(restored.grassroots_id or restored.id)):
+        return True
+    if keep is not None and is_privacy_hidden(keep):
+        restored.is_public = False
+        restored.privacy_hidden_at = keep.privacy_hidden_at or datetime.now(timezone.utc)
+        restored.privacy_hidden_by = keep.privacy_hidden_by or "merge"
+        restored.privacy_hidden_reason = keep.privacy_hidden_reason
+        return True
+    return False
+
+
 async def load_player(session: AsyncSession, raw_id: str) -> Optional[Player]:
     try:
         pid = uuid.UUID(str(raw_id))
