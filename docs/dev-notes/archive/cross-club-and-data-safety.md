@@ -892,3 +892,7 @@ The suppression is global (keyed on the participant id), but enforcement had dep
 ## v9.108.7: name matching for hand-typed players (2026-10-08)
 
 The trigger enforced the suppression by participant id only. A hand-typed or imported row has none, so `player_privacy_suppressions` now keeps `names` and the trigger holds a no-id row whose canonical name key matches (`name-match`, releasable by the club, audited). Rejected: matching on surname plus initial, or on any one-word name (false positives on relatives). Rule: hiding wrongly is recoverable, showing a person who asked not to be shown is not. `verify_privacy_survives_sync.py` (52 checks; the control fails the 11 new ones), `verify_player_privacy.py` (+10 route checks), `verify_player_privacy_browser.mjs` (+ the namesake, 36 checks).
+
+## v9.108.8: data access PDF (2026-10-08)
+
+`player_data_report.py` gathers across every club row for the person (the participant id is shared) and renders an A4 PDF with fpdf2. Decisions: the person sees their own values; other people never appear; free-text notes are stated, not printed; fee and payment records are a count (table names matched by `_MONEY_TABLE`); the sources of the data are not described. `verify_player_data_report.py` (46 checks, each absence check paired with a presence check) and `verify_privacy_requests_browser.mjs` (28 checks). Rejected: a generic dump of every column (cannot be reviewed), and a Hide button on the Super Admin screen (destructive, not asked for).

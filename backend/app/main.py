@@ -17,6 +17,7 @@ from app.auth.modules import require_module
 from app.routers import instructional_videos
 from app.routers import admin_broadcasts
 from app.routers import club_links as club_links_router
+from app.routers import privacy_requests as privacy_requests_router
 from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, cricketstatz, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, public_net_checkin, net_manager, website, comms, public_comms, public_ses, public_contact, public_webinar, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, public_billing, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
     stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
     club_diary, social_media, votes, public_votes, roles_activities, club_room, roster, facility_requests, directory, \
@@ -6325,6 +6326,7 @@ app.include_router(usage.router)
 app.include_router(login_attempts.router)
 app.include_router(admin_broadcasts.router)  # Super-admin messages on the club admin dashboard
 app.include_router(club_links_router.router)  # Super Admin: link clubs so Club Admins can switch between them
+app.include_router(privacy_requests_router.router)  # Super Admin: find a person, download the PDF of what we hold about them
 app.include_router(meta_ads.router)  # Meta Ads HQ dashboard (super-admin) — BetterCricket's own ad spend
 app.include_router(self_serve_trial.router)  # Self-serve club trial registration (internal, flag-gated — see docs/self-serve-trial-onboarding-plan.md)
 app.include_router(public_self_serve.router)  # Public self-serve trial registration (unauthenticated, same flag — the /trial ad-campaign landing page)

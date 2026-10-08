@@ -58,6 +58,7 @@ export const SUPER_SECTIONS = [
       { to: '/admin/super/fantasy', label: 'Fantasy Competitions', blurb: 'Every club running a BetterFantasyCricket competition, with the current scores.' },
       { to: '/admin/super/migration', label: 'KlubPro Migration', blurb: 'Import player profiles and sponsors from a legacy KlubPro club.' },
       { to: '/admin/super/club-links', label: 'Linked Clubs', blurb: 'Link clubs so their Club Admins can switch between them.' },
+      { to: '/admin/super/privacy-requests', label: 'Privacy Requests', blurb: 'Find a person and download a PDF of the personal information we hold about them.' },
       { to: '/admin/super/merge-clubs', label: 'Merge Clubs', blurb: 'Combine two club records into one.' },
       { to: '/admin/super/onboarding', label: 'Onboarding Requests', blurb: 'Enquiries from the public contact form.' },
       { to: '/admin/super/unpause-requests', label: 'Unpause Requests', blurb: "Leads from a lapsed-trial club's password-protected page.", badge: 'unpauseRequests' },

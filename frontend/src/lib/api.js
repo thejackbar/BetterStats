@@ -2178,6 +2178,19 @@ export const api = {
     request('/auth/switch-club', { method: 'POST', body: JSON.stringify({ club_id: clubId }) }),
   // Linked clubs (migration 322): a Super Admin groups clubs so their Club
   // Admins can switch between them.
+  // Privacy requests: find a person at any club, and download the PDF of what we
+  // hold about them. The PDF needs the session cookie, so it is fetched directly.
+  superFindPrivacyPlayers: (q) => request(`/club-admin/super/privacy/players?q=${encodeURIComponent(q)}`),
+  superPlayerDataReport: async (id) => {
+    const res = await fetch(`${BASE}/club-admin/super/privacy/players/${id}/data-report.pdf`, { credentials: 'include' })
+    if (!res.ok) {
+      let detail = ''
+      try { detail = (await res.json()).detail } catch { /* not JSON */ }
+      throw new Error(detail || `Could not create the report (${res.status})`)
+    }
+    const m = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') || '')
+    return { blob: await res.blob(), filename: m ? m[1] : 'data-held.pdf' }
+  },
   superListClubLinks: () => request('/club-admin/super/club-links'),
   superLinkClubs: (clubAId, clubBId) =>
     request('/club-admin/super/club-links', { method: 'POST', body: JSON.stringify({ club_a_id: clubAId, club_b_id: clubBId }) }),
