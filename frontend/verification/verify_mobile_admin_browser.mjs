@@ -18,7 +18,7 @@
 import { readFileSync, mkdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import { launch, overflow, stubAccounts, stubSquads, json, BASE, PHONE } from './mobile_harness.mjs'
+import { launch, overflow, stubAccounts, stubSquads, stubPlayers, json, BASE, PHONE } from './mobile_harness.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SHOTS = process.env.SHOTS_DIR || join(HERE, 'shots')
@@ -233,11 +233,33 @@ const run = async () => {
     await page.waitForTimeout(200)
     ok('the Pool tab shows the pool', await page.getByText('Available pool').first().isVisible().catch(() => false))
     await page.screenshot({ path: join(SHOTS, 'selection_pool.png') })
+    // The dot sits on the picture. A tap on it (even off to the side, where iOS
+    // would have handed it to the avatar link) opens the availability sheet.
+    const poolCard = (n) => page.locator('section', { hasText: 'Available pool' }).locator('div.group.relative', { hasText: n }).first()
+    await poolCard('Wilson, Sam').scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {})
+    await page.waitForTimeout(400)
+    const dotBox = await box(poolCard('Wilson, Sam').locator('[data-avail-dot]'))
+    ok('the dot on the picture is a button of 32px or more', !!dotBox && dotBox.width >= 31.5 && dotBox.height >= 31.5, JSON.stringify(dotBox))
+    const urlBefore = page.url()
+    if (dotBox) await page.touchscreen.tap(dotBox.x + dotBox.width / 2 - 10, dotBox.y + dotBox.height / 2 - 10)
+    await page.waitForTimeout(300)
+    const adlg = page.getByRole('dialog', { name: /Update availability/i })
+    ok('tapping the dot opens the availability sheet', (await count(adlg)) === 1)
+    ok('and does not open the profile or add the player', page.url() === urlBefore && /XI\s*3\/11/.test(await text(bar)), `${page.url()} ${await text(bar)}`)
+    await tap(adlg.getByRole('button', { name: 'Maybe' }))
+    await page.waitForTimeout(300)
+    ok('the pick is saved from the board', (await count(adlg)) === 0)
+    await poolCard('Taylor, Max').scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {})
+    await page.waitForTimeout(400)
+    const avBox = await box(poolCard('Taylor, Max').locator('span.relative.shrink-0 > span').first())
+    if (avBox) await page.touchscreen.tap(avBox.x + avBox.width / 2, avBox.y + avBox.height / 2 - 4)
+    await page.waitForTimeout(300)
+    ok('on a phone the picture is not a link to the profile', /\/select\//.test(page.url()), page.url())
     const before = (await text(bar)).replace(/\s+/g, ' ')
     await tap(page.locator('section', { hasText: 'Available pool' }).locator('div.group.relative', { hasText: 'Evans, Zac' }).first())
     await page.waitForTimeout(200)
     const after = (await text(bar)).replace(/\s+/g, ' ')
-    ok('tapping a pool card moves the XI count in the bar', before !== after && /XI\s*4\/11/.test(after), `${before} -> ${after}`)
+    ok('tapping a pool card moves the XI count in the bar', before !== after && /XI\s*5\/11/.test(after), `${before} -> ${after}`)
 
     // Confirm from the bar writes the order on screen
     await tap(bar.getByRole('tab', { name: /XI/ }))
@@ -249,6 +271,33 @@ const run = async () => {
     const idByName = Object.fromEntries(pool.map((p) => [p.display_name, p.id]))
     ok('Confirm sends the batting order that is on screen', JSON.stringify(sent) === JSON.stringify(shown.filter((n) => n && idByName[n]).map((n) => idByName[n])), `${JSON.stringify(sent)} vs ${JSON.stringify(shown)}`)
     ok('and the captain', state.confirm?.players?.find((p) => p.is_captain)?.player_id === idByName['Barker, David'])
+    ok('no script error', errors.length === 0, errors.join(' | '))
+    await browser.close()
+  }
+
+  console.log('Players (390px)')
+  {
+    const { browser, page, errors } = await launch()
+    await stubPlayers(page)
+    await page.goto(`${BASE}/admin/betterselect/players`, { waitUntil: 'domcontentloaded' })
+    await page.getByText('Ashworth, Shayne').first().waitFor({ timeout: 15000 }).catch(() => {})
+    await page.waitForTimeout(400)
+    const list = page.locator('[data-players-list]'), prof = page.locator('[data-players-profile]')
+    ok('page is not wider than the screen', (await overflow(page)).over <= 0)
+    ok('a phone opens on the list, not on the first player', (await list.first().isVisible().catch(() => false)) && !(await prof.first().isVisible().catch(() => false)))
+    await tap(page.getByText('Ashworth, Shayne').first())
+    await page.waitForTimeout(500)
+    ok('choosing a player shows their profile in place of the list', (await prof.first().isVisible().catch(() => false)) && !(await list.first().isVisible().catch(() => false)))
+    const pb = await box(prof)
+    ok('the profile starts at the top of the screen', !!pb && pb.y >= 0 && pb.y < 240, JSON.stringify(pb))
+    ok('there is a Back to the list', (await count(page.locator('[data-players-back]'))) === 1)
+    await page.screenshot({ path: join(SHOTS, 'players_profile.png') })
+    await tap(page.locator('[data-players-back]'))
+    await page.waitForTimeout(300)
+    ok('Back returns to the list', (await list.first().isVisible().catch(() => false)) && !(await prof.first().isVisible().catch(() => false)))
+    await page.goto(`${BASE}/admin/betterselect/players?player=p2`, { waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(800)
+    ok('a ?player= link opens straight onto that profile', await prof.first().isVisible().catch(() => false))
     ok('no script error', errors.length === 0, errors.join(' | '))
     await browser.close()
   }

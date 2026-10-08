@@ -214,6 +214,33 @@ export function RuleStrip({ vm }) {
   )
 }
 
+/* ── Avatar with its availability dot ───────────────────────────────────────
+ * The dot sits on the picture, and the picture is a link to the player's
+ * profile. On an iPhone a tap near a 10px dot is given to the nearest thing
+ * that can be tapped, which was the avatar, so "change availability" kept
+ * opening the profile. The dot is now its own button (32px) that opens the
+ * availability sheet, and on a phone the avatar is not a link at all (the
+ * profile is one tap away in the options sheet). */
+function AvatarAvail({ p, vm, size = 34, dotSize = 10 }) {
+  const edit = vm.canEdit && vm.setAvailEdit
+  return (
+    <span className="relative shrink-0">
+      <Avatar player={p} size={size} noLink={vm.isPhone} />
+      {edit
+        ? (
+          <button type="button" data-avail-dot draggable={false}
+            aria-label={`Update availability for ${p.display_name}`} title="Update availability"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); vm.setAvailEdit(p) }}
+            className="absolute -right-[11px] -bottom-[11px] w-8 h-8 inline-flex items-center justify-center rounded-full">
+            <Dot status={p.availability} size={dotSize} style={{ boxShadow: '0 0 0 2px var(--pb-surface)' }} />
+          </button>
+        )
+        : <span className="absolute -right-px -bottom-px"><Dot status={p.availability} size={dotSize} style={{ boxShadow: '0 0 0 2px var(--pb-surface)' }} /></span>}
+    </span>
+  )
+}
+
 /* ── Captain / keeper / remove control cluster ───────────────────────────── */
 function SlotControls({ vm, id, idx }) {
   if (!vm.canEdit) return null
@@ -276,10 +303,7 @@ function DualCard({ p, kind, idx, vm, drag }) {
       {kind === 'slot' && vm.canEdit && (
         <span {...drag.bind(dragItem)} className="max-sm:hidden cursor-grab text-pb-faintest shrink-0" style={{ touchAction: 'none' }} title="Drag to reorder / off"><Icon name="grip" size={14} /></span>
       )}
-      <span className="relative shrink-0">
-        <Avatar player={p} size={34} />
-        <span className="absolute -right-px -bottom-px"><Dot status={p.availability} size={10} style={{ boxShadow: '0 0 0 2px var(--pb-surface)' }} /></span>
-      </span>
+      <AvatarAvail p={p} vm={vm} dotSize={10} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
           <span className="text-[14px] font-semibold truncate">{fmt(p.display_name)}</span>
@@ -413,10 +437,7 @@ function SheetRow({ i, id, vm, drag }) {
       {p ? (
         <>
           {vm.canEdit && <span {...drag.bind({ kind: 'slot', idx: i, player: p })} className="max-sm:hidden cursor-grab text-pb-faintest shrink-0" style={{ touchAction: 'none' }} title="Drag to reorder / off"><Icon name="grip" size={15} /></span>}
-          <span className="relative shrink-0">
-            <Avatar player={p} size={34} />
-            <span className="absolute -right-px -bottom-px"><Dot status={p.availability} size={11} style={{ boxShadow: '0 0 0 2px var(--pb-surface)' }} /></span>
-          </span>
+          <AvatarAvail p={p} vm={vm} dotSize={11} />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 min-w-0">
               <span className="font-display font-semibold text-[16.5px] max-sm:text-[15px] tracking-tight truncate">{fmt(p.display_name)}</span>
@@ -455,10 +476,7 @@ function TrayCard({ p, vm, drag }) {
       {...(interactive ? drag.bind({ kind: 'pool', player: p }) : {})}
       onClick={interactive ? drag.clickGuard(() => vm.tapPlayer(p)) : undefined}>
       <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: p.availability === 'NO_RESPONSE' ? 'var(--pb-faintest)' : meta.cssVar }} />
-      <span className="relative shrink-0">
-        <Avatar player={p} size={34} />
-        <span className="absolute -right-px -bottom-px"><Dot status={p.availability} size={10} style={{ boxShadow: '0 0 0 2px var(--pb-surface)' }} /></span>
-      </span>
+      <AvatarAvail p={p} vm={vm} dotSize={10} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
           <span className="text-[13.5px] font-semibold truncate">{fmt(p.display_name)}</span>

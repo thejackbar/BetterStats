@@ -258,6 +258,13 @@ export default function BetterSelectPlayers() {
   // BetterSelect. Selecting a player keeps the URL in sync so it's shareable
   // and the back button works.
   const [selId, setSelId] = useState(() => searchParams.get('player') || null)
+  // Phone only: the list and a profile do not fit side by side, and stacked
+  // they put the profile a long scroll below the list. So a phone shows ONE of
+  // them. `phoneOpen` is true only once someone has actually chosen a player (or
+  // arrived on a ?player= link): selId alone is not enough, because it defaults
+  // to the first player in the roster.
+  const [phoneOpen, setPhoneOpen] = useState(() => !!searchParams.get('player'))
+  const openPlayer = useCallback((id) => { setSelId(id); setPhoneOpen(true); window.scrollTo({ top: 0 }) }, [])
   const [profile, setProfile] = useState(null)   // full profile of selId
   const [draft, setDraft] = useState(null)
   const [savedTick, setSavedTick] = useState(false)
@@ -286,7 +293,7 @@ export default function BetterSelectPlayers() {
   // avatar elsewhere routes here with a new id).
   useEffect(() => {
     const pid = searchParams.get('player')
-    if (pid && pid !== selId) setSelId(pid)
+    if (pid && pid !== selId) { setSelId(pid); setPhoneOpen(true) }
   }, [searchParams])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keep the URL's ?player= in sync with the active selection (replace, so we
@@ -453,12 +460,22 @@ export default function BetterSelectPlayers() {
           master/detail grid below keeps its full height almost always. */}
       <UnrosteredGuests onPromoted={loadRoster} />
       <div className="grid gap-4 grid-cols-1 lg:grid-cols-[minmax(380px,1fr)_1.35fr] lg:h-[calc(100vh-140px)]">
-        <PlayerList
-          players={players} rulesById={rulesById} statusOf={statusOf} squadNameOf={squadNameOf} selectedIds={selectedIds}
-          selectedId={selId} onSelect={setSelId} onOpenProfile={setSelId}
-          canEdit={canEdit} teams={teams} onBulkSquad={onBulkSquad} onBulkInactive={onBulkInactive}
-          onEditAvail={canEdit ? (p) => openAvail(p, null) : undefined} />
-        <div className="pb-card bg-pb-surface min-h-0 h-[80vh] lg:h-full overflow-hidden">
+        {/* Hidden, not unmounted, while a phone shows the profile, so the
+            search, filters and scroll position are all still there on Back. */}
+        <div className={`min-w-0 min-h-0 lg:h-full ${phoneOpen ? 'max-lg:hidden' : ''}`} data-players-list>
+          <PlayerList
+            players={players} rulesById={rulesById} statusOf={statusOf} squadNameOf={squadNameOf} selectedIds={selectedIds}
+            selectedId={selId} onSelect={openPlayer} onOpenProfile={openPlayer}
+            canEdit={canEdit} teams={teams} onBulkSquad={onBulkSquad} onBulkInactive={onBulkInactive}
+            onEditAvail={canEdit ? (p) => openAvail(p, null) : undefined} />
+        </div>
+        {phoneOpen && (
+          <button type="button" onClick={() => setPhoneOpen(false)} data-players-back
+            className="lg:hidden -mb-1 self-start inline-flex items-center gap-2 min-h-[44px] pr-3 font-display font-semibold text-[14px] text-pb-accent">
+            <Icon name="chevron" size={16} style={{ transform: 'rotate(180deg)' }} /> All players
+          </button>
+        )}
+        <div className={`pb-card bg-pb-surface min-h-0 h-[80dvh] lg:h-full overflow-hidden ${phoneOpen ? '' : 'max-lg:hidden'}`} data-players-profile>
           {!selId
             ? <div className="p-6"><Empty>Select a player</Empty></div>
             : (!profileForView || !draft)

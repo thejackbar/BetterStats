@@ -98,3 +98,13 @@ export function stubSquads(page) {
     page.route('**/api/availability', (r) => json(r, { status: 'ok' })),
   ])
 }
+
+// The Players page: the roster and matrix from the Squads stub, plus a profile.
+export async function stubPlayers(page) {
+  await stubSquads(page)
+  await page.route(/\/api\/players\/[^/]+\/aliases/, (r) => json(r, []))
+  await page.route(/\/api\/players\/[^/]+\/profile/, (r) => {
+    const id = r.request().url().match(/players\/([^/]+)\/profile/)[1]
+    json(r, { id, name: `Player ${id}`, display_name: `Player ${id}`, status: 'active', is_player: true, gender: 'male', skill_positions: ['BAT'], squad_team_ids: [], availability_snapshot: [], dates: [] })
+  })
+}

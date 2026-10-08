@@ -1227,3 +1227,11 @@ What changed:
 - `ToastContext` honours `--pb-bottom-bar` so a toast sits above the bar.
 
 Verification: `frontend/verification/verify_mobile_admin_browser.mjs` (56 checks, mobile context at 390px plus the 1440px desk layout). Control run against the previous build: 37 fail on exactly these behaviours, none crash. `verify_selection_draft_browser.mjs` and `verify_selection_same_day_browser.mjs` already fail identically on the previous build (they look for "Cara Free" but the board shows "Free, Cara"); `verify_squads_pools_browser.mjs` has two data-date failures that are identical before and after, and its overflow check now asserts the page fits instead of the old 319px.
+
+## v9.109.1, iPhone report on the Selection dot and the Players page
+
+Reported on an iPhone (Android looked better): the availability dot sits on the player's picture and a tap on it opened the profile, and the Players profile appeared under the list so it needed an edge-of-screen scroll to reach.
+
+The dot on Selection cards was a 10px non-interactive `Dot` drawn over `Avatar`, which is a profile link. Touch browsers give a tap near a tiny target to the nearest tappable thing, and that was the avatar. `SelectionViews.AvatarAvail` makes the dot a 32px button (`data-avail-dot`, `onPointerDown` stopped so the card's drag does not start) that opens `QuickAvailModal`, and passes `noLink={vm.isPhone}` to the avatar. Players (`BetterSelectPlayers`) is master-detail on `lg`+ and one-at-a-time below it: `phoneOpen` is set only by an explicit pick or a `?player=` link (selId alone defaults to the first player), the list is hidden not unmounted so filters and scroll survive Back, and the profile card is `80dvh`.
+
+Not verified on iOS Safari: only Chromium is installed here, so the check is Chromium with touch and `isMobile`. The fix removes the reason iOS mis-routed the tap rather than relying on a Chromium behaviour.

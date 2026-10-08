@@ -97,6 +97,7 @@
 61. A page wider than the screen is not a scroll on a phone: the browser widens the layout viewport, the sticky header covers the list and fixed modals open off to one side. Every action cluster must wrap below `md` (never `shrink-0` on a phone). Test with a real mobile context and compare `scrollWidth` to the SCREEN width, not `innerWidth`.
 62. Below `lg` the Selection board uses `SelectionMobile.jsx`: bottom bar (Confirm lives there, not in the header), Add players sheet, per-row up/down and ••• sheet. Touch targets are 40px or more; the grip is desk only. Sheets use `visualViewport` so the keyboard does not hide the list. Search is `selectionMeta.nameMatches` (any word order); never a plain substring.
 63. `AvailDot` is a button, 40px under `(pointer: coarse)`. A stray tap there used to open the profile via the avatar link.
+64. A tiny dot drawn on a profile-link picture steals taps on iOS (the tap goes to the link). Give the dot its own 32px+ button and make the picture a non-link on a phone. Players is one-at-a-time below `lg` (`phoneOpen`), never list-above-profile.
 
 **Layout and process**
 54. `min-w-0` goes on the element that may shrink (`<h1>` `truncate min-w-0`, toggle `shrink-0`), not the group. Selection header uses `flex-wrap xl:flex-nowrap` and moves user name + Logout from `sm` to `xl`; only Selection passes `headerLeft`. `flex-wrap` cannot save a `shrink-0` child. A native date input clips its year if it shares a row (age on the caption line).
