@@ -12,7 +12,7 @@ import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { Icon, Avatar, Dot, Tag, RuleTags } from './ui'
 import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
 import { useDrag } from './selectionDnd'
-import { roleLine, formMeta, spark, alsoInLine, dropInLine } from './selectionMeta'
+import { roleLine, formMeta, spark, alsoInLine, dropInLine, inDraftLine } from './selectionMeta'
 import { hasRuleFlag, ruleNotes, isBlocked, xiCompliance } from './selectionRules'
 
 const ROLE_CODES = ['BAT', 'ALL', 'BWL', 'WKT']
@@ -319,6 +319,8 @@ function DualCard({ p, kind, idx, vm, drag }) {
               : <div className="text-[11px] text-pb-red mt-0.5 truncate">⛔ Picked for {p.clash.join(', ')}</div>)
           : alsoInLine(p)
             ? <div className="text-[11px] text-pb-amber mt-0.5 truncate" title={`Also in ${alsoInLine(p)}`}>Also in {alsoInLine(p)}</div>
+            : inDraftLine(p)
+              ? <div className="text-[11px] text-pb-amber mt-0.5 truncate" data-in-draft>{inDraftLine(p)}</div>
             : dropInLine(p)
               ? <div className="text-[11px] text-pb-accent mt-0.5 truncate" data-drop-in>↓ {dropInLine(p)}</div>
               : p.availability_reason && <div className="text-[11px] text-pb-faint mt-0.5 truncate">{p.availability_reason}</div>}
@@ -493,7 +495,8 @@ function TrayCard({ p, vm, drag }) {
               : <div className="text-[10.5px] text-pb-red mt-0.5 truncate">⛔ Picked for {p.clash.join(', ')}</div>)
           : <>
               {alsoInLine(p) && <div className="text-[10.5px] text-pb-amber mt-0.5 truncate" title={`Also in ${alsoInLine(p)}`}>Also in {alsoInLine(p)}</div>}
-              {!alsoInLine(p) && dropInLine(p) && <div className="text-[10.5px] text-pb-accent mt-0.5 truncate" data-drop-in>↓ {dropInLine(p)}</div>}
+              {!alsoInLine(p) && inDraftLine(p) && <div className="text-[10.5px] text-pb-amber mt-0.5 truncate" data-in-draft>{inDraftLine(p)}</div>}
+              {!alsoInLine(p) && !inDraftLine(p) && dropInLine(p) && <div className="text-[10.5px] text-pb-accent mt-0.5 truncate" data-drop-in>↓ {dropInLine(p)}</div>}
               <div className="mt-1"><FormInline p={p} /></div>
             </>}
         <RuleNotes p={p} />

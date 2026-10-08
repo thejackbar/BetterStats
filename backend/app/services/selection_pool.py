@@ -221,7 +221,7 @@ def _drop_in_from(
     """The name of the squad above, when this player is a natural pick for THIS
     fixture because that squad has not taken them: they are one grade up (tier
     3, never the fixture's own squad), named in no XI that day, and neither
-    marked out nor barred. None when we cannot tell (no fixture date), which is
+    marked out nor barred, and in no other side's draft either. None when we cannot tell (no fixture date), which is
     silence rather than a guess."""
     if tier != 3 or not above_name or not has_date or not eligible:
         return None
@@ -537,6 +537,31 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
                 "batting_order": bo,
             })
 
+    # Players in ANOTHER fixture's unconfirmed draft that day. A draft is working
+    # state, so it never blocks a pick (that is the confirmed XI's job above); it
+    # only stops us calling someone "not picked" when another selector has
+    # already put them in a side. Silent if there is no fixture date.
+    in_other_draft: dict[str, list] = {}
+    if fx.played_on:
+        dr_res = await db.execute(
+            text(
+                "SELECT x.pid, COALESCE(t.short_name, t.name, f.label, f.opponent_name) "
+                "FROM selection_drafts d "
+                "JOIN fixtures f ON f.id = d.fixture_id "
+                "LEFT JOIN teams t ON t.id = f.team_id "
+                "CROSS JOIN LATERAL jsonb_array_elements_text("
+                "  CASE WHEN jsonb_typeof(d.draft->'slots') = 'array' THEN d.draft->'slots' "
+                "       ELSE '[]'::jsonb END) AS x(pid) "
+                "WHERE d.organisation_id = :org AND f.played_on = :d AND f.id <> :fid "
+                "AND x.pid IS NOT NULL"
+            ),
+            {"org": club.id, "fid": fx.id, "d": fx.played_on},
+        )
+        for pid_, where_ in dr_res.fetchall():
+            names_ = in_other_draft.setdefault(str(pid_), [])
+            if (where_ or "another fixture") not in names_:
+                names_.append(where_ or "another fixture")
+
     pl_res = await db.execute(
         select(Player).where(Player.organisation_id == club.id, Player.is_player.is_(True))
     )
@@ -639,7 +664,7 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
         drop_in_from = _drop_in_from(
             tier, squad_label.get(tier_squad or ""),
             has_date=bool(fx.played_on),
-            picked_elsewhere=bool(clash.get(pid) or also_in.get(pid)),
+            picked_elsewhere=bool(clash.get(pid) or also_in.get(pid) or in_other_draft.get(pid)),
             in_lineup=pid in lineup,
             available=avail.get(pid) != "UNAVAILABLE",
             eligible=gender_ok and not manual_inactive,
@@ -711,6 +736,9 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             "tier": tier,
             # The squad above that has not picked this player today, or None.
             "drop_in_from": drop_in_from,
+            # Other sides' UNCONFIRMED drafts that name this player that day.
+            # A flag only: it never blocks a pick, the confirmed XIs do that.
+            "in_draft_of": in_other_draft.get(pid, []),
             "gender_ok": gender_ok,
             "recent_ok": recent_ok,
             "score": round(score, 2),

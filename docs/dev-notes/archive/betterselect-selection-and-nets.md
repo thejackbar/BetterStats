@@ -1245,3 +1245,9 @@ Reported: a 3rd XI squad player not yet picked in the 3rds did not "show to sele
 Judgement call to know about: drop-ins go ABOVE the fixture's own squad, because they are the players the higher grade did not take and the board is worked top-down. If the 3rds XI has not been picked yet, every unpicked 3rd squad player is a drop-in until it is. To rank them after the own squad instead, change `_pool_rank` and `poolRank` together.
 
 Verification: `backend/verification/verify_selection_drop_in.py` (21 checks, real Postgres, shipped `assemble_selection`); control run on the previous `selection_pool.py` fails the label and both ordering checks (4 of 21) without crashing. Browser: two checks added to `verify_mobile_admin_browser.mjs`. `verify_selection_same_day.py` stops at its harness (it does not create `selection_drafts`) at the same point before and after.
+
+## v9.109.3: another side's draft counts as "picked" for the drop-in label
+
+Reported: a 3rd XI squad player picked in the 2nd XI showed first in the 4ths pool. The board autosaves unconfirmed sides to `selection_drafts`, and the pool's "named in another XI" test reads only `fixture_lineups` (confirmed), so a player sitting in the 2nds DRAFT looked unpicked. A confirmed 2nds pick was already handled (it is a `clash`). `selection_pool.assemble_selection` now reads other same-day fixtures' draft `slots` (`jsonb_array_elements_text`, tolerant of gaps and junk) into `in_draft_of`; `_drop_in_from` treats that as picked. A draft is working state and still never blocks a pick or becomes a `clash`. Cards show "In 2nd XI draft (not confirmed)" in amber.
+
+Verification: `verify_selection_drop_in.py` now 29 checks; control on the v9.109.2 code fails the three draft checks (labelled, no `in_draft_of`, sorted first). Not covered: a multi-day fixture that spans the date but starts on another (the clash query matches `played_on` only).

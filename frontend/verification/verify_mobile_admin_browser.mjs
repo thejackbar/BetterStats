@@ -127,6 +127,8 @@ const run = async () => {
   // Davis is in the 3rd XI squad and not picked there: one grade up (tier 3), so he
   // would sort LAST by tier alone; the server says he is a drop-in and he goes first.
   Object.assign(pool.find((p) => p.display_name === 'Davis, Cal'), { tier: 3, drop_in_from: '3rd XI' })
+  // Smith is in the 2nd XI's unconfirmed draft that day: said so, and not a drop-in.
+  Object.assign(pool.find((p) => p.display_name === 'Smith, Tom'), { tier: 3, drop_in_from: null, in_draft_of: ['2nd XI'] })
   const payload = { ...FIX.payload, pool, lineup: [] }
 
   const stubSelection = async (page, state) => {
@@ -180,6 +182,8 @@ const run = async () => {
     ok('with nothing typed it lists the pool', (await count(sheet.locator('[data-add-row]'))) === 14, `got ${await count(sheet.locator('[data-add-row]'))}`)
     const firstRow = await text(sheet.locator('[data-add-row]'))
     ok('a player the squad above has not picked is listed first, and says so', /Davis, Cal/.test(firstRow) && /Not picked in 3rd XI/.test(firstRow), firstRow.replace(/\s+/g, ' '))
+    const smithRow = await text(sheet.locator('[data-add-row]', { hasText: 'Smith, Tom' }))
+    ok('a player in another side\'s draft says so and is not labelled "not picked"', /In 2nd XI draft \(not confirmed\)/.test(smithRow) && !/Not picked in/.test(smithRow), smithRow.replace(/\s+/g, ' '))
     await fill('jack bar')
     await page.waitForTimeout(150)
     const rows = sheet.locator('[data-add-row]')

@@ -22,6 +22,9 @@ export function dropInLine(p) { return p?.drop_in_from ? `Not picked in ${p.drop
 // The board's default order, mirroring selection_pool._pool_rank: those players
 // first, then the fixture's own squad (1), the squad below (2), the rest of the
 // squad above (3), everyone else.
+// Another side's UNCONFIRMED draft already names this player that day. Never
+// blocks a pick (only a confirmed XI does); it just says someone has plans.
+export function inDraftLine(p) { return Array.isArray(p?.in_draft_of) && p.in_draft_of.length ? `In ${p.in_draft_of.join(', ')} draft (not confirmed)` : '' }
 export function poolRank(p) { return p?.drop_in_from ? 0 : (p?.tier ?? 99) }
 
 export function alsoInTight(p) { return alsoIn(p).some((a) => a.tight) }

@@ -18,6 +18,9 @@ re-implementation:
   * 5th XI squad (promotion)                   -> no label, behind the 4ths squad
   * 2nd XI squad (two grades up)               -> no label (not the grade directly above)
   * a fixture with no date                     -> no label (we cannot say "that day")
+  * 3rd XI squad, named in the 2nd XI (confirmed) -> no label, shown as a clash
+  * 3rd XI squad, in the 2nd XI's UNCONFIRMED draft -> no label, flagged `in_draft_of`, still pickable
+  * a draft on another date, or with gaps in it -> no effect / no crash
   * from the 3rds' own pool                    -> tier 1, no label
 
 CONTROL MODE: run against the commit BEFORE this change. New keys are read
@@ -29,6 +32,7 @@ Run:  DATABASE_URL=postgresql+asyncpg://... python verification/verify_selection
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 import uuid
@@ -54,6 +58,10 @@ check = base.check
 
 async def main():
     await base.build_schema()
+    from app.services.selection_draft_ddl import STATEMENTS as DRAFT_DDL
+    async with engine.begin() as conn:
+        for stmt in DRAFT_DDL:
+            await conn.execute(text(stmt))
     from app.services.selection_pool import assemble_selection
 
     org_id, user_id, season_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
@@ -119,6 +127,15 @@ async def main():
         return sel["pool"]
 
     fx3, fx4, fx5 = await fixture("3rd XI"), await fixture("4th XI"), await fixture("5th XI")
+    fx2 = await fixture("2nd XI")
+    fx2_other_day = await fixture("2nd XI", on=d + timedelta(days=7))
+
+    async def draft(fid, slots):
+        async with Session() as db:
+            await db.execute(text(
+                "INSERT INTO selection_drafts (fixture_id, organisation_id, draft) "
+                "VALUES (:f, :o, CAST(:d AS jsonb))"), {"f": fid, "o": org_id, "d": json.dumps({"slots": slots})})
+            await db.commit()
 
     jaimin = await player("Jaimin Major", ["3rd XI"])
     picked = await player("Picked In Threes", ["3rd XI"])
@@ -171,6 +188,23 @@ async def main():
     check("before: labelled", {r["display_name"]: r for r in await pool(fx4)}["Late Pick"].get("drop_in_from"), "3rd XI")
     await name_in_xi(fx3, late)
     check("after being named in the 3rds: no label", {r["display_name"]: r for r in await pool(fx4)}["Late Pick"].get("drop_in_from"), None)
+
+    print("\n# E. 3rd XI squad player already taken by the 2nd XI")
+    in_seconds = await player("In Seconds", ["3rd XI"])
+    in_seconds_draft = await player("In Seconds Draft", ["3rd XI"])
+    other_day_draft = await player("Draft Other Day", ["3rd XI"])
+    await name_in_xi(fx2, in_seconds)
+    await draft(fx2, [str(in_seconds_draft), None, None, "not-a-uuid-gap"])
+    await draft(fx2_other_day, [str(other_day_draft)])
+    re_ = {r["display_name"]: r for r in await pool(fx4)}
+    check("confirmed in the 2nd XI: no label", re_["In Seconds"].get("drop_in_from"), None)
+    check("confirmed in the 2nd XI: a clash naming the 2nd XI", re_["In Seconds"].get("clash"), ["2nd XI"])
+    check("2nd XI draft only: no label", re_["In Seconds Draft"].get("drop_in_from"), None)
+    check("2nd XI draft only: flagged with the 2nd XI", re_["In Seconds Draft"].get("in_draft_of"), ["2nd XI"])
+    check("2nd XI draft only: not a clash (a draft never blocks)", (re_["In Seconds Draft"].get("clash"), re_["In Seconds Draft"].get("clash_blocks")), ([], False))
+    check("2nd XI draft only: does not sort first", [r["display_name"] for r in await pool(fx4)].index("In Seconds Draft") > [r["display_name"] for r in await pool(fx4)].index("Jaimin Major"), True)
+    check("a draft on another date does not count: still labelled", re_["Draft Other Day"].get("drop_in_from"), "3rd XI")
+    check("Jaimin is still labelled with those drafts around", re_["Jaimin Major"].get("drop_in_from"), "3rd XI")
 
     print(f"\n{base.PASS} passed, {base.FAIL} failed")
     if base.FAIL:
