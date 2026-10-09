@@ -150,6 +150,9 @@ export default function HonourBoard() {
                   <Label style={{ color: 'var(--pb-accent)' }}>{current.role}</Label>
                   <span className="sm:ml-auto font-mono text-[11px] text-pb-faint">
                     {current.group} · {current.holder_count} {current.holder_count === 1 ? 'person' : 'people'}
+                    {/* Said only when the club chose an order; the standard one needs no note. */}
+                    {current.sort === 'oldest' && ' · oldest first'}
+                    {current.sort === 'manual' && ' · in the club\u2019s order'}
                   </span>
                 </div>
                 <table className="w-full text-[13px]">

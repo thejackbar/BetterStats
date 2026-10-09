@@ -4431,6 +4431,12 @@ async def lifespan(app: FastAPI):
         for _stmt in _FANTASY_LATE_JOIN_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 324: a club's own Honour Board order. Same one-copy rule:
+        # this list and alembic's 324 both run services/honour_layout_ddl.STATEMENTS.
+        from app.services.honour_layout_ddl import STATEMENTS as _HONOUR_LAYOUT_DDL
+        for _stmt in _HONOUR_LAYOUT_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 312: super-admin messages on the club admin dashboard.
         # Same one-copy rule: this and alembic's 312 both run
         # services/admin_broadcast_ddl.STATEMENTS.

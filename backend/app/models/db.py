@@ -349,6 +349,10 @@ class Organisation(Base):
     # Cricket", "sponsor_id": "..."}}. NULL means standard names everywhere.
     # Read through services/section_names.py, never directly.
     section_names = Column(JSONB, nullable=True)
+    # The club's own Honour Board order (migration 324): group order, role order
+    # inside a group, and how the people under a role are sorted. NULL means the
+    # standard order. Read through services/honour_layout.py, never directly.
+    honour_board_layout = Column(JSONB, nullable=True)
     # Sponsors pinned to a team or a grade so every post for it starts with them
     # (migration 320). NULL means none pinned. Read through
     # services/post_sponsors.py, never directly.

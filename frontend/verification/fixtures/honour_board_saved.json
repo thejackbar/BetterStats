@@ -1,0 +1,818 @@
+{
+ "admin": {
+  "customised": true,
+  "layout": {
+   "groups": [
+    "Life Members",
+    "Executive Committee",
+    "General Committee"
+   ],
+   "roles": {
+    "General Committee": [
+     "Director of Cricket",
+     "Club Manager"
+    ],
+    "Executive Committee": [
+     "President",
+     "Treasurer",
+     "Secretary"
+    ]
+   },
+   "holders": {
+    "Life Members": {
+     "Life Membership": {
+      "sort": "manual",
+      "order": [
+       "id:6bcf5782-1895-43e6-9341-9ff4989f3e6a"
+      ]
+     }
+    }
+   }
+  },
+  "groups": [
+   {
+    "group": "Life Members",
+    "boards": [
+     {
+      "group": "Life Members",
+      "role": "Life Membership",
+      "sort": "manual",
+      "holders": [
+       {
+        "key": "id:6bcf5782-1895-43e6-9341-9ff4989f3e6a",
+        "player_id": "6bcf5782-1895-43e6-9341-9ff4989f3e6a",
+        "name": "Allan Godfrey",
+        "photo_url": null,
+        "from_year": 1985,
+        "to_year": 1985,
+        "spans": [
+         {
+          "from": 1985,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "1985",
+        "seasons": 1
+       },
+       {
+        "key": "name:zed zane",
+        "player_id": null,
+        "name": "Zed Zane",
+        "photo_url": null,
+        "from_year": 2024,
+        "to_year": 2024,
+        "spans": [
+         {
+          "from": 2024,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "2024",
+        "seasons": 1
+       },
+       {
+        "key": "name:gus gray",
+        "player_id": null,
+        "name": "Gus Gray",
+        "photo_url": null,
+        "from_year": 2022,
+        "to_year": 2022,
+        "spans": [
+         {
+          "from": 2022,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "2022",
+        "seasons": 1
+       },
+       {
+        "key": "name:fay ford",
+        "player_id": null,
+        "name": "Fay Ford",
+        "photo_url": null,
+        "from_year": 2014,
+        "to_year": 2014,
+        "spans": [
+         {
+          "from": 2014,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "2014",
+        "seasons": 1
+       },
+       {
+        "key": "name:dana dunn",
+        "player_id": null,
+        "name": "Dana Dunn",
+        "photo_url": null,
+        "from_year": 2003,
+        "to_year": 2003,
+        "spans": [
+         {
+          "from": 2003,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "2003",
+        "seasons": 1
+       },
+       {
+        "key": "name:eddie east",
+        "player_id": null,
+        "name": "Eddie East",
+        "photo_url": null,
+        "from_year": 2003,
+        "to_year": 2003,
+        "spans": [
+         {
+          "from": 2003,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "2003",
+        "seasons": 1
+       },
+       {
+        "key": "name:colin cole",
+        "player_id": null,
+        "name": "Colin Cole",
+        "photo_url": null,
+        "from_year": 1991,
+        "to_year": 1991,
+        "spans": [
+         {
+          "from": 1991,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "1991",
+        "seasons": 1
+       },
+       {
+        "key": "name:beryl brown",
+        "player_id": null,
+        "name": "Beryl Brown",
+        "photo_url": null,
+        "from_year": 1978,
+        "to_year": 1978,
+        "spans": [
+         {
+          "from": 1978,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "1978",
+        "seasons": 1
+       },
+       {
+        "key": "name:hana hill",
+        "player_id": null,
+        "name": "Hana Hill",
+        "photo_url": null,
+        "from_year": null,
+        "to_year": null,
+        "spans": [],
+        "years": null,
+        "seasons": 0
+       }
+      ],
+      "holder_count": 9
+     }
+    ]
+   },
+   {
+    "group": "Executive Committee",
+    "boards": [
+     {
+      "group": "Executive Committee",
+      "role": "President",
+      "sort": "newest",
+      "holders": [
+       {
+        "key": "name:rob reed",
+        "player_id": null,
+        "name": "Rob Reed",
+        "photo_url": null,
+        "from_year": 2018,
+        "to_year": 2018,
+        "spans": [
+         {
+          "from": 2018,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "2018",
+        "seasons": 1
+       },
+       {
+        "key": "name:quinn quill",
+        "player_id": null,
+        "name": "Quinn Quill",
+        "photo_url": null,
+        "from_year": 2012,
+        "to_year": 2012,
+        "spans": [
+         {
+          "from": 2012,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "2012",
+        "seasons": 1
+       },
+       {
+        "key": "name:pat price",
+        "player_id": null,
+        "name": "Pat Price",
+        "photo_url": null,
+        "from_year": 2010,
+        "to_year": 2010,
+        "spans": [
+         {
+          "from": 2010,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "2010",
+        "seasons": 1
+       }
+      ],
+      "holder_count": 3
+     },
+     {
+      "group": "Executive Committee",
+      "role": "Treasurer",
+      "sort": "newest",
+      "holders": [
+       {
+        "key": "name:tess tate",
+        "player_id": null,
+        "name": "Tess Tate",
+        "photo_url": null,
+        "from_year": 2016,
+        "to_year": 2016,
+        "spans": [
+         {
+          "from": 2016,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "2016",
+        "seasons": 1
+       }
+      ],
+      "holder_count": 1
+     },
+     {
+      "group": "Executive Committee",
+      "role": "Secretary",
+      "sort": "newest",
+      "holders": [
+       {
+        "key": "name:sam shaw",
+        "player_id": null,
+        "name": "Sam Shaw",
+        "photo_url": null,
+        "from_year": 2015,
+        "to_year": 2015,
+        "spans": [
+         {
+          "from": 2015,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "2015",
+        "seasons": 1
+       }
+      ],
+      "holder_count": 1
+     }
+    ]
+   },
+   {
+    "group": "General Committee",
+    "boards": [
+     {
+      "group": "General Committee",
+      "role": "Director of Cricket",
+      "sort": "newest",
+      "holders": [
+       {
+        "key": "name:vic vance",
+        "player_id": null,
+        "name": "Vic Vance",
+        "photo_url": null,
+        "from_year": 2020,
+        "to_year": 2020,
+        "spans": [
+         {
+          "from": 2020,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "2020",
+        "seasons": 1
+       }
+      ],
+      "holder_count": 1
+     },
+     {
+      "group": "General Committee",
+      "role": "Club Manager",
+      "sort": "newest",
+      "holders": [
+       {
+        "key": "name:una underhill",
+        "player_id": null,
+        "name": "Una Underhill",
+        "photo_url": null,
+        "from_year": 2019,
+        "to_year": 2019,
+        "spans": [
+         {
+          "from": 2019,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "2019",
+        "seasons": 1
+       }
+      ],
+      "holder_count": 1
+     }
+    ]
+   },
+   {
+    "group": "Captains",
+    "boards": [
+     {
+      "group": "Captains",
+      "role": "1st XI Captain",
+      "sort": "newest",
+      "holders": [
+       {
+        "key": "name:wes west",
+        "player_id": null,
+        "name": "Wes West",
+        "photo_url": null,
+        "from_year": 2021,
+        "to_year": 2021,
+        "spans": [
+         {
+          "from": 2021,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "2021",
+        "seasons": 1
+       }
+      ],
+      "holder_count": 1
+     }
+    ]
+   },
+   {
+    "group": "Social Committee",
+    "boards": [
+     {
+      "group": "Social Committee",
+      "role": "Social Convenor",
+      "sort": "newest",
+      "holders": [
+       {
+        "key": "name:kit kane",
+        "player_id": null,
+        "name": "Kit Kane",
+        "photo_url": null,
+        "from_year": 2024,
+        "to_year": 2024,
+        "spans": [
+         {
+          "from": 2024,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "2024",
+        "seasons": 1
+       }
+      ],
+      "holder_count": 1
+     }
+    ]
+   }
+  ]
+ },
+ "public": {
+  "groups": [
+   {
+    "group": "Life Members",
+    "boards": [
+     {
+      "group": "Life Members",
+      "role": "Life Membership",
+      "sort": "manual",
+      "holders": [
+       {
+        "key": "id:6bcf5782-1895-43e6-9341-9ff4989f3e6a",
+        "player_id": "6bcf5782-1895-43e6-9341-9ff4989f3e6a",
+        "name": "Allan Godfrey",
+        "photo_url": null,
+        "from_year": 1985,
+        "to_year": 1985,
+        "spans": [
+         {
+          "from": 1985,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "1985",
+        "seasons": 1
+       },
+       {
+        "key": "name:zed zane",
+        "player_id": null,
+        "name": "Zed Zane",
+        "photo_url": null,
+        "from_year": 2024,
+        "to_year": 2024,
+        "spans": [
+         {
+          "from": 2024,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "2024",
+        "seasons": 1
+       },
+       {
+        "key": "name:gus gray",
+        "player_id": null,
+        "name": "Gus Gray",
+        "photo_url": null,
+        "from_year": 2022,
+        "to_year": 2022,
+        "spans": [
+         {
+          "from": 2022,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "2022",
+        "seasons": 1
+       },
+       {
+        "key": "name:fay ford",
+        "player_id": null,
+        "name": "Fay Ford",
+        "photo_url": null,
+        "from_year": 2014,
+        "to_year": 2014,
+        "spans": [
+         {
+          "from": 2014,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "2014",
+        "seasons": 1
+       },
+       {
+        "key": "name:dana dunn",
+        "player_id": null,
+        "name": "Dana Dunn",
+        "photo_url": null,
+        "from_year": 2003,
+        "to_year": 2003,
+        "spans": [
+         {
+          "from": 2003,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "2003",
+        "seasons": 1
+       },
+       {
+        "key": "name:eddie east",
+        "player_id": null,
+        "name": "Eddie East",
+        "photo_url": null,
+        "from_year": 2003,
+        "to_year": 2003,
+        "spans": [
+         {
+          "from": 2003,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "2003",
+        "seasons": 1
+       },
+       {
+        "key": "name:colin cole",
+        "player_id": null,
+        "name": "Colin Cole",
+        "photo_url": null,
+        "from_year": 1991,
+        "to_year": 1991,
+        "spans": [
+         {
+          "from": 1991,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "1991",
+        "seasons": 1
+       },
+       {
+        "key": "name:beryl brown",
+        "player_id": null,
+        "name": "Beryl Brown",
+        "photo_url": null,
+        "from_year": 1978,
+        "to_year": 1978,
+        "spans": [
+         {
+          "from": 1978,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "1978",
+        "seasons": 1
+       },
+       {
+        "key": "name:hana hill",
+        "player_id": null,
+        "name": "Hana Hill",
+        "photo_url": null,
+        "from_year": null,
+        "to_year": null,
+        "spans": [],
+        "years": null,
+        "seasons": 0
+       }
+      ],
+      "holder_count": 9
+     }
+    ]
+   },
+   {
+    "group": "Executive Committee",
+    "boards": [
+     {
+      "group": "Executive Committee",
+      "role": "President",
+      "sort": "newest",
+      "holders": [
+       {
+        "key": "name:rob reed",
+        "player_id": null,
+        "name": "Rob Reed",
+        "photo_url": null,
+        "from_year": 2018,
+        "to_year": 2018,
+        "spans": [
+         {
+          "from": 2018,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "2018",
+        "seasons": 1
+       },
+       {
+        "key": "name:quinn quill",
+        "player_id": null,
+        "name": "Quinn Quill",
+        "photo_url": null,
+        "from_year": 2012,
+        "to_year": 2012,
+        "spans": [
+         {
+          "from": 2012,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "2012",
+        "seasons": 1
+       },
+       {
+        "key": "name:pat price",
+        "player_id": null,
+        "name": "Pat Price",
+        "photo_url": null,
+        "from_year": 2010,
+        "to_year": 2010,
+        "spans": [
+         {
+          "from": 2010,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "2010",
+        "seasons": 1
+       }
+      ],
+      "holder_count": 3
+     },
+     {
+      "group": "Executive Committee",
+      "role": "Treasurer",
+      "sort": "newest",
+      "holders": [
+       {
+        "key": "name:tess tate",
+        "player_id": null,
+        "name": "Tess Tate",
+        "photo_url": null,
+        "from_year": 2016,
+        "to_year": 2016,
+        "spans": [
+         {
+          "from": 2016,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "2016",
+        "seasons": 1
+       }
+      ],
+      "holder_count": 1
+     },
+     {
+      "group": "Executive Committee",
+      "role": "Secretary",
+      "sort": "newest",
+      "holders": [
+       {
+        "key": "name:sam shaw",
+        "player_id": null,
+        "name": "Sam Shaw",
+        "photo_url": null,
+        "from_year": 2015,
+        "to_year": 2015,
+        "spans": [
+         {
+          "from": 2015,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "2015",
+        "seasons": 1
+       }
+      ],
+      "holder_count": 1
+     }
+    ]
+   },
+   {
+    "group": "General Committee",
+    "boards": [
+     {
+      "group": "General Committee",
+      "role": "Director of Cricket",
+      "sort": "newest",
+      "holders": [
+       {
+        "key": "name:vic vance",
+        "player_id": null,
+        "name": "Vic Vance",
+        "photo_url": null,
+        "from_year": 2020,
+        "to_year": 2020,
+        "spans": [
+         {
+          "from": 2020,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "2020",
+        "seasons": 1
+       }
+      ],
+      "holder_count": 1
+     },
+     {
+      "group": "General Committee",
+      "role": "Club Manager",
+      "sort": "newest",
+      "holders": [
+       {
+        "key": "name:una underhill",
+        "player_id": null,
+        "name": "Una Underhill",
+        "photo_url": null,
+        "from_year": 2019,
+        "to_year": 2019,
+        "spans": [
+         {
+          "from": 2019,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "2019",
+        "seasons": 1
+       }
+      ],
+      "holder_count": 1
+     }
+    ]
+   },
+   {
+    "group": "Captains",
+    "boards": [
+     {
+      "group": "Captains",
+      "role": "1st XI Captain",
+      "sort": "newest",
+      "holders": [
+       {
+        "key": "name:wes west",
+        "player_id": null,
+        "name": "Wes West",
+        "photo_url": null,
+        "from_year": 2021,
+        "to_year": 2021,
+        "spans": [
+         {
+          "from": 2021,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "2021",
+        "seasons": 1
+       }
+      ],
+      "holder_count": 1
+     }
+    ]
+   },
+   {
+    "group": "Social Committee",
+    "boards": [
+     {
+      "group": "Social Committee",
+      "role": "Social Convenor",
+      "sort": "newest",
+      "holders": [
+       {
+        "key": "name:kit kane",
+        "player_id": null,
+        "name": "Kit Kane",
+        "photo_url": null,
+        "from_year": 2024,
+        "to_year": 2024,
+        "spans": [
+         {
+          "from": 2024,
+          "to": null,
+          "open": false
+         }
+        ],
+        "years": "2024",
+        "seasons": 1
+       }
+      ],
+      "holder_count": 1
+     }
+    ]
+   }
+  ]
+ },
+ "godfrey_key": "id:6bcf5782-1895-43e6-9341-9ff4989f3e6a"
+}

@@ -2912,6 +2912,10 @@ export const api = {
     return request(`/club-admin/sponsors/post-default${qs ? `?${qs}` : ''}`)
   },
   // The club's own names for its public sections, each optionally linked to a sponsor.
+  // The order the club's public Honour Board lists groups, roles and people in.
+  adminGetHonourBoardLayout: () => request('/club-admin/honour-board-layout'),
+  adminPutHonourBoardLayout: (layout) =>
+    request('/club-admin/honour-board-layout', { method: 'PUT', body: JSON.stringify(layout) }),
   adminGetSectionNames: () => request('/club-admin/sponsors/section-names'),
   adminPutSectionNames: (sections) =>
     request('/club-admin/sponsors/section-names', { method: 'PUT', body: JSON.stringify({ sections }) }),

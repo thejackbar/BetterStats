@@ -4,7 +4,7 @@ import secrets as _secrets
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, null as _sql_null
 from pydantic import BaseModel
 from typing import Optional
 import uuid
@@ -27,7 +27,7 @@ from app.routers.auth import get_current_user, get_current_club, require_super_a
 from app.auth.capabilities import (
     require_cap, effective_capabilities, ALL_CAPABILITIES,
     MANAGE_SETTINGS, MANAGE_MERGES, MANAGE_USERS, MANAGE_SPONSORS, RUN_HARD_REFRESH, RUN_SYNC,
-    MANAGE_MILESTONES,
+    MANAGE_MILESTONES, MANAGE_AWARDS,
 )
 from app.auth.modules import (
     ALL_MODULES, MANAGED_MODULES, ALL_STATUSES, ALL_BILLING_CYCLES, org_entitled_modules,
@@ -38,6 +38,8 @@ from app.services import junior_hiding
 from app.services.milestone_rules import RUNS_STEPS, WICKETS_STEPS
 from app.services import sponsor_tiers
 from app.services import section_names
+from app.services import honour_layout
+from app.services import honours as honours_service
 from app.services import post_sponsors
 from app.services import player_privacy
 from app.services import module_subscriptions as mod_subs
@@ -5661,6 +5663,60 @@ async def put_section_names(
     await db.commit()
     await db.refresh(club)
     return section_names.admin_view(club.section_names)
+
+
+async def _honour_layout_view(club: Organisation, db: AsyncSession) -> dict:
+    """The boards in the order the club's layout gives them, for the Honour
+    Board order screen. ``customised`` says whether a layout is saved at all."""
+    layout = honour_layout.clean_layout(club.honour_board_layout)
+    boards = await honours_service.office_bearer_boards(
+        db, club.id, include_life_members=True, layout=layout)
+    return {"customised": layout is not None, "layout": layout or {}, "groups": boards["groups"]}
+
+
+@router.get("/honour-board-layout")
+async def get_honour_board_layout(
+    current_user: User = Depends(require_cap(MANAGE_AWARDS)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Every group, role and person on the Honour Board in the order the club
+    has them now, with the order the club has saved (if any)."""
+    return await _honour_layout_view(club, db)
+
+
+class HonourHolderLayout(BaseModel):
+    sort: Optional[str] = None
+    order: list[str] = []
+
+
+class HonourBoardLayoutPut(BaseModel):
+    groups: list[str] = []
+    roles: dict[str, list[str]] = {}
+    holders: dict[str, dict[str, HonourHolderLayout]] = {}
+
+
+@router.put("/honour-board-layout")
+async def put_honour_board_layout(
+    data: HonourBoardLayoutPut,
+    current_user: User = Depends(require_cap(MANAGE_AWARDS)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Replace the club's Honour Board order with what is sent. Sending nothing
+    (or nothing that cleans to anything) goes back to the standard order."""
+    cleaned = honour_layout.clean_layout({
+        "groups": data.groups,
+        "roles": data.roles,
+        "holders": {g: {r: c.model_dump() for r, c in by_role.items()}
+                    for g, by_role in data.holders.items()},
+    })
+    # sql null(), not Python None: a JSONB column given None stores the JSON
+    # value null, which reads back fine but is not NULL.
+    club.honour_board_layout = cleaned if cleaned is not None else _sql_null()
+    await db.commit()
+    await db.refresh(club)
+    return await _honour_layout_view(club, db)
 
 
 async def _club_sponsor_rows(db: AsyncSession, club: Organisation) -> list[Sponsor]:

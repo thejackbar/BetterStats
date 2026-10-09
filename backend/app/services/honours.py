@@ -22,6 +22,8 @@ from typing import Optional
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services import honour_layout as hl
+
 PREMIERSHIP_CATEGORY = "Premiership"
 OFFICE_BEARER_CATEGORY = "Office Bearer"
 LIFE_MEMBERSHIP_CATEGORY = "Life Membership"
@@ -325,8 +327,30 @@ def _span_label(spans: list[tuple[int, Optional[int]]], open_ended: bool) -> str
     return ", ".join(parts)
 
 
+def _holder_sort_key(h: dict, mode: str, rank: dict[str, int]) -> tuple:
+    """One person's place under a role.
+
+    ``newest`` is the standard order (most recent term first) and is what every
+    club has until it saves a layout. ``oldest`` is the same by the season each
+    person STARTED, oldest first. Under both, the club's own order only breaks
+    a tie between people on the same season (two life members in one year);
+    anybody the club never placed sorts after the ones it did. ``manual`` is the
+    club's order outright, with anybody it never placed after, newest first.
+    A person with no year at all is last in the two season orders.
+    """
+    placed = rank.get(h["key"], len(rank))
+    year = h["from_year"]
+    name = _sort_name(h["name"])
+    if mode == hl.SORT_MANUAL:
+        return (placed, year is None, -((h["to_year"] or year) or 0), name)
+    if mode == hl.SORT_OLDEST:
+        return (year is None, year or 0, placed, name)
+    return (year is None, -((h["to_year"] or year) or 0), placed, name)
+
+
 async def office_bearer_boards(db: AsyncSession, org_id: uuid.UUID, *,
-                               include_life_members: bool = False) -> dict:
+                               include_life_members: bool = False,
+                               layout: Optional[dict] = None) -> dict:
     """One board per role the club has recorded somebody in — President,
     Secretary, Club Coach and the rest — each listing who held it and when.
 
@@ -339,6 +363,10 @@ async def office_bearer_boards(db: AsyncSession, org_id: uuid.UUID, *,
     has its own way of showing a life membership, so only the caller that asks
     gets the extra group. The year shown is the season the club recorded the
     life membership under.
+
+    ``layout`` is the club's own order (services/honour_layout.py, already
+    cleaned). None, which is every club until it saves one and the whole
+    football silo, gives the standard order below, unchanged.
     """
     renames = await _renames(db, org_id)
     sources = [(OFFICE_BEARER_CATEGORY, await _rows(db, org_id, OFFICE_BEARER_CATEGORY))]
@@ -381,9 +409,12 @@ async def office_bearer_boards(db: AsyncSession, org_id: uuid.UUID, *,
     out = []
     for b in boards.values():
         holders = []
-        for h in b["holders"].values():
+        for pkey, h in b["holders"].items():
             spans = _merge_spans(h["_years"]) if h["_years"] else []
             holders.append({
+                # The key a club's own order refers to a person by. Not a
+                # player id on its own: a row with no linked player has none.
+                "key": pkey,
                 "player_id": h["player_id"],
                 "name": h["name"],
                 "photo_url": h["photo_url"],
@@ -402,22 +433,39 @@ async def office_bearer_boards(db: AsyncSession, org_id: uuid.UUID, *,
                 "years": _span_label(spans, h["_open"]) if spans else None,
                 "seasons": len(h["_years"]),
             })
-        # Most recent term first; a holder with no year at all sorts last.
-        holders.sort(key=lambda h: (h["from_year"] is None,
-                                    -((h["to_year"] or h["from_year"]) or 0),
-                                    _sort_name(h["name"])))
-        out.append({"group": b["group"], "role": b["role"],
+        mode, rank = hl.holder_setting(layout, b["group"], b["role"])
+        # Most recent term first unless the club chose otherwise; a holder with
+        # no year at all sorts last.
+        holders.sort(key=lambda h: _holder_sort_key(h, mode, rank))
+        out.append({"group": b["group"], "role": b["role"], "sort": mode,
                     "holders": holders, "holder_count": len(holders)})
 
-    def group_rank(name: str) -> int:
+    group_pos = hl.group_rank(layout)
+
+    def group_rank(name: str) -> tuple:
+        # A group the club placed comes first, in its order. The rest keep the
+        # standard order after them, so a group recorded later is never lost.
+        placed = group_pos.get(hl.lc(name))
+        if placed is not None:
+            return (0, placed)
         try:
-            return _GROUP_ORDER.index(name)
+            return (1, _GROUP_ORDER.index(name))
         except ValueError:
-            return len(_GROUP_ORDER)
+            return (1, len(_GROUP_ORDER))
+
+    role_pos: dict[str, dict[str, int]] = {}
+
+    def role_rank(b: dict) -> tuple:
+        pos = role_pos.get(b["group"])
+        if pos is None:
+            pos = role_pos[b["group"]] = hl.role_rank(layout, b["group"])
+        placed = pos.get(hl.lc(b["role"]))
+        if placed is not None:
+            return (0, placed)
+        return (1, _ROLE_PRIORITY.get(b["role"].lower(), 50))
 
     out.sort(key=lambda b: (group_rank(b["group"]), b["group"].lower(),
-                            _ROLE_PRIORITY.get(b["role"].lower(), 50),
-                            b["role"].lower()))
+                            role_rank(b), b["role"].lower()))
 
     groups: list[dict] = []
     for b in out:
