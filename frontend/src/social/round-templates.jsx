@@ -388,8 +388,8 @@ export function FixtureGrid({ palette: pal, width = 1080, height = 1080, meta = 
           <div style={{ fontFamily: DISPLAY, fontSize: 22, color: pal.accent, marginTop: 6 }}>{meta.date}</div>
         </>
       ) })}
-      <div style={{ position: 'absolute', left: 56, right: 56, top: barGeo(width, height, false).h + 4, bottom: bodyEnd(height), display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr 1fr', gap: 18 }}>
-        {rows.slice(0, 6).map((r, i) => {
+      <div style={{ position: 'absolute', left: 56, right: 56, top: barGeo(width, height, false).h + 4, bottom: bodyEnd(height), display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: `repeat(${Math.max(3, Math.ceil(rows.length / 2))}, 1fr)`, gap: 18 }}>
+        {rows.map((r, i) => {
           const home = r.ha === 'H'
           return (
             <div key={i} style={{ position: 'relative', background: pal.secondary, borderTop: `3px solid ${pal.accent}`, padding: '20px 24px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', overflow: 'hidden' }}>
@@ -1181,8 +1181,8 @@ export function ResultsScoreboard({ palette: pal, width = 1080, height = 1080, m
           <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={100} />
         </div>
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(188), bottom: rrFoot(width, height).reserve, display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr 1fr', gap: 24 }}>
-        {rows.slice(0, 6).map((r, i) => {
+      <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(188), bottom: rrFoot(width, height).reserve, display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: `repeat(${Math.max(3, Math.ceil(rows.length / 2))}, 1fr)`, gap: 24 }}>
+        {rows.map((r, i) => {
           const w = r.outcome === 'W'
           const c = w ? WIN : LOSS
           return (

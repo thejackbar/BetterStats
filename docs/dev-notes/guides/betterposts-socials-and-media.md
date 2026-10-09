@@ -176,3 +176,6 @@
 | A club font with no bold, and ink on a dark accent (migration 226, v9.14.0), L8406-8464 | rules extracted | Rules 32 to 37; Verify (fonts) |
 | Instructional videos, managed from the site (migration 280, v9.54.0), L10210-10378 | rules extracted | Rules 38 to 49; Traps (VIDEO_STORAGE_DIR); Operator commands; Open follow-ups; FLAG-POSTS-4 |
 | indented: call to action follows the video's module (v9.54.1) | rules extracted | Rule 47 |
+
+**Lists on a post (v9.109.7)**
+53. A layout never drops rows it was handed. No `slice(0, n)` on players, fixtures or results: size rows from the real count (`LINEUP_MAX = 15` in `cricket-templates.jsx` is the lineup ceiling, and the registry `maxPlayers` must equal it). Sizes for eleven or fewer must stay byte-identical, so past-the-old-limit changes are conditional on the count. A layout's sponsor slot that depends on the list length gets the count through `slotOpts`.

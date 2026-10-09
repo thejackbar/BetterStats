@@ -497,13 +497,18 @@ const SLOT_T1 = (width, height) => {
   const bottom = pick(aspectOf(width, height), { square: 36, portrait: 40, story: 90 })
   return { x: 64, y: height - bottom - h, w: 480, h, pad: 8, gap: 14, panel: 'light' }
 }
+// The most players any lineup layout is built to carry. A side is however many
+// the competition plays (12 a side in some grades), so no layout cuts the list at
+// eleven: each one sizes its rows from the real count, up to this ceiling.
+export const LINEUP_MAX = 15
+
 // The editor fills an empty competition with the word COMPETITION so layouts that
 // always print one have something to show. A layout that is happy to print
 // nothing reads it through here.
 const realComp = (m) => (m && m.competition && m.competition !== 'COMPETITION' ? m.competition : '')
 
 export function T1_HeroList({ width = 1080, height = 1080, team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus, markHero }) {
-  const P = players.slice(0, 13)
+  const P = players.slice(0, LINEUP_MAX)
   const A = aspectOf(width, height)
   const slot = SLOT_T1(width, height)
   // ── T1 at 4:5 and 9:16 ────────────────────────────────────────────────────
@@ -521,7 +526,7 @@ export function T1_HeroList({ width = 1080, height = 1080, team, opponent, match
   // bar and its top the profile row — a name block anchored to either edge is
   // the half that gets covered up.
   const packed = A === 'story'
-  const base = P.length >= 13 ? 28 : P.length >= 11 ? 32 : P.length >= 9 ? 36 : 42
+  const base = P.length >= 15 ? 24 : P.length >= 14 ? 26 : P.length >= 13 ? 28 : P.length >= 11 ? 32 : P.length >= 9 ? 36 : 42
   const rowMax = Math.round(base * pick(A, { square: 1, portrait: 1.22, story: 1.6 }))
   const heroTop = pick(A, { square: 210, portrait: 240, story: 300 })
   return (
@@ -686,7 +691,7 @@ export function T1_HeroList({ width = 1080, height = 1080, team, opponent, match
 // canvas shape.
 const SLOT_T2 = (width, height) => ({ x: 56, y: 268, w: 500, h: 100, pad: 8, gap: 14, panel: 'light' })
 export function T2_CardGrid({ width = 1080, height = 1080, team, opponent, match, players, palette, headline }) {
-  const P = players.slice(0, 12)
+  const P = players.slice(0, LINEUP_MAX)
   const A = aspectOf(width, height)
   const slot = SLOT_T2(width, height)
   // ── T2 at 4:5 and 9:16 ────────────────────────────────────────────────────
@@ -696,7 +701,8 @@ export function T2_CardGrid({ width = 1080, height = 1080, team, opponent, match
   // was. STORY cannot: 4×3 there is 240×480, a face stretched down a slot, so
   // it goes 3×4 and the cards come back to 330×360.
   const cols = pick(A, { square: 4, story: 3 })
-  const rows = pick(A, { square: 3, story: 4 })
+  // Twelve cards fill the grid; a bigger squad adds a row rather than losing a card.
+  const rows = Math.max(pick(A, { square: 3, story: 4 }), Math.ceil(P.length / cols))
   // The header ends about 300px down whatever the canvas, so the grid keeps
   // roughly the square's own 80px gap under it rather than opening a band the
   // taller canvas has no use for.
@@ -828,7 +834,7 @@ const SLOT_T3 = (width, height) => {
   return { x, y: height - 40 - 96, w: width - 40 - 64 - x, h: 96, pad: 8, gap: 14, panel: 'light' }
 }
 export function T3_SideNumbered({ width = 1080, height = 1080, team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus, markHero }) {
-  const P = players.slice(0, 11)
+  const P = players.slice(0, LINEUP_MAX)
   const slot = SLOT_T3(width, height)
   // The vertical spine label echoes the post headline (defaults to STARTING XI).
   // Scale it down for longer headlines so it never runs off the top edge.
@@ -842,11 +848,15 @@ export function T3_SideNumbered({ width = 1080, height = 1080, team, opponent, m
   // The outline spine is measured against the height it runs down, not a fixed
   // 1000, or it stays a square-sized word on a canvas twice as long.
   const spineSize = Math.max(34, Math.min(pick(A, { square: 80, portrait: 96, story: 120 }), Math.floor((height * 0.93) / Math.max(spine.length, 1))))
-  const numSize = pick(A, { square: 40, portrait: 48, story: 56 })
+  // Past eleven the rows have to share the column at every shape (the square's
+  // natural rows only fit eleven), and the type steps down with the count.
+  const crowd = P.length > 11 ? 11 / P.length : 1
+  const flexRows = A !== 'square' || P.length > 11
+  const numSize = Math.round(pick(A, { square: 40, portrait: 48, story: 56 }) * crowd)
   // The square's rows are naturally sized, so the sponsor slot at the foot is
   // paid for by a touch less padding per row (7 to 5), not by cutting a row.
-  const rowPad = pick(A, { square: 5, portrait: 7 })
-  const nameMax = pick(A, { square: 38, portrait: 42, story: 50 })
+  const rowPad = Math.max(2, Math.round(pick(A, { square: 5, portrait: 7 }) * crowd))
+  const nameMax = Math.round(pick(A, { square: 38, portrait: 42, story: 50 }) * crowd)
   return (
     <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
@@ -937,7 +947,7 @@ export function T3_SideNumbered({ width = 1080, height = 1080, team, opponent, m
         </div>
         {/* `minHeight: 0` is TALL-ONLY: at square it lets this column shrink
             below its own rows, which moves the credit rule under it. */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, ...(A === 'square' ? null : { minHeight: 0 }) }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, ...(flexRows ? { minHeight: 0 } : null) }}>
           {P.map((p, i) => {
             const chip = p.captain ? 'C' : p.viceCaptain ? 'VC' : p.keeper ? 'WK' : null
             return (
@@ -945,7 +955,7 @@ export function T3_SideNumbered({ width = 1080, height = 1080, team, opponent, m
               // runs down to the credit rule instead of stopping where it did on
               // the square and leaving 270px of nothing under it. The square
               // keeps its own naturally-sized rows.
-              <div key={i} style={{ ...(A === 'square' ? null : { flex: 1, minHeight: 0 }), display: 'flex', alignItems: 'center', gap: 12, padding: `${rowPad}px 0`, borderBottom: `1px solid ${palette.ink}1c`, ...heroRowMark(isHeroRow(p, featuredOf(players, featuredId), markHero), palette.accent, { bleed: 8, padY: rowPad }) }}>
+              <div key={i} style={{ ...(flexRows ? { flex: 1, minHeight: 0 } : null), display: 'flex', alignItems: 'center', gap: 12, padding: `${rowPad}px 0`, borderBottom: `1px solid ${palette.ink}1c`, ...heroRowMark(isHeroRow(p, featuredOf(players, featuredId), markHero), palette.accent, { bleed: 8, padY: rowPad }) }}>
                 <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: numSize, color: palette.accent, lineHeight: 1, width: Math.round(numSize * 1.2), textAlign: 'right', flexShrink: 0 }}>{i + 1}</div>
                 <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-start' }}>
                   <AutoFitText max={nameMax} min={16} lines={1} pad={8} measureDeps={[p.debut ? 1 : 0]}
@@ -982,7 +992,7 @@ export function T3_SideNumbered({ width = 1080, height = 1080, team, opponent, m
 const T4_FOOT_BOTTOM = 22
 const SLOT_T4 = (width, height) => ({ x: 440, y: height - T4_FOOT_BOTTOM - 96, w: 500, h: 96, pad: 8, gap: 14, panel: 'light' })
 export function T4_BattingOrder({ width = 1080, height = 1080, team, opponent, match, players, palette }) {
-  const P = players.slice(0, 13)
+  const P = players.slice(0, LINEUP_MAX)
   const A = aspectOf(width, height)
   const slot = SLOT_T4(width, height)
   // Footer box: 1px rule + 12px air + the slot's own height.
@@ -992,8 +1002,10 @@ export function T4_BattingOrder({ width = 1080, height = 1080, team, opponent, m
   // The root is a flex column and the rows share what is left below the meta
   // band, rather than the square's fixed-height rows leaving a dead strip above
   // the footer. Numbers and names step up with the rows they sit in.
-  const numSize = pick(A, { square: 40, portrait: 46, story: 56 })
-  const nameMax = pick(A, { square: 30, portrait: 34, story: 42 })
+  // The sizes below carry thirteen rows; a bigger squad steps the type down.
+  const crowd = P.length > 13 ? 13 / P.length : 1
+  const numSize = Math.round(pick(A, { square: 40, portrait: 46, story: 56 }) * crowd)
+  const nameMax = Math.round(pick(A, { square: 30, portrait: 34, story: 42 }) * crowd)
   const headSize = pick(A, { square: 68, portrait: 78, story: 92 })
   return (
     <LayerRoot style={{
@@ -1082,7 +1094,7 @@ export function T4_BattingOrder({ width = 1080, height = 1080, team, opponent, m
 const T5_FOOT_PAD = 12
 const SLOT_T5 = (width, height) => ({ x: 480, y: height - T5_FOOT_PAD - 92, w: 494, h: 92, pad: 8, gap: 14, panel: 'light' })
 export function T5_Brutalist({ width = 1080, height = 1080, team, opponent, match, players, palette, headline }) {
-  const P = players.slice(0, 11)
+  const P = players.slice(0, LINEUP_MAX)
   const A = aspectOf(width, height)
   const slot = SLOT_T5(width, height)
   const footH = slot.h + T5_FOOT_PAD * 2 + 3
@@ -1092,7 +1104,11 @@ export function T5_Brutalist({ width = 1080, height = 1080, team, opponent, matc
   // header and footer leave and each name is allowed to run bigger; the
   // background marks are placed against the real canvas so the watermark still
   // sits behind the middle of the list rather than a third of the way down.
-  const nameMax = pick(A, { square: 60, portrait: 76, story: 92 })
+  // Past eleven the square's rows share the room like a taller post's do, and
+  // the type steps down with the count so the names still fit their rows.
+  const crowd = P.length > 11 ? 11 / P.length : 1
+  const flexRows = A !== 'square' || P.length > 11
+  const nameMax = Math.round(pick(A, { square: 60, portrait: 76, story: 92 }) * crowd)
   return (
     <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
@@ -1122,13 +1138,13 @@ export function T5_Brutalist({ width = 1080, height = 1080, team, opponent, matc
           square it keeps its original natural height and bottom padding, so the
           list sits exactly where it did. */}
       <div style={{
-        ...(A === 'square' ? { padding: '32px 44px 0' } : { flex: 1, minHeight: 0, padding: `32px 44px ${footH + 16}px` }),
+        ...(!flexRows ? { padding: '32px 44px 0' } : { flex: 1, minHeight: 0, padding: `32px 44px ${footH + 16}px` }),
         position: 'relative', zIndex: 2, display: 'flex', flexDirection: 'column', gap: 0,
       }}>
         {P.map((p, i) => {
           const chip = p.captain ? 'C' : p.viceCaptain ? 'VC' : p.keeper ? 'WK' : null
           return (
-            <div key={i} style={{ ...(A === 'square' ? null : { flex: 1, minHeight: 0 }), display: 'grid', gridTemplateColumns: '56px 1fr 70px 60px', alignItems: 'center', gap: 14, borderBottom: `1px solid ${palette.ink}1a`, padding: '4px 0' }}>
+            <div key={i} style={{ ...(flexRows ? { flex: 1, minHeight: 0 } : null), display: 'grid', gridTemplateColumns: '56px 1fr 70px 60px', alignItems: 'center', gap: 14, borderBottom: `1px solid ${palette.ink}1a`, padding: '4px 0' }}>
               <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 1.5, color: palette.accent, opacity: 0.9 }}>{String(i + 1).padStart(2, '0')}</div>
               <div style={{ minWidth: 0, display: 'flex', justifyContent: 'flex-start' }}>
                 <AutoFitText max={nameMax} min={22} lines={1}
@@ -1182,7 +1198,7 @@ export const SLOT_T6 = (width = 1080, height = 1080, count = 3) => {
 }
 
 export function T6_Diagonal({ width = 1080, height = 1080, team, opponent, match, players, palette, heroImage, featuredId }) {
-  const P = players.slice(0, 11)
+  const P = players.slice(0, LINEUP_MAX)
   const A = aspectOf(width, height)
   // ── T6 at 4:5 and 9:16 ────────────────────────────────────────────────────
   // Three bands between two rotated slabs: crest, hero and the XI in two
@@ -1197,7 +1213,9 @@ export function T6_Diagonal({ width = 1080, height = 1080, team, opponent, match
   const heroTop = share(height, 230)
   const heroH = A === 'square' ? 318 : share(height, 340)
   const crestSize = pick(A, { square: 208, portrait: 250, story: 272 })
-  const nameMax = pick(A, { square: 25, portrait: 30, story: 38 })
+  // Six pairs of rows fit the sizes below; a seventh pair or more steps the type down.
+  const pairRows = Math.ceil(P.length / 2) || 1
+  const nameMax = Math.round(pick(A, { square: 25, portrait: 30, story: 38 }) * Math.min(1, 6 / pairRows))
   return (
     <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
@@ -1309,7 +1327,7 @@ export function T7_CaptainSpotlight({ width = 1080, height = 1080, team, opponen
   const unit = milestone?.unit || 'XI'
   const reason = milestone?.reason || 'NAMED IN THE STARTING XI'
   const detail = milestone?.detail || `${player?.roleLong || ''}`
-  const rest = players.slice(0, 13).filter(p => p !== player)
+  const rest = players.slice(0, LINEUP_MAX).filter(p => p !== player)
   const hasHead = !!(player && player.headshot)
   const A = aspectOf(width, height)
   // ── T7 at 4:5 and 9:16 ────────────────────────────────────────────────────
@@ -1386,8 +1404,8 @@ export function T7_CaptainSpotlight({ width = 1080, height = 1080, team, opponen
         </div>
         {/* Equal rows filling the band on a taller post; the square keeps its
             natural-height grid, since stretching it spreads the names apart. */}
-        <div style={{ ...(A === 'square' ? null : { flex: 1, minHeight: 0, gridTemplateRows: `repeat(${Math.ceil(Math.min(rest.length, 12) / 3) || 1}, 1fr)` }), display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4, columnGap: 24 }}>
-          {rest.slice(0, 12).map((p, i) => {
+        <div style={{ ...(A === 'square' ? null : { flex: 1, minHeight: 0, gridTemplateRows: `repeat(${Math.ceil(rest.length / 3) || 1}, 1fr)` }), display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4, columnGap: 24 }}>
+          {rest.map((p, i) => {
             const chip = p.captain ? 'C' : p.viceCaptain ? 'VC' : p.keeper ? 'WK' : null
             return (
               <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", lineHeight: 1.1, color: palette.ink, borderBottom: `1px solid ${palette.ink}1c`, paddingBottom: 5, whiteSpace: 'nowrap', overflow: 'hidden' }}>
@@ -1421,7 +1439,7 @@ export const SLOT_T8 = (width = 1080, height = 1080) => {
 }
 
 export function T8_Mosaic({ width = 1080, height = 1080, team, opponent, match, players, palette, headline, featuredIdx = 0 }) {
-  const playersXI = players.slice(0, 11)
+  const playersXI = players.slice(0, LINEUP_MAX)
   const featuredP = playersXI[featuredIdx] || playersXI.find(p => p.captain) || playersXI[0]
   const rest = playersXI.filter(p => p !== featuredP)
   // featuredP is undefined when no players are picked yet (the empty initial
@@ -1532,10 +1550,11 @@ export const SLOT_T9 = (width = 1080, height = 1080, count = 3) => {
 }
 
 export function T9_Flyer({ width = 1080, height = 1080, team, opponent, match, players, palette, headline }) {
-  const P = players.slice(0, 11)
+  const P = players.slice(0, LINEUP_MAX)
   const tier1 = P.slice(0, 2)
   const tier2 = P.slice(2, 5)
-  const tier3 = P.slice(5, 11)
+  // Everyone after the top five is the support act, however many that is.
+  const tier3 = P.slice(5)
   const A = aspectOf(width, height)
   // ── T9 at 4:5 and 9:16 ────────────────────────────────────────────────────
   // A gig poster: the billing IS the design, so a taller canvas is more room
@@ -1549,12 +1568,30 @@ export function T9_Flyer({ width = 1080, height = 1080, team, opponent, match, p
   const t2 = pick(A, { square: 68, portrait: 80, story: 100 })
   const t3 = pick(A, { square: 40, portrait: 47, story: 72 })
   const tierGap = pick(A, { square: 1, portrait: 1.3, story: 1.8 })
-  const perLine = pick(A, { square: 3, portrait: 3, story: 2 })
+  // Six support names (an eleven) set three to a line. More than that and a line
+  // takes one more name, and the lines are balanced so a twelfth player never
+  // sits alone on a line of his own.
+  const bigSupport = tier3.length > 6
+  const perLine = pick(A, { square: 3, portrait: 3, story: 2 }) + (bigSupport ? 1 : 0)
   // The sponsor slot sits between the billing and the date strip, inside the
   // corner brackets. The billing is centred in what is left above it.
   const slot = SLOT_T9(width, height)
   const t3Lines = []
-  for (let i = 0; i < tier3.length; i += perLine) t3Lines.push(tier3.slice(i, i + perLine))
+  const t3Count = Math.ceil(tier3.length / perLine)
+  if (bigSupport) {
+    // As even as possible, the longer lines first (ten names on three lines: 4, 3, 3).
+    let at = 0
+    for (let l = 0; l < t3Count; l++) {
+      const n = Math.floor(tier3.length / t3Count) + (l < tier3.length % t3Count ? 1 : 0)
+      t3Lines.push(tier3.slice(at, at + n)); at += n
+    }
+  } else {
+    for (let i = 0; i < tier3.length; i += perLine) t3Lines.push(tier3.slice(i, i + perLine))
+  }
+  // The sizes above carry two lines of support names on the square and three on
+  // a story; every line past that steps the type down so the billing keeps fitting.
+  const t3Base = pick(A, { square: 2, portrait: 2, story: 3 })
+  const t3Size = t3Lines.length > t3Base ? Math.round(t3 * (t3Base + 0.5) / (t3Lines.length + 0.5)) : t3
   return (
     <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
@@ -1612,7 +1649,7 @@ export function T9_Flyer({ width = 1080, height = 1080, team, opponent, match, p
             </span>
           ))}</span>
         </AutoFitText>
-        <div style={{ fontSize: t3, marginTop: Math.round(18 * tierGap), opacity: 0.88, letterSpacing: 0 }}>
+        <div style={{ fontSize: t3Size, marginTop: Math.round(18 * tierGap), opacity: 0.88, letterSpacing: 0 }}>
           {t3Lines.map((line, li) => (
             <div key={li} style={{ marginTop: li === 0 ? 0 : Math.round(6 * tierGap) }}>
               {line.map((p, i, arr) => (
@@ -1679,7 +1716,7 @@ export const SLOT_T10 = (width = 1080, height = 1080) => {
 }
 
 export function T10_TeamSheet({ width = 1080, height = 1080, team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus, markHero }) {
-  const P = players.slice(0, 13)
+  const P = players.slice(0, LINEUP_MAX)
   const A = aspectOf(width, height)
   // ── T10 at 4:5 and 9:16 ───────────────────────────────────────────────────
   // A team sheet over a photo. The photo is the element that WANTS the extra
@@ -1688,7 +1725,7 @@ export function T10_TeamSheet({ width = 1080, height = 1080, team, opponent, mat
   // too. Left alone the names spread themselves 60px apart down a story and
   // read as a list somebody forgot to finish.
   // Shrink the rows as the squad grows so a full 13 still fits the column.
-  const base = P.length >= 13 ? 32 : P.length >= 12 ? 36 : P.length >= 11 ? 40 : P.length >= 9 ? 46 : 52
+  const base = P.length >= 15 ? 27 : P.length >= 14 ? 29 : P.length >= 13 ? 32 : P.length >= 12 ? 36 : P.length >= 11 ? 40 : P.length >= 9 ? 46 : 52
   const rowMax = Math.round(base * pick(A, { square: 1, portrait: 1.2, story: 1.55 }))
   const featured = featuredOf(players, featuredId)
   const photo = heroImage || heroSrcOf(featured)
@@ -2700,10 +2737,14 @@ export function SC3_Dashboard({ match, palette = {}, square = false, only = 'hom
     const batCount = (team.batting || []).length
     const bowlCount = (team.bowling || []).length
     const totalRows = Math.max(1, batCount + bowlCount)
-    const rowH = Math.max(20, Math.min(28, Math.floor(590 / totalRows)))
+    // The panel is 760 tall and its header, extras line and column heads take about
+    // 260 of that, so every row (batters and bowlers) shares the other 498. A side
+    // with 12 batters and 9 bowlers used to run off the bottom of the card and lose
+    // its last bowlers; the padding now shrinks with the row so the rows always fit.
+    const rowH = Math.max(18, Math.min(28, Math.floor(498 / totalRows)))
     const sc = rowH / 28
-    const rp = Math.max(2, Math.round(5 * sc))
     const bnf = Math.max(11, Math.round(14 * sc))
+    const rp = rowH >= 28 ? 5 : Math.max(1, Math.floor((rowH - 1 - bnf * 1.25) / 2))
     const bff = Math.max(9, Math.round(12 * sc))
     const brf = Math.max(12, Math.round(16 * sc))
     const bsf = Math.max(9, Math.round(11 * sc))

@@ -24,7 +24,7 @@ import {
   T5_Brutalist, T6_Diagonal, T7_CaptainSpotlight, T8_Mosaic, T9_Flyer, T10_TeamSheet,
   C1_CaptainAnnounce, C2_TossWon, C3_ManOfMatch, C4_FinalScore,
   SC1_Broadcast, SC2_Brutalist, SC3_Dashboard,
-  PALETTES, orgAccent, orgAccent2, orgToPalette, featuredOf, DEFAULT_HERO_FOCUS,
+  PALETTES, orgAccent, orgAccent2, orgToPalette, featuredOf, DEFAULT_HERO_FOCUS, LINEUP_MAX,
 } from '../../social/cricket-templates'
 import {
   FixtureList, FixtureHype, FixtureGrid, FixtureBoard, FixtureHeadline, FixtureSchedule,
@@ -71,19 +71,19 @@ const EMPTY_LAYER = () => []
 // Football has no Split Poster, so its lineups still open on T1.
 const LINEUP_DEFAULT = IS_AFL ? 'T1' : 'T11'
 const ALL_TEMPLATES = [
-  { id: 'T11', name: 'Split Poster',    component: SplitPoster,        desc: 'Pale panel + dark XI, debut tags', maxPlayers: 11 },
-  { id: 'T12', name: 'Match Day Card', component: LineupCard,         desc: 'Photo + colour wash, role icons, sponsor bar', maxPlayers: 11 },
+  { id: 'T11', name: 'Split Poster',    component: SplitPoster,        desc: 'Pale panel + dark XI, debut tags', maxPlayers: LINEUP_MAX },
+  { id: 'T12', name: 'Match Day Card', component: LineupCard,         desc: 'Photo + colour wash, role icons, sponsor bar', maxPlayers: LINEUP_MAX },
   { id: 'T13', name: 'Round Cover',    component: RoundCover,         desc: 'Hero photo, giant side word, round number', maxPlayers: 0 },
-  { id: 'T1', name: 'Hero List',       component: T1_HeroList,        desc: 'Big player + name list',          maxPlayers: 13 },
-  { id: 'T2', name: 'Card Grid',       component: T2_CardGrid,        desc: '4×3 trading card grid',           maxPlayers: 12 },
-  { id: 'T3', name: 'Side Numbered',   component: T3_SideNumbered,    desc: IS_AFL ? 'Side photo + numbered team' : 'Side photo + numbered XI',        maxPlayers: 11 },
-  { id: 'T4', name: 'Batting Order',   component: T4_BattingOrder,    desc: 'Tactical batting order',          maxPlayers: 13 },
-  { id: 'T5', name: 'Brutalist',       component: T5_Brutalist,       desc: IS_AFL ? 'Typography-forward team list' : 'Typography-forward XI',           maxPlayers: 11 },
-  { id: 'T6', name: 'Diagonal Poster', component: T6_Diagonal,        desc: 'Diagonal poster, match-day hype', maxPlayers: 11 },
-  { id: 'T7', name: 'Milestone',       component: T7_CaptainSpotlight, desc: 'Milestone achievement showcase',  maxPlayers: 13 },
-  { id: 'T8', name: 'Mosaic',          component: T8_Mosaic,          desc: 'Asymmetric photo mosaic',         maxPlayers: 11 },
-  { id: 'T9', name: 'Flyer',           component: T9_Flyer,           desc: 'Festival poster style',           maxPlayers: 11 },
-  { id: 'T10', name: 'Team Sheet',     component: T10_TeamSheet,      desc: 'Full-bleed photo + torn strip',   maxPlayers: 13 },
+  { id: 'T1', name: 'Hero List',       component: T1_HeroList,        desc: 'Big player + name list',          maxPlayers: LINEUP_MAX },
+  { id: 'T2', name: 'Card Grid',       component: T2_CardGrid,        desc: '4×3 trading card grid',           maxPlayers: LINEUP_MAX },
+  { id: 'T3', name: 'Side Numbered',   component: T3_SideNumbered,    desc: IS_AFL ? 'Side photo + numbered team' : 'Side photo + numbered XI',        maxPlayers: LINEUP_MAX },
+  { id: 'T4', name: 'Batting Order',   component: T4_BattingOrder,    desc: 'Tactical batting order',          maxPlayers: LINEUP_MAX },
+  { id: 'T5', name: 'Brutalist',       component: T5_Brutalist,       desc: IS_AFL ? 'Typography-forward team list' : 'Typography-forward XI',           maxPlayers: LINEUP_MAX },
+  { id: 'T6', name: 'Diagonal Poster', component: T6_Diagonal,        desc: 'Diagonal poster, match-day hype', maxPlayers: LINEUP_MAX },
+  { id: 'T7', name: 'Milestone',       component: T7_CaptainSpotlight, desc: 'Milestone achievement showcase',  maxPlayers: LINEUP_MAX },
+  { id: 'T8', name: 'Mosaic',          component: T8_Mosaic,          desc: 'Asymmetric photo mosaic',         maxPlayers: LINEUP_MAX },
+  { id: 'T9', name: 'Flyer',           component: T9_Flyer,           desc: 'Festival poster style',           maxPlayers: LINEUP_MAX },
+  { id: 'T10', name: 'Team Sheet',     component: T10_TeamSheet,      desc: 'Full-bleed photo + torn strip',   maxPlayers: LINEUP_MAX },
   { id: 'C1', name: 'Announcement',    component: C1_CaptainAnnounce, desc: 'Captain / debut / award',         maxPlayers: 1 },
   { id: 'C5', name: 'Giant Type',      component: GiantType,          desc: 'FIRST XI / 100 / 5FA behind the player', maxPlayers: 1 },
   { id: 'C2', name: 'Toss',            component: C2_TossWon,         desc: 'Toss result post',                maxPlayers: 0 },
@@ -3137,7 +3137,10 @@ export default function AdminSocialPost() {
   // sheet with a footer strip). Every other layout reserves a slot for the grid.
   const nativeSponsors = isScorecard
   // A layout whose sponsor slot moves with an editor choice (the Glass Card's position).
-  const slotOpts = templateId === 'RS7' ? { position: glassLook.position } : undefined
+  // The Split Poster's grid sits under its XI, which is as long as the side is.
+  const slotOpts = templateId === 'RS7' ? { position: glassLook.position }
+    : templateId === 'T11' ? { players: selectedPlayers.length }
+    : undefined
   const sponsorCanvas = (() => {
     if (isScorecard) return { w: 1920, h: 1080 }
     const sz = postSizeOf(postSize)
@@ -3184,7 +3187,7 @@ export default function AdminSocialPost() {
       if (!same) sponsorTarget.patchMany({ [existing.id]: { sponsorIds: sponsorDefault.ids, ...geo } })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, sponsorDefault, sponsorTarget.items, sponsorKey, sponsorCanvas.w, sponsorCanvas.h, nativeSponsors, templateId, slotOpts?.position])
+  }, [loading, sponsorDefault, sponsorTarget.items, sponsorKey, sponsorCanvas.w, sponsorCanvas.h, nativeSponsors, templateId, slotOpts?.position, slotOpts?.players])
   // A layout with sponsor slots of its own (fixtures, results, scorecards) fills
   // them from the same default, until somebody picks their own logos there.
   useEffect(() => {

@@ -10,7 +10,7 @@
 // The size maths follows postAspect.js: all three post shapes are 1080 wide, so
 // the question is only where the extra height goes. The photo and the list take
 // it; the wordmark and the foot keep their pixels.
-import { Halftone, AutoFitText, CreditMark, RoleChip, DebutTag, featuredOf, heroSrcOf, heroRowMark, isHeroRow } from './cricket-templates'
+import { Halftone, AutoFitText, CreditMark, RoleChip, DebutTag, featuredOf, heroSrcOf, heroRowMark, isHeroRow, LINEUP_MAX } from './cricket-templates'
 import { aspectOf, pick, share } from './postAspect'
 import { LayerRoot } from './postLayers'
 
@@ -42,8 +42,10 @@ export function autoPanelColor(accent) {
 }
 
 // The measurements the layout and its sponsor slot both read, so the grid sits
-// exactly where the XI stops. All three post shapes are 1080 wide.
-function splitGeo(width, height) {
+// exactly where the XI stops. All three post shapes are 1080 wide. `count` is how
+// many players are listed: the rows share the same room, so a twelfth player
+// makes every row a little shorter instead of being cut.
+function splitGeo(width, height, count = 11) {
   const A = aspectOf(width, height)
   const LEFT_W = Math.round(width * 0.505)
   const EDGE = 40
@@ -55,7 +57,8 @@ function splitGeo(width, height) {
   const listTop = 312 + headShift
   const listGap = pick(A, { square: 257, portrait: 262, story: 400 })
   const avail = height - listTop - listGap
-  const rowH = Math.min(pick(A, { square: 46.5, portrait: 60, story: 80 }), avail / 11)
+  const rows = Math.max(11, Math.min(count, LINEUP_MAX))
+  const rowH = Math.min(pick(A, { square: 46.5, portrait: 60, story: 80 }), avail / rows)
   return { A, LEFT_W, EDGE, DARK_W, headShift, footBottom, LIST_X, LIST_R, listTop, listGap, rowH }
 }
 
@@ -63,13 +66,14 @@ function splitGeo(width, height) {
 const CREDIT_H = 44
 const CREDIT_GAP = 12
 
-// Sponsor slot: on the dark panel, directly under the eleven rows, as wide as
-// the XI. It stops above the platform credit and never reaches into the list.
-export function splitSponsorSlot(width = 1080, height = 1080) {
-  const g = splitGeo(width, height)
+// Sponsor slot: on the dark panel, directly under the XI rows, as wide as the
+// XI. It stops above the platform credit and never reaches into the list.
+// `opts.players` is how many players the post lists (eleven when not given).
+export function splitSponsorSlot(width = 1080, height = 1080, _count = 1, opts) {
+  const g = splitGeo(width, height, opts?.players)
   const x = g.LIST_X - 34
   const bottom = height - g.footBottom - CREDIT_H - CREDIT_GAP
-  const top = g.listTop + 11 * g.rowH + 16
+  const top = g.listTop + Math.max(11, Math.min(opts?.players || 11, LINEUP_MAX)) * g.rowH + 16
   // Taller posts have more room under the list, so the grid takes more of it.
   const h = Math.max(70, Math.min(pick(g.A, { square: 140, portrait: 170, story: 240 }), bottom - top))
   return { x, y: bottom - h, w: g.LIST_R - x, h, pad: 8, gap: 16, panel: 'light' }
@@ -79,7 +83,7 @@ export function SplitPoster({
   width = 1080, height = 1080, team, opponent, match, players, palette,
   heroImage, headline, featuredId, panelColor, markHero, background,
 }) {
-  const P = (players || []).slice(0, 11)
+  const P = (players || []).slice(0, LINEUP_MAX)
   const A = aspectOf(width, height)
   const featured = featuredOf(players, featuredId)
   const photo = heroImage || heroSrcOf(featured)
@@ -97,7 +101,7 @@ export function SplitPoster({
   // is the root's own background, so it needs no layer.
   // Where the height goes. The story's top and bottom carry the app's own
   // profile row and reply bar, so the type moves in from both edges there.
-  const { LEFT_W, EDGE, DARK_W, headShift, footBottom, LIST_X, LIST_R, listTop, rowH } = splitGeo(width, height)
+  const { LEFT_W, EDGE, DARK_W, headShift, footBottom, LIST_X, LIST_R, listTop, rowH } = splitGeo(width, height, P.length)
   const nameMax = Math.round(rowH * 0.52)
 
   const photoTop = share(height, 200)
