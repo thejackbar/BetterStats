@@ -265,3 +265,15 @@ Request: give Ask IQ the Claude habit of putting a short qualifying question, wi
 - `AskIQ.jsx`: `ClarifyChoices` buttons under the question. The bubble shows the label while the server gets the button's `value` (`sent`). Only the newest set is live; typing a reply answers it too. Each pick is one more question against the 20 an hour limit.
 - Verified: `verify_iq_ask_clarify.py` (17 pass; the previous commit fails the 10 clarify checks) and `frontend/scripts/verify-ask-iq-clarify.mjs` in Chromium at 390px with the API stubbed (12 pass; the previous page renders no buttons).
 - Not verified: how often the live model chooses to ask. That needs real traffic; the prompt is the only lever, so tune its wording first if it asks too much or too little.
+
+## BetterIQ: the opposition's named XI, matched to the scouted squad (v9.109.10, Oct 2026)
+
+Request: BetterIQ should pull the opposition's team selection for the fixture, using the match id, and match the named players to the players already scanned.
+
+- Source: the plain match record the public Lineups page already reads (`gr.get_match_detail`, five minute cache). The fixture's match id is `Fixture.playhq_id`. New `services/iq_lineup.py` finds their side, normalises it with `lineups.normalise_team`, and matches it with `match_named` against the dossier squad. New route `GET /iq/opposition/lineup`; new card `OppLineup.jsx` under the game plan, for a fixture scout only. Not stored, not part of the cached dossier: the list moves until the first ball, the dossier lives seven days.
+- Matching: participant GUID, then full name, then surname plus first initial (first names must agree; Ashton is not Angus). Ambiguous names match neither. Redacted juniors match by GUID only.
+- Two pools, deliberately. A fixture scout is now scoped to the fixture's grade and the Match Type filter, so a 1st XI player named in the 3rds has no scouted form there. The second pool is their whole club with the scope switched off (`iq_filters.set_scope(None)` around `get_or_start_dossier`), and a player found there is tagged "from another side" with a note that the numbers are from other grades and formats. A named side's `danger_named` / `danger_missing` list says whether the scouted danger players are in the XI.
+- A bug found while verifying: `iq_opponent._find_opponent_team` returns "the team that isn't ours" even when ours is absent from the record. `_opponent_team` here refuses that fallback unless our org is positively one of exactly two teams.
+- States: `named`, `not_named` (normal early in the week; Check again bypasses the cache), `no_match`, `unavailable`, `building` (poll), `pending` (second pool still building).
+- Verified: `verify_iq_opponent_lineup.py` (21 pass on real Postgres; the previous commit has no route) and `frontend/scripts/verify-opp-lineup.mjs` in Chromium at 390px (14 pass; the previous page renders no card).
+- Known gaps: Ask IQ has no lineup tool yet; a fixture whose `grade_id` was never set (synced before it was stored) gets no fixture-grade default; a club that publishes late shows `not_named` until it does.

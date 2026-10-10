@@ -3559,6 +3559,9 @@ export const api = {
   // competitions is discovered via its own org endpoints.
   iqOppositionDossier: ({ opponent, fixtureId, team, grade, name } = {}) =>
     request(`/iq/opposition/dossier?${_iqQs(opponent, fixtureId, team, name)}${grade ? `&grade=${encodeURIComponent(grade)}` : ''}`),
+  // The opposition's named XI for a fixture, matched to their scouted squad.
+  iqOppositionLineup: ({ opponent, fixtureId, team, grade, name, refresh } = {}) =>
+    request(`/iq/opposition/lineup?${_iqQs(opponent, fixtureId, team, name)}${grade ? `&grade=${encodeURIComponent(grade)}` : ''}${refresh ? '&refresh=true' : ''}`),
   // Live ladder standing for an upcoming opponent (our row + theirs).
   iqOpponentLadder: ({ opponent, fixtureId } = {}) =>
     request(`/iq/opposition/ladder?${_iqQs(opponent, fixtureId)}`),

@@ -52,6 +52,8 @@
 
 22a. The opposition dossier honours Grade Type / Match Type and the fixture's grade. The router puts the scope in a ContextVar; `iq_opponent` rebuilds it against THEIR grades (`_opponent_scope`, category on primary category, `formats_only()` once a grade or team is picked) and applies it in `_db_season_accumulators`, `_our_games_vs` and `_target_season_grades`. A scout started from a fixture (`grade_id` set) with no grade or team defaults the grade filter to the fixture's canonical grade (`grade_from_fixture`), and a grade taken from the fixture is never relaxed to the whole club: an empty answer sets `scoped_empty` and never falls through to the live whole-club scout. The scope is in the cache key (`_scope_sig`) and prewarm builds under the club's default scope. Not covered: the live Grassroots path (non-synced opponents) has no per-game format, only grade-level scope on our side.
 
+22b. The opposition's NAMED XI (`services/iq_lineup.py`, `GET /iq/opposition/lineup`, `OppLineup.jsx`) is read live from the fixture's match record, never stored: `Fixture.playhq_id` is the Grassroots match GUID (a hand-added fixture has none, status `no_match`), `gr.get_match_detail` carries `teams[].players[]` (empty means not named yet, status `not_named`). Their side is found by their org id or club name; "the team that isn't ours" is only used when OURS is positively in the record. Players match to the dossier by participant GUID, then full name, then surname plus first initial; a name that fits two scouted players matches neither, and a redacted junior matches by GUID only (CA can issue a different GUID on this route). Two pools: the page's own dossier (`pool: grade`), then their whole club with NO Grade Type / Match Type filter (`pool: other_sides`) so a 1st XI T20 player named in the 3rds is flagged, labelled as form from another side and never blended in. The route takes the same `team`/`grade` as the dossier route.
+
 **Team analysis and trends**
 23. Team scores are reconstructed: ours `SUM(batting_innings.runs)`, theirs `SUM(bowling_spells.runs)` (extras excluded, so close not exact). One `_per_game` pull, aggregated in Python.
 24. Wrap every optional `team_overview` add-on in `iq_team._safe(session, factory, default)` (logs, `session.rollback()`, returns default) so one heavy all-time query cannot blank the page. Avoid short SQL aliases like `no` (use `nout`).
@@ -106,6 +108,7 @@ The archive records no dedicated suites for BetterIQ. Check by hand against a re
 - Bump check: `DOSSIER_VERSION`/`DEEP_VERSION` after shape changes.
 - `backend/verification/verify_iq_dossier_scope.py` (own database): the 3rds fixture under Men's and Two day must exclude the 1st XI's T20, a T20 game inside the same grade, and the juniors; a 4th grade fixture they have no side in must say `scoped_empty`, never the whole club. Run it against the previous commit for the control.
 - `backend/verification/verify_iq_ask_clarify.py` (no database, scripted model) and `frontend/scripts/verify-ask-iq-clarify.mjs` (real page, stubbed `/iq/ask`) for the clarify buttons.
+- `backend/verification/verify_iq_opponent_lineup.py` (real Postgres, stubbed match record) and `frontend/scripts/verify-opp-lineup.mjs` for the named XI.
 - Frontend: first visit defaults season to All; deep links; `CheatSheet` print layout.
 
 ## Operator commands and scripts

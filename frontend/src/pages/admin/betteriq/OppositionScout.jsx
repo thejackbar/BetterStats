@@ -23,6 +23,7 @@ import {
 } from './ui'
 import { Radar, BAT_AXES, BOWL_AXES, PhaseStrip, buildRadar } from './viz'
 import KeyPlayersCard from './KeyPlayersCard'
+import OppLineup from './OppLineup'
 import AnyClubSearch from './AnyClubSearch'
 import { OppPlayerDetail, buildOppPlayerIndex } from './OppPlayerProfile'
 import { useClubPlayers, careerOnlyEntries, entryWithThreat } from './clubPlayers'
@@ -1106,6 +1107,11 @@ export default function OppositionScout() {
         {ready && (
           <div className="space-y-5 iq-fade">
             <GamePlan plan={dossier.game_plan} report={report} dossier={dossier} />
+
+            {/* Who they have named for THIS fixture, matched to the squad scouted below.
+                Same team/grade as the dossier, so it matches against the squad on screen. */}
+            <OppLineup fixtureId={selected?.fixtureId} opponent={selected?.opponent} name={selected?.name}
+              team={teamGradeId} grade={gradeKey || undefined} oppKey={oppLinkKey} oppName={oppName} ready={ready} />
 
             {/* Key players — the signature flick-through showcase cards */}
             {(dossier.danger_batters?.length > 0 || dossier.danger_bowlers?.length > 0) && (
