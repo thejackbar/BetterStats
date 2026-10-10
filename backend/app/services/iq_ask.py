@@ -101,6 +101,17 @@ _SYSTEM = (
     "- If a fixture's opponent has no linked history (has_history false), say the "
     "club can be linked via 'Match club' on the BetterIQ Opposition page to unlock "
     "the head-to-head.\n"
+    "Clarifying questions:\n"
+    "- You have an ask_user tool that puts a question to the user as buttons. Use it "
+    "ONLY when the answer would materially change with the choice and you can't "
+    "settle it from the tools: which grade or side when several fit, all-time or this "
+    "season, which of two similar clubs, one-day or two-day or T20 figures. Look up "
+    "the real options first (grades, find_players, upcoming_fixtures) and offer those, "
+    "never invented ones.\n"
+    "- Don't ask when the question is clear enough to answer, when the tools can tell "
+    "you, or about anything minor. Ask at most once. If the user's reply is a choice "
+    "from your buttons or a typed answer to your question, go ahead and answer with "
+    "it, and never ask again in that thread.\n"
     "If the tools don't cover what was asked, say so plainly and point to where in "
     "BetterIQ to look (Opposition scout for an opponent, Player search for one player, "
     "Team analysis for the side)."
@@ -110,6 +121,29 @@ _SYSTEM = (
 # ─── tools ────────────────────────────────────────────────────────────────────
 
 TOOLS = [
+    {
+        "name": "ask_user",
+        "description": "Ask the user ONE short clarifying question, shown as buttons, instead of answering. Use only when the answer would change materially with their choice and the other tools can't settle it (which grade or side, all-time or this season, one-day or two-day or T20). Offer 2 to 5 real options you found with the other tools. Calling this ends your turn; the user's pick comes back as their next message. Never use it when the question is already clear.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "question": {"type": "string", "description": "the question, in a short plain sentence"},
+                "options": {
+                    "type": "array",
+                    "description": "2 to 5 choices",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "label": {"type": "string", "description": "the button text, a few words"},
+                            "value": {"type": "string", "description": "what is sent back as the user's reply when picked; defaults to the label. Make it a self-contained instruction, e.g. 'Use 3rd Grade'"},
+                        },
+                        "required": ["label"],
+                    },
+                },
+            },
+            "required": ["question", "options"],
+        },
+    },
     {
         "name": "find_players",
         "description": "Find players in the club by name (or list the whole roster when no query). Returns each player's id, role, whether they keep wicket, their bowling_style (e.g. 'Off spin', 'Right-arm fast-medium') and bowling_class ('pace' or 'spin'), their selection squad (their BetterSelect team, e.g. '1st XI'), and career matches/runs/wickets. Use this to get a player_id before calling player_detail or player_vs_club.",
@@ -720,6 +754,36 @@ _DISPATCH = {
 # typed params don't know cache_control on a system block, but the SDK forwards
 # unknown dict keys to the API unchanged (the same pass-through the scorecard
 # reader's PDF document blocks already rely on), so the plain dict works.
+MAX_CLARIFY_OPTIONS = 5
+
+
+def _clarify_from(args) -> dict | None:
+    """A clean ``{question, options[{label, value}]}`` from an ask_user call, or
+    None when it isn't a usable question (so the loop carries on rather than
+    showing a dead-end with fewer than two buttons)."""
+    if not isinstance(args, dict):
+        return None
+    question = strip_em_dashes(str(args.get("question") or "").strip())[:240]
+    options: list[dict] = []
+    seen: set[str] = set()
+    for raw in (args.get("options") or [])[:MAX_CLARIFY_OPTIONS * 2]:
+        if isinstance(raw, str):
+            raw = {"label": raw}
+        if not isinstance(raw, dict):
+            continue
+        label = strip_em_dashes(str(raw.get("label") or "").strip())[:60]
+        if not label or label.lower() in seen:
+            continue
+        seen.add(label.lower())
+        value = strip_em_dashes(str(raw.get("value") or "").strip())[:200] or label
+        options.append({"label": label, "value": value})
+        if len(options) == MAX_CLARIFY_OPTIONS:
+            break
+    if not question or len(options) < 2:
+        return None
+    return {"question": question, "options": options}
+
+
 _SYSTEM_BLOCKS = [{"type": "text", "text": _SYSTEM, "cache_control": {"type": "ephemeral"}}]
 
 
@@ -774,6 +838,9 @@ async def answer(
     # tells it who/what the thread is about. Clipped and capped so the context
     # stays small, and validated here so a malformed client body can't poison it.
     messages: list = []
+    # A thread asks at most one clarifying question: when the previous turn WAS
+    # one, this call isn't offered ask_user, so the user's pick gets an answer.
+    last_clarified = False
     for turn in (history or [])[-MAX_HISTORY_TURNS:]:
         if not isinstance(turn, dict):
             continue
@@ -781,27 +848,41 @@ async def answer(
         prev_a = str(turn.get("answer") or "").strip()[:1500]
         if not prev_q:
             continue
+        last_clarified = bool(turn.get("clarified"))
         messages.append({"role": "user", "content": prev_q})
         messages.append({"role": "assistant", "content": prev_a or "(no answer)"})
     messages.append({"role": "user", "content": f"Club: {club_name}\nQuestion: {question.strip()[:600]}"})
 
+    tools = [t for t in TOOLS if t["name"] != "ask_user"] if last_clarified else TOOLS
     try:
         for _ in range(MAX_STEPS):
             resp = await client.messages.create(
                 model=MODEL,
                 max_tokens=MAX_TOKENS,
                 system=_SYSTEM_BLOCKS,
-                tools=TOOLS,
+                tools=tools,
                 messages=messages,
             )
             if resp.stop_reason != "tool_use":
                 return _answer_from(resp, empty_msg="I couldn't put an answer together, try rephrasing.")
 
+            # The model wants to ask rather than answer: end the turn with the
+            # question and its buttons. Nothing else it called this step runs.
+            ask = next((b for b in resp.content if b.type == "tool_use" and b.name == "ask_user"), None)
+            if ask is not None:
+                clarify = _clarify_from(ask.input)
+                if clarify:
+                    return {"available": True, "answer": clarify["question"], "clarify": clarify}
+
             messages.append({"role": "assistant", "content": resp.content})
             results = []
             for block in resp.content:
                 if block.type == "tool_use":
-                    out = await _run_tool(org_id, block.name, block.input)
+                    if block.name == "ask_user":
+                        # Reached only when the question wasn't usable (see above).
+                        out = {"error": "That wasn't a usable question. Answer with your best reading and say what you assumed."}
+                    else:
+                        out = await _run_tool(org_id, block.name, block.input)
                     results.append({"type": "tool_result", "tool_use_id": block.id, "content": json.dumps(out, default=str)})
             messages.append({"role": "user", "content": results})
 

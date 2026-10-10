@@ -77,6 +77,7 @@
 40. `PlayerLink.jsx` is the one link: ours `/admin/betteriq/trends?player=`, opposition `/admin/betteriq/opposition-player?opponent=&player=` (or `&playerName=` for name-only rows, resolved once the dossier builds). Payload id is `player_id`.
 41. `viz.Radar` has hover/focus tooltips and `legend`; pass `details` from `buildRadar`. Averages 2dp (`fmt2`). Catches use `total_catches_non_wk`/`total_catches_wk`. Add a `<Note>` "how this is worked out" to any opaque blended rating.
 42. `iq_ask.py` tools: `upcoming_fixtures`, `opposition_report`, `opponent_danger_players` (via `get_or_start_dossier`, reports `building` when cold). Prompt: resolve the fixture first, keep picks team-relevant via `squad` (lower-grade record vs opponent is a "possible promotion"), point unlinked opponents at "Match club". `MAX_STEPS = 8`.
+42a. Ask IQ can ask back. `ask_user` (options 2 to 5, cleaned by `_clarify_from`) ends the turn with `{answer, clarify:{question, options[{label, value}]}}`; the page shows buttons and sends the pick's `value` as the next message. History turns carry `clarified`; the turn after one is not offered `ask_user`, so a thread asks at most once. The prompt limits it to choices that change the answer (grade, season, format, which club), using real options from the tools. Each pick is a normal ask against the 20 an hour limit.
 
 ## Traps and failure signatures
 
@@ -104,6 +105,7 @@ The archive records no dedicated suites for BetterIQ. Check by hand against a re
 - Force an add-on to raise: `team_overview` must still return the core.
 - Bump check: `DOSSIER_VERSION`/`DEEP_VERSION` after shape changes.
 - `backend/verification/verify_iq_dossier_scope.py` (own database): the 3rds fixture under Men's and Two day must exclude the 1st XI's T20, a T20 game inside the same grade, and the juniors; a 4th grade fixture they have no side in must say `scoped_empty`, never the whole club. Run it against the previous commit for the control.
+- `backend/verification/verify_iq_ask_clarify.py` (no database, scripted model) and `frontend/scripts/verify-ask-iq-clarify.mjs` (real page, stubbed `/iq/ask`) for the clarify buttons.
 - Frontend: first visit defaults season to All; deep links; `CheatSheet` print layout.
 
 ## Operator commands and scripts

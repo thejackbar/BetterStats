@@ -254,3 +254,14 @@ Fix:
 - `_scope_sig` joins the cache key (`::sc::`), `DOSSIER_VERSION` 10 to 11, prewarm builds under the club's default scope and polls the real key. The payload gains `scope_labels`, `scoped_empty`, `grade_from_fixture`; `GamePlan` shows the labels and an empty-scope message.
 - Known gap: for a non-synced opponent (live Grassroots path) only our side's grade list is scoped, since a Grassroots match carries no per-game format we can filter on.
 - Verified with `backend/verification/verify_iq_dossier_scope.py` on a real Postgres through the shipped `apply_grade_scope` and `opposition_dossier` bodies: 28 pass on the fix; the previous commit fails 19 of them, on exactly the whole-club squad.
+
+## BetterIQ: Ask IQ asks a clarifying question as buttons (v9.109.9, Oct 2026)
+
+Request: give Ask IQ the Claude habit of putting a short qualifying question, with buttons, before answering when the answer depends on the choice. Chosen scope: the Ask IQ chat only, and only when it matters. The Opposition scout is not changed.
+
+- `iq_ask.TOOLS` gains `ask_user` (question plus 2 to 5 options, each `label` and optional `value`). The system prompt limits it to choices that change the figures (which grade or side, all-time or this season, one-day or two-day or T20, which of two clubs), with options taken from the other tools, and never when the question is already clear.
+- `answer()` returns `{answer: <question>, clarify: {...}}` the moment the model calls it; anything else called in that step is not run. `_clarify_from` strips em dashes, de-duplicates, caps at five and rejects fewer than two options; an unusable call goes back to the model as an error result so it answers on its best reading.
+- One ask per thread: the client marks the clarifying turn `clarified` in the history it sends, and the next call is not offered `ask_user`.
+- `AskIQ.jsx`: `ClarifyChoices` buttons under the question. The bubble shows the label while the server gets the button's `value` (`sent`). Only the newest set is live; typing a reply answers it too. Each pick is one more question against the 20 an hour limit.
+- Verified: `verify_iq_ask_clarify.py` (17 pass; the previous commit fails the 10 clarify checks) and `frontend/scripts/verify-ask-iq-clarify.mjs` in Chromium at 390px with the API stubbed (12 pass; the previous page renders no buttons).
+- Not verified: how often the live model chooses to ask. That needs real traffic; the prompt is the only lever, so tune its wording first if it asks too much or too little.
