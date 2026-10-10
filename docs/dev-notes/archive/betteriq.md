@@ -277,3 +277,14 @@ Request: BetterIQ should pull the opposition's team selection for the fixture, u
 - States: `named`, `not_named` (normal early in the week; Check again bypasses the cache), `no_match`, `unavailable`, `building` (poll), `pending` (second pool still building).
 - Verified: `verify_iq_opponent_lineup.py` (21 pass on real Postgres; the previous commit has no route) and `frontend/scripts/verify-opp-lineup.mjs` in Chromium at 390px (14 pass; the previous page renders no card).
 - Known gaps: Ask IQ has no lineup tool yet; a fixture whose `grade_id` was never set (synced before it was stored) gets no fixture-grade default; a club that publishes late shows `not_named` until it does.
+
+## BetterIQ: a quick analysis of the opposition's named players, in Ask IQ and on the card (v9.109.11, Oct 2026)
+
+Request: be able to say "give me a quick analysis of the players selected by the opposition" and get which grades they have played and who is a threat.
+
+- Grade history: scouted rows now carry `grades` (`[{name, matches}]`, distinct matches). The DB path selects `grade_canonical_label` per row; the live path passes the grade name through `_scout_grade` to `_accumulate(grade=)`. `DOSSIER_VERSION` 11 to 12. This season only: prior seasons are not read, and for a non-synced club the live scout covers up to `MAX_TEAMS_SCOUTED` grades.
+- `iq_lineup`: the whole-club pool is now always read, not just for unplaced players, because the grade pool is filtered to one grade and cannot say where else a player plays. `attach_grades`, `build_analysis`, `ambiguous` rows (a name fitting two scouted players is "could not place", not "new to us"), `unsure_count`.
+- Found by reading the generated text, not the assertions: `_team_rank` reads the `1` in "T20 Div 1" as a rung, which made a T20 side "higher" than a 3rd Grade. `_ordinal` now accepts spelled-out ordinals only. A one-game "threat" now says "small sample".
+- Ask IQ: `opponent_lineup(fixture_id)` returns the analysis lines, each player's figures, where the figures came from, usual grade and grades this season, and danger players not named. The prompt tells the model to lead with threats and danger players not named, then grades, then new players, and to say when figures are from other grades and formats.
+- Card: a "quick read" box above the list and a "This season: grade (n)" line per player.
+- Verified: `verify_iq_opponent_lineup.py` 40 pass on real Postgres (the previous commit fails the 13 new checks), `verify-opp-lineup.mjs` 16 pass in Chromium. Not verified: how the live model words the answer from the tool result.

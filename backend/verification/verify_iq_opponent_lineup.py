@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import os
 import sys
 import uuid
 from pathlib import Path
@@ -99,6 +100,10 @@ async def main() -> int:
                         {"i": QUENTIN, "o": base.THEM, "g": str(QUENTIN)})
         await s.execute(text("INSERT INTO bowling_spells (game_id, player_id, overs, maidens, runs, wickets) "
                              "VALUES (:g, :p, 3, 0, 20, 1)"), {"g": g1, "p": QUENTIN})
+        # Smith also turned out once for the 1st XI in T20 Div 1 (a tie with his one 3rds game).
+        await s.execute(text("INSERT INTO batting_innings (game_id, player_id, runs, balls, fours, sixes, not_out, "
+                             " dismissal_type, did_not_bat, batting_position) "
+                             "VALUES (:g, :p, 12, 10, 1, 0, false, 'bowled', false, 5)"), {"g": g1, "p": base.SMITH})
         await s.commit()
 
     if not hasattr(iq_router, "opposition_lineup"):
@@ -139,17 +144,50 @@ async def main() -> int:
           str(P.get("David Lane")))
     check("Hitter: matched on surname and initial, flagged as the weaker basis",
           (P.get("H Hitter") or {}).get("basis") == "initial", str(P.get("H Hitter")))
-    check("Q Quick fits two scouted players, so it matches neither",
-          (P.get("Q Quick") or {}).get("matched") is False, str(P.get("Q Quick")))
+    check("Q Quick fits two scouted players, so it matches neither, and is flagged ambiguous",
+          (P.get("Q Quick") or {}).get("matched") is False and P["Q Quick"].get("ambiguous") is True, str(P.get("Q Quick")))
     check("the redacted junior is flagged, not guessed", (P.get("********") or {}).get("redacted") is True
           and P["********"].get("matched") is False, str(P.get("********")))
-    check("a stranger is counted as new to us", res.get("new_count") == 2 and not P["Zed Newbie"]["matched"],
-          f"new_count={res.get('new_count')}")
+    check("a stranger is counted as new to us", res.get("new_count") == 1 and res.get("unsure_count") == 1 and not P["Zed Newbie"]["matched"],
+          f"new_count={res.get('new_count')} unsure={res.get('unsure_count')}")
     check("counts: 2 from the grade scout, 2 from other sides, 1 redacted",
           (res.get("scouted_count"), res.get("other_sides_count"), res.get("redacted_count")) == (2, 2, 1),
           str((res.get("scouted_count"), res.get("other_sides_count"), res.get("redacted_count"))))
     check("Smith, their scouted danger batter, is named", any(d["name"] == smith for d in res.get("danger_named", [])),
           str(res.get("danger_named")))
+
+    print("\n-- grades they have played, from the whole club --")
+    check("Lane usually plays T20 Div 1, not this grade",
+          (P.get("David Lane") or {}).get("usual_grade") == "T20 Div 1" and (P.get("David Lane") or {}).get("plays_elsewhere") is True,
+          str(((P.get("David Lane") or {}).get("usual_grade"), (P.get("David Lane") or {}).get("plays_elsewhere"))))
+    check("Smith has played both, and the tie goes to this grade: not a visitor",
+          {g["name"] for g in (P.get("Sam Smith") or {}).get("grades", [])} == {"3rd Grade", "T20 Div 1"}
+          and (P.get("Sam Smith") or {}).get("usual_grade") == "3rd Grade" and (P.get("Sam Smith") or {}).get("plays_elsewhere") is False,
+          str((P["Sam Smith"].get("grades"), (P.get("Sam Smith") or {}).get("usual_grade"))))
+    check("Bowler has only played 3rd Grade", [g["name"] for g in (P.get("Ben Bowler") or {}).get("grades", [])] == ["3rd Grade"],
+          str(P["Ben Bowler"].get("grades")))
+    check("Smith's figures are still the grade scout's (45), the T20 innings is not blended in",
+          ((P["Sam Smith"].get("bat") or {}).get("runs")) == 45, str(P["Sam Smith"].get("bat")))
+    check("a stranger has no grade history", not (P.get("Zed Newbie") or {}).get("grades"), str(P["Zed Newbie"].get("grades")))
+
+    print("\n-- the quick read --")
+    lines = (res.get("analysis") or {}).get("lines") or []
+    text_ = " ".join(lines)
+    if os.environ.get("SHOW"):  # eyeball the generated text: SHOW=1 python -m verification.verify_iq_opponent_lineup
+        for ln in lines:
+            print("       |", ln)
+        for r in res.get("players", []):
+            print("       |", r["name"], "->", r.get("pool"), r.get("grades"), r.get("usual_grade"))
+    check("it opens with how many they named and how many we know", lines[:1] == ["Swanbourne CC 3rd XI have named 7. We have form on 4 of them."], str(lines[:1]))
+    check("it names the threat with his numbers", "Threats:" in text_ and "Sam Smith, 45 runs" in text_, text_)
+    check("it says Lane usually plays T20 Div 1, with no higher/lower claim across competitions",
+          "David Lane usually plays T20 Div 1 (their only game this season)." in text_, text_)
+    check("a thin sample is called one, inside one bracket", "79.0 (in T20 Div 1, small sample)" in text_, text_)
+    check("it lists who we have never seen, and the junior", "Not scouted before: Zed Newbie and 1 junior with names withheld." in text_, text_)
+    check("an ambiguous name is not called new: it says it could not tell",
+          "Q Quick" not in text_.partition("Not scouted before:")[2].split(".")[0] and "Could not tell which scouted player Q Quick is" in text_, text_)
+    check("no em dashes", "\u2014" not in text_ and "\u2013" not in text_, text_)
+    check("nothing is pending once the pool is built", res.get("pending") is False, str(res.get("pending")))
 
     print("\n-- the danger man is NOT named --")
     DETAIL = record([person(base.BOWL_3, "Ben Bowler"), person(uuid.uuid4(), "Zed Newbie")])
@@ -157,6 +195,8 @@ async def main() -> int:
     check("Smith is listed as missing from the XI", any(d["name"] == smith for d in res.get("danger_missing", [])),
           str(res.get("danger_missing")))
     check("and not as named", not any(d["name"] == smith for d in res.get("danger_named", [])), str(res.get("danger_named")))
+    check("the quick read says so", "Not named: Sam Smith" in " ".join((res.get("analysis") or {}).get("lines", [])),
+          str((res.get("analysis") or {}).get("lines")))
 
     print("\n-- the other states --")
     DETAIL = record([])
@@ -178,6 +218,40 @@ async def main() -> int:
     check("a hand-added fixture has no match id: no_match", res.get("status") == "no_match", str(res.get("status")))
     res = await lineup(fixture=None)
     check("no fixture at all: no_match", res.get("status") == "no_match", str(res.get("status")))
+
+    print("\n-- Ask IQ: the opponent_lineup tool --")
+    from app.services import iq_ask
+    check("the tool is registered and offered to the model",
+          "opponent_lineup" in iq_ask._DISPATCH and any(t["name"] == "opponent_lineup" for t in iq_ask.TOOLS), "")
+    if not hasattr(iq_ask, "_tool_opponent_lineup"):
+        check("the Ask IQ tool function exists", False, "iq_ask._tool_opponent_lineup is missing")
+        print(f"\n{base.PASS} passed, {base.FAIL} failed")
+        return 1
+    DETAIL = record([person(base.SMITH, "Sam Smith", ["Captain"]), person(uuid.uuid4(), "David Lane"),
+                     person(uuid.uuid4(), "Zed Newbie")])
+    out: dict = {}
+    async with base.Session() as s:
+        club = (await s.execute(select(Organisation).where(Organisation.id == base.US))).scalar_one()
+        gen = iq_router.apply_grade_scope(categories="senior", formats="two_day", competitions=None, db=s, club=club)
+        await gen.__anext__()
+        try:
+            for _ in range(200):
+                out = await iq_ask._tool_opponent_lineup(s, str(base.US), fixture_id=str(base.FX3))
+                if out.get("status") != "building":
+                    break
+                await asyncio.sleep(0.2)
+            err = await iq_ask._tool_opponent_lineup(s, str(base.US))
+        finally:
+            await gen.aclose()
+    PL = {p["name"]: p for p in out.get("players", [])}
+    check("it returns the named XI with the analysis sentences",
+          out.get("status") == "named" and len(PL) == 3 and bool(out.get("analysis")), str(out)[:200])
+    check("Lane carries his usual grade and where his figures came from",
+          PL.get("David Lane", {}).get("usual_grade") == "T20 Div 1"
+          and PL["David Lane"].get("figures_from") == "their other grades and formats", str(PL.get("David Lane")))
+    check("Smith's figures are this grade's", PL.get("Sam Smith", {}).get("figures_from") == "this fixture's grade"
+          and PL["Sam Smith"].get("runs") == 45, str(PL.get("Sam Smith")))
+    check("a fixture id is required", "error" in err, str(err))
 
     print(f"\n{base.PASS} passed, {base.FAIL} failed")
     return 1 if base.FAIL else 0

@@ -42,9 +42,15 @@ function PlayerRow({ p, oppKey, oppName }) {
         {p.alert?.level === 'caution' && <Tag tone="amber">Caution</Tag>}
         {p.matched && p.pool === 'other_sides' && <Tag tone="amber">From another side</Tag>}
         {p.matched && p.basis && p.basis !== 'id' && <Tag tone="faint">Name match</Tag>}
-        {!p.matched && !p.redacted && <Tag tone="faint">New to us</Tag>}
+        {!p.matched && !p.redacted && !p.ambiguous && <Tag tone="faint">New to us</Tag>}
+        {!p.matched && p.ambiguous && <Tag tone="amber">Name fits two players</Tag>}
       </div>
       {p.matched && fig && <div className="text-pb-faint text-[12px] mt-1 leading-snug">{fig}</div>}
+      {p.matched && p.grades?.length > 0 && (
+        <div className="text-pb-faint text-[12px] mt-0.5 leading-snug">
+          {p.plays_elsewhere && `Usually plays ${p.usual_grade}. `}This season: {p.grades.map(g => `${g.name} (${g.matches})`).join(', ')}.
+        </div>
+      )}
       {p.matched && p.pool === 'other_sides' && (
         <div className="text-pb-faint text-[11.5px] mt-0.5 leading-snug">These are their numbers in other grades and formats, so read them with care.</div>
       )}
@@ -106,21 +112,16 @@ export default function OppLineup({ fixtureId, opponent, name, team, grade, oppK
           {data.named_count} named · {data.scouted_count} scouted
           {data.other_sides_count > 0 && ` · ${data.other_sides_count} from another side`}
           {data.new_count > 0 && ` · ${data.new_count} new to us`}
+          {data.unsure_count > 0 && ` · ${data.unsure_count} we could not place`}
           {data.redacted_count > 0 && ` · ${data.redacted_count} junior${data.redacted_count > 1 ? 's' : ''} with names withheld`}
         </div>
-        {data.danger_missing?.length > 0 && (
-          <div className="flex gap-2 text-[13px] mb-1.5" style={{ color: 'var(--pb-brand)' }}>
-            <Icon name="check" size={15} className="mt-0.5 shrink-0" />
-            <span>Not named: {data.danger_missing.map(d => d.name).join(', ')}, from the players you've scouted as dangerous.</span>
+        {data.analysis?.lines?.length > 0 && (
+          <div className="mb-3 p-3 space-y-1.5 text-[13px] leading-snug" style={{ background: 'var(--pb-surface2)', borderRadius: 10, border: '1px solid var(--pb-hairline)' }}>
+            <div className="iq-eyebrow">quick read</div>
+            {data.analysis.lines.map((l, i) => <div key={i}>{l}</div>)}
           </div>
         )}
-        {data.danger_named?.length > 0 && (
-          <div className="flex gap-2 text-[13px] mb-1.5" style={{ color: 'var(--pb-red)' }}>
-            <Icon name="info" size={15} className="mt-0.5 shrink-0" />
-            <span>Named and dangerous: {data.danger_named.map(d => d.name).join(', ')}.</span>
-          </div>
-        )}
-        {data.pending && <Note>Still checking their other sides for the players we haven't placed yet.</Note>}
+        {data.pending && <Note>Still checking which grades they have played in, and the players we haven't placed yet. This updates by itself.</Note>}
         <div className="mt-2">
           {players.map((p, i) => <PlayerRow key={p.participant_id || `${p.name}-${i}`} p={p} oppKey={oppKey} oppName={oppName} />)}
         </div>

@@ -50,7 +50,18 @@ const NAMED = {
     { participant_id: 'e', name: 'Ben Bowler', is_captain: false, is_keeper: false, redacted: false, matched: false, basis: null, pool: null, player_id: null },
   ],
   danger_named: [{ player_id: 'p-smith', name: 'Smith, Sam', kind: 'bat' }], danger_missing: [],
+  analysis: { lines: [
+    'Swanbourne CC 3rd XI have named 5. We have form on 2 of them.',
+    'Threats: Sam Smith, 211 runs at 42.2.',
+    'David Lane usually plays T20 Div 1 (their only game this season).',
+    'Not scouted before: Zed Newbie, Ben Bowler and 1 junior with names withheld.',
+  ] },
 }
+NAMED.players[0].grades = [{ name: '3rd Grade', matches: 6 }]
+NAMED.players[0].plays_elsewhere = false
+NAMED.players[1].grades = [{ name: 'T20 Div 1', matches: 1 }]
+NAMED.players[1].usual_grade = 'T20 Div 1'
+NAMED.players[1].plays_elsewhere = true
 
 const lineupCalls = []
 const browser = await chromium.launch(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : {})
@@ -97,7 +108,9 @@ await page.waitForSelector('text=Zed Newbie', { timeout: 10000 })
 check('Check again asks the server to bypass its cache', lineupCalls.at(-1)?.refresh, 'true')
 const body = await page.innerText('body')
 check('the summary line counts them', body.includes('5 named') && body.includes('1 scouted') && body.includes('1 from another side') && body.includes('2 new to us'), true)
-check('the danger player is called out as named', body.includes('Named and dangerous: Smith, Sam'), true)
+check('the quick read is shown, with its sentences', body.toUpperCase().includes('QUICK READ') && body.includes('Threats: Sam Smith, 211 runs at 42.2.'), true)
+check('the grades a visitor usually plays are shown', body.includes('Usually plays T20 Div 1. This season: T20 Div 1 (1).'), true)
+check('a regular in this grade gets no "usually" claim', body.includes('This season: 3rd Grade (6).') && !body.includes('Usually plays 3rd Grade'), true)
 // Tags are CSS-uppercased, so innerText comes back uppercase: write the check that way.
 check('Lane is labelled as form from another side', body.toUpperCase().includes('FROM ANOTHER SIDE') && body.includes('79 runs'), true)
 check('the redacted junior is not guessed', body.includes('Name withheld (junior)'), true)

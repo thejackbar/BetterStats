@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.settings import settings
 from app.models.db import async_session_maker
-from app.services import iq_opponent, iq_players, iq_team, iq_trends
+from app.services import iq_lineup, iq_opponent, iq_players, iq_team, iq_trends
 from app.services import iq as iq_service
 from app.services.aggregations import get_player_by_opposition
 from app.services.bowling_style import bowling_class, bowling_label
@@ -98,6 +98,14 @@ _SYSTEM = (
     "from opposition_report and add that the deeper scout (their current-season "
     "form) will be ready if they ask again in a minute, or on the BetterIQ "
     "Opposition page.\n"
+    "- To analyse who the opposition have PICKED for a game ('quick analysis of "
+    "their selected players', 'who have they named', 'who is a threat in their "
+    "side'), find the fixture with upcoming_fixtures, then call opponent_lineup. "
+    "Lead with the threats and the danger players not named, then say which grades "
+    "the named players usually play (usual_grade, plays_elsewhere), who is new to "
+    "us, and how sure the numbers are. A player whose figures are from 'their other "
+    "grades and formats' is not a read on this grade, so say so. If they have not "
+    "named a side, say that and offer the opposition_report instead.\n"
     "- If a fixture's opponent has no linked history (has_history false), say the "
     "club can be linked via 'Match club' on the BetterIQ Opposition page to unlock "
     "the head-to-head.\n"
@@ -243,6 +251,15 @@ TOOLS = [
                 "fixture_id": {"type": "string", "description": "fixture id from upcoming_fixtures"},
                 "opponent": {"type": "string", "description": "opponent club name (or opp_key)"},
             },
+        },
+    },
+    {
+        "name": "opponent_lineup",
+        "description": "The opposition's NAMED XI for ONE upcoming fixture, read live from the match record and matched to the players already scouted. For each named player: whether we have scouted them, their season runs, average, strike rate, wickets, economy and form, their threat flag and plan, and the GRADES they have played this season (usual_grade, plays_elsewhere when they normally play a different side). Also a ready-made 'analysis' of plain sentences (threats, who is playing out of their usual side, who is new to us, danger players NOT named). Needs a fixture_id from upcoming_fixtures. Use for 'who have they picked', 'quick analysis of the players selected by the opposition', 'who is a threat in their side'. If status is not_named they have not published a team yet, say so.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"fixture_id": {"type": "string", "description": "fixture id from upcoming_fixtures"}},
+            "required": ["fixture_id"],
         },
     },
 ]
@@ -732,6 +749,54 @@ async def _tool_opponent_danger_players(session, org_id, *, fixture_id=None, opp
     return out
 
 
+async def _tool_opponent_lineup(session, org_id, *, fixture_id=None):
+    if not fixture_id:
+        return {"error": "Pass a fixture_id from upcoming_fixtures."}
+    from app.models.db import Organisation
+    club = await session.get(Organisation, org_id)
+    if club is None:
+        return {"error": "club not found"}
+    d = await iq_lineup.opponent_lineup(session, club, fixture_id=fixture_id)
+    status = d.get("status")
+    if status == "building" or d.get("pending"):
+        return {
+            "status": "building",
+            "note": "The scout behind this is still building (takes up to a minute). Tell the user to ask again shortly, or use the Opposition page, which updates as it finishes.",
+        }
+    if status != "named":
+        notes = {
+            "not_named": f"{d.get('team_name') or 'The opposition'} have not named their side yet. Clubs usually publish a day or two before the game.",
+            "no_match": d.get("reason"),
+            "unavailable": d.get("reason"),
+        }
+        return {"status": status, "note": notes.get(status) or d.get("reason") or "No team list available."}
+
+    def _p(p):
+        bat, bowl = p.get("bat") or {}, p.get("bowl") or {}
+        return {
+            "name": p.get("name"), "captain": p.get("is_captain"), "keeper": p.get("is_keeper"),
+            "scouted": p.get("matched"), "junior_name_withheld": p.get("redacted"),
+            "matched_by": p.get("basis"),
+            "figures_from": {"grade": "this fixture's grade", "other_sides": "their other grades and formats"}.get(p.get("pool")),
+            "runs": bat.get("runs"), "innings": bat.get("innings"), "average": _round(bat.get("average")),
+            "strike_rate": _round(bat.get("strike_rate")), "form": bat.get("form"),
+            "wickets": bowl.get("wickets"), "economy": _round(bowl.get("economy")),
+            "threat": p.get("danger"), "alert": (p.get("alert") or {}).get("level"),
+            "plan": p.get("plan"),
+            "usual_grade": p.get("usual_grade"), "plays_elsewhere": p.get("plays_elsewhere"),
+            "usual_side_is": p.get("usual_step"), "grades_this_season": p.get("grades"),
+        }
+
+    return {
+        "status": "named", "team": d.get("team_name"), "date": d.get("date"),
+        "fixture_grade": d.get("fixture_grade"),
+        "analysis": (d.get("analysis") or {}).get("lines"),
+        "players": [_p(p) for p in (d.get("players") or [])],
+        "danger_players_not_named": [x.get("name") for x in (d.get("danger_missing") or [])],
+        "scope": _scope_echo(basis="this season, under the filters in force"),
+    }
+
+
 _DISPATCH = {
     "find_players": _tool_find_players,
     "player_detail": _tool_player_detail,
@@ -744,6 +809,7 @@ _DISPATCH = {
     "upcoming_fixtures": _tool_upcoming_fixtures,
     "opposition_report": _tool_opposition_report,
     "opponent_danger_players": _tool_opponent_danger_players,
+    "opponent_lineup": _tool_opponent_lineup,
 }
 
 

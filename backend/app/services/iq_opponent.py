@@ -53,7 +53,7 @@ logger = logging.getLogger(__name__)
 # rebuilt on next view, so new analysis (game plan, how-they-win/lose, scouting
 # notes, …) pulls through for EVERY cache key — whole-club AND each team — without
 # waiting on the TTL or a manual refresh.
-DOSSIER_VERSION = 11
+DOSSIER_VERSION = 12
 
 # Squads change slowly and a rebuild is heavy; a week's freshness with a manual
 # Refresh button is the right trade-off.
@@ -201,13 +201,28 @@ def _new_bat(name):
     return {"name": name, "inns": 0, "runs": 0, "balls": 0, "outs": 0, "no": 0,
             "fours": 0, "sixes": 0, "hs": None, "hs_no": False,
             "cov_runs": 0, "cov_balls": 0, "cov_inns": 0,
-            "dism": Counter(), "scores": [], "matches": set()}
+            "dism": Counter(), "scores": [], "matches": set(), "grades": {}}
 
 
 def _new_bowl(name):
     return {"name": name, "balls": 0, "maidens": 0, "runs": 0, "wkts": 0, "spells": 0,
             "cov_runs": 0, "cov_balls": 0, "cov_wkts": 0, "cov_spells": 0,
-            "five_fors": 0, "best_w": -1, "best_r": None, "spell_log": [], "matches": set()}
+            "five_fors": 0, "best_w": -1, "best_r": None, "spell_log": [], "matches": set(), "grades": {}}
+
+
+def _note_grade(acc: dict, grade: str | None, match_id: str) -> None:
+    """Record that this player played ``match_id`` in ``grade`` (distinct matches,
+    so a two-day game's second innings is not a second game)."""
+    if grade:
+        acc["grades"].setdefault(grade, set()).add(match_id)
+
+
+def _grades_list(acc: dict) -> list[dict]:
+    """``[{name, matches}]`` busiest grade first, for the finalised row."""
+    return sorted(
+        ({"name": g, "matches": len(m)} for g, m in (acc.get("grades") or {}).items()),
+        key=lambda x: (-x["matches"], x["name"]),
+    )
 
 
 def _bat_coverage(b: dict, runs, balls) -> None:
@@ -232,7 +247,8 @@ def _new_field(name):
 
 
 def _accumulate(scorecard: dict, match_id: str, opp_pids: dict[str, str], when: date | None,
-                bat: dict, bowl: dict, field: dict, fow: dict | None = None) -> None:
+                bat: dict, bowl: dict, field: dict, fow: dict | None = None,
+                grade: str | None = None) -> None:
     """Fold one scorecard's opponent rows into the accumulators (in place)."""
     when_s = when.isoformat() if when else None
     for inn in (scorecard.get("innings") or []):
@@ -258,6 +274,7 @@ def _accumulate(scorecard: dict, match_id: str, opp_pids: dict[str, str], when: 
             b["fours"] += row.get("foursScored") or 0
             b["sixes"] += row.get("sixesScored") or 0
             b["matches"].add(match_id)
+            _note_grade(b, grade, match_id)
             if not_out:
                 b["no"] += 1
             else:
@@ -288,6 +305,7 @@ def _accumulate(scorecard: dict, match_id: str, opp_pids: dict[str, str], when: 
             bw["wkts"] += w
             bw["spells"] += 1
             bw["matches"].add(match_id)
+            _note_grade(bw, grade, match_id)
             if w >= 5:
                 bw["five_fors"] += 1
             if w > bw["best_w"] or (w == bw["best_w"] and (bw["best_r"] is None or r < bw["best_r"])):
@@ -385,6 +403,7 @@ def _finalise_bat(pid: str, b: dict) -> dict:
         ],
         "recent_avg": recent_avg,
         "form": form,
+        "grades": _grades_list(b),
     }
 
 
@@ -406,6 +425,7 @@ def _finalise_bowl(pid: str, b: dict) -> dict:
         "best": (f"{b['best_w']}/{b['best_r']}" if b["best_w"] >= 0 else None),
         "five_fors": b["five_fors"],
         "recent_wickets": [s["wkts"] for s in log[:5]],
+        "grades": _grades_list(b),
     }
 
 
@@ -546,7 +566,8 @@ async def _db_season_accumulators(
                    COALESCE(pl.display_name_override, pl.name) AS name,
                    g.id::text AS match_id, g.played_at,
                    bi.runs, bi.balls, bi.fours, bi.sixes, bi.not_out,
-                   bi.dismissal_type, bi.caught_behind
+                   bi.dismissal_type, bi.caught_behind,
+                   {grade_canonical_label('gr', 'org')} AS grade_name
             FROM v_effective_batting_innings bi
             -- Their club's players only. These seasons are theirs, but a fixture
             -- between them and a THIRD synced club is a single `games` row holding
@@ -575,6 +596,7 @@ async def _db_season_accumulators(
         b["fours"] += r.fours or 0
         b["sixes"] += r.sixes or 0
         b["matches"].add(r.match_id)
+        _note_grade(b, r.grade_name, r.match_id)
         if r.not_out:
             b["no"] += 1
         else:
@@ -600,7 +622,8 @@ async def _db_season_accumulators(
             SELECT COALESCE(pl.grassroots_id, pl.id::text) AS pid,
                    COALESCE(pl.display_name_override, pl.name) AS name,
                    g.id::text AS match_id, g.played_at,
-                   bs.overs, bs.maidens, bs.runs, bs.wickets
+                   bs.overs, bs.maidens, bs.runs, bs.wickets,
+                   {grade_canonical_label('gr', 'org')} AS grade_name
             FROM v_effective_bowling_spells bs
             JOIN players pl ON pl.id = bs.player_id AND pl.organisation_id = CAST(:org AS UUID)
             JOIN v_effective_games g ON g.id = bs.game_id
@@ -624,6 +647,7 @@ async def _db_season_accumulators(
         bw["wkts"] += w
         bw["spells"] += 1
         bw["matches"].add(r.match_id)
+        _note_grade(bw, r.grade_name, r.match_id)
         if w >= 5:
             bw["five_fors"] += 1
         if w > bw["best_w"] or (w == bw["best_w"] and (bw["best_r"] is None or runs < bw["best_r"])):
@@ -1154,6 +1178,7 @@ async def _discover_opponent_teams(
 async def _scout_grade(
     grade_id: str, *, our_org_id: str, opp_org_id: str | None, opp_name: str | None, cap: int,
     bat: dict, bowl: dict, field: dict, dates: list, seen: set, fow: dict | None = None,
+    grade_name: str | None = None,
 ) -> int:
     """Fold up to ``cap`` of the opponent's most-recent matches in one grade into
     the accumulators (in place). Returns how many were scouted."""
@@ -1187,7 +1212,7 @@ async def _scout_grade(
         when = _match_date(sc)
         if when:
             dates.append(when)
-        _accumulate(sc, mid, roster, when, bat, bowl, field, fow)
+        _accumulate(sc, mid, roster, when, bat, bowl, field, fow, grade=grade_name)
         scouted += 1
     return scouted
 
@@ -1593,7 +1618,7 @@ async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: 
             n = await _scout_grade(
                 g["grade_id"], our_org_id=org_id, opp_org_id=opp_org_id, opp_name=opp_name, cap=cap,
                 bat=season_bat, bowl=season_bowl, field=season_field, dates=season_dates, seen=seen_match_ids,
-                fow=season_fow,
+                fow=season_fow, grade_name=g.get("grade_name") or g.get("team_name"),
             )
             season_matches += n
             if n:
