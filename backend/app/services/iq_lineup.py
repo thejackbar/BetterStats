@@ -42,7 +42,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services import grassroots_scores_client as gr
 from app.services import iq as iq_service
-from app.services import iq_filters, iq_opponent
+from app.services import iq_filters, iq_opponent, iq_scout
 from app.services.lineups import looks_redacted, normalise_team
 
 logger = logging.getLogger(__name__)
@@ -225,6 +225,54 @@ def attach_grades(rows: list[dict], pool: dict[str, dict] | None, fixture_grade:
             r["usual_step"] = _step(top[0], fixture_grade or "")
 
 
+# ─── last season ─────────────────────────────────────────────────────────────
+
+_LAST_KEYS = ("matches", "innings", "runs", "average", "strike_rate", "high_score", "fifties", "hundreds",
+              "wickets", "overs", "economy", "bowling_average", "best")
+
+
+def _year_in(text_: str | None) -> int | None:
+    m = re.search(r"(?:19|20)\d{2}", text_ or "")
+    return int(m.group(0)) if m else None
+
+
+def _last_season(career_player: dict | None, this_year: int | None) -> dict | None:
+    """The player's most recent season BEFORE the one being scouted, from the
+    Cricket Australia season aggregates (``iq_scout``'s career cache). A season
+    row is a calendar year, so 2025 is the 2025/26 summer."""
+    if not career_player:
+        return None
+    seasons = [
+        x for x in (career_player.get("seasons") or [])
+        if (x.get("matches") or x.get("innings") or x.get("wickets")) and (this_year is None or x["year"] < this_year)
+    ]
+    if not seasons:
+        return None
+    x = max(seasons, key=lambda v: v["year"])
+    return {"year": x["year"], "label": f"{x['year']}/{str(x['year'] + 1)[2:]}", **{k: x.get(k) for k in _LAST_KEYS}}
+
+
+def attach_last_season(rows: list[dict], career: dict | None, this_year: int | None) -> None:
+    """Give each named player last season's figures, in place.
+
+    Found by the player id we already matched (a scouted player), then by the
+    participant id on the team list, then by name within the club's career list
+    (the same ambiguity rule as everywhere else: two fits match neither). A
+    player the scout has not seen this season but who played last season is
+    ``career_only``: known to us, just not yet this year."""
+    index = {str(c.get("player_id") or "").lower(): c for c in (career or {}).get("players") or []}
+    names = {pid: {"name": c.get("name")} for pid, c in index.items()}
+    for r in rows:
+        cp = index.get(str(r.get("player_id") or "").lower()) or index.get(str(r.get("participant_id") or "").lower())
+        if cp is None and index and not r.get("redacted"):
+            pid, _basis, _amb = _find(names, None, r.get("name"), False)
+            cp = index.get(pid) if pid else None
+        r["last_season"] = _last_season(cp, this_year)
+        r["career_only"] = bool(not r["matched"] and cp is not None and r["last_season"])
+        if r["career_only"]:
+            r["ambiguous"] = False
+
+
 # ─── the quick read ──────────────────────────────────────────────────────────
 
 def _threat(p: dict) -> float:
@@ -236,6 +284,10 @@ def _threat(p: dict) -> float:
     score += 50 if lvl == "danger" else 10 if lvl == "caution" else 0
     score += (bat.get("runs") or 0) / 10 + 3 * (bowl.get("wickets") or 0)
     score += 10 if bat.get("form") == "hot" else 0
+    ls = p.get("last_season") or {}
+    if ls and (not p.get("matched") or p.get("confidence") == "low"):
+        # Early in a season this year's sample says little: last year counts.
+        score += (ls.get("runs") or 0) / 10 + 3 * (ls.get("wickets") or 0)
     return score
 
 
@@ -248,14 +300,28 @@ def _short(name: str | None) -> str:
     return n
 
 
-def _figs(p: dict) -> str:
-    bat, bowl = p.get("bat") or {}, p.get("bowl") or {}
+def _line(side: dict) -> str:
     bits = []
-    if bat.get("innings"):
-        bits.append(f"{bat['runs']} runs" + (f" at {round(bat['average'], 1)}" if bat.get("average") is not None else ""))
-    if bowl.get("wickets"):
-        bits.append(f"{bowl['wickets']} wickets" + (f", economy {round(bowl['economy'], 2)}" if bowl.get("economy") is not None else ""))
+    if side.get("innings"):
+        bits.append(f"{side['runs']} runs" + (f" at {round(side['average'], 1)}" if side.get("average") is not None else ""))
+    if side.get("wickets"):
+        bits.append(f"{side['wickets']} wickets" + (f", economy {round(side['economy'], 2)}" if side.get("economy") is not None else ""))
     return " and ".join(bits)
+
+
+def _figs(p: dict) -> str:
+    """This season's figures, and last season's when this season is thin or
+    missing (a small sample is a weak read; last year's is the better one)."""
+    bat, bowl = p.get("bat") or {}, p.get("bowl") or {}
+    this = _line({"innings": bat.get("innings"), "runs": bat.get("runs"), "average": bat.get("average"),
+                  "wickets": bowl.get("wickets"), "economy": bowl.get("economy")})
+    ls = p.get("last_season") or {}
+    last = _line(ls) if ls else ""
+    if this and last and p.get("confidence") == "low":
+        return f"{this} this season, {last} last season"
+    if last and not this:
+        return f"{last} last season"
+    return this
 
 
 def build_analysis(rows: list[dict], *, team_name: str | None, fixture_grade: str | None,
@@ -266,12 +332,13 @@ def build_analysis(rows: list[dict], *, team_name: str | None, fixture_grade: st
     show; the lists beside it are the same facts as data."""
     who = team_name or "They"
     known = [r for r in rows if r["matched"]]
-    threats = sorted((r for r in known if _threat(r) >= 20), key=_threat, reverse=True)[:3]
+    threats = sorted((r for r in rows if (r["matched"] or r["career_only"]) and _threat(r) >= 20), key=_threat, reverse=True)[:3]
     visitors = [r for r in known if r.get("plays_elsewhere")]
-    new = [r for r in rows if not r["matched"] and not r["redacted"] and not r["ambiguous"]]
+    new = [r for r in rows if not r["matched"] and not r["redacted"] and not r["ambiguous"] and not r["career_only"]]
+    last_only = [r for r in rows if r["career_only"]]
     unsure = [r for r in rows if not r["matched"] and r["ambiguous"]]
     redacted = [r for r in rows if not r["matched"] and r["redacted"]]
-    lines = [f"{who} have named {len(rows)}. We have form on {len(known)} of them."]
+    lines = [f"{who} have named {len(rows)}. We have form on {len(known) + len(last_only)} of them."]
     if threats:
         parts = []
         for r in threats:
@@ -293,6 +360,9 @@ def build_analysis(rows: list[dict], *, team_name: str | None, fixture_grade: st
         count = (f"their only game this season" if total == 1 else f"all {total} games this season") if usual_n == total \
             else f"{usual_n} of {total} games this season"
         lines.append(f"{_short(r['name'])} usually plays {usual}{side} ({count}).")
+    if last_only:
+        lines.append("Played for them last season but nothing yet this season: " + "; ".join(
+            f"{_short(r['name'])}" + (f", {_line(r['last_season'])}" if _line(r["last_season"]) else "") for r in last_only[:4]) + ".")
     if danger_missing:
         lines.append("Not named: " + ", ".join(_short(d["name"]) for d in danger_missing[:3]) + ", who we had down as dangerous.")
     if new or redacted:
@@ -307,12 +377,13 @@ def build_analysis(rows: list[dict], *, team_name: str | None, fixture_grade: st
     if bowlers:
         lines.append("Wicket-takers named: " + ", ".join(f"{_short(r['name'])} ({r['bowl']['wickets']})" for r in bowlers) + ".")
     if pending:
-        lines.append("Still checking which grades the rest have played in.")
+        lines.append("Still checking last season and the grades they have played in. This updates by itself.")
     return {
         "lines": lines,
         "threats": [{"name": r["name"], "player_id": r["player_id"], "pool": r["pool"]} for r in threats],
         "visitors": [{"name": r["name"], "usual_grade": r["usual_grade"], "step": r.get("usual_step")} for r in visitors],
         "new_to_us": [r["name"] for r in new],
+        "last_season_only": [r["name"] for r in last_only],
     }
 
 
@@ -427,6 +498,26 @@ async def opponent_lineup(
     fixture_grade = ((d1.get("grade_filter") or [None])[0]) or base.get("grade")
     attach_grades(rows, other_pool, fixture_grade)
 
+    # Last season, from the club's cached Cricket Australia season totals. An add-on:
+    # if it fails or is still building, the lineup stands without it.
+    career = None
+    opp_guid = (d1.get("opponent") or {}).get("org_id") or opp_org
+    if opp_guid and iq_opponent._is_uuid(opp_guid):
+        try:
+            c = await iq_scout._get_or_start(
+                session, org_id, iq_scout._career_key(opp_guid), iq_scout.CAREER_VERSION,
+                lambda: iq_scout._build_career(opp_guid, opp_name), name=opp_name,
+            )
+            if c.get("status") == "ready":
+                career = c
+            elif c.get("status") == "building":
+                pending = True
+        except Exception as e:  # noqa: BLE001 - never take the lineup down for last season
+            logger.warning("BetterIQ lineup: career lookup failed for %s: %s", opp_guid, e)
+            await session.rollback()
+    this_year = _year_in((d1.get("scouted") or {}).get("season_name"))
+    attach_last_season(rows, career, this_year)
+
     named_ids = {r["player_id"] for r in rows if r["player_id"]}
     dangers = [
         {"player_id": d.get("player_id"), "name": d.get("name"), "kind": kind}
@@ -444,7 +535,8 @@ async def opponent_lineup(
         "named_count": len(rows),
         "scouted_count": sum(1 for r in rows if r["pool"] == "grade"),
         "other_sides_count": sum(1 for r in rows if r["pool"] == "other_sides"),
-        "new_count": sum(1 for r in rows if not r["matched"] and not r["redacted"] and not r["ambiguous"]),
+        "new_count": sum(1 for r in rows if not r["matched"] and not r["redacted"] and not r["ambiguous"] and not r["career_only"]),
+        "last_season_only_count": sum(1 for r in rows if r["career_only"]),
         "unsure_count": sum(1 for r in rows if not r["matched"] and r["ambiguous"]),
         "redacted_count": sum(1 for r in rows if not r["matched"] and r["redacted"]),
         "players": rows,

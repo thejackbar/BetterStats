@@ -103,7 +103,10 @@ _SYSTEM = (
     "side'), find the fixture with upcoming_fixtures, then call opponent_lineup. "
     "Lead with the threats and the danger players not named, then say which grades "
     "the named players usually play (usual_grade, plays_elsewhere), who is new to "
-    "us, and how sure the numbers are. A player whose figures are from 'their other "
+    "us, and how sure the numbers are. Early in a season this year's figures are a "
+    "small sample, so say what each key player did LAST season (last_season) and "
+    "treat that as the better read until this season has a few games in it. A player "
+    "whose figures are from 'their other "
     "grades and formats' is not a read on this grade, so say so. If they have not "
     "named a side, say that and offer the opposition_report instead.\n"
     "- If a fixture's opponent has no linked history (has_history false), say the "
@@ -255,7 +258,7 @@ TOOLS = [
     },
     {
         "name": "opponent_lineup",
-        "description": "The opposition's NAMED XI for ONE upcoming fixture, read live from the match record and matched to the players already scouted. For each named player: whether we have scouted them, their season runs, average, strike rate, wickets, economy and form, their threat flag and plan, and the GRADES they have played this season (usual_grade, plays_elsewhere when they normally play a different side). Also a ready-made 'analysis' of plain sentences (threats, who is playing out of their usual side, who is new to us, danger players NOT named). Needs a fixture_id from upcoming_fixtures. Use for 'who have they picked', 'quick analysis of the players selected by the opposition', 'who is a threat in their side'. If status is not_named they have not published a team yet, say so.",
+        "description": "The opposition's NAMED XI for ONE upcoming fixture, read live from the match record and matched to the players already scouted. For each named player: whether we have scouted them, their season runs, average, strike rate, wickets, economy and form, their threat flag and plan, LAST SEASON's totals from Cricket Australia (last_season), and the GRADES they have played this season (usual_grade, plays_elsewhere when they normally play a different side). Also a ready-made 'analysis' of plain sentences (threats, who is playing out of their usual side, who is new to us, danger players NOT named). Needs a fixture_id from upcoming_fixtures. Use for 'who have they picked', 'quick analysis of the players selected by the opposition', 'who is a threat in their side'. If status is not_named they have not published a team yet, say so.",
         "input_schema": {
             "type": "object",
             "properties": {"fixture_id": {"type": "string", "description": "fixture id from upcoming_fixtures"}},
@@ -785,6 +788,10 @@ async def _tool_opponent_lineup(session, org_id, *, fixture_id=None):
             "plan": p.get("plan"),
             "usual_grade": p.get("usual_grade"), "plays_elsewhere": p.get("plays_elsewhere"),
             "usual_side_is": p.get("usual_step"), "grades_this_season": p.get("grades"),
+            "last_season": ({k: (p["last_season"] or {}).get(k) for k in (
+                "label", "matches", "innings", "runs", "average", "strike_rate", "high_score", "wickets", "economy")}
+                if p.get("last_season") else None),
+            "played_last_season_only": p.get("career_only"),
         }
 
     return {

@@ -288,3 +288,14 @@ Request: be able to say "give me a quick analysis of the players selected by the
 - Ask IQ: `opponent_lineup(fixture_id)` returns the analysis lines, each player's figures, where the figures came from, usual grade and grades this season, and danger players not named. The prompt tells the model to lead with threats and danger players not named, then grades, then new players, and to say when figures are from other grades and formats.
 - Card: a "quick read" box above the list and a "This season: grade (n)" line per player.
 - Verified: `verify_iq_opponent_lineup.py` 40 pass on real Postgres (the previous commit fails the 13 new checks), `verify-opp-lineup.mjs` 16 pass in Chromium. Not verified: how the live model words the answer from the tool result.
+
+## BetterIQ: last season's figures on the named XI (v9.109.12, Oct 2026)
+
+Reported from the first live use: a named player (Jacques Lee) showed 173 runs this season while he made 300+ last season in 6th grade; early in a season this year's sample is thin, so last season is the better read until a few games are in.
+
+- `iq_lineup.attach_last_season` adds `last_season` (`label` like 2025/26, matches, innings, runs, average, strike rate, high score, wickets, economy) to every named player, from the club's cached Cricket Australia season totals (`iq_scout._get_or_start` on `career::<org>`; reused, not a second source, and the same cache the opposition player profile reads). Match by the player id already matched, then the participant id, then name within the club's career list (two fits match neither).
+- "Last season" is the latest career year strictly before the year of the scouted season, so a club whose new season has no rows yet does not show the season the scout is already on as "last".
+- A player with no scout this year but a last-season record is `career_only`: shown with "Last season only", counted separately, and no longer "new to us".
+- The quick read and `_threat` lean on last season while `confidence` is low or the player is unscouted this year; once a player has a real sample, this season's figures stand alone. The Ask IQ tool returns `last_season` and the prompt tells the model to lead with it early in a season.
+- The CA season rows carry no grade, so last season shows totals only, not which grade they were scored in. A club's calendar year bucket can include a winter competition, which would sit in the same year.
+- Verified: `verify_iq_opponent_lineup.py` 48 pass on real Postgres with the CA season totals scripted through the real cache (the previous commit fails the 10 new checks); `verify-opp-lineup.mjs` 18 pass in Chromium.

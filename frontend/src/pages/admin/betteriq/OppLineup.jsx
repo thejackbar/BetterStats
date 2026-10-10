@@ -24,6 +24,15 @@ function figures(p) {
   return bits.join('  |  ')
 }
 
+// Last season's totals (Cricket Australia season aggregates): runs, average and
+// strike rate, then wickets and economy, then the games behind them.
+function lastFig(l) {
+  const bits = []
+  if (l.innings) bits.push(`${l.runs} runs${l.average != null ? ` @ ${n1(l.average)}` : ''}${l.strike_rate != null ? ` · SR ${n1(l.strike_rate)}` : ''}${l.high_score ? ` · HS ${l.high_score}` : ''}`)
+  if (l.wickets) bits.push(`${l.wickets} wkts${l.economy != null ? ` · econ ${n2(l.economy)}` : ''}`)
+  return bits.length ? `${bits.join('  |  ')} (${l.matches} games)` : ''
+}
+
 const rank = p => (p.alert?.level === 'danger' || p.danger ? 0 : p.matched ? 1 : p.redacted ? 3 : 2)
 
 function PlayerRow({ p, oppKey, oppName }) {
@@ -42,7 +51,8 @@ function PlayerRow({ p, oppKey, oppName }) {
         {p.alert?.level === 'caution' && <Tag tone="amber">Caution</Tag>}
         {p.matched && p.pool === 'other_sides' && <Tag tone="amber">From another side</Tag>}
         {p.matched && p.basis && p.basis !== 'id' && <Tag tone="faint">Name match</Tag>}
-        {!p.matched && !p.redacted && !p.ambiguous && <Tag tone="faint">New to us</Tag>}
+        {p.career_only && <Tag tone="faint">Last season only</Tag>}
+        {!p.matched && !p.redacted && !p.ambiguous && !p.career_only && <Tag tone="faint">New to us</Tag>}
         {!p.matched && p.ambiguous && <Tag tone="amber">Name fits two players</Tag>}
       </div>
       {p.matched && fig && <div className="text-pb-faint text-[12px] mt-1 leading-snug">{fig}</div>}
@@ -50,6 +60,9 @@ function PlayerRow({ p, oppKey, oppName }) {
         <div className="text-pb-faint text-[12px] mt-0.5 leading-snug">
           {p.plays_elsewhere && `Usually plays ${p.usual_grade}. `}This season: {p.grades.map(g => `${g.name} (${g.matches})`).join(', ')}.
         </div>
+      )}
+      {p.last_season && lastFig(p.last_season) && (
+        <div className="text-[12px] mt-0.5 leading-snug"><span className="text-pb-faint">Last season ({p.last_season.label}):</span> {lastFig(p.last_season)}</div>
       )}
       {p.matched && p.pool === 'other_sides' && (
         <div className="text-pb-faint text-[11.5px] mt-0.5 leading-snug">These are their numbers in other grades and formats, so read them with care.</div>
@@ -111,6 +124,7 @@ export default function OppLineup({ fixtureId, opponent, name, team, grade, oppK
         <div className="text-[12.5px] text-pb-faint mb-2">
           {data.named_count} named · {data.scouted_count} scouted
           {data.other_sides_count > 0 && ` · ${data.other_sides_count} from another side`}
+          {data.last_season_only_count > 0 && ` · ${data.last_season_only_count} with nothing yet this season`}
           {data.new_count > 0 && ` · ${data.new_count} new to us`}
           {data.unsure_count > 0 && ` · ${data.unsure_count} we could not place`}
           {data.redacted_count > 0 && ` · ${data.redacted_count} junior${data.redacted_count > 1 ? 's' : ''} with names withheld`}
@@ -121,7 +135,7 @@ export default function OppLineup({ fixtureId, opponent, name, team, grade, oppK
             {data.analysis.lines.map((l, i) => <div key={i}>{l}</div>)}
           </div>
         )}
-        {data.pending && <Note>Still checking which grades they have played in, and the players we haven't placed yet. This updates by itself.</Note>}
+        {data.pending && <Note>Still checking last season and the grades they have played in. This updates by itself.</Note>}
         <div className="mt-2">
           {players.map((p, i) => <PlayerRow key={p.participant_id || `${p.name}-${i}`} p={p} oppKey={oppKey} oppName={oppName} />)}
         </div>

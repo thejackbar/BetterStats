@@ -120,11 +120,12 @@ async def main() -> int:
         person(uuid.uuid4(), "Q Quick"),                              # fits two scouted players
         person(uuid.uuid4(), "********"),                             # a redacted junior
         person(uuid.uuid4(), "Zed Newbie"),                           # nobody scouted him
+        person(uuid.uuid4(), "Anthony Delaney"),                      # played last season, nothing yet this year
     ])
 
     print("\n-- the 3rds fixture: their named XI, matched to the scouted squad --")
     res = await lineup(fixture=base.FX3)
-    check("status named, seven players", res.get("status") == "named" and res.get("named_count") == 7,
+    check("status named, eight players", res.get("status") == "named" and res.get("named_count") == 8,
           f"{res.get('status')} {res.get('named_count')}")
     check("the match id used is the fixture's own", res.get("match_id") == MATCH_ID, str(res.get("match_id")))
     P = by_name(res)
@@ -150,9 +151,9 @@ async def main() -> int:
           and P["********"].get("matched") is False, str(P.get("********")))
     check("a stranger is counted as new to us", res.get("new_count") == 1 and res.get("unsure_count") == 1 and not P["Zed Newbie"]["matched"],
           f"new_count={res.get('new_count')} unsure={res.get('unsure_count')}")
-    check("counts: 2 from the grade scout, 2 from other sides, 1 redacted",
-          (res.get("scouted_count"), res.get("other_sides_count"), res.get("redacted_count")) == (2, 2, 1),
-          str((res.get("scouted_count"), res.get("other_sides_count"), res.get("redacted_count"))))
+    check("counts: 2 from the grade scout, 2 from other sides, 1 redacted, 1 last-season only",
+          (res.get("scouted_count"), res.get("other_sides_count"), res.get("redacted_count"), res.get("last_season_only_count")) == (2, 2, 1, 1),
+          str((res.get("scouted_count"), res.get("other_sides_count"), res.get("redacted_count"), res.get("last_season_only_count"))))
     check("Smith, their scouted danger batter, is named", any(d["name"] == smith for d in res.get("danger_named", [])),
           str(res.get("danger_named")))
 
@@ -178,16 +179,36 @@ async def main() -> int:
             print("       |", ln)
         for r in res.get("players", []):
             print("       |", r["name"], "->", r.get("pool"), r.get("grades"), r.get("usual_grade"))
-    check("it opens with how many they named and how many we know", lines[:1] == ["Swanbourne CC 3rd XI have named 7. We have form on 4 of them."], str(lines[:1]))
+    check("it opens with how many they named and how many we know", lines[:1] == ["Swanbourne CC 3rd XI have named 8. We have form on 5 of them."], str(lines[:1]))
     check("it names the threat with his numbers", "Threats:" in text_ and "Sam Smith, 45 runs" in text_, text_)
     check("it says Lane usually plays T20 Div 1, with no higher/lower claim across competitions",
           "David Lane usually plays T20 Div 1 (their only game this season)." in text_, text_)
-    check("a thin sample is called one, inside one bracket", "79.0 (in T20 Div 1, small sample)" in text_, text_)
+    check("a thin sample is called one, inside one bracket", "(in T20 Div 1, small sample)" in text_, text_)
     check("it lists who we have never seen, and the junior", "Not scouted before: Zed Newbie and 1 junior with names withheld." in text_, text_)
     check("an ambiguous name is not called new: it says it could not tell",
           "Q Quick" not in text_.partition("Not scouted before:")[2].split(".")[0] and "Could not tell which scouted player Q Quick is" in text_, text_)
     check("no em dashes", "\u2014" not in text_ and "\u2013" not in text_, text_)
     check("nothing is pending once the pool is built", res.get("pending") is False, str(res.get("pending")))
+
+    print("\n-- last season, from the Cricket Australia season totals --")
+    sm, ln, dl = P["Sam Smith"], P["David Lane"], P["Anthony Delaney"]
+    check("Smith: last season is 2025/26 (312 runs at 31.2), not the 2026 row the scout is already showing",
+          (sm.get("last_season") or {}).get("label") == "2025/26" and (sm.get("last_season") or {}).get("runs") == 312
+          and (sm.get("last_season") or {}).get("average") == 31.2, str(sm.get("last_season")))
+    check("Smith's this-season figures are untouched (45)", ((sm.get("bat") or {}).get("runs")) == 45, str(sm.get("bat")))
+    check("Lane has last season too, from his other side's season", (ln.get("last_season") or {}).get("runs") == 250,
+          str(ln.get("last_season")))
+    check("a player with a different GUID is found by name in the season totals",
+          dl.get("career_only") is True and (dl.get("last_season") or {}).get("runs") == 210, str(dl))
+    check("he is not counted as new to us, and is not marked scouted this season",
+          dl.get("matched") is False and res.get("new_count") == 1, f"matched={dl.get('matched')} new={res.get('new_count')}")
+    check("a stranger has no last season", not (P["Zed Newbie"].get("last_season")), str(P["Zed Newbie"].get("last_season")))
+    check("Smith's threat line leans on last season because this season is one innings",
+          "Sam Smith, 45 runs at 45.0 this season, 312 runs at 31.2 last season" in " ".join((res.get("analysis") or {}).get("lines", [])),
+          " ".join((res.get("analysis") or {}).get("lines", [])))
+    check("the quick read names who played last season but nothing yet this year",
+          "Played for them last season but nothing yet this season: Anthony Delaney, 210 runs at 30.0." in " ".join((res.get("analysis") or {}).get("lines", [])),
+          " ".join((res.get("analysis") or {}).get("lines", [])))
 
     print("\n-- the danger man is NOT named --")
     DETAIL = record([person(base.BOWL_3, "Ben Bowler"), person(uuid.uuid4(), "Zed Newbie")])
@@ -257,12 +278,42 @@ async def main() -> int:
     return 1 if base.FAIL else 0
 
 
+DELANEY = uuid.uuid4()
+
+
+def season(year, **kw):
+    s = {"year": year, "matches": 0, "innings": 0, "runs": 0, "average": None, "strike_rate": None, "high_score": None,
+         "fifties": 0, "hundreds": 0, "wickets": 0, "overs": None, "economy": None, "bowling_average": None, "best": None}
+    s.update(kw)
+    return s
+
+
+async def _fake_career(org_guid, club_name=None, years=10):
+    """What `iq_scout._build_career` returns: every player's season totals, keyed by CA participant id."""
+    return {
+        "org": {"id": str(org_guid), "name": club_name}, "window": {"from_year": 2017, "to_year": 2026},
+        "schema_v": __import__("app.services.iq_scout", fromlist=["x"]).CAREER_VERSION, "built_at": "2026-10-10T00:00:00Z",
+        "players": [
+            {"player_id": str(base.SMITH), "name": "Smith, Sam", "seasons": [
+                season(2026, matches=1, innings=1, runs=57, average=57.0),
+                season(2025, matches=12, innings=12, runs=312, average=31.2, strike_rate=61.0, high_score="87", fifties=2)]},
+            {"player_id": str(base.BOWL_3), "name": "Bowler, Ben", "seasons": [
+                season(2025, matches=10, innings=4, runs=40, average=10.0, wickets=15, economy=3.4)]},
+            {"player_id": str(base.LANE), "name": "Lane, David", "seasons": [
+                season(2025, matches=9, innings=9, runs=250, average=31.2, strike_rate=140.0, high_score="79")]},
+            {"player_id": str(DELANEY), "name": "Delaney, Anthony", "seasons": [
+                season(2025, matches=8, innings=8, runs=210, average=30.0, strike_rate=70.0, high_score="64*")]},
+        ],
+    }
+
+
 def base_main_stubs() -> None:
     """The same CA stubs the scope check uses, plus the match record."""
     gr_client.get_grade_matches = base._fake_grade_matches
     gr_client.get_match_scorecard = base._fake_scorecard
     gr_client.get_match_detail = _detail
     from app.services import iq_scout
+    iq_scout._build_career = _fake_career
 
     async def _no_external_teams(*_a, **_k):
         return []

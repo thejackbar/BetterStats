@@ -57,6 +57,13 @@ const NAMED = {
     'Not scouted before: Zed Newbie, Ben Bowler and 1 junior with names withheld.',
   ] },
 }
+NAMED.players[0].last_season = { label: '2025/26', matches: 12, innings: 12, runs: 312, average: 31.2, strike_rate: 61, high_score: '87', wickets: 0 }
+NAMED.players.push({ participant_id: 'f', name: 'Anthony Delaney', is_captain: false, is_keeper: false, redacted: false, matched: false, career_only: true, basis: null, pool: null, player_id: null,
+  last_season: { label: '2025/26', matches: 8, innings: 8, runs: 210, average: 30, strike_rate: 70, high_score: '64*', wickets: 0 } })
+NAMED.named_count = 6
+NAMED.last_season_only_count = 1
+NAMED.new_count = 1
+NAMED.analysis.lines.push('Played for them last season but nothing yet this season: Anthony Delaney, 210 runs at 30.0.')
 NAMED.players[0].grades = [{ name: '3rd Grade', matches: 6 }]
 NAMED.players[0].plays_elsewhere = false
 NAMED.players[1].grades = [{ name: 'T20 Div 1', matches: 1 }]
@@ -107,9 +114,12 @@ await page.click('button:has-text("Check again")')
 await page.waitForSelector('text=Zed Newbie', { timeout: 10000 })
 check('Check again asks the server to bypass its cache', lineupCalls.at(-1)?.refresh, 'true')
 const body = await page.innerText('body')
-check('the summary line counts them', body.includes('5 named') && body.includes('1 scouted') && body.includes('1 from another side') && body.includes('2 new to us'), true)
+check('the summary line counts them', body.includes('6 named') && body.includes('1 scouted') && body.includes('1 from another side') && body.includes('1 with nothing yet this season') && body.includes('1 new to us'), true)
 check('the quick read is shown, with its sentences', body.toUpperCase().includes('QUICK READ') && body.includes('Threats: Sam Smith, 211 runs at 42.2.'), true)
 check('the grades a visitor usually plays are shown', body.includes('Usually plays T20 Div 1. This season: T20 Div 1 (1).'), true)
+check('last season is shown per player, with the games behind it', body.includes('Last season (2025/26): 312 runs @ 31.2 · SR 61 · HS 87 (12 games)'), true)
+check('a player with nothing yet this season is marked, with last season\'s figures',
+  body.toUpperCase().includes('LAST SEASON ONLY') && body.includes('210 runs @ 30 · SR 70 · HS 64* (8 games)'), true)
 check('a regular in this grade gets no "usually" claim', body.includes('This season: 3rd Grade (6).') && !body.includes('Usually plays 3rd Grade'), true)
 // Tags are CSS-uppercased, so innerText comes back uppercase: write the check that way.
 check('Lane is labelled as form from another side', body.toUpperCase().includes('FROM ANOTHER SIDE') && body.includes('79 runs'), true)
