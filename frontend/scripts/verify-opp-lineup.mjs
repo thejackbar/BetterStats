@@ -64,6 +64,9 @@ NAMED.named_count = 6
 NAMED.last_season_only_count = 1
 NAMED.new_count = 1
 NAMED.analysis.lines.push('Played for them last season but nothing yet this season: Anthony Delaney, 210 runs at 30.0.')
+NAMED.players[0].band_stats = { label: '3rd/4th Grade', span: '2024/25 to 2026/27', matches: 23, innings: 23, runs: 595, average: 28.33, strike_rate: 54.09, high_score: '87', wickets: 0 }
+NAMED.players[1].band_stats = null
+NAMED.players[1].other_grade_stats = { label: '1st/2nd Grade (T20)', span: '2025/26', matches: 9, innings: 9, runs: 250, average: 31.2, strike_rate: 138.9, high_score: '79', wickets: 0 }
 NAMED.players[0].grades = [{ name: '3rd Grade', matches: 6 }]
 NAMED.players[0].plays_elsewhere = false
 NAMED.players[1].grades = [{ name: 'T20 Div 1', matches: 1 }]
@@ -117,7 +120,10 @@ const body = await page.innerText('body')
 check('the summary line counts them', body.includes('6 named') && body.includes('1 scouted') && body.includes('1 from another side') && body.includes('1 with nothing yet this season') && body.includes('1 new to us'), true)
 check('the quick read is shown, with its sentences', body.toUpperCase().includes('QUICK READ') && body.includes('Threats: Sam Smith, 211 runs at 42.2.'), true)
 check('the grades a visitor usually plays are shown', body.includes('Usually plays T20 Div 1. This season: T20 Div 1 (1).'), true)
-check('last season is shown per player, with the games behind it', body.includes('Last season (2025/26): 312 runs @ 31.2 · SR 61 · HS 87 (12 games)'), true)
+check('this grade and the one beside it, over the seasons, with the games behind it', body.includes('3rd/4th Grade, 2024/25 to 2026/27: 595 runs @ 28.3 · SR 54.1 · HS 87 (23 games)'), true)
+check('last season is the fallback only: not shown where the band record is', !body.includes('Last season (2025/26): 312 runs'), true)
+check('more in another grade shows its own line', body.includes('More in 1st/2nd Grade (T20), 2025/26: 250 runs @ 31.2 · SR 138.9 · HS 79 (9 games)'), true)
+check('a last-season-only player still gets last season\'s line (no band record)', body.includes('Last season (2025/26): 210 runs @ 30 · SR 70 · HS 64* (8 games)'), true)
 check('a player with nothing yet this season is marked, with last season\'s figures',
   body.toUpperCase().includes('LAST SEASON ONLY') && body.includes('210 runs @ 30 · SR 70 · HS 64* (8 games)'), true)
 check('a regular in this grade gets no "usually" claim', body.includes('This season: 3rd Grade (6).') && !body.includes('Usually plays 3rd Grade'), true)

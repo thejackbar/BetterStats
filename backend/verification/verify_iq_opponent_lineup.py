@@ -203,12 +203,55 @@ async def main() -> int:
     check("he is not counted as new to us, and is not marked scouted this season",
           dl.get("matched") is False and res.get("new_count") == 1, f"matched={dl.get('matched')} new={res.get('new_count')}")
     check("a stranger has no last season", not (P["Zed Newbie"].get("last_season")), str(P["Zed Newbie"].get("last_season")))
-    check("Smith's threat line leans on last season because this season is one innings",
-          "Sam Smith, 45 runs at 45.0 this season, 312 runs at 31.2 last season" in " ".join((res.get("analysis") or {}).get("lines", [])),
+    check("Smith's threat line leans on his 3rd/4th Grade record because this season is one innings",
+          "Sam Smith, 45 runs at 45.0 this season, 595 runs at 28.3 in 3rd/4th Grade, 2024/25 to 2026/27" in " ".join((res.get("analysis") or {}).get("lines", [])),
           " ".join((res.get("analysis") or {}).get("lines", [])))
     check("the quick read names who played last season but nothing yet this year",
           "Played for them last season but nothing yet this season: Anthony Delaney, 210 runs at 30.0." in " ".join((res.get("analysis") or {}).get("lines", [])),
           " ".join((res.get("analysis") or {}).get("lines", [])))
+
+    print("\n-- this grade and the one beside it, over the last three seasons --")
+    sb, ob = sm.get("band_stats") or {}, sm.get("other_grade_stats")
+    check("Smith: 3rd and 4th Grade are combined (23 games, 595 runs at 28.33, 3 seasons)",
+          (sb.get("label"), sb.get("matches"), sb.get("runs"), sb.get("average"), sb.get("span")) == ("3rd/4th Grade", 23, 595, 28.33, "2024/25 to 2026/27"),
+          str(sb))
+    check("his strike rate and high score are recomputed/taken across them", (sb.get("strike_rate"), sb.get("high_score")) == (54.09, "87"), str(sb))
+    check("his 6th Grade games do not leak into the band", sb.get("matches") == 23, str(sb))
+    check("he has not played more elsewhere, so no second line", ob is None, str(ob))
+    hh = P["H Hitter"]
+    check("Hitter: 2 games in this band, but 20 in 5th/6th Grade, so the other grade is shown too",
+          (hh.get("band_stats") or {}).get("matches") == 2
+          and (hh.get("other_grade_stats") or {}).get("label") == "5th/6th Grade"
+          and (hh.get("other_grade_stats") or {}).get("runs") == 480, str((hh.get("band_stats"), hh.get("other_grade_stats"))))
+    check("Lane has nothing in the band, but 9 games at 1st/2nd Grade (T20) shows as his other grade",
+          ln.get("band_stats") is None and (ln.get("other_grade_stats") or {}).get("label") == "1st/2nd Grade (T20)"
+          and (ln.get("other_grade_stats") or {}).get("matches") == 9, str((ln.get("band_stats"), ln.get("other_grade_stats"))))
+    check("the bowler's band record has wickets and economy (15 wkts, 5.0)",
+          ((P["Ben Bowler"].get("band_stats") or {}).get("wickets"), (P["Ben Bowler"].get("band_stats") or {}).get("economy")) == (15, 5.0),
+          str(P["Ben Bowler"].get("band_stats")))
+    check("a player found only by name in the table still gets his other grade (Delaney, 5th/6th)",
+          (dl.get("other_grade_stats") or {}).get("label") == "5th/6th Grade", str(dl.get("other_grade_stats")))
+    check("a stranger has neither", P["Zed Newbie"].get("band_stats") is None and P["Zed Newbie"].get("other_grade_stats") is None, "")
+
+    print("\n-- the format rule (pure function) --")
+    from app.services import iq_lineup
+    if not hasattr(iq_lineup, "attach_band_stats"):
+        check("attach_band_stats exists (feature present)", False, "iq_lineup.attach_band_stats is missing")
+        iq_lineup.attach_band_stats = lambda rows, table, grade: [r.update(band_stats=None, other_grade_stats=None) for r in rows]
+    rows = [{"player_id": str(base.SMITH), "name": "Sam Smith", "matched": True, "redacted": False}]
+    table = {"players": [{"player_id": str(base.SMITH), "name": "Smith, Sam", "rows": [
+        grow(2025, "Two Day 3rd Grade", matches=6, innings=6, runs=180, balls_faced=400, high_score="50"),
+        grow(2025, "One Day Grade 3", matches=9, innings=9, runs=300, balls_faced=330, high_score="80")]}]}
+    iq_lineup.attach_band_stats(rows, table, "3rd Grade (Two Day)")
+    check("a two day fixture: the one day 3rd grade is NOT similar; it is his other grade because he played more there",
+          (rows[0]["band_stats"] or {}).get("matches") == 6 and (rows[0]["other_grade_stats"] or {}).get("label") == "3rd/4th Grade (one day)",
+          str((rows[0]["band_stats"], rows[0]["other_grade_stats"])))
+    iq_lineup.attach_band_stats(rows, table, "3rd Grade")
+    check("a fixture grade with no format counts both formats as similar",
+          (rows[0]["band_stats"] or {}).get("matches") == 15 and rows[0]["other_grade_stats"] is None, str(rows[0]["band_stats"]))
+    iq_lineup.attach_band_stats(rows, table, "Premier")
+    check("a fixture grade with no level has no band, only the busiest other grade",
+          rows[0]["band_stats"] is None and rows[0]["other_grade_stats"] is not None, str(rows[0]["other_grade_stats"]))
 
     print("\n-- the danger man is NOT named --")
     DETAIL = record([person(base.BOWL_3, "Ben Bowler"), person(uuid.uuid4(), "Zed Newbie")])
@@ -307,6 +350,38 @@ async def _fake_career(org_guid, club_name=None, years=10):
     }
 
 
+def grow(year, grade, **kw):
+    """One row of the club's per-grade season table (a `_rollup`: summable fields)."""
+    r = {"year": year, "grade_name": grade, "matches": 0, "innings": 0, "not_outs": 0, "runs": 0, "balls_faced": 0,
+         "high_score": None, "fifties": 0, "hundreds": 0, "wickets": 0, "bowling_balls": 0, "runs_conceded": 0}
+    r.update(kw)
+    return r
+
+
+async def _fake_gcareer(org_guid, club_name=None, years=3):
+    from app.services import iq_scout
+    return {
+        "org": {"id": str(org_guid), "name": club_name}, "window": {"from_year": 2024, "to_year": 2026},
+        "schema_v": iq_scout.GRADE_CAREER_VERSION, "built_at": "2026-10-10T00:00:00Z",
+        "players": [
+            {"player_id": str(base.SMITH), "name": "Smith, Sam", "rows": [
+                grow(2026, "3rd Grade", matches=1, innings=1, runs=45, balls_faced=120, high_score="45"),
+                grow(2025, "4th Grade", matches=12, innings=12, not_outs=2, runs=300, balls_faced=500, high_score="87", fifties=2),
+                grow(2024, "3rd Grade", matches=10, innings=10, runs=250, balls_faced=480, high_score="70", fifties=1),
+                grow(2025, "6th Grade", matches=2, innings=2, runs=20, balls_faced=60, high_score="15")]},
+            {"player_id": str(base.LANE), "name": "Lane, David", "rows": [
+                grow(2025, "T20 Div 1", matches=9, innings=9, runs=250, balls_faced=180, high_score="79")]},
+            {"player_id": str(base.BOWL_3), "name": "Bowler, Ben", "rows": [
+                grow(2025, "3rd Grade", matches=10, innings=4, runs=40, balls_faced=100, wickets=15, bowling_balls=360, runs_conceded=300)]},
+            {"player_id": str(base.HITTER), "name": "Hitter, Hugh", "rows": [
+                grow(2025, "3rd Grade", matches=2, innings=2, runs=30, balls_faced=50, high_score="22"),
+                grow(2025, "6th Grade", matches=20, innings=20, not_outs=4, runs=480, balls_faced=700, high_score="91", fifties=3)]},
+            {"player_id": str(DELANEY), "name": "Delaney, Anthony", "rows": [
+                grow(2025, "5th Grade", matches=8, innings=8, runs=210, balls_faced=300, high_score="64*")]},
+        ],
+    }
+
+
 def base_main_stubs() -> None:
     """The same CA stubs the scope check uses, plus the match record."""
     gr_client.get_grade_matches = base._fake_grade_matches
@@ -314,6 +389,7 @@ def base_main_stubs() -> None:
     gr_client.get_match_detail = _detail
     from app.services import iq_scout
     iq_scout._build_career = _fake_career
+    iq_scout._build_grade_career = _fake_gcareer
 
     async def _no_external_teams(*_a, **_k):
         return []

@@ -252,6 +252,25 @@ def _last_season(career_player: dict | None, this_year: int | None) -> dict | No
     return {"year": x["year"], "label": f"{x['year']}/{str(x['year'] + 1)[2:]}", **{k: x.get(k) for k in _LAST_KEYS}}
 
 
+def _career_index(career: dict | None) -> tuple[dict[str, dict], dict[str, dict]]:
+    """``(id -> career player, id -> {name})`` over a career-style payload."""
+    index = {str(c.get("player_id") or "").lower(): c for c in (career or {}).get("players") or []}
+    return index, {pid: {"name": c.get("name")} for pid, c in index.items()}
+
+
+def _career_for(r: dict, index: dict[str, dict], names: dict[str, dict]) -> dict | None:
+    """The career record for a named player: by the id we matched, the id on the
+    team list, the career id already found, then name (two fits match neither)."""
+    for key in (r.get("player_id"), r.get("participant_id"), r.get("career_id")):
+        cp = index.get(str(key or "").lower())
+        if cp is not None:
+            return cp
+    if index and not r.get("redacted"):
+        pid, _basis, _amb = _find(names, None, r.get("name"), False)
+        return index.get(pid) if pid else None
+    return None
+
+
 def attach_last_season(rows: list[dict], career: dict | None, this_year: int | None) -> None:
     """Give each named player last season's figures, in place.
 
@@ -260,17 +279,121 @@ def attach_last_season(rows: list[dict], career: dict | None, this_year: int | N
     (the same ambiguity rule as everywhere else: two fits match neither). A
     player the scout has not seen this season but who played last season is
     ``career_only``: known to us, just not yet this year."""
-    index = {str(c.get("player_id") or "").lower(): c for c in (career or {}).get("players") or []}
-    names = {pid: {"name": c.get("name")} for pid, c in index.items()}
+    index, names = _career_index(career)
     for r in rows:
-        cp = index.get(str(r.get("player_id") or "").lower()) or index.get(str(r.get("participant_id") or "").lower())
-        if cp is None and index and not r.get("redacted"):
-            pid, _basis, _amb = _find(names, None, r.get("name"), False)
-            cp = index.get(pid) if pid else None
+        cp = _career_for(r, index, names)
+        r["career_id"] = cp.get("player_id") if cp else None
         r["last_season"] = _last_season(cp, this_year)
         r["career_only"] = bool(not r["matched"] and cp is not None and r["last_season"])
         if r["career_only"]:
             r["ambiguous"] = False
+
+
+# ─── this grade and the one beside it, over the last three seasons ───────────
+
+_FORMATS = (("t20", r"t20|twenty ?20|20/20"), ("one_day", r"one ?day|1 ?day|limited|\b(?:40|50) ?over"), ("two_day", r"two ?day|2 ?day"))
+_FORMAT_WORDS = {"t20": "T20", "one_day": "one day", "two_day": "two day"}
+
+
+def _grade_format(name: str | None) -> str | None:
+    n = (name or "").lower()
+    return next((k for k, pat in _FORMATS if re.search(pat, n)), None)
+
+
+def _grade_level(name: str | None) -> int | None:
+    """The rung a grade sits on: 3 for "3rd Grade", "Third XI", "One Day Grade 3"
+    or "Div 3". None when the name carries no level."""
+    n = (name or "").lower()
+    m = re.search(r"\b(\d{1,2})(?:st|nd|rd|th)\b", n)
+    if m:
+        return int(m.group(1))
+    for word in re.findall(r"[a-z]+", n):
+        if word in iq_opponent._TEAM_ORDINALS:
+            return iq_opponent._TEAM_ORDINALS[word]
+    m = re.search(r"\b(?:grade|div(?:ision)?|section|tier)\s*(\d{1,2})\b", n)
+    return int(m.group(1)) if m else None
+
+
+def _ord(n: int) -> str:
+    return {1: "1st", 2: "2nd", 3: "3rd"}.get(n, f"{n}th")
+
+
+def _band(level: int) -> int:
+    """Grades sit in pairs: 1st and 2nd, 3rd and 4th, 5th and 6th."""
+    return (level - 1) // 2
+
+
+def _band_label(band: int) -> str:
+    return f"{_ord(2 * band + 1)}/{_ord(2 * band + 2)} Grade"
+
+
+def _season_label(year: int) -> str:
+    return f"{year}/{str(year + 1)[2:]}"
+
+
+def _hs(v) -> tuple[int, bool]:
+    m = re.match(r"(\d+)(\*?)", str(v or ""))
+    return (int(m.group(1)), bool(m.group(2))) if m else (-1, False)
+
+
+def _combine(rows: list[dict]) -> dict:
+    """Fold per-grade season rows into one summary (counts sum; averages and rates
+    are recomputed from the sums, as everywhere else)."""
+    t = {k: sum(x.get(k) or 0 for x in rows) for k in (
+        "matches", "innings", "not_outs", "runs", "balls_faced", "fifties", "hundreds",
+        "wickets", "bowling_balls", "runs_conceded")}
+    outs = max(t["innings"] - t["not_outs"], 0)
+    best = max((_hs(x.get("high_score")) for x in rows), default=(-1, False))
+    years = sorted({x["year"] for x in rows})
+    span = _season_label(years[0]) if len(years) == 1 else f"{_season_label(years[0])} to {_season_label(years[-1])}"
+    return {
+        "matches": t["matches"], "innings": t["innings"], "runs": t["runs"],
+        "average": round(t["runs"] / outs, 2) if outs else None,
+        "strike_rate": round(100 * t["runs"] / t["balls_faced"], 2) if t["balls_faced"] else None,
+        "high_score": (f"{best[0]}{'*' if best[1] else ''}" if best[0] >= 0 else None),
+        "fifties": t["fifties"], "hundreds": t["hundreds"], "wickets": t["wickets"],
+        "economy": round(t["runs_conceded"] / (t["bowling_balls"] / 6), 2) if t["bowling_balls"] else None,
+        "bowling_average": round(t["runs_conceded"] / t["wickets"], 2) if t["wickets"] else None,
+        "span": span, "years": years,
+    }
+
+
+def attach_band_stats(rows: list[dict], gcareer: dict | None, fixture_grade: str | None) -> None:
+    """Per named player, in place: ``band_stats`` (this grade and the one beside it,
+    combined over the table's window) and ``other_grade_stats`` (the busiest other
+    grade, only when they have played MORE there).
+
+    "Beside it" is the pair: 3rd and 4th, 5th and 6th. A grade of another format is
+    not similar when both formats are known (a one day 3rd grade says little about
+    a two day 3rd grade). A grade name with no level can only ever be "other"."""
+    index, names = _career_index(gcareer)
+    level = _grade_level(fixture_grade)
+    fx_band = _band(level) if level is not None else None
+    fx_fmt = _grade_format(fixture_grade)
+    for r in rows:
+        r["band_stats"], r["other_grade_stats"] = None, None
+        cp = _career_for(r, index, names)
+        if cp is None:
+            continue
+        similar, groups = [], {}
+        for x in cp.get("rows") or []:
+            lv, fmt = _grade_level(x["grade_name"]), _grade_format(x["grade_name"])
+            if fx_band is not None and lv is not None and _band(lv) == fx_band and (fx_fmt is None or fmt is None or fmt == fx_fmt):
+                similar.append(x)
+                continue
+            key = (_band(lv), fmt) if lv is not None else (x["grade_name"], fmt)
+            groups.setdefault(key, []).append(x)
+        in_band = _combine(similar) if similar else None
+        if in_band:
+            suffix = f" ({_FORMAT_WORDS[fx_fmt]})" if fx_fmt else ""
+            r["band_stats"] = {**in_band, "label": _band_label(fx_band) + suffix}
+        if groups:
+            key, grp = max(groups.items(), key=lambda kv: sum(g.get("matches") or 0 for g in kv[1]))
+            other = _combine(grp)
+            if other["matches"] > (in_band["matches"] if in_band else 0):
+                name = _band_label(key[0]) if isinstance(key[0], int) else key[0]
+                fmt = f" ({_FORMAT_WORDS[key[1]]})" if key[1] and isinstance(key[0], int) else ""
+                r["other_grade_stats"] = {**other, "label": name + fmt}
 
 
 # ─── the quick read ──────────────────────────────────────────────────────────
@@ -284,7 +407,7 @@ def _threat(p: dict) -> float:
     score += 50 if lvl == "danger" else 10 if lvl == "caution" else 0
     score += (bat.get("runs") or 0) / 10 + 3 * (bowl.get("wickets") or 0)
     score += 10 if bat.get("form") == "hot" else 0
-    ls = p.get("last_season") or {}
+    ls = p.get("band_stats") or p.get("last_season") or {}
     if ls and (not p.get("matched") or p.get("confidence") == "low"):
         # Early in a season this year's sample says little: last year counts.
         score += (ls.get("runs") or 0) / 10 + 3 * (ls.get("wickets") or 0)
@@ -315,12 +438,13 @@ def _figs(p: dict) -> str:
     bat, bowl = p.get("bat") or {}, p.get("bowl") or {}
     this = _line({"innings": bat.get("innings"), "runs": bat.get("runs"), "average": bat.get("average"),
                   "wickets": bowl.get("wickets"), "economy": bowl.get("economy")})
-    ls = p.get("last_season") or {}
-    last = _line(ls) if ls else ""
+    band, ls = p.get("band_stats"), p.get("last_season") or {}
+    last = _line(band) if band else (_line(ls) if ls else "")
+    where = (f"in {band['label']}, {band['span']}" if band else "last season")
     if this and last and p.get("confidence") == "low":
-        return f"{this} this season, {last} last season"
+        return f"{this} this season, {last} {where}"
     if last and not this:
-        return f"{last} last season"
+        return f"{last} {where}"
     return this
 
 
@@ -517,6 +641,24 @@ async def opponent_lineup(
             await session.rollback()
     this_year = _year_in((d1.get("scouted") or {}).get("season_name"))
     attach_last_season(rows, career, this_year)
+
+    # This grade and the one beside it over the last three seasons: the club's
+    # per-grade season table, also an add-on that never takes the lineup down.
+    gcareer = None
+    if opp_guid and iq_opponent._is_uuid(opp_guid):
+        try:
+            g = await iq_scout._get_or_start(
+                session, org_id, iq_scout._gcareer_key(opp_guid), iq_scout.GRADE_CAREER_VERSION,
+                lambda: iq_scout._build_grade_career(opp_guid, opp_name), name=opp_name,
+            )
+            if g.get("status") == "ready":
+                gcareer = g
+            elif g.get("status") == "building":
+                pending = True
+        except Exception as e:  # noqa: BLE001
+            logger.warning("BetterIQ lineup: grade table failed for %s: %s", opp_guid, e)
+            await session.rollback()
+    attach_band_stats(rows, gcareer, fixture_grade)
 
     named_ids = {r["player_id"] for r in rows if r["player_id"]}
     dangers = [

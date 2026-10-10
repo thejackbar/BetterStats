@@ -61,7 +61,13 @@ function PlayerRow({ p, oppKey, oppName }) {
           {p.plays_elsewhere && `Usually plays ${p.usual_grade}. `}This season: {p.grades.map(g => `${g.name} (${g.matches})`).join(', ')}.
         </div>
       )}
-      {p.last_season && lastFig(p.last_season) && (
+      {p.band_stats && lastFig(p.band_stats) && (
+        <div className="text-[12px] mt-0.5 leading-snug"><span className="text-pb-faint">{p.band_stats.label}, {p.band_stats.span}:</span> {lastFig(p.band_stats)}</div>
+      )}
+      {p.other_grade_stats && lastFig(p.other_grade_stats) && (
+        <div className="text-[12px] mt-0.5 leading-snug"><span className="text-pb-faint">More in {p.other_grade_stats.label}, {p.other_grade_stats.span}:</span> {lastFig(p.other_grade_stats)}</div>
+      )}
+      {!p.band_stats && p.last_season && lastFig(p.last_season) && (
         <div className="text-[12px] mt-0.5 leading-snug"><span className="text-pb-faint">Last season ({p.last_season.label}):</span> {lastFig(p.last_season)}</div>
       )}
       {p.matched && p.pool === 'other_sides' && (
