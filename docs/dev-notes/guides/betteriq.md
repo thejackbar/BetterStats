@@ -50,6 +50,8 @@
 21. Grade filters must honour merges: `iq_filters.grade_canonical_label(alias, org_param)` (single hop, like `aggregations._GRADE_MATCH`) before stripping the sponsor suffix. Used by `season_grade_clause`, `iq_team._scope`, `player_impact`, `iq_trends._movers_src`, `iq._opp_scope`, `team_grades`. `org_param` defaults `"org"`; `iq.py` binds `"org_id"`.
 22. `team_overview(season_id, grade_id)`: `_scope` prefers `gr.id`, else `gr.season_id`, else all-time. `GET /iq/team/grades` feeds the bar. `_team_fielding` reads `v_effective_fielding_stats` (outfield = `catches - catches_wk`).
 
+22a. The opposition dossier honours Grade Type / Match Type and the fixture's grade. The router puts the scope in a ContextVar; `iq_opponent` rebuilds it against THEIR grades (`_opponent_scope`, category on primary category, `formats_only()` once a grade or team is picked) and applies it in `_db_season_accumulators`, `_our_games_vs` and `_target_season_grades`. A scout started from a fixture (`grade_id` set) with no grade or team defaults the grade filter to the fixture's canonical grade (`grade_from_fixture`), and a grade taken from the fixture is never relaxed to the whole club: an empty answer sets `scoped_empty` and never falls through to the live whole-club scout. The scope is in the cache key (`_scope_sig`) and prewarm builds under the club's default scope. Not covered: the live Grassroots path (non-synced opponents) has no per-game format, only grade-level scope on our side.
+
 **Team analysis and trends**
 23. Team scores are reconstructed: ours `SUM(batting_innings.runs)`, theirs `SUM(bowling_spells.runs)` (extras excluded, so close not exact). One `_per_game` pull, aggregated in Python.
 24. Wrap every optional `team_overview` add-on in `iq_team._safe(session, factory, default)` (logs, `session.rollback()`, returns default) so one heavy all-time query cannot blank the page. Avoid short SQL aliases like `no` (use `nout`).
@@ -91,6 +93,7 @@
 - Upcoming fixtures with no XI vanish from Selection: inner join (rule 9).
 - Stale synthesis after a code change: `DOSSIER_VERSION` not bumped (rule 15).
 - Dossier never finishes: task not held in `_BUILD_TASKS`, or reused the request session (rule 14).
+- A "3rd XI" scout full of 1st XI or T20 numbers, header "whole club": the dossier ignored the fixture grade or the Grade Type / Match Type scope (rule 22a).
 - Economy or workload wildly off: cricket-notation overs summed directly (rule 25).
 
 ## How to verify a change here
@@ -100,6 +103,7 @@ The archive records no dedicated suites for BetterIQ. Check by hand against a re
 - The grade filter with one name, several (`'||'`) and a merged alias.
 - Force an add-on to raise: `team_overview` must still return the core.
 - Bump check: `DOSSIER_VERSION`/`DEEP_VERSION` after shape changes.
+- `backend/verification/verify_iq_dossier_scope.py` (own database): the 3rds fixture under Men's and Two day must exclude the 1st XI's T20, a T20 game inside the same grade, and the juniors; a 4th grade fixture they have no side in must say `scoped_empty`, never the whole club. Run it against the previous commit for the control.
 - Frontend: first visit defaults season to All; deep links; `CheatSheet` print layout.
 
 ## Operator commands and scripts
@@ -115,7 +119,7 @@ None in this archive. Dossier refresh is `POST /iq/opposition/dossier/refresh`. 
 
 ## Flags: conflicting, superseded or possibly obsolete guidance
 
-- [FLAG-IQ-1] `DOSSIER_VERSION` "bumped to 3", `DEEP_VERSION`→2 | code has `DOSSIER_VERSION = 10`, `DEEP_VERSION = 3`; numbers are history | "Danger/false-threat alerts", "Manual scouting cards" (L13501-13527, L13641-13718) | keep the rule, ignore numbers.
+- [FLAG-IQ-1] `DOSSIER_VERSION` "bumped to 3", `DEEP_VERSION`→2 | code has `DOSSIER_VERSION = 11`, `DEEP_VERSION = 3`; numbers are history | "Danger/false-threat alerts", "Manual scouting cards" (L13501-13527, L13641-13718) | keep the rule, ignore numbers.
 - [FLAG-IQ-2] "NL Q&A is the one remaining phase", "no LLM" | `services/iq_ask.py` exists (`MAX_STEPS = 8`) and v8.74 documents its tools | "Opposition, Selection & Player Trends" vs "Filters honest" (L13501-13527, L13528-13596) | retire "parked"; keep "synthesis is rule-based".
 - [FLAG-IQ-3] `_safe(session, factory, default)` | code signature is `_safe(session, factory, default, key=None, degraded=None)`, failed cards go in a `degraded` list | "Review Fixes v2.12.1" (L13597-13606) | verify, update rule 24.
 - [FLAG-IQ-4] "We don't store the toss" | a scorecard note elsewhere in project docs says `matchSummary.teams` carries `wonToss`/`battedFirst`, contradicting the sync-path claim | "Bowler deep-dive, captaincy & bowling discipline" (L13616-13623) | verify against a live payload and `games` schema.

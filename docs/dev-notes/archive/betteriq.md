@@ -239,3 +239,18 @@ dismissal mix we *do* hold into a short "DNA" read.
 **Bounds** (CA-proxy politeness + latency): `MAX_OPP_SEASON_MATCHES=18`, `MAX_HEAD_TO_HEAD_GAMES=25`; reuses `grassroots_scores_client`'s in-process scorecard cache + semaphore(6). First build ~10–40s, then cached. Overs maths: `_overs_to_balls(10.2)=62` (10 overs + 2 balls).
 
 <!-- END original CLAUDE.md L13641-13718 -->
+
+## BetterIQ: opposition scout scoped to the fixture's grade and the Grade Type / Match Type filters (v9.109.8, Oct 2026)
+
+Reported by a club selector: pressing Scout on a Swanbourne 3rd XI fixture, with Grade Type Men's and Match Type Two day, returned a plan headed "WHOLE CLUB, 3 SIDES" whose danger batter was a 1st XI T20 Div 1 innings (79 at a strike rate of 219).
+
+Causes, both in `iq_opponent`:
+- `apply_grade_scope` resolved the Grade Type / Match Type scope for every `/iq` route, but the dossier's own queries (`_db_season_accumulators`, `_our_games_vs`, `_target_season_grades`) never read it, and the dossier cache key did not carry it.
+- The fixture's grade (`grade_hint`) only chose the season. With "All grades" in the filter bar nothing narrowed to the side the fixture was against, so the dossier was the whole club.
+
+Fix:
+- `_opponent_scope` rebuilds the request scope against the opponent's own grades with `grade_scope.resolve_scope(opp_org, req.categories, formats=req.formats, judge_primary=True)`; `formats_only()` when a grade or team is picked. Format is per fixture off `match_format`, so a T20 friendly inside the 3rds is out of a Two day scout.
+- `get_or_start_dossier` turns the fixture's grade into the grade filter when no grade or team was sent (`_fixture_grade_label`, payload `grade_from_fixture`). A fixture grade is never relaxed to the whole club: `_discover_opponent_teams(relax_grade=False)` and no whole-club retry in the synced branch. If the opponent holds games this season but none in scope, the payload carries `scoped_empty` and a note, and the build does not fall through to the live whole-club scout.
+- `_scope_sig` joins the cache key (`::sc::`), `DOSSIER_VERSION` 10 to 11, prewarm builds under the club's default scope and polls the real key. The payload gains `scope_labels`, `scoped_empty`, `grade_from_fixture`; `GamePlan` shows the labels and an empty-scope message.
+- Known gap: for a non-synced opponent (live Grassroots path) only our side's grade list is scoped, since a Grassroots match carries no per-game format we can filter on.
+- Verified with `backend/verification/verify_iq_dossier_scope.py` on a real Postgres through the shipped `apply_grade_scope` and `opposition_dossier` bodies: 28 pass on the fix; the previous commit fails 19 of them, on exactly the whole-club squad.

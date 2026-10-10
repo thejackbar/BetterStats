@@ -38,10 +38,12 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import OppositionDossier, async_session_maker
+from app.services import grade_scope as gscope
 from app.services import grassroots_scores_client as gr
+from app.services import iq_filters
 from app.services import iq_phrases
 from app.services import rate_coverage as rc
-from app.services.iq_filters import grade_canonical_label, grade_match_clause
+from app.services.iq_filters import grade_canonical_label, grade_match_clause, grade_scope_fragment
 from app.services.sync import _caught_by_keeper, _innings_keeper_names
 
 logger = logging.getLogger(__name__)
@@ -51,7 +53,7 @@ logger = logging.getLogger(__name__)
 # rebuilt on next view, so new analysis (game plan, how-they-win/lose, scouting
 # notes, …) pulls through for EVERY cache key — whole-club AND each team — without
 # waiting on the TTL or a manual refresh.
-DOSSIER_VERSION = 10
+DOSSIER_VERSION = 11
 
 # Squads change slowly and a rebuild is heavy; a week's freshness with a manual
 # Refresh button is the right trade-off.
@@ -430,9 +432,32 @@ async def _synced_opponent_org(session: AsyncSession, opp_key: str) -> str | Non
     return opp_key if hit else None
 
 
+async def _opponent_scope(session: AsyncSession, opp_org_id: str, *, picked: bool):
+    """The request's Grade Type / Match Type scope, re-resolved against the
+    OPPONENT's own grades. The request scope names OUR grade ids, which mean
+    nothing on their rows, so it is rebuilt from the categories and formats it
+    asked for. Returns None when it narrows nothing.
+
+    Category is judged on each grade's primary category (``judge_primary``), so a
+    girls' age-group side is junior, as it is under the club default. ``picked``
+    is True when a grade or team was chosen: that beats the category half and
+    keeps the format half, the rule ``grade_scope_fragment`` applies on our side.
+    """
+    req = iq_filters.active_scope()
+    if req is None:
+        return None
+    scope = await gscope.resolve_scope(
+        session, opp_org_id, req.categories, formats=req.formats, judge_primary=True,
+    )
+    if picked:
+        scope = scope.formats_only()
+    return scope if scope.active else None
+
+
 async def _db_season_accumulators(
     session: AsyncSession, opp_org_id: str,
     grade_filter: str | None = None, team_grade_id: str | None = None,
+    opp_scope=None,
 ):
     """Build the dossier's ``season_bat/bowl/field/fow`` accumulators from the
     opponent's OWN stored data — identical in-memory shape to what
@@ -482,7 +507,16 @@ async def _db_season_accumulators(
     if grade_filter:
         scope += f" AND {grade_match_clause(grade_canonical_label('gr', 'org'))}"
         p["grade"] = grade_filter
+    # Grade Type / Match Type, resolved against THEIR grades. Without this a
+    # "Men's, Two day" scout of the 3rds counted the 1st XI's T20 season.
+    scope_sql = ""
+    if opp_scope is not None and opp_scope.active:
+        scope_sql = opp_scope.clause("gr.id", "game", game_alias="g")
+        opp_scope.bind(p)
+        scope += scope_sql
 
+    # The picker list: their sides with games in scope (a side with none is not
+    # one this scout looks at, and must not inflate "N sides").
     grade_rows = await session.execute(
         text(
             f"""
@@ -493,11 +527,13 @@ async def _db_season_accumulators(
             JOIN seasons s ON s.id = gr.season_id
             LEFT JOIN games g ON g.grade_id = gr.id
             WHERE s.organisation_id = CAST(:org AS UUID) AND s.year = :yr
+              {scope_sql}
             GROUP BY 1, 2
+            {"HAVING COUNT(DISTINCT g.id) > 0" if scope_sql else ""}
             ORDER BY matches DESC NULLS LAST, grade_name
             """
         ),
-        {"org": opp_org_id, "yr": yr},
+        {k: v for k, v in p.items() if k not in ("tgid", "grade")},
     )
     for r in grade_rows:
         teams.append({"grade_id": r.grade_id, "grade_name": r.grade_name,
@@ -705,13 +741,29 @@ async def _upsert(session: AsyncSession, org_id: str, opp_key: str, **fields) ->
     await session.commit()
 
 
+def _scope_sig() -> str | None:
+    """Short fingerprint of the Grade Type / Match Type scope in force, or None
+    when it narrows nothing. It changes which of THEIR games feed the pool (and
+    which of ours make the head-to-head), so a dossier built under "Men's, Two
+    day" must never be served to a request made under "T20"."""
+    scope = iq_filters.active_scope()
+    if scope is None:
+        return None
+    import hashlib
+    import json
+    return hashlib.sha1(
+        json.dumps(scope.as_meta(), sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()[:10]
+
+
 def _cache_key(opp_key: str, team_grade_id: str | None, grade_filter: str | None = None) -> str:
     """Dossier cache key. A team-scoped dossier is cached separately from the
     whole-club one (and from other teams) by suffixing the chosen grade; a
     grade-FILTERED dossier likewise — a dossier built under one filter must
     never be served under another (the filter changes which of their grades
-    feed the pool). Bare ``opp_key`` stays the unfiltered whole-club key, so
-    prewarm and Ask IQ keep hitting the same rows they always did."""
+    feed the pool). The Grade Type / Match Type scope is suffixed the same way.
+    Bare ``opp_key`` stays the unfiltered whole-club key, so a request with no
+    grade and no scope in force keeps hitting the same row it always did."""
     key = opp_key
     if team_grade_id:
         key += f"::team::{team_grade_id}"
@@ -719,7 +771,27 @@ def _cache_key(opp_key: str, team_grade_id: str | None, grade_filter: str | None
         # Deterministic + short: the filter is a '||'-joined name list.
         import hashlib
         key += "::gf::" + hashlib.sha1(grade_filter.encode("utf-8")).hexdigest()[:12]
+    sig = _scope_sig()
+    if sig:
+        key += f"::sc::{sig}"
     return key
+
+
+async def _fixture_grade_label(session: AsyncSession, org_id: str, grade_id: str | None) -> str | None:
+    """The canonical (merge- and sponsor-aware) name of the fixture's grade, in
+    the same vocabulary the filter bar sends, or None. ``grade_id`` is the
+    fixture's own grade row — our club's per-season grade."""
+    if not grade_id or not _is_uuid(grade_id):
+        return None
+    row = (await session.execute(
+        text(
+            f"SELECT {grade_canonical_label('gr', 'org')} AS label "
+            "FROM grades gr WHERE gr.id = CAST(:gid AS UUID)"
+        ),
+        {"gid": grade_id, "org": org_id},
+    )).mappings().first()
+    label = (row["label"] if row else None) or None
+    return label.strip() if label and label.strip() else None
 
 
 async def get_or_start_dossier(
@@ -743,7 +815,18 @@ async def get_or_start_dossier(
     ``grade_filter`` is the IQ filter bar's grade selection (canonical names,
     ``'||'``-joined) — it narrows which of THEIR grades are scouted, so a
     filtered page never headlines a player from a side outside the filter.
+
+    A scout started from a FIXTURE (``grade_id`` set) with no grade or team
+    chosen is about that fixture's grade: asking about the 3rds used to return
+    the whole club's season, 1st XI T20 form included. The fixture's grade
+    becomes the grade filter (``grade_from_fixture`` in the payload says so), and
+    an explicit grade or team still wins.
     """
+    grade_from_fixture = False
+    if grade_id and not grade_filter and not team_grade_id:
+        fixture_label = await _fixture_grade_label(session, org_id, grade_id)
+        if fixture_label:
+            grade_filter, grade_from_fixture = fixture_label, True
     cache_key = _cache_key(opp_key, team_grade_id, grade_filter)
     row = await _load_row(session, org_id, cache_key)
     now = datetime.now(timezone.utc)
@@ -764,7 +847,10 @@ async def get_or_start_dossier(
 
     # Mark building and launch the detached build (its own session).
     await _upsert(session, org_id, cache_key, opp_name=opp_name, status="building", error=None)
-    task = asyncio.create_task(_run_build(org_id, cache_key, opp_key, opp_name, grade_id, team_grade_id, grade_filter))
+    task = asyncio.create_task(_run_build(
+        org_id, cache_key, opp_key, opp_name, grade_id, team_grade_id, grade_filter,
+        grade_from_fixture=grade_from_fixture, scope=iq_filters.active_scope(),
+    ))
     _BUILD_TASKS.add(task)
     task.add_done_callback(_BUILD_TASKS.discard)
     return {"status": "building", "opponent": {"opp_key": opp_key, "name": opp_name}}
@@ -772,10 +858,26 @@ async def get_or_start_dossier(
 
 async def _run_build(org_id: str, cache_key: str, opp_key: str, opp_name: str | None,
                      grade_hint: str | None, team_grade_id: str | None,
-                     grade_filter: str | None = None) -> None:
+                     grade_filter: str | None = None, *,
+                     grade_from_fixture: bool = False, scope=None) -> None:
+    # The Grade Type / Match Type scope is the request's, handed over explicitly:
+    # this task outlives the request, and the scope the cache key was made under
+    # is the one the payload must be built under.
+    token = iq_filters.set_scope(scope)
+    try:
+        await _build_and_store(org_id, cache_key, opp_key, opp_name, grade_hint,
+                               team_grade_id, grade_filter, grade_from_fixture)
+    finally:
+        iq_filters.reset_scope(token)
+
+
+async def _build_and_store(org_id: str, cache_key: str, opp_key: str, opp_name: str | None,
+                           grade_hint: str | None, team_grade_id: str | None,
+                           grade_filter: str | None, grade_from_fixture: bool) -> None:
     async with async_session_maker() as session:
         try:
-            payload = await _assemble(session, org_id, opp_key, opp_name, grade_hint, team_grade_id, grade_filter)
+            payload = await _assemble(session, org_id, opp_key, opp_name, grade_hint, team_grade_id,
+                                      grade_filter, grade_from_fixture=grade_from_fixture)
             await _upsert(
                 session, org_id, cache_key,
                 opp_name=payload.get("opponent", {}).get("name") or opp_name,
@@ -800,6 +902,10 @@ async def _our_games_vs(session: AsyncSession, org_id: str, opp_key: str,
     # out of the universe). With a grade filter, the vs-us pool narrows to games
     # in the filtered grade(s) so the head-to-head matches the page's header.
     extra = f"AND {grade_match_clause(grade_canonical_label('gr', 'org'))}" if grade_filter else ""
+    # The Grade Type / Match Type scope reaches the head-to-head too: a Two day
+    # scout must not headline a player's record from a T20 meeting. A picked
+    # grade beats the category half, never the format half (grade_scope_fragment).
+    extra += grade_scope_fragment("gr.id", grade_filter, kind="game", game_alias="g")
     params: dict = {"org": org_id, "opp_key": opp_key}
     if grade_filter:
         params["grade"] = grade_filter
@@ -948,6 +1054,11 @@ async def _target_season_grades(
     # the shared raw CA grade GUID — use grassroots_id (== id for legacy grades),
     # not the (possibly per-club uuid5) primary key.
     extra = f"AND {grade_match_clause(grade_canonical_label('grades', 'org'))}" if grade_filter else ""
+    if not grade_filter:
+        # No grade picked: the Grade Type / Match Type scope decides which of our
+        # grades (and so which of their sides) are looked at. A picked grade is
+        # taken as picked; format is then applied per game where we hold the games.
+        extra += grade_scope_fragment("grades.id", None, kind="grade")
     params: dict = {"sid": season_id, "org": org_id}
     if grade_filter:
         params["grade"] = grade_filter
@@ -964,7 +1075,7 @@ async def _target_season_grades(
 
 async def _discover_opponent_teams(
     session: AsyncSession, org_id: str, opp_key: str | None, opp_name: str | None,
-    grade_hint: str | None, grade_filter: str | None = None,
+    grade_hint: str | None, grade_filter: str | None = None, *, relax_grade: bool = True,
 ) -> tuple[list[dict], str | None, bool, bool]:
     """The opponent's teams this season = the grades they field a side in.
 
@@ -1016,7 +1127,7 @@ async def _discover_opponent_teams(
         return found
 
     teams = await _teams_in(season_grades)
-    if not teams and grade_filter and grade_filter_matched:
+    if not teams and grade_filter and grade_filter_matched and relax_grade:
         # The grades matched the filter but the opponent fields no side in any of
         # them (e.g. filtered to our 1st-grade comp, they only play lower grades)
         # — retry unfiltered rather than shipping an empty scout, and say so.
@@ -1024,7 +1135,9 @@ async def _discover_opponent_teams(
         teams = await _teams_in(await _target_season_grades(session, org_id, season_id, None))
 
     external = False
-    if not teams and opp_org_id:
+    # A grade taken from the fixture is never widened (relax_grade False): if they
+    # field no side in it, the honest answer is an empty scout, not their club.
+    if not teams and opp_org_id and relax_grade:
         # The club fields no side in any grade we hold — a different association,
         # the division we've just been relegated into, or any club picked from
         # the CA-wide search. Enumerate THEIR seasons/teams from the public org
@@ -1333,9 +1446,27 @@ def _game_plan(danger_batters, danger_bowlers, bowlers):
     }
 
 
+_CATEGORY_LABELS = {"senior": "Men's", "womens": "Women's", "junior": "Junior", "masters": "Masters", "mixed": "Mixed"}
+_FORMAT_LABELS = {"two_day": "Two day", "one_day": "One day", "t20": "T20"}
+
+
+def _scope_labels() -> list[str]:
+    """Plain names for the Grade Type / Match Type scope in force, for the UI and
+    the coverage note. Only the halves that narrow something are named."""
+    scope = iq_filters.active_scope()
+    if scope is None:
+        return []
+    labels: list[str] = []
+    if scope.categories and set(scope.categories) < set(_CATEGORY_LABELS):
+        labels += [_CATEGORY_LABELS.get(c, c) for c in scope.categories]
+    if scope.format_active:
+        labels += [_FORMAT_LABELS.get(f, f) for f in (scope.formats or ())]
+    return labels
+
+
 async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: str | None,
                     grade_hint: str | None, team_grade_id: str | None,
-                    grade_filter: str | None = None) -> dict:
+                    grade_filter: str | None = None, *, grade_from_fixture: bool = False) -> dict:
     opp_name = opp_name or (opp_key if not _is_uuid(opp_key) else None)
     our_games = await _our_games_vs(session, org_id, opp_key, grade_filter)
     if grade_filter and not our_games:
@@ -1349,7 +1480,8 @@ async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: 
 
     # Discover the opponent's teams (= the grades they field a side in this season).
     teams, opp_org_id, external_discovery, grade_filter_matched = await _discover_opponent_teams(
-        session, org_id, opp_key, opp_name, grade_hint, grade_filter
+        session, org_id, opp_key, opp_name, grade_hint, grade_filter,
+        relax_grade=not grade_from_fixture,
     )
     if opp_name is None:
         opp_name = next((t["team_name"] for t in teams), None)
@@ -1377,30 +1509,50 @@ async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: 
     # enrichment, game plan, partnerships) is shape-identical, so it's unchanged.
     synced_org = await _synced_opponent_org(session, opp_key)
     db_built = False
-    if synced_org:
-        season_bat, season_bowl, season_field, season_fow, season_dates, db_teams = \
-            await _db_season_accumulators(session, synced_org, grade_filter, team_grade_id)
-        season_matches = len(
+    scoped_empty = False
+
+    def _count_matches() -> int:
+        return len(
             {m for b in season_bat.values() for m in b["matches"]}
             | {m for b in season_bowl.values() for m in b["matches"]}
         )
-        if not season_matches and (grade_filter or team_grade_id):
+
+    if synced_org:
+        narrowed = bool(grade_filter or team_grade_id)
+        scope_picked = await _opponent_scope(session, synced_org, picked=True) if narrowed else None
+        scope_wide = await _opponent_scope(session, synced_org, picked=False)
+        season_bat, season_bowl, season_field, season_fow, season_dates, db_teams = \
+            await _db_season_accumulators(
+                session, synced_org, grade_filter, team_grade_id,
+                scope_picked if narrowed else scope_wide,
+            )
+        season_matches = _count_matches()
+        if not season_matches and narrowed and not grade_from_fixture:
             # Narrowed to nothing (they hold no game-level rows in the filtered
             # grade) — retry whole-club rather than shipping an empty squad, and
-            # flag it so the UI says the filter couldn't be applied.
+            # flag it so the UI says the filter couldn't be applied. The Grade
+            # Type / Match Type scope still holds on the retry: only the grade
+            # is relaxed. A grade taken from the FIXTURE is never relaxed: the
+            # fixture is that grade, and the whole club is the wrong answer.
             grade_filter_matched = False
             season_bat, season_bowl, season_field, season_fow, season_dates, db_teams = \
-                await _db_season_accumulators(session, synced_org)
-            season_matches = len(
-                {m for b in season_bat.values() for m in b["matches"]}
-                | {m for b in season_bowl.values() for m in b["matches"]}
-            )
-        if season_matches:
+                await _db_season_accumulators(session, synced_org, None, None, scope_wide)
+            season_matches = _count_matches()
+        if not season_matches and (narrowed or scope_wide is not None):
+            # Empty under the grade/scope. If they hold game rows this season
+            # outside it, the answer is "nothing in this scope yet": say so,
+            # rather than falling through to the live whole-club scout (which
+            # reads every grade and format and is the report that was wrong).
+            probe_bat, probe_bowl, *_ = await _db_season_accumulators(session, synced_org)
+            scoped_empty = bool(probe_bat or probe_bowl)
+        if season_matches or scoped_empty:
             db_built = True
             if not teams and db_teams:
                 teams = db_teams
             scout_grades = teams
-            if grade_filter and grade_filter_matched:
+            if scoped_empty:
+                teams_scouted = 0
+            elif grade_filter and grade_filter_matched:
                 # db_teams is the full picker list; the note's "across N teams"
                 # should count only the grades the filter actually scoped to.
                 wanted = set(grade_filter.split("||"))
@@ -1576,7 +1728,18 @@ async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: 
 
     coverage = "rich" if season_matches else ("history_only" if h2h_games else "none")
     notes = []
-    if db_built and season_matches:
+    scope_labels = _scope_labels()
+    scope_text = ", ".join(scope_labels)
+    if scoped_empty:
+        where = " ".join(p for p in (
+            ", ".join(grade_filter.split("||")) if grade_filter else "",
+            f"({scope_text})" if scope_text else "",
+        ) if p)
+        notes.append(
+            f"Nothing for {opp_name or 'this opponent'} in {where or 'this scope'} this season yet, "
+            "so there is no squad form to show. Their other sides are left out on purpose."
+        )
+    elif db_built and season_matches:
         notes.append(
             f"Built from our own database — {opp_name or 'this opponent'} is a synced "
             f"BetterStats club ({season_matches} of their matches this season)."
@@ -1596,7 +1759,10 @@ async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: 
         )
     else:
         notes.append("No current-season matches found — showing head-to-head history only.")
-    if grade_filter and grade_filter_matched:
+    if grade_filter and grade_filter_matched and grade_from_fixture:
+        gf_names = ", ".join(grade_filter.split("||"))
+        notes.append(f"Scoped to {gf_names}, the grade of this fixture.")
+    elif grade_filter and grade_filter_matched:
         gf_names = ", ".join(grade_filter.split("||"))
         notes.append(f"Scoped to {gf_names} per your filter.")
     elif grade_filter and not grade_filter_matched:
@@ -1604,10 +1770,17 @@ async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: 
         notes.append(
             f"Your grade filter ({gf_names}) matched none of their sides — showing the whole club instead."
         )
+    if scope_text and not scoped_empty:
+        notes.append(f"Only {scope_text} games counted, per your Grade Type and Match Type filters.")
     if season_name:
         notes.append(f"Season scouted: {season_name}.")
     if h2h_games:
-        h2h_scope = "in the filtered grade(s)" if h2h_grade_filtered else "across every grade and season we hold"
+        if h2h_grade_filtered:
+            h2h_scope = "in the filtered grade(s)"
+        elif scope_text:
+            h2h_scope = f"across every season we hold, {scope_text} only"
+        else:
+            h2h_scope = "across every grade and season we hold"
         notes.append(f"Head-to-head built from {h2h_games} of our games against them, {h2h_scope}.")
     notes.append("Based on scorecards (no ball-by-ball), so no phase or ball-level matchup data.")
 
@@ -1623,6 +1796,12 @@ async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: 
         # a filtered header can never sit over an unfiltered scout unremarked.
         "grade_filter": grade_filter.split("||") if grade_filter else None,
         "grade_filter_matched": grade_filter_matched if grade_filter else None,
+        # True when the grade came from the fixture being scouted rather than the
+        # filter bar. `scope_labels` names the Grade Type / Match Type in force;
+        # `scoped_empty` says they hold games this season, just none inside it.
+        "grade_from_fixture": bool(grade_from_fixture and grade_filter),
+        "scope_labels": scope_labels,
+        "scoped_empty": scoped_empty,
         "mixed_grades": mixed_grades,
         "scouted": {
             "season_matches": season_matches,

@@ -277,7 +277,22 @@ function GamePlan({ plan, report, dossier }) {
   const scopeBits = []
   if (dossier?.grade_filter?.length && dossier.grade_filter_matched) scopeBits.push(dossier.grade_filter.join(', '))
   else if (dossier?.mixed_grades) scopeBits.push(`whole club · ${dossier.scouted?.teams_scouted || 'several'} sides`)
+  // The Grade Type / Match Type the plan was counted under (Men's, Two day, ...).
+  if (dossier?.scope_labels?.length) scopeBits.push(dossier.scope_labels.join(', '))
   if (dossier?.scouted?.season_name) scopeBits.push(dossier.scouted.season_name)
+  if (dossier?.scoped_empty) {
+    // They have games this season, none inside this grade and scope. Say so
+    // rather than draw three empty tiles (or fall back to their other sides).
+    return (
+      <Card accent eyebrow="The game plan" title="How to beat them"
+        right={scopeBits.length > 0 ? <Tag>{scopeBits.join(' · ')}</Tag> : null}>
+        <div className="flex gap-2 text-[13px]" style={{ color: 'var(--pb-amber)' }}>
+          <Icon name="info" size={15} className="mt-0.5 shrink-0" />
+          <span>{dossier.coverage?.notes?.[0] || 'Nothing for them in this grade and scope yet this season.'}</span>
+        </div>
+      </Card>
+    )
+  }
   return (
     <Card accent eyebrow="The game plan" title="How to beat them"
       right={<span className="flex items-center gap-1.5">{scopeBits.length > 0 && <Tag>{scopeBits.join(' · ')}</Tag>}<Tag tone="accent">Synthesised</Tag></span>}>
