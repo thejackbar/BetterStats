@@ -1,6 +1,6 @@
 ---
 name: face-swap
-description: Swap faces in a video or image using a photo, entirely locally with free open-source FaceFusion (no paid service, API key or GPU). Use when the user uploads a photo plus a template video or image and wants their face (or two different people's faces) put onto the people in it, for example dance templates, memes, club promo clips. Handles one or several people per video and keeps the original audio.
+description: Swap faces in a video or image using a photo, entirely locally with free open-source FaceFusion (no paid service, API key or GPU). Use when the user uploads a photo plus a template video or image and wants their face (or two different people's faces) put onto the people in it, for example dance templates, memes, club promo clips. Handles one or several people per video and keeps the original audio. Also covers whole-body replacement (hair, body, clothes), which needs a GPU and so goes through the Colab notebook in colab/.
 ---
 
 # Face swap (FaceFusion, free, CPU-capable)
@@ -93,3 +93,20 @@ Frames where the head is thrown back or the face is tiny may stay unswapped. To 
 - Profile views, heavy blur, hands over the face and fast head turns can flicker or drop the swap on a few frames. Preview a hard moment if the video has one.
 - The reference-frame method fails if the people are too similar or too close together to be told apart; swap by position (`left`/`right`) on a frame where they are apart.
 - FaceFusion's own code is open source (OpenRAIL-AS). The individual swap models carry their own licences; check them before using output commercially.
+
+## Whole body instead of just the face
+
+Face swap only blends a face onto the existing head. Replacing the whole person (hair, body, clothes, keeping the template's motion and scene) needs a video-diffusion model, Wan2.2-Animate (14B). It cannot run on the 4-core CPU sandbox, so do not attempt it here.
+
+What exists, in order of preference for a user who wants it free:
+
+1. **`colab/wan_animate_colab.ipynb`**: a self-contained notebook for Colab's free T4. The user opens it in Colab, uploads the video and photo, and runs the cells. It drives ComfyUI headless on localhost (no public web UI), using the Q4 GGUF build, and chains 33-frame chunks so a whole clip is done in one go. `colab/wan_replace.py` is the source of truth for the logic (also usable from the command line on any CUDA machine); regenerate the notebook with `python3 colab/build_notebook.py` after editing it, never edit the notebook's embedded copy.
+2. **Free Hugging Face Space** (`alexnasa/Wan2.2-Animate-ZEROGPU`, endpoint `/animate_scene`, args `input_video, max_duration_s, edited_frame` (the reference photo), `rc_str="Character Swap"`, `resolution_choice="Low Res"`). It works with `gradio_client` plus an `HF_TOKEN`, but a free account only gets roughly one 3 second run per day, and the user's files are uploaded to a third party. A first attempt with a portrait that had an object held across the body did not transfer the identity. Use it only as a one-off test and ask first.
+
+What has and has not been verified for the notebook (be honest about this when handing it over):
+
+* Verified on CPU: fresh install at the pinned commits, ComfyUI starts, every node the graph needs exists, the full 6 chunk graph passes ComfyUI's validator, and the whole front half (DWPose, face crop, SAM2 mask) runs on a real clip with correct outputs.
+* **Not run on a GPU**: loading the 14B GGUF, the sampler, and real output quality and speed on a T4. Nobody has timed it. Tell the user to do the 2 second test first.
+* Traps found while building it: DWPose `detect_face` must be `enable` or the face crop silently becomes empty background; the GGUF text-encoder and `sage_attention="auto"` are untested on T4 (SageAttention does not support it, keep `disabled`).
+* **Colab's own rules (checked against Google's FAQ, research.google.com/colaboratory/faq.html):** "creating deepfakes" is disallowed on all managed runtimes, and the free tier also disallows "bypassing the notebook UI to interact primarily via a web UI". The notebook avoids the web UI rule by running ComfyUI headless with no tunnel. It does nothing about the deepfake rule, and swapping a real person into a video may fall under it. Tell the user plainly before they run it on Colab; the risk is runtime termination or account restrictions, set by Google. Never help disguise the use to get past detection. The same code runs on any CUDA machine; a rental provider has its own terms.
+
