@@ -27,6 +27,7 @@ from app.models.db import (
 )
 from app.routers.auth import get_current_club, get_current_user
 from app.services.name_format import name_sort_key
+from app.services.squad_next_game import squad_next_games
 
 router = APIRouter(prefix="/availability", tags=["availability"])
 
@@ -160,13 +161,17 @@ async def _owned_player_ids(db: AsyncSession, club_id) -> set:
     return {r[0] for r in res.fetchall()}
 
 
-async def upcoming_fixtures_by_date(db: AsyncSession, club_id) -> dict[str, list[dict]]:
+async def upcoming_fixtures_by_date(db: AsyncSession, club_id, with_scope: bool = False) -> dict[str, list[dict]]:
     """{date_iso: [fixture entries]} for every upcoming club fixture.
 
     Dates are the union of each fixture's played_on and end_on; a two-day game
     appears under both its dates (role 'day1'/'day2'), a one-day game under its
     single date ('single'). Shared by the admin matrix and the player-facing
     self-service page so both agree on which dates are collectable.
+
+    `with_scope` adds the fixture's `team_id` and `grade_id`. Only the admin
+    matrix asks: the self-service page is unauthenticated and has no use for
+    them.
     """
     fx_res = await db.execute(
         select(Fixture)
@@ -182,14 +187,18 @@ async def upcoming_fixtures_by_date(db: AsyncSession, club_id) -> dict[str, list
         if f.end_on and f.end_on != f.played_on:
             spans.append((f.end_on, "day2"))
         for d, role in spans:
-            by_date.setdefault(d.isoformat(), []).append({
+            entry = {
                 "id": str(f.id),
                 "label": f.label,
                 "opponent_name": f.opponent_name,
                 "home_away": f.home_away,
                 "role": role,
                 "two_day": role in ("day1", "day2"),
-            })
+            }
+            if with_scope:
+                entry["team_id"] = str(f.team_id) if f.team_id else None
+                entry["grade_id"] = str(f.grade_id) if f.grade_id else None
+            by_date.setdefault(d.isoformat(), []).append(entry)
     return by_date
 
 
@@ -279,8 +288,19 @@ async def availability_matrix(
     Dates are the union of every upcoming fixture's played_on and end_on. Each
     date lists the fixtures occurring that day; a two-day game appears under
     both its dates (role 'day1'/'day2'), a one-day game under its single date.
+
+    `squad_next` is each squad's own next game ({team_id: {date, scope, ...}}),
+    so the Squads board reads a squad's availability against ITS next game and
+    not the club's first date. See services/squad_next_game.py.
     """
-    by_date = await upcoming_fixtures_by_date(db, club.id)
+    by_date = await upcoming_fixtures_by_date(db, club.id, with_scope=True)
+    team_rows = (await db.execute(
+        text("SELECT id, grade_id FROM teams WHERE organisation_id = :org"),
+        {"org": club.id},
+    )).fetchall()
+    squad_next = squad_next_games(
+        by_date, [(str(tid), str(gid) if gid else None) for tid, gid in team_rows],
+    )
 
     # All real players (not just status=active): the frontend filter bar decides
     # what to show. We hand back enough per-player signal — manual status, plus
@@ -409,6 +429,7 @@ async def availability_matrix(
         "availability": avail_map,
         "all_squads": sorted({s for names in squads_map.values() for s in names}),
         "dormancy_months": months,
+        "squad_next": squad_next,
         # Empty for a club that has written no rules, which is what keeps the
         # roster and the matrix looking exactly as they did.
         "rules": {"active": rules.active, "applied": rules.rules},

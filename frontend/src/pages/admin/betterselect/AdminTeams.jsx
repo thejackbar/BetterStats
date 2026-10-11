@@ -90,6 +90,27 @@ const EMPTY_TEAM = { name: '', short_name: '', sequence: 0, default_formation: '
 
 function isKeeper(p) { return (p.skill_positions || []).includes('WKT') }
 
+function fmtDay(d) {
+  try { return new Date(d + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) }
+  catch { return d }
+}
+
+// What a column's availability is measured against. A squad reads ITS next game
+// (the matrix's `squad_next`); the unassigned pools have no grade, so they read
+// the club's first upcoming date. `date` is null when there is nothing to read.
+function nextGameInfo(col, squadNext, firstDate) {
+  if (col.unassigned) {
+    return { date: firstDate, scope: 'club', text: firstDate ? `Club's next game · ${fmtDay(firstDate)}` : null }
+  }
+  const n = squadNext?.[col.id]
+  if (!n) return { date: firstDate, scope: 'club', text: firstDate ? `Club's next game · ${fmtDay(firstDate)}` : null }
+  if (!n.date) return { date: null, scope: 'none', text: 'No upcoming game for this grade' }
+  if (n.scope === 'club') return { date: n.date, scope: 'club', text: `Club's next game · ${fmtDay(n.date)} (squad has no grade)` }
+  const opp = n.opponent_name || n.label
+  const prefix = n.home_away === 'AWAY' ? '@ ' : n.home_away === 'BYE' ? '' : 'vs '
+  return { date: n.date, scope: 'squad', opponent: opp ? `${prefix}${opp}` : null, text: `Next game · ${fmtDay(n.date)}${opp ? ` · ${prefix}${opp}` : ''}` }
+}
+
 /* ── Team create/edit modal (grade linking preserved) ─────────────────────── */
 function TeamModal({ team, onClose, onSaved }) {
   const toast = useToast()
@@ -163,6 +184,7 @@ function TeamModal({ team, onClose, onSaved }) {
  * squad" (the toolbar Bulk-add tool) where you pick the destination here. Either
  * way: multi-select players, then assign them all at once. */
 function BulkAddModal({ fixedTeam, teams, players, dormantCutoff, statusOf, onAssign, onClose }) {
+  // statusOf(playerId, teamId): the dot reads the TARGET squad's next game.
   const fmt = useAdminNameFormat()
   const [sel, setSel] = useState(() => new Set())
   const [q, setQ] = useState('')
@@ -220,7 +242,7 @@ function BulkAddModal({ fixedTeam, teams, players, dormantCutoff, statusOf, onAs
             return (
               <label key={p.id} className={`flex items-center gap-3 px-4 py-2 border-b pb-hairline cursor-pointer ${on ? 'bg-pb-accent/[0.06]' : ''}`}>
                 <input type="checkbox" checked={on} onChange={() => toggle(p.id)} className="accent-pb-accent w-[15px] h-[15px]" />
-                <Dot status={statusOf(p.id)} />
+                <Dot status={statusOf(p.id, targetId)} />
                 <Avatar player={p} size={26} />
                 <span className="flex-1 text-[13.5px] font-medium truncate">{fmt(p.display_name || p.name)}</span>
                 {cur && <span className="font-mono text-[9px] text-pb-faintest truncate shrink-0">in {cur}</span>}
@@ -329,8 +351,10 @@ function PlayerCard({ p, status, dormantCutoff, draggable, onDragStart, onDragEn
 }
 
 /* ── One squad column (collapsible) ────────────────────────────────────────── */
-function SquadColumn({ col, members, dormantCutoff, statusOf, canManage, collapsed, onToggleCollapse, isOver, dragHandlers, onAdd, onEdit, onDelete, onEditAvail, teams, onAddToSquad }) {
+function SquadColumn({ col, next, members, dormantCutoff, statusOf: statusAt, canManage, collapsed, onToggleCollapse, isOver, dragHandlers, onAdd, onEdit, onDelete, onEditAvail, teams, onAddToSquad }) {
   const hasKeeper = members.some(isKeeper)
+  // Every status on this column is read against the column's own date.
+  const statusOf = useCallback((id) => statusAt(id, next.date), [statusAt, next.date])
   const nAvail = members.filter((m) => statusOf(m.id) === 'AVAILABLE').length
   // The card handlers belong to the cards, not the column — spreading them onto
   // the column div hands React two props no DOM element knows, which it warns
@@ -366,6 +390,10 @@ function SquadColumn({ col, members, dormantCutoff, statusOf, canManage, collaps
           {members.length > 0 && !hasKeeper && !col.unassigned && <span className="text-[10px] text-pb-amber">· no keeper</span>}
           <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-pb-faint shrink-0"><Dot status="AVAILABLE" size={7} /> {nAvail}</span>
         </div>
+        {next.text && (
+          <div data-next-game={next.scope} title="The game this column's availability is for"
+            className={`mt-1 pl-[26px] text-[10.5px] truncate ${next.scope === 'none' ? 'text-pb-amber' : 'text-pb-faint'}`}>{next.text}</div>
+        )}
         {collapsed && members.length > 0 && <div className="mt-2 pl-[26px]"><AvailSummary players={members.map((m) => ({ availability: statusOf(m.id) }))} compact hideTotal /></div>}
       </div>
 
@@ -375,7 +403,7 @@ function SquadColumn({ col, members, dormantCutoff, statusOf, canManage, collaps
             {sorted.map((p) => (
               <PlayerCard key={p.id} p={p} status={statusOf(p.id)} dormantCutoff={dormantCutoff} draggable={canManage}
                 onDragStart={() => onCardDragStart(p.id)} onDragEnd={onCardDragEnd}
-                onEditAvail={onEditAvail ? () => onEditAvail(p) : undefined}
+                onEditAvail={onEditAvail && next.date ? () => onEditAvail(p, next) : undefined}
                 teams={teams} onAddToSquad={onAddToSquad} />
             ))}
             {members.length === 0 && (
@@ -758,6 +786,7 @@ export default function AdminTeams() {
   const [players, setPlayers] = useState(null)
   const [availability, setAvailability] = useState({})  // playerId → {date:{status}}
   const [firstDate, setFirstDate] = useState(null)
+  const [squadNext, setSquadNext] = useState({})     // teamId → that squad's next game
   const [editing, setEditing] = useState(undefined)
   const [addTo, setAddTo] = useState(undefined)        // BulkAddModal target: a team (fixed), or null (choose squad)
   const [over, setOver] = useState(null)
@@ -791,6 +820,7 @@ export default function AdminTeams() {
     api.bsAvailabilityMatrix()
       .then((d) => {
         setAvailability(d.availability || {}); setFirstDate((d.dates || [])[0]?.date || null)
+        setSquadNext(d.squad_next || {})
         // The club's own dormancy window rides on this payload, so the board
         // splits its pools on the same boundary every other BetterSelect
         // screen uses instead of a hardcoded number of its own.
@@ -813,10 +843,14 @@ export default function AdminTeams() {
     return () => { live = false }
   }, [firstDate])
 
+  // A player's answer for one date. The date is the COLUMN's: a squad reads its
+  // own next game, so the 3s' Saturday is not the T20's Tuesday. No date reads
+  // as no answer, never as another game's.
   const statusOf = useCallback(
-    (id) => (firstDate && availability[id]?.[firstDate]?.status) || 'NO_RESPONSE',
+    (id, date = firstDate) => (date && availability[id]?.[date]?.status) || 'NO_RESPONSE',
     [availability, firstDate],
   )
+  const nextOf = useCallback((col) => nextGameInfo(col, squadNext, firstDate), [squadNext, firstDate])
 
   // Dormancy boundary as a plain date string, and the pool each unassigned
   // player falls in. Counted before any facet so a column doesn't vanish
@@ -959,11 +993,11 @@ export default function AdminTeams() {
     }
     if (search.trim()) list = list.filter((p) => matchesName(p, search))
     if (values.role?.length) list = list.filter((p) => (p.skill_positions || []).some((r) => values.role.includes(r)))
-    if (values.avail?.length) list = list.filter((p) => values.avail.includes(statusOf(p.id)))
+    if (values.avail?.length) { const dt = nextOf(col).date; list = list.filter((p) => values.avail.includes(statusOf(p.id, dt))) }
     if (values.selected === 'selected') list = list.filter((p) => selectedIds.has(p.id))
     else if (values.selected === 'unselected') list = list.filter((p) => !selectedIds.has(p.id))
     return list
-  }, [players, search, values, dormantCutoff, fillInCutoff, statusOf, selectedIds])
+  }, [players, search, values, dormantCutoff, fillInCutoff, statusOf, nextOf, selectedIds])
 
   // Optimistically edit a player's membership set, then persist. A drag from
   // one squad to another is a MOVE (remove + add in one call); a drag to
@@ -1016,12 +1050,13 @@ export default function AdminTeams() {
   const expandAll = () => setCollapseOverride(new Map(columns.map((c) => [c.key, false])))
 
   const pickAvail = async (status) => {
-    const p = availEdit
+    const edit = availEdit
     setAvailEdit(null)
-    if (!p) return
-    if (!firstDate) { toast.error('No upcoming fixtures to set availability against'); return }
-    setAvailability((a) => ({ ...a, [p.id]: { ...(a[p.id] || {}), [firstDate]: { status } } }))
-    try { await api.bsSetAvailability({ player_id: p.id, date: firstDate, status }) }
+    if (!edit) return
+    const { player: p, date } = edit
+    if (!date) { toast.error('No upcoming fixtures to set availability against'); return }
+    setAvailability((a) => ({ ...a, [p.id]: { ...(a[p.id] || {}), [date]: { status } } }))
+    try { await api.bsSetAvailability({ player_id: p.id, date, status }) }
     catch (e) { toast.error('Could not update availability: ' + e.message); loadMatrix() }
   }
 
@@ -1067,11 +1102,14 @@ export default function AdminTeams() {
       )}
       {addTo !== undefined && (
         <BulkAddModal fixedTeam={addTo} teams={teams || []} players={players || []}
-          dormantCutoff={dormantCutoff} statusOf={statusOf} onAssign={addToSquad} onClose={() => setAddTo(undefined)} />
+          dormantCutoff={dormantCutoff}
+          statusOf={(id, teamId) => statusOf(id, teamId ? nextOf({ id: teamId }).date : firstDate)}
+          onAssign={addToSquad} onClose={() => setAddTo(undefined)} />
       )}
       {availEdit && (
-        <QuickAvailModal player={availEdit} dateLabel={firstDate}
-          current={statusOf(availEdit.id)} onPick={pickAvail} onClose={() => setAvailEdit(null)} />
+        <QuickAvailModal player={availEdit.player}
+          dateLabel={`${fmtDay(availEdit.date)}${availEdit.opponent ? ` · ${availEdit.opponent}` : ''}`}
+          current={statusOf(availEdit.player.id, availEdit.date)} onPick={pickAvail} onClose={() => setAvailEdit(null)} />
       )}
       {autoAssign && <AutoAssignModal onApply={applyAutoAssign} onClose={() => setAutoAssign(false)} />}
       {autoSeed && <AutoSeedModal onSeeded={() => { loadTeams(); loadPlayers() }} onClose={() => setAutoSeed(false)} />}
@@ -1118,7 +1156,7 @@ export default function AdminTeams() {
                 return (
                   <div key={col.key}>
                     <SquadColumn
-                      col={col} members={members} dormantCutoff={dormantCutoff} statusOf={statusOf} canManage={canManage}
+                      col={col} next={nextOf(col)} members={members} dormantCutoff={dormantCutoff} statusOf={statusOf} canManage={canManage}
                       collapsed={isCollapsed(col)} onToggleCollapse={() => toggleCollapse(col)}
                       isOver={over === col.key}
                       teams={teams} onAddToSquad={addToSquad}
@@ -1130,7 +1168,7 @@ export default function AdminTeams() {
                         onCardDragEnd: () => { dragRef.current = null; setOver(null) },
                       }}
                       onAdd={() => setAddTo(col.team)} onEdit={() => setEditing(col.team)} onDelete={() => del(col.team)}
-                      onEditAvail={canManage ? setAvailEdit : undefined} />
+                      onEditAvail={canManage ? (player, nx) => setAvailEdit({ player, date: nx.date, opponent: nx.opponent || null }) : undefined} />
                     {col.unassigned && !isCollapsed(col) && (
                       <div className="text-[10.5px] text-pb-faintest mt-1 px-1 space-y-0.5">
                         {facetsOn && members.length < total && (

@@ -1,0 +1,209 @@
+"""Verification: a squad's availability is read against ITS next game.
+
+The reported behaviour (BetterSelect feedback, Oct 2026): availability typed on
+the Squads board for the Saturday 3s landed on the club's next game, a midweek
+T20, because the board used the club's first upcoming date for every column.
+
+Two layers:
+
+  1. The rule itself (`services/squad_next_game.py`, pure, no database).
+  2. The shipped `GET /availability/matrix` route body, when DATABASE_URL points
+     at a real Postgres (skipped, and said so, when it does not).
+
+Each "squad reads its own game" check is paired with the OLD behaviour run as a
+control (`club_first_date`), which must give the reported wrong answer; a check
+that passes against the broken code is not a check.
+
+Run:  python verification/verify_squad_next_game.py
+      DATABASE_URL=postgresql+asyncpg://... python verification/verify_squad_next_game.py
+"""
+from __future__ import annotations
+
+import asyncio
+import importlib.util
+import os
+import sys
+import uuid
+from datetime import date, timedelta
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+os.environ.setdefault("SECRET_KEY", "verify-secret-key-for-tests-only")
+
+PASS = FAIL = 0
+FAILURES: list[str] = []
+
+
+def check(name: str, ok: bool, detail: str = "") -> None:
+    global PASS, FAIL
+    if ok:
+        PASS += 1
+        print(f"  ok   {name}")
+    else:
+        FAIL += 1
+        FAILURES.append(name)
+        print(f"  FAIL {name}  {detail}")
+
+
+def load_service():
+    spec = importlib.util.spec_from_file_location("squad_next_game", ROOT / "app/services/squad_next_game.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def club_first_date(by_date: dict) -> str | None:
+    """The behaviour that was reported: every squad reads the club's first date."""
+    return sorted(by_date)[0] if by_date else None
+
+
+def fx(fid, team=None, grade=None, opp=None, role="single", home_away="HOME", label=None):
+    return {"id": fid, "label": label, "opponent_name": opp, "home_away": home_away,
+            "role": role, "two_day": role != "single", "team_id": team, "grade_id": grade}
+
+
+def pure_checks() -> None:
+    print("pure rule")
+    svc = load_service()
+    t20, thirds, firsts, bare = "t-t20", "t-3s", "t-1s", "t-bare"
+    g_t20, g_3, g_1 = "g-t20", "g-3", "g-1"
+    tue = "2026-10-13"
+    sat = "2026-10-17"
+    sun = "2026-10-18"
+    by_date = {
+        tue: [fx("f-t20", team=t20, grade=g_t20, opp="Jarrah T20")],
+        sat: [fx("f-1", team=None, grade=g_1, opp="Willetton 1s"),
+              fx("f-3", team=None, grade=g_3, opp="Willetton 3s")],
+        sun: [fx("f-1-day2", team=None, grade=g_1, role="day2")],
+    }
+    teams = [(t20, g_t20), (thirds, g_3), (firsts, g_1), (bare, None)]
+    out = svc.squad_next_games(by_date, teams)
+
+    # Control: the old rule gives the 3s the T20's Tuesday. That is the report.
+    check("control: old rule puts the 3s on the T20's date", club_first_date(by_date) == tue)
+    check("3s read their own Saturday, not the T20's Tuesday", out[thirds]["date"] == sat, str(out[thirds]))
+    check("3s fixture is the 3s game", out[thirds]["fixture_id"] == "f-3" and out[thirds]["opponent_name"] == "Willetton 3s")
+    check("T20 squad still reads the T20", out[t20]["date"] == tue and out[t20]["scope"] == "squad")
+    check("1s read Saturday (day 1), not the day-2 Sunday", out[firsts]["date"] == sat)
+    check("a squad with no grade reads the club's first date, labelled club",
+          out[bare]["date"] == tue and out[bare]["scope"] == "club")
+
+    # The Sunday after the Saturday game: the Saturday fixtures are gone, so the
+    # 3s' next game is the following Saturday, not whatever the club plays next.
+    sat2 = "2026-10-24"
+    after = {
+        "2026-10-19": [fx("f-t20-2", team=t20, grade=g_t20, opp="Jarrah T20")],
+        sat2: [fx("f-3-2", team=None, grade=g_3, opp="Kenwick 3s")],
+    }
+    out2 = svc.squad_next_games(after, teams)
+    check("control (Sunday): old rule is again the T20's date", club_first_date(after) == "2026-10-19")
+    check("Sunday after: 3s default to their next Saturday", out2[thirds]["date"] == sat2, str(out2[thirds]))
+
+    # A grade with nothing upcoming says so: no date, never another grade's game.
+    only_t20 = {tue: [fx("f-t20", team=t20, grade=g_t20)]}
+    out3 = svc.squad_next_games(only_t20, teams)
+    check("graded squad with no upcoming game gets no date", out3[thirds]["date"] is None and out3[thirds]["scope"] == "none", str(out3[thirds]))
+    check("...while the control would have given it the T20's date", club_first_date(only_t20) == tue)
+
+    # A fixture that names another squad is that squad's, even in the same grade.
+    two = {sat: [fx("f-a", team="t-a", grade=g_3, opp="A"), fx("f-b", team="t-b", grade=g_3, opp="B")]}
+    out4 = svc.squad_next_games(two, [("t-a", g_3), ("t-b", g_3), ("t-c", g_3)])
+    check("two squads in one grade each take their own fixture",
+          out4["t-a"]["fixture_id"] == "f-a" and out4["t-b"]["fixture_id"] == "f-b")
+    check("a third squad in the grade takes neither named fixture", out4["t-c"]["scope"] == "none")
+
+    # An empty fixture list is not a crash.
+    out5 = svc.squad_next_games({}, teams)
+    check("no upcoming fixtures at all: every squad has no date",
+          all(v["date"] is None for v in out5.values()))
+    check("shape is stable (every key present)",
+          all(set(v) == {"date", "fixture_id", "opponent_name", "label", "home_away", "scope"} for v in out.values()))
+
+
+async def route_checks(db_url: str) -> None:
+    print("matrix route (real Postgres)")
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from app.models.db import Base, Organisation, Team, Grade, Season, Fixture
+    from app.routers import availability as av
+
+    engine = create_async_engine(db_url, echo=False)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    from sqlalchemy import text
+    from app.services.selection_rule_ddl import SELECTION_RULE_STATEMENTS
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+        # The matrix reads the club's association rules: a raw-SQL lifespan
+        # table create_all never built. Lifted from the shared DDL, not stubbed.
+        for stmt in SELECTION_RULE_STATEMENTS:
+            await conn.execute(text(stmt))
+
+    org_id, season_id = uuid.uuid4(), uuid.uuid4()
+    g_t20, g_3 = uuid.uuid4(), uuid.uuid4()
+    t_t20, t_3 = uuid.uuid4(), uuid.uuid4()
+    today = date.today()
+    tue, sat = today + timedelta(days=2), today + timedelta(days=6)
+    async with Session() as s:
+        s.add(Organisation(id=org_id, name=f"SquadNext {org_id.hex[:6]}", slug=f"sn-{org_id.hex[:8]}"))
+        await s.flush()
+        s.add(Season(id=season_id, organisation_id=org_id, name="2026/27"))
+        await s.flush()
+        s.add(Grade(id=g_t20, season_id=season_id, name="T20"))
+        s.add(Grade(id=g_3, season_id=season_id, name="Saturday 3s"))
+        await s.flush()
+        s.add(Team(id=t_t20, organisation_id=org_id, name="T20", grade_id=g_t20))
+        s.add(Team(id=t_3, organisation_id=org_id, name="3rd XI", grade_id=g_3))
+        await s.flush()
+        s.add(Fixture(id=uuid.uuid4(), organisation_id=org_id, grade_id=g_t20, team_id=t_t20,
+                      source="manual", played_on=tue, opponent_name="Jarrah T20"))
+        s.add(Fixture(id=uuid.uuid4(), organisation_id=org_id, grade_id=g_3, team_id=None,
+                      source="manual", played_on=sat, opponent_name="Willetton 3s"))
+        await s.commit()
+        club = await s.get(Organisation, org_id)
+        body = await av.availability_matrix(db=s, club=club)
+
+    check("matrix still lists the club's dates, first is the T20's",
+          [d["date"] for d in body["dates"]][:1] == [tue.isoformat()])
+    sn = body.get("squad_next") or {}
+    check("matrix carries squad_next", bool(sn), str(sn))
+    check("route: 3rd XI reads Saturday", (sn.get(str(t_3)) or {}).get("date") == sat.isoformat(), str(sn.get(str(t_3))))
+    check("route: T20 squad reads Tuesday", (sn.get(str(t_t20)) or {}).get("date") == tue.isoformat())
+    check("route: control, old rule (dates[0]) gives the 3rd XI Tuesday",
+          body["dates"][0]["date"] == tue.isoformat())
+    async with Session() as s:
+        plain = await av.upcoming_fixtures_by_date(s, org_id)
+        try:
+            scoped = await av.upcoming_fixtures_by_date(s, org_id, with_scope=True)
+        except TypeError:   # the previous code has no such argument: report, don't crash
+            scoped = {}
+    flat_plain = [f for fs in plain.values() for f in fs]
+    flat_scoped = [f for fs in scoped.values() for f in fs]
+    check("self-service shape has no team_id/grade_id", all("team_id" not in f and "grade_id" not in f for f in flat_plain))
+    check("scoped shape has them", bool(flat_scoped) and all("team_id" in f and "grade_id" in f for f in flat_scoped))
+
+    async with Session() as s:
+        from sqlalchemy import delete
+        await s.execute(delete(Fixture).where(Fixture.organisation_id == org_id))
+        await s.execute(delete(Team).where(Team.organisation_id == org_id))
+        await s.execute(delete(Grade).where(Grade.season_id == season_id))
+        await s.execute(delete(Season).where(Season.id == season_id))
+        await s.execute(delete(Organisation).where(Organisation.id == org_id))
+        await s.commit()
+    await engine.dispose()
+
+
+def main() -> int:
+    pure_checks()
+    db_url = os.environ.get("DATABASE_URL")
+    if db_url:
+        asyncio.run(route_checks(db_url))
+    else:
+        print("matrix route: SKIPPED (no DATABASE_URL), only the pure rule was run")
+    print(f"\n{PASS} passed, {FAIL} failed")
+    for f in FAILURES:
+        print("  failed:", f)
+    return 1 if FAIL else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
