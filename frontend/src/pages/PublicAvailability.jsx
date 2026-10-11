@@ -24,6 +24,26 @@ function fmtDay(d) {
   } catch { return d }
 }
 
+// Dates grouped into Monday to Sunday weeks, in order. The page opens on the
+// first week with games (a Tuesday T20 and the Saturday game sit together) and
+// reveals one more week per tap, so a long fixture list is not the first thing
+// a player sees.
+function weekKey(iso) {
+  const d = new Date(iso + 'T00:00:00')
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7))
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+function groupByWeek(dates) {
+  const weeks = []
+  let last = null
+  for (const d of dates) {
+    const k = weekKey(d.date)
+    if (k !== last) { weeks.push([]); last = k }
+    weeks[weeks.length - 1].push(d)
+  }
+  return weeks
+}
+
 // "13:00" → "1:00pm". The time is the club's own local display string, so an
 // unexpected format is shown as it came rather than guessed at.
 function fmtTime(t) {
@@ -152,7 +172,9 @@ export default function PublicAvailability() {
   const [me, setMe] = useState(null) // {player, dates, availability}
   const [savingDate, setSavingDate] = useState(null)
   const [savedDate, setSavedDate] = useState(null)
+  const [weeksOpen, setWeeksOpen] = useState(1) // weeks of games showing, from the next one
   const pinRef = useRef(null)
+  const weeks = useMemo(() => groupByWeek(me?.dates || []), [me?.dates])
 
   // White-label: re-point --pb-accent (and its rgb form, used by a few tints) to
   // the club's colour for this page only. Falls back to the brand green.
@@ -235,7 +257,7 @@ export default function PublicAvailability() {
 
   const switchPlayer = async () => {
     try { await api.availPublicSwitch(token) } catch {}
-    setMe(null); setChosen(null); setPin(''); setSearch(''); setError('')
+    setMe(null); setChosen(null); setPin(''); setSearch(''); setError(''); setWeeksOpen(1)
     setStep('pick')
   }
 
@@ -368,7 +390,7 @@ export default function PublicAvailability() {
             )}
 
             <div className="flex flex-col gap-3">
-              {(me.dates || []).map((d) => {
+              {weeks.slice(0, weeksOpen).flat().map((d) => {
                 const cur = me.availability?.[d.date]?.status || 'NO_RESPONSE'
                 return (
                   <div key={d.date} className="rounded-xl border pb-hairline p-3.5">
@@ -400,6 +422,21 @@ export default function PublicAvailability() {
                 )
               })}
             </div>
+            {weeks.length > weeksOpen && (
+              <button type="button" data-see-more onClick={() => setWeeksOpen((n) => n + 1)}
+                className="w-full mt-3 py-3 rounded-lg border pb-hairline text-sm font-semibold text-pb-text hover:bg-pb-surface2 transition-colors">
+                See more games
+                <span className="block text-[11.5px] font-normal text-pb-faint mt-0.5">
+                  {(() => { const n = weeks.slice(weeksOpen).flat().length; return `${n} more day${n === 1 ? '' : 's'} with games` })()}
+                </span>
+              </button>
+            )}
+            {weeksOpen > 1 && (
+              <button type="button" data-show-fewer onClick={() => setWeeksOpen(1)}
+                className="block mx-auto mt-3 text-[12px] text-pb-faint underline">
+                Show only the next games
+              </button>
+            )}
             <p className="text-center text-pb-faintest text-[11px] mt-6">
               Your answers save automatically. One tap covers every game that day.
             </p>

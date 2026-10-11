@@ -21,7 +21,13 @@ const check = (name, cond, detail = '') => {
   console.log(`${cond ? '  ok  ' : ' FAIL '} ${name}${!cond && detail ? '  — ' + detail : ''}`)
 }
 const plusDays = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10) }
-const SAT = plusDays(6), SUN = plusDays(7)
+// Calendar weeks, not "today plus n": the page groups Monday to Sunday, so the
+// dates are built from the Monday of NEXT week and the test means the same on
+// any weekday. Week 1 is Sat + Sun, week 2 Tue + Sat, week 3 Sat.
+const MON1 = (() => { const d = new Date(); d.setDate(d.getDate() + (7 - ((d.getDay() + 6) % 7))); return d })()
+const onWeek = (w, dow) => { const d = new Date(MON1); d.setDate(d.getDate() + 7 * (w - 1) + dow); return d.toISOString().slice(0, 10) }
+const SAT = onWeek(1, 5), SUN = onWeek(1, 6)
+const TUE2 = onWeek(2, 1), SAT2 = onWeek(2, 5), SAT3 = onWeek(3, 5)
 
 let n = 0
 const G = (opp, ha, time, team, mine, venue, extra) => ({
@@ -44,6 +50,9 @@ const payload = (hasSquad, mineOn = true) => ({
   dates: [
     { date: SAT, fixtures: sat.map((f) => ({ ...f, mine: hasSquad && mineOn ? f.mine : false })) },
     { date: SUN, fixtures: sun },
+    { date: TUE2, fixtures: [G('Jarrah T20', 'HOME', '18:30', 'T20 Div 3', false, 'Hillcrest Oval')] },
+    { date: SAT2, fixtures: [G('Kenwick 3s', 'AWAY', '12:30', '3rd XI', hasSquad && mineOn, 'Kenwick Park')] },
+    { date: SAT3, fixtures: [G('Bayswater 3s', 'HOME', '13:00', '3rd XI', hasSquad && mineOn, 'Hillcrest Oval')] },
   ],
   availability: {},
 })
@@ -95,6 +104,11 @@ const run = async () => {
   let { ctx, page } = await open(browser, payload(true))
   let cards = await readCards(page)
   const satCard = cards[0], sunCard = cards[1]
+  check('opens on the next games only: two date cards, not five', cards.length === 2, `${cards.length}: ${cards.map((c) => c.heading).join(' | ')}`)
+  const more = page.locator('[data-see-more]')
+  check('a See more button is offered', (await more.count()) === 1)
+  check('it says how many more days have games', /3 more days with games/.test((await more.innerText().catch(() => '')) || ''), await more.innerText().catch(() => ''))
+  check('the second week is not on the page yet', !(await page.locator('body').innerText()).includes('Kenwick 3s'))
   check('Saturday opens with only the player\'s own game', satCard?.rows.length === 1, JSON.stringify(satCard?.rows.map((r) => r.text)))
   const mine = satCard?.rows[0]
   check('own game shows the time as 1:00pm', /1:00pm/.test(mine?.text || ''), mine?.text)
@@ -127,6 +141,27 @@ const run = async () => {
   await page.locator('div.rounded-xl.border', { hasText: 'Willetton 3s' }).getByRole('button', { name: /Available/ }).first().click({ timeout: 2000 }).catch(() => {})
   await page.waitForTimeout(300)
   check('exact request: POST /me with the Saturday date', writes.length === 1 && writes[0].date === SAT && writes[0].status === 'AVAILABLE', JSON.stringify(writes))
+
+  // See more: one more week per tap; then it goes away; Show fewer returns to the first week.
+  await more.click({ timeout: 2000 }).catch(() => {})
+  await page.waitForTimeout(150)
+  cards = await readCards(page)
+  check('first tap adds the second week (two more dates)', cards.length === 4, String(cards.length))
+  check('the second week\'s games are on the page', (await page.locator('body').innerText()).includes('Kenwick 3s'))
+  check('the third week is still held back', !(await page.locator('body').innerText()).includes('Bayswater 3s'))
+  check('the button now counts one more day', /1 more day with games/.test((await more.innerText().catch(() => '')) || ''), await more.innerText().catch(() => ''))
+  await more.click({ timeout: 2000 }).catch(() => {})
+  await page.waitForTimeout(150)
+  cards = await readCards(page)
+  check('second tap shows every date', cards.length === 5, String(cards.length))
+  check('See more is gone when nothing is left', (await page.locator('[data-see-more]').count()) === 0)
+  // answering a later week writes that week's date
+  await page.locator('div.rounded-xl.border', { hasText: 'Bayswater 3s' }).getByRole('button', { name: /Maybe/ }).first().click({ timeout: 2000 }).catch(() => {})
+  await page.waitForTimeout(250)
+  check('answering a later week writes that date', writes.length === 2 && writes[1].date === SAT3 && writes[1].status === 'MAYBE', JSON.stringify(writes))
+  await page.getByRole('button', { name: 'Show only the next games' }).click({ timeout: 2000 }).catch(() => {})
+  await page.waitForTimeout(150)
+  check('Show only the next games returns to the first week', (await readCards(page)).length === 2 && (await page.locator('[data-see-more]').count()) === 1)
 
   const w = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, screen: window.screen.width }))
   check('390px: no sideways overflow', w.sw <= Math.max(w.screen, 390), JSON.stringify(w))
