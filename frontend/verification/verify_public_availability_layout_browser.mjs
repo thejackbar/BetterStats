@@ -58,13 +58,14 @@ const payload = (hasSquad, mineOn = true) => ({
 })
 
 const writes = []
-async function stub(page, me) {
+async function stub(page, holder) {
+  const me = holder.me
   await page.route('**/api/public/availability/**', async (route) => {
     const req = route.request(), url = req.url()
     const json = (b) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(b) })
-    if (url.endsWith('/me') && req.method() === 'POST') { writes.push(JSON.parse(req.postData() || '{}')); return json({ status: 'ok' }) }
-    if (url.endsWith('/me')) return json(me)
-    return json({ club: me.club, require_pin: true, players: [{ id: 'p1', display_name: 'Barendse, Jack', has_phone: true }] })
+    if (/\/me$/.test(url) && req.method() === 'POST') { writes.push(JSON.parse(req.postData() || '{}')); return json({ status: 'ok' }) }
+    if (url.includes('/me')) { holder.urls.push(url); return json(holder.me) }
+    return json({ club: holder.me.club, require_pin: true, players: [{ id: 'p1', display_name: 'Barendse, Jack', has_phone: true }] })
   })
   await page.route('**/api/**', (route) => (route.request().url().includes('/public/availability/') ? route.fallback() : route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })))
 }
@@ -90,18 +91,19 @@ const rowsOf = (c) => c?.rows ?? []
 const open = async (browser, me, width = 390) => {
   const ctx = await browser.newContext({ viewport: { width, height: 900 }, isMobile: width < 500, hasTouch: width < 500 })
   const page = await ctx.newPage()
-  await stub(page, me)
+  const holder = { me, urls: [] }
+  await stub(page, holder)
   await page.goto(`${BASE}/avail/tok123`)
   await page.waitForSelector('text=Signed in as', { timeout: 20000 })
   await page.waitForTimeout(300)
-  return { ctx, page }
+  return { ctx, page, holder }
 }
 
 const run = async () => {
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' })
 
   // ── a player in a squad ─────────────────────────────────────────────────
-  let { ctx, page } = await open(browser, payload(true))
+  let { ctx, page, holder } = await open(browser, payload(true))
   let cards = await readCards(page)
   const satCard = cards[0], sunCard = cards[1]
   check('opens on the next games only: two date cards, not five', cards.length === 2, `${cards.length}: ${cards.map((c) => c.heading).join(' | ')}`)
@@ -162,6 +164,22 @@ const run = async () => {
   await page.getByRole('button', { name: 'Show only the next games' }).click({ timeout: 2000 }).catch(() => {})
   await page.waitForTimeout(150)
   check('Show only the next games returns to the first week', (await readCards(page)).length === 2 && (await page.locator('[data-see-more]').count()) === 1)
+
+  // The browser's timezone rides on the read, so the server can tell which games have started.
+  const tzSent = holder.urls.some((u) => /[?&]tz=[A-Za-z_%0-9+-]+/.test(u))
+  check('the /me read carries the browser timezone', tzSent, holder.urls.join(' '))
+
+  // A page left open: once week one's games have started the server stops listing
+  // them; coming back to the tab re-reads, and the page moves to the next week.
+  const before = holder.urls.length
+  holder.me = { ...holder.me, dates: holder.me.dates.filter((d) => d.date !== SAT && d.date !== SUN) }
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+  await page.waitForTimeout(400)
+  cards = await readCards(page)
+  check('returning to the tab re-reads the games', holder.urls.length === before + 1, String(holder.urls.length - before))
+  check('games that have started are gone and the next week is first', cards.length === 2 && /Tuesday/.test(cards[0]?.heading || ''), cards.map((c) => c.heading).join(' | '))
+  check('the started games are no longer on the page', !(await page.locator('body').innerText()).includes('Willetton 3s'))
+  check('See more now counts what is left', /1 more day with games/.test((await page.locator('[data-see-more]').innerText().catch(() => '')) || ''))
 
   const w = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, screen: window.screen.width }))
   check('390px: no sideways overflow', w.sw <= Math.max(w.screen, 390), JSON.stringify(w))

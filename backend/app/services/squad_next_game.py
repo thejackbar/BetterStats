@@ -16,7 +16,40 @@ definition.
 """
 from __future__ import annotations
 
+from datetime import date, datetime, time
 from typing import Iterable, Optional
+
+# A game in one of these states has started whatever the clock says.
+STARTED_STATUSES = ("IN_PROGRESS", "FINAL")
+
+
+def _minutes(value) -> Optional[int]:
+    """"HH:MM" (or "HH:MM:SS") to minutes after midnight, None for anything else."""
+    parts = str(value or "").strip().split(":")
+    try:
+        h, m = int(parts[0]), int(parts[1]) if len(parts) > 1 else 0
+    except (ValueError, IndexError):
+        return None
+    return h * 60 + m if 0 <= h < 24 and 0 <= m < 60 else None
+
+
+def fixture_has_started(status: Optional[str], played_on: Optional[date], start_time, now_local: Optional[datetime]) -> bool:
+    """Whether availability is moot because the game is under way or over.
+
+    True when the fixture's status says so (no clock needed), or when the club's
+    local time has reached its start time on the day. `now_local` is naive local
+    time; the app holds no per-club timezone, so the caller supplies the viewer's
+    and None means "cannot tell", which keeps the game. A game with no readable
+    start time is kept for its whole date: nothing says when it begins.
+    """
+    if (status or "").upper() in STARTED_STATUSES:
+        return True
+    if now_local is None or played_on is None:
+        return False
+    mins = _minutes(start_time)
+    if mins is None:
+        return False
+    return datetime.combine(played_on, time(mins // 60, mins % 60)) <= now_local
 
 
 def fixture_belongs_to_squad(f: dict, team_id: str, grade_id: Optional[str]) -> bool:

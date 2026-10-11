@@ -38,6 +38,7 @@ from app.config.settings import settings
 from app.models.db import Grade, Organisation, Player, PlayerAvailability, get_db
 from app.routers.availability import (
     active_self_service_players,
+    local_now,
     phone_last4,
     upcoming_fixtures_by_date,
 )
@@ -250,9 +251,9 @@ async def _player_squads(db: AsyncSession, club: Organisation, player: Player) -
     return [(str(tid), str(gid) if gid else None) for tid, gid in rows]
 
 
-async def _fixtures_for_player(db: AsyncSession, club: Organisation, squads: list) -> dict[str, list[dict]]:
+async def _fixtures_for_player(db: AsyncSession, club: Organisation, squads: list, tz: Optional[str] = None) -> dict[str, list[dict]]:
     """Upcoming fixtures with time, venue, our team and which are this player's."""
-    by_date = await upcoming_fixtures_by_date(db, club.id, with_scope=True, with_detail=True)
+    by_date = await upcoming_fixtures_by_date(db, club.id, with_scope=True, with_detail=True, now_local=local_now(tz))
     team_rows = (await db.execute(
         text("SELECT id, name FROM teams WHERE organisation_id = :org"),
         {"org": club.id},
@@ -270,13 +271,13 @@ async def _fixtures_for_player(db: AsyncSession, club: Organisation, squads: lis
 
 
 @router.get("/{token}/me")
-async def get_me(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+async def get_me(token: str, request: Request, tz: Optional[str] = None, db: AsyncSession = Depends(get_db)):
     """This verified player's upcoming fixtures (grouped by date) + their current
     answers. Date-keyed: one answer covers every fixture that day."""
     club = await _club_for_token(db, token)
     player = await _player_for_session(db, request, club)
     squads = await _player_squads(db, club, player)
-    by_date = await _fixtures_for_player(db, club, squads)
+    by_date = await _fixtures_for_player(db, club, squads, tz)
     answers: dict[str, dict] = {}
     if by_date:
         av_res = await db.execute(

@@ -192,6 +192,28 @@ async def route_checks(db_url: str) -> None:
     await engine.dispose()
 
 
+def started_pure_checks() -> None:
+    print("started games drop out (pure)")
+    from datetime import datetime
+    svc = load_service()
+    day = date(2026, 10, 17)
+    at = lambda h, m=0: datetime(2026, 10, 17, h, m)
+    f = svc.fixture_has_started
+    check("before the start time the game stays", f("UPCOMING", day, "13:00", at(12, 59)) is False)
+    check("at the start time it goes", f("UPCOMING", day, "13:00", at(13, 0)) is True)
+    check("after the start time it stays gone", f("UPCOMING", day, "13:00", at(17, 30)) is True)
+    check("an earlier game goes while a later one the same day stays",
+          f("UPCOMING", day, "09:30", at(11)) is True and f("UPCOMING", day, "14:00", at(11)) is False)
+    check("start time with seconds is read", f("UPCOMING", day, "13:00:00", at(13, 5)) is True)
+    check("no start time: kept for the whole date", f("UPCOMING", day, None, at(23, 59)) is False)
+    check("an unreadable start time is kept, not guessed", f("UPCOMING", day, "TBC", at(23, 59)) is False)
+    check("no clock given: the time cannot drop it", f("UPCOMING", day, "09:00", None) is False)
+    check("status in progress drops it with no clock", f("IN_PROGRESS", day, "20:00", None) is True)
+    check("status final drops it with no clock", f("FINAL", day, None, None) is True)
+    check("control: a future game on a later date stays",
+          f("UPCOMING", date(2026, 10, 24), "09:00", at(23)) is False)
+
+
 def player_pure_checks() -> None:
     print("self-service fixtures (pure)")
     svc = load_service()
@@ -270,8 +292,8 @@ async def public_route_checks(db_url: str) -> None:
         s.add(Fixture(id=uuid.uuid4(), organisation_id=org_id, grade_id=g1, team_id=t1, source="manual",
                       played_on=sat, start_time="11:00", venue="Swan Park", home_away="AWAY", opponent_name="Swan Valley 1st XI"))
         await s.commit()
-        mine = await pa.get_me(token, req_for(p_in), s)
-        nosquad = await pa.get_me(token, req_for(p_out), s)
+        mine = await pa.get_me(token, req_for(p_in), db=s)
+        nosquad = await pa.get_me(token, req_for(p_out), db=s)
 
     fx_in = {f["opponent_name"]: f for f in (mine["dates"][0]["fixtures"] if mine.get("dates") else [])}
     f3, f1 = fx_in.get("Willetton 3s", {}), fx_in.get("Swan Valley 1st XI", {})
@@ -299,13 +321,111 @@ async def public_route_checks(db_url: str) -> None:
     await engine.dispose()
 
 
+async def started_route_checks(db_url: str) -> None:
+    print("started games, shipped routes (real Postgres)")
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from jose import jwt as jose_jwt
+    from starlette.requests import Request
+    from sqlalchemy import delete, text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from app.config.settings import settings
+    from app.models.db import Base, Organisation, Player, Team, TeamMember, Grade, Season, Fixture
+    from app.routers import availability as av
+    from app.routers import public_availability as pa
+    from app.services.selection_rule_ddl import SELECTION_RULE_STATEMENTS
+
+    engine = create_async_engine(db_url, echo=False)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+        for stmt in SELECTION_RULE_STATEMENTS:
+            await conn.execute(text(stmt))
+
+    tz = "Australia/Perth"
+    today_local = datetime.now(ZoneInfo(tz)).date()
+    next_sat = today_local + timedelta(days=(5 - today_local.weekday()) % 7 + 7)
+    org_id, season_id, g3, t3, pid = (uuid.uuid4() for _ in range(5))
+    token = "tok-" + uuid.uuid4().hex
+    ids = {k: uuid.uuid4() for k in ("started", "later", "nextweek", "inprog", "untimed")}
+
+    def fixture(key, on, start, status="UPCOMING", opp=None):
+        return Fixture(id=ids[key], organisation_id=org_id, grade_id=g3, team_id=None, source="manual",
+                       played_on=on, start_time=start, status=status, opponent_name=opp or key, home_away="HOME")
+
+    async with Session() as s:
+        s.add(Organisation(id=org_id, name=f"Started {org_id.hex[:6]}", slug=f"st-{org_id.hex[:8]}",
+                           module_overrides=["select"], availability_link_token=token,
+                           availability_self_service_enabled=True))
+        await s.flush()
+        s.add(Season(id=season_id, organisation_id=org_id, name="2026/27")); await s.flush()
+        s.add(Grade(id=g3, season_id=season_id, name="Saturday 3s")); await s.flush()
+        s.add(Team(id=t3, organisation_id=org_id, name="3rd XI", grade_id=g3))
+        s.add(Player(id=pid, organisation_id=org_id, name="Started, Sam")); await s.flush()
+        s.add(TeamMember(team_id=t3, player_id=pid, organisation_id=org_id))
+        # today in the viewer's timezone: one that began at 00:00, one that begins at 23:59,
+        # one marked in progress, one with no start time, and next Saturday's game.
+        s.add(fixture("started", today_local, "00:00"))
+        s.add(fixture("later", today_local, "23:59"))
+        s.add(fixture("inprog", today_local, "23:58", status="IN_PROGRESS"))
+        s.add(fixture("untimed", today_local, None))
+        s.add(fixture("nextweek", next_sat, "13:00"))
+        await s.commit()
+        club = await s.get(Organisation, org_id)
+        async def matrix(tz_value):
+            try:
+                return await av.availability_matrix(tz=tz_value, db=s, club=club)
+            except TypeError:   # the previous route has no tz: report, do not crash
+                return await av.availability_matrix(db=s, club=club)
+        with_tz, without, bad_tz = await matrix(tz), await matrix(None), await matrix("Not/AZone")
+        c = jose_jwt.encode({"club": str(org_id), "pid": str(pid), "typ": "avail",
+                             "exp": datetime.now(ZoneInfo("UTC")) + timedelta(days=1)},
+                            settings.secret_key, algorithm=settings.algorithm)
+        req = Request({"type": "http", "headers": [(b"cookie", f"{pa.COOKIE_NAME}={c}".encode())]})
+        try:
+            me_tz = await pa.get_me(token, req, tz=tz, db=s)
+        except TypeError:
+            me_tz = await pa.get_me(token, req, db=s)
+        me_plain = await pa.get_me(token, req, db=s)
+
+    def opps(body):
+        return sorted(f["opponent_name"] for d in body["dates"] for f in d["fixtures"])
+    check("matrix with tz: the 00:00 game has gone", "started" not in opps(with_tz), str(opps(with_tz)))
+    check("matrix with tz: the game that has not started stays", "later" in opps(with_tz))
+    check("matrix with tz: the in-progress game has gone", "inprog" not in opps(with_tz))
+    check("matrix with tz: the untimed game stays for its date", "untimed" in opps(with_tz))
+    check("matrix with tz: next week's game stays", "nextweek" in opps(with_tz))
+    check("control: with no tz only the status drops a game (date-only, as before)",
+          "started" in opps(without) and "inprog" not in opps(without), str(opps(without)))
+    check("a bad timezone is ignored, not an error", "started" in opps(bad_tz))
+    check("self-service page with tz: the 00:00 game has gone, the rest stay",
+          "started" not in opps(me_tz) and {"later", "untimed", "nextweek"} <= set(opps(me_tz)), str(opps(me_tz)))
+    check("self-service page without tz still lists the 00:00 game", "started" in opps(me_plain))
+    sn = with_tz.get("squad_next", {}).get(str(t3), {})
+    check("the squad's next game skips what has started (today, 23:59 or next week)",
+          sn.get("date") in (today_local.isoformat(), next_sat.isoformat()) and sn.get("fixture_id") != str(ids["started"]), str(sn))
+
+    async with Session() as s:
+        await s.execute(delete(Fixture).where(Fixture.organisation_id == org_id))
+        await s.execute(delete(TeamMember).where(TeamMember.organisation_id == org_id))
+        await s.execute(delete(Player).where(Player.organisation_id == org_id))
+        await s.execute(delete(Team).where(Team.organisation_id == org_id))
+        await s.execute(delete(Grade).where(Grade.season_id == season_id))
+        await s.execute(delete(Season).where(Season.id == season_id))
+        await s.execute(delete(Organisation).where(Organisation.id == org_id))
+        await s.commit()
+    await engine.dispose()
+
+
 def main() -> int:
     pure_checks()
+    started_pure_checks()
     player_pure_checks()
     db_url = os.environ.get("DATABASE_URL")
     if db_url:
         asyncio.run(route_checks(db_url))
         asyncio.run(public_route_checks(db_url))
+        asyncio.run(started_route_checks(db_url))
     else:
         print("matrix route: SKIPPED (no DATABASE_URL), only the pure rule was run")
     print(f"\n{PASS} passed, {FAIL} failed")

@@ -180,6 +180,17 @@ async function videoUpload(path, method, fields = {}, video = null, poster = nul
   return res.json()
 }
 
+// The viewer's IANA timezone as a query string ("?tz=Australia/Perth"). The app
+// holds no per-club timezone, and fixtures carry a local start time, so the
+// availability reads send the browser's own to know which games have started.
+// Empty when the browser will not say, which leaves the server on date only.
+function tzQuery() {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+    return tz ? `?tz=${encodeURIComponent(tz)}` : ''
+  } catch { return '' }
+}
+
 export const api = {
   // Set BetterIQ's Grade Type / Match Type filter. Lives on `api` (not just as
   // a bare export) because every caller already holds this object, and the
@@ -3215,7 +3226,7 @@ export const api = {
     }) }),
 
   // ─── BetterSelect: Availability ─────────────────────────
-  bsAvailabilityMatrix: () => request('/availability/matrix'),
+  bsAvailabilityMatrix: () => request(`/availability/matrix${tzQuery()}`),
   bsSetAvailability: (data) =>
     request('/availability', { method: 'POST', body: JSON.stringify(data) }),
   bsBulkAvailability: (items) =>
@@ -3241,7 +3252,7 @@ export const api = {
     request(`/public/availability/${token}/verify`, { method: 'POST', body: JSON.stringify({ player_id, pin }) }),
   availPublicSwitch: (token) =>
     request(`/public/availability/${token}/switch`, { method: 'POST' }),
-  availPublicMe: (token) => request(`/public/availability/${token}/me`),
+  availPublicMe: (token) => request(`/public/availability/${token}/me${tzQuery()}`),
   availPublicSet: (token, data) =>
     request(`/public/availability/${token}/me`, { method: 'POST', body: JSON.stringify(data) }),
 

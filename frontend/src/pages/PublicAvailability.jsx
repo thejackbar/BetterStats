@@ -218,6 +218,21 @@ export default function PublicAvailability() {
 
   useEffect(() => { if (step === 'pin' && pinRef.current) pinRef.current.focus() }, [step])
 
+  // A page left open in a group chat goes stale: once a game starts it is no
+  // longer offered. Re-read when the tab comes back into view, unless a save is
+  // in flight (the answer on screen is newer than the server's).
+  const savingRef = useRef(null)
+  useEffect(() => { savingRef.current = savingDate }, [savingDate])
+  useEffect(() => {
+    if (step !== 'weekend') return undefined
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible' || savingRef.current) return
+      api.availPublicMe(token).then((d) => { if (!savingRef.current) setMe(d) }).catch(() => {})
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [step, token])
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     if (!q) return players

@@ -73,6 +73,7 @@ const MATRIX = {
 }
 
 const writes = []
+const matrixUrls = []
 async function stub(page, matrix = MATRIX) {
   await page.route('**/api/**', async (route) => {
     const req = route.request()
@@ -80,7 +81,7 @@ async function stub(page, matrix = MATRIX) {
     const json = (body) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
     if (url.includes('/auth/me')) return json(ME)
     if (url.includes('/club-admin/players')) return json(PLAYERS)
-    if (url.includes('/availability/matrix')) return json(matrix)
+    if (url.includes('/availability/matrix')) { matrixUrls.push(url); return json(matrix) }
     if (/\/availability(\?|$)/.test(url) && req.method() === 'POST') {
       writes.push(JSON.parse(req.postData() || '{}'))
       return json({ status: 'ok' })
@@ -151,6 +152,8 @@ const run = async () => {
   check('4s: Cat shows no response and is not editable',
     colour(fourth?.rows['Cat, Cara']?.dot || '') === 'NO_RESPONSE' && fourth?.rows['Cat, Cara']?.editable === false,
     JSON.stringify(fourth?.rows['Cat, Cara']))
+
+  check('the matrix read carries the browser timezone', matrixUrls.some((u) => /[?&]tz=[A-Za-z_%0-9+-]+/.test(u)), matrixUrls.join(' '))
 
   // The write goes to the date of the column that was tapped, not the club's first date.
   const thirdCard = page.locator('.pb-card', { has: page.locator('.font-display', { hasText: /^3s$/ }) }).first()

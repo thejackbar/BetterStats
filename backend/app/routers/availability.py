@@ -14,6 +14,7 @@ import re
 import secrets
 import uuid
 from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -27,7 +28,7 @@ from app.models.db import (
 )
 from app.routers.auth import get_current_club, get_current_user
 from app.services.name_format import name_sort_key
-from app.services.squad_next_game import squad_next_games
+from app.services.squad_next_game import fixture_has_started, squad_next_games
 
 router = APIRouter(prefix="/availability", tags=["availability"])
 
@@ -161,8 +162,20 @@ async def _owned_player_ids(db: AsyncSession, club_id) -> set:
     return {r[0] for r in res.fetchall()}
 
 
+def local_now(tz: Optional[str]) -> Optional[datetime]:
+    """Naive local time in the viewer's IANA timezone, or None when none was
+    given or it is not one. None keeps today's behaviour (date only)."""
+    if not tz or len(tz) > 64:
+        return None
+    try:
+        return datetime.now(ZoneInfo(tz)).replace(tzinfo=None)
+    except (ZoneInfoNotFoundError, ValueError, OSError):
+        return None
+
+
 async def upcoming_fixtures_by_date(
     db: AsyncSession, club_id, with_scope: bool = False, with_detail: bool = False,
+    now_local: Optional[datetime] = None,
 ) -> dict[str, list[dict]]:
     """{date_iso: [fixture entries]} for every upcoming club fixture.
 
@@ -174,15 +187,21 @@ async def upcoming_fixtures_by_date(
     `with_scope` adds the fixture's `team_id` and `grade_id`. Only the admin
     matrix asks: the self-service page is unauthenticated and has no use for
     them. `with_detail` adds `start_time` and `venue` for the self-service page.
+
+    `now_local` (the viewer's local time, from `local_now`) drops every game that
+    has started or whose start time has passed, so availability moves on to the
+    next game. Left None, only whole past dates drop, as before.
     """
     fx_res = await db.execute(
         select(Fixture)
-        .where(Fixture.organisation_id == club_id, Fixture.played_on >= date.today())
+        .where(Fixture.organisation_id == club_id, Fixture.played_on >= (now_local.date() if now_local else date.today()))
         .order_by(Fixture.played_on.asc().nullslast(), Fixture.start_time.asc().nullslast())
     )
     fixtures = fx_res.scalars().all()
     by_date: dict[str, list[dict]] = {}
     for f in fixtures:
+        if fixture_has_started(f.status, f.played_on, f.start_time, now_local):
+            continue
         spans = []
         if f.played_on:
             spans.append((f.played_on, "day1" if f.end_on and f.end_on != f.played_on else "single"))
@@ -285,6 +304,7 @@ async def resolve_period_statuses(
 
 @router.get("/matrix")
 async def availability_matrix(
+    tz: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
 ):
@@ -298,7 +318,7 @@ async def availability_matrix(
     so the Squads board reads a squad's availability against ITS next game and
     not the club's first date. See services/squad_next_game.py.
     """
-    by_date = await upcoming_fixtures_by_date(db, club.id, with_scope=True)
+    by_date = await upcoming_fixtures_by_date(db, club.id, with_scope=True, now_local=local_now(tz))
     team_rows = (await db.execute(
         text("SELECT id, grade_id FROM teams WHERE organisation_id = :org"),
         {"org": club.id},
