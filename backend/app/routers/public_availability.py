@@ -30,18 +30,19 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from jose import JWTError, jwt
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.modules import MODULE_SELECT, org_has_module
 from app.config.settings import settings
-from app.models.db import Organisation, Player, PlayerAvailability, get_db
+from app.models.db import Grade, Organisation, Player, PlayerAvailability, get_db
 from app.routers.availability import (
     active_self_service_players,
     phone_last4,
     upcoming_fixtures_by_date,
 )
 from app.services import rate_limit
+from app.services.squad_next_game import fixtures_for_player
 
 router = APIRouter(prefix="/public/availability", tags=["public-availability"])
 
@@ -238,13 +239,44 @@ def _grouped_dates(by_date: dict[str, list[dict]]) -> list[dict]:
     return [{"date": d, "fixtures": by_date[d]} for d in sorted(by_date.keys())]
 
 
+async def _player_squads(db: AsyncSession, club: Organisation, player: Player) -> list[tuple[str, Optional[str]]]:
+    rows = (await db.execute(
+        text(
+            "SELECT t.id, t.grade_id FROM team_members tm JOIN teams t ON t.id = tm.team_id "
+            "WHERE tm.player_id = :p AND t.organisation_id = :org"
+        ),
+        {"p": player.id, "org": club.id},
+    )).fetchall()
+    return [(str(tid), str(gid) if gid else None) for tid, gid in rows]
+
+
+async def _fixtures_for_player(db: AsyncSession, club: Organisation, squads: list) -> dict[str, list[dict]]:
+    """Upcoming fixtures with time, venue, our team and which are this player's."""
+    by_date = await upcoming_fixtures_by_date(db, club.id, with_scope=True, with_detail=True)
+    team_rows = (await db.execute(
+        text("SELECT id, name FROM teams WHERE organisation_id = :org"),
+        {"org": club.id},
+    )).fetchall()
+    grade_ids = {uuid.UUID(f["grade_id"]) for fs in by_date.values() for f in fs if f.get("grade_id")}
+    grade_rows = (await db.execute(
+        select(Grade.id, Grade.name).where(Grade.id.in_(grade_ids)),
+    )).fetchall() if grade_ids else []
+    return fixtures_for_player(
+        by_date,
+        squads,
+        {str(i): n for i, n in team_rows},
+        {str(i): n for i, n in grade_rows},
+    )
+
+
 @router.get("/{token}/me")
 async def get_me(token: str, request: Request, db: AsyncSession = Depends(get_db)):
     """This verified player's upcoming fixtures (grouped by date) + their current
     answers. Date-keyed: one answer covers every fixture that day."""
     club = await _club_for_token(db, token)
     player = await _player_for_session(db, request, club)
-    by_date = await upcoming_fixtures_by_date(db, club.id)
+    squads = await _player_squads(db, club, player)
+    by_date = await _fixtures_for_player(db, club, squads)
     answers: dict[str, dict] = {}
     if by_date:
         av_res = await db.execute(
@@ -262,6 +294,8 @@ async def get_me(token: str, request: Request, db: AsyncSession = Depends(get_db
         "player": {"id": str(player.id), "display_name": player.display_name},
         "dates": _grouped_dates(by_date),
         "availability": answers,
+        # False for a player in no squad: the page then emphasises no game.
+        "has_squad": bool(squads),
     }
 
 

@@ -192,11 +192,120 @@ async def route_checks(db_url: str) -> None:
     await engine.dispose()
 
 
+def player_pure_checks() -> None:
+    print("self-service fixtures (pure)")
+    svc = load_service()
+    sat = "2026-10-17"
+    by_date = {sat: [
+        {**fx("f-3", team=None, grade="g3", opp="Willetton 3s", home_away="HOME"), "start_time": "13:00", "venue": "Home Oval"},
+        {**fx("f-1", team="t-1", grade="g1", opp="Swan Valley 1st XI", home_away="AWAY"), "start_time": "11:00", "venue": "Swan Park"},
+        {**fx("f-2", team="t-2", grade="g3", opp="Other 2s", home_away="HOME"), "start_time": "13:00", "venue": "Home Oval"},
+    ]}
+    names = {"t-3": "3rd XI", "t-1": "1st XI", "t-2": "2nd XI"}
+    out = svc.fixtures_for_player(by_date, [("t-3", "g3")], names, {"g3": "Saturday 3s", "g1": "Saturday 1s"})[sat]
+    by_id = {f["id"]: f for f in out}
+    check("grade-only fixture in my squad's grade is mine", by_id["f-3"]["mine"] is True)
+    check("...and is named by my squad, not the grade", by_id["f-3"]["team_name"] == "3rd XI", str(by_id["f-3"]["team_name"]))
+    check("another squad's game is not mine", by_id["f-1"]["mine"] is False and by_id["f-1"]["team_name"] == "1st XI")
+    check("a fixture naming another squad is not mine even in my grade", by_id["f-2"]["mine"] is False)
+    check("time, venue, home or away travel with each game",
+          by_id["f-1"]["start_time"] == "11:00" and by_id["f-1"]["venue"] == "Swan Park" and by_id["f-1"]["home_away"] == "AWAY")
+    check("no internal team_id or grade_id leaves the service",
+          all("team_id" not in f and "grade_id" not in f for f in out))
+    none = svc.fixtures_for_player(by_date, [], names, {})[sat]
+    check("a player in no squad has nothing marked mine", not any(f["mine"] for f in none))
+    check("grade name is the last resort for our side",
+          svc.fixtures_for_player({sat: [fx("x", grade="g1")]}, [], {}, {"g1": "Saturday 1s"})[sat][0]["team_name"] == "Saturday 1s")
+
+
+async def public_route_checks(db_url: str) -> None:
+    print("GET /public/availability/{token}/me (real Postgres)")
+    from jose import jwt as jose_jwt
+    from starlette.requests import Request
+    from sqlalchemy import delete, text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from app.config.settings import settings
+    from app.models.db import Base, Organisation, Player, Team, TeamMember, Grade, Season, Fixture
+    from app.routers import public_availability as pa
+    from app.services.selection_rule_ddl import SELECTION_RULE_STATEMENTS
+
+    engine = create_async_engine(db_url, echo=False)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+        for stmt in SELECTION_RULE_STATEMENTS:
+            await conn.execute(text(stmt))
+
+    org_id, season_id = uuid.uuid4(), uuid.uuid4()
+    g3, g1 = uuid.uuid4(), uuid.uuid4()
+    t3, t1 = uuid.uuid4(), uuid.uuid4()
+    p_in, p_out = uuid.uuid4(), uuid.uuid4()
+    token = "tok-" + uuid.uuid4().hex
+    sat = date.today() + timedelta(days=6)
+
+    def req_for(pid):
+        c = jose_jwt.encode({"club": str(org_id), "pid": str(pid), "typ": "avail",
+                             "exp": __import__("datetime").datetime.now(__import__("datetime").timezone.utc) + timedelta(days=1)},
+                            settings.secret_key, algorithm=settings.algorithm)
+        return Request({"type": "http", "headers": [(b"cookie", f"{pa.COOKIE_NAME}={c}".encode())]})
+
+    async with Session() as s:
+        s.add(Organisation(id=org_id, name=f"Pub {org_id.hex[:6]}", slug=f"pub-{org_id.hex[:8]}",
+                           module_overrides=["select"], availability_link_token=token,
+                           availability_self_service_enabled=True))
+        await s.flush()
+        s.add(Season(id=season_id, organisation_id=org_id, name="2026/27"))
+        await s.flush()
+        s.add(Grade(id=g3, season_id=season_id, name="Saturday 3s"))
+        s.add(Grade(id=g1, season_id=season_id, name="Saturday 1s"))
+        await s.flush()
+        s.add(Team(id=t3, organisation_id=org_id, name="3rd XI", short_name="3s", grade_id=g3))
+        s.add(Team(id=t1, organisation_id=org_id, name="1st XI", short_name="1s", grade_id=g1))
+        s.add(Player(id=p_in, organisation_id=org_id, name="Mine, Mick"))
+        s.add(Player(id=p_out, organisation_id=org_id, name="Nosquad, Nat"))
+        await s.flush()
+        s.add(TeamMember(team_id=t3, player_id=p_in, organisation_id=org_id))
+        s.add(Fixture(id=uuid.uuid4(), organisation_id=org_id, grade_id=g3, team_id=None, source="manual",
+                      played_on=sat, start_time="13:00", venue="Home Oval", home_away="HOME", opponent_name="Willetton 3s"))
+        s.add(Fixture(id=uuid.uuid4(), organisation_id=org_id, grade_id=g1, team_id=t1, source="manual",
+                      played_on=sat, start_time="11:00", venue="Swan Park", home_away="AWAY", opponent_name="Swan Valley 1st XI"))
+        await s.commit()
+        mine = await pa.get_me(token, req_for(p_in), s)
+        nosquad = await pa.get_me(token, req_for(p_out), s)
+
+    fx_in = {f["opponent_name"]: f for f in (mine["dates"][0]["fixtures"] if mine.get("dates") else [])}
+    f3, f1 = fx_in.get("Willetton 3s", {}), fx_in.get("Swan Valley 1st XI", {})
+    check("route: both games listed for the date", len(fx_in) == 2, str(list(fx_in)))
+    check("route: my game carries time, venue, home, my squad's name",
+          f3.get("start_time") == "13:00" and f3.get("venue") == "Home Oval" and f3.get("home_away") == "HOME" and f3.get("team_name") == "3rd XI", str(f3))
+    check("route: my game is marked mine", f3.get("mine") is True)
+    check("route: the 1st XI game is shown, away, not mine",
+          f1.get("mine") is False and f1.get("home_away") == "AWAY" and f1.get("team_name") == "1st XI" and f1.get("start_time") == "11:00", str(f1))
+    check("route: has_squad true for a squad player", mine.get("has_squad") is True)
+    check("route: response carries no team_id or grade_id",
+          all("team_id" not in f and "grade_id" not in f for d in mine.get("dates", []) for f in d["fixtures"]))
+    check("route: a player in no squad has has_squad false and nothing mine",
+          nosquad.get("has_squad") is False and not any(f.get("mine") for d in nosquad.get("dates", []) for f in d["fixtures"]), str(nosquad.get("has_squad")))
+
+    async with Session() as s:
+        await s.execute(delete(Fixture).where(Fixture.organisation_id == org_id))
+        await s.execute(delete(TeamMember).where(TeamMember.organisation_id == org_id))
+        await s.execute(delete(Player).where(Player.organisation_id == org_id))
+        await s.execute(delete(Team).where(Team.organisation_id == org_id))
+        await s.execute(delete(Grade).where(Grade.season_id == season_id))
+        await s.execute(delete(Season).where(Season.id == season_id))
+        await s.execute(delete(Organisation).where(Organisation.id == org_id))
+        await s.commit()
+    await engine.dispose()
+
+
 def main() -> int:
     pure_checks()
+    player_pure_checks()
     db_url = os.environ.get("DATABASE_URL")
     if db_url:
         asyncio.run(route_checks(db_url))
+        asyncio.run(public_route_checks(db_url))
     else:
         print("matrix route: SKIPPED (no DATABASE_URL), only the pure rule was run")
     print(f"\n{PASS} passed, {FAIL} failed")

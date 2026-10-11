@@ -161,7 +161,9 @@ async def _owned_player_ids(db: AsyncSession, club_id) -> set:
     return {r[0] for r in res.fetchall()}
 
 
-async def upcoming_fixtures_by_date(db: AsyncSession, club_id, with_scope: bool = False) -> dict[str, list[dict]]:
+async def upcoming_fixtures_by_date(
+    db: AsyncSession, club_id, with_scope: bool = False, with_detail: bool = False,
+) -> dict[str, list[dict]]:
     """{date_iso: [fixture entries]} for every upcoming club fixture.
 
     Dates are the union of each fixture's played_on and end_on; a two-day game
@@ -171,7 +173,7 @@ async def upcoming_fixtures_by_date(db: AsyncSession, club_id, with_scope: bool 
 
     `with_scope` adds the fixture's `team_id` and `grade_id`. Only the admin
     matrix asks: the self-service page is unauthenticated and has no use for
-    them.
+    them. `with_detail` adds `start_time` and `venue` for the self-service page.
     """
     fx_res = await db.execute(
         select(Fixture)
@@ -198,6 +200,9 @@ async def upcoming_fixtures_by_date(db: AsyncSession, club_id, with_scope: bool 
             if with_scope:
                 entry["team_id"] = str(f.team_id) if f.team_id else None
                 entry["grade_id"] = str(f.grade_id) if f.grade_id else None
+            if with_detail:
+                entry["start_time"] = f.start_time
+                entry["venue"] = f.venue
             by_date.setdefault(d.isoformat(), []).append(entry)
     return by_date
 

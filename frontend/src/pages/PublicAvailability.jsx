@@ -24,16 +24,93 @@ function fmtDay(d) {
   } catch { return d }
 }
 
-// "vs Willetton · @ Melville" — one line summarising a date's fixtures.
-function fixtureSub(dateObj) {
-  const fxs = dateObj.fixtures || []
-  if (!fxs.length) return ''
-  return fxs.map((f) => {
-    const opp = f.opponent_name || f.label || 'TBC'
-    const prefix = f.home_away === 'AWAY' ? '@ ' : f.home_away === 'BYE' ? '' : 'vs '
-    const d1d2 = f.two_day ? (f.role === 'day1' ? 'D1 ' : f.role === 'day2' ? 'D2 ' : '') : ''
-    return `${d1d2}${prefix}${opp}`
-  }).join(' · ')
+// "13:00" → "1:00pm". The time is the club's own local display string, so an
+// unexpected format is shown as it came rather than guessed at.
+function fmtTime(t) {
+  const m = /^(\d{1,2}):(\d{2})(?::\d{2})?$/.exec((t || '').trim())
+  if (!m) return (t || '').trim()
+  const h = Number(m[1])
+  if (h > 23) return t
+  return `${h % 12 === 0 ? 12 : h % 12}:${m[2]}${h >= 12 ? 'pm' : 'am'}`
+}
+
+// The player's own games first, then by start time (untimed last), then team.
+function orderFixtures(fxs) {
+  return [...fxs].sort((a, b) =>
+    (b.mine ? 1 : 0) - (a.mine ? 1 : 0)
+    || (a.start_time || '99:99').localeCompare(b.start_time || '99:99')
+    || (a.team_name || '').localeCompare(b.team_name || ''))
+}
+
+function Tag({ children, tone }) {
+  return (
+    <span className="font-mono text-[9.5px] tracking-wide2 uppercase rounded px-1.5 py-0.5 shrink-0"
+      style={tone
+        ? { background: `color-mix(in srgb, ${tone} 16%, transparent)`, color: tone }
+        : { background: 'var(--pb-surface2)', color: 'var(--pb-faint)' }}>
+      {children}
+    </span>
+  )
+}
+
+// One game: when, which of our teams, home or away, against whom, where.
+function FixtureRow({ f }) {
+  const opp = f.opponent_name || f.label || 'TBC'
+  const bye = f.home_away === 'BYE'
+  const where = f.home_away === 'AWAY' ? 'at' : 'vs'
+  const dayTag = f.two_day ? (f.role === 'day1' ? 'Day 1' : f.role === 'day2' ? 'Day 2' : null) : null
+  return (
+    <div data-fixture data-mine={f.mine ? 'yes' : 'no'}
+      className={`flex gap-3 rounded-lg px-2.5 py-2 ${f.mine ? 'border-l-[3px]' : ''}`}
+      style={f.mine
+        ? { borderColor: 'var(--pb-accent)', background: 'color-mix(in srgb, var(--pb-accent) 8%, transparent)' }
+        : undefined}>
+      <div className={`w-[58px] shrink-0 font-mono text-[12px] pt-0.5 ${f.mine ? 'text-pb-text font-bold' : 'text-pb-faint'}`}>
+        {fmtTime(f.start_time) || 'TBC'}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          {f.team_name && (
+            <span className={f.mine ? 'font-display font-bold text-[15px] text-pb-text' : 'text-[13px] font-medium text-pb-dim'}>
+              {f.team_name}
+            </span>
+          )}
+          {f.mine && <Tag tone="var(--pb-accent)">Your squad</Tag>}
+          {bye ? <Tag>Bye</Tag> : f.home_away ? <Tag>{f.home_away === 'AWAY' ? 'Away' : 'Home'}</Tag> : null}
+          {dayTag && <Tag>{dayTag}</Tag>}
+        </div>
+        {!bye && (
+          <div className={`mt-0.5 ${f.mine ? 'text-[14px] text-pb-text' : 'text-[12.5px] text-pb-faint'}`}>
+            {where} {opp}
+          </div>
+        )}
+        {f.venue && <div className="text-[11.5px] text-pb-faint mt-0.5">{f.venue}</div>}
+      </div>
+    </div>
+  )
+}
+
+// A date's games. The player's own come first and bold. When some are theirs and
+// the rest are other grades' games, the rest wait behind a tap; with none of
+// theirs (a fill-in, or a player in no squad) everything stays open.
+function FixtureList({ fixtures }) {
+  const [showAll, setShowAll] = useState(false)
+  const ordered = orderFixtures(fixtures)
+  const mine = ordered.filter((f) => f.mine)
+  const others = ordered.filter((f) => !f.mine)
+  const collapse = mine.length > 0 && others.length > 0 && !showAll
+  const shown = collapse ? mine : ordered
+  return (
+    <div className="flex flex-col gap-1 mb-3">
+      {shown.map((f, i) => <FixtureRow key={`${f.id}-${f.role}-${i}`} f={f} />)}
+      {mine.length > 0 && others.length > 0 && (
+        <button type="button" onClick={() => setShowAll((v) => !v)}
+          className="self-start px-2.5 py-1 text-[12px] text-pb-faint underline">
+          {showAll ? 'Hide other club games' : `Show ${others.length} other club game${others.length === 1 ? '' : 's'}`}
+        </button>
+      )}
+    </div>
+  )
 }
 
 function ClubHeader({ club }) {
@@ -293,16 +370,13 @@ export default function PublicAvailability() {
             <div className="flex flex-col gap-3">
               {(me.dates || []).map((d) => {
                 const cur = me.availability?.[d.date]?.status || 'NO_RESPONSE'
-                const sub = fixtureSub(d)
                 return (
                   <div key={d.date} className="rounded-xl border pb-hairline p-3.5">
-                    <div className="flex items-baseline justify-between gap-2 mb-3">
-                      <div>
-                        <div className="font-display font-bold text-[15px]">{fmtDay(d.date)}</div>
-                        {sub && <div className="text-[12px] text-pb-faint mt-0.5">{sub}</div>}
-                      </div>
+                    <div className="flex items-baseline justify-between gap-2 mb-2">
+                      <div className="font-display font-bold text-[16px]">{fmtDay(d.date)}</div>
                       {savedDate === d.date && <span className="font-mono text-[10px]" style={{ color: 'var(--pb-positive)' }}>SAVED ✓</span>}
                     </div>
+                    <FixtureList fixtures={d.fixtures || []} />
                     <div className="grid grid-cols-3 gap-2">
                       {CHOICES.map((s) => {
                         const meta = AVAILABILITY[s]

@@ -19,13 +19,19 @@ from __future__ import annotations
 from typing import Iterable, Optional
 
 
+def fixture_belongs_to_squad(f: dict, team_id: str, grade_id: Optional[str]) -> bool:
+    """A fixture is a squad's own when it names the squad, or names no squad and
+    sits in the squad's grade. One that names a different squad is that squad's,
+    even in the same grade."""
+    ft = f.get("team_id")
+    if ft:
+        return ft == team_id
+    return bool(grade_id) and f.get("grade_id") == grade_id
+
+
 def _next_entry(team_id: str, grade_id: Optional[str], fixtures: list[dict]) -> Optional[dict]:
     for f in fixtures:   # already in date order
-        ft = f.get("team_id")
-        if ft:
-            if ft == team_id:
-                return f
-        elif grade_id and f.get("grade_id") == grade_id:
+        if fixture_belongs_to_squad(f, team_id, grade_id):
             return f
     return None
 
@@ -75,4 +81,41 @@ def squad_next_games(by_date: dict[str, list[dict]], teams: Iterable[tuple[str, 
                 "date": None, "fixture_id": None, "opponent_name": None,
                 "label": None, "home_away": None, "scope": "none",
             }
+    return out
+
+
+def fixtures_for_player(
+    by_date: dict[str, list[dict]],
+    squads: Iterable[tuple[str, Optional[str]]],
+    team_names: dict[str, str],
+    grade_names: dict[str, str],
+) -> dict[str, list[dict]]:
+    """The self-service page's fixtures: what is on, where and when, and which
+    games are the player's own.
+
+    `by_date` entries are built with `with_scope=True, with_detail=True`;
+    `squads` is the verified player's (team_id, grade_id) pairs. Each entry comes
+    back without the internal `team_id` / `grade_id` (the page is unauthenticated)
+    and with `team_name` (our side) and `mine`.
+    A player in no squad gets `mine` False everywhere; the page then draws no
+    emphasis rather than guessing one.
+    """
+    squads = list(squads)
+    out: dict[str, list[dict]] = {}
+    for d, entries in by_date.items():
+        rows = []
+        for f in entries:
+            tid, gid = f.get("team_id"), f.get("grade_id")
+            row = {k: v for k, v in f.items() if k not in ("team_id", "grade_id")}
+            mine_squad = next((t for t, g in squads if fixture_belongs_to_squad(f, t, g)), None)
+            # Our side: the team the fixture names, else the player's squad it
+            # matched on (what they call it), else the grade.
+            row["team_name"] = (
+                (team_names.get(tid) if tid else None)
+                or (team_names.get(mine_squad) if mine_squad else None)
+                or (grade_names.get(gid) if gid else None)
+            )
+            row["mine"] = mine_squad is not None
+            rows.append(row)
+        out[d] = rows
     return out
