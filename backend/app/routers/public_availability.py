@@ -276,7 +276,9 @@ async def get_me(token: str, request: Request, tz: Optional[str] = None, db: Asy
     answers. Date-keyed: one answer covers every fixture that day."""
     club = await _club_for_token(db, token)
     player = await _player_for_session(db, request, club)
-    squads = await _player_squads(db, club, player)
+    # A club may not want players to know their squad: with the switch off the
+    # squads are never read, so nothing about them can reach the page.
+    squads = await _player_squads(db, club, player) if club.availability_show_squad else []
     by_date = await _fixtures_for_player(db, club, squads, tz)
     answers: dict[str, dict] = {}
     if by_date:

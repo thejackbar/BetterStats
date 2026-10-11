@@ -274,7 +274,7 @@ async def public_route_checks(db_url: str) -> None:
     async with Session() as s:
         s.add(Organisation(id=org_id, name=f"Pub {org_id.hex[:6]}", slug=f"pub-{org_id.hex[:8]}",
                            module_overrides=["select"], availability_link_token=token,
-                           availability_self_service_enabled=True))
+                           availability_self_service_enabled=True, availability_show_squad=True))
         await s.flush()
         s.add(Season(id=season_id, organisation_id=org_id, name="2026/27"))
         await s.flush()
@@ -308,6 +308,92 @@ async def public_route_checks(db_url: str) -> None:
           all("team_id" not in f and "grade_id" not in f for d in mine.get("dates", []) for f in d["fixtures"]))
     check("route: a player in no squad has has_squad false and nothing mine",
           nosquad.get("has_squad") is False and not any(f.get("mine") for d in nosquad.get("dates", []) for f in d["fixtures"]), str(nosquad.get("has_squad")))
+
+    async with Session() as s:
+        await s.execute(delete(Fixture).where(Fixture.organisation_id == org_id))
+        await s.execute(delete(TeamMember).where(TeamMember.organisation_id == org_id))
+        await s.execute(delete(Player).where(Player.organisation_id == org_id))
+        await s.execute(delete(Team).where(Team.organisation_id == org_id))
+        await s.execute(delete(Grade).where(Grade.season_id == season_id))
+        await s.execute(delete(Season).where(Season.id == season_id))
+        await s.execute(delete(Organisation).where(Organisation.id == org_id))
+        await s.commit()
+    await engine.dispose()
+
+
+async def show_squad_checks(db_url: str) -> None:
+    print("show squad switch (real Postgres)")
+    from datetime import datetime, timezone
+    from jose import jwt as jose_jwt
+    from starlette.requests import Request
+    from sqlalchemy import delete, text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from app.config.settings import settings
+    from app.models.db import Base, Organisation, Player, Team, TeamMember, Grade, Season, Fixture
+    from app.routers import availability as av
+    from app.routers import public_availability as pa
+    from app.services.selection_rule_ddl import SELECTION_RULE_STATEMENTS
+    from app.services.availability_squad_ddl import STATEMENTS as SQUAD_DDL
+
+    engine = create_async_engine(db_url, echo=False)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+        for stmt in SELECTION_RULE_STATEMENTS:
+            await conn.execute(text(stmt))
+        for stmt in SQUAD_DDL:      # the lifespan's own statements: they must re-run cleanly
+            await conn.execute(text(stmt))
+            await conn.execute(text(stmt))
+
+    org_id, season_id, g3, t3, pid = (uuid.uuid4() for _ in range(5))
+    token = "tok-" + uuid.uuid4().hex
+    sat = date.today() + timedelta(days=6)
+    async with Session() as s:
+        # No availability_show_squad given: the column default is what a club gets.
+        s.add(Organisation(id=org_id, name=f"Squad {org_id.hex[:6]}", slug=f"sq-{org_id.hex[:8]}",
+                           module_overrides=["select"], availability_link_token=token,
+                           availability_self_service_enabled=True))
+        await s.flush()
+        s.add(Season(id=season_id, organisation_id=org_id, name="2026/27")); await s.flush()
+        s.add(Grade(id=g3, season_id=season_id, name="Saturday 3s")); await s.flush()
+        s.add(Team(id=t3, organisation_id=org_id, name="3rd XI", grade_id=g3))
+        s.add(Player(id=pid, organisation_id=org_id, name="Hidden, Hal")); await s.flush()
+        s.add(TeamMember(team_id=t3, player_id=pid, organisation_id=org_id))
+        s.add(Fixture(id=uuid.uuid4(), organisation_id=org_id, grade_id=g3, team_id=None, source="manual",
+                      played_on=sat, start_time="13:00", venue="Home Oval", home_away="HOME", opponent_name="Willetton 3s"))
+        await s.commit()
+        club = await s.get(Organisation, org_id)
+        c = jose_jwt.encode({"club": str(org_id), "pid": str(pid), "typ": "avail",
+                             "exp": datetime.now(timezone.utc) + timedelta(days=1)},
+                            settings.secret_key, algorithm=settings.algorithm)
+        req = Request({"type": "http", "headers": [(b"cookie", f"{pa.COOKIE_NAME}={c}".encode())]})
+
+        async def me():
+            return await pa.get_me(token, req, db=s)
+        def flat(body):
+            return [f for d in body["dates"] for f in d["fixtures"]]
+
+        off = await me()
+        check("default is off", club.availability_show_squad is False)
+        check("off: no game is marked mine", flat(off) and not any(f.get("mine") for f in flat(off)), str(flat(off)))
+        check("off: has_squad is false", off.get("has_squad") is False)
+        check("off: the squad's name is not on the page (the grade is)",
+              all(f.get("team_name") != "3rd XI" for f in flat(off)) and flat(off)[0].get("team_name") == "Saturday 3s", str(flat(off)[0].get("team_name")))
+        check("off: the game itself (time, venue, opponent) still shows",
+              flat(off)[0].get("start_time") == "13:00" and flat(off)[0].get("opponent_name") == "Willetton 3s")
+        check("admin read says show_squad false", (await av.get_self_service(db=s, club=club, user=None)).get("show_squad") is False)
+
+        on_payload = await av.update_self_service(av.SelfServiceUpdate(show_squad=True), db=s, club=club, user=None)
+        check("admin write turns it on", on_payload.get("show_squad") is True)
+        on = await me()
+        check("on: the player's game is marked mine and named by the squad",
+              flat(on)[0].get("mine") is True and flat(on)[0].get("team_name") == "3rd XI" and on.get("has_squad") is True)
+
+        kept = await av.update_self_service(av.SelfServiceUpdate(require_pin=False), db=s, club=club, user=None)
+        check("a key that is not sent leaves show_squad alone", kept.get("show_squad") is True and kept.get("require_pin") is False)
+        off_payload = await av.update_self_service(av.SelfServiceUpdate(show_squad=False), db=s, club=club, user=None)
+        check("admin write turns it off again", off_payload.get("show_squad") is False)
+        check("off again: nothing mine", not any(f.get("mine") for f in flat(await me())))
 
     async with Session() as s:
         await s.execute(delete(Fixture).where(Fixture.organisation_id == org_id))
@@ -426,6 +512,7 @@ def main() -> int:
         asyncio.run(route_checks(db_url))
         asyncio.run(public_route_checks(db_url))
         asyncio.run(started_route_checks(db_url))
+        asyncio.run(show_squad_checks(db_url))
     else:
         print("matrix route: SKIPPED (no DATABASE_URL), only the pure rule was run")
     print(f"\n{PASS} passed, {FAIL} failed")

@@ -656,6 +656,7 @@ async def delete_period(
 class SelfServiceUpdate(BaseModel):
     enabled: Optional[bool] = None
     require_pin: Optional[bool] = None
+    show_squad: Optional[bool] = None
 
 
 async def _self_service_payload(db: AsyncSession, club: Organisation) -> dict:
@@ -664,6 +665,7 @@ async def _self_service_payload(db: AsyncSession, club: Organisation) -> dict:
     return {
         "enabled": bool(club.availability_self_service_enabled),
         "require_pin": bool(club.availability_require_pin),
+        "show_squad": bool(club.availability_show_squad),
         "token": club.availability_link_token,
         # The link is a frontend route; the admin UI prefixes its own origin.
         "path": f"/avail/{club.availability_link_token}" if club.availability_link_token else None,
@@ -688,10 +690,13 @@ async def update_self_service(
     club: Organisation = Depends(get_current_club),
     user: User = Depends(require_cap(MANAGE_SELECTIONS)),
 ):
-    """Enable/disable the link and/or flip the PIN requirement. Enabling for the
-    first time mints a token if the club doesn't have one yet."""
+    """Enable/disable the link, flip the PIN requirement and/or whether players
+    are shown their squad. A key that is not sent leaves its setting alone.
+    Enabling for the first time mints a token if the club doesn't have one yet."""
     if body.require_pin is not None:
         club.availability_require_pin = bool(body.require_pin)
+    if body.show_squad is not None:
+        club.availability_show_squad = bool(body.show_squad)
     if body.enabled is not None:
         club.availability_self_service_enabled = bool(body.enabled)
         if body.enabled and not club.availability_link_token:

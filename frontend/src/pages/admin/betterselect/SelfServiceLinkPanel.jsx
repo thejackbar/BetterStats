@@ -115,7 +115,21 @@ export default function SelfServiceLinkPanel() {
                   options={[{ value: 'pin', label: 'Last-4 PIN' }, { value: 'nopin', label: 'No PIN' }]} />
               </div>
             )}
+            {enabled && (
+              <div className="flex items-center gap-2.5" data-show-squad-setting>
+                <span className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint">Show squad</span>
+                <Segmented sm value={cfg.show_squad ? 'on' : 'off'} onChange={(v) => update({ show_squad: v === 'on' })}
+                  options={[{ value: 'on', label: 'On' }, { value: 'off', label: 'Off' }]} />
+              </div>
+            )}
           </div>
+          {enabled && (
+            <p className="text-[11.5px] text-pb-faintest -mt-2">
+              {cfg.show_squad
+                ? 'Players see their own squad’s games first, in bold, tagged “Your squad”.'
+                : 'Players are not told which squad they are in. They see every game, in time order.'}
+            </p>
+          )}
 
           {!enabled ? (
             <p className="text-sm text-pb-faint">

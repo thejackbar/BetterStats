@@ -4437,6 +4437,12 @@ async def lifespan(app: FastAPI):
         for _stmt in _HONOUR_LAYOUT_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 325: the club switch that shows players their squad on the
+        # self-service availability page. Same one-copy rule as 324 above.
+        from app.services.availability_squad_ddl import STATEMENTS as _AVAIL_SQUAD_DDL
+        for _stmt in _AVAIL_SQUAD_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 312: super-admin messages on the club admin dashboard.
         # Same one-copy rule: this and alembic's 312 both run
         # services/admin_broadcast_ddl.STATEMENTS.
