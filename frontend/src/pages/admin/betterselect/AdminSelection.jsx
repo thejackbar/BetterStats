@@ -15,6 +15,7 @@
 // semantic (green/amber/red); the club accent is reserved for chrome.
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
+import { sortByFirstName } from '../../../lib/nameFormat'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import BetterSelectLayout from '../../../components/admin/BetterSelectLayout'
 import { useAuth } from '../../../contexts/AuthContext'
@@ -257,6 +258,16 @@ export default function AdminSelection() {
   const [slotOpen, setSlotOpen] = useState(null)
   const [showSheet, setShowSheet] = useState(false)
   const [copied, setCopied] = useState(false)
+  // How the team sheet lists the XI: the saved batting order, or A to Z by first
+  // name for a team announcement. Display only: the batting order itself is not
+  // touched. A per-browser convenience, so storage may be unavailable.
+  const [sheetOrder, setSheetOrderState] = useState(() => {
+    try { return localStorage.getItem('bs_sheet_order') === 'alpha' ? 'alpha' : 'batting' } catch { return 'batting' }
+  })
+  const setSheetOrder = (v) => {
+    setSheetOrderState(v)
+    try { localStorage.setItem('bs_sheet_order', v) } catch { /* not available */ }
+  }
   const [allFixtures, setAllFixtures] = useState([])
   const [prevXI, setPrevXI] = useState(null)
   // Which fixture we've already offered the eligible-only pool for. A ref, not
@@ -794,11 +805,15 @@ export default function AdminSelection() {
   const { title, sub, kicker } = fmtHeader(fx)
   // The same verdict the board's rule strip shows, for the shareable sheet.
   const sheetRules = xiCompliance(data?.rules, poolById, filled)
+  const alpha = sheetOrder === 'alpha'
+  // Same players, listed the way the sheet is set to show them. A to Z has no
+  // batting positions, so it carries no numbers.
+  const sheetIds = alpha ? sortByFirstName(filled, (id) => poolById[id]?.display_name) : filled
   const lineupText = () => {
-    const lines = filled.map((id, i) => {
+    const lines = sheetIds.map((id, i) => {
       const p = poolById[id]
       const tags = [id === capId && '(C)', id === wkId && '(WK)'].filter(Boolean).join(' ')
-      return `${i + 1}. ${fmt(p?.display_name) || '—'}${tags ? ' ' + tags : ''}`
+      return `${alpha ? '' : `${i + 1}. `}${fmt(p?.display_name) || '—'}${tags ? ' ' + tags : ''}`
     })
     return `${title}${sub ? '\n' + sub : ''}\n\n${lines.join('\n')}`
   }
@@ -810,7 +825,7 @@ export default function AdminSelection() {
     navigate('/admin/social-post', {
       state: {
         teamSheet: {
-          players: filled.map((id) => {
+          players: sheetIds.map((id) => {
             const p = poolById[id]
             return { player_id: id, role: (p?.skill_positions?.[0]) || p?.player_role || 'BAT', is_captain: id === capId, is_wicket_keeper: id === wkId }
           }),
@@ -944,12 +959,23 @@ export default function AdminSelection() {
               </div>
               <button onClick={() => setShowSheet(false)} className="text-pb-faint hover:text-pb-text p-1"><Icon name="close" size={18} /></button>
             </div>
+            {count > 1 && (
+              <div className="px-[18px] py-2.5 border-b pb-hairline flex flex-wrap items-center gap-x-3 gap-y-1.5" data-testid="sheet-order">
+                <span className="font-mono text-[10px] uppercase tracking-wide3 text-pb-faint">Order</span>
+                <div className="inline-flex rounded-lg border border-pb-hairline2 overflow-hidden" role="group" aria-label="Team sheet order">
+                  {[['batting', 'Batting order'], ['alpha', 'A to Z by first name']].map(([key, label]) => (
+                    <button key={key} type="button" onClick={() => setSheetOrder(key)} aria-pressed={sheetOrder === key}
+                      className={`px-2.5 py-1.5 font-display text-[12px] transition-colors ${sheetOrder === key ? 'bg-pb-surface2 text-pb-accent' : 'text-pb-dim hover:text-pb-text'}`}>{label}</button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="overflow-auto flex-1 pb-scroll">
-              {filled.map((id, i) => {
+              {sheetIds.map((id, i) => {
                 const p = poolById[id]
                 return (
                   <div key={id} className="flex items-center gap-3 px-4 py-2 border-b pb-hairline">
-                    <span className="font-mono text-xs text-pb-faintest w-5 text-right">{i + 1}</span>
+                    {!alpha && <span className="font-mono text-xs text-pb-faintest w-5 text-right">{i + 1}</span>}
                     <Avatar player={p} size={26} />
                     <span className="flex-1 text-[13.5px] truncate">
                       {fmt(p?.display_name)}{id === capId && <> <Tag>C</Tag></>}{id === wkId && <> <Tag tone="amber">WK</Tag></>}

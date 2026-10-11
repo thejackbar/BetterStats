@@ -1295,3 +1295,10 @@ Timezone. The app holds no per-club timezone (the nets QR link has the same prob
 Page. `PublicAvailability.jsx` re-reads `/me` when the tab becomes visible (unless a save is in flight), so a page left open in a group chat drops started games and moves to the next week. The Squads board and Availability screen read once on load, as before.
 
 Verification: `verify_squad_next_game.py` is now 57 checks (pure `fixture_has_started` at the boundary minute, plus the shipped matrix and `/me` route bodies on real Postgres with a Perth timezone: a 00:00 game gone, a 23:59 one kept, an in-progress one gone, an untimed one kept, bad timezone ignored, the squad's next game skipping the started one). Control with the previous routers fails 5. Browser: `verify_public_availability_layout_browser.mjs` 39 checks (timezone on the request; the visibility re-read drops week one and the page moves to the next week) and `verify_squads_next_game_browser.mjs` 18 (timezone on the matrix read); control with the previous build fails the new ones and nothing else.
+
+
+## Team sheet lists A to Z by first name (v9.110.0)
+
+- The Share sheet on the selection board (`showSheet` in `AdminSelection.jsx`) has an Order switch: Batting order (default) or A to Z by first name, from `lib/nameFormat.sortByFirstName`. It is display only: the saved batting order, the draft and `fixture_lineups` are not touched, and nothing is written. A to Z drops the batting numbers on the sheet and in the copied text. The choice is a per-browser convenience (`bs_sheet_order`, read and written in try/catch).
+- `Copy lineup as text` and `Open in social post` use the same ordered list (`sheetIds`), so the post opens with the players already in that order. The board itself still shows the batting order.
+- Verified: `frontend/verification/verify_alpha_order_browser.mjs` (20 checks; control on v9.109.17 passes 8 and fails 12, the 8 being guards such as "nothing was written").

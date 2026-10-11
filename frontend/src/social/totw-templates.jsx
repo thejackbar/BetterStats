@@ -288,3 +288,8 @@ Face.displayName = 'Face'
 
 // Where this file's layouts keep the sponsor grid (see sponsorSlots.js).
 export const SPONSOR_SLOTS = { TW1: slotTW, TW2: slotTW }
+
+// The milestone layouts (milestone-templates.jsx) are built on the same frame: a
+// masthead, a body and the sponsor strip along the foot. One definition of the
+// strip and the face, so the two post types cannot drift apart.
+export { slotTW, frame as bandFrame, footer as bandFooter, Face as PlayerFace, Line as StatLine }
