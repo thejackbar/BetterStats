@@ -75,6 +75,8 @@ def build_cmd(a, face, src_target, dst):
                 "--reference-face-position", str(face["index"]),
                 "--reference-frame-number", str(a.reference_frame),
                 "--reference-face-distance", str(a.distance)]
+    for extra in a.ff:
+        cmd += extra.split()
     if a.trim_start is not None:
         cmd += ["--trim-frame-start", str(a.trim_start)]
     if a.trim_end is not None:
@@ -100,6 +102,8 @@ def main():
     ap.add_argument("--quality", type=int, default=90, help="output video quality 0-100")
     ap.add_argument("--providers", default="cpu")
     ap.add_argument("--threads", type=int, default=os.cpu_count() or 4)
+    ap.add_argument("--ff", action="append", default=[], metavar="'--flag value'",
+                    help="extra raw FaceFusion flag(s), repeatable, e.g. --ff '--face-detector-score 0.25'")
     ap.add_argument("--keep-work", action="store_true")
     a = ap.parse_args()
 

@@ -73,8 +73,19 @@ Send the result with `SendUserFile`. Mention the mapping, the duration processed
 | `--distance 0.3` | How strictly a face must match the reference identity to be swapped. Raise a little if a person's face is skipped when they turn; lower if the wrong person gets swapped. |
 | `--trim-start/--trim-end` | Frame range, for previews. |
 | `--quality 90` | Output video quality. Each extra person adds one re-encode, so keep it high. |
+| `--ff '--flag value'` | Pass any extra FaceFusion flag straight through (repeatable). Loosening detection (`--face-detector-score 0.2`) did not help on a tiny GIF and made it worse, so preview before trusting it. |
 
 An image target works the same way (`-o out.png`).
+
+**GIFs and small clips.** FaceFusion wants a video, not a GIF, and cannot find faces smaller than about 40 px. For a GIF, upscale to an mp4 first, swap, then convert back:
+
+```bash
+ffmpeg -y -i in.gif -vf "scale=iw*4:ih*4:flags=lanczos,format=yuv420p" -r 10 -c:v libx264 -crf 14 up.mp4
+python3 -I .claude/skills/face-swap/scripts/face_swap.py up.mp4 -o swapped.mp4 --face large=photo.jpg --reference-frame 10
+ffmpeg -y -i swapped.mp4 -vf "fps=10,scale=440:-1:flags=lanczos,split[a][b];[a]palettegen[p];[b][p]paletteuse" -loop 0 out.gif
+```
+
+Frames where the head is thrown back or the face is tiny may stay unswapped. To see which frames changed, compare against the input with `ffmpeg -i orig.mp4 -i swapped.mp4 -filter_complex "[0][1]psnr=stats_file=psnr.log" -f null -`: unswapped frames sit a little higher than the rest.
 
 ## Known limits
 
