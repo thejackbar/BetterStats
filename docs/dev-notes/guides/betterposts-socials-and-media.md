@@ -183,3 +183,4 @@
 **Milestones post (v9.110.0)**
 54. Milestone posts read `GET /club-admin/milestones` (`achieved`) through `social/milestoneItems.js`; never a second milestone definition. A tick is a key (player, type, value, grade) held in `msPicks`, in post order; the window and search only narrow the picker. The layouts are given prepared items (`milestones`, `milestoneMeta`) and take their frame from `totw-templates.jsx` (`bandFrame`, `bandFooter`, `slotTW`). Check: `verify_milestones_browser.mjs`.
 55. A to Z by first name is `lib/nameFormat.sortByFirstName`, used by the BetterSelect team sheet (display only) and the lineup Players list (in place, with a way back). Check: `verify_alpha_order_browser.mjs`.
+56. A post type with a choice to make gets it on the phone quick-post through `MobileQuickPost`'s `extra` step, reusing the full editor's component (milestones: `MilestonePicker`), never a second copy of the state. Phone targets are 44px or more.

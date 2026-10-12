@@ -953,3 +953,9 @@ Seven requests from one club meeting, built together.
 - Feedback: team announcements could only follow batting order, or be dragged into place by hand. Two places now sort A to Z by first name: the BetterSelect team sheet (display only, see the BetterSelect archive) and the BetterSocials lineup Players list (`A TO Z BY FIRST NAME`, `data-testid="order-alpha"`). The post list sorts in place and remembers the previous order as ids (`alphaFrom`), so `BATTING ORDER` puts it back; anyone added or removed in between is handled (the restore orders whoever is listed by the saved order, new players last).
 - `lib/nameFormat.sortByFirstName(items, nameOf)` is the one comparison: it reads the stored name through `canonicalPlayerName` and `splitDisplayName`, so "Last, First" and a free-text "First Last" both sort on the given name, surname breaks a tie, equal names keep their order.
 - Verified: `frontend/verification/verify_alpha_order_browser.mjs` (20 checks; names chosen so a surname sort gives a different order).
+
+## Milestones on the phone quick-post (v9.110.1)
+
+- The phone quick-post (`MobileQuickPost`) had no way to choose milestones, so the post only ever used the default ticks. `MobileQuickPost` takes a new optional `extra {label, node}` step, drawn after the details; for the Milestones tab `AdminSocialPost` passes the layout switch, the show-dates box and the SAME `MilestonePicker` the full editor uses (so the ticks are one state, `msPicks`). Heading is the third detail field. Step numbers follow what is shown.
+- `MilestonePicker` rows, tick boxes, window buttons and search are 44px or more below `md` (`max-md:` classes); the list is capped at 55vh on a phone.
+- Verified: `verify_milestones_browser.mjs` section 5 at 390px (55 checks in all): picker present, report asked once, preview holds the ticked six, rows 44px or more, unticking takes that player off the preview, layout switch, heading, window, no horizontal overflow. Screenshot read.

@@ -3474,7 +3474,12 @@ export default function AdminSocialPost() {
       { label: 'Headline', value: announcement.headline, onChange: (v) => setAnnouncement((a) => ({ ...a, headline: v })) },
       { label: 'Subheadline', value: announcement.subheadline, onChange: (v) => setAnnouncement((a) => ({ ...a, subheadline: v })) },
     ]
-    else if (activeTab === 'fixtures' || activeTab === 'results' || activeTab === 'totw' || activeTab === 'milestones') mFields = [
+    else if (activeTab === 'milestones') mFields = [
+      { label: 'Heading (optional)', value: msOpts.title, onChange: (v) => setMsOpts((o) => ({ ...o, title: v })), placeholder: 'MILESTONES' },
+      { label: 'Round', value: match.round, onChange: (v) => patchMatch({ round: v }), placeholder: 'ROUND 7' },
+      { label: 'Date', value: match.date, onChange: (v) => patchMatch({ date: v }), placeholder: 'SAT 30 MAY' },
+    ]
+    else if (activeTab === 'fixtures' || activeTab === 'results' || activeTab === 'totw') mFields = [
       { label: 'Round', value: match.round, onChange: (v) => patchMatch({ round: v }), placeholder: 'ROUND 7' },
       { label: 'Date', value: match.date, onChange: (v) => patchMatch({ date: v }), placeholder: 'SAT 30 MAY' },
     ]
@@ -3484,6 +3489,29 @@ export default function AdminSocialPost() {
       { label: 'Opponent', value: opponent.name, onChange: (v) => patchOpp({ name: v }), placeholder: 'Opponent CC' },
       { label: 'Date', value: match.date, onChange: (v) => patchMatch({ date: v }), placeholder: 'SAT 30 MAY' },
     ]
+    // Milestones: which ones to feature, and the layout. The picker is the same one
+    // the full editor uses, so a tick made on a phone is the same tick.
+    const mExtra = activeTab === 'milestones' ? {
+      label: 'Which milestones',
+      node: (
+        <div className="flex flex-col gap-3">
+          <div className="flex gap-2" role="group" aria-label="Milestone layout">
+            {TEMPLATES.filter((t) => t.kind === 'milestones').map((t) => (
+              <button key={t.id} type="button" onClick={() => selectTemplate(t.id)} aria-pressed={templateId === t.id}
+                className={`flex-1 min-h-11 px-3 rounded-lg border font-mono text-[10px] tracking-wide2 uppercase ${templateId === t.id ? 'text-pb-accent' : 'border-pb-hairline2 text-pb-faint'}`}
+                style={templateId === t.id ? { borderColor: 'var(--pb-accent)', background: 'color-mix(in srgb, var(--pb-accent) 12%, transparent)' } : undefined}>{t.name}</button>
+            ))}
+          </div>
+          <label className="flex items-center gap-2 min-h-11 text-[13px] text-pb-text cursor-pointer">
+            <input type="checkbox" className="w-5 h-5" checked={msOpts.showDates} onChange={(e) => setMsOpts((o) => ({ ...o, showDates: e.target.checked }))} />
+            Show the date each was reached
+          </label>
+          <MilestonePicker status={msImport.status} rows={msRows} picks={msPicks} windowKey={msWindow} search={msSearch}
+            onWindow={setMsWindow} onSearch={setMsSearch} onToggle={toggleMilestone} onTickShown={tickShownMilestones}
+            onClear={() => setMsPicks([])} onLoad={loadMilestones} />
+        </div>
+      ),
+    } : null
     const mPalettes = [
       { key: 'club', label: 'Club', color: orgAccent(settings) },
       ...Object.entries(PALETTES).map(([key, pal]) => ({ key, label: pal.name, color: pal.accent })),
@@ -3495,7 +3523,7 @@ export default function AdminSocialPost() {
           moduleLogo={moduleBrand('socials').logo} clubName={settings?.name}
           W={W} H={H} content={previewContent} fontStyle={fontStyle} fill={canvasFill}
           types={TABS.map((t) => ({ key: t.key, label: t.label }))} activeType={activeTab} onPickType={switchTab}
-          fields={mFields} palettes={mPalettes} paletteKey={paletteKey} onPickPalette={setPaletteKey}
+          fields={mFields} extra={mExtra} palettes={mPalettes} paletteKey={paletteKey} onPickPalette={setPaletteKey}
           onExport={handleExport} exporting={exporting} onSaveDraft={saveCurrentTemplate}
           onFullEditor={() => setForceFullEditor(true)}
         />

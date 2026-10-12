@@ -272,7 +272,44 @@ const tickExactly = async (page, n) => {
   await ctx.close()
 }
 
-// ── 5. Mobile: nothing pushes the page sideways at 390px ───────────────────
+// ── 5. The phone quick-post: pick, untick, choose the layout ──────────────
+{
+  const { ctx, page, errors, reportCalls } = await openEditor('?type=milestones', { width: 390, height: 800 }, true)
+  await page.getByTestId('milestone-picker').first().waitFor({ timeout: 8000 }).catch(() => {})
+  ck('the phone quick-post offers the milestone picker', await seen(page.getByTestId('quick-extra')) && await seen(page.getByTestId('milestone-picker')))
+  ck('it asks the club report once', reportCalls.length === 1, String(reportCalls.length))
+  // The preview is drawn in the page: read the layer that holds the cards.
+  const cards = () => page.evaluate(() => {
+    const box = document.querySelector('[data-layer="Milestones"]')
+    return box ? [...box.children].map((c) => c.innerText) : null
+  })
+  ck('the preview holds the six ticked to begin with', (await cards())?.length === 6, String((await cards())?.length))
+  ck('the count says six', (await tickedCount(page)) === 6, String(await tickedCount(page)))
+  const heights = await rows(page).evaluateAll((els) => els.map((e) => e.getBoundingClientRect().height))
+  ck('every row is a finger-sized target (44px or more)', heights.length > 0 && heights.every((h) => h >= 44), JSON.stringify(heights))
+  const boxes = await rows(page).locator('input').evaluateAll((els) => els.map((e) => e.getBoundingClientRect().width))
+  ck('the tick box is big enough to hit', boxes.length > 0 && boxes.every((w) => w >= 20), JSON.stringify(boxes))
+  await rows(page).nth(1).locator('input').uncheck().catch(() => {})
+  await page.waitForTimeout(200)
+  ck('unticking on the phone takes that player off the preview', (await cards())?.length === 5 && !/TON/i.test((await cards() || []).join(' ')), JSON.stringify(await cards()))
+  await press(page.getByRole('button', { name: 'Milestone Board', exact: true }))
+  await page.waitForTimeout(200)
+  ck('the layout can be switched on the phone', await page.getByRole('button', { name: 'Milestone Board', exact: true }).first().getAttribute('aria-pressed').catch(() => null) === 'true' && (await cards())?.length === 5)
+  ck('the board is the layout showing', await page.evaluate(() => !!document.querySelector('[data-layer="Milestones"]') && getComputedStyle(document.querySelector('[data-layer="Milestones"]')).flexDirection === 'column'))
+  await fillIn(page.getByPlaceholder('MILESTONES'), 'Big night')
+  await page.waitForTimeout(200)
+  ck('a heading typed on the phone reaches the preview', await page.evaluate(() => /BIG NIGHT/i.test(document.querySelector('[data-layer="Masthead"]')?.innerText || '')))
+  await press(page.getByRole('button', { name: 'All time', exact: true }))
+  await page.waitForTimeout(150)
+  ck('the window works on the phone', (await rows(page).count()) === 13, String(await rows(page).count()))
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+  ck('no horizontal overflow at 390px with the picker open', overflow <= 1, String(overflow))
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/phone-milestones.png`, fullPage: false }).catch(() => {})
+  ck('no page errors on the phone', errors.length === 0, errors.join(' | '))
+  await ctx.close()
+}
+
+// ── 6. Mobile: nothing pushes the page sideways at 390px ───────────────────
 {
   const { ctx, page } = await openEditor('?type=milestones', { width: 390, height: 800 }, true)
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
