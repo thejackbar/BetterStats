@@ -265,6 +265,27 @@ GRADE_NAMES = {18: "A grade", 19: "B grade", 20: "C grade", 21: "D grade",
 # confidently wrong rather than merely silent.
 LEGACY_GRADE_NAMES = {1: "A grade"}
 
+# A CLUB'S OWN TEAM LIST, from `--team-names`. It wins over both maps above,
+# which are Shoalwater Bay's and mean nothing at another club. Payneham's teams
+# are "1st XI" to "5th XI" (picked from CSFW's Team box on each match), so
+# without this a Payneham file would be filed under Shoalwater's "A grade".
+TEAM_NAME_OVERRIDES: dict = {}
+
+
+def parse_team_names(spec: str) -> dict:
+    """`1=1st XI,2=2nd XI` into {1: "1st XI", 2: "2nd XI"}.
+
+    Refuses a malformed pair rather than skipping it: a dropped pair would file
+    that team's matches under an "(unmapped)" grade with no hint why.
+    """
+    out = {}
+    for part in spec.split(","):
+        key, sep, name = part.partition("=")
+        if not sep or not key.strip().isdigit() or not name.strip():
+            raise ValueError(f"bad team name {part!r}: write it as 1=1st XI")
+        out[int(key)] = name.strip()
+    return out
+
 # ── match type (match record byte 8) ─────────────────────────────────────────
 #
 # Found by diffing the club's pre- and post-rename exports: the ONLY byte that
@@ -570,6 +591,8 @@ def grade_label(team: int) -> str:
     """
     if not team or team < 0:
         return "Grade (unknown)"
+    if team in TEAM_NAME_OVERRIDES:
+        return TEAM_NAME_OVERRIDES[team]
     if team in GRADE_NAMES:
         return GRADE_NAMES[team]
     if team in LEGACY_GRADE_NAMES:
@@ -1566,8 +1589,18 @@ def main() -> None:
     ap.add_argument("--absent", choices=("out", "did-not-bat"), default="out",
                     help="how this club's competition scores a code 29 absence "
                          "(default: out, as Shoalwater Bay confirmed)")
+    ap.add_argument("--team-names", metavar="N=NAME,...",
+                    help="the club's own names for its team numbers, e.g. "
+                         "'1=1st XI,2=2nd XI,3=3rd XI'. Overrides the built-in "
+                         "Shoalwater Bay grade map; read them off the club's "
+                         "CSFW Team list, since the names are not in the files")
     args = ap.parse_args()
     absent_is_out = args.absent == "out"
+    if args.team_names:
+        try:
+            TEAM_NAME_OVERRIDES.update(parse_team_names(args.team_names))
+        except ValueError as e:
+            raise SystemExit(str(e))
 
     files = sorted(p for p in args.source.iterdir() if p.suffix.lower() == ".av")
     if not files:

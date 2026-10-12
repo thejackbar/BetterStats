@@ -39,9 +39,39 @@ work in v9.66.0, which is about a live PlayHQ feed and has nothing to do with
 CSFW).
 
 So either Payneham's files have not been supplied yet, or a different club was
-meant. When they arrive, run the checklist in section 10: nothing in the
-converter is specific to Shoalwater Bay beyond the club name it reads out of
-the file header.
+meant. When they arrive, run the checklist in section 10. The club name comes
+out of the file header, and the team names are the club's own, passed with
+`--team-names` (see below).
+
+**Payneham's feedback on the first CSV (Oct 2026): the team is missing.** Their
+senior men's file for last season holds 75 matches across 1st to 5th XI, and in
+CSFW every match carries a **Team** (picked in the Team box on Match Details,
+from the list under User Preferences > User-Defined Types > Teams). The CSV we
+sent had the club name ("Payneham") in its "Team as stored" column on all 75
+rows, so every game looked like one team and nothing could be filed by grade.
+That CSV did not come from `convert_shoalwater_av.py` (it has "Match key" and
+"File" columns that script does not write) and the script that made it is not in
+this repository, so the cause is unconfirmed. Three things to settle with the
+real files before regenerating:
+
+  * **Where the team lives.** In the `.AV` layout it is the fixture's team
+    number (section 4, offset 18). Check Payneham's files are the 549,871-byte
+    layout at all, then read that number per match, not the club name.
+  * **The names are not in the files** (section 6). Take them from the club's
+    CSFW Team list: pass `--team-names "1=1st XI,2=2nd XI,3=3rd XI,4=4th XI,5=5th XI"`.
+    Without it the converter would use Shoalwater's A/B/C/D map, which is wrong
+    here. A number nobody mapped still reads `Grade #N (unmapped)`.
+  * **Match type is a second missing column.** CSFW's list shows "Adelaide Turf"
+    for 1st to 3rd XI and "Limited Over" for 4th and 5th, so it also decides the
+    match format. See "Match type is byte 8" in section 6.
+
+**Rows that disagree with CSFW's list, to check after regenerating.** CSFW shows
+25-Oct 4th XI v Marion and 5th XI v Golden Grove as Abandoned; the CSV has both
+as completed wins with full scores. It shows 25-Oct 1st XI v Goodwood as Won;
+the CSV has it lost by 40 (96 v 136). That pattern matches the fixture-slot trap
+in section 4, where a scorecard is paired with another match's fixture.
+Reconcile every date and opponent against the 75-line list before trusting any
+other column.
 
 ---
 
