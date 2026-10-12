@@ -1328,3 +1328,13 @@ UI. `AdminSelection.jsx` reads `draft.seeded_from` into `draftInfo.carried` and 
 Existing data is not back-filled: a next round shows the draft after its previous round is next confirmed.
 
 Verification: `backend/verification/verify_selection_next_round_draft.py` (32 checks on real Postgres through the shipped `set_selection`, `get_draft`, `save_draft`, `discard_draft`; control on the previous `selection.py` fails 8, all on the carry itself). `verify_selection_draft.py` still passes unchanged (55).
+
+## Carried-over drafts leave out unavailable players (v9.110.5)
+
+Requested: the draft carried into the next round should also drop anyone who had said unavailable.
+
+`selection_seed.unavailable_ids` uses the pool's rule for the NEXT fixture's `played_on`: an explicit `player_availability` row wins, a covering `player_availability_periods` row speaks only where there is none, and only `UNAVAILABLE` counts (MAYBE and no answer stay). Read with `= ANY(CAST(:ids AS uuid[]))`. It runs twice: at seed time (the seeded payload carries `left_out`, and a seed with nobody left removes or skips the draft), and in `GET /selection/{id}/draft` through `without_unavailable`, for a draft still tagged `seeded_from` only, so a player who says no after the draft was made drops out too. The read-time view is not written back: the stored row and its version are unchanged, and a player who later says yes returns on the next read. A selector's own (untagged) draft is never filtered. Removed players close up the batting order; a removed captain or keeper is cleared.
+
+UI. `AdminSelection.jsx` keeps `leftOut` on `draftInfo` and the Draft strip lists those names.
+
+Verification: `verify_selection_next_round_draft.py` is now 47 checks (seed time, period vs explicit answer, MAYBE, another date, a later no, stored row unchanged, selector's own draft, everyone said no). Control on the v9.110.4 code fails 7, all on the unavailable behaviour; `verify_selection_draft.py` still 55.

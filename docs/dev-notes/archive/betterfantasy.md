@@ -94,7 +94,7 @@ New players could register but not save a squad once the season was `active` (fi
 
 Rules kept: the round lock still applies (`_assert_unlocked`), so nobody joins during a locked round with that round's scores already known; a completed season takes no new teams; `registration_open` still decides whether the club accepts anyone. A joiner may rebuild the whole squad while their `joined_round` is still the open round and no chip or transfer has been recorded for it (`_may_rebuild`); after that it is transfers only. `/me` returns `start_points` (for a manager with no squad in a running season), and `catchup_points`, `joined_round` and `can_rebuild` on the squad; the builder and My Team read those. Nobody who was already in changes. `verify_fantasy_late_join.py` (24 checks, `--control` runs the previous `public_fantasy.py` and fails on the 409).
 
-## v9.110.5 (2026-10-12): player prices move on performances
+## v9.110.6 (2026-10-12): player prices move on performances
 
 The design (docs/betterfantasycricket.md) said prices rise and fall through the season, but nothing wrote them: `fantasy_pool_players.current_price` was set only at pool build, by an admin edit or when a player was added, `price_change` was read by the API and never written, so every arrow and the "price moves" notification were empty and the sell-on rule (buy price plus half the rise) had no rise to pay.
 

@@ -2,11 +2,9 @@ export default {
   version: 'v9.110.5',
   date: '2026-10-12',
   sortKey: '2026-10-12T18:00:00Z',
-  title: 'Fantasy prices now move with performances',
+  title: 'Carried-over drafts leave out anyone unavailable',
   items: [
-    'BetterFantasyCricket player prices rise and fall after every scored round. A player who scores well goes up and one who has a quiet round goes down, by up to $0.5 a round. A player who did not play does not move.',
-    'A green arrow up or a red arrow down, with the amount, now sits beside the price on My Team, Pick Squad, Transfers, the Players list, the player profile and the admin Player pool.',
-    'When you sell a player you get his price on the day. If he went up while you owned him, the extra goes into your bank. If he went down, you get less back.',
-    'Rounds that were scored before this update catch up overnight, so prices and arrows will be right by the next morning. A price you type in by hand on the Player pool page stays where you put it, and "set · auto" hands it back.',
+    'When the next round opens with last round\'s side as a draft, anyone who has said they are unavailable for that game is left out. The rest close up, and the draft strip names who was left out.',
+    'It checks again each time you open the draft, so a player who says no after the draft was made drops out too. Once you edit the draft it is yours and nobody is removed from it.',
   ],
 }
