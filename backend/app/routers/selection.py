@@ -28,7 +28,7 @@ from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
 from app.models.db import Fixture, FixtureLineup, Grade, Organisation, Player, Team, User, get_db
 from app.routers.auth import get_current_club
 from app.routers.availability import resolve_period_statuses
-from app.services import selection_clash
+from app.services import selection_clash, selection_seed
 from app.services.selection_pool import assemble_selection, rule_context
 
 router = APIRouter(prefix="/selection", tags=["selection"])
@@ -696,6 +696,20 @@ async def set_selection(
     await db.execute(
         text("DELETE FROM selection_drafts WHERE fixture_id = :fid"),
         {"fid": fx.id},
+    )
+    # The team's next round opens with this side as a draft. Never blocks the
+    # confirm and never touches a side somebody has already started.
+    ordered = sorted(slots, key=lambda s: (s.batting_order is None, s.batting_order or 0))
+    await selection_seed.seed_next_round_draft(
+        db,
+        org_id=club.id,
+        fixture_id=fx.id,
+        team_id=fx.team_id,
+        played_on=fx.played_on,
+        user_id=user.id,
+        player_ids=[s.player_id for s in ordered],
+        captain_id=next((s.player_id for s in ordered if s.is_captain), None),
+        wicket_keeper_id=next((s.player_id for s in ordered if s.is_wicket_keeper), None),
     )
     await db.commit()
     return {"status": "ok", "count": len(slots)}

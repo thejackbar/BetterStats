@@ -319,7 +319,7 @@ export default function AdminSelection() {
           demo = r.demo
           draftOnServer.current = true
           draftVersion.current = dr.version || 0
-          setDraftInfo({ at: dr.updated_at, by: dr.updated_by })
+          setDraftInfo({ at: dr.updated_at, by: dr.updated_by, carried: !!dd.seeded_from })
         }
         draftServerSig.current = JSON.stringify([slotsInit, cap, wk, demo])
         setData(d)
@@ -564,7 +564,7 @@ export default function AdminSelection() {
     draftServerSig.current = JSON.stringify([r.slots, r.cap, r.wk, r.demo])
     draftOnServer.current = true
     draftVersion.current = t.version || 0
-    setDraftInfo({ at: t.at, by: t.by })
+    setDraftInfo({ at: t.at, by: t.by, carried: !!t.draft?.seeded_from })
     setDraftConflict(null)
   }
 
@@ -918,10 +918,12 @@ export default function AdminSelection() {
               ? 'Your changes are not saving yet. Keep this page open until this clears.'
               : draftStatus === 'saving'
                 ? 'Saving your changes…'
-                : 'Your changes are saved as you go, so you can leave and come back.'}
+                : draftInfo?.carried
+                  ? "This is the previous round's XI, carried over. Change anyone you need to; your changes are saved as you go."
+                  : 'Your changes are saved as you go, so you can leave and come back.'}
             <span className="max-sm:hidden">
               {' '}The confirmed XI stays as it was until you press Confirm.
-              {draftInfo?.by && draftInfo.at && !saving ? ` Last saved by ${draftInfo.by}.` : ''}
+              {draftInfo?.by && draftInfo.at && !draftInfo.carried && !saving ? ` Last saved by ${draftInfo.by}.` : ''}
             </span>
           </span>
           <button type="button" onClick={discardDraft} disabled={saving}
