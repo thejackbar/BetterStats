@@ -71,8 +71,23 @@ window scores toward that round.
   sentence saying whether the draw is unpublished or the season does not exist.
   Proof: `backend/verification/verify_fantasy_rounds.py` (real Postgres, with a
   `--control` run against the previous commit).
-- A round locks at the start time of its first game. Transfers confirmed after
-  the lock apply to the next round.
+- **The lock.** One deadline for the whole round, set per round. After it, every
+  manager's XI, captain and chips are frozen until the round is scored. The time
+  is 09:00 (Melbourne time) on the round's first game day unless an admin sets it
+  (Overview > Rounds > Locks > Change); a time set by hand is kept when rounds are
+  refreshed from the draw (`fantasy_rounds.lock_manual`). The default can be moved
+  with the season rules `lock_time` ("HH:MM") and `lock_timezone` (an IANA name).
+  We hold match dates, not kick-off times, so the default is early on purpose.
+- **Transfers after the lock are queued, not refused.** They wait on the locked
+  round (`fantasy_queued_transfers`; the team is not touched, so the locked round
+  is scored with the XI that was locked) and are carried out when it is scored, at
+  the prices after that round's price movement, counting as transfers for the next
+  round (a free one if the squad has one, else the points hit). If the bank can't
+  cover the swap at those prices, or a player is gone, the transfer is cancelled
+  with a reason the manager sees (notifications and the Transfers screen). The
+  armband passes with the player: a captain or vice who is transferred out hands it
+  to the player coming in. A manager can cancel a queued transfer until it happens.
+  Unsettling a round puts its carried-out transfers back in the queue.
 - A player who turns out in more than one game in a round has those points summed
   before the best-11 selection.
 - A two-day game counts in the round where the match finishes, so a full scorecard
