@@ -10,9 +10,11 @@ are respected) and writes the fantasy spine:
   - ``settle_round``     computes per-player fantasy points for a round from the
                          scorecards, idempotently (safe to re-run after a re-sync)
 
-Squad-level scoring (best 11, captain, transfer hit) and price movement live with
-the salary-cap engine, which has the managers and squads. Pure points and role
-maths come from ``fantasy_scoring``. Full design: docs/betterfantasycricket.md.
+Squad-level scoring (best 11, captain, transfer hit) lives with the salary-cap
+engine, which has the managers and squads. Price movement after each scored round
+is ``fantasy_pricing.recompute_prices``, called from ``settle_round`` and
+``unsettle_round``. Pure points and role maths come from ``fantasy_scoring``. Full
+design: docs/betterfantasycricket.md.
 
 NOTE: not exercised in the build sandbox (no database). Verify on a deployed
 environment after migration 087.
@@ -24,12 +26,13 @@ import json
 import logging
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import Organisation
-from app.services import fantasy_squad, fantasy_draft
+from app.services import fantasy_squad, fantasy_draft, fantasy_pricing, fantasy_queue
 from app.services import grassroots_scores_client as gr
 from app.services import playhq_client
 from app.services.club_match import club_match_keys
@@ -42,11 +45,37 @@ logger = logging.getLogger(__name__)
 
 # Recent window (in seasons, inclusive of the current year) used to price form.
 PRICE_WINDOW_YEARS = 3
-# Price band the baseline maps into; tuned so a balanced 12 fits a 100 budget but
-# the premiums can't all be afforded. Heuristic — easy to retune once a club plays.
 # A match longer than this many days between first and last day is treated as bad data.
 MAX_MATCH_SPAN_DAYS = 10
-PRICE_MIN, PRICE_MAX, PRICE_FLOOR, PRICE_K = 4.0, 15.0, 4.0, 0.12
+# Price band the baseline maps into (defined with the price movement that shares it).
+PRICE_MIN, PRICE_MAX, PRICE_FLOOR, PRICE_K = (
+    fantasy_pricing.PRICE_MIN, fantasy_pricing.PRICE_MAX, fantasy_pricing.PRICE_FLOOR, fantasy_pricing.PRICE_K)
+
+# When a round locks if an admin has not set the time: this local time on the first day
+# the round has games. We hold match DATES only (no kick-off times), so the default has
+# to be early enough to beat any start; an admin sets the exact time per round. A club
+# can change the defaults with the season rules ``lock_time`` ("HH:MM") and
+# ``lock_timezone`` (an IANA name).
+DEFAULT_LOCK_TIME = "09:00"
+DEFAULT_LOCK_TZ = "Australia/Melbourne"
+
+
+def default_lock_at(first_day: date, rules: dict | None = None) -> datetime:
+    """The lock time for a round whose first game day is ``first_day``, as an aware
+    datetime. A bad rule value falls back to the default rather than failing the
+    round refresh."""
+    rules = rules or {}
+    try:
+        tz = ZoneInfo(str(rules.get("lock_timezone") or DEFAULT_LOCK_TZ))
+    except Exception:
+        tz = ZoneInfo(DEFAULT_LOCK_TZ)
+    try:
+        hh, mm = (int(x) for x in str(rules.get("lock_time") or DEFAULT_LOCK_TIME).split(":")[:2])
+        at = time(hh, mm)
+    except Exception:
+        at = time(9, 0)
+    return datetime.combine(first_day, at, tzinfo=tz)
+
 
 # A round an admin has taken back out of settlement. It reads as not scored
 # everywhere (public pages, ladders), but the automatic settlers skip it so the
@@ -310,21 +339,24 @@ async def generate_rounds(session: AsyncSession, fs, refresh: bool = False) -> d
     for n, (first, last) in enumerate(windows, start=1):
         if n in scored:
             continue  # leave settled rounds untouched
-        # games.played_at is a DATE, so the round window is date-keyed. We don't
-        # hold kick-off times, so the lock is the start of the round's first day.
+        # games.played_at is a DATE, so the round window is date-keyed. We don't hold
+        # kick-off times, so the lock is a set time on the round's first day
+        # (``default_lock_at``) unless an admin has set it (``lock_manual``).
         await session.execute(
             text("""
                 INSERT INTO fantasy_rounds
                     (fantasy_season_id, organisation_id, round_number, name, lock_at, start_date, end_date, status)
                 VALUES (CAST(:fs AS UUID), CAST(:org AS UUID), :n, :name, :lock_at, :start, :end, 'upcoming')
                 ON CONFLICT (fantasy_season_id, round_number) DO UPDATE
-                SET name = EXCLUDED.name, lock_at = EXCLUDED.lock_at,
+                SET name = EXCLUDED.name,
+                    lock_at = CASE WHEN fantasy_rounds.lock_manual THEN fantasy_rounds.lock_at
+                                   ELSE EXCLUDED.lock_at END,
                     start_date = EXCLUDED.start_date, end_date = EXCLUDED.end_date,
                     updated_at = NOW()
             """),
             {
                 "fs": str(fs.id), "org": str(fs.organisation_id), "n": n,
-                "name": f"Round {n}", "lock_at": datetime.combine(first, time()),
+                "name": f"Round {n}", "lock_at": default_lock_at(first, fs.rules),
                 "start": first, "end": last,
             },
         )
@@ -339,6 +371,7 @@ async def generate_rounds(session: AsyncSession, fs, refresh: bool = False) -> d
               AND NOT EXISTS (SELECT 1 FROM fantasy_player_round_scores x WHERE x.round_id = r.id)
               AND NOT EXISTS (SELECT 1 FROM fantasy_squad_round_scores x WHERE x.round_id = r.id)
               AND NOT EXISTS (SELECT 1 FROM fantasy_transactions x WHERE x.round_id = r.id)
+              AND NOT EXISTS (SELECT 1 FROM fantasy_queued_transfers x WHERE x.after_round_id = r.id)
               AND NOT EXISTS (SELECT 1 FROM fantasy_h2h_fixtures x WHERE x.round_id = r.id)
         """),
         {"fs": str(fs.id), "n": len(windows)},
@@ -358,11 +391,13 @@ async def build_pool(session: AsyncSession, fs, reset: bool | None = None) -> in
     current-year-only gate would leave the pool empty pre-season; seeding from
     the last couple of seasons gives the squad you'd expect, and a rebuild once
     the season is underway naturally picks up anyone new. An admin role override
-    (role_source = 'admin') is preserved on rebuild; the live ``current_price`` is
-    kept once the season is live, but reset to the new baseline while the season
-    is still in setup, so changing the pricing window updates the visible prices.
-    ``reset`` overrides that default: the admin's explicit "recalculate prices"
-    passes ``reset=True`` so a window change moves prices even mid-season.
+    (role_source = 'admin') is preserved on rebuild; once the season is live the
+    live price (``base_price`` and everything the rounds moved off it) is kept,
+    but while the season is still in setup both reset to the new baseline, so
+    changing the pricing window updates the visible prices. ``reset`` overrides
+    that default: the admin's explicit "recalculate prices" passes ``reset=True``
+    so a window change moves prices even mid-season (the rounds scored so far are
+    then replayed on the new baseline) and hands a hand-typed price back to auto.
     Returns the pool size."""
     window = max(1, int((fs.rules or {}).get("price_window_years", PRICE_WINDOW_YEARS)))
     recent_from = fs.season_year - (window - 1)
@@ -415,9 +450,12 @@ async def build_pool(session: AsyncSession, fs, reset: bool | None = None) -> in
                 VALUES (CAST(:fs AS UUID), CAST(:org AS UUID), CAST(:pid AS UUID), :role, :source,
                         :price, :price)
                 ON CONFLICT (fantasy_season_id, player_id) DO UPDATE SET
-                    base_price = EXCLUDED.base_price,
+                    base_price = CASE WHEN :reset THEN EXCLUDED.base_price
+                                ELSE fantasy_pool_players.base_price END,
                     current_price = CASE WHEN :reset THEN EXCLUDED.base_price
                                 ELSE fantasy_pool_players.current_price END,
+                    price_locked = CASE WHEN :reset THEN false
+                                ELSE fantasy_pool_players.price_locked END,
                     role = CASE WHEN fantasy_pool_players.role_source = 'admin'
                                 THEN fantasy_pool_players.role ELSE EXCLUDED.role END,
                     role_source = CASE WHEN fantasy_pool_players.role_source = 'admin'
@@ -430,6 +468,10 @@ async def build_pool(session: AsyncSession, fs, reset: bool | None = None) -> in
             },
         )
         count += 1
+    if reset_price:
+        # The rounds already scored move the new baseline the same way they moved
+        # the old one (a no-op while none are scored).
+        await fantasy_pricing.recompute_prices(session, fs)
     return count
 
 
@@ -675,6 +717,8 @@ async def settle_round(session: AsyncSession, fs, rnd, live_picks: bool = False)
     )).scalar())
     if not by_player and not has_manual and rnd.status != "scored":
         await _mark_scored(session, rnd, 0)
+        await fantasy_pricing.recompute_prices(session, fs)
+        await fantasy_queue.apply_pending(session, fs)
         return 0
     # Settling a round that is already scored (to pick up a corrected scorecard or
     # an admin edit) must not bank another free transfer; only the first does.
@@ -705,6 +749,12 @@ async def settle_round(session: AsyncSession, fs, rnd, live_picks: bool = False)
         )
         fs.status = "active"
     await _mark_scored(session, rnd, scored)
+    # Prices move once the round is scored (and are replayed, not added to, when a
+    # scored round is settled again).
+    await fantasy_pricing.recompute_prices(session, fs)
+    # Transfers managers queued while this round was locked happen now, at the prices
+    # just set. The round above was scored with the XI that was locked.
+    await fantasy_queue.apply_pending(session, fs)
     return scored
 
 
@@ -871,6 +921,9 @@ async def unsettle_round(session: AsyncSession, fs, rnd) -> int:
         {**p, "st": new_status},
     )
     rnd.status, rnd.scored_at = new_status, None
+    # Transfers carried out when this round was scored go back to waiting, so it is
+    # scored again with the XI it had (a transfer that cannot safely be put back stays).
+    await fantasy_queue.revert_applied(session, fs, rnd)
 
     # Totals follow the rows that are left. Last-round points show the latest
     # round that is still scored.
@@ -893,6 +946,8 @@ async def unsettle_round(session: AsyncSession, fs, rnd) -> int:
         """), p,
     )
     await fantasy_squad.recompute_squad_totals(session, fs)
+    # The round no longer counts, so the prices it moved are replayed without it.
+    await fantasy_pricing.recompute_prices(session, fs)
 
     # Take back the free transfer settlement banked. A squad with a wildcard or
     # free hit armed (a huge bank) is left alone.

@@ -5646,7 +5646,9 @@ class FantasyPoolPlayer(Base):
     total_points = Column(Numeric(8, 2), nullable=False, server_default="0")
     last_round_points = Column(Numeric(8, 2), nullable=False, server_default="0")
     owned_count = Column(Integer, nullable=False, server_default="0")
-    price_change = Column(Numeric(6, 1), nullable=False, server_default="0")
+    price_change = Column(Numeric(6, 1), nullable=False, server_default="0")   # the latest scored round's move
+    # A price an admin typed in by hand: the round-by-round movement leaves it alone.
+    price_locked = Column(Boolean, nullable=False, server_default="false")
     is_available = Column(Boolean, nullable=False, server_default="true")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
@@ -5673,8 +5675,39 @@ class FantasyRound(Base):
     end_date = Column(Date, nullable=True)
     status = Column(Text, nullable=False, server_default="upcoming")   # upcoming | locked | scored
     scored_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    # An admin set `lock_at` by hand: the nightly round refresh keeps it.
+    lock_manual = Column(Boolean, nullable=False, server_default="false")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class FantasyQueuedTransfer(Base):
+    """A transfer made after the round locked. It waits on `after_round_id` and is
+    carried out when that round is scored, at the prices after settlement, so the
+    locked round is scored with the XI that was locked. `status`: pending | applied |
+    cancelled (`reason` says why). The sell/buy figures and what the swap used are
+    kept so unsettling the round can put it back."""
+    __tablename__ = "fantasy_queued_transfers"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    fantasy_season_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_seasons.id", ondelete="CASCADE"), nullable=False)
+    squad_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_squads.id", ondelete="CASCADE"), nullable=False)
+    after_round_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_rounds.id", ondelete="CASCADE"), nullable=False)
+    out_player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    in_player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    status = Column(Text, nullable=False, server_default="pending")
+    reason = Column(Text, nullable=True)
+    sell_value = Column(Numeric(8, 1), nullable=True)
+    buy_price = Column(Numeric(8, 1), nullable=True)
+    hit = Column(Integer, nullable=False, server_default="0")
+    free_used = Column(Boolean, nullable=False, server_default="false")
+    out_purchase_price = Column(Numeric(8, 1), nullable=True)
+    out_added_round = Column(Integer, nullable=True)
+    out_was_captain = Column(Boolean, nullable=False, server_default="false")
+    out_was_vice = Column(Boolean, nullable=False, server_default="false")
+    applied_round_number = Column(Integer, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    applied_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
 
 class FantasyPlayerRoundScore(Base):

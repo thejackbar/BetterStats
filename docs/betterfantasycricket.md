@@ -71,8 +71,23 @@ window scores toward that round.
   sentence saying whether the draw is unpublished or the season does not exist.
   Proof: `backend/verification/verify_fantasy_rounds.py` (real Postgres, with a
   `--control` run against the previous commit).
-- A round locks at the start time of its first game. Transfers confirmed after
-  the lock apply to the next round.
+- **The lock.** One deadline for the whole round, set per round. After it, every
+  manager's XI, captain and chips are frozen until the round is scored. The time
+  is 09:00 (Melbourne time) on the round's first game day unless an admin sets it
+  (Overview > Rounds > Locks > Change); a time set by hand is kept when rounds are
+  refreshed from the draw (`fantasy_rounds.lock_manual`). The default can be moved
+  with the season rules `lock_time` ("HH:MM") and `lock_timezone` (an IANA name).
+  We hold match dates, not kick-off times, so the default is early on purpose.
+- **Transfers after the lock are queued, not refused.** They wait on the locked
+  round (`fantasy_queued_transfers`; the team is not touched, so the locked round
+  is scored with the XI that was locked) and are carried out when it is scored, at
+  the prices after that round's price movement, counting as transfers for the next
+  round (a free one if the squad has one, else the points hit). If the bank can't
+  cover the swap at those prices, or a player is gone, the transfer is cancelled
+  with a reason the manager sees (notifications and the Transfers screen). The
+  armband passes with the player: a captain or vice who is transferred out hands it
+  to the player coming in. A manager can cancel a queued transfer until it happens.
+  Unsettling a round puts its carried-out transfers back in the queue.
 - A player who turns out in more than one game in a round has those points summed
   before the best-11 selection.
 - A two-day game counts in the round where the match finishes, so a full scorecard
@@ -171,12 +186,28 @@ Each player carries a price for the season. Draft mode ignores price.
   map it onto a price band. A player with no usable history gets a role baseline.
 - **Budget.** A fixed salary cap (default 100.0 credits) sized so a balanced 12
   is affordable but a manager cannot field every premium player.
-- **Live movement.** After each scored round prices drift on a blend of form
-  (recent points vs price) and net ownership change. Movement is capped per round
-  so prices move gradually.
-- **Sell-on.** When a manager sells a player they realise the purchase price plus
-  part of any profit (FPL convention: half the rise, rounded), so the budget
-  reflects good early buys without making trading free money.
+- **Live movement.** After each scored round, every player who played has their
+  price step towards what their recent form is worth. Form is their points over
+  their last 3 played rounds, with 2 rounds at the points their starting price
+  implies mixed in so one big or small game cannot swing a price alone. The price
+  form is worth is `4.0 + form x 0.12` (the scale the baseline uses), and the price
+  moves half the gap, rounded to 0.1, **never more than $0.5 up or down in a round**
+  and never below $4.0. A player who did not play does not move. Ownership is not
+  used (there is no per-round ownership history to replay).
+  Prices are derived: `fantasy_pricing.recompute_prices` replays every scored round
+  onto each player's `base_price`, so settling a round again, unsettling it or a
+  late scorecard gives the same prices as if it had been scored once. The nightly
+  job also runs it, so a season scored before this existed catches up by itself
+  (`python -m app.scripts.fantasy_recompute_prices <org|all> [--apply]` does it
+  now, dry run by default). `price_change` is the latest scored round's move.
+- **Hand-set prices.** A price an admin types in on the Player pool page is locked
+  (`price_locked`) and never moves; "set · auto" hands it back, and "Recalculate
+  prices" (reset) clears every lock.
+- **Sale.** When a manager sells a player the bank gets the player's price that
+  day. A rise while owned adds to the bank, a fall takes from it, so squad value
+  and the bank always agree. (This replaced the FPL half-the-rise rule.)
+- **Arrows.** A green ▲ or red ▼ with the amount sits beside a price on My Team,
+  Pick Squad, Transfers, the Players list and profile, and the admin pool table.
 
 ## Salary-cap engine
 
