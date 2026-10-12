@@ -5646,7 +5646,9 @@ class FantasyPoolPlayer(Base):
     total_points = Column(Numeric(8, 2), nullable=False, server_default="0")
     last_round_points = Column(Numeric(8, 2), nullable=False, server_default="0")
     owned_count = Column(Integer, nullable=False, server_default="0")
-    price_change = Column(Numeric(6, 1), nullable=False, server_default="0")
+    price_change = Column(Numeric(6, 1), nullable=False, server_default="0")   # the latest scored round's move
+    # A price an admin typed in by hand: the round-by-round movement leaves it alone.
+    price_locked = Column(Boolean, nullable=False, server_default="false")
     is_available = Column(Boolean, nullable=False, server_default="true")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)

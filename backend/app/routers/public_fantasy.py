@@ -661,6 +661,18 @@ async def me(token: str, request: Request, db: AsyncSession = Depends(get_db)):
             .where(FantasySquadPlayer.squad_id == squad.id)
         )).all()
         payload = _squad_payload(squad, picks)
+        # Each pick's price now, last round's move and what selling him returns.
+        moves = {str(r[0]): (float(r[1]), float(r[2])) for r in (await db.execute(
+            text("""SELECT pp.player_id, pp.current_price, pp.price_change FROM fantasy_squad_players sp
+                    JOIN fantasy_pool_players pp ON pp.player_id = sp.player_id
+                       AND pp.fantasy_season_id = CAST(:fs AS UUID)
+                    WHERE sp.squad_id = CAST(:sid AS UUID)"""),
+            {"fs": str(season.id), "sid": str(squad.id)},
+        )).all()}
+        for pk in payload["players"]:
+            now, chg = moves.get(pk["player_id"], (pk["purchase_price"], 0.0))
+            pk["price"], pk["price_change"] = now, chg
+            pk["sell_value"] = _sell_value(pk["purchase_price"], now)
         payload["free_transfers"] = squad.free_transfers
         # Team value = what the squad is worth now (current prices) plus the bank.
         val = (await db.execute(
@@ -904,9 +916,10 @@ def _gen_code(n: int = 6) -> str:
 
 
 def _sell_value(purchase, current) -> float:
-    """FPL-style sell-on: realise the buy price plus half of any profit."""
-    profit = max(0.0, float(current) - float(purchase or 0))
-    return round(float(purchase or 0) + profit / 2, 1)
+    """What a manager gets back for a player: his price now. A rise since they
+    bought him banks the extra budget and a fall costs it, so team value and the
+    bank always agree. (`purchase` is kept for callers and for the price paid.)"""
+    return round(float(current if current is not None else (purchase or 0)), 1)
 
 
 async def _current_round(db: AsyncSession, season: FantasySeason) -> Optional[FantasyRound]:
@@ -989,8 +1002,9 @@ class TransferBody(BaseModel):
 @router.post("/{token}/transfer")
 async def transfer(token: str, body: TransferBody, request: Request, db: AsyncSession = Depends(get_db)):
     """Swap one player for another of the same role. The first free transfer of the
-    round is free; further transfers cost the points hit. Budget uses the sell-on
-    value of the player leaving."""
+    round is free; further transfers cost the points hit. Budget uses the current
+    price of the player leaving, so a rise while owned adds to the bank and a fall
+    takes from it."""
     club = await _club_for_token(db, token)
     mgr = await _manager_for_session(db, request, club)
     season = await _current_season(db, club)
@@ -1707,7 +1721,7 @@ async def notifications(token: str, request: Request, db: AsyncSession = Depends
         for name, chg, pid in moves:
             up = float(chg) > 0
             feed.append({
-                "id": f"price-{pid}", "tone": "green" if up else "amber",
+                "id": f"price-{pid}-{float(chg):+.1f}", "tone": "green" if up else "amber",
                 "badge": "▲" if up else "▼",
                 "title": f"{name} {'rose' if up else 'fell'} {abs(float(chg)):.1f}",
                 "body": "A player you own moved in price.",

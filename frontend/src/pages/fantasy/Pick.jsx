@@ -6,7 +6,7 @@
 import { useMemo, useState } from 'react'
 import { api } from '../../lib/api'
 import {
-  StatTile, DISP, tintBg, money, pts, Btn, Field, CapBadge,
+  StatTile, DISP, tintBg, money, pts, Btn, Field, CapBadge, PriceTag,
   ROLE_ORDER, ROLE_LABEL, GREEN,
 } from './ui'
 import { ScreenTitle, SectionLabel, PlayerRow } from './shell'
@@ -47,7 +47,7 @@ function Builder({ token, pool, rules, squad, joinPoints, onSaved, fail, nav, de
   const size = rules?.squad_size ?? 12
   const [picked, setPicked] = useState(() => {
     const init = {}
-    ;(squad?.players || []).forEach(p => { init[p.player_id] = { ...p, price: p.purchase_price } })
+    ;(squad?.players || []).forEach(p => { init[p.player_id] = { ...p, price: p.price ?? p.purchase_price } })
     return init
   })
   const [teamName, setTeamName] = useState(squad?.team_name || '')
@@ -80,7 +80,7 @@ function Builder({ token, pool, rules, squad, joinPoints, onSaved, fail, nav, de
     if (chosen.length >= size) return cur
     if (byRole(pp.role) >= (quota[pp.role] || 0)) return cur
     if (Number(pp.price) > left + 1e-6) return cur
-    next[pp.player_id] = { player_id: pp.player_id, name: pp.name, role: pp.role, price: pp.price, photo_url: pp.photo_url, is_captain: false, is_vice_captain: false }
+    next[pp.player_id] = { player_id: pp.player_id, name: pp.name, role: pp.role, price: pp.price, price_change: pp.price_change, photo_url: pp.photo_url, is_captain: false, is_vice_captain: false }
     return next
   })
   const remove = (pid) => setPicked(cur => { const next = { ...cur }; delete next[pid]; return next })
@@ -146,7 +146,7 @@ function Builder({ token, pool, rules, squad, joinPoints, onSaved, fail, nav, de
           {chosenByRole.map(p => (
             <PlayerRow
               key={p.player_id} name={p.name} photoUrl={p.photo_url}
-              sub={`${ROLE_LABEL[p.role]} · ${money(p.price)}`}
+              sub={<>{ROLE_LABEL[p.role]} · <PriceTag price={p.price} change={p.price_change} /></>}
               tone="picked"
               badge={p.is_captain ? <CapBadge /> : p.is_vice_captain ? <CapBadge vice /> : null}
               right={<SquadControls p={p} onCap={setCap} onRemove={remove} />}
@@ -199,7 +199,7 @@ function Builder({ token, pool, rules, squad, joinPoints, onSaved, fail, nav, de
         return (
           <PlayerRow
             key={pp.player_id} name={pp.name} photoUrl={pp.photo_url}
-            sub={`${ROLE_LABEL[pp.role]} · ${money(pp.price)}`}
+            sub={<>{ROLE_LABEL[pp.role]} · <PriceTag price={pp.price} change={pp.price_change} /></>}
             tone={on ? 'picked' : 'plain'}
             onClick={blocked ? undefined : () => toggle(pp)}
             right={<span style={{

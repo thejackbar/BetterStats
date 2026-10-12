@@ -5,7 +5,7 @@ import { useState, useEffect } from 'react'
 import { api } from '../../lib/api'
 import {
   Aurora, StatTile, DISP, tintBg, mix, ROLE_ORDER, ROLE_GROUP, ROLE_LABEL,
-  money, pts, Btn, CapBadge, Avatar,
+  money, pts, Btn, CapBadge, Avatar, PriceTag,
 } from './ui'
 import { PlayerRow, RowPoints, SectionLabel } from './shell'
 
@@ -209,7 +209,7 @@ export default function MyTeam({ token, manager, squad, season, round, startPoin
                 <div key={p.player_id}>
                   <PlayerRow
                     name={p.name} photoUrl={p.photo_url}
-                    sub={`${ROLE_LABEL[p.role]} · ${money(p.purchase_price)}`}
+                    sub={<>{ROLE_LABEL[p.role]} · <PriceTag price={p.price ?? p.purchase_price} change={p.price_change} /></>}
                     badge={p.is_captain ? <CapBadge /> : p.is_vice_captain ? <CapBadge vice /> : null}
                     onClick={() => onPlayer(p.player_id)}
                     right={<RowPoints value={gwPts && gwPts[p.player_id] != null ? pts(gwPts[p.player_id]) : '—'} />}
@@ -247,7 +247,7 @@ function PlayerCard({ p, gw, onClick }) {
           {p.is_captain && <CapBadge />}
           {p.is_vice_captain && <CapBadge vice />}
         </div>
-        <div style={{ font: `500 11px 'Hanken Grotesk'`, color: 'var(--faint)', marginTop: 3 }}>{ROLE_LABEL[p.role]} · {money(p.purchase_price)}</div>
+        <div style={{ font: `500 11px 'Hanken Grotesk'`, color: 'var(--faint)', marginTop: 3 }}>{ROLE_LABEL[p.role]} · <PriceTag price={p.price ?? p.purchase_price} change={p.price_change} /></div>
       </div>
       <div style={{ textAlign: 'right', flex: 'none' }}>
         <div style={{ font: `700 22px ${DISP}`, color: 'var(--text)', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>{gw != null ? pts(gw) : '—'}</div>

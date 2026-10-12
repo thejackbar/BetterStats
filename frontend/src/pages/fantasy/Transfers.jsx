@@ -3,13 +3,12 @@
 // further ones cost the points hit.
 import { useMemo, useState } from 'react'
 import { api } from '../../lib/api'
-import { StatTile, DISP, tintBg, mix, money, pts, Btn, Avatar, Field, ROLE_LABEL, ROLE_SHORT, ROLE_ORDER, GREEN, RED } from './ui'
+import { StatTile, DISP, tintBg, mix, money, pts, Btn, Avatar, Field, ROLE_LABEL, ROLE_SHORT, ROLE_ORDER, GREEN, RED, PriceTag, PriceArrow } from './ui'
 import { ScreenTitle, SectionLabel, PlayerRow } from './shell'
 
-const sellValue = (purchase, current) => {
-  const profit = Math.max(0, Number(current || 0) - Number(purchase || 0))
-  return Math.round((Number(purchase || 0) + profit / 2) * 10) / 10
-}
+// What selling a player returns: his price now. A rise since you bought him adds to
+// your bank and a fall takes from it (the server sells at the same figure).
+const sellValue = (purchase, current) => Math.round(Number(current ?? purchase ?? 0) * 10) / 10
 
 export default function Transfers({ token, squad, pool, rules, round, onChange, flash, fail, nav, desktop }) {
   const [out, setOut] = useState(null)
@@ -25,7 +24,7 @@ export default function Transfers({ token, squad, pool, rules, round, onChange, 
 
   if (!squad) return <Empty nav={nav} />
 
-  const outCurrent = out ? (poolById[out.player_id]?.price ?? out.purchase_price) : 0
+  const outCurrent = out ? (poolById[out.player_id]?.price ?? out.price ?? out.purchase_price) : 0
   const outSell = out ? sellValue(out.purchase_price, outCurrent) : 0
   const bank = Number(squad.budget_remaining || 0)
   const cost = free > 100 ? 'free' : free > 0 ? 'free' : `${hit} pts`
@@ -99,7 +98,7 @@ export default function Transfers({ token, squad, pool, rules, round, onChange, 
                       }}>
                         <Avatar name={p.name} photoUrl={p.photo_url} size={30} />
                         <span style={{ flex: 1, minWidth: 0, font: `700 12.5px 'Hanken Grotesk'`, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span>
-                        <span style={{ font: `600 11px ${DISP}`, color: 'var(--faint)' }}>{money(p.purchase_price)}</span>
+                        <span style={{ font: `600 11px ${DISP}`, color: 'var(--faint)' }} title={`Bought for ${money(p.purchase_price)}`}>{money(poolById[p.player_id]?.price ?? p.price ?? p.purchase_price)}<PriceArrow change={poolById[p.player_id]?.price_change ?? p.price_change} /></span>
                         <span style={{ font: `700 9px 'Hanken Grotesk'`, letterSpacing: '.06em', textTransform: 'uppercase', color: RED, border: `1px solid ${mix(RED, 34)}`, padding: '3px 7px', borderRadius: 6 }}>{sel ? 'Out' : 'Sell'}</span>
                       </button>
                     )
@@ -132,7 +131,7 @@ export default function Transfers({ token, squad, pool, rules, round, onChange, 
                   <div key={p.player_id} style={{ display: 'grid', gridTemplateColumns: '2fr 0.7fr 0.8fr 0.7fr 0.8fr 44px', alignItems: 'center', padding: '9px 6px', borderTop: '1px solid var(--surface2)', background: sel ? tintBg(12) : 'transparent', opacity: owned ? 0.4 : 1 }}>
                     <span style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}><Avatar name={p.name} photoUrl={p.photo_url} size={28} /><span style={{ font: `700 12.5px 'Hanken Grotesk'`, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span></span>
                     <span style={{ textAlign: 'center', font: `700 9.5px ${DISP}`, color: 'var(--dim)' }}>{ROLE_SHORT[p.role]}</span>
-                    <span style={{ textAlign: 'right', font: `600 12px ${DISP}`, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{money(p.price)}</span>
+                    <span style={{ textAlign: 'right', font: `600 12px ${DISP}`, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{money(p.price)}<PriceArrow change={p.price_change} /></span>
                     <span style={{ textAlign: 'right', font: `500 11px 'Hanken Grotesk'`, color: 'var(--faint)' }}>{p.selected_pct ?? 0}%</span>
                     <span style={{ textAlign: 'right', font: `700 13px ${DISP}`, color: 'var(--accent-strong)', fontVariantNumeric: 'tabular-nums' }}>{pts(p.total_points)}</span>
                     <span style={{ textAlign: 'right' }}>
@@ -176,7 +175,7 @@ export default function Transfers({ token, squad, pool, rules, round, onChange, 
           <SectionLabel>Your squad · tap to sell</SectionLabel>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
             {squad.players.map(p => (
-              <PlayerRow key={p.player_id} name={p.name} photoUrl={p.photo_url} sub={`${ROLE_LABEL[p.role]} · ${money(p.purchase_price)}`}
+              <PlayerRow key={p.player_id} name={p.name} photoUrl={p.photo_url} sub={<>{ROLE_LABEL[p.role]} · sells for <PriceTag price={sellValue(p.purchase_price, poolById[p.player_id]?.price ?? p.price)} change={poolById[p.player_id]?.price_change ?? p.price_change} /> · bought {money(p.purchase_price)}</>}
                 onClick={() => { setOut(p); setTin(null) }}
                 right={<span style={{ font: `700 9px 'Hanken Grotesk'`, letterSpacing: '.06em', textTransform: 'uppercase', color: RED, border: `1px solid ${mix(RED, 34)}`, padding: '3px 7px', borderRadius: 6 }}>Sell</span>} />
             ))}
@@ -193,7 +192,7 @@ export default function Transfers({ token, squad, pool, rules, round, onChange, 
               const on = tin?.player_id === p.player_id
               const over = bank + outSell - Number(p.price) < -1e-6
               return (
-                <PlayerRow key={p.player_id} name={p.name} photoUrl={p.photo_url} sub={`${ROLE_LABEL[p.role]} · ${money(p.price)}`}
+                <PlayerRow key={p.player_id} name={p.name} photoUrl={p.photo_url} sub={<>{ROLE_LABEL[p.role]} · <PriceTag price={p.price} change={p.price_change} /></>}
                   tone={on ? 'picked' : 'plain'} onClick={over ? undefined : () => setTin(p)}
                   right={<span style={{
                     width: 26, height: 26, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', font: `800 ${on ? 13 : 16}px 'Hanken Grotesk'`,
@@ -237,7 +236,7 @@ function SwapCard({ tone, label, player, placeholder }) {
           <Avatar name={player.name} photoUrl={player.photo_url} size={30} />
           <div style={{ minWidth: 0 }}>
             <div style={{ font: `700 12.5px 'Hanken Grotesk'`, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{player.name}</div>
-            <div style={{ font: `500 9.5px 'Hanken Grotesk'`, color: 'var(--faint)' }}>{ROLE_LABEL[player.role]} · {money(player.price ?? player.purchase_price)}</div>
+            <div style={{ font: `500 9.5px 'Hanken Grotesk'`, color: 'var(--faint)' }}>{ROLE_LABEL[player.role]} · <PriceTag price={player.price ?? player.purchase_price} change={player.price_change} /></div>
           </div>
         </div>
       ) : (

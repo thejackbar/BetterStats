@@ -311,7 +311,7 @@ async def settle_all_fantasy():
     """
     from datetime import date
     from app.models.db import FantasySeason, FantasyRound
-    from app.services import fantasy_engine
+    from app.services import fantasy_engine, fantasy_pricing
 
     logger.info("Starting scheduled fantasy settlement")
     async with async_session_maker() as session:
@@ -351,6 +351,12 @@ async def settle_all_fantasy():
                 late = await fantasy_engine.refresh_recent_rounds(session, fs)
                 if late:
                     logger.info(f"Fantasy: refreshed {late} recent round(s) for season {fs.id} after late scorecards")
+                # Prices are replayed from the scored rounds, so a season whose
+                # rounds were scored before price movement existed (or by a path
+                # that did not move them) catches up here.
+                moved = await fantasy_pricing.recompute_prices(session, fs)
+                if moved["changed"]:
+                    logger.info(f"Fantasy: moved {moved['changed']} price(s) for season {fs.id}")
                 await session.commit()
             except Exception as e:
                 await session.rollback()
