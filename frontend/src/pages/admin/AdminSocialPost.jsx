@@ -38,6 +38,11 @@ import { ResultGlass, GLASS_DEFAULTS, GLASS_FOCUS, GLASS_POSITIONS } from '../..
 import { RoundCover } from '../../social/round-cover-template'
 import { ResultHighlights, HIGHLIGHTS_FOCUS } from '../../social/highlights-cover-template'
 import { GiantType } from '../../social/giant-type-template'
+import { MilestoneCards, MilestoneBoard, MILESTONE_MAX } from '../../social/milestone-templates'
+import {
+  DEFAULT_MILESTONE_WINDOW, achievedMilestones, defaultPicks, milestoneUnit, milestoneValueText, formatMilestoneDate,
+} from '../../social/milestoneItems'
+import MilestonePicker from '../../components/admin/socialpost/MilestonePicker'
 import { TeamOfWeekGrid, TeamOfWeekBoard, TOTW_MIN, TOTW_MAX, TOTW_DEFAULT } from '../../social/totw-templates'
 import { exportNodeToPng } from '../../social/exportImage'
 import { SocialBackground, SocialBackgroundDefs, SOCIAL_BACKGROUNDS, GRADIENT_ANGLES, DEFAULT_COLORS as BG_DEFAULT_COLORS } from '../../social/SocialBackgrounds'
@@ -59,6 +64,7 @@ import { POST_SIZES, DEFAULT_POST_SIZE, postSizeOf, PostFrame } from '../../soci
 import { resolveClubFonts, fontWeightFor, buildFontFaceCss } from '../../lib/theme'
 import { IS_AFL } from '../../lib/sport'
 import { socialRole } from '../../lib/playerAttributes'
+import { sortByFirstName } from '../../lib/nameFormat'
 
 // Stable initial value for the (empty) Custom Edit overlay layer.
 const EMPTY_LAYER = () => []
@@ -116,6 +122,9 @@ const ALL_TEMPLATES = [
   // Team of the week — the round's best performers across every grade, 6 to 14 of them.
   { id: 'TW1', name: 'Team Sheet',     component: TeamOfWeekGrid,     desc: 'Photo cards, any team size',      maxPlayers: TOTW_MAX, kind: 'totw' },
   { id: 'TW2', name: 'Ranked Board',   component: TeamOfWeekBoard,    desc: 'One row per player, best first',  maxPlayers: TOTW_MAX, kind: 'totw' },
+  // Player milestones — the club ticks which recorded milestones to feature.
+  { id: 'MS1', name: 'Milestone Cards', component: MilestoneCards,    desc: 'Photo cards with the big number', maxPlayers: 0, kind: 'milestones' },
+  { id: 'MS2', name: 'Milestone Board', component: MilestoneBoard,    desc: 'One row per milestone',           maxPlayers: 0, kind: 'milestones' },
   { id: 'SC1', name: 'Broadcast',      component: SC1_Broadcast,      desc: 'TV-style full scorecard',         maxPlayers: 0, isScorecard: true },
   { id: 'SC2', name: 'Brutalist',      component: SC2_Brutalist,      desc: 'Bold type, heavy rules',          maxPlayers: 0, isScorecard: true },
   { id: 'SC3', name: 'Dashboard',      component: SC3_Dashboard,      desc: 'Soft cards, app-style',           maxPlayers: 0, isScorecard: true },
@@ -128,7 +137,7 @@ const ALL_TEMPLATES = [
 // The football build drops the layouts that only mean anything with cricket
 // data: the batting order, the results wrap's batting/bowling leaders, and
 // every layout of the three hidden post types (toss, scorecard, final score).
-const AFL_HIDDEN_TEMPLATES = new Set(['T4', 'T11', 'T12', 'T13', 'C5', 'RR7', 'C2', 'C4', 'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6', 'RS7', 'RS8', 'SC1', 'SC2', 'SC3', 'TW1', 'TW2'])
+const AFL_HIDDEN_TEMPLATES = new Set(['T4', 'T11', 'T12', 'T13', 'C5', 'RR7', 'C2', 'C4', 'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6', 'RS7', 'RS8', 'SC1', 'SC2', 'SC3', 'TW1', 'TW2', 'MS1', 'MS2'])
 const TEMPLATES = IS_AFL ? ALL_TEMPLATES.filter(t => !AFL_HIDDEN_TEMPLATES.has(t.id)) : ALL_TEMPLATES
 
 // The lineup templates that crop the hero photo into a fixed box, and the shape
@@ -158,6 +167,7 @@ const TAB_MAP = {
   C4: 'result', RS1: 'result', RS2: 'result', RS3: 'result', RS4: 'result', RS5: 'result', RS6: 'result', RS7: 'result', RS8: 'result',
   RR1: 'results', RR2: 'results', RR3: 'results', RR4: 'results', RR5: 'results', RR6: 'results', RR7: 'results',
   TW1: 'totw', TW2: 'totw',
+  MS1: 'milestones', MS2: 'milestones',
   SC1: 'scorecard', SC2: 'scorecard', SC3: 'scorecard',
   EV1: 'events', EV2: 'events', EV3: 'events', EV4: 'events', EV5: 'events', EV6: 'events',
   EV7: 'events', EV8: 'events', EV9: 'events', EV10: 'events', EV11: 'events',
@@ -169,7 +179,7 @@ const TAB_MAP = {
 // Final Score layouts (overs, run rates, batting and bowling columns). Every
 // other type takes football data as it is; fixtures, results, lineups and the
 // player spotlight are fed from the football backend's own /admin/social/*.
-const AFL_HIDDEN_TABS = new Set(['toss', 'scorecard', 'result', 'totw'])
+const AFL_HIDDEN_TABS = new Set(['toss', 'scorecard', 'result', 'totw', 'milestones'])
 const TABS = [
   { key: 'lineup',       label: 'Lineup' },
   { key: 'fixtures',     label: 'Fixtures' },
@@ -177,6 +187,7 @@ const TABS = [
   { key: 'results',      label: 'Results' },
   { key: 'motm',         label: IS_AFL ? 'Best on Ground' : 'Player of Match' },
   { key: 'totw',         label: 'Team of the Week' },
+  { key: 'milestones',   label: 'Milestones' },
   { key: 'announcement', label: 'Announcement' },
   { key: 'toss',         label: 'Toss' },
   { key: 'scorecard',    label: 'Scorecard' },
@@ -184,19 +195,19 @@ const TABS = [
   { key: 'blank',        label: 'Blank' },
 ].filter(t => !IS_AFL || !AFL_HIDDEN_TABS.has(t.key))
 const TAB_FIRST = {
-  lineup: LINEUP_DEFAULT, fixtures: 'FX1', announcement: 'C1', toss: 'C2', motm: 'C3', totw: 'TW1',
+  lineup: LINEUP_DEFAULT, fixtures: 'FX1', announcement: 'C1', toss: 'C2', motm: 'C3', totw: 'TW1', milestones: 'MS1',
   result: 'C4', results: 'RR1', scorecard: 'SC1', events: 'EV1', blank: 'BL1',
 }
 // Icon per post type (from the app's own kit) for the post-type bar and the
 // Start-screen cards.
 const TAB_ICON = {
   lineup: 'teams', fixtures: 'fixtures', result: 'ladders', results: 'list',
-  motm: 'player', totw: 'teams', announcement: 'share', toss: 'bolt', scorecard: 'sheet',
+  motm: 'player', totw: 'teams', milestones: 'selection', announcement: 'share', toss: 'bolt', scorecard: 'sheet',
   events: 'availability', blank: 'plus',
 }
 // Post types that pull from external data (BetterSelect / a match link / a round
 // import). These open on the "Get your data" step so the source is collected first.
-const DATA_TABS = ['lineup', 'fixtures', 'results', 'result', 'scorecard', 'motm', 'totw']
+const DATA_TABS = ['lineup', 'fixtures', 'results', 'result', 'scorecard', 'motm', 'totw', 'milestones']
 const SOURCE_HELP = {
   lineup: 'Pick a saved BetterSelect XI or a Play.Cricket published team list below to pull the players, captain, keeper and match details — or add players yourself in Content.',
   result: 'Pick a game from your Games page, or paste the match link, and we\'ll pull the scores, the top batters and bowlers for both sides, the result and the player of the match.',
@@ -204,6 +215,7 @@ const SOURCE_HELP = {
   fixtures: 'Pull this round\'s fixtures for every grade straight from the fixtures feed.',
   results: 'Pull the latest round\'s results for every grade straight from the results feed.',
   motm: 'Paste the match link and we\'ll work out the player of the match from the scorecard. You choose which of their batting, bowling and fielding stats go on the post.',
+  milestones: 'Pick the milestones your club has recorded: a 100th game, 1,000 career runs, a 50th wicket. Choose a window, then tick or untick the ones to feature. Up to 12 go on the post.',
   totw: 'Pull the latest round, or paste any match link from the round you want. Every grade\'s scorecard is scored the same way as the player of the match, and the best performers become the team. Choose 6 to 14 players.',
 }
 if (IS_AFL) {
@@ -1393,6 +1405,14 @@ export default function AdminSocialPost() {
   // exactly as they do on a lineup.
   const [totwImport, setTotwImport] = useState({ status: null, data: null, notice: null })
   const [totwOpts, setTotwOpts] = useState({ showPoints: false })
+  // Milestones: the club's recorded list, which are ticked (in post order), the
+  // window and search that narrow the picker, and what the post says about them.
+  const [msImport, setMsImport] = useState({ status: null, report: null })
+  const [msPicks, setMsPicks] = useState([])
+  const [msWindow, setMsWindow] = useState(DEFAULT_MILESTONE_WINDOW)
+  const [msSearch, setMsSearch] = useState('')
+  const [msOpts, setMsOpts] = useState({ title: '', showDates: true })
+  const msRows = useMemo(() => achievedMilestones(msImport.report), [msImport.report])
   // How far down the ranking the team has reached (a pool index). Growing the
   // team continues from here, so a player taken off by hand is not fetched
   // straight back on by the next +.
@@ -2248,6 +2268,33 @@ export default function AdminSocialPost() {
     }
   }, [applyTotw])
 
+  // The club's recorded milestones (the same report as Admin > Milestones). The
+  // first load ticks the newest in the window so a post exists straight away; a
+  // reload keeps whatever is ticked.
+  const loadMilestones = useCallback(async () => {
+    setMsImport(s => ({ ...s, status: 'loading' }))
+    try {
+      const report = await api.adminGetMilestones()
+      const rows = achievedMilestones(report)
+      setMsImport({ status: 'ok', report })
+      setMsPicks(prev => (prev.length ? prev : defaultPicks(rows, msWindow, MILESTONE_MAX)))
+    } catch (e) {
+      setMsImport(s => ({ ...s, status: e?.message || 'failed' }))
+    }
+  }, [msWindow])
+  const toggleMilestone = (key) => setMsPicks(prev => (
+    prev.includes(key) ? prev.filter(k => k !== key) : prev.length >= MILESTONE_MAX ? prev : [...prev, key]
+  ))
+  const tickShownMilestones = (shown) => setMsPicks(prev => {
+    const next = [...prev]
+    for (const r of shown) { if (next.length >= MILESTONE_MAX) break; if (!next.includes(r.key)) next.push(r.key) }
+    return next
+  })
+  // Load once, the first time the Milestones post type is opened.
+  useEffect(() => {
+    if (!IS_AFL && TAB_MAP[templateId] === 'milestones' && msImport.status === null) loadMilestones()
+  }, [templateId, msImport.status, loadMilestones])
+
   // Resize the team. Growing continues down the ranking from where the team
   // reached; shrinking drops from the bottom of the order and pulls that point
   // back up. Either way a player swapped in by hand stays, and one taken off by
@@ -2508,6 +2555,25 @@ export default function AdminSocialPost() {
       return next
     })
   }, [])
+
+  // A to Z by first name for a team announcement, with a way back. The order
+  // the lineup was in is kept (ids only) until it is restored, so the sort is
+  // never a one-way trip. Players added or removed in between are handled: the
+  // restore orders whoever is still listed by the saved order, new ones last.
+  const [alphaFrom, setAlphaFrom] = useState(null)
+  const sortPlayersAlpha = () => {
+    setAlphaFrom(selectedPlayers.map(sp => String(sp.player.id)))
+    setSelectedPlayers(sortByFirstName(selectedPlayers, sp => sp.player.display_name || sp.player.name))
+  }
+  const restorePlayerOrder = useCallback(() => {
+    setSelectedPlayers(prev => {
+      const rank = new Map((alphaFrom || []).map((id, i) => [id, i]))
+      const at = sp => (rank.has(String(sp.player.id)) ? rank.get(String(sp.player.id)) : Infinity)
+      return prev.map((sp, i) => ({ sp, i })).sort((a, b) => (at(a.sp) - at(b.sp)) || (a.i - b.i) || 0).map(x => x.sp)
+    })
+    setAlphaFrom(null)
+  }, [alphaFrom])
+  useEffect(() => { if (selectedPlayers.length === 0) setAlphaFrom(null) }, [selectedPlayers.length])
 
   const movePlayer = useCallback((idx, dir) => {
     setSelectedPlayers(prev => {
@@ -3003,6 +3069,22 @@ export default function AdminSocialPost() {
     extraProps.totw = { round: matchData.round, date: matchData.date, comp: match.competition, showPoints: totwOpts.showPoints }
     extraProps.sponsors = scorecardMatch.meta.sponsors
   }
+  if (tmpl.kind === 'milestones') {
+    const byKey = new Map(msRows.map(r => [r.key, r]))
+    const profiles = new Map(allPlayers.map(pl => [String(pl.id), pl]))
+    extraProps.milestones = msPicks.map(k => byKey.get(k)).filter(Boolean).map(r => {
+      const pl = profiles.get(String(r.player_id)) || {}
+      const tp = playerToTemplatePlayer({ id: r.player_id, display_name: r.player_name, photo_url: pl.photo_url, hero_photo_url: pl.hero_photo_url }, {}, nameFormat, swapNames)
+      return {
+        key: r.key, _id: r.player_id, first: tp.first, last: tp.last, headshot: tp.headshot,
+        value: milestoneValueText(r), unit: milestoneUnit(r),
+        dateLabel: msOpts.showDates ? formatMilestoneDate(r.achieved_at) : '',
+      }
+    })
+    // Typed as it is: no 'ROUND 1' placeholder on a post that is not about a round.
+    extraProps.milestoneMeta = { title: msOpts.title, round: match.round, date: match.date, comp: match.competition }
+    extraProps.sponsors = scorecardMatch.meta.sponsors
+  }
   if (tmpl.kind === 'singleresult') {
     const mapPerf = (arr) => (arr || []).map((p) => ({ n: p.last, l: p.line, first: p.first || '', sn: p.surname || '', o: p.overs || '' })).filter((p) => p.n || p.l)
     // POTM photo: an uploaded hero image wins, else the matched player's profile
@@ -3098,6 +3180,11 @@ export default function AdminSocialPost() {
     setTotwImport({ status: null, data: null, notice: null })
     setTotwOpts({ showPoints: false })
     totwCursor.current = -1
+    setMsImport({ status: null, report: null })
+    setMsPicks([])
+    setMsWindow(DEFAULT_MILESTONE_WINDOW)
+    setMsSearch('')
+    setMsOpts({ title: '', showDates: true })
     setFixtures(DEFAULT_FIXTURES.map((f) => ({ ...f })))
     setResults(DEFAULT_RESULTS.map((r) => ({ ...r })))
     setRoundPages({ fixtures: { count: 1, idx: 0 }, results: { count: 1, idx: 0 } })
@@ -3354,7 +3441,7 @@ export default function AdminSocialPost() {
 
   // ─── Controls ────────────────────────────────────────────────────────────────
   const showMatchInfo = !['scorecard', 'events', 'blank'].includes(activeTab)
-  const showOpponent  = !['scorecard', 'fixtures', 'results', 'totw', 'events', 'blank'].includes(activeTab)
+  const showOpponent  = !['scorecard', 'fixtures', 'results', 'totw', 'milestones', 'events', 'blank'].includes(activeTab)
   const showPlayers   = activeTab !== 'scorecard' && activeTab !== 'blank' && tmpl.maxPlayers > 0
   const showHeroImage = HERO_SLOT_TEMPLATES.includes(templateId)
   const HERO_SLOT_LAYOUT_NAMES = HERO_SLOT_TEMPLATES
@@ -3387,6 +3474,11 @@ export default function AdminSocialPost() {
       { label: 'Headline', value: announcement.headline, onChange: (v) => setAnnouncement((a) => ({ ...a, headline: v })) },
       { label: 'Subheadline', value: announcement.subheadline, onChange: (v) => setAnnouncement((a) => ({ ...a, subheadline: v })) },
     ]
+    else if (activeTab === 'milestones') mFields = [
+      { label: 'Heading (optional)', value: msOpts.title, onChange: (v) => setMsOpts((o) => ({ ...o, title: v })), placeholder: 'MILESTONES' },
+      { label: 'Round', value: match.round, onChange: (v) => patchMatch({ round: v }), placeholder: 'ROUND 7' },
+      { label: 'Date', value: match.date, onChange: (v) => patchMatch({ date: v }), placeholder: 'SAT 30 MAY' },
+    ]
     else if (activeTab === 'fixtures' || activeTab === 'results' || activeTab === 'totw') mFields = [
       { label: 'Round', value: match.round, onChange: (v) => patchMatch({ round: v }), placeholder: 'ROUND 7' },
       { label: 'Date', value: match.date, onChange: (v) => patchMatch({ date: v }), placeholder: 'SAT 30 MAY' },
@@ -3397,6 +3489,29 @@ export default function AdminSocialPost() {
       { label: 'Opponent', value: opponent.name, onChange: (v) => patchOpp({ name: v }), placeholder: 'Opponent CC' },
       { label: 'Date', value: match.date, onChange: (v) => patchMatch({ date: v }), placeholder: 'SAT 30 MAY' },
     ]
+    // Milestones: which ones to feature, and the layout. The picker is the same one
+    // the full editor uses, so a tick made on a phone is the same tick.
+    const mExtra = activeTab === 'milestones' ? {
+      label: 'Which milestones',
+      node: (
+        <div className="flex flex-col gap-3">
+          <div className="flex gap-2" role="group" aria-label="Milestone layout">
+            {TEMPLATES.filter((t) => t.kind === 'milestones').map((t) => (
+              <button key={t.id} type="button" onClick={() => selectTemplate(t.id)} aria-pressed={templateId === t.id}
+                className={`flex-1 min-h-11 px-3 rounded-lg border font-mono text-[10px] tracking-wide2 uppercase ${templateId === t.id ? 'text-pb-accent' : 'border-pb-hairline2 text-pb-faint'}`}
+                style={templateId === t.id ? { borderColor: 'var(--pb-accent)', background: 'color-mix(in srgb, var(--pb-accent) 12%, transparent)' } : undefined}>{t.name}</button>
+            ))}
+          </div>
+          <label className="flex items-center gap-2 min-h-11 text-[13px] text-pb-text cursor-pointer">
+            <input type="checkbox" className="w-5 h-5" checked={msOpts.showDates} onChange={(e) => setMsOpts((o) => ({ ...o, showDates: e.target.checked }))} />
+            Show the date each was reached
+          </label>
+          <MilestonePicker status={msImport.status} rows={msRows} picks={msPicks} windowKey={msWindow} search={msSearch}
+            onWindow={setMsWindow} onSearch={setMsSearch} onToggle={toggleMilestone} onTickShown={tickShownMilestones}
+            onClear={() => setMsPicks([])} onLoad={loadMilestones} />
+        </div>
+      ),
+    } : null
     const mPalettes = [
       { key: 'club', label: 'Club', color: orgAccent(settings) },
       ...Object.entries(PALETTES).map(([key, pal]) => ({ key, label: pal.name, color: pal.accent })),
@@ -3408,7 +3523,7 @@ export default function AdminSocialPost() {
           moduleLogo={moduleBrand('socials').logo} clubName={settings?.name}
           W={W} H={H} content={previewContent} fontStyle={fontStyle} fill={canvasFill}
           types={TABS.map((t) => ({ key: t.key, label: t.label }))} activeType={activeTab} onPickType={switchTab}
-          fields={mFields} palettes={mPalettes} paletteKey={paletteKey} onPickPalette={setPaletteKey}
+          fields={mFields} extra={mExtra} palettes={mPalettes} paletteKey={paletteKey} onPickPalette={setPaletteKey}
           onExport={handleExport} exporting={exporting} onSaveDraft={saveCurrentTemplate}
           onFullEditor={() => setForceFullEditor(true)}
         />
@@ -4067,6 +4182,14 @@ export default function AdminSocialPost() {
                   </div>
                 )}
 
+                {activeTab === 'milestones' && (
+                  <div className="pb-card p-4">
+                    <MilestonePicker status={msImport.status} rows={msRows} picks={msPicks} windowKey={msWindow} search={msSearch}
+                      onWindow={setMsWindow} onSearch={setMsSearch} onToggle={toggleMilestone} onTickShown={tickShownMilestones}
+                      onClear={() => setMsPicks([])} onLoad={loadMilestones} />
+                  </div>
+                )}
+
                 <button onClick={() => setTool(DATA_TABS.includes(activeTab) ? 'content' : 'content')}
                   className="self-start px-3.5 h-9 rounded-md font-mono text-[10px] tracking-wide2 uppercase"
                   style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>
@@ -4656,11 +4779,19 @@ export default function AdminSocialPost() {
                   <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">
                     Players <span className="ml-1 text-pb-faintest">{selectedPlayers.length}/{tmpl.maxPlayers}</span>
                   </h2>
-                  <button
-                    onClick={() => setSwapNames(s => !s)}
-                    className={`font-mono text-[9px] tracking-wide2 px-2 py-1 rounded border pb-hairline transition-colors ${swapNames ? 'text-pb-text' : 'text-pb-faint hover:text-pb-text'}`}
-                    style={swapNames ? { borderColor: 'var(--pb-accent)', color: 'var(--pb-accent)' } : {}}
-                  >↕ SWAP</button>
+                  <div className="flex items-center gap-1.5">
+                    {selectedPlayers.length > 1 && (alphaFrom
+                      ? <button onClick={restorePlayerOrder} data-testid="order-restore" title="Put the players back in the order they were in before the A to Z sort"
+                          className="font-mono text-[9px] tracking-wide2 px-2 py-1 rounded border pb-hairline transition-colors"
+                          style={{ borderColor: 'var(--pb-accent)', color: 'var(--pb-accent)' }}>↺ BATTING ORDER</button>
+                      : <button onClick={sortPlayersAlpha} data-testid="order-alpha" title="List the players A to Z by first name"
+                          className="font-mono text-[9px] tracking-wide2 px-2 py-1 rounded border pb-hairline transition-colors text-pb-faint hover:text-pb-text">A TO Z BY FIRST NAME</button>)}
+                    <button
+                      onClick={() => setSwapNames(s => !s)}
+                      className={`font-mono text-[9px] tracking-wide2 px-2 py-1 rounded border pb-hairline transition-colors ${swapNames ? 'text-pb-text' : 'text-pb-faint hover:text-pb-text'}`}
+                      style={swapNames ? { borderColor: 'var(--pb-accent)', color: 'var(--pb-accent)' } : {}}
+                    >↕ SWAP</button>
+                  </div>
                 </div>
                 {selectedPlayers.length > 0 && (
                   <div className="flex flex-col gap-1.5 mb-3">
@@ -5013,6 +5144,24 @@ export default function AdminSocialPost() {
                     </div>
                   </div>
                 )}
+              </section>
+            )}
+
+            {/* Milestones */}
+            {activeTab === 'milestones' && (
+              <section className="pb-card p-4" data-testid="milestones-section">
+                <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Milestones</h2>
+                <MilestonePicker status={msImport.status} rows={msRows} picks={msPicks} windowKey={msWindow} search={msSearch}
+                      onWindow={setMsWindow} onSearch={setMsSearch} onToggle={toggleMilestone} onTickShown={tickShownMilestones}
+                      onClear={() => setMsPicks([])} onLoad={loadMilestones} />
+                <div className="mt-4 flex flex-col gap-3">
+                  <Field label="Heading (optional)"><TextInput value={msOpts.title} onChange={v => setMsOpts(o => ({ ...o, title: v }))} placeholder="MILESTONES" /></Field>
+                  <label className="flex items-center gap-2 text-xs font-mono text-pb-text cursor-pointer">
+                    <input type="checkbox" checked={msOpts.showDates} onChange={(e) => setMsOpts(o => ({ ...o, showDates: e.target.checked }))} />
+                    Show the date each was reached
+                  </label>
+                  <p className="text-[11px] text-pb-faintest leading-relaxed">The Round and Date in Match Info print under the heading. Cards run in the order they were ticked.</p>
+                </div>
               </section>
             )}
 

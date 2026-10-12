@@ -93,6 +93,21 @@ export function nameSortKey(name) {
 }
 
 /**
+ * Order a list of players A to Z by FIRST name (surname breaks a tie), whatever
+ * shape the stored name is in. Returns a new array and keeps the incoming order
+ * between two identical names. `nameOf` reads the stored name off an item.
+ */
+export function sortByFirstName(items, nameOf = (x) => x) {
+  const key = (item) => {
+    const { first, last } = splitDisplayName(canonicalPlayerName(nameOf(item)))
+    return [first.toLowerCase(), last.toLowerCase()]
+  }
+  const keyed = items.map((item, i) => ({ item, i, k: key(item) }))
+  keyed.sort((a, b) => a.k[0].localeCompare(b.k[0]) || a.k[1].localeCompare(b.k[1]) || a.i - b.i)
+  return keyed.map((x) => x.item)
+}
+
+/**
  * Tokenized search: returns true if every word in the query appears somewhere
  * in the name (case-insensitive), regardless of order.
  * Handles searching "John Smith" against "Smith, John" by checking each token.

@@ -1296,7 +1296,7 @@ Page. `PublicAvailability.jsx` re-reads `/me` when the tab becomes visible (unle
 
 Verification: `verify_squad_next_game.py` is now 57 checks (pure `fixture_has_started` at the boundary minute, plus the shipped matrix and `/me` route bodies on real Postgres with a Perth timezone: a 00:00 game gone, a 23:59 one kept, an in-progress one gone, an untimed one kept, bad timezone ignored, the squad's next game skipping the started one). Control with the previous routers fails 5. Browser: `verify_public_availability_layout_browser.mjs` 39 checks (timezone on the request; the visibility re-read drops week one and the page moves to the next week) and `verify_squads_next_game_browser.mjs` 18 (timezone on the matrix read); control with the previous build fails the new ones and nothing else.
 
-## v9.109.18: "Show squad" switch for the self-service availability page (migration 325)
+## v9.110.2: "Show squad" switch for the self-service availability page (migration 325)
 
 Requested: some clubs do not want players to know which squad they have been assigned to, so the squad emphasis on the self-service page (v9.109.15) needs an on/off setting in BetterSelect.
 
@@ -1307,3 +1307,10 @@ Server. `public_availability.get_me` reads the player's `team_members` only when
 UI. `SelfServiceLinkPanel.jsx`: a "Show squad" On/Off switch beside Status and PIN (only while the link is enabled), with a help line that changes with it. A tap sends only `{show_squad}`.
 
 Verification: `verify_squad_next_game.py` is now 68 checks (default off; off: nothing mine, no squad name on the page, game details still shown; admin read and write; an unsent key leaves it alone; the lifespan DDL runs twice cleanly); control with the previous routers fails 8, including the reported leak (the squad's name "3rd XI" on the page with the switch off). `frontend/verification/verify_self_service_squad_toggle_browser.mjs` (11 checks, production build, API stubbed): the switch, exact request bodies, the PIN switch unchanged, no switch while the link is off, 390px; control with the previous build fails 10.
+
+
+## Team sheet lists A to Z by first name (v9.110.0)
+
+- The Share sheet on the selection board (`showSheet` in `AdminSelection.jsx`) has an Order switch: Batting order (default) or A to Z by first name, from `lib/nameFormat.sortByFirstName`. It is display only: the saved batting order, the draft and `fixture_lineups` are not touched, and nothing is written. A to Z drops the batting numbers on the sheet and in the copied text. The choice is a per-browser convenience (`bs_sheet_order`, read and written in try/catch).
+- `Copy lineup as text` and `Open in social post` use the same ordered list (`sheetIds`), so the post opens with the players already in that order. The board itself still shows the batting order.
+- Verified: `frontend/verification/verify_alpha_order_browser.mjs` (20 checks; control on v9.109.17 passes 8 and fails 12, the 8 being guards such as "nothing was written").

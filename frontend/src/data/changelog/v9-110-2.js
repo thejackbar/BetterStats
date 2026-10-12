@@ -1,7 +1,7 @@
 export default {
-  version: 'v9.109.18',
-  date: '2026-10-11',
-  sortKey: '2026-10-11T13:00:00Z',
+  version: 'v9.110.2',
+  date: '2026-10-12',
+  sortKey: '2026-10-12T10:00:00Z',
   title: 'Choose whether players see their squad when setting availability',
   items: [
     'There is a new "Show squad" switch on the self-service link panel in BetterSelect, on the Availability screen. Turn it on and players see their own squad\'s games first, in bold, with a "Your squad" tag. Turn it off and they are not told which squad they are in.',

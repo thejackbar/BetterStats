@@ -9,6 +9,8 @@
 //   fontStyle                the display-font CSS vars for the preview
 //   types [{key,label}], activeType, onPickType
 //   fields [{label,value,onChange,placeholder}]   up to 3
+//   extra {label, node}      one more step for a post type that has a choice to make
+//                             (the milestones to feature), drawn after the details
 //   palettes [{key,label,color}], paletteKey, onPickPalette
 //   onExport, exporting, onFullEditor, onSaveDraft
 import { useEffect, useRef, useState } from 'react'
@@ -27,7 +29,7 @@ function StepLabel({ n, children }) {
 export default function MobileQuickPost({
   moduleLogo, clubName, W, H, content, fontStyle, fill,
   types = [], activeType, onPickType,
-  fields = [], palettes = [], paletteKey, onPickPalette,
+  fields = [], extra = null, palettes = [], paletteKey, onPickPalette,
   onExport, exporting, onFullEditor, onSaveDraft,
 }) {
   const wrapRef = useRef(null)
@@ -93,8 +95,15 @@ export default function MobileQuickPost({
           </div>
         )}
 
+        {extra && (
+          <div data-testid="quick-extra">
+            <StepLabel n={fields.length > 0 ? 3 : 2}>{extra.label}</StepLabel>
+            {extra.node}
+          </div>
+        )}
+
         <div>
-          <StepLabel n={3}>The look</StepLabel>
+          <StepLabel n={2 + (fields.length > 0 ? 1 : 0) + (extra ? 1 : 0)}>The look</StepLabel>
           <div className="flex gap-2 flex-wrap">
             {palettes.map((p) => (
               <button key={p.key} onClick={() => onPickPalette(p.key)} title={p.label}

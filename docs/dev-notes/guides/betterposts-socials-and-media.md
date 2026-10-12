@@ -179,3 +179,8 @@
 
 **Lists on a post (v9.109.7)**
 53. A layout never drops rows it was handed. No `slice(0, n)` on players, fixtures or results: size rows from the real count (`LINEUP_MAX = 15` in `cricket-templates.jsx` is the lineup ceiling, and the registry `maxPlayers` must equal it). Sizes for eleven or fewer must stay byte-identical, so past-the-old-limit changes are conditional on the count. A layout's sponsor slot that depends on the list length gets the count through `slotOpts`.
+
+**Milestones post (v9.110.0)**
+54. Milestone posts read `GET /club-admin/milestones` (`achieved`) through `social/milestoneItems.js`; never a second milestone definition. A tick is a key (player, type, value, grade) held in `msPicks`, in post order; the window and search only narrow the picker. The layouts are given prepared items (`milestones`, `milestoneMeta`) and take their frame from `totw-templates.jsx` (`bandFrame`, `bandFooter`, `slotTW`). Check: `verify_milestones_browser.mjs`.
+55. A to Z by first name is `lib/nameFormat.sortByFirstName`, used by the BetterSelect team sheet (display only) and the lineup Players list (in place, with a way back). Check: `verify_alpha_order_browser.mjs`.
+56. A post type with a choice to make gets it on the phone quick-post through `MobileQuickPost`'s `extra` step, reusing the full editor's component (milestones: `MilestonePicker`), never a second copy of the state. Phone targets are 44px or more.
