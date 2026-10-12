@@ -381,7 +381,12 @@ async def get_draft(
     unchanged, and so only someone who can edit the XI is ever handed a
     half-built one."""
     fx = await _get_owned_fixture(db, fixture_id, club.id)
-    return await _current_draft(db, fx.id, club.id)
+    current = await _current_draft(db, fx.id, club.id)
+    if current["draft"] is not None:
+        # A carried draft (never edited) drops anyone who has since said
+        # unavailable for the date. The stored row and its version are unchanged.
+        current["draft"] = await selection_seed.without_unavailable(db, club.id, fx.played_on, current["draft"])
+    return current
 
 
 @router.put("/{fixture_id}/draft")

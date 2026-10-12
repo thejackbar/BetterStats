@@ -12,6 +12,10 @@ selections as a draft. Drives the SHIPPED route bodies (`set_selection`,
   * re-confirming round 1 refreshes a draft nobody touched, but not an edited one
   * emptying round 1 removes the untouched copy
   * a finished or past round is not seeded
+  * a player who has said UNAVAILABLE for the next round's date is left out of
+    the carried draft, at seed time and when the board reads it later; an
+    explicit answer beats a period, MAYBE and no answer stay, a selector's own
+    draft is never filtered
   * round 2's draft is judged at its own Confirm (clash with the same day)
 
 CONTROL MODE: against the commit before this change `selection_seed` does not
@@ -151,6 +155,7 @@ async def main():
     org, user_id, season = (uuid.uuid4() for _ in range(3))
     g1, g2, t1, t2 = (uuid.uuid4() for _ in range(4))
     R1, R2, R3, R2_other, R_past, R_final, R_bye = (uuid.uuid4() for _ in range(7))
+    A1, A2 = uuid.uuid4(), uuid.uuid4()
     P = [uuid.uuid4() for _ in range(6)]
     d0 = date.today() + timedelta(days=10)
 
@@ -178,6 +183,8 @@ async def main():
         fx(R_past, t1, g1, -400, rnd="old")
         fx(R_final, t1, g1, 3, status="FINAL", rnd="done")
         fx(R_bye, t1, g1, 4, status="BYE", rnd="bye")
+        fx(A1, t2, g2, 30, rnd="a1")
+        fx(A2, t2, g2, 37, rnd="a2")
         await db.commit()
 
     async def call(fn, *args, **kw):
@@ -280,6 +287,62 @@ async def main():
         seed.next_fixture_id = orig
     ids = await scalar("SELECT array_agg(player_id::text ORDER BY batting_order) FROM fixture_lineups WHERE fixture_id=:f", f=R1)
     check("and the XI was written", ids, [s[0], s[1]])
+
+    print("\n# J. Anyone who said unavailable for the next round is left out")
+    a2_date = d0 + timedelta(days=37)
+    async def avail(pid, on, status):
+        async with engine.begin() as conn:
+            await conn.execute(text(
+                "INSERT INTO player_availability (organisation_id, player_id, avail_date, status, source) "
+                "VALUES (:o, :p, :d, :s, 'admin') ON CONFLICT (player_id, avail_date) DO UPDATE SET status = :s"),
+                {"o": org, "p": pid, "d": on, "s": status})
+    async with engine.begin() as conn:
+        # P5 is away for a whole stretch that covers round A2 (a period) ...
+        await conn.execute(text(
+            "INSERT INTO player_availability_periods (organisation_id, player_id, start_date, end_date, status) "
+            "VALUES (:o, :p, :a, :b, 'UNAVAILABLE')"),
+            {"o": org, "p": P[5], "a": a2_date - timedelta(days=3), "b": a2_date + timedelta(days=3)})
+    await avail(P[1], a2_date, "UNAVAILABLE")      # P1: said no
+    await avail(P[2], a2_date, "MAYBE")            # P2: maybe, stays
+    await avail(P[4], a2_date, "AVAILABLE")        # P4: yes, stays
+    await avail(P[5], a2_date, "AVAILABLE")        # P5: the explicit yes beats the period
+    await avail(P[3], d0 + timedelta(days=36), "UNAVAILABLE")   # P3: said no, but for another date
+    check("A1 confirmed", await confirm(A1, [P[0], P[1], P[2], P[3], P[4], P[5]], cap=P[1], wk=P[2]), "ok")
+    dr = await draft_of(A2) or {}
+    check("the one who said unavailable is left out, the rest close up",
+          dr.get("slots"), [s[0], s[2], s[3], s[4], s[5]])
+    check("captain who said no is cleared; keeper who is maybe stays", (dr.get("captain_id"), dr.get("wicket_keeper_id")), (None, s[2]))
+    check("who was left out is recorded", dr.get("left_out"), [s[1]])
+    check("an explicit yes beats a period; a no for another date does not count",
+          (s[5] in dr.get("slots", []), s[3] in dr.get("slots", [])), (True, True))
+    check("still nothing in fixture_lineups", await scalar("SELECT COUNT(*) FROM fixture_lineups WHERE fixture_id=:f", f=A2), 0)
+
+    print("\n# K. A no that comes in after the draft was made")
+    await avail(P[4], a2_date, "UNAVAILABLE")
+    dr = await draft_of(A2) or {}
+    check("the board's read drops them", dr.get("slots"), [s[0], s[2], s[3], s[5]])
+    check("both are reported as left out", dr.get("left_out"), sorted([s[1], s[4]]))
+    stored = await scalar("SELECT draft->'slots' FROM selection_drafts WHERE fixture_id=:f", f=A2)
+    check("the stored draft is not rewritten", len(stored), 5)
+    r, _ = await call(get_draft, str(A2))
+    check("and its version is unchanged", r["version"], await scalar("SELECT version FROM selection_drafts WHERE fixture_id=:f", f=A2))
+    await avail(P[4], a2_date, "AVAILABLE")
+    dr = await draft_of(A2) or {}
+    check("a yes again brings them back (nothing was lost)", s[4] in dr.get("slots", []), True)
+
+    print("\n# L. A selector's own draft is never filtered")
+    r, _ = await call(get_draft, str(A2))
+    r2, err = await call(save_draft, str(A2), DraftSet(slots=[s[1], s[0]], base_version=r["version"]))
+    check("selector saves a side that includes someone unavailable", (r2 or {}).get("status", err), "ok")
+    dr = await draft_of(A2) or {}
+    check("it comes back exactly as saved", dr.get("slots"), [s[1], s[0]])
+
+    print("\n# M. Everyone said no: nothing to carry")
+    await call(discard_draft, str(A2))
+    for p in P[:3]:
+        await avail(p, a2_date, "UNAVAILABLE")
+    check("A1 re-confirmed with only people who said no", await confirm(A1, [P[0], P[1], P[2]]), "ok")
+    check("no draft is made", await draft_of(A2), None)
 
     print(f"\n{PASS} passed, {FAIL} failed")
     for f in FAILURES:
