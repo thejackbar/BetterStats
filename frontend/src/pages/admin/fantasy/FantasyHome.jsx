@@ -8,6 +8,51 @@ import { Btn } from './shared'
 // rounds. The other tools (team make-up, scoring, the pool, registered players)
 // each have their own side-menu page.
 
+// Casual date-time for a round's lock time, and an editor for it. After the lock
+// time managers' XI, captain and chips are frozen and their transfers wait for the
+// next round. A time set here is kept when the rounds are refreshed from the draw.
+const fmtLock = (iso) => new Date(iso).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })
+const toInput = (iso) => {
+  const d = new Date(iso), p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+function LockCell({ r, onChanged, flash, fail }) {
+  const [editing, setEditing] = useState(false)
+  const [val, setVal] = useState('')
+  const [busy, setBusy] = useState(false)
+  if (!r.lock_at) return <span className="text-pb-faint">–</span>
+  const save = async (iso) => {
+    setBusy(true)
+    try {
+      const res = await api.fantasySetRoundLock(r.id, iso)
+      flash(res.warning || (iso ? 'Lock time saved.' : 'Back to the default lock time.'))
+      setEditing(false); await onChanged()
+    } catch (e) { fail(e) } finally { setBusy(false) }
+  }
+  if (r.status === 'scored') return <span className="text-pb-faint whitespace-nowrap">{fmtLock(r.lock_at)}</span>
+  if (!editing) {
+    return (
+      <div className="whitespace-nowrap">
+        {fmtLock(r.lock_at)}
+        {r.lock_manual && <span className="ml-1 text-[10px] text-pb-accent">set</span>}
+        <button onClick={() => { setVal(toInput(r.lock_at)); setEditing(true) }} className="ml-2 text-xs underline text-pb-faint hover:text-pb-text">Change</button>
+      </div>
+    )
+  }
+  return (
+    <div className="space-y-1">
+      <input type="datetime-local" value={val} onChange={e => setVal(e.target.value)}
+        className="rounded border pb-hairline bg-pb-surface px-2 py-1 text-xs" />
+      <div className="flex gap-2 text-xs">
+        <button disabled={busy || !val} onClick={() => save(new Date(val).toISOString())} className="px-2 py-0.5 rounded bg-pb-accent text-white disabled:opacity-50">Save</button>
+        {r.lock_manual && <button disabled={busy} onClick={() => save(null)} className="underline text-pb-faint hover:text-pb-text">Use the default</button>}
+        <button disabled={busy} onClick={() => setEditing(false)} className="underline text-pb-faint hover:text-pb-text">Cancel</button>
+      </div>
+    </div>
+  )
+}
+
 export default function FantasyHome() {
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState(null)       // { season, link_token, counts }
@@ -155,6 +200,7 @@ export default function FantasyHome() {
                     <tr>
                       <th className="py-1.5 pr-3">Round</th>
                       <th className="py-1.5 pr-3">Window</th>
+                      <th className="py-1.5 pr-3">Locks</th>
                       <th className="py-1.5 pr-3">Status</th>
                       <th className="py-1.5 pr-3"></th>
                     </tr>
@@ -164,6 +210,9 @@ export default function FantasyHome() {
                       <tr key={r.id} className="border-t pb-hairline">
                         <td className="py-1.5 pr-3">{r.name || `Round ${r.round_number}`}</td>
                         <td className="py-1.5 pr-3 text-pb-faint">{r.start_date}{r.end_date && r.end_date !== r.start_date ? ` – ${r.end_date}` : ''}</td>
+                        <td className="py-1.5 pr-3 align-top">
+                          <LockCell r={r} onChanged={load} flash={flash} fail={fail} />
+                        </td>
                         <td className="py-1.5 pr-3">
                           <span className={r.status === 'scored' ? 'text-pb-accent' : r.status === 'unsettled' ? 'text-amber-400' : 'text-pb-faint'}>{r.status}</span>
                           {r.drift && (

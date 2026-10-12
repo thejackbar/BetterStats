@@ -1046,6 +1046,8 @@ async def list_rounds(season_id: str, club=Depends(get_current_club), db: AsyncS
                          if str(r.id) in drift else None,
                 "id": str(r.id), "round_number": r.round_number, "name": r.name,
                 "lock_at": r.lock_at.isoformat() if r.lock_at else None,
+                "lock_manual": bool(r.lock_manual),
+                "default_lock_at": fantasy_engine.default_lock_at(r.start_date, fs.rules).isoformat() if r.start_date else None,
                 "start_date": r.start_date.isoformat() if r.start_date else None,
                 "end_date": r.end_date.isoformat() if r.end_date else None,
                 "status": r.status,
@@ -1054,6 +1056,44 @@ async def list_rounds(season_id: str, club=Depends(get_current_club), db: AsyncS
             for r in rows
         ]
     }
+
+
+class RoundLock(BaseModel):
+    lock_at: str | None = None   # an ISO date-time with its offset; null hands the round back to the default
+
+
+@router.patch("/rounds/{round_id}/lock")
+async def set_round_lock(round_id: str, body: RoundLock, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
+    """Set when a round locks: after this time managers' XI, captain and chips are
+    frozen and their transfers queue for the next round. A time set here survives the
+    nightly round refresh (``lock_manual``); null goes back to the default time on the
+    round's first day. A scored round's lock is history and is not changed."""
+    rnd = await db.get(FantasyRound, round_id)
+    if rnd is None or str(rnd.organisation_id) != str(club.id):
+        raise HTTPException(status_code=404, detail="Round not found")
+    if rnd.status == "scored":
+        raise HTTPException(status_code=409, detail="This round is already scored, so its lock time can't change.")
+    fs = await _load_season(db, club, str(rnd.fantasy_season_id))
+    if "lock_at" not in body.model_fields_set:
+        raise HTTPException(status_code=400, detail="Send lock_at: a date-time, or null for the default.")
+    warning = None
+    if body.lock_at is None:
+        if rnd.start_date is None:
+            raise HTTPException(status_code=400, detail="This round has no start date to default from.")
+        rnd.lock_at, rnd.lock_manual = fantasy_engine.default_lock_at(rnd.start_date, fs.rules), False
+    else:
+        try:
+            at = datetime.fromisoformat(body.lock_at.replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="That isn't a date and time.")
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=timezone.utc)
+        rnd.lock_at, rnd.lock_manual = at, True
+        if rnd.end_date and at.date() > rnd.end_date + timedelta(days=1):
+            warning = "That is after the round's last game day, so nothing would lock before the round is played."
+    rnd.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"ok": True, "lock_at": rnd.lock_at.isoformat(), "lock_manual": bool(rnd.lock_manual), "warning": warning}
 
 
 @router.post("/rounds/{round_id}/settle")

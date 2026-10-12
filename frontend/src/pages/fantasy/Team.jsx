@@ -121,9 +121,10 @@ export default function MyTeam({ token, manager, squad, season, round, startPoin
     } catch (e) { fail(e) }
   }
 
+  const queuedN = (squad.queued_transfers || []).filter(q => q.status === 'pending').length
   const lockText = round && round.status !== 'scored'
     ? (locked
-      ? `Round ${round.number} is locked. You can change your team once it's scored.`
+      ? `Round ${round.number} is locked. Your XI and captain are frozen until it's scored. ${queuedN ? `${queuedN} transfer${queuedN === 1 ? '' : 's'} queued for the next round.` : 'Transfers you make now are queued for the next round.'}`
       : `Round ${round.number}${round.lock_at ? ` locks ${new Date(round.lock_at).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}` : ''}.`)
     : null
 

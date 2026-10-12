@@ -3,7 +3,7 @@
 // further ones cost the points hit.
 import { useMemo, useState } from 'react'
 import { api } from '../../lib/api'
-import { StatTile, DISP, tintBg, mix, money, pts, Btn, Avatar, Field, ROLE_LABEL, ROLE_SHORT, ROLE_ORDER, GREEN, RED, PriceTag, PriceArrow } from './ui'
+import { StatTile, DISP, tintBg, mix, money, pts, Btn, Avatar, Field, ROLE_LABEL, ROLE_SHORT, ROLE_ORDER, GREEN, RED, AMBER, PriceTag, PriceArrow } from './ui'
 import { ScreenTitle, SectionLabel, PlayerRow } from './shell'
 
 // What selling a player returns: his price now. A rise since you bought him adds to
@@ -21,32 +21,50 @@ export default function Transfers({ token, squad, pool, rules, round, onChange, 
   const free = squad?.free_transfers ?? 0
   const hit = rules?.transfer_hit ?? 4
   const locked = !!round?.locked
+  // Transfers made after the round locked wait for it to be scored (see QueuedList).
+  const queuedAll = squad?.queued_transfers || []
+  const pendingQ = queuedAll.filter(q => q.status === 'pending')
+  const cancelledQ = queuedAll.filter(q => q.status === 'cancelled')
+  const queuedOut = new Set(pendingQ.map(q => q.out_player_id))
+  const queuedIn = new Set(pendingQ.map(q => q.in_player_id))
+
+  const shortlist = useMemo(() => {
+    if (!out || !squad) return []
+    const have = new Set(squad.players.map(p => p.player_id))
+    const term = search.trim().toLowerCase()
+    return (pool || [])
+      .filter(p => p.role === out.role && !have.has(p.player_id) && !queuedIn.has(p.player_id) && (!term || p.name.toLowerCase().includes(term)))
+      .sort((a, b) => b.price - a.price)
+      .slice(0, 40)
+  }, [out, pool, squad, search]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!squad) return <Empty nav={nav} />
 
   const outCurrent = out ? (poolById[out.player_id]?.price ?? out.price ?? out.purchase_price) : 0
   const outSell = out ? sellValue(out.purchase_price, outCurrent) : 0
   const bank = Number(squad.budget_remaining || 0)
-  const cost = free > 100 ? 'free' : free > 0 ? 'free' : `${hit} pts`
-
-  const shortlist = useMemo(() => {
-    if (!out) return []
-    const have = new Set(squad.players.map(p => p.player_id))
-    const term = search.trim().toLowerCase()
-    return (pool || [])
-      .filter(p => p.role === out.role && !have.has(p.player_id) && (!term || p.name.toLowerCase().includes(term)))
-      .sort((a, b) => b.price - a.price)
-      .slice(0, 40)
-  }, [out, pool, squad, search])
+  const cost = locked ? 'queued' : free > 100 ? 'free' : free > 0 ? 'free' : `${hit} pts`
+  const lockMsg = locked
+    ? `Round ${round?.number ?? ''} has locked, so your XI and captain are frozen until it's scored. A transfer you make now is queued: it happens once the round is scored, at the prices then, and counts for Round ${round?.next_number ?? 'next'}. If you can't afford it at those prices it is cancelled.`
+    : null
 
   const afterBank = out && tin ? bank + outSell - Number(tin.price) : null
-  const canConfirm = out && tin && afterBank >= -1e-6 && !locked
+  // While a round is locked the prices are about to move, so the bank is checked when the
+  // transfer happens (and the server warns); otherwise it has to fit now.
+  const canConfirm = out && tin && !queuedOut.has(out.player_id) && !queuedIn.has(tin.player_id) && (locked || afterBank >= -1e-6)
+  const cancelQueued = async (id) => {
+    setBusy(true)
+    try { await api.fanCancelQueuedTransfer(token, id); flash('Queued transfer cancelled.'); await onChange() }
+    catch (e) { fail(e) } finally { setBusy(false) }
+  }
 
   const confirm = async () => {
     setBusy(true)
     try {
       const r = await api.fanTransfer(token, out.player_id, tin.player_id)
-      flash(r.hit ? `Transfer done. ${r.hit} pt hit.` : 'Transfer done.')
+      flash(r.queued
+        ? (r.warning || `Queued. It happens once Round ${r.after_round} is scored.`)
+        : r.hit ? `Transfer done. ${r.hit} pt hit.` : 'Transfer done.')
       setOut(null); setTin(null); setSearch('')
       await onChange()
     } catch (e) { fail(e) } finally { setBusy(false) }
@@ -76,12 +94,13 @@ export default function Transfers({ token, squad, pool, rules, round, onChange, 
             <BarChip label="Cost" value={cost === 'free' ? '0 pts' : cost} />
           </div>
           <div style={{ marginLeft: 'auto' }}>
-            <Btn disabled={!canConfirm || busy} onClick={confirm} style={{ padding: '9px 18px', fontSize: 13 }}>{busy ? 'Confirming…' : 'Confirm transfer'}</Btn>
+            <Btn disabled={!canConfirm || busy} onClick={confirm} style={{ padding: '9px 18px', fontSize: 13 }}>{busy ? 'Confirming…' : locked ? 'Queue transfer' : 'Confirm transfer'}</Btn>
           </div>
         </div>
-        {locked && <div style={{ padding: '10px 26px', font: `600 11.5px 'Hanken Grotesk'`, color: RED, background: mix(RED, 8) }}>This round has locked. You can transfer again once it's scored.</div>}
+        {lockMsg && <div style={{ padding: '10px 26px', font: `600 11.5px 'Hanken Grotesk'`, color: AMBER, background: mix(AMBER, 10) }}>{lockMsg}</div>}
         <div style={{ display: 'grid', gridTemplateColumns: '380px 1fr' }}>
           <div style={{ borderRight: '1px solid var(--hairline)', padding: '18px 20px' }}>
+            <QueuedList items={pendingQ} cancelled={cancelledQ} onCancel={cancelQueued} busy={busy} />
             <div style={{ font: `700 12px ${DISP}`, letterSpacing: '.14em', textTransform: 'uppercase', color: 'var(--dim)', marginBottom: 10 }}>Your squad · tap to sell</div>
             {ROLE_ORDER.map(role => {
               const rows = squad.players.filter(p => p.role === role)
@@ -91,15 +110,16 @@ export default function Transfers({ token, squad, pool, rules, round, onChange, 
                   <div style={{ font: `700 10px 'Hanken Grotesk'`, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--faint)', margin: '12px 2px 7px' }}>{ROLE_LABEL[role]}s</div>
                   {rows.map(p => {
                     const sel = out?.player_id === p.player_id
+                    const qd = queuedOut.has(p.player_id)
                     return (
-                      <button key={p.player_id} onClick={() => { setOut(p); setTin(null) }} style={{
+                      <button key={p.player_id} onClick={qd ? undefined : () => { setOut(p); setTin(null) }} style={{
                         display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', padding: '8px 11px', marginBottom: 6, borderRadius: 11, cursor: 'pointer',
                         background: sel ? mix(RED, 10, 'var(--surface)') : 'var(--surface)', border: `1px solid ${sel ? mix(RED, 34) : 'var(--hairline)'}`,
                       }}>
                         <Avatar name={p.name} photoUrl={p.photo_url} size={30} />
                         <span style={{ flex: 1, minWidth: 0, font: `700 12.5px 'Hanken Grotesk'`, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span>
                         <span style={{ font: `600 11px ${DISP}`, color: 'var(--faint)' }} title={`Bought for ${money(p.purchase_price)}`}>{money(poolById[p.player_id]?.price ?? p.price ?? p.purchase_price)}<PriceArrow change={poolById[p.player_id]?.price_change ?? p.price_change} /></span>
-                        <span style={{ font: `700 9px 'Hanken Grotesk'`, letterSpacing: '.06em', textTransform: 'uppercase', color: RED, border: `1px solid ${mix(RED, 34)}`, padding: '3px 7px', borderRadius: 6 }}>{sel ? 'Out' : 'Sell'}</span>
+                        <span style={{ font: `700 9px 'Hanken Grotesk'`, letterSpacing: '.06em', textTransform: 'uppercase', color: qd ? AMBER : RED, border: `1px solid ${mix(qd ? AMBER : RED, 34)}`, padding: '3px 7px', borderRadius: 6 }}>{qd ? 'Queued' : sel ? 'Out' : 'Sell'}</span>
                       </button>
                     )
                   })}
@@ -124,7 +144,7 @@ export default function Transfers({ token, squad, pool, rules, round, onChange, 
             </div>
             <div style={{ maxHeight: 520, overflowY: 'auto' }}>
               {table.map(p => {
-                const owned = have.has(p.player_id)
+                const owned = have.has(p.player_id) || queuedIn.has(p.player_id)
                 const sel = tin?.player_id === p.player_id
                 const ok = out && p.role === out.role && !owned && bank + outSell - Number(p.price) >= -1e-6
                 return (
@@ -157,11 +177,12 @@ export default function Transfers({ token, squad, pool, rules, round, onChange, 
         <div style={{ flex: 1 }}><StatTile label="Cost" value={cost} color={cost === 'free' ? GREEN : 'var(--text)'} /></div>
       </div>
 
-      {locked && (
-        <div style={{ margin: '12px 0 0', borderRadius: 10, padding: '9px 12px', font: `600 11.5px 'Hanken Grotesk'`, color: RED, background: mix(RED, 10), border: `1px solid ${mix(RED, 28)}` }}>
-          This round has locked. You can transfer again once it's scored.
+      {lockMsg && (
+        <div style={{ margin: '12px 0 0', borderRadius: 10, padding: '9px 12px', font: `600 11.5px 'Hanken Grotesk'`, color: AMBER, background: mix(AMBER, 10), border: `1px solid ${mix(AMBER, 28)}` }}>
+          {lockMsg}
         </div>
       )}
+      <QueuedList items={pendingQ} cancelled={cancelledQ} onCancel={cancelQueued} busy={busy} />
 
       {/* Out → In swap */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '16px 0 0' }}>
@@ -176,8 +197,8 @@ export default function Transfers({ token, squad, pool, rules, round, onChange, 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
             {squad.players.map(p => (
               <PlayerRow key={p.player_id} name={p.name} photoUrl={p.photo_url} sub={<>{ROLE_LABEL[p.role]} · sells for <PriceTag price={sellValue(p.purchase_price, poolById[p.player_id]?.price ?? p.price)} change={poolById[p.player_id]?.price_change ?? p.price_change} /> · bought {money(p.purchase_price)}</>}
-                onClick={() => { setOut(p); setTin(null) }}
-                right={<span style={{ font: `700 9px 'Hanken Grotesk'`, letterSpacing: '.06em', textTransform: 'uppercase', color: RED, border: `1px solid ${mix(RED, 34)}`, padding: '3px 7px', borderRadius: 6 }}>Sell</span>} />
+                onClick={queuedOut.has(p.player_id) ? undefined : () => { setOut(p); setTin(null) }}
+                right={<span style={{ font: `700 9px 'Hanken Grotesk'`, letterSpacing: '.06em', textTransform: 'uppercase', color: queuedOut.has(p.player_id) ? AMBER : RED, border: `1px solid ${mix(queuedOut.has(p.player_id) ? AMBER : RED, 34)}`, padding: '3px 7px', borderRadius: 6 }}>{queuedOut.has(p.player_id) ? 'Queued' : 'Sell'}</span>} />
             ))}
           </div>
         </>
@@ -206,8 +227,35 @@ export default function Transfers({ token, squad, pool, rules, round, onChange, 
 
       <div style={{ paddingTop: 16 }}>
         <Btn full disabled={!canConfirm || busy} onClick={confirm}>
-          {busy ? 'Confirming…' : canConfirm ? `Confirm transfer · ${cost}` : 'Pick a player out and in'}
+          {busy ? 'Confirming…' : canConfirm ? (locked ? 'Queue transfer for next round' : `Confirm transfer · ${cost}`) : 'Pick a player out and in'}
         </Btn>
+      </div>
+    </div>
+  )
+}
+
+// Transfers waiting for the locked round to be scored, with a way to withdraw each, and
+// any that were cancelled this week with the reason (it cost too much once prices moved).
+function QueuedList({ items, cancelled, onCancel, busy }) {
+  if (!items.length && !cancelled.length) return null
+  return (
+    <div style={{ margin: '14px 0 4px' }}>
+      <div style={{ font: `700 10px 'Hanken Grotesk'`, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--faint)', marginBottom: 7 }}>Queued transfers</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {items.map(q => (
+          <div key={q.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 11px', borderRadius: 11, background: mix(AMBER, 8, 'var(--surface)'), border: `1px solid ${mix(AMBER, 28)}` }}>
+            <div style={{ flex: 1, minWidth: 0, font: `600 12px 'Hanken Grotesk'`, color: 'var(--text)' }}>
+              {q.in_name} <span style={{ color: 'var(--faint)' }}>in for</span> {q.out_name}
+              <div style={{ font: `500 10.5px 'Hanken Grotesk'`, color: 'var(--faint)', marginTop: 2 }}>Happens once Round {q.after_round} is scored</div>
+            </div>
+            <button disabled={busy} onClick={() => onCancel(q.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: RED, font: `700 11px 'Hanken Grotesk'` }}>Cancel</button>
+          </div>
+        ))}
+        {cancelled.map(q => (
+          <div key={q.id} style={{ padding: '8px 11px', borderRadius: 11, background: 'var(--surface)', border: '1px solid var(--hairline)', font: `500 11px 'Hanken Grotesk'`, color: 'var(--faint)' }}>
+            {q.in_name} for {q.out_name} did not happen. {q.reason}
+          </div>
+        ))}
       </div>
     </div>
   )

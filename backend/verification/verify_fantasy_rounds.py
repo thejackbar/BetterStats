@@ -39,8 +39,10 @@ import os
 import subprocess
 import sys
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -349,6 +351,35 @@ async def main() -> int:
     rs2 = await rounds_of(fs.id)
     check("still four rounds after a re-run", len(rs2) == 4, f"got {len(rs2)}")
     check("scored round untouched", rs2[0].status == "scored" and rs2[0].name == "Round 1 (settled)")
+
+    print("2b. Lock time: an early default on the round's first day; one an admin sets survives a refresh")
+    mel = ZoneInfo("Australia/Melbourne")
+    rs2 = await rounds_of(fs.id)
+    check("a round locks at 09:00 Melbourne time on its first day by default",
+          rs2[2].lock_at == datetime(2026, 10, 17, 9, 0, tzinfo=mel), repr(rs2[2].lock_at))
+    org_lock = SimpleNamespace(id=ORG)
+    async with Session() as s:
+        res_l = await fantasy_router.set_round_lock(str(rs2[3].id), fantasy_router.RoundLock(lock_at="2026-10-24T11:30:00+11:00"),
+                                                    club=org_lock, db=s, _=None)
+    check("the admin sets a round's lock time", res_l["lock_manual"] is True and datetime.fromisoformat(res_l["lock_at"]) == datetime(2026, 10, 24, 0, 30, tzinfo=timezone.utc), repr(res_l))
+    async with Session() as s:
+        fs3 = await s.get(FantasySeason, fs.id)
+        await fantasy_engine.generate_rounds(s, fs3)
+        await s.commit()
+    rs3 = await rounds_of(fs.id)
+    check("a hand-set lock time survives the nightly refresh", rs3[3].lock_at == datetime(2026, 10, 24, 0, 30, tzinfo=timezone.utc) and rs3[3].lock_manual is True, repr(rs3[3].lock_at))
+    check("a round nobody set is still on the default after the refresh", rs3[2].lock_at == datetime(2026, 10, 17, 9, 0, tzinfo=mel) and not rs3[2].lock_manual)
+    async with Session() as s:
+        await fantasy_router.set_round_lock(str(rs3[3].id), fantasy_router.RoundLock(lock_at=None), club=org_lock, db=s, _=None)
+    rs4 = await rounds_of(fs.id)
+    check("null hands the round back to the default", rs4[3].lock_at == datetime(2026, 10, 24, 9, 0, tzinfo=mel) and not rs4[3].lock_manual, repr(rs4[3].lock_at))
+    try:
+        async with Session() as s:
+            await fantasy_router.set_round_lock(str(rs4[0].id), fantasy_router.RoundLock(lock_at="2026-10-03T09:00:00+11:00"), club=org_lock, db=s, _=None)
+        refused = None
+    except fantasy_router.HTTPException as e:
+        refused = e.status_code
+    check("a scored round's lock time is refused", refused == 409, repr(refused))
 
     print("3. Stored games merge with the calendar (union, no double count)")
     fs_b = await season(2025)   # a 2025 season: stored games only, calendar has no 2025 grades

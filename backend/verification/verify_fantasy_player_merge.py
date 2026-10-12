@@ -513,6 +513,8 @@ async def main_checks() -> None:
         await s.execute(text("""INSERT INTO fantasy_waiver_claims (league_id, organisation_id, manager_id, add_player_id, drop_player_id)
                                 VALUES (:l, :o, :m, :p, :x), (:l, :o, :m, :x, :p)"""), {"l": lg, "o": ORG, "m": mgr, "p": M6, "x": A})
         await s.execute(text("INSERT INTO fantasy_transactions (squad_id, type, player_id, detail) VALUES (:s, 'transfer_in', :p, '{}')"), {"s": SQ_X, "p": M6})
+        await s.execute(text("""INSERT INTO fantasy_queued_transfers (fantasy_season_id, squad_id, after_round_id, out_player_id, in_player_id)
+                                VALUES (:f, :s, :r, :p, :x), (:f, :s, :r, :x, :p)"""), {"f": FS_ID, "s": SQ_X, "r": R1, "p": M6, "x": A})
         await s.execute(text("""UPDATE fantasy_squad_round_scores SET captain_player_id=:p, vice_captain_player_id=:p, dropped_player_id=:p
                                 WHERE squad_id=:s AND round_id=:r"""), {"p": M6, "s": SQ_X, "r": R1})
         await s.execute(text("""INSERT INTO fantasy_player_round_scores (fantasy_season_id, round_id, player_id, total_points, base_points, breakdown, games_counted)

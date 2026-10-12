@@ -26,12 +26,13 @@ import json
 import logging
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import Organisation
-from app.services import fantasy_squad, fantasy_draft, fantasy_pricing
+from app.services import fantasy_squad, fantasy_draft, fantasy_pricing, fantasy_queue
 from app.services import grassroots_scores_client as gr
 from app.services import playhq_client
 from app.services.club_match import club_match_keys
@@ -49,6 +50,32 @@ MAX_MATCH_SPAN_DAYS = 10
 # Price band the baseline maps into (defined with the price movement that shares it).
 PRICE_MIN, PRICE_MAX, PRICE_FLOOR, PRICE_K = (
     fantasy_pricing.PRICE_MIN, fantasy_pricing.PRICE_MAX, fantasy_pricing.PRICE_FLOOR, fantasy_pricing.PRICE_K)
+
+# When a round locks if an admin has not set the time: this local time on the first day
+# the round has games. We hold match DATES only (no kick-off times), so the default has
+# to be early enough to beat any start; an admin sets the exact time per round. A club
+# can change the defaults with the season rules ``lock_time`` ("HH:MM") and
+# ``lock_timezone`` (an IANA name).
+DEFAULT_LOCK_TIME = "09:00"
+DEFAULT_LOCK_TZ = "Australia/Melbourne"
+
+
+def default_lock_at(first_day: date, rules: dict | None = None) -> datetime:
+    """The lock time for a round whose first game day is ``first_day``, as an aware
+    datetime. A bad rule value falls back to the default rather than failing the
+    round refresh."""
+    rules = rules or {}
+    try:
+        tz = ZoneInfo(str(rules.get("lock_timezone") or DEFAULT_LOCK_TZ))
+    except Exception:
+        tz = ZoneInfo(DEFAULT_LOCK_TZ)
+    try:
+        hh, mm = (int(x) for x in str(rules.get("lock_time") or DEFAULT_LOCK_TIME).split(":")[:2])
+        at = time(hh, mm)
+    except Exception:
+        at = time(9, 0)
+    return datetime.combine(first_day, at, tzinfo=tz)
+
 
 # A round an admin has taken back out of settlement. It reads as not scored
 # everywhere (public pages, ladders), but the automatic settlers skip it so the
@@ -312,21 +339,24 @@ async def generate_rounds(session: AsyncSession, fs, refresh: bool = False) -> d
     for n, (first, last) in enumerate(windows, start=1):
         if n in scored:
             continue  # leave settled rounds untouched
-        # games.played_at is a DATE, so the round window is date-keyed. We don't
-        # hold kick-off times, so the lock is the start of the round's first day.
+        # games.played_at is a DATE, so the round window is date-keyed. We don't hold
+        # kick-off times, so the lock is a set time on the round's first day
+        # (``default_lock_at``) unless an admin has set it (``lock_manual``).
         await session.execute(
             text("""
                 INSERT INTO fantasy_rounds
                     (fantasy_season_id, organisation_id, round_number, name, lock_at, start_date, end_date, status)
                 VALUES (CAST(:fs AS UUID), CAST(:org AS UUID), :n, :name, :lock_at, :start, :end, 'upcoming')
                 ON CONFLICT (fantasy_season_id, round_number) DO UPDATE
-                SET name = EXCLUDED.name, lock_at = EXCLUDED.lock_at,
+                SET name = EXCLUDED.name,
+                    lock_at = CASE WHEN fantasy_rounds.lock_manual THEN fantasy_rounds.lock_at
+                                   ELSE EXCLUDED.lock_at END,
                     start_date = EXCLUDED.start_date, end_date = EXCLUDED.end_date,
                     updated_at = NOW()
             """),
             {
                 "fs": str(fs.id), "org": str(fs.organisation_id), "n": n,
-                "name": f"Round {n}", "lock_at": datetime.combine(first, time()),
+                "name": f"Round {n}", "lock_at": default_lock_at(first, fs.rules),
                 "start": first, "end": last,
             },
         )
@@ -341,6 +371,7 @@ async def generate_rounds(session: AsyncSession, fs, refresh: bool = False) -> d
               AND NOT EXISTS (SELECT 1 FROM fantasy_player_round_scores x WHERE x.round_id = r.id)
               AND NOT EXISTS (SELECT 1 FROM fantasy_squad_round_scores x WHERE x.round_id = r.id)
               AND NOT EXISTS (SELECT 1 FROM fantasy_transactions x WHERE x.round_id = r.id)
+              AND NOT EXISTS (SELECT 1 FROM fantasy_queued_transfers x WHERE x.after_round_id = r.id)
               AND NOT EXISTS (SELECT 1 FROM fantasy_h2h_fixtures x WHERE x.round_id = r.id)
         """),
         {"fs": str(fs.id), "n": len(windows)},
@@ -687,6 +718,7 @@ async def settle_round(session: AsyncSession, fs, rnd, live_picks: bool = False)
     if not by_player and not has_manual and rnd.status != "scored":
         await _mark_scored(session, rnd, 0)
         await fantasy_pricing.recompute_prices(session, fs)
+        await fantasy_queue.apply_pending(session, fs)
         return 0
     # Settling a round that is already scored (to pick up a corrected scorecard or
     # an admin edit) must not bank another free transfer; only the first does.
@@ -720,6 +752,9 @@ async def settle_round(session: AsyncSession, fs, rnd, live_picks: bool = False)
     # Prices move once the round is scored (and are replayed, not added to, when a
     # scored round is settled again).
     await fantasy_pricing.recompute_prices(session, fs)
+    # Transfers managers queued while this round was locked happen now, at the prices
+    # just set. The round above was scored with the XI that was locked.
+    await fantasy_queue.apply_pending(session, fs)
     return scored
 
 
@@ -886,6 +921,9 @@ async def unsettle_round(session: AsyncSession, fs, rnd) -> int:
         {**p, "st": new_status},
     )
     rnd.status, rnd.scored_at = new_status, None
+    # Transfers carried out when this round was scored go back to waiting, so it is
+    # scored again with the XI it had (a transfer that cannot safely be put back stays).
+    await fantasy_queue.revert_applied(session, fs, rnd)
 
     # Totals follow the rows that are left. Last-round points show the latest
     # round that is still scored.

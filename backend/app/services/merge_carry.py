@@ -88,6 +88,8 @@ CARRIED: tuple[tuple[str, str, str, Optional[tuple[str, ...]]], ...] = (
     ("fantasy_drafts", "lot_player_id", "uuid", None),
     ("fantasy_waiver_claims", "add_player_id", "uuid", None),
     ("fantasy_waiver_claims", "drop_player_id", "uuid", None),
+    ("fantasy_queued_transfers", "out_player_id", "uuid", None),
+    ("fantasy_queued_transfers", "in_player_id", "uuid", None),
 )
 
 # Tables whose primary key is not an `id` column: the column that identifies one
@@ -116,6 +118,8 @@ _OWN_CLUB = {
                                   "AND s.organisation_id = :org)",
     "fantasy_transactions": "EXISTS (SELECT 1 FROM fantasy_squads s WHERE s.id = r.squad_id "
                             "AND s.organisation_id = :org)",
+    "fantasy_queued_transfers": "EXISTS (SELECT 1 FROM fantasy_squads s WHERE s.id = r.squad_id "
+                                "AND s.organisation_id = :org)",
     "fantasy_player_round_scores": "EXISTS (SELECT 1 FROM fantasy_seasons s WHERE s.id = r.fantasy_season_id "
                                    "AND s.organisation_id = :org)",
     "fantasy_draft_picks": "EXISTS (SELECT 1 FROM fantasy_drafts d WHERE d.id = r.draft_id "

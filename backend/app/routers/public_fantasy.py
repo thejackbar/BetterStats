@@ -39,7 +39,7 @@ from app.models.db import (
     FantasySquadRoundScore, FantasyPlayerRoundScore,
     FantasyDraft, FantasyDraftPick, FantasyDraftWishlist, FantasyWaiverClaim, FantasyTrade,
 )
-from app.services import rate_limit, fantasy_draft, fantasy_engine, fantasy_squad, section_names
+from app.services import rate_limit, fantasy_draft, fantasy_engine, fantasy_squad, fantasy_queue, section_names
 from app.services.fantasy_squad import validate_squad, score_squad_round
 from app.services.fantasy_scoring import DEFAULT_RULES, DEFAULT_SCORING
 
@@ -673,6 +673,22 @@ async def me(token: str, request: Request, db: AsyncSession = Depends(get_db)):
             now, chg = moves.get(pk["player_id"], (pk["purchase_price"], 0.0))
             pk["price"], pk["price_change"] = now, chg
             pk["sell_value"] = _sell_value(pk["purchase_price"], now)
+        # Transfers made after the round locked: waiting, or recently cancelled.
+        payload["queued_transfers"] = [
+            {"id": str(r[0]), "status": r[1], "reason": r[2], "out_player_id": str(r[3]), "out_name": r[4],
+             "in_player_id": str(r[5]), "in_name": r[6], "after_round": r[7]}
+            for r in (await db.execute(
+                text("""SELECT q.id, q.status, q.reason, q.out_player_id, po.name, q.in_player_id, pi.name, r.round_number
+                        FROM fantasy_queued_transfers q
+                        JOIN players po ON po.id = q.out_player_id JOIN players pi ON pi.id = q.in_player_id
+                        JOIN fantasy_rounds r ON r.id = q.after_round_id
+                        WHERE q.squad_id = CAST(:sid AS UUID)
+                          AND (q.status = 'pending'
+                               OR (q.status = 'cancelled' AND q.created_at > NOW() - INTERVAL '7 days'))
+                        ORDER BY q.created_at"""),
+                {"sid": str(squad.id)},
+            )).all()
+        ]
         payload["free_transfers"] = squad.free_transfers
         # Team value = what the squad is worth now (current prices) plus the bank.
         val = (await db.execute(
@@ -704,6 +720,7 @@ async def me(token: str, request: Request, db: AsyncSession = Depends(get_db)):
             "number": rnd.round_number, "name": rnd.name,
             "lock_at": rnd.lock_at.isoformat() if rnd.lock_at else None,
             "locked": _round_locked(rnd), "status": rnd.status,
+            "next_number": rnd.round_number + 1,
         }
     # A manager who has no squad yet in a season that is already running starts
     # level with the lowest team: tell them the figure before they pick.
@@ -857,28 +874,9 @@ async def build_squad(token: str, body: SquadBody, request: Request, db: AsyncSe
 
 
 async def _recount_ownership(db: AsyncSession, season_id) -> None:
-    """Refresh each pool player's owned_count from the global-league squads (drives
-    ownership-based pricing and the 'X% picked' display). Reset to zero, then set
-    the owned counts, so a player nobody now holds drops back to zero."""
-    await db.execute(
-        text("UPDATE fantasy_pool_players SET owned_count = 0 WHERE fantasy_season_id = CAST(:fs AS UUID)"),
-        {"fs": str(season_id)},
-    )
-    await db.execute(
-        text("""
-            UPDATE fantasy_pool_players pp SET owned_count = c.n
-            FROM (
-                SELECT sp.player_id, COUNT(*) AS n
-                FROM fantasy_squad_players sp
-                JOIN fantasy_squads sq ON sq.id = sp.squad_id
-                JOIN fantasy_leagues l ON l.id = sq.league_id AND l.kind = 'global_salary_cap'
-                WHERE sq.fantasy_season_id = CAST(:fs AS UUID)
-                GROUP BY sp.player_id
-            ) c
-            WHERE pp.fantasy_season_id = CAST(:fs AS UUID) AND pp.player_id = c.player_id
-        """),
-        {"fs": str(season_id)},
-    )
+    """Refresh each pool player's owned_count (see fantasy_squad.recount_ownership)
+    and commit."""
+    await fantasy_squad.recount_ownership(db, season_id)
     await db.commit()
 
 
@@ -965,7 +963,7 @@ def _round_locked(rnd: Optional[FantasyRound]) -> bool:
 
 async def _assert_unlocked(db: AsyncSession, season: FantasySeason) -> None:
     if _round_locked(await _current_round(db, season)):
-        raise HTTPException(status_code=403, detail="This round has locked. You can change your team again once it's scored.")
+        raise HTTPException(status_code=403, detail="This round has locked. Your XI and captain are frozen until it's scored. Transfers you make now happen after that.")
 
 
 async def _global_squad(db: AsyncSession, season: FantasySeason, mgr: FantasyManager) -> Optional[FantasySquad]:
@@ -978,20 +976,8 @@ async def _global_squad(db: AsyncSession, season: FantasySeason, mgr: FantasyMan
 
 
 async def _record_round_transfer(db: AsyncSession, squad_id, rnd: Optional[FantasyRound], hit: int) -> None:
-    """Tally a transfer (and any points hit) against the current round's score row,
-    which settlement later reads when it computes points = raw - transfer_hit."""
-    if rnd is None:
-        return
-    await db.execute(
-        text("""
-            INSERT INTO fantasy_squad_round_scores (squad_id, round_id, transfer_hit, transfers_made, lineup)
-            VALUES (CAST(:sid AS UUID), CAST(:rid AS UUID), :hit, 1, '[]')
-            ON CONFLICT (squad_id, round_id) DO UPDATE SET
-                transfer_hit = fantasy_squad_round_scores.transfer_hit + :hit,
-                transfers_made = fantasy_squad_round_scores.transfers_made + 1
-        """),
-        {"sid": str(squad_id), "rid": str(rnd.id), "hit": hit},
-    )
+    """Tally a transfer (and any points hit) against the current round's score row."""
+    await fantasy_squad.record_round_transfer(db, squad_id, rnd, hit)
 
 
 class TransferBody(BaseModel):
@@ -1004,7 +990,7 @@ async def transfer(token: str, body: TransferBody, request: Request, db: AsyncSe
     """Swap one player for another of the same role. The first free transfer of the
     round is free; further transfers cost the points hit. Budget uses the current
     price of the player leaving, so a rise while owned adds to the bank and a fall
-    takes from it."""
+    takes from it. After the round has locked the swap is queued instead (see below)."""
     club = await _club_for_token(db, token)
     mgr = await _manager_for_session(db, request, club)
     season = await _current_season(db, club)
@@ -1014,7 +1000,20 @@ async def transfer(token: str, body: TransferBody, request: Request, db: AsyncSe
     if squad is None:
         raise HTTPException(status_code=400, detail="Build your squad first.")
     rate_limit.enforce(f"fantasy-write:{mgr.id}", WRITE_LIMIT, WRITE_WINDOW)
-    await _assert_unlocked(db, season)
+
+    # Once the round has locked the XI is frozen until it is scored, so a transfer
+    # made now is queued: it happens when the round is scored, at the prices then,
+    # and counts for the round after it (services/fantasy_queue).
+    locked_round = await _current_round(db, season)
+    if _round_locked(locked_round):
+        try:
+            res = await fantasy_queue.queue_transfer(db, season, squad, locked_round, body.out_player_id, body.in_player_id)
+        except fantasy_queue.QueueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        await db.commit()
+        return {"ok": True, "queued": True, "id": res["id"], "after_round": locked_round.round_number,
+                "warning": res["warning"], "budget_remaining": float(squad.budget_remaining or 0),
+                "free_transfers": squad.free_transfers}
 
     sps = (await db.execute(
         select(FantasySquadPlayer).where(FantasySquadPlayer.squad_id == squad.id)
@@ -1072,6 +1071,23 @@ async def transfer(token: str, body: TransferBody, request: Request, db: AsyncSe
     await db.commit()
     await _recount_ownership(db, season.id)
     return {"ok": True, "hit": hit, "budget_remaining": squad.budget_remaining, "free_transfers": squad.free_transfers}
+
+
+@router.delete("/{token}/transfer/queued/{queued_id}")
+async def cancel_queued_transfer(token: str, queued_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Withdraw a queued transfer that has not happened yet."""
+    club = await _club_for_token(db, token)
+    mgr = await _manager_for_session(db, request, club)
+    season = await _current_season(db, club)
+    if season is None:
+        raise HTTPException(status_code=404, detail="No fantasy season")
+    squad = await _global_squad(db, season, mgr)
+    if squad is None:
+        raise HTTPException(status_code=400, detail="Build your squad first.")
+    if not await fantasy_queue.cancel_queued(db, squad, queued_id):
+        raise HTTPException(status_code=404, detail="That queued transfer isn't waiting any more.")
+    await db.commit()
+    return {"ok": True}
 
 
 class CaptainBody(BaseModel):
@@ -1726,6 +1742,24 @@ async def notifications(token: str, request: Request, db: AsyncSession = Depends
                 "title": f"{name} {'rose' if up else 'fell'} {abs(float(chg)):.1f}",
                 "body": "A player you own moved in price.",
             })
+        for qid, qstatus, qreason, oname, iname, qround in (await db.execute(
+            text("""SELECT q.id, q.status, q.reason, po.name, pi.name, r.round_number
+                    FROM fantasy_queued_transfers q
+                    JOIN players po ON po.id = q.out_player_id JOIN players pi ON pi.id = q.in_player_id
+                    JOIN fantasy_rounds r ON r.id = q.after_round_id
+                    WHERE q.squad_id = CAST(:sid AS UUID)
+                      AND (q.status = 'pending' OR (q.status = 'cancelled' AND q.created_at > NOW() - INTERVAL '7 days'))
+                    ORDER BY q.created_at DESC LIMIT 4"""),
+            {"sid": str(squad.id)},
+        )).all():
+            if qstatus == "pending":
+                feed.append({"id": f"queued-{qid}", "tone": "accent", "badge": "!",
+                             "title": f"{iname} in for {oname} is queued",
+                             "body": f"It happens once Round {qround} is scored, at the prices then."})
+            else:
+                feed.append({"id": f"queued-{qid}-cancelled", "tone": "amber", "badge": "!",
+                             "title": f"Your transfer of {iname} for {oname} didn't go through",
+                             "body": qreason or "It was cancelled."})
         rank = await _overall_rank(db, squad.league_id, squad.id)
         if rank:
             feed.append({
