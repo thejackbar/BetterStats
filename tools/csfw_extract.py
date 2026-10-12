@@ -1,12 +1,21 @@
-"""Convert a club's ``DATA<year>.AV`` files into a combined match spreadsheet
-and a BetterImport season-stats CSV.
+"""Analyse and extract a club's Cricket Statistics for Windows (CSFW) archive.
+
+ONE tool for every club.  It reads a folder of ``DATA<year>.AV`` files, works
+out which record layout each file uses (``--analyse`` reports it and writes
+nothing), and writes a combined match spreadsheet, a BetterImport season-stats
+CSV and the Manual Games scorecard CSV.  What differs between clubs is data,
+not code: the record ``Layout`` (a file the club's files do not fit can be
+described with ``--layout``) and the club ``Profile`` (team names, match types;
+``--profile``), because neither the team names nor the match types are in the
+files themselves.
 
 The ``.AV`` files are the fixed-record binary database of an MS-DOS/Delphi era
-club averages program.  Nothing in this repository read that format before, so
-the layout below was recovered by inspection and then checked against the data
-itself (see ``verify`` / the ``Notes`` sheet the converter writes).
+club averages program.  The layout below was recovered by inspection and then
+checked against the data itself (see ``verify`` / the ``Notes`` sheet the
+converter writes).
 
-File layout — every byte of a 549,871 byte file is accounted for::
+File layout of the one registered layout, ``csfw-av-v1`` — every byte of a
+549,871 byte file is accounted for::
 
     offset       size                 section
     0            311                  header: club name (30) + year (4) + settings
@@ -41,41 +50,143 @@ from __future__ import annotations
 import argparse
 import csv
 import datetime
+import json
 import re
 import struct
-from collections import defaultdict
+from collections import Counter, defaultdict
+from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 
 # ── file layout ──────────────────────────────────────────────────────────────
+#
+# A LAYOUT IS DATA. Every offset the parser reads lives on `Layout`, whose
+# defaults are the one layout reverse engineered so far (csfw-av-v1, the
+# 549,871 byte file). Another CSFW version is described by overriding only what
+# differs - see `layout_from_dict` and `--layout` - and is found by file size
+# (`detect_layout`), so a folder can mix versions and each file is read with its
+# own. `--analyse` is how a layout nobody has described yet gets worked out.
 
-HEADER_LEN = 311
-PLAYER_BASE, PLAYER_REC, PLAYER_N = 311, 37, 200
-PSTATS_BASE, PSTATS_REC, PSTATS_N = 7_711, 578, 200
-FIXTURE_BASE, FIXTURE_REC, FIXTURE_N = 123_311, 54, 160
-MATCH_BASE, MATCH_REC, MATCH_N = 131_951, 2_612, 160
-FILE_LEN = HEADER_LEN + PLAYER_N * PLAYER_REC + PSTATS_N * PSTATS_REC \
-    + FIXTURE_N * FIXTURE_REC + MATCH_N * MATCH_REC          # 549,871
 
-# within a match record
-M_TYPE = 8                             # the competition's match type - see MATCH_TYPES
-M_ROUND, M_ROUND_LEN = 10, 20
-M_GROUND_IDX, M_GROUND, M_GROUND_LEN = 30, 32, 30
-M_RESULT = 496                         # the club's OWN recorded result - see RESULT_LABELS
-M_INN_US, M_INN_THEM = 502, 574        # slot A is always our club's innings
-M_FOW = 646                            # pairs of (score, batter position, 1-indexed)
-M_FOW_PAIRS = 10
-BLOCK_BASE, BLOCK_REC, BLOCK_N = 756, 116, 16
+@dataclass(frozen=True)
+class Layout:
+    name: str = "csfw-av-v1"
+    file_len: int = 549_871
+    # header
+    club_at: int = 0
+    club_len: int = 30
+    year_at: int = 30
+    year_len: int = 4
+    # player index: id at 0, then the name fields below
+    player_base: int = 311
+    player_rec: int = 37
+    player_n: int = 200
+    p_surname: int = 2
+    p_surname_len: int = 16
+    p_initial: int = 18
+    p_initial_len: int = 3
+    p_first: int = 21
+    p_first_len: int = 16
+    # fixtures: the match slot a fixture points at is at 0
+    fixture_base: int = 123_311
+    fixture_rec: int = 54
+    fixture_n: int = 160
+    f_date: int = 2
+    f_team: int = 18
+    f_name: int = 20
+    f_name_len: int = 32
+    # matches
+    match_base: int = 131_951
+    match_rec: int = 2_612
+    match_n: int = 160
+    m_type: int = 8                    # the competition's match type
+    m_round: int = 10
+    m_round_len: int = 20
+    m_ground_idx: int = 30
+    m_ground: int = 32
+    m_ground_len: int = 30
+    m_result: int = 496                # the club's OWN recorded result
+    m_inn_us: int = 502                # slot A is always our club's innings
+    m_inn_them: int = 574
+    m_fow: int = 646                   # pairs of (score, batter position, 1-indexed)
+    m_fow_pairs: int = 10
+    block_base: int = 756
+    block_rec: int = 116
+    block_n: int = 16
+    # within a 72-byte innings block
+    i_total: int = 0
+    i_wickets: int = 2
+    i_number: int = 4
+    i_overs: int = 6
+    i_extras: tuple = (14, 16, 18, 20, 22)   # byes, leg byes, wides, no balls, penalty
+    # within a 116-byte player block
+    b_player: int = 0
+    b_position: int = 2
+    b_runs: int = 8
+    b_sixes: int = 12
+    b_fours: int = 14
+    b_howout: int = 20
+    b_overs: int = 24
+    b_maidens: int = 32
+    b_wickets: int = 34
+    b_flags: int = 42
+    b_conceded: int = 46
+    b_wides: int = 48
+    b_noballs: int = 50
+    b_catches: int = 52
+    b_wk_catches: int = 56
+    b_stumpings: int = 60
+    b_byes: int = 64
+    b_votes: int = 82
+    did_not_bat: int = 255             # b_position for a player not in the order
+    # the .FIX / .MCH siblings of THIS layout, used only to cross-check
+    siblings: bool = True
 
-# within a 72-byte innings block
-I_TOTAL, I_WICKETS, I_NUMBER, I_OVERS = 0, 2, 4, 6
-I_EXTRAS = (14, 16, 18, 20, 22)        # byes, leg byes, wides, no balls, penalty
 
-# within a 116-byte player block
-B_PLAYER, B_POSITION, B_RUNS, B_SIXES, B_FOURS, B_HOWOUT = 0, 2, 8, 12, 14, 20
-B_OVERS, B_MAIDENS, B_WICKETS = 24, 32, 34
-B_FLAGS, B_CONCEDED, B_WIDES, B_NOBALLS = 42, 46, 48, 50
-B_CATCHES, B_WK_CATCHES, B_STUMPINGS, B_BYES = 52, 56, 60, 64
-B_VOTES = 82
+LAYOUT_V1 = Layout()
+LAYOUTS: dict = {LAYOUT_V1.file_len: LAYOUT_V1}     # by file size
+
+# kept for callers that read the single known layout directly
+FILE_LEN = LAYOUT_V1.file_len
+
+
+class LayoutError(ValueError):
+    """A file no registered layout describes, or a layout the file contradicts."""
+
+
+def layout_from_dict(d: dict, base: Layout = LAYOUT_V1) -> Layout:
+    """A layout from a JSON object: `base` with the named fields replaced.
+
+    An unknown key is refused. A typo silently ignored would read the file at
+    the base layout's offset and produce plausible-looking nonsense.
+    """
+    names = {f.name for f in fields(Layout)}
+    bad = sorted(set(d) - names)
+    if bad:
+        raise LayoutError(f"unknown layout field(s): {', '.join(bad)}")
+    d = dict(d)
+    if "i_extras" in d:
+        d["i_extras"] = tuple(d["i_extras"])
+    if "name" not in d:
+        raise LayoutError("a layout needs a name")
+    lay = replace(base, **d)
+    for what, base_at, rec, n in (("player", lay.player_base, lay.player_rec, lay.player_n),
+                                  ("fixture", lay.fixture_base, lay.fixture_rec, lay.fixture_n),
+                                  ("match", lay.match_base, lay.match_rec, lay.match_n)):
+        if base_at + rec * n > lay.file_len:
+            raise LayoutError(f"{lay.name}: the {what} table runs past the end of the file")
+    return lay
+
+
+def register_layouts(path: Path) -> list:
+    """Load one layout object, or a list of them, from a JSON file."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    out = []
+    for d in data if isinstance(data, list) else [data]:
+        lay = layout_from_dict(d)
+        LAYOUTS[lay.file_len] = lay
+        out.append(lay)
+    return out
+
 
 NOT_OUT = 11          # value of B_HOWOUT for a batter who was not out
 RETIRED_NOT_OUT = 12  # a second not-out kind - see NOT_OUT_CODES
@@ -354,7 +465,6 @@ def dismissal_label(code, absent_is_out: bool = True) -> str:
     return DISMISSALS.get(code, f"code {code}")
 
 
-DID_NOT_BAT = 255     # value of B_POSITION for a player who was not in the order
 EPOCH = datetime.date(1899, 12, 30)
 
 # ── primitives ───────────────────────────────────────────────────────────────
@@ -410,16 +520,16 @@ def player_display(surname: str, initial: str, first: str) -> str:
     return surname
 
 
-def parse_players(buf: bytes) -> dict:
+def parse_players(buf: bytes, lay: Layout = LAYOUT_V1) -> dict:
     players = {}
-    for slot in range(PLAYER_N):
-        off = PLAYER_BASE + slot * PLAYER_REC
+    for slot in range(lay.player_n):
+        off = lay.player_base + slot * lay.player_rec
         pid = i16(buf, off)
         if pid < 0:
             continue
-        surname = text(buf, off + 2, 16)
-        initial = text(buf, off + 18, 3)
-        first = text(buf, off + 21, 16)
+        surname = text(buf, off + lay.p_surname, lay.p_surname_len)
+        initial = text(buf, off + lay.p_initial, lay.p_initial_len)
+        first = text(buf, off + lay.p_first, lay.p_first_len)
         if not surname:
             continue
         players[pid] = {
@@ -430,7 +540,7 @@ def parse_players(buf: bytes) -> dict:
     return players
 
 
-def parse_fixtures(buf: bytes) -> dict:
+def parse_fixtures(buf: bytes, lay: Layout = LAYOUT_V1) -> dict:
     """Keyed by the match slot the fixture POINTS AT, not by its own position.
 
     The fixture array is held in date order, and each record's first field is
@@ -441,19 +551,19 @@ def parse_fixtures(buf: bytes) -> dict:
     are a permutation of 0..n-1 rather than a run.
     """
     fixtures = {}
-    for pos in range(FIXTURE_N):
-        off = FIXTURE_BASE + pos * FIXTURE_REC
+    for pos in range(lay.fixture_n):
+        off = lay.fixture_base + pos * lay.fixture_rec
         slot = i16(buf, off)
-        if slot < 0 or slot >= MATCH_N:
+        if slot < 0 or slot >= lay.match_n:
             continue
-        name = text(buf, off + 20, 32)
+        name = text(buf, off + lay.f_name, lay.f_name_len)
         if not name:
             continue
-        serial = struct.unpack_from("<d", buf, off + 2)[0]
+        serial = struct.unpack_from("<d", buf, off + lay.f_date)[0]
         date = EPOCH + datetime.timedelta(days=serial) if serial > 0 else None
         fixtures[slot] = {
             "index": slot, "order": pos, "date": date,
-            "team": i16(buf, off + 18), "name": name,
+            "team": i16(buf, off + lay.f_team), "name": name,
         }
     return fixtures
 
@@ -478,14 +588,14 @@ def split_leg(fixtures: dict) -> None:
             fx["opponent"], fx["leg"] = base, leg
 
 
-def parse_innings(rec: bytes, base: int) -> dict:
-    extras = [opt(i16(rec, base + o)) for o in I_EXTRAS]
-    total = opt(i16(rec, base + I_TOTAL))
+def parse_innings(rec: bytes, base: int, lay: Layout = LAYOUT_V1) -> dict:
+    extras = [opt(i16(rec, base + o)) for o in lay.i_extras]
+    total = opt(i16(rec, base + lay.i_total))
     return {
         "total": total,
-        "wickets": opt(i16(rec, base + I_WICKETS)),
-        "innings_no": opt(i16(rec, base + I_NUMBER)),
-        "overs": currency(rec, base + I_OVERS),
+        "wickets": opt(i16(rec, base + lay.i_wickets)),
+        "innings_no": opt(i16(rec, base + lay.i_number)),
+        "overs": currency(rec, base + lay.i_overs),
         "byes": extras[0], "leg_byes": extras[1], "wides": extras[2],
         "no_balls": extras[3], "penalty": extras[4],
         "extras": sum(e for e in extras if e) if any(e for e in extras) else 0,
@@ -493,50 +603,50 @@ def parse_innings(rec: bytes, base: int) -> dict:
     }
 
 
-def parse_blocks(rec: bytes) -> list:
+def parse_blocks(rec: bytes, lay: Layout = LAYOUT_V1) -> list:
     blocks = []
-    for slot in range(BLOCK_N):
-        off = BLOCK_BASE + slot * BLOCK_REC
-        pid = i16(rec, off)
-        if pid < 0 or pid >= PLAYER_N:
+    for slot in range(lay.block_n):
+        off = lay.block_base + slot * lay.block_rec
+        pid = i16(rec, off + lay.b_player)
+        if pid < 0 or pid >= lay.player_n:
             continue
-        pos = i16(rec, off + B_POSITION)
-        howout = i16(rec, off + B_HOWOUT)
-        runs = opt(i16(rec, off + B_RUNS))
-        overs = currency(rec, off + B_OVERS)
+        pos = i16(rec, off + lay.b_position)
+        howout = i16(rec, off + lay.b_howout)
+        runs = opt(i16(rec, off + lay.b_runs))
+        overs = currency(rec, off + lay.b_overs)
         blocks.append({
             "slot": slot, "player_id": pid,
-            "position": None if pos in (DID_NOT_BAT, -1) else pos + 1,
+            "position": None if pos in (lay.did_not_bat, -1) else pos + 1,
             "batted": runs is not None,
             "runs": runs,
-            "fours": opt(i16(rec, off + B_FOURS)),
-            "sixes": opt(i16(rec, off + B_SIXES)),
+            "fours": opt(i16(rec, off + lay.b_fours)),
+            "sixes": opt(i16(rec, off + lay.b_sixes)),
             "not_out": howout in NOT_OUT_CODES,
             "dismissal_code": opt(howout),
             "bowled": overs is not None,
             "overs": overs,
             "balls": overs_to_balls(overs),
-            "maidens": opt(i16(rec, off + B_MAIDENS)),
-            "wickets": opt(i16(rec, off + B_WICKETS)),
-            "conceded": opt(i16(rec, off + B_CONCEDED)),
-            "wides": opt(i16(rec, off + B_WIDES)),
-            "no_balls": opt(i16(rec, off + B_NOBALLS)),
-            "catches": opt(i16(rec, off + B_CATCHES)),
-            "wk_catches": opt(i16(rec, off + B_WK_CATCHES)),
-            "stumpings": opt(i16(rec, off + B_STUMPINGS)),
-            "byes": opt(i16(rec, off + B_BYES)),
-            "votes": currency(rec, off + B_VOTES),
-            "flags": opt(i16(rec, off + B_FLAGS)),
+            "maidens": opt(i16(rec, off + lay.b_maidens)),
+            "wickets": opt(i16(rec, off + lay.b_wickets)),
+            "conceded": opt(i16(rec, off + lay.b_conceded)),
+            "wides": opt(i16(rec, off + lay.b_wides)),
+            "no_balls": opt(i16(rec, off + lay.b_noballs)),
+            "catches": opt(i16(rec, off + lay.b_catches)),
+            "wk_catches": opt(i16(rec, off + lay.b_wk_catches)),
+            "stumpings": opt(i16(rec, off + lay.b_stumpings)),
+            "byes": opt(i16(rec, off + lay.b_byes)),
+            "votes": currency(rec, off + lay.b_votes),
+            "flags": opt(i16(rec, off + lay.b_flags)),
         })
     return blocks
 
 
-def parse_fow(rec: bytes) -> list:
+def parse_fow(rec: bytes, lay: Layout = LAYOUT_V1) -> list:
     """Pairs of (score, batting position). Positions are 1-indexed."""
     out = []
-    for n in range(M_FOW_PAIRS):
-        score = i16(rec, M_FOW + n * 4)
-        batter = i16(rec, M_FOW + n * 4 + 2)
+    for n in range(lay.m_fow_pairs):
+        score = i16(rec, lay.m_fow + n * 4)
+        batter = i16(rec, lay.m_fow + n * 4 + 2)
         if score < 0:
             break
         out.append({"wicket": n + 1, "score": score,
@@ -544,18 +654,72 @@ def parse_fow(rec: bytes) -> list:
     return out
 
 
-def parse_file(path: Path) -> dict:
+def file_family(path: Path) -> str:
+    """`DATA` for DATA2025.AV, `DAT1` for DAT12025.AV.
+
+    A club can keep several competitions as separate families of files (a
+    different set of teams in each), told apart only by the first letters of the
+    name. The last four characters are the season.
+    """
+    stem = path.stem.upper()
+    return stem[:-4] if re.search(r"\d{4}$", stem) and len(stem) > 4 else stem
+
+
+def layout_problems(buf: bytes, lay: Layout) -> list:
+    """Why `buf` does not look like `lay`, as sentences; empty when it does.
+
+    Size alone picks a layout, so this is the second opinion: a different
+    program version that happens to share a size would still fail here, because
+    the year would not read as a year and the fixture dates would not be dates.
+    """
+    problems = []
+    if len(buf) != lay.file_len:
+        return [f"{len(buf)} bytes, layout {lay.name} is {lay.file_len}"]
+    year = text(buf, lay.year_at, lay.year_len)
+    if not (year.isdigit() and 1900 <= int(year) <= 2100):
+        problems.append(f"header year reads {year!r}, not a year")
+    seen = good = 0
+    for pos in range(lay.fixture_n):
+        off = lay.fixture_base + pos * lay.fixture_rec
+        slot = i16(buf, off)
+        if slot < 0 or slot >= lay.match_n or not text(buf, off + lay.f_name, lay.f_name_len):
+            continue
+        seen += 1
+        serial = struct.unpack_from("<d", buf, off + lay.f_date)[0]
+        if 10_000 <= serial <= 60_000:       # 1927 to 2064
+            good += 1
+    if seen and good < seen * 0.9:
+        problems.append(f"only {good} of {seen} fixture dates are plausible dates")
+    return problems
+
+
+def detect_layout(buf: bytes, name: str = "file") -> Layout:
+    """The registered layout for this file's size, checked against its contents."""
+    lay = LAYOUTS.get(len(buf))
+    if lay is None:
+        raise LayoutError(
+            f"{name}: {len(buf):,} bytes matches no known layout "
+            f"({', '.join(f'{l.name} = {l.file_len:,}' for l in LAYOUTS.values())}). "
+            f"Run with --analyse to see what the file holds, then describe it "
+            f"with --layout.")
+    problems = layout_problems(buf, lay)
+    if problems:
+        raise LayoutError(f"{name}: sized like {lay.name} but {'; '.join(problems)}")
+    return lay
+
+
+def parse_file(path: Path, lay: Layout | None = None) -> dict:
     buf = path.read_bytes()
-    if len(buf) != FILE_LEN:
-        raise ValueError(f"{path.name}: expected {FILE_LEN} bytes, got {len(buf)}")
-    year = int(text(buf, 30, 4))
-    fixtures = parse_fixtures(buf)
+    lay = lay or detect_layout(buf, path.name)
+    year = int(text(buf, lay.year_at, lay.year_len))
+    fixtures = parse_fixtures(buf, lay)
     split_leg(fixtures)
     matches = []
     for idx in sorted(fixtures):
-        rec = buf[MATCH_BASE + idx * MATCH_REC:MATCH_BASE + (idx + 1) * MATCH_REC]
-        us, them = parse_innings(rec, M_INN_US), parse_innings(rec, M_INN_THEM)
-        blocks = parse_blocks(rec)
+        rec = buf[lay.match_base + idx * lay.match_rec:lay.match_base + (idx + 1) * lay.match_rec]
+        us = parse_innings(rec, lay.m_inn_us, lay)
+        them = parse_innings(rec, lay.m_inn_them, lay)
+        blocks = parse_blocks(rec, lay)
         # EVERY FIXTURE-BACKED RECORD IS A MATCH THE CLUB COUNTS, scorecard or
         # not. An earlier cut skipped a record with no innings and no batting or
         # bowling, reading it as a fixture nobody ever filled in - and that
@@ -564,18 +728,19 @@ def parse_file(path: Path) -> dict:
         # Keeping them is what makes the total 914, which is the club's own.
         matches.append({
             **fixtures[idx],
-            "type_code": rec[M_TYPE],
-            "round": text(rec, M_ROUND, M_ROUND_LEN),
-            "ground": text(rec, M_GROUND, M_GROUND_LEN),
-            "ground_index": opt(i16(rec, M_GROUND_IDX)),
-            "result_code": rec[M_RESULT],
-            "us": us, "them": them, "blocks": blocks, "fow": parse_fow(rec),
+            "type_code": rec[lay.m_type],
+            "round": text(rec, lay.m_round, lay.m_round_len),
+            "ground": text(rec, lay.m_ground, lay.m_ground_len),
+            "ground_index": opt(i16(rec, lay.m_ground_idx)),
+            "result_code": rec[lay.m_result],
+            "us": us, "them": them, "blocks": blocks, "fow": parse_fow(rec, lay),
             "has_play": us["played"] or them["played"],
         })
     return {
-        "source": path.name, "club": text(buf, 0, 30), "year": year,
-        "season": season_label(year), "players": parse_players(buf),
-        "matches": matches,
+        "source": path.name, "club": text(buf, lay.club_at, lay.club_len), "year": year,
+        "season": season_label(year), "players": parse_players(buf, lay),
+        "matches": matches, "layout": lay.name, "family": file_family(path),
+        "stem": path.stem.lower(),
     }
 
 
@@ -627,7 +792,9 @@ def match_format_for(type_code, season_two_day_teams, team, total_overs,
     """
     if type_code in FORMAT_BY_TYPE:
         return FORMAT_BY_TYPE[type_code]
-    if type_code in FINALS_TYPES:
+    if type_code in FINALS_TYPES and FORMAT_BY_TYPE:
+        # (only where the club's own formats are known: with none, a final's
+        # length is nothing this file can measure, so it stays blank)
         if (team in season_two_day_teams and season_one_day_max
                 and total_overs > season_one_day_max):
             return "Two Day"
@@ -649,7 +816,7 @@ def group_legs(season: dict) -> list:
     for n, key in enumerate(sorted(groups,
                                    key=lambda k: (k[0] or datetime.date.min, k[1], k[2])), 1):
         date, team, opponent = key
-        out.append((f"{season['year']}-{n:03d}", date, team, opponent,
+        out.append((f"{season.get('key_prefix', season['year'])}-{n:03d}", date, team, opponent,
                     sorted(groups[key], key=lambda m: (m["leg"] or 0, m["index"]))))
     return out
 
@@ -693,10 +860,13 @@ def season_format_context(season: dict) -> tuple:
     two_day_teams, one_day_overs = set(), []
     for mid, date, team, opponent, all_legs in group_legs(season):
         legs = match_legs(all_legs)
-        code = legs[0].get("type_code")
-        if code == 1:
+        # THE PROFILE SAYS WHICH CODES ARE TWO DAY AND ONE DAY. Another club's
+        # codes are not Shoalwater's 1 and 4, so they are read from the active
+        # format table and never written here.
+        fmt = FORMAT_BY_TYPE.get(legs[0].get("type_code"))
+        if fmt == "Two Day":
             two_day_teams.add(team)
-        elif code == 4:
+        elif fmt == "One Day":
             one_day_overs.append(total_overs(legs))
     return two_day_teams, (max(one_day_overs) if one_day_overs else 0.0)
 
@@ -1052,8 +1222,11 @@ def cross_check(source: Path, seasons: list) -> list:
     """
     out = []
     for s in seasons:
+        if not layout_named(s["layout"]).siblings:
+            continue
         year = str(s["year"])
-        fix_p, mch_p = source / f"DATA{year}.FIX", source / f"DATA{year}.MCH"
+        fix_p = source / f"{s['family']}{year}.FIX"
+        mch_p = source / f"{s['family']}{year}.MCH"
         mine = {m["index"]: m for m in s["matches"]}
         row = {"Season": s["season"], "Fixtures checked": "", "Fixtures agreeing": "",
                "Grounds checked": "", "Grounds agreeing": ""}
@@ -1526,7 +1699,296 @@ NOTES = [
 ]
 
 
-def write_xlsx(sheets: dict, checks: list, path: Path) -> None:
+# ── club profile ─────────────────────────────────────────────────────────────
+#
+# WHAT A FILE CANNOT SAY, a club has to. The team names and the match-type names
+# are not in a club's data export (CSFW keeps both lists in an installation
+# file), so they are supplied per club as a `Profile` and never assumed. Shoalwater
+# Bay's, derived and confirmed with the club, is built in and picked by the club
+# name in the file header. Any other club's comes from `--profile file.json`, or
+# just `--team-names` for the one thing most clubs need. A club with neither is
+# still extracted: every team reads `Grade #N (unmapped)` and every match type
+# `type N`, loudly, so nothing is quietly filed under another club's names.
+
+
+@dataclass
+class Profile:
+    name: str
+    club: str = ""                       # regex over the header's club name
+    team_names: dict = field(default_factory=dict)
+    legacy_team_names: dict = field(default_factory=dict)
+    match_types: dict = field(default_factory=dict)
+    finals_types: frozenset = frozenset()
+    format_by_type: dict = field(default_factory=dict)
+    # a club with several competitions keeps a separate team list for each file
+    # family (DATA, DAT1, ...): {"DAT1": {1: "Under 11", ...}}
+    families: dict = field(default_factory=dict)
+    # a side the club holds only text reports for: (season, grade), Shoalwater only
+    no_scorebook: tuple | None = None
+    notes: list | None = None            # the Notes sheet, where a club has its own
+
+
+SHOALWATER = Profile(
+    "shoalwater", r"shoalwater", dict(GRADE_NAMES), dict(LEGACY_GRADE_NAMES),
+    dict(MATCH_TYPES), FINALS_TYPES, dict(FORMAT_BY_TYPE),
+    no_scorebook=("1995/96", "C2 grade"), notes=NOTES)
+BUILTIN_PROFILES = [SHOALWATER]
+
+_PROFILE_KEYS = {"name", "club", "team_names", "legacy_team_names", "match_types",
+                 "finals_types", "format_by_type", "families"}
+
+
+def _int_keys(d: dict) -> dict:
+    return {int(k): v for k, v in d.items()}
+
+
+def load_profile(path: Path) -> Profile:
+    d = json.loads(path.read_text(encoding="utf-8"))
+    bad = sorted(set(d) - _PROFILE_KEYS)
+    if bad:
+        raise ValueError(f"{path.name}: unknown profile field(s): {', '.join(bad)}")
+    return Profile(
+        d.get("name", path.stem), d.get("club", ""),
+        _int_keys(d.get("team_names", {})), _int_keys(d.get("legacy_team_names", {})),
+        _int_keys(d.get("match_types", {})), frozenset(d.get("finals_types", [])),
+        _int_keys(d.get("format_by_type", {})),
+        {fam.upper(): _int_keys(names) for fam, names in d.get("families", {}).items()})
+
+
+def choose_profile(club: str, path: Path | None) -> Profile:
+    if path:
+        return load_profile(path)
+    for prof in BUILTIN_PROFILES:
+        if prof.club and re.search(prof.club, club, re.I):
+            return prof
+    return Profile("unprofiled")
+
+
+def activate(profile: Profile, family: str) -> None:
+    """Make `profile` (and this family's team list) the tables everything reads."""
+    global FINALS_TYPES
+    GRADE_NAMES.clear()
+    GRADE_NAMES.update(profile.families.get(family, profile.team_names))
+    LEGACY_GRADE_NAMES.clear()
+    LEGACY_GRADE_NAMES.update(profile.legacy_team_names)
+    MATCH_TYPES.clear()
+    MATCH_TYPES.update(profile.match_types)
+    FORMAT_BY_TYPE.clear()
+    FORMAT_BY_TYPE.update(profile.format_by_type)
+    FINALS_TYPES = profile.finals_types
+
+
+def layout_named(name: str) -> Layout:
+    return next((l for l in LAYOUTS.values() if l.name == name), LAYOUT_V1)
+
+
+def generic_notes(club: str, seasons: list, profile: Profile, family: str) -> list:
+    """The Notes sheet for a club with no notes of its own.
+
+    Everything here is measured off the files in hand or true of the format; the
+    Shoalwater notes quote that club's own confirmations and would be wrong, so
+    they are never shown for another club.
+    """
+    teams = Counter()
+    unnamed_types = Counter()
+    for s in seasons:
+        for mid, date, team, opp, legs in group_legs(s):
+            teams[team] += 1
+            code = legs[0].get("type_code")
+            if code not in MATCH_TYPES:
+                unnamed_types[code] += 1
+    named = ", ".join(f"{t} = {grade_label(t)}" for t in sorted(teams)
+                      if "(unmapped)" not in grade_label(t))
+    unmapped = sorted(t for t in teams if "(unmapped)" in grade_label(t))
+    notes = [
+        ("What this is", ""),
+        ("", f"{club}'s {family}<year>.AV files ({len(seasons)} seasons, "
+             f"{seasons[0]['season']} to {seasons[-1]['season']}), converted."),
+        ("", "One row per match, innings, spell or dismissal, exactly as the files hold it."),
+        ("", "Nothing is estimated: a figure the files do not carry is left blank."),
+        ("", ""),
+        ("Things worth knowing", ""),
+        ("Overs", "Cricket notation. 93.3 is 93 overs and 3 balls, so season totals are "
+                  "summed as balls and written back the same way."),
+        ("Team", "The files hold a team NUMBER on every fixture and no name for it. "
+                 + (f"Names used: {named}. " if named else "")
+                 + (f"No name was given for team(s) {', '.join(map(str, unmapped))}, "
+                    "so those read 'Grade #N (unmapped)' - pass --team-names or a profile "
+                    "to name them." if unmapped else "")),
+        ("Match type", "The files hold a match-type code and no name for it. "
+                       + (f"Codes with no name given: "
+                          f"{', '.join(f'{c} ({n} matches)' for c, n in sorted(unnamed_types.items(), key=lambda x: str(x[0])))}. "
+                          "They import with no format and are not marked as finals."
+                          if unnamed_types else "Every code in these files has a name.")),
+        ("Two innings a side", "Where a match is stored as two records, 'Opponent 1' and "
+                               "'Opponent 2' with the same date and team, they are one match "
+                               "here, with the Leg column saying which record a row came "
+                               "from. A second record with no figures is left out rather than "
+                               "imported as an innings nobody batted in."),
+        ("Match result", "Read from the club's own result field, not worked out from the "
+                         "scores. Check its counts against the club's CSFW summary screen "
+                         "before importing - the byte is the same one Shoalwater Bay's "
+                         "files use, but each layout should be confirmed, not assumed."),
+        ("Opposition", "The program only ever stored this club's own players, so there are "
+                       "no opposition batting or bowling cards - only their innings totals."),
+        ("Dismissals", "Codes 11 and 12 are not outs. Codes 0-4 read as bowled, caught, LBW, "
+                       "stumped and run out; 7, 10, 13, 14, 15, 29 and 37 are the other "
+                       "codes seen so far. A code outside those imports blank. Code 29 is "
+                       "read as the club answered --absent: absent out, or did not bat."),
+        ("Not recorded", "Balls faced, batting strike rate, run outs and the bowler or "
+                         "fielder who took a wicket are not in the format at all. They are "
+                         "left blank, never zeroed."),
+        ("Bowling flags", "An unidentified bitmask, present only on bowlers. Passed through raw."),
+        ("Which file to import", "manual_games_scorecards.csv - one row per player per match, "
+                                 "in the columns BetterCricket's scorecard import reads. "
+                                 "betterimport_season_stats.csv is the simpler alternative: "
+                                 "season totals per player, no match detail. Import one, "
+                                 "never both - the same runs would be counted twice."),
+        ("", ""),
+        ("Checks run against the files' own arithmetic", ""),
+    ]
+    return notes
+
+
+# ── analyse ──────────────────────────────────────────────────────────────────
+
+
+def probe_layout(buf: bytes) -> dict:
+    """What an UNRECOGNISED file holds, found rather than assumed.
+
+    The one table that can be located without knowing the layout is the fixture
+    list: every record carries a date as a Delphi day number (a whole float64 in
+    a plausible range) at a fixed stride, and nothing else in the file repeats
+    like that. From it come the record size and where the date sits; the columns
+    around the date that take only a few distinct values are the team and the
+    like. All of it is a CANDIDATE to be confirmed against the club's CSFW
+    screens, never a layout to use unchecked.
+    """
+    out = {"size": len(buf), "club": text(buf, 0, 30), "year": text(buf, 30, 4)}
+    cands = []
+    for p in range(0, len(buf) - 8):
+        if buf[p + 7] != 0x40:
+            continue
+        v = struct.unpack_from("<d", buf, p)[0]
+        if 10_000 <= v <= 60_000 and v == int(v):
+            cands.append(p)
+    cset = set(cands)
+    best = None
+    for stride in range(16, 401):
+        for p in cands:
+            if p - stride in cset:
+                continue
+            hits, misses, k = [p], 0, 1
+            while misses < 3 and p + k * stride < len(buf) - 8:
+                if p + k * stride in cset:
+                    hits.append(p + k * stride)
+                    misses = 0
+                else:
+                    misses += 1
+                k += 1
+            # >= so that on a tie the LARGER stride wins: half the true record
+            # size also lands on every date (and misses the others), but a
+            # multiple of it lands on fewer
+            if len(hits) >= 8 and (best is None or len(hits) >= len(best[1])):
+                best = (stride, hits)
+    if not best:
+        out["fixtures"] = None
+        return out
+    stride, hits = best
+    cols = []
+    for c in range(-8, stride - 8, 2):
+        vals = Counter()
+        for h in hits:
+            if h + c + 2 <= len(buf):
+                vals[i16(buf, h + c)] += 1
+        if 1 < len(vals) <= 30 and min(vals) >= 0:
+            cols.append((c, dict(sorted(vals.items()))))
+    name_at = None
+    for c in range(-8, stride - 8):
+        sample = [buf[h + c:h + c + 4] for h in hits[:20]]
+        if all(len(x) == 4 and all(32 <= b < 127 for b in x) for x in sample):
+            name_at = (c, text(buf, hits[0] + c, 32))
+            break
+    out["fixtures"] = {"record": stride, "first_date_at": hits[0], "dated": len(hits),
+                       "small_columns": cols[:8], "text_at": name_at}
+    return out
+
+
+def analyse(source: Path, profile_path: Path | None) -> None:
+    """Report on a folder without writing anything: layouts, families, teams."""
+    files = sorted(p for p in source.iterdir() if p.suffix.lower() == ".av")
+    if not files:
+        raise SystemExit(f"no .av files in {source}")
+    print(f"{len(files)} .AV files in {source}\n")
+    parsed, unknown = [], []
+    for p in files:
+        buf = p.read_bytes()
+        try:
+            lay = detect_layout(buf, p.name)
+        except LayoutError as e:
+            unknown.append((p, buf, str(e)))
+            continue
+        parsed.append(parse_file(p, lay))
+    layouts = Counter(s["layout"] for s in parsed)
+    for name, n in layouts.items():
+        print(f"layout {name}: {n} file(s)")
+    clubs = Counter(s["club"] for s in parsed)
+    print("club name in the headers: " + "; ".join(f"{c!r} x{n}" for c, n in clubs.items()))
+    if len(clubs) > 1:
+        print("  WARNING: more than one club name - is this folder one club's archive?")
+    fams = defaultdict(list)
+    for s in parsed:
+        fams[s["family"]].append(s)
+    profile = choose_profile(next(iter(clubs), ""), profile_path) if clubs else Profile("none")
+    print(f"profile: {profile.name}\n")
+    for fam, ss in sorted(fams.items()):
+        activate(profile, fam)
+        teams, types, results = Counter(), Counter(), Counter()
+        for s in ss:
+            for mid, date, team, opp, legs in group_legs(s):
+                teams[team] += 1
+                types[legs[0]["type_code"]] += 1
+                results[legs[0]["result_code"]] += 1
+        years = sorted(s["year"] for s in ss)
+        print(f"family {fam}: {len(ss)} file(s), {years[0]} to {years[-1]}, "
+              f"{sum(teams.values())} matches")
+        print("  teams (number = name): "
+              + ", ".join(f"{t} = {grade_label(t)} ({n})" for t, n in sorted(teams.items())))
+        print("  match types: "
+              + ", ".join(f"{c} = {match_type_label(c) or '?'} ({n})"
+                          for c, n in sorted(types.items())))
+        print("  result codes (compare with the club's CSFW summary screen): "
+              + ", ".join(f"{c} = {RESULT_LABELS.get(c, '?')} ({n})"
+                          for c, n in sorted(results.items())))
+        codes = Counter(b["dismissal_code"] for s in ss for m in s["matches"]
+                        for b in m["blocks"] if b["dismissal_code"] is not None)
+        odd = {c: n for c, n in codes.items() if c not in DISMISSALS}
+        if odd:
+            print(f"  dismissal codes with no name: {dict(sorted(odd.items()))}")
+        print()
+    siblings = Counter(p.suffix.lower() for p in source.iterdir()
+                       if p.is_file() and p.suffix.lower() not in (".av",))
+    if siblings:
+        print("other files: " + ", ".join(f"{e} x{n}" for e, n in sorted(siblings.items())))
+    for p, buf, why in unknown:
+        print(f"\nUNRECOGNISED {p.name}: {why}")
+        info = probe_layout(buf)
+        print(f"  header says club {info['club']!r}, year {info['year']!r}")
+        fx = info["fixtures"]
+        if not fx:
+            print("  no table of dates found, so this may not be a CSFW averages file")
+            continue
+        print(f"  fixture table: {fx['dated']} dated records, {fx['record']} bytes apart, "
+              f"first date at byte {fx['first_date_at']}")
+        if fx["text_at"]:
+            print(f"  opponent text {fx['text_at'][1]!r} at date{fx['text_at'][0]:+d}")
+        for c, vals in fx["small_columns"]:
+            print(f"  small-integer column at date{c:+d}: {vals}")
+        print("  These are candidates. Check them against the club's CSFW screens, then "
+              "describe the file with --layout (see Layout for the field names).")
+
+
+def write_xlsx(sheets: dict, checks: list, path: Path, notes: list | None = None) -> None:
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font
     from openpyxl.utils import get_column_letter
@@ -1537,7 +1999,7 @@ def write_xlsx(sheets: dict, checks: list, path: Path) -> None:
     ws = wb.create_sheet("Notes")
     ws.column_dimensions["A"].width = 22
     ws.column_dimensions["B"].width = 110
-    for a, b in NOTES:
+    for a, b in (NOTES if notes is None else notes):
         ws.append([a, b])
     for label, ok, total in checks:
         pct = f"{ok / total:.1%}" if total else "n/a"
@@ -1581,6 +2043,15 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("source", type=Path, help="folder holding the .AV files")
     ap.add_argument("-o", "--out", type=Path, default=Path("."), help="output folder")
+    ap.add_argument("--analyse", action="store_true",
+                    help="report what the folder holds (layouts, file families, team "
+                         "numbers, match types, result counts) and write nothing")
+    ap.add_argument("--layout", type=Path, metavar="FILE.json",
+                    help="describe a record layout the built-in one does not fit: a "
+                         "JSON object, or a list, of Layout fields keyed by file_len")
+    ap.add_argument("--profile", type=Path, metavar="FILE.json",
+                    help="the club's own team names and match types (see Profile). "
+                         "Shoalwater Bay's is built in and chosen by the header's club name")
     # THE BINARY HOLDS A CODE, NOT A WORD, so nothing in the file says which
     # reading this competition used - only the club can. Getting it wrong moves
     # a batting average, so it is asked for rather than assumed. Shoalwater Bay
@@ -1591,59 +2062,92 @@ def main() -> None:
                          "(default: out, as Shoalwater Bay confirmed)")
     ap.add_argument("--team-names", metavar="N=NAME,...",
                     help="the club's own names for its team numbers, e.g. "
-                         "'1=1st XI,2=2nd XI,3=3rd XI'. Overrides the built-in "
-                         "Shoalwater Bay grade map; read them off the club's "
-                         "CSFW Team list, since the names are not in the files")
+                         "'1=1st XI,2=2nd XI,3=3rd XI'. Overrides the profile's team "
+                         "names for every file family; read them off the club's CSFW "
+                         "Team list, since the names are not in the files")
     args = ap.parse_args()
     absent_is_out = args.absent == "out"
-    if args.team_names:
-        try:
+    try:
+        if args.layout:
+            register_layouts(args.layout)
+        if args.team_names:
             TEAM_NAME_OVERRIDES.update(parse_team_names(args.team_names))
-        except ValueError as e:
-            raise SystemExit(str(e))
+    except (ValueError, OSError) as e:
+        raise SystemExit(str(e))
+
+    if args.analyse:
+        analyse(args.source, args.profile)
+        return
 
     files = sorted(p for p in args.source.iterdir() if p.suffix.lower() == ".av")
     if not files:
         raise SystemExit(f"no .av files in {args.source}")
-    seasons = [parse_file(p) for p in files]
+    try:
+        all_seasons = [parse_file(p) for p in files]
+    except LayoutError as e:
+        raise SystemExit(str(e))
     args.out.mkdir(parents=True, exist_ok=True)
+    club = all_seasons[0]["club"]
+    profile = choose_profile(club, args.profile)
 
-    sheets = build_rows(seasons, absent_is_out)
-    sheets["Data quality"] = squad_clashes(seasons)
-    sheets["Cross-check"] = cross_check(args.source, seasons)
-    checks = verify(seasons)
-    stats = build_season_stats(seasons, absent_is_out=absent_is_out)
-    # The one side the club holds no scorebook for, from its own CSFW text
-    # reports. Season totals only - see `build_c2_season_rows`.
-    c2 = build_c2_season_rows(args.source, "1995/96", "C2 grade")
-    if c2:
-        sheets["C2 1995-96 (no scorebook)"] = c2
-        # ON ITS OWN AS WELL, and that is not a convenience. The match file and
-        # the season-totals file are alternatives - importing both counts every
-        # run twice - but C2 1995/96 exists in the season file ALONE, because
-        # there is no scorebook to make matches from. A club importing the
-        # match file would otherwise lose that side entirely, so it gets a file
-        # of its own that can be imported alongside without overlapping
-        # anything.
-        write_csv(c2, args.out / "betterimport_c2_1995-96.csv")
-        stats.extend(c2)
-        stats.sort(key=lambda x: (x["Season"], x.get("Grade", ""), x["Player"]))
-    write_xlsx(sheets, checks, args.out / "match_detail.xlsx")
-    write_csv(stats, args.out / "betterimport_season_stats.csv")
-    games = build_game_rows(seasons, seasons[0]["club"], absent_is_out)
-    write_csv(games, args.out / "manual_games_scorecards.csv")
+    # ONE OUTPUT SET PER FILE FAMILY. DATA and DAT1 are different competitions
+    # with different team lists, and one CSV across both would file every team
+    # number under whichever list happened to be active. With a single family
+    # the file names and game keys are exactly as they always were.
+    families = defaultdict(list)
+    for s in all_seasons:
+        families[s["family"]].append(s)
+    multi = len(families) > 1
+    print(f"{club}: {len(all_seasons)} files, {len(families)} file famil"
+          f"{'ies' if multi else 'y'}, profile {profile.name}")
+    for family, seasons in families.items():
+        activate(profile, family)
+        tag = f"_{family.lower()}" if multi else ""
+        if multi:
+            for s in seasons:
+                s["key_prefix"] = s["stem"]
+        sheets = build_rows(seasons, absent_is_out)
+        sheets["Data quality"] = squad_clashes(seasons)
+        sheets["Cross-check"] = cross_check(args.source, seasons)
+        checks = verify(seasons)
+        stats = build_season_stats(seasons, absent_is_out=absent_is_out)
+        # The one side the club holds no scorebook for, from its own CSFW text
+        # reports. Season totals only - see `build_c2_season_rows`.
+        c2 = (build_c2_season_rows(args.source, *profile.no_scorebook)
+              if profile.no_scorebook else [])
+        if c2:
+            sheets["C2 1995-96 (no scorebook)"] = c2
+            # ON ITS OWN AS WELL, and that is not a convenience. The match file and
+            # the season-totals file are alternatives - importing both counts every
+            # run twice - but C2 1995/96 exists in the season file ALONE, because
+            # there is no scorebook to make matches from. A club importing the
+            # match file would otherwise lose that side entirely, so it gets a file
+            # of its own that can be imported alongside without overlapping
+            # anything.
+            write_csv(c2, args.out / "betterimport_c2_1995-96.csv")
+            stats.extend(c2)
+            stats.sort(key=lambda x: (x["Season"], x.get("Grade", ""), x["Player"]))
+        notes = profile.notes or generic_notes(club, seasons, profile, family)
+        write_xlsx(sheets, checks, args.out / f"match_detail{tag}.xlsx", notes)
+        write_csv(stats, args.out / f"betterimport_season_stats{tag}.csv")
+        games = build_game_rows(seasons, club, absent_is_out)
+        write_csv(games, args.out / f"manual_games_scorecards{tag}.csv")
 
-    club = seasons[0]["club"]
-    print(f"{club}: {len(seasons)} seasons, {seasons[0]['season']} to {seasons[-1]['season']}")
-    for name, rows in sheets.items():
-        print(f"  {name:<16} {len(rows):>6} rows")
-    print(f"  season stats     {len(stats):>6} rows"
-          + (f"  (incl. {len(c2)} C2 1995/96 with no scorebook)" if c2 else ""))
-    print(f"  game scorecards  {len(games):>6} rows")
-    print()
-    for label, ok, total in checks:
-        pct = f"{ok / total:.1%}" if total else "n/a"
-        print(f"  {label:<58} {ok:>5} / {total:<5} {pct}")
+        print(f"\n{family}: {len(seasons)} seasons, "
+              f"{seasons[0]['season']} to {seasons[-1]['season']}")
+        for name, rows in sheets.items():
+            print(f"  {name:<16} {len(rows):>6} rows")
+        print(f"  season stats     {len(stats):>6} rows"
+              + (f"  (incl. {len(c2)} C2 1995/96 with no scorebook)" if c2 else ""))
+        print(f"  game scorecards  {len(games):>6} rows")
+        unmapped = sorted({grade_label(t) for s in seasons
+                           for _, _, t, _, _ in group_legs(s) if "(unmapped)" in grade_label(t)})
+        if unmapped:
+            print(f"  NO NAME GIVEN FOR: {', '.join(unmapped)} - see --team-names / --profile")
+        print()
+        for label, ok, total in checks:
+            pct = f"{ok / total:.1%}" if total else "n/a"
+            print(f"  {label:<58} {ok:>5} / {total:<5} {pct}")
 
 
 if __name__ == "__main__":

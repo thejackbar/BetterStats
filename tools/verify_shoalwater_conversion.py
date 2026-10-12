@@ -2,7 +2,7 @@
 
 The grade names and the match-type names are NOT in the .AV files - CSFW keeps
 both lists somewhere a club's data export does not reach - so both maps in
-`convert_shoalwater_av.py` are derived rather than read. This is what holds
+`csfw_extract.py` (the Shoalwater profile) are derived rather than read. This is what holds
 them to the data.
 
 Run with a control (the maps emptied, or an older converter) - every check
@@ -52,8 +52,9 @@ def load(path, name):
 
 
 spec = importlib.util.spec_from_file_location(
-    "conv", HERE / "convert_shoalwater_av.py")
+    "conv", HERE / "csfw_extract.py")
 m = importlib.util.module_from_spec(spec)
+sys.modules["conv"] = m          # a dataclass looks its own module up here
 spec.loader.exec_module(m)
 
 src = Path(sys.argv[1] if len(sys.argv) > 1 else HERE.parent / "data/shoalwater-av-2026-09")

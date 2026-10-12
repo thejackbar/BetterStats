@@ -59,6 +59,9 @@
 31. Reader: it transcribes faithfully; the ONE allowed deviation is inferring a blank result (`result_inferred`, flagged). `reconcile()` returns `[{kind, text}]`: `card_error` (card's own figures disagree, fix-or-keep) versus `misread`. Unticked "This card tracks" columns import as NULL, not 0 (migration 184; defaults stay `Optional[int] = 0`, only explicit null means unrecorded). Pre-1980 8-ball overs: `match.balls_per_over` (DB overs stay as written). Read EVERY occurrence of a name (bowling analysis is authority for bowlers, batting order for batters; never merge players sharing only a surname). Roster matching: `import_ingest.match_players` (auto-fill exact or one candidate at 0.9+). Run `scorecard_eval` before and after any prompt, schema or model change (`docs/scorecard-reader-eval.md`); uploads never teach the model.
 32. Jump-back edit replays `extracted_payload` through the upload review UI (photo uploads only); save is `PATCH /games/{id}`. `check_scorecard_duplicate` takes `exclude_id`. Delete and restore use the one audit trail (`/admin/manual-entries#audit`).
 
+**CSFW archives**
+33. There is ONE extractor, `tools/csfw_extract.py` (`docs/csfw-data-extraction.md`). Never copy it for a club: a record layout is a `Layout` (`--layout`), team and match-type names are a `Profile` (`--profile`, `--team-names`) because no data file holds them, and each file family (DATA, DAT1) is its own competition with its own output. Start any new club with `--analyse`. Never read another club's type codes or team names into a club that has no profile.
+
 ## Traps and failure signatures
 
 - Same total on both innings: rule 1. "All" lower than "Men's": rules 21, 22. "— vs —" or `home_team: None`: rule 7. Scores under the wrong team: rule 10. Bowlers bowl at own batters: rules 3, 8.

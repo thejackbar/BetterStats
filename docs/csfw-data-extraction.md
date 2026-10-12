@@ -5,8 +5,8 @@ spreadsheets BetterCricket can import. Written from the Shoalwater Bay Cricket
 Club conversion (15 seasons, 1992/93 to 2006/07, 914 matches), and meant to be
 followed for any other club that arrives with the same files.
 
-The working code is `tools/convert_shoalwater_av.py`. This document is the
-reasoning behind it: the byte layout, the rules, the exceptions that cost
+The working code is `tools/csfw_extract.py`, the ONE extractor for every club
+(see "One extractor" below). This document is the reasoning behind it: the byte layout, the rules, the exceptions that cost
 real matches when they were got wrong, and the checks that catch it.
 
 ---
@@ -21,7 +21,7 @@ anything else.
 |---|---|---|
 | What you receive | A folder of `DATA<year>.AV` binaries | A URL like `www2.cricketstatz.com/ss/w?mode=104&club=93931` |
 | Era | MS-DOS / early Delphi, 1990s to mid 2000s | Current, subscription hosted |
-| Reader | `tools/convert_shoalwater_av.py` | `backend/app/services/cricketstatz_*` |
+| Reader | `tools/csfw_extract.py` | `backend/app/services/cricketstatz_*` |
 | Output | Spreadsheets, imported by hand | In-app import wizard |
 | Covered by | Part 1 below | Part 2 below |
 
@@ -30,50 +30,80 @@ CricketStatz case. Part 1 is the bulk of this document because the binary
 format had to be reverse engineered and nothing else in this repository reads
 it.
 
+### One extractor, not one per club
+
+There is exactly one CSFW tool, `tools/csfw_extract.py`. A second script for a
+second club would drift, and the first sign of it was Payneham's CSV: it came
+from a different, older extractor (33 columns, no opposition or innings figures)
+and carried no team at all. What differs between clubs is data, so it is data:
+
+| What differs | Where it lives | How a club supplies it |
+|---|---|---|
+| **The record layout** of the files (table positions, record sizes, field offsets) | `Layout`; one is registered, `csfw-av-v1` (549,871 bytes) | Detected by file size and checked against the contents (a year that is not a year, fixture dates that are not dates, and the file is refused). A new one is a JSON file of only the fields that differ: `--layout v2.json` |
+| **The team names and match-type names**, which are in NO data file | `Profile`; Shoalwater Bay's is built in and chosen by the header's club name | `--profile club.json`, or just `--team-names "1=1st XI,2=2nd XI"`. With neither, teams read `Grade #N (unmapped)` and match types `type N`, loudly, never another club's names |
+| **File families**: one club's DATA, DAT1, DAT2... can be different competitions with different team lists | The first letters of the file name (`DAT12025.AV` is family `DAT1`, season 2025) | One profile, a `families` entry per family. One output set per family, with the family in the file names and game keys, so two competitions are never mixed into one CSV |
+| **How a competition scores code 29** | `--absent` | Asked of the club, never assumed |
+
+**Start with `--analyse`.** `python3 tools/csfw_extract.py <folder> --analyse`
+writes nothing. It reports each file's layout, the club name in the headers (and
+warns if the folder mixes clubs), then per family: every team number with its
+match count, every match-type code, the result-code counts to compare with the
+club's CSFW summary screen, and any dismissal code with no name. That is the
+list of questions to put to the club. For a file NO layout describes it says
+so, then probes it: it finds the fixture table (the only table that repeats at a
+fixed stride with a date in each record), reports the record size, where the
+date and the opponent text sit, and which columns take only a few values (the
+team and match-type candidates). Run against a real Shoalwater file it
+recovers the documented 54-byte record with the date at 123,313. Those are
+candidates to check against the club's CSFW screens, then describe with
+`--layout`; they are never used unchecked.
+
+**Never add Shoalwater's tables to another club.** The old converter's
+`season_format_context` read type codes 1 and 4 straight out of the code, so a
+second club's two-day matches would have been classed by Shoalwater's numbers.
+It now reads the active profile's format table, and a final's format stays blank
+where the profile knows no formats at all.
+
+Verification: `tools/verify_csfw_extract.py` (34 checks) builds archives in a
+layout the extractor was never written against (every table moved and resized,
+every field shifted), with two file families, an unprofiled club and two layouts
+in one folder, and runs the shipped code over them. `tools/verify_shoalwater_conversion.py`
+(30 checks) holds the Shoalwater profile to the real files. Run both with a
+control: `--module <old converter>` makes the first report what is missing.
+
 ### Payneham Cricket Club
 
-**There is no Payneham CSFW data in this repository.** No `.AV` file, no
-CricketStatz club id, no conversion output. The only mention of Payneham
-anywhere in the codebase is a Cricket Australia sync fix (the retired-not-out
-work in v9.66.0, which is about a live PlayHQ feed and has nothing to do with
-CSFW).
+Payneham's raw files are not in this repository. What exists is a CSV from the
+older extractor (`manual_games_scorecards_payneham.csv`, 7,834 games, 1932 to
+2025) with `grade_name`, `match_format`, `home_team` and `away_team` blank on
+every row. The `game_key` prefix (`data`, `dat1` to `dat6`, `datw`, `dath`) is
+the source FILE FAMILY, not the team.
 
-So either Payneham's files have not been supplied yet, or a different club was
-meant. When they arrive, run the checklist in section 10. The club name comes
-out of the file header, and the team names are the club's own, passed with
-`--team-names` (see below).
+**Their feedback (Oct 2026): the team is missing.** Their senior men's file for
+last season holds 75 matches across 1st to 5th XI, and in CSFW every match
+carries a **Team** (picked in the Team box on Match Details, from the list under
+User Preferences > User-Defined Types > Teams). Their CSV named the club, not the
+team, so nothing could be filed by grade. Match type is a second missing column:
+CSFW lists "Adelaide Turf" for 1st to 3rd XI and "Limited Over" for 4th and 5th.
 
-**Payneham's feedback on the first CSV (Oct 2026): the team is missing.** Their
-senior men's file for last season holds 75 matches across 1st to 5th XI, and in
-CSFW every match carries a **Team** (picked in the Team box on Match Details,
-from the list under User Preferences > User-Defined Types > Teams). The CSV we
-sent had the club name ("Payneham") in its "Team as stored" column on all 75
-rows, so every game looked like one team and nothing could be filed by grade.
-That CSV did not come from `convert_shoalwater_av.py` (it has "Match key" and
-"File" columns that script does not write) and the script that made it is not in
-this repository, so the cause is unconfirmed. Three things to settle with the
-real files before regenerating:
+**Rows in that CSV that disagree with CSFW's list**, to settle by re-extracting
+rather than patching: `data2025` has 66 of the 75 matches (keys 0 to 74 with
+17, 19, 20, 22, 23, 24, 39, 57 and 58 missing, probably the abandoned ones);
+`data2025-005` (Marion) and `-006` (Golden Grove) are WIN where CSFW has
+Abandoned, and `-007` (Goodwood) is LOSS where CSFW has Won. All three name 11
+or 12 players with no runs. That fits the fixture-slot trap in section 4, or a
+result byte at a different offset in their files. Reconcile every date and
+opponent against the 75-line list before trusting any other column.
 
-  * **Where the team lives.** In the `.AV` layout it is the fixture's team
-    number (section 4, offset 18). Check Payneham's files are the 549,871-byte
-    layout at all, then read that number per match, not the club name.
-  * **The names are not in the files** (section 6). Take them from the club's
-    CSFW Team list: pass `--team-names "1=1st XI,2=2nd XI,3=3rd XI,4=4th XI,5=5th XI"`.
-    Without it the converter would use Shoalwater's A/B/C/D map, which is wrong
-    here. A number nobody mapped still reads `Grade #N (unmapped)`.
-  * **Match type is a second missing column.** CSFW's list shows "Adelaide Turf"
-    for 1st to 3rd XI and "Limited Over" for 4th and 5th, so it also decides the
-    match format. See "Match type is byte 8" in section 6.
+**To finish Payneham** (needs their `DATA*.AV` files, every family, and ideally
+the `.FIX` and `.MCH` siblings):
 
-**Rows that disagree with CSFW's list, to check after regenerating.** CSFW shows
-25-Oct 4th XI v Marion and 5th XI v Golden Grove as Abandoned; the CSV has both
-as completed wins with full scores. It shows 25-Oct 1st XI v Goodwood as Won;
-the CSV has it lost by 40 (96 v 136). That pattern matches the fixture-slot trap
-in section 4, where a scorecard is paired with another match's fixture.
-Reconcile every date and opponent against the 75-line list before trusting any
-other column.
-
----
+  1. `--analyse` the folder and read the layout, the families, the team numbers
+     and the result counts.
+  2. Take each family's team list from the club's CSFW Team list into a profile.
+  3. If any file is "UNRECOGNISED", describe its layout from the probe and
+     confirm the result byte against the club's summary counts (section 5).
+  4. Extract, then reconcile the matches against CSFW's own list.
 
 # Part 1: the `.AV` binary format
 
@@ -879,14 +909,16 @@ under the CricketStatz headings.
 ## Appendix: running the converter
 
 ```bash
-python3 tools/convert_shoalwater_av.py <folder of .AV files> -o <output folder>
+python3 tools/csfw_extract.py <folder of .AV files> --analyse          # report only
+python3 tools/csfw_extract.py <folder of .AV files> -o <output folder> \
+    [--profile club.json] [--team-names "1=1st XI,2=2nd XI"] [--layout v2.json]
 ```
 
 It prints a row count per sheet and the seven checks. No network access, no
 database, no configuration.
 
-Despite the file name it is not Shoalwater specific. The club name comes out of
-the file header.
+The club name comes out of the file header. Shoalwater Bay's profile is built in
+and chosen by it; any other club needs its own (see "One extractor").
 
 ---
 
