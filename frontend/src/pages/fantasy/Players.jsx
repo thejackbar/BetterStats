@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../lib/api'
 import {
   Aurora, Avatar, DISP, tintBg, mix, money, pts, Btn, Field,
-  ROLE_LABEL, ROLE_SHORT, GREEN, AMBER, RED, CYAN, useFantasy, PriceTag, PriceArrow,
+  ROLE_LABEL, ROLE_SHORT, GREEN, AMBER, RED, CYAN, useFantasy, PriceTag, PriceArrow, MoverChips, byMover, moverEmpty,
 } from './ui'
 import { ScreenTitle, SectionLabel } from './shell'
 
@@ -269,19 +269,19 @@ function PoolPick({ pool, value, onChange, placeholder }) {
 }
 
 // ── Stats explorer ─────────────────────────────────────────────────────────────
-const SORTS = { total: (a, b) => b.total_points - a.total_points, gw: (a, b) => (b.last_round_points || 0) - (a.last_round_points || 0), price: (a, b) => b.price - a.price, sel: (a, b) => (b.selected_pct || 0) - (a.selected_pct || 0), name: (a, b) => a.name.localeCompare(b.name) }
+const SORTS = { total: (a, b) => b.total_points - a.total_points, gw: (a, b) => (b.last_round_points || 0) - (a.last_round_points || 0), price: (a, b) => b.price - a.price, sel: (a, b) => (b.selected_pct || 0) - (a.selected_pct || 0), rise: (a, b) => (b.price_change || 0) - (a.price_change || 0), fall: (a, b) => (a.price_change || 0) - (b.price_change || 0), name: (a, b) => a.name.localeCompare(b.name) }
 
 export function StatsExplorer({ pool, nav }) {
   const [role, setRole] = useState('all')
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState('total')
+  const [move, setMove] = useState('all')   // price movers: all | up | down
 
   const list = useMemo(() => {
     const term = search.trim().toLowerCase()
-    return (pool || [])
-      .filter(p => (role === 'all' || p.role === role) && (!term || p.name.toLowerCase().includes(term)))
-      .sort(SORTS[sort])
-  }, [pool, role, search, sort])
+    const l = (pool || []).filter(p => (role === 'all' || p.role === role) && (!term || p.name.toLowerCase().includes(term)))
+    return move === 'all' ? l.sort(SORTS[sort]) : byMover(l, move)
+  }, [pool, role, search, sort, move])
 
   return (
     <div>
@@ -293,10 +293,11 @@ export function StatsExplorer({ pool, nav }) {
           return <button key={k} onClick={() => setRole(k)} style={{ font: `${on ? 700 : 600} 11px 'Hanken Grotesk'`, color: on ? 'var(--ink)' : 'var(--dim)', background: on ? 'var(--pb-accent, #06B6D4)' : 'var(--surface2)', padding: '6px 11px', borderRadius: 8, border: 'none', cursor: 'pointer' }}>{l}</button>
         })}
       </div>
+      <div style={{ padding: '8px 0 0' }}><MoverChips value={move} onChange={setMove} /></div>
       <div style={{ display: 'flex', gap: 8, padding: '10px 0 4px' }}>
         <Field placeholder="⌕ Search" value={search} onChange={e => setSearch(e.target.value)} style={{ padding: '9px 12px', fontSize: 12 }} />
         <select value={sort} onChange={e => setSort(e.target.value)} style={{ background: 'var(--surface)', border: '1px solid var(--hairline)', borderRadius: 9, padding: '9px 12px', font: `600 12px 'Hanken Grotesk'`, color: 'var(--dim)', outline: 'none' }}>
-          <option value="total">Total</option><option value="gw">GW</option><option value="price">Price</option><option value="sel">Sel%</option><option value="name">Name</option>
+          <option value="total">Total</option><option value="gw">GW</option><option value="price">Price</option><option value="rise">Biggest rise</option><option value="fall">Biggest fall</option><option value="sel">Sel%</option><option value="name">Name</option>
         </select>
       </div>
 
@@ -306,6 +307,7 @@ export function StatsExplorer({ pool, nav }) {
         ))}
       </div>
       <div>
+        {!list.length && move !== 'all' && <p style={{ font: `500 12.5px 'Hanken Grotesk'`, color: 'var(--faint)', padding: '14px 4px' }}>{moverEmpty(move)}</p>}
         {list.map(p => (
           <button key={p.player_id} onClick={() => nav('player', { playerId: p.player_id, from: 'stats' })} style={{
             display: 'grid', gridTemplateColumns: '2fr 0.7fr 0.9fr 0.7fr 0.6fr 0.7fr', gap: 0, alignItems: 'center',

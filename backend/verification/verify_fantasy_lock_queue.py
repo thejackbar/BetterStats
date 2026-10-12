@@ -83,11 +83,12 @@ TODAY = date.today()
 NOW = datetime.now(timezone.utc)
 ORG = uuid.uuid4()
 A, B, C, D, E = (uuid.uuid4() for _ in range(5))
+FILL = [uuid.uuid4() for _ in range(5)]   # peers: a round needs enough players for prices to move
 FS_ID = uuid.uuid4()
 R1, R2 = uuid.uuid4(), uuid.uuid4()
 SQ_X, SQ_Y, SQ_Z = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
 MGR_X, MGR_Y, MGR_Z = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
-BASE = {A: 5.0, B: 14.0, C: 7.0, D: 6.0, E: 10.0}
+BASE = {A: 5.0, B: 14.0, C: 7.0, D: 6.0, E: 10.0, **{p: 6.0 for p in FILL}}
 MGR = {SQ_X: MGR_X, SQ_Y: MGR_Y, SQ_Z: MGR_Z}
 
 
@@ -126,15 +127,15 @@ async def seed() -> None:
         await s.flush()
         gr = Grade(id=uuid.uuid4(), season_id=sx.id, name="Firsts", grassroots_id="g1")
         s.add(gr)
-        s.add_all([Player(id=p, name=n, organisation_id=ORG, grassroots_id=f"p{i}")
-                   for i, (p, n) in enumerate(((A, "Ann Ace"), (B, "Bo Bat"), (C, "Cy Cap"), (D, "Di Dash"), (E, "Ed Extra")))])
+        named = [(A, "Ann Ace"), (B, "Bo Bat"), (C, "Cy Cap"), (D, "Di Dash"), (E, "Ed Extra")] + [(p, f"Fill {i + 1}") for i, p in enumerate(FILL)]
+        s.add_all([Player(id=p, name=n, organisation_id=ORG, grassroots_id=f"p{i}") for i, (p, n) in enumerate(named)])
         await s.flush()
-        # Round 1's game: A 50, B 10, D 40 (C and E do not play).
+        # Round 1's game: A 50, B 10, D 90 (a hundred-ish), five fillers on 20 (C and E do not play).
         gid = uuid.uuid4()
         s.add(Game(id=gid, grade_id=gr.id, played_at=TODAY - timedelta(days=1), home_team="Alpha", away_team="X",
                    home_org_id=ORG, status="COMPLETED"))
         await s.flush()
-        for pid, r in {A: 50, B: 10, D: 40}.items():
+        for pid, r in {A: 50, B: 10, D: 90, **{p: 20 for p in FILL}}.items():
             s.add(GameAppearance(game_id=gid, player_id=pid, team_name="Alpha"))
             s.add(BattingInnings(game_id=gid, player_id=pid, innings_number=1, runs=r, balls=r,
                                  fours=0, sixes=0, dismissal_type="bowled", not_out=False))

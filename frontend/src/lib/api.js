@@ -3851,6 +3851,7 @@ export const api = {
   fantasyPatchPool: (poolId, data) =>
     request(`/club-admin/fantasy/pool/${poolId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   fantasyListRounds: (seasonId) => request(`/club-admin/fantasy/season/${seasonId}/rounds`),
+  fantasyPriceMovements: (seasonId) => request(`/club-admin/fantasy/season/${seasonId}/price-movements`),
   fantasySetRoundLock: (roundId, lock_at) =>
     request(`/club-admin/fantasy/rounds/${roundId}/lock`, { method: 'PATCH', body: JSON.stringify({ lock_at }) }),
   fantasySettleRound: (roundId) =>

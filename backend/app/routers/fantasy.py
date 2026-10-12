@@ -234,6 +234,50 @@ async def list_pool(season_id: str, club=Depends(get_current_club), db: AsyncSes
     }
 
 
+@router.get("/season/{season_id}/price-movements")
+async def price_movements(season_id: str, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
+    """Every pool player's price movement: where they started, where they are, the
+    latest scored round's move, the move over the season and the last few rounds, for
+    the admin Price movements page. History is replayed from the scored rounds (the same
+    maths as the nightly recompute), so it is right even for a late scorecard; a price an
+    admin typed in is flagged and has no history."""
+    fs = await _load_season(db, club, season_id)
+    hist = await fantasy_pricing.season_history(db, fs)
+    rows = (await db.execute(
+        select(FantasyPoolPlayer, Player.name)
+        .join(Player, Player.id == FantasyPoolPlayer.player_id)
+        .where(FantasyPoolPlayer.fantasy_season_id == fs.id)
+    )).all()
+    players = []
+    for pp, name in rows:
+        h = hist["players"].get(str(pp.player_id), {}).get("history", []) if not pp.price_locked else []
+        players.append({
+            "player_id": str(pp.player_id), "name": name, "role": pp.role,
+            "base_price": float(pp.base_price), "price": float(pp.current_price),
+            "last_change": float(pp.price_change), "season_change": round(float(pp.current_price) - float(pp.base_price), 1),
+            "history": [{"round": rn, "move": mv, "price": px} for rn, mv, px in h[-6:]],
+            "total_points": float(pp.total_points), "last_round_points": float(pp.last_round_points),
+            "owned_count": pp.owned_count, "price_locked": bool(pp.price_locked), "is_available": bool(pp.is_available),
+        })
+    up = [p for p in players if p["last_change"] > 0]
+    down = [p for p in players if p["last_change"] < 0]
+    pick = lambda xs, key, rev: ({"name": xs[0]["name"], "change": xs[0][key]} if xs else None)  # noqa: E731
+    by_last = sorted(players, key=lambda p: p["last_change"])
+    by_season = sorted(players, key=lambda p: p["season_change"])
+    return {
+        "rounds": hist["rounds"],
+        "last_round": hist["rounds"][-1] if hist["rounds"] else None,
+        "summary": {
+            "risers": len(up), "fallers": len(down), "unchanged": len(players) - len(up) - len(down),
+            "biggest_riser": pick(list(reversed(by_last)), "last_change", True) if up else None,
+            "biggest_faller": pick(by_last, "last_change", False) if down else None,
+            "season_riser": pick(list(reversed(by_season)), "season_change", True) if any(p["season_change"] > 0 for p in players) else None,
+            "season_faller": pick(by_season, "season_change", False) if any(p["season_change"] < 0 for p in players) else None,
+        },
+        "players": players,
+    }
+
+
 class PoolPatch(BaseModel):
     role: str | None = None
     is_available: bool | None = None

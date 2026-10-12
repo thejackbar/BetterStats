@@ -1,9 +1,12 @@
 """Verification for Fantasy player price movement, against a real Postgres.
 
-Reported: player prices never changed after a round was scored (the design said they
+Reported (1): player prices never changed after a round was scored (the design said they
 should move on performances), there were no arrows to show a rise or fall, and a
 sale returned the purchase price plus half the rise, so the bank did not follow the
 player's price.
+Reported (2): once prices did move, nearly everyone went up by the 0.5 cap: a cheap
+player on 41 points rose as far as one on 82 or 150. The rule compared a score with what
+the STARTING price implied, which is about nothing for a player on the floor price.
 
 Runs the SHIPPED `services/fantasy_engine` settle/unsettle, `services/fantasy_pricing`,
 the `routers/fantasy` pool PATCH body and the `routers/public_fantasy` `me` and
@@ -55,6 +58,9 @@ try:
     from app.services import fantasy_pricing
 except ImportError:
     fantasy_pricing = None
+# The rule's own functions are read through hasattr so the previous commit (which has a
+# different rule) reports failed checks instead of crashing.
+HAS_RULE = fantasy_pricing is not None and hasattr(fantasy_pricing, "peer_moves")
 
 DB = os.environ["DATABASE_URL"]
 engine = create_async_engine(DB, echo=False)
@@ -80,11 +86,20 @@ def near(a, b, eps=1e-6) -> bool:
 TODAY = date.today()
 ORG = uuid.uuid4()
 A, B, C, D, E = (uuid.uuid4() for _ in range(5))   # players
+LOW = [uuid.uuid4() for _ in range(7)]             # on or near the floor price, 41 points in round 1
+L82 = uuid.uuid4()                                 # cheap, 82 points in round 1
+MID = [uuid.uuid4() for _ in range(3)]
 FS_ID = uuid.uuid4()
 R1, R2 = uuid.uuid4(), uuid.uuid4()
 SQ_X, SQ_Y = uuid.uuid4(), uuid.uuid4()
 MGR_X, MGR_Y = uuid.uuid4(), uuid.uuid4()
-BASE = {A: 5.0, B: 14.0, C: 7.0, D: 8.0, E: 10.0}
+BASE = {A: 5.0, B: 14.0, C: 7.0, D: 8.0, E: 10.0, L82: 4.5}
+BASE.update(dict(zip(LOW, (4.0, 4.0, 4.0, 4.5, 4.5, 5.0, 5.0))))
+BASE.update(dict(zip(MID, (8.0, 8.5, 9.0))))
+# Runs per player per round. Batting only, no boundaries: points = runs + 4 for turning out,
+# +16 from 50 runs and +32 from 100 (not both). 37 runs = 41 points, 62 runs = 82, 110 runs = 146.
+R1_RUNS = {A: 110, B: 6, C: 30, L82: 62, **{p: 37 for p in LOW}, **{p: 25 for p in MID}}
+R2_RUNS = {A: 20, C: 30, **{p: 37 for p in LOW}, **{p: 25 for p in MID}}
 
 
 async def build_schema() -> None:
@@ -122,11 +137,12 @@ async def seed() -> None:
         await s.flush()
         gr = Grade(id=uuid.uuid4(), season_id=sx.id, name="Firsts", grassroots_id="g1")
         s.add(gr)
-        s.add_all([Player(id=p, name=n, organisation_id=ORG, grassroots_id=f"p{i}")
-                   for i, (p, n) in enumerate(((A, "Ann Ace"), (B, "Bo Bat"), (C, "Cy Cap"), (D, "Di Idle"), (E, "Ed Extra")))])
+        names = {A: "Ann Ace", B: "Bo Bat", C: "Cy Cap", D: "Di Idle", E: "Ed Extra", L82: "Lo Eighty"}
+        names.update({p: f"Low {i + 1}" for i, p in enumerate(LOW)})
+        names.update({p: f"Mid {i + 1}" for i, p in enumerate(MID)})
+        s.add_all([Player(id=p, name=n, organisation_id=ORG, grassroots_id=f"p{i}") for i, (p, n) in enumerate(names.items())])
         await s.flush()
-        # Round 1 game: A 50, B 10, C 30. Round 2 game: A 20 only (B does not play).
-        for gdate, runs in ((TODAY - timedelta(days=18), {A: 50, B: 10, C: 30}), (TODAY - timedelta(days=9), {A: 20})):
+        for gdate, runs in ((TODAY - timedelta(days=18), R1_RUNS), (TODAY - timedelta(days=9), R2_RUNS)):
             gid = uuid.uuid4()
             s.add(Game(id=gid, grade_id=gr.id, played_at=gdate, home_team="Alpha", away_team="X",
                        home_org_id=ORG, status="COMPLETED"))
@@ -215,36 +231,83 @@ def stub_public(manager_id) -> None:
     public_fantasy._manager_for_session = manager_for_session
 
 
+async def expected_prices(start: dict | None = None, fixed: set | None = None) -> dict:
+    """The prices the pure rule gives for the scored rounds as stored in the database,
+    {player: (price, last move)}. Reads only the points and rounds, so it checks that the
+    shipped recompute wires the database to the rule, not just the rule."""
+    async with Session() as s:
+        rnds = (await s.execute(text("SELECT id, round_number FROM fantasy_rounds WHERE status = 'scored' ORDER BY round_number"))).all()
+        rounds = []
+        for rid, rn in rnds:
+            rows = (await s.execute(text(
+                "SELECT player_id, total_points, games_counted FROM fantasy_player_round_scores WHERE round_id = :r"), {"r": rid})).all()
+            rounds.append((rn, {str(p): float(t) / max(int(g), 1) for p, t, g in rows}))
+        if start is None:
+            start = {str(p): float(b) for p, b in (await s.execute(text("SELECT player_id, base_price FROM fantasy_pool_players"))).all()}
+    res = fantasy_pricing.replay_season(start, fixed or set(), rounds)
+    return {uuid.UUID(k): (v["price"], v["last"]) for k, v in res.items()}
+
+
 async def main_checks() -> None:
-    org_rows = None
     print("0. The movement rule on its own")
-    if fantasy_pricing is None:
-        check("services/fantasy_pricing exists", False, "no price movement module")
+    if not HAS_RULE:
+        check("prices move relative to the other players in the round (peer_moves)", False, "the module has no such rule")
     else:
-        up, mv = fantasy_pricing.step_price(5.0, 5.0, [90.0])
-        check("a big score moves the price up by at most 0.5", near(up, 5.5) and near(mv, 0.5), f"{up} {mv}")
-        dn, mv = fantasy_pricing.step_price(14.0, 14.0, [0.0])
-        check("a blank moves a star down by at most 0.5", near(dn, 13.5) and near(mv, -0.5), f"{dn} {mv}")
-        check("a price never goes below the floor",
-              near(fantasy_pricing.step_price(4.0, 4.0, [0.0, 0.0])[0], 4.0))
-        check("a player who did not play does not move", fantasy_pricing.replay(10.0, [None, None]) == (10.0, 0.0))
-        check("one round cannot move a price further than the cap",
-              all(abs(fantasy_pricing.step_price(p, 9.0, [pts])[1]) <= 0.5 + 1e-9
-                  for p in (4.0, 9.0, 15.0) for pts in (0.0, 30.0, 500.0)))
-        check("replay is deterministic", fantasy_pricing.replay(8.0, [40, None, 10]) == fantasy_pricing.replay(8.0, [40, None, 10]))
+        import random
+        random.seed(11)
+        club = {}
+        for i in range(80):
+            price = random.choice([4.0] * 30 + [5.0] * 20 + [7.0] * 12 + [9.0] * 10 + [12.0] * 8)
+            club[f"p{i}"] = (max(4.0, random.gauss(15 + (price - 4) * 5, 20)), price)
+        mv = fantasy_pricing.peer_moves(club)
+        check("moves are whole tenths held to the 0.5 cap", all(abs(v) <= 0.5 + 1e-9 and abs(v * 10 - round(v * 10)) < 1e-9 for v in mv.values()))
+        check("a round nets out to about nothing, so prices cannot all drift one way", abs(sum(mv.values()) / len(mv)) < 0.05, repr(sum(mv.values()) / len(mv)))
+        check("most players move 0.2 or less on an ordinary round", sum(abs(v) <= 0.2 for v in mv.values()) >= 0.9 * len(mv))
+        club_boost = {k: (v[0] * 1.5, v[1]) for k, v in club.items()}
+        check("everyone scoring more (a flat track) moves nobody on average", abs(sum(fantasy_pricing.peer_moves(club_boost).values()) / len(club)) < 0.05)
+
+        def move_for(pts, price):
+            s_ = dict(club)
+            s_["x"] = (pts, price)
+            return fantasy_pricing.peer_moves(s_)["x"]
+        m41, m82, m150 = move_for(41, 4.5), move_for(82, 4.5), move_for(150, 4.5)
+        check("a cheap player on 41 points no longer gets the full 0.5", m41 < 0.5 and m41 <= 0.2, repr(m41))
+        check("82 points is worth clearly more than 41, and 150 (a century) gets the 0.5", m41 < m82 < 0.5 <= m150, repr((m41, m82, m150)))
+        check("a star's flop falls, but not past the cap", -0.5 <= move_for(8, 13.0) < 0, repr(move_for(8, 13.0)))
+        check("fewer than 6 players makes no moves", fantasy_pricing.peer_moves({f"q{i}": (50.0 + i * 20, 5.0 + i) for i in range(5)}) == {f"q{i}": 0.0 for i in range(5)})
+        rep1 = fantasy_pricing.replay_season({"a": 5.0, "b": 4.0}, set(), [(1, {"a": 90.0})])
+        check("a player who did not play does not move", rep1["b"]["price"] == 4.0 and rep1["b"]["last"] == 0.0)
+        floor = fantasy_pricing.replay_season({f"f{i}": 4.0 for i in range(8)}, set(), [(1, {f"f{i}": 0.0 if i == 0 else 90.0 for i in range(8)})])
+        check("a price never goes below the floor", all(v["price"] >= 4.0 for v in floor.values()))
+        locked = fantasy_pricing.replay_season({f"f{i}": 6.0 for i in range(8)}, {"f0"}, [(1, {f"f{i}": 200.0 if i == 0 else 20.0 for i in range(8)})])
+        check("a locked price never moves, while the others still do",
+              locked["f0"]["price"] == 6.0 and locked["f1"]["price"] != 6.0, repr((locked["f0"], locked["f1"])))
 
     print("1. Nothing moves before a round is scored")
     p0 = await prices()
     check("every player is on their starting price", all(near(p0[p][0], BASE[p]) and near(p0[p][1], 0) for p in BASE), repr(p0))
 
-    print("2. Settling round 1 moves prices on performances")
+    print("2. Settling round 1: moves follow the score, and cheap players are not all on the cap")
     await settle(R1)
     p1 = await prices()
     pts1 = await round_points(R1)
-    check("the player who scored well rose by the 0.5 cap", near(p1[A][0], 5.5) and near(p1[A][1], 0.5), repr(p1[A]))
-    check("the star who scored poorly fell by the 0.5 cap", near(p1[B][0], 13.5) and near(p1[B][1], -0.5), repr(p1[B]))
-    check("player scores exist for those who played", set(pts1) >= {A, B, C}, repr(pts1))
-    check("a player who did not play has not moved", near(p1[D][0], BASE[D]) and near(p1[D][1], 0), repr(p1[D]))
+    check("player scores exist for those who played", set(pts1) == set(R1_RUNS), repr(len(pts1)))
+    check("41 points is 41 points (the setup is what the report describes)", all(near(pts1[p], 41) for p in LOW), repr([pts1[p] for p in LOW]))
+    cheap41 = [p1[p][1] for p in LOW]
+    check("no cheap player on 41 points is on the 0.5 cap", all(m < 0.5 for m in cheap41), repr(cheap41))
+    check("a cheap 41 is worth no more than 0.2", all(m <= 0.2 + 1e-9 for m in cheap41), repr(cheap41))
+    check("82 points moves a price clearly more than 41 and still not to the cap", p1[L82][1] - max(cheap41) >= 0.1 and p1[L82][1] < 0.5, repr((p1[L82], cheap41)))
+    check("a century (146 points) earns the full 0.5", near(p1[A][1], 0.5) and near(p1[A][0], 5.5), repr(p1[A]))
+    check("a star who flopped (10 points) falls, by less than the cap", -0.5 < p1[B][1] <= -0.2, repr(p1[B]))
+    moved = [p1[p][1] for p in R1_RUNS]
+    check("the round nets out to about nothing (they cannot all go up)", abs(sum(moved) / len(moved)) < 0.15, repr(sum(moved) / len(moved)))
+    check("some players went down and some up", min(moved) < 0 < max(moved), repr(sorted(moved)))
+    check("players who did not play have not moved", all(near(p1[p][0], BASE[p]) and near(p1[p][1], 0) for p in (D, E)), repr((p1[D], p1[E])))
+    check("every move is a whole tenth within the cap", all(abs(m) <= 0.5 + 1e-9 and abs(m * 10 - round(m * 10)) < 1e-6 for m in moved))
+    if HAS_RULE:
+        want = await expected_prices()
+        check("the stored prices are what the rule gives for the stored scores", all(near(p1[p][0], want[p][0]) and near(p1[p][1], want[p][1]) for p in BASE),
+              repr([(p, p1[p], want[p]) for p in BASE if not near(p1[p][0], want[p][0])][:2]))
 
     print("3. Settling the same round again does not move it twice")
     await settle(R1)
@@ -252,11 +315,11 @@ async def main_checks() -> None:
     check("prices are the same after a second settle", p1b == p1, f"{p1} -> {p1b}")
 
     print("4. The bank follows the price (sale at the current price)")
-    # Put the prices in the shape the new rule produces so the sale checks run the same
-    # against the previous commit, which never moved them.
+    # Fix the two prices the sale checks use, so they run the same against the previous
+    # commit (which never moved a price) and do not depend on the movement rule.
     async with Session() as s:
-        await s.execute(text("UPDATE fantasy_pool_players SET current_price = 5.5 WHERE player_id = :p"), {"p": A})
-        await s.execute(text("UPDATE fantasy_pool_players SET current_price = 13.5 WHERE player_id = :p"), {"p": B})
+        await s.execute(text("UPDATE fantasy_pool_players SET current_price = 5.5, price_change = 0.5 WHERE player_id = :p"), {"p": A})
+        await s.execute(text("UPDATE fantasy_pool_players SET current_price = 13.5, price_change = -0.5 WHERE player_id = :p"), {"p": B})
         await s.commit()
     stub_public(MGR_Y)
     async with Session() as s:
@@ -273,30 +336,37 @@ async def main_checks() -> None:
         async with Session() as s:
             return await public_fantasy.transfer("tok", public_fantasy.TransferBody(out_player_id=str(out_p), in_player_id=str(in_p)),
                                                  SimpleNamespace(), db=s)
+    async with Session() as s:
+        d_price = float((await s.execute(text("SELECT current_price FROM fantasy_pool_players WHERE player_id = :p"), {"p": D})).scalar())
+        e_price = float((await s.execute(text("SELECT current_price FROM fantasy_pool_players WHERE player_id = :p"), {"p": E})).scalar())
     r = await do_transfer(MGR_Y, A, D)
-    check("selling a player who rose banks the whole rise (95 + 5.5 - 8 = 92.5)", near(r["budget_remaining"], 92.5), repr(r))
+    check(f"selling a player who rose banks the whole rise (95 + 5.5 - {d_price} = {95 + 5.5 - d_price})", near(r["budget_remaining"], 95 + 5.5 - d_price), repr(r))
     async with Session() as s:
         await s.execute(text("UPDATE fantasy_squad_players SET is_captain = false WHERE squad_id = :s"), {"s": SQ_X})
         await s.execute(text("UPDATE fantasy_squad_players SET is_captain = true WHERE squad_id = :s AND player_id = :p"), {"s": SQ_X, "p": A})
         await s.commit()
     r = await do_transfer(MGR_X, B, E)
-    check("selling a player who fell takes the fall (81 + 13.5 - 10 = 84.5)", near(r["budget_remaining"], 84.5), repr(r))
+    check(f"selling a player who fell takes the fall (81 + 13.5 - {e_price} = {81 + 13.5 - e_price})", near(r["budget_remaining"], 81 + 13.5 - e_price), repr(r))
 
     print("5. Round 2: a player who sat out does not move; the rest compound")
     await settle(R2)
     p2 = await prices()
     pts2 = await round_points(R2)
-    check("round 2 scored only A", set(pts2) == {A}, repr(pts2))
-    if fantasy_pricing is not None:
-        want_a = fantasy_pricing.replay(BASE[A], [pts1[A], pts2[A]])
-        check("A's price is the replay of both rounds", near(p2[A][0], want_a[0]) and near(p2[A][1], want_a[1]), f"{p2[A]} vs {want_a}")
-    check("B sat out round 2, so no move this round", near(p2[B][0], 13.5) and near(p2[B][1], 0), repr(p2[B]))
+    check("round 2 scored the players who turned out", set(pts2) == set(R2_RUNS) and B not in pts2, repr(len(pts2)))
+    if HAS_RULE:
+        want = await expected_prices()
+        check("every price is the replay of both rounds", all(near(p2[p][0], want[p][0]) and near(p2[p][1], want[p][1]) for p in BASE),
+              repr([(p, p2[p], want[p]) for p in BASE if not near(p2[p][0], want[p][0])][:2]))
+    check("B sat out round 2, so no move this round", near(p2[B][1], 0), repr(p2[B]))
     check("A's round 2 move is the gap between the two prices", near(p2[A][1], p2[A][0] - p1[A][0]), f"{p1[A]} -> {p2[A]}")
+    check("a cheap 41 stays a small move in round 2 too (no century in the pack, so a tenth or so)",
+          all(abs(p2[p][1]) <= 0.2 + 1e-9 for p in LOW), repr([p2[p][1] for p in LOW]))
 
     print("6. Unsettling takes the movement back")
     await unsettle(R2)
     pu = await prices()
-    check("round 2 off: A is back to round 1's price and move", near(pu[A][0], 5.5) and near(pu[A][1], 0.5), repr(pu[A]))
+    check("round 2 off: everyone is back to their round 1 price and move",
+          all(near(pu[p][0], p1[p][0]) and near(pu[p][1], p1[p][1]) for p in BASE), repr([(p, pu[p], p1[p]) for p in BASE if not near(pu[p][0], p1[p][0])][:2]))
     await unsettle(R1)
     pu = await prices()
     check("round 1 off too: everyone is on their starting price", all(near(pu[p][0], BASE[p]) and near(pu[p][1], 0) for p in BASE), repr(pu))
@@ -304,6 +374,27 @@ async def main_checks() -> None:
     await settle(R2)
     p3 = await prices()
     check("settling again gives the same prices as the first time", p3 == p2, f"{p2} -> {p3}")
+
+    print("6b. The admin Price movements page shows the same prices, and how they got there")
+    route = getattr(fantasy_router, "price_movements", None)
+    if route is None:
+        check("there is a price movements route for the admin", False, "no price_movements in the routes module")
+    else:
+        async with Session() as s:
+            res = await route(str(FS_ID), club=SimpleNamespace(id=ORG), db=s, _=None)
+        by = {uuid.UUID(p["player_id"]): p for p in res["players"]}
+        check("every pool player is listed", set(by) == set(BASE), repr(len(by)))
+        check("price and last move are the stored ones", all(near(by[p]["price"], p3[p][0]) and near(by[p]["last_change"], p3[p][1]) for p in BASE))
+        check("the season move is price less the starting price", all(near(by[p]["season_change"], p3[p][0] - BASE[p]) for p in BASE))
+        check("the history adds up to the season move", all(near(sum(h["move"] for h in by[p]["history"]), by[p]["season_change"]) for p in BASE))
+        check("a player who sat out round 2 has only round 1 in their history", [h["round"] for h in by[B]["history"]] == [1], repr(by[B]["history"]))
+        check("the latest round is reported", res["last_round"] == 2, repr(res["last_round"]))
+        sm = res["summary"]
+        check("the risers and fallers counts match the list",
+              sm["risers"] == sum(1 for p in BASE if p3[p][1] > 0) and sm["fallers"] == sum(1 for p in BASE if p3[p][1] < 0)
+              and sm["risers"] + sm["fallers"] + sm["unchanged"] == len(BASE), repr(sm))
+        top = max(BASE, key=lambda p: p3[p][1])
+        check("the biggest riser is named", sm["biggest_riser"] is not None and near(sm["biggest_riser"]["change"], p3[top][1]), repr(sm["biggest_riser"]))
 
     print("7. A price an admin typed in stays put")
     org = SimpleNamespace(id=ORG)
@@ -319,13 +410,14 @@ async def main_checks() -> None:
         async with Session() as s:
             await fantasy_router.patch_pool_player(str(pool_id), fantasy_router.PoolPatch(price_locked=False), club=org, db=s, _=None)
         pc = (await prices())[C]
-        check("handing it back to auto replays the rounds onto the starting price", pc[0] != 9.0 and abs(pc[0] - BASE[C]) <= 1.0 + 1e-9, repr(pc))
+        want = await expected_prices() if HAS_RULE else {C: (None, None)}
+        check("handing it back to auto replays the rounds onto the starting price", near(pc[0], want[C][0]) and near(pc[1], want[C][1]) and pc[0] != 9.0, f"{pc} vs {want[C]}")
 
     print("8. A season scored before price movement existed catches up")
     async with Session() as s:
         await s.execute(text("UPDATE fantasy_pool_players SET current_price = base_price, price_change = 0"))
         await s.commit()
-    if fantasy_pricing is None:
+    if not HAS_RULE:
         check("recompute_prices exists", False, "no price movement module")
     else:
         async with Session() as s:
@@ -376,7 +468,7 @@ async def main_checks() -> None:
             check("a later boot does not lock a price the movement set", locked == {E}, repr(locked))
 
     print("10. Recalculating prices replays the scored rounds onto the new baseline")
-    if fantasy_pricing is None or not await has_column():
+    if not HAS_RULE or not await has_column():
         check("recalculate needs the pricing module", False, "absent")
     else:
         async with Session() as s:
@@ -401,7 +493,9 @@ async def main_checks() -> None:
             await s.commit()
         async with Session() as s:
             row = (await s.execute(text("SELECT base_price, current_price, price_locked, price_change FROM fantasy_pool_players WHERE player_id = :p"), {"p": A})).first()
-        want = fantasy_pricing.replay(float(row[0]), [pts1[A], pts2[A]])
+        async with Session() as s:
+            bases = {str(p): float(b) for p, b in (await s.execute(text("SELECT player_id, base_price FROM fantasy_pool_players"))).all()}
+        want = (await expected_prices(start=bases))[A]
         check("a reset takes a new baseline", not near(row[0], BASE[A]) and float(row[0]) > 5.0, repr(tuple(row)))
         check("a reset clears the lock", row[2] is False, repr(tuple(row)))
         check("a reset replays the scored rounds onto the new baseline", near(row[1], want[0]) and near(row[3], want[1]), f"{tuple(row)} vs {want}")
