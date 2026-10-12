@@ -3216,6 +3216,60 @@ def _read_game_csv(content: str) -> tuple[list[dict], list[str], list[str]]:
     return rows, unknown, missing
 
 
+# Columns the importer reads as a whole number or an overs figure. A cell in one
+# of these that is not a number (a stray backtick from a mistyped 1, "n/a", a
+# note typed into the wrong column) used to reach `_parse_int` unguarded in the
+# review step and come back as a bare "Internal Server Error".
+_GAME_FLOAT_COLUMNS = frozenset({"bowling_overs", "innings_overs", "opp_overs"})
+_GAME_INT_COLUMNS = frozenset(
+    {"innings_number", "batting_position", "batting_runs", "batting_balls",
+     "batting_fours", "batting_sixes", "bowling_maidens", "bowling_runs",
+     "bowling_wickets", "bowling_wides", "bowling_no_balls", "bowling_order",
+     "fielding_catches", "fielding_catches_wk", "fielding_run_outs",
+     "fielding_stumpings", "opp_innings_number", "fow_wicket", "fow_score"}
+    | {p + s for p in ("innings_", "opp_")
+       for s in ("total", "wickets", "byes", "leg_byes", "wides", "no_balls",
+                 "penalty", "extras")}
+) - _GAME_FLOAT_COLUMNS
+
+
+def _bad_number_cells(rows: list[dict]) -> list[dict]:
+    """Every numeric cell on the sheet that is not a number, in sheet order.
+
+    `row` counts data rows from 2 (the header is row 1), the same numbering
+    `_group_by_game` uses. The game and player are named as well, because a
+    blank line in the file shifts the count and the club finds the cell by
+    who it belongs to.
+    """
+    out: list[dict] = []
+    for idx, raw in enumerate(rows):
+        for col in _GAME_INT_COLUMNS | _GAME_FLOAT_COLUMNS:
+            v = raw.get(col)
+            if v is None or str(v).strip() == "":
+                continue
+            try:
+                _parse_float(v) if col in _GAME_FLOAT_COLUMNS else _parse_int(v)
+            except (ValueError, OverflowError):
+                out.append({"index": idx, "row": idx + 2,
+                            "game_key": (raw.get("game_key") or "").strip(),
+                            "player": (raw.get("player_name") or "").strip(),
+                            "column": col, "value": str(v).strip()})
+    out.sort(key=lambda b: (b["index"], b["column"]))
+    return out
+
+
+def _bad_cells_message(bad: list[dict]) -> str:
+    shown = "; ".join(
+        f"row {b['row']}"
+        + (f" ({b['player']}, game {b['game_key']})" if b["player"] else
+           f" (game {b['game_key']})" if b["game_key"] else "")
+        + f", {b['column']}: '{b['value']}'"
+        for b in bad[:6])
+    more = f" and {len(bad) - 6} more" if len(bad) > 6 else ""
+    return (f"{len(bad)} cell(s) in number columns are not numbers: {shown}{more}. "
+            "Correct them in the spreadsheet and choose the file again.")
+
+
 def _season_label_year(label: str) -> Optional[int]:
     return _season_start_year(label)
 
@@ -3425,6 +3479,16 @@ async def _resolve_games(
     for a caller that has not resolved them itself.
     """
     rows = (req.rows or []) if rows is None else rows
+    # A cell that is not a number is reported, not parsed: every figure the
+    # review totals up reads through `_parse_int`, so a copy of the sheet with
+    # those cells blanked is what the rest of this function sees. The staged
+    # rows are untouched, and the commit refuses while any remain (the club
+    # fixes the file and chooses it again).
+    bad_cells = _bad_number_cells(rows)
+    if bad_cells:
+        rows = list(rows)
+        for b in bad_cells:
+            rows[b["index"]] = {**rows[b["index"]], b["column"]: ""}
     by_game, group_errors = _group_by_game(rows)
 
     season_labels, grade_labels, names = [], [], []
@@ -3585,6 +3649,8 @@ async def _resolve_games(
     dup_synced += dup_scores
 
     warnings = []
+    if bad_cells:
+        warnings.append(_bad_cells_message(bad_cells))
     if unresolved:
         warnings.append(
             f"{len(unresolved)} player name(s) still need an answer: "
@@ -3610,6 +3676,8 @@ async def _resolve_games(
         "grade_options": grade_names,
         "warnings": warnings,
         "row_errors": group_errors[:50],
+        "bad_cells": [{k: v for k, v in b.items() if k != "index"} for b in bad_cells[:50]],
+        "bad_cell_count": len(bad_cells),
         "will_create": {
             "seasons": len(new_seasons),
             "grades": grade_rows_to_create,
@@ -3635,7 +3703,8 @@ async def _resolve_games(
         },
         "_plan": {"by_game": by_game, "smatch": smatch, "gmatch": gmatch,
                   "pmatch": pmatch, "grade_pairs": {k: sorted(v) for k, v in grade_pairs.items()},
-                  "unresolved": unresolved, "existing_by_game": existing_by_game},
+                  "unresolved": unresolved, "existing_by_game": existing_by_game,
+                  "bad_cells": bad_cells},
     }
 
 
@@ -3731,6 +3800,8 @@ async def commit_manual_games(
     rows = await _rows_for(db, req, org_id=club.id, user_id=current_user.id)
     resolved = await _resolve_games(db, club, req, rows)
     plan = resolved["_plan"]
+    if plan["bad_cells"]:
+        raise HTTPException(422, _bad_cells_message(plan["bad_cells"]))
     if plan["unresolved"]:
         raise HTTPException(422, resolved["warnings"][0])
     if not plan["by_game"]:

@@ -242,6 +242,45 @@ export function Toggle({ on, onClick }) {
   )
 }
 
+// A price movement arrow: green ▲ and the amount when a player's price rose after
+// the last scored round, red ▼ when it fell, nothing when it did not move.
+export function PriceArrow({ change }) {
+  const c = Math.round(Number(change || 0) * 10) / 10
+  if (!c) return null
+  const up = c > 0
+  const label = `${up ? 'Up' : 'Down'} ${Math.abs(c).toFixed(1)} after the last round`
+  return (
+    <span title={label} aria-label={label} style={{ color: up ? GREEN : RED, font: `700 0.85em 'Hanken Grotesk'`, marginLeft: 4, whiteSpace: 'nowrap' }}>
+      {up ? '▲' : '▼'}{Math.abs(c).toFixed(1)}
+    </span>
+  )
+}
+
+// Movers: filter a player list down to the players whose price rose or fell after the
+// last scored round, biggest move first (`byMover`), with the chips that pick the mode.
+export const MOVER_MODES = [['all', 'All'], ['up', '▲ Risers'], ['down', '▼ Fallers']]
+export function MoverChips({ value, onChange }) {
+  return (
+    <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+      {MOVER_MODES.map(([k, l]) => {
+        const on = value === k
+        const c = k === 'up' ? GREEN : k === 'down' ? RED : null
+        return (
+          <button key={k} onClick={() => onChange(k)} title="Price moves after the last scored round"
+            style={{ font: `${on ? 700 : 600} 11px 'Hanken Grotesk'`, color: on ? 'var(--ink)' : (c || 'var(--dim)'), background: on ? (c || 'var(--pb-accent, #06B6D4)') : 'var(--surface2)', padding: '6px 11px', borderRadius: 8, border: 'none', cursor: 'pointer' }}>{l}</button>
+        )
+      })}
+    </div>
+  )
+}
+export const byMover = (list, mode) => (mode === 'all' ? list
+  : list.filter(p => (mode === 'up' ? Number(p.price_change) > 0 : Number(p.price_change) < 0))
+    .sort((a, b) => (mode === 'up' ? Number(b.price_change) - Number(a.price_change) : Number(a.price_change) - Number(b.price_change)) || b.price - a.price))
+export const moverEmpty = (mode) => `No ${mode === 'up' ? 'risers' : 'fallers'} after the last scored round.`
+
+// A price with its movement arrow beside it.
+export const PriceTag = ({ price, change }) => <>{money(price)}<PriceArrow change={change} /></>
+
 // A movement arrow for ladders (▲ n / ▼ n / –).
 export function MoveArrow({ delta, width = 18 }) {
   let color = 'var(--faintest)', txt = '–'

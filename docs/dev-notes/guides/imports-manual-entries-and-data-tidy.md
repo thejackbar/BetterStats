@@ -58,19 +58,23 @@
 30. `players.import_batch_id` (234) marks players the import minted (`ON DELETE SET NULL`); a re-import moves it forward only where non-NULL. `import_cleanup.deletable_players` is the one rule (undo endpoints and script): delete only with none of ~40 `BLOCKING_REFS`, no profile data, no `grassroots_id`/`playhq_id`. Check emptiness AFTER `db.flush()`.
 31. Reader: it transcribes faithfully; the ONE allowed deviation is inferring a blank result (`result_inferred`, flagged). `reconcile()` returns `[{kind, text}]`: `card_error` (card's own figures disagree, fix-or-keep) versus `misread`. Unticked "This card tracks" columns import as NULL, not 0 (migration 184; defaults stay `Optional[int] = 0`, only explicit null means unrecorded). Pre-1980 8-ball overs: `match.balls_per_over` (DB overs stay as written). Read EVERY occurrence of a name (bowling analysis is authority for bowlers, batting order for batters; never merge players sharing only a surname). Roster matching: `import_ingest.match_players` (auto-fill exact or one candidate at 0.9+). Run `scorecard_eval` before and after any prompt, schema or model change (`docs/scorecard-reader-eval.md`); uploads never teach the model.
 32. Jump-back edit replays `extracted_payload` through the upload review UI (photo uploads only); save is `PATCH /games/{id}`. `check_scorecard_duplicate` takes `exclude_id`. Delete and restore use the one audit trail (`/admin/manual-entries#audit`).
+33. A number column holding a non-number must be reported, never parsed bare. `_resolve_games` runs `_bad_number_cells` first, blanks those cells in a copy of the rows (so every later `_parse_int` is safe) and returns `bad_cells` and a warning naming row, player, game, column and value. `/commit` refuses with a 422 while any remain. A new numeric CSV column goes in `_GAME_INT_COLUMNS` or `_GAME_FLOAT_COLUMNS`.
+
+**CSFW archives**
+33. There is ONE extractor, `tools/csfw_extract.py` (`docs/csfw-data-extraction.md`). Never copy it for a club: a record layout is a `Layout` (`--layout`); team and match-type names are a `Profile` (`tools/csfw_profiles/<club>.json`, `--profile`, `--team-names`) because no data file holds them; a team number is only meaningful inside its DATABASE (the header's club-name field, never the file name); byes are the profile's `byes`. Start any new club with `--analyse`. Never read another club's type codes or team names into a club with no profile, and never name two databases' teams the same grade.
 
 ## Traps and failure signatures
 
 - Same total on both innings: rule 1. "All" lower than "Men's": rules 21, 22. "— vs —" or `home_team: None`: rule 7. Scores under the wrong team: rule 10. Bowlers bowl at own batters: rules 3, 8.
 - Player page 6 s or 45 s slow after a rollup change: CTE wall (rule 23), or `player_categories` running a correlated EXISTS per grade row. Find what every endpoint on the page calls.
-- Import 504, 413 or a vanished POST body: rule 20.
+- Import 504, 413 or a vanished POST body: rule 20. Bare "Internal Server Error" on choosing a sheet: a non-numeric cell, rule 33.
 - "Steve" beside "Steven": rule 26. Brad K Mant missed: rule 27. One Day Grade 2 into Grade 4: rule 28. 1974 card under 1999/00: rule 13. Card invisible under every season: rule 15.
 - Harness: suites share one database and stub tables collide (`player_achievements.org_id`): use a fresh one. StatLab path needs lifespan-only `grade_merge_logs`; views need `_view_ddl.py`. Check `origin/main` before numbering a migration.
 
 ## How to verify a change here
 
 Real Postgres, shipped route bodies, and a control run that REPORTS rather than crashes. A check on an empty fixture or a crashed control proves nothing.
-- `backend/verification/`: `verify_manual_game_check.py` (control reports 142/7), `verify_scorebook_innings.py` (control "None v None"), `verify_csv_innings_import.py`, `verify_manual_side_names.py`, `verify_manual_winner.py`, `verify_manual_games_import.py`, `verify_import_team_labels.py`, `verify_junior_residual_scope.py`, `verify_short_form_match.py`, `verify_grade_duplicates.py`, `verify_season_resolve.py`. Browser twins: `frontend/verification/`.
+- `backend/verification/`: `verify_manual_game_check.py` (control reports 142/7), `verify_scorebook_innings.py` (control "None v None"), `verify_csv_innings_import.py`, `verify_manual_side_names.py`, `verify_manual_winner.py`, `verify_manual_games_import.py`, `verify_import_team_labels.py`, `verify_junior_residual_scope.py`, `verify_short_form_match.py`, `verify_grade_duplicates.py`, `verify_season_resolve.py`, `verify_import_bad_cells.py` (control: resolve raises ValueError, 12 of 17 fail). Browser twins: `frontend/verification/`.
 - Diagnose live data first: `ops/diagnostics/csv_import_unpaired.sql`.
 
 ## Operator commands and scripts

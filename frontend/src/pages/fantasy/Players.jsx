@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../lib/api'
 import {
   Aurora, Avatar, DISP, tintBg, mix, money, pts, Btn, Field,
-  ROLE_LABEL, ROLE_SHORT, GREEN, AMBER, RED, CYAN, useFantasy,
+  ROLE_LABEL, ROLE_SHORT, GREEN, AMBER, RED, CYAN, useFantasy, PriceTag, PriceArrow, MoverChips, byMover, moverEmpty,
 } from './ui'
 import { ScreenTitle, SectionLabel } from './shell'
 
@@ -44,14 +44,14 @@ export function PlayerProfile({ token, playerId, season, onBack, nav, desktop })
   const hasCareer = (career.matches ?? 0) > 0 || (career.seasons ?? 0) > 0
 
   // Fantasy scoring breakdown the manager cares about: total, the weekly average,
-  // last round, form, ownership and the season's price move.
+  // last round, form, ownership and the price move after the last scored round.
   const fantasyTiles = [
     ['Total pts', pts(p.total_points)],
     ['Avg / round', pts(p.weekly_avg ?? 0)],
     ['Last round', pts(p.last_round_points)],
     ['Form', p.form],
     ['Selected', `${p.selected_pct}%`],
-    ['Price change', signMoney(pc), pcColor],
+    ['Price change', pc ? `${pc > 0 ? '▲' : '▼'} ${money(Math.abs(pc))}` : '–', pcColor],
   ]
   const seasonTiles = [
     ['Matches', ss.matches ?? 0],
@@ -59,7 +59,7 @@ export function PlayerProfile({ token, playerId, season, onBack, nav, desktop })
     ['50s / 100s', `${ss.fifties ?? 0} / ${ss.hundreds ?? 0}`],
     ['Wickets', ss.wickets ?? 0],
     ['Catches', ss.catches ?? 0],
-    ['Price', money(p.price)],
+    ['Price', <PriceTag price={p.price} change={pc} />],
   ]
   const careerTiles = [
     ['Seasons', career.seasons ?? 0],
@@ -87,7 +87,7 @@ export function PlayerProfile({ token, playerId, season, onBack, nav, desktop })
             <div style={{ font: `800 23px ${DISP}`, textTransform: 'uppercase', color: 'var(--text)', lineHeight: 1 }}>{p.name}</div>
             <div style={{ font: `500 12px 'Hanken Grotesk'`, color: 'var(--faint)', marginTop: 4 }}>{ROLE_LABEL[p.role]}{p.team ? ` · ${p.team}` : club?.name ? ` · ${club.name}` : ''}</div>
             <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-              <Chip color="var(--accent-strong)" bg={tintBg(14)} border={`1px solid ${tintBg(30)}`}>{money(p.price)}</Chip>
+              <Chip color="var(--accent-strong)" bg={tintBg(14)} border={`1px solid ${tintBg(30)}`}><PriceTag price={p.price} change={p.price_change} /></Chip>
               <Chip color={GREEN} bg={mix(GREEN, 12)} border={`1px solid ${mix(GREEN, 26)}`}>Form {p.form}</Chip>
               <Chip>{p.selected_pct}% owned</Chip>
             </div>
@@ -133,7 +133,7 @@ export function PlayerProfile({ token, playerId, season, onBack, nav, desktop })
     </>
   )
 
-  const transferBtn = <Btn full onClick={() => nav(active ? 'transfers' : 'pick')}>Transfer in · {money(p.price)}</Btn>
+  const transferBtn = <Btn full onClick={() => nav(active ? 'transfers' : 'pick')}>Transfer in · <PriceTag price={p.price} change={p.price_change} /></Btn>
 
   const statSections = (
     <>
@@ -244,7 +244,7 @@ const Head = ({ p, cyan }) => (
   <div style={{ flex: 1, textAlign: 'center' }}>
     <div style={{ margin: '0 auto', width: 52, height: 52 }}><Avatar name={p.name} photoUrl={p.photo_url} size={52} /></div>
     <div style={{ font: `800 14px ${DISP}`, textTransform: 'uppercase', color: 'var(--text)', marginTop: 8 }}>{p.name}</div>
-    <div style={{ font: `500 10.5px 'Hanken Grotesk'`, color: cyan ? '#22a8c4' : 'var(--faint)' }}>{ROLE_LABEL[p.role]} · {money(p.price)}</div>
+    <div style={{ font: `500 10.5px 'Hanken Grotesk'`, color: cyan ? '#22a8c4' : 'var(--faint)' }}>{ROLE_LABEL[p.role]} · <PriceTag price={p.price} change={p.price_change} /></div>
   </div>
 )
 const CmpCell = ({ v, lead, cyan }) => (
@@ -269,19 +269,19 @@ function PoolPick({ pool, value, onChange, placeholder }) {
 }
 
 // ── Stats explorer ─────────────────────────────────────────────────────────────
-const SORTS = { total: (a, b) => b.total_points - a.total_points, gw: (a, b) => (b.last_round_points || 0) - (a.last_round_points || 0), price: (a, b) => b.price - a.price, sel: (a, b) => (b.selected_pct || 0) - (a.selected_pct || 0), name: (a, b) => a.name.localeCompare(b.name) }
+const SORTS = { total: (a, b) => b.total_points - a.total_points, gw: (a, b) => (b.last_round_points || 0) - (a.last_round_points || 0), price: (a, b) => b.price - a.price, sel: (a, b) => (b.selected_pct || 0) - (a.selected_pct || 0), rise: (a, b) => (b.price_change || 0) - (a.price_change || 0), fall: (a, b) => (a.price_change || 0) - (b.price_change || 0), name: (a, b) => a.name.localeCompare(b.name) }
 
 export function StatsExplorer({ pool, nav }) {
   const [role, setRole] = useState('all')
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState('total')
+  const [move, setMove] = useState('all')   // price movers: all | up | down
 
   const list = useMemo(() => {
     const term = search.trim().toLowerCase()
-    return (pool || [])
-      .filter(p => (role === 'all' || p.role === role) && (!term || p.name.toLowerCase().includes(term)))
-      .sort(SORTS[sort])
-  }, [pool, role, search, sort])
+    const l = (pool || []).filter(p => (role === 'all' || p.role === role) && (!term || p.name.toLowerCase().includes(term)))
+    return move === 'all' ? l.sort(SORTS[sort]) : byMover(l, move)
+  }, [pool, role, search, sort, move])
 
   return (
     <div>
@@ -293,10 +293,11 @@ export function StatsExplorer({ pool, nav }) {
           return <button key={k} onClick={() => setRole(k)} style={{ font: `${on ? 700 : 600} 11px 'Hanken Grotesk'`, color: on ? 'var(--ink)' : 'var(--dim)', background: on ? 'var(--pb-accent, #06B6D4)' : 'var(--surface2)', padding: '6px 11px', borderRadius: 8, border: 'none', cursor: 'pointer' }}>{l}</button>
         })}
       </div>
+      <div style={{ padding: '8px 0 0' }}><MoverChips value={move} onChange={setMove} /></div>
       <div style={{ display: 'flex', gap: 8, padding: '10px 0 4px' }}>
         <Field placeholder="⌕ Search" value={search} onChange={e => setSearch(e.target.value)} style={{ padding: '9px 12px', fontSize: 12 }} />
         <select value={sort} onChange={e => setSort(e.target.value)} style={{ background: 'var(--surface)', border: '1px solid var(--hairline)', borderRadius: 9, padding: '9px 12px', font: `600 12px 'Hanken Grotesk'`, color: 'var(--dim)', outline: 'none' }}>
-          <option value="total">Total</option><option value="gw">GW</option><option value="price">Price</option><option value="sel">Sel%</option><option value="name">Name</option>
+          <option value="total">Total</option><option value="gw">GW</option><option value="price">Price</option><option value="rise">Biggest rise</option><option value="fall">Biggest fall</option><option value="sel">Sel%</option><option value="name">Name</option>
         </select>
       </div>
 
@@ -306,6 +307,7 @@ export function StatsExplorer({ pool, nav }) {
         ))}
       </div>
       <div>
+        {!list.length && move !== 'all' && <p style={{ font: `500 12.5px 'Hanken Grotesk'`, color: 'var(--faint)', padding: '14px 4px' }}>{moverEmpty(move)}</p>}
         {list.map(p => (
           <button key={p.player_id} onClick={() => nav('player', { playerId: p.player_id, from: 'stats' })} style={{
             display: 'grid', gridTemplateColumns: '2fr 0.7fr 0.9fr 0.7fr 0.6fr 0.7fr', gap: 0, alignItems: 'center',
@@ -317,7 +319,7 @@ export function StatsExplorer({ pool, nav }) {
               <span style={{ font: `700 12.5px 'Hanken Grotesk'`, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span>
             </span>
             <span style={{ textAlign: 'center', font: `700 9.5px ${DISP}`, letterSpacing: '.06em', color: 'var(--dim)' }}>{ROLE_SHORT[p.role]}</span>
-            <span style={{ textAlign: 'right', font: `600 12px ${DISP}`, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{money(p.price)}</span>
+            <span style={{ textAlign: 'right', font: `600 12px ${DISP}`, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{money(p.price)}<PriceArrow change={p.price_change} /></span>
             <span style={{ textAlign: 'right', font: `500 11.5px 'Hanken Grotesk'`, color: 'var(--faint)', fontVariantNumeric: 'tabular-nums' }}>{p.selected_pct ?? 0}%</span>
             <span style={{ textAlign: 'right', font: `600 12.5px ${DISP}`, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{pts(p.last_round_points)}</span>
             <span style={{ textAlign: 'right', font: `700 13.5px ${DISP}`, color: 'var(--accent-strong)', fontVariantNumeric: 'tabular-nums' }}>{pts(p.total_points)}</span>

@@ -3362,6 +3362,8 @@ export const api = {
   fanSaveSquad: (token, data) => request(`/public/fantasy/${token}/squad`, { method: 'POST', body: JSON.stringify(data) }),
   fanTransfer: (token, out_player_id, in_player_id) =>
     request(`/public/fantasy/${token}/transfer`, { method: 'POST', body: JSON.stringify({ out_player_id, in_player_id }) }),
+  fanCancelQueuedTransfer: (token, id) =>
+    request(`/public/fantasy/${token}/transfer/queued/${id}`, { method: 'DELETE' }),
   fanSetCaptain: (token, captain_player_id, vice_player_id) =>
     request(`/public/fantasy/${token}/captain`, { method: 'POST', body: JSON.stringify({ captain_player_id, vice_player_id }) }),
   fanChip: (token, chip) => request(`/public/fantasy/${token}/chip`, { method: 'POST', body: JSON.stringify({ chip }) }),
@@ -3849,6 +3851,9 @@ export const api = {
   fantasyPatchPool: (poolId, data) =>
     request(`/club-admin/fantasy/pool/${poolId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   fantasyListRounds: (seasonId) => request(`/club-admin/fantasy/season/${seasonId}/rounds`),
+  fantasyPriceMovements: (seasonId) => request(`/club-admin/fantasy/season/${seasonId}/price-movements`),
+  fantasySetRoundLock: (roundId, lock_at) =>
+    request(`/club-admin/fantasy/rounds/${roundId}/lock`, { method: 'PATCH', body: JSON.stringify({ lock_at }) }),
   fantasySettleRound: (roundId) =>
     request(`/club-admin/fantasy/rounds/${roundId}/settle`, { method: 'POST' }),
   fantasyUnsettleRound: (roundId) =>

@@ -269,3 +269,45 @@ async def score_squads_for_round(session: AsyncSession, fs, rnd, rollover: bool 
         {"per": per, "cap": cap, "fs": str(fs.id)},
     )
     return len(squads)
+
+
+async def record_round_transfer(session: AsyncSession, squad_id, rnd, hit: int) -> None:
+    """Tally a transfer (and any points hit) against a round's score row, which
+    settlement later reads when it computes points = raw - transfer_hit."""
+    if rnd is None:
+        return
+    await session.execute(
+        text("""
+            INSERT INTO fantasy_squad_round_scores (squad_id, round_id, transfer_hit, transfers_made, lineup)
+            VALUES (CAST(:sid AS UUID), CAST(:rid AS UUID), :hit, 1, '[]')
+            ON CONFLICT (squad_id, round_id) DO UPDATE SET
+                transfer_hit = fantasy_squad_round_scores.transfer_hit + :hit,
+                transfers_made = fantasy_squad_round_scores.transfers_made + 1
+        """),
+        {"sid": str(squad_id), "rid": str(rnd.id), "hit": hit},
+    )
+
+
+async def recount_ownership(session: AsyncSession, season_id) -> None:
+    """Refresh each pool player's owned_count from the global-league squads (drives
+    the 'X% picked' display). Reset to zero, then set the owned counts, so a player
+    nobody now holds drops back to zero. Does not commit."""
+    await session.execute(
+        text("UPDATE fantasy_pool_players SET owned_count = 0 WHERE fantasy_season_id = CAST(:fs AS UUID)"),
+        {"fs": str(season_id)},
+    )
+    await session.execute(
+        text("""
+            UPDATE fantasy_pool_players pp SET owned_count = c.n
+            FROM (
+                SELECT sp.player_id, COUNT(*) AS n
+                FROM fantasy_squad_players sp
+                JOIN fantasy_squads sq ON sq.id = sp.squad_id
+                JOIN fantasy_leagues l ON l.id = sq.league_id AND l.kind = 'global_salary_cap'
+                WHERE sq.fantasy_season_id = CAST(:fs AS UUID)
+                GROUP BY sp.player_id
+            ) c
+            WHERE pp.fantasy_season_id = CAST(:fs AS UUID) AND pp.player_id = c.player_id
+        """),
+        {"fs": str(season_id)},
+    )

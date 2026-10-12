@@ -1314,3 +1314,27 @@ Verification: `verify_squad_next_game.py` is now 68 checks (default off; off: no
 - The Share sheet on the selection board (`showSheet` in `AdminSelection.jsx`) has an Order switch: Batting order (default) or A to Z by first name, from `lib/nameFormat.sortByFirstName`. It is display only: the saved batting order, the draft and `fixture_lineups` are not touched, and nothing is written. A to Z drops the batting numbers on the sheet and in the copied text. The choice is a per-browser convenience (`bs_sheet_order`, read and written in try/catch).
 - `Copy lineup as text` and `Open in social post` use the same ordered list (`sheetIds`), so the post opens with the players already in that order. The board itself still shows the batting order.
 - Verified: `frontend/verification/verify_alpha_order_browser.mjs` (20 checks; control on v9.109.17 passes 8 and fails 12, the 8 being guards such as "nothing was written").
+
+## Next round opens with the previous round's XI as a draft (v9.110.4)
+
+Requested: the next round should start with the previous round's selections as a draft, so a selector edits instead of rebuilding.
+
+`services/selection_seed.seed_next_round_draft` runs inside `PUT /selection/{id}` (the Confirm), in a savepoint, after the lineup is replaced and before the commit. It finds the SAME team's next fixture (`team_id`, `played_on` later than this one, `status = 'UPCOMING'`, not more than two days in the past) and writes the confirmed XI there as a `selection_drafts` row: slots in batting order, captain, keeper, and a `seeded_from` tag holding the source fixture id. No migration: the draft table already existed (317) and the payload is free-form jsonb.
+
+Rules it keeps. Only the immediate next fixture is seeded, never a chain. A fixture with a confirmed XI is never seeded or touched. A draft with no `seeded_from` (the board rebuilds the payload on its first save, which drops the tag) is a selector's own and is never touched. A tagged draft is by definition untouched, so re-confirming the source refreshes it (version bump, so an open board adopts it) and emptying the source removes it. Discard deletes the draft and nothing re-creates it until the source is confirmed again. A failure inside the carry is logged and swallowed; the savepoint keeps the confirm's transaction usable.
+
+UI. `AdminSelection.jsx` reads `draft.seeded_from` into `draftInfo.carried` and the Draft strip says "This is the previous round's XI, carried over" instead of "Last saved by" the person who confirmed the earlier round. The overview already shows `Continue draft` for any fixture with a draft.
+
+Existing data is not back-filled: a next round shows the draft after its previous round is next confirmed.
+
+Verification: `backend/verification/verify_selection_next_round_draft.py` (32 checks on real Postgres through the shipped `set_selection`, `get_draft`, `save_draft`, `discard_draft`; control on the previous `selection.py` fails 8, all on the carry itself). `verify_selection_draft.py` still passes unchanged (55).
+
+## Carried-over drafts leave out unavailable players (v9.110.5)
+
+Requested: the draft carried into the next round should also drop anyone who had said unavailable.
+
+`selection_seed.unavailable_ids` uses the pool's rule for the NEXT fixture's `played_on`: an explicit `player_availability` row wins, a covering `player_availability_periods` row speaks only where there is none, and only `UNAVAILABLE` counts (MAYBE and no answer stay). Read with `= ANY(CAST(:ids AS uuid[]))`. It runs twice: at seed time (the seeded payload carries `left_out`, and a seed with nobody left removes or skips the draft), and in `GET /selection/{id}/draft` through `without_unavailable`, for a draft still tagged `seeded_from` only, so a player who says no after the draft was made drops out too. The read-time view is not written back: the stored row and its version are unchanged, and a player who later says yes returns on the next read. A selector's own (untagged) draft is never filtered. Removed players close up the batting order; a removed captain or keeper is cleared.
+
+UI. `AdminSelection.jsx` keeps `leftOut` on `draftInfo` and the Draft strip lists those names.
+
+Verification: `verify_selection_next_round_draft.py` is now 47 checks (seed time, period vs explicit answer, MAYBE, another date, a later no, stored row unchanged, selector's own draft, everyone said no). Control on the v9.110.4 code fails 7, all on the unavailable behaviour; `verify_selection_draft.py` still 55.

@@ -4443,6 +4443,20 @@ async def lifespan(app: FastAPI):
         for _stmt in _AVAIL_SQUAD_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 326: a hand-typed Fantasy price is left alone by the price
+        # movement. Same one-copy rule: this list and alembic's 326 both run
+        # services/fantasy_price_ddl.STATEMENTS.
+        from app.services.fantasy_price_ddl import STATEMENTS as _FANTASY_PRICE_DDL
+        for _stmt in _FANTASY_PRICE_DDL:
+            await conn.execute(text(_stmt))
+
+        # Migration 327: a Fantasy round's hand-set lock time, and transfers queued
+        # behind a locked round. Same one-copy rule: this list and alembic's 327
+        # both run services/fantasy_queue_ddl.STATEMENTS.
+        from app.services.fantasy_queue_ddl import STATEMENTS as _FANTASY_QUEUE_DDL
+        for _stmt in _FANTASY_QUEUE_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 312: super-admin messages on the club admin dashboard.
         # Same one-copy rule: this and alembic's 312 both run
         # services/admin_broadcast_ddl.STATEMENTS.

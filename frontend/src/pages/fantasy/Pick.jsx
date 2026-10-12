@@ -6,7 +6,7 @@
 import { useMemo, useState } from 'react'
 import { api } from '../../lib/api'
 import {
-  StatTile, DISP, tintBg, money, pts, Btn, Field, CapBadge,
+  StatTile, DISP, tintBg, money, pts, Btn, Field, CapBadge, PriceTag, MoverChips, byMover, moverEmpty,
   ROLE_ORDER, ROLE_LABEL, GREEN,
 } from './ui'
 import { ScreenTitle, SectionLabel, PlayerRow } from './shell'
@@ -47,13 +47,14 @@ function Builder({ token, pool, rules, squad, joinPoints, onSaved, fail, nav, de
   const size = rules?.squad_size ?? 12
   const [picked, setPicked] = useState(() => {
     const init = {}
-    ;(squad?.players || []).forEach(p => { init[p.player_id] = { ...p, price: p.purchase_price } })
+    ;(squad?.players || []).forEach(p => { init[p.player_id] = { ...p, price: p.price ?? p.purchase_price } })
     return init
   })
   const [teamName, setTeamName] = useState(squad?.team_name || '')
   const [filter, setFilter] = useState('batter')
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState('price')
+  const [move, setMove] = useState('all')   // price movers: all | up | down
   const [poolOpen, setPoolOpen] = useState(true)
   const [busy, setBusy] = useState(false)
 
@@ -67,12 +68,15 @@ function Builder({ token, pool, rules, squad, joinPoints, onSaved, fail, nav, de
     const term = search.trim().toLowerCase()
     let l = term ? (pool || []).filter(p => p.name.toLowerCase().includes(term)) : (pool || []).filter(p => p.role === filter)
     l = [...l]
+    if (move !== 'all') return byMover(l, move)
     if (sort === 'price') l.sort((a, b) => b.price - a.price)
     else if (sort === 'price_asc') l.sort((a, b) => a.price - b.price)
     else if (sort === 'points') l.sort((a, b) => b.total_points - a.total_points)
+    else if (sort === 'rise') l.sort((a, b) => (b.price_change || 0) - (a.price_change || 0))
+    else if (sort === 'fall') l.sort((a, b) => (a.price_change || 0) - (b.price_change || 0))
     else l.sort((a, b) => a.name.localeCompare(b.name))
     return l
-  }, [pool, filter, search, sort])
+  }, [pool, filter, search, sort, move])
 
   const toggle = (pp) => setPicked(cur => {
     const next = { ...cur }
@@ -80,7 +84,7 @@ function Builder({ token, pool, rules, squad, joinPoints, onSaved, fail, nav, de
     if (chosen.length >= size) return cur
     if (byRole(pp.role) >= (quota[pp.role] || 0)) return cur
     if (Number(pp.price) > left + 1e-6) return cur
-    next[pp.player_id] = { player_id: pp.player_id, name: pp.name, role: pp.role, price: pp.price, photo_url: pp.photo_url, is_captain: false, is_vice_captain: false }
+    next[pp.player_id] = { player_id: pp.player_id, name: pp.name, role: pp.role, price: pp.price, price_change: pp.price_change, photo_url: pp.photo_url, is_captain: false, is_vice_captain: false }
     return next
   })
   const remove = (pid) => setPicked(cur => { const next = { ...cur }; delete next[pid]; return next })
@@ -146,7 +150,7 @@ function Builder({ token, pool, rules, squad, joinPoints, onSaved, fail, nav, de
           {chosenByRole.map(p => (
             <PlayerRow
               key={p.player_id} name={p.name} photoUrl={p.photo_url}
-              sub={`${ROLE_LABEL[p.role]} · ${money(p.price)}`}
+              sub={<>{ROLE_LABEL[p.role]} · <PriceTag price={p.price} change={p.price_change} /></>}
               tone="picked"
               badge={p.is_captain ? <CapBadge /> : p.is_vice_captain ? <CapBadge vice /> : null}
               right={<SquadControls p={p} onCap={setCap} onRemove={remove} />}
@@ -175,6 +179,8 @@ function Builder({ token, pool, rules, squad, joinPoints, onSaved, fail, nav, de
   )
 
   const searchSort = (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <MoverChips value={move} onChange={setMove} />
     <div style={{ display: 'flex', gap: 8 }}>
       <Field placeholder="⌕ Search players…" value={search} onChange={e => setSearch(e.target.value)} style={{ padding: '10px 12px', fontSize: 12.5 }} />
       <select value={sort} onChange={e => setSort(e.target.value)} style={{
@@ -184,8 +190,11 @@ function Builder({ token, pool, rules, squad, joinPoints, onSaved, fail, nav, de
         <option value="price">Price ▾</option>
         <option value="price_asc">Price ▴</option>
         <option value="points">Points</option>
+        <option value="rise">Biggest rise</option>
+        <option value="fall">Biggest fall</option>
         <option value="name">Name</option>
       </select>
+    </div>
     </div>
   )
 
@@ -193,13 +202,14 @@ function Builder({ token, pool, rules, squad, joinPoints, onSaved, fail, nav, de
     <div style={desktop
       ? { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 8 }
       : { display: 'flex', flexDirection: 'column', gap: 7 }}>
+      {!list.length && move !== 'all' && <p style={{ font: `500 12.5px 'Hanken Grotesk'`, color: 'var(--faint)', padding: '6px 2px' }}>{moverEmpty(move)}</p>}
       {list.map(pp => {
         const on = !!picked[pp.player_id]
         const blocked = !on && (chosen.length >= size || byRole(pp.role) >= (quota[pp.role] || 0) || Number(pp.price) > left + 1e-6)
         return (
           <PlayerRow
             key={pp.player_id} name={pp.name} photoUrl={pp.photo_url}
-            sub={`${ROLE_LABEL[pp.role]} · ${money(pp.price)}`}
+            sub={<>{ROLE_LABEL[pp.role]} · <PriceTag price={pp.price} change={pp.price_change} /></>}
             tone={on ? 'picked' : 'plain'}
             onClick={blocked ? undefined : () => toggle(pp)}
             right={<span style={{
