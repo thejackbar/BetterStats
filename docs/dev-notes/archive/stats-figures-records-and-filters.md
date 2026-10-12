@@ -2373,3 +2373,12 @@ Verified on a local Postgres 16: 48 checks in `backend/verification/verify_honou
 - **Not done.** The TV shows names as stored, not in the club's chosen name format, like the leaderboard slide. Football has no Club Room.
 
 Verified on a local Postgres 16: 27 checks in `backend/verification/verify_club_room_honours.py`; the control (the previous commit) fails 21 of 27, and the 6 that pass are the "not shown" checks, each paired with a "shown to the owner" check. Browser: 21 checks in `frontend/verification/verify_club_room_honours_browser.mjs` (admin editor, three slide kinds on the stage, a 60-row board scrolling, 390px overflow), screenshots read.
+
+## v9.110.8.1: Club Room "Launch on this screen" returned a 500
+
+- **Report.** On production, Launch on this screen showed "Couldn't load Club Room Mode. Internal Server Error". The playlist had sponsors and leaderboards.
+- **Cause.** `/play` expands the whole playlist in one request. `_get_records_cached` called `get_records` as a plain function with seven arguments; `get_records` has since gained `categories`, `formats`, `competitions`, `debug_timing` and `viewer`. Unpassed, each arrived as a FastAPI `Query(...)` or `Depends(...)` object, and the first read of `viewer.id` raised `AttributeError: 'Depends' object has no attribute 'id'`. Any playlist with a Club Records slide failed, and one failing slide blanks the whole show. Not caused by the Honour Boards slide (v9.110.3), which has no records call.
+- **Fix.** All arguments passed, `viewer=None`, so the TV reads the public view: a junior grade the club hides from the public stays off it, the same on the logged-out `/room` link and the admin preview.
+- **Not done.** One slide that raises still blanks the whole show, and the production log was not read (this session has no server access), so the cause is reproduced and not seen in the log. Wrapping each slide's expansion so a bad one is skipped and logged is the next step if another cause turns up.
+
+Verified on a local Postgres 16 over the records suite's own schema and seed: 9 checks in `backend/verification/verify_club_room_records.py`. The previous code fails 7 of 7 with the `Depends` error and does not crash the script; the fixed code passes, including a playlist of sponsors grid, three leaderboards, records, images and a StatLab entry.
