@@ -1,0 +1,45 @@
+{
+  "name": "payneham",
+  "club": "payneham",
+  "team_names": {},
+  "databases": {
+    "Payneham": {
+      "1": "1st XI",
+      "2": "2nd XI",
+      "3": "3rd XI",
+      "4": "4th XI",
+      "5": "5th XI"
+    },
+    "Payneham.": {
+      "6": "6th XI"
+    }
+  },
+  "match_types": {
+    "0": "Friendly",
+    "1": "League",
+    "2": "Brock Cup",
+    "3": "Brock Cup Final",
+    "4": "Limited Over",
+    "5": "Internal",
+    "6": "Adelaide Turf",
+    "7": "ATCA Final",
+    "8": "NE Jnr CA",
+    "9": "ATCA T20 Final",
+    "10": "Ltd Overs Final",
+    "11": "NEJCA Final"
+  },
+  "finals_types": [
+    3,
+    7,
+    9,
+    10,
+    11
+  ],
+  "format_by_type": {
+    "4": "One Day"
+  },
+  "byes": [
+    "Bye"
+  ],
+  "club_name": "Payneham Cricket Club"
+}

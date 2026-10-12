@@ -576,9 +576,14 @@ def split_leg(fixtures: dict) -> None:
     suffix where the sibling leg is actually present, so an opponent whose real
     name ends in a digit is left alone.
     """
-    seen = {(f["date"], f["team"], f["name"]) for f in fixtures.values()}
+    # Compared with runs of spaces collapsed: Payneham's own "Reynella  1" and
+    # "Reynella  2" carry two, and compared raw they would read as two opponents.
+    def norm(name):
+        return re.sub(r"\s+", " ", name)
+
+    seen = {(f["date"], f["team"], norm(f["name"])) for f in fixtures.values()}
     for fx in fixtures.values():
-        m = re.match(r"^(.*?)\s+([12])$", fx["name"])
+        m = re.match(r"^(.*?)\s+([12])$", norm(fx["name"]))
         fx["opponent"], fx["leg"] = fx["name"], None
         if not m:
             continue
@@ -792,9 +797,11 @@ def match_format_for(type_code, season_two_day_teams, team, total_overs,
     """
     if type_code in FORMAT_BY_TYPE:
         return FORMAT_BY_TYPE[type_code]
-    if type_code in FINALS_TYPES and FORMAT_BY_TYPE:
-        # (only where the club's own formats are known: with none, a final's
-        # length is nothing this file can measure, so it stays blank)
+    if type_code in FINALS_TYPES and {"Two Day", "One Day"} <= set(FORMAT_BY_TYPE.values()):
+        # (only where the club's profile names BOTH formats, because that is
+        # what this measures between. With one known, a final could be either,
+        # and stamping it with the one that is known would be a guess: Payneham's
+        # ATCA Final is a turf final, and Limited Over is the only format named)
         if (team in season_two_day_teams and season_one_day_max
                 and total_overs > season_one_day_max):
             return "Two Day"
@@ -876,6 +883,7 @@ def build_rows(seasons: list, absent_is_out: bool = True) -> dict:
     matches, batting, bowling, fielding, fow_rows, votes, players = [], [], [], [], [], [], []
     match_no = 0
     for s in seasons:
+        use_season(s)
         for p in sorted(s["players"].values(), key=lambda x: (x["surname"], x["first_name"])):
             players.append({"Season": s["season"], "Player ID": p["player_id"],
                             "Player": p["name"], "Surname": p["surname"],
@@ -970,6 +978,7 @@ def build_season_stats(seasons: list, by_grade: bool = True,
     agg = {}
     seen_games = defaultdict(set)      # (player, season, grade) -> the matches played
     for s in seasons:
+        use_season(s)
         groups = defaultdict(list)
         for m in s["matches"]:
             groups[(m["date"], m["team"], m["opponent"])].append(m)
@@ -1281,6 +1290,7 @@ def squad_clashes(seasons: list) -> list:
     """
     out = []
     for s_ in seasons:
+        use_season(s_)
         by_date = defaultdict(lambda: defaultdict(list))
         for m in s_["matches"]:
             if not m["has_play"]:
@@ -1447,6 +1457,7 @@ def build_game_rows(seasons: list, club: str,
     """
     rows = []
     for s in seasons:
+        use_season(s)
         two_day_teams, one_day_max = season_format_context(s)
         for mid, date, team, opponent, all_legs in group_legs(s):
             played = match_legs(all_legs)
@@ -1720,11 +1731,24 @@ class Profile:
     match_types: dict = field(default_factory=dict)
     finals_types: frozenset = frozenset()
     format_by_type: dict = field(default_factory=dict)
-    # a club with several competitions keeps a separate team list for each file
-    # family (DATA, DAT1, ...): {"DAT1": {1: "Under 11", ...}}
-    families: dict = field(default_factory=dict)
+    # A CLUB KEEPS SEVERAL DATABASES (a CSFW file holds at most 160 match
+    # records), and a team NUMBER means something only inside one of them: at
+    # Payneham team 1 is the senior men's 1st XI in one and the women's side in
+    # another. The database is named by the club-name field in the file header
+    # ("Payneham", "Payneham W", "Payneham S J 12"), which is stable across
+    # years where the file name is not (2024's DAT4 is the women's, 2025's holds
+    # sub-junior 12s). {"Payneham W": {1: "Women's 1st XI", ...}}
+    databases: dict = field(default_factory=dict)
     # a side the club holds only text reports for: (season, grade), Shoalwater only
     no_scorebook: tuple | None = None
+    # Opponent names that are not a match: a fixture the club enters for a round
+    # it has no game in ("Bye"). Dropped only where nothing was played and nobody
+    # was named, and counted in the report.
+    byes: tuple = ()
+    # The club's own name for `winning_team`, which the importer compares with
+    # the club's name in BetterStats. The header's club field is a database
+    # label ("Payneham W") where a club keeps several, so it cannot serve.
+    club_name: str = ""
     notes: list | None = None            # the Notes sheet, where a club has its own
 
 
@@ -1735,7 +1759,7 @@ SHOALWATER = Profile(
 BUILTIN_PROFILES = [SHOALWATER]
 
 _PROFILE_KEYS = {"name", "club", "team_names", "legacy_team_names", "match_types",
-                 "finals_types", "format_by_type", "families"}
+                 "finals_types", "format_by_type", "databases", "byes", "club_name"}
 
 
 def _int_keys(d: dict) -> dict:
@@ -1752,23 +1776,38 @@ def load_profile(path: Path) -> Profile:
         _int_keys(d.get("team_names", {})), _int_keys(d.get("legacy_team_names", {})),
         _int_keys(d.get("match_types", {})), frozenset(d.get("finals_types", [])),
         _int_keys(d.get("format_by_type", {})),
-        {fam.upper(): _int_keys(names) for fam, names in d.get("families", {}).items()})
+        {label.strip(): _int_keys(names) for label, names in d.get("databases", {}).items()},
+        byes=tuple(x.strip().lower() for x in d.get("byes", [])),
+        club_name=d.get("club_name", ""))
+
+
+PROFILE_DIR = Path(__file__).resolve().parent / "csfw_profiles"
 
 
 def choose_profile(club: str, path: Path | None) -> Profile:
+    """--profile if given; else a built-in or a tools/csfw_profiles/*.json whose
+    `club` pattern matches the header's club name; else a blank one."""
     if path:
         return load_profile(path)
     for prof in BUILTIN_PROFILES:
         if prof.club and re.search(prof.club, club, re.I):
             return prof
+    for f in sorted(PROFILE_DIR.glob("*.json")):
+        prof = load_profile(f)
+        if prof.club and re.search(prof.club, club, re.I):
+            return prof
     return Profile("unprofiled")
 
 
-def activate(profile: Profile, family: str) -> None:
-    """Make `profile` (and this family's team list) the tables everything reads."""
-    global FINALS_TYPES
+ACTIVE: Profile = Profile("unprofiled")
+
+
+def activate(profile: Profile) -> None:
+    """Make `profile` the tables everything reads."""
+    global FINALS_TYPES, ACTIVE
+    ACTIVE = profile
     GRADE_NAMES.clear()
-    GRADE_NAMES.update(profile.families.get(family, profile.team_names))
+    GRADE_NAMES.update(profile.team_names)
     LEGACY_GRADE_NAMES.clear()
     LEGACY_GRADE_NAMES.update(profile.legacy_team_names)
     MATCH_TYPES.clear()
@@ -1778,11 +1817,39 @@ def activate(profile: Profile, family: str) -> None:
     FINALS_TYPES = profile.finals_types
 
 
+def use_season(season: dict) -> None:
+    """Point the team names at the database this season's file belongs to.
+
+    Called at the top of every per-season loop, because a team number is read
+    against the names of the database it was written in.
+    """
+    GRADE_NAMES.clear()
+    GRADE_NAMES.update(ACTIVE.databases.get(season["club"].strip(), ACTIVE.team_names))
+
+
+def is_bye(match: dict, byes: tuple) -> bool:
+    """A fixture that is not a match: a listed opponent name, nothing played."""
+    return (match["opponent"].strip().lower() in byes and not match["has_play"]
+            and not match["blocks"])
+
+
+def drop_byes(seasons: list, profile: Profile) -> int:
+    """Remove the profile's byes from every season; how many went."""
+    gone = 0
+    if not profile.byes:
+        return gone
+    for s in seasons:
+        keep = [m for m in s["matches"] if not is_bye(m, profile.byes)]
+        gone += len(s["matches"]) - len(keep)
+        s["matches"] = keep
+    return gone
+
+
 def layout_named(name: str) -> Layout:
     return next((l for l in LAYOUTS.values() if l.name == name), LAYOUT_V1)
 
 
-def generic_notes(club: str, seasons: list, profile: Profile, family: str) -> list:
+def generic_notes(club: str, seasons: list, profile: Profile) -> list:
     """The Notes sheet for a club with no notes of its own.
 
     Everything here is measured off the files in hand or true of the format; the
@@ -1792,29 +1859,33 @@ def generic_notes(club: str, seasons: list, profile: Profile, family: str) -> li
     teams = Counter()
     unnamed_types = Counter()
     for s in seasons:
+        use_season(s)
+        db = s["club"].strip()
         for mid, date, team, opp, legs in group_legs(s):
-            teams[team] += 1
+            teams[(db, team, grade_label(team))] += 1
             code = legs[0].get("type_code")
             if code not in MATCH_TYPES:
                 unnamed_types[code] += 1
-    named = ", ".join(f"{t} = {grade_label(t)}" for t in sorted(teams)
-                      if "(unmapped)" not in grade_label(t))
-    unmapped = sorted(t for t in teams if "(unmapped)" in grade_label(t))
+    unmapped = sorted({(db, t) for db, t, g in teams if "(unmapped)" in g})
+    dbs = sorted({db for db, _, _ in teams})
     notes = [
         ("What this is", ""),
-        ("", f"{club}'s {family}<year>.AV files ({len(seasons)} seasons, "
-             f"{seasons[0]['season']} to {seasons[-1]['season']}), converted."),
+        ("", f"{club}'s CSFW .AV files ({len(seasons)} files, "
+             f"{seasons[0]['season']} to {seasons[-1]['season']}, "
+             f"{len(dbs)} database{'s' if len(dbs) != 1 else ''}: {', '.join(dbs)}), converted."),
         ("", "One row per match, innings, spell or dismissal, exactly as the files hold it."),
         ("", "Nothing is estimated: a figure the files do not carry is left blank."),
         ("", ""),
         ("Things worth knowing", ""),
         ("Overs", "Cricket notation. 93.3 is 93 overs and 3 balls, so season totals are "
                   "summed as balls and written back the same way."),
-        ("Team", "The files hold a team NUMBER on every fixture and no name for it. "
-                 + (f"Names used: {named}. " if named else "")
-                 + (f"No name was given for team(s) {', '.join(map(str, unmapped))}, "
-                    "so those read 'Grade #N (unmapped)' - pass --team-names or a profile "
-                    "to name them." if unmapped else "")),
+        ("Team", "The files hold a team NUMBER on every fixture and no name for it, and a "
+                 "number means something only inside its own database (the club-name field "
+                 "in the file header). "
+                 + (f"No name was given for {len(unmapped)} database/team pair(s), e.g. "
+                    + ", ".join(f"{db!r} team {t}" for db, t in unmapped[:6])
+                    + ", so those read 'Grade #N (unmapped)' - pass --team-names or a "
+                    "profile to name them." if unmapped else "Every team has a name.")),
         ("Match type", "The files hold a match-type code and no name for it. "
                        + (f"Codes with no name given: "
                           f"{', '.join(f'{c} ({n} matches)' for c, n in sorted(unnamed_types.items(), key=lambda x: str(x[0])))}. "
@@ -1933,39 +2004,59 @@ def analyse(source: Path, profile_path: Path | None) -> None:
     for name, n in layouts.items():
         print(f"layout {name}: {n} file(s)")
     clubs = Counter(s["club"] for s in parsed)
-    print("club name in the headers: " + "; ".join(f"{c!r} x{n}" for c, n in clubs.items()))
-    if len(clubs) > 1:
-        print("  WARNING: more than one club name - is this folder one club's archive?")
-    fams = defaultdict(list)
+    firsts = {re.split(r"[\s./]", c.strip().lower())[0] for c in clubs}
+    print(f"{len(clubs)} database label(s) in the headers (see below)")
+    if len(firsts) > 1:
+        print(f"  WARNING: the labels start with different words ({', '.join(sorted(firsts))}) "
+              "- is this folder one club's archive?")
+    dbs = defaultdict(list)
     for s in parsed:
-        fams[s["family"]].append(s)
+        dbs[s["club"].strip()].append(s)
     profile = choose_profile(next(iter(clubs), ""), profile_path) if clubs else Profile("none")
+    activate(profile)
+    unlisted = Counter(m["opponent"].strip() for s in parsed for m in s["matches"]
+                       if m["opponent"].strip().lower() in ("bye", "no game")
+                       and not m["has_play"] and not m["blocks"]
+                       and m["opponent"].strip().lower() not in profile.byes)
+    dropped = drop_byes(parsed, profile)
+    if dropped:
+        print(f"{dropped} bye fixtures dropped (profile byes: {', '.join(profile.byes)})")
+    if unlisted:
+        print(f"HINT: {sum(unlisted.values())} fixture(s) against "
+              f"{', '.join(repr(k) for k in unlisted)} with nothing played and nobody named "
+              "- a bye is not a match; list the name under 'byes' in the profile")
     print(f"profile: {profile.name}\n")
-    for fam, ss in sorted(fams.items()):
-        activate(profile, fam)
-        teams, types, results = Counter(), Counter(), Counter()
-        for s in ss:
-            for mid, date, team, opp, legs in group_legs(s):
-                teams[team] += 1
+    # A DATABASE is what the club-name field in the header says it is. The file
+    # NAME is not stable (2024's DAT4 is the women's, 2025's is sub-junior 12s),
+    # and a team number only means something inside one database.
+    print("databases (the header's club name; team numbers are only meaningful inside one):")
+    types, results = Counter(), Counter()
+    for label, ss in sorted(dbs.items()):
+        years = sorted(x["year"] for x in ss)
+        teams = defaultdict(lambda: [0, 9999, 0])
+        for x in ss:
+            use_season(x)
+            for mid, date, team, opp, legs in group_legs(x):
+                t = teams[team]
+                t[0] += 1
+                t[1], t[2] = min(t[1], x["year"]), max(t[2], x["year"])
                 types[legs[0]["type_code"]] += 1
                 results[legs[0]["result_code"]] += 1
-        years = sorted(s["year"] for s in ss)
-        print(f"family {fam}: {len(ss)} file(s), {years[0]} to {years[-1]}, "
-              f"{sum(teams.values())} matches")
-        print("  teams (number = name): "
-              + ", ".join(f"{t} = {grade_label(t)} ({n})" for t, n in sorted(teams.items())))
-        print("  match types: "
-              + ", ".join(f"{c} = {match_type_label(c) or '?'} ({n})"
-                          for c, n in sorted(types.items())))
-        print("  result codes (compare with the club's CSFW summary screen): "
-              + ", ".join(f"{c} = {RESULT_LABELS.get(c, '?')} ({n})"
-                          for c, n in sorted(results.items())))
-        codes = Counter(b["dismissal_code"] for s in ss for m in s["matches"]
-                        for b in m["blocks"] if b["dismissal_code"] is not None)
-        odd = {c: n for c, n in codes.items() if c not in DISMISSALS}
-        if odd:
-            print(f"  dismissal codes with no name: {dict(sorted(odd.items()))}")
-        print()
+        print(f"\n  {label!r}: {len(ss)} file(s) [{', '.join(sorted({x['family'] for x in ss}))}], "
+              f"{years[0]} to {years[-1]}, {sum(t[0] for t in teams.values())} matches")
+        for team, (n, y0, y1) in sorted(teams.items()):
+            use_season(ss[0])
+            print(f"    team {team:>3} = {grade_label(team):<24} {n:>5} matches, {y0} to {y1}")
+    print("\nmatch types, all files (code = name): "
+          + ", ".join(f"{c} = {match_type_label(c) or '?'} ({n})" for c, n in sorted(types.items())))
+    print("result codes, all files (compare with the club's CSFW summary screen): "
+          + ", ".join(f"{c} = {RESULT_LABELS.get(c, '?')} ({n})" for c, n in sorted(results.items())))
+    codes = Counter(b["dismissal_code"] for x in parsed for m in x["matches"]
+                    for b in m["blocks"] if b["dismissal_code"] is not None)
+    odd = {c: n for c, n in codes.items() if c not in DISMISSALS}
+    if odd:
+        print(f"dismissal codes with no name: {dict(sorted(odd.items()))}")
+    print()
     siblings = Counter(p.suffix.lower() for p in source.iterdir()
                        if p.is_file() and p.suffix.lower() not in (".av",))
     if siblings:
@@ -2087,67 +2178,77 @@ def main() -> None:
     except LayoutError as e:
         raise SystemExit(str(e))
     args.out.mkdir(parents=True, exist_ok=True)
+    # by season, then file: sorted() on names alone puts DAT12020 before DATA2019
+    all_seasons.sort(key=lambda s: (s["year"], s["stem"]))
     club = all_seasons[0]["club"]
     profile = choose_profile(club, args.profile)
+    club = profile.club_name or club
 
-    # ONE OUTPUT SET PER FILE FAMILY. DATA and DAT1 are different competitions
-    # with different team lists, and one CSV across both would file every team
-    # number under whichever list happened to be active. With a single family
-    # the file names and game keys are exactly as they always were.
-    families = defaultdict(list)
-    for s in all_seasons:
-        families[s["family"]].append(s)
-    multi = len(families) > 1
-    print(f"{club}: {len(all_seasons)} files, {len(families)} file famil"
-          f"{'ies' if multi else 'y'}, profile {profile.name}")
-    for family, seasons in families.items():
-        activate(profile, family)
-        tag = f"_{family.lower()}" if multi else ""
-        if multi:
-            for s in seasons:
-                s["key_prefix"] = s["stem"]
-        sheets = build_rows(seasons, absent_is_out)
-        sheets["Data quality"] = squad_clashes(seasons)
-        sheets["Cross-check"] = cross_check(args.source, seasons)
-        checks = verify(seasons)
-        stats = build_season_stats(seasons, absent_is_out=absent_is_out)
-        # The one side the club holds no scorebook for, from its own CSFW text
-        # reports. Season totals only - see `build_c2_season_rows`.
-        c2 = (build_c2_season_rows(args.source, *profile.no_scorebook)
-              if profile.no_scorebook else [])
-        if c2:
-            sheets["C2 1995-96 (no scorebook)"] = c2
-            # ON ITS OWN AS WELL, and that is not a convenience. The match file and
-            # the season-totals file are alternatives - importing both counts every
-            # run twice - but C2 1995/96 exists in the season file ALONE, because
-            # there is no scorebook to make matches from. A club importing the
-            # match file would otherwise lose that side entirely, so it gets a file
-            # of its own that can be imported alongside without overlapping
-            # anything.
-            write_csv(c2, args.out / "betterimport_c2_1995-96.csv")
-            stats.extend(c2)
-            stats.sort(key=lambda x: (x["Season"], x.get("Grade", ""), x["Player"]))
-        notes = profile.notes or generic_notes(club, seasons, profile, family)
-        write_xlsx(sheets, checks, args.out / f"match_detail{tag}.xlsx", notes)
-        write_csv(stats, args.out / f"betterimport_season_stats{tag}.csv")
-        games = build_game_rows(seasons, club, absent_is_out)
-        write_csv(games, args.out / f"manual_games_scorecards{tag}.csv")
+    # ONE OUTPUT SET FOR THE WHOLE FOLDER. A club's DATA, DAT1, DAT2... files are
+    # overflow databases of one club (a file holds at most 160 matches), not
+    # separate competitions, so splitting the output by file name would cut a
+    # season's games across several CSVs. Each file's teams are named from ITS
+    # database's names (`use_season`). Where more than one file name stem is in
+    # play, game keys carry the file stem so they cannot collide; with a single
+    # stem they are exactly as they always were.
+    activate(profile)
+    gone = drop_byes(all_seasons, profile)
+    if gone:
+        print(f"{gone} bye fixtures dropped (not matches)")
+    stems = {s["family"] for s in all_seasons}
+    if len(stems) > 1:
+        for s in all_seasons:
+            s["key_prefix"] = s["stem"]
+    seasons = all_seasons
+    dbs = sorted({s["club"].strip() for s in seasons})
+    print(f"{club}: {len(seasons)} files, {len(dbs)} database label(s), profile {profile.name}")
+    sheets = build_rows(seasons, absent_is_out)
+    sheets["Data quality"] = squad_clashes(seasons)
+    sheets["Cross-check"] = cross_check(args.source, seasons)
+    checks = verify(seasons)
+    stats = build_season_stats(seasons, absent_is_out=absent_is_out)
+    # The one side the club holds no scorebook for, from its own CSFW text
+    # reports. Season totals only - see `build_c2_season_rows`.
+    c2 = (build_c2_season_rows(args.source, *profile.no_scorebook)
+          if profile.no_scorebook else [])
+    if c2:
+        sheets["C2 1995-96 (no scorebook)"] = c2
+        # ON ITS OWN AS WELL, and that is not a convenience. The match file and
+        # the season-totals file are alternatives - importing both counts every
+        # run twice - but C2 1995/96 exists in the season file ALONE, because
+        # there is no scorebook to make matches from. A club importing the
+        # match file would otherwise lose that side entirely, so it gets a file
+        # of its own that can be imported alongside without overlapping
+        # anything.
+        write_csv(c2, args.out / "betterimport_c2_1995-96.csv")
+        stats.extend(c2)
+        stats.sort(key=lambda x: (x["Season"], x.get("Grade", ""), x["Player"]))
+    notes = profile.notes or generic_notes(club, seasons, profile)
+    write_xlsx(sheets, checks, args.out / "match_detail.xlsx", notes)
+    write_csv(stats, args.out / "betterimport_season_stats.csv")
+    games = build_game_rows(seasons, club, absent_is_out)
+    write_csv(games, args.out / "manual_games_scorecards.csv")
 
-        print(f"\n{family}: {len(seasons)} seasons, "
-              f"{seasons[0]['season']} to {seasons[-1]['season']}")
-        for name, rows in sheets.items():
-            print(f"  {name:<16} {len(rows):>6} rows")
-        print(f"  season stats     {len(stats):>6} rows"
-              + (f"  (incl. {len(c2)} C2 1995/96 with no scorebook)" if c2 else ""))
-        print(f"  game scorecards  {len(games):>6} rows")
-        unmapped = sorted({grade_label(t) for s in seasons
-                           for _, _, t, _, _ in group_legs(s) if "(unmapped)" in grade_label(t)})
-        if unmapped:
-            print(f"  NO NAME GIVEN FOR: {', '.join(unmapped)} - see --team-names / --profile")
-        print()
-        for label, ok, total in checks:
-            pct = f"{ok / total:.1%}" if total else "n/a"
-            print(f"  {label:<58} {ok:>5} / {total:<5} {pct}")
+    print(f"\n{seasons[0]['season']} to {seasons[-1]['season']}")
+    for name, rows in sheets.items():
+        print(f"  {name:<16} {len(rows):>6} rows")
+    print(f"  season stats     {len(stats):>6} rows"
+          + (f"  (incl. {len(c2)} C2 1995/96 with no scorebook)" if c2 else ""))
+    print(f"  game scorecards  {len(games):>6} rows")
+    unmapped = set()
+    for s in seasons:
+        use_season(s)
+        for _, _, t, _, _ in group_legs(s):
+            if "(unmapped)" in grade_label(t):
+                unmapped.add((s["club"].strip(), t))
+    if unmapped:
+        print(f"  NO NAME GIVEN FOR {len(unmapped)} database/team pairs, e.g. "
+              + ", ".join(f"{d!r} team {t}" for d, t in sorted(unmapped)[:5])
+              + " - see --team-names / --profile")
+    print()
+    for label, ok, total in checks:
+        pct = f"{ok / total:.1%}" if total else "n/a"
+        print(f"  {label:<58} {ok:>5} / {total:<5} {pct}")
 
 
 if __name__ == "__main__":

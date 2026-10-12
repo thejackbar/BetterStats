@@ -164,6 +164,7 @@ FIXTURES = [  # file order is NOT slot order: the slot a fixture points at is th
     (2, datetime.date(2025, 10, 25), 3, "Goodwood"),
     (0, datetime.date(2025, 10, 11), 1, "Fulham"),
     (1, datetime.date(2025, 10, 18), 4, "Glenunga"),
+    (3, datetime.date(2025, 11, 1), 2, "Bye"),
 ]
 MATCHES = {
     0: dict(type=4, result=0, us=(263, 7), them=(138, 10), ground="Devitt Oval",
@@ -171,6 +172,7 @@ MATCHES = {
     1: dict(type=9, result=1, us=(90, 10), them=(91, 3), ground="Glenunga Oval",
             bat=squad((0, 0, 12), (1, 1, 30), (2, 2, 20))),
     2: dict(type=4, result=4, us=(-1, -1), them=(-1, -1), bat=squad((0, 0, 0))),
+    3: dict(type=0, result=255, us=(-1, -1), them=(-1, -1), bat=[]),
 }
 
 
@@ -225,15 +227,15 @@ with tempfile.TemporaryDirectory() as td:
         by_opp = {x["opponent"]: x for x in s["matches"]}
         check("fixtures are keyed by the slot they point at, not their position",
               sorted((x["opponent"], x["team"], x["date"].isoformat()) for x in s["matches"]),
-              [("Fulham", 1, "2025-10-11"), ("Glenunga", 4, "2025-10-18"),
-               ("Goodwood", 3, "2025-10-25")])
+              [("Bye", 2, "2025-11-01"), ("Fulham", 1, "2025-10-11"),
+               ("Glenunga", 4, "2025-10-18"), ("Goodwood", 3, "2025-10-25")])
         check("the scorecard sits under its own fixture (Fulham 263/7, 101 by Smith)",
               (by_opp["Fulham"]["us"]["total"], by_opp["Fulham"]["blocks"][0]["runs"],
                s["players"][by_opp["Fulham"]["blocks"][0]["player_id"]]["surname"]),
               (263, 101, "Smith"))
         check("the club's result and match type are read at the layout's offsets",
               [(x["opponent"], x["result_code"], x["type_code"]) for x in s["matches"]],
-              [("Fulham", 0, 4), ("Glenunga", 1, 9), ("Goodwood", 4, 4)])
+              [("Fulham", 0, 4), ("Glenunga", 1, 9), ("Goodwood", 4, 4), ("Bye", 255, 0)])
 
         # 3. a layout is checked, not trusted
         refuses("an unknown layout field is refused, not ignored",
@@ -263,8 +265,8 @@ with tempfile.TemporaryDirectory() as td:
 # 5. A club with no profile does not inherit Shoalwater Bay's names
 # ---------------------------------------------------------------------------
 if hasattr(m, "choose_profile"):
-    prof = m.choose_profile("Payneham CC", None)
-    m.activate(prof, "DATA")
+    prof = m.choose_profile("Newtown CC", None)
+    m.activate(prof)
     check("another club's team number is unnamed, not Shoalwater's grade",
           m.grade_label(18), "Grade #18 (unmapped)")
     check("another club's match type is unnamed, not Shoalwater's 'Two day'",
@@ -272,76 +274,97 @@ if hasattr(m, "choose_profile"):
     check("an unnamed match type states no format (never a guess)",
           m.match_format_for(1, set(), 1, 50.0, 0.0), "")
     m.FINALS_TYPES = frozenset({9})
-    check("a final in a club whose formats are unknown stays blank, not 'One Day'",
+    m.FORMAT_BY_TYPE.clear()
+    m.FORMAT_BY_TYPE.update({4: "One Day"})
+    check("a final stays blank where only ONE format is named (it could be either)",
           m.match_format_for(9, set(), 1, 50.0, 0.0), "")
+    m.FORMAT_BY_TYPE.update({1: "Two Day"})
+    check("a final is measured once both formats are named",
+          m.match_format_for(9, set(), 1, 50.0, 0.0), "One Day")
     sh = m.choose_profile("Shoalwater Bay Cricket Club", None)
-    m.activate(sh, "DATA")
+    m.activate(sh)
     check("Shoalwater Bay's own profile is still chosen by its header name",
           (m.grade_label(18), m.match_type_label(4)), ("A grade", "One day"))
 else:
     check("a club profile exists", "no choose_profile", "choose_profile")
 
 # ---------------------------------------------------------------------------
-# 6. End to end: two file families, an unprofiled club, a described layout
+# 6. End to end: two databases, an unprofiled club, a described layout
 # ---------------------------------------------------------------------------
 with tempfile.TemporaryDirectory() as td:
     td = Path(td)
     src, out = td / "src", td / "out"
     src.mkdir()
     if lay2 is not None:
-        archive(src, lay2, {"DATA2025.AV": ("Payneham CC", 2025),
-                            "DAT12025.AV": ("Payneham CC", 2025)})
+        # DAT1 is the women's database THIS year; the name of a file says nothing
+        (src / "DATA2025.AV").write_bytes(build_av(lay2, "Payneham", 2025, FIXTURES, MATCHES, PLAYERS))
+        (src / "DAT12025.AV").write_bytes(build_av(lay2, "Payneham W", 2025, FIXTURES, MATCHES, PLAYERS))
     (td / "layout.json").write_text(json.dumps(V2))
     (td / "profile.json").write_text(json.dumps({
-        "name": "payneham-test", "club": "payneham",
-        "team_names": {"1": "1st XI", "3": "3rd XI"},
+        "name": "payneham-test", "club": "payneham", "club_name": "Payneham Cricket Club",
+        "team_names": {},
+        "databases": {"Payneham": {"1": "1st XI", "3": "3rd XI"},
+                      "Payneham W": {"1": "Women's 1st XI", "3": "Women's 3rd XI", "4": "Women's 4th XI"}},
         "match_types": {"4": "Limited Over", "9": "Final"}, "finals_types": [9],
-        "format_by_type": {"4": "One Day"},
-        "families": {"DAT1": {"1": "Under 11", "3": "Under 13", "4": "Under 15"}}}))
+        "format_by_type": {"4": "One Day"}, "byes": ["Bye"]}))
     code, text_out = run("--layout", td / "layout.json", "--analyse", src)
     check("--analyse runs on the folder", code, 0)
-    check("--analyse reports both file families and the layout it used",
-          all(w in text_out for w in ("family DATA", "family DAT1", "synthetic-v2")), True)
-    check("--analyse names the team numbers it found and that none has a name yet",
-          "1 = Grade #1 (unmapped)" in text_out, True)
+    check("--analyse groups by the database label in the header, with the file names beside it",
+          all(w in text_out for w in ("'Payneham':", "'Payneham W':", "[DAT1]", "[DATA]")), True)
+    check("the built-in Payneham profile is picked by the header, so team 1 of the men's database is named",
+          "team   1 = 1st XI" in text_out, True)
     check("--analyse writes nothing", out.exists(), False)
+    # a club nobody has a profile for: the bye is flagged, not silently imported
+    (td / "other").mkdir()
+    if lay2 is not None:
+        (td / "other" / "DATA2025.AV").write_bytes(
+            build_av(lay2, "Newtown CC", 2025, FIXTURES, MATCHES, PLAYERS))
+    code, other_out = run("--layout", td / "layout.json", "--analyse", td / "other")
+    check("--analyse hints at a bye with nothing played, for a club with no profile",
+          "HINT: 1 fixture(s) against 'Bye'" in other_out, True)
+    check("and a club with no profile is not given another club's names",
+          "team   1 = Grade #1 (unmapped)" in other_out, True)
 
     code, text_out = run("--layout", td / "layout.json", src, "-o", out)
     check("extraction without a profile still runs and says what is unnamed",
           (code, "NO NAME GIVEN FOR" in text_out), (0, True))
     code, text_out = run("--layout", td / "layout.json", "--profile", td / "profile.json",
                          src, "-o", out)
-    check("extraction with a profile runs", code, 0)
-    files = sorted(p.name for p in out.glob("manual_games_scorecards*.csv"))
-    check("one scorecard CSV per file family, never one mixed file",
-          files, ["manual_games_scorecards_dat1.csv", "manual_games_scorecards_data.csv"])
-    if len(files) == 2:
-        data = read_csv(out / "manual_games_scorecards_data.csv")
-        dat1 = read_csv(out / "manual_games_scorecards_dat1.csv")
-        check("each family is filed under ITS OWN team names (the Fulham game, team 1)",
-              ({r["grade_name"] for r in data if r["opposition"] == "Fulham"},
-               {r["grade_name"] for r in dat1 if r["opposition"] == "Fulham"}),
-              ({"1st XI"}, {"Under 11"}))
-        check("a team the profile did not name is loud, not filed under another's (Glenunga, team 4)",
-              ({r["grade_name"] for r in data if r["opposition"] == "Goodwood"},
-               {r["grade_name"] for r in data if r["opposition"] == "Glenunga"}),
-              ({"3rd XI"}, {"Grade #4 (unmapped)"}))
-        check("game keys cannot collide between families",
-              (data[0]["game_key"].split("-")[0], dat1[0]["game_key"].split("-")[0]),
-              ("data2025", "dat12025"))
-        # a final states no format: it is measured (this team played no two-day
-        # cricket), and only where the profile knows the club's formats at all
-        check("the profile's match types decide format and finals",
-              ({(r["opposition"], r["match_format"], r["is_final"]) for r in data}),
-              {("Fulham", "One Day", ""), ("Glenunga", "One Day", "true"), ("Goodwood", "One Day", "")})
-        check("an abandoned match is blank, and still a match",
-              {r["result"] for r in data if r["opposition"] == "Goodwood"}, {""})
-        check("the club's result byte reaches the file (Fulham won, Glenunga lost)",
-              ({r["result"] for r in data if r["opposition"] == "Fulham"},
-               {r["result"] for r in data if r["opposition"] == "Glenunga"}),
-              ({"WIN"}, {"LOSS"}))
+    check("extraction with a profile runs and drops the byes",
+          (code, "2 bye fixtures dropped" in text_out), (0, True))
+    check("ONE scorecard CSV for the whole folder, not one per file name",
+          sorted(p.name for p in out.glob("manual_games_scorecards*.csv")),
+          ["manual_games_scorecards.csv"])
+    rows = read_csv(out / "manual_games_scorecards.csv") if code == 0 else []
+    men = [r for r in rows if r["game_key"].startswith("data2025")]
+    women = [r for r in rows if r["game_key"].startswith("dat12025")]
+    check("each file's teams are named from ITS database (Fulham, team 1, in both)",
+          ({r["grade_name"] for r in men if r["opposition"] == "Fulham"},
+           {r["grade_name"] for r in women if r["opposition"] == "Fulham"}),
+          ({"1st XI"}, {"Women's 1st XI"}))
+    check("a team the profile did not name in that database is loud (Glenunga, team 4, men's)",
+          ({r["grade_name"] for r in men if r["opposition"] == "Goodwood"},
+           {r["grade_name"] for r in men if r["opposition"] == "Glenunga"},
+           {r["grade_name"] for r in women if r["opposition"] == "Glenunga"}),
+          ({"3rd XI"}, {"Grade #4 (unmapped)"}, {"Women's 4th XI"}))
+    check("game keys carry the file name where several are in play, so they cannot collide",
+          (men[0]["game_key"].split("-")[0] if men else None,
+           women[0]["game_key"].split("-")[0] if women else None), ("data2025", "dat12025"))
+    check("a bye is not a game",
+          {r["opposition"] for r in rows}, {"Fulham", "Glenunga", "Goodwood"})
+    check("the profile's club name is the winner when we win",
+          {r["winning_team"] for r in men if r["opposition"] == "Fulham"}, {"Payneham Cricket Club"})
+    check("the profile's match types decide format and finals; a final is blank with one format named",
+          ({(r["opposition"], r["match_format"], r["is_final"]) for r in men}),
+          {("Fulham", "One Day", ""), ("Glenunga", "", "true"), ("Goodwood", "One Day", "")})
+    check("an abandoned match is blank, and still a match",
+          {r["result"] for r in men if r["opposition"] == "Goodwood"}, {""})
+    check("the club's result byte reaches the file (Fulham won, Glenunga lost)",
+          ({r["result"] for r in men if r["opposition"] == "Fulham"},
+           {r["result"] for r in men if r["opposition"] == "Glenunga"}),
+          ({"WIN"}, {"LOSS"}))
 
-# A single family keeps the file names and game keys it always had.
+# A single file name stem keeps the file names and game keys it always had.
 with tempfile.TemporaryDirectory() as td:
     td = Path(td)
     src, out = td / "src", td / "out"
@@ -352,7 +375,7 @@ with tempfile.TemporaryDirectory() as td:
         code, _ = run("--layout", td / "layout.json", "--team-names", "1=1st XI,3=3rd XI,4=4th XI",
                       src, "-o", out)
         rows = read_csv(out / "manual_games_scorecards.csv") if code == 0 else []
-        check("one family: the plain file name and the year-based game key",
+        check("one file stem: the plain file name and the year-based game key",
               (code, rows[0]["game_key"] if rows else None), (0, "2025-001"))
         check("--team-names names the teams with no profile",
               sorted({r["grade_name"] for r in rows}), ["1st XI", "3rd XI", "4th XI"])
@@ -370,6 +393,13 @@ with tempfile.TemporaryDirectory() as td:
         code, text_out = run("--layout", td / "layout.json", "--analyse", src)
         check("a folder mixing two layouts reads each file with its own",
               ("csfw-av-v1: 1 file" in text_out, "synthetic-v2: 1 file" in text_out), (True, True))
+
+# The two-space leg names Payneham's own files carry ("Reynella  1", "Reynella  2")
+fx = {0: dict(date=1, team=3, name="Reynella  1"), 1: dict(date=1, team=3, name="Reynella  2"),
+      2: dict(date=1, team=3, name="Reynella 12")}
+attempt("two spaces in 'Reynella  1' / 'Reynella  2' do not split one match into two opponents",
+        lambda: (m.split_leg(fx), sorted({(f["opponent"], f["leg"]) for f in fx.values()}))[1],
+        [("Reynella", 1), ("Reynella", 2), ("Reynella 12", None)])
 
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

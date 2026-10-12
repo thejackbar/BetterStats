@@ -60,7 +60,7 @@
 32. Jump-back edit replays `extracted_payload` through the upload review UI (photo uploads only); save is `PATCH /games/{id}`. `check_scorecard_duplicate` takes `exclude_id`. Delete and restore use the one audit trail (`/admin/manual-entries#audit`).
 
 **CSFW archives**
-33. There is ONE extractor, `tools/csfw_extract.py` (`docs/csfw-data-extraction.md`). Never copy it for a club: a record layout is a `Layout` (`--layout`), team and match-type names are a `Profile` (`--profile`, `--team-names`) because no data file holds them, and each file family (DATA, DAT1) is its own competition with its own output. Start any new club with `--analyse`. Never read another club's type codes or team names into a club that has no profile.
+33. There is ONE extractor, `tools/csfw_extract.py` (`docs/csfw-data-extraction.md`). Never copy it for a club: a record layout is a `Layout` (`--layout`); team and match-type names are a `Profile` (`tools/csfw_profiles/<club>.json`, `--profile`, `--team-names`) because no data file holds them; a team number is only meaningful inside its DATABASE (the header's club-name field, never the file name); byes are the profile's `byes`. Start any new club with `--analyse`. Never read another club's type codes or team names into a club with no profile, and never name two databases' teams the same grade.
 
 ## Traps and failure signatures
 
