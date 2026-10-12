@@ -171,12 +171,28 @@ Each player carries a price for the season. Draft mode ignores price.
   map it onto a price band. A player with no usable history gets a role baseline.
 - **Budget.** A fixed salary cap (default 100.0 credits) sized so a balanced 12
   is affordable but a manager cannot field every premium player.
-- **Live movement.** After each scored round prices drift on a blend of form
-  (recent points vs price) and net ownership change. Movement is capped per round
-  so prices move gradually.
-- **Sell-on.** When a manager sells a player they realise the purchase price plus
-  part of any profit (FPL convention: half the rise, rounded), so the budget
-  reflects good early buys without making trading free money.
+- **Live movement.** After each scored round, every player who played has their
+  price step towards what their recent form is worth. Form is their points over
+  their last 3 played rounds, with 2 rounds at the points their starting price
+  implies mixed in so one big or small game cannot swing a price alone. The price
+  form is worth is `4.0 + form x 0.12` (the scale the baseline uses), and the price
+  moves half the gap, rounded to 0.1, **never more than $0.5 up or down in a round**
+  and never below $4.0. A player who did not play does not move. Ownership is not
+  used (there is no per-round ownership history to replay).
+  Prices are derived: `fantasy_pricing.recompute_prices` replays every scored round
+  onto each player's `base_price`, so settling a round again, unsettling it or a
+  late scorecard gives the same prices as if it had been scored once. The nightly
+  job also runs it, so a season scored before this existed catches up by itself
+  (`python -m app.scripts.fantasy_recompute_prices <org|all> [--apply]` does it
+  now, dry run by default). `price_change` is the latest scored round's move.
+- **Hand-set prices.** A price an admin types in on the Player pool page is locked
+  (`price_locked`) and never moves; "set · auto" hands it back, and "Recalculate
+  prices" (reset) clears every lock.
+- **Sale.** When a manager sells a player the bank gets the player's price that
+  day. A rise while owned adds to the bank, a fall takes from it, so squad value
+  and the bank always agree. (This replaced the FPL half-the-rise rule.)
+- **Arrows.** A green ▲ or red ▼ with the amount sits beside a price on My Team,
+  Pick Squad, Transfers, the Players list and profile, and the admin pool table.
 
 ## Salary-cap engine
 

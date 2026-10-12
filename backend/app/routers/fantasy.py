@@ -35,7 +35,7 @@ from app.models.db import (
     FantasySeason, FantasyLeague, FantasyLeagueMember, FantasyRound, FantasyPoolPlayer,
     FantasyManager, FantasySquad, FantasySquadPlayer, FantasyDraft, FANTASY_ROLES,
 )
-from app.services import fantasy_engine, fantasy_draft, fantasy_pool_check, fantasy_grades
+from app.services import fantasy_engine, fantasy_draft, fantasy_pool_check, fantasy_grades, fantasy_pricing
 from app.routers import public_fantasy
 from app.services.fantasy_scoring import DEFAULT_SCORING, DEFAULT_RULES
 from app.services.session_safety import rollback_keeping
@@ -225,6 +225,7 @@ async def list_pool(season_id: str, club=Depends(get_current_club), db: AsyncSes
                 "id": str(pp.id), "player_id": str(pp.player_id), "name": name,
                 "role": pp.role, "role_source": pp.role_source,
                 "base_price": float(pp.base_price), "current_price": float(pp.current_price),
+                "price_change": float(pp.price_change), "price_locked": bool(pp.price_locked),
                 "total_points": float(pp.total_points), "last_round_points": float(pp.last_round_points),
                 "owned_count": pp.owned_count, "is_available": pp.is_available,
             }
@@ -237,13 +238,16 @@ class PoolPatch(BaseModel):
     role: str | None = None
     is_available: bool | None = None
     current_price: float | None = None
+    price_locked: bool | None = None
 
 
 @router.patch("/pool/{pool_id}")
 async def patch_pool_player(pool_id: str, body: PoolPatch, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
     """Admin override of a pool player — set the fantasy role (stamps role_source
-    'admin' so a rebuild won't overwrite it), pull them from the pool, or nudge a
-    price."""
+    'admin' so a rebuild won't overwrite it), pull them from the pool, or set a
+    price. A price typed in by hand is locked: the round-by-round price movement
+    leaves it alone until ``price_locked`` is sent as false, which hands the player
+    back to the movement."""
     pp = await db.get(FantasyPoolPlayer, pool_id)
     if pp is None or str(pp.organisation_id) != str(club.id):
         raise HTTPException(status_code=404, detail="Pool player not found")
@@ -256,7 +260,16 @@ async def patch_pool_player(pool_id: str, body: PoolPatch, club=Depends(get_curr
         pp.is_available = body.is_available
     if body.current_price is not None:
         pp.current_price = round(float(body.current_price), 1)
+        pp.price_change = 0
+        pp.price_locked = body.price_locked is not False
+    elif body.price_locked is not None:
+        pp.price_locked = body.price_locked
     pp.updated_at = datetime.now(timezone.utc)
+    if body.price_locked is False and body.current_price is None:
+        # Back to auto: replay the scored rounds onto the starting price.
+        await db.flush()
+        fs = await db.get(FantasySeason, pp.fantasy_season_id)
+        await fantasy_pricing.recompute_prices(db, fs)
     await db.commit()
     return {"ok": True}
 
@@ -860,11 +873,14 @@ async def add_pool_player(season_id: str, body: PoolAdd, club=Depends(get_curren
     if existing is not None:
         existing.role, existing.role_source = role, "admin"
         existing.base_price = existing.current_price = price
+        existing.price_change = 0
+        existing.price_locked = body.price is not None   # a price the admin typed stays put
         existing.is_available = True
     else:
         db.add(FantasyPoolPlayer(
             fantasy_season_id=fs.id, organisation_id=club.id, player_id=player.id,
             role=role, role_source="admin", base_price=price, current_price=price, is_available=True,
+            price_locked=body.price is not None,
         ))
     await db.commit()
     return {"ok": True, "role": role, "price": price}

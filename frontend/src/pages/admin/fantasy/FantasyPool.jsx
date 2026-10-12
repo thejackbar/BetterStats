@@ -19,6 +19,9 @@ export default function FantasyPool() {
   const setRole = async (pp, role) => {
     try { await api.fantasyPatchPool(pp.id, { role }); await loadPool() } catch (e) { fail(e) }
   }
+  const priceAuto = async (pp) => {
+    try { await api.fantasyPatchPool(pp.id, { price_locked: false }); await loadPool() } catch (e) { fail(e) }
+  }
   const removePool = async (id) => {
     if (!window.confirm('Remove this player from the pool?')) return
     try { await api.fantasyRemovePoolPlayer(id); await loadPool() } catch (e) { fail(e) }
@@ -29,7 +32,7 @@ export default function FantasyPool() {
       {season && (
         <div className="space-y-6">
           <PoolManager season={season} flash={flash} fail={fail} onChanged={loadPool} />
-          <PoolTable pool={pool} onRoleChange={setRole} onRemove={removePool} />
+          <PoolTable pool={pool} onRoleChange={setRole} onRemove={removePool} onPriceAuto={priceAuto} />
         </div>
       )}
     </FantasyFrame>

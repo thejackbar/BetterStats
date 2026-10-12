@@ -297,8 +297,10 @@ export function PoolManager({ season, flash, fail, onChanged }) {
 }
 
 // The priced pool, sortable and searchable. Role is editable inline (stamps the
-// admin override server-side) and a player can be removed from the pool.
-export function PoolTable({ pool, onRoleChange, onRemove }) {
+// admin override server-side) and a player can be removed from the pool. A price
+// shows the move after the last scored round; a hand-set price is marked and can be
+// handed back to the automatic movement.
+export function PoolTable({ pool, onRoleChange, onRemove, onPriceAuto }) {
   const [sort, setSort] = useState({ key: 'current_price', dir: 'desc' })
   const [poolSearch, setPoolSearch] = useState('')
   const [showAll, setShowAll] = useState(false)
@@ -371,7 +373,18 @@ export function PoolTable({ pool, onRoleChange, onRemove }) {
                     </select>
                     {p.role_source === 'admin' && <span className="ml-1 text-[10px] text-pb-accent">set</span>}
                   </td>
-                  <td className="py-1.5 pr-3 text-right tabular-nums">{fmt(p.current_price)}</td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums">
+                    {fmt(p.current_price)}
+                    {Number(p.price_change) !== 0 && (
+                      <span className={`ml-1 text-xs font-semibold ${Number(p.price_change) > 0 ? 'text-green-500' : 'text-red-400'}`}>
+                        {Number(p.price_change) > 0 ? '▲' : '▼'}{Math.abs(Number(p.price_change)).toFixed(1)}
+                      </span>
+                    )}
+                    {p.price_locked && (
+                      <button type="button" onClick={() => onPriceAuto && onPriceAuto(p)} title="This price was set by hand and does not move. Click to let it follow performances."
+                        className="ml-1 text-[10px] text-pb-accent underline">set · auto</button>
+                    )}
+                  </td>
                   <td className="py-1.5 pr-3 text-right tabular-nums">{fmt(p.total_points)}</td>
                   <td className="py-1.5 pr-3 text-right tabular-nums">{p.owned_count}</td>
                   <td className="py-1.5 text-right">

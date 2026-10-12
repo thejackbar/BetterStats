@@ -242,6 +242,23 @@ export function Toggle({ on, onClick }) {
   )
 }
 
+// A price movement arrow: green ▲ and the amount when a player's price rose after
+// the last scored round, red ▼ when it fell, nothing when it did not move.
+export function PriceArrow({ change }) {
+  const c = Math.round(Number(change || 0) * 10) / 10
+  if (!c) return null
+  const up = c > 0
+  const label = `${up ? 'Up' : 'Down'} ${Math.abs(c).toFixed(1)} after the last round`
+  return (
+    <span title={label} aria-label={label} style={{ color: up ? GREEN : RED, font: `700 0.85em 'Hanken Grotesk'`, marginLeft: 4, whiteSpace: 'nowrap' }}>
+      {up ? '▲' : '▼'}{Math.abs(c).toFixed(1)}
+    </span>
+  )
+}
+
+// A price with its movement arrow beside it.
+export const PriceTag = ({ price, change }) => <>{money(price)}<PriceArrow change={change} /></>
+
 // A movement arrow for ladders (▲ n / ▼ n / –).
 export function MoveArrow({ delta, width = 18 }) {
   let color = 'var(--faintest)', txt = '–'
