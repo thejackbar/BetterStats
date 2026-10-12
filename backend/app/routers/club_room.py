@@ -78,11 +78,16 @@ async def _get_records_cached(db, org_id: str, season_id: str | None) -> dict:
         return hit[1]
     from app.routers.records import get_records
     # get_records is a FastAPI path function whose unfilled params default to
-    # Query(...) sentinel objects, not real values — bypassing DI (as here)
-    # means every one of them must be passed explicitly.
+    # Query(...) / Depends(...) sentinel objects, not real values — bypassing DI
+    # (as here) means every one of them must be passed explicitly, and a
+    # parameter added to it later has to be added here too: a missed one reaches
+    # the query as a sentinel and 500s the whole /play. `viewer=None` is the
+    # public reading, so a junior grade the club hides from the public stays off
+    # the TV as well (the show also runs on the logged-out /room link).
     data = await get_records(
         org_id=org_id, season_id=season_id, grade_id=None, grade_name=None,
-        finals_only=False, captain_only=False, gender=None, db=db,
+        finals_only=False, captain_only=False, gender=None, categories=None,
+        formats=None, competitions=None, debug_timing=False, db=db, viewer=None,
     )
     _records_cache[key] = (now, data)
     return data
