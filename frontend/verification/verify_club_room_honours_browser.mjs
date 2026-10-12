@@ -199,6 +199,43 @@ const run = async () => {
     await browser.close()
   })
 
+  await section('A skipped playlist entry is named to the admin, not to the TV', async () => {
+    const play = structuredClone(FIX.play)
+    play.enabled = true
+    play.slides.forEach((s) => { s.duration_seconds = 600 })
+    const skipped = [{ id: 'e1', slide_type: 'records', title: null }]
+
+    const admin = await launch({ viewport: DESKTOP, mobile: false })
+    admin.page.setDefaultTimeout(5000)
+    await admin.page.route('**/api/auth/me', (r) => json(r, ME_CLUB))
+    await admin.page.route('**/api/club-admin/club-room/play', (r) => json(r, { ...play, skipped }))
+    await admin.page.goto(`${BASE}/admin/club-room/play`, { waitUntil: 'domcontentloaded' })
+    await admin.page.getByText('Batting Honour Roll').first().waitFor({ timeout: 15000 })
+    let t = (await admin.page.locator('body').innerText()).replace(/\s+/g, ' ')
+    ok('the admin preview names the entry that was skipped', /1 playlist entry skipped because it could not load: Club Records/.test(t), t.slice(0, 300))
+    ok('the rest of the show still plays beside the note', /Batting Honour Roll/.test(t))
+    await admin.page.screenshot({ path: join(SHOTS, 'club-room-skipped-admin.png') })
+    await admin.browser.close()
+
+    const none = await launch({ viewport: DESKTOP, mobile: false })
+    none.page.setDefaultTimeout(5000)
+    await none.page.route('**/api/auth/me', (r) => json(r, ME_CLUB))
+    await none.page.route('**/api/club-admin/club-room/play', (r) => json(r, { ...play, skipped: [] }))
+    await none.page.goto(`${BASE}/admin/club-room/play`, { waitUntil: 'domcontentloaded' })
+    await none.page.getByText('Batting Honour Roll').first().waitFor({ timeout: 15000 })
+    t = (await none.page.locator('body').innerText()).replace(/\s+/g, ' ')
+    ok('nothing skipped, no note (so the note above was a real signal)', !/skipped because/.test(t))
+    await none.browser.close()
+
+    const tv = await stagePage({ viewport: DESKTOP, mobile: false }, { ...play, skipped })
+    tv.page.setDefaultTimeout(5000)
+    await tv.page.goto(`${BASE}/room/tok`, { waitUntil: 'domcontentloaded' })
+    await tv.page.getByText('Batting Honour Roll').first().waitFor({ timeout: 15000 })
+    t = (await tv.page.locator('body').innerText()).replace(/\s+/g, ' ')
+    ok('the public TV link shows the show and no note, even with an entry skipped', /Batting Honour Roll/.test(t) && !/skipped because/.test(t))
+    await tv.browser.close()
+  })
+
   console.log(`\n${PASS} passed, ${FAIL} failed`)
   process.exit(FAIL ? 1 : 0)
 }

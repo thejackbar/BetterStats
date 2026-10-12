@@ -24,6 +24,7 @@ requires MANAGE_CLUB_ROOM.
 """
 from __future__ import annotations
 
+import logging
 import secrets
 import uuid
 from pathlib import Path
@@ -42,6 +43,9 @@ from app.models.db import (
 )
 from app.routers.auth import get_current_club, get_current_user
 from app.services import club_lock
+from app.services.session_safety import rollback_keeping
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/club-admin/club-room", tags=["club-room"])
 
@@ -921,6 +925,29 @@ async def _expand_honours(db, club, entry: ClubRoomSlide) -> list[dict]:
     ]
 
 
+async def _expand_entry(db, club, entry: ClubRoomSlide) -> list[dict]:
+    """One saved playlist entry as the slides it expands into."""
+    if entry.slide_type == "sponsors":
+        return await _expand_sponsors(db, club, entry)
+    if entry.slide_type == "fixtures":
+        return await _expand_fixtures(db, club, entry)
+    if entry.slide_type == "social_posts":
+        if not org_has_module(club, "socials"):
+            return []
+        return await _expand_media(db, club, entry, "social_export", "social_post", 6)
+    if entry.slide_type == "custom_images":
+        return await _expand_media(db, club, entry, "upload", "custom_image", EXPAND_CAP)
+    if entry.slide_type == "leaderboard":
+        return await _expand_leaderboard(db, club, entry)
+    if entry.slide_type == "records":
+        return await _expand_records(db, club, entry)
+    if entry.slide_type == "statlab_report":
+        return await _expand_statlab_report(db, club, entry)
+    if entry.slide_type == "honours":
+        return await _expand_honours(db, club, entry)
+    return []
+
+
 async def build_play_payload(db: AsyncSession, club: Organisation) -> dict:
     """The whole resolved show for one club — shared by the authenticated
     `/play` endpoint and the public `/room/{token}` link, so there's exactly
@@ -934,28 +961,21 @@ async def build_play_payload(db: AsyncSession, club: Organisation) -> dict:
     entries = rows.scalars().all()
 
     slides: list[dict] = []
+    skipped: list[dict] = []
     for entry in entries:
-        if entry.slide_type == "sponsors":
-            expanded = await _expand_sponsors(db, club, entry)
-        elif entry.slide_type == "fixtures":
-            expanded = await _expand_fixtures(db, club, entry)
-        elif entry.slide_type == "social_posts":
-            if not org_has_module(club, "socials"):
-                expanded = []
-            else:
-                expanded = await _expand_media(db, club, entry, "social_export", "social_post", 6)
-        elif entry.slide_type == "custom_images":
-            expanded = await _expand_media(db, club, entry, "upload", "custom_image", EXPAND_CAP)
-        elif entry.slide_type == "leaderboard":
-            expanded = await _expand_leaderboard(db, club, entry)
-        elif entry.slide_type == "records":
-            expanded = await _expand_records(db, club, entry)
-        elif entry.slide_type == "statlab_report":
-            expanded = await _expand_statlab_report(db, club, entry)
-        elif entry.slide_type == "honours":
-            expanded = await _expand_honours(db, club, entry)
-        else:
-            expanded = []
+        # One entry that cannot be built (a stale saved query, an upstream
+        # hiccup, a bug in one expander) must not blank the whole TV: the rest
+        # of the playlist still plays. It is logged with its traceback and named
+        # in `skipped`, so it is neither silent nor lost. The rollback matters
+        # when the failure was a database error, which leaves the transaction
+        # aborted for every entry after it.
+        try:
+            expanded = await _expand_entry(db, club, entry)
+        except Exception:  # noqa: BLE001 - see above
+            logger.exception("club room: skipped %s slide %s for club %s", entry.slide_type, entry.id, club.id)
+            await rollback_keeping(db, club, settings, *entries)
+            skipped.append({"id": str(entry.id), "slide_type": entry.slide_type, "title": entry.title})
+            continue
         duration = entry.duration_seconds or settings.rotation_seconds
         for item in expanded:
             item["duration_seconds"] = duration
@@ -972,6 +992,7 @@ async def build_play_payload(db: AsyncSession, club: Organisation) -> dict:
         "logo_url": (f"/api/images/organisations/{club.id}/logo" if club.logo_data or club.logo_url else None),
         "theme_config": club.theme_config,
         "slides": slides,
+        "skipped": skipped,
     }
 
 

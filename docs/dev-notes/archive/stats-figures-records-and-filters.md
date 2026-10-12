@@ -2382,3 +2382,12 @@ Verified on a local Postgres 16: 27 checks in `backend/verification/verify_club_
 - **Not done.** One slide that raises still blanks the whole show, and the production log was not read (this session has no server access), so the cause is reproduced and not seen in the log. Wrapping each slide's expansion so a bad one is skipped and logged is the next step if another cause turns up.
 
 Verified on a local Postgres 16 over the records suite's own schema and seed: 9 checks in `backend/verification/verify_club_room_records.py`. The previous code fails 7 of 7 with the `Depends` error and does not crash the script; the fixed code passes, including a playlist of sponsors grid, three leaderboards, records, images and a StatLab entry.
+
+## v9.110.9: the club room TV skips a slide it cannot build
+
+- **Why.** v9.110.8.1 showed that `/play` builds the whole playlist in one request, so one entry that raised blanked the TV with "Internal Server Error". The records cause was fixed there; this makes the next one of a different kind harmless.
+- **Change.** `build_play_payload` builds each entry through `_expand_entry` inside a try. A failure is logged (`club room: skipped <type> slide <id> for club <id>`), rolled back with `rollback_keeping` (a database error otherwise leaves the transaction aborted for every later entry), and recorded in `skipped`. The admin preview shows an amber note naming it; the public TV link shows none.
+- **Trade-off.** A broad `except` can hide a bug behind "the slide just is not there" (rule 14). The log line with its traceback and the admin note are what stop that; look for the log line when a club says a slide is missing.
+- **Not done.** The Club Room editor does not show skipped entries, only the preview does.
+
+Verified on a local Postgres 16: 18 checks in `backend/verification/verify_club_room_records.py`, including an exception and a database error in the middle entry, with the entries before and after it still present, the skipped one named, and a healthy playlist skipping nothing. The previous commit fails the 9 skip checks and passes the other 9. Browser: 25 checks in `verify_club_room_honours_browser.mjs`, including the note in the admin preview, none when nothing was skipped, none on the public link; screenshot read.

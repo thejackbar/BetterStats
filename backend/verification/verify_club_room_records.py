@@ -118,6 +118,54 @@ async def main() -> None:
         slides_a, err = await playlist(db, org, [("records", {"category": "batting.top_career_runs", "season_id": str(vrt.SEASON)})])
         check("a records slide scoped to a season plays", err is None and len([x for x in slides_a if x.get("type") == "records"]) == 1, str(err))
 
+        print("== one slide that cannot be built is skipped, not fatal")
+        real_records = cr._expand_records
+
+        async def boom(db_, club_, entry_):
+            raise RuntimeError("stale saved query")
+
+        async def db_boom(db_, club_, entry_):
+            # A real database error leaves the transaction aborted for every entry after it.
+            await db_.execute(text("SELECT * FROM no_such_table_anywhere"))
+
+        mixed = [
+            ("leaderboard", {"stat_group": "batting", "sort_by": "total_runs", "limit": 10}),
+            ("records", {"category": "batting.top_career_runs"}),
+            ("leaderboard", {"stat_group": "bowling", "sort_by": "total_wickets", "limit": 10}),
+        ]
+        for label, fake in (("an exception", boom), ("a database error", db_boom)):
+            cr._expand_records = fake
+            try:
+                payload = {}
+                org_row = await db.get(Organisation, vrt.ORG)
+                await db.execute(text("DELETE FROM club_room_slides WHERE organisation_id = :o"), {"o": vrt.ORG})
+                for i, (stype, cfg) in enumerate(mixed):
+                    await db.execute(text(
+                        "INSERT INTO club_room_slides (id, organisation_id, slide_type, config, position, enabled) "
+                        "VALUES (gen_random_uuid(), :o, :t, CAST(:c AS jsonb), :p, true)"),
+                        {"o": vrt.ORG, "t": stype, "c": json.dumps(cfg), "p": i})
+                await db.commit()
+                try:
+                    payload = await cr.build_play_payload(db, org_row)
+                    err = None
+                except Exception as exc:  # noqa: BLE001 - the control raises; report it
+                    await db.rollback()
+                    err = f"{type(exc).__name__}: {exc}"
+            finally:
+                cr._expand_records = real_records
+            got = [x.get("stat_group") for x in payload.get("slides", []) if x.get("type") == "leaderboard"]
+            skipped = payload.get("skipped") or []
+            check(f"{label} in one entry: the playlist still plays", err is None, str(err))
+            check(f"{label}: the entries before AND after it are still there", got == ["batting", "bowling"], str(got))
+            check(f"{label}: it is named in `skipped`, with its type",
+                  [x.get("slide_type") for x in skipped] == ["records"], str(skipped))
+            check(f"{label}: the club and its settings are still readable afterwards",
+                  bool(payload.get("club_name")), str(payload.get("club_name")))
+        payload_ok = await cr.build_play_payload(db, await db.get(Organisation, vrt.ORG))
+        check("a healthy playlist skips nothing (so `skipped` above was a real signal)",
+              payload_ok.get("skipped") == [] and any(x.get("type") == "records" for x in payload_ok.get("slides", [])),
+              str(payload_ok.get("skipped")))
+
         print("== a club with nothing to show")
         empty = vrt.EMPTY_ORG
         if await db.get(Organisation, empty) is None:
