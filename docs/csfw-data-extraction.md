@@ -65,13 +65,27 @@ against a real Shoalwater file it recovers the documented 54-byte record with th
 date at 123,313. Those are candidates to check against the club's CSFW screens,
 then describe with `--layout`; they are never used unchecked.
 
+**Ask the club with a sheet, not a document.** `--questions answers.csv` writes
+the club's fill-in sheet from the files (columns `Section, Ref, Item, Database,
+Number, Matches, Years, Example match, What we have, How to answer, Your answer`):
+one row per team number per database (A), per match type (B), and the questions
+only the club can answer (C): a format for each named type, what an unnamed
+result code means, absent out or did not bat, byes, printed reports. Each row
+carries its matches, years and a recent match so a club member can recognise it.
+`--answers answers.csv` reads the filled copy onto the profile (a blank answer
+changes nothing; a type whose answer says "Final" is a final; what no profile
+field can hold, such as the meaning of a result code, is printed for a person and
+never guessed). The covering letter for Payneham (`Payneham_CSFW_questions.docx`)
+names those columns, and its counts are read from the sheet, so the two cannot
+disagree.
+
 **Never add one club's tables to another.** The first converter read Shoalwater's
 match-type codes 1 and 4 straight out of the code. `season_format_context` now
 reads the active profile's format table, and a final's format is measured only
 where the profile names BOTH a one-day and a two-day type (Payneham names only
 Limited Over, so its finals stay blank: an ATCA Final is a turf final).
 
-Verification: `tools/verify_csfw_extract.py` (40 checks) builds archives in a
+Verification: `tools/verify_csfw_extract.py` (52 checks) builds archives in a
 layout the extractor was never written against (every table moved and resized,
 every field shifted), with two databases, a bye, an unprofiled club and two
 layouts in one folder, and runs the shipped code over them.

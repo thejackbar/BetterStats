@@ -1985,6 +1985,149 @@ def probe_layout(buf: bytes) -> dict:
     return out
 
 
+# ── the club's answer sheet ──────────────────────────────────────────────────
+#
+# What the files cannot say (team names, match-type names, formats, what a
+# result code is) has to come from the club, and a club will fill in a sheet
+# before it reads a document. `--questions` writes that sheet from the files in
+# hand, one row per thing to name, with enough beside each row (matches, years,
+# a recent match) for someone who knows the club to recognise it. `--answers`
+# reads the filled copy back. The columns are fixed and are what the covering
+# letter refers to by name.
+
+QUESTION_COLUMNS = ["Section", "Ref", "Item", "Database", "Number", "Matches", "Years",
+                    "Example match", "What we have", "How to answer", "Your answer"]
+
+
+def _example(date, opponent, extra=""):
+    when = date.strftime("%d %b %Y") if date else "undated"
+    return f"{when} v {opponent.strip()}" + (f" ({extra})" if extra else "")
+
+
+def build_questions(seasons: list, profile: Profile, source: Path | None = None) -> list:
+    """The answer sheet's rows. Drops byes first, as the extraction will."""
+    teams = defaultdict(lambda: [0, 9999, 0, None])        # n, first, last, latest match
+    types = defaultdict(lambda: [0, 9999, 0, None, 0])     # ... and with a 2nd innings
+    results = defaultdict(lambda: [0, 9999, 0, None])
+    absent = 0
+    # matches, not records: every match is two records in these files
+    byes = sum(len(group_legs(dict(s, matches=[m for m in s["matches"]
+                                               if is_bye(m, profile.byes)])))
+               for s in seasons) if profile.byes else 0
+    keep = [dict(s, matches=[m for m in s["matches"] if not is_bye(m, profile.byes)])
+            for s in seasons]
+    for s in keep:
+        use_season(s)
+        db = s["club"].strip()
+        for mid, date, team, opp, legs in group_legs(s):
+            for table, key in ((teams, (db, team)), (types, legs[0]["type_code"]),
+                               (results, legs[0]["result_code"])):
+                r = table[key]
+                r[0] += 1
+                r[1], r[2] = min(r[1], s["year"]), max(r[2], s["year"])
+                if r[3] is None or (date and (r[3][0] is None or date > r[3][0])):
+                    r[3] = (date, opp, f"{db}, team {team}")
+            if len(legs) > 1 and (legs[1]["us"]["played"] or legs[1]["them"]["played"]):
+                types[legs[0]["type_code"]][4] += 1
+        absent += sum(1 for m in s["matches"] for b in m["blocks"]
+                      if b["dismissal_code"] == ABSENT)
+    rows, n = [], {"A": 0, "B": 0, "C": 0}
+
+    def add(section, item, **kw):
+        n[section] += 1
+        rows.append({"Section": section, "Ref": f"{section}{n[section]}", "Item": item,
+                     "Database": "", "Number": "", "Matches": "", "Years": "",
+                     "Example match": "", "What we have": "",
+                     "How to answer": _ANSWER_HELP.get(item, ""), "Your answer": "", **kw})
+
+    def span(r):
+        return f"{r[1]} to {r[2]}" if r[1] != r[2] else str(r[1])
+
+    for (db, team), r in sorted(teams.items(), key=lambda x: (x[0][0].lower(), x[0][1])):
+        if team <= 0:
+            continue
+        use_season({"club": db})
+        name = grade_label(team)
+        add("A", "Team", Database=db, Number=team, Matches=r[0], Years=span(r),
+            **{"Example match": _example(r[3][0], r[3][1]),
+               "What we have": "" if "(unmapped)" in name else name})
+    for code, r in sorted(types.items()):
+        if code == 255:
+            continue
+        add("B", "Match type", Number=code, Matches=r[0], Years=span(r),
+            **{"Example match": _example(r[3][0], r[3][1], r[3][2]),
+               "What we have": MATCH_TYPES.get(code, "")})
+    for code, r in sorted(types.items()):
+        if code in MATCH_TYPES and code not in FORMAT_BY_TYPE and r[0] >= 5:
+            add("C", "Format", Number=code, Matches=r[0], Years=span(r),
+                **{"Example match": f"Second innings recorded in {r[4]} of {r[0]} matches",
+                   "What we have": f"{MATCH_TYPES[code]} (no format yet)"})
+    for code, r in sorted(results.items()):
+        if code in (5, 6, 7) or (code not in RESULT_LABELS and code != 255):
+            add("C", "Result code", Number=code, Matches=r[0], Years=span(r),
+                **{"Example match": _example(r[3][0], r[3][1], r[3][2])})
+    if absent:
+        add("C", "Absent batter", Matches=absent)
+    if byes:
+        add("C", "Bye", Matches=byes)
+    if source and any(p.suffix.lower() == ".csv" for p in source.iterdir()):
+        add("C", "Printed reports",
+            Matches=sum(1 for p in source.iterdir() if p.suffix.lower() == ".csv"))
+    return rows
+
+
+_ANSWER_HELP = {
+    "Team": "Type the team's name. Leave as is if the name we have is right",
+    "Match type": "Type the match type's name. Leave as is if the name we have is right",
+    "Format": "Type Two Day or One Day",
+    "Result code": "Type what this result means (for example No result, Forfeit)",
+    "Absent batter": "Type Absent out (counts as an innings and a dismissal) or Did not bat (counts as neither)",
+    "Bye": "Type Yes to leave byes out of the load, or No to load them as games",
+    "Printed reports": "Type Yes to load them as season totals, or No to skip them",
+}
+
+
+def apply_answers(profile: Profile, path: Path) -> tuple:
+    """(profile with the club's answers applied, absent reading or None, notes).
+
+    Reads the filled sheet. A blank answer changes nothing. What no profile field
+    can hold (what a result code means, whether to load the printed reports) is
+    handed back as a note for a person, never guessed at.
+    """
+    rows = list(csv.DictReader(path.open(encoding="utf-8-sig", newline="")))
+    prof = replace(profile, databases={k: dict(v) for k, v in profile.databases.items()},
+                   match_types=dict(profile.match_types),
+                   format_by_type=dict(profile.format_by_type),
+                   finals_types=frozenset(profile.finals_types))
+    absent, notes = None, []
+    for r in rows:
+        ans = (r.get("Your answer") or "").strip()
+        item, num = (r.get("Item") or "").strip(), (r.get("Number") or "").strip()
+        if not ans:
+            continue
+        if item == "Team" and num.isdigit():
+            prof.databases.setdefault((r["Database"] or "").strip(), {})[int(num)] = ans
+        elif item == "Match type" and num.isdigit():
+            prof.match_types[int(num)] = ans
+            if re.search(r"final", ans, re.I):
+                prof.finals_types = prof.finals_types | {int(num)}
+        elif item == "Format" and num.isdigit():
+            if re.search(r"two", ans, re.I):
+                prof.format_by_type[int(num)] = "Two Day"
+            elif re.search(r"one|limited", ans, re.I):
+                prof.format_by_type[int(num)] = "One Day"
+            else:
+                notes.append(f"{r.get('Ref')}: could not read {ans!r} as Two Day or One Day")
+        elif item == "Absent batter":
+            absent = "did-not-bat" if re.search(r"not|dnb|did", ans, re.I) else "out"
+        elif item == "Bye":
+            if re.match(r"\s*(n|no)\b", ans, re.I):
+                prof.byes = ()
+        else:
+            notes.append(f"{r.get('Ref')} {item} {num}: {ans!r} (needs a person, nothing applied)")
+    return prof, absent, notes
+
+
 def analyse(source: Path, profile_path: Path | None) -> None:
     """Report on a folder without writing anything: layouts, families, teams."""
     files = sorted(p for p in source.iterdir() if p.suffix.lower() == ".av")
@@ -2148,16 +2291,20 @@ def main() -> None:
     # a batting average, so it is asked for rather than assumed. Shoalwater Bay
     # confirmed "absent out" for their own archive, which is the default here;
     # a club whose competition scores it as a did-not-bat passes the other.
-    ap.add_argument("--absent", choices=("out", "did-not-bat"), default="out",
+    ap.add_argument("--absent", choices=("out", "did-not-bat"), default=None,
                     help="how this club's competition scores a code 29 absence "
                          "(default: out, as Shoalwater Bay confirmed)")
+    ap.add_argument("--questions", type=Path, metavar="FILE.csv",
+                    help="write the club's fill-in answer sheet (team and match-type "
+                         "names, formats, result codes) from the files, and stop")
+    ap.add_argument("--answers", type=Path, metavar="FILE.csv",
+                    help="read the club's filled-in answer sheet onto the profile")
     ap.add_argument("--team-names", metavar="N=NAME,...",
                     help="the club's own names for its team numbers, e.g. "
                          "'1=1st XI,2=2nd XI,3=3rd XI'. Overrides the profile's team "
                          "names for every file family; read them off the club's CSFW "
                          "Team list, since the names are not in the files")
     args = ap.parse_args()
-    absent_is_out = args.absent == "out"
     try:
         if args.layout:
             register_layouts(args.layout)
@@ -2183,6 +2330,22 @@ def main() -> None:
     club = all_seasons[0]["club"]
     profile = choose_profile(club, args.profile)
     club = profile.club_name or club
+    answered_absent = None
+    if args.answers:
+        profile, answered_absent, notes = apply_answers(profile, args.answers)
+        for note in notes:
+            print(f"ANSWER NOT APPLIED: {note}")
+    # the --absent flag wins, then the club's answer, then Shoalwater's reading
+    absent_is_out = (args.absent or answered_absent or "out") == "out"
+    if args.questions:
+        activate(profile)
+        rows = build_questions(all_seasons, profile, args.source)
+        with args.questions.open("w", newline="", encoding="utf-8-sig") as fh:
+            w = csv.DictWriter(fh, fieldnames=QUESTION_COLUMNS)
+            w.writeheader()
+            w.writerows(rows)
+        print(f"{len(rows)} questions written to {args.questions}")
+        return
 
     # ONE OUTPUT SET FOR THE WHOLE FOLDER. A club's DATA, DAT1, DAT2... files are
     # overflow databases of one club (a file holds at most 160 matches), not

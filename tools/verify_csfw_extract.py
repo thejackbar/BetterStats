@@ -401,5 +401,102 @@ attempt("two spaces in 'Reynella  1' / 'Reynella  2' do not split one match into
         lambda: (m.split_leg(fx), sorted({(f["opponent"], f["leg"]) for f in fx.values()}))[1],
         [("Reynella", 1), ("Reynella", 2), ("Reynella 12", None)])
 
+# ---------------------------------------------------------------------------
+# 7. The club's answer sheet: written from the files, read back onto a profile
+# ---------------------------------------------------------------------------
+with tempfile.TemporaryDirectory() as td:
+    td = Path(td)
+    src = td / "src"
+    src.mkdir()
+    if lay2 is not None:
+        (src / "DATA2025.AV").write_bytes(build_av(lay2, "Newtown CC", 2025, FIXTURES, MATCHES, PLAYERS))
+    (td / "layout.json").write_text(json.dumps(V2))
+    sheet = td / "sheet.csv"
+    code, out_text = run("--layout", td / "layout.json", "--questions", sheet, src)
+    check("--questions writes the sheet and stops (no extraction files)",
+          (code, sheet.exists(), (td / "match_detail.xlsx").exists()), (0, True, False))
+    rows = read_csv(sheet) if sheet.exists() else []
+    check("the sheet's columns are the ones the covering letter names",
+          list(rows[0].keys()) if rows else None,
+          ["Section", "Ref", "Item", "Database", "Number", "Matches", "Years",
+           "Example match", "What we have", "How to answer", "Your answer"])
+    teams = [r for r in rows if r["Item"] == "Team"]
+    check("one row per database and team number, with its matches and years",
+          sorted((r["Database"], r["Number"], r["Matches"], r["Years"]) for r in teams),
+          [("Newtown CC", "1", "1", "2025"), ("Newtown CC", "2", "1", "2025"),
+           ("Newtown CC", "3", "1", "2025"), ("Newtown CC", "4", "1", "2025")])
+    check("each row gives a match to recognise it by",
+          sorted(r["Example match"] for r in teams),
+          ["01 Nov 2025 v Bye", "11 Oct 2025 v Fulham", "18 Oct 2025 v Glenunga",
+           "25 Oct 2025 v Goodwood"])
+    (td / "byes.json").write_text(json.dumps({"name": "t", "club": "newtown", "byes": ["Bye"]}))
+    sheet2 = td / "sheet2.csv"
+    run("--layout", td / "layout.json", "--profile", td / "byes.json", "--questions", sheet2, src)
+    rows2 = read_csv(sheet2) if sheet2.exists() else []
+    check("with the bye in the profile its team is not asked about, and the bye is a question",
+          (sorted(r["Number"] for r in rows2 if r["Item"] == "Team"),
+           [(r["Item"], r["Matches"]) for r in rows2 if r["Item"] == "Bye"]),
+          (["1", "3", "4"], [("Bye", "1")]))
+    check("match types seen are asked, not types that were never used",
+          sorted(r["Number"] for r in rows if r["Item"] == "Match type"), ["0", "4", "9"])
+    check("every row says how to answer it",
+          all(r["How to answer"] for r in rows), True)
+    if not rows:
+        check("the sheet has rows to answer", "none written", "rows")
+    else:
+        # the club fills it in
+        for r in rows:
+            if r["Item"] == "Team":
+                r["Your answer"] = {"1": "Under 12 Blue", "2": "", "3": "Under 12 White", "4": ""}[r["Number"]]
+            elif r["Item"] == "Match type":
+                r["Your answer"] = {"0": "Friendly", "4": "Limited Over", "9": "Semi Final"}[r["Number"]]
+        with sheet.open("w", newline="", encoding="utf-8-sig") as fh:
+            w = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
+            w.writeheader()
+            w.writerows(rows)
+        out = td / "out"
+        code, out_text = run("--layout", td / "layout.json", "--answers", sheet, src, "-o", out)
+        games = read_csv(out / "manual_games_scorecards.csv") if code == 0 else []
+        by = {g["opposition"]: g for g in games}
+        check("answered teams are named, an unanswered one stays loudly unnamed",
+              (code, by.get("Fulham", {}).get("grade_name"), by.get("Goodwood", {}).get("grade_name"),
+               by.get("Glenunga", {}).get("grade_name")),
+              (0, "Under 12 Blue", "Under 12 White", "Grade #4 (unmapped)"))
+        check("an answered match type that says Final is a final, and its name is used",
+              (by.get("Glenunga", {}).get("is_final"), by.get("Fulham", {}).get("is_final")), ("true", ""))
+        # the same sheet read onto a profile directly, for what the CSV cannot hold
+        if hasattr(m, "apply_answers"):
+            extra = [dict(r, **{"Your answer": a}) for r, a in zip(
+                [dict(r) for r in rows[:1]], ["x"])]
+            more = rows + [
+                {"Section": "C", "Ref": "C1", "Item": "Format", "Database": "", "Number": "4",
+                 "Matches": "", "Years": "", "Example match": "", "What we have": "",
+                 "How to answer": "", "Your answer": "One Day"},
+                {"Section": "C", "Ref": "C2", "Item": "Absent batter", "Database": "", "Number": "",
+                 "Matches": "", "Years": "", "Example match": "", "What we have": "",
+                 "How to answer": "", "Your answer": "Did not bat"},
+                {"Section": "C", "Ref": "C3", "Item": "Result code", "Database": "", "Number": "6",
+                 "Matches": "", "Years": "", "Example match": "", "What we have": "",
+                 "How to answer": "", "Your answer": "No result"},
+                {"Section": "C", "Ref": "C4", "Item": "Bye", "Database": "", "Number": "",
+                 "Matches": "", "Years": "", "Example match": "", "What we have": "",
+                 "How to answer": "", "Your answer": "No"}]
+            full = td / "full.csv"
+            with full.open("w", newline="", encoding="utf-8-sig") as fh:
+                w = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
+                w.writeheader()
+                w.writerows(more)
+            base = m.Profile("t", byes=("bye",))
+            prof2, absent, notes = m.apply_answers(base, full)
+            check("a Format answer sets the format, an Absent answer sets the reading, a No keeps the byes",
+                  (prof2.format_by_type, absent, prof2.byes), ({4: "One Day"}, "did-not-bat", ()))
+            check("what no profile field can hold is handed back for a person, not guessed",
+                  [n for n in notes if "Result code 6" in n] != [], True)
+            check("a blank answer changes nothing; the base profile is not edited in place",
+                  (base.byes, base.format_by_type, base.databases), (("bye",), {}, {}))
+        else:
+            check("the answer sheet can be read back", "no apply_answers", "apply_answers")
+
+
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)
