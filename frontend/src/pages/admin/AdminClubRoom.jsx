@@ -11,6 +11,7 @@ const SLIDE_TYPE_INFO = {
   leaderboard: { label: 'Leaderboard', desc: 'Top run-scorers, wicket-takers or fielders, podium-style.', module: null },
   records: { label: 'Club Records', desc: 'A record category, like Most Runs or Best Bowling Figures.', module: null },
   statlab_report: { label: 'Custom StatLab Report', desc: 'Any report saved and approved in StatLab.', module: null },
+  honours: { label: 'Honour Boards', desc: 'Your honour boards, premiership squads, or office bearers and life members.', module: null },
   social_posts: { label: 'Recent Social Posts', desc: 'Posts saved from the Post Designer with "Save to Club Room".', module: 'socials' },
   custom_images: { label: 'Custom Images', desc: 'Any images you upload below, like action shots or club notices.', module: null },
 }
@@ -69,6 +70,7 @@ export default function AdminClubRoom() {
   const [sponsors, setSponsors] = useState([])
   const [seasons, setSeasons] = useState([])
   const [reports, setReports] = useState([])
+  const [honourSources, setHonourSources] = useState({ boards: [], groups: [] })
   const dragItem = useRef(null)
   const fileInputRef = useRef(null)
 
@@ -78,6 +80,7 @@ export default function AdminClubRoom() {
     api.adminListSponsors().then(setSponsors).catch(() => {})
     api.adminListSeasons().then(setSeasons).catch(() => {})
     api.clubRoomListReports().then(setReports).catch(() => {})
+    api.clubRoomHonourSources().then(setHonourSources).catch(() => {})
   }, [])
 
   async function load() {
@@ -128,6 +131,7 @@ export default function AdminClubRoom() {
     if (slideType === 'leaderboard') return { stat_group: 'batting', sort_by: 'total_runs', season_id: '', limit: 10 }
     if (slideType === 'records') return { category: 'batting.top_career_runs', season_id: '', limit: 8 }
     if (slideType === 'statlab_report') return { report_id: '' }
+    if (slideType === 'honours') return { kind: 'boards', board_id: '', group: '' }
     return {}
   }
 
@@ -363,6 +367,7 @@ export default function AdminClubRoom() {
                             sponsors={sponsors}
                             seasons={seasons}
                             reports={reports}
+                            honourSources={honourSources}
                             customMedia={customMedia}
                             socialMedia={socialMedia}
                           />
@@ -501,13 +506,60 @@ function slideSummary(slide, info) {
   if (slide.slide_type === 'leaderboard') return `${info.label} · ${cfg.stat_group || 'batting'}`
   if (slide.slide_type === 'records') return `${info.label} · ${(RECORD_CATEGORIES.find(c => c.key === cfg.category) || {}).label || ''}`
   if (slide.slide_type === 'statlab_report') return info.label
+  if (slide.slide_type === 'honours') {
+    if (cfg.kind === 'premierships') return `${info.label} · premiership squads`
+    if (cfg.kind === 'office_bearers') return `${info.label} · ${cfg.group || 'office bearers and life members'}`
+    return `${info.label} · ${cfg.board_id ? 'one board' : 'all your boards'}`
+  }
   if (cfg.media_ids?.length) return `${info.label} · ${cfg.media_ids.length} picked`
   if (cfg.count) return `${info.label} · up to ${cfg.count}`
   return info.label
 }
 
-function SlideConfigFields({ slide, draft, setConfig, sponsors, seasons, reports, customMedia, socialMedia }) {
+function SlideConfigFields({ slide, draft, setConfig, sponsors, seasons, reports, honourSources, customMedia, socialMedia }) {
   const cfg = draft.config
+
+  if (slide.slide_type === 'honours') {
+    const kind = cfg.kind || 'boards'
+    return (
+      <div className="space-y-2">
+        <div>
+          <label className={labelCls}>What to show</label>
+          <select value={kind} onChange={e => setConfig({ kind: e.target.value })} className={fieldCls}>
+            <option value="boards">Our honour boards</option>
+            <option value="premierships">Premiership squads</option>
+            <option value="office_bearers">Office bearers and life members</option>
+          </select>
+        </div>
+        {kind === 'boards' && (
+          <div>
+            <label className={labelCls}>Board</label>
+            <select value={cfg.board_id || ''} onChange={e => setConfig({ board_id: e.target.value })} className={fieldCls}>
+              <option value="">All boards, one after another</option>
+              {honourSources.boards.map(b => <option key={b.id} value={b.id}>{b.title}</option>)}
+            </select>
+            {honourSources.boards.length === 0 && (
+              <p className="text-pb-faintest text-[11px] mt-1">
+                No honour boards yet. Build them under Website → Honours and they appear here.
+              </p>
+            )}
+          </div>
+        )}
+        {kind === 'office_bearers' && (
+          <div>
+            <label className={labelCls}>Group</label>
+            <select value={cfg.group || ''} onChange={e => setConfig({ group: e.target.value })} className={fieldCls}>
+              <option value="">Every group</option>
+              {honourSources.groups.map(g => <option key={g} value={g}>{g}</option>)}
+            </select>
+          </div>
+        )}
+        <p className="text-pb-faintest text-[11px]">
+          Each board, flag or role gets its own slide. Long lists scroll by themselves.
+        </p>
+      </div>
+    )
+  }
 
   if (slide.slide_type === 'sponsors') {
     return (

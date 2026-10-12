@@ -2974,6 +2974,7 @@ export const api = {
   clubRoomDeleteMedia: (id) =>
     request(`/club-admin/club-room/media/${id}`, { method: 'DELETE' }),
   clubRoomListReports: () => request('/club-admin/club-room/reports'),
+  clubRoomHonourSources: () => request('/club-admin/club-room/honour-sources'),
   clubRoomPlay: () => request('/club-admin/club-room/play'),
   clubRoomGetPublicLink: () => request('/club-admin/club-room/public-link'),
   clubRoomSetPublicLink: (data) =>

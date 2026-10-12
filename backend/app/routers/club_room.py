@@ -37,7 +37,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.capabilities import MANAGE_CLUB_ROOM, MANAGE_SOCIAL, require_cap
 from app.auth.modules import org_has_module
 from app.models.db import (
-    ClubRoomMedia, ClubRoomSettings, ClubRoomSlide, Organisation, SavedReport, Sponsor, User, get_db,
+    ClubHonourBoard, ClubHonourEntry, ClubRoomMedia, ClubRoomSettings, ClubRoomSlide, Organisation,
+    SavedReport, Sponsor, User, get_db,
 )
 from app.routers.auth import get_current_club, get_current_user
 from app.services import club_lock
@@ -49,8 +50,9 @@ MEDIA_MAX_BYTES = 8 * 1024 * 1024
 MEDIA_MAX_PER_CLUB = 120
 SLIDE_TYPES = {
     "sponsors", "fixtures", "social_posts", "custom_images",
-    "leaderboard", "records", "statlab_report",
+    "leaderboard", "records", "statlab_report", "honours",
 }
+HONOUR_KINDS = {"boards", "premierships", "office_bearers"}
 STAT_TABLE_LIMIT = 12  # rows shown on a leaderboard/records/report slide
 
 # records.get_records() computes EVERY record category in one call (batting,
@@ -466,6 +468,23 @@ async def list_reports_for_picker(
     return [{"id": str(r.id), "title": r.title, "description": r.description} for r in rows.scalars().all()]
 
 
+@router.get("/honour-sources")
+async def list_honour_sources(
+    current_user: User = Depends(require_cap(MANAGE_CLUB_ROOM)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """What the "Honour Boards" slide can show, for its pickers: the club's own
+    boards, and the office-bearer groups. Read here rather than from the website
+    admin routes so a club-room admin needs no website permission to pick one."""
+    boards = (await db.execute(
+        select(ClubHonourBoard).where(ClubHonourBoard.organisation_id == club.id)
+        .order_by(ClubHonourBoard.display_order, ClubHonourBoard.title)
+    )).scalars().all()
+    groups = list(dict.fromkeys(b["group"] for b in await _office_bearer_boards(db, club)))
+    return {"boards": [{"id": str(b.id), "title": b.title} for b in boards], "groups": groups}
+
+
 # ─── Play — resolves the saved playlist into a flat, ready-to-render list ──
 
 def _sponsor_dict(s: Sponsor) -> dict:
@@ -782,6 +801,121 @@ def _report_columns(first_row: dict, sort_by: str | None) -> list[str]:
     return (priority + rest)[:6]
 
 
+# ─── Honour boards ─────────────────────────────────────────────────────────
+#
+# One slide shape for all three things a club calls an honour board, so the
+# stage has one renderer: {title, subtitle, eyebrow, columns, entries:[{label,
+# name, detail}]}. `label` is the left-hand column (a year, a span of years or
+# nothing). Every source is read by the same code the public pages use, so the
+# TV can never disagree with the website about who is on a board.
+
+def _honour_label(year) -> str | None:
+    return str(year) if year is not None else None
+
+
+async def _expand_honour_boards(db, club, cfg: dict) -> list[dict]:
+    """The club's own honour boards (Admin → Website → Honours): the hand-typed
+    entries first, then anything the board pulls from an award category, the
+    same merge the public Honours page makes. An empty board is skipped."""
+    from app.routers.website import _auto_entries
+
+    stmt = select(ClubHonourBoard).where(ClubHonourBoard.organisation_id == club.id)
+    board_id = cfg.get("board_id")
+    if board_id:
+        try:
+            stmt = stmt.where(ClubHonourBoard.id == uuid.UUID(str(board_id)))
+        except ValueError:
+            return []
+    boards = (await db.execute(stmt.order_by(ClubHonourBoard.display_order, ClubHonourBoard.title))).scalars().all()
+
+    out = []
+    for b in boards:
+        rows = (await db.execute(
+            select(ClubHonourEntry)
+            .where(ClubHonourEntry.board_id == b.id)
+            .order_by(ClubHonourEntry.display_order, ClubHonourEntry.year.desc().nullslast())
+        )).scalars().all()
+        entries = [{"label": _honour_label(e.year), "name": e.name, "detail": e.detail} for e in rows]
+        if b.source_category:
+            entries += [
+                {"label": _honour_label(a["year"]), "name": a["name"], "detail": a["detail"]}
+                for a in await _auto_entries(club.id, b.source_category, b.source_subcategory, db)
+            ]
+        if not entries:
+            continue
+        out.append({
+            "eyebrow": "Honour board", "title": b.title, "subtitle": b.description,
+            "columns": max(1, min(4, b.columns or 1)), "entries": entries,
+        })
+    return out
+
+
+async def _expand_honour_premierships(db, club) -> list[dict]:
+    """One slide per flag, newest first, with the squad that won it."""
+    from app.services import honours as honours_svc
+
+    out = []
+    for g in (await honours_svc.premiership_squads(db, club.id))["premierships"]:
+        entries = []
+        for p in g["players"]:
+            bits = list(dict.fromkeys([*p["roles"], *([p["detail"]] if p["detail"] else [])]))
+            entries.append({"label": None, "name": p["name"], "detail": " / ".join(bits) or None})
+        if not entries:
+            continue
+        title = " · ".join(x for x in (g["season"], g["team"]) if x) or g["competition"] or "Premiers"
+        out.append({
+            "eyebrow": "Premiers", "title": title,
+            "subtitle": g["competition"] if g["competition"] and g["competition"] != title else None,
+            "columns": 3 if len(entries) > 12 else 2, "entries": entries,
+        })
+    return out
+
+
+async def _office_bearer_boards(db, club) -> list[dict]:
+    """Every office-bearer and life-member board, in the club's saved order."""
+    from app.services import honour_layout, honours as honours_svc
+
+    stored = (await db.execute(
+        select(Organisation.honour_board_layout).where(Organisation.id == club.id)
+    )).scalar_one_or_none()
+    data = await honours_svc.office_bearer_boards(
+        db, club.id, include_life_members=True, layout=honour_layout.clean_layout(stored))
+    return [b for g in data["groups"] for b in g["boards"]]
+
+
+async def _expand_honour_office_bearers(db, club, cfg: dict) -> list[dict]:
+    """One slide per role (President, Secretary, Life Members ...), each listing
+    who held it and when. `config.group` narrows it to one group."""
+    group = (cfg.get("group") or "").strip().lower()
+    out = []
+    for b in await _office_bearer_boards(db, club):
+        if group and b["group"].lower() != group:
+            continue
+        entries = [{"label": h["years"], "name": h["name"], "detail": None} for h in b["holders"]]
+        if not entries:
+            continue
+        out.append({
+            "eyebrow": b["group"], "title": b["role"], "subtitle": None,
+            "columns": 2 if len(entries) > 14 else 1, "entries": entries,
+        })
+    return out
+
+
+async def _expand_honours(db, club, entry: ClubRoomSlide) -> list[dict]:
+    cfg = entry.config or {}
+    kind = cfg.get("kind") if cfg.get("kind") in HONOUR_KINDS else "boards"
+    if kind == "premierships":
+        slides = await _expand_honour_premierships(db, club)
+    elif kind == "office_bearers":
+        slides = await _expand_honour_office_bearers(db, club, cfg)
+    else:
+        slides = await _expand_honour_boards(db, club, cfg)
+    return [
+        {"type": "honours", "id": f"honours-{entry.id}-{i}", **s}
+        for i, s in enumerate(slides[:EXPAND_CAP])
+    ]
+
+
 async def build_play_payload(db: AsyncSession, club: Organisation) -> dict:
     """The whole resolved show for one club — shared by the authenticated
     `/play` endpoint and the public `/room/{token}` link, so there's exactly
@@ -813,6 +947,8 @@ async def build_play_payload(db: AsyncSession, club: Organisation) -> dict:
             expanded = await _expand_records(db, club, entry)
         elif entry.slide_type == "statlab_report":
             expanded = await _expand_statlab_report(db, club, entry)
+        elif entry.slide_type == "honours":
+            expanded = await _expand_honours(db, club, entry)
         else:
             expanded = []
         duration = entry.duration_seconds or settings.rotation_seconds

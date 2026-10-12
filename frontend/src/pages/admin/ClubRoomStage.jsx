@@ -301,6 +301,7 @@ function SlideView({ slide, clubLogoUrl }) {
   if (slide.type === 'leaderboard') return <LeaderboardSlide slide={slide} clubLogoUrl={clubLogoUrl} />
   if (slide.type === 'records') return <RecordsSlide slide={slide} clubLogoUrl={clubLogoUrl} />
   if (slide.type === 'statlab_report') return <ReportSlide slide={slide} />
+  if (slide.type === 'honours') return <HonoursSlide slide={slide} />
   return null
 }
 
@@ -563,6 +564,45 @@ function RecordsSlide({ slide, clubLogoUrl }) {
           })}
         </AutoScrollList>
       )}
+    </div>
+  )
+}
+
+// ─── Honour boards ──────────────────────────────────────────────────────────
+// One renderer for the club's own boards, premiership squads and office-bearer
+// boards: a left label (year or span of years, blank for a squad), a name, and
+// an optional detail. Columns come from the board; a long board scrolls.
+
+function HonoursSlide({ slide }) {
+  const entries = slide.entries || []
+  const columns = Math.max(1, Math.min(4, slide.columns || 1))
+  const hasLabels = entries.some(e => e.label)
+  return (
+    <div className="w-full h-full flex flex-col px-14 py-12">
+      <div className="mb-6 shrink-0">
+        <div className="font-mono text-[13px] tracking-wide4 text-pb-accent uppercase">{slide.eyebrow || 'Honour board'}</div>
+        <div className="text-[40px] font-extrabold tracking-tight leading-tight">{slide.title}</div>
+        {slide.subtitle && <div className="text-pb-dim text-lg mt-1">{slide.subtitle}</div>}
+      </div>
+      <AutoScrollList
+        className="flex-1 min-h-0 rounded-xl px-6 py-2"
+        style={{ border: '1px solid var(--pb-hairline)', background: 'var(--pb-surface)' }}
+      >
+        <div style={{ columnCount: columns, columnGap: '3rem' }}>
+          {entries.map((e, i) => (
+            <div key={i} className="flex items-baseline gap-5 py-2.5 break-inside-avoid"
+              style={{ borderBottom: '1px solid var(--pb-hairline)' }}>
+              {hasLabels && (
+                <span className="font-mono text-lg text-pb-accent tabular-nums shrink-0 min-w-[5.5rem] text-right">{e.label || ''}</span>
+              )}
+              <span className="min-w-0 flex-1">
+                <span className="text-2xl font-semibold text-pb-text">{e.name}</span>
+                {e.detail && <span className="text-pb-dim text-lg"> · {e.detail}</span>}
+              </span>
+            </div>
+          ))}
+        </div>
+      </AutoScrollList>
     </div>
   )
 }

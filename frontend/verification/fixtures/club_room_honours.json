@@ -1,0 +1,183 @@
+{
+  "play": {
+    "enabled": false,
+    "rotation_seconds": 15,
+    "theme": "dark",
+    "shuffle": false,
+    "club_name": "Shoalwater Bay CC",
+    "club_short": "SH",
+    "logo_url": null,
+    "theme_config": null,
+    "slides": [
+      {
+        "type": "honours",
+        "id": "honours-eeb9b73e-5c46-48f8-9fa7-32fbab49d2b3-0",
+        "eyebrow": "Honour board",
+        "title": "Batting Honour Roll",
+        "subtitle": "Centuries for the club",
+        "columns": 2,
+        "entries": [
+          {
+            "label": "2019",
+            "name": "Sam Shaw",
+            "detail": "142 v Rivals"
+          },
+          {
+            "label": "2015",
+            "name": "Pat Price",
+            "detail": null
+          },
+          {
+            "label": null,
+            "name": "Old Timer",
+            "detail": "year not recorded"
+          }
+        ],
+        "duration_seconds": 15,
+        "playlist_title": null
+      },
+      {
+        "type": "honours",
+        "id": "honours-eeb9b73e-5c46-48f8-9fa7-32fbab49d2b3-1",
+        "eyebrow": "Honour board",
+        "title": "Hall of Fame",
+        "subtitle": null,
+        "columns": 1,
+        "entries": [
+          {
+            "label": "2021",
+            "name": "Hana Hill",
+            "detail": "Inducted for services to the club"
+          }
+        ],
+        "duration_seconds": 15,
+        "playlist_title": null
+      },
+      {
+        "type": "honours",
+        "id": "honours-cdb11059-a61a-40ab-8a29-54aa22bf5b46-0",
+        "eyebrow": "Premiers",
+        "title": "2019/20 \u00b7 1st XI",
+        "subtitle": "A Grade Premiership",
+        "columns": 2,
+        "entries": [
+          {
+            "label": null,
+            "name": "Wes West",
+            "detail": "Captain"
+          },
+          {
+            "label": null,
+            "name": "Xavi Xu",
+            "detail": "Player of the Match"
+          },
+          {
+            "label": null,
+            "name": "Yan Yu",
+            "detail": null
+          }
+        ],
+        "duration_seconds": 15,
+        "playlist_title": null
+      },
+      {
+        "type": "honours",
+        "id": "honours-cdb11059-a61a-40ab-8a29-54aa22bf5b46-1",
+        "eyebrow": "Premiers",
+        "title": "2015/16 \u00b7 2nd XI",
+        "subtitle": null,
+        "columns": 2,
+        "entries": [
+          {
+            "label": null,
+            "name": "Zed Zhou",
+            "detail": null
+          }
+        ],
+        "duration_seconds": 15,
+        "playlist_title": null
+      },
+      {
+        "type": "honours",
+        "id": "honours-233fe5a0-d6e7-4211-b62f-88df30fe5671-0",
+        "eyebrow": "Executive Committee",
+        "title": "President",
+        "subtitle": null,
+        "columns": 1,
+        "entries": [
+          {
+            "label": "2018",
+            "name": "Rob Reed",
+            "detail": null
+          },
+          {
+            "label": "2010",
+            "name": "Pat Price",
+            "detail": null
+          }
+        ],
+        "duration_seconds": 15,
+        "playlist_title": null
+      },
+      {
+        "type": "honours",
+        "id": "honours-233fe5a0-d6e7-4211-b62f-88df30fe5671-1",
+        "eyebrow": "Executive Committee",
+        "title": "Secretary",
+        "subtitle": null,
+        "columns": 1,
+        "entries": [
+          {
+            "label": "2015",
+            "name": "Sam Shaw",
+            "detail": null
+          }
+        ],
+        "duration_seconds": 15,
+        "playlist_title": null
+      },
+      {
+        "type": "honours",
+        "id": "honours-233fe5a0-d6e7-4211-b62f-88df30fe5671-2",
+        "eyebrow": "Life Members",
+        "title": "Life Membership",
+        "subtitle": null,
+        "columns": 1,
+        "entries": [
+          {
+            "label": "1985",
+            "name": "Allan Godfrey",
+            "detail": null
+          },
+          {
+            "label": "1978",
+            "name": "Beryl Brown",
+            "detail": null
+          }
+        ],
+        "duration_seconds": 15,
+        "playlist_title": null
+      }
+    ]
+  },
+  "sources": {
+    "boards": [
+      {
+        "id": "c408f71c-6921-4bcf-81d3-8cf6fb135d83",
+        "title": "Batting Honour Roll"
+      },
+      {
+        "id": "4bee1615-c4ec-4c49-90b8-d9ca800938ea",
+        "title": "Hall of Fame"
+      },
+      {
+        "id": "efaa63d0-e987-4bcc-88e0-7e3e54ca3514",
+        "title": "Not Filled In Yet"
+      }
+    ],
+    "groups": [
+      "Executive Committee",
+      "Life Members"
+    ]
+  }
+}

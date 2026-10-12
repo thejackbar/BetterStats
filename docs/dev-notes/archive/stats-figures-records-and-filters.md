@@ -2363,3 +2363,13 @@ Asked for by Shoalwater Bay: Life Members above the Executive Committee, and All
 
 Verified on a local Postgres 16: 48 checks in `backend/verification/verify_honour_board_layout.py`; the control (the previous commit) fails 18 of 27 on exactly the new behaviour while its standard-order checks pass, which also shows the default order is unchanged. Browser: 46 checks in `frontend/verification/verify_honour_board_order_browser.mjs` against the real screens with the API stubbed (the fixtures are the shipped backend's own output), including 390px overflow and the request body on the wire; the control build fails the tab and the "club's order" note.
 
+
+## v9.110.3: honour boards on the Club Room TV
+
+- **Ask.** Shoalwater Bay set up Club Room Mode and could not put their honour boards in the playlist: the Add to playlist list had no honour board option.
+- **Change.** A new playlist entry, "Honour Boards", with three sources: the club's own boards (Website, Honours; all of them or one), premiership squads (one slide per flag, newest first, with the part each person played), and office bearers and life members (one slide per role, in the club's saved order, optionally narrowed to one group). Each board, flag or role is its own slide, and a long list scrolls itself like the other slides.
+- **Where.** `club_room._expand_honours` and its three helpers, `GET /club-admin/club-room/honour-sources` for the pickers (gated on `MANAGE_CLUB_ROOM`, so no website permission is needed), `HonoursSlide` in `ClubRoomStage.jsx`, the editor fields in `AdminClubRoom.jsx`. No migration: `slide_type` and `config` are free-form.
+- **Reuse.** No new reading of honours: the expanders call the same functions the public Honours, Premierships and Honour Board pages call, so the layout a club saved applies on the TV too. An empty board is skipped, as on the public page.
+- **Not done.** The TV shows names as stored, not in the club's chosen name format, like the leaderboard slide. Football has no Club Room.
+
+Verified on a local Postgres 16: 27 checks in `backend/verification/verify_club_room_honours.py`; the control (the previous commit) fails 21 of 27, and the 6 that pass are the "not shown" checks, each paired with a "shown to the owner" check. Browser: 21 checks in `frontend/verification/verify_club_room_honours_browser.mjs` (admin editor, three slide kinds on the stage, a 60-row board scrolling, 390px overflow), screenshots read.
