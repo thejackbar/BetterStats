@@ -100,7 +100,11 @@ async def selection_overview(
     """
     fx_res = await db.execute(
         select(Fixture)
-        .where(Fixture.organisation_id == club.id, Fixture.played_on >= date.today())
+        .where(
+            Fixture.organisation_id == club.id,
+            Fixture.played_on >= date.today(),
+            Fixture.status != "CANCELLED",
+        )
         .order_by(Fixture.played_on.asc().nullslast(), Fixture.start_time.asc().nullslast())
     )
     fixtures = fx_res.scalars().all()

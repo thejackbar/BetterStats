@@ -47,6 +47,57 @@ async def _current_grade_rows(db: AsyncSession, org_id) -> list[tuple]:
     return [(r.guid, r.grade_id, r.grade_name, r.season_name) for r in res]
 
 
+async def org_grassroots_fixtures_checked(
+    db: AsyncSession, org, hidden_grade_ids=(), *, force: bool = False
+) -> tuple[list[dict], dict]:
+    """``org_grassroots_fixtures`` plus what CA said about every match it knows.
+
+    Returns ``(fixtures, listing)``. ``listing`` is what a caller needs to tell
+    "CA dropped this game" from "we could not ask":
+
+      ``grades``  ``{our_grade_id: {match_guid: STATUS}}`` for each grade whose
+                  match list was fetched successfully and was not empty.
+      ``failed``  how many grades could not be read at all (a non-200 or an
+                  exception: ``get_grade_matches`` returns ``[]`` for those too,
+                  so the cache is the only honest signal).
+
+    ``force`` bypasses the 30 minute match-list cache, for the Sync button: an
+    admin pressing it expects today's draw, not whatever was fetched earlier.
+    """
+    rows = await _current_grade_rows(db, org.id)
+    if hidden_grade_ids:
+        # Junior grades a club hides from its public Stats (services/
+        # junior_hiding): never fetched, so they cost no Grassroots call either.
+        hidden = {str(g) for g in hidden_grade_ids}
+        rows = [r for r in rows if str(r[1]) not in hidden]
+    listing: dict = {"grades": {}, "failed": 0}
+    if not rows:
+        return [], listing
+    meta = {guid: (grade_id, gname, sname) for guid, grade_id, gname, sname in rows}
+    categories = await org_grade_categories(db, org.id)
+    fixtures = await gr.get_grades_fixtures(
+        [guid for guid, _, _, _ in rows], club_match_keys(org), force=force
+    )
+    for guid, grade_id, _, _ in rows:
+        matches = gr.cached_grade_matches(guid)
+        if matches is None:
+            listing["failed"] += 1
+        elif matches:
+            listing["grades"][str(grade_id)] = {
+                m.get("id"): (m.get("status") or "").strip().upper() for m in matches if m.get("id")
+            }
+    for fx in fixtures:
+        db_grade_id, gname, sname = meta.get(fx.get("grade_id"), (None, None, None))
+        fx["db_grade_id"] = str(db_grade_id) if db_grade_id else None
+        fx["grade_name"] = gname
+        fx["season_name"] = sname
+        cat = category_for_name(categories, gname) if gname else None
+        fx["category"] = cat
+        fx["category_label"] = category_label(cat) if cat else None
+        fx["is_final"] = "final" in (fx.get("round") or "").lower()
+    return fixtures, listing
+
+
 async def org_grassroots_fixtures(db: AsyncSession, org, hidden_grade_ids=()) -> list[dict]:
     """Upcoming/live fixtures for the org, filtered to its own games.
 
@@ -64,26 +115,5 @@ async def org_grassroots_fixtures(db: AsyncSession, org, hidden_grade_ids=()) ->
     ``hidden_grade_ids`` leaves those grades out, for a public viewer of a club
     that hides its juniors. Admin callers omit it and see every grade.
     """
-    rows = await _current_grade_rows(db, org.id)
-    if hidden_grade_ids:
-        # Junior grades a club hides from its public Stats (services/
-        # junior_hiding): never fetched, so they cost no Grassroots call either.
-        hidden = {str(g) for g in hidden_grade_ids}
-        rows = [r for r in rows if str(r[1]) not in hidden]
-    if not rows:
-        return []
-    meta = {guid: (grade_id, gname, sname) for guid, grade_id, gname, sname in rows}
-    categories = await org_grade_categories(db, org.id)
-    fixtures = await gr.get_grades_fixtures(
-        [guid for guid, _, _, _ in rows], club_match_keys(org)
-    )
-    for fx in fixtures:
-        db_grade_id, gname, sname = meta.get(fx.get("grade_id"), (None, None, None))
-        fx["db_grade_id"] = str(db_grade_id) if db_grade_id else None
-        fx["grade_name"] = gname
-        fx["season_name"] = sname
-        cat = category_for_name(categories, gname) if gname else None
-        fx["category"] = cat
-        fx["category_label"] = category_label(cat) if cat else None
-        fx["is_final"] = "final" in (fx.get("round") or "").lower()
+    fixtures, _ = await org_grassroots_fixtures_checked(db, org, hidden_grade_ids)
     return fixtures

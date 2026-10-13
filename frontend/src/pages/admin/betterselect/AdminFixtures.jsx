@@ -262,11 +262,12 @@ export default function AdminFixtures() {
                   {games.map((g, gi) => {
                     const bye = g.home_away === 'BYE'
                     const named = (g.lineup_count || 0) > 0
+                    const cancelled = g.status === 'CANCELLED'
                     const isCurrentTop = current && (g.team_sequence ?? 99) <= 1
                     return (
                       <div key={g.id}
                         className={`relative flex items-center gap-2 sm:gap-4 pl-[18px] pr-3 sm:pl-[22px] sm:pr-[18px] py-3 ${gi > 0 ? 'border-t pb-hairline' : ''}`}
-                        style={{ background: named ? 'color-mix(in srgb, var(--pb-positive) 6%, transparent)' : 'transparent' }}>
+                        style={{ background: named && !cancelled ? 'color-mix(in srgb, var(--pb-positive) 6%, transparent)' : 'transparent', opacity: cancelled ? 0.6 : 1 }}>
                         {/* Home/away accent bar on the far left */}
                         <span className="absolute left-0 top-0 bottom-0 w-[3px]" style={{ background: homeAwayColor(g.home_away) }}
                           title={g.home_away === 'HOME' ? 'Home' : g.home_away === 'AWAY' ? 'Away' : 'Bye'} />
@@ -283,8 +284,9 @@ export default function AdminFixtures() {
                             </>
                           )}
                         </div>
+                        {cancelled && <span title="Cricket Australia no longer lists this game. It is kept because a team or votes were recorded on it." className="font-mono text-[9px] text-pb-red bg-pb-red/10 px-1.5 py-0.5 rounded shrink-0">CANCELLED</span>}
                         {named && <span className="font-mono text-[9px] text-pb-positive bg-pb-positive/12 px-1.5 py-0.5 rounded shrink-0">XI named</span>}
-                        {!bye && canSelect && (
+                        {!bye && !cancelled && canSelect && (
                           <Btn variant={isCurrentTop ? 'primary' : 'ghost'} sm onClick={() => navigate(`/admin/betterselect/select/${g.id}`)}>
                             {isCurrentTop ? 'Pick team' : 'Select'}
                           </Btn>

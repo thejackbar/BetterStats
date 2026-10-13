@@ -387,7 +387,21 @@ async def get_grade_results(grade_id: str, *, since: Optional[str] = None) -> li
     return out
 
 
-async def get_grade_fixtures(grade_id: str, *, include_live: bool = True) -> list[dict]:
+def cached_grade_matches(grade_id: str) -> Optional[list[dict]]:
+    """The grade's match list if the last fetch genuinely succeeded, else None.
+
+    ``get_grade_matches`` returns ``[]`` both for "no matches" and for a failed
+    call, but only a real 200 is cached. Reading the cache therefore tells a
+    caller that must act on ABSENCE (the fixtures sync removing games CA no
+    longer lists) whether the list can be trusted. Never fetches.
+    """
+    hit = _grade_matches_cache.get(grade_id)
+    if hit and time.time() - hit[0] < _GRADE_MATCHES_TTL:
+        return hit[1]
+    return None
+
+
+async def get_grade_fixtures(grade_id: str, *, include_live: bool = True, force: bool = False) -> list[dict]:
     """Upcoming (and optionally live) fixtures for one grade, normalised.
 
     Reuses ``get_grade_matches`` (same in-process cache). Returns a list of
@@ -402,7 +416,7 @@ async def get_grade_fixtures(grade_id: str, *, include_live: bool = True) -> lis
     note) — pulled here too since a fixtures/results round pull is otherwise
     the one surface with no crest at all.
     """
-    matches = await get_grade_matches(grade_id)
+    matches = await get_grade_matches(grade_id, force=force)
     today = date.today().isoformat()
     keep = {_FIXTURE_STATUS_UPCOMING}
     if include_live:
@@ -448,6 +462,7 @@ async def get_grades_fixtures(
     match_keys: Optional[list[str]] = None,
     *,
     include_live: bool = True,
+    force: bool = False,
 ) -> list[dict]:
     """Aggregate ``get_grade_fixtures`` across grades, de-duplicated and sorted.
 
@@ -457,7 +472,7 @@ async def get_grades_fixtures(
     cache makes repeat calls cheap.
     """
     results = await asyncio.gather(
-        *[get_grade_fixtures(g, include_live=include_live) for g in grade_ids],
+        *[get_grade_fixtures(g, include_live=include_live, force=force) for g in grade_ids],
         return_exceptions=True,
     )
     out: list[dict] = []
