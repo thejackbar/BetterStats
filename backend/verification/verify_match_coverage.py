@@ -501,10 +501,47 @@ async def main() -> None:
               not (unscoped.get("grade_scope") or {}).get("active"),
               str(unscoped.get("grade_scope")))
         headline = (unscoped.get("career_batting") or {}).get("games")
-        check("with no scope at all the headline IS Cricket Australia's figure, "
-              "which is what the note quotes",
-              bool(cov) and cov.get("career_matches") == headline,
-              f"note {cov} vs headline {headline}")
+        # THE HEADER NEVER READS BELOW THE ANALYSIS GRID (reported: 95 in the
+        # header, 96 in Analysis, 96 correct). With no scope the grid is the
+        # one place that reconciles per season AND grade, so the header takes
+        # the higher of CA's total and the grid's total. Read the grid through
+        # its own route body so this can only pass if the two really agree.
+        ugrid = await grid(session, WILTON, categories="senior,junior")
+        grid_total = sum(s.get("matches") or 0 for s in ugrid.get("season_rows") or [])
+        check("the grid total is a real figure above CA's for this player, so the "
+              "next check can fail",
+              grid_total > (cov.get("career_matches") or 0),
+              f"grid {grid_total} vs CA {cov.get('career_matches')}")
+        check("with no scope at all the headline is the Analysis grid's total, "
+              "not the lower CA figure",
+              headline == grid_total, f"headline {headline} vs grid {grid_total}")
+        check("and it is the same on all three career blocks, so the page can "
+              "never show one figure from batting and another from fielding",
+              all((unscoped.get(k) or {}).get("games") == grid_total
+                  for k in ("career_batting", "career_bowling", "career_fielding")),
+              str({k: (unscoped.get(k) or {}).get("games")
+                   for k in ("career_batting", "career_bowling", "career_fielding")}))
+        check("the note still quotes CA's own figure, not the raised headline",
+              cov.get("career_matches") == WILTON_CLAIMED, str(cov))
+        # RAISE-ONLY: a header must never be LOWERED to the grid.
+        short_head = (await stats(session, SHORT, categories="senior,junior")
+                      ).get("career_batting", {}).get("games")
+        check("a player CA counts MORE for keeps CA's figure (9), never lowered "
+              "to the 3 scorecards we hold",
+              short_head == 9, str(short_head))
+        even_head = (await stats(session, EVEN, categories="senior,junior")
+                     ).get("career_batting", {}).get("games")
+        check("a player the two sources agree on is untouched (5)",
+              even_head == 5, str(even_head))
+        # A season-narrowed profile follows the same rule over that season.
+        s_head = (await stats(session, WILTON, season_id=str(S_NEW),
+                              categories="senior,junior")
+                  ).get("career_batting", {}).get("games")
+        s_grid = await grid(session, WILTON, season_id=str(S_NEW),
+                            categories="senior,junior")
+        s_grid_total = sum(s.get("matches") or 0 for s in s_grid.get("season_rows") or [])
+        check("a single season's header is that season's grid total",
+              s_head == s_grid_total and s_head >= 6, f"{s_head} vs grid {s_grid_total}")
         default_headline = (res.get("career_batting") or {}).get("games")
         check("but the CLUB DEFAULT already moves it, so the note must never "
               "claim its figures are the headline",

@@ -36,12 +36,14 @@ function CoverageExplainer({ coverage }) {
           Here it runs the other way: we hold {extra_scorecards} more{' '}
           {extra_scorecards === 1 ? 'scorecard' : 'scorecards'} than the season totals
           count, so a filtered figure can be higher than the career total rather than
-          lower. A fixture marked completed with nothing on its scorecard is not
-          counted here, but a game that started and was then stopped is.
+          lower. The Matches figure at the top counts them. A fixture marked
+          completed with nothing on its scorecard is not counted here, but a game
+          that started and was then stopped is.
         </p>
       )}
       <p className="mb-0">
-        Both figures are real. Neither is adjusted to match the other.
+        Both figures are real. The Matches figure at the top is never lower than
+        the by-grade total on the Analysis tab.
       </p>
     </div>
   )

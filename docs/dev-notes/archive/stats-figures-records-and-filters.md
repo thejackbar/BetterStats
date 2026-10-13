@@ -2399,3 +2399,14 @@ Verified on a local Postgres 16: 18 checks in `backend/verification/verify_club_
 - **Not done.** The failure reason is not shown: it can carry SQL or paths, and the same payload feeds the public link. It stays in the log line.
 
 Verified: `verify_club_room_records.py` 24 checks on a local Postgres 16 (a hidden first row makes the records entry row 3; every type's description; the previous commit fails the 4 new checks, passes the other 20); `verify_club_room_honours_browser.mjs` 29 checks (two rows listed with title and description, singular wording for one, 390px, none when nothing skipped, none on the public link); screenshots read.
+
+### Profile header Matches never reads below the Analysis grid (v9.110.13, Oct 2026)
+
+- **Reported.** Shaylyn Wijesinghe's profile header read 95 matches while the Analysis tab (the by-grade and by-season grids) read 96, and 96 was right.
+- **Cause.** Two sources by design (see "A career has two match counts" above): the unscoped header is `SUM(player_season_stats.matches)`, CA's own total, and the grid reconciles per season AND grade with `max(held, CA per-grade)`. CA had missed a game we hold a scorecard for.
+- **Decision.** The earlier rule "do not adopt max in the header (rewrites ~19k players)" was reversed on the owner's say-so ("we need to focus on getting the numbers right"). The 19,439 players it would move are the ones whose extra held games were checked as real (completed, graded, dated, no duplicates). It is raise-only: the 36,917 players CA counts more for keep CA's figure, because lowering would rewrite more careers than it corrects.
+- **Change.** `get_player_team_breakdown` now also returns `grid_matches` (sum of `season_rows[].matches`). `aggregations.raise_games_to_grid_total` calls it with the request's season and scope and lifts `games` on `career_batting`, `career_bowling` and `career_fielding` when the grid is higher. Called from `routers/players.get_player_stats` for the career path only (not last-N or date windows), inside a try that rolls back with `rollback_keeping` and logs, so the header falls back to its old figure rather than failing. The "i" panel copy now says the header is never lower than the by-grade total.
+- **Cost.** One extra `get_player_team_breakdown` per profile request (the Analysis tab already makes the same call from the page).
+- **Not done.** Other readers of `get_career_*` (compare, share cards) still use the old figure.
+
+Verified: `verification/verify_match_coverage.py` 72 checks on a local Postgres 16 (headline equals the grid route's total on all three career blocks, CA's 9 kept where it exceeds the 3 held, an agreeing player untouched, a single season follows the same rule, `match_coverage.career_matches` still CA's figure). The previous commit fails the 3 header checks and passes the rest.

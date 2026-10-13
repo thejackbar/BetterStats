@@ -2353,6 +2353,7 @@ async def get_player_team_breakdown(
     return {
         "rows": rows,
         "season_rows": season_rows,
+        "grid_matches": sum(s["matches"] for s in season_rows),
         "unattributed": unattributed,
         "total_aggregate_matches": total_aggregate,
         # What the active filter could and could not reach, so the screen can
@@ -2369,6 +2370,35 @@ async def get_player_team_breakdown(
             "seasons_left_to_scorecards": seasons_left_to_scorecards,
         }} if scope_active else {}),
     }
+
+
+async def raise_games_to_grid_total(
+    session: AsyncSession,
+    player_id: str,
+    org_id: str,
+    season_id: Optional[str],
+    scope: Optional[GradeScope],
+    *careers: Optional[dict],
+) -> int:
+    """Lift a profile header's matches to the Analysis grid's total when that is higher.
+
+    The header reads CA's season totals (or, under a scope, the scorecards we
+    hold), while the Analysis grid reconciles per season AND grade with
+    `max(held, claimed)`. A player CA undercounted by one game read 95 in the
+    header and 96 in the grid, which is two answers to "how many games". The
+    grid is the more specific of the two, so the header never reads below it.
+
+    RAISE-ONLY ON PURPOSE. Where the grid is lower than the header (CA claims a
+    shortfall the grid will not place) the header keeps its figure: lowering it
+    would rewrite far more careers than this corrects. Returns the grid total.
+    """
+    breakdown = await get_player_team_breakdown(
+        session, player_id, org_id, season_id, scope=scope)
+    grid_total = _n(breakdown.get("grid_matches"))
+    for career in careers:
+        if career is not None and grid_total > _n(career.get("games")):
+            career["games"] = grid_total
+    return grid_total
 
 
 # ── Folding a real season back into one row ──────────────────────────────────

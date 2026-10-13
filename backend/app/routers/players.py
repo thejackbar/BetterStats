@@ -1,3 +1,4 @@
+import logging
 from contextvars import ContextVar
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -32,7 +33,7 @@ from app.services.aggregations import (
     get_career_batting_from_innings, get_career_bowling_from_spells, get_career_fielding_from_stats,
     get_player_batting_innings, get_player_bowling_spells,
     get_dismissal_breakdown, get_batting_by_position, get_batting_by_grade,
-    get_bowling_by_grade, get_player_team_breakdown,
+    get_bowling_by_grade, get_player_team_breakdown, raise_games_to_grid_total,
     get_bowling_dismissal_breakdown, get_bowling_by_batter_position,
     get_season_by_season, get_player_milestones, get_player_partnerships,
     get_player_activity, get_upcoming_milestones_for_org,
@@ -43,6 +44,7 @@ from app.services.milestone_rules import (
     crossed_thresholds, is_displayable, load_scheme, next_threshold, reach_window,
 )
 from app.services import iq_teammates
+from app.services.session_safety import rollback_keeping
 from app.services import milestone_totals
 from app.services import grade_scope, junior_hiding, player_privacy
 from app.services.player_aliases import normalise_name_key, seed_alias_on_rename
@@ -361,6 +363,18 @@ async def get_player_stats(
         batting = await get_career_batting(db, player_id, season_id, scope=scope)
         bowling = await get_career_bowling(db, player_id, season_id, scope=scope)
         fielding = await get_career_fielding(db, player_id, season_id, scope=scope)
+        # The header must not read below the Analysis grid's own total (95 beside
+        # 96 for a player CA undercounted by a game). Raise-only; see
+        # raise_games_to_grid_total. A failure here leaves the figures as they were.
+        if player.organisation_id:
+            try:
+                await raise_games_to_grid_total(
+                    db, player_id, str(player.organisation_id), season_id, scope,
+                    batting, bowling, fielding)
+            except Exception:
+                await rollback_keeping(db, player, org)
+                logging.getLogger(__name__).exception(
+                    "grid match total failed for player %s", player_id)
     batting_innings = await get_player_batting_innings(db, player_id, season_id, grade_id, scope=scope)
     bowling_spells = await get_player_bowling_spells(db, player_id, season_id, grade_id, scope=scope)
 
@@ -381,7 +395,6 @@ async def get_player_stats(
         except Exception:
             # A note about the figures must never take the figures down.
             await db.rollback()
-            import logging
             logging.getLogger(__name__).exception(
                 "match coverage failed for player %s", player_id)
 
