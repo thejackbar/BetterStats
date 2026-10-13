@@ -2631,6 +2631,11 @@ class ImportBatch(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     committed_at = Column(TIMESTAMP(timezone=True), nullable=True)
     undone_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    # A historical summary that stops at a season (migration 328): the START year
+    # of the last season the sheet covers, and the club's wording for it. NULL =
+    # an ordinary import that claims the whole career.
+    through_year = Column(Integer, nullable=True)
+    through_label = Column(Text, nullable=True)
 
     organisation = relationship("Organisation")
 

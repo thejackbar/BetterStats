@@ -4457,6 +4457,13 @@ async def lifespan(app: FastAPI):
         for _stmt in _FANTASY_QUEUE_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 328: a historical summary that stops at a season. Same
+        # one-copy rule: this list and alembic's 328 both run
+        # services/import_through_ddl.STATEMENTS.
+        from app.services.import_through_ddl import STATEMENTS as _IMPORT_THROUGH_DDL
+        for _stmt in _IMPORT_THROUGH_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 312: super-admin messages on the club admin dashboard.
         # Same one-copy rule: this and alembic's 312 both run
         # services/admin_broadcast_ddl.STATEMENTS.
