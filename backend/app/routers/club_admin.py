@@ -4713,6 +4713,38 @@ async def reset_password(
     return {"status": "password_reset"}
 
 
+@router.post("/super/users/{user_id}/send-password-reset")
+async def super_send_password_reset_link(
+    user_id: str,
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Super-admin twin of send_password_reset_link: email any club user a reset
+    link instead of typing a password for them (reset_password above sends no
+    email at all). Names the club the account belongs to."""
+    row = await db.execute(
+        _text(
+            "SELECT u.id, u.email, u.display_name, u.username, cm.club_id "
+            "FROM users u LEFT JOIN club_memberships cm ON cm.user_id = u.id "
+            "WHERE u.id = :uid"
+        ),
+        {"uid": user_id},
+    )
+    target = row.mappings().first()
+    if not target:
+        raise HTTPException(404, "User not found")
+    if not target["email"]:
+        raise HTTPException(400, "This user has no email address on file to send a reset link to")
+    club = await db.get(Organisation, target["club_id"]) if target["club_id"] else None
+    if not club:
+        raise HTTPException(400, "This user is not attached to a club")
+
+    await _issue_and_send_password_reset(
+        db, club=club, actor_id=current_user.id, target=target, action="send_password_reset_link",
+    )
+    return {"status": "sent"}
+
+
 async def _super_admin_count(db: AsyncSession) -> int:
     res = await db.execute(
         select(func.count()).select_from(ClubMembership).where(ClubMembership.role == "super_admin")
@@ -6212,10 +6244,53 @@ async def update_club_user(
     return {"status": "ok", **changes}
 
 
+def _reset_email_failure_detail(error: Optional[str]) -> str:
+    """Plain-language reason a reset email did not go, for the admin screen."""
+    e = (error or "").lower()
+    if "no live email provider" in e:
+        return "Email sending is not set up on this server, so nothing was sent."
+    if e.startswith("blocked"):
+        return "This person asked to be removed and is never emailed."
+    return "The email provider refused or could not send the message. Nothing was delivered, so try again shortly."
+
+
+async def _issue_and_send_password_reset(
+    db: AsyncSession, *, club: Organisation, actor_id, target, action: str,
+) -> None:
+    """Mint a reset token for `target` (a users row mapping), email the link and
+    raise a readable error if the email did not go. The email is sent before
+    returning, not in a background task: the screen used to say "sent" whatever
+    happened to the message afterwards. The token is committed first; if the send
+    fails it simply expires unused."""
+    reset_token = _secrets.token_urlsafe(32)
+    reset_expires = _datetime.now(_timezone.utc) + _timedelta(hours=_PASSWORD_RESET_TOKEN_TTL_HOURS)
+    await db.execute(
+        _text("UPDATE users SET password_reset_token = :tok, password_reset_token_expires_at = :exp WHERE id = :id"),
+        {"tok": reset_token, "exp": reset_expires, "id": target["id"]},
+    )
+
+    from app.services.audit_log import log_activity
+    await log_activity(
+        db, org_id=club.id, user_id=actor_id,
+        action=action, target_type="user", target_id=str(target["id"]),
+    )
+    await db.commit()
+
+    from app.config.settings import settings as _settings
+    from app.services.user_invite import send_password_reset_email
+    reset_link = f"{_settings.public_base_url}/login?reset={reset_token}"
+    result = await send_password_reset_email(
+        email=target["email"],
+        display_name=target["display_name"] or target["username"],
+        club_name=club.name, link=reset_link,
+    )
+    if not result.ok:
+        raise HTTPException(502, _reset_email_failure_detail(result.error))
+
+
 @router.post("/users/{user_id}/send-password-reset")
 async def send_password_reset_link(
     user_id: str,
-    background_tasks: BackgroundTasks,
     current_user: User = Depends(require_cap(MANAGE_USERS)),
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
@@ -6241,27 +6316,8 @@ async def send_password_reset_link(
     if not target["email"]:
         raise HTTPException(400, "This user has no email address on file to send a reset link to")
 
-    reset_token = _secrets.token_urlsafe(32)
-    reset_expires = _datetime.now(_timezone.utc) + _timedelta(hours=_PASSWORD_RESET_TOKEN_TTL_HOURS)
-    await db.execute(
-        _text("UPDATE users SET password_reset_token = :tok, password_reset_token_expires_at = :exp WHERE id = :id"),
-        {"tok": reset_token, "exp": reset_expires, "id": user_id},
-    )
-
-    from app.services.audit_log import log_activity
-    await log_activity(
-        db, org_id=club.id, user_id=current_user.id,
-        action="send_password_reset_link", target_type="user", target_id=user_id,
-    )
-    await db.commit()
-
-    from app.config.settings import settings as _settings
-    from app.services.user_invite import send_password_reset_email
-    reset_link = f"{_settings.public_base_url}/login?reset={reset_token}"
-    background_tasks.add_task(
-        send_password_reset_email, email=target["email"],
-        display_name=target["display_name"] or target["username"],
-        club_name=club.name, link=reset_link,
+    await _issue_and_send_password_reset(
+        db, club=club, actor_id=current_user.id, target=target, action="send_password_reset_link",
     )
     return {"status": "sent"}
 

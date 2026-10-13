@@ -2634,6 +2634,8 @@ export const api = {
     request(`/club-admin/sales-workspace/events/${eventId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   salesWorkspaceDeleteEvent: (eventId) =>
     request(`/club-admin/sales-workspace/events/${eventId}`, { method: 'DELETE' }),
+  superSendPasswordReset: (userId) =>
+    request(`/club-admin/super/users/${userId}/send-password-reset`, { method: 'POST' }),
   superResetPassword: (userId, newPassword) =>
     request(`/club-admin/super/users/${userId}/reset-password`, {
       method: 'POST',
