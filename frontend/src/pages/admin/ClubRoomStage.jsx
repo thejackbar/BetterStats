@@ -255,13 +255,21 @@ export default function ClubRoomStage({ fetchPlay, onExit, exitLabel = 'Back to 
         {data.logo_url && <img src={data.logo_url} alt="" className="w-8 h-8 rounded object-contain bg-pb-surface2 p-1" />}
         <span className="text-sm font-bold">{data.club_name}</span>
       </div>
-      {/* The show carries on without a slide it could not build; the person
-          setting it up is told which, the TV in the club room is not. */}
+      {/* The show carries on without an entry it could not build; the person
+          setting it up is told which row, the TV in the club room is not. */}
       {onExit && data.skipped?.length > 0 && (
-        <div className="absolute bottom-5 left-7 z-10 text-xs font-mono text-amber-400">
-          {data.skipped.length === 1 ? '1 playlist entry' : `${data.skipped.length} playlist entries`} skipped because
-          {' '}{data.skipped.length === 1 ? 'it' : 'they'} could not load:{' '}
-          {data.skipped.map(x => x.title || SLIDE_TYPE_NAMES[x.slide_type] || x.slide_type).join(', ')}
+        <div className="absolute bottom-4 left-7 right-7 z-10 text-xs font-mono text-amber-400 space-y-0.5 rounded-lg px-3 py-2"
+          style={{ background: 'var(--pb-surface)', border: '1px solid var(--pb-hairline2)' }}>
+          <div>
+            Skipped because {data.skipped.length === 1 ? 'it' : 'they'} could not load. Open{' '}
+            {data.skipped.length === 1 ? 'that row' : 'those rows'} in the playlist to check:
+          </div>
+          {data.skipped.map(x => (
+            <div key={x.id}>
+              {x.row ? `Row ${x.row}: ` : ''}
+              {x.title ? `${x.title} (${x.summary || SLIDE_TYPE_NAMES[x.slide_type] || x.slide_type})` : (x.summary || SLIDE_TYPE_NAMES[x.slide_type] || x.slide_type)}
+            </div>
+          ))}
         </div>
       )}
       <div className="absolute top-6 right-7 flex items-center gap-3 z-10">

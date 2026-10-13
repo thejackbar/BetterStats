@@ -2391,3 +2391,11 @@ Verified on a local Postgres 16 over the records suite's own schema and seed: 9 
 - **Not done.** The Club Room editor does not show skipped entries, only the preview does.
 
 Verified on a local Postgres 16: 18 checks in `backend/verification/verify_club_room_records.py`, including an exception and a database error in the middle entry, with the entries before and after it still present, the skipped one named, and a healthy playlist skipping nothing. The previous commit fails the 9 skip checks and passes the other 9. Browser: 25 checks in `verify_club_room_honours_browser.mjs`, including the note in the admin preview, none when nothing was skipped, none on the public link; screenshot read.
+
+## v9.110.9.1: the skipped-slide note names the row
+
+- **Why.** v9.110.9's note named an entry by title or type only, so two Leaderboard entries read the same and nothing said which row to open.
+- **Change.** Each `skipped` item also carries `row` (the editor's 1-based row, counting hidden entries) and `summary` (`_entry_summary`: type plus its key setting, as the editor's row describes it, for example "Club Records · Top Career Runs"). The admin preview lists one line per entry, "Row 3: ...", with an entry's own title first when it has one, on a solid panel so it stays readable over any slide. The public `/room` link still shows nothing.
+- **Not done.** The failure reason is not shown: it can carry SQL or paths, and the same payload feeds the public link. It stays in the log line.
+
+Verified: `verify_club_room_records.py` 24 checks on a local Postgres 16 (a hidden first row makes the records entry row 3; every type's description; the previous commit fails the 4 new checks, passes the other 20); `verify_club_room_honours_browser.mjs` 29 checks (two rows listed with title and description, singular wording for one, 390px, none when nothing skipped, none on the public link); screenshots read.

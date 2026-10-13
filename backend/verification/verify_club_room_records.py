@@ -128,7 +128,9 @@ async def main() -> None:
             # A real database error leaves the transaction aborted for every entry after it.
             await db_.execute(text("SELECT * FROM no_such_table_anywhere"))
 
+        # A hidden entry first: the editor counts it as row 1, so the records entry is row 3.
         mixed = [
+            ("sponsors", {"mode": "grid"}),
             ("leaderboard", {"stat_group": "batting", "sort_by": "total_runs", "limit": 10}),
             ("records", {"category": "batting.top_career_runs"}),
             ("leaderboard", {"stat_group": "bowling", "sort_by": "total_wickets", "limit": 10}),
@@ -142,8 +144,8 @@ async def main() -> None:
                 for i, (stype, cfg) in enumerate(mixed):
                     await db.execute(text(
                         "INSERT INTO club_room_slides (id, organisation_id, slide_type, config, position, enabled) "
-                        "VALUES (gen_random_uuid(), :o, :t, CAST(:c AS jsonb), :p, true)"),
-                        {"o": vrt.ORG, "t": stype, "c": json.dumps(cfg), "p": i})
+                        "VALUES (gen_random_uuid(), :o, :t, CAST(:c AS jsonb), :p, :en)"),
+                        {"o": vrt.ORG, "t": stype, "c": json.dumps(cfg), "p": i, "en": i != 0})
                 await db.commit()
                 try:
                     payload = await cr.build_play_payload(db, org_row)
@@ -159,8 +161,29 @@ async def main() -> None:
             check(f"{label}: the entries before AND after it are still there", got == ["batting", "bowling"], str(got))
             check(f"{label}: it is named in `skipped`, with its type",
                   [x.get("slide_type") for x in skipped] == ["records"], str(skipped))
+            check(f"{label}: it names the row the editor shows (hidden rows count) and says what it is",
+                  [(x.get("row"), x.get("summary")) for x in skipped] == [(3, "Club Records · Top Career Runs")],
+                  str([(x.get("row"), x.get("summary")) for x in skipped]))
+            check(f"{label}: the hidden entry is not built or reported",
+                  not [x for x in payload.get("slides", []) if x.get("type") in ("sponsor", "sponsor_grid")], str(payload.get("slides", [])[:1]))
             check(f"{label}: the club and its settings are still readable afterwards",
                   bool(payload.get("club_name")), str(payload.get("club_name")))
+        class _E:
+            def __init__(self, t, c): self.slide_type, self.config = t, c
+        cases = [
+            ("sponsors", {}, "Sponsors · rotating"), ("sponsors", {"mode": "grid"}, "Sponsors · all on one screen"),
+            ("leaderboard", {"stat_group": "bowling"}, "Leaderboard · bowling"), ("fixtures", {}, "Fixtures & Lineups"),
+            ("honours", {"board_id": "x"}, "Honour Boards · one board"), ("honours", {}, "Honour Boards · all your boards"),
+            ("records", {"category": "bowling.most_five_fors"}, "Club Records · Most Five Fors"),
+            ("statlab_report", {}, "Custom StatLab Report"), ("nonsense", {}, "nonsense"),
+        ]
+        describe = getattr(cr, "_entry_summary", lambda e: None)  # presence-safe: the control has none
+        wrong = [(t, describe(_E(t, c)), want) for t, c, want in cases if describe(_E(t, c)) != want]
+        check("an entry is described by type and its key setting, in the editor's words", not wrong, str(wrong))
+        check("single-sponsor, premierships and the rest read plainly",
+              describe(_E("sponsors", {"mode": "single"})) == "Sponsors · one sponsor"
+              and describe(_E("honours", {"kind": "premierships"})) == "Honour Boards · premiership squads"
+              and describe(_E("leaderboard", None)) == "Leaderboard · batting")
         payload_ok = await cr.build_play_payload(db, await db.get(Organisation, vrt.ORG))
         check("a healthy playlist skips nothing (so `skipped` above was a real signal)",
               payload_ok.get("skipped") == [] and any(x.get("type") == "records" for x in payload_ok.get("slides", [])),

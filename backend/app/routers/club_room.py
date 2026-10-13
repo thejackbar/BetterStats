@@ -925,6 +925,36 @@ async def _expand_honours(db, club, entry: ClubRoomSlide) -> list[dict]:
     ]
 
 
+_ENTRY_LABELS = {
+    "sponsors": "Sponsors", "fixtures": "Fixtures & Lineups", "leaderboard": "Leaderboard",
+    "records": "Club Records", "statlab_report": "Custom StatLab Report",
+    "social_posts": "Recent Social Posts", "custom_images": "Custom Images", "honours": "Honour Boards",
+}
+_SPONSOR_MODES = {"single": "one sponsor", "grid": "all on one screen"}
+_HONOUR_KINDS = {"premierships": "premiership squads", "office_bearers": "office bearers and life members"}
+
+
+def _entry_summary(entry: ClubRoomSlide) -> str:
+    """A playlist entry in words, the way the editor's row describes it, so a
+    note about it points at one row ("Club Records · Top Career Runs") and not
+    just a type. Plain strings only: nothing here can raise or touch the
+    database, because it runs while reporting that something else did."""
+    cfg = entry.config if isinstance(entry.config, dict) else {}
+    label = _ENTRY_LABELS.get(entry.slide_type, entry.slide_type)
+    detail = None
+    if entry.slide_type == "sponsors":
+        detail = _SPONSOR_MODES.get(cfg.get("mode"), "rotating")
+    elif entry.slide_type == "leaderboard":
+        detail = cfg.get("stat_group") or "batting"
+    elif entry.slide_type == "records":
+        cat = str(cfg.get("category") or "batting.top_career_runs")
+        detail = cat.split(".")[-1].replace("_", " ").title()
+    elif entry.slide_type == "honours":
+        kind = cfg.get("kind")
+        detail = _HONOUR_KINDS.get(kind) or ("one board" if cfg.get("board_id") else "all your boards")
+    return f"{label} · {detail}" if detail else label
+
+
 async def _expand_entry(db, club, entry: ClubRoomSlide) -> list[dict]:
     """One saved playlist entry as the slides it expands into."""
     if entry.slide_type == "sponsors":
@@ -953,16 +983,20 @@ async def build_play_payload(db: AsyncSession, club: Organisation) -> dict:
     `/play` endpoint and the public `/room/{token}` link, so there's exactly
     one place that expands the saved playlist into ready-to-render slides."""
     settings = await _get_or_create_settings(db, club)
+    # Every row, hidden ones included, so a row number here is the row number
+    # the editor shows; a hidden row is counted but not built.
     rows = await db.execute(
         select(ClubRoomSlide)
-        .where(ClubRoomSlide.organisation_id == club.id, ClubRoomSlide.enabled == True)  # noqa: E712
+        .where(ClubRoomSlide.organisation_id == club.id)
         .order_by(ClubRoomSlide.position)
     )
     entries = rows.scalars().all()
 
     slides: list[dict] = []
     skipped: list[dict] = []
-    for entry in entries:
+    for row_number, entry in enumerate(entries, start=1):
+        if not entry.enabled:
+            continue
         # One entry that cannot be built (a stale saved query, an upstream
         # hiccup, a bug in one expander) must not blank the whole TV: the rest
         # of the playlist still plays. It is logged with its traceback and named
@@ -974,7 +1008,10 @@ async def build_play_payload(db: AsyncSession, club: Organisation) -> dict:
         except Exception:  # noqa: BLE001 - see above
             logger.exception("club room: skipped %s slide %s for club %s", entry.slide_type, entry.id, club.id)
             await rollback_keeping(db, club, settings, *entries)
-            skipped.append({"id": str(entry.id), "slide_type": entry.slide_type, "title": entry.title})
+            skipped.append({
+                "id": str(entry.id), "slide_type": entry.slide_type, "title": entry.title,
+                "row": row_number, "summary": _entry_summary(entry),
+            })
             continue
         duration = entry.duration_seconds or settings.rotation_seconds
         for item in expanded:
